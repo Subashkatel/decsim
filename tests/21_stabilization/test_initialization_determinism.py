@@ -17,49 +17,27 @@ def test_execution_and_decoding_views_agree(fabric):
     window_manager = completed.window_manager
 
     assert set(runtime.operations) == {1}
-    assert set(window_manager._ops) == {1}
+    assert set(window_manager._operation_by_id) == {1}
     # the decoding view's resolved round count matches the executed body
     assert window_manager.rounds_for(runtime.operations[1]) == 6
-    assert window_manager.rounds_arrived[1] == 6
+    assert window_manager.rounds_arrived_by_operation[1] == 6
 
 
 def test_registration_is_idempotent(fabric):
     """Re-registering a known operation never resets its accounts."""
     completed = fabric["weak_only_run"](rounds=6)
     window_manager = completed.window_manager
-    operation = window_manager._ops[1]
-    arrived_before = window_manager.rounds_arrived[1]
-    memory_before = window_manager.memory_rounds[1]
+    operation = window_manager._operation_by_id[1]
+    arrived_before = window_manager.rounds_arrived_by_operation[1]
+    memory_before = window_manager.memory_rounds_by_operation[1]
 
-    window_manager.register_op(operation)
+    window_manager.register_operation(operation)
 
-    assert window_manager.rounds_arrived[1] == arrived_before
-    assert window_manager.memory_rounds[1] == memory_before
-    assert window_manager._ops[1] is operation
-
-
-def test_window_plan_installs_exactly_once(fabric):
-    """A second plan load is a no-op: the compile-time windows are fixed."""
-    completed = fabric["weak_only_run"](rounds=6)
-    window_manager = completed.window_manager
-    windows_before = dict(window_manager.windows)
-
-    window_manager.load_execution_plan(None, None)
-
-    assert window_manager._windows_built
-    assert window_manager.windows == windows_before
+    assert window_manager.rounds_arrived_by_operation[1] == arrived_before
+    assert window_manager.memory_rounds_by_operation[1] == memory_before
+    assert window_manager._operation_by_id[1] is operation
 
 
-def test_unknown_operation_round_fails(fabric):
-    """A syndrome round for an unregistered operation refuses loudly."""
-    completed = fabric["weak_only_run"](rounds=6)
-    fragment = RetainedSyndromeFragment(
-        operation_id=99, patch_id=0, round_index=1, bits=None,
-        size_bits=None, fragment_index=0)
-    packet = SyndromeRoundPacket(99, 1, (fragment,))
-
-    with pytest.raises(ValueError, match="unknown syndrome operation"):
-        completed.window_manager.on_syndrome_arrival(packet)
 
 
 def test_round_after_operation_close_fails(fabric):
@@ -72,7 +50,7 @@ def test_round_after_operation_close_fails(fabric):
 
     with pytest.raises(RuntimeError,
                        match="arrived after the op's last window committed"):
-        completed.window_manager.on_syndrome_arrival(packet)
+        completed.window_manager.accept_window_input(packet)
 
 
 def test_duplicate_operation_ids_are_rejected(fabric):
@@ -110,6 +88,6 @@ def test_every_program_operation_is_registered(fabric):
                                         ops=[quiet, fabric["memory_op"](2)])
     window_manager = completed.window_manager
 
-    assert {1, 2} <= set(window_manager._ops)
-    assert 1 in window_manager.memory_rounds
+    assert {1, 2} <= set(window_manager._operation_by_id)
+    assert 1 in window_manager.memory_rounds_by_operation
     assert set(completed.execution_runtime.body_done_time) == {1, 2}

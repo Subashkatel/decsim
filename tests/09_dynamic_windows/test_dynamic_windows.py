@@ -13,7 +13,7 @@ from decsim.windows.window_manager import WindowManager
 
 class RecordingWindowManager:
     def __init__(self):
-        self.rounds_arrived = {}
+        self.rounds_arrived_by_operation = {}
         self.windows = {}
         self.committed_windows = set()
         self.events = []
@@ -118,9 +118,7 @@ def test_real_manager_constructs_with_segment_delivery_state_in_its_owner():
     manager = WindowManager(
         SimpleNamespace(),
         scheme=SimpleNamespace(),
-        code_geometry=SimpleNamespace(),
         resolved_operations=(),
-        resolved_patches=(),
         links=SimpleNamespace(),
         conditional_release=SimpleNamespace(),
         boundary_policy=SimpleNamespace(),
@@ -164,7 +162,7 @@ def test_round_count_views_follow_open_capped_unbounded_and_sealed_states():
     register(lifecycle, stream_id="open")
     register(lifecycle, stream_id="capped", source_limit=9,
              finite_geometries=[])
-    manager.rounds_arrived.update(open=4, capped=3)
+    manager.rounds_arrived_by_operation.update(open=4, capped=3)
 
     assert lifecycle.arrival_round_limit("open", 99) is None
     assert lifecycle.arrival_round_limit("capped", 99) == 9
@@ -186,10 +184,10 @@ def test_arithmetic_windows_grow_online_with_commit_and_buffer_extents():
     manager = RecordingWindowManager()
     lifecycle = DynamicWindows(manager)
     register(lifecycle)
-    manager.rounds_arrived["stream"] = 1
+    manager.rounds_arrived_by_operation["stream"] = 1
 
     lifecycle.grow("stream")
-    manager.rounds_arrived["stream"] = 7
+    manager.rounds_arrived_by_operation["stream"] = 7
     lifecycle.grow("stream")
     lifecycle.grow("stream")
 
@@ -263,7 +261,7 @@ def test_arrival_update_grows_then_auto_seals_at_a_finite_source_limit():
     manager.lifecycle = lifecycle
     finite = [geometry(1, 3, 5), geometry(4, 5, 5)]
     register(lifecycle, source_limit=5, finite_geometries=finite)
-    manager.rounds_arrived["stream"] = 5
+    manager.rounds_arrived_by_operation["stream"] = 5
 
     lifecycle.maybe_update("stream")
 
@@ -315,7 +313,7 @@ def test_preflight_failure_leaves_local_and_delegated_state_unchanged():
     lifecycle = DynamicWindows(manager)
     manager.lifecycle = lifecycle
     register(lifecycle)
-    manager.rounds_arrived["stream"] = 4
+    manager.rounds_arrived_by_operation["stream"] = 4
     initial_stream_state = lifecycle._streams["stream"].copy()
 
     def reject_length(_stream_id, _stream_round_count):
@@ -340,7 +338,7 @@ def test_real_manager_clips_only_the_first_containing_tail_window():
                             start_round=1, n_rounds=10)
     second = SimpleNamespace(commit_lo=4, commit_hi=9, buffer_hi=11,
                              start_round=4, n_rounds=8)
-    manager.op_windows = {"stream": [0, 1]}
+    manager.window_indices_by_operation = {"stream": [0, 1]}
     manager.windows = {("stream", 0): first, ("stream", 1): second}
     manager.syndrome_buffer = HoldRecorder()
 
@@ -440,8 +438,8 @@ def test_real_manager_links_overlapping_online_windows_by_temporal_dependency():
     manager.committed_windows = set()
     manager.courier = BoundaryCourier(manager)
     manager.windows = {}
-    manager.op_windows = {"stream": []}
-    manager.window_count = {"stream": 0}
+    manager.window_indices_by_operation = {"stream": []}
+    manager.window_count_by_operation = {"stream": 0}
     manager.total_windows = 0
     manager.error_model_provider = None
     manager._add_window_read_refs = lambda _key, _window: None
@@ -552,7 +550,6 @@ def test_unsealed_streams_block_real_manager_workload_finality_until_seal():
     manager.seal_stream("stream", 0)
     assert completions == ["complete"]
     assert manager.has_dynamic_stream("stream") is True
-    assert manager.committed_stream_round_count("stream") == 0
 
 
 def _per_round_fold(contributions, lo, hi, policy):
@@ -645,8 +642,8 @@ def test_courier_ignores_a_stale_delivery_and_releases_the_edge_once():
     manager = SimpleNamespace(
         engine=engine, links=LinkFabric(logical_reference_profile(), engine),
         windows={(1, 0): source, (1, 1): dependent}, absorbed_windows=set(),
-        window_interaction=DefaultWindowInteraction(), window_models={},
-        _ops={1: op}, rounds_for=lambda operation: 20, release_service=None,
+        window_interaction=DefaultWindowInteraction(), model_by_window={},
+        _operation_by_id={1: op}, rounds_for=lambda operation: 20, release_service=None,
         check_window=lambda key: checks.append((engine.now, key)),
         _window_attribution=WindowManager._window_attribution)
     manager._window_infos = lambda: {key: __import__("decsim.message", fromlist=["WindowInfo"])

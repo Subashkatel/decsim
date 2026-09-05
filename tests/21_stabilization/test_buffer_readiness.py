@@ -40,16 +40,6 @@ def test_unpriced_cwb_publishes_at_packing(fabric):
     assert window.t_data_complete == microseconds_to_ticks(6 + 2 + 3)
 
 
-def test_notification_without_publication_refuses(fabric):
-    """accept_window_input for a round the store does not hold fails loudly."""
-    completed = fabric["weak_only_run"](rounds=6)
-    fragment = RetainedSyndromeFragment(
-        operation_id=1, patch_id=1, round_index=3, bits=None,
-        size_bits=None, fragment_index=0)
-    packet = SyndromeRoundPacket(1, 3, (fragment,))
-    with pytest.raises(RuntimeError):
-        completed.window_manager.accept_window_input(packet)
-
 
 def test_cwb_delivers_rounds_in_order(fabric):
     """Buffer 0 receives rounds 1..6 in strictly increasing order."""

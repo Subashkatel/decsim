@@ -93,7 +93,7 @@ class DynamicWindows:
             return
         commit_rounds = stream_state["commit_rounds"]
         buffer_rounds = stream_state["buffer_rounds"]
-        highest_known_round = wm.rounds_arrived[stream_id] \
+        highest_known_round = wm.rounds_arrived_by_operation[stream_id] \
             if rounds_to_plan is None else rounds_to_plan
         finite_geometries = stream_state["finite_geometries"]
         if finite_geometries is not None:
@@ -148,7 +148,7 @@ class DynamicWindows:
         stream_state = self._streams[op_id]
         if (not stream_state["sealed"]
                 and stream_state["source_round_limit"] is not None
-                and self.window_manager.rounds_arrived[op_id]
+                and self.window_manager.rounds_arrived_by_operation[op_id]
                 >= stream_state["source_round_limit"]):
             self.seal(op_id, stream_state["source_round_limit"])
 
@@ -239,7 +239,7 @@ class DynamicWindows:
             return stream_state["source_round_limit"]
         if window is not None:
             return window.buffer_hi
-        return self.window_manager.rounds_arrived.get(op_id, 0)
+        return self.window_manager.rounds_arrived_by_operation.get(op_id, 0)
 
     def committed_round_count(self, stream_id) -> int:
         """Committed-prefix round count cached for a stream, or 0."""

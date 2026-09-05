@@ -155,7 +155,7 @@ class BoundaryCourier:
             latest_delivery_revision=self._boundary_delivery_versions.get(
                 delivery_key, 0),
             source_operation_round_count=self.wm.rounds_for(
-                self.wm._ops[source_key[0]]),
+                self.wm._operation_by_id[source_key[0]]),
             dependency_released=True,
             payload=boundary,
         )
@@ -185,7 +185,7 @@ class BoundaryCourier:
             latest_source_revision=self._boundary_versions.get(source_key, 0),
             latest_delivery_revision=self._boundary_delivery_versions.get(
                 delivery_key, 0),
-            source_operation_round_count=self.wm.rounds_for(self.wm._ops[src_op_id]),
+            source_operation_round_count=self.wm.rounds_for(self.wm._operation_by_id[src_op_id]),
             dependency_released=dependency_released,
             payload=defects,
         )
@@ -226,7 +226,7 @@ class BoundaryCourier:
                 f"boundary state for {delivery.destination_key} must support "
                 "deep copying before merge_boundary"
             ) from error
-        destination_model = self.wm.window_models.get(destination.key)
+        destination_model = self.wm.model_by_window.get(destination.key)
         update = self.wm.window_interaction.merge_boundary(
             delivery,
             WindowInfo.from_window(

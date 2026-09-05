@@ -576,7 +576,7 @@ class StrongEscalation:
             pending = self._escalations.update_wsd_arrival(
                 pending, wsd_arrival_ticks)
             if (pending.phase is _EscalationPhase.WAITING_TERMINAL_DATA
-                    and self.wm.strong_rounds_arrived.get(
+                    and self.wm.strong_rounds_arrived_by_operation.get(
                         pending.key[0], 0) >=
                     pending.resolved_region.plan.context_hi):
                 self._submit_terminal_strong(pending.key[0], pending)
@@ -606,7 +606,7 @@ class StrongEscalation:
         the operation's edge has a shorter context than commit + 2 buffer."""
         key = (weak_job.op_id, weak_job.window_id)
         weak_window = self.wm.windows[key]
-        op = self.wm._ops[weak_job.op_id]
+        op = self.wm._operation_by_id[weak_job.op_id]
         strong_window = self._strong_context_window(weak_window)
         model_round_count = self.wm._round_count_for_window(op.id, strong_window)
         left_exclusions = (
@@ -626,7 +626,7 @@ class StrongEscalation:
             weak_job.op_id, strong_window.buffer_lo, strong_window.buffer_hi,
             strong_window)
         missing = [round_key for round_key in context_reads
-                   if round_key[1] <= self.wm.rounds_arrived.get(
+                   if round_key[1] <= self.wm.rounds_arrived_by_operation.get(
                        round_key[0], 0)
                    and self.wm.syndrome_buffer_1.retained_fragments(round_key)
                    is None]
@@ -686,7 +686,7 @@ class StrongEscalation:
         round_count = self.wm._round_count_for_window(op_id, weak_window)
         later_windows = [
             self.wm.windows[(op_id, window_index)]
-            for window_index in self.wm.op_windows[op_id]
+            for window_index in self.wm.window_indices_by_operation[op_id]
             if window_index > escalated_index
         ]
         plan = self.wm.window_interaction.plan_strong_region(
@@ -722,7 +722,7 @@ class StrongEscalation:
             proposed_restart = deepcopy(self.wm.windows[restart_key])
             proposed_restart.buffer_lo = plan.restart_buffer_lo
             restart_model = self._build_strong_window_model(
-                self.wm._ops[op_id],
+                self.wm._operation_by_id[op_id],
                 proposed_restart,
                 round_count,
                 resolved_region.restart_fault_exclusion_ranges,
@@ -736,7 +736,7 @@ class StrongEscalation:
             n_rounds=plan.context_hi - plan.context_lo + 1,
         )
         strong_model = self._build_strong_window_model(
-            self.wm._ops[op_id], strong_window, round_count,
+            self.wm._operation_by_id[op_id], strong_window, round_count,
             resolved_region.strong_fault_exclusion_ranges)
         logical_candidate = self._strong_window_ownership_candidate(
             key, resolved_region)
@@ -1008,7 +1008,7 @@ class StrongEscalation:
         restart.n_rounds = restart.buffer_hi - restart.buffer_lo + 1
         self.wm._replace_window_read_refs(restart_key, restart)
         if model is not None:
-            self.wm.window_models[restart_key] = model
+            self.wm.model_by_window[restart_key] = model
         self.wm.engine.log("DecoderCluster",
                         f"restart window {restart_key} re-sliced across strong window "
                         f"edge {strong_window_hi} (reads rounds {restart.buffer_lo}-"
@@ -1026,7 +1026,7 @@ class StrongEscalation:
         window.queued = True                  # keeps check_window() away
         window.committed = True
         self.wm.committed_windows.add(key)
-        self.wm._committed_per_op[key[0]] = self.wm._committed_per_op.get(key[0], 0) + 1
+        self.wm._committed_count_by_operation[key[0]] = self.wm._committed_count_by_operation.get(key[0], 0) + 1
         self.wm.absorbed_windows.add(key)
         if restart_key is not None:
             restart = self.wm.windows[restart_key]
@@ -1128,7 +1128,7 @@ class StrongEscalation:
         if pending is None:
             return
         if (
-            self.wm.strong_rounds_arrived.get(op_id, 0)
+            self.wm.strong_rounds_arrived_by_operation.get(op_id, 0)
             >= pending.resolved_region.plan.context_hi
         ):
             self._submit_terminal_strong(op_id, pending)

@@ -71,6 +71,13 @@ def make_operation():
     return Operation(id=1, name="memory", qubits=(0,))
 
 
+
+def _resolved_geometry(completed):
+    """The code geometry the run resolved, read off the issuer's table."""
+    resolved = completed.issuer.resolved_operation_by_id.values()
+    first = next(iter(resolved))
+    return first.code_geometry
+
 def build_run(code=None, scheme=None, **qpu_options):
     """The machine and its result; qpu_options are QpuSettings fields."""
     settings = MachineSettings(
@@ -418,13 +425,13 @@ def test_outside_structural_code_model_completes_a_full_run():
     assert isinstance(card, CodeModel)
     completed, result = build_run(card)
     assert result.terminal_status == "complete"
-    assert completed.window_manager._code_geometry.code_name == card.name
+    assert _resolved_geometry(completed).code_name == card.name
 
 
 def test_default_run_resolves_a_distance_three_surface_card():
     """A run without an explicit code resolves the default distance-three Surface geometry."""
     completed, _ = build_run()
-    geometry = completed.window_manager._code_geometry
+    geometry = _resolved_geometry(completed)
     assert geometry.code_name == "rotated surface code (d=3)"
     assert geometry.distance == 3
 
@@ -434,7 +441,7 @@ def test_outside_name_annotation_is_declared_but_not_runtime_validated():
     card = OutsideCodeModel()
     card.name = 7
     completed, result = build_run(card)
-    geometry = completed.window_manager._code_geometry
+    geometry = _resolved_geometry(completed)
     assert geometry.code_name == 7
     assert geometry.window_floor_justification is None
     assert result.terminal_status == "complete"

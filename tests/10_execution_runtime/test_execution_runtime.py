@@ -56,24 +56,23 @@ class RecordingController:
         self.engine.events.append(("can_start", operation.id))
         return self.allowed.get(operation.id, True)
 
-    def issue_operation(self, operation, idle_rounds):
+    def issue_operation(self, operation, on_started):
         self.observe_lifecycle("issue_operation", operation.id)
-        self.issued.append((operation, idle_rounds))
+        self.issued.append((operation, on_started))
         if self.runtime is not None:
             self.observed_at_issue.append((
                 operation.id,
                 operation.id in self.runtime.op_start_time,
                 self.runtime.op_start_time.get(operation.id),
-                dict(self.runtime.idle_rounds_by_patch),
             ))
-        self.engine.events.append(("issue", operation.id, idle_rounds))
+        self.engine.events.append(("issue", operation.id))
         return self.engine.now
 
     def before_successor_release(self, operation):
         self.observe_lifecycle("before_successor_release", operation.id)
         self.engine.events.append(("before", operation.id))
 
-    def after_successor_release(self, operation):
+    def after_successor_release(self, operation, waits_for_blocked, is_workload_complete):
         self.observe_lifecycle("after_successor_release", operation.id)
         self.engine.events.append(("after", operation.id))
 
@@ -105,7 +104,7 @@ def make_runtime(*operations, round_ticks=1, claims=None):
     factory = RecordingFactory(engine)
     runtime = ExecutionRuntime(
         engine,
-        controller=controller,
+        issuer=controller,
         factory=factory,
         resource_claims_by_operation_id=claims if claims is not None else claims_for(*operations),
     )
@@ -118,7 +117,7 @@ def mutable_runtime_state(runtime, engine, controller, factory):
         "operations", "dependencies_remaining", "successors", "schedule_released",
         "requested", "state_ready", "op_start_time", "body_done_time",
         "decode_release_time",
-        "result_return_time_by_operation", "idle_rounds_by_patch",
+        "result_return_time_by_operation",
     )
     copied = {}
     for name in names:
@@ -143,7 +142,7 @@ def test_construction_preserves_collaborators_and_shallow_copies_claim_mapping()
     runtime, engine, controller, factory = make_runtime(operation, claims=supplied_claims)
 
     assert runtime.engine is engine
-    assert runtime.controller is controller
+    assert runtime.issuer is controller
     assert runtime.factory is factory
     assert runtime.resources.claims_by_operation_id[operation.id] is claim_list
     supplied_claims[2] = []
@@ -158,11 +157,11 @@ def test_construction_preserves_collaborators_and_shallow_copies_claim_mapping()
     bare_factory = object()
     bare_runtime = ExecutionRuntime(
         bare_engine,
-        controller=bare_controller,
+        issuer=bare_controller,
         factory=bare_factory,
         resource_claims_by_operation_id={},
     )
-    assert (bare_runtime.engine, bare_runtime.controller, bare_runtime.factory) == (
+    assert (bare_runtime.engine, bare_runtime.issuer, bare_runtime.factory) == (
         bare_engine, bare_controller, bare_factory
     )
 
@@ -176,7 +175,7 @@ def test_construction_starts_with_the_documented_empty_lifecycle():
     for name in (
         "operations", "dependencies_remaining", "successors",
         "op_start_time", "body_done_time", "decode_release_time",
-        "result_return_time_by_operation", "idle_rounds_by_patch",
+        "result_return_time_by_operation",
     ):
         assert getattr(runtime, name) == {}
     for name in ("schedule_released", "requested", "state_ready"):
@@ -343,13 +342,12 @@ def test_magic_state_request_holds_resources_until_readiness_and_issues_once():
     assert controller.issued == []
     assert engine.events[-1] == ("factory_request", 1)
 
-    runtime.idle_rounds_by_patch["data"] = 3
     engine.now = 7
     factory.release()
     factory.release()
     assert runtime.op_start_time == {1: 7}
-    assert controller.issued == [(operation, 3)]
-    assert controller.observed_at_issue == [(1, True, 7, {})]
+    assert [issued for issued, _ in controller.issued] == [operation]
+    assert controller.observed_at_issue == [(1, True, 7)]
 
 
 def test_feedback_and_controller_cadence_are_independent_start_gates():
@@ -486,7 +484,7 @@ def test_body_done_preserves_valid_release_hook_issue_and_completion_order():
         ("log", "ExecutionRuntime", "operation-1 body done"),
         ("before", 1),
         ("can_start", 2),
-        ("issue", 2, 0),
+        ("issue", 2),
         ("after", 1),
     ]
     assert runtime.resources.holder_by_resource == {("qubit", "shared"): 2}
@@ -547,7 +545,7 @@ def test_ready_retry_offers_state_ready_operations_in_identity_order():
     runtime.retry_ready_operations()
     assert engine.events == [
         ("can_start", 9),
-        ("issue", 9, 0),
+        ("issue", 9),
         ("can_start", 24),
     ]
     assert set(runtime.op_start_time) == {1, 9}
@@ -557,50 +555,9 @@ def test_ready_retry_offers_state_ready_operations_in_identity_order():
     engine.now = 8
     engine.events.clear()
     runtime.retry_ready_operations()
-    assert engine.events == [("can_start", 24), ("issue", 24, 0)]
+    assert engine.events == [("can_start", 24), ("issue", 24)]
     assert [operation.id for operation, _ in controller.issued] == [1, 9, 24]
     assert runtime.op_start_time[24] == 8
-
-
-def test_idle_round_accounting_accumulates_per_patch_until_consumed():
-    """Recorded idle rounds accumulate per patch identity and survive only until an operation consumes them."""
-    operation = make_operation(1, patches=("patch-a",))
-    runtime, _, _, _ = make_runtime(operation)
-
-    runtime.record_idle_round("patch-a")
-    runtime.record_idle_round("patch-b")
-    runtime.record_idle_round("patch-a")
-    assert runtime.idle_rounds_by_patch == {"patch-a": 2, "patch-b": 1}
-
-    assert runtime.consume_idle_rounds(operation) == 2
-    assert runtime.idle_rounds_by_patch == {"patch-b": 1}
-
-    runtime.record_idle_round("patch-a")
-    assert runtime.idle_rounds_by_patch == {"patch-a": 1, "patch-b": 1}
-
-
-def test_idle_round_consumption_prefers_patches_and_is_destructive():
-    """Idle-round consumption prefers truthy patches, counts duplicates once, and removes used entries."""
-    patched = make_operation(1, qubits=("q",), patches=("p", "p", "missing"))
-    runtime, _, _, _ = make_runtime(patched)
-    runtime.idle_rounds_by_patch = {"p": 3, "q": 8}
-    assert runtime.consume_idle_rounds(patched) == 3
-    assert runtime.idle_rounds_by_patch == {"q": 8}
-
-    fallback = make_operation(2, qubits=("q",), patches=())
-    assert runtime.consume_idle_rounds(fallback) == 8
-    assert runtime.idle_rounds_by_patch == {}
-
-
-def test_idle_round_consumption_deliberately_does_not_roll_back_earlier_pops():
-    """An invalid later idle identity fails naturally without restoring an earlier consumed value."""
-    operation = make_operation(1, patches=("valid", []))
-    runtime, _, _, _ = make_runtime(operation)
-    runtime.idle_rounds_by_patch.update({"valid": 4, "other": 1})
-
-    with pytest.raises(TypeError):
-        runtime.consume_idle_rounds(operation)
-    assert runtime.idle_rounds_by_patch == {"other": 1}
 
 
 def test_decisions_keep_release_and_result_timestamps_distinct_and_latched():

@@ -433,15 +433,15 @@ class IdlePolicy(Protocol):
 
     Table rows: separate_decode_jobs, ignore, extend_stream
     (controller/policies.py). relay carries one idle round through the
-    controller it is given; end_idle_period runs when an operation
-    claims the patch, so rounds the policy has not charged yet can be
-    settled.
+    idle accounting it is given (controller/idle_rounds.py);
+    end_idle_period runs when an operation claims the patch, so rounds
+    the policy has not charged yet can be settled.
     """
 
-    def relay(self, controller, operation, patch, round_index: int) -> None:
-        """Carry one idle round of the patch through the controller."""
+    def relay(self, idle_rounds, operation, patch, round_index: int) -> None:
+        """Carry one idle round of the patch through the idle accounting."""
 
-    def end_idle_period(self, controller, operation, patch) -> None:
+    def end_idle_period(self, idle_rounds, operation, patch) -> None:
         """Settle the uncharged rounds when an operation claims the patch."""
 
 

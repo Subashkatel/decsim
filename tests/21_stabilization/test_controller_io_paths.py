@@ -12,7 +12,7 @@ from decsim.frontends.settings import WorkloadSettings
 from decsim.machine import MachineSettings
 from decsim.qpu.settings import QpuSettings
 from decsim.observe.link_traffic import TrafficLedger
-from decsim.controller.controller import Controller
+from decsim.controller.instruction_output import InstructionOutput
 from decsim.decoders.decoders import PresetLatencyDecoder
 from decsim.engine import Engine
 from decsim.links.fabric import LinkFabric
@@ -164,14 +164,10 @@ def test_controller_output_without_a_link_still_pays_local_processing():
     engine = Engine(verbose=False)
     delivered = []
     recorder = RoundEventRecorder(engine)
-    controller = Controller(
-        engine, qpu=None, window_manager=None, recorder=recorder,
-        instruction_or_decision_to_analog_control_pulse_ticks=17,
-        links=None, resolved_operations=(), resolved_patches=(),
-        idle_policy=None, feedback_streams=None)
+    output = InstructionOutput(engine, None, None, 17, recorder)
     decision = Decision(9, releases_operation=False)
 
-    controller.relay_instruction(decision, delivered.append)
+    output.relay_instruction(decision, delivered.append)
     engine.run()
 
     assert delivered == [decision]

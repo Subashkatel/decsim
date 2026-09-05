@@ -11,15 +11,18 @@ map each section's `kind` to the class that fills the port, sinter's
 made one dict per pluggable part. A new component is one class that
 fills its port in decsim/ports.py and one row here.
 
-Three components are still wired after construction (the QPU's
-receivers, the controller's runtime, the window manager's decode queue
-methods) because the window manager, the decoder manager and the
-factory refer to each other; slices 5 and 6 retire them with the
-per-job callback law (SimPy's callback on the event, simpy/core.py
-step()): the submitting side carries the return path with the job.
-The stores' callbacks arrive by constructor: the held rounds are built
-first, each store retries them when a slot frees, and the strong
-writer tells the window manager what landed.
+Two components are still wired after construction (the QPU's
+receivers, the window manager's decode queue methods) because the
+window manager, the decoder manager and the factory refer to each
+other; slices 5 and 6 retire them with the per-job callback law
+(SimPy's callback on the event, simpy/core.py step()): the submitting
+side carries the return path with the job. The controller's runtime
+bind was retired by slice 4's structural C: the issuer carries the
+start callback with the issue, the QPU's completion receiver is the
+runtime's body_done, and the runtime tells the issuer what it knows at
+each release. The stores' callbacks arrive by constructor: the held
+rounds are built first, each store retries them when a slot frees, and
+the strong writer tells the window manager what landed.
 """
 
 import copy
@@ -34,6 +37,9 @@ import decsim.confidence.decoder as confidence_decoder
 import decsim.config as config
 import decsim.controller.controller as controller_module
 import decsim.controller.feedback_streams as feedback_streams
+import decsim.controller.idle_rounds as idle_rounds_module
+import decsim.controller.instruction_output as instruction_output_module
+import decsim.controller.operation_issue as operation_issue
 import decsim.controller.policies as policies
 import decsim.controller.round_assembly as round_assembly
 import decsim.controller.round_transmission as round_transmission
@@ -350,6 +356,9 @@ class Machine:
     syndrome_source: Any
     qpu: cycle_clock.QPUDevice
     controller: controller_module.Controller
+    issuer: operation_issue.OperationIssuer
+    instruction_output: instruction_output_module.InstructionOutput
+    idle_rounds: idle_rounds_module.IdleRoundAccounting
     execution_runtime: execution_runtime_module.ExecutionRuntime
     operations: tuple
 
@@ -447,6 +456,10 @@ class Machine:
             settings.magic_state_factory, engine, decoder_manager, plan
         )
         qpu = cycle_clock.QPUDevice(engine, plan.device, plan.round_ticks)
+        pulse_ticks = settings.controller.decision_to_pulse_ticks()
+        instruction_output = instruction_output_module.InstructionOutput(
+            engine, links, qpu, pulse_ticks, round_events
+        )
         streams = _feedback_streams(
             engine,
             plan,
@@ -456,30 +469,32 @@ class Machine:
                 execution_runtime.retry_ready_operations()
             ),
         )
-        controller = _controller(
+        patch_by_identity = _patch_by_identity(plan)
+        idle_rounds = idle_rounds_module.IdleRoundAccounting(
+            plan.idle_policy, window_manager, patch_by_identity, streams, qpu
+        )
+        issuer = operation_issue.OperationIssuer(
             engine,
-            settings,
-            plan,
-            qpu,
-            window_manager,
-            assembler,
-            round_events,
-            links,
             streams,
+            idle_rounds,
+            window_manager,
+            plan.run_plan.resolved_operations,
+            instruction_output,
+        )
+        controller = controller_module.Controller(
+            engine, links, settings.controller, assembler, round_events
         )
         execution_runtime = execution_runtime_module.ExecutionRuntime(
             engine,
-            controller=controller,
+            issuer=issuer,
             factory=factory,
             resource_claims_by_operation_id=plan.resource_claims,
         )
-        # Slice 5 retires the controller's runtime bind; the QPU's
-        # receivers arrive through its constructor once the controller
-        # is built first (slice 4).
-        controller.connect_runtime(execution_runtime)
+        # The QPU's receivers arrive through its constructor once the
+        # qpu lane builds the controller first.
         qpu.connect_readout_receiver(controller)
-        qpu.connect_completion_receiver(controller._body_done)
-        qpu.connect_idle_receiver(controller.emit_idle_round)
+        qpu.connect_completion_receiver(execution_runtime.body_done)
+        qpu.connect_idle_receiver(idle_rounds.emit_idle_round)
         metric_list = _metrics(observation, window_manager, decoder_manager)
         metric_bindings = _metric_bindings(metric_list)
         seed_roots = _seed_roots(
@@ -511,12 +526,16 @@ class Machine:
             metrics=metric_bindings,
         )
         seeding.bind_run_seed(root_seed, seed_roots)
-        conditional_release.connect(controller, execution_runtime.on_decision)
+        conditional_release.connect(
+            instruction_output, execution_runtime.on_decision
+        )
         _load_program(
             plan,
             conditional_release,
             window_manager,
-            controller,
+            streams,
+            idle_rounds,
+            execution_runtime,
             engine,
             metric_bindings,
         )
@@ -541,6 +560,9 @@ class Machine:
             syndrome_source=plan.device,
             qpu=qpu,
             controller=controller,
+            issuer=issuer,
+            instruction_output=instruction_output,
+            idle_rounds=idle_rounds,
             execution_runtime=execution_runtime,
             operations=plan.all_operations,
         )
@@ -1268,37 +1290,12 @@ def _feedback_streams(
     )
 
 
-def _controller(
-    engine: engine_module.Engine,
-    settings: MachineSettings,
-    plan: _Plan,
-    qpu,
-    window_manager,
-    assembler,
-    round_events,
-    links,
-    streams,
-) -> controller_module.Controller:
-    controller = settings.controller
-    run_plan = plan.run_plan
-    readout_to_bits_ticks = controller.readout_to_bits_ticks()
-    decision_to_pulse_ticks = controller.decision_to_pulse_ticks()
-    return controller_module.Controller(
-        engine,
-        qpu=qpu,
-        window_manager=window_manager,
-        assembler=assembler,
-        recorder=round_events,
-        measurement_signal_to_classical_bits_ticks=readout_to_bits_ticks,
-        instruction_or_decision_to_analog_control_pulse_ticks=(
-            decision_to_pulse_ticks
-        ),
-        links=links,
-        resolved_operations=run_plan.resolved_operations,
-        resolved_patches=run_plan.resolved_patches,
-        idle_policy=plan.idle_policy,
-        feedback_streams=streams,
-    )
+def _patch_by_identity(plan: _Plan) -> dict:
+    """The resolved patches by identity, for the idle accounting."""
+    patch_by_identity = {}
+    for patch in plan.run_plan.resolved_patches:
+        patch_by_identity[patch.patch_identity] = patch
+    return patch_by_identity
 
 
 def _metrics(
@@ -1340,11 +1337,17 @@ def _load_program(
     plan: _Plan,
     conditional_release,
     window_manager,
-    controller,
+    streams,
+    idle_rounds,
+    execution_runtime,
     engine: engine_module.Engine,
     metric_bindings: tuple,
 ) -> None:
-    """Register the workload with every component that reads it."""
+    """Register the workload with every component that reads it.
+
+    The streams first, then every operation with the windows, then the
+    idle accounting, then the runtime starts the roots.
+    """
     for operation in plan.operations:
         if operation.blocked_by is not None:
             conditional_release.register_blocked_operation(
@@ -1369,7 +1372,11 @@ def _load_program(
         plan.dynamic_streams,
         plan.protected_regions,
     )
-    controller.load_program(program)
+    streams.load(program)
+    for operation in program.operations:
+        window_manager.register_op(operation)
+    idle_rounds.load(program)
+    execution_runtime.load_program(program)
 
 
 # ------------------------------------------------------------ the result
@@ -1435,7 +1442,7 @@ def _operation_result(
                 f"observables but the syndrome source sampled {len(actual)}"
             )
         failure = bits != actual
-    binding = machine.controller.stream_binding_for(operation_id)
+    binding = machine.issuer.stream_binding_for(operation_id)
     stream_offset = operation.stream_offset
     if binding is not None:
         stream_offset = binding.stream_offset

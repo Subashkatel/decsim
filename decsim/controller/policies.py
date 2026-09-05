@@ -44,13 +44,13 @@ class Ignore:
     multi-operation workloads (every reference decodes idle volume).
     """
 
-    def relay(self, controller, operation, patch, round_index: int) -> None:
+    def relay(self, idle_rounds, operation, patch, round_index: int) -> None:
         """Send the round as a memory round."""
-        controller.emit_memory_round(operation, patch, round_index)
+        idle_rounds.emit_memory_round(operation, patch, round_index)
 
-    def end_idle_period(self, controller, operation, patch) -> None:
+    def end_idle_period(self, idle_rounds, operation, patch) -> None:
         """Nothing was charged, so nothing settles."""
-        del controller
+        del idle_rounds
         del operation
         del patch
 
@@ -62,15 +62,15 @@ class ExtendStream:
     sampled content and are decoded: the XQsim continuous-stream shape.
     """
 
-    def relay(self, controller, operation, patch, round_index: int) -> None:
+    def relay(self, idle_rounds, operation, patch, round_index: int) -> None:
         """Extend the live stream, or send a memory round."""
-        extended = controller.extend_live_stream(operation, patch)
+        extended = idle_rounds.extend_live_stream(operation, patch)
         if not extended:
-            controller.emit_memory_round(operation, patch, round_index)
+            idle_rounds.emit_memory_round(operation, patch, round_index)
 
-    def end_idle_period(self, controller, operation, patch) -> None:
+    def end_idle_period(self, idle_rounds, operation, patch) -> None:
         """Nothing was charged, so nothing settles."""
-        del controller
+        del idle_rounds
         del operation
         del patch
 
@@ -89,11 +89,11 @@ class SeparateDecodeJobs:
     utilization, backlog, or unit-count claims.
     """
 
-    def relay(self, controller, operation, patch, round_index: int) -> None:
+    def relay(self, idle_rounds, operation, patch, round_index: int) -> None:
         """Send the memory round and count it toward the next job."""
-        controller.emit_memory_round(operation, patch, round_index)
-        controller.submit_idle_decode_if_due(operation, patch, round_index)
+        idle_rounds.emit_memory_round(operation, patch, round_index)
+        idle_rounds.submit_idle_decode_if_due(operation, patch, round_index)
 
-    def end_idle_period(self, controller, operation, patch) -> None:
+    def end_idle_period(self, idle_rounds, operation, patch) -> None:
         """Charge the rounds left after the last full commit region."""
-        controller.submit_idle_decode_for_remaining_rounds(operation, patch)
+        idle_rounds.submit_idle_decode_for_remaining_rounds(operation, patch)

@@ -177,12 +177,12 @@ def test_a_yaml_section_nobody_owns_is_refused_naming_the_sections():
         )
 
 
-def test_the_three_post_construction_binds_reach_their_components():
+def test_the_two_post_construction_binds_reach_their_components():
     """The debt slices 5 and 6 retire: the binds are made, not left None."""
     settings = machine_module.MachineSettings()
     machine = machine_module.Machine.build(settings)
     assert machine.qpu.readout_receiver is machine.controller
-    assert machine.controller.runtime is machine.execution_runtime
+    assert machine.execution_runtime.issuer is machine.issuer
     manager = machine.decoder_manager
     assert machine.window_manager.release_service == manager.release_parked
     assert machine.window_manager.withdraw_decode == manager.withdraw_window

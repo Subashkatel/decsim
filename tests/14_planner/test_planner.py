@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 from decsim.config import TICKS_PER_MICROSECOND
-from decsim.syndrome_buffer.syndrome_buffer import PotentialStrong
+from decsim.message import PotentialStrong
 from decsim.message import (
     Operation,
     OperationPlanningView,

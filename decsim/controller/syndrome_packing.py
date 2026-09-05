@@ -16,9 +16,11 @@ import enum
 import functools
 from typing import Callable, Optional
 
+import decsim.controller.round_writes as round_writes
 import decsim.message as message
 import decsim.ports as ports
-import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
+import decsim.syndrome_buffer.round_store as round_store_module
+import decsim.syndrome_buffer.settings as round_store_settings
 
 
 class ReassemblyQueueAdmission(enum.Enum):
@@ -43,11 +45,12 @@ class PackingOverflowPolicy(enum.Enum):
     cores block in WAIT_MEAS, and credit-based flow control never loses
     a flit. LILLIPUT's readout buffer and QubiC's measurement register
     instead overwrite the latest value, a storage choice this policy does
-    not model. DROP_ROUND and FAIL_STOP are study knobs.
+    not model. DROP_ROUND is a study knob with no yaml key (ns-3's drop
+    tail, point-to-point-net-device.cc Send: Enqueue false, packet
+    dropped).
     """
 
     STALL = "stall"
-    FAIL_STOP = "fail_stop"
     DROP_ROUND = "drop_round"
 
 
@@ -97,7 +100,7 @@ class SyndromeReassemblyTimeoutError(RuntimeError):
 
 
 class SyndromePackingOverflowError(RuntimeError):
-    """A new round found no free assembly context, or no slot in Buffer 0."""
+    """A new round found no free assembly context."""
 
     status = "controller_packing_overflow"
 
@@ -174,9 +177,10 @@ class SyndromePacking:
         packing_context_capacity: Optional[int],
         window_input_receiver,
         feedback_memory_receiver,
-        syndrome_buffer: Optional[syndrome_buffer_module.SyndromeBuffer] = None,
+        syndrome_buffer: Optional[round_store_module.RoundStore] = None,
         syndrome_buffer_1=None,
         window_input_store=None,
+        held_rounds: Optional[round_writes.HeldRounds] = None,
         policy: SyndromePackingPolicy = _DEFAULT_POLICY,
         detector_formation=None,
     ):
@@ -193,17 +197,20 @@ class SyndromePacking:
         self.packing_context_capacity = packing_context_capacity
         self.window_input_receiver = window_input_receiver
         self.feedback_memory_receiver = feedback_memory_receiver
+        if held_rounds is None:
+            held_rounds = round_writes.HeldRounds()
+        # finished rounds waiting for store room, in completion order;
+        # the stores retry them when a slot frees (on_slot_freed)
+        self.held_rounds = held_rounds
         if syndrome_buffer is None:
-            syndrome_buffer = syndrome_buffer_module.SyndromeBuffer(
-                capacity=packing_context_capacity
+            settings = round_store_settings.RoundStoreSettings()
+            syndrome_buffer = round_store_module.RoundStore(
+                settings, on_slot_freed=held_rounds.retry
             )
         self.syndrome_buffer = syndrome_buffer
         self.syndrome_buffer_1 = syndrome_buffer_1
         self.window_input_store = self._window_input_store(window_input_store)
         self._contexts: dict = {}
-        # finished rounds waiting for store room, in completion order
-        self._stalled_identities: list = []
-        self._connect_store_releases()
         self._route_queues = {}
         for kind in message.SyndromePacketRouteKind:
             self._route_queues[kind] = []
@@ -227,13 +234,6 @@ class SyndromePacking:
         if window_input_store is None:
             return self.syndrome_buffer
         return window_input_store
-
-    def _connect_store_releases(self) -> None:
-        """A store that frees a slot wakes the stalled rounds."""
-        self.syndrome_buffer.on_round_released = self._retry_stalled_rounds
-        if self.syndrome_buffer_1 is not None:
-            room_store = self.syndrome_buffer_1.store
-            room_store.on_round_released = self._retry_stalled_rounds
 
     def _connect_window_input_ready(self, window_input_receiver) -> None:
         connect_ready = getattr(
@@ -425,16 +425,14 @@ class SyndromePacking:
                 return self._store_is_full(context)
             self._store_in_syndrome_buffer_1(packet, context)
             return True
-        if not self.syndrome_buffer.has_operation(packet.operation_id):
-            self.syndrome_buffer.open_operation(packet.operation_id)
+        if not self.syndrome_buffer.has_room():
+            return self._store_is_full(context)
         if not self._strong_store_has_room():
             return self._store_is_full(context)
         publication_tick = self._publication_tick_at_storage(context)
-        admission = self.syndrome_buffer.accept_packed_round(
+        self.syndrome_buffer.accept_packed_round(
             packet, publication_tick=publication_tick
         )
-        if admission.refused:
-            return self._store_is_full(context)
         self._stored_in_buffer_0(context, publication_tick)
         context.state = _PackingSlotState.PACKED_WAIT
         if (
@@ -507,44 +505,22 @@ class SyndromePacking:
         if policy is PackingOverflowPolicy.STALL:
             if context.state is not _PackingSlotState.STALLED:
                 context.state = _PackingSlotState.STALLED
-                self._stalled_identities.append(context.identity)
+                self.held_rounds.hold(context, self._admit_packed_round)
                 self._record(
                     "STALLED", operation_id, round_index, context.route
                 )
             return False
         self._forget_context(context)
-        if policy is PackingOverflowPolicy.DROP_ROUND:
-            self.packing_drops += 1
-            self._dropped_rounds.add(context.round_key)
-            self._record("DROPPED", operation_id, round_index, context.route)
-            return False
-        snapshot = self.packing_snapshot()
-        raise SyndromePackingOverflowError(
-            tick=self.engine.now,
-            route=context.route,
-            incoming_identity=context.identity,
-            capacity=self.syndrome_buffer.capacity,
-            snapshot=snapshot,
-        )
-
-    def _retry_stalled_rounds(self) -> None:
-        """A store freed a slot: admit waiting rounds in completion order.
-
-        The walk stops at the first round that still finds no room.
-        """
-        while self._stalled_identities:
-            head = self._stalled_identities[0]
-            context = self._contexts[head]
-            admitted = self._admit_packed_round(context)
-            if not admitted:
-                return
-            self._stalled_identities.pop(0)
+        self.packing_drops += 1
+        self._dropped_rounds.add(context.round_key)
+        self._record("DROPPED", operation_id, round_index, context.route)
+        return False
 
     def _stores_window_input_in_syndrome_buffer_1(self, context) -> bool:
         window_input = message.SyndromePacketRouteKind.WINDOW_INPUT
         on_window_route = context.route.kind is window_input
         strong_is_window_store = (
-            self.window_input_store is self.syndrome_buffer_1
+            self.window_input_store is not self.syndrome_buffer
         )
         return on_window_route and strong_is_window_store
 
@@ -695,12 +671,7 @@ class SyndromePacking:
             # keep round order
             context.state = _PackingSlotState.PACKED_WAIT
             return False
-        accepted = self.window_input_receiver.accept_window_input(
-            context.packet
-        )
-        if not accepted:
-            context.state = _PackingSlotState.PACKED_WAIT
-            return False
+        self.window_input_receiver.accept_window_input(context.packet)
         context.state = _PackingSlotState.DRAINING
         release = functools.partial(self._release_context, context)
         self.engine.schedule(

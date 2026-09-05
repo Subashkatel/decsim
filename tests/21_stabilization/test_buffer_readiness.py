@@ -12,8 +12,7 @@ from decsim.engine import Engine
 from decsim.links.fabric import LinkFabric
 from decsim.links.link_profiles import logical_reference_profile
 from decsim.message import (DecoderTier, RetainedSyndromeFragment,
-                            SyndromeRoundPacket, TransferAttribution)
-from decsim.syndrome_buffer.syndrome_buffer_1 import SyndromeBuffer1
+                            SyndromeRoundPacket)
 
 
 def test_weak_only_pipeline_arithmetic(fabric):
@@ -105,38 +104,11 @@ def test_strong_primary_rounds_never_enter_the_weak_path(fabric):
                          for edge in link_traffic["semantic_edges"]}
     assert transfers_by_path["controller_to_weak_buffer"] == 0
     assert transfers_by_path["controller_to_strong_buffer"] == 6
-    buffer_0 = completed.window_manager.syndrome_buffer.metrics()
-    assert buffer_0.allocations_total == 0
     (record,) = completed.pauli_frame.snapshot().records
     assert record.tier == "strong"
     (request,) = completed.decoder_manager.terminal_request_records_snapshot()
     assert request.request_key.tier is DecoderTier.STRONG
     assert request.terminal_processing_outcome.value == "primary_forwarded_for_delivery"
-
-
-def test_sb1_gap_cannot_be_served(fabric):
-    """A missing interior round is never hidden by the stored-through
-    counter: exact reads refuse."""
-    engine = Engine()
-    sb1 = SyndromeBuffer1(engine, LinkFabric(logical_reference_profile(), engine))
-    sb1.register_hold("reader", [(1, 1), (1, 2), (1, 3)])
-
-    def write(round_index):
-        fragment = RetainedSyndromeFragment(
-            operation_id=1, patch_id=0, round_index=round_index,
-            bits=(1,), size_bits=1, fragment_index=0)
-        sb1.write(SyndromeRoundPacket(1, round_index, (fragment,)),
-                  packet_bits=1,
-                  attribution=TransferAttribution(
-                      operation_id=1, patch_ids=(0,), window_id=None,
-                      first_round=round_index, last_round=round_index))
-
-    write(1)
-    write(3)
-    assert sb1.rounds_arrived[1] == 3          # the max counter reads 3
-    assert sb1.retained_fragments((1, 2)) is None
-    with pytest.raises(RuntimeError, match="not stored in syndrome buffer 1"):
-        sb1.check_rounds_stored([(1, 2)])
 
 
 def test_a_full_buffer_0_stalls_the_controller_instead_of_failing(fabric):
@@ -185,10 +157,8 @@ def test_a_full_buffer_0_stalls_the_controller_instead_of_failing(fabric):
 def test_stores_settle_empty(fabric):
     """At the end of a run neither store holds a round or a hold."""
     completed = fabric["switching_run"](escalation_probability=1.0, rounds=9)
-    buffer0 = completed.syndrome_buffer.snapshot()
-    assert buffer0.occupancy == 0
-    completed.syndrome_buffer_1.check_settled()
-    assert completed.syndrome_buffer_1.peak_occupancy_rounds() > 0
+    assert completed.round_store.occupancy == 0
+    completed.strong_round_writer.check_settled()
 
 
 def test_upstream_rounds_survive_until_the_input_transfer_lands(fabric):

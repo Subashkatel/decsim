@@ -427,7 +427,7 @@ def event_ledger(completed) -> RunLedgerView:
     # fast csb legitimately lands first. A round that was never published
     # to Buffer 0 (the strong tier is primary) ends its journey here
     stored_of_round: dict = {}
-    room_store = completed.syndrome_buffer_1
+    room_store = completed.strong_round_writer
     if room_store is not None:
         for tick, operation_id, round_index in room_store.stored_log:
             key = (operation_id, round_index)

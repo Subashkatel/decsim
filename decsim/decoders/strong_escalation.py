@@ -33,8 +33,8 @@ from ..message import (
     LinkPath,DecodeJob, DecodeResult, DecoderRequestKey, DecoderTier,
                        LogicalContribution, Operation, SeamFaultOwner, StrongDecodeCompletion,
                        StrongRegionPlan, Window, WindowInfo, stable_identity_order_key)
-from ..syndrome_buffer.syndrome_buffer import (CsdInput, PendingStrong, PotentialStrong,
-                                               RephaseGuard)
+from ..message import (PendingStrong, PotentialStrong, RephaseGuard,
+                       StrongInputInFlight)
 from .decoder_memory import count_decoder_input_round_demand
 
 
@@ -496,16 +496,16 @@ class StrongEscalation:
         sb1 = self.wm.syndrome_buffer_1
         if sb1.has_hold(PotentialStrong(window_key)):
             self.wm._transfer_retention_hold(
-                PotentialStrong(window_key), CsdInput(request_key), sb1)
+                PotentialStrong(window_key), StrongInputInFlight(request_key), sb1)
         elif sb1.has_hold(PendingStrong(request_key)):
             self.wm._transfer_retention_hold(
-                PendingStrong(request_key), CsdInput(request_key), sb1)
+                PendingStrong(request_key), StrongInputInFlight(request_key), sb1)
         else:
             packet_ids = tuple(dict.fromkeys(
                 (fragment.operation_id, fragment.round_index)
                 for fragment in strong_job.payloads))
-            sb1.register_hold(CsdInput(request_key), packet_ids)
-        self.wm._bind_decoder_input_hold(strong_job, CsdInput(request_key), sb1)
+            sb1.register_hold(StrongInputInFlight(request_key), packet_ids)
+        self.wm._bind_decoder_input_hold(strong_job, StrongInputInFlight(request_key), sb1)
         payload_bits = self.wm._job_payload_bits(strong_job)
         context_identities = tuple(dict.fromkeys(
             (fragment.operation_id, fragment.round_index)
@@ -514,7 +514,7 @@ class StrongEscalation:
         def send_input(on_landed) -> int:
             # the DMA reads only context rounds that landed in syndrome
             # buffer 1 (always, whenever the csb margin holds)
-            sb1.check_rounds_stored(context_identities)
+            sb1.require_stored(context_identities)
             def landed() -> None:
                 if wsd_arrival_ticks is None:
                     on_landed()
@@ -576,7 +576,7 @@ class StrongEscalation:
             pending = self._escalations.update_wsd_arrival(
                 pending, wsd_arrival_ticks)
             if (pending.phase is _EscalationPhase.WAITING_TERMINAL_DATA
-                    and self.wm.syndrome_buffer_1.rounds_arrived.get(
+                    and self.wm.strong_rounds_arrived.get(
                         pending.key[0], 0) >=
                     pending.resolved_region.plan.context_hi):
                 self._submit_terminal_strong(pending.key[0], pending)
@@ -1128,7 +1128,7 @@ class StrongEscalation:
         if pending is None:
             return
         if (
-            self.wm.syndrome_buffer_1.rounds_arrived.get(op_id, 0)
+            self.wm.strong_rounds_arrived.get(op_id, 0)
             >= pending.resolved_region.plan.context_hi
         ):
             self._submit_terminal_strong(op_id, pending)

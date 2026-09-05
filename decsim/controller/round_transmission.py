@@ -12,6 +12,8 @@ classified result as it is produced, gem5's DmaPort queues the next
 request behind the front of transmitList (src/dev/dma_device.cc) and
 ns-3's point-to-point device starts the next packet at TransmitComplete
 (point-to-point-net-device.cc); the FIFO channel keeps delivery order.
+in_flight counts the rounds from their send until the windows have heard
+of them; the packing stage's bound reads it (RoundsInFlight).
 """
 
 import functools
@@ -79,8 +81,8 @@ class RoundTransmitter:
 
     def _send_window_input(self, packed: message.PackedRound) -> None:
         if not self._publishes_at_delivery():
-            self.in_flight -= 1
             self.windows.accept_window_input(packed.packet)
+            self._leave_after_publication()
             return
         operation_id, round_index = packed.round_key
         self.recorder.record(
@@ -97,6 +99,18 @@ class RoundTransmitter:
             "PUBLISHED", operation_id, round_index, packed.route
         )
         self.windows.accept_window_input(packed.packet)
+        self._leave_after_publication()
+
+    def _leave_after_publication(self) -> None:
+        """The round leaves in the event after its publication.
+
+        A round is in flight until its publication has completed, so a
+        fragment landing at the publication tick still counts it.
+        """
+        self.engine.schedule(0, self._leave, label="round publication complete")
+
+    def _leave(self) -> None:
+        self.in_flight -= 1
 
     def _send_feedback_memory(self, packed: message.PackedRound) -> None:
         deliver = functools.partial(self._deliver_feedback_memory, packed)
@@ -113,12 +127,12 @@ class RoundTransmitter:
             "FEEDBACK_MEMORY_DELIVERED", operation_id, round_index, packed.route
         )
         self.weak_store.release_round(packed.round_key)
+        self._leave()
 
     def _send(self, path: message.LinkPath, packed, on_delivered) -> None:
         attribution = message.TransferAttribution.for_packet(packed.packet)
 
         def delivered(_transfer) -> None:
-            self.in_flight -= 1
             on_delivered()
 
         self.link.send(

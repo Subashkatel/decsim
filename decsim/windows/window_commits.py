@@ -73,9 +73,10 @@ class WindowCommitter:
 
     Seven attributes: the engine stamps and logs, the planner and the
     tracker name the window and its operation, and the courier, the
-    publisher, the escalation and the results are the four the commit
-    hands to; the escalation hears an escalated result before its
-    provisional commit and every weak commit after it.
+    publisher, the strong redecode and the results are the four the
+    commit hands to; the strong redecode (None when the run never
+    escalates) hears an escalated result before its provisional commit
+    and every weak commit after it.
     """
 
     def __init__(
@@ -85,7 +86,7 @@ class WindowCommitter:
         tracker,
         courier,
         publisher: CorrectionPublisher,
-        escalation,
+        strong_redecode,
         results,
     ) -> None:
         self.engine = engine
@@ -93,7 +94,7 @@ class WindowCommitter:
         self.tracker = tracker
         self.courier = courier
         self.publisher = publisher
-        self.escalation = escalation
+        self.strong_redecode = strong_redecode
         self.results = results
 
     def accept_result(
@@ -112,7 +113,7 @@ class WindowCommitter:
         operation = self.tracker.operation_by_id[job.op_id]
         is_final = not job.awaiting_strong_result
         if not is_final:
-            self.escalation.escalate(job)
+            self.strong_redecode.escalate(job)
             self.commit(window, operation, result, job.request_key, False)
             return
         self.courier.hand_on(window, operation, result, job.request_key, True)
@@ -169,7 +170,8 @@ class WindowCommitter:
         if not is_final:
             # provisional: the boundary leaves with the commit
             self.courier.hand_on(window, operation, result, request_key, False)
-        self.escalation.after_weak_commit(window.key)
+        if self.strong_redecode is not None:
+            self.strong_redecode.submit_if_far_boundary_committed(window.key)
         self.results.deliver_if_final(operation)
 
     def finish_strong(

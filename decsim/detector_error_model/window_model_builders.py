@@ -6,7 +6,7 @@ graph when the plan has one (ownership advances in plan order otherwise),
 and slices every window (Skoric et al. 2209.08552, section I.B and the
 last paragraph of section III; qLDPC's SlidingWindowDecoder). The two
 single-window builders serve the strong re-decode of one window
-(decsim/decoders/strong_escalation), whose exclusion ranges are decsim's
+(decsim/escalation/strong_window_shapes), whose exclusion ranges are decsim's
 own device: the faults the weak decoder already committed stay
 uncommitted. Nothing inside the package imports this module.
 """

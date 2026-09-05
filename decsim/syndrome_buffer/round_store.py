@@ -85,12 +85,6 @@ class RoundStore:
             raise RuntimeError(f"round {round_key!r} has live consumer holds")
         self._free_round(round_key)
 
-    def require_stored(self, round_keys) -> None:
-        """Refuse a read of a round that has not landed here."""
-        for round_key in round_keys:
-            if round_key not in self.round_by_key:
-                raise RuntimeError(f"round {round_key!r} is not stored")
-
     # ---- reads
 
     @property

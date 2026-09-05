@@ -25,10 +25,9 @@ def _strong_job(request_key, window_key=(1, 0)):
     )
 
 
-def _held(job, key, now=50):
+def _held(job, now=50):
     result = message.DecodeResult(1, 0)
-    completion = message.StrongDecodeCompletion(key, result)
-    return HeldStrongCompletion(job, completion, now)
+    return HeldStrongCompletion(job, result, now)
 
 
 def test_a_result_before_its_selection_is_held_then_consumed():
@@ -38,10 +37,10 @@ def test_a_result_before_its_selection_is_held_then_consumed():
     requests.admit_strong(job, now=0)
     requests.begin_selection((1, 0), key)
     requests.finish_service(job)
-    held = _held(job, key)
+    held = _held(job)
     assert requests.complete(held) is False
     selected = requests.select((1, 0), key)
-    assert selected.completion.request_key == key
+    assert selected.request_job.request_key == key
 
 
 def test_a_selection_before_the_result_consumes_it_at_once():
@@ -52,7 +51,7 @@ def test_a_selection_before_the_result_consumes_it_at_once():
     requests.begin_selection((1, 0), key)
     assert requests.select((1, 0), key) is None
     requests.finish_service(job)
-    held = _held(job, key)
+    held = _held(job)
     assert requests.complete(held) is True
     assert requests.counts.needed == 1
 
@@ -66,7 +65,7 @@ def test_a_stale_result_is_refused_once_a_newer_request_owns_the_window():
     new_key = _request_key(9)
     new_job = _strong_job(new_key)
     requests.admit_strong(new_job, now=1)
-    stale = _held(old_job, old_key)
+    stale = _held(old_job)
     with pytest.raises(RuntimeError, match="newer strong request"):
         requests.complete(stale)
 
@@ -77,7 +76,7 @@ def test_a_result_nobody_waits_for_is_refused():
     job = _strong_job(key)
     requests.admit_strong(job, now=0)
     requests.finish_service(job)
-    orphan = _held(job, key)
+    orphan = _held(job)
     with pytest.raises(RuntimeError, match="no destination waiting"):
         requests.complete(orphan)
 
@@ -123,12 +122,12 @@ def test_a_merged_batch_splits_into_one_empty_completion_per_member():
     result = message.DecodeResult(-1, 0)
     deliveries = requests.deliveries_for(batch, result, now=40)
     assert [held.request_job for held in deliveries] == [first, second]
-    assert [held.completion.request_key for held in deliveries] == [
+    assert [held.request_job.request_key for held in deliveries] == [
         first_key,
         second_key,
     ]
-    assert deliveries[1].completion.result.window_id == 1
-    assert deliveries[1].completion.result.logical_observables is None
+    assert deliveries[1].result.window_id == 1
+    assert deliveries[1].result.logical_observables is None
 
 
 def test_a_merged_batch_may_carry_no_accuracy_bearing_field():

@@ -1,33 +1,37 @@
-"""The strong decoder tier on the window side.
+"""The strong window's shape: which rounds the strong tier re-decodes, and when.
 
-StrongEscalation plans the strong re-decode of an escalated window: the
-two-sided context window (Toshio et al. 2510.25222 Sec. III A, the
-serial modification) or the forward strong window of the double window
-scheme (Sec. III C, Fig. 12) that absorbs the windows it covers and
-restarts the weak chain past it; it holds the forward window's job until
-the restart window's weak commit or, at the operation's end, until every
-strong window round is stored, and it carries the strong result's
-selection to the decoder side over the DecodeQueue port. The committer
-calls escalate for a weak result the policy escalated; the requester
-asks parallel_strong_submission for a strong sibling started with the
-weak job. A run without the tier uses NoStrongTier. The decoder side,
-which destination waits for which strong result, is StrongRequests
-(strong_requests.py).
+Two rows, selected by escalation.double_window (Toshio et al.
+2510.25222). ContextWindow is Sec. III A: the escalated window's commit
+region with one buffer of raw context on each side (r_strong = r_com +
+2 r_buf, text lines 1250-1252 of tmp/papers/txt), built the moment it
+is asked for. ForwardWindow is Sec. III C and Fig. 12: a strong window
+that starts at the escalated commit and extends forward, absorbs the
+weak windows it covers, re-slices the window past it (the restart
+window) and is held until that window's weak commit or, at the
+operation's end, until its last round is stored. A shape builds the
+strong job on the window components (planner, tracker, retention,
+builder) and hands it to the StrongRedecode, which submits it
+(strong_redecode.py).
 
-Wide state recorded: StrongEscalation sets fifteen attributes, the ten
-components it works on, the shape it plans and its four tables (the
-pending escalations, the parallel siblings, the delivered selections,
-the landings waiting for one). Slice 7's structural B dissolves it into
-StrongRedecode (design note docs/rewrite/notes/slice_07_escalation.md,
-section 3), so the width is recorded, not split.
+Seam modelling of the forward window: both faces are decoded as
+two-sided windows, one buffer of raw context per face, exact
+fault-ownership partition, no folded decoded defects (folding at a
+raw-read face double-counts). Unlike the paper's exactly-r_strong read
+with weak-pinned faces, the context reads are extra: seam-edge accuracy
+is slightly optimistic, and the strong window is priced for the whole
+context it reads rather than the r_strong rounds it commits, so its
+decode cost is conservative against Theorem 1 rather than optimistic.
+
+Wide state recorded: ForwardWindow sets nine attributes, the eight
+window components its layout touches and its registry of pending
+windows; it is one job, the forward window's layout, and the width is
+the number of components a re-slice reaches.
 """
 
 import copy
 import dataclasses
 import enum
-import functools
-import types
-from typing import Callable, Optional
+from typing import Optional, Protocol, runtime_checkable
 
 import decsim.message as message
 import decsim.windows.round_retention as round_retention
@@ -35,149 +39,84 @@ import decsim.windows.round_retention as round_retention
 LOG_SOURCE = "DecoderCluster"
 
 
-class NoStrongTier:
-    """The window side of a run that never escalates.
+@dataclasses.dataclass(frozen=True)
+class StrongAssignment:
+    """A strong window assigned to an escalated weak window.
 
-    Nothing is pending and every hook is a no-op; Baseline never asks
-    it to build a strong job.
+    job is the strong job when the shape builds it now (the context
+    window); None when the shape holds it for its far boundary or its
+    terminal data (the forward window).
     """
 
-    pending_escalations: dict = {}
-
-    def after_arrival(self, operation_id) -> None:
-        """A round arrived; nothing waits for it."""
-        del operation_id
-
-    def after_weak_commit(self, key) -> None:
-        """A weak window committed; nothing waits for it."""
-        del key
-
-    def pending_strong_work_snapshot(self) -> tuple:
-        """No strong window is ever assigned."""
-        return ()
+    request_key: message.DecoderRequestKey
+    job: Optional[message.DecodeJob]
 
 
-class StrongEscalation:
-    """The window side of the strong tier.
+@dataclasses.dataclass(frozen=True)
+class DeferredStrongJob:
+    """A held strong job its condition released, with its selection's tick."""
 
-    When a weak window escalates, how its strong job is built (the
-    two-sided context, or a forward strong window that absorbs the
-    windows it covers and restarts the weak chain past it), when the
-    deferred job is submitted (the far weak boundary, or the terminal
-    data), and how the strong result's selection reaches the decoder
-    side. It works on the window components it is built with: the
-    planner, the tracker, the retention, the request builder, the
-    transfers, the requester, the ledger and the interaction, and on the
-    decoder manager through the DecodeQueue port.
-    """
+    job: message.DecodeJob
+    selection_arrival_ticks: int
 
-    def __init__(
-        self,
-        engine,
-        planner,
-        tracker,
-        retention,
-        builder,
-        transfers,
-        requester,
-        ledger,
-        interaction,
-        decode_queue,
-        *,
-        is_double_window: bool,
+
+@runtime_checkable
+class StrongWindowShape(Protocol):
+    """How the strong tier's window is laid out, as the redecode sees it."""
+
+    def plan(self, weak_job: message.DecodeJob) -> StrongAssignment:
+        """Assign the strong window; build its job now or hold it."""
+
+    def note_selection_sent(
+        self, window_key: tuple, selection_arrival_ticks: int
     ) -> None:
+        """The held window's selection left; its arrival tick is known."""
+
+    def take_if_far_boundary_committed(
+        self, window_key: tuple
+    ) -> Optional[DeferredStrongJob]:
+        """The held job whose far boundary this weak commit is, if any."""
+
+    def take_if_terminal_data_stored(
+        self, operation_id
+    ) -> Optional[DeferredStrongJob]:
+        """The held terminal job whose last round is stored, if any."""
+
+    def has_pending(self) -> bool:
+        """Whether a strong window is still held."""
+
+    def pending_work(self) -> tuple:
+        """The held strong windows as (key, phase, rounds), for the views."""
+
+
+class ContextWindow:
+    """Sec. III A: the commit region and one buffer of context each side.
+
+    The job is built the moment it is asked for and priced for the
+    context rounds that exist: a window at the operation's edge has a
+    shorter context than commit + 2 buffer.
+    """
+
+    def __init__(self, engine, planner, tracker, retention, builder) -> None:
         self.engine = engine
         self.planner = planner
         self.tracker = tracker
         self.retention = retention
         self.builder = builder
-        self.transfers = transfers
-        self.requester = requester
-        self.ledger = ledger
-        self.interaction = interaction
-        self.decode_queue = decode_queue
-        # the forward window of Toshio Sec. III C, or the two-sided
-        # context of Sec. III A
-        self.is_double_window = is_double_window
-        self._escalations = _EscalationRegistry()
-        # the strong sibling started with each weak job, by window, until
-        # the window's verdict is committed
-        self._parallel_request_keys: dict = {}
-        # strong request keys whose selection has arrived over
-        # weak_decoder_to_strong_decoder, and the strong inputs landed in
-        # their unit that wait for one that has not
-        self._delivered_selections: set = set()
-        self._landing_after_selection: dict = {}
 
-    # ---- the two entries: a strong sibling at window ready, an escalation
-
-    def parallel_strong_submission(
-        self, weak_job: message.DecodeJob
-    ) -> message.Submission:
-        """The strong sibling started with the weak job (the paper's Step 1).
-
-        Its context is held and its send built now; the verdict selects
-        it or cancels it.
-        """
-        key = (weak_job.op_id, weak_job.window_id)
-        submission = self._context_submission(weak_job)
-        self._parallel_request_keys[key] = submission.job.request_key
-        return submission
-
-    def escalate(self, weak_job: message.DecodeJob) -> None:
-        """Ask the strong tier to re-decode the weak job's window.
-
-        The selection rides weak_decoder_to_strong_decoder and the
-        decoder side awaits the request's result. A strong sibling
-        started with the weak job is selected as it is; otherwise the
-        strong job is built now: the forward window, held until its far
-        boundary or its terminal data (Sec. III C), or the two-sided
-        context window, queued now behind its selection (Sec. III A).
-        """
-        key = (weak_job.op_id, weak_job.window_id)
-        sibling_request_key = self._parallel_request_keys.get(key)
-        if sibling_request_key is not None:
-            self._send_selection(weak_job, sibling_request_key)
-            self.decode_queue.await_strong_result(key, sibling_request_key)
-            return
-        if self.is_double_window:
-            strong_request_key = self._defer_forward_window(weak_job)
-            self._send_deferred_selection(weak_job, strong_request_key)
-            self.decode_queue.await_strong_result(key, strong_request_key)
-            return
-        submission = self._context_submission(weak_job)
-        strong_job = submission.job
-        selection_arrival_ticks = self._send_selection(
-            weak_job, strong_job.request_key
-        )
-        self._enqueue_reserved_strong(strong_job, selection_arrival_ticks)
-        self.decode_queue.await_strong_result(key, strong_job.request_key)
-
-    # ---- the context window: built now, submitted now or after the selection
-
-    def _context_submission(
-        self, weak_job: message.DecodeJob
-    ) -> message.Submission:
-        """The two-sided context job, its context held and its send built."""
-        strong_job = self._context_job(weak_job)
-        return self._strong_submission(strong_job, None)
-
-    def _context_job(self, weak_job: message.DecodeJob) -> message.DecodeJob:
-        """Build the two-sided strong re-decode job for an escalated window.
-
-        The job is priced for the context rounds that exist: a window at
-        the operation's edge has a shorter context than commit + 2 buffer.
-        """
+    def plan(self, weak_job: message.DecodeJob) -> StrongAssignment:
+        """The two-sided context job, built now, its context held."""
         key = (weak_job.op_id, weak_job.window_id)
         weak_window = self.planner.windows_by_key[key]
         operation = self.tracker.operation_by_id[weak_job.op_id]
-        strong_window = self._strong_context_window(weak_window)
+        strong_window = _context_window_of(weak_window)
         round_count = self.tracker.round_count_for_window(
             operation.id, strong_window
         )
         left_exclusions = _left_fault_exclusions(strong_window.commit_lo)
-        model = self._build_strong_window_model(
-            operation, strong_window, round_count, left_exclusions
+        resolved = self.planner.resolved_operation_by_id[operation.id]
+        model = self.planner.models.strong_model_for_operation(
+            operation, resolved, strong_window, round_count, left_exclusions
         )
         request_key = self.builder.new_request_key(
             weak_job.op_id, weak_job.window_id, message.DecoderTier.STRONG
@@ -187,7 +126,7 @@ class StrongEscalation:
         self.builder.stamp_first_round(strong_window, strong_store)
         payloads = self.builder.assemble_payloads(strong_window, strong_store)
         payload_round_count = message.distinct_round_count(payloads)
-        return message.DecodeJob(
+        job = message.DecodeJob(
             op_id=weak_job.op_id,
             window_id=weak_job.window_id,
             n_rounds=payload_round_count,
@@ -205,164 +144,37 @@ class StrongEscalation:
             request_created_ticks=self.engine.now,
             gate=self.builder,
         )
+        self.retention.hold_strong_input(job)
+        return StrongAssignment(request_key, job)
 
-    # ---- the forward window: planned now, submitted when its far side exists
+    def note_selection_sent(
+        self, window_key: tuple, selection_arrival_ticks: int
+    ) -> None:
+        """Nothing is held; the job left with its selection."""
+        del window_key
+        del selection_arrival_ticks
 
-    def _defer_forward_window(
-        self, weak_job: message.DecodeJob
-    ) -> message.DecoderRequestKey:
-        """Lay out the forward strong window; hold its job until it may start.
+    def take_if_far_boundary_committed(
+        self, window_key: tuple
+    ) -> Optional[DeferredStrongJob]:
+        """Nothing waits for a far boundary."""
+        del window_key
+        return None
 
-        The strong window absorbs the windows it covers. Its job waits for
-        the restart window's weak commit (waiting_far_boundary) or, at the
-        operation's end, until every clamped strong window round is
-        stored (waiting_terminal_data). One strong job per escalation; a
-        duplicate raises.
-        """
-        key = (weak_job.op_id, weak_job.window_id)
-        self._refuse_second_escalation(key)
-        strong_request_key = self.builder.new_request_key(
-            weak_job.op_id, weak_job.window_id, message.DecoderTier.STRONG
-        )
-        strong_request_created_ticks = self.engine.now
-        operation_id, escalated_index = key
-        weak_window = self.planner.windows_by_key[key]
-        round_count = self.tracker.round_count_for_window(
-            operation_id, weak_window
-        )
-        later_windows = self._later_windows(operation_id, escalated_index)
-        plan = self._plan_strong_region(weak_window, later_windows, round_count)
-        resolved_region = self._resolve_strong_region_plan(
-            key, weak_window, later_windows, round_count, plan
-        )
-        restart_key = resolved_region.restart_window_key
-        self._refuse_readiness_collision(operation_id, restart_key)
-        operation = self.tracker.operation_by_id[operation_id]
-        proposed_restart = None
-        restart_model = None
-        if restart_key is not None:
-            proposed_restart = self._proposed_restart_window(restart_key, plan)
-            restart_model = self._build_strong_window_model(
-                operation,
-                proposed_restart,
-                round_count,
-                resolved_region.restart_fault_exclusion_ranges,
-            )
-        strong_window = _strong_window_of(key, plan)
-        strong_model = self._build_strong_window_model(
-            operation,
-            strong_window,
-            round_count,
-            resolved_region.strong_fault_exclusion_ranges,
-        )
-        logical_candidate = self._strong_window_ownership_candidate(
-            key, resolved_region
-        )
-        guard = self._guard_restart_reads(
-            key,
-            restart_key,
-            proposed_restart,
-            strong_request_key,
-            resolved_region,
-        )
-        phase = _EscalationPhase.WAITING_FAR_BOUNDARY
-        if restart_key is None:
-            phase = _EscalationPhase.WAITING_TERMINAL_DATA
-        pending = _PendingEscalation(
-            key=key,
-            weak_job=weak_job,
-            label=weak_job.strong_label,
-            resolved_region=resolved_region,
-            strong_window=strong_window,
-            strong_model=strong_model,
-            selection_arrival_ticks=None,
-            phase=phase,
-            strong_request_key=strong_request_key,
-            strong_request_created_ticks=strong_request_created_ticks,
-        )
-        try:
-            self.ledger.contributions = logical_candidate
-            self._register_pending(pending, operation_id, restart_key)
-            self._hold_strong_context(key, strong_request_key, plan)
-            pending_hold = message.PendingStrong(strong_request_key)
-            for absorbed_key in resolved_region.absorbed_window_keys:
-                self._absorb_window(absorbed_key, restart_key, pending_hold)
-            self._log_assignment(pending, resolved_region)
-            if restart_key is not None:
-                self._reslice_restart_window(
-                    restart_key,
-                    plan.restart_buffer_lo,
-                    restart_model,
-                    plan.commit_hi,
-                    plan.restart_seam_fault_owner,
-                )
-                restart = self.planner.windows_by_key[restart_key]
-                # its absorbed dependency is gone
-                self.requester.request_if_ready(restart, self)
-            return strong_request_key
-        finally:
-            if guard is not None:
-                self.retention.release_hold_if_live(guard)
-                self.retention.release_hold_if_live(
-                    guard, self.retention.strong_store
-                )
+    def take_if_terminal_data_stored(
+        self, operation_id
+    ) -> Optional[DeferredStrongJob]:
+        """Nothing waits for terminal data."""
+        del operation_id
+        return None
 
-    # ---- the hooks that submit a deferred job
+    def has_pending(self) -> bool:
+        """Nothing is ever held."""
+        return False
 
-    def after_weak_commit(self, key) -> None:
-        """A weak commit at a strong window's far boundary releases its job.
-
-        The committed window's own verdict is in, so its strong sibling,
-        if it had one, is selected or cancelled by now and is forgotten.
-        """
-        self._parallel_request_keys.pop(key, None)
-        pending = self._escalations.peek_far(key)
-        if pending is not None:
-            self._submit_far_strong(key, pending)
-
-    def after_arrival(self, operation_id) -> None:
-        """A round arrived: a terminal strong window waits for its tail."""
-        pending = self._escalations.peek_terminal(operation_id)
-        if pending is None:
-            return
-        if self._is_terminal_data_stored(operation_id, pending):
-            self._submit_terminal_strong(operation_id, pending)
-
-    # ---- observation
-
-    @property
-    def pending_escalations(self) -> dict:
-        """The deferral phase of every escalated window, for the settlement."""
-        phases = {}
-        snapshot = self._escalations.snapshot_phases()
-        for key, phase in snapshot.items():
-            phases[key] = phase.name.lower()
-        return phases
-
-    def pending_strong_work_snapshot(self) -> tuple:
-        """The strong windows assigned but not yet admitted for service."""
-        return self._escalations.snapshot_work()
-
-    # ---- private: the context window
-
-    def _strong_context_window(
-        self, weak_window: message.Window
-    ) -> message.Window:
-        context_lo, commit_lo, commit_hi, context_hi = (
-            round_retention.strong_context_bounds(weak_window)
-        )
-        round_count = context_hi - context_lo + 1
-        strong_window = message.Window(
-            op_id=weak_window.op_id,
-            k=weak_window.k,
-            commit_lo=commit_lo,
-            commit_hi=commit_hi,
-            buffer_hi=context_hi,
-            buffer_lo=context_lo,
-            n_rounds=round_count,
-        )
-        strong_window.boundary_in = weak_window.boundary_in
-        return strong_window
+    def pending_work(self) -> tuple:
+        """Nothing is ever held."""
+        return ()
 
     def _require_context_stored(
         self, key: tuple, operation_id, strong_window: message.Window
@@ -391,185 +203,182 @@ class StrongEscalation:
                 f"margin, or an early release)"
             )
 
-    # ---- private: submitting a strong job with its input send
 
-    def _enqueue_strong_job(
-        self, strong_job: message.DecodeJob, selection_arrival_ticks: int
+class ForwardWindow:
+    """Sec. III C, Fig. 12: a strong window that absorbs what it covers.
+
+    The window starts at the escalated commit and extends forward by
+    the interaction's plan; the weak chain skips the windows it absorbs
+    and restarts past it on a re-sliced window; the strong result owns
+    the whole extent. The job is held until both of its boundaries are
+    weak-determined: the commits before it, and the restart window's
+    commit or the terminal boundary. The weak pipeline never waits on
+    strong work. One strong job per escalation; a second is refused.
+    """
+
+    def __init__(
+        self,
+        engine,
+        planner,
+        tracker,
+        retention,
+        builder,
+        requester,
+        ledger,
+        interaction,
     ) -> None:
-        """Queue a deferred strong job now; its input is sent at dispatch."""
-        submission = self._strong_submission(
-            strong_job, selection_arrival_ticks
-        )
-        self.requester.enqueue(submission)
+        self.engine = engine
+        self.planner = planner
+        self.tracker = tracker
+        self.retention = retention
+        self.builder = builder
+        self.requester = requester
+        self.ledger = ledger
+        self.interaction = interaction
+        self.pending = _PendingWindows()
 
-    def _enqueue_reserved_strong(
-        self, strong_job: message.DecodeJob, selection_arrival_ticks: int
-    ) -> None:
-        """Queue a serial strong job whose context was held when it was built.
+    # ---- the shape
 
-        Its send also waits for the selection.
-        """
-        send_input = self._input_send(strong_job, selection_arrival_ticks)
-        submission = message.Submission(strong_job, send_input)
-        self.requester.enqueue(submission)
+    def plan(self, weak_job: message.DecodeJob) -> StrongAssignment:
+        """Lay out the forward strong window; hold its job until it may start.
 
-    def _strong_submission(
-        self,
-        strong_job: message.DecodeJob,
-        selection_arrival_ticks: Optional[int],
-    ) -> message.Submission:
-        """The strong job with its input send; its context rounds held.
-
-        The unit is assigned first, then the input moves into that unit's
-        memory over strong_buffer_to_strong_decoder; a serial job also
-        waits for its selection to arrive. selection_arrival_ticks is the
-        tick the selection is expected, for the pool's estimate; the
-        landing itself waits for the delivery.
-        """
-        request_key = strong_job.request_key
-        window_key = strong_job.strong_decode_for
-        strong_store = self.retention.strong_store
-        in_flight = message.StrongInputInFlight(request_key)
-        potential = message.PotentialStrong(window_key)
-        pending = message.PendingStrong(request_key)
-        if strong_store.has_hold(potential):
-            self.retention.transfer_hold(potential, in_flight, strong_store)
-        elif strong_store.has_hold(pending):
-            self.retention.transfer_hold(pending, in_flight, strong_store)
-        else:
-            round_identities = round_retention.round_identities_of(
-                strong_job.payloads
-            )
-            strong_store.register_hold(in_flight, round_identities)
-        self.retention.bind_input_hold(strong_job, in_flight, strong_store)
-        send_input = self._input_send(strong_job, selection_arrival_ticks)
-        return message.Submission(strong_job, send_input)
-
-    def _input_send(
-        self,
-        strong_job: message.DecodeJob,
-        selection_arrival_ticks: Optional[int],
-    ) -> Callable[[Callable[[], None]], int]:
-        """The job's input send, its payload bits and context fixed now.
-
-        The staging clears the job's payloads when the input lands.
-        """
-        payload_bits = strong_job.payload_bits()
-        context_identities = round_retention.round_identities_of(
-            strong_job.payloads
-        )
-        return functools.partial(
-            self._send_input,
-            strong_job,
-            payload_bits,
-            context_identities,
-            selection_arrival_ticks,
-        )
-
-    def _send_input(
-        self,
-        strong_job: message.DecodeJob,
-        payload_bits: Optional[int],
-        context_identities: tuple,
-        selection_arrival_ticks: Optional[int],
-        on_landed: Callable[[], None],
-    ) -> int:
-        """Send the input at dispatch; returns the delay the pool expects."""
-        # the DMA reads only context rounds that landed in syndrome buffer
-        # 1 (always, whenever the controller_to_strong_buffer margin holds)
-        self.retention.strong_store.require_stored(context_identities)
-        landed = on_landed
-        if selection_arrival_ticks is not None:
-            landed = functools.partial(
-                self._land_after_selection, strong_job.request_key, on_landed
-            )
-        expected_delay_ticks = self.transfers.send_for_job(
-            message.LinkPath.STRONG_BUFFER_TO_STRONG_DECODER,
-            strong_job,
-            payload_bits=payload_bits,
-            on_delivered=landed,
-        )
-        if selection_arrival_ticks is None:
-            return expected_delay_ticks
-        selection_delay_ticks = selection_arrival_ticks - self.engine.now
-        return max(expected_delay_ticks, selection_delay_ticks)
-
-    def _land_after_selection(
-        self,
-        request_key: message.DecoderRequestKey,
-        on_landed: Callable[[], None],
-    ) -> None:
-        """A serial strong input lands only once its selection arrived."""
-        if request_key in self._delivered_selections:
-            on_landed()
-            return
-        self._landing_after_selection[request_key] = on_landed
-
-    # ---- private: the selection
-
-    def _send_selection(
-        self,
-        weak_job: message.DecodeJob,
-        strong_request_key: message.DecoderRequestKey,
-    ) -> int:
-        """Send the escalation; returns the tick its arrival is expected.
-
-        At the delivery the decoder side accepts the selection.
+        The strong window absorbs the windows it covers. Its job waits for
+        the restart window's weak commit (waiting_far_boundary) or, at the
+        operation's end, until every clamped strong window round is
+        stored (waiting_terminal_data).
         """
         key = (weak_job.op_id, weak_job.window_id)
-        on_selection_delivered = functools.partial(
-            self.decode_queue.accept_selection, key, strong_request_key
+        self._refuse_second_escalation(key)
+        strong_request_key = self.builder.new_request_key(
+            weak_job.op_id, weak_job.window_id, message.DecoderTier.STRONG
         )
-        delivered = functools.partial(
-            self._selection_delivered,
+        strong_request_created_ticks = self.engine.now
+        operation_id, escalated_index = key
+        weak_window = self.planner.windows_by_key[key]
+        round_count = self.tracker.round_count_for_window(
+            operation_id, weak_window
+        )
+        later_windows = self._later_windows(operation_id, escalated_index)
+        plan = self._plan_strong_region(weak_window, later_windows, round_count)
+        resolved_region = self._resolve_strong_region_plan(
+            key, weak_window, later_windows, round_count, plan
+        )
+        restart_key = resolved_region.restart_window_key
+        operation = self.tracker.operation_by_id[operation_id]
+        proposed_restart = None
+        restart_model = None
+        if restart_key is not None:
+            proposed_restart = self._proposed_restart_window(restart_key, plan)
+            restart_model = self._build_strong_window_model(
+                operation,
+                proposed_restart,
+                round_count,
+                resolved_region.restart_fault_exclusion_ranges,
+            )
+        strong_window = _strong_window_of(key, plan)
+        strong_model = self._build_strong_window_model(
+            operation,
+            strong_window,
+            round_count,
+            resolved_region.strong_fault_exclusion_ranges,
+        )
+        logical_candidate = self._strong_window_ownership_candidate(
+            key, resolved_region
+        )
+        guard = self._guard_restart_reads(
+            key,
+            restart_key,
+            proposed_restart,
             strong_request_key,
-            on_selection_delivered,
+            resolved_region,
         )
-        expected_delay_ticks = self.transfers.send_for_job(
-            message.LinkPath.WEAK_DECODER_TO_STRONG_DECODER,
-            weak_job,
-            payload_bits=None,
-            request_key=strong_request_key,
-            on_delivered=delivered,
+        phase = _Phase.WAITING_FAR_BOUNDARY
+        if restart_key is None:
+            phase = _Phase.WAITING_TERMINAL_DATA
+        held = _PendingWindow(
+            key=key,
+            weak_job=weak_job,
+            label=weak_job.strong_label,
+            resolved_region=resolved_region,
+            strong_window=strong_window,
+            strong_model=strong_model,
+            selection_arrival_ticks=None,
+            phase=phase,
+            strong_request_key=strong_request_key,
+            strong_request_created_ticks=strong_request_created_ticks,
         )
-        return self.engine.now + expected_delay_ticks
+        try:
+            self.ledger.contributions = logical_candidate
+            self.pending.register(held, operation_id, restart_key)
+            self._hold_strong_context(key, strong_request_key, plan)
+            pending_hold = message.PendingStrong(strong_request_key)
+            for absorbed_key in resolved_region.absorbed_window_keys:
+                self._absorb_window(absorbed_key, restart_key, pending_hold)
+            self._log_assignment(held, resolved_region)
+            if restart_key is not None:
+                self._reslice_restart_window(
+                    restart_key,
+                    plan.restart_buffer_lo,
+                    restart_model,
+                    plan.commit_hi,
+                    plan.restart_seam_fault_owner,
+                )
+                restart = self.planner.windows_by_key[restart_key]
+                # its absorbed dependency is gone; no strong sibling in
+                # the forward scheme
+                self.requester.request_if_ready(restart, None)
+            return StrongAssignment(strong_request_key, None)
+        finally:
+            if guard is not None:
+                self.retention.release_hold_if_live(guard)
+                self.retention.release_hold_if_live(
+                    guard, self.retention.strong_store
+                )
 
-    def _selection_delivered(
-        self,
-        request_key: message.DecoderRequestKey,
-        on_selection_delivered: Callable[[], None],
+    def note_selection_sent(
+        self, window_key: tuple, selection_arrival_ticks: int
     ) -> None:
-        """The selection arrived: a landed input waiting for it may start."""
-        self._delivered_selections.add(request_key)
-        waiting = self._landing_after_selection.pop(request_key, None)
-        if waiting is not None:
-            waiting()
-        on_selection_delivered()
+        """The held window's selection left; its arrival tick is recorded."""
+        held = self.pending.peek_key(window_key)
+        self.pending.update_selection_arrival(held, selection_arrival_ticks)
 
-    def _send_deferred_selection(
-        self,
-        weak_job: message.DecodeJob,
-        strong_request_key: message.DecoderRequestKey,
-    ) -> None:
-        """A forward window's selection; a terminal one may submit now."""
-        key = (weak_job.op_id, weak_job.window_id)
-        pending = self._escalations.peek_key(key)
-        selection_arrival_ticks = self._send_selection(
-            weak_job, strong_request_key
-        )
-        pending = self._escalations.update_selection_arrival(
-            pending, selection_arrival_ticks
-        )
-        if pending.phase is not _EscalationPhase.WAITING_TERMINAL_DATA:
-            return
-        operation_id = pending.key[0]
-        if self._is_terminal_data_stored(operation_id, pending):
-            self._submit_terminal_strong(operation_id, pending)
+    def take_if_far_boundary_committed(
+        self, window_key: tuple
+    ) -> Optional[DeferredStrongJob]:
+        """The job held for this far boundary, built now, if there is one."""
+        held = self.pending.peek_far(window_key)
+        if held is None:
+            return None
+        job = self._build_pending_strong_job(held)
+        self.pending.take_far(window_key, held)
+        return _released(held, job)
 
-    # ---- private: the forward window's plan
+    def take_if_terminal_data_stored(
+        self, operation_id
+    ) -> Optional[DeferredStrongJob]:
+        """The operation's terminal job, built now once its tail is stored."""
+        held = self.pending.peek_terminal(operation_id)
+        if held is None:
+            return None
+        stored_through = self.tracker.strong_rounds_arrived(operation_id)
+        if stored_through < held.resolved_region.plan.context_hi:
+            return None
+        job = self._build_pending_strong_job(held)
+        self.pending.take_terminal(operation_id, held)
+        return _released(held, job)
+
+    def has_pending(self) -> bool:
+        """Whether a strong window is still held for its condition."""
+        return bool(self.pending.by_key)
+
+    def pending_work(self) -> tuple:
+        """The held strong windows without the live windows."""
+        return self.pending.work()
+
+    # ---- private: the plan
 
     def _refuse_second_escalation(self, key: tuple) -> None:
-        if self._escalations.peek_key(key) is not None:
+        if self.pending.peek_key(key) is not None:
             raise RuntimeError(
                 f"duplicate strong escalation for window {key}: one "
                 f"switching event creates exactly one strong job"
@@ -614,7 +423,11 @@ class StrongEscalation:
         round_count: int,
         plan: message.StrongRegionPlan,
     ) -> "_ResolvedStrongRegion":
-        """Check the plan against the live window graph; resolve its reads."""
+        """Check the plan against the live window graph; resolve its reads.
+
+        The interaction that planned the region is a plug-in, so its
+        plan is checked like an input.
+        """
         _check_region_bounds(key, weak_window, round_count, plan)
         absorbed = _absorbed_window_keys(later_windows, plan)
         _refuse_crossing_window(later_windows, plan)
@@ -645,7 +458,8 @@ class StrongEscalation:
     def _withdraw_absorbed_windows(self, absorbed: tuple) -> None:
         for absorbed_key in absorbed:
             window = self.planner.windows_by_key[absorbed_key]
-            _refuse_absorbing_decoded(absorbed_key, window)
+            assert not window.committed, f"absorbing committed {absorbed_key}"
+            assert window.t_done is None, f"absorbing decoded {absorbed_key}"
             if window.queued:
                 # early-shipped at data-complete but parked on the
                 # escalated window's boundary, which will never arrive
@@ -664,18 +478,6 @@ class StrongEscalation:
         return self.retention.read_keys_for_bounds(
             restart.op_id, plan.restart_buffer_lo, restart.buffer_hi, restart
         )
-
-    def _refuse_readiness_collision(
-        self, operation_id, restart_key: Optional[tuple]
-    ) -> None:
-        if restart_key is None:
-            collision = self._escalations.peek_terminal(operation_id)
-            readiness_key = operation_id
-        else:
-            collision = self._escalations.peek_far(restart_key)
-            readiness_key = restart_key
-        if collision is not None:
-            raise RuntimeError(f"readiness index collision for {readiness_key}")
 
     def _proposed_restart_window(
         self, restart_key: tuple, plan: message.StrongRegionPlan
@@ -779,18 +581,7 @@ class StrongEscalation:
         )
         return guarded
 
-    # ---- private: landing the forward window's plan
-
-    def _register_pending(
-        self,
-        pending: "_PendingEscalation",
-        operation_id,
-        restart_key: Optional[tuple],
-    ) -> None:
-        if restart_key is None:
-            self._escalations.register_terminal(pending, operation_id)
-        else:
-            self._escalations.register_far(pending, restart_key)
+    # ---- private: landing the plan
 
     def _hold_strong_context(
         self,
@@ -814,7 +605,8 @@ class StrongEscalation:
         request's.
         """
         window = self.planner.windows_by_key[key]
-        _refuse_absorbing_active(key, window)
+        assert not window.queued, f"absorbing queued {key}"
+        assert not window.committed, f"absorbing committed {key}"
         window.queued = True  # keeps the requester away
         window.committed = True
         window.is_absorbed = True
@@ -860,7 +652,7 @@ class StrongEscalation:
 
     def _log_assignment(
         self,
-        pending: "_PendingEscalation",
+        held: "_PendingWindow",
         resolved_region: "_ResolvedStrongRegion",
     ) -> None:
         plan = resolved_region.plan
@@ -870,7 +662,7 @@ class StrongEscalation:
         absorbed_count = len(resolved_region.absorbed_window_keys)
         self.engine.log(
             LOG_SOURCE,
-            f"{pending.label}: strong window rounds {plan.commit_lo}-"
+            f"{held.label}: strong window rounds {plan.commit_lo}-"
             f"{plan.commit_hi} assigned; weak chain skips "
             f"{absorbed_count} window(s); "
             f"strong start deferred until {readiness_description}",
@@ -900,16 +692,10 @@ class StrongEscalation:
             f"{seam_owner_name})",
         )
 
-    # ---- private: submitting the forward window's job
-
-    def _is_terminal_data_stored(
-        self, operation_id, pending: "_PendingEscalation"
-    ) -> bool:
-        stored_through = self.tracker.strong_rounds_arrived(operation_id)
-        return stored_through >= pending.resolved_region.plan.context_hi
+    # ---- private: the held job
 
     def _build_pending_strong_job(
-        self, pending: "_PendingEscalation"
+        self, held: "_PendingWindow"
     ) -> message.DecodeJob:
         """The strong window's job, once both of its boundaries exist.
 
@@ -917,66 +703,34 @@ class StrongEscalation:
         buffer of raw context per face, owning nothing that touches
         rounds before its extent.
         """
-        key = pending.key
-        weak_job = pending.weak_job
-        strong_window = pending.strong_window
+        key = held.key
+        weak_job = held.weak_job
+        strong_window = held.strong_window
         strong_store = self.retention.strong_store
         payloads = self.builder.assemble_payloads(strong_window, strong_store)
-        _check_every_round_retained(pending, payloads)
+        _check_every_round_retained(held, payloads)
         self.builder.stamp_first_round(strong_window, strong_store)
         payload_round_count = message.distinct_round_count(payloads)
-        return message.DecodeJob(
+        job = message.DecodeJob(
             op_id=key[0],
             window_id=key[1],
             n_rounds=payload_round_count,
             ready_time=self.engine.now,
-            label=pending.label,
+            label=held.label,
             hint="strong",
             spatial_nodes=weak_job.spatial_nodes,
             code=weak_job.code,
-            dem=pending.strong_model,
+            dem=held.strong_model,
             payloads=payloads,
             attempt=1,
             window=strong_window,
             strong_decode_for=key,
-            request_key=pending.strong_request_key,
-            request_created_ticks=pending.strong_request_created_ticks,
+            request_key=held.strong_request_key,
+            request_created_ticks=held.strong_request_created_ticks,
             gate=self.builder,
         )
-
-    def _submit_far_strong(
-        self, far_boundary_key: tuple, pending: "_PendingEscalation"
-    ) -> None:
-        if pending.selection_arrival_ticks is None:
-            raise RuntimeError(
-                "far strong submission requires the "
-                "weak_decoder_to_strong_decoder send"
-            )
-        strong_job = self._build_pending_strong_job(pending)
-        self._escalations.take_far(far_boundary_key, pending)
-        self._enqueue_strong_job(strong_job, pending.selection_arrival_ticks)
-        self.engine.log(
-            LOG_SOURCE,
-            f"{pending.label}: far-side weak boundary determined -> "
-            "strong window submitted",
-        )
-
-    def _submit_terminal_strong(
-        self, operation_id, pending: "_PendingEscalation"
-    ) -> None:
-        if pending.selection_arrival_ticks is None:
-            raise RuntimeError(
-                "terminal strong submission requires the "
-                "weak_decoder_to_strong_decoder send"
-            )
-        strong_job = self._build_pending_strong_job(pending)
-        self._escalations.take_terminal(operation_id, pending)
-        self._enqueue_strong_job(strong_job, pending.selection_arrival_ticks)
-        self.engine.log(
-            LOG_SOURCE,
-            f"{pending.label}: terminal data complete -> "
-            "strong window submitted",
-        )
+        self.retention.hold_strong_input(job)
+        return job
 
 
 @dataclasses.dataclass(frozen=True)
@@ -991,15 +745,15 @@ class _ResolvedStrongRegion:
     restart_fault_exclusion_ranges: Optional[tuple]
 
 
-class _EscalationPhase(enum.Enum):
-    """The one readiness condition that releases a pending strong job."""
+class _Phase(enum.Enum):
+    """The one readiness condition that releases a held strong job."""
 
     WAITING_FAR_BOUNDARY = enum.auto()
     WAITING_TERMINAL_DATA = enum.auto()
 
 
 @dataclasses.dataclass(frozen=True)
-class _PendingEscalation:
+class _PendingWindow:
     """Everything kept from the plan until the one strong-job submission."""
 
     key: tuple
@@ -1009,155 +763,153 @@ class _PendingEscalation:
     strong_window: message.Window
     strong_model: object
     selection_arrival_ticks: Optional[int]
-    phase: _EscalationPhase
+    phase: _Phase
     strong_request_key: message.DecoderRequestKey
     strong_request_created_ticks: int
 
 
-class _EscalationRegistry:
-    """The pending escalations by window, each in one readiness index."""
+class _PendingWindows:
+    """The held strong windows by window, each in one readiness index.
+
+    Its invariants (one phase per index, one entry per window, a take
+    that matches its register) are the shape's own and are asserted.
+    """
 
     def __init__(self) -> None:
-        self.pending_by_key: dict = {}
+        self.by_key: dict = {}
         self.key_by_far_boundary: dict = {}
         self.key_by_terminal_operation: dict = {}
 
-    def register_far(
-        self, pending: _PendingEscalation, far_boundary_key: tuple
+    def register(
+        self, held: _PendingWindow, operation_id, restart_key: Optional[tuple]
     ) -> None:
+        """Index the held window by its far boundary, or by its operation."""
+        if restart_key is None:
+            self._register(
+                held,
+                _Phase.WAITING_TERMINAL_DATA,
+                self.key_by_terminal_operation,
+                operation_id,
+            )
+            return
         self._register(
-            pending,
-            _EscalationPhase.WAITING_FAR_BOUNDARY,
+            held,
+            _Phase.WAITING_FAR_BOUNDARY,
             self.key_by_far_boundary,
-            far_boundary_key,
-        )
-
-    def register_terminal(
-        self, pending: _PendingEscalation, operation_id
-    ) -> None:
-        self._register(
-            pending,
-            _EscalationPhase.WAITING_TERMINAL_DATA,
-            self.key_by_terminal_operation,
-            operation_id,
+            restart_key,
         )
 
     def update_selection_arrival(
-        self, expected: _PendingEscalation, selection_arrival_ticks: int
-    ) -> _PendingEscalation:
+        self, expected: _PendingWindow, selection_arrival_ticks: int
+    ) -> _PendingWindow:
         """Record the selection's expected arrival without moving ownership."""
-        if self.pending_by_key.get(expected.key) is not expected:
-            raise RuntimeError(
-                f"stale escalation timing update for {expected.key}"
-            )
-        if expected.selection_arrival_ticks is not None:
-            raise RuntimeError(
-                f"duplicate weak_decoder_to_strong_decoder send for "
-                f"{expected.key}"
-            )
+        assert self.by_key.get(expected.key) is expected, expected.key
+        assert expected.selection_arrival_ticks is None, expected.key
         updated = dataclasses.replace(
             expected, selection_arrival_ticks=selection_arrival_ticks
         )
-        self.pending_by_key[expected.key] = updated
+        self.by_key[expected.key] = updated
         return updated
 
-    def peek_key(self, key: tuple) -> Optional[_PendingEscalation]:
-        return self.pending_by_key.get(key)
+    def peek_key(self, key: tuple) -> Optional[_PendingWindow]:
+        return self.by_key.get(key)
 
-    def peek_far(self, far_boundary_key: tuple) -> Optional[_PendingEscalation]:
+    def peek_far(self, far_boundary_key: tuple) -> Optional[_PendingWindow]:
         key = self.key_by_far_boundary.get(far_boundary_key)
         if key is None:
             return None
-        return self.pending_by_key[key]
+        return self.by_key[key]
 
-    def peek_terminal(self, operation_id) -> Optional[_PendingEscalation]:
+    def peek_terminal(self, operation_id) -> Optional[_PendingWindow]:
         key = self.key_by_terminal_operation.get(operation_id)
         if key is None:
             return None
-        return self.pending_by_key[key]
+        return self.by_key[key]
 
     def take_far(
-        self, far_boundary_key: tuple, expected: _PendingEscalation
-    ) -> _PendingEscalation:
-        return self._take(
+        self, far_boundary_key: tuple, expected: _PendingWindow
+    ) -> None:
+        self._take(
             expected,
-            _EscalationPhase.WAITING_FAR_BOUNDARY,
+            _Phase.WAITING_FAR_BOUNDARY,
             self.key_by_far_boundary,
             far_boundary_key,
         )
 
-    def take_terminal(
-        self, operation_id, expected: _PendingEscalation
-    ) -> _PendingEscalation:
-        return self._take(
+    def take_terminal(self, operation_id, expected: _PendingWindow) -> None:
+        self._take(
             expected,
-            _EscalationPhase.WAITING_TERMINAL_DATA,
+            _Phase.WAITING_TERMINAL_DATA,
             self.key_by_terminal_operation,
             operation_id,
         )
 
-    def snapshot_phases(self) -> types.MappingProxyType:
-        phases = {}
-        for key, pending in self.pending_by_key.items():
-            phases[key] = pending.phase
-        return types.MappingProxyType(phases)
-
-    def snapshot_work(self) -> tuple:
-        """The pending strong assignments without the live windows."""
+    def work(self) -> tuple:
+        """The held windows as (key, phase name, rounds), in stable order."""
         phase_names = {
-            _EscalationPhase.WAITING_FAR_BOUNDARY: "waiting_far_boundary",
-            _EscalationPhase.WAITING_TERMINAL_DATA: "waiting_terminal_data",
+            _Phase.WAITING_FAR_BOUNDARY: "waiting_far_boundary",
+            _Phase.WAITING_TERMINAL_DATA: "waiting_terminal_data",
         }
         records = []
-        for key, pending in self.pending_by_key.items():
-            phase_name = phase_names[pending.phase]
-            record = (key, phase_name, pending.strong_window.n_rounds)
+        for key, held in self.by_key.items():
+            phase_name = phase_names[held.phase]
+            record = (key, phase_name, held.strong_window.n_rounds)
             records.append(record)
         ordered = sorted(records, key=_work_record_order)
         return tuple(ordered)
 
     def _register(
         self,
-        pending: _PendingEscalation,
-        expected_phase: _EscalationPhase,
+        held: _PendingWindow,
+        expected_phase: _Phase,
         readiness_index: dict,
         readiness_key,
     ) -> None:
-        if pending.phase is not expected_phase:
-            raise RuntimeError(
-                f"pending escalation {pending.key} has phase "
-                f"{pending.phase.name}, expected {expected_phase.name}"
-            )
-        if pending.key in self.pending_by_key:
-            raise RuntimeError(
-                f"duplicate strong escalation for window {pending.key}: one "
-                "switching event creates exactly one strong job"
-            )
-        if readiness_key in readiness_index:
-            raise RuntimeError(f"readiness index collision for {readiness_key}")
-        self.pending_by_key[pending.key] = pending
-        readiness_index[readiness_key] = pending.key
+        assert held.phase is expected_phase, held.key
+        assert held.key not in self.by_key, held.key
+        assert readiness_key not in readiness_index, readiness_key
+        self.by_key[held.key] = held
+        readiness_index[readiness_key] = held.key
 
     def _take(
         self,
-        expected: _PendingEscalation,
-        expected_phase: _EscalationPhase,
+        expected: _PendingWindow,
+        expected_phase: _Phase,
         readiness_index: dict,
         readiness_key,
-    ) -> _PendingEscalation:
-        if expected.phase is not expected_phase:
-            raise RuntimeError(
-                f"wrong-phase take for escalation {expected.key}"
-            )
-        primary = self.pending_by_key.get(expected.key)
-        indexed_key = readiness_index.get(readiness_key)
-        if primary is not expected or indexed_key != expected.key:
-            raise RuntimeError(
-                f"stale escalation take for readiness key {readiness_key}"
-            )
+    ) -> None:
+        assert expected.phase is expected_phase, expected.key
+        assert self.by_key.get(expected.key) is expected, expected.key
+        assert readiness_index.get(readiness_key) == expected.key, readiness_key
         del readiness_index[readiness_key]
-        del self.pending_by_key[expected.key]
-        return expected
+        del self.by_key[expected.key]
+
+
+def _released(
+    held: _PendingWindow, job: message.DecodeJob
+) -> DeferredStrongJob:
+    """The held window's job with its selection's tick."""
+    assert held.selection_arrival_ticks is not None, held.key
+    return DeferredStrongJob(job, held.selection_arrival_ticks)
+
+
+def _context_window_of(weak_window: message.Window) -> message.Window:
+    """The two-sided context window of a weak window (Sec. III A)."""
+    context_lo, commit_lo, commit_hi, context_hi = (
+        round_retention.strong_context_bounds(weak_window)
+    )
+    round_count = context_hi - context_lo + 1
+    strong_window = message.Window(
+        op_id=weak_window.op_id,
+        k=weak_window.k,
+        commit_lo=commit_lo,
+        commit_hi=commit_hi,
+        buffer_hi=context_hi,
+        buffer_lo=context_lo,
+        n_rounds=round_count,
+    )
+    strong_window.boundary_in = weak_window.boundary_in
+    return strong_window
 
 
 def _left_fault_exclusions(commit_lo: int) -> tuple:
@@ -1254,20 +1006,6 @@ def _refuse_crossing_window(
             )
 
 
-def _refuse_absorbing_decoded(key: tuple, window: message.Window) -> None:
-    if window.committed:
-        raise RuntimeError(f"cannot absorb window {key}: already committed")
-    if window.t_done is not None:
-        raise RuntimeError(f"cannot absorb window {key}: already decoded")
-
-
-def _refuse_absorbing_active(key: tuple, window: message.Window) -> None:
-    if window.queued:
-        raise RuntimeError(f"cannot absorb window {key}: already queued")
-    if window.committed:
-        raise RuntimeError(f"cannot absorb window {key}: already committed")
-
-
 def _restart_window_key(
     later_windows: list, plan: message.StrongRegionPlan
 ) -> Optional[tuple]:
@@ -1360,20 +1098,18 @@ def _refuse_overlapping_contribution(
         )
 
 
-def _check_every_round_retained(
-    pending: _PendingEscalation, payloads: list
-) -> None:
+def _check_every_round_retained(held: _PendingWindow, payloads: list) -> None:
     """A strong window starts only once every context round is retained."""
     covered = set()
     for payload in payloads:
         covered.add(payload.round_index)
-    plan = pending.resolved_region.plan
+    plan = held.resolved_region.plan
     stop_round = plan.context_hi + 1
     needed = set(range(plan.context_lo, stop_round))
     if covered != needed:
         listed = sorted(covered)
         raise RuntimeError(
-            f"{pending.label}: strong window submitted with rounds "
+            f"{held.label}: strong window submitted with rounds "
             f"{listed} but it needs "
             f"{plan.context_lo}-{plan.context_hi}; a strong window may "
             "only start once every required round is retained"

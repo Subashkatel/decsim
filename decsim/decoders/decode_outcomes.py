@@ -92,10 +92,10 @@ class DecodeOutcomes:
         if not self.strong_requests.complete(held):
             return
         request_job = held.request_job
-        request_job.on_decoded(request_job, held.completion.result)
+        request_job.on_decoded(request_job, held.result)
         self.records.request_ended(
             held.request_job,
-            held.completion.result,
+            held.result,
             message.RequestProcessingOutcome.STRONG_FORWARDED_FOR_DELIVERY,
             held.decode_output_ticks,
         )

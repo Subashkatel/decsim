@@ -113,13 +113,17 @@ class DecoderManagerSettings:
     (FifoScheduler by default), unit_pools names each pool's unit count
     (built from the tiers' units by default) and decoder_memory bounds
     each pool's input memory in rounds (built from the active tier's
-    unit_memory_rounds by default).
+    unit_memory_rounds by default). bulk_strong serves the strong pool's
+    queued re-decodes as one merged batch (Toshio 2510.25222 Sec. III C,
+    the strong decoder processes its assigned data in bulk); timing-only,
+    since a batch carries no accuracy-bearing result, and serial only.
     """
 
     router: Optional[Any] = None
     scheduler: Optional[Any] = None
     unit_pools: Optional[Mapping[str, int]] = None
     decoder_memory: Optional[decoder_memory_module.DecoderMemoryConfig] = None
+    bulk_strong: bool = False
 
 
 @dataclasses.dataclass(frozen=True)

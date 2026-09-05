@@ -1,7 +1,7 @@
 """Far-boundary escalation in a backlog regime refuses with contract
 messages, never a bare KeyError (stabilization finding R3).
 
-The guard in defer_strong_escalation reads the restart window's Buffer 0
+The guard in ForwardWindow.plan reads the restart window's Buffer 0
 hold. Once the restart window's weak decode is built, that hold is
 transferred to the job (DecoderInputHold), so the window-key lookup can
 miss while every round is still retained. In the shipped fabric the

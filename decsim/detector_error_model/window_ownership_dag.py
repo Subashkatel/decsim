@@ -6,7 +6,7 @@ checks that the edges form an acyclic graph, gives every window a depth,
 assigns every fault to the shallowest window whose commit rounds it
 touches, and answers, for each window, which faults its ancestors own. A
 fault touching an excluded round (decsim's own device for the strong
-re-decode, decsim/decoders/strong_escalation) has no owner at all.
+re-decode, decsim/escalation/strong_window_shapes) has no owner at all.
 """
 
 from collections.abc import Container, Sequence

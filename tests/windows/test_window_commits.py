@@ -91,7 +91,9 @@ class _Fixture:
         self.results = _RecordingResults()
         self.escalation = types.SimpleNamespace(
             escalate=lambda job: self.escalated.append(job),
-            after_weak_commit=lambda key: self.after_weak.append(key),
+            submit_if_far_boundary_committed=lambda key: self.after_weak.append(
+                key
+            ),
         )
         self.escalated = []
         self.after_weak = []

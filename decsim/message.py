@@ -791,28 +791,22 @@ class Verdict(Enum):
 
 
 @dataclass(frozen=True)
-class StrongDecodeCompletion:
-    """A strong result paired with the request it answers."""
-
-    request_key: DecoderRequestKey
-    result: DecodeResult
-
-
-@dataclass(frozen=True)
 class RunShape:
     """What a run is made of, as the root checks it before planning.
 
     The escalation policy refuses a run it cannot serve from this
     record, once, in Machine.build. is_double_window is the strong
     window's shape (Toshio et al. 2510.25222 Sec. III C when true, the
-    two-sided context of Sec. III A otherwise); operations are the
-    workload's planning views.
+    two-sided context of Sec. III A otherwise); is_bulk_strong is the
+    decoder manager's merging of queued strong re-decodes; operations
+    are the workload's planning views.
     """
 
     scheme: Any
     boundary_policy: Any
     operations: tuple
     is_double_window: bool
+    is_bulk_strong: bool
     has_dynamic_streams: bool
     has_static_decode_plan: bool
     has_frontend: bool

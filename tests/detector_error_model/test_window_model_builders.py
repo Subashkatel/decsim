@@ -12,7 +12,7 @@ only the correction edges in the commit region are taken as final) and
 the last paragraph of its section III, Methods (in both branches the last
 window commits through the last round). Exclusion ranges are decsim's own
 device (a strong re-decode leaves the weak decoder's committed faults
-uncommitted, decsim/decoders/strong_escalation) with no paper referent.
+uncommitted, decsim/escalation/strong_window_shapes) with no paper referent.
 """
 
 import numpy

@@ -67,6 +67,25 @@ class WindowTransfers:
         self.link.send(path, payload_bits, now_ticks, attribution, delivered)
         return expected_delay_ticks
 
+    def send_selection(
+        self,
+        weak_job: message.DecodeJob,
+        strong_request_key: message.DecoderRequestKey,
+        on_delivered: Callable[[], None],
+    ) -> int:
+        """Send a window's strong selection over weak_decoder_to_strong_decoder.
+
+        The send is in the weak job's name for the strong request it
+        selects; returns the delay the link expects.
+        """
+        return self.send_for_job(
+            message.LinkPath.WEAK_DECODER_TO_STRONG_DECODER,
+            weak_job,
+            payload_bits=None,
+            request_key=strong_request_key,
+            on_delivered=on_delivered,
+        )
+
     def send_boundary(
         self,
         attribution: message.TransferAttribution,

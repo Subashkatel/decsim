@@ -153,7 +153,7 @@ def test_pair_timing_charges_the_slower_core_plus_the_join():
         predicted_class=0, gap=4.0, solve_ns=(5_000_000, 3_000_000)
     )
     wrapper = ParallelGapDecoder(
-        StubWeakDecoder(prediction=0), StubMetricFactory(metric), combine_ns=250
+        StubWeakDecoder(prediction=0), StubMetricFactory(metric), combine_nanoseconds=250
     )
     result, elapsed_ns = wrapper.decode_timed(paired_job())
     assert elapsed_ns == 5_000_000 + 250

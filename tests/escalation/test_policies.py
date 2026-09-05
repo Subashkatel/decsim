@@ -251,6 +251,61 @@ def test_a_plan_that_contradicts_itself_is_refused_at_build_with_a_sentence():
         )
 
 
+def _double_window_settings(
+    commit_rounds: int, buffer_rounds: int
+) -> machine_module.MachineSettings:
+    """The gate's switching card with double_window on and the sizes given.
+
+    Every part is a table row, the way the yaml builds it.
+    """
+    windows = window_settings.WindowSettings(
+        commit_rounds=commit_rounds, buffer_rounds=buffer_rounds
+    )
+    weak_decoder = decoder_settings.DecoderSettings(
+        kind="pymatching", engine_megahertz=100.0
+    )
+    strong_decoder = decoder_settings.DecoderSettings(
+        kind="belief_matching", engine_megahertz=100.0
+    )
+    escalation = decoder_settings.EscalationSettings(
+        kind="switching", gap_threshold_nats=1.0, double_window=True
+    )
+    return machine_module.MachineSettings(
+        windows=windows,
+        weak_decoder=weak_decoder,
+        strong_decoder=strong_decoder,
+        escalation=escalation,
+    )
+
+
+@pytest.mark.parametrize("commit_rounds, buffer_rounds", [(3, 4), (4, 3)])
+def test_a_double_window_crossing_a_later_commit_region_is_refused_at_build(
+    commit_rounds, buffer_rounds
+):
+    """The slice note's ruling 5: the crossing shape is decided at build.
+
+    The strong region is commit plus two buffers; when twice the buffer
+    is not a multiple of the commit, it ends inside a later window's
+    commit region, and the run used to die at its first escalation.
+    """
+    settings = _double_window_settings(commit_rounds, buffer_rounds)
+    with pytest.raises(
+        ValueError,
+        match="the double window's strong region, commit plus two buffers, "
+        "must end inside its own commit region",
+    ):
+        machine_module.Machine.build(settings, 0)
+
+
+@pytest.mark.parametrize("commit_rounds, buffer_rounds", [(3, 3), (4, 4)])
+def test_a_double_window_ending_on_a_commit_edge_builds(
+    commit_rounds, buffer_rounds
+):
+    settings = _double_window_settings(commit_rounds, buffer_rounds)
+    machine = machine_module.Machine.build(settings, 0)
+    assert machine.window_manager.strong_redecode is not None
+
+
 def test_an_online_source_beside_run_both_at_once_is_refused():
     online = _always_auditing_online_threshold(threshold=2.0)
     with pytest.raises(ValueError, match="nothing to audit"):

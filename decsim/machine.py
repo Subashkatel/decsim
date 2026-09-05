@@ -799,10 +799,14 @@ def _plan(settings: MachineSettings, escalation_policy) -> _Plan:
         raise ValueError("dynamic streams require SlidingWindowScheme")
     has_static_decode_plan = settings.workload.decode_operations is not None
     has_frontend = settings.workload.kind in ("surgery_ir", "qlx")
+    commit_round_count = code.commit_rounds()
+    buffer_round_count = code.buffer_rounds()
     run_shape = message.RunShape(
         scheme=scheme,
         boundary_policy=boundary_policy,
         operations=views,
+        commit_round_count=commit_round_count,
+        buffer_round_count=buffer_round_count,
         is_double_window=settings.escalation.double_window,
         is_bulk_strong=settings.decoder_manager.bulk_strong,
         has_dynamic_streams=bool(dynamic_streams),

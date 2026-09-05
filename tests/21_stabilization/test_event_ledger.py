@@ -214,7 +214,7 @@ def test_dropped_round_is_an_accounted_terminal_state():
     packing = SyndromePacking(
         engine,
         LinkFabric(logical_reference_profile(), engine),
-        t_pack=0,
+        packing_ticks=0,
         packing_context_capacity=None,
         window_input_receiver=SimpleNamespace(
             accept_window_input=lambda _packet: True
@@ -276,7 +276,7 @@ def test_reassembly_context_drop_is_an_accounted_terminal_state():
     packing = SyndromePacking(
         engine,
         LinkFabric(logical_reference_profile(), engine),
-        t_pack=0,
+        packing_ticks=0,
         packing_context_capacity=1,
         window_input_receiver=SimpleNamespace(
             accept_window_input=lambda _packet: True

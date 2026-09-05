@@ -41,7 +41,7 @@ def test_measurement_signal_path_preserves_classified_bits_and_exact_latency(fab
     ledger = TrafficLedger(settings)
     links = LinkFabric(settings, engine, ledger)
     packing = SyndromePacking(
-        engine, links=links, t_pack=0, packing_context_capacity=None,
+        engine, links=links, packing_ticks=0, packing_context_capacity=None,
         window_input_receiver=receiver, feedback_memory_receiver=None)
     controller = Controller(
         engine, qpu=None, window_manager=None, syndrome_packing=packing,
@@ -79,7 +79,7 @@ def test_packing_charges_its_assembly_time_for_every_round(fabric):
         controller_to_weak_buffer=False, controller_to_strong_buffer=False)
     links = LinkFabric(settings, engine)
     packing = SyndromePacking(
-        engine, links=links, t_pack=microseconds_to_ticks(1), packing_context_capacity=None,
+        engine, links=links, packing_ticks=microseconds_to_ticks(1), packing_context_capacity=None,
         window_input_receiver=receiver, feedback_memory_receiver=None)
     controller = Controller(
         engine, qpu=None, window_manager=None, syndrome_packing=packing,
@@ -125,7 +125,7 @@ def test_feedback_memory_rounds_pipeline_onto_wbd_without_a_landing_wait(
         controller_to_weak_buffer=False, controller_to_strong_buffer=False)
     links = LinkFabric(settings, engine)
     packing = SyndromePacking(
-        engine, links=links, t_pack=0, packing_context_capacity=None,
+        engine, links=links, packing_ticks=0, packing_context_capacity=None,
         window_input_receiver=None, feedback_memory_receiver=receiver)
     controller = Controller(
         engine, qpu=None, window_manager=None, syndrome_packing=packing,

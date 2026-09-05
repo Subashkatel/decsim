@@ -1143,7 +1143,7 @@ def _syndrome_packing(
     return syndrome_packing_module.SyndromePacking(
         engine,
         links=links,
-        t_pack=packing_ticks,
+        packing_ticks=packing_ticks,
         packing_context_capacity=controller.packing_rounds_in_flight,
         window_input_receiver=window_manager,
         feedback_memory_receiver=window_manager,

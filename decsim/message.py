@@ -635,7 +635,7 @@ class DecodeJob:
     send_input: Optional[Callable[[Callable[[], None]], int]] = (
         None  # called at dispatch: send the input link, call back at the landing, return the expected delay in ticks
     )
-    unit: Optional[int] = None  # decoder unit assigned at dispatch
+    unit: Optional[Any] = None  # the DecoderUnit assigned at dispatch
     memory: Optional[Any] = (
         None  # that unit's DecoderMemory while it holds this job's input
     )
@@ -674,6 +674,9 @@ class DecodeJob:
     service_started: bool = (
         False  # the decode itself began (past the boundary gate)
     )
+    # landed in its slot with a boundary still owed: holds the slot,
+    # never the unit's compute, until release_parked
+    is_parked: bool = False
     request_key: Optional[DecoderRequestKey] = None
     request_created_ticks: Optional[int] = None
     request_admitted_ticks: Optional[int] = None

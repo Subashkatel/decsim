@@ -324,7 +324,7 @@ def test_a_pipelined_units_compute_returns_to_the_pool_once():
         submit(index, arrival)
     engine.run()
     manager.check_decode_work_settled()
-    assert manager.pool_free["default"] == 1
+    assert manager.pool.free_count("default") == 1
     assert compute_start["w1"] == microseconds_to_ticks(4.5)
     # one start per initiation interval: w2 and w3 follow at 0.5 us steps
     assert compute_start["w2"] == microseconds_to_ticks(5.0) and compute_start[

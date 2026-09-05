@@ -235,8 +235,8 @@ def test_final_results_use_the_sink_while_provisional_and_delivery_legs_bypass_i
     manager = object.__new__(WindowManager)
     manager.engine = final_engine
     manager.pauli_frame = sink
-    manager.windows = {(4, 1): SimpleNamespace(t_done=None, k=1)}
-    manager._operation_by_id = {4: SimpleNamespace(name="logical")}
+    manager.planner = SimpleNamespace(windows_by_key={(4, 1): SimpleNamespace(t_done=None, k=1)})
+    manager.tracker = SimpleNamespace(operation_by_id={4: SimpleNamespace(name="logical")})
     manager._send_window_transfer = (
         lambda path, window, op, request_key, payload_bits, on_delivered:
             final_engine.schedule(4, on_delivered))
@@ -264,7 +264,7 @@ def test_final_results_use_the_sink_while_provisional_and_delivery_legs_bypass_i
     provisional.pauli_frame = SimpleNamespace(
         commit_correction=lambda **kwargs: pytest.fail("provisional weak reached sink")
     )
-    provisional.windows = {(4, 1): SimpleNamespace(t_done=None)}
+    provisional.planner = SimpleNamespace(windows_by_key={(4, 1): SimpleNamespace(t_done=None)})
     provisional._commit_decode_done = lambda actual_job, actual_result: weak_commits.append(
         (actual_job, actual_result)
     )
@@ -282,8 +282,8 @@ def test_final_results_use_the_sink_while_provisional_and_delivery_legs_bypass_i
             "the DO delivery leg must not touch the frame; the fold happens "
             "at the strong commit")
     )
-    strong.windows = {(4, 1): SimpleNamespace(op_id=4, k=1)}
-    strong._operation_by_id = {4: SimpleNamespace(name="logical")}
+    strong.planner = SimpleNamespace(windows_by_key={(4, 1): SimpleNamespace(op_id=4, k=1)})
+    strong.tracker = SimpleNamespace(operation_by_id={4: SimpleNamespace(name="logical")})
     strong._send_window_transfer = (
         lambda path, window, op, request_key, payload_bits, on_delivered:
             engine.schedule(5, on_delivered))
@@ -337,8 +337,8 @@ def test_escalated_strong_final_folds_into_the_frame_and_gates_the_commit():
     manager.pauli_frame = SimpleNamespace(
         commit_correction=lambda **kwargs: frame_calls.append(kwargs)
     )
-    manager.windows = {(4, 1): SimpleNamespace(op_id=4, k=1)}
-    manager._operation_by_id = {4: SimpleNamespace(id=4, name="logical")}
+    manager.planner = SimpleNamespace(windows_by_key={(4, 1): SimpleNamespace(op_id=4, k=1)})
+    manager.tracker = SimpleNamespace(operation_by_id={4: SimpleNamespace(id=4, name="logical")})
     finished = []
     manager._finish_strong_commit = (
         lambda completion, key, result, window, op: finished.append(key))
@@ -360,8 +360,8 @@ def test_frameless_strong_commit_finishes_directly():
     manager = object.__new__(WindowManager)
     manager.engine = engine
     manager.pauli_frame = None
-    manager.windows = {(4, 1): SimpleNamespace(op_id=4, k=1)}
-    manager._operation_by_id = {4: SimpleNamespace(id=4, name="logical")}
+    manager.planner = SimpleNamespace(windows_by_key={(4, 1): SimpleNamespace(op_id=4, k=1)})
+    manager.tracker = SimpleNamespace(operation_by_id={4: SimpleNamespace(id=4, name="logical")})
     finished = []
     manager._finish_strong_commit = (
         lambda completion, key, result, window, op: finished.append(key))
@@ -383,8 +383,8 @@ def test_final_result_rides_its_tiers_output_link():
         manager = object.__new__(WindowManager)
         manager.engine = engine
         manager.pauli_frame = None
-        manager.windows = {(4, 1): SimpleNamespace(t_done=None, k=1)}
-        manager._operation_by_id = {4: SimpleNamespace(name="logical")}
+        manager.planner = SimpleNamespace(windows_by_key={(4, 1): SimpleNamespace(t_done=None, k=1)})
+        manager.tracker = SimpleNamespace(operation_by_id={4: SimpleNamespace(name="logical")})
         paths = []
         def send(path, window, op, request_key, payload_bits, on_delivered,
                  paths=paths):

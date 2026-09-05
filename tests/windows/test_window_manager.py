@@ -6,6 +6,8 @@ set that mirrors it. The run is a six-round d=3 memory on the
 timing-only device with a preset-latency weak decoder.
 """
 
+import types
+
 import decsim.decoders.decoders as decoders
 import decsim.decoders.settings as decoder_settings
 import decsim.frontends.settings as workload_settings
@@ -14,6 +16,12 @@ import decsim.message as message
 import decsim.qpu.code_geometry as code_geometry
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
+import decsim.windows.round_tracker as round_tracker
+import decsim.windows.window_boundaries as window_boundaries
+import decsim.windows.window_interactions as window_interactions
+import decsim.windows.window_manager as window_manager_module
+import decsim.windows.window_planner as window_planner
+import decsim.windows.windowing_schemes as windowing_schemes
 
 
 def _weak_run():
@@ -62,3 +70,77 @@ def test_a_window_is_final_once_its_request_is_published():
     request_key = message.DecoderRequestKey(1, 0, message.DecoderTier.STRONG, 3)
     window.published_request_key = request_key
     assert window.published_request_key.tier is message.DecoderTier.STRONG
+
+
+def test_a_streams_later_window_waits_on_the_previous_ones_boundary():
+    """Each later overlapping stream window depends on its predecessor."""
+    manager = object.__new__(window_manager_module.WindowManager)
+    manager.window_interaction = window_interactions.DefaultWindowInteraction()
+    manager.planner = _stream_planner()
+    manager.tracker = types.SimpleNamespace(is_sealed=lambda _stream_id: False)
+    manager.courier = window_boundaries.BoundaryCourier(manager)
+    manager._add_window_read_refs = lambda _key, _window: None
+    stream = message.Operation("stream", "stream", (0,))
+    manager.planner.register_stream(stream)
+
+    manager._grow_stream("stream", 4, None)
+
+    first, second = manager.planner.windows_of("stream")
+    assert (first.commit_lo, first.commit_hi, first.buffer_hi) == (1, 3, 5)
+    assert (second.commit_lo, second.commit_hi, second.buffer_hi) == (4, 6, 8)
+    assert second.deps == [("stream", 0)]
+    assert second.deps_remaining == 1
+    assert first.dependents == [("stream", 1)]
+
+
+def test_the_workload_is_not_final_until_every_stream_is_sealed():
+    manager = object.__new__(window_manager_module.WindowManager)
+    manager._workload_complete_sent = False
+    manager.planner = _stream_planner()
+    manager.tracker = round_tracker.RoundTracker(
+        manager.planner.scheme, manager.planner
+    )
+    manager.syndrome_buffer = types.SimpleNamespace(
+        open_operation=lambda _operation_id: None
+    )
+    manager.feedback_boundary_mode = "trailing_buffer"
+    completions = []
+    manager.on_workload_complete = lambda: completions.append("complete")
+    manager.check_windows_for_operation = lambda _stream_id: None
+    stream = message.Operation("stream", "stream", (0,))
+    manager.register_stream(stream)
+
+    manager.finish_workload_if_ready()
+    assert completions == []
+    manager.seal_stream("stream", 0)
+    assert completions == ["complete"]
+    assert manager.has_dynamic_stream("stream") is True
+
+
+def _stream_planner() -> window_planner.WindowPlanner:
+    plan = message.WindowPlan(
+        windows={},
+        window_count={},
+        op_windows={},
+        successors={},
+        spatial_nodes={},
+        rounds_by_operation={},
+        code_names={},
+        total_windows=0,
+        windowed_by_operation={},
+        batch_preceding_idle_rounds_by_operation={},
+    )
+    geometry = types.SimpleNamespace(
+        commit_round_count=3, buffer_round_count=2, code_name="surface"
+    )
+    resolved = types.SimpleNamespace(
+        operation_id="stream",
+        code_geometry=geometry,
+        round_count=9,
+        spatial_node_count=17,
+    )
+    models = window_planner.WindowModels(None, lambda _code_name: None)
+    scheme = windowing_schemes.SlidingWindowScheme()
+    return window_planner.WindowPlanner(
+        scheme, [resolved], plan, models, planned_operations=()
+    )

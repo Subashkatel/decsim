@@ -201,7 +201,7 @@ class ParallelGapDecoder(SoftOutputDecoder):
         syndrome = decoder_module.payload_syndrome(job)
         paired = metric.paired_evaluate(syndrome)
         result.soft_output = paired.soft_output
-        slower_solve_ns = max(paired.forced_solve_ns)
+        slower_solve_ns = max(paired.forced_solve_nanoseconds)
         return result, slower_solve_ns + self.combine_ns
 
 

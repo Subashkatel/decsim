@@ -53,7 +53,7 @@ def surface_code_metric():
     detection_events, _ = sampler.sample(
         PARITY_SHOTS, separate_observables=True
     )
-    return ComplementaryGapMetric.from_dem(model), detection_events
+    return ComplementaryGapMetric.from_detector_error_model(model), detection_events
 
 
 def test_paired_evaluate_matches_serial_evaluate_shot_for_shot():
@@ -63,8 +63,8 @@ def test_paired_evaluate_matches_serial_evaluate_shot_for_shot():
         paired = metric.paired_evaluate(shot_events)
         assert paired.soft_output.gap == pytest.approx(serial.gap, abs=1e-9)
         assert paired.soft_output.w_min == pytest.approx(serial.w_min, abs=1e-9)
-        assert len(paired.forced_solve_ns) == 2
-        assert all(t > 0 for t in paired.forced_solve_ns)
+        assert len(paired.forced_solve_nanoseconds) == 2
+        assert all(t > 0 for t in paired.forced_solve_nanoseconds)
 
 
 def test_the_forced_pair_reproduces_the_unconstrained_solve():
@@ -74,8 +74,8 @@ def test_the_forced_pair_reproduces_the_unconstrained_solve():
     metric, detection_events = surface_code_metric()
     for shot_events in detection_events:
         bits = numpy.asarray(shot_events, dtype=numpy.uint8).ravel()
-        correction, plain_weight = metric._base.decode(bits, return_weight=True)
-        plain_class = int(((metric.obs @ correction) % 2)[0])
+        correction, plain_weight = metric._matching.decode(bits, return_weight=True)
+        plain_class = int(((metric.observable_matrix @ correction) % 2)[0])
         paired = metric.paired_evaluate(shot_events)
         assert paired.soft_output.w_min == pytest.approx(
             float(plain_weight), abs=1e-9
@@ -124,7 +124,7 @@ class StubPairedMetric:
         self.evaluation = PairedGapEvaluation(
             soft_output=SoftOutput(gap=gap, source=COMPLEMENTARY_GAP_SOURCE),
             predicted_class=predicted_class,
-            forced_solve_ns=solve_ns,
+            forced_solve_nanoseconds=solve_ns,
         )
 
     def paired_evaluate(self, _syndrome) -> PairedGapEvaluation:

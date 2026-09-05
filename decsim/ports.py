@@ -419,7 +419,6 @@ class WindowingScheme(Protocol):
         window: message.Window,
         *,
         readiness: message.WindowReadiness,
-        operation: message.OperationPlanningView,
     ) -> bool:
         """Whether the window has every round it reads."""
 

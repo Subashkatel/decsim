@@ -296,16 +296,16 @@ class Window:
     buffer_lo: Optional[int] = None   # leading-buffer start (for two-sided A windows)
     closed_temporal_boundaries: bool = False
     batched_preceding_idle_round_count: int = 0
-    buffer_filled_by_memory: bool = False  # trailing buffer satisfied by
-                                      # memory rounds alone: released on time,
-                                      # no syndrome content behind those
-                                      # rounds (references decode buffer
-                                      # content: LATTE, SWIPER, Skoric/Tan)
     deps: list = field(default_factory=list)        # window keys this one waits on
     dependents: list = field(default_factory=list)  # window keys waiting on this one
     deps_remaining: int = 0           # unfinished deps countdown; 0 = unblocked
     service_began: bool = False       # its decode is past the boundary gate
     committed: bool = False           # result folded into the op's accumulator
+    # a strong window covers it: the weak chain skips it (never decoded)
+    is_absorbed: bool = False
+    # the request whose result the window finally published; None until
+    # the final one, so a provisional weak commit is still awaiting strong
+    published_request_key: Optional["DecoderRequestKey"] = None
     queued: bool = False              # job handed to the decoder cluster
     blocked_logged: bool = False      # log-once flag for the "blocked" trace line
     boundary_in: Any = field(default_factory=dict)  # state owned by the

@@ -314,12 +314,12 @@ class DynamicWindows:
 
     def _committed_prefix_round_count(self, stream_id) -> int:
         """How many initial rounds are covered by committed windows."""
-        window_manager = self.window_manager
         committed_ranges = []
-        for key in window_manager.committed_windows:
+        for key, window in self.window_manager.windows.items():
             if key[0] != stream_id:
                 continue
-            window = window_manager.windows[key]
+            if not window.committed:
+                continue
             committed_ranges.append((window.commit_lo, window.commit_hi))
         committed_ranges.sort()
         committed_round_count = 0

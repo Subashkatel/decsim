@@ -137,10 +137,8 @@ class SlidingWindowScheme:
         window: message.Window,
         *,
         readiness: message.WindowReadiness,
-        operation,
     ) -> bool:
         """Whether the window has every round it reads."""
-        del operation
         return sliding_data_complete(window, readiness)
 
 
@@ -175,10 +173,8 @@ class NaiveOnlineScheme:
         window: message.Window,
         *,
         readiness: message.WindowReadiness,
-        operation,
     ) -> bool:
         """Whether the window has every round it reads."""
-        del operation
         return sliding_data_complete(window, readiness)
 
     def validate_buffer(self, geometry) -> None:
@@ -222,10 +218,8 @@ class ParallelWindowScheme:
         window: message.Window,
         *,
         readiness: message.WindowReadiness,
-        operation,
     ) -> bool:
         """Whether the window has every round it reads."""
-        del operation
         return sliding_data_complete(window, readiness)
 
     def validate_buffer(self, geometry) -> None:
@@ -316,10 +310,8 @@ class TanSandwichScheme:
         window: message.Window,
         *,
         readiness: message.WindowReadiness,
-        operation,
     ) -> bool:
         """Whether the window has every round it reads."""
-        del operation
         return sliding_data_complete(window, readiness)
 
     def validate_buffer(self, geometry) -> None:

@@ -9,7 +9,7 @@ dynamic streams are DynamicWindows'; all of them are built here and
 work on this manager's tables. One round reads as accept_window_input,
 check_window, _submit_window_decode, on_decode_done, _commit_window.
 
-Wide state (53 attributes) recorded for the structural commits that
+Wide state (46 attributes) recorded for the structural commits that
 split it into planner, tracker, retention, requester, committer and
 results (slice 5 design note, section 3).
 """
@@ -97,7 +97,6 @@ class WindowManager:
         conditional_release,
         boundary_policy,
         window_interaction,
-        planning_view_by_operation_id,
         fault_model_requirement_for,
         feedback_boundary_mode: str = "trailing_buffer",
         error_model_provider=None,
@@ -105,7 +104,6 @@ class WindowManager:
         syndrome_buffer: Optional[round_store_module.RoundStore] = None,
         syndrome_buffer_1: Optional[round_store_module.RoundStore] = None,
         pauli_frame=None,
-        capture_enabled: bool = False,
         escalation_policy,
         submit_fn: Callable,
         check_strong_route: Callable,
@@ -123,10 +121,6 @@ class WindowManager:
         self.pauli_frame = pauli_frame
         self.boundary_policy = boundary_policy
         self.window_interaction = window_interaction
-        planning_views = dict(planning_view_by_operation_id)
-        self._planning_view_by_operation_id = types.MappingProxyType(
-            planning_views
-        )
         self._fault_model_requirement_for_code = fault_model_requirement_for
         self.feedback_boundary_mode = feedback_boundary_mode
         self.error_model_provider = error_model_provider
@@ -135,9 +129,6 @@ class WindowManager:
         # boundary receive path releases them (wired by the root)
         self.release_service: Optional[Callable] = None
         self._next_decoder_request_sequence = 0
-        self._selected_request_keys = None
-        if capture_enabled:
-            self._selected_request_keys = {}
         self.escalation_policy = escalation_policy
         self.primary_tier = escalation_policy.primary_tier
         self._idle_decode_demand_receiver = None
@@ -173,8 +164,6 @@ class WindowManager:
         self.window_indices_by_operation: dict[int, list] = {}
         self.window_count_by_operation: dict[int, int] = {}
         self.successors_by_operation: dict[int, list] = {}
-        self.committed_windows: set = set()
-        self._committed_count_by_operation: dict[int, int] = {}
         self.blocking_operation_ids: set[int] = set()
         self.result_by_operation: dict[int, tuple[int, ...]] = {}
         self.segment_results_sent: set = set()
@@ -182,10 +171,6 @@ class WindowManager:
         self._stream_binding_by_operation_id: dict[int, tuple] = {}
         self.ledger = committed_rounds.LogicalLedger()
         self.courier = window_boundaries.BoundaryCourier(self)
-        self._pending_strong_windows: set[tuple] = set()
-        self._pending_strong_count_by_operation: dict[int, int] = {}
-        # windows the weak chain skips: a strong window covers them
-        self.absorbed_windows: set[tuple] = set()
         self._finished_operation_ids: set[int] = set()
         self._workload_complete_sent = False
         self.model_by_window: dict = {}
@@ -497,10 +482,10 @@ class WindowManager:
     def _resolving_without_new_slots(self, key: tuple, visiting: set) -> bool:
         if key in visiting:
             return False
-        if key in self.absorbed_windows:
-            return True
         window = self.windows.get(key)
         if window is None:
+            return True
+        if window.is_absorbed:
             return True
         if window.t_done is not None or window.service_began:
             return True
@@ -841,7 +826,6 @@ class WindowManager:
             window, readiness
         ):
             return
-        window.buffer_filled_by_memory = True
         self.engine.log(
             "DecoderCluster",
             f"{operation.name} W{window.k} buffer filled by memory rounds "
@@ -849,12 +833,8 @@ class WindowManager:
         )
 
     def _window_data_complete(self, window: message.Window) -> bool:
-        operation = self._operation_by_id[window.op_id]
         readiness = self._window_readiness(window)
-        planning_view = self._planning_view_by_operation_id[operation.id]
-        return self.scheme.data_complete(
-            window, readiness=readiness, operation=planning_view
-        )
+        return self.scheme.data_complete(window, readiness=readiness)
 
     def _window_readiness(
         self, window: message.Window
@@ -1349,10 +1329,10 @@ class WindowManager:
         key = (job.op_id, job.window_id)
         window = self.windows[key]
         operation = self._operation_by_id[job.op_id]
-        self._commit_window(job, result, key, window, operation)
+        self._commit_window(result, key, window, operation)
         is_final = not job.awaiting_strong_result
-        if is_final and self._selected_request_keys is not None:
-            self._selected_request_keys[key] = job.request_key
+        if is_final:
+            window.published_request_key = job.request_key
         self.lifecycle.update_committed_round_count(operation.id)
         if job.awaiting_strong_result:
             # provisional: the boundary leaves with the commit
@@ -1407,10 +1387,7 @@ class WindowManager:
     def _committed_prefix_round_count(self, operation_id) -> int:
         """Rounds decoded in an unbroken prefix from round 1."""
         committed_ranges = []
-        for key in self.committed_windows:
-            if key[0] != operation_id:
-                continue
-            window = self.windows[key]
+        for window in self._committed_windows_of(operation_id):
             committed_ranges.append((window.commit_lo, window.commit_hi))
         committed_ranges.sort()
         decoded = 0
@@ -1420,18 +1397,8 @@ class WindowManager:
             decoded = max(decoded, end_round)
         return decoded
 
-    def selected_request_key(self, key: tuple):
-        """The request whose result the window finally published.
-
-        None unless the run captures switching records.
-        """
-        if self._selected_request_keys is None:
-            return None
-        return self._selected_request_keys.get(key)
-
     def _commit_window(
         self,
-        job: message.DecodeJob,
         result: message.DecodeResult,
         key: tuple,
         window: message.Window,
@@ -1440,9 +1407,6 @@ class WindowManager:
         window.committed = True
         if window.t_done is None:
             window.t_done = self.engine.now
-        self.committed_windows.add(key)
-        committed = self._committed_count_by_operation.get(operation.id, 0)
-        self._committed_count_by_operation[operation.id] = committed + 1
         status = result.decode_status
         window.decode_status = None
         status_note = ""
@@ -1464,15 +1428,6 @@ class WindowManager:
                 logical_observables=result.logical_observables,
             )
             self.ledger.install(contribution)
-        if job.awaiting_strong_result:
-            self._mark_window_waiting_for_strong(key, operation.id)
-
-    def _mark_window_waiting_for_strong(self, key: tuple, operation_id) -> None:
-        if key in self._pending_strong_windows:
-            return
-        self._pending_strong_windows.add(key)
-        pending = self._pending_strong_count_by_operation.get(operation_id, 0)
-        self._pending_strong_count_by_operation[operation_id] = pending + 1
 
     def on_strong_decode_done(
         self, completion: message.StrongDecodeCompletion
@@ -1509,8 +1464,6 @@ class WindowManager:
         result = completion.result
         window = self.windows[key]
         operation = self._operation_by_id[window.op_id]
-        if self._selected_request_keys is not None:
-            self._selected_request_keys[key] = completion.request_key
         if self.pauli_frame is None:
             self._finish_strong_commit(
                 completion, key, result, window, operation
@@ -1544,7 +1497,9 @@ class WindowManager:
     ) -> None:
         if result.logical_observables is not None:
             self.ledger.replace_prediction(key, result.logical_observables)
-        self._resolve_strong_wait(key, operation.id)
+        # the strong result is the window's final one: its status is now
+        # published, and nothing of the operation waits on it any more
+        window.published_request_key = completion.request_key
         held = self.courier.take_held(key)  # Held: ship now
         if held is not None:
             boundary = self.window_interaction.boundary_from_result(
@@ -1566,17 +1521,6 @@ class WindowManager:
         self._finish_operation_if_ready(operation)
         self.finish_workload_if_ready()
 
-    def _resolve_strong_wait(self, key: tuple, operation_id) -> None:
-        if key not in self._pending_strong_windows:
-            return
-        self._pending_strong_windows.remove(key)
-        pending = self._pending_strong_count_by_operation.get(operation_id, 0)
-        remaining = pending - 1
-        if remaining > 0:
-            self._pending_strong_count_by_operation[operation_id] = remaining
-        else:
-            self._pending_strong_count_by_operation.pop(operation_id, None)
-
     def _window_infos(self):
         infos = {}
         for key, window in self.windows.items():
@@ -1592,14 +1536,14 @@ class WindowManager:
         """
         if operation.id in self._finished_operation_ids:
             return
-        if self._pending_strong_count_by_operation.get(operation.id, 0) > 0:
+        if self._has_window_awaiting_strong(operation.id):
             return
         if self.syndrome_buffer.has_live_operation_reference(operation.id):
             return
         if self._strong_store_references(operation.id):
             return
-        committed = self._committed_count_by_operation.get(operation.id, 0)
-        if committed != self.window_count_by_operation[operation.id]:
+        committed = self._committed_windows_of(operation.id)
+        if len(committed) != self.window_count_by_operation[operation.id]:
             return
         if not self.lifecycle.sealed(operation.id):
             return
@@ -1623,9 +1567,9 @@ class WindowManager:
         """Tell the root once every window of the workload is final."""
         if self._workload_complete_sent:
             return
-        if len(self.committed_windows) != self.total_windows:
+        if self._committed_window_count() != self.total_windows:
             return
-        if self._pending_strong_windows:
+        if self._has_window_awaiting_strong(None):
             return
         if self.lifecycle.has_unsealed_streams():
             return
@@ -1702,11 +1646,38 @@ class WindowManager:
         self.conditional_release.release_waiters(operation)
 
     def _segment_waits_for_strong(self, stream_id, segment_end: int) -> bool:
-        for key in self._pending_strong_windows:
+        for key, window in self.windows.items():
             if key[0] != stream_id:
                 continue
-            window = self.windows[key]
+            if not _is_awaiting_strong(window):
+                continue
             if window.commit_lo <= segment_end:
+                return True
+        return False
+
+    def _committed_windows_of(self, operation_id) -> list:
+        """The operation's committed windows, absorbed ones included."""
+        committed = []
+        for key, window in self.windows.items():
+            if key[0] != operation_id:
+                continue
+            if window.committed:
+                committed.append(window)
+        return committed
+
+    def _committed_window_count(self) -> int:
+        count = 0
+        for window in self.windows.values():
+            if window.committed:
+                count += 1
+        return count
+
+    def _has_window_awaiting_strong(self, operation_id) -> bool:
+        """Whether a window of the operation (or of any) awaits its redo."""
+        for key, window in self.windows.items():
+            if operation_id is not None and key[0] != operation_id:
+                continue
+            if _is_awaiting_strong(window):
                 return True
         return False
 
@@ -1773,6 +1744,15 @@ class WindowManager:
     def has_dynamic_stream(self, stream_id) -> bool:
         """True for a stream whose windows are planned at runtime."""
         return self.lifecycle.has(stream_id)
+
+
+def _is_awaiting_strong(window: message.Window) -> bool:
+    """Committed provisionally: the strong redo has not published yet."""
+    if not window.committed:
+        return False
+    if window.is_absorbed:
+        return False
+    return window.published_request_key is None
 
 
 def _protocols_of(plan: message.WindowPlan) -> dict:

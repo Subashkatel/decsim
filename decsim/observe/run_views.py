@@ -293,7 +293,7 @@ def switching_records_view(window_manager, decoder_manager) -> SwitchingRecordsV
     for key, window in sorted(window_manager.windows.items(),
                               key=lambda item: stable_identity_order_key(item[0])):
         contribution = window_manager.ledger.contributions.get(key)
-        absorbed = key in window_manager.absorbed_windows
+        absorbed = window.is_absorbed
         absorbed_into = None
         if absorbed:
             owners = [owner for owner, value in
@@ -313,7 +313,7 @@ def switching_records_view(window_manager, decoder_manager) -> SwitchingRecordsV
             None if absorbed else contribution.commit_hi,
             "absorbed" if absorbed else contribution.ownership_kind,
             absorbed_into, None if absorbed else
-            window_manager.selected_request_key(key)))
+            window.published_request_key))
     return SwitchingRecordsView(
         tuple(rows), decoder_manager.terminal_request_records_snapshot(),
         decoder_manager.terminal_service_records_snapshot())

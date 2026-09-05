@@ -1,11 +1,8 @@
-"""The priced controller-to-buffer-0 hop (cwb) through syndrome packing.
+"""The priced controller-to-buffer-0 hop (cwb) and its card.
 
-Sources: the cwb card in decsim/links/link_profiles.py and the packing
-stage in decsim/controller/syndrome_packing.py (one send per round, the
-publication at arrival, retries without a second send).
+Sources: the cwb card in decsim/links/link_profiles.py; the rounds
+pipeline onto it from the transmitter (decsim/controller/round_transmission.py).
 """
-
-from types import SimpleNamespace
 
 import pytest
 
@@ -14,8 +11,6 @@ from decsim.engine import Engine
 from decsim.links.fabric import LinkFabric
 from decsim.links.link_profiles import logical_reference_profile, with_controller_to_weak_buffer_path
 from decsim.message import LinkPath, TransferAttribution
-from decsim.controller.syndrome_packing import SyndromePacking, _PackingSlotState
-from decsim.message import SyndromePacketRouteKind
 from decsim.observe.link_traffic import TrafficLedger
 
 
@@ -185,36 +180,6 @@ def test_unbounded_cwb_bandwidth_charges_propagation_only():
     assert second.total_delay_ticks == microseconds_to_ticks(0.10)
 
 
-def test_unwired_legacy_packing_delivery_is_immediate_and_has_no_cwb_publication():
-    engine = _Engine(now=321)
-    links, ledger = _fabric_and_ledger(logical_reference_profile(), engine)
-    receiver = _Receiver([True])
-    publication = _PublicationSpy()
-    packet = SimpleNamespace(
-        operation_id=3, round_index=8,
-        fragments=(SimpleNamespace(patch_id=1, size_bits=16),),
-    )
-    slot = SimpleNamespace(
-        identity="ctx", round_key=(3, 8),
-        packet=packet, packet_bits=16, cwb_reserved=False,
-        cwb_delivered=False, state=_PackingSlotState.PACKED_WAIT,
-    )
-    packing = object.__new__(SyndromePacking)
-    packing.round_events = []
-    packing.engine = engine
-    packing.links = links
-    packing.window_input_receiver = receiver
-    packing.syndrome_buffer = publication
-    slot.route = SimpleNamespace(kind=SyndromePacketRouteKind.WINDOW_INPUT)
-    packing._contexts = {"ctx": slot}
-    packing._route_queues = {SyndromePacketRouteKind.WINDOW_INPUT: ["ctx"]}
-
-    assert packing._transmit_window_input_round(slot) is True
-    assert receiver.received == [packet]
-    assert publication.calls == []
-    assert "controller_to_weak_buffer" not in ledger.traffic_json_value()["path_order"]
-
-
 def test_rounds_pipeline_on_cwb_instead_of_stop_and_wait():
     """Fast rounds arrive at Buffer 0 spaced by the round period, not by the CWB
     latency: the link serializes them FIFO and propagation is pipelined."""
@@ -249,53 +214,3 @@ def test_rounds_pipeline_on_cwb_instead_of_stop_and_wait():
     assert len(delivered) == 8
     gaps = [(b - a) / TICKS_PER_MICROSECOND for a, b in zip(delivered, delivered[1:])]
     assert all(gap == pytest.approx(0.02, abs=1e-3) for gap in gaps), gaps   # first gap adds serialization
-
-
-def _packing(*, assembly_slots=None, overflow=None):
-    from decsim.controller.syndrome_packing import (PackingOverflowPolicy,
-                                                    SyndromePackingPolicy)
-    policy = SyndromePackingPolicy(
-        overflow=overflow if overflow is not None
-        else PackingOverflowPolicy.STALL)
-    engine = _Engine()
-    return SyndromePacking(
-        engine, LinkFabric(logical_reference_profile(), engine), packing_ticks=0,
-        packing_context_capacity=assembly_slots,
-        window_input_receiver=_Receiver([True] * 8),
-        feedback_memory_receiver=None,
-        policy=policy)
-
-
-def _fragment(round_index, *, fragment_index=0, operation_id=1):
-    from decsim.message import RetainedSyndromeFragment
-    return RetainedSyndromeFragment(
-        operation_id=operation_id, patch_id=0, round_index=round_index,
-        bits=None, size_bits=24, fragment_index=fragment_index)
-
-
-def test_assembly_capacity_bounds_rounds_in_flight_through_the_stage():
-    from decsim.controller.syndrome_packing import SyndromePackingOverflowError
-    from decsim.message import WINDOW_INPUT_ROUTE
-    packing = _packing(assembly_slots=1)
-    packing._receive_fragment(_fragment(1, fragment_index=0), 2,
-                              WINDOW_INPUT_ROUTE)   # round 1 mid-assembly
-    with pytest.raises(SyndromePackingOverflowError, match="capacity 1 is full"):
-        packing._receive_fragment(_fragment(2), 1, WINDOW_INPUT_ROUTE)
-    packing._receive_fragment(_fragment(1, fragment_index=1), 2,
-                              WINDOW_INPUT_ROUTE)   # round 1 still completes
-    assert packing.syndrome_buffer.retained_fragments((1, 1)) is not None
-
-
-def test_assembly_capacity_drop_round_drops_only_the_new_round():
-    from decsim.controller.syndrome_packing import PackingOverflowPolicy
-    from decsim.message import WINDOW_INPUT_ROUTE
-    packing = _packing(assembly_slots=1,
-                       overflow=PackingOverflowPolicy.DROP_ROUND)
-    packing._receive_fragment(_fragment(1, fragment_index=0), 2,
-                              WINDOW_INPUT_ROUTE)
-    packing._receive_fragment(_fragment(2), 1, WINDOW_INPUT_ROUTE)
-    assert packing.packing_drops == 1
-    packing._receive_fragment(_fragment(1, fragment_index=1), 2,
-                              WINDOW_INPUT_ROUTE)
-    assert packing.syndrome_buffer.retained_fragments((1, 1)) is not None
-    assert packing.syndrome_buffer.retained_fragments((1, 2)) is None

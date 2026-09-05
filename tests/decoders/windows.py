@@ -40,15 +40,13 @@ def job_for(model, shot, window_id: int = 0) -> message.DecodeJob:
     """A decode job carrying one shot's detection events in row order."""
     syndrome = row_syndrome(model, shot)
     bits = bit_tuple(syndrome)
-    payload = message.SyndromePayload(
+    payload = message.RetainedSyndromeFragment(
         operation_id=1,
         patch_id=0,
         round_index=1,
         bits=bits,
-        code=None,
-        n_fragments=1,
-        fragment_index=0,
         size_bits=len(bits),
+        fragment_index=0,
     )
     return message.DecodeJob(
         op_id=1,

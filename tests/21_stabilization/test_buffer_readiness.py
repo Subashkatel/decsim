@@ -138,9 +138,9 @@ def test_a_full_buffer_0_stalls_the_controller_instead_of_failing(fabric):
         round_store=RoundStoreSettings(rounds=7),
         pauli_frame=PauliFrameConfig(commit_microseconds=declared["frame"]))
     completed = fabric["run_machine"](settings, 0)
-    packing = completed.syndrome_packing
-    assert packing.packing_drops == 0
-    published = [(event.round_index, event.tick) for event in packing.round_events
+    recorder = completed.round_events
+    assert recorder.packing_drops == 0
+    published = [(event.round_index, event.tick) for event in recorder.events
                  if event.kind == "PUBLISHED"]
     assert [round_index for round_index, _ in published] == list(range(1, 13))
     ticks = [tick for _, tick in published]

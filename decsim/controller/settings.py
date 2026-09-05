@@ -5,12 +5,33 @@ workspace; the idle policy says how an idle patch's rounds are charged.
 """
 
 import dataclasses
+import enum
 from collections.abc import Mapping
 from typing import Optional
 
 import decsim.config as config
-import decsim.controller.syndrome_packing as syndrome_packing
 import decsim.ports as ports
+
+
+class PackingOverflowPolicy(enum.Enum):
+    """What the controller does with a finished round its store cannot take.
+
+    STALL holds the round upstream of the store until a slot frees and
+    writes it in order, the backpressure real-time systems apply to their
+    source: the Rigetti sequencer polls the decoder's status register and
+    stalls (Caune et al. 2410.05202), Helios's input port is valid/ready
+    and asserts ready only when it can take data, QubiC's cores block in
+    WAIT_MEAS, and credit-based flow control never loses a flit. LILLIPUT's
+    readout buffer and QubiC's measurement register instead overwrite the
+    latest value, a storage choice this policy does not model. DROP_ROUND
+    is a study knob with no yaml key (ns-3's drop tail,
+    point-to-point-net-device.cc Send: Enqueue false, packet dropped);
+    it applies to the assembly workspace too, which under STALL stops
+    the run when full.
+    """
+
+    STALL = "stall"
+    DROP_ROUND = "drop_round"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -27,16 +48,16 @@ class ControllerSettings:
     (2110.07965), 155 ns root to leaf in Liu et al. (2603.16203).
     packing_rounds_in_flight bounds the packing stage's assembly
     workspace, the rounds in flight through the stage at once; None is
-    unbounded. The packing policy is a Python-only knob.
+    unbounded. packing_overflow and reassembly_timeout_ticks are
+    Python-only knobs.
     """
 
     readout_to_bits_microseconds: float = 0.0
     packing_microseconds_per_round: float = 0.0
     decision_to_pulse_microseconds: float = 0.0
     packing_rounds_in_flight: Optional[int] = None
-    packing_policy: syndrome_packing.SyndromePackingPolicy = (
-        syndrome_packing.SyndromePackingPolicy()
-    )
+    packing_overflow: PackingOverflowPolicy = PackingOverflowPolicy.STALL
+    reassembly_timeout_ticks: Optional[int] = None
 
     def __post_init__(self) -> None:
         config.check_duration(

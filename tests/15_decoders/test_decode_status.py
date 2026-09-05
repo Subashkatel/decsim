@@ -25,7 +25,7 @@ from decsim.detector_error_model.fault_model_contracts import (
     PlacedFaultModel,
     WindowErrorModel,
 )
-from decsim.message import DecodeJob, SyndromePayload
+from decsim.message import DecodeJob, RetainedSyndromeFragment
 
 
 def _window(check):
@@ -56,15 +56,13 @@ def _window(check):
 
 
 def _job(model, syndrome):
-    payload = SyndromePayload(
+    payload = RetainedSyndromeFragment(
         operation_id=1,
         patch_id=0,
         round_index=1,
         bits=tuple(int(b) for b in syndrome),
-        code=None,
-        n_fragments=1,
-        fragment_index=0,
         size_bits=len(syndrome),
+        fragment_index=0,
     )
     return DecodeJob(
         op_id=1,

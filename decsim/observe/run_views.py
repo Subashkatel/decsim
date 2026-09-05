@@ -407,7 +407,7 @@ def event_ledger(completed) -> RunLedgerView:
     last_of_round: dict = {}
     packed_of_round: dict = {}
     published_rounds: set = set()
-    for event in completed.syndrome_packing.round_events:
+    for event in completed.round_events.events:
         key = (event.operation_id, event.round_index)
         terminal = event.kind in ("PUBLISHED", "DROPPED",
                                   "FEEDBACK_MEMORY_DELIVERED")
@@ -427,14 +427,12 @@ def event_ledger(completed) -> RunLedgerView:
     # fast csb legitimately lands first. A round that was never published
     # to Buffer 0 (the strong tier is primary) ends its journey here
     stored_of_round: dict = {}
-    room_store = completed.strong_round_writer
-    if room_store is not None:
-        for tick, operation_id, round_index in room_store.stored_log:
-            key = (operation_id, round_index)
-            stored_of_round[key] = add(
-                "STORED_SB1", tick, operation_id, round=round_index,
-                prev=packed_of_round.get(key),
-                status="" if key in published_rounds else "terminal")
+    for tick, operation_id, round_index in completed.round_events.stored_rounds:
+        key = (operation_id, round_index)
+        stored_of_round[key] = add(
+            "STORED_SB1", tick, operation_id, round=round_index,
+            prev=packed_of_round.get(key),
+            status="" if key in published_rounds else "terminal")
 
     # window chains, from the window stamps
     frame_prev: dict = {}
@@ -478,8 +476,7 @@ def event_ledger(completed) -> RunLedgerView:
     decision_issued_of_op = {}
     command_issued_by_identity = {}
     preloaded_by_identity = {}
-    controller = getattr(completed, "controller", None)
-    for event in getattr(controller, "output_events", ()):
+    for event in completed.round_events.output_events:
         if event.kind == "DECISION_AVAILABLE":
             operation = operations.get(event.operation_id)
             blocking_op = getattr(operation, "blocked_by", None)

@@ -68,8 +68,16 @@ class WindowManagerProbe:
     def has_dynamic_stream(self, stream_id):
         return stream_id in self.live_streams
 
-    def accept_idle_decode_demand(self, **demand):
-        self.idle_demands.append(demand)
+    def submit_decode(self, round_count, on_done, label, code, spatial_nodes):
+        del on_done
+        self.idle_demands.append(
+            {
+                "rounds": round_count,
+                "code": code,
+                "spatial_nodes": spatial_nodes,
+                "label": label,
+            }
+        )
 
 
 class StreamsProbe:

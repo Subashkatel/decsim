@@ -13,7 +13,7 @@ instead of raise, which leaves the run's real store state untouched.
 
 import pytest
 
-from decsim.windows.window_manager import WindowManager
+from decsim.windows.round_retention import RoundRetention
 
 def escalate_only(window_id):
     def probability(job):
@@ -40,7 +40,7 @@ def test_backlog_far_boundary_refuses_with_retained_payload_message(fabric):
 def test_missing_restart_hold_refuses_with_contract_message(fabric, monkeypatch):
     """The narrower regime: every restart read still retained, but the
     restart window's own hold already transferred to its weak job."""
-    original = WindowManager._require_retained_payloads
+    original = RoundRetention.require_retained
 
     def record_instead_of_raise_for_restart(self, round_keys, purpose,
                                             store=None):
@@ -50,7 +50,7 @@ def test_missing_restart_hold_refuses_with_contract_message(fabric, monkeypatch)
             return None
         return original(self, round_keys, purpose, store=store)
 
-    monkeypatch.setattr(WindowManager, "_require_retained_payloads",
+    monkeypatch.setattr(RoundRetention, "require_retained",
                         record_instead_of_raise_for_restart)
     with pytest.raises(RuntimeError, match="restart window .* weak reads "
                                            "under its window hold"):

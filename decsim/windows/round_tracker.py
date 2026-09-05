@@ -16,6 +16,7 @@ closed feedback boundaries) lives here; its geometry is the planner's.
 from typing import Optional
 
 import decsim.message as message
+import decsim.windows.windowing_schemes as windowing_schemes
 
 
 class RoundTracker:
@@ -242,6 +243,11 @@ class RoundTracker:
         """Whether the window has every round it reads, by the scheme's rule."""
         readiness = self.readiness(window)
         return self.scheme.data_complete(window, readiness=readiness)
+
+    def is_buffer_filled_by_memory(self, window: message.Window) -> bool:
+        """Whether memory rounds alone satisfy the buffer past the operation."""
+        readiness = self.readiness(window)
+        return windowing_schemes.buffer_filled_by_memory_only(window, readiness)
 
     def has_first_round(self, window: message.Window) -> bool:
         """Whether the window's first read round has arrived."""

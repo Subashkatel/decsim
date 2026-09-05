@@ -104,6 +104,26 @@ class WindowInput(Protocol):
 
 
 @runtime_checkable
+class WindowInputGate(Protocol):
+    """The window side's say over a job's input, carried on the job.
+
+    The decoder manager asks may_stage before a boundary-blocked job
+    takes an input slot, may_start before a landed job decodes, and
+    calls mask_input once at the start so the landed input carries the
+    window's boundary (qLDPC's net_error folded into the next window).
+    """
+
+    def may_stage(self, job: message.DecodeJob) -> bool:
+        """Whether a blocked job may occupy an input slot yet."""
+
+    def may_start(self, job: message.DecodeJob) -> bool:
+        """Whether the landed job owes no boundary and may decode."""
+
+    def mask_input(self, job: message.DecodeJob) -> None:
+        """Fold the window's boundary into the landed input, once."""
+
+
+@runtime_checkable
 class DecodeQueue(Protocol):
     """The decoder manager, as the window manager sees it."""
 
@@ -112,7 +132,10 @@ class DecodeQueue(Protocol):
         job: message.DecodeJob,
         send_input: Optional[Callable[[Callable[[], None]], int]] = None,
     ) -> None:
-        """Admit a job once; send_input(on_landed) moves its input later."""
+        """Admit a job once; send_input(on_landed) moves its input later.
+
+        The job carries its WindowInputGate; a windowless job has none.
+        """
 
     def withdraw_window(self, window_key: tuple) -> None:
         """Take back a window's not-yet-started decode; it is superseded."""
@@ -315,18 +338,13 @@ class EscalationServices(Protocol):
 
     def make_strong_job(
         self, weak_job: message.DecodeJob, label: str
-    ) -> message.DecodeJob:
-        """The strong job that re-decodes the weak job's window."""
+    ) -> message.Submission:
+        """The strong job re-decoding the weak job's window, with its send."""
 
     def defer_strong_escalation(
         self, weak_job: message.DecodeJob
     ) -> message.DecoderRequestKey:
         """Reserve a strong request for later, once its boundaries exist."""
-
-    def check_strong_route(
-        self, weak_job: message.DecodeJob, strong_job: message.DecodeJob
-    ) -> None:
-        """Refuse a strong job the decoder manager cannot route."""
 
     def prepare_strong_selection(
         self,

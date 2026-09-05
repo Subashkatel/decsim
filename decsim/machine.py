@@ -84,11 +84,14 @@ import decsim.seeding as seeding
 import decsim.syndrome_buffer.round_store as round_store_module
 import decsim.syndrome_buffer.settings as round_store_settings
 import decsim.syndrome_buffer.strong_round_writer as strong_round_writer_module
+import decsim.windows.decode_requests as decode_requests
+import decsim.windows.round_retention as round_retention_module
 import decsim.windows.round_tracker as round_tracker_module
 import decsim.windows.settings as window_settings
 import decsim.windows.window_interactions as window_interactions
 import decsim.windows.window_manager as window_manager_module
 import decsim.windows.window_planner as window_planner_module
+import decsim.windows.window_transfers as window_transfers_module
 import decsim.windows.windowing_schemes as windowing_schemes
 
 # ------------------------------------------------------------ the tables
@@ -405,9 +408,25 @@ class Machine:
             settings.strong_round_store, escalation_policy, held_rounds
         )
         pauli_frame = _pauli_frame(settings.pauli_frame, engine)
-        # The window manager, the decoder manager and the factory refer
-        # to each other; these three lambdas bind the later two by name
-        # at first call. Slices 5 and 6 retire them (module docstring).
+        # The decoder manager is built first, so the requester takes the
+        # decode queue by constructor. Its result callbacks bind the window
+        # manager by name until structural D puts on_decoded on the job;
+        # the services seam is the escalation the window manager builds
+        # until slice 7 dissolves it. The factory is bound by name until
+        # slice 6.
+        decoder_manager = _decoder_manager(
+            engine,
+            settings,
+            escalation_policy,
+            pool,
+            links,
+            on_window_decoded=lambda job, result: window_manager.on_decode_done(
+                job, result
+            ),
+            on_strong_window_decoded=lambda completion: (
+                window_manager.on_strong_decode_done(completion)
+            ),
+        )
         window_manager = _window_manager(
             engine,
             settings,
@@ -419,14 +438,11 @@ class Machine:
             syndrome_buffer=round_store,
             syndrome_buffer_1=strong_round_store,
             pauli_frame=pauli_frame,
-            submit_fn=lambda job, send_input=None: decoder_manager.enqueue(
-                job, send_input
-            ),
-            check_strong_route=lambda weak_job, strong_job: (
-                decoder_manager.check_strong_route(weak_job, strong_job)
-            ),
+            decode_queue=decoder_manager,
             on_workload_complete=lambda: factory.shutdown(),
         )
+        decoder_manager.services = window_manager.escalation
+        _check_strong_route(settings, decoder_manager)
         strong_round_writer = _strong_round_writer(
             engine, links, strong_round_store, window_manager, round_events
         )
@@ -434,7 +450,7 @@ class Machine:
             engine, links, round_store, window_manager, round_events
         )
         publishes_from_strong_store = (
-            window_manager.primary_store is not round_store
+            window_manager.retention.primary_store is not round_store
         )
         round_writer = round_writes.RoundWriter(
             round_store,
@@ -458,15 +474,6 @@ class Machine:
             rounds_in_flight=rounds_in_flight,
             recorder=round_events,
         )
-        decoder_manager = _decoder_manager(
-            engine, settings, escalation_policy, pool, window_manager
-        )
-        # Slice 6 retires these three binds with enqueue(job, on_decoded).
-        window_manager.connect_idle_decode_demand_receiver(
-            decoder_manager.submit_decode
-        )
-        window_manager.release_service = decoder_manager.release_parked
-        window_manager.withdraw_decode = decoder_manager.withdraw_window
         factory = _factory(
             settings.magic_state_factory, engine, decoder_manager, plan
         )
@@ -486,7 +493,7 @@ class Machine:
         )
         patch_by_identity = _patch_by_identity(plan)
         idle_rounds = idle_rounds_module.IdleRoundAccounting(
-            plan.idle_policy, window_manager, patch_by_identity, streams, qpu
+            plan.idle_policy, decoder_manager, patch_by_identity, streams, qpu
         )
         issuer = operation_issue.OperationIssuer(
             engine,
@@ -1209,10 +1216,10 @@ def _window_manager(
     syndrome_buffer,
     syndrome_buffer_1,
     pauli_frame,
-    submit_fn,
-    check_strong_route,
+    decode_queue,
     on_workload_complete,
 ) -> window_manager_module.WindowManager:
+    """The windows facade over its six components, wired by constructor."""
     run_plan = plan.run_plan
     models = window_planner_module.WindowModels(
         plan.error_model_provider, fault_model_requirement_for
@@ -1225,24 +1232,37 @@ def _window_manager(
         plan.planned_operations,
     )
     tracker = round_tracker_module.RoundTracker(plan.scheme, planner)
-    return window_manager_module.WindowManager(
+    retention = round_retention_module.RoundRetention(
+        syndrome_buffer,
+        syndrome_buffer_1,
+        planner,
+        tracker,
+        is_strong_context_retained=escalation_policy.requires_strong_context,
+        primary_tier=escalation_policy.primary_tier,
+    )
+    transfers = window_transfers_module.WindowTransfers(engine, links)
+    builder = decode_requests.DecodeRequestBuilder(
+        engine, planner, tracker, plan.window_interaction, transfers
+    )
+    requester = decode_requests.DecodeRequester(
+        tracker, retention, builder, decode_queue, escalation_policy
+    )
+    window_manager = window_manager_module.WindowManager(
         engine,
         planner=planner,
         tracker=tracker,
-        links=links,
+        retention=retention,
+        transfers=transfers,
+        builder=builder,
+        requester=requester,
         conditional_release=conditional_release,
         boundary_policy=plan.boundary_policy,
         window_interaction=plan.window_interaction,
         feedback_boundary_mode=settings.workload.feedback_boundary_mode,
-        syndrome_buffer=syndrome_buffer,
-        syndrome_buffer_1=syndrome_buffer_1,
         pauli_frame=pauli_frame,
-        retain_strong_context=escalation_policy.requires_strong_context,
-        escalation_policy=escalation_policy,
-        submit_fn=submit_fn,
-        check_strong_route=check_strong_route,
         on_workload_complete=on_workload_complete,
     )
+    return window_manager
 
 
 def _decoder_manager(
@@ -1250,10 +1270,14 @@ def _decoder_manager(
     settings: MachineSettings,
     escalation_policy,
     pool: _DecoderPool,
-    window_manager,
+    links,
+    *,
+    on_window_decoded,
+    on_strong_window_decoded,
 ) -> decoder_manager_module.DecoderManager:
     return decoder_manager_module.DecoderManager(
         engine,
+        link=links,
         router=pool.router,
         scheduler=pool.scheduler,
         unit_pools=pool.unit_pools,
@@ -1262,13 +1286,25 @@ def _decoder_manager(
         capture_enabled=settings.observation.record_switching_windows,
         decoder_memory=pool.decoder_memory,
         escalation_policy=escalation_policy,
-        services=window_manager.escalation,
-        service_gate=window_manager.begin_service_gate,
-        apply_service_boundary=window_manager.apply_service_boundary,
-        stage_admission=window_manager.stage_admission,
-        on_window_decoded=window_manager.on_decode_done,
-        on_strong_window_decoded=window_manager.on_strong_decode_done,
+        services=None,
+        on_window_decoded=on_window_decoded,
+        on_strong_window_decoded=on_strong_window_decoded,
     )
+
+
+def _check_strong_route(settings: MachineSettings, decoder_manager) -> None:
+    """A switching run routes a strong job away from the weak decoder.
+
+    The wiring check the escalation ran on every strong job, run once
+    here on probe jobs: one decoder for both hints is the user's mistake.
+    """
+    if settings.escalation.kind != "switching":
+        return
+    weak_probe = message.DecodeJob(op_id=-1, window_id=0, n_rounds=0)
+    strong_probe = message.DecodeJob(
+        op_id=-1, window_id=0, n_rounds=0, hint="strong"
+    )
+    decoder_manager.check_strong_route(weak_probe, strong_probe)
 
 
 def _factory(

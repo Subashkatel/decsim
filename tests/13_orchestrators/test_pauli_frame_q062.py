@@ -237,8 +237,8 @@ def test_final_results_use_the_sink_while_provisional_and_delivery_legs_bypass_i
     manager.pauli_frame = sink
     manager.planner = SimpleNamespace(windows_by_key={(4, 1): SimpleNamespace(t_done=None, k=1)})
     manager.tracker = SimpleNamespace(operation_by_id={4: SimpleNamespace(name="logical")})
-    manager._send_window_transfer = (
-        lambda path, window, op, request_key, payload_bits, on_delivered:
+    manager.transfers = SimpleNamespace(
+        send_for_window=lambda path, window, op, request_key, payload_bits, on_delivered:
             final_engine.schedule(4, on_delivered))
     manager._commit_decode_done = lambda actual_job, actual_result: weak_commits.append(
         (actual_job, actual_result)
@@ -284,8 +284,8 @@ def test_final_results_use_the_sink_while_provisional_and_delivery_legs_bypass_i
     )
     strong.planner = SimpleNamespace(windows_by_key={(4, 1): SimpleNamespace(op_id=4, k=1)})
     strong.tracker = SimpleNamespace(operation_by_id={4: SimpleNamespace(name="logical")})
-    strong._send_window_transfer = (
-        lambda path, window, op, request_key, payload_bits, on_delivered:
+    strong.transfers = SimpleNamespace(
+        send_for_window=lambda path, window, op, request_key, payload_bits, on_delivered:
             engine.schedule(5, on_delivered))
     strong._commit_strong_decode_done = lambda completion: strong_calls.append(completion)
     completion = SimpleNamespace(
@@ -390,7 +390,7 @@ def test_final_result_rides_its_tiers_output_link():
                  paths=paths):
             paths.append(path)
             engine.schedule(4, on_delivered)
-        manager._send_window_transfer = send
+        manager.transfers = SimpleNamespace(send_for_window=send)
         manager._hand_on_boundary = lambda *args: None
         manager._commit_decode_done = lambda job, result: None
         job = SimpleNamespace(

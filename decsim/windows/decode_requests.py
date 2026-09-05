@@ -1,0 +1,412 @@
+"""The decode requests: a job per complete window, asked for once.
+
+A window's raw rounds ship as soon as its data is complete; a window
+that still owes a boundary is masked at the decoder when its decode
+starts (qLDPC folds the net error into the syndrome of the next window,
+qldpc/decoders/sinter.py decode_shots_to_error; cudaq-x keeps raw
+rounds and applies syndrome_mods at assembly). The builder is the job's
+WindowInputGate: may_stage says whether a blocked job may take an input
+slot yet, may_start whether the landed job may decode, mask_input folds
+the boundary into the landed input once. The requester enqueues the
+policy's submissions, weak and strong alike, on the DecodeQueue port
+with each job's input send.
+"""
+
+import dataclasses
+import functools
+from typing import Callable, Optional
+
+import decsim.decoders.decoder_memory as decoder_memory
+import decsim.message as message
+
+
+class DecodeRequestBuilder:
+    """Builds one request from a complete window; the job's input gate."""
+
+    def __init__(
+        self, engine, planner, tracker, interaction, transfers
+    ) -> None:
+        self.engine = engine
+        self.planner = planner
+        self.tracker = tracker
+        self.interaction = interaction
+        self.transfers = transfers
+        self.next_request_sequence = 0
+
+    # ---- building a request
+
+    def new_request_key(
+        self, operation_id, window_id: int, tier: message.DecoderTier
+    ) -> message.DecoderRequestKey:
+        """The next request identity, run-wide ordinal included."""
+        request_key = message.DecoderRequestKey(
+            operation_id, window_id, tier, self.next_request_sequence
+        )
+        self.next_request_sequence += 1
+        return request_key
+
+    def stamp_first_round(self, window: message.Window, store) -> None:
+        """Retain arrival provenance for latency accounting."""
+        if window.t_first_round is not None:
+            return
+        first_round_key = (window.op_id, window.start_round)
+        window.t_first_round = store.publication_tick(first_round_key)
+
+    def note_data_complete(
+        self, window: message.Window, operation: message.Operation
+    ) -> None:
+        """Stamp the window's data-complete tick the first time it is seen.
+
+        A trailing buffer satisfied by memory rounds alone releases on
+        time with no syndrome content behind it; the log line keeps that
+        approximation visible.
+        """
+        if window.t_data_complete is not None:
+            return
+        window.t_data_complete = self.engine.now
+        if not self.tracker.is_buffer_filled_by_memory(window):
+            return
+        self.engine.log(
+            "DecoderCluster",
+            f"{operation.name} W{window.k} buffer filled by memory rounds "
+            f"(time-only, no syndrome content)",
+        )
+
+    def build(
+        self,
+        window: message.Window,
+        operation: message.Operation,
+        tier: message.DecoderTier,
+        store,
+    ) -> message.DecodeJob:
+        """The tier's decode job for one complete window, read from store."""
+        request_key = self.new_request_key(window.op_id, window.k, tier)
+        payloads = self.assemble_payloads(window, store)
+        payload_round_count = decoder_memory.count_decoder_input_round_demand(
+            payloads
+        )
+        round_count = (
+            payload_round_count + window.batched_preceding_idle_round_count
+        )
+        spatial_nodes = self.planner.spatial_node_count_of(operation.id)
+        geometry = self.planner.code_geometry_of(operation.id)
+        model = self.planner.model_by_window.get(window.key)
+        label = self._job_label(window, operation)
+        return message.DecodeJob(
+            op_id=window.op_id,
+            window_id=window.k,
+            n_rounds=round_count,
+            ready_time=self.engine.now,
+            spatial_nodes=spatial_nodes,
+            payloads=payloads,
+            dem=model,
+            code=geometry.code_name,
+            window=window,
+            label=label,
+            strong_label=f"strong({operation.name} W{window.k})",
+            request_key=request_key,
+            request_created_ticks=self.engine.now,
+            gate=self,
+        )
+
+    def assemble_payloads(self, window: message.Window, store) -> list:
+        """Collect this window's raw payloads, with successor overflow rounds.
+
+        The boundary is never folded here: the mask is XORed into the
+        landed input at the decoder when the decode starts.
+        """
+        operation_rounds = self.tracker.effective_round_count_for_window(
+            window.op_id, window
+        )
+        end_round = min(window.buffer_hi, operation_rounds)
+        window_info = message.WindowInfo.from_window(window)
+        payloads = []
+        stop_round = end_round + 1
+        for round_index in range(window.start_round, stop_round):
+            round_key = (window.op_id, round_index)
+            fragments = store.retained_fragments(round_key)
+            self._append_round_payloads(
+                payloads, fragments, window_info, round_index
+            )
+        overflow = window.buffer_hi - operation_rounds
+        if overflow <= 0:
+            return payloads
+        successor_ids = self.planner.successors_by_operation.get(
+            window.op_id, []
+        )
+        for successor_id in successor_ids:
+            self._append_overflow_payloads(
+                payloads,
+                store,
+                successor_id,
+                overflow,
+                operation_rounds,
+                window_info,
+            )
+        return payloads
+
+    def input_send(
+        self, job: message.DecodeJob, path: message.LinkPath
+    ) -> Callable[[Callable[[], None]], int]:
+        """The job's input send: at dispatch it rides the path into the unit.
+
+        The payload bits are fixed now: the staging clears the job's
+        payloads when the input lands.
+        """
+        payload_bits = job.payload_bits()
+        return functools.partial(self._send_input, job, path, payload_bits)
+
+    def resend_held_input(self) -> Callable[[Callable[[], None]], int]:
+        """A job resubmitted after a withdrawal: its input lands at once."""
+        return self._land_held_input
+
+    # ---- the WindowInputGate port
+
+    def may_stage(self, job: message.DecodeJob) -> bool:
+        """May this boundary-blocked job occupy an input slot yet?
+
+        Only when every unmet dependency is already resolving without
+        needing a slot of its own: decoded, decoding, or itself dispatched
+        with resolving dependencies all the way down. Admitted earlier, a
+        job like the Tan seam (which reads both neighbors) squats a slot
+        against the very decode that must release it.
+        """
+        window = job.window
+        if window is None or window.deps_remaining <= 0:
+            return True
+        visiting = {(window.op_id, window.k)}
+        for dependency in window.deps:
+            if not self._resolving_without_new_slots(dependency, visiting):
+                return False
+        return True
+
+    def may_start(self, job: message.DecodeJob) -> bool:
+        """May this landed job start its decode?
+
+        False parks the job in its slot until its window's last boundary
+        arrives. Pure check: the mask itself is applied by mask_input at
+        the actual start, so a re-check can never fold the boundary twice.
+        """
+        window = job.window
+        if window is None:
+            return True
+        return window.deps_remaining <= 0
+
+    def mask_input(self, job: message.DecodeJob) -> None:
+        """XOR the window's boundary mask into the landed decoder input.
+
+        The unit's stored copy stays raw (cudaq-x keeps raw rounds and
+        applies syndrome_mods at window assembly); the job's input view is
+        replaced with the masked rounds the decode will read.
+        """
+        window = job.window
+        if window is None:
+            return
+        state = window.boundary_in
+        if not state or job.decoder_input is None:
+            return
+        window_info = message.WindowInfo.from_window(window)
+        masked_rounds = []
+        for round_input in job.decoder_input.rounds:
+            masked = self._masked_round(state, window_info, round_input)
+            masked_rounds.append(masked)
+        job.decoder_input = dataclasses.replace(
+            job.decoder_input, rounds=tuple(masked_rounds)
+        )
+
+    # ---- private
+
+    def _job_label(
+        self, window: message.Window, operation: message.Operation
+    ) -> str:
+        if self.planner.is_windowed(window.op_id):
+            return (
+                f"{operation.name} W{window.k} "
+                f"[commit {window.commit_lo}-{window.commit_hi}]"
+            )
+        body_rounds = self.tracker.round_count_for_window(operation.id, window)
+        idle_rounds = window.batched_preceding_idle_round_count
+        if idle_rounds:
+            effective_rounds = window.n_rounds + idle_rounds
+            return (
+                f"{operation.name} [whole op, {effective_rounds} rounds: "
+                f"{idle_rounds} idle + {body_rounds} body]"
+            )
+        return f"{operation.name} [whole op, {window.n_rounds} rounds]"
+
+    def _append_overflow_payloads(
+        self,
+        payloads,
+        store,
+        successor_id,
+        overflow,
+        operation_rounds,
+        window_info,
+    ) -> None:
+        stop_round = overflow + 1
+        for round_index in range(1, stop_round):
+            round_key = (successor_id, round_index)
+            fragments = store.retained_fragments(round_key)
+            shifted_round_index = operation_rounds + round_index
+            self._append_round_payloads(
+                payloads, fragments, window_info, shifted_round_index
+            )
+
+    def _append_round_payloads(
+        self, payloads, fragments, window_info, round_index
+    ) -> None:
+        """One round's fragments in stable patch order, no boundary folded."""
+        if fragments is None:
+            return
+        ordered = sorted(fragments, key=_fragment_patch_order)
+        for fragment in ordered:
+            payload = self.interaction.apply_boundary(
+                None, window_info, fragment, round_index
+            )
+            payloads.append(payload)
+
+    def _send_input(
+        self,
+        job: message.DecodeJob,
+        path: message.LinkPath,
+        payload_bits: Optional[int],
+        on_landed: Callable[[], None],
+    ) -> int:
+        return self.transfers.send_for_job(
+            path, job, payload_bits=payload_bits, on_delivered=on_landed
+        )
+
+    def _land_held_input(self, on_landed: Callable[[], None]) -> int:
+        return self.transfers.land_after(0, on_landed)
+
+    def _resolving_without_new_slots(self, key: tuple, visiting: set) -> bool:
+        if key in visiting:
+            return False
+        window = self.planner.windows_by_key.get(key)
+        if window is None:
+            return True
+        if window.is_absorbed:
+            return True
+        if window.t_done is not None or window.service_began:
+            return True
+        if window.t_dispatch is None:
+            return False
+        visited = visiting | {key}
+        for dependency in window.deps:
+            if not self._resolving_without_new_slots(dependency, visited):
+                return False
+        return True
+
+    def _masked_round(self, state, window_info, round_input):
+        fragments = []
+        for fragment in round_input.fragments:
+            masked = self.interaction.apply_boundary(
+                state, window_info, fragment, round_input.round_index
+            )
+            fragments.append(masked)
+        return dataclasses.replace(round_input, fragments=tuple(fragments))
+
+
+class DecodeRequester:
+    """Requests a decode for every complete, unblocked window, once."""
+
+    def __init__(
+        self,
+        tracker,
+        retention,
+        builder: DecodeRequestBuilder,
+        decode_queue,
+        escalation_policy,
+    ) -> None:
+        self.tracker = tracker
+        self.retention = retention
+        self.builder = builder
+        self.decode_queue = decode_queue
+        self.escalation_policy = escalation_policy
+
+    def request_ready_windows(self, windows, services) -> None:
+        """Request each window that has its data, in the given order.
+
+        services is what the escalation policy may ask of the window side
+        when a window is ready (the EscalationServices seam).
+        """
+        for window in windows:
+            self.request_if_ready(window, services)
+
+    def request_if_ready(self, window: message.Window, services) -> None:
+        """If the window has its data, submit it through the policy."""
+        if window.queued or window.committed:
+            return
+        if window.t_first_round is None and self.tracker.has_first_round(
+            window
+        ):
+            self.builder.stamp_first_round(window, self.retention.weak_store)
+        if not self.tracker.is_data_complete(window):
+            return
+        operation = self.tracker.operation_by_id[window.op_id]
+        self.builder.note_data_complete(window, operation)
+        if window.deps_remaining > 0 and not window.blocked_logged:
+            # raw rounds ship now; the boundary is XORed into the landed
+            # input at the decoder when it arrives (qLDPC net_error /
+            # cudaq-x syndrome_mods / LILLIPUT's state register)
+            window.blocked_logged = True
+        self.request(window, operation, services)
+
+    def request(
+        self, window: message.Window, operation: message.Operation, services
+    ) -> None:
+        """Build the primary job, ask the policy, enqueue its submissions."""
+        store = self.retention.primary_store
+        self.builder.stamp_first_round(window, store)
+        window.t_queued = self.builder.engine.now
+        tier = self.retention.primary_tier
+        job = self.builder.build(window, operation, tier, store)
+        window.queued = True
+        submissions = self.escalation_policy.on_window_ready(
+            window, job, services
+        )
+        for submission in submissions:
+            self._submit(submission, window.key)
+
+    def enqueue(self, submission: message.Submission) -> None:
+        """Admit one submission on the decode queue with its input send."""
+        self.decode_queue.enqueue(submission.job, submission.send_input)
+
+    def withdraw(self, window: message.Window) -> None:
+        """Withdraw one window's early-shipped, unstarted decode.
+
+        Its submission bookkeeping is reset so it can be resubmitted fresh
+        (a strong window that absorbs the window owns its rounds from then
+        on).
+        """
+        self.decode_queue.withdraw_window(window.key)
+        window.queued = False
+        window.blocked_logged = False
+        window.t_queued = None
+        window.t_dispatch = None
+        window.service_began = False
+
+    def release_parked(self, window_key: tuple) -> None:
+        """The window's last boundary arrived: its parked decode may start."""
+        self.decode_queue.release_parked(window_key)
+
+    def _submit(self, submission: message.Submission, key: tuple) -> None:
+        """A strong submission carries its send; a weak one gets its input."""
+        job = submission.job
+        if job.strong_decode_for is not None:
+            self.enqueue(submission)
+            return
+        if job.submitted or self.retention.holds_input(job):
+            resend = self.builder.resend_held_input()
+            self.decode_queue.enqueue(job, resend)
+            return
+        store = self.retention.primary_store
+        self.retention.bind_input_hold(job, key, store)
+        send_input = self.builder.input_send(
+            job, self.retention.primary_input_path
+        )
+        self.decode_queue.enqueue(job, send_input)
+
+
+def _fragment_patch_order(fragment):
+    return message.stable_identity_order_key(fragment.patch_id)

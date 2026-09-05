@@ -79,7 +79,9 @@ def test_a_streams_later_window_waits_on_the_previous_ones_boundary():
     manager.planner = _stream_planner()
     manager.tracker = types.SimpleNamespace(is_sealed=lambda _stream_id: False)
     manager.courier = window_boundaries.BoundaryCourier(manager)
-    manager._add_window_read_refs = lambda _key, _window: None
+    manager.retention = types.SimpleNamespace(
+        register_window=lambda _key, _window: None
+    )
     stream = message.Operation("stream", "stream", (0,))
     manager.planner.register_stream(stream)
 
@@ -100,9 +102,10 @@ def test_the_workload_is_not_final_until_every_stream_is_sealed():
     manager.tracker = round_tracker.RoundTracker(
         manager.planner.scheme, manager.planner
     )
-    manager.syndrome_buffer = types.SimpleNamespace(
+    weak_store = types.SimpleNamespace(
         open_operation=lambda _operation_id: None
     )
+    manager.retention = types.SimpleNamespace(weak_store=weak_store)
     manager.feedback_boundary_mode = "trailing_buffer"
     completions = []
     manager.on_workload_complete = lambda: completions.append("complete")

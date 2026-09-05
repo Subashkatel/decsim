@@ -147,7 +147,7 @@ class BoundaryCourier:
         delivery_version: int,
     ) -> None:
         """One delivery over decoder_to_decoder, received at its landing."""
-        window_attribution = self.window_manager._window_attribution(
+        window_attribution = message.TransferAttribution.for_window(
             window, operation, source_request_key
         )
         relation = message.BoundaryTransferRelation(
@@ -167,13 +167,7 @@ class BoundaryCourier:
             version,
             delivery_version,
         )
-        self.window_manager.links.send(
-            message.LinkPath.DECODER_TO_DECODER,
-            None,
-            self.window_manager.engine.now,
-            attribution,
-            receive,
-        )
+        self.window_manager.transfers.send_boundary(attribution, receive)
 
     def merge_available(
         self, source_key: tuple, destination: message.Window, boundary
@@ -283,10 +277,7 @@ class BoundaryCourier:
             return
         if window.deps_remaining != 0:
             return
-        release_service = self.window_manager.release_service
-        if release_service is None:
-            return
-        release_service(key)
+        self.window_manager.requester.release_parked(key)
 
     def _propose_boundary_update(
         self, delivery: message.BoundaryDelivery, destination: message.Window

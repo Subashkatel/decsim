@@ -134,6 +134,7 @@ class Switching(EscalationPolicyBase):
             return
         self._refuse_double_window_contradictions(plan)
         _refuse_double_window_scheme(plan.scheme, plan.boundary_policy)
+        _refuse_crossing_strong_region(plan)
         _refuse_double_window_run(plan)
 
     def tiers_for_ready_window(self, window: message.Window) -> tuple:
@@ -225,6 +226,33 @@ def _refuse_double_window_scheme(scheme, boundary_policy) -> None:
             "the Held boundary policy would make later windows wait for "
             "the strong result and deadlock the strong window"
         )
+
+
+def _refuse_crossing_strong_region(plan: message.RunShape) -> None:
+    """The forward strong window must end where a weak commit region ends.
+
+    The shipped interaction's strong region is commit plus two buffers
+    from the escalated window's commit start (window_interactions.py),
+    and the sliding scheme commits in strides of commit_rounds, so the
+    region ends on a stride edge exactly when twice buffer_rounds is a
+    multiple of commit_rounds. Otherwise a later window commits across
+    the region's end and has no owner; the shape stops the run there
+    (strong_window_shapes.py), and the settings say so at build.
+    """
+    commit_round_count = plan.commit_round_count
+    buffer_round_count = plan.buffer_round_count
+    strong_round_count = commit_round_count + 2 * buffer_round_count
+    if strong_round_count % commit_round_count == 0:
+        return
+    raise ValueError(
+        f"windows.commit_rounds {commit_round_count} with "
+        f"windows.buffer_rounds {buffer_round_count} gives the double "
+        f"window a strong region of {strong_round_count} rounds that ends "
+        "inside a later window's commit region; the double window's "
+        "strong region, commit plus two buffers, must end inside its own "
+        "commit region, so twice buffer_rounds must be a multiple of "
+        "commit_rounds"
+    )
 
 
 def _refuse_double_window_run(plan: message.RunShape) -> None:

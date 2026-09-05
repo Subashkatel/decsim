@@ -799,12 +799,17 @@ class RunShape:
     window's shape (Toshio et al. 2510.25222 Sec. III C when true, the
     two-sided context of Sec. III A otherwise); is_bulk_strong is the
     decoder manager's merging of queued strong re-decodes; operations
-    are the workload's planning views.
+    are the workload's planning views; commit_round_count and
+    buffer_round_count size every window (windows.commit_rounds and
+    windows.buffer_rounds, the code distance when the yaml leaves them
+    null).
     """
 
     scheme: Any
     boundary_policy: Any
     operations: tuple
+    commit_round_count: int
+    buffer_round_count: int
     is_double_window: bool
     is_bulk_strong: bool
     has_dynamic_streams: bool

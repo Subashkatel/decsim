@@ -994,7 +994,13 @@ def _absorbed_window_keys(
 def _refuse_crossing_window(
     later_windows: list, plan: message.StrongRegionPlan
 ) -> None:
-    """A window committing across the strong window's edge has no owner."""
+    """A window committing across the strong window's edge has no owner.
+
+    The settings refuse the shape at build for the shipped interaction
+    (policies.py, _refuse_crossing_strong_region); this is the contract
+    behind it, since the interaction that planned the region is a
+    plug-in and its plan is checked like an input.
+    """
     for window in later_windows:
         is_begun = window.commit_lo <= plan.commit_hi
         is_unfinished = plan.commit_hi < window.commit_hi

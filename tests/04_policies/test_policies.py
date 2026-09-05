@@ -260,6 +260,8 @@ def _run_shape(
         scheme=scheme,
         boundary_policy=boundary_policy,
         operations=(),
+        commit_round_count=3,
+        buffer_round_count=3,
         is_double_window=is_double_window,
         is_bulk_strong=False,
         has_dynamic_streams=has_dynamic_streams,

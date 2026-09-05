@@ -2,10 +2,13 @@
 
 An operation starts when its predecessors are done, its scheduled start
 round has passed, its magic state (if any) is ready, its feedback release
-(if any) has arrived and the controller lets it onto the QPU. Resources
-(qubits, patches) are claimed at request and freed when the body is done;
-two operations never hold one resource without a dependency edge between
-them. The timestamp maps are the run's record of every operation's life.
+(if any) has arrived and the controller's issuer lets it onto the QPU.
+Resources (qubits, patches) are claimed at request and freed when the
+body is done; two operations never hold one resource without a
+dependency edge between them. The timestamp maps are the run's record of
+every operation's life. The issuer hears each start through on_started
+(SimPy's callback on the event): the runtime never receives a call back
+from the controller.
 """
 
 import functools
@@ -97,12 +100,12 @@ class ExecutionRuntime:
         self,
         engine: decsim.engine.Engine,
         *,
-        controller,
+        issuer,
         factory,
         resource_claims_by_operation_id,
     ):
         self.engine = engine
-        self.controller = controller
+        self.issuer = issuer
         self.factory = factory
         self.resources = ResourceLedger(resource_claims_by_operation_id)
         self.program = None
@@ -116,7 +119,6 @@ class ExecutionRuntime:
         self.body_done_time = {}
         self.decode_release_time = {}
         self.result_return_time_by_operation = {}
-        self.idle_rounds_by_patch = {}
         self.last_finish_time = 0
 
     @property
@@ -166,7 +168,7 @@ class ExecutionRuntime:
         self.last_finish_time = max(self.last_finish_time, self.engine.now)
         self.engine.log("ExecutionRuntime", f"{operation.name} body done")
         self.resources.release(operation)
-        self.controller.before_successor_release(operation)
+        self.issuer.before_successor_release(operation)
         for successor_id in self.successors[operation.id]:
             self.dependencies_remaining[successor_id] -= 1
             if self.dependencies_remaining[successor_id] == 0:
@@ -179,7 +181,10 @@ class ExecutionRuntime:
                 f"QPU finished. All {operation_count} operations are "
                 "physically complete; decoder may still be draining.",
             )
-        self.controller.after_successor_release(operation)
+        waits_for_blocked = self.waiting_blocked_successor(operation.id)
+        self.issuer.after_successor_release(
+            operation, waits_for_blocked, self.workload_complete
+        )
 
     def waiting_blocked_successor(self, operation_id) -> bool:
         """True while a feedback-blocked successor awaits its decode release."""
@@ -198,21 +203,6 @@ class ExecutionRuntime:
         for operation_id in sorted(self.state_ready):
             operation = self.operations[operation_id]
             self._maybe_begin(operation)
-
-    def record_idle_round(self, patch) -> None:
-        """Account one emitted idle round against the patch that idled."""
-        counted = self.idle_rounds_by_patch.get(patch, 0)
-        self.idle_rounds_by_patch[patch] = counted + 1
-
-    def consume_idle_rounds(self, operation: message.Operation) -> int:
-        """Take the idle rounds emitted on the operation's patches so far."""
-        patches = operation.patches
-        if not patches:
-            patches = operation.qubits
-        total = 0
-        for patch in patches:
-            total += self.idle_rounds_by_patch.pop(patch, 0)
-        return total
 
     def on_decision(self, decision: message.Decision) -> None:
         """A decision reached the controller: a release starts its operation.
@@ -243,7 +233,7 @@ class ExecutionRuntime:
         self._maybe_begin(operation)
 
     def _release_at_scheduled_start(self, operation: message.Operation) -> None:
-        round_ticks = self.controller.round_ticks_for(operation)
+        round_ticks = self.issuer.round_ticks_for(operation)
         release_tick = operation.scheduled_start_round * round_ticks
         if release_tick == 0:
             self.schedule_released.add(operation.id)
@@ -297,15 +287,15 @@ class ExecutionRuntime:
         is_blocked = operation.blocked_by is not None
         if is_blocked and operation.id not in self.decode_release_time:
             return
-        if not self.controller.can_start(operation):
+        if not self.issuer.can_start(operation):
             return
         # A provisional stamp marks the operation as started before the
-        # controller issues it: issuing can retry ready operations, and a
+        # issuer issues it: issuing can retry ready operations, and a
         # reentrant _maybe_begin must not issue this one twice. The QPU's
         # actual start boundary then replaces the stamp (operation_started).
         self.op_start_time[operation.id] = self.engine.now
-        idle_rounds = self.consume_idle_rounds(operation)
-        self.controller.issue_operation(operation, idle_rounds)
+        on_started = functools.partial(self.operation_started, operation)
+        self.issuer.issue_operation(operation, on_started)
 
 
 def _resource_keys(claims) -> list[tuple]:

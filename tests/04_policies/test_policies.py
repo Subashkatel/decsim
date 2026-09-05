@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import pytest
 
 from decsim.controller import policies
-from decsim.controller.controller import Controller
+from decsim.controller.idle_rounds import IdleRoundAccounting
 from decsim.message import RunSeedReservation, SoftOutputSource
 from decsim.controller.policies import Eager, ExtendStream, Held, Ignore, SeparateDecodeJobs
 from decsim.ports import IdlePolicy
@@ -72,17 +72,6 @@ class WindowManagerProbe:
         self.idle_demands.append(demand)
 
 
-class RuntimeProbe:
-    def __init__(self):
-        self.operations = {7: SimpleNamespace(id=7, name="logical-cnot")}
-        self.idle_rounds_by_patch = {}
-        self.idle_round_records = []
-
-    def record_idle_round(self, patch):
-        self.idle_round_records.append(patch)
-        self.idle_rounds_by_patch[patch] = self.idle_rounds_by_patch.get(patch, 0) + 1
-
-
 class StreamsProbe:
     """Stream bookkeeping stand-in: a binding per operation, a set of live
     protected patches, and the streams the window manager knows."""
@@ -127,16 +116,14 @@ def make_controller(idle_policy, *, live_streams=()):
     engine = EngineProbe()
     qpu = QPUProbe()
     window_manager = WindowManagerProbe(live_streams)
-    controller = Controller(
-        engine,
-        qpu=qpu,
-        window_manager=window_manager,
-        resolved_operations=(),
-        resolved_patches=(patch,),
-        idle_policy=idle_policy,
-        feedback_streams=StreamsProbe(qpu, window_manager),
+    controller = IdleRoundAccounting(
+        idle_policy,
+        window_manager,
+        {"patch-a": patch},
+        StreamsProbe(qpu, window_manager),
+        qpu,
     )
-    controller.runtime = RuntimeProbe()
+    controller.operation_by_id[7] = SimpleNamespace(id=7, name="logical-cnot")
     return controller, engine, qpu, window_manager
 
 
@@ -198,11 +185,11 @@ def test_runspec_builds_fresh_policy_defaults():
     second.run()
 
     assert isinstance(first.window_manager.boundary_policy, Eager)
-    assert isinstance(first.controller.idle_policy, SeparateDecodeJobs)
+    assert isinstance(first.idle_rounds.policy, SeparateDecodeJobs)
     assert isinstance(second.window_manager.boundary_policy, Eager)
-    assert isinstance(second.controller.idle_policy, SeparateDecodeJobs)
+    assert isinstance(second.idle_rounds.policy, SeparateDecodeJobs)
     assert first.window_manager.boundary_policy is not second.window_manager.boundary_policy
-    assert first.controller.idle_policy is not second.controller.idle_policy
+    assert first.idle_rounds.policy is not second.idle_rounds.policy
 
 
 def test_runspec_preserves_truthy_custom_policies_on_independent_axes():
@@ -217,8 +204,8 @@ def test_runspec_preserves_truthy_custom_policies_on_independent_axes():
     idle_run.run()
 
     assert boundary_run.window_manager.boundary_policy is boundary_policy
-    assert isinstance(boundary_run.controller.idle_policy, SeparateDecodeJobs)
-    assert idle_run.controller.idle_policy is idle_policy
+    assert isinstance(boundary_run.idle_rounds.policy, SeparateDecodeJobs)
+    assert idle_run.idle_rounds.policy is idle_policy
     assert isinstance(idle_run.window_manager.boundary_policy, Eager)
 
 
@@ -267,7 +254,7 @@ def test_switching_validates_builtin_boundary_contexts():
 def test_extend_stream_relays_idle_rounds_into_a_live_stream():
     """ExtendStream routes idle data into an existing live stream."""
     controller, _, qpu, _ = make_controller(ExtendStream(), live_streams=("stream-a",))
-    operation = controller.runtime.operations[7]
+    operation = controller.operation_by_id[7]
     controller.streams.bindings[7] = SimpleNamespace(stream_id="stream-a")
 
     controller.emit_idle_round(7, "patch-a", 9)
@@ -325,7 +312,7 @@ def test_separate_decode_jobs_charges_the_trailing_idle_region_when_the_patch_is
     2209.08552), and no validated system leaves the end of a stream
     undecoded (Google's streaming decoder, LILLIPUT's per-cycle decode)."""
     controller, _, _, window_manager = make_controller(SeparateDecodeJobs())
-    operation = controller.runtime.operations[7]
+    operation = controller.operation_by_id[7]
 
     for round_index in (1, 2, 3, 4, 5):
         controller.emit_idle_round(7, "patch-a", round_index)
@@ -348,7 +335,7 @@ def test_an_external_idle_policy_relays_through_the_controller():
     assert qpu.feedback_rounds == [(7, "patch-a", 2)]
     assert qpu.stream_rounds == []
     assert window_manager.idle_demands == []
-    assert policy.relayed == [(controller.runtime.operations[7], "patch-a", 2)]
+    assert policy.relayed == [(controller.operation_by_id[7], "patch-a", 2)]
 
 
 def test_controller_accounts_every_idle_round_except_on_a_live_protected_stream():
@@ -363,9 +350,7 @@ def test_controller_accounts_every_idle_round_except_on_a_live_protected_stream(
     controller.emit_idle_round(7, "patch-a", 3)
 
     assert qpu.feedback_rounds == [(7, "patch-a", 1), (7, "patch-a", 2)]
-    assert controller.runtime.idle_round_records == ["patch-a", "patch-a"]
-    assert controller.runtime.idle_rounds_by_patch == {"patch-a": 2}
-    assert controller.idle_rounds_emitted == 2
+    assert controller.emitted_count == 2
     assert engine.scheduled == []
 
 
@@ -404,7 +389,7 @@ def test_run_seed_binding_uses_distinct_policy_paths():
     completed.run()
 
     assert completed.window_manager.boundary_policy is boundary_policy
-    assert completed.controller.idle_policy is idle_policy
+    assert completed.idle_rounds.policy is idle_policy
     assert [event[0] for event in events] == [
         "reserve", "reserve", "commit", "commit"
     ]
@@ -503,9 +488,9 @@ def test_idle_rounds_cost_decode_jobs_by_default():
 
     assert _idle_decode_labels(charged), "the default charged no idle work"
     assert not _idle_decode_labels(optimistic)
-    assert optimistic.controller.idle_rounds_emitted > 0
-    assert (charged.controller.idle_rounds_emitted
-            >= optimistic.controller.idle_rounds_emitted)
+    assert optimistic.idle_rounds.emitted_count > 0
+    assert (charged.idle_rounds.emitted_count
+            >= optimistic.idle_rounds.emitted_count)
 
 
 def test_memory_filled_trailing_buffer_is_flagged():
@@ -549,7 +534,7 @@ def test_single_operation_run_charges_no_idle_work():
     completed = Machine.build(settings, 13)
     completed.run()
 
-    assert completed.controller.idle_rounds_emitted == 0
+    assert completed.idle_rounds.emitted_count == 0
     assert completed.window_manager.memory_filled_buffer_windows == 0
     assert not _idle_decode_labels(completed)
 

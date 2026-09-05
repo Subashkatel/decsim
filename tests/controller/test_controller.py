@@ -8,15 +8,19 @@ law is the channel's (tests/links/test_channel.py); here the reference
 card prices the hop and the controller adds 3 us on top.
 """
 
-import decsim.config as config
 import decsim.controller.controller as controller_module
+import decsim.controller.settings as controller_settings
 import decsim.engine as engine_module
 import decsim.links.fabric as fabric_module
 import decsim.links.link_profiles as link_profiles
 import decsim.message as message
 import decsim.observe.round_events as round_events
 
-READOUT_TICKS = config.microseconds_to_ticks(3.0)
+SETTINGS = controller_settings.ControllerSettings(
+    readout_to_bits_microseconds=3.0
+)
+READOUT_TICKS = SETTINGS.readout_to_bits_ticks()
+FREE_SETTINGS = controller_settings.ControllerSettings()
 
 
 class RecordingAssembler:
@@ -28,19 +32,9 @@ class RecordingAssembler:
         self.added.append((self.engine.now, fragment, fragment_count, route))
 
 
-def controller_with(engine, links, assembler, recorder):
+def controller_with(engine, links, assembler, recorder, settings=SETTINGS):
     return controller_module.Controller(
-        engine,
-        qpu=None,
-        window_manager=None,
-        assembler=assembler,
-        recorder=recorder,
-        measurement_signal_to_classical_bits_ticks=READOUT_TICKS,
-        links=links,
-        resolved_operations=(),
-        resolved_patches=(),
-        idle_policy=None,
-        feedback_streams=None,
+        engine, links, settings, assembler, recorder
     )
 
 
@@ -78,8 +72,9 @@ def test_a_readout_with_no_delay_reaches_the_assembler_at_the_crossing():
     links = fabric_module.LinkFabric(reference, engine)
     assembler = RecordingAssembler(engine)
     recorder = round_events.NoRoundEvents()
-    controller = controller_with(engine, links, assembler, recorder)
-    controller.measurement_signal_to_classical_bits_ticks = 0
+    controller = controller_with(
+        engine, links, assembler, recorder, settings=FREE_SETTINGS
+    )
     readout = message.QPUReadout(7, "patch-a", 4, bits=[1], size_bits=1)
     crossing_ticks = links.expected_delay_ticks(
         message.LinkPath.QPU_TO_CONTROLLER, 1, 0

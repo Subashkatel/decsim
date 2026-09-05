@@ -211,11 +211,11 @@ def window_latency_view(window_manager) -> WindowLatencyView:
 
 def reaction_view(execution_runtime) -> ReactionView:
     """Snapshot execution admission and controller cadence state."""
-    controller = execution_runtime.controller
+    issuer = execution_runtime.issuer
     ops = tuple(
         OpReactionInfo(op=op_id, name=op.name, blocked_by=op.blocked_by,
-                       round_ticks=controller.round_ticks_for(op),
-                       rounds=controller.round_count_for(op))
+                       round_ticks=issuer.round_ticks_for(op),
+                       rounds=issuer.round_count_for(op))
         for op_id, op in sorted(
             execution_runtime.operations.items(),
             key=lambda item: stable_identity_order_key(item[0])))

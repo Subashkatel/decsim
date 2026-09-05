@@ -329,7 +329,7 @@ def test_decoder_manager_cannot_bypass_the_controller(fabric):
     """Releases travel ConditionalRelease -> Controller (OC) -> CQ; the
     decoder side holds no path to the QPU or the runtime."""
     completed = fabric["weak_only_run"](rounds=6)
-    assert completed.conditional_release.controller is completed.controller
+    assert completed.conditional_release.controller is completed.instruction_output
     assert not hasattr(completed.decoder_manager, "qpu")
     assert not hasattr(completed.decoder_manager, "conditional_release")
     assert not hasattr(completed.decoder_manager, "execution_runtime")

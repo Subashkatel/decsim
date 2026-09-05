@@ -160,11 +160,11 @@ def test_controller_cycle_card_reaches_both_runtime_paths(tmp_path):
     )
     completed = Machine.build(settings, 0)
     assert (
-        completed.controller.measurement_signal_to_classical_bits_ticks
+        completed.controller.settings.readout_to_bits_ticks()
         == microseconds_to_ticks(0.054)
     )
     assert (
-        completed.controller.instruction_or_decision_to_analog_control_pulse_ticks
+        completed.instruction_output.pulse_ticks
         == microseconds_to_ticks(0.016)
     )
 

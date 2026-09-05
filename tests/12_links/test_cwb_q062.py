@@ -14,7 +14,8 @@ from decsim.engine import Engine
 from decsim.links.fabric import LinkFabric
 from decsim.links.link_profiles import logical_reference_profile, with_controller_to_weak_buffer_path
 from decsim.message import LinkPath, TransferAttribution
-from decsim.controller.syndrome_packing import SyndromePacketRouteKind, SyndromePacking, _PackingSlotState
+from decsim.controller.syndrome_packing import SyndromePacking, _PackingSlotState
+from decsim.message import SyndromePacketRouteKind
 from decsim.observe.link_traffic import TrafficLedger
 
 
@@ -310,7 +311,7 @@ def _packing(*, assembly_slots=None, buffer_capacity=None, overflow=None):
         else PackingOverflowPolicy.FAIL_STOP)
     engine = _Engine()
     return SyndromePacking(
-        engine, LinkFabric(logical_reference_profile(), engine), t_pack=0,
+        engine, LinkFabric(logical_reference_profile(), engine), packing_ticks=0,
         packing_context_capacity=assembly_slots,
         window_input_receiver=_Receiver([True] * 8),
         feedback_memory_receiver=None,
@@ -326,12 +327,12 @@ def _fragment(round_index, *, fragment_index=0, operation_id=1):
 
 
 def test_assembly_capacity_bounds_rounds_in_flight_through_the_stage():
-    from decsim.controller.syndrome_packing import SyndromePackingOverflow
+    from decsim.controller.syndrome_packing import SyndromePackingOverflowError
     from decsim.message import WINDOW_INPUT_ROUTE
     packing = _packing(assembly_slots=1)
     packing._receive_fragment(_fragment(1, fragment_index=0), 2,
                               WINDOW_INPUT_ROUTE)   # round 1 mid-assembly
-    with pytest.raises(SyndromePackingOverflow, match="capacity 1 is full"):
+    with pytest.raises(SyndromePackingOverflowError, match="capacity 1 is full"):
         packing._receive_fragment(_fragment(2), 1, WINDOW_INPUT_ROUTE)
     packing._receive_fragment(_fragment(1, fragment_index=1), 2,
                               WINDOW_INPUT_ROUTE)   # round 1 still completes
@@ -354,9 +355,9 @@ def test_assembly_capacity_drop_round_drops_only_the_new_round():
 
 
 def test_retention_refusal_reports_the_stores_capacity():
-    from decsim.controller.syndrome_packing import SyndromePackingOverflow
+    from decsim.controller.syndrome_packing import SyndromePackingOverflowError
     from decsim.message import WINDOW_INPUT_ROUTE
     packing = _packing(assembly_slots=None, buffer_capacity=1)
     packing._receive_fragment(_fragment(1), 1, WINDOW_INPUT_ROUTE)
-    with pytest.raises(SyndromePackingOverflow, match="capacity 1 is full"):
+    with pytest.raises(SyndromePackingOverflowError, match="capacity 1 is full"):
         packing._receive_fragment(_fragment(2), 1, WINDOW_INPUT_ROUTE)

@@ -16,7 +16,6 @@ import decsim.message as message
 import decsim.qpu.code_geometry as code_geometry
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
-import decsim.windows.round_tracker as round_tracker
 import decsim.windows.window_boundaries as window_boundaries
 import decsim.windows.window_interactions as window_interactions
 import decsim.windows.window_manager as window_manager_module
@@ -78,7 +77,9 @@ def test_a_streams_later_window_waits_on_the_previous_ones_boundary():
     manager.window_interaction = window_interactions.DefaultWindowInteraction()
     manager.planner = _stream_planner()
     manager.tracker = types.SimpleNamespace(is_sealed=lambda _stream_id: False)
-    manager.courier = window_boundaries.BoundaryCourier(manager)
+    manager.courier = window_boundaries.BoundaryCourier(
+        manager.planner, None, manager.window_interaction, None, _no_boundary
+    )
     manager.retention = types.SimpleNamespace(
         register_window=lambda _key, _window: None
     )
@@ -95,29 +96,8 @@ def test_a_streams_later_window_waits_on_the_previous_ones_boundary():
     assert first.dependents == [("stream", 1)]
 
 
-def test_the_workload_is_not_final_until_every_stream_is_sealed():
-    manager = object.__new__(window_manager_module.WindowManager)
-    manager._workload_complete_sent = False
-    manager.planner = _stream_planner()
-    manager.tracker = round_tracker.RoundTracker(
-        manager.planner.scheme, manager.planner
-    )
-    weak_store = types.SimpleNamespace(
-        open_operation=lambda _operation_id: None
-    )
-    manager.retention = types.SimpleNamespace(weak_store=weak_store)
-    manager.feedback_boundary_mode = "trailing_buffer"
-    completions = []
-    manager.on_workload_complete = lambda: completions.append("complete")
-    manager.check_windows_for_operation = lambda _stream_id: None
-    stream = message.Operation("stream", "stream", (0,))
-    manager.register_stream(stream)
-
-    manager.finish_workload_if_ready()
-    assert completions == []
-    manager.seal_stream("stream", 0)
-    assert completions == ["complete"]
-    assert manager.has_dynamic_stream("stream") is True
+def _no_boundary(_key, _is_unblocked) -> None:
+    """No delivery lands in this test."""
 
 
 def _stream_planner() -> window_planner.WindowPlanner:

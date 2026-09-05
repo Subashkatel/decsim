@@ -131,10 +131,16 @@ class DecodeQueue(Protocol):
         self,
         job: message.DecodeJob,
         send_input: Optional[Callable[[Callable[[], None]], int]] = None,
+        on_decoded: Optional[
+            Callable[[message.DecodeJob, message.DecodeResult], None]
+        ] = None,
     ) -> None:
         """Admit a job once; send_input(on_landed) moves its input later.
 
-        The job carries its WindowInputGate; a windowless job has none.
+        on_decoded(job, result) is the job's return path, SimPy's callback
+        on the event (simpy/core.py): the submitting side carries it with
+        the job. The job carries its WindowInputGate; a windowless job has
+        none.
         """
 
     def withdraw_window(self, window_key: tuple) -> None:
@@ -186,21 +192,6 @@ class Decoder(Protocol):
 
     def pipeline_depth(self, job: message.DecodeJob) -> int:
         """Decodes that may be in flight on one unit; one is no pipeline."""
-
-
-@runtime_checkable
-class DecodedWindowReceiver(Protocol):
-    """The window manager, as the decoder manager sees it."""
-
-    def on_decode_done(
-        self, job: message.DecodeJob, result: message.DecodeResult
-    ) -> None:
-        """A weak decode finished; the result reaches the window."""
-
-    def on_strong_decode_done(
-        self, completion: message.StrongDecodeCompletion
-    ) -> None:
-        """A strong decode finished; the completion names its request."""
 
 
 # ------------------------------------------- the frame commits the correction

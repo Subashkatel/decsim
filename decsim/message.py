@@ -4,6 +4,7 @@ and the Pauli frame (readouts, payloads, packets, windows, plans, jobs,
 results, boundaries, requests, seeds), and the stable-identity helpers that
 make operation and window keys hashable and orderable across types. Nothing
 here has behavior beyond a value's own derived views."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -12,12 +13,8 @@ from typing import Any, Callable, Optional, Union
 
 
 def is_stable_string(value: Any) -> bool:
-    return (
-        type(value) is str
-        and all(
-            not 0xD800 <= ord(character) <= 0xDFFF
-            for character in value
-        )
+    return type(value) is str and all(
+        not 0xD800 <= ord(character) <= 0xDFFF for character in value
     )
 
 
@@ -37,12 +34,9 @@ def same_stable_identity(left: Any, right: Any) -> bool:
     if type(left) is not type(right):
         return False
     if type(left) is tuple:
-        return (
-            len(left) == len(right)
-            and all(
-                same_stable_identity(left_item, right_item)
-                for left_item, right_item in zip(left, right)
-            )
+        return len(left) == len(right) and all(
+            same_stable_identity(left_item, right_item)
+            for left_item, right_item in zip(left, right)
         )
     if type(left) is int or type(left) is str:
         return left == right
@@ -61,8 +55,7 @@ def stable_identity_bytes(identity: Any) -> bytes:
         b"T"
         + len(encoded_items).to_bytes(8, "big")
         + b"".join(
-            len(item).to_bytes(8, "big") + item
-            for item in encoded_items
+            len(item).to_bytes(8, "big") + item for item in encoded_items
         )
     )
 
@@ -97,11 +90,7 @@ class RunSeedPathSegment:
             return b"N" + (0).to_bytes(4, "big")
         if self.kind == "integer_key":
             encoded_value = str(self.value).encode("ascii")
-            return (
-                b"I"
-                + len(encoded_value).to_bytes(4, "big")
-                + encoded_value
-            )
+            return b"I" + len(encoded_value).to_bytes(4, "big") + encoded_value
         encoded_value = self.value.encode()
         tag = _SEED_PATH_TAG[self.kind]
         return tag + len(encoded_value).to_bytes(4, "big") + encoded_value
@@ -139,9 +128,13 @@ class SyndromePacketRoute:
     source_operation_id: Optional[Any] = None
 
     @classmethod
-    def feedback_memory_round(cls, source_operation_id) -> "SyndromePacketRoute":
-        return cls(SyndromePacketRouteKind.FEEDBACK_MEMORY_ROUND,
-                   source_operation_id)
+    def feedback_memory_round(
+        cls, source_operation_id
+    ) -> "SyndromePacketRoute":
+        return cls(
+            SyndromePacketRouteKind.FEEDBACK_MEMORY_ROUND, source_operation_id
+        )
+
 
 WINDOW_INPUT_ROUTE = SyndromePacketRoute(SyndromePacketRouteKind.WINDOW_INPUT)
 
@@ -219,7 +212,11 @@ class SyndromeRoundPacket:
                 if bit:
                     defects.append(position)
                 position += 1
-        return f"defects {{{', '.join(map(str, defects))}}}" if defects else "no defects"
+        return (
+            f"defects {{{', '.join(map(str, defects))}}}"
+            if defects
+            else "no defects"
+        )
 
 
 @dataclass(frozen=True)
@@ -269,6 +266,7 @@ class ControllerOutputEvent:
     operation_id: object
     payload: object
 
+
 # ------------------------------------------------------------------ windows
 
 
@@ -287,35 +285,43 @@ class Window:
     [start_round, buffer_hi] and commits corrections for
     [commit_lo, commit_hi]."""
 
-    op_id: int                        # operation that owns the stream
-    k: int                            # window index within the op; key = (op_id, k)
-    commit_lo: int                    # first round this window commits
-    commit_hi: int                    # last round this window commits
-    buffer_hi: int                    # last round it reads (trailing buffer)
-    n_rounds: int                     # planned rounds from start_round to buffer_hi; the job is priced for the rounds that exist
-    buffer_lo: Optional[int] = None   # leading-buffer start (for two-sided A windows)
+    op_id: int  # operation that owns the stream
+    k: int  # window index within the op; key = (op_id, k)
+    commit_lo: int  # first round this window commits
+    commit_hi: int  # last round this window commits
+    buffer_hi: int  # last round it reads (trailing buffer)
+    n_rounds: int  # planned rounds from start_round to buffer_hi; the job is priced for the rounds that exist
+    buffer_lo: Optional[int] = (
+        None  # leading-buffer start (for two-sided A windows)
+    )
     closed_temporal_boundaries: bool = False
     batched_preceding_idle_round_count: int = 0
-    deps: list = field(default_factory=list)        # window keys this one waits on
-    dependents: list = field(default_factory=list)  # window keys waiting on this one
-    deps_remaining: int = 0           # unfinished deps countdown; 0 = unblocked
-    service_began: bool = False       # its decode is past the boundary gate
-    committed: bool = False           # result folded into the op's accumulator
+    deps: list = field(default_factory=list)  # window keys this one waits on
+    dependents: list = field(
+        default_factory=list
+    )  # window keys waiting on this one
+    deps_remaining: int = 0  # unfinished deps countdown; 0 = unblocked
+    service_began: bool = False  # its decode is past the boundary gate
+    committed: bool = False  # result folded into the op's accumulator
     # a strong window covers it: the weak chain skips it (never decoded)
     is_absorbed: bool = False
     # the request whose result the window finally published; None until
     # the final one, so a provisional weak commit is still awaiting strong
     published_request_key: Optional["DecoderRequestKey"] = None
-    queued: bool = False              # job handed to the decoder cluster
-    blocked_logged: bool = False      # log-once flag for the "blocked" trace line
+    queued: bool = False  # job handed to the decoder cluster
+    blocked_logged: bool = False  # log-once flag for the "blocked" trace line
     boundary_in: Any = field(default_factory=dict)  # state owned by the
-                                      # configured WindowInteraction
-    decode_status: Optional[str] = None  # best-effort status of the committed decode, None = succeeded
-    t_first_round: Optional[int] = None    # tick the first round arrived
-    t_data_complete: Optional[int] = None  # tick the last buffered round arrived
-    t_queued: Optional[int] = None         # tick the job entered the decode queue
-    t_dispatch: Optional[int] = None       # tick a decoder unit started it
-    t_done: Optional[int] = None           # tick the decode finished
+    # configured WindowInteraction
+    decode_status: Optional[str] = (
+        None  # best-effort status of the committed decode, None = succeeded
+    )
+    t_first_round: Optional[int] = None  # tick the first round arrived
+    t_data_complete: Optional[int] = (
+        None  # tick the last buffered round arrived
+    )
+    t_queued: Optional[int] = None  # tick the job entered the decode queue
+    t_dispatch: Optional[int] = None  # tick a decoder unit started it
+    t_done: Optional[int] = None  # tick the decode finished
 
     @property
     def start_round(self) -> int:
@@ -360,8 +366,7 @@ class WindowInfo:
             deps=tuple(window.deps),
             dependents=tuple(window.dependents),
             detector_positions=(
-                None if detector_positions is None
-                else dict(detector_positions)
+                None if detector_positions is None else dict(detector_positions)
             ),
         )
 
@@ -438,13 +443,13 @@ class OperationWindowPlan:
 class WindowPlan:
     """Compile-time window layout handed to the window manager."""
 
-    windows: dict         # (op_id, k) -> Window
-    window_count: dict    # op_id -> number of windows
-    op_windows: dict      # op_id -> [window keys, in k order]
-    successors: dict      # op_id -> [op ids listing it as predecessor]
-    spatial_nodes: dict   # op_id -> decoding-graph nodes per round
+    windows: dict  # (op_id, k) -> Window
+    window_count: dict  # op_id -> number of windows
+    op_windows: dict  # op_id -> [window keys, in k order]
+    successors: dict  # op_id -> [op ids listing it as predecessor]
+    spatial_nodes: dict  # op_id -> decoding-graph nodes per round
     rounds_by_operation: dict  # op_id -> resolved positive round count
-    code_names: dict       # op_id -> exact resolved code name
+    code_names: dict  # op_id -> exact resolved code name
     total_windows: int
     windowed_by_operation: dict
     batch_preceding_idle_rounds_by_operation: dict
@@ -511,6 +516,7 @@ class StrongRegionPlan:
     context_hi: int
     restart_buffer_lo: Optional[int]
     restart_seam_fault_owner: Optional[SeamFaultOwner]
+
 
 # ------------------------------------------------------------------- decode
 
@@ -608,44 +614,74 @@ class DecodeJob:
     memory (``decoder_input``); a decoder reads only its unit's memory.
     """
 
-    op_id: int                               # operation the window belongs to
-    window_id: int                           # window index within that op
-    n_rounds: int                            # rounds the decoder processes: the distinct rounds landed in its input, plus batched idle rounds
-    dem: Optional[Any] = None                # window detector error model (data-path decoders)
-    payloads: list = field(default_factory=list)   # transfer-source view; cleared after materialization
-    decoder_input: Optional[Any] = None             # materialized decoder memory value
-    input_hold: Optional[Any] = None                # upstream hold released at transfer completion
+    op_id: int  # operation the window belongs to
+    window_id: int  # window index within that op
+    n_rounds: int  # rounds the decoder processes: the distinct rounds landed in its input, plus batched idle rounds
+    dem: Optional[Any] = (
+        None  # window detector error model (data-path decoders)
+    )
+    payloads: list = field(
+        default_factory=list
+    )  # transfer-source view; cleared after materialization
+    decoder_input: Optional[Any] = None  # materialized decoder memory value
+    input_hold: Optional[Any] = (
+        None  # upstream hold released at transfer completion
+    )
     # the WindowInputGate the decoder manager asks before staging, before
     # starting and when masking the landed input; None for a windowless job
     gate: Optional[Any] = None
-    send_input: Optional[Callable[[Callable[[], None]], int]] = None   # called at dispatch: send the input link, call back at the landing, return the expected delay in ticks
-    unit: Optional[int] = None                     # decoder unit assigned at dispatch
-    memory: Optional[Any] = None                   # that unit's DecoderMemory while it holds this job's input
-    ready_time: int = 0                      # tick the job was enqueued (queue-wait accounting)
-    on_done: Optional[Callable[[], None]] = None   # completion callback
-    label: str = ""                          # log label
-    strong_label: Optional[str] = None       # manager-owned label for a strong sibling
-    spatial_nodes: Optional[int] = None      # decoding-graph nodes per round (latency models)
-    code: Optional[str] = None               # code name, drives CodeRouter routing
-    attempt: int = 0                         # 0 = first (weak) decode, 1 = strong redo
-    hint: Optional[str] = None               # routing override, e.g. "strong"
-    pool: Optional[str] = None               # unit pool assigned at dispatch
-    window: Optional[Window] = None          # back-reference to the source window
-    strong_decode_for: Optional[tuple] = None      # (op_id, window_id) this strong job re-decodes
-    gap_sibling_for: Optional[tuple] = None        # (op_id, window_id) whose split-gap half this job solves
-    awaiting_strong_result: bool = False     # weak result held non-final until the strong sibling lands
-    cancelled: bool = False                  # cancelled siblings discard completion
-    completed: bool = False                  # terminal flag; admission refuses reuse of a completed job
-    submitted: bool = False                  # admitted once to one queue slot and unit
-    input_landed: bool = False               # the input transfer deposited into unit memory
-    input_landing_ticks: Optional[int] = None    # tick the staged input lands (set at DMA start)
-    service_started: bool = False            # the decode itself began (past the boundary gate)
+    # where the result goes: on_decoded(job, result), set at enqueue
+    on_decoded: Optional[Callable] = None
+    send_input: Optional[Callable[[Callable[[], None]], int]] = (
+        None  # called at dispatch: send the input link, call back at the landing, return the expected delay in ticks
+    )
+    unit: Optional[int] = None  # decoder unit assigned at dispatch
+    memory: Optional[Any] = (
+        None  # that unit's DecoderMemory while it holds this job's input
+    )
+    ready_time: int = 0  # tick the job was enqueued (queue-wait accounting)
+    on_done: Optional[Callable[[], None]] = None  # completion callback
+    label: str = ""  # log label
+    strong_label: Optional[str] = (
+        None  # manager-owned label for a strong sibling
+    )
+    spatial_nodes: Optional[int] = (
+        None  # decoding-graph nodes per round (latency models)
+    )
+    code: Optional[str] = None  # code name, drives CodeRouter routing
+    attempt: int = 0  # 0 = first (weak) decode, 1 = strong redo
+    hint: Optional[str] = None  # routing override, e.g. "strong"
+    pool: Optional[str] = None  # unit pool assigned at dispatch
+    window: Optional[Window] = None  # back-reference to the source window
+    strong_decode_for: Optional[tuple] = (
+        None  # (op_id, window_id) this strong job re-decodes
+    )
+    gap_sibling_for: Optional[tuple] = (
+        None  # (op_id, window_id) whose split-gap half this job solves
+    )
+    awaiting_strong_result: bool = (
+        False  # weak result held non-final until the strong sibling lands
+    )
+    cancelled: bool = False  # cancelled siblings discard completion
+    completed: bool = (
+        False  # terminal flag; admission refuses reuse of a completed job
+    )
+    submitted: bool = False  # admitted once to one queue slot and unit
+    input_landed: bool = False  # the input transfer deposited into unit memory
+    input_landing_ticks: Optional[int] = (
+        None  # tick the staged input lands (set at DMA start)
+    )
+    service_started: bool = (
+        False  # the decode itself began (past the boundary gate)
+    )
     request_key: Optional[DecoderRequestKey] = None
     request_created_ticks: Optional[int] = None
     request_admitted_ticks: Optional[int] = None
     service_key: Optional[DecoderServiceKey] = None
     service_original_request_keys: tuple[DecoderRequestKey, ...] = ()
-    service_cancelled_request_keys: set[DecoderRequestKey] = field(default_factory=set)
+    service_cancelled_request_keys: set[DecoderRequestKey] = field(
+        default_factory=set
+    )
     service_dispatch_ticks: Optional[int] = None
 
     def payload_bits(self) -> Optional[int]:
@@ -677,14 +713,16 @@ class DecodeResult:
 
     op_id: int
     window_id: int
-    correction: Optional[Any] = None         # correction operator (None = timing-only)
+    correction: Optional[Any] = None  # correction operator (None = timing-only)
     logical_observables: Optional[tuple[int, ...]] = None  # full prediction
     soft_output: Optional["SoftOutput"] = None  # source-compatible confidence
     # one forced-class solve's weight, carried to the split-gap join
     # (the gap exists only once both halves have reported)
     gap_half_weight: Optional[float] = None
-    boundary_defects: Optional[dict] = None  # round-keyed seam defects (synthetic decoders, recovery lock scenarios)
-    boundary_data: Optional[Any] = None      # optional richer interaction payload
+    boundary_defects: Optional[dict] = (
+        None  # round-keyed seam defects (synthetic decoders, recovery lock scenarios)
+    )
+    boundary_data: Optional[Any] = None  # optional richer interaction payload
     # BackendDecodeStatus of a best-effort correction (nonconverged, low
     # confidence, does not reproduce the syndrome); None when the decode
     # succeeded. The correction is committed either way and the status travels
@@ -706,14 +744,20 @@ class Submission:
 
 class Directive(Enum):
     """What the core should do with a decode outcome."""
-    FINALIZE = auto()          # accept the weak result; cancel any parallel strong
-    AWAIT_STRONG = auto()      # hold the weak result; .extra may carry the strong redo
-    FINALIZE_STRONG = auto()   # a strong result landed; core applies hold-or-deliver
+
+    FINALIZE = auto()  # accept the weak result; cancel any parallel strong
+    AWAIT_STRONG = (
+        auto()
+    )  # hold the weak result; .extra may carry the strong redo
+    FINALIZE_STRONG = (
+        auto()
+    )  # a strong result landed; core applies hold-or-deliver
 
 
 @dataclass
 class OutcomeDirective:
     """An escalation policy's verdict on one decode outcome."""
+
     directive: Directive
     extra: Optional[Submission] = None
     strong_request_key: Optional[DecoderRequestKey] = None
@@ -744,17 +788,25 @@ class LinkPath(str, Enum):
     the strong buffer syndrome buffer 1; the two controller-to-buffer
     hops are optional on a card."""
 
-    QPU_TO_CONTROLLER = "qpu_to_controller"                # a readout
+    QPU_TO_CONTROLLER = "qpu_to_controller"  # a readout
     CONTROLLER_TO_WEAK_BUFFER = "controller_to_weak_buffer"  # a published round
-    WEAK_BUFFER_TO_WEAK_DECODER = "weak_buffer_to_weak_decoder"  # a window, or a feedback-memory round
-    WEAK_DECODER_TO_STRONG_DECODER = "weak_decoder_to_strong_decoder"  # an escalation
-    STRONG_BUFFER_TO_STRONG_DECODER = "strong_buffer_to_strong_decoder"  # the strong window's input
-    WEAK_DECODER_TO_FRAME = "weak_decoder_to_frame"        # the weak correction
-    DECODER_TO_DECODER = "decoder_to_decoder"              # a committed window boundary
-    STRONG_DECODER_TO_FRAME = "strong_decoder_to_frame"    # the strong correction
-    FRAME_TO_CONTROLLER = "frame_to_controller"            # the conditional release
-    CONTROLLER_TO_QPU = "controller_to_qpu"                # the instruction back
-    CONTROLLER_TO_STRONG_BUFFER = "controller_to_strong_buffer"  # the room-side write
+    WEAK_BUFFER_TO_WEAK_DECODER = (
+        "weak_buffer_to_weak_decoder"  # a window, or a feedback-memory round
+    )
+    WEAK_DECODER_TO_STRONG_DECODER = (
+        "weak_decoder_to_strong_decoder"  # an escalation
+    )
+    STRONG_BUFFER_TO_STRONG_DECODER = (
+        "strong_buffer_to_strong_decoder"  # the strong window's input
+    )
+    WEAK_DECODER_TO_FRAME = "weak_decoder_to_frame"  # the weak correction
+    DECODER_TO_DECODER = "decoder_to_decoder"  # a committed window boundary
+    STRONG_DECODER_TO_FRAME = "strong_decoder_to_frame"  # the strong correction
+    FRAME_TO_CONTROLLER = "frame_to_controller"  # the conditional release
+    CONTROLLER_TO_QPU = "controller_to_qpu"  # the instruction back
+    CONTROLLER_TO_STRONG_BUFFER = (
+        "controller_to_strong_buffer"  # the room-side write
+    )
 
 
 @dataclass(frozen=True)
@@ -857,9 +909,7 @@ class TransferAttribution:
     def for_packet(cls, packet: SyndromeRoundPacket) -> "TransferAttribution":
         """The packed round's transfer: every patch of the round."""
         patch_ids = tuple(fragment.patch_id for fragment in packet.fragments)
-        return cls.for_round(
-            packet.operation_id, patch_ids, packet.round_index
-        )
+        return cls.for_round(packet.operation_id, patch_ids, packet.round_index)
 
 
 def _read_range(window: Window) -> tuple:
@@ -954,6 +1004,7 @@ class ExecutionProgram:
 @dataclass(frozen=True)
 class StreamBinding:
     """Immutable runtime association between an operation and stream range."""
+
     stream_id: Any
     stream_offset: int
 
@@ -968,6 +1019,7 @@ class RunOperationBody:
     source_round_count: int
     emits_detector_data: bool = True
     finalizes_stream_round: bool = False
+
 
 # ----------------------------------------------------------------- workload
 
@@ -1019,28 +1071,40 @@ class Operation:
     """One logical operation in the circuit."""
 
     id: int
-    name: str                         # human-readable label used in traces
-    qubits: tuple                     # logical qubit ids the op acts on
-    clifford: bool = True             # non-Clifford implies a magic state by default
-    circuit: Optional[Any] = None     # stim circuit for real-syndrome (data-path) runs
-    consumes_magic_state: Optional[bool] = None  # override; None = infer from clifford
-    patches: tuple = ()               # patch ids whose syndrome streams feed the op
-    predecessors: tuple = ()          # workload op ids that must complete first
+    name: str  # human-readable label used in traces
+    qubits: tuple  # logical qubit ids the op acts on
+    clifford: bool = True  # non-Clifford implies a magic state by default
+    circuit: Optional[Any] = (
+        None  # stim circuit for real-syndrome (data-path) runs
+    )
+    consumes_magic_state: Optional[bool] = (
+        None  # override; None = infer from clifford
+    )
+    patches: tuple = ()  # patch ids whose syndrome streams feed the op
+    predecessors: tuple = ()  # workload op ids that must complete first
     decoder_boundary_predecessors: tuple = ()  # prior decode streams at a boundary
     # Decode stream this segment's rounds fold into. Seeded StimDevice runs
     # require an exact built-in int/str; unseeded and non-Stim devices may use
     # another identity type accepted by that device.
     stream_id: Optional[Any] = None
-    stream_offset: Optional[int] = None  # global-round offset of the segment in its stream
+    stream_offset: Optional[int] = (
+        None  # global-round offset of the segment in its stream
+    )
     scheduled_start_round: int = 0
     emits_detector_data: bool = True
     finalizes_stream_round: bool = False
     syndrome_fragment_index: Optional[int] = None
     syndrome_fragment_count: Optional[int] = None
-    blocked_by: Optional[int] = None  # op id whose Decision must release this op
-    feedback_boundary_mode: Optional[str] = None  # per-op override of the RunSpec mode
-    requires_result_return_to_qpu: bool = False  # decision must travel back to the QPU
-    kind: OpKind = OpKind.GENERIC     # rounds-policy vocabulary (see OpKind)
+    blocked_by: Optional[int] = (
+        None  # op id whose Decision must release this op
+    )
+    feedback_boundary_mode: Optional[str] = (
+        None  # per-op override of the RunSpec mode
+    )
+    requires_result_return_to_qpu: bool = (
+        False  # decision must travel back to the QPU
+    )
+    kind: OpKind = OpKind.GENERIC  # rounds-policy vocabulary (see OpKind)
 
     @property
     def needs_magic_state(self) -> bool:

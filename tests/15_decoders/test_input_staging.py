@@ -162,6 +162,10 @@ def test_an_oversized_single_window_still_stops_loudly():
         _run(capacity=8)
 
 
+def _ignore_result(_job, _result) -> None:
+    """A staging test reads the unit's timing, not the result."""
+
+
 def _fixed_input(engine, transfer_us):
     """A send_input that lands after a fixed delay, no link in the way."""
     delay_ticks = microseconds_to_ticks(transfer_us)
@@ -199,8 +203,6 @@ def _standalone_pool(units, transfer_us, compute_us, decoder=None):
         num_units=units,
         escalation_policy=Baseline(),
         services=None,
-        on_window_decoded=lambda _job, _result: None,
-        on_strong_window_decoded=None,
     )
     compute_start = {}
     original_begin = manager._begin_service
@@ -230,7 +232,9 @@ def _standalone_pool(units, transfer_us, compute_us, decoder=None):
         )
         engine.schedule(
             microseconds_to_ticks(arrival_us),
-            lambda: manager.enqueue(job, _fixed_input(engine, transfer_us)),
+            lambda: manager.enqueue(
+                job, _fixed_input(engine, transfer_us), _ignore_result
+            ),
         )
 
     return engine, manager, submit, compute_start
@@ -278,8 +282,6 @@ def test_a_job_without_input_waits_in_the_queue_for_free_compute():
         num_units=2,
         escalation_policy=None,
         services=None,
-        on_window_decoded=None,
-        on_strong_window_decoded=None,
     )
     done = {}
     for label, arrival in (("a", 0.0), ("b", 1.0), ("c", 2.0)):

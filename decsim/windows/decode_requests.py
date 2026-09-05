@@ -317,12 +317,14 @@ class DecodeRequester:
         builder: DecodeRequestBuilder,
         decode_queue,
         escalation_policy,
+        committer,
     ) -> None:
         self.tracker = tracker
         self.retention = retention
         self.builder = builder
         self.decode_queue = decode_queue
         self.escalation_policy = escalation_policy
+        self.committer = committer
 
     def request_ready_windows(self, windows, services) -> None:
         """Request each window that has its data, in the given order.
@@ -369,8 +371,16 @@ class DecodeRequester:
             self._submit(submission, window.key)
 
     def enqueue(self, submission: message.Submission) -> None:
-        """Admit one submission on the decode queue with its input send."""
-        self.decode_queue.enqueue(submission.job, submission.send_input)
+        """Admit one submission with its input send and its return path.
+
+        A strong job's result finalizes its window; a primary job's
+        result commits it.
+        """
+        job = submission.job
+        on_decoded = self.committer.accept_result
+        if job.strong_decode_for is not None:
+            on_decoded = self.committer.accept_strong_result
+        self.decode_queue.enqueue(job, submission.send_input, on_decoded)
 
     def withdraw(self, window: message.Window) -> None:
         """Withdraw one window's early-shipped, unstarted decode.
@@ -398,14 +408,16 @@ class DecodeRequester:
             return
         if job.submitted or self.retention.holds_input(job):
             resend = self.builder.resend_held_input()
-            self.decode_queue.enqueue(job, resend)
+            submission = message.Submission(job, resend)
+            self.enqueue(submission)
             return
         store = self.retention.primary_store
         self.retention.bind_input_hold(job, key, store)
         send_input = self.builder.input_send(
             job, self.retention.primary_input_path
         )
-        self.decode_queue.enqueue(job, send_input)
+        submission = message.Submission(job, send_input)
+        self.enqueue(submission)
 
 
 def _fragment_patch_order(fragment):

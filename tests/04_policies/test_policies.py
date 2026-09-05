@@ -192,11 +192,11 @@ def test_runspec_builds_fresh_policy_defaults():
     second = Machine.build(MachineSettings())
     second.run()
 
-    assert isinstance(first.window_manager.boundary_policy, Eager)
+    assert isinstance(first.window_manager.courier.boundary_policy, Eager)
     assert isinstance(first.idle_rounds.policy, SeparateDecodeJobs)
-    assert isinstance(second.window_manager.boundary_policy, Eager)
+    assert isinstance(second.window_manager.courier.boundary_policy, Eager)
     assert isinstance(second.idle_rounds.policy, SeparateDecodeJobs)
-    assert first.window_manager.boundary_policy is not second.window_manager.boundary_policy
+    assert first.window_manager.courier.boundary_policy is not second.window_manager.courier.boundary_policy
     assert first.idle_rounds.policy is not second.idle_rounds.policy
 
 
@@ -211,10 +211,10 @@ def test_runspec_preserves_truthy_custom_policies_on_independent_axes():
         idle_policy=IdlePolicySettings(policy=idle_policy)))
     idle_run.run()
 
-    assert boundary_run.window_manager.boundary_policy is boundary_policy
+    assert boundary_run.window_manager.courier.boundary_policy is boundary_policy
     assert isinstance(boundary_run.idle_rounds.policy, SeparateDecodeJobs)
     assert idle_run.idle_rounds.policy is idle_policy
-    assert isinstance(idle_run.window_manager.boundary_policy, Eager)
+    assert isinstance(idle_run.window_manager.courier.boundary_policy, Eager)
 
 
 def test_policy_module_has_no_registry_or_string_selector():
@@ -396,7 +396,7 @@ def test_run_seed_binding_uses_distinct_policy_paths():
     ), 23)
     completed.run()
 
-    assert completed.window_manager.boundary_policy is boundary_policy
+    assert completed.window_manager.courier.boundary_policy is boundary_policy
     assert completed.idle_rounds.policy is idle_policy
     assert [event[0] for event in events] == [
         "reserve", "reserve", "commit", "commit"

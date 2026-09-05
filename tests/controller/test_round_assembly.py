@@ -5,12 +5,15 @@ fragments it arrived in (Caune et al. 2410.05202 measure 250 to 370 FPGA
 cycles for packetization, bus transfer, result return and the
 conditional together, an upper bound); a two-fragment round is the QLX
 frontend's shape (decsim/frontends/qlx_frontend.py, the terminal data
-readout as its own fragment). A full workspace stops the run with a
-sentence naming controller.packing_rounds_in_flight (design note,
-slice 4, ruling 7), or drops the new round under the drop knob.
+readout as its own fragment). The bound counts every round in flight
+through the stage, in assembly, held for store room or on its route
+(controller.packing_rounds_in_flight); a full stage stops the run with a
+sentence naming the setting (design note, slice 4, ruling 7), or drops
+the new round under the drop knob.
 """
 
 import functools
+import types
 
 import pytest
 
@@ -36,13 +39,22 @@ def fragment(round_index, fragment_index=0, bits=(1, 0)):
     )
 
 
+def rounds_in_flight(capacity, held=0, on_route=0):
+    """The bound over `held` held rounds and `on_route` on their route."""
+    held_rounds = types.SimpleNamespace(count=held)
+    transmitter = types.SimpleNamespace(in_flight=on_route)
+    return round_assembly.RoundsInFlight(capacity, held_rounds, transmitter)
+
+
 def assembler_with(engine, packed, recorder, **settings_fields):
     settings = controller_settings.ControllerSettings(**settings_fields)
+    bound = rounds_in_flight(settings.packing_rounds_in_flight)
     return round_assembly.RoundAssembler(
         engine,
         settings,
         form_round=None,
         on_packed=packed.append,
+        rounds_in_flight=bound,
         recorder=recorder,
     )
 
@@ -100,6 +112,37 @@ def test_a_full_workspace_stops_the_run_naming_the_setting():
     assert len(packed) == 1
 
 
+def test_the_bound_counts_rounds_held_and_on_their_route():
+    """Two rounds past assembly fill a bound of two; three admits a fragment.
+
+    One round held for store room and one on its route count against
+    the bound before any round is in assembly.
+    """
+    engine = engine_module.Engine(verbose=False)
+    settings = controller_settings.ControllerSettings()
+    recorder = round_events.NoRoundEvents()
+    full = rounds_in_flight(2, held=1, on_route=1)
+    packed = []
+    assembler = round_assembly.RoundAssembler(
+        engine,
+        settings,
+        form_round=None,
+        on_packed=packed.append,
+        rounds_in_flight=full,
+        recorder=recorder,
+    )
+    first = fragment(1)
+
+    with pytest.raises(RuntimeError, match="held for store room: 1, on"):
+        assembler.add(first, 1, message.WINDOW_INPUT_ROUTE)
+    assert full.count(0) == 2
+
+    room_for_one = rounds_in_flight(3, held=1, on_route=1)
+    assembler.workspace.rounds_in_flight = room_for_one
+    assembler.add(first, 1, message.WINDOW_INPUT_ROUTE)
+    assert [round.packet.round_index for round in packed] == [1]
+
+
 def test_the_drop_knob_drops_only_the_round_that_found_no_context():
     engine = engine_module.Engine(verbose=False)
     packed = []
@@ -139,11 +182,13 @@ def test_detection_events_are_formed_once_from_the_merged_bits():
 
     settings = controller_settings.ControllerSettings()
     recorder = round_events.NoRoundEvents()
+    unbounded = rounds_in_flight(None)
     assembler = round_assembly.RoundAssembler(
         engine,
         settings,
         form_round=form_round,
         on_packed=packed.append,
+        rounds_in_flight=unbounded,
         recorder=recorder,
     )
     first = fragment(1, fragment_index=0, bits=(1, 0))

@@ -26,7 +26,7 @@ class PackingOverflowPolicy(enum.Enum):
     latest value, a storage choice this policy does not model. DROP_ROUND
     is a study knob with no yaml key (ns-3's drop tail,
     point-to-point-net-device.cc Send: Enqueue false, packet dropped);
-    it applies to the assembly workspace too, which under STALL stops
+    it applies to the packing stage's bound too, which under STALL stops
     the run when full.
     """
 
@@ -46,9 +46,10 @@ class ControllerSettings:
     from the bit strings (Yang 2605.04892); a 42 ns conditional jump and
     a 52 ns next pulse on QICK (2110.00557 Table II), 125 ns at USTC
     (2110.07965), 155 ns root to leaf in Liu et al. (2603.16203).
-    packing_rounds_in_flight bounds the packing stage's assembly
-    workspace, the rounds in flight through the stage at once; None is
-    unbounded. packing_overflow is a Python-only knob.
+    packing_rounds_in_flight bounds the rounds in flight through the
+    packing stage at once, each from its first fragment until the windows
+    hear of it (round_assembly.RoundsInFlight); None is unbounded.
+    packing_overflow is a Python-only knob.
     """
 
     readout_to_bits_microseconds: float = 0.0

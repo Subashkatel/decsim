@@ -443,11 +443,17 @@ class Machine:
             recorder=round_events,
         )
         form_round = getattr(plan.device, "form_round", None)
+        rounds_in_flight = round_assembly.RoundsInFlight(
+            settings.controller.packing_rounds_in_flight,
+            held_rounds,
+            transmitter,
+        )
         assembler = round_assembly.RoundAssembler(
             engine,
             settings.controller,
             form_round=form_round,
             on_packed=round_writer.admit,
+            rounds_in_flight=rounds_in_flight,
             recorder=round_events,
         )
         decoder_manager = _decoder_manager(

@@ -559,10 +559,10 @@ def test_run_gives_every_unit_its_own_memory_and_frees_it_at_completion() -> (
     )
     completed = Machine.build(settings)
     completed.run()
-    memories = completed.decoder_manager.decoder_memories
-    assert sorted(memories) == [("default", 0), ("default", 1)]
-    assert all(m.occupied_rounds == 0 for m in memories.values())
-    assert sum(m.admissions for m in memories.values()) >= 2
+    units = completed.decoder_manager.pool.units()
+    assert [unit.name for unit in units] == ["default#0", "default#1"]
+    assert all(unit.memory.occupied_rounds == 0 for unit in units)
+    assert sum(unit.memory.admissions for unit in units) >= 2
     completed.decoder_manager.check_decode_work_settled()
 
 

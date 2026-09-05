@@ -1,28 +1,20 @@
 """The decoder manager: gives ready windows a decoder unit.
 
-One ready queue per pool; a unit assigned at dispatch; the input staged
-into that unit's memory; the decode started once the input has landed and
-the window owes no boundary; the result delivered to the window manager.
-The strong tier's request bookkeeping is the StrongRequestLedger's
-(strong_escalation.py); the terminal records at the bottom are optional
-capture for the switching study.
-
-Every unit is a depth-1 decoupled access-execute machine (Smith 1982; TI
-EDMA ping-pong, SPRAAN4A Example D; gem5-Aladdin ready bits at
-whole-buffer granularity, Shao et al. MICRO 2016 Sec IV-B-2): two input
-slots, so the next window's DMA overlaps the current compute. Both inputs
-are resident in the unit's DecoderMemory, so a unit needs capacity for
-two windows or the run stops loudly. Compute is claimed separately from
-the slots (Tomasulo's rule: an instruction whose operands are not ready
-waits in its reservation station, never on the functional unit). A landed
-job whose window still owes a boundary parks in its slot and releases its
+One ready queue per pool; a unit of the DecoderPool assigned at
+dispatch; the input staged into that DecoderUnit's memory; the decode
+started once the input has landed and the window owes no boundary; the
+result delivered to the window manager. The unit's two-slot law and the
+pool's least-work-left choice are theirs (decoder_unit.py,
+decoder_pool.py). The strong tier's request bookkeeping is the
+StrongRequestLedger's (strong_escalation.py); the terminal records at
+the bottom are optional capture for the switching study. A landed job
+whose window still owes a boundary parks in its slot and releases its
 compute claim, so a dependent that fills early never deadlocks the unit
 against its own predecessor.
 """
 
 import dataclasses
 import enum
-import math
 from typing import Callable, Optional
 
 import numpy
@@ -31,6 +23,8 @@ import decsim.confidence.complementary as complementary
 import decsim.config as config
 import decsim.decoders.decoder_memory as decoder_memory_module
 import decsim.decoders.decoder_memory_transfer as staging_module
+import decsim.decoders.decoder_pool as decoder_pool_module
+import decsim.decoders.decoder_unit as decoder_unit_module
 import decsim.decoders.strong_escalation as strong_escalation
 import decsim.message as message
 
@@ -116,9 +110,10 @@ class TerminalServiceRecord:
 class DecoderManager:
     """Queues, places, stages, starts, settles and records every decode.
 
-    Wide state (36 attributes) recorded for the structural slice that
-    splits it into queue, pool, unit, dispatcher, service, strong
-    requests, gap joins and outcomes (slice 6 design note, section 3).
+    Wide state (22 attributes) recorded for the structural commits that
+    split it into queue, dispatcher, service, strong requests, gap joins
+    and outcomes (slice 6 design note, section 3); the unit and the pool
+    are DecoderUnit and DecoderPool.
     """
 
     def __init__(
@@ -153,30 +148,6 @@ class DecoderManager:
         self.scheduler = scheduler
         self.lane_policy = lane_policy
         self.bulk_strong = bulk_strong
-        # request_key -> job parked in its slot, a boundary still owed
-        self._parked_service: dict = {}
-        # (pool, unit) -> jobs whose input occupies or reserves a slot
-        # (in transfer or landed), in dispatch order; at most two
-        self._unit_residents: dict = {}
-        # (pool, unit) -> the job holding or reserving the unit's compute
-        # (from assignment through decode end), None when compute is free
-        self._computing: dict = {}
-        # Pipelined units only (a routed decoder declaring an initiation
-        # interval): (pool, unit) -> decodes started and not yet finished,
-        # and (pool, unit) -> (owner, depth) when the pipeline is full and
-        # the intake stays claimed until the next completion. Both stay
-        # empty under non-pipelined decoders, whose occupancy IS latency.
-        self._pipeline_flights: dict = {}
-        self._pipeline_stalled: dict = {}
-        # A pipelined unit's intake remains unavailable until the declared
-        # initiation interval ends, even when the response finishes first.
-        # This is distinct from an in-flight result and from a depth stall.
-        self._pipeline_intake_busy: dict = {}
-        # (pool, unit) -> the tick its compute is expected to free, from the
-        # running decode's declared latency (or initiation interval); the
-        # staging choice among busy units reads it. A decoder measured on
-        # the host clock declares none.
-        self._compute_free_ticks: dict = {}
         self.log_name = log_name
         self._terminal_request_records = None
         self._terminal_service_records = None
@@ -188,22 +159,7 @@ class DecoderManager:
         self.services = services
         if unit_pools is None:
             unit_pools = {"default": num_units}
-        _check_unit_pools(unit_pools)
-        self.unit_totals = dict(unit_pools)
-        self.pool_free = dict(unit_pools)
-        # Every unit is a numbered engine with its own input memory.
-        self._free_units = {}
-        self.decoder_memories = {}
-        for pool, unit_count in unit_pools.items():
-            self._free_units[pool] = list(range(unit_count))
-            capacity = None
-            if decoder_memory is not None:
-                capacity = decoder_memory.capacity_for(pool)
-            for unit in range(unit_count):
-                memory = decoder_memory_module.DecoderMemory(
-                    pool, unit, capacity
-                )
-                self.decoder_memories[(pool, unit)] = memory
+        self.pool = decoder_pool_module.DecoderPool(unit_pools, decoder_memory)
         self._dispatching = False
         # Split-pair gap joins: a router with a gap route turns them on.
         # (op_id, window_id) -> GapJoinState, created when the sibling
@@ -211,10 +167,9 @@ class DecoderManager:
         gap_route = getattr(router, "gap", None)
         self.gap_split_enabled = gap_route is not None
         self._gap_joins: dict[tuple, GapJoinState] = {}
-        self.num_units = self.unit_totals["default"]
         self.ready: list[message.DecodeJob] = []
         self.pool_ready: dict[str, list] = {}
-        for pool in self.unit_totals:
+        for pool in self.pool.units_by_pool:
             if pool != "default":
                 self.pool_ready[pool] = []
         self.queue_log: list[tuple[int, int]] = []
@@ -229,11 +184,6 @@ class DecoderManager:
     def strong_cancelled(self) -> int:
         """Strong requests cancelled before anyone consumed them."""
         return self.strong.strong_cancelled
-
-    @property
-    def free_units(self) -> int:
-        """Units of the default pool with free compute."""
-        return self.pool_free["default"]
 
     # ---------------------------------------------------------- admission
 
@@ -306,7 +256,7 @@ class DecoderManager:
             return
         self._dispatching = True
         try:
-            for pool in self.unit_totals:
+            for pool in self.pool.units_by_pool:
                 self._dispatch_pool(pool)
         finally:
             self._dispatching = False
@@ -316,14 +266,13 @@ class DecoderManager:
 
         A job still in transfer passes the gate at its own landing instead.
         """
-        parked = dict(self._parked_service)
-        for request_key, job in parked.items():
+        for job in self._parked_jobs():
             key = (job.op_id, job.window_id)
             if key != window_key:
                 continue
             if self._is_boundary_owed(job):
                 continue  # another dependency still owed
-            del self._parked_service[request_key]
+            job.is_parked = False
             self._restart_parked(job)
         self.try_dispatch()  # a started decode may admit blocked stages
 
@@ -419,7 +368,7 @@ class DecoderManager:
     def admitted_strong_work_snapshot(self) -> tuple:
         """Each physical strong job once in its phase."""
         queue_memberships = {}
-        for pool in self.unit_totals:
+        for pool in self.pool.units_by_pool:
             for queued_job in self.queue_for(pool):
                 identity = id(queued_job)
                 memberships = queue_memberships.setdefault(identity, [])
@@ -445,8 +394,8 @@ class DecoderManager:
         unconditionally, so a leak on either path is a real defect rather
         than a tolerated one.
         """
-        if self._parked_service:
-            parked = self._parked_labels()
+        parked = self._parked_labels()
+        if parked:
             raise RuntimeError(
                 f"run ended with parked decodes never released: {parked}"
             )
@@ -461,8 +410,8 @@ class DecoderManager:
                 "run ended with pipelined decodes still in flight: "
                 f"{leftover_flights}"
             )
-        if self._pipeline_intake_busy:
-            busy = sorted(self._pipeline_intake_busy, key=repr)
+        busy = self._intake_busy_names()
+        if busy:
             raise RuntimeError(
                 "run ended with pipelined decoder intake intervals still "
                 f"active: {busy}"
@@ -482,11 +431,12 @@ class DecoderManager:
 
     def pool_for(self, job: message.DecodeJob) -> str:
         """The pool a job queues in: its hint, its lane, else default."""
-        if job.hint in self.unit_totals:
-            return job.hint
+        pool = self.pool.pool_for(job)
+        if pool != "default":
+            return pool
         if self.lane_policy is not None:
             lane = self.lane_policy.pool_for(job)
-            if lane in self.unit_totals:
+            if lane in self.pool.units_by_pool:
                 return lane
         return "default"
 
@@ -580,7 +530,7 @@ class DecoderManager:
 
     def _first_placement(self, pool: str, ordered: list, startable: bool):
         for index, job in enumerate(ordered):
-            is_startable = self._startable(job)
+            is_startable = decoder_unit_module.is_startable(job)
             if is_startable is not startable:
                 continue
             placement = self._eligible_unit(pool, job)
@@ -639,18 +589,6 @@ class DecoderManager:
             return False
         return job.strong_decode_for is not None
 
-    @staticmethod
-    def _startable(job: message.DecodeJob) -> bool:
-        """A job whose window owes no boundary may hold compute.
-
-        Anything windowless (external, strong context, merged batch)
-        always may.
-        """
-        window = job.window
-        if window is None:
-            return True
-        return window.deps_remaining <= 0
-
     # ------------------------------------------------- placing on a unit
 
     def _eligible_unit(self, pool: str, job: message.DecodeJob):
@@ -660,74 +598,33 @@ class DecoderManager:
         compute when that unit's compute is free. A boundary-blocked job
         takes an input slot only (its DMA overlaps other work, Tomasulo's
         reservation station), and only once its gate
-        (WindowInputGate.may_stage) says its release is already resolving, so parked
-        work can never squat a slot against the decode that must free it.
-
-        When every unit is computing, a job with input to move is staged
-        on the unit whose compute frees earliest among those with a free
-        slot: least work left, which starts each job when a central FIFO
-        queue over the pool would (Harchol-Balter, Performance Modeling
-        and Design of Computer Systems, 2013, Ch. 24). A job with no input
-        has nothing to prefetch and waits in the queue for free compute.
+        (WindowInputGate.may_stage) says its release is already
+        resolving, so parked work can never squat a slot against the
+        decode that must free it. The pool offers a free unit first, else
+        the busy unit with room that frees earliest (decoder_pool.py).
         """
-        startable = self._startable(job)
+        startable = decoder_unit_module.is_startable(job)
         if not startable and self._is_staging_refused(job):
             return None
         resident_capacity = self._resident_capacity(job)
-        for unit in self._free_units[pool]:
-            slot = (pool, unit)
-            if self._has_room(slot, job, resident_capacity):
-                return unit, startable
-        if not self._carries_input(job):
-            return None
-        busy_with_room = self._busy_units_with_room(
-            pool, job, resident_capacity
+        carries_input = self._carries_input(job)
+        placement = self.pool.offer(
+            pool,
+            job,
+            carries_input=carries_input,
+            resident_capacity=resident_capacity,
+            memory_demand_of=self._memory_demand,
         )
-        if not busy_with_room:
+        if placement is None:
             return None
-        unit = self._earliest_freeing(pool, busy_with_room)
-        return unit, False
+        unit, has_free_compute = placement
+        claim_compute = has_free_compute and startable
+        return unit, claim_compute
 
     def _is_staging_refused(self, job: message.DecodeJob) -> bool:
         if job.gate is None:
             return False
         return not job.gate.may_stage(job)
-
-    def _has_room(
-        self, slot: tuple, job: message.DecodeJob, resident_capacity: int
-    ) -> bool:
-        residents = self._residents(slot)
-        if len(residents) >= resident_capacity:
-            return False
-        return self._slot_memory_ok(slot, job)
-
-    def _busy_units_with_room(
-        self, pool: str, job: message.DecodeJob, resident_capacity: int
-    ) -> list:
-        free = set(self._free_units[pool])
-        units = []
-        for unit in range(self.unit_totals[pool]):
-            if unit in free:
-                continue
-            slot = (pool, unit)
-            if self._has_room(slot, job, resident_capacity):
-                units.append(unit)
-        return units
-
-    def _earliest_freeing(self, pool: str, units: list) -> int:
-        """The unit whose compute frees first: least work left."""
-        earliest_unit = units[0]
-        earliest_free = self._expected_compute_free(pool, earliest_unit)
-        for unit in units[1:]:
-            free_ticks = self._expected_compute_free(pool, unit)
-            if free_ticks < earliest_free:
-                earliest_free = free_ticks
-                earliest_unit = unit
-        return earliest_unit
-
-    def _expected_compute_free(self, pool: str, unit: int):
-        slot = (pool, unit)
-        return self._compute_free_ticks.get(slot, math.inf)
 
     def _carries_input(self, job: message.DecodeJob) -> bool:
         """The job moves syndrome data into a unit's memory."""
@@ -748,35 +645,6 @@ class DecoderManager:
         decoder = self.router.route(job)
         depth = decoder.pipeline_depth(job)
         return depth + 1
-
-    def _slot_memory_ok(self, slot: tuple, job: message.DecodeJob) -> bool:
-        """Whether the unit's memory holds this job beside its residents.
-
-        A second resident joins only if the unit's memory holds both
-        inputs; a unit sized for one window keeps serial residency (the
-        doubled-SRAM price of overlap is paid explicitly, never assumed).
-        A first resident is always admitted, so a genuinely oversized
-        window still stops loudly at its deposit.
-        """
-        live = self._live_residents(slot)
-        if not live:
-            return True
-        capacity = self.decoder_memories[slot].capacity_rounds
-        if capacity is None:
-            return True
-        demand = 0
-        for resident in live:
-            demand += self._memory_demand(resident)
-        demand += self._memory_demand(job)
-        return demand <= capacity
-
-    def _live_residents(self, slot: tuple) -> list:
-        live = []
-        for resident in self._residents(slot):
-            if resident.cancelled or resident.completed:
-                continue
-            live.append(resident)
-        return live
 
     def _memory_demand(self, job: message.DecodeJob) -> int:
         """The rounds a job's input occupies in unit memory.
@@ -800,30 +668,20 @@ class DecoderManager:
             job.payloads
         )
 
-    def _residents(self, slot: tuple) -> list:
-        return self._unit_residents.setdefault(slot, [])
-
     # ------------------------------------------------- the unit's compute
-
-    def _claim_compute(self, slot: tuple, job: message.DecodeJob) -> None:
-        pool, unit = slot
-        self.pool_free[pool] -= 1
-        self._free_units[pool].remove(unit)
-        self._computing[slot] = job
 
     def _release_compute_claim(self, job: message.DecodeJob) -> None:
         """Tomasulo's rule at the boundary hazard.
 
         A parked job keeps its input slot but never the unit's compute.
         """
-        slot = (job.pool, job.unit)
-        holder = self._computing.get(slot)
-        if holder is job:
-            self._computing[slot] = None
-            self._offer_compute(slot)
+        unit = job.unit
+        if unit.holder is job:
+            unit.release_compute()
+            self._offer_compute(unit)
             self.try_dispatch()
 
-    def _offer_compute(self, slot: tuple) -> None:
+    def _offer_compute(self, unit: decoder_unit_module.DecoderUnit) -> None:
         """Free compute goes to the oldest startable resident.
 
         Or it stays reserved for the oldest one still in flight, or it
@@ -832,54 +690,23 @@ class DecoderManager:
         (fu_pool->getUnit at issue), and blocked work waits in the queue,
         never on the unit.
         """
-        pool, unit = slot
-        holder = self._computing.get(slot)
-        if holder is not None:
+        if unit.holder is not None:
             return
-        ready = self._oldest_landed_resident_ready_to_start(slot)
+        ready = unit.oldest_landed_resident_ready_to_start()
         if ready is not None:
-            self._computing[slot] = ready
+            unit.claim_compute(ready)
             self._begin_service(ready)
             return
-        landing = self._oldest_landing_resident_that_may_start(slot)
+        landing = unit.oldest_landing_resident_that_may_start()
         if landing is not None:
-            self._computing[slot] = landing  # starts at its landing
+            unit.claim_compute(landing)  # starts at its landing
             self._predict_compute_free(landing)
             return
-        if unit in self._free_units[pool]:
+        if self.pool.is_free(unit):
             # a pipelined unit's intake went back to the pool at the end of
             # its initiation interval; the decode's completion offers again
             return
-        self.pool_free[pool] += 1
-        self._free_units[pool].append(unit)
-
-    def _oldest_landed_resident_ready_to_start(self, slot: tuple):
-        for resident in self._residents(slot):
-            if _is_past_start(resident):
-                continue
-            if not resident.input_landed:
-                continue
-            if self._is_parked(resident):
-                continue
-            return resident
-        return None
-
-    def _oldest_landing_resident_that_may_start(self, slot: tuple):
-        for resident in self._residents(slot):
-            if _is_past_start(resident):
-                continue
-            if resident.input_landed:
-                continue
-            if not self._startable(resident):
-                continue
-            return resident
-        return None
-
-    def _is_parked(self, job: message.DecodeJob) -> bool:
-        if job.request_key is None:
-            return False
-        parked = self._parked_service.get(job.request_key)
-        return parked is job
+        self.pool.release(unit)
 
     def _free_unit(self, job: message.DecodeJob) -> None:
         """Compute finished: drop the job from its slot and offer the compute.
@@ -887,66 +714,36 @@ class DecoderManager:
         The ping-pong swap at compute end.
         """
         self._end_flight(job, offer_now=False)
-        slot = (job.pool, job.unit)
-        job.unit = None
-        residents = self._residents(slot)
-        if job in residents:
-            residents.remove(job)
-        intake_owner = self._pipeline_intake_busy.get(slot)
-        holder = self._computing.get(slot)
-        if holder is job and intake_owner is not job:
-            self._computing[slot] = None
-        pool, unit = slot
+        unit = job.unit
+        unit.evict(job)
+        intake_owner = unit.pipeline.intake_job
+        if unit.holder is job and intake_owner is not job:
+            unit.release_compute()
         self.engine.log_io(
-            f"unit {pool}#{unit} SRAM",
-            lambda: self._emitted_description(job, slot),
+            f"unit {unit.name} SRAM",
+            lambda: self._emitted_description(job, unit),
         )
-        self._offer_compute(slot)
+        self._offer_compute(unit)
 
     def _evict_resident(self, job: message.DecodeJob) -> None:
         """Drop a job from its slot before its decode started.
 
         Compute it held or reserved passes onward.
         """
-        slot = (job.pool, job.unit)
-        residents = self._residents(slot)
-        if job in residents:
-            residents.remove(job)
-        if job.request_key is not None:
-            self._parked_service.pop(job.request_key, None)
+        unit = job.unit
+        unit.evict(job)
+        job.is_parked = False
         self.staging.cancel(job)
-        holder = self._computing.get(slot)
-        if holder is job:
-            self._computing[slot] = None
-            self._offer_compute(slot)
-        job.unit = None
+        if unit.holder is job:
+            unit.release_compute()
+            self._offer_compute(unit)
 
-    def _emitted_description(self, job: message.DecodeJob, slot: tuple) -> str:
-        holds = self._sram_description(slot)
+    @staticmethod
+    def _emitted_description(
+        job: message.DecodeJob, unit: decoder_unit_module.DecoderUnit
+    ) -> str:
+        holds = unit.describe_residents()
         return f"emitted {job.label} result; holds {holds}"
-
-    def _sram_description(self, slot: tuple) -> str:
-        """One compact line of a unit's residents and their phase."""
-        residents = self._residents(slot)
-        if not residents:
-            return "empty"
-        parts = []
-        for resident in residents:
-            phase = self._resident_phase(slot, resident)
-            parts.append(
-                f"{resident.label} {phase}, {resident.n_rounds} rounds"
-            )
-        return "; ".join(parts)
-
-    def _resident_phase(self, slot: tuple, resident: message.DecodeJob) -> str:
-        holder = self._computing.get(slot)
-        if holder is resident and resident.service_started:
-            return "computing"
-        if self._is_parked(resident):
-            return "parked"
-        if resident.input_landed:
-            return "ready"
-        return "capturing"
 
     def _predict_compute_free(self, job: message.DecodeJob) -> None:
         """Record when the compute this job holds frees.
@@ -956,17 +753,18 @@ class DecoderManager:
         decoder measured on the host clock declares no latency, so its
         unit stays unpredicted.
         """
-        slot = (job.pool, job.unit)
+        unit = job.unit
         decoder = self.router.route(job)
         occupancy = decoder.occupancy(job)
         if occupancy is None:
-            self._compute_free_ticks.pop(slot, None)
+            unit.expect_compute_free(None)
             return
         start = self.engine.now
         landing = job.input_landing_ticks
         if landing is not None:
             start = max(start, landing)
-        self._compute_free_ticks[slot] = start + occupancy
+        free_ticks = start + occupancy
+        unit.expect_compute_free(free_ticks)
 
     # ------------------------------------------------- the pipelined unit
 
@@ -1003,35 +801,19 @@ class DecoderManager:
         interval_ticks: int,
         depth: int,
     ) -> None:
-        slot = (job.pool, job.unit)
-        flights = self._pipeline_flights.setdefault(slot, [])
-        # in-order completion: a hardware pipeline retires in issue
-        # order, so every in-flight decode on one unit must declare
-        # the same latency; mixed latencies refuse loudly
-        mixed = _flights_with_other_latency(flights, latency_ticks)
-        if mixed:
-            other = mixed[0]
-            raise RuntimeError(
-                f"decode job {job.label!r} declares latency "
-                f"{latency_ticks} ticks while {other.label!r} is in "
-                "flight with a different latency: a pipelined unit "
-                "completes in order and takes one latency per unit"
-            )
-        flights.append((job, latency_ticks))
-        if slot in self._pipeline_intake_busy:
-            raise RuntimeError(
-                f"pipelined unit {slot!r} started {job.label!r} before "
-                "its prior initiation interval completed"
-            )
-        self._pipeline_intake_busy[slot] = job
+        unit = job.unit
+        unit.add_flight(job, latency_ticks)
         self.engine.schedule(
             interval_ticks,
-            lambda: self._initiation_complete(slot, job, depth),
+            lambda: self._initiation_complete(unit, job, depth),
             label=f"initiation_complete({job.label})",
         )
 
     def _initiation_complete(
-        self, slot: tuple, job: message.DecodeJob, depth: int
+        self,
+        unit: decoder_unit_module.DecoderUnit,
+        job: message.DecodeJob,
+        depth: int,
     ) -> None:
         """The pipelined unit's intake is free again.
 
@@ -1039,24 +821,21 @@ class DecoderManager:
         pipeline is full; a full pipeline keeps the claim until the next
         completion.
         """
-        intake_owner = self._pipeline_intake_busy.get(slot)
-        if intake_owner is not job:
+        if unit.pipeline.intake_job is not job:
             return
-        del self._pipeline_intake_busy[slot]
-        holder = self._computing.get(slot)
-        if holder is not job:
+        unit.pipeline.intake_job = None
+        if unit.holder is not job:
             return
         if job.cancelled or job.completed:
-            self._computing[slot] = None
-            self._offer_compute(slot)
+            unit.release_compute()
+            self._offer_compute(unit)
             self.try_dispatch()
             return
-        flights = self._pipeline_flights.get(slot, ())
-        if len(flights) >= depth:
-            self._pipeline_stalled[slot] = (job, depth)
+        if unit.flight_count() >= depth:
+            unit.stall(job, depth)
             return
-        self._computing[slot] = None
-        self._offer_compute(slot)
+        unit.release_compute()
+        self._offer_compute(unit)
         self.try_dispatch()
 
     def _end_flight(self, job: message.DecodeJob, offer_now: bool) -> None:
@@ -1066,32 +845,21 @@ class DecoderManager:
         normal flow performs the compute offer unless offer_now says
         otherwise.
         """
-        for slot, flights in self._pipeline_flights.items():
-            flight = _flight_of(flights, job)
-            if flight is None:
+        for unit in self.pool.units():
+            if not unit.take_flight(job):
                 continue
-            flights.remove(flight)
-            self._lift_pipeline_stall(slot, flights, offer_now)
+            self._lift_pipeline_stall(unit, offer_now)
             return
 
     def _lift_pipeline_stall(
-        self, slot: tuple, flights: list, offer_now: bool
+        self, unit: decoder_unit_module.DecoderUnit, offer_now: bool
     ) -> None:
-        stalled = self._pipeline_stalled.get(slot)
-        if stalled is None:
+        owner = unit.lift_stall()
+        if owner is None:
             return
-        owner, depth = stalled
-        if len(flights) >= depth:
-            return
-        del self._pipeline_stalled[slot]
-        holder = self._computing.get(slot)
-        if holder is not owner:
-            return
-        if owner.cancelled or owner.completed:
-            return
-        self._computing[slot] = None
+        unit.release_compute()
         if offer_now:
-            self._offer_compute(slot)
+            self._offer_compute(unit)
             self.try_dispatch()
 
     # ------------------------------------------------- staging and service
@@ -1101,7 +869,7 @@ class DecoderManager:
         pool: str,
         job: message.DecodeJob,
         *,
-        unit: int,
+        unit: decoder_unit_module.DecoderUnit,
         claim_compute: bool,
     ) -> None:
         job.pool = pool
@@ -1109,17 +877,14 @@ class DecoderManager:
         # the unit is assigned at DMA start (gem5-Aladdin's invocation
         # model: invoke the unit, then DMA its input); compute is claimed
         # only when this unit's compute is actually free
-        job.unit = unit
-        slot = (pool, unit)
-        residents = self._residents(slot)
-        residents.append(job)
+        unit.admit(job)
         if claim_compute:
-            self._claim_compute(slot, job)
+            self.pool.claim(unit, job)
         if job.window is not None:
             job.window.t_dispatch = self.engine.now
         self._log_assignment(pool, job, claim_compute)
         self._sample_queue_depth()
-        self._stage_input(job, slot)
+        self._stage_input(job, unit)
         if claim_compute:
             self._predict_compute_free(job)
 
@@ -1151,7 +916,7 @@ class DecoderManager:
         if not claim_compute:
             slot_note = "staged, "
         pool_tag = self.pool_tag(pool)
-        free_now = self.pool_free[pool]
+        free_now = self.pool.free_count(pool)
         self.engine.log(
             self.log_name,
             f"ASSIGN UNIT {job.label} "
@@ -1159,16 +924,17 @@ class DecoderManager:
             f"{pool_tag}units free now {free_now})",
         )
 
-    def _stage_input(self, job: message.DecodeJob, slot: tuple) -> None:
+    def _stage_input(
+        self, job: message.DecodeJob, unit: decoder_unit_module.DecoderUnit
+    ) -> None:
         """Move every member request's rounds into this unit's memory.
 
         One transfer per request (a merged strong batch has several); the
         decode starts when all have landed.
         """
         members = self._transfer_members(job)
-        memory = self.decoder_memories[slot]
-        pool, unit = slot
-        source = f"unit {pool}#{unit} SRAM"
+        memory = unit.memory
+        source = f"unit {unit.name} SRAM"
         remaining = len(members)
 
         def landed(_member: message.DecodeJob) -> None:
@@ -1176,7 +942,7 @@ class DecoderManager:
             remaining -= 1
             if remaining > 0:
                 return
-            self._input_landed(job, slot)
+            self._input_landed(job, unit)
 
         for member in members:
             self._log_input_receiving(source, member)
@@ -1196,30 +962,34 @@ class DecoderManager:
     ) -> None:
         self.engine.log_io(source, lambda: _receiving_text(member))
 
-    def _input_landed(self, job: message.DecodeJob, slot: tuple) -> None:
+    def _input_landed(
+        self, job: message.DecodeJob, unit: decoder_unit_module.DecoderUnit
+    ) -> None:
         """Every transfer landed: start now, or wait for the unit's compute."""
         job.input_landed = True
-        pool, unit = slot
         self.engine.log_io(
-            f"unit {pool}#{unit} SRAM",
-            lambda: self._landed_description(job, slot),
+            f"unit {unit.name} SRAM",
+            lambda: self._landed_description(job, unit),
         )
-        holder = self._computing.get(slot)
+        holder = unit.holder
         if holder is job:
             # this job holds or was reserved the unit's compute
             self._begin_service(job)
             return
-        if holder is None and unit in self._free_units[pool]:
+        if holder is None and self.pool.is_free(unit):
             # compute went back to the pool (a resident parked and
             # released its claim); take it now
-            self._claim_compute(slot, job)
+            self.pool.claim(unit, job)
             self._begin_service(job)
         # otherwise the compute is busy: _offer_compute picks this
         # job up at the next compute end
 
-    def _landed_description(self, job: message.DecodeJob, slot: tuple) -> str:
+    @staticmethod
+    def _landed_description(
+        job: message.DecodeJob, unit: decoder_unit_module.DecoderUnit
+    ) -> str:
         defects = _job_defects_text(job)
-        holds = self._sram_description(slot)
+        holds = unit.describe_residents()
         return f"{job.label} input landed; {defects}; holds {holds}"
 
     def _begin_service(
@@ -1260,7 +1030,7 @@ class DecoderManager:
         return not job.gate.may_start(job)
 
     def _park(self, job: message.DecodeJob) -> None:
-        self._parked_service[job.request_key] = job
+        job.is_parked = True
         self.engine.log(
             self.log_name, f"PARK DECODE {job.label} (boundary pending)"
         )
@@ -1268,10 +1038,10 @@ class DecoderManager:
 
     def _restart_parked(self, job: message.DecodeJob) -> None:
         """A released job takes the unit's compute if it can have it now."""
-        slot = (job.pool, job.unit)
-        holder = self._computing.get(slot)
-        if holder is None and job.unit in self._free_units[job.pool]:
-            self._claim_compute(slot, job)
+        unit = job.unit
+        holder = unit.holder
+        if holder is None and self.pool.is_free(unit):
+            self.pool.claim(unit, job)
             self._begin_service(job, gated=False)
             return
         if holder is None:
@@ -1285,7 +1055,7 @@ class DecoderManager:
         # steal a reservation held for an input still in flight:
         # ready work issues first; the in-flight job re-competes
         # at its own landing
-        self._computing[slot] = job
+        unit.claim_compute(job)
         self._begin_service(job, gated=False)
 
     # ------------------------------------------------- the split gap
@@ -1473,7 +1243,7 @@ class DecoderManager:
         # and this is a no-op.
         self.staging.release(job)
         pool_tag = self.pool_tag(job.pool)
-        free_now = self.pool_free[job.pool]
+        free_now = self.pool.free_count(job.pool)
         self.engine.log(
             self.log_name,
             f"DECODE DONE {job.label} ({pool_tag}units free now {free_now})",
@@ -1659,7 +1429,7 @@ class DecoderManager:
         )
 
     def _remove_from_queues(self, job: message.DecodeJob) -> None:
-        for pool in self.unit_totals:
+        for pool in self.pool.units_by_pool:
             queue = self.queue_for(pool)
             if job in queue:
                 queue.remove(job)
@@ -1667,11 +1437,11 @@ class DecoderManager:
 
     def _find_window_job(self, window_key: tuple):
         candidates = []
-        for pool in self.unit_totals:
+        for pool in self.pool.units_by_pool:
             queue = self.queue_for(pool)
             candidates.extend(queue)
-        for residents in self._unit_residents.values():
-            candidates.extend(residents)
+        for unit in self.pool.units():
+            candidates.extend(unit.residents)
         for job in candidates:
             if _is_live_weak_window_job(job, window_key):
                 return job
@@ -1743,39 +1513,39 @@ class DecoderManager:
         )
         self._terminal_service_records.append(record)
 
+    def _parked_jobs(self) -> list:
+        parked = []
+        for unit in self.pool.units():
+            unit_parked = unit.parked_residents()
+            parked.extend(unit_parked)
+        return parked
+
     def _parked_labels(self) -> list:
         labels = []
-        for job in self._parked_service.values():
+        for job in self._parked_jobs():
             labels.append(job.label)
         return sorted(labels)
 
     def _in_flight_labels(self) -> list:
         labels = []
-        for flights in self._pipeline_flights.values():
-            for flight_job, _latency_ticks in flights:
-                labels.append(flight_job.label)
+        for unit in self.pool.units():
+            flight_labels = unit.flight_labels()
+            labels.extend(flight_labels)
         return sorted(labels)
+
+    def _intake_busy_names(self) -> list:
+        names = []
+        for unit in self.pool.units():
+            if unit.pipeline.intake_job is not None:
+                names.append(unit.name)
+        return sorted(names)
 
     def _units_holding_rounds(self) -> list:
         held = []
-        for memory in self.decoder_memories.values():
-            if memory.occupied_rounds:
-                held.append(f"{memory.pool}#{memory.unit}")
+        for unit in self.pool.units():
+            if unit.memory.occupied_rounds:
+                held.append(unit.name)
         return held
-
-
-def _check_unit_pools(unit_pools: dict) -> None:
-    """A pool map names the default pool and gives every pool a unit."""
-    if "default" not in unit_pools:
-        pools = sorted(unit_pools)
-        raise ValueError(
-            f'unit_pools must include a "default" pool (got {pools})'
-        )
-    for pool_name, units in unit_pools.items():
-        if units < 1:
-            raise ValueError(
-                f"pool {pool_name!r} needs at least 1 unit (got {units})"
-            )
 
 
 def _refuse_spent_job(job: message.DecodeJob) -> None:
@@ -1841,15 +1611,6 @@ def _batch_job(jobs: list, window_keys: list) -> message.DecodeJob:
     )
 
 
-def _is_past_start(job: message.DecodeJob) -> bool:
-    """A job that never starts again; an in-flight decode stays resident."""
-    if job.cancelled:
-        return True
-    if job.completed:
-        return True
-    return job.service_started
-
-
 def _is_outside_pipelined_model(job: message.DecodeJob) -> bool:
     if job.strong_decode_for is not None:
         return True
@@ -1867,21 +1628,6 @@ def _is_live_weak_window_job(job: message.DecodeJob, window_key: tuple) -> bool:
     if job.on_done is not None:
         return False
     return not job.cancelled
-
-
-def _flight_of(flights: list, job: message.DecodeJob):
-    for flight in flights:
-        if flight[0] is job:
-            return flight
-    return None
-
-
-def _flights_with_other_latency(flights: list, latency_ticks: int) -> list:
-    others = []
-    for flight_job, flight_latency in flights:
-        if flight_latency != latency_ticks:
-            others.append(flight_job)
-    return others
 
 
 def _fragments_in(decoder_input) -> list:

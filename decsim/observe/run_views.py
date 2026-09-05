@@ -147,18 +147,18 @@ class SwitchingRecordsView:
 
 
 def utilization_view(decoder_manager) -> UtilizationView:
-    """Snapshot decoder occupancy."""
-    totals = getattr(decoder_manager, "unit_totals", None)
-    if totals is None:
-        busy = decoder_manager.num_units - decoder_manager.free_units
-        return UtilizationView(busy, decoder_manager.num_units,
-                               (("", busy, decoder_manager.num_units),))
-    total = sum(totals.values())
-    busy = total - sum(decoder_manager.pool_free.values())
-    per_pool = tuple(
-        (name, totals[name] - decoder_manager.pool_free.get(name, 0), totals[name])
-        for name in sorted(totals))
-    return UtilizationView(busy, total, per_pool)
+    """Snapshot decoder occupancy from the pool's units."""
+    pool = decoder_manager.pool
+    per_pool = []
+    busy = 0
+    total = 0
+    for name in sorted(pool.units_by_pool):
+        pool_total = len(pool.units_by_pool[name])
+        pool_busy = pool_total - pool.free_count(name)
+        per_pool.append((name, pool_busy, pool_total))
+        busy += pool_busy
+        total += pool_total
+    return UtilizationView(busy, total, tuple(per_pool))
 
 
 def backlog_view(window_manager, decoder_manager,
@@ -281,10 +281,11 @@ def strong_work_view(window_manager, decoder_manager) -> StrongWorkView:
 
 
 def decoder_memory_view(decoder_manager) -> DecoderMemoryView:
-    """Snapshot every unit's input memory."""
-    return DecoderMemoryView(per_unit=tuple(
-        memory.snapshot()
-        for _key, memory in sorted(decoder_manager.decoder_memories.items())))
+    """Snapshot every unit's input memory, pool by pool."""
+    rows = []
+    for unit in decoder_manager.pool.units():
+        rows.append(unit.memory.snapshot())
+    return DecoderMemoryView(per_unit=tuple(rows))
 
 
 def switching_records_view(window_manager, decoder_manager) -> SwitchingRecordsView:

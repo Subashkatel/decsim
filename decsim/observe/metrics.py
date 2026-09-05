@@ -27,15 +27,15 @@ class WindowSwitchingRecords:
     name = "window_switching_records"
     result_schema_version = 1
 
-    def __init__(self, window_manager, decoder_manager):
+    def __init__(self, window_manager, decode_records):
         self.window_manager = window_manager
-        self.decoder_manager = decoder_manager
+        self.decode_records = decode_records
 
     def observe(self, engine: "Engine") -> None:
         return None
 
     def result(self) -> dict:
-        view = switching_records_view(self.window_manager, self.decoder_manager)
+        view = switching_records_view(self.window_manager, self.decode_records)
 
         def json_value(value):
             if isinstance(value, Enum):

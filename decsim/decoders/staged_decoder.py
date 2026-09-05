@@ -253,10 +253,7 @@ class StagedDecoder(decoder_module.DecoderBase):
         job = running.job
         if job.decoder_input is not None:
             # the read out of this unit's memory
-            fragments = []
-            for round_input in job.decoder_input.rounds:
-                fragments.extend(round_input.fragments)
-            job.payloads = fragments
+            job.payloads = job.decoder_input.fragments()
         start = engine.now
 
         def on_algorithm_result(result: Optional[message.DecodeResult]) -> None:

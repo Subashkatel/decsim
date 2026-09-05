@@ -23,12 +23,13 @@ from typing import Optional
 import numpy
 import scipy.sparse
 
-import decsim.decoders.window_decode_results as window_decode_results
+import decsim.decoders.backend_outcome as backend_outcome
+import decsim.decoders.decoder as decoder_module
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.seeding as seeding
 
-_Status = window_decode_results.BackendDecodeStatus
-_Reason = window_decode_results.BackendFailureReason
+_Status = backend_outcome.BackendDecodeStatus
+_Reason = backend_outcome.BackendFailureReason
 _SEED_LIMIT = 2**64
 
 
@@ -74,7 +75,7 @@ class RelayBeliefPropagationWindowDecoder(seeding._AtomicRunSeedConsumer):
 
     def decode(
         self, window_model, syndrome
-    ) -> window_decode_results.BackendDecodeOutcome:
+    ) -> backend_outcome.BackendDecodeOutcome:
         """Call the official detailed API once and snapshot its evidence."""
         faults = window_model.require_faults(
             fault_models.FaultRepresentation.PHYSICAL
@@ -83,7 +84,7 @@ class RelayBeliefPropagationWindowDecoder(seeding._AtomicRunSeedConsumer):
         syndrome = _validated_syndrome(syndrome, detector_count)
         compiled = self._compiled_model(faults)
         if faults.check.shape[1] == 0:
-            return window_decode_results.empty_fault_model_outcome(syndrome)
+            return backend_outcome.empty_fault_model_outcome(syndrome)
         if compiled.backend_construction_failed:
             return _backend_error_outcome()
         try:
@@ -379,7 +380,7 @@ def _binary_vector(value, *, expected_size: int) -> tuple:
     is_bit = is_zero | is_one
     if not numpy.all(is_bit):
         raise _NonbinaryCorrectionError
-    return window_decode_results.bit_tuple(vector)
+    return decoder_module.bit_tuple(vector)
 
 
 def _float_tuple(values) -> tuple:
@@ -391,8 +392,8 @@ def _float_tuple(values) -> tuple:
 
 def _reconstruct(check, correction) -> tuple:
     correction_array = numpy.asarray(correction)
-    parity = window_decode_results.parity_product(check, correction_array)
-    return window_decode_results.bit_tuple(parity)
+    parity = decoder_module.parity_product(check, correction_array)
+    return decoder_module.bit_tuple(parity)
 
 
 def _detailed_evidence(detailed, faults) -> _DetailedEvidence:
@@ -422,10 +423,10 @@ def _detailed_evidence(detailed, faults) -> _DetailedEvidence:
 
 def _outcome_of(
     faults, syndrome, correction: tuple, evidence: _DetailedEvidence
-) -> window_decode_results.BackendDecodeOutcome:
+) -> backend_outcome.BackendDecodeOutcome:
     """The outcome of one answer: inconsistent, nonconverged or succeeded."""
     reconstructed = _reconstruct(faults.check, correction)
-    syndrome_bits = window_decode_results.bit_tuple(syndrome)
+    syndrome_bits = decoder_module.bit_tuple(syndrome)
     is_inconsistent = evidence.decoded_detectors != reconstructed
     if evidence.succeeded and reconstructed != syndrome_bits:
         is_inconsistent = True
@@ -448,8 +449,8 @@ def _outcome_of(
 
 def _detailed_outcome(
     correction: tuple, evidence: _DetailedEvidence, status, reason
-) -> window_decode_results.BackendDecodeOutcome:
-    return window_decode_results.BackendDecodeOutcome(
+) -> backend_outcome.BackendDecodeOutcome:
+    return backend_outcome.BackendDecodeOutcome(
         status=status,
         failure_reason=reason,
         physical_correction=correction,
@@ -463,8 +464,8 @@ def _detailed_outcome(
     )
 
 
-def _invalid_outcome(reason) -> window_decode_results.BackendDecodeOutcome:
-    return window_decode_results.BackendDecodeOutcome(
+def _invalid_outcome(reason) -> backend_outcome.BackendDecodeOutcome:
+    return backend_outcome.BackendDecodeOutcome(
         status=_Status.INVALID_CORRECTION,
         failure_reason=reason,
         physical_correction=None,
@@ -476,8 +477,8 @@ def _invalid_outcome(reason) -> window_decode_results.BackendDecodeOutcome:
     )
 
 
-def _backend_error_outcome() -> window_decode_results.BackendDecodeOutcome:
-    return window_decode_results.BackendDecodeOutcome(
+def _backend_error_outcome() -> backend_outcome.BackendDecodeOutcome:
+    return backend_outcome.BackendDecodeOutcome(
         status=_Status.BACKEND_ERROR,
         failure_reason=_Reason.UPSTREAM_EXCEPTION,
         physical_correction=None,

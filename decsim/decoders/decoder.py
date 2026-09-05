@@ -9,20 +9,35 @@ methods from its latency; WindowDecoderBase gives a real decoder its
 frame (the model's faults, the payload syndrome, the size check, the
 result built from the selected faults), one compiled backend per live
 window model (sinter's CompiledDecoder), and the measured clock when it
-carries no latency model.
+carries no latency model. The helpers after the classes are that frame:
+the payload syndrome, the size check, the result from the selected
+faults, and the status a best-effort result carries.
 """
 
 import abc
+import enum
 import time
 import weakref
 from typing import Callable, Optional
 
+import numpy
+
 import decsim.config as config
-import decsim.decoders.window_decode_results as window_decode_results
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.message as message
 
 OnResult = Callable[[Optional[message.DecodeResult]], None]
+
+
+class BackendDecodeStatus(enum.Enum):
+    """Backend-neutral disposition of one window decode attempt."""
+
+    SUCCEEDED = "succeeded"
+    LOW_CONFIDENCE = "low_confidence"
+    NONCONVERGED = "nonconverged"
+    INVALID_CORRECTION = "invalid_correction"
+    EMPTY_MODEL_UNSATISFIABLE = "empty_model_unsatisfiable"
+    BACKEND_ERROR = "backend_error"
 
 
 class DecoderBase(abc.ABC):
@@ -165,15 +180,15 @@ class WindowDecoderBase(DecoderBase):
         if model is None:
             return message.DecodeResult(job.op_id, job.window_id), 0
         faults = model.require_faults(self.fault_representation)
-        syndrome = window_decode_results.payload_syndrome(job)
-        window_decode_results.check_syndrome_size(job, syndrome, faults)
+        syndrome = payload_syndrome(job)
+        check_syndrome_size(job, syndrome, faults)
         backend = self.compiled_for(faults, model)
         started_ns = time.perf_counter_ns()
         selected, decode_status = self.decode_window(
             backend, model, faults, syndrome
         )
         finished_ns = time.perf_counter_ns()
-        result = window_decode_results.result_from_selected_faults(
+        result = result_from_selected_faults(
             job, model, faults, selected, decode_status=decode_status
         )
         return result, finished_ns - started_ns
@@ -201,3 +216,114 @@ class WindowDecoderBase(DecoderBase):
         reference = weakref.ref(faults, discard_dead_model)
         self.compiled_by_model[model_identity] = (reference, backend)
         return backend
+
+
+def parity_product(matrix, vector):
+    """The matrix times the vector over GF(2), as a flat array."""
+    matrix_integers = matrix.astype(numpy.int64)
+    vector_integers = vector.astype(numpy.int64)
+    product = matrix_integers @ vector_integers
+    product = numpy.asarray(product)
+    flat = product.ravel()
+    return flat % 2
+
+
+def bit_tuple(array) -> tuple:
+    """The array's entries as a tuple of ints."""
+    bits = []
+    for bit in array:
+        bits.append(int(bit))
+    return tuple(bits)
+
+
+def payload_syndrome(job: message.DecodeJob):
+    """Concatenate payload bits into one syndrome vector."""
+    if not job.payloads:
+        return numpy.zeros(0, dtype=numpy.uint8)
+    bit_arrays = []
+    for payload in job.payloads:
+        if payload.bits is None:
+            continue
+        bits = numpy.asarray(payload.bits, dtype=numpy.uint8)
+        bit_arrays.append(bits)
+    return numpy.concatenate(bit_arrays)
+
+
+def check_syndrome_size(
+    job: message.DecodeJob, syndrome, placed_faults
+) -> None:
+    """Fail when payload bits and detector rows do not line up."""
+    detector_count = placed_faults.check.shape[0]
+    if syndrome.size == detector_count:
+        return
+    raise ValueError(
+        f"{job.label}: payload bits ({syndrome.size}) do not match the window "
+        f"error model's detectors ({detector_count}). The device and the "
+        "cluster's model build must use the same folded-round convention."
+    )
+
+
+def result_from_selected_faults(
+    job: message.DecodeJob, model, placed_faults, selected, decode_status=None
+) -> message.DecodeResult:
+    """Keep the owned selected faults and convert them into a DecodeResult.
+
+    ``decode_status`` marks a best-effort correction (None = succeeded).
+    """
+    selected = numpy.asarray(selected, dtype=numpy.uint8)
+    fault_count = placed_faults.check.shape[1]
+    if selected.ndim != 1 or selected.shape[0] != fault_count:
+        raise ValueError(
+            f"{job.label}: selected correction has shape {selected.shape}; "
+            f"expected ({fault_count},)"
+        )
+    selected_faults = selected.astype(bool)
+    committed = selected_faults & placed_faults.owned
+    observable_flips = parity_product(placed_faults.observables, committed)
+    residual_detector_ids = _detector_ids_from_columns(
+        placed_faults.boundary_flips, committed
+    )
+    defects = _defects_from_detector_ids(model, residual_detector_ids)
+    correction = committed.astype(numpy.uint8)
+    logical_observables = bit_tuple(observable_flips)
+    boundary_data = message.DependencyResidual(
+        detector_ids=residual_detector_ids, defects=defects
+    )
+    return message.DecodeResult(
+        job.op_id,
+        job.window_id,
+        correction=correction,
+        logical_observables=logical_observables,
+        boundary_data=boundary_data,
+        decode_status=decode_status,
+    )
+
+
+def _detector_ids_from_columns(detector_flips, committed) -> tuple[int, ...]:
+    """XOR complete global detector identities across selected columns."""
+    detector_ids = set()
+    nonzero = numpy.nonzero(committed)
+    for column_index in nonzero[0]:
+        flips = detector_flips.get(int(column_index), ())
+        detector_ids.symmetric_difference_update(flips)
+    return tuple(sorted(detector_ids))
+
+
+def _defects_from_detector_ids(model, detector_ids) -> Optional[dict]:
+    defects: dict = {}
+    for detector_id in detector_ids:
+        round_index, position = model.defect_positions[detector_id]
+        mask = defects.setdefault(round_index, [])
+        length = position + 1
+        _extend_to(mask, length)
+        mask[position] ^= 1
+    if not defects:
+        return None
+    return defects
+
+
+def _extend_to(mask: list, length: int) -> None:
+    missing = length - len(mask)
+    if missing > 0:
+        padding = [0] * missing
+        mask.extend(padding)

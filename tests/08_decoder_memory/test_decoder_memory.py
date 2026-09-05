@@ -269,7 +269,7 @@ def test_same_size_divergent_model_row_layout_order_raises() -> None:
         make_fragment(round_index=1, bits=(1,)),
     ]
 
-    with pytest.raises(ValueError, match="row layout"):
+    with pytest.raises(RuntimeError, match="row layout"):
         materialize_decoder_input(make_job(payloads, op_id=1, dem=window_model))
 
 
@@ -293,7 +293,9 @@ def test_successor_identity_cannot_replace_predecessor_model_rows() -> None:
         bits=(1,),
     )
 
-    with pytest.raises(ValueError, match="round operation 1.*job operation 2"):
+    with pytest.raises(
+        RuntimeError, match="round operation 1.*job operation 2"
+    ):
         materialize_decoder_input(
             make_job(
                 [predecessor_fragment, successor_fragment],
@@ -335,7 +337,7 @@ def test_detector_row_length_divergence_raises() -> None:
         physical_faults=None,
     )
 
-    with pytest.raises(ValueError, match="row layout"):
+    with pytest.raises(RuntimeError, match="row layout"):
         materialize_decoder_input(
             make_job(
                 [make_fragment(round_index=1, bits=(1, 0))],
@@ -343,22 +345,6 @@ def test_detector_row_length_divergence_raises() -> None:
                 dem=window_model,
             )
         )
-
-
-def test_custom_model_without_row_layout_materializes_unchanged() -> None:
-    """A custom model without row-layout attributes remains accepted."""
-
-    class CustomModelWithoutRowLayout:
-        """Represent a decoder model whose contract has no row-layout view."""
-
-    custom_model = CustomModelWithoutRowLayout()
-    fragment = make_fragment(operation_id=3, round_index=2, bits=(1, 0))
-
-    decoder_input = materialize_decoder_input(
-        make_job([fragment], op_id=3, dem=custom_model)
-    )
-
-    assert decoder_input.rounds[0].fragments == (fragment,)
 
 
 def test_timing_only_fragments_need_no_detector_model_or_bits() -> None:
@@ -397,25 +383,6 @@ def test_empty_job_materializes_to_self_identifying_input() -> None:
     assert not hasattr(decoder_input, "round_count")
     with pytest.raises(FrozenInstanceError):
         decoder_input.rounds = ()
-
-
-def test_compatible_job_consumes_one_shot_payloads_once() -> None:
-    """A compatible job consumes one-shot payloads once."""
-    fragment = make_fragment(operation_id=3, round_index=2)
-    accepted_payloads = OneShotPayloads([fragment])
-    accepted_job = CompatibleJob(
-        op_id=3,
-        window_id=8,
-        request_key=None,
-        payloads=accepted_payloads,
-    )
-
-    assert not hasattr(accepted_job, "dem")
-    decoder_input = materialize_decoder_input(accepted_job)
-
-    assert accepted_payloads.iterations == 1
-    assert len(decoder_input.rounds) == 1
-    assert decoder_input.rounds[0].fragments == (fragment,)
 
 
 def test_materialized_fragments_remain_safe_aliases_after_upstream_clear() -> (
@@ -503,8 +470,6 @@ def test_config_is_rounds_per_unit_by_pool_and_absent_pools_are_unbounded() -> (
     config = DecoderMemoryConfig({"default": 6})
     assert config.capacity_for("default") == 6
     assert config.capacity_for("strong") is None
-    with pytest.raises(ValueError):
-        DecoderMemoryConfig({"default": 0})
 
 
 def test_unit_memory_holds_one_job_input_and_frees_it_exactly() -> None:

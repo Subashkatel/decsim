@@ -41,7 +41,7 @@ class RecordingDecodeQueue:
     def __init__(self):
         self.demands = []
 
-    def submit_decode(self, round_count, on_done, label, code, spatial_nodes):
+    def enqueue_without_input(self, round_count, on_done, label, code, spatial_nodes):
         del on_done
         self.demands.append(
             {

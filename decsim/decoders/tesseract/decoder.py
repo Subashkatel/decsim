@@ -8,7 +8,7 @@ from typing import Optional
 
 import decsim.decoders.decoder as decoder_module
 import decsim.decoders.tesseract.window_decoder as window_decoder
-import decsim.decoders.window_decode_results as window_decode_results
+import decsim.decoders.backend_outcome as backend_outcome
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.message as message
 
@@ -48,4 +48,4 @@ class TesseractDecoder(decoder_module.WindowDecoderBase):
         """One backend call; a produced correction is committed as it stands."""
         del faults
         outcome = backend.decode(model, syndrome)
-        return window_decode_results.selected_faults_of(outcome)
+        return backend_outcome.selected_faults_of(outcome)

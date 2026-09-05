@@ -68,7 +68,7 @@ class WindowManagerProbe:
     def has_dynamic_stream(self, stream_id):
         return stream_id in self.live_streams
 
-    def submit_decode(self, round_count, on_done, label, code, spatial_nodes):
+    def enqueue_without_input(self, round_count, on_done, label, code, spatial_nodes):
         del on_done
         self.idle_demands.append(
             {

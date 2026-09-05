@@ -14,7 +14,7 @@ import pymatching
 
 import decsim.decoders.decoder as decoder_module
 import decsim.decoders.minimum_weight_perfect_matching.weights as weights
-import decsim.decoders.window_decode_results as window_decode_results
+import decsim.decoders.decoder as decoder_module
 import decsim.detector_error_model.fault_identity_validation as fault_identity
 import decsim.detector_error_model.fault_model_contracts as fault_models
 
@@ -76,7 +76,7 @@ class PyMatchingDecoder(decoder_module.WindowDecoderBase):
             fault_count = faults.check.shape[1]
             empty = numpy.zeros(fault_count, dtype=numpy.uint8)
             invalid = (
-                window_decode_results.BackendDecodeStatus.INVALID_CORRECTION
+                decoder_module.BackendDecodeStatus.INVALID_CORRECTION
             )
             return empty, invalid
 

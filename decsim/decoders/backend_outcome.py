@@ -1,9 +1,11 @@
-"""Turns a window decoder's selection into a DecodeResult.
+"""The backend outcome record Tesseract and Relay-BP return.
 
-The helpers every decoder shares (the payload syndrome, the size check,
-the result built from the selected faults), and the backend outcome
-record that Tesseract and Relay-BP return: its correction, its
-disposition and its diagnostics, normalized once at construction.
+One backend call's correction, its disposition and its diagnostics,
+normalized once at construction; selected_faults_of turns it into the
+correction the row commits and the status the result carries. A backend
+that produced a correction has it committed as it stands, best effort
+or not; only a backend that produced no correction at all is a
+structural failure and stops the run.
 """
 
 import dataclasses
@@ -14,18 +16,9 @@ from typing import Optional
 
 import numpy
 
-import decsim.message as message
+import decsim.decoders.decoder as decoder_module
 
-
-class BackendDecodeStatus(enum.Enum):
-    """Backend-neutral disposition of one window decode attempt."""
-
-    SUCCEEDED = "succeeded"
-    LOW_CONFIDENCE = "low_confidence"
-    NONCONVERGED = "nonconverged"
-    INVALID_CORRECTION = "invalid_correction"
-    EMPTY_MODEL_UNSATISFIABLE = "empty_model_unsatisfiable"
-    BACKEND_ERROR = "backend_error"
+BackendDecodeStatus = decoder_module.BackendDecodeStatus
 
 
 class BackendFailureReason(enum.Enum):
@@ -134,51 +127,6 @@ def empty_fault_model_outcome(syndrome) -> BackendDecodeOutcome:
     )
 
 
-def parity_product(matrix, vector):
-    """The matrix times the vector over GF(2), as a flat array."""
-    matrix_integers = matrix.astype(numpy.int64)
-    vector_integers = vector.astype(numpy.int64)
-    product = matrix_integers @ vector_integers
-    product = numpy.asarray(product)
-    flat = product.ravel()
-    return flat % 2
-
-
-def bit_tuple(array) -> tuple:
-    """The array's entries as a tuple of ints."""
-    bits = []
-    for bit in array:
-        bits.append(int(bit))
-    return tuple(bits)
-
-
-def payload_syndrome(job: message.DecodeJob):
-    """Concatenate payload bits into one syndrome vector."""
-    if not job.payloads:
-        return numpy.zeros(0, dtype=numpy.uint8)
-    bit_arrays = []
-    for payload in job.payloads:
-        if payload.bits is None:
-            continue
-        bits = numpy.asarray(payload.bits, dtype=numpy.uint8)
-        bit_arrays.append(bits)
-    return numpy.concatenate(bit_arrays)
-
-
-def check_syndrome_size(
-    job: message.DecodeJob, syndrome, placed_faults
-) -> None:
-    """Fail when payload bits and detector rows do not line up."""
-    detector_count = placed_faults.check.shape[0]
-    if syndrome.size == detector_count:
-        return
-    raise ValueError(
-        f"{job.label}: payload bits ({syndrome.size}) do not match the window "
-        f"error model's detectors ({detector_count}). The device and the "
-        "cluster's model build must use the same folded-round convention."
-    )
-
-
 def selected_faults_of(outcome: BackendDecodeOutcome) -> tuple:
     """(correction, status) of a backend outcome: one policy for every backend.
 
@@ -197,42 +145,6 @@ def selected_faults_of(outcome: BackendDecodeOutcome) -> tuple:
     if not outcome.succeeded:
         decode_status = outcome.status
     return outcome.physical_correction, decode_status
-
-
-def result_from_selected_faults(
-    job: message.DecodeJob, model, placed_faults, selected, decode_status=None
-) -> message.DecodeResult:
-    """Keep the owned selected faults and convert them into a DecodeResult.
-
-    ``decode_status`` marks a best-effort correction (None = succeeded).
-    """
-    selected = numpy.asarray(selected, dtype=numpy.uint8)
-    fault_count = placed_faults.check.shape[1]
-    if selected.ndim != 1 or selected.shape[0] != fault_count:
-        raise ValueError(
-            f"{job.label}: selected correction has shape {selected.shape}; "
-            f"expected ({fault_count},)"
-        )
-    selected_faults = selected.astype(bool)
-    committed = selected_faults & placed_faults.owned
-    observable_flips = parity_product(placed_faults.observables, committed)
-    residual_detector_ids = _detector_ids_from_columns(
-        placed_faults.boundary_flips, committed
-    )
-    defects = _defects_from_detector_ids(model, residual_detector_ids)
-    correction = committed.astype(numpy.uint8)
-    logical_observables = bit_tuple(observable_flips)
-    boundary_data = message.DependencyResidual(
-        detector_ids=residual_detector_ids, defects=defects
-    )
-    return message.DecodeResult(
-        job.op_id,
-        job.window_id,
-        correction=correction,
-        logical_observables=logical_observables,
-        boundary_data=boundary_data,
-        decode_status=decode_status,
-    )
 
 
 def _check_status_reason(
@@ -328,33 +240,3 @@ def _empty_model_outcome(
         iteration_limit=None,
         posterior_log_likelihood_ratios=None,
     )
-
-
-def _detector_ids_from_columns(detector_flips, committed) -> tuple[int, ...]:
-    """XOR complete global detector identities across selected columns."""
-    detector_ids = set()
-    nonzero = numpy.nonzero(committed)
-    for column_index in nonzero[0]:
-        flips = detector_flips.get(int(column_index), ())
-        detector_ids.symmetric_difference_update(flips)
-    return tuple(sorted(detector_ids))
-
-
-def _defects_from_detector_ids(model, detector_ids) -> Optional[dict]:
-    defects: dict = {}
-    for detector_id in detector_ids:
-        round_index, position = model.defect_positions[detector_id]
-        mask = defects.setdefault(round_index, [])
-        length = position + 1
-        _extend_to(mask, length)
-        mask[position] ^= 1
-    if not defects:
-        return None
-    return defects
-
-
-def _extend_to(mask: list, length: int) -> None:
-    missing = length - len(mask)
-    if missing > 0:
-        padding = [0] * missing
-        mask.extend(padding)

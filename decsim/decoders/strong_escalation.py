@@ -21,8 +21,7 @@ from ..message import (
                        LogicalContribution, Operation, SeamFaultOwner,
                        StrongRegionPlan, Window, WindowInfo, stable_identity_order_key)
 from ..message import (PendingStrong, PotentialStrong, RephaseGuard,
-                       StrongInputInFlight)
-from .decoder_memory import count_decoder_input_round_demand
+                       StrongInputInFlight, distinct_round_count)
 from ..windows import round_retention
 
 
@@ -449,7 +448,7 @@ class StrongEscalation:
             strong_window, self.retention.strong_store)
         return DecodeJob(
             op_id=weak_job.op_id, window_id=weak_job.window_id,
-            n_rounds=count_decoder_input_round_demand(payloads),
+            n_rounds=distinct_round_count(payloads),
             ready_time=self.engine.now,
             label=label, hint="strong",
             spatial_nodes=weak_job.spatial_nodes, code=weak_job.code,
@@ -871,7 +870,7 @@ class StrongEscalation:
             strong_window, self.retention.strong_store)
         return DecodeJob(
             op_id=key[0], window_id=key[1],
-            n_rounds=count_decoder_input_round_demand(payloads),
+            n_rounds=distinct_round_count(payloads),
             ready_time=self.engine.now,
             label=pending.label, hint="strong",
             spatial_nodes=weak_job.spatial_nodes, code=weak_job.code,

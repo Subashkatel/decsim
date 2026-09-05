@@ -606,6 +606,39 @@ class DecoderServiceKey:
     run_sequence: int
 
 
+class RequestProcessingOutcome(Enum):
+    """How one decode request ended, for the switching study's records."""
+
+    PRIMARY_FORWARDED_FOR_DELIVERY = "primary_forwarded_for_delivery"
+    WEAK_AWAITED_STRONG = "weak_awaited_strong"
+    STRONG_FORWARDED_FOR_DELIVERY = "strong_forwarded_for_delivery"
+    STRONG_COMPLETED_DISCARDED = "strong_completed_discarded"
+    STRONG_CANCELLED_BEFORE_DISPATCH = "strong_cancelled_before_dispatch"
+    STRONG_CANCELLED_WHILE_STAGED = "strong_cancelled_while_staged"
+    STRONG_CANCELLED_DURING_SERVICE = "strong_cancelled_during_service"
+    STRONG_CANCELLED_MEMBER_SERVICE_CONTINUED = (
+        "strong_cancelled_member_service_continued"
+    )
+    WEAK_WITHDRAWN_FOR_STRONG_WINDOW = "weak_withdrawn_for_strong_window"
+
+
+def distinct_round_count(payloads) -> int:
+    """The distinct syndrome rounds a set of payloads carries.
+
+    The number of (operation_id, round_index) identities, the rounds a
+    decode job is priced and admitted for, the rounds the decoder reads:
+    a sliding-window decoder's work scales with the rounds in its window
+    (Skoric et al. 2209.08552, tau_W over n_W), a final window can be
+    smaller than a regular one with the whole window as core (Tan et al.
+    2209.09219), and no window implementation feeds rounds beyond the
+    data (Gong et al. sliding-window decoder; cudaq-qec sliding_window).
+    """
+    round_identities = set()
+    for payload in payloads:
+        round_identities.add((payload.operation_id, payload.round_index))
+    return len(round_identities)
+
+
 @dataclass
 class DecodeJob:
     """One unit of decoder work: a window's rounds, its model, its identity

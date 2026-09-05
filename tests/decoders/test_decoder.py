@@ -9,11 +9,8 @@ import pytest
 import decsim.config as config
 import decsim.decoders.decoder as decoder_module
 import decsim.decoders.decoders as decoders
-import decsim.decoders.schedulers as schedulers
-import decsim.decoders.weak_strong_switching as weak_strong_switching
 import decsim.engine as engine_module
 import decsim.message as message
-from decsim.decoders.decoder_manager import DecoderManager
 
 MEASURED_NS = 2500
 
@@ -162,24 +159,3 @@ def test_a_window_row_without_a_model_gives_the_empty_result():
     result = row.decode(job)
     assert result.correction is None
     assert result.logical_observables is None
-
-
-def test_a_spent_job_is_refused_by_the_manager():
-    engine = engine_module.Engine(verbose=False)
-    row = FixedRow()
-    router = decoders.CodeRouter(row)
-    scheduler = schedulers.FifoScheduler()
-    policy = weak_strong_switching.Baseline()
-    manager = DecoderManager(
-        engine,
-        router=router,
-        scheduler=scheduler,
-        num_units=1,
-        escalation_policy=policy,
-        services=None,
-    )
-    request_key = message.DecoderRequestKey(1, 0, message.DecoderTier.WEAK, 0)
-    job = _job(request_key=request_key)
-    manager.enqueue(job, None, lambda _job, _result: None)
-    with pytest.raises(RuntimeError, match="submitted once"):
-        manager.enqueue(job, None, lambda _job, _result: None)

@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from ..decoders.decoder_memory import DecoderMemorySnapshot
-from ..decoders.decoder_manager import TerminalRequestRecord, TerminalServiceRecord
+from .decode_records import TerminalRequestRecord, TerminalServiceRecord
 from ..message import DecoderRequestKey, stable_identity_order_key
 
 
@@ -248,7 +248,12 @@ def truth_view(window_manager, device) -> TruthView:
 def strong_work_view(window_manager, decoder_manager) -> StrongWorkView:
     """Compose exact global strong work from its two lifecycle owners."""
     pending = window_manager.escalation.pending_strong_work_snapshot()
-    admitted = decoder_manager.admitted_strong_work_snapshot()
+    queue_memberships = {}
+    for queued_job in decoder_manager.queue.jobs():
+        identity = id(queued_job)
+        memberships = queue_memberships.setdefault(identity, [])
+        memberships.append(queued_job)
+    admitted = decoder_manager.strong_requests.snapshot(queue_memberships)
     pending_keys = {key for key, _, _ in pending}
     admitted_keys = {key for keys, _, _ in admitted for key in keys}
     overlap = pending_keys & admitted_keys
@@ -290,7 +295,7 @@ def decoder_memory_view(decoder_manager) -> DecoderMemoryView:
     return DecoderMemoryView(per_unit=tuple(rows))
 
 
-def switching_records_view(window_manager, decoder_manager) -> SwitchingRecordsView:
+def switching_records_view(window_manager, decode_records) -> SwitchingRecordsView:
     """Compose terminal owner facts without duplicating transfer timing."""
     rows = []
     for key, window in sorted(window_manager.windows.items(),
@@ -318,8 +323,8 @@ def switching_records_view(window_manager, decoder_manager) -> SwitchingRecordsV
             absorbed_into, None if absorbed else
             window.published_request_key))
     return SwitchingRecordsView(
-        tuple(rows), decoder_manager.terminal_request_records_snapshot(),
-        decoder_manager.terminal_service_records_snapshot())
+        tuple(rows), tuple(decode_records.requests),
+        tuple(decode_records.services))
 
 
 @dataclass(frozen=True)

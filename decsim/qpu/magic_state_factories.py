@@ -34,16 +34,8 @@ from typing import Callable, Optional, Protocol
 
 import decsim.config as config
 import decsim.engine
+import decsim.ports as ports
 import decsim.seeding as seeding
-
-
-class DecodeService(Protocol):
-    """The decoder manager, as a distillation factory sees it."""
-
-    def submit_decode(
-        self, round_count: int, on_done: Callable[[], None], label: str = ""
-    ) -> None:
-        """Queue one load-only decode of the rounds; on_done at its end."""
 
 
 @dataclasses.dataclass
@@ -109,7 +101,7 @@ class DistillationFactory(seeding._RandomSeedConsumer):
         engine: decsim.engine.Engine,
         unit_count: int,
         attempt_ticks: int,
-        decode_service: DecodeService,
+        decode_service: ports.DecodeQueue,
         correction_round_count: int,
         correction_decode_count: int = 11,
         return_ticks: int = 0,
@@ -277,7 +269,7 @@ class DistillationFactory(seeding._RandomSeedConsumer):
         batch = _CorrectionBatch(self.correction_decode_count, trace)
         on_done = functools.partial(self._finish_correction_decode, batch)
         for _ in range(self.correction_decode_count):
-            self.decode_service.submit_decode(
+            self.decode_service.enqueue_without_input(
                 self.correction_round_count, on_done=on_done, label="MSF-corr"
             )
 
@@ -388,7 +380,7 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
         preparation_logical_cycles: int = 2,
         preparation_distance: int = 3,
         preparation_success_probability: float = 1.0,
-        decode_service: Optional[DecodeService] = None,
+        decode_service: Optional[ports.DecodeQueue] = None,
         correction_round_count: int = 0,
         correction_decode_count: int = 0,
         seed: Optional[int] = None,
@@ -614,7 +606,7 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
                 self._finish_correction_decode, distillation_round
             )
             for _ in range(self.correction_decode_count):
-                self.decode_service.submit_decode(
+                self.decode_service.enqueue_without_input(
                     self.correction_round_count,
                     on_done=on_done,
                     label=f"MSF-corr-L{level}",

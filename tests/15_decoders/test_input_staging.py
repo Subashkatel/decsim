@@ -265,7 +265,8 @@ def test_a_full_pool_stages_the_next_window_on_the_unit_that_frees_first():
 def test_a_job_without_input_waits_in_the_queue_for_free_compute():
     """A job without input waits centrally for free compute.
 
-    submit_decode carries no syndrome data, so there is nothing to
+    enqueue_without_input carries no syndrome data, so there is nothing
+    to
     prefetch into a busy unit's second slot; the job waits centrally and
     takes the first unit that frees (G/D/k FIFO).
     """
@@ -287,7 +288,7 @@ def test_a_job_without_input_waits_in_the_queue_for_free_compute():
     for label, arrival in (("a", 0.0), ("b", 1.0), ("c", 2.0)):
         engine.schedule(
             microseconds_to_ticks(arrival),
-            lambda label=label: manager.submit_decode(
+            lambda label=label: manager.enqueue_without_input(
                 1,
                 lambda label=label: done.__setitem__(label, engine.now),
                 label=label,

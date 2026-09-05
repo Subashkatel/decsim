@@ -4,25 +4,21 @@ A job waits in the WaitingJobs of its pool, the DecodeDispatcher places
 it on the DecoderUnit the DecoderPool offers, the DecodeService stages
 its input into that unit's memory and starts the routed decoder once the
 input landed and the window owes no boundary, the GapJoins spawn the
-split-gap sibling at service start, and the StrongRequests say which
-destination waits for which strong result. The facade admits, cancels,
-withdraws, releases and settles, and wires the rest, the shape of
-gem5's cache (BaseCache owns its MSHR queue, write buffer and tags,
-each one job, and implements the ports: src/mem/cache/base.hh). The
-outcome of a finished decode (what the policy makes of it, where it
-goes) and the switching study's terminal records are still here until
-structural D moves them to DecodeOutcomes and the record ledger.
-
-Wide state recorded: twelve attributes, the six components, the pool
-they share, the engine, the escalation policy and its services seam
-(slice 7), and the two record lists.
+split-gap sibling at service start, the StrongRequests say which
+destination waits for which strong result, and the DecodeOutcomes
+decide what a finished decode means and deliver it through the job's
+on_decoded. The facade implements the DecodeQueue port (admits, cancels,
+withdraws, releases, settles) and wires the six, the shape of gem5's
+cache (BaseCache owns its MSHR queue, write buffer and tags, each one
+job, and implements the ports: src/mem/cache/base.hh). One job reads as
+enqueue, dispatcher.run, service.dispatch_to, service.begin,
+decode_completed, outcomes.conclude_weak, job.on_decoded.
 """
 
-import dataclasses
-import enum
 from typing import Callable, Optional
 
 import decsim.decoders.decode_dispatch as decode_dispatch
+import decsim.decoders.decode_outcomes as decode_outcomes
 import decsim.decoders.decode_queue as decode_queue
 import decsim.decoders.decode_service as decode_service
 import decsim.decoders.decoder_memory as decoder_memory_module
@@ -31,57 +27,7 @@ import decsim.decoders.decoder_pool as decoder_pool_module
 import decsim.decoders.gap_joins as gap_joins_module
 import decsim.decoders.strong_requests as strong_requests_module
 import decsim.message as message
-
-
-class RequestProcessingOutcome(enum.Enum):
-    """How one decode request ended, for the switching study's records."""
-
-    PRIMARY_FORWARDED_FOR_DELIVERY = "primary_forwarded_for_delivery"
-    WEAK_AWAITED_STRONG = "weak_awaited_strong"
-    STRONG_FORWARDED_FOR_DELIVERY = "strong_forwarded_for_delivery"
-    STRONG_COMPLETED_DISCARDED = "strong_completed_discarded"
-    STRONG_CANCELLED_BEFORE_DISPATCH = "strong_cancelled_before_dispatch"
-    STRONG_CANCELLED_WHILE_STAGED = "strong_cancelled_while_staged"
-    STRONG_CANCELLED_DURING_SERVICE = "strong_cancelled_during_service"
-    STRONG_CANCELLED_MEMBER_SERVICE_CONTINUED = (
-        "strong_cancelled_member_service_continued"
-    )
-    WEAK_WITHDRAWN_FOR_STRONG_WINDOW = "weak_withdrawn_for_strong_window"
-
-
-@dataclasses.dataclass(frozen=True)
-class TerminalRequestRecord:
-    """One decode request at its end: identity, input, ticks, outcome."""
-
-    request_key: message.DecoderRequestKey
-    input_round_lo: int
-    input_round_hi: int
-    input_round_count: int
-    syndrome_bit_count: Optional[int]
-    syndrome_weight: Optional[int]
-    created_ticks: int
-    admitted_ticks: Optional[int]
-    ready_ticks: int
-    dispatch_ticks: Optional[int]
-    decode_output_ticks: Optional[int]
-    service_key: Optional[message.DecoderServiceKey]
-    soft_output: Optional[message.SoftOutput]
-    terminal_processing_outcome: RequestProcessingOutcome
-
-
-@dataclasses.dataclass(frozen=True)
-class TerminalServiceRecord:
-    """One decode service at its end: the requests it served and its ticks."""
-
-    service_key: message.DecoderServiceKey
-    pool: str
-    original_request_keys: tuple[message.DecoderRequestKey, ...]
-    completed_request_keys: tuple[message.DecoderRequestKey, ...]
-    cancelled_request_keys: tuple[message.DecoderRequestKey, ...]
-    input_round_count: int
-    dispatch_ticks: int
-    terminal_ticks: int
-    service_ticks: int
+import decsim.observe.decode_records as decode_records
 
 
 class DecoderManager:
@@ -96,25 +42,26 @@ class DecoderManager:
         unit_pools: Optional[dict] = None,
         num_units: int = 1,
         bulk_strong: bool = False,
-        capture_enabled: bool = False,
         decoder_memory: Optional[
             decoder_memory_module.DecoderMemoryConfig
         ] = None,
         escalation_policy,
         services,
         link=None,
+        records: Optional[decode_records.DecodeRecordLedger] = None,
     ):
-        self.engine = engine
         if unit_pools is None:
             unit_pools = {"default": num_units}
-        self.pool = decoder_pool_module.DecoderPool(
+        if records is None:
+            records = decode_records.DecodeRecordLedger(is_enabled=False)
+        pool = decoder_pool_module.DecoderPool(
             router, unit_pools, decoder_memory
         )
         self.strong_requests = strong_requests_module.StrongRequests()
         self.queue = decode_queue.WaitingJobs(
             engine,
             scheduler,
-            self.pool.units_by_pool,
+            pool.units_by_pool,
             self.strong_requests,
             is_bulk_strong=bulk_strong,
         )
@@ -128,7 +75,7 @@ class DecoderManager:
         staging = staging_module.DecoderInputStaging(transport, engine)
         self.service = decode_service.DecodeService(
             engine,
-            self.pool,
+            pool,
             staging,
             self.strong_requests,
             self.gap_joins,
@@ -136,16 +83,30 @@ class DecoderManager:
             dispatch=self.dispatch,
         )
         self.dispatcher = decode_dispatch.DecodeDispatcher(
-            self.queue, self.pool, self.service
+            self.queue, pool, self.service
         )
-        self.escalation_policy = escalation_policy
-        # the EscalationServices seam (the window manager)
-        self.services = services
-        self._terminal_request_records = None
-        self._terminal_service_records = None
-        if capture_enabled:
-            self._terminal_request_records = []
-            self._terminal_service_records = []
+        self.outcomes = decode_outcomes.DecodeOutcomes(
+            engine,
+            escalation_policy,
+            services,
+            self.strong_requests,
+            records,
+            cancel_strong=self.cancel_strong,
+        )
+
+    @property
+    def pool(self) -> decoder_pool_module.DecoderPool:
+        """The pool the dispatcher and the service share."""
+        return self.service.pool
+
+    @property
+    def services(self):
+        """The escalation's services seam, on the outcomes (slice 7)."""
+        return self.outcomes.services
+
+    @services.setter
+    def services(self, services) -> None:
+        self.outcomes.services = services
 
     # ---------------------------------------------------------- admission
 
@@ -163,7 +124,7 @@ class DecoderManager:
         ``on_decoded(job, result)`` is where the result goes.
         """
         _refuse_spent_job(job)
-        self.strong_requests.admit(job, self.engine.now)
+        self.strong_requests.admit(job, self.queue.engine.now)
         job.submitted = True
         job.send_input = send_input
         job.on_decoded = on_decoded
@@ -176,7 +137,7 @@ class DecoderManager:
         self.queue.add(job)
         self.dispatcher.run()
 
-    def submit_decode(
+    def enqueue_without_input(
         self,
         round_count: int,
         on_done: Callable[[], None],
@@ -195,7 +156,7 @@ class DecoderManager:
             op_id=-1,
             window_id=0,
             n_rounds=round_count,
-            ready_time=self.engine.now,
+            ready_time=self.queue.engine.now,
             on_done=on_done,
             label=label,
             code=code,
@@ -252,32 +213,19 @@ class DecoderManager:
                 "withdraw"
             )
         self.strong_requests.resolve_weak(window_key)
-        self._record_request(
+        self.outcomes.report_request(
             job,
             None,
-            RequestProcessingOutcome.WEAK_WITHDRAWN_FOR_STRONG_WINDOW,
+            message.RequestProcessingOutcome.WEAK_WITHDRAWN_FOR_STRONG_WINDOW,
             None,
         )
-        self.engine.log(
+        self.queue.engine.log(
             decode_queue.LOG_SOURCE,
             f"WITHDRAW {job.label} (invalidated before start)",
         )
         self.dispatcher.run()
 
     # ------------------------------------------------- the strong requests
-
-    def check_strong_route(
-        self, weak_job: message.DecodeJob, strong_job: message.DecodeJob
-    ) -> None:
-        """Refuse a strong job that would route back to the weak decoder."""
-        strong_decoder = self.pool.decoder_for(strong_job)
-        weak_decoder = self.pool.decoder_for(weak_job)
-        if strong_decoder is weak_decoder:
-            raise RuntimeError(
-                "Strong job routes to the same decoder as the weak job; "
-                "pass a router (e.g. SwitchingRouter) that sends "
-                "hint='strong' to a distinct decoder."
-            )
 
     def cancel_strong(self, key: tuple) -> None:
         """Cancel an unneeded strong re-decode wherever it is.
@@ -291,10 +239,10 @@ class DecoderManager:
         """
         held = self.strong_requests.take_held(key)
         if held is not None:
-            self._record_request(
+            self.outcomes.report_request(
                 held.request_job,
                 held.completion.result,
-                RequestProcessingOutcome.STRONG_COMPLETED_DISCARDED,
+                message.RequestProcessingOutcome.STRONG_COMPLETED_DISCARDED,
                 held.decode_output_ticks,
             )
         live = self.strong_requests.take_live(key)
@@ -312,24 +260,7 @@ class DecoderManager:
         self.strong_requests.counts.cancelled += 1
         self.dispatcher.run()  # returned credits may admit a waiting head
 
-    def admitted_strong_work_snapshot(self) -> tuple:
-        """Each physical strong job once in its phase."""
-        queue_memberships = {}
-        for queued_job in self.queue.jobs():
-            identity = id(queued_job)
-            memberships = queue_memberships.setdefault(identity, [])
-            memberships.append(queued_job)
-        return self.strong_requests.snapshot(queue_memberships)
-
-    # ------------------------------------------------- records and settling
-
-    def terminal_request_records_snapshot(self) -> tuple:
-        """The switching study's request records so far."""
-        return tuple(self._terminal_request_records)
-
-    def terminal_service_records_snapshot(self) -> tuple:
-        """The switching study's service records so far."""
-        return tuple(self._terminal_service_records)
+    # ------------------------------------------------------------ settling
 
     def check_decode_work_settled(self) -> None:
         """Require every admitted decode to reach a final result.
@@ -357,7 +288,7 @@ class DecoderManager:
                 "every window is final once the simulation is quiescent"
             )
 
-    # ------------------------------------------------- outcomes
+    # ------------------------------------------------- the decode's end
 
     def decode_completed(self, job: message.DecodeJob, result) -> None:
         """One decode finished: free the unit and settle the outcome."""
@@ -380,37 +311,28 @@ class DecoderManager:
         job.completed = True
         self.service.free(job)
         self.service.release_input(job)
-        self.engine.log(
+        self.queue.engine.log(
             decode_queue.LOG_SOURCE, f"DECODE DONE {job.label} (gap half)"
         )
         sibling_weight = None
         if result is not None:
             sibling_weight = result.gap_half_weight
-        joined = self.gap_joins.sibling_done(
-            job.gap_sibling_for, sibling_weight
-        )
+        key = job.gap_sibling_for
+        joined = self.gap_joins.sibling_done(key, sibling_weight)
         if joined is not None:
             held_job, held_result = joined
-            self._conclude_weak(held_job, held_result)
+            self._finish_weak(held_job, held_result)
         self.dispatcher.run()
 
     def _strong_decode_done(self, job: message.DecodeJob, result) -> None:
-        _validate_logical_observables(job, result)
         self.service.release_input(job)
-        deliveries = self.strong_requests.deliveries_for(
-            job, result, self.engine.now
-        )
+        now = self.queue.engine.now
+        deliveries = self.strong_requests.deliveries_for(job, result, now)
         job.completed = True
         self.service.free(job)
         members = self.strong_requests.members_of(job)
         self.service.release_inputs(members)
-        self.strong_requests.finish_service(job)
-        outcome = message.DecodeOutcome(job, result)
-        # FINALIZE_STRONG
-        self.escalation_policy.on_decode_outcome(outcome, self.services)
-        for held in deliveries:
-            self._complete_strong_result(held)
-        self._record_service(job)
+        self.outcomes.conclude_strong(job, result, deliveries)
         self.dispatcher.run()
 
     def _external_decode_done(self, job: message.DecodeJob) -> None:
@@ -419,12 +341,12 @@ class DecoderManager:
         # An external job that carried syndrome payloads through the
         # transport holds stored input like any other request, so its
         # credits come back before its callback runs and before the
-        # same-tick drain; a self-contained submit_decode job holds none
-        # and this is a no-op.
+        # same-tick drain; a self-contained job holds none and this is a
+        # no-op.
         self.service.release_input(job)
         pool_tag = decode_queue.pool_tag_of(job.pool)
-        free_now = self.pool.free_count(job.pool)
-        self.engine.log(
+        free_now = self.service.free_unit_count(job.pool)
+        self.queue.engine.log(
             decode_queue.LOG_SOURCE,
             f"DECODE DONE {job.label} ({pool_tag}units free now {free_now})",
         )
@@ -432,7 +354,6 @@ class DecoderManager:
         self.dispatcher.run()
 
     def _weak_decode_done(self, job: message.DecodeJob, result) -> None:
-        _validate_logical_observables(job, result)
         job.completed = True
         self.service.free(job)
         key = (job.op_id, job.window_id)
@@ -443,86 +364,13 @@ class DecoderManager:
         if joined_result is None:
             self.dispatcher.run()
             return
-        self._conclude_weak(job, joined_result)
+        self._finish_weak(job, joined_result)
 
-    def _conclude_weak(self, job: message.DecodeJob, result) -> None:
-        """The weak outcome's decision and delivery.
-
-        In split-pair mode this runs at the gap join, otherwise straight
-        from decode end.
-        """
-        key = (job.op_id, job.window_id)
-        outcome = message.DecodeOutcome(job, result)
-        directive = self.escalation_policy.on_decode_outcome(
-            outcome, self.services
-        )
-        self.strong_requests.resolve_weak(key)
-        awaiting = directive.directive is message.Directive.AWAIT_STRONG
-        if directive.directive is message.Directive.FINALIZE:
-            self.cancel_strong(key)  # no-op unless one is live/held
-        if awaiting:
-            self._await_strong_result(job, key, directive)
-        job.awaiting_strong_result = awaiting  # BEFORE the commit callback
-        job.on_decoded(job, result)
-        processing = RequestProcessingOutcome.PRIMARY_FORWARDED_FOR_DELIVERY
-        if awaiting:
-            processing = RequestProcessingOutcome.WEAK_AWAITED_STRONG
-        self._record_request(job, result, processing, self.engine.now)
-        self._record_service(job)
+    def _finish_weak(self, job: message.DecodeJob, result) -> None:
+        """The weak outcome concluded; the memory and the queue move on."""
+        self.outcomes.conclude_weak(job, result)
         self.service.release_input(job)
         self.dispatcher.run()
-
-    def _await_strong_result(
-        self,
-        job: message.DecodeJob,
-        key: tuple,
-        directive: message.OutcomeDirective,
-    ) -> None:
-        """Send the escalation; the strong result is selected on delivery."""
-        serial_job = None
-        if directive.extra is not None:
-            serial_job = directive.extra.job
-        strong_request_key = directive.strong_request_key
-        deferred = serial_job is None and strong_request_key is not None
-        if serial_job is None and not deferred:
-            (carrier,) = self.strong_requests.carriers_for(key)
-            strong_request_key = carrier.request_job.request_key
-        self.services.prepare_strong_selection(
-            job,
-            strong_request_key,
-            serial_job,
-            deferred=deferred,
-            on_selection_delivered=lambda: self._select_strong_result(
-                key, strong_request_key
-            ),
-        )
-        self.strong_requests.begin_selection(key, strong_request_key)
-
-    def _select_strong_result(
-        self, key: tuple, request_key: message.DecoderRequestKey
-    ) -> None:
-        """Make one strong completion eligible only after WSD delivery."""
-        held = self.strong_requests.select(key, request_key)
-        if held is not None:
-            self._complete_strong_result(held)
-
-    def _complete_strong_result(
-        self, held: strong_requests_module.HeldStrongCompletion
-    ) -> None:
-        """Deliver a strong result to the destination that waits for it.
-
-        The ledger holds it when the demand is still on its way.
-        """
-        if not self.strong_requests.complete(held):
-            return
-        request_job = held.request_job
-        request_job.on_decoded(request_job, held.completion.result)
-        self._record_request(
-            held.request_job,
-            held.completion.result,
-            RequestProcessingOutcome.STRONG_FORWARDED_FOR_DELIVERY,
-            held.decode_output_ticks,
-        )
 
     # ------------------------------------------------- cancelling strong
 
@@ -534,10 +382,10 @@ class DecoderManager:
         job.cancelled = True
         self.service.evict(job)
         self.service.release_input(live.request_job)
-        self._record_request(
+        self.outcomes.report_request(
             live.request_job,
             None,
-            RequestProcessingOutcome.STRONG_CANCELLED_WHILE_STAGED,
+            message.RequestProcessingOutcome.STRONG_CANCELLED_WHILE_STAGED,
             None,
         )
 
@@ -550,10 +398,10 @@ class DecoderManager:
         # Credits belong to the original request, never to a batch service
         # job, and the request is its own service job before dispatch.
         self.service.release_input(live.request_job)
-        self._record_request(
+        self.outcomes.report_request(
             live.request_job,
             None,
-            RequestProcessingOutcome.STRONG_CANCELLED_BEFORE_DISPATCH,
+            message.RequestProcessingOutcome.STRONG_CANCELLED_BEFORE_DISPATCH,
             None,
         )
 
@@ -564,22 +412,22 @@ class DecoderManager:
         job.service_cancelled_request_keys.add(live.request_job.request_key)
         if self.strong_requests.has_survivors(job):
             self.service.release_input(live.request_job)
-            self._record_request(
+            self.outcomes.report_request(
                 live.request_job,
                 None,
-                RequestProcessingOutcome.STRONG_CANCELLED_MEMBER_SERVICE_CONTINUED,
+                message.RequestProcessingOutcome.STRONG_CANCELLED_MEMBER_SERVICE_CONTINUED,
                 None,
             )
             return
         job.cancelled = True
         self.service.abort(job)
         self.service.release_input(live.request_job)
-        self._record_service(job)
+        self.outcomes.report_service(job)
         self.dispatcher.run()
-        self._record_request(
+        self.outcomes.report_request(
             live.request_job,
             None,
-            RequestProcessingOutcome.STRONG_CANCELLED_DURING_SERVICE,
+            message.RequestProcessingOutcome.STRONG_CANCELLED_DURING_SERVICE,
             None,
         )
 
@@ -591,72 +439,6 @@ class DecoderManager:
             if _is_live_weak_window_job(job, window_key):
                 return job
         return None
-
-    # ------------------------------------------------- records, private
-
-    def _record_request(
-        self,
-        job: message.DecodeJob,
-        result: Optional[message.DecodeResult],
-        outcome: RequestProcessingOutcome,
-        decode_output_ticks: Optional[int],
-    ) -> None:
-        if self._terminal_request_records is None:
-            return
-        window = job.window
-        local_fragments = ()
-        if job.decoder_input is not None:
-            fragments = gap_joins_module.fragments_in(job.decoder_input)
-            local_fragments = tuple(fragments)
-        bit_count, weight = _syndrome_bit_count_and_weight(local_fragments)
-        soft_output = None
-        if result is not None:
-            soft_output = result.soft_output
-        record = TerminalRequestRecord(
-            job.request_key,
-            window.start_round,
-            window.buffer_hi,
-            job.n_rounds,
-            bit_count,
-            weight,
-            job.request_created_ticks,
-            job.request_admitted_ticks,
-            job.ready_time,
-            job.service_dispatch_ticks,
-            decode_output_ticks,
-            job.service_key,
-            soft_output,
-            outcome,
-        )
-        self._terminal_request_records.append(record)
-
-    def _record_service(self, job: message.DecodeJob) -> None:
-        if self._terminal_service_records is None:
-            return
-        if job.service_key is None:
-            return
-        original = job.service_original_request_keys
-        cancelled = []
-        completed = []
-        for key in original:
-            if key in job.service_cancelled_request_keys:
-                cancelled.append(key)
-            else:
-                completed.append(key)
-        dispatch = job.service_dispatch_ticks
-        service_ticks = self.engine.now - dispatch
-        record = TerminalServiceRecord(
-            job.service_key,
-            job.pool,
-            original,
-            tuple(completed),
-            tuple(cancelled),
-            job.n_rounds,
-            dispatch,
-            self.engine.now,
-            service_ticks,
-        )
-        self._terminal_service_records.append(record)
 
 
 def _refuse_spent_job(job: message.DecodeJob) -> None:
@@ -687,21 +469,6 @@ def _is_boundary_owed(job: message.DecodeJob) -> bool:
     return not job.gate.may_start(job)
 
 
-def _validate_logical_observables(
-    job: message.DecodeJob, result: message.DecodeResult
-) -> None:
-    logical_observables = result.logical_observables
-    if logical_observables is None:
-        return
-    for observable_index, bit in enumerate(logical_observables):
-        if bit not in (0, 1):
-            raise ValueError(
-                f"job ({job.op_id}, {job.window_id}) "
-                f"logical_observables index {observable_index} must be "
-                f"0 or 1, got {bit}"
-            )
-
-
 def _is_live_weak_window_job(job: message.DecodeJob, window_key: tuple) -> bool:
     key = (job.op_id, job.window_id)
     if key != window_key:
@@ -711,20 +478,6 @@ def _is_live_weak_window_job(job: message.DecodeJob, window_key: tuple) -> bool:
     if job.on_done is not None:
         return False
     return not job.cancelled
-
-
-def _syndrome_bit_count_and_weight(fragments: tuple) -> tuple:
-    """(bit count, set bits) of the landed input; None when bits are unknown."""
-    if not fragments:
-        return None, None
-    bit_count = 0
-    weight = 0
-    for fragment in fragments:
-        if fragment.bits is None:
-            return None, None
-        bit_count += len(fragment.bits)
-        weight += sum(fragment.bits)
-    return bit_count, weight
 
 
 def _unsettled_text(unsettled: dict) -> str:

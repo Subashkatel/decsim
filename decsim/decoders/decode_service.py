@@ -21,7 +21,6 @@ import numpy
 
 import decsim.config as config
 import decsim.decoders.decode_queue as decode_queue
-import decsim.decoders.decoder_memory as decoder_memory_module
 import decsim.decoders.decoder_memory_transfer as staging_module
 import decsim.decoders.decoder_pool as decoder_pool_module
 import decsim.decoders.decoder_unit as decoder_unit_module
@@ -94,15 +93,9 @@ class DecodeService:
         if strong_requests_module.is_merged_batch(job):
             demand = 0
             for member in self.strong_requests.members_of(job):
-                demand += (
-                    decoder_memory_module.count_decoder_input_round_demand(
-                        member.payloads
-                    )
-                )
+                demand += message.distinct_round_count(member.payloads)
             return demand
-        return decoder_memory_module.count_decoder_input_round_demand(
-            job.payloads
-        )
+        return message.distinct_round_count(job.payloads)
 
     # -------------------------------------------------- dispatch and start
 
@@ -152,7 +145,7 @@ class DecodeService:
         pipeline = self._pipeline_of(decoder, job)
         if job.decoder_input is not None:
             # the decoder reads this unit's memory now
-            job.payloads = gap_joins_module.fragments_in(job.decoder_input)
+            job.payloads = job.decoder_input.fragments()
         decoder.start(
             job, self.engine, lambda result: self.on_completed(job, result)
         )
@@ -238,6 +231,10 @@ class DecodeService:
     def release_inputs(self, members) -> None:
         """Return the credits of every request one decode still serves."""
         self.staging.release_service_members(members)
+
+    def free_unit_count(self, pool: str) -> int:
+        """Units of the pool with free compute now."""
+        return self.pool.free_count(pool)
 
     # ------------------------------------------------- the units' state
 
@@ -602,7 +599,7 @@ def job_defects_text(job: message.DecodeJob) -> str:
     memory (the algorithm stage reads the same fragments).
     """
     if job.decoder_input is not None:
-        fragments = gap_joins_module.fragments_in(job.decoder_input)
+        fragments = job.decoder_input.fragments()
     else:
         fragments = job.payloads
         if fragments is None:

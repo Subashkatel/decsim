@@ -52,6 +52,12 @@ class DecoderMemoryConfig:
 
     def __post_init__(self) -> None:
         copied = dict(self.capacity_rounds_by_pool)
+        for pool, capacity in copied.items():
+            if capacity < 1:
+                raise ValueError(
+                    f"pool {pool!r} needs a positive round capacity, "
+                    f"got {capacity}"
+                )
         frozen = types.MappingProxyType(copied)
         object.__setattr__(self, "capacity_rounds_by_pool", frozen)
 

@@ -6,6 +6,8 @@ App. C (rowD4): a pipelined unit retires its flights in issue order and
 a full pipeline stalls the intake until a flight retires.
 """
 
+import pytest
+
 import decsim.decoders.decoder_memory as decoder_memory
 import decsim.decoders.decoder_unit as decoder_unit
 import decsim.message as message
@@ -87,3 +89,14 @@ def test_the_residents_describe_their_phase():
     assert unit.describe_residents() == (
         "w0 computing, 3 rounds; w1 capturing, 2 rounds"
     )
+
+
+def test_a_memory_config_with_a_zero_capacity_is_refused_at_construction():
+    # A front-built memory config is a boundary: a unit that holds zero
+    # rounds can serve nothing, so the mistake is caught before a run
+    # rather than at the first deposit.
+
+    with pytest.raises(
+        ValueError, match="pool 'default' needs a positive round capacity"
+    ):
+        decoder_memory.DecoderMemoryConfig({"default": 0})

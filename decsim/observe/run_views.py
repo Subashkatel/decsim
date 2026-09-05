@@ -25,7 +25,7 @@ class UtilizationView:
 
     busy_units: int
     total_units: int
-    per_pool: tuple                 # ((pool_name, busy, total), ...)
+    per_pool: tuple  # ((pool_name, busy, total), ...)
 
 
 @dataclass(frozen=True)
@@ -33,11 +33,11 @@ class BacklogView:
     """Decode backlog at one instant, per lane and hierarchical
     (op -> patch -> system) in syndrome rounds."""
 
-    ready_jobs: int                 # jobs waiting across every queue
-    per_lane: tuple                 # ((lane, queued_jobs), ...); "" = default
-    per_op_rounds: tuple            # ((op_id, rounds_waiting), ...)
-    per_patch_rounds: tuple         # ((patch, rounds_waiting), ...)
-    total_rounds: int               # system-level depth
+    ready_jobs: int  # jobs waiting across every queue
+    per_lane: tuple  # ((lane, queued_jobs), ...); "" = default
+    per_op_rounds: tuple  # ((op_id, rounds_waiting), ...)
+    per_patch_rounds: tuple  # ((patch, rounds_waiting), ...)
+    total_rounds: int  # system-level depth
 
 
 @dataclass(frozen=True)
@@ -63,7 +63,7 @@ class WindowLatencyView:
     """
 
     stages: tuple = WINDOW_STAGES
-    rows: tuple = ()                # (WindowStageRow, ...)
+    rows: tuple = ()  # (WindowStageRow, ...)
 
 
 @dataclass(frozen=True)
@@ -72,7 +72,7 @@ class OpReactionInfo:
 
     op: int
     name: str
-    blocked_by: object              # op id or None
+    blocked_by: object  # op id or None
     round_ticks: int
     rounds: int
 
@@ -81,19 +81,19 @@ class OpReactionInfo:
 class ReactionView:
     """The reaction-path timeline of one run."""
 
-    execution_done: object               # last physical-work tick (None if unfinished)
-    fully_done: int                 # engine.now at snapshot
-    body_done_time: tuple           # ((op_id, tick), ...)
-    decode_release_time: tuple      # ((op_id, tick), ...)
-    ops: tuple                      # (OpReactionInfo, ...)
+    execution_done: object  # last physical-work tick (None if unfinished)
+    fully_done: int  # engine.now at snapshot
+    body_done_time: tuple  # ((op_id, tick), ...)
+    decode_release_time: tuple  # ((op_id, tick), ...)
+    ops: tuple  # (OpReactionInfo, ...)
 
 
 @dataclass(frozen=True)
 class TruthView:
     """Sampled ground truth next to the decoder's published predictions."""
 
-    observables: tuple              # ((op_id, (bit, ...)), ...)
-    predictions: tuple              # ((op_id, predicted), ...)
+    observables: tuple  # ((op_id, (bit, ...)), ...)
+    predictions: tuple  # ((op_id, predicted), ...)
 
 
 @dataclass(frozen=True)
@@ -161,8 +161,9 @@ def utilization_view(decoder_manager) -> UtilizationView:
     return UtilizationView(busy, total, tuple(per_pool))
 
 
-def backlog_view(window_manager, decoder_manager,
-                 include_rounds: bool = True) -> BacklogView:
+def backlog_view(
+    window_manager, decoder_manager, include_rounds: bool = True
+) -> BacklogView:
     """Snapshot job queues + per-op/per-patch/system syndrome backlog.
 
     include_rounds=False skips the (comparatively costly) rounds scan for
@@ -177,17 +178,25 @@ def backlog_view(window_manager, decoder_manager,
         ready_jobs += len(queue)
 
     per_op, per_patch = [], {}
-    for op_id, patch, waiting in (window_manager.rounds_backlog() if include_rounds else ()):
+    for op_id, patch, waiting in (
+        window_manager.rounds_backlog() if include_rounds else ()
+    ):
         per_op.append((op_id, waiting))
         per_patch[patch] = per_patch.get(patch, 0) + waiting
-    return BacklogView(ready_jobs=ready_jobs,
-                       per_lane=tuple(per_lane),
-                       per_op_rounds=tuple(sorted(
-                           per_op, key=lambda item: stable_identity_order_key(item[0])
-                       )),
-                       per_patch_rounds=tuple(sorted(per_patch.items(),
-                           key=lambda item: stable_identity_order_key(item[0]))),
-                       total_rounds=sum(w for _, w in per_op))
+    return BacklogView(
+        ready_jobs=ready_jobs,
+        per_lane=tuple(per_lane),
+        per_op_rounds=tuple(
+            sorted(per_op, key=lambda item: stable_identity_order_key(item[0]))
+        ),
+        per_patch_rounds=tuple(
+            sorted(
+                per_patch.items(),
+                key=lambda item: stable_identity_order_key(item[0]),
+            )
+        ),
+        total_rounds=sum(w for _, w in per_op),
+    )
 
 
 def window_latency_view(window_manager) -> WindowLatencyView:
@@ -197,17 +206,26 @@ def window_latency_view(window_manager) -> WindowLatencyView:
         window_manager.windows.items(),
         key=lambda item: stable_identity_order_key(item[0]),
     ):
-        stamps = (window.t_first_round, window.t_data_complete,
-                  window.t_queued, window.t_dispatch, window.t_done)
+        stamps = (
+            window.t_first_round,
+            window.t_data_complete,
+            window.t_queued,
+            window.t_dispatch,
+            window.t_done,
+        )
         if any(stamp is None for stamp in stamps):
             continue
-        rows.append(WindowStageRow(
-            op=op_id, window=window_index,
-            buffer_fill=window.t_data_complete - window.t_first_round,
-            dep_block=window.t_queued - window.t_data_complete,
-            queue_wait=window.t_dispatch - window.t_queued,
-            service=window.t_done - window.t_dispatch,
-            total=window.t_done - window.t_first_round))
+        rows.append(
+            WindowStageRow(
+                op=op_id,
+                window=window_index,
+                buffer_fill=window.t_data_complete - window.t_first_round,
+                dep_block=window.t_queued - window.t_data_complete,
+                queue_wait=window.t_dispatch - window.t_queued,
+                service=window.t_done - window.t_dispatch,
+                total=window.t_done - window.t_first_round,
+            )
+        )
     return WindowLatencyView(rows=tuple(rows))
 
 
@@ -215,33 +233,52 @@ def reaction_view(execution_runtime) -> ReactionView:
     """Snapshot execution admission and controller cadence state."""
     issuer = execution_runtime.issuer
     ops = tuple(
-        OpReactionInfo(op=op_id, name=op.name, blocked_by=op.blocked_by,
-                       round_ticks=issuer.round_ticks_for(op),
-                       rounds=issuer.round_count_for(op))
+        OpReactionInfo(
+            op=op_id,
+            name=op.name,
+            blocked_by=op.blocked_by,
+            round_ticks=issuer.round_ticks_for(op),
+            rounds=issuer.round_count_for(op),
+        )
         for op_id, op in sorted(
             execution_runtime.operations.items(),
-            key=lambda item: stable_identity_order_key(item[0])))
+            key=lambda item: stable_identity_order_key(item[0]),
+        )
+    )
     return ReactionView(
         execution_done=execution_runtime.last_finish_time,
         fully_done=execution_runtime.engine.now,
-        body_done_time=tuple(sorted(
-            execution_runtime.body_done_time.items(),
-            key=lambda item: stable_identity_order_key(item[0]))),
-        decode_release_time=tuple(sorted(
-            execution_runtime.decode_release_time.items(),
-            key=lambda item: stable_identity_order_key(item[0]))),
-        ops=ops)
+        body_done_time=tuple(
+            sorted(
+                execution_runtime.body_done_time.items(),
+                key=lambda item: stable_identity_order_key(item[0]),
+            )
+        ),
+        decode_release_time=tuple(
+            sorted(
+                execution_runtime.decode_release_time.items(),
+                key=lambda item: stable_identity_order_key(item[0]),
+            )
+        ),
+        ops=ops,
+    )
+
 
 def truth_view(window_manager, device) -> TruthView:
     """Snapshot sampled truth (device) next to published predictions."""
     sampled_truth = getattr(device, "sampled_truth", None)
     truth = sampled_truth() if sampled_truth is not None else {}
-    observables = tuple(sorted(truth.items(),
-                               key=lambda item: stable_identity_order_key(item[0])))
-    predictions = tuple(sorted(
-        window_manager.result_by_operation.items(),
-        key=lambda item: stable_identity_order_key(item[0]),
-    ))
+    observables = tuple(
+        sorted(
+            truth.items(), key=lambda item: stable_identity_order_key(item[0])
+        )
+    )
+    predictions = tuple(
+        sorted(
+            window_manager.result_by_operation.items(),
+            key=lambda item: stable_identity_order_key(item[0]),
+        )
+    )
     return TruthView(observables=observables, predictions=predictions)
 
 
@@ -258,13 +295,18 @@ def strong_work_view(window_manager, decoder_manager) -> StrongWorkView:
     admitted_keys = {key for keys, _, _ in admitted for key in keys}
     overlap = pending_keys & admitted_keys
     if overlap:
-        raise RuntimeError(f"strong work has overlapping owners for {overlap!r}")
+        raise RuntimeError(
+            f"strong work has overlapping owners for {overlap!r}"
+        )
 
     values = {
         phase: [0, 0]
         for phase in (
-            "waiting_far_boundary", "waiting_terminal_data",
-            "in_transit", "queued", "running",
+            "waiting_far_boundary",
+            "waiting_terminal_data",
+            "in_transit",
+            "queued",
+            "running",
         )
     }
     for _, phase, rounds in pending:
@@ -274,8 +316,7 @@ def strong_work_view(window_manager, decoder_manager) -> StrongWorkView:
         values[phase][0] += 1
         values[phase][1] += rounds
     phases = {
-        phase: StrongWorkPhaseView(*counts)
-        for phase, counts in values.items()
+        phase: StrongWorkPhaseView(*counts) for phase, counts in values.items()
     }
     return StrongWorkView(
         **phases,
@@ -289,42 +330,66 @@ def strong_work_view(window_manager, decoder_manager) -> StrongWorkView:
 
 def decoder_memory_view(decoder_manager) -> DecoderMemoryView:
     """Snapshot every unit's input memory, pool by pool."""
+    # Units are listed by name so the view's order does not depend on
+    # the order the pools were built in.
+    units = decoder_manager.pool.units()
+    by_name = sorted(units, key=_unit_name)
     rows = []
-    for unit in decoder_manager.pool.units():
+    for unit in by_name:
         rows.append(unit.memory.snapshot())
     return DecoderMemoryView(per_unit=tuple(rows))
 
 
-def switching_records_view(window_manager, decode_records) -> SwitchingRecordsView:
+def _unit_name(unit) -> tuple:
+    return (unit.pool, unit.index)
+
+
+def switching_records_view(
+    window_manager, decode_records
+) -> SwitchingRecordsView:
     """Compose terminal owner facts without duplicating transfer timing."""
     rows = []
-    for key, window in sorted(window_manager.windows.items(),
-                              key=lambda item: stable_identity_order_key(item[0])):
+    for key, window in sorted(
+        window_manager.windows.items(),
+        key=lambda item: stable_identity_order_key(item[0]),
+    ):
         contribution = window_manager.ledger.contributions.get(key)
         absorbed = window.is_absorbed
         absorbed_into = None
         if absorbed:
-            owners = [owner for owner, value in
-                      window_manager.ledger.contributions.items()
-                      if value.ownership_kind == "strong_window"
-                      and value.commit_lo <= window.commit_lo
-                      and value.commit_hi >= window.commit_hi]
+            owners = [
+                owner
+                for owner, value in window_manager.ledger.contributions.items()
+                if value.ownership_kind == "strong_window"
+                and value.commit_lo <= window.commit_lo
+                and value.commit_hi >= window.commit_hi
+            ]
             if len(owners) != 1:
                 raise RuntimeError(f"absorbed window {key} has no unique owner")
             absorbed_into = owners[0]
         elif contribution is None:
-            raise RuntimeError(f"final window {key} has no logical contribution")
-        rows.append(FinalWindowRow(
-            key, window.start_round, window.commit_lo, window.commit_hi,
-            window.buffer_hi,
-            None if absorbed else contribution.commit_lo,
-            None if absorbed else contribution.commit_hi,
-            "absorbed" if absorbed else contribution.ownership_kind,
-            absorbed_into, None if absorbed else
-            window.published_request_key))
+            raise RuntimeError(
+                f"final window {key} has no logical contribution"
+            )
+        rows.append(
+            FinalWindowRow(
+                key,
+                window.start_round,
+                window.commit_lo,
+                window.commit_hi,
+                window.buffer_hi,
+                None if absorbed else contribution.commit_lo,
+                None if absorbed else contribution.commit_hi,
+                "absorbed" if absorbed else contribution.ownership_kind,
+                absorbed_into,
+                None if absorbed else window.published_request_key,
+            )
+        )
     return SwitchingRecordsView(
-        tuple(rows), tuple(decode_records.requests),
-        tuple(decode_records.services))
+        tuple(rows),
+        tuple(decode_records.requests),
+        tuple(decode_records.services),
+    )
 
 
 @dataclass(frozen=True)
@@ -360,11 +425,16 @@ class RunLedgerView:
 
     events: tuple
 
-    def chain(self, *, op, round: Optional[int] = None,
-              window: Optional[int] = None) -> tuple:
-        rows = [event for event in self.events
-                if event.op == op and (round is None or event.round == round)
-                and (window is None or event.window == window)]
+    def chain(
+        self, *, op, round: Optional[int] = None, window: Optional[int] = None
+    ) -> tuple:
+        rows = [
+            event
+            for event in self.events
+            if event.op == op
+            and (round is None or event.round == round)
+            and (window is None or event.window == window)
+        ]
         return tuple(sorted(rows, key=lambda event: event.event_id))
 
     def check(self) -> None:
@@ -377,7 +447,8 @@ class RunLedgerView:
             if event.tick < prev.tick:
                 problems.append(
                     f"{event.kind}@{event.tick} precedes its cause "
-                    f"{prev.kind}@{prev.tick} (op {event.op})")
+                    f"{prev.kind}@{prev.tick} (op {event.op})"
+                )
         round_terminals: dict = {}
         emitted_rounds = set()
         for event in self.events:
@@ -393,21 +464,41 @@ class RunLedgerView:
             if len(terminals) != 1:
                 problems.append(
                     f"round {key} reached {len(terminals)} terminal states "
-                    f"{terminals}: expected exactly one")
+                    f"{terminals}: expected exactly one"
+                )
         if problems:
             raise RuntimeError(
-                "ledger check failed:\n  " + "\n  ".join(problems))
+                "ledger check failed:\n  " + "\n  ".join(problems)
+            )
 
 
 def event_ledger(completed) -> RunLedgerView:
     """Assemble the flight recorder of one CompletedRun."""
-    raw = []          # (tick, order, kind, fields...) before ids
+    raw = []  # (tick, order, kind, fields...) before ids
 
-    def add(kind, tick, op, *, round=None, window=None, patch=None,
-            route="", prev=None, status=""):
-        row = {"kind": kind, "tick": tick, "op": op, "round": round,
-               "window": window, "patch": patch, "route": route,
-               "prev": prev, "status": status}
+    def add(
+        kind,
+        tick,
+        op,
+        *,
+        round=None,
+        window=None,
+        patch=None,
+        route="",
+        prev=None,
+        status="",
+    ):
+        row = {
+            "kind": kind,
+            "tick": tick,
+            "op": op,
+            "round": round,
+            "window": window,
+            "patch": patch,
+            "route": route,
+            "prev": prev,
+            "status": status,
+        }
         raw.append(row)
         return row
 
@@ -417,15 +508,23 @@ def event_ledger(completed) -> RunLedgerView:
     published_rounds: set = set()
     for event in completed.round_events.events:
         key = (event.operation_id, event.round_index)
-        terminal = event.kind in ("PUBLISHED", "DROPPED",
-                                  "FEEDBACK_MEMORY_DELIVERED")
+        terminal = event.kind in (
+            "PUBLISHED",
+            "DROPPED",
+            "FEEDBACK_MEMORY_DELIVERED",
+        )
         if event.kind == "PUBLISHED":
             published_rounds.add(key)
-        row = add(event.kind, event.tick, event.operation_id,
-                  round=event.round_index, patch=event.patch_id,
-                  route=event.route,
-                  prev=last_of_round.get(key),
-                  status="terminal" if terminal else "")
+        row = add(
+            event.kind,
+            event.tick,
+            event.operation_id,
+            round=event.round_index,
+            patch=event.patch_id,
+            route=event.route,
+            prev=last_of_round.get(key),
+            status="terminal" if terminal else "",
+        )
         last_of_round[key] = row
         if event.kind == "PACKED":
             packed_of_round[key] = row
@@ -438,23 +537,35 @@ def event_ledger(completed) -> RunLedgerView:
     for tick, operation_id, round_index in completed.round_events.stored_rounds:
         key = (operation_id, round_index)
         stored_of_round[key] = add(
-            "STORED_SB1", tick, operation_id, round=round_index,
+            "STORED_SB1",
+            tick,
+            operation_id,
+            round=round_index,
             prev=packed_of_round.get(key),
-            status="" if key in published_rounds else "terminal")
+            status="" if key in published_rounds else "terminal",
+        )
 
     # window chains, from the window stamps
     frame_prev: dict = {}
     for (op_id, window_id), window in sorted(
-            completed.window_manager.windows.items(), key=repr):
+        completed.window_manager.windows.items(), key=repr
+    ):
         if window.t_data_complete is None:
             continue
         input_key = (op_id, window.buffer_hi)
         prev = last_of_round.get(input_key) or stored_of_round.get(input_key)
-        row = add("WINDOW_DATA_COMPLETE", window.t_data_complete, op_id,
-                  window=window_id, prev=prev)
-        for kind, tick in (("DECODE_QUEUED", window.t_queued),
-                           ("UNIT_ASSIGNED", window.t_dispatch),
-                           ("DECODE_DONE", window.t_done)):
+        row = add(
+            "WINDOW_DATA_COMPLETE",
+            window.t_data_complete,
+            op_id,
+            window=window_id,
+            prev=prev,
+        )
+        for kind, tick in (
+            ("DECODE_QUEUED", window.t_queued),
+            ("UNIT_ASSIGNED", window.t_dispatch),
+            ("DECODE_DONE", window.t_done),
+        ):
             if tick is None:
                 continue
             row = add(kind, tick, op_id, window=window_id, prev=row)
@@ -467,12 +578,23 @@ def event_ledger(completed) -> RunLedgerView:
         snapshot = frame.snapshot()
         for record in snapshot.records:
             op_id, window_id = record.window_key
-            accepted = add("FRAME_ACCEPTED", record.accepted_ticks, op_id,
-                           window=window_id, route=record.tier,
-                           prev=frame_prev.get(record.window_key))
-            committed = add("FRAME_COMMITTED", record.committed_ticks, op_id,
-                            window=window_id, route=record.tier,
-                            prev=accepted, status="terminal")
+            accepted = add(
+                "FRAME_ACCEPTED",
+                record.accepted_ticks,
+                op_id,
+                window=window_id,
+                route=record.tier,
+                prev=frame_prev.get(record.window_key),
+            )
+            committed = add(
+                "FRAME_COMMITTED",
+                record.committed_ticks,
+                op_id,
+                window=window_id,
+                route=record.tier,
+                prev=accepted,
+                status="terminal",
+            )
             best = committed_of_op.get(op_id)
             if best is None or committed["tick"] > best["tick"]:
                 committed_of_op[op_id] = committed
@@ -488,28 +610,45 @@ def event_ledger(completed) -> RunLedgerView:
         if event.kind == "DECISION_AVAILABLE":
             operation = operations.get(event.operation_id)
             blocking_op = getattr(operation, "blocked_by", None)
-            row = add(event.kind, event.tick, event.operation_id,
-                      prev=committed_of_op.get(blocking_op))
+            row = add(
+                event.kind,
+                event.tick,
+                event.operation_id,
+                prev=committed_of_op.get(blocking_op),
+            )
             decision_of_op[event.operation_id] = row
         elif event.kind == "CONTROL_PULSE_COMMAND_ISSUED":
-            row = add(event.kind, event.tick, event.operation_id,
-                      prev=decision_of_op.get(event.operation_id))
+            row = add(
+                event.kind,
+                event.tick,
+                event.operation_id,
+                prev=decision_of_op.get(event.operation_id),
+            )
             command_issued_by_identity[id(event.payload)] = row
         elif event.kind == "PRELOADED_COMMAND":
             row = add(event.kind, event.tick, event.operation_id)
             preloaded_by_identity[id(event.payload)] = row
         elif event.kind == "CONTROL_DECISION_ISSUED":
             decision_issued_of_op[event.operation_id] = add(
-                event.kind, event.tick, event.operation_id,
-                prev=decision_of_op.get(event.operation_id))
+                event.kind,
+                event.tick,
+                event.operation_id,
+                prev=decision_of_op.get(event.operation_id),
+            )
 
     released_of_op = {}
     for op_id, tick in sorted(
-            completed.execution_runtime.decode_release_time.items(), key=repr):
+        completed.execution_runtime.decode_release_time.items(), key=repr
+    ):
         released_of_op[op_id] = add(
-            "DECODE_RELEASED", tick, op_id,
-            prev=decision_of_op.get(op_id) or committed_of_op.get(
-                getattr(operations.get(op_id), "blocked_by", None)))
+            "DECODE_RELEASED",
+            tick,
+            op_id,
+            prev=decision_of_op.get(op_id)
+            or committed_of_op.get(
+                getattr(operations.get(op_id), "blocked_by", None)
+            ),
+        )
 
     # Rewire a dynamic command's issued event through the runtime release at
     # the same controller timestamp, making the dependency explicit.
@@ -524,30 +663,58 @@ def event_ledger(completed) -> RunLedgerView:
         command_identity = id(event.command)
         operation_id = event.command.operation.id
         if event.kind == "ARRIVED":
-            row = add("QPU_COMMAND_ARRIVED", event.tick, operation_id,
-                      prev=(command_issued_by_identity.get(command_identity) or
-                            preloaded_by_identity.get(command_identity)))
+            row = add(
+                "QPU_COMMAND_ARRIVED",
+                event.tick,
+                operation_id,
+                prev=(
+                    command_issued_by_identity.get(command_identity)
+                    or preloaded_by_identity.get(command_identity)
+                ),
+            )
             arrived_by_identity[command_identity] = row
         elif event.kind == "STARTED":
-            add("QPU_COMMAND_STARTED", event.tick, operation_id,
-                prev=arrived_by_identity.get(command_identity), status="terminal")
+            add(
+                "QPU_COMMAND_STARTED",
+                event.tick,
+                operation_id,
+                prev=arrived_by_identity.get(command_identity),
+                status="terminal",
+            )
 
     for op_id, tick in sorted(
-            getattr(completed.execution_runtime,
-                    "result_return_time_by_operation", {}).items(), key=repr):
-        add("RESULT_RETURNED_TO_QPU", tick, op_id,
+        getattr(
+            completed.execution_runtime, "result_return_time_by_operation", {}
+        ).items(),
+        key=repr,
+    ):
+        add(
+            "RESULT_RETURNED_TO_QPU",
+            tick,
+            op_id,
             prev=decision_issued_of_op.get(op_id) or decision_of_op.get(op_id),
-            status="terminal")
+            status="terminal",
+        )
 
-    ordered = sorted(enumerate(raw), key=lambda pair: (pair[1]["tick"], pair[0]))
+    ordered = sorted(
+        enumerate(raw), key=lambda pair: (pair[1]["tick"], pair[0])
+    )
     ids = {id(row): event_id for event_id, (_, row) in enumerate(ordered)}
     events = tuple(
         LedgerEvent(
-            event_id=ids[id(row)], kind=row["kind"], tick=row["tick"],
-            op=row["op"], round=row["round"], window=row["window"],
-            patch=row["patch"], route=row["route"],
-            prev_event_id=(None if row["prev"] is None
-                           else ids[id(row["prev"])]),
-            status=row["status"])
-        for _, row in ordered)
+            event_id=ids[id(row)],
+            kind=row["kind"],
+            tick=row["tick"],
+            op=row["op"],
+            round=row["round"],
+            window=row["window"],
+            patch=row["patch"],
+            route=row["route"],
+            prev_event_id=(
+                None if row["prev"] is None else ids[id(row["prev"])]
+            ),
+            status=row["status"],
+        )
+        for _, row in ordered
+    )
     return RunLedgerView(events=events)

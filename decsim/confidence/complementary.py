@@ -1,21 +1,28 @@
-"""Complementary-gap soft output: ``g_comp = |w_comp - w_min|`` for MWPM (SoftOutputMetric seam)."""
+"""The complementary gap: the confidence of one MWPM window decode.
 
-from __future__ import annotations
+g_comp = |w_comp - w_min| (Toshio et al. 2510.25222 Sec. III A, text
+lines 480-495 of tmp/papers/txt; the method of Gidney et al.
+2312.04522): the minimum-weight matching gives w_min and the decoded
+class, and the same graph with one virtual detector that pins the
+observable to the other class gives w_comp. A small gap is a decoder
+unsure of its class. The factory declares the source and builds one
+metric per window model for the confidence wrappers (decoder.py).
+"""
 
-from dataclasses import dataclass
-from typing import TYPE_CHECKING
+import dataclasses
+import time
 
-from ..message import SoftOutput, SoftOutputSource
-from ..detector_error_model.fault_model_contracts import (
-    GRAPHLIKE_FAULT_MODEL_REQUIRED,
-)
-from ..decoders.minimum_weight_perfect_matching.weights import matching_weights
+import numpy
+import pymatching
+import scipy.sparse
 
-if TYPE_CHECKING:
-    import stim
-    from ..detector_error_model.fault_model_contracts import WindowErrorModel
+import decsim.decoders.minimum_weight_perfect_matching.weights as weights_module
+import decsim.detector_error_model.fault_identity_validation as fault_identity
+import decsim.detector_error_model.fault_model_contracts as fault_models
+import decsim.detector_error_model.stim_fault_catalog as stim_fault_catalog
+import decsim.message as message
 
-COMPLEMENTARY_GAP_SOURCE = SoftOutputSource(
+COMPLEMENTARY_GAP_SOURCE = message.SoftOutputSource(
     method="complementary_gap",
     cluster_origin="mwpm_opposite_logical",
     growth_schedule="minimum_weight_matching",
@@ -24,260 +31,286 @@ COMPLEMENTARY_GAP_SOURCE = SoftOutputSource(
     weight_step_natural_log=None,
     references=("complementary-gap method",),
 )
+# PyMatching finishes its graph lazily on the first decode; this many
+# single-fault syndromes warm both graphs at build
+WARM_UP_SYNDROME_COUNT = 3
 
 
-def dem_to_matrices(dem: "stim.DetectorErrorModel"):
-    """Flatten a decomposed DEM into ``(H[det x err], O[obs x err], weights=ln((1-p)/p))``."""
-    import numpy as np
+def detector_error_model_to_matrices(detector_error_model) -> tuple:
+    """A decomposed stim model as (check, observables, weights).
 
-    from ..detector_error_model.fault_identity_validation import (
-        validate_graphlike_fault,
+    check is detectors by faults, observables is observables by faults,
+    both 0/1; weights are ln((1 - p) / p) per fault.
+    """
+    detector_count = detector_error_model.num_detectors
+    observable_count = detector_error_model.num_observables
+    detector_sets, observable_sets, priors = (
+        stim_fault_catalog.detector_error_model_to_faults(detector_error_model)
     )
-    from ..detector_error_model.stim_fault_catalog import (
-        detector_error_model_to_faults,
-    )
-
-    num_det = dem.num_detectors
-    num_obs = dem.num_observables
-    h_cols: list = []
-    o_cols: list = []
-    weights: list = []
-
-    def append_component(dets, obs, weight) -> None:
-        hcol = np.zeros(num_det, dtype=np.uint8)
-        hcol[list(dets)] = 1
-        ocol = np.zeros(num_obs, dtype=np.uint8)
-        ocol[list(obs)] = 1
-        h_cols.append(hcol)
-        o_cols.append(ocol)
-        weights.append(weight)
-
-    detector_sets, observable_sets, priors = detector_error_model_to_faults(dem)
-    for fault_index, (detectors, logical_observables, probability) in enumerate(
-        zip(detector_sets, observable_sets, priors)
-    ):
-        validate_graphlike_fault(
-            detectors,
-            logical_observables,
-            location=f"fault {fault_index}",
+    check_columns = []
+    observable_columns = []
+    fault_weights = []
+    faults = zip(detector_sets, observable_sets, priors)
+    for fault_index, (detectors, observables, probability) in enumerate(faults):
+        location = f"fault {fault_index}"
+        fault_identity.validate_graphlike_fault(
+            detectors, observables, location=location
         )
-        append_component(
-            detectors,
-            logical_observables,
-            float(matching_weights([probability])[0]),
-        )
-
-    h = (
-        np.array(h_cols, dtype=np.uint8).T
-        if h_cols
-        else np.zeros((num_det, 0), np.uint8)
-    )
-    o = (
-        np.array(o_cols, dtype=np.uint8).T
-        if o_cols
-        else np.zeros((num_obs, 0), np.uint8)
-    )
-    return h, o, np.asarray(weights, dtype=float)
+        check_column = _indicator_column(detector_count, detectors)
+        observable_column = _indicator_column(observable_count, observables)
+        weight = weights_module.matching_weights([probability])
+        check_columns.append(check_column)
+        observable_columns.append(observable_column)
+        fault_weights.append(float(weight[0]))
+    check = _columns_as_matrix(check_columns, detector_count)
+    observable_matrix = _columns_as_matrix(observable_columns, observable_count)
+    weights = numpy.asarray(fault_weights, dtype=float)
+    return check, observable_matrix, weights
 
 
 class ComplementaryGapMetric:
-    """Complementary-gap soft output for a single-observable decoding window."""
+    """The complementary gap of a single-observable decoding window."""
 
     name = "complementary_gap"
 
-    def __init__(self, check, obs, weights):
-        import numpy as np
-        import pymatching
-
-        from ..detector_error_model.fault_identity_validation import (
-            validate_graphlike_matrices,
-        )
-
-        from scipy.sparse import csc_matrix, issparse
-
-        self.check = (
-            check.tocsc() if issparse(check) else csc_matrix(np.asarray(check))
-        ).astype(np.uint8)
-        self.obs = (obs.toarray() if issparse(obs) else np.asarray(obs)).astype(
-            np.uint8
-        )
-        self.weights = np.asarray(weights, dtype=float)
-        validate_graphlike_matrices(
-            self.check,
-            self.obs,
+    def __init__(self, check, observables, weights) -> None:
+        self.check_matrix = _as_uint8_csc(check)
+        self.observable_matrix = _as_uint8_dense(observables)
+        self.weights = numpy.asarray(weights, dtype=float)
+        fault_identity.validate_graphlike_matrices(
+            self.check_matrix,
+            self.observable_matrix,
             location="complementary-gap model",
         )
-        if self.obs.shape[0] != 1:
+        observable_count = self.observable_matrix.shape[0]
+        if observable_count != 1:
             raise ValueError(
                 "the complementary gap is defined for one observable; got "
-                f"{self.obs.shape[0]}. Decode each logical operator with its own "
-                "metric."
+                f"{observable_count}. Decode each logical operator with its "
+                "own metric."
             )
         # parallel faults (a window restriction folds distinct faults onto
         # one edge) combine as independent errors, the convention of
         # PyMatching's detector-error-model loader and of the window
         # decoder, so w_min here is the window decoder's minimum weight
-        priors = 1 / (1 + np.exp(self.weights))
-        self._base = pymatching.Matching.from_check_matrix(
-            self.check.copy(),
-            weights=self.weights,
-            error_probabilities=priors,
-            merge_strategy="independent",
-        )
-        from scipy.sparse import csc_matrix, vstack
-
-        check_aug = vstack([self.check, csc_matrix(self.obs[0:1, :])]).tocsc()
-        self._aug = pymatching.Matching.from_check_matrix(
-            check_aug.copy(),
-            weights=self.weights,
-            error_probabilities=priors,
-            merge_strategy="independent",
+        priors = 1 / (1 + numpy.exp(self.weights))
+        self._matching = _matching_over(self.check_matrix, self.weights, priors)
+        observable_row = self.observable_matrix[0:1, :]
+        observable_check = scipy.sparse.csc_matrix(observable_row)
+        stacked = scipy.sparse.vstack([self.check_matrix, observable_check])
+        augmented_check = stacked.tocsc()
+        self._augmented_matching = _matching_over(
+            augmented_check, self.weights, priors
         )
         self._warm_matchings()
 
-    def _warm_matchings(self) -> None:
-        """Decode a few single-fault syndromes on both graphs at build.
-
-        PyMatching finishes its internal graph construction lazily on
-        the first decode; without this, every window's first timed solve
-        silently pays graph build (the base window decoder warms for the
-        same reason). Each warm-up syndrome is one column's detector
-        set, which that fault alone explains, so it is satisfiable; the
-        augmented graph additionally gets that fault's observable bit.
-        """
-        import numpy as np
-
-        warmed = 0
-        for column in range(self.check.shape[1]):
-            rows = self.check.indices[
-                self.check.indptr[column] : self.check.indptr[column + 1]
-            ]
-            if rows.size == 0:
-                continue
-            syndrome = np.zeros(self.check.shape[0], dtype=np.uint8)
-            syndrome[rows] = 1
-            self._base.decode(syndrome)
-            observable_bit = int(self.obs[0, column])
-            augmented_syndrome = np.concatenate(
-                [syndrome, [observable_bit]]
-            ).astype(np.uint8)
-            self._aug.decode(augmented_syndrome)
-            warmed += 1
-            if warmed == 3:
-                break
-
     @classmethod
-    def from_dem(
-        cls, dem: "stim.DetectorErrorModel"
+    def from_detector_error_model(
+        cls, detector_error_model
     ) -> "ComplementaryGapMetric":
-        """Build the metric from a (decomposed) stim DetectorErrorModel."""
-        check, obs, weights = dem_to_matrices(dem)
-        return cls(check, obs, weights)
-
-    @classmethod
-    def from_window_model(
-        cls, model: "WindowErrorModel"
-    ) -> "ComplementaryGapMetric":
-        """Build the metric from a decsim WindowErrorModel (check/obs/priors)."""
-        from ..detector_error_model.fault_model_contracts import (
-            FaultRepresentation,
+        """The metric of a decomposed stim DetectorErrorModel."""
+        check, observables, weights = detector_error_model_to_matrices(
+            detector_error_model
         )
+        return cls(check, observables, weights)
 
-        faults = model.require_faults(FaultRepresentation.GRAPHLIKE)
-        return cls(
-            faults.check,
-            faults.observables,
-            matching_weights(faults.priors),
+    @classmethod
+    def from_window_model(cls, model) -> "ComplementaryGapMetric":
+        """The metric of a decsim window model (check, observables, priors)."""
+        faults = model.require_faults(
+            fault_models.FaultRepresentation.GRAPHLIKE
+        )
+        weights = weights_module.matching_weights(faults.priors)
+        return cls(faults.check, faults.observables, weights)
+
+    def evaluate(self, syndrome) -> message.SoftOutput:
+        """The soft output of one syndrome: the gap and the two weights.
+
+        w_min is the minimum-weight matching's weight, w_comp the weight
+        of the matching forced into the other class (Toshio et al.
+        2510.25222 Sec. III A).
+        """
+        bits = _syndrome_bits(syndrome)
+        correction, minimum_weight = self._matching.decode(
+            bits, return_weight=True
+        )
+        predicted_class = self._class_of(correction)
+        complementary_class = predicted_class ^ 1
+        forced_bits = _with_virtual_detector(bits, complementary_class)
+        _, complementary_weight = self._augmented_matching.decode(
+            forced_bits, return_weight=True
+        )
+        w_min = float(minimum_weight)
+        w_comp = float(complementary_weight)
+        difference = w_comp - w_min
+        gap = abs(difference)
+        return message.SoftOutput(
+            gap=gap, source=COMPLEMENTARY_GAP_SOURCE, w_min=w_min, w_comp=w_comp
         )
 
     def forced_class_solve(self, syndrome, forced_class: int) -> tuple:
         """(weight, nanoseconds) of one forced-class solve.
 
         The augmented virtual-detector bit pins the observable's parity
-        to ``forced_class``; the solve is independent of the other
-        class's solve, which is what lets the two run on different
-        hardware. ``paired_evaluate`` is both solves on one host;
-        the split engines call this once each.
+        to forced_class; the solve is independent of the other class's
+        solve, which is what lets the two run on different hardware.
+        paired_evaluate is both solves on one host; the split engines
+        call this once each.
         """
-        import time
-
-        import numpy as np
-
-        bits = np.asarray(syndrome, dtype=np.uint8).ravel()
-        forced_bits = np.concatenate([bits, [forced_class]]).astype(np.uint8)
-        started_ns = time.perf_counter_ns()
-        _, weight = self._aug.decode(forced_bits, return_weight=True)
-        elapsed_ns = time.perf_counter_ns() - started_ns
-        return float(weight), elapsed_ns
+        bits = _syndrome_bits(syndrome)
+        forced_bits = _with_virtual_detector(bits, forced_class)
+        started = time.perf_counter_ns()
+        _, weight = self._augmented_matching.decode(
+            forced_bits, return_weight=True
+        )
+        finished = time.perf_counter_ns()
+        elapsed_nanoseconds = finished - started
+        return float(weight), elapsed_nanoseconds
 
     def paired_evaluate(self, syndrome) -> "PairedGapEvaluation":
-        """Evaluate the gap as two independent forced-class solves.
+        """The gap as two independent forced-class solves.
 
         Each solve constrains the observable to one class by setting the
         augmented virtual-detector bit, so neither depends on the other:
         this is the form two matching cores compute side by side. The
-        unconstrained minimum weight equals the smaller forced weight,
-        the prediction is the winning class, and the gap is the weight
-        difference; ``evaluate`` computes the same object serially.
+        unconstrained minimum weight w_min equals the smaller forced
+        weight, the prediction is the winning class, and the gap is the
+        weight difference; evaluate computes the same object serially.
         Each solve carries its own wall-clock time so a caller can model
         the pair's latency as the slower core, not the sum.
         """
         forced_weights = []
-        solve_times_ns = []
+        solve_nanoseconds = []
         for forced_class in (0, 1):
-            weight, elapsed_ns = self.forced_class_solve(syndrome, forced_class)
+            weight, elapsed = self.forced_class_solve(syndrome, forced_class)
             forced_weights.append(weight)
-            solve_times_ns.append(elapsed_ns)
-        predicted_class = int(forced_weights[1] < forced_weights[0])
+            solve_nanoseconds.append(elapsed)
+        is_class_one_lighter = forced_weights[1] < forced_weights[0]
+        predicted_class = int(is_class_one_lighter)
         w_min = forced_weights[predicted_class]
-        w_comp = forced_weights[1 - predicted_class]
-        soft_output = SoftOutput(
-            gap=abs(w_comp - w_min),
-            source=COMPLEMENTARY_GAP_SOURCE,
-            w_min=w_min,
-            w_comp=w_comp,
+        complementary_class = 1 - predicted_class
+        w_comp = forced_weights[complementary_class]
+        difference = w_comp - w_min
+        gap = abs(difference)
+        soft_output = message.SoftOutput(
+            gap=gap, source=COMPLEMENTARY_GAP_SOURCE, w_min=w_min, w_comp=w_comp
         )
         return PairedGapEvaluation(
             soft_output=soft_output,
             predicted_class=predicted_class,
-            forced_solve_ns=tuple(solve_times_ns),
+            forced_solve_nanoseconds=tuple(solve_nanoseconds),
         )
 
-    def evaluate(self, syndrome) -> SoftOutput:
-        """Return the :class:`SoftOutput` (logical value + gap) for one syndrome."""
-        import numpy as np
+    def _class_of(self, correction) -> int:
+        """The observable's parity under the correction."""
+        if self.observable_matrix.shape[1] == 0:
+            return 0
+        parity = (self.observable_matrix @ correction) % 2
+        return int(parity[0])
 
-        bits = np.asarray(syndrome, dtype=np.uint8).ravel()
-        correction, w_min = self._base.decode(bits, return_weight=True)
-        pred = int(((self.obs @ correction) % 2)[0]) if self.obs.shape[1] else 0
-        forced = np.concatenate([bits, [pred ^ 1]]).astype(np.uint8)
-        _, w_comp = self._aug.decode(forced, return_weight=True)
-        return SoftOutput(
-            gap=abs(float(w_comp) - float(w_min)),
-            source=COMPLEMENTARY_GAP_SOURCE,
-            w_min=float(w_min),
-            w_comp=float(w_comp),
-        )
+    def _warm_matchings(self) -> None:
+        """Decode a few single-fault syndromes on both graphs at build.
+
+        Without this, every window's first timed solve silently pays
+        the graph build (the base window decoder warms for the same
+        reason). Each warm-up syndrome is one column's detector set,
+        which that fault alone explains, so it is satisfiable; the
+        augmented graph additionally gets that fault's observable bit.
+        """
+        warmed = 0
+        column_count = self.check_matrix.shape[1]
+        for column in range(column_count):
+            rows = _column_rows(self.check_matrix, column)
+            if rows.size == 0:
+                continue
+            syndrome = numpy.zeros(
+                self.check_matrix.shape[0], dtype=numpy.uint8
+            )
+            syndrome[rows] = 1
+            self._matching.decode(syndrome)
+            observable_bit = int(self.observable_matrix[0, column])
+            augmented_syndrome = _with_virtual_detector(
+                syndrome, observable_bit
+            )
+            self._augmented_matching.decode(augmented_syndrome)
+            warmed += 1
+            if warmed == WARM_UP_SYNDROME_COUNT:
+                break
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class PairedGapEvaluation:
     """One window's gap computed as two parallel forced-class solves."""
 
-    soft_output: SoftOutput
+    soft_output: message.SoftOutput
     predicted_class: int
-    forced_solve_ns: tuple
+    forced_solve_nanoseconds: tuple
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class ComplementaryGapMetricFactory:
-    """Stateless complementary-gap builder used by ``SoftOutputDecoder``."""
+    """The stateless builder the wrappers hold: a source, a metric per model."""
 
     source = COMPLEMENTARY_GAP_SOURCE
-    fault_model_requirement = GRAPHLIKE_FAULT_MODEL_REQUIRED
+    fault_model_requirement = fault_models.GRAPHLIKE_FAULT_MODEL_REQUIRED
 
-    def from_window_model(
-        self,
-        model: "WindowErrorModel",
-    ) -> ComplementaryGapMetric:
+    def from_window_model(self, model) -> ComplementaryGapMetric:
+        """The metric of one placed window model."""
         return ComplementaryGapMetric.from_window_model(model)
+
+
+def _indicator_column(length: int, indices) -> numpy.ndarray:
+    column = numpy.zeros(length, dtype=numpy.uint8)
+    column[list(indices)] = 1
+    return column
+
+
+def _columns_as_matrix(columns: list, row_count: int) -> numpy.ndarray:
+    if not columns:
+        return numpy.zeros((row_count, 0), numpy.uint8)
+    stacked = numpy.array(columns, dtype=numpy.uint8)
+    return stacked.T
+
+
+def _as_uint8_csc(check):
+    if scipy.sparse.issparse(check):
+        sparse = check.tocsc()
+    else:
+        dense = numpy.asarray(check)
+        sparse = scipy.sparse.csc_matrix(dense)
+    return sparse.astype(numpy.uint8)
+
+
+def _as_uint8_dense(observables) -> numpy.ndarray:
+    if scipy.sparse.issparse(observables):
+        dense = observables.toarray()
+    else:
+        dense = numpy.asarray(observables)
+    return dense.astype(numpy.uint8)
+
+
+def _matching_over(check, weights, priors) -> pymatching.Matching:
+    copied = check.copy()
+    return pymatching.Matching.from_check_matrix(
+        copied,
+        weights=weights,
+        error_probabilities=priors,
+        merge_strategy="independent",
+    )
+
+
+def _column_rows(check, column: int) -> numpy.ndarray:
+    start = check.indptr[column]
+    stop = check.indptr[column + 1]
+    return check.indices[start:stop]
+
+
+def _syndrome_bits(syndrome) -> numpy.ndarray:
+    bits = numpy.asarray(syndrome, dtype=numpy.uint8)
+    return bits.ravel()
+
+
+def _with_virtual_detector(bits, observable_bit: int) -> numpy.ndarray:
+    """The syndrome with the augmented graph's observable detector appended."""
+    extended = numpy.concatenate([bits, [observable_bit]])
+    return extended.astype(numpy.uint8)

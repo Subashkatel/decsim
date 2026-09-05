@@ -19,7 +19,7 @@ from .complementary import (
     COMPLEMENTARY_GAP_SOURCE,
     ComplementaryGapMetric,
     ComplementaryGapMetricFactory,
-    dem_to_matrices,
+    detector_error_model_to_matrices,
 )
 from .decoder import SoftOutputDecoder
 from .cluster import (
@@ -33,7 +33,7 @@ __all__ = [
     "ComplementaryGapMetric",
     "ComplementaryGapMetricFactory",
     "COMPLEMENTARY_GAP_SOURCE",
-    "dem_to_matrices",
+    "detector_error_model_to_matrices",
     "SoftOutputDecoder",
     "UnionFindClusterGapDecoder",
     "union_find_cluster_gap_source",

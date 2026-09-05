@@ -109,7 +109,7 @@ def test_frozen_mem_surface_schedule_has_stable_structure_and_gate_rounds():
     result = completed.run()
 
     resolved_rounds = tuple(
-        completed.window_manager.rounds_for(operation)
+        completed.window_manager.planner.round_count_of(operation.id)
         for operation in program.operations
     )
     assert resolved_rounds == (3, 3, 3, 3, 3, 3, 3, 3, 3, 1, 3)
@@ -156,11 +156,10 @@ def test_frozen_mem_surface_native_round_routing_completes_without_quality_claim
     device = _physical_device(program)
     completed, result = _run_native_physical_program(program, device)
 
-    assert completed.window_manager.rounds_for(
-        program.decoder_operations[0]
-    ) == 8
+    assert completed.window_manager.planner.round_count_of(program.decoder_operations[0]
+    .id) == 8
     assert tuple(
-        completed.window_manager.rounds_for(operation)
+        completed.window_manager.planner.round_count_of(operation.id)
         for operation in program.operations
     ) == (8, 1, 1, 1, 1, 1, 1, 1, 1, 1, 8)
     submissions = [

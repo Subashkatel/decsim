@@ -1,17 +1,19 @@
 """The windows facade: the window life cycle of every operation.
 
-Which rounds each window needs, when it is ready, when its result
-commits and reaches the Pauli frame and the conditional release.
-Boundaries between windows are the BoundaryCourier's, ownership of
-committed rounds is the LogicalLedger's, the strong tier is
-StrongEscalation's (NoStrongTier when the policy never escalates) and
-dynamic streams are DynamicWindows'; all of them are built here and
-work on this manager's tables. One round reads as accept_window_input,
-check_window, _submit_window_decode, on_decode_done, _commit_window.
+Which windows exist is the WindowPlanner's, which rounds arrived and
+whether a window has its data is the RoundTracker's; the facade
+receives rounds, keeps the holds, requests decodes, commits results and
+delivers each operation's result, the shape of gem5's cache (BaseCache
+owns its MSHR queue, write buffer and tags, each one job, and implements
+the ports: src/mem/cache/base.hh). Boundaries between windows are the
+BoundaryCourier's, ownership of committed rounds is the LogicalLedger's,
+the strong tier is StrongEscalation's (NoStrongTier when the policy
+never escalates). One round reads as accept_window_input, check_window,
+_submit_window_decode, on_decode_done, _commit_window.
 
-Wide state (46 attributes) recorded for the structural commits that
-split it into planner, tracker, retention, requester, committer and
-results (slice 5 design note, section 3).
+Wide state recorded for the structural commits that split the rest into
+retention, requester, committer and results (slice 5 design note,
+section 3).
 """
 
 import dataclasses
@@ -25,7 +27,6 @@ import decsim.message as message
 import decsim.syndrome_buffer.round_store as round_store_module
 import decsim.syndrome_buffer.settings as round_store_settings
 import decsim.windows.committed_rounds as committed_rounds
-import decsim.windows.dynamic_windows as dynamic_windows
 import decsim.windows.window_boundaries as window_boundaries
 import decsim.windows.windowing_schemes as windowing_schemes
 
@@ -91,15 +92,13 @@ class WindowManager:
         self,
         engine,
         *,
-        scheme,
-        resolved_operations,
+        planner,
+        tracker,
         links,
         conditional_release,
         boundary_policy,
         window_interaction,
-        fault_model_requirement_for,
         feedback_boundary_mode: str = "trailing_buffer",
-        error_model_provider=None,
         retain_strong_context: bool,
         syndrome_buffer: Optional[round_store_module.RoundStore] = None,
         syndrome_buffer_1: Optional[round_store_module.RoundStore] = None,
@@ -110,20 +109,14 @@ class WindowManager:
         on_workload_complete: Callable[[], None],
     ):
         self.engine = engine
-        self.scheme = scheme
-        operation_by_id = {
-            operation.operation_id: operation
-            for operation in resolved_operations
-        }
-        self._resolved_operations = types.MappingProxyType(operation_by_id)
+        self.planner = planner
+        self.tracker = tracker
         self.links = links
         self.conditional_release = conditional_release
         self.pauli_frame = pauli_frame
         self.boundary_policy = boundary_policy
         self.window_interaction = window_interaction
-        self._fault_model_requirement_for_code = fault_model_requirement_for
         self.feedback_boundary_mode = feedback_boundary_mode
-        self.error_model_provider = error_model_provider
         self.retain_strong_context = retain_strong_context
         # jobs whose windows still owe a boundary at the decoder; the
         # boundary receive path releases them (wired by the root)
@@ -150,21 +143,6 @@ class WindowManager:
             settings = round_store_settings.RoundStoreSettings()
             syndrome_buffer_1 = round_store_module.RoundStore(settings)
         self.syndrome_buffer_1 = syndrome_buffer_1
-        # the room-side store's stored-through round per operation, fed by
-        # the strong writer's on_round_stored: the strong tier's
-        # data-readiness gates read this, never Buffer 0's counter
-        self.strong_rounds_arrived_by_operation: dict = {}
-        self.lifecycle = dynamic_windows.DynamicWindows(self)
-
-        self._operation_by_id: dict[int, message.Operation] = {}
-        self.rounds_arrived_by_operation: dict[int, int] = {}
-        self.memory_rounds_by_operation: dict[int, int] = {}
-
-        self.windows: dict[tuple, message.Window] = {}
-        self.window_indices_by_operation: dict[int, list] = {}
-        self.window_count_by_operation: dict[int, int] = {}
-        self.successors_by_operation: dict[int, list] = {}
-        self.blocking_operation_ids: set[int] = set()
         self.result_by_operation: dict[int, tuple[int, ...]] = {}
         self.segment_results_sent: set = set()
         self._required_stream_end_by_operation_id: dict[int, int] = {}
@@ -173,27 +151,28 @@ class WindowManager:
         self.courier = window_boundaries.BoundaryCourier(self)
         self._finished_operation_ids: set[int] = set()
         self._workload_complete_sent = False
-        self.model_by_window: dict = {}
-        self.total_windows = 0
-        self._windowed_by_operation: dict = {}
-        self._batch_preceding_idle_rounds_by_operation: dict = {}
-        self._protocol_by_operation: dict = {}
+        # the committed prefix of each stream, so segments release once
+        self._committed_round_count_by_stream: dict = {}
+        for window in self.planner.windows_by_key.values():
+            window_info = message.WindowInfo.from_window(window)
+            window.boundary_in = self.window_interaction.initial_boundary_state(
+                window_info
+            )
+
+    @property
+    def windows(self) -> dict:
+        """Every window by key; the planner's table."""
+        return self.planner.windows_by_key
 
     # ---- the plan: operations, streams, windows and their holds
 
     def register_operation(self, operation: message.Operation) -> None:
         """Track an operation's rounds, payload RAM, and feedback role."""
-        if operation.id not in self._operation_by_id:
-            self.rounds_arrived_by_operation[operation.id] = 0
-            self.memory_rounds_by_operation[operation.id] = 0
+        is_new = self.tracker.register_operation(operation)
+        if is_new:
             self.syndrome_buffer.open_operation(operation.id)
-        self._operation_by_id[operation.id] = operation
-        if operation.blocked_by is not None:
-            self.blocking_operation_ids.add(operation.blocked_by)
 
-    def register_stream(
-        self, stream_operation: message.Operation, resolved_operation
-    ) -> None:
+    def register_stream(self, stream_operation: message.Operation) -> None:
         """Register a stream whose windows are created at runtime."""
         resolved_feedback_mode = stream_operation.feedback_boundary_mode
         if resolved_feedback_mode is None:
@@ -201,78 +180,12 @@ class WindowManager:
         stream_operation = dataclasses.replace(
             stream_operation, feedback_boundary_mode=resolved_feedback_mode
         )
-        stream_id = stream_operation.id
-        self._operation_by_id[stream_id] = stream_operation
-        self.rounds_arrived_by_operation.setdefault(stream_id, 0)
-        self.memory_rounds_by_operation.setdefault(stream_id, 0)
-        self.syndrome_buffer.open_operation(stream_id)
-        self.window_count_by_operation[stream_id] = 0
-        self.window_indices_by_operation[stream_id] = []
-        self.successors_by_operation.setdefault(stream_id, [])
-        self._windowed_by_operation[stream_id] = True
-        self._batch_preceding_idle_rounds_by_operation[stream_id] = False
-        source_round_limit = self._stream_source_round_limit(stream_operation)
-        geometry = resolved_operation.code_geometry
-        finite_geometries = None
-        if source_round_limit is not None:
-            finite_plan = self.scheme.plan_operation(
-                stream_id,
-                source_round_limit,
-                commit_round_count=geometry.commit_round_count,
-                buffer_round_count=geometry.buffer_round_count,
-            )
-            finite_geometries = finite_plan.windows
-        self.lifecycle.register(
-            stream_operation,
-            commit_round_count=geometry.commit_round_count,
-            buffer_round_count=geometry.buffer_round_count,
-            source_round_limit=source_round_limit,
-            finite_geometries=finite_geometries,
-        )
+        self.syndrome_buffer.open_operation(stream_operation.id)
+        source_round_limit = self.planner.register_stream(stream_operation)
+        self.tracker.register_stream(stream_operation, source_round_limit)
 
-    def _stream_source_round_limit(self, stream_operation) -> Optional[int]:
-        """The rounds the source can supply, None for an open stream."""
-        if self.error_model_provider is None:
-            return None
-        round_count = self.rounds_for(stream_operation)
-        fault_model_requirement = self._fault_model_requirement(
-            stream_operation
-        )
-        return self.error_model_provider.register_dynamic_stream(
-            stream_operation,
-            round_count,
-            fault_model_requirement=fault_model_requirement,
-        )
-
-    def rounds_for(self, operation: message.Operation) -> int:
-        """The root-resolved round count of an operation."""
-        resolved = self._resolved_operations[operation.id]
-        return resolved.round_count
-
-    def _fault_model_requirement(self, operation: message.Operation):
-        """The decoder views for this operation's frozen code."""
-        resolved = self._resolved_operations[operation.id]
-        code_name = resolved.code_geometry.code_name
-        return self._fault_model_requirement_for_code(code_name)
-
-    def load_plan(self, plan: message.WindowPlan, buffering_plan) -> None:
-        """Install the compile-time window plan and its holds."""
-        self.windows = plan.windows
-        for window in self.windows.values():
-            window_info = message.WindowInfo.from_window(window)
-            window.boundary_in = self.window_interaction.initial_boundary_state(
-                window_info
-            )
-        self.window_count_by_operation = plan.window_count
-        self.window_indices_by_operation = plan.op_windows
-        self.successors_by_operation = plan.successors
-        self._windowed_by_operation = plan.windowed_by_operation
-        self._batch_preceding_idle_rounds_by_operation = (
-            plan.batch_preceding_idle_rounds_by_operation
-        )
-        self._protocol_by_operation = _protocols_of(plan)
-        self.total_windows = plan.total_windows
-        self._build_window_error_models()
+    def install_planned_holds(self, buffering_plan) -> None:
+        """Check the stores against the plan and place its holds."""
         self._check_store_capacities(buffering_plan)
         self._register_planned_holds(buffering_plan)
 
@@ -320,36 +233,6 @@ class WindowManager:
         for owner, identities in plan.potential_holds:
             self.syndrome_buffer_1.register_hold(owner, identities)
 
-    def _build_window_error_models(self) -> None:
-        """Ask the syndrome source for per-window detector error models."""
-        if self.error_model_provider is None:
-            return
-        for operation_id, operation in self._operation_by_id.items():
-            self._build_operation_window_models(operation_id, operation)
-
-    def _build_operation_window_models(self, operation_id, operation) -> None:
-        keys = []
-        indices = self.window_indices_by_operation.get(operation_id, [])
-        for window_index in indices:
-            keys.append((operation_id, window_index))
-        windows = [self.windows[key] for key in keys]
-        if not windows:
-            return
-        round_count = self.rounds_for(operation)
-        fault_model_requirement = self._fault_model_requirement(operation)
-        models = self.error_model_provider.window_models_for_operation(
-            operation,
-            windows,
-            round_count,
-            fault_model_requirement=fault_model_requirement,
-            fault_exclusion_ranges=(),
-            window_protocol=self._protocol_by_operation[operation.id],
-        )
-        if not models:
-            return
-        for key, model in zip(keys, models):
-            self.model_by_window[key] = model
-
     # ---- retention: which rounds each window holds in the two stores
 
     def _transfer_retention_hold(
@@ -394,7 +277,7 @@ class WindowManager:
         window: Optional[message.Window] = None,
     ) -> list:
         """Retained payload round keys for a possibly cross-operation range."""
-        operation_rounds = self._effective_round_count_for_window(
+        operation_rounds = self.tracker.effective_round_count_for_window(
             operation_id, window
         )
         last_local_round = min(buffer_hi, operation_rounds)
@@ -405,7 +288,9 @@ class WindowManager:
         overflow = buffer_hi - operation_rounds
         if overflow <= 0:
             return reads
-        successor_ids = self.successors_by_operation.get(operation_id, [])
+        successor_ids = self.planner.successors_by_operation.get(
+            operation_id, []
+        )
         overflow_stop = overflow + 1
         for successor_id in successor_ids:
             for round_index in range(1, overflow_stop):
@@ -451,7 +336,7 @@ class WindowManager:
         (a strong window that absorbs the window owns its rounds from then
         on).
         """
-        window = self.windows[key]
+        window = self.planner.windows_by_key[key]
         self.withdraw_decode(key)
         window.queued = False
         window.blocked_logged = False
@@ -482,7 +367,7 @@ class WindowManager:
     def _resolving_without_new_slots(self, key: tuple, visiting: set) -> bool:
         if key in visiting:
             return False
-        window = self.windows.get(key)
+        window = self.planner.windows_by_key.get(key)
         if window is None:
             return True
         if window.is_absorbed:
@@ -547,12 +432,12 @@ class WindowManager:
         """Reject a new consumer if any already-arrived input was released."""
         if store is None:
             store = self.syndrome_buffer
-        arrived_by_operation = self.rounds_arrived_by_operation
+        arrived_for = self.tracker.rounds_arrived
         if store is not self.syndrome_buffer:
-            arrived_by_operation = self.strong_rounds_arrived_by_operation
+            arrived_for = self.tracker.strong_rounds_arrived
         missing = []
         for round_key in round_keys:
-            if _is_released(store, arrived_by_operation, round_key):
+            if _is_released(store, arrived_for, round_key):
                 missing.append(round_key)
         if missing:
             raise RuntimeError(
@@ -562,79 +447,44 @@ class WindowManager:
 
     # ---- dynamic streams: their windows are planned as rounds arrive
 
-    def refresh_unqueued_stream_windows(self, stream_id) -> None:
-        """Refresh retained reads once a stream boundary closes the tail."""
-        indices = self.window_indices_by_operation.get(stream_id, [])
-        for window_index in indices:
-            key = (stream_id, window_index)
-            window = self.windows[key]
-            if window.queued or window.committed:
-                continue
-            self._replace_window_read_refs(key, window)
+    def _update_stream(self, operation_id) -> None:
+        """Grow (and maybe seal) the stream as one more round arrives."""
+        if not self.planner.has_stream(operation_id):
+            return
+        highest_known_round = self.tracker.rounds_arrived(operation_id)
+        self._grow_stream(operation_id, highest_known_round, None)
+        if self.tracker.is_sealed(operation_id):
+            return
+        if self.tracker.reaches_source_limit(operation_id):
+            limit = self.tracker.source_round_limit(operation_id)
+            self.seal_stream(operation_id, limit)
 
-    def reset_dynamic_window_reads(
-        self, stream_id, window_index: int, window: message.Window
+    def _grow_stream(
+        self, stream_id, highest_known_round: int, round_cap: Optional[int]
     ) -> None:
-        """After clipping a live tail, retain only the weak commit range."""
-        key = (stream_id, window_index)
-        stop_round = window.commit_hi + 1
-        new_reads = []
-        for round_index in range(window.start_round, stop_round):
-            new_reads.append((stream_id, round_index))
-        new_reads.sort()
-        self.syndrome_buffer.replace_hold(key, new_reads)
+        """Plan every window whose commit region has begun, and admit it."""
+        if self.tracker.is_sealed(stream_id):
+            return
+        created = self.planner.grow_stream(
+            stream_id, highest_known_round, round_cap
+        )
+        for window in created:
+            self._admit_stream_window(window)
 
-    def trim_dynamic_window_tail(
-        self, stream_id, stream_round_count: int, buffer_rounds
-    ) -> None:
-        """Clip the one window whose commit region holds the sealed length."""
-        indices = self.window_indices_by_operation.get(stream_id, [])
-        for window_index in indices:
-            window = self.windows[(stream_id, window_index)]
-            if window.commit_lo <= stream_round_count <= window.commit_hi:
-                window.commit_hi = stream_round_count
-                window.buffer_hi = stream_round_count + buffer_rounds
-                window.n_rounds = window.buffer_hi - window.start_round + 1
-                self.reset_dynamic_window_reads(stream_id, window_index, window)
-                return
-
-    def create_dynamic_window(
-        self, stream_id, window_index, commit_lo, commit_hi, buffer_hi
-    ) -> None:
-        """Create one window and connect it to the live stream plan.
+    def _admit_stream_window(self, window: message.Window) -> None:
+        """Connect one new stream window: its boundary, its model, its holds.
 
         If the previous boundary already arrived, apply it immediately.
         """
-        buffer_lo = commit_lo
-        round_count = buffer_hi - buffer_lo + 1
-        window = message.Window(
-            op_id=stream_id,
-            k=window_index,
-            commit_lo=commit_lo,
-            commit_hi=commit_hi,
-            buffer_hi=buffer_hi,
-            n_rounds=round_count,
-            buffer_lo=buffer_lo,
-        )
         window_info = message.WindowInfo.from_window(window)
         window.boundary_in = self.window_interaction.initial_boundary_state(
             window_info
         )
-        key = (stream_id, window_index)
-        if window_index > 0:
-            previous_key = (stream_id, window_index - 1)
-            self._link_to_previous_window(previous_key, key, window)
-        self.windows[key] = window
-        self.window_indices_by_operation[stream_id].append(window_index)
-        self.window_count_by_operation[stream_id] += 1
-        self.total_windows += 1
-        if self.error_model_provider is not None:
-            model = self.error_model_provider.window_model_for_stream(
-                stream_id, window
-            )
-            if model is not None:
-                self.model_by_window[key] = model
-        self._add_window_read_refs(key, window)
+        if window.k > 0:
+            previous_key = (window.op_id, window.k - 1)
+            self._link_to_previous_window(previous_key, window.key, window)
+        self.planner.attach_stream_model(window)
+        self._add_window_read_refs(window.key, window)
 
     def _link_to_previous_window(
         self, previous_key: tuple, key: tuple, window: message.Window
@@ -646,19 +496,53 @@ class WindowManager:
             return
         window.deps.append(previous_key)
         window.deps_remaining = 1
-        previous = self.windows[previous_key]
+        previous = self.planner.windows_by_key[previous_key]
         previous.dependents.append(key)
 
-    def validate_stream_length(
-        self, stream_id, stream_round_count: int
-    ) -> None:
-        """Refuse a stream longer than its source can supply."""
-        if self.error_model_provider is None:
+    def seal_stream(self, stream_id, stream_round_count: int) -> None:
+        """Close a dynamic stream once its full length has arrived."""
+        if self.tracker.is_sealed(stream_id):
             return
-        stream_operation = self._operation_by_id[stream_id]
-        self.error_model_provider.validate_stream_length(
-            stream_operation, stream_round_count
-        )
+        self.tracker.check_stream_length(stream_id, stream_round_count)
+        self._grow_stream(stream_id, stream_round_count, stream_round_count)
+        if not self.planner.is_finite_stream(stream_id):
+            clipped = self.planner.trim_stream_tail(
+                stream_id, stream_round_count
+            )
+            if clipped is not None:
+                self._reset_stream_window_reads(clipped)
+        self.tracker.seal(stream_id, stream_round_count)
+        self.check_windows_for_operation(stream_id)
+        self.finish_workload_if_ready()
+
+    def _reset_stream_window_reads(self, window: message.Window) -> None:
+        """After clipping a live tail, retain only the weak commit range."""
+        stop_round = window.commit_hi + 1
+        new_reads = []
+        for round_index in range(window.start_round, stop_round):
+            new_reads.append((window.op_id, round_index))
+        new_reads.sort()
+        self.syndrome_buffer.replace_hold(window.key, new_reads)
+
+    def close_stream_boundary(self, stream_id, stream_round_count: int) -> None:
+        """Mark a live stream round as a measurement-closed boundary."""
+        if not self.planner.has_stream(stream_id):
+            return
+        self.tracker.close_boundary(stream_id, stream_round_count)
+        self._grow_stream(stream_id, stream_round_count, None)
+        self._refresh_unqueued_stream_windows(stream_id)
+        self.check_windows_for_operation(stream_id)
+
+    def _refresh_unqueued_stream_windows(self, stream_id) -> None:
+        """Refresh retained reads once a stream boundary closes the tail."""
+        for window in self.planner.windows_of(stream_id):
+            if window.queued or window.committed:
+                continue
+            self._replace_window_read_refs(window.key, window)
+
+    def has_dynamic_stream(self, stream_id) -> bool:
+        """True for a stream whose windows are planned at runtime."""
+        return self.planner.has_stream(stream_id)
 
     # ---- arrivals: the WindowInput port and the room-side store's signal
 
@@ -669,12 +553,12 @@ class WindowManager:
         allocation; no decoder input moves here. Window input transfer
         begins only when a decode request is admitted.
         """
-        operation = self._operation_by_id[packet.operation_id]
+        operation = self.tracker.operation_by_id[packet.operation_id]
         self._refuse_unplanned_round(packet, operation)
         if self.primary_tier is not message.DecoderTier.STRONG:
             # Buffer 0 publication is the readiness authority for the weak lane
             self._count_arrival(operation, packet.round_index)
-            self.lifecycle.maybe_update(operation.id)
+            self._update_stream(operation.id)
             self.escalation.after_arrival(operation.id)
             self._wake_windows(operation)
         # a round whose every consumer already resolved (an absorbed window's
@@ -695,10 +579,7 @@ class WindowManager:
                 f"was freed. The device emitted more rounds than the "
                 f"execution plan expects."
             )
-        fallback_rounds = self.rounds_for(operation)
-        round_limit = self.lifecycle.arrival_round_limit(
-            operation.id, fallback_rounds=fallback_rounds
-        )
+        round_limit = self.tracker.arrival_round_limit(operation.id)
         if round_limit is not None and packet.round_index > round_limit:
             raise ValueError(
                 f"round {packet.round_index} of {operation.name} exceeds the "
@@ -707,9 +588,8 @@ class WindowManager:
 
     def accept_feedback_memory_round(self, source_operation_id) -> None:
         """Record one idle or memory round and re-check waiting windows."""
-        self.memory_rounds_by_operation[source_operation_id] += 1
-        operation = self._operation_by_id[source_operation_id]
-        memory_rounds = self.memory_rounds_by_operation[source_operation_id]
+        memory_rounds = self.tracker.note_memory_round(source_operation_id)
+        operation = self.tracker.operation_by_id[source_operation_id]
         self.engine.log(
             "DecoderCluster",
             f"memory round for {operation.name} "
@@ -723,32 +603,21 @@ class WindowManager:
         Wake the strong tier's listeners, and drive readiness when the
         strong tier is primary.
         """
-        stored_before = self.strong_rounds_arrived_by_operation.get(
-            operation_id, 0
-        )
-        self.strong_rounds_arrived_by_operation[operation_id] = max(
-            stored_before, round_index
-        )
+        self.tracker.note_room_round(operation_id, round_index)
         self.escalation.after_arrival(operation_id)
         if self.primary_tier is not message.DecoderTier.STRONG:
             return
-        operation = self._operation_by_id[operation_id]
-        stored_through = self.strong_rounds_arrived_by_operation.get(
-            operation_id, 0
-        )
+        operation = self.tracker.operation_by_id[operation_id]
+        stored_through = self.tracker.strong_rounds_arrived(operation_id)
         self._count_arrival(operation, stored_through)
-        self.lifecycle.maybe_update(operation_id)
+        self._update_stream(operation_id)
         self._wake_windows(operation)
 
     def _count_arrival(
         self, operation: message.Operation, round_index: int
     ) -> None:
         """Advance the readiness arrival counter; the authority calls this."""
-        arrived_before = self.rounds_arrived_by_operation[operation.id]
-        self.rounds_arrived_by_operation[operation.id] = max(
-            arrived_before, round_index
-        )
-        arrived_now = self.rounds_arrived_by_operation[operation.id]
+        arrived_now = self.tracker.note_arrival(operation.id, round_index)
         self.engine.log(
             "DecoderCluster",
             f"round {round_index} of {operation.name} arrived "
@@ -762,35 +631,25 @@ class WindowManager:
 
     def prepend_idle_rounds(self, operation_id: int, round_count: int) -> None:
         """Fold pre-gate idle rounds into a batch-style operation."""
-        if round_count <= 0:
-            return
-        batches_idle_rounds = (
-            self._batch_preceding_idle_rounds_by_operation.get(
-                operation_id, False
-            )
-        )
-        if not batches_idle_rounds:
-            return
-        window = self.windows[(operation_id, 0)]
-        window.batched_preceding_idle_round_count += round_count
+        self.planner.prepend_idle_rounds(operation_id, round_count)
 
     # ---- readiness: a window with its data and no owed boundary is requested
 
     def check_windows_for_operation(self, operation_id: int) -> None:
         """Check every window of the operation, in index order."""
-        window_count = self.window_count_by_operation[operation_id]
+        window_count = self.planner.window_count_of(operation_id)
         for window_index in range(window_count):
             self.check_window((operation_id, window_index))
 
     def check_window(self, key: tuple) -> None:
         """If a window has its data, submit it through the escalation policy."""
-        window = self.windows[key]
+        window = self.planner.windows_by_key[key]
         if window.queued or window.committed:
             return
         self._stamp_first_round_if_arrived(window)
-        if not self._window_data_complete(window):
+        if not self.tracker.is_data_complete(window):
             return
-        operation = self._operation_by_id[window.op_id]
+        operation = self.tracker.operation_by_id[window.op_id]
         if window.t_data_complete is None:
             window.t_data_complete = self.engine.now
             self._note_memory_filled_buffer(window, operation)
@@ -804,8 +663,7 @@ class WindowManager:
     def _stamp_first_round_if_arrived(self, window: message.Window) -> None:
         if window.t_first_round is not None:
             return
-        arrived = self.rounds_arrived_by_operation[window.op_id]
-        if arrived < window.start_round:
+        if not self.tracker.has_first_round(window):
             return
         first_round_key = (window.op_id, window.start_round)
         window.t_first_round = self.syndrome_buffer.publication_tick(
@@ -821,7 +679,7 @@ class WindowManager:
         the flag keeps that approximation visible wherever the window's
         result is read.
         """
-        readiness = self._window_readiness(window)
+        readiness = self.tracker.readiness(window)
         if not windowing_schemes.buffer_filled_by_memory_only(
             window, readiness
         ):
@@ -831,76 +689,6 @@ class WindowManager:
             f"{operation.name} W{window.k} buffer filled by memory rounds "
             f"(time-only, no syndrome content)",
         )
-
-    def _window_data_complete(self, window: message.Window) -> bool:
-        readiness = self._window_readiness(window)
-        return self.scheme.data_complete(window, readiness=readiness)
-
-    def _window_readiness(
-        self, window: message.Window
-    ) -> message.WindowReadiness:
-        successor_ids = sorted(
-            self.successors_by_operation[window.op_id],
-            key=message.stable_identity_order_key,
-        )
-        successors = []
-        for successor_id in successor_ids:
-            arrived = self.rounds_arrived_by_operation[successor_id]
-            round_count = self._round_count_for_window(successor_id)
-            readiness = message.SuccessorReadiness(
-                successor_id, arrived, round_count
-            )
-            successors.append(readiness)
-        local_round_count = self._effective_round_count_for_window(
-            window.op_id, window
-        )
-        closed_boundary = self._closed_boundary_round_for_window(window)
-        is_tail_closed = closed_boundary is not None
-        return message.WindowReadiness(
-            local_rounds_arrived=self.rounds_arrived_by_operation[window.op_id],
-            local_round_count=local_round_count,
-            successors=tuple(successors),
-            memory_rounds_arrived=self.memory_rounds_by_operation[window.op_id],
-            tail_closed=is_tail_closed,
-        )
-
-    def _round_count_for_window(
-        self, operation_id, window: Optional[message.Window] = None
-    ) -> int:
-        fallback_rounds = 0
-        if not self.lifecycle.has(operation_id):
-            operation = self._operation_by_id[operation_id]
-            fallback_rounds = self.rounds_for(operation)
-        return self.lifecycle.round_count_for_window(
-            operation_id, window, fallback_rounds=fallback_rounds
-        )
-
-    def _effective_round_count_for_window(
-        self, operation_id, window: Optional[message.Window]
-    ) -> int:
-        round_count = self._round_count_for_window(operation_id, window)
-        if window is None:
-            return round_count
-        closed = self._closed_boundary_round_for_window(window)
-        if closed is None:
-            return round_count
-        return min(round_count, closed)
-
-    def _closed_boundary_round_for_window(
-        self, window: message.Window
-    ) -> Optional[int]:
-        stream_boundary = self.lifecycle.closed_boundary_for_window(window)
-        if stream_boundary is not None:
-            return stream_boundary
-        operation = self._operation_by_id[window.op_id]
-        if operation.feedback_boundary_mode != "measurement_closed":
-            return None
-        if operation.id not in self.blocking_operation_ids:
-            return None
-        round_count = self._round_count_for_window(window.op_id, window)
-        if window.commit_hi <= round_count < window.buffer_hi:
-            return round_count
-        return None
 
     # ---- the request: build the job, ask the policy, enqueue
 
@@ -932,18 +720,19 @@ class WindowManager:
         round_count = (
             payload_round_count + window.batched_preceding_idle_round_count
         )
-        resolved = self._resolved_operations[operation.id]
-        model = self.model_by_window.get(key)
+        spatial_nodes = self.planner.spatial_node_count_of(operation.id)
+        geometry = self.planner.code_geometry_of(operation.id)
+        model = self.planner.model_by_window.get(key)
         label = self._job_label(window, operation)
         return message.DecodeJob(
             op_id=window.op_id,
             window_id=window.k,
             n_rounds=round_count,
             ready_time=self.engine.now,
-            spatial_nodes=resolved.spatial_node_count,
+            spatial_nodes=spatial_nodes,
             payloads=payloads,
             dem=model,
-            code=resolved.code_geometry.code_name,
+            code=geometry.code_name,
             window=window,
             label=label,
             strong_label=f"strong({operation.name} W{window.k})",
@@ -955,12 +744,12 @@ class WindowManager:
         self, window: message.Window, operation: message.Operation
     ) -> str:
         """The decode job's log label."""
-        if self._windowed_by_operation[window.op_id]:
+        if self.planner.is_windowed(window.op_id):
             return (
                 f"{operation.name} W{window.k} "
                 f"[commit {window.commit_lo}-{window.commit_hi}]"
             )
-        body_rounds = self._round_count_for_window(operation.id, window)
+        body_rounds = self.tracker.round_count_for_window(operation.id, window)
         idle_rounds = window.batched_preceding_idle_round_count
         if idle_rounds:
             effective_rounds = window.n_rounds + idle_rounds
@@ -1083,7 +872,7 @@ class WindowManager:
         """
         if store is None:
             store = self.syndrome_buffer
-        operation_rounds = self._effective_round_count_for_window(
+        operation_rounds = self.tracker.effective_round_count_for_window(
             window.op_id, window
         )
         end_round = min(window.buffer_hi, operation_rounds)
@@ -1099,7 +888,9 @@ class WindowManager:
         overflow = window.buffer_hi - operation_rounds
         if overflow <= 0:
             return payloads
-        successor_ids = self.successors_by_operation.get(window.op_id, [])
+        successor_ids = self.planner.successors_by_operation.get(
+            window.op_id, []
+        )
         for successor_id in successor_ids:
             self._append_overflow_payloads(
                 payloads,
@@ -1289,12 +1080,12 @@ class WindowManager:
         net_error do; the frame commit downstream never gates the next
         window.
         """
-        window = self.windows[(job.op_id, job.window_id)]
+        window = self.planner.windows_by_key[(job.op_id, job.window_id)]
         window.t_done = self.engine.now
         if job.awaiting_strong_result:
             self._commit_decode_done(job, result)
             return
-        operation = self._operation_by_id[job.op_id]
+        operation = self.tracker.operation_by_id[job.op_id]
         self._hand_on_boundary(job, result, window, operation)
         # the result rides its tier's output link home: WDO for the weak
         # tier, DO for a strong-primary decode
@@ -1327,13 +1118,13 @@ class WindowManager:
     ) -> None:
         """Commit after the weak result's transport, or provisionally."""
         key = (job.op_id, job.window_id)
-        window = self.windows[key]
-        operation = self._operation_by_id[job.op_id]
+        window = self.planner.windows_by_key[key]
+        operation = self.tracker.operation_by_id[job.op_id]
         self._commit_window(result, key, window, operation)
         is_final = not job.awaiting_strong_result
         if is_final:
             window.published_request_key = job.request_key
-        self.lifecycle.update_committed_round_count(operation.id)
+        self._update_committed_round_count(operation.id)
         if job.awaiting_strong_result:
             # provisional: the boundary leaves with the commit
             self._hand_on_boundary(job, result, window, operation)
@@ -1372,12 +1163,12 @@ class WindowManager:
         """
         rows = []
         ordered_ids = sorted(
-            self._operation_by_id, key=message.stable_identity_order_key
+            self.tracker.operation_by_id, key=message.stable_identity_order_key
         )
         for operation_id in ordered_ids:
-            operation = self._operation_by_id[operation_id]
+            operation = self.tracker.operation_by_id[operation_id]
             decoded = self._committed_prefix_round_count(operation_id)
-            arrived = self.rounds_arrived_by_operation.get(operation_id, 0)
+            arrived = self.tracker.rounds_arrived(operation_id)
             undecoded = arrived - decoded
             waiting = max(0, undecoded)
             patch = _representative_patch(operation)
@@ -1437,8 +1228,8 @@ class WindowManager:
             completion.request_key.operation_id,
             completion.request_key.window_id,
         )
-        window = self.windows[key]
-        operation = self._operation_by_id[window.op_id]
+        window = self.planner.windows_by_key[key]
+        operation = self.tracker.operation_by_id[window.op_id]
         payload_bits = self._result_payload_bits(completion.result, operation)
         commit = functools.partial(self._commit_strong_decode_done, completion)
         self._send_window_transfer(
@@ -1462,8 +1253,8 @@ class WindowManager:
             completion.request_key.window_id,
         )
         result = completion.result
-        window = self.windows[key]
-        operation = self._operation_by_id[window.op_id]
+        window = self.planner.windows_by_key[key]
+        operation = self.tracker.operation_by_id[window.op_id]
         if self.pauli_frame is None:
             self._finish_strong_commit(
                 completion, key, result, window, operation
@@ -1505,15 +1296,15 @@ class WindowManager:
             boundary = self.window_interaction.boundary_from_result(
                 result, held.boundary
             )
-            held_operation = self._operation_by_id[held.operation_id]
+            held_operation = self.tracker.operation_by_id[held.operation_id]
             self.courier.send(
                 window,
                 held_operation,
                 boundary,
                 source_request_key=completion.request_key,
             )
-        committed_round_count = self.lifecycle.committed_round_count(
-            operation.id
+        committed_round_count = self._committed_round_count_by_stream.get(
+            operation.id, 0
         )
         self.release_stream_segments_at_commit(
             operation.id, committed_round_count
@@ -1523,7 +1314,7 @@ class WindowManager:
 
     def _window_infos(self):
         infos = {}
-        for key, window in self.windows.items():
+        for key, window in self.planner.windows_by_key.items():
             infos[key] = message.WindowInfo.from_window(window)
         return types.MappingProxyType(infos)
 
@@ -1543,9 +1334,9 @@ class WindowManager:
         if self._strong_store_references(operation.id):
             return
         committed = self._committed_windows_of(operation.id)
-        if len(committed) != self.window_count_by_operation[operation.id]:
+        if len(committed) != self.planner.window_count_of(operation.id):
             return
-        if not self.lifecycle.sealed(operation.id):
+        if not self.tracker.is_sealed(operation.id):
             return
         self._finished_operation_ids.add(operation.id)
         self._deliver_result(operation)
@@ -1567,11 +1358,11 @@ class WindowManager:
         """Tell the root once every window of the workload is final."""
         if self._workload_complete_sent:
             return
-        if self._committed_window_count() != self.total_windows:
+        if self._committed_window_count() != self.planner.total_windows:
             return
         if self._has_window_awaiting_strong(None):
             return
-        if self.lifecycle.has_unsealed_streams():
+        if self.tracker.has_unsealed_streams():
             return
         if self.on_workload_complete is None:
             return
@@ -1579,11 +1370,9 @@ class WindowManager:
         self.on_workload_complete()
 
     def _deliver_result(self, operation: message.Operation) -> None:
-        window_keys = []
-        for window_index in self.window_indices_by_operation[operation.id]:
-            window_keys.append((operation.id, window_index))
-        commit_los = [self.windows[key].commit_lo for key in window_keys]
-        commit_his = [self.windows[key].commit_hi for key in window_keys]
+        windows = self.planner.windows_of(operation.id)
+        commit_los = [window.commit_lo for window in windows]
+        commit_his = [window.commit_hi for window in windows]
         commit_lo = min(commit_los)
         commit_hi = max(commit_his)
         logical_observables = self.ledger.observables_for_interval(
@@ -1605,7 +1394,7 @@ class WindowManager:
 
         Gated as operations are: no pending strong may still change it.
         """
-        operations = self._operation_by_id.values()
+        operations = self.tracker.operation_by_id.values()
         operations = list(operations)
         for operation in operations:
             self._release_segment_if_committed(
@@ -1625,7 +1414,7 @@ class WindowManager:
             operation_stream_id, stream_offset = binding
         if operation_stream_id != stream_id:
             return
-        if operation.id not in self.blocking_operation_ids:
+        if operation.id not in self.tracker.blocking_operation_ids:
             return
         if operation.id in self.segment_results_sent:
             return
@@ -1645,8 +1434,17 @@ class WindowManager:
         self.segment_results_sent.add(operation.id)
         self.conditional_release.release_waiters(operation)
 
+    def _update_committed_round_count(self, stream_id) -> None:
+        """Advance the stream's committed prefix; release what it covers."""
+        committed = self._committed_prefix_round_count(stream_id)
+        cached = self._committed_round_count_by_stream.get(stream_id, 0)
+        if committed <= cached:
+            return
+        self._committed_round_count_by_stream[stream_id] = committed
+        self.release_stream_segments_at_commit(stream_id, committed)
+
     def _segment_waits_for_strong(self, stream_id, segment_end: int) -> bool:
-        for key, window in self.windows.items():
+        for key, window in self.planner.windows_by_key.items():
             if key[0] != stream_id:
                 continue
             if not _is_awaiting_strong(window):
@@ -1658,7 +1456,7 @@ class WindowManager:
     def _committed_windows_of(self, operation_id) -> list:
         """The operation's committed windows, absorbed ones included."""
         committed = []
-        for key, window in self.windows.items():
+        for key, window in self.planner.windows_by_key.items():
             if key[0] != operation_id:
                 continue
             if window.committed:
@@ -1667,14 +1465,14 @@ class WindowManager:
 
     def _committed_window_count(self) -> int:
         count = 0
-        for window in self.windows.values():
+        for window in self.planner.windows_by_key.values():
             if window.committed:
                 count += 1
         return count
 
     def _has_window_awaiting_strong(self, operation_id) -> bool:
         """Whether a window of the operation (or of any) awaits its redo."""
-        for key, window in self.windows.items():
+        for key, window in self.planner.windows_by_key.items():
             if operation_id is not None and key[0] != operation_id:
                 continue
             if _is_awaiting_strong(window):
@@ -1695,7 +1493,7 @@ class WindowManager:
             stream_offset = binding[1]
         if stream_offset is None:
             return None
-        round_count = self.rounds_for(operation)
+        round_count = self.planner.round_count_of(operation.id)
         return stream_offset + round_count
 
     # ---- what the controller and the feedback streams ask
@@ -1733,18 +1531,6 @@ class WindowManager:
             required_stream_end
         )
 
-    def close_stream_boundary(self, stream_id, stream_round_count: int) -> None:
-        """Mark a live stream round as a measurement-closed boundary."""
-        self.lifecycle.close_boundary(stream_id, stream_round_count)
-
-    def seal_stream(self, stream_id, stream_round_count: int) -> None:
-        """Close a dynamic stream once its full length has arrived."""
-        self.lifecycle.seal(stream_id, stream_round_count)
-
-    def has_dynamic_stream(self, stream_id) -> bool:
-        """True for a stream whose windows are planned at runtime."""
-        return self.lifecycle.has(stream_id)
-
 
 def _is_awaiting_strong(window: message.Window) -> bool:
     """Committed provisionally: the strong redo has not published yet."""
@@ -1755,23 +1541,12 @@ def _is_awaiting_strong(window: message.Window) -> bool:
     return window.published_request_key is None
 
 
-def _protocols_of(plan: message.WindowPlan) -> dict:
-    """The window protocol of every planned operation, GENERIC by default."""
-    protocol_by_operation = {}
-    for operation_id in plan.op_windows:
-        protocol = plan.protocol_by_operation.get(
-            operation_id, message.WindowProtocol.GENERIC
-        )
-        protocol_by_operation[operation_id] = protocol
-    return protocol_by_operation
-
-
-def _is_released(store, arrived_by_operation: dict, round_key: tuple) -> bool:
+def _is_released(store, arrived_for, round_key: tuple) -> bool:
     """True when a round that already arrived is no longer in the store."""
     operation_id, round_index = round_key
     if not store.has_operation(operation_id):
         return True
-    arrived = arrived_by_operation.get(operation_id, 0)
+    arrived = arrived_for(operation_id)
     if round_index > arrived:
         return False
     fragments = store.retained_fragments(round_key)

@@ -84,9 +84,11 @@ import decsim.seeding as seeding
 import decsim.syndrome_buffer.round_store as round_store_module
 import decsim.syndrome_buffer.settings as round_store_settings
 import decsim.syndrome_buffer.strong_round_writer as strong_round_writer_module
+import decsim.windows.round_tracker as round_tracker_module
 import decsim.windows.settings as window_settings
 import decsim.windows.window_interactions as window_interactions
 import decsim.windows.window_manager as window_manager_module
+import decsim.windows.window_planner as window_planner_module
 import decsim.windows.windowing_schemes as windowing_schemes
 
 # ------------------------------------------------------------ the tables
@@ -1212,17 +1214,26 @@ def _window_manager(
     on_workload_complete,
 ) -> window_manager_module.WindowManager:
     run_plan = plan.run_plan
+    models = window_planner_module.WindowModels(
+        plan.error_model_provider, fault_model_requirement_for
+    )
+    planner = window_planner_module.WindowPlanner(
+        plan.scheme,
+        run_plan.resolved_operations,
+        run_plan.execution,
+        models,
+        plan.planned_operations,
+    )
+    tracker = round_tracker_module.RoundTracker(plan.scheme, planner)
     return window_manager_module.WindowManager(
         engine,
-        scheme=plan.scheme,
-        resolved_operations=run_plan.resolved_operations,
+        planner=planner,
+        tracker=tracker,
         links=links,
         conditional_release=conditional_release,
         boundary_policy=plan.boundary_policy,
         window_interaction=plan.window_interaction,
-        fault_model_requirement_for=fault_model_requirement_for,
         feedback_boundary_mode=settings.workload.feedback_boundary_mode,
-        error_model_provider=plan.error_model_provider,
         syndrome_buffer=syndrome_buffer,
         syndrome_buffer_1=syndrome_buffer_1,
         pauli_frame=pauli_frame,
@@ -1377,12 +1388,9 @@ def _load_program(
     for operation in plan.planned_operations:
         window_manager.register_operation(operation)
     run_plan = plan.run_plan
-    window_manager.load_plan(run_plan.execution, run_plan.buffering)
-    resolved_by_id = {}
-    for resolved in run_plan.resolved_operations:
-        resolved_by_id[resolved.operation_id] = resolved
+    window_manager.install_planned_holds(run_plan.buffering)
     for stream in plan.dynamic_streams:
-        window_manager.register_stream(stream, resolved_by_id[stream.id])
+        window_manager.register_stream(stream)
     for _name, metric in metric_bindings:
         engine.add_metric(metric)
     program = message.ExecutionProgram(

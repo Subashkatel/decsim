@@ -17,25 +17,25 @@ def test_execution_and_decoding_views_agree(fabric):
     window_manager = completed.window_manager
 
     assert set(runtime.operations) == {1}
-    assert set(window_manager._operation_by_id) == {1}
+    assert set(window_manager.tracker.operation_by_id) == {1}
     # the decoding view's resolved round count matches the executed body
-    assert window_manager.rounds_for(runtime.operations[1]) == 6
-    assert window_manager.rounds_arrived_by_operation[1] == 6
+    assert window_manager.planner.round_count_of(1) == 6
+    assert window_manager.tracker.rounds_arrived(1) == 6
 
 
 def test_registration_is_idempotent(fabric):
     """Re-registering a known operation never resets its accounts."""
     completed = fabric["weak_only_run"](rounds=6)
     window_manager = completed.window_manager
-    operation = window_manager._operation_by_id[1]
-    arrived_before = window_manager.rounds_arrived_by_operation[1]
-    memory_before = window_manager.memory_rounds_by_operation[1]
+    operation = window_manager.tracker.operation_by_id[1]
+    arrived_before = window_manager.tracker.rounds_arrived(1)
+    memory_before = window_manager.tracker.memory_rounds(1)
 
     window_manager.register_operation(operation)
 
-    assert window_manager.rounds_arrived_by_operation[1] == arrived_before
-    assert window_manager.memory_rounds_by_operation[1] == memory_before
-    assert window_manager._operation_by_id[1] is operation
+    assert window_manager.tracker.rounds_arrived(1) == arrived_before
+    assert window_manager.tracker.memory_rounds(1) == memory_before
+    assert window_manager.tracker.operation_by_id[1] is operation
 
 
 
@@ -88,6 +88,6 @@ def test_every_program_operation_is_registered(fabric):
                                         ops=[quiet, fabric["memory_op"](2)])
     window_manager = completed.window_manager
 
-    assert {1, 2} <= set(window_manager._operation_by_id)
-    assert 1 in window_manager.memory_rounds_by_operation
+    assert {1, 2} <= set(window_manager.tracker.operation_by_id)
+    assert 1 in window_manager.tracker.arrivals_by_operation
     assert set(completed.execution_runtime.body_done_time) == {1, 2}

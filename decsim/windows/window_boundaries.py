@@ -127,7 +127,9 @@ class BoundaryCourier:
         selected = interaction.boundary_targets(window_info, window_infos)
         targets = []
         for dependent_key in selected:
-            dependent = self.window_manager.windows[dependent_key]
+            dependent = self.window_manager.planner.windows_by_key[
+                dependent_key
+            ]
             if dependent.is_absorbed:
                 continue
             targets.append(dependent_key)
@@ -204,8 +206,7 @@ class BoundaryCourier:
             destination.boundary_in = update.state
 
     def _operation_round_count(self, operation_id) -> int:
-        operation = self.window_manager._operation_by_id[operation_id]
-        return self.window_manager.rounds_for(operation)
+        return self.window_manager.planner.round_count_of(operation_id)
 
     def _receive_boundary(
         self,
@@ -219,7 +220,7 @@ class BoundaryCourier:
     ) -> None:
         """A delivery landed: merge it if current, release the edge once."""
         delivery_key = (source_key, key)
-        window = self.window_manager.windows[key]
+        window = self.window_manager.planner.windows_by_key[key]
         dependency_released = (
             delivery_key in self._released_boundary_dependencies
         )
@@ -298,7 +299,7 @@ class BoundaryCourier:
                 f"boundary state for {delivery.destination_key} must support "
                 "deep copying before merge_boundary"
             ) from error
-        model = self.window_manager.model_by_window.get(destination.key)
+        model = self.window_manager.planner.model_by_window.get(destination.key)
         detector_positions = None
         if model is not None:
             detector_positions = model.defect_positions

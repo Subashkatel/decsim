@@ -576,8 +576,7 @@ class StrongEscalation:
             pending = self._escalations.update_wsd_arrival(
                 pending, wsd_arrival_ticks)
             if (pending.phase is _EscalationPhase.WAITING_TERMINAL_DATA
-                    and self.wm.strong_rounds_arrived_by_operation.get(
-                        pending.key[0], 0) >=
+                    and self.wm.tracker.strong_rounds_arrived(pending.key[0]) >=
                     pending.resolved_region.plan.context_hi):
                 self._submit_terminal_strong(pending.key[0], pending)
             return
@@ -605,10 +604,10 @@ class StrongEscalation:
         The job is priced for the context rounds that exist: a window at
         the operation's edge has a shorter context than commit + 2 buffer."""
         key = (weak_job.op_id, weak_job.window_id)
-        weak_window = self.wm.windows[key]
-        op = self.wm._operation_by_id[weak_job.op_id]
+        weak_window = self.wm.planner.windows_by_key[key]
+        op = self.wm.tracker.operation_by_id[weak_job.op_id]
         strong_window = self._strong_context_window(weak_window)
-        model_round_count = self.wm._round_count_for_window(op.id, strong_window)
+        model_round_count = self.wm.tracker.round_count_for_window(op.id, strong_window)
         left_exclusions = (
             ((1, strong_window.commit_lo - 1),)
             if strong_window.commit_lo > 1
@@ -626,8 +625,7 @@ class StrongEscalation:
             weak_job.op_id, strong_window.buffer_lo, strong_window.buffer_hi,
             strong_window)
         missing = [round_key for round_key in context_reads
-                   if round_key[1] <= self.wm.rounds_arrived_by_operation.get(
-                       round_key[0], 0)
+                   if round_key[1] <= self.wm.tracker.rounds_arrived(round_key[0])
                    and self.wm.syndrome_buffer_1.retained_fragments(round_key)
                    is None]
         if missing:
@@ -681,12 +679,12 @@ class StrongEscalation:
         strong_request_key = self.wm._new_request_key(
             weak_job.op_id, weak_job.window_id, DecoderTier.STRONG)
         strong_request_created_ticks = self.wm.engine.now
-        weak_window = self.wm.windows[key]
+        weak_window = self.wm.planner.windows_by_key[key]
         op_id, escalated_index = key
-        round_count = self.wm._round_count_for_window(op_id, weak_window)
+        round_count = self.wm.tracker.round_count_for_window(op_id, weak_window)
         later_windows = [
-            self.wm.windows[(op_id, window_index)]
-            for window_index in self.wm.window_indices_by_operation[op_id]
+            self.wm.planner.windows_by_key[(op_id, window_index)]
+            for window_index in self.wm.planner.window_indices_of(op_id)
             if window_index > escalated_index
         ]
         plan = self.wm.window_interaction.plan_strong_region(
@@ -719,10 +717,10 @@ class StrongEscalation:
 
         restart_model = None
         if restart_key is not None:
-            proposed_restart = deepcopy(self.wm.windows[restart_key])
+            proposed_restart = deepcopy(self.wm.planner.windows_by_key[restart_key])
             proposed_restart.buffer_lo = plan.restart_buffer_lo
             restart_model = self._build_strong_window_model(
-                self.wm._operation_by_id[op_id],
+                self.wm.tracker.operation_by_id[op_id],
                 proposed_restart,
                 round_count,
                 resolved_region.restart_fault_exclusion_ranges,
@@ -736,7 +734,7 @@ class StrongEscalation:
             n_rounds=plan.context_hi - plan.context_lo + 1,
         )
         strong_model = self._build_strong_window_model(
-            self.wm._operation_by_id[op_id], strong_window, round_count,
+            self.wm.tracker.operation_by_id[op_id], strong_window, round_count,
             resolved_region.strong_fault_exclusion_ranges)
         logical_candidate = self._strong_window_ownership_candidate(
             key, resolved_region)
@@ -901,7 +899,7 @@ class StrongEscalation:
                 f"{window.commit_hi} across the strong-region edge "
                 f"{plan.commit_hi}")
         for absorbed_key in absorbed:
-            absorbed_window = self.wm.windows[absorbed_key]
+            absorbed_window = self.wm.planner.windows_by_key[absorbed_key]
             if absorbed_window.committed or absorbed_window.t_done is not None:
                 raise RuntimeError(
                     f"cannot absorb window {absorbed_key}: already "
@@ -924,7 +922,7 @@ class StrongEscalation:
                     f"terminal strong-region plan for {key} cannot define "
                     f"restart seam data")
         else:
-            restart = self.wm.windows[expected_restart]
+            restart = self.wm.planner.windows_by_key[expected_restart]
             if restart.commit_lo != plan.commit_hi + 1:
                 raise RuntimeError(
                     f"strong-region plan for {key} ends at "
@@ -980,35 +978,20 @@ class StrongEscalation:
         fault_exclusions: tuple,
     ):
         """Build through the historical or explicit multi-range device port."""
-        if self.wm.error_model_provider is None:
-            return None
-        if len(fault_exclusions) <= 1:
-            exclusion = fault_exclusions[0] if fault_exclusions else None
-            return self.wm.error_model_provider.strong_window_model_for_operation(
-                operation, window, round_count,
-                fault_model_requirement=self.wm._fault_model_requirement(operation),
-                exclude_faults_touching=exclusion,
-            )
-        builder = (
-            self.wm.error_model_provider
-            .strong_window_model_for_operation_with_exclusions
-        )
-        return builder(
-            operation, window, round_count,
-            fault_model_requirement=self.wm._fault_model_requirement(operation),
-            fault_exclusion_ranges=fault_exclusions,
-        )
+        resolved = self.wm.planner.resolved_operation_by_id[operation.id]
+        return self.wm.planner.models.strong_model_for_operation(
+            operation, resolved, window, round_count, fault_exclusions)
     def _reslice_restart_window(
         self, restart_key: tuple, buffer_lo: int, model,
         strong_window_hi: int, seam_owner: SeamFaultOwner,
     ) -> None:
         """Install a restart model prepared before plan mutation."""
-        restart = self.wm.windows[restart_key]
+        restart = self.wm.planner.windows_by_key[restart_key]
         restart.buffer_lo = buffer_lo
         restart.n_rounds = restart.buffer_hi - restart.buffer_lo + 1
         self.wm._replace_window_read_refs(restart_key, restart)
         if model is not None:
-            self.wm.model_by_window[restart_key] = model
+            self.wm.planner.model_by_window[restart_key] = model
         self.wm.engine.log("DecoderCluster",
                         f"restart window {restart_key} re-sliced across strong window "
                         f"edge {strong_window_hi} (reads rounds {restart.buffer_lo}-"
@@ -1019,7 +1002,7 @@ class StrongEscalation:
     ) -> None:
         """A strong-window-covered window is never weak-decoded: count it committed
         with no logical contribution and unhook the restart window."""
-        window = self.wm.windows[key]
+        window = self.wm.planner.windows_by_key[key]
         if window.queued or window.committed:
             raise RuntimeError(f"cannot absorb window {key}: already "
                                f"{'queued' if window.queued else 'committed'}")
@@ -1027,7 +1010,7 @@ class StrongEscalation:
         window.committed = True
         window.is_absorbed = True
         if restart_key is not None:
-            restart = self.wm.windows[restart_key]
+            restart = self.wm.planner.windows_by_key[restart_key]
             if key in restart.deps:
                 restart.deps.remove(key)
                 restart.deps_remaining -= 1
@@ -1126,7 +1109,7 @@ class StrongEscalation:
         if pending is None:
             return
         if (
-            self.wm.strong_rounds_arrived_by_operation.get(op_id, 0)
+            self.wm.tracker.strong_rounds_arrived(op_id)
             >= pending.resolved_region.plan.context_hi
         ):
             self._submit_terminal_strong(op_id, pending)

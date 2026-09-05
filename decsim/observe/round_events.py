@@ -24,9 +24,6 @@ class RoundEventRecorder:
         # (tick, operation_id, round_index) per strong-store landing
         self.stored_rounds: list = []
         self.packing_drops = 0
-        # counted by the assembler's reassembly timeout; the results
-        # projection reads it until structural D retires both
-        self.reassembly_timeouts = 0
 
     def record(
         self,
@@ -64,10 +61,6 @@ class RoundEventRecorder:
         """A round landed in the strong store."""
         self.stored_rounds.append((self.engine.now, operation_id, round_index))
 
-    def reassembly_timed_out(self) -> None:
-        """An incomplete round exceeded the reassembly timeout."""
-        self.reassembly_timeouts += 1
-
     def output(self, kind: str, operation_id, payload) -> None:
         """One transition on the controller's digital-to-QPU path."""
         event = message.ControllerOutputEvent(
@@ -88,7 +81,6 @@ class NoRoundEvents:
     """A recorder that records nothing, for a component run alone."""
 
     packing_drops = 0
-    reassembly_timeouts = 0
 
     def record(self, kind, operation_id, round_index, route, **fields) -> None:
         """Nothing to keep."""
@@ -101,9 +93,6 @@ class NoRoundEvents:
     def round_stored(self, operation_id, round_index) -> None:
         """Nothing to keep."""
         del operation_id, round_index
-
-    def reassembly_timed_out(self) -> None:
-        """Nothing to keep."""
 
     def output(self, kind, operation_id, payload) -> None:
         """Nothing to keep."""

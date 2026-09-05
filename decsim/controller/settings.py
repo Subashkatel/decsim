@@ -48,8 +48,7 @@ class ControllerSettings:
     (2110.07965), 155 ns root to leaf in Liu et al. (2603.16203).
     packing_rounds_in_flight bounds the packing stage's assembly
     workspace, the rounds in flight through the stage at once; None is
-    unbounded. packing_overflow and reassembly_timeout_ticks are
-    Python-only knobs.
+    unbounded. packing_overflow is a Python-only knob.
     """
 
     readout_to_bits_microseconds: float = 0.0
@@ -57,7 +56,6 @@ class ControllerSettings:
     decision_to_pulse_microseconds: float = 0.0
     packing_rounds_in_flight: Optional[int] = None
     packing_overflow: PackingOverflowPolicy = PackingOverflowPolicy.STALL
-    reassembly_timeout_ticks: Optional[int] = None
 
     def __post_init__(self) -> None:
         config.check_duration(

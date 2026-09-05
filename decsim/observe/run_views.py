@@ -167,12 +167,14 @@ def backlog_view(window_manager, decoder_manager,
 
     include_rounds=False skips the (comparatively costly) rounds scan for
     per-event observers that only need the job-queue depths."""
-    pools = getattr(decoder_manager, "pool_ready", None)
-    ready_jobs = len(decoder_manager.ready)
+    waiting_by_pool = decoder_manager.queue.waiting_by_pool
+    ready_jobs = len(waiting_by_pool["default"])
     per_lane = [("", ready_jobs)]
-    if pools is not None:
-        per_lane += [(lane, len(queue)) for lane, queue in sorted(pools.items())]
-        ready_jobs += sum(len(queue) for queue in pools.values())
+    for lane, queue in sorted(waiting_by_pool.items()):
+        if lane == "default":
+            continue
+        per_lane.append((lane, len(queue)))
+        ready_jobs += len(queue)
 
     per_op, per_patch = [], {}
     for op_id, patch, waiting in (window_manager.rounds_backlog() if include_rounds else ()):
@@ -276,7 +278,7 @@ def strong_work_view(window_manager, decoder_manager) -> StrongWorkView:
         total_full_input_rounds=sum(
             value.full_input_rounds for value in phases.values()
         ),
-        strong_needed=decoder_manager.strong_needed,
+        strong_needed=decoder_manager.strong_requests.counts.needed,
     )
 
 

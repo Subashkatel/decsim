@@ -9,8 +9,8 @@ deterministic; all times are exact arithmetic over the declared ticks.
 import pytest
 
 from decsim.config import microseconds_to_ticks
-from decsim.decoders.strong_escalation import (HeldStrongCompletion,
-                                               StrongRequestLedger)
+from decsim.decoders.strong_requests import (HeldStrongCompletion,
+                                             StrongRequests)
 from decsim.message import (DecodeJob, DecodeResult, DecoderRequestKey,
                             DecoderTier, StrongDecodeCompletion)
 
@@ -21,15 +21,15 @@ def test_confident_serial_weak_never_escalates(fabric):
     completed = fabric["switching_run"](escalation_probability=0.0, rounds=9)
     records = completed.pauli_frame.snapshot().records
     assert [record.tier for record in records] == ["weak"] * 3
-    assert completed.decoder_manager.strong_needed == 0
-    assert completed.decoder_manager.strong_cancelled == 0
+    assert completed.decoder_manager.strong_requests.counts.needed == 0
+    assert completed.decoder_manager.strong_requests.counts.cancelled == 0
 
 
 def test_unconfident_serial_escalates_every_window(fabric):
     completed = fabric["switching_run"](escalation_probability=1.0, rounds=9)
     records = completed.pauli_frame.snapshot().records
     assert [record.tier for record in records] == ["strong"] * 3
-    assert completed.decoder_manager.strong_needed == 3
+    assert completed.decoder_manager.strong_requests.counts.needed == 3
     assert completed.window_manager.escalation.pending_escalations == {}
 
 
@@ -77,8 +77,8 @@ def test_parallel_confident_weak_cancels_every_strong(fabric):
                                         run_both_at_once=True, strong_buffer_us=2.0)
     records = completed.pauli_frame.snapshot().records
     assert [record.tier for record in records] == ["weak"] * 3
-    assert completed.decoder_manager.strong_cancelled == 3
-    assert completed.decoder_manager.strong_needed == 0
+    assert completed.decoder_manager.strong_requests.counts.cancelled == 3
+    assert completed.decoder_manager.strong_requests.counts.needed == 0
     completed.strong_round_writer.check_settled()   # cancels released the holds
 
 
@@ -87,8 +87,8 @@ def test_parallel_unconfident_weak_takes_every_strong(fabric):
                                         run_both_at_once=True, strong_buffer_us=2.0)
     records = completed.pauli_frame.snapshot().records
     assert [record.tier for record in records] == ["strong"] * 3
-    assert completed.decoder_manager.strong_needed == 3
-    assert completed.decoder_manager.strong_cancelled == 0
+    assert completed.decoder_manager.strong_requests.counts.needed == 3
+    assert completed.decoder_manager.strong_requests.counts.cancelled == 0
 
 
 # ---------------------------------------------------------- double window
@@ -234,7 +234,7 @@ def _strong_job(request_key):
 def test_strong_completion_before_selection_is_held_then_consumed():
     """A result finishing before its WSD selection waits in the ledger and
     is consumed the moment the selection lands."""
-    ledger = StrongRequestLedger()
+    ledger = StrongRequests()
     key = _request_key(7)
     job = _strong_job(key)
     ledger.admit_strong(job, now=0)
@@ -248,7 +248,7 @@ def test_strong_completion_before_selection_is_held_then_consumed():
 
 
 def test_selection_before_completion_consumes_immediately():
-    ledger = StrongRequestLedger()
+    ledger = StrongRequests()
     key = _request_key(7)
     job = _strong_job(key)
     ledger.admit_strong(job, now=0)
@@ -261,7 +261,7 @@ def test_selection_before_completion_consumes_immediately():
 
 
 def test_stale_strong_result_raises_when_a_newer_request_owns_the_destination():
-    ledger = StrongRequestLedger()
+    ledger = StrongRequests()
     old_key, new_key = _request_key(7), _request_key(9)
     old_job = _strong_job(old_key)
     ledger.admit_strong(old_job, now=0)
@@ -274,7 +274,7 @@ def test_stale_strong_result_raises_when_a_newer_request_owns_the_destination():
 
 
 def test_unconsumable_strong_result_raises():
-    ledger = StrongRequestLedger()
+    ledger = StrongRequests()
     key = _request_key(7)
     job = _strong_job(key)
     ledger.admit_strong(job, now=0)
@@ -286,7 +286,7 @@ def test_unconsumable_strong_result_raises():
 
 
 def test_duplicate_strong_admission_for_one_destination_raises():
-    ledger = StrongRequestLedger()
+    ledger = StrongRequests()
     ledger.admit_strong(_strong_job(_request_key(7)), now=0)
     with pytest.raises(RuntimeError, match="duplicate strong decode"):
         ledger.admit_strong(_strong_job(_request_key(8)), now=1)

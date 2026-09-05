@@ -30,6 +30,9 @@ SAMPLED_CONFIDENCE_SOURCE = message.SoftOutputSource(
 class CodeRouter:
     """Route each job by code name, with a default decoder fallback."""
 
+    # no gap route: split-pair joins are the switching router's
+    gap = None
+
     def __init__(self, default, by_code: Optional[dict] = None):
         self.default = default
         self.by_code = {}

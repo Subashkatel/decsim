@@ -145,7 +145,7 @@ def _measurement(
     rounds_this_shot = rounds_per_shot.rounds_for(distance)
     span_us = _decoded_span_microseconds(machine)
     queue_depths = []
-    for _tick, depth in machine.decoder_manager.queue_log:
+    for _tick, depth in machine.decoder_manager.queue.depth_samples:
         queue_depths.append(depth)
     load = chain_load(samples, settings, distance, round_period_us)
     algorithm = machine.active_decoder.decoder

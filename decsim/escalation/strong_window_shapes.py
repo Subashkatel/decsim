@@ -22,6 +22,17 @@ is slightly optimistic, and the strong window is priced for the whole
 context it reads rather than the r_strong rounds it commits, so its
 decode cost is conservative against Theorem 1 rather than optimistic.
 
+The restart window's weak decode reads its buffer into the strong
+region from Buffer 0, so those rounds, the last absorbed window's
+commit rounds, must still be stored when the plan lands, whether the
+absorbed windows' inputs are in flight or already landed in a unit.
+Every window an earlier window bounds claims its reads and one buffer
+before them at planning (PotentialRestart, frontends/planner.py), past
+its own request and landing; the plan withdraws the stale weak requests
+of the windows it rewrites, re-slices the restart window, requests its
+weak decode afresh and only then ends the claim (Sec. III C: the weak
+decoder resumes past the strong region once its rounds are stored).
+
 Wide state recorded: ForwardWindow sets nine attributes, the eight
 window components its layout touches and its registry of pending
 windows; it is one job, the forward window's layout, and the width is
@@ -311,26 +322,16 @@ class ForwardWindow:
             self.ledger.contributions = logical_candidate
             self.pending.register(held, operation_id, restart_key)
             self._hold_strong_context(key, strong_request_key, plan)
+            self._withdraw_stale_requests(resolved_region)
             pending_hold = message.PendingStrong(strong_request_key)
             for absorbed_key in resolved_region.absorbed_window_keys:
                 self._absorb_window(absorbed_key, restart_key, pending_hold)
             self._log_assignment(held, resolved_region)
             if restart_key is not None:
-                self._reslice_restart_window(
-                    restart_key,
-                    plan.restart_buffer_lo,
-                    restart_model,
-                    plan.commit_hi,
-                    plan.restart_seam_fault_owner,
-                )
-                restart = self.planner.windows_by_key[restart_key]
-                # its absorbed dependency is gone; no strong sibling in
-                # the forward scheme
-                self.requester.request_if_ready(restart, None)
+                self._restart_weak_chain(restart_key, plan, restart_model)
             return StrongAssignment(strong_request_key, None)
         finally:
             if guard is not None:
-                self.retention.release_hold_if_live(guard)
                 self.retention.release_hold_if_live(
                     guard, self.retention.strong_store
                 )
@@ -431,7 +432,7 @@ class ForwardWindow:
         _check_region_bounds(key, weak_window, round_count, plan)
         absorbed = _absorbed_window_keys(later_windows, plan)
         _refuse_crossing_window(later_windows, plan)
-        self._withdraw_absorbed_windows(absorbed)
+        self._check_absorbable(absorbed)
         restart_key = _restart_window_key(later_windows, plan)
         restart_reads = self._restart_reads(key, restart_key, plan)
         strong_exclusions, restart_exclusions = _fault_exclusions(
@@ -440,8 +441,9 @@ class ForwardWindow:
         context_reads = _context_round_keys(weak_window.op_id, plan)
         purpose = f"strong-region plan for {key}"
         # the strong window's context lives in syndrome buffer 1; the
-        # restart window's weak reads stay retained in Buffer 0 by its
-        # own window hold
+        # restart window's weak reads, the re-read range among them, sit
+        # in Buffer 0 under its potential restart hold (planned with the
+        # window, live until _restart_weak_chain ends it)
         self.retention.require_retained(
             context_reads, purpose, self.retention.strong_store
         )
@@ -455,16 +457,11 @@ class ForwardWindow:
             restart_fault_exclusion_ranges=restart_exclusions,
         )
 
-    def _withdraw_absorbed_windows(self, absorbed: tuple) -> None:
+    def _check_absorbable(self, absorbed: tuple) -> None:
         for absorbed_key in absorbed:
             window = self.planner.windows_by_key[absorbed_key]
             assert not window.committed, f"absorbing committed {absorbed_key}"
             assert window.t_done is None, f"absorbing decoded {absorbed_key}"
-            if window.queued:
-                # early-shipped at data-complete but parked on the
-                # escalated window's boundary, which will never arrive
-                # (the strong window owns it); withdraw the unstarted attempt
-                self.requester.withdraw(window)
 
     def _restart_reads(
         self, key: tuple, restart_key: Optional[tuple], plan
@@ -529,32 +526,34 @@ class ForwardWindow:
         strong_request_key: message.DecoderRequestKey,
         resolved_region: "_ResolvedStrongRegion",
     ) -> Optional[message.RephaseGuard]:
-        """Hold the restart window's reads in both stores while the plan lands.
+        """Hold the restart window's strong context while the plan lands.
 
-        The restart window's weak reads must still sit under its own
-        window hold; once its weak decode is built the hold moves to the
-        job, and a rephase can no longer claim those rounds.
+        Syndrome buffer 1 loses the absorbed windows' potential strong
+        holds as the plan lands; the guard keeps the restart window's
+        context until its re-sliced potential strong hold names it. Its
+        Buffer 0 reads need no guard: its potential restart hold is
+        live until the plan ends (_restart_weak_chain).
         """
         if restart_key is None:
             return None
+        self._require_restart_claim(key, restart_key)
         guard = message.RephaseGuard(strong_request_key)
-        weak_store = self.retention.weak_store
-        if not weak_store.has_hold(restart_key):
-            raise RuntimeError(
-                f"strong-region plan for {key} requires restart window "
-                f"{restart_key}'s weak reads under its window hold, "
-                f"which is no longer live (its weak decode already "
-                f"consumed them)"
-            )
-        restart_identities = weak_store.hold_round_identities(restart_key)
-        guarded_weak = list(restart_identities)
-        guarded_weak += list(resolved_region.restart_read_keys)
         guarded_strong = self._guarded_strong_reads(
             key, restart_key, proposed_restart, resolved_region
         )
-        weak_store.register_hold(guard, guarded_weak)
         self.retention.strong_store.register_hold(guard, guarded_strong)
         return guard
+
+    def _require_restart_claim(self, key: tuple, restart_key: tuple) -> None:
+        """The restart window still claims its reads and the re-read range."""
+        claim = message.PotentialRestart(restart_key)
+        if not self.retention.weak_store.has_hold(claim):
+            raise RuntimeError(
+                f"strong-region plan for {key} requires restart window "
+                f"{restart_key}'s Buffer 0 reads under its potential "
+                f"restart hold, which is no longer live (the window "
+                f"before it already committed)"
+            )
 
     def _guarded_strong_reads(
         self,
@@ -582,6 +581,26 @@ class ForwardWindow:
         return guarded
 
     # ---- private: landing the plan
+
+    def _withdraw_stale_requests(
+        self, resolved_region: "_ResolvedStrongRegion"
+    ) -> None:
+        """Take back the weak decodes the strong window supersedes.
+
+        An absorbed window's request, and the restart window's request
+        built on its old shape: early-shipped at data-complete, parked
+        on the escalated window's boundary, which never arrives. Their
+        Buffer 0 holds end with them, in flight or landed; the restart
+        window's potential restart hold keeps every round its re-sliced
+        decode reads, the re-read range among them, until the plan ends.
+        """
+        stale_keys = list(resolved_region.absorbed_window_keys)
+        if resolved_region.restart_window_key is not None:
+            stale_keys.append(resolved_region.restart_window_key)
+        for window_key in stale_keys:
+            window = self.planner.windows_by_key[window_key]
+            if window.queued:
+                self.requester.withdraw(window)
 
     def _hold_strong_context(
         self,
@@ -613,6 +632,7 @@ class ForwardWindow:
         if restart_key is not None:
             self._unhook_restart(key, restart_key, window)
         self.retention.release_hold_if_live(key)
+        self.retention.release_restart_reads(key)
         self._release_absorbed_strong_hold(key, restart_key, replacement)
         self.engine.log(
             LOG_SOURCE,
@@ -667,6 +687,28 @@ class ForwardWindow:
             f"{absorbed_count} window(s); "
             f"strong start deferred until {readiness_description}",
         )
+
+    def _restart_weak_chain(
+        self, restart_key: tuple, plan: message.StrongRegionPlan, model
+    ) -> None:
+        """Re-slice the restart window and request its weak decode afresh.
+
+        Its rounds pass from its potential restart hold to its own hold
+        or to the fresh request's, with no gap; the claim ends here,
+        since no earlier escalation remains to re-slice it.
+        """
+        self._reslice_restart_window(
+            restart_key,
+            plan.restart_buffer_lo,
+            model,
+            plan.commit_hi,
+            plan.restart_seam_fault_owner,
+        )
+        restart = self.planner.windows_by_key[restart_key]
+        # its absorbed dependency is gone; no strong sibling in the
+        # forward scheme
+        self.requester.request_if_ready(restart, None)
+        self.retention.release_restart_reads(restart_key)
 
     def _reslice_restart_window(
         self,

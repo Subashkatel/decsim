@@ -572,6 +572,20 @@ class PotentialStrong:
 
 
 @dataclass(frozen=True)
+class PotentialRestart:
+    """A hold: a window's reads and one buffer before them, in Buffer 0.
+
+    Under the double window an earlier escalation may re-slice the
+    window as its restart window, whose weak decode re-reads one buffer
+    into the strong region (Toshio 2510.25222 Sec. III C); the rounds
+    stay past the window's own request and landing, until the window
+    before it commits.
+    """
+
+    window_key: tuple
+
+
+@dataclass(frozen=True)
 class PendingStrong:
     """A hold: rounds for an admitted, not yet served strong request."""
 

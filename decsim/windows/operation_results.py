@@ -63,8 +63,14 @@ class OperationResults:
     def note_window_committed(
         self, window: message.Window, is_final: bool
     ) -> None:
-        """A window committed: advance the stream's prefix; free its context."""
+        """A window committed: advance the stream's prefix; free its context.
+
+        No earlier escalation can re-slice its dependents now, so their
+        potential restart reads end.
+        """
         self._update_committed_round_count(window.op_id)
+        for dependent_key in window.dependents:
+            self.retention.release_restart_reads(dependent_key)
         if is_final and self.retention.strong_store is not None:
             potential = message.PotentialStrong(window.key)
             self.retention.release_hold_if_live(

@@ -55,7 +55,10 @@ class RoundTransmitter:
 
         The departure is its own event, so the writer's own step (the
         store, the trace line, the strong write) completes before the
-        windows hear of the round; rounds depart in completion order.
+        windows hear of the round; rounds sent at one tick depart in
+        completion order, each at its own send, as gem5's DmaPort queues
+        each request on transmitList and ns-3's device on its FIFO, with
+        no arbitration between the routes.
         """
         self.in_flight += 1
         depart = functools.partial(self._depart, packed)

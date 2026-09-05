@@ -306,6 +306,29 @@ def test_a_double_window_ending_on_a_commit_edge_builds(
     assert machine.window_manager.strong_redecode is not None
 
 
+def test_an_online_source_under_a_double_window_is_refused_as_serial_only():
+    """check_plan's serial-only law.
+
+    An audit label compares one window's weak and strong committed
+    observables, and a double-window strong result owns a larger extent
+    than the audited window.
+    """
+    online = _always_auditing_online_threshold(threshold=2.0)
+    policy = policies.Switching(online, decoders.SAMPLED_CONFIDENCE_SOURCE)
+    escalation = decoder_settings.EscalationSettings(
+        policy=policy, double_window=True
+    )
+    with pytest.raises(
+        ValueError, match="online threshold calibration is serial-only"
+    ):
+        fabric.switching_machine(
+            rounds=9,
+            escalated_windows=set(),
+            double_window=True,
+            escalation=escalation,
+        )
+
+
 def test_an_online_source_beside_run_both_at_once_is_refused():
     online = _always_auditing_online_threshold(threshold=2.0)
     with pytest.raises(ValueError, match="nothing to audit"):

@@ -184,8 +184,6 @@ class SampledConfidenceDecoder(
     downstream pipeline behaves identically.
     """
 
-    reports_soft_output = True
-
     def __init__(
         self,
         inner: decoder_module.DecoderBase,

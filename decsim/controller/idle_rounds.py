@@ -28,11 +28,9 @@ class _PatchIdle:
 class IdleRoundAccounting:
     """Routes each idle round by the policy and charges the decodes."""
 
-    def __init__(self, policy, decode_demand, geometry_by_patch, streams, qpu):
+    def __init__(self, policy, decode_queue, geometry_by_patch, streams, qpu):
         self.policy = policy
-        # where a load-only decode job is asked for (the window manager
-        # until slice 5 hands the DecodeQueue port)
-        self.decode_demand = decode_demand
+        self.decode_queue = decode_queue
         self.geometry_by_patch = geometry_by_patch
         self.streams = streams
         self.qpu = qpu
@@ -137,8 +135,9 @@ class IdleRoundAccounting:
         patch_record = self.geometry_by_patch[patch]
         geometry = patch_record.code_geometry
         rounds = idle_round_count + geometry.buffer_round_count
-        self.decode_demand.accept_idle_decode_demand(
-            rounds=rounds,
+        self.decode_queue.submit_decode(
+            rounds,
+            on_done=_ignore_completion,
             code=geometry.code_name,
             spatial_nodes=patch_record.spatial_node_count,
             label=f"mem({operation.name},r{round_index})",
@@ -150,3 +149,7 @@ class IdleRoundAccounting:
             idle = _PatchIdle()
             self.idle_by_patch[patch] = idle
         return idle
+
+
+def _ignore_completion() -> None:
+    """An idle decode's completion has no listener."""

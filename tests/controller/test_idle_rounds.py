@@ -37,12 +37,20 @@ class RecordingStreams:
         return False
 
 
-class RecordingDecodeDemand:
+class RecordingDecodeQueue:
     def __init__(self):
         self.demands = []
 
-    def accept_idle_decode_demand(self, **demand):
-        self.demands.append(demand)
+    def submit_decode(self, round_count, on_done, label, code, spatial_nodes):
+        del on_done
+        self.demands.append(
+            {
+                "rounds": round_count,
+                "code": code,
+                "spatial_nodes": spatial_nodes,
+                "label": label,
+            }
+        )
 
 
 def patch_record():
@@ -56,7 +64,7 @@ def accounting_with(policy, streams=None):
     if streams is None:
         streams = RecordingStreams()
     qpu = RecordingQpu()
-    demand = RecordingDecodeDemand()
+    demand = RecordingDecodeQueue()
     geometry_by_patch = {"patch-a": patch_record(), "patch-b": patch_record()}
     accounting = idle_rounds_module.IdleRoundAccounting(
         policy, demand, geometry_by_patch, streams, qpu

@@ -16,7 +16,7 @@ import decsim.links.link_profiles as link_profiles
 import decsim.message as message
 import decsim.windows.window_boundaries as window_boundaries
 import decsim.windows.window_interactions as window_interactions
-import decsim.windows.window_manager as window_manager
+import decsim.windows.window_transfers as window_transfers
 
 
 def test_a_stale_delivery_is_ignored_and_the_edge_releases_once():
@@ -63,14 +63,15 @@ def test_a_stale_delivery_is_ignored_and_the_edge_releases_once():
     profile = link_profiles.logical_reference_profile()
     links = fabric.LinkFabric(profile, engine)
     interaction = window_interactions.DefaultWindowInteraction()
+    requester = types.SimpleNamespace(release_parked=lambda _key: None)
+    transfers = window_transfers.WindowTransfers(engine, links)
     manager = types.SimpleNamespace(
         engine=engine,
-        links=links,
+        transfers=transfers,
         planner=planner,
         window_interaction=interaction,
-        release_service=None,
+        requester=requester,
         check_window=check_window,
-        _window_attribution=window_manager.WindowManager._window_attribution,
     )
     manager._window_infos = window_infos
     courier = window_boundaries.BoundaryCourier(manager)

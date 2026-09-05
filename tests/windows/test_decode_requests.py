@@ -1,0 +1,178 @@
+"""The decode requests' laws through the DecodeQueue port.
+
+A complete window is requested once; a blocked window ships its raw
+rounds and is masked when its decode starts (qLDPC's net_error folded
+into the next window's syndrome, qldpc/decoders/sinter.py
+decode_shots_to_error); a withdrawn window is requested again fresh.
+"""
+
+import types
+
+import decsim.decoders.decoder_memory as decoder_memory
+import decsim.decoders.weak_strong_switching as weak_strong_switching
+import decsim.engine as engine_module
+import decsim.message as message
+import decsim.syndrome_buffer.round_store as round_store_module
+import decsim.syndrome_buffer.settings as round_store_settings
+import decsim.windows.decode_requests as decode_requests
+import decsim.windows.round_retention as round_retention
+import decsim.windows.window_interactions as window_interactions
+import decsim.windows.window_transfers as window_transfers
+
+
+class _RecordingQueue:
+    def __init__(self) -> None:
+        self.enqueued = []
+        self.withdrawn = []
+
+    def enqueue(self, job, send_input=None) -> None:
+        job.submitted = True
+        self.enqueued.append((job, send_input))
+
+    def withdraw_window(self, window_key) -> None:
+        self.withdrawn.append(window_key)
+
+    def release_parked(self, window_key) -> None:
+        del window_key
+
+
+class _Link:
+    def expected_delay_ticks(self, _path, _payload_bits, _now_ticks) -> int:
+        return 3
+
+    def send(
+        self, _path, _payload_bits, _now_ticks, _attribution, on_delivered
+    ):
+        on_delivered(None)
+
+
+def _fragment(round_index, bits=None) -> message.RetainedSyndromeFragment:
+    return message.RetainedSyndromeFragment(
+        operation_id=1,
+        patch_id=0,
+        round_index=round_index,
+        bits=bits,
+        size_bits=None,
+        fragment_index=0,
+    )
+
+
+class _Fixture:
+    """One six-round operation with one window reading rounds 1 to 5."""
+
+    def __init__(self) -> None:
+        self.engine = engine_module.Engine(verbose=False)
+        self.operation = message.Operation(1, "memory", (0,), patches=(0,))
+        self.window = message.Window(
+            op_id=1, k=0, commit_lo=1, commit_hi=3, buffer_hi=5, n_rounds=5
+        )
+        settings = round_store_settings.RoundStoreSettings()
+        self.store = round_store_module.RoundStore(settings)
+        self.arrived = 0
+        geometry = types.SimpleNamespace(code_name="surface")
+        self.planner = types.SimpleNamespace(
+            windows_by_key={(1, 0): self.window},
+            successors_by_operation={1: []},
+            model_by_window={},
+            spatial_node_count_of=lambda _operation_id: 17,
+            code_geometry_of=lambda _operation_id: geometry,
+            is_windowed=lambda _operation_id: True,
+        )
+        self.tracker = types.SimpleNamespace(
+            operation_by_id={1: self.operation},
+            effective_round_count_for_window=lambda _operation_id, _window: 6,
+            round_count_for_window=lambda _operation_id, _window=None: 6,
+            rounds_arrived=lambda _operation_id: self.arrived,
+            strong_rounds_arrived=lambda _operation_id: 0,
+            has_first_round=self._has_first_round,
+            is_data_complete=self._is_data_complete,
+            is_buffer_filled_by_memory=lambda _window: False,
+        )
+        self.retention = round_retention.RoundRetention(
+            self.store,
+            None,
+            self.planner,
+            self.tracker,
+            is_strong_context_retained=False,
+            primary_tier=message.DecoderTier.WEAK,
+        )
+        link = _Link()
+        transfers = window_transfers.WindowTransfers(self.engine, link)
+        interaction = window_interactions.DefaultWindowInteraction()
+        self.builder = decode_requests.DecodeRequestBuilder(
+            self.engine, self.planner, self.tracker, interaction, transfers
+        )
+        self.queue = _RecordingQueue()
+        policy = weak_strong_switching.Baseline()
+        self.requester = decode_requests.DecodeRequester(
+            self.tracker, self.retention, self.builder, self.queue, policy
+        )
+        self.retention.register_window((1, 0), self.window)
+
+    def _has_first_round(self, _window) -> bool:
+        return self.arrived >= 1
+
+    def _is_data_complete(self, _window) -> bool:
+        return self.arrived >= 5
+
+    def arrive(self, round_index: int) -> None:
+        fragment = _fragment(round_index)
+        packet = message.SyndromeRoundPacket(1, round_index, (fragment,))
+        self.store.accept_packed_round(packet, publication_tick=round_index)
+        self.arrived = round_index
+        self.requester.request_if_ready(self.window, None)
+
+
+def test_a_complete_window_is_requested_once():
+    fixture = _Fixture()
+    for round_index in (1, 2, 3, 4):
+        fixture.arrive(round_index)
+    assert fixture.queue.enqueued == []
+    fixture.arrive(5)
+    fixture.requester.request_if_ready(fixture.window, None)
+    assert len(fixture.queue.enqueued) == 1
+    (job, send_input) = fixture.queue.enqueued[0]
+    assert job.window is fixture.window
+    assert job.gate is fixture.builder
+    assert [payload.round_index for payload in job.payloads] == [1, 2, 3, 4, 5]
+    assert fixture.window.queued
+    assert fixture.window.t_queued == 0
+    assert send_input(lambda: None) == 3
+
+
+def test_a_blocked_window_ships_raw_rounds_and_is_masked_at_start():
+    fixture = _Fixture()
+    fixture.window.deps = [(1, 9)]
+    fixture.window.deps_remaining = 1
+    fixture.window.boundary_in = {2: [1, 0, 1]}
+    for round_index in (1, 2, 3, 4, 5):
+        fixture.arrive(round_index)
+    (job, _send_input) = fixture.queue.enqueued[0]
+    assert fixture.builder.may_start(job) is False
+    raw = job.payloads[1]
+    assert raw.bits is None
+    landed = decoder_memory.MaterializedSyndromeRound(1, 2, (raw,))
+    job.decoder_input = decoder_memory.DecoderInput(
+        1, 0, job.request_key, (landed,)
+    )
+    fixture.builder.mask_input(job)
+    (masked,) = job.decoder_input.rounds[0].fragments
+    assert masked.bits == (1, 0, 1)
+    fixture.window.deps_remaining = 0
+    assert fixture.builder.may_start(job) is True
+
+
+def test_a_withdrawn_window_is_requested_again_fresh():
+    fixture = _Fixture()
+    for round_index in (1, 2, 3, 4, 5):
+        fixture.arrive(round_index)
+    (first_job, _send_input) = fixture.queue.enqueued[0]
+    fixture.requester.withdraw(fixture.window)
+    assert fixture.queue.withdrawn == [(1, 0)]
+    assert not fixture.window.queued
+    assert fixture.window.t_queued is None
+    fixture.requester.request_if_ready(fixture.window, None)
+    assert len(fixture.queue.enqueued) == 2
+    (second_job, _send_input) = fixture.queue.enqueued[1]
+    assert second_job is not first_job
+    assert second_job.request_key.run_sequence == 1

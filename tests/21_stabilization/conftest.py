@@ -203,10 +203,10 @@ class OccupancyProbe:
         self.sb1_timeline = []
 
     def observe(self, engine):
-        live_upstream = self.window_manager.syndrome_buffer.occupancy
+        live_upstream = self.window_manager.retention.weak_store.occupancy
         if not self.buffer0_timeline or self.buffer0_timeline[-1][1] != live_upstream:
             self.buffer0_timeline.append((engine.now, live_upstream))
-        room_store = self.window_manager.syndrome_buffer_1
+        room_store = self.window_manager.retention.strong_store
         if room_store is not None:
             live_room = room_store.occupancy
             if not self.sb1_timeline or self.sb1_timeline[-1][1] != live_room:

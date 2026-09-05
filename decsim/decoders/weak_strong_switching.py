@@ -491,7 +491,7 @@ class Switching:
             strong = services.make_strong_job(
                 weak_job,
                 getattr(weak_job, "strong_label", f"strong({weak_job.label})"))
-            submissions.append(Submission(strong, delay_ticks=0))
+            submissions.append(strong)
         return submissions
 
     def on_decode_outcome(self, outcome, services) -> OutcomeDirective:
@@ -510,10 +510,9 @@ class Switching:
             # after the far-side weak boundary is ready.
             strong_request_key = services.defer_strong_escalation(job)
         elif not self.run_both_at_once:        # serial: redo after ws (dm:153-154)
-            strong = services.make_strong_job(
+            extra = services.make_strong_job(
                 job, getattr(job, "strong_label", f"strong({job.label})"))
-            extra = Submission(strong)
-            strong_request_key = strong.request_key
+            strong_request_key = extra.job.request_key
         return OutcomeDirective(
             Directive.AWAIT_STRONG,
             extra=extra,

@@ -615,6 +615,9 @@ class DecodeJob:
     payloads: list = field(default_factory=list)   # transfer-source view; cleared after materialization
     decoder_input: Optional[Any] = None             # materialized decoder memory value
     input_hold: Optional[Any] = None                # upstream hold released at transfer completion
+    # the WindowInputGate the decoder manager asks before staging, before
+    # starting and when masking the landed input; None for a windowless job
+    gate: Optional[Any] = None
     send_input: Optional[Callable[[Callable[[], None]], int]] = None   # called at dispatch: send the input link, call back at the landing, return the expected delay in ticks
     unit: Optional[int] = None                     # decoder unit assigned at dispatch
     memory: Optional[Any] = None                   # that unit's DecoderMemory while it holds this job's input
@@ -644,6 +647,17 @@ class DecodeJob:
     service_original_request_keys: tuple[DecoderRequestKey, ...] = ()
     service_cancelled_request_keys: set[DecoderRequestKey] = field(default_factory=set)
     service_dispatch_ticks: Optional[int] = None
+
+    def payload_bits(self) -> Optional[int]:
+        """The bits of the job's payloads; None when any size is unknown."""
+        payloads = self.payloads or ()
+        sizes = []
+        for payload in payloads:
+            sizes.append(payload.size_bits)
+        for size in sizes:
+            if size is None:
+                return None
+        return sum(sizes)
 
 
 @dataclass(frozen=True)
@@ -680,14 +694,14 @@ class DecodeResult:
 
 @dataclass
 class Submission:
-    """One decode job an escalation policy wants enqueued, optionally after a delay.
+    """One decode job an escalation policy wants enqueued, with its input send.
 
-    A strong redo job gets its ready time when it reaches the queue, so link
-    delay is not charged as queue wait.
+    send_input(on_landed) moves the job's input at dispatch and returns
+    the delay the link expects; None for a job that carries no input.
     """
 
     job: DecodeJob
-    delay_ticks: int = 0
+    send_input: Optional[Callable[[Callable[[], None]], int]] = None
 
 
 class Directive(Enum):
@@ -797,12 +811,66 @@ class TransferAttribution:
         )
 
     @classmethod
+    def for_window(
+        cls, window: Window, operation: Operation, request_key
+    ) -> "TransferAttribution":
+        """A window's transfer: the operation's patches, the rounds it reads."""
+        ordered_patches = sorted(
+            operation.patches, key=stable_identity_order_key
+        )
+        first_round, last_round = _read_range(window)
+        return cls(
+            operation_id=operation.id,
+            patch_ids=tuple(ordered_patches),
+            window_id=window.k,
+            first_round=first_round,
+            last_round=last_round,
+            relation=RequestTransferRelation(request_key),
+        )
+
+    @classmethod
+    def for_job(cls, job: DecodeJob, request_key) -> "TransferAttribution":
+        """A job's transfer: the patches of its payloads, its window's rounds."""
+        payloads = job.payloads or ()
+        patches = {}
+        for payload in payloads:
+            patch_id = payload.patch_id
+            order_key = stable_identity_order_key(patch_id)
+            patches[order_key] = patch_id
+        ordered_keys = sorted(patches)
+        patch_ids = tuple(patches[key] for key in ordered_keys)
+        window = job.window
+        assert window is not None, (
+            "window-scoped transport requires a DecodeJob window"
+        )
+        first_round, last_round = _read_range(window)
+        return cls(
+            operation_id=job.op_id,
+            patch_ids=patch_ids,
+            window_id=job.window_id,
+            first_round=first_round,
+            last_round=last_round,
+            relation=RequestTransferRelation(request_key),
+        )
+
+    @classmethod
     def for_packet(cls, packet: SyndromeRoundPacket) -> "TransferAttribution":
         """The packed round's transfer: every patch of the round."""
         patch_ids = tuple(fragment.patch_id for fragment in packet.fragments)
         return cls.for_round(
             packet.operation_id, patch_ids, packet.round_index
         )
+
+
+def _read_range(window: Window) -> tuple:
+    """The inclusive round range a window reads."""
+    first_round = window.commit_lo
+    if window.buffer_lo is not None:
+        first_round = window.buffer_lo
+    last_round = window.commit_hi
+    if window.buffer_hi is not None:
+        last_round = window.buffer_hi
+    return first_round, last_round
 
 
 class PayloadSelection(Enum):

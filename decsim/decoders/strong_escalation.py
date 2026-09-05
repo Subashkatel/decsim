@@ -30,12 +30,13 @@ from types import MappingProxyType
 from typing import Callable, Optional
 
 from ..message import (
-    LinkPath,DecodeJob, DecodeResult, DecoderRequestKey, DecoderTier,
+    LinkPath,DecodeJob, Submission, DecodeResult, DecoderRequestKey, DecoderTier,
                        LogicalContribution, Operation, SeamFaultOwner, StrongDecodeCompletion,
                        StrongRegionPlan, Window, WindowInfo, stable_identity_order_key)
 from ..message import (PendingStrong, PotentialStrong, RephaseGuard,
                        StrongInputInFlight)
 from .decoder_memory import count_decoder_input_round_demand
+from ..windows import round_retention
 
 
 @dataclass(frozen=True)
@@ -458,18 +459,13 @@ class StrongEscalation:
     directly; it is the one object outside the manager allowed to.
     """
 
-    def __init__(self, window_manager, check_strong_route):
+    def __init__(self, window_manager):
         self.wm = window_manager
-        self._check_strong_route = check_strong_route
         self._escalations = _EscalationRegistry()
         # strong request keys whose WSD selection has arrived, and the
         # SBD landings waiting for one that has not
         self._delivered_selections: set = set()
         self._landing_after_selection: dict = {}
-
-    def submit_strong(self, strong_job) -> None:
-        """An escalation policy submitted a strong job alongside the weak one (run both at once)."""
-        self._submit_strong_with_sbd(strong_job)
 
     def after_weak_commit(self, key) -> None:
         """A weak commit at a strong window's far boundary releases the
@@ -484,7 +480,18 @@ class StrongEscalation:
         *,
         wsd_arrival_ticks: Optional[int] = None,
     ) -> None:
-        """Queue a strong job now; its SBD input is sent at dispatch.
+        """Queue a strong job now; its SBD input is sent at dispatch."""
+        submission = self._strong_submission(
+            strong_job, wsd_arrival_ticks=wsd_arrival_ticks)
+        self.wm.requester.enqueue(submission)
+
+    def _strong_submission(
+        self,
+        strong_job: DecodeJob,
+        *,
+        wsd_arrival_ticks: Optional[int] = None,
+    ) -> Submission:
+        """The strong job with its input send; its context rounds held.
 
         The unit is assigned first, then the input moves into that unit's memory
         (SBD link); a serial job also waits for its WSD selection to arrive.
@@ -493,23 +500,21 @@ class StrongEscalation:
         """
         request_key = strong_job.request_key
         window_key = strong_job.strong_decode_for
-        sb1 = self.wm.syndrome_buffer_1
+        sb1 = self.wm.retention.strong_store
         if sb1.has_hold(PotentialStrong(window_key)):
-            self.wm._transfer_retention_hold(
+            self.wm.retention.transfer_hold(
                 PotentialStrong(window_key), StrongInputInFlight(request_key), sb1)
         elif sb1.has_hold(PendingStrong(request_key)):
-            self.wm._transfer_retention_hold(
+            self.wm.retention.transfer_hold(
                 PendingStrong(request_key), StrongInputInFlight(request_key), sb1)
         else:
-            packet_ids = tuple(dict.fromkeys(
-                (fragment.operation_id, fragment.round_index)
-                for fragment in strong_job.payloads))
+            packet_ids = round_retention.round_identities_of(strong_job.payloads)
             sb1.register_hold(StrongInputInFlight(request_key), packet_ids)
-        self.wm._bind_decoder_input_hold(strong_job, StrongInputInFlight(request_key), sb1)
-        payload_bits = self.wm._job_payload_bits(strong_job)
-        context_identities = tuple(dict.fromkeys(
-            (fragment.operation_id, fragment.round_index)
-            for fragment in strong_job.payloads))
+        self.wm.retention.bind_input_hold(
+            strong_job, StrongInputInFlight(request_key), sb1)
+        payload_bits = strong_job.payload_bits()
+        context_identities = round_retention.round_identities_of(
+            strong_job.payloads)
 
         def send_input(on_landed) -> int:
             # the DMA reads only context rounds that landed in syndrome
@@ -521,7 +526,7 @@ class StrongEscalation:
                     return
                 self._land_after_selection(request_key, on_landed)
 
-            expected_delay_ticks = self.wm._send_job_transfer(
+            expected_delay_ticks = self.wm.transfers.send_for_job(
                 LinkPath.STRONG_BUFFER_TO_STRONG_DECODER, strong_job, payload_bits=payload_bits,
                 on_delivered=landed)
             if wsd_arrival_ticks is None:
@@ -529,7 +534,31 @@ class StrongEscalation:
             selection_delay_ticks = wsd_arrival_ticks - self.wm.engine.now
             return max(expected_delay_ticks, selection_delay_ticks)
 
-        self.wm.submit_fn(strong_job, send_input)
+        return Submission(strong_job, send_input)
+
+    def _enqueue_reserved_strong(
+        self, strong_job: DecodeJob, wsd_arrival_ticks: int,
+    ) -> None:
+        """A serial strong job: its context was held when the policy built
+        it; it queues now with a send that also waits for the selection."""
+        request_key = strong_job.request_key
+        sb1 = self.wm.retention.strong_store
+        payload_bits = strong_job.payload_bits()
+        context_identities = round_retention.round_identities_of(
+            strong_job.payloads)
+
+        def send_input(on_landed) -> int:
+            sb1.require_stored(context_identities)
+            def landed() -> None:
+                self._land_after_selection(request_key, on_landed)
+
+            expected_delay_ticks = self.wm.transfers.send_for_job(
+                LinkPath.STRONG_BUFFER_TO_STRONG_DECODER, strong_job, payload_bits=payload_bits,
+                on_delivered=landed)
+            selection_delay_ticks = wsd_arrival_ticks - self.wm.engine.now
+            return max(expected_delay_ticks, selection_delay_ticks)
+
+        self.wm.requester.enqueue(Submission(strong_job, send_input))
 
     def _land_after_selection(self, request_key: DecoderRequestKey,
                               on_landed: Callable[[], None]) -> None:
@@ -554,7 +583,7 @@ class StrongEscalation:
             self._selection_delivered(strong_request_key)
             on_selection_delivered()
 
-        expected_delay_ticks = self.wm._send_job_transfer(
+        expected_delay_ticks = self.wm.transfers.send_for_job(
             LinkPath.WEAK_DECODER_TO_STRONG_DECODER, weak_job, payload_bits=None,
             request_key=strong_request_key, on_delivered=delivered)
         return self.wm.engine.now + expected_delay_ticks
@@ -583,21 +612,19 @@ class StrongEscalation:
         if serial_strong_job is not None:
             wsd_arrival_ticks = self._send_selection(
                 weak_job, strong_request_key, on_selection_delivered)
-            self._submit_strong_with_sbd(
-                serial_strong_job,
-                wsd_arrival_ticks=wsd_arrival_ticks,
-            )
+            self._enqueue_reserved_strong(serial_strong_job, wsd_arrival_ticks)
             return
         if pending is not None:
             raise RuntimeError("deferred pending request needs an explicit key")
         self._send_selection(weak_job, strong_request_key, on_selection_delivered)
-    def make_strong_job(self, weak_job: DecodeJob, label: str) -> DecodeJob:
-        """Build the strong job for a weak one; a route back to the weak decoder fails now."""
+    def make_strong_job(self, weak_job: DecodeJob, label: str) -> Submission:
+        """The strong job for a weak one, with its context held and its send.
+
+        A parallel policy enqueues it at once; a serial one hands its job
+        back through prepare_strong_selection once the selection is sent.
+        """
         strong = self.make_strong_decode_job(weak_job, label)
-        self.check_strong_route(weak_job, strong)
-        return strong
-    def check_strong_route(self, weak_job: DecodeJob, strong_job: DecodeJob) -> None:
-        self._check_strong_route(weak_job, strong_job)
+        return self._strong_submission(strong)
     def make_strong_decode_job(self, weak_job: DecodeJob,
                                label: str) -> DecodeJob:
         """Build the two-sided strong re-decode job for an escalated window.
@@ -608,6 +635,7 @@ class StrongEscalation:
         op = self.wm.tracker.operation_by_id[weak_job.op_id]
         strong_window = self._strong_context_window(weak_window)
         model_round_count = self.wm.tracker.round_count_for_window(op.id, strong_window)
+        builder = self.wm.builder
         left_exclusions = (
             ((1, strong_window.commit_lo - 1),)
             if strong_window.commit_lo > 1
@@ -619,24 +647,24 @@ class StrongEscalation:
             model_round_count,
             left_exclusions,
         )
-        request_key = self.wm._new_request_key(
+        request_key = builder.new_request_key(
             weak_job.op_id, weak_job.window_id, DecoderTier.STRONG)
-        context_reads = self.wm._read_keys_for_bounds(
+        context_reads = self.wm.retention.read_keys_for_bounds(
             weak_job.op_id, strong_window.buffer_lo, strong_window.buffer_hi,
             strong_window)
         missing = [round_key for round_key in context_reads
-                   if round_key[1] <= self.wm.tracker.rounds_arrived(round_key[0])
-                   and self.wm.syndrome_buffer_1.retained_fragments(round_key)
+                   if round_key[1] <= self.wm.tracker.rounds_arrived(
+                       round_key[0])
+                   and self.wm.retention.strong_store.retained_fragments(round_key)
                    is None]
         if missing:
             raise RuntimeError(
                 f"strong context for {key} arrived at Buffer 0 but is not "
                 f"stored in syndrome buffer 1: {missing} (controller_to_strong_buffer lag "
                 f"beyond the escalation margin, or an early release)")
-        self.wm._stamp_first_round_tick(
-            strong_window, self.wm.syndrome_buffer_1)
-        payloads = self.wm._assemble_payloads(
-            strong_window, self.wm.syndrome_buffer_1)
+        builder.stamp_first_round(strong_window, self.wm.retention.strong_store)
+        payloads = builder.assemble_payloads(
+            strong_window, self.wm.retention.strong_store)
         return DecodeJob(
             op_id=weak_job.op_id, window_id=weak_job.window_id,
             n_rounds=count_decoder_input_round_demand(payloads),
@@ -645,10 +673,11 @@ class StrongEscalation:
             spatial_nodes=weak_job.spatial_nodes, code=weak_job.code,
             dem=dem, payloads=payloads,
             attempt=1, window=strong_window, strong_decode_for=key,
-            request_key=request_key, request_created_ticks=self.wm.engine.now)
+            request_key=request_key, request_created_ticks=self.wm.engine.now,
+            gate=builder)
     def _strong_context_window(self, weak_window: Window) -> Window:
         buffer_lo, commit_lo, commit_hi, buffer_hi = \
-            self.wm._strong_context_bounds(weak_window)
+            round_retention.strong_context_bounds(weak_window)
         strong_window = Window(
             op_id=weak_window.op_id, k=weak_window.k, commit_lo=commit_lo,
             commit_hi=commit_hi, buffer_hi=buffer_hi, buffer_lo=buffer_lo,
@@ -676,7 +705,7 @@ class StrongEscalation:
         if weak_job.strong_label is None:
             raise RuntimeError(
                 f"double-window escalation {key} needs a declared strong label")
-        strong_request_key = self.wm._new_request_key(
+        strong_request_key = self.wm.builder.new_request_key(
             weak_job.op_id, weak_job.window_id, DecoderTier.STRONG)
         strong_request_created_ticks = self.wm.engine.now
         weak_window = self.wm.planner.windows_by_key[key]
@@ -741,25 +770,25 @@ class StrongEscalation:
         guard = None
         if restart_key is not None:
             guard = RephaseGuard(strong_request_key)
-            sb1 = self.wm.syndrome_buffer_1
+            sb1 = self.wm.retention.strong_store
             # the restart window's weak reads must still sit under its own
             # window hold; once its weak decode is built the hold moves to
             # the job, and a rephase can no longer claim those rounds
-            if not self.wm.syndrome_buffer.has_hold(restart_key):
+            if not self.wm.retention.weak_store.has_hold(restart_key):
                 raise RuntimeError(
                     f"strong-region plan for {key} requires restart window "
                     f"{restart_key}'s weak reads under its window hold, "
                     f"which is no longer live (its weak decode already "
                     f"consumed them)")
-            guarded_weak = list(self.wm.syndrome_buffer.hold_round_identities(restart_key))
+            guarded_weak = list(self.wm.retention.weak_store.hold_round_identities(restart_key))
             guarded_weak += list(resolved_region.restart_read_keys)
             guarded_strong = list(sb1.hold_round_identities(PotentialStrong(key)))
             guarded_strong += list(sb1.hold_round_identities(PotentialStrong(restart_key)))
             guarded_strong += [(op_id, round_index) for round_index in
                                range(plan.context_lo, plan.context_hi + 1)]
-            guarded_strong += self.wm._strong_context_read_keys(
+            guarded_strong += self.wm.retention.strong_context_read_keys(
                 proposed_restart, list(resolved_region.restart_read_keys))
-            self.wm.syndrome_buffer.register_hold(guard, guarded_weak)
+            self.wm.retention.weak_store.register_hold(guard, guarded_weak)
             sb1.register_hold(guard, guarded_strong)
         try:
             self.wm.ledger.contributions = logical_candidate
@@ -784,8 +813,8 @@ class StrongEscalation:
                 self._escalations.register_terminal(pending, op_id)
             else:
                 self._escalations.register_far(pending, restart_key)
-            self.wm._transfer_potential_to_pending(key, strong_request_key)
-            self.wm.syndrome_buffer_1.replace_hold(
+            self.wm.retention.transfer_potential_to_pending(key, strong_request_key)
+            self.wm.retention.strong_store.replace_hold(
                 PendingStrong(strong_request_key),
                 [(op_id, round_index) for round_index in
                  range(plan.context_lo, plan.context_hi + 1)])
@@ -817,9 +846,9 @@ class StrongEscalation:
             return strong_request_key
         finally:
             if guard is not None:
-                self.wm._release_hold_if_live(guard)
-                self.wm._release_hold_if_live(
-                    guard, self.wm.syndrome_buffer_1)
+                self.wm.retention.release_hold_if_live(guard)
+                self.wm.retention.release_hold_if_live(
+                    guard, self.wm.retention.strong_store)
     def _defer_crossing_strong_escalation(
         self, weak_job: DecodeJob, weak_window: Window, later_windows: list,
         round_count: int, plan: StrongRegionPlan, crossing_window: Window,
@@ -908,7 +937,7 @@ class StrongEscalation:
                 # early-shipped at data-complete but parked on the
                 # escalated window's boundary, which will never arrive
                 # (the strong window owns it); withdraw the unstarted attempt
-                self.wm.withdraw_window_decode(absorbed_key)
+                self.wm.requester.withdraw(absorbed_window)
         expected_restart = next(
             (window.key for window in later_windows
              if window.commit_lo > plan.commit_hi),
@@ -934,7 +963,7 @@ class StrongEscalation:
                 raise RuntimeError(
                     f"strong-region restart {expected_restart} needs a "
                     f"buffer start in 1-{restart.commit_lo}")
-            restart_reads = self.wm._read_keys_for_bounds(
+            restart_reads = self.wm.retention.read_keys_for_bounds(
                 restart.op_id, plan.restart_buffer_lo, restart.buffer_hi,
                 restart)
 
@@ -960,10 +989,10 @@ class StrongEscalation:
         # the strong window's context lives in syndrome buffer 1; the
         # restart window's weak reads stay retained in Buffer 0 by its
         # own window hold
-        self.wm._require_retained_payloads(
+        self.wm.retention.require_retained(
             context_reads, f"strong-region plan for {key}",
-            self.wm.syndrome_buffer_1)
-        self.wm._require_retained_payloads(
+            self.wm.retention.strong_store)
+        self.wm.retention.require_retained(
             list(restart_reads), f"strong-region plan for {key}")
         return _ResolvedStrongRegion(
             plan=plan,
@@ -989,7 +1018,7 @@ class StrongEscalation:
         restart = self.wm.planner.windows_by_key[restart_key]
         restart.buffer_lo = buffer_lo
         restart.n_rounds = restart.buffer_hi - restart.buffer_lo + 1
-        self.wm._replace_window_read_refs(restart_key, restart)
+        self.wm.retention.replace_window_reads(restart_key, restart)
         if model is not None:
             self.wm.planner.model_by_window[restart_key] = model
         self.wm.engine.log("DecoderCluster",
@@ -1016,16 +1045,17 @@ class StrongEscalation:
                 restart.deps_remaining -= 1
             if restart_key in window.dependents:
                 window.dependents.remove(restart_key)
-        self.wm._release_hold_if_live(key)
+        self.wm.retention.release_hold_if_live(key)
         absorbed = PotentialStrong(key)
-        needed = set(self.wm.syndrome_buffer_1.hold_round_identities(absorbed))
-        replacements = set(self.wm.syndrome_buffer_1.hold_round_identities(replacement))
+        sb1 = self.wm.retention.strong_store
+        needed = set(sb1.hold_round_identities(absorbed))
+        replacements = set(sb1.hold_round_identities(replacement))
         if restart_key is not None:
-            replacements.update(self.wm.syndrome_buffer_1.hold_round_identities(
+            replacements.update(sb1.hold_round_identities(
                 PotentialStrong(restart_key)))
         if not needed <= replacements:
             raise RuntimeError("absorption replacement does not cover packets")
-        self.wm.syndrome_buffer_1.release_hold(absorbed)
+        sb1.release_hold(absorbed)
         self.wm.engine.log("DecoderCluster",
                         f"window {key} absorbed into the strong window "
                         f"(weak chain skips it)")
@@ -1043,8 +1073,8 @@ class StrongEscalation:
         weak_job = pending.weak_job
         strong_window = pending.strong_window
         dem = pending.strong_model
-        payloads = self.wm._assemble_payloads(
-            strong_window, self.wm.syndrome_buffer_1)
+        payloads = self.wm.builder.assemble_payloads(
+            strong_window, self.wm.retention.strong_store)
         covered = {payload.round_index for payload in payloads}
         plan = pending.resolved_region.plan
         needed = set(range(plan.context_lo, plan.context_hi + 1))
@@ -1054,7 +1084,8 @@ class StrongEscalation:
                 f"{sorted(covered)} but it needs "
                 f"{plan.context_lo}-{plan.context_hi}; a strong window may "
                 "only start once every required round is retained")
-        self.wm._stamp_first_round_tick(strong_window, self.wm.syndrome_buffer_1)
+        self.wm.builder.stamp_first_round(
+            strong_window, self.wm.retention.strong_store)
         return DecodeJob(
             op_id=key[0], window_id=key[1],
             n_rounds=count_decoder_input_round_demand(payloads),
@@ -1064,7 +1095,8 @@ class StrongEscalation:
             dem=dem, payloads=payloads,
             attempt=1, window=strong_window, strong_decode_for=key,
             request_key=pending.strong_request_key,
-            request_created_ticks=pending.strong_request_created_ticks)
+            request_created_ticks=pending.strong_request_created_ticks,
+            gate=self.wm.builder)
     def _submit_far_strong(
         self,
         far_boundary_key: tuple,
@@ -1073,7 +1105,6 @@ class StrongEscalation:
         if pending.wsd_arrival_ticks is None:
             raise RuntimeError("far strong submission requires the weak_decoder_to_strong_decoder send")
         strong_job = self._build_pending_strong_job(pending)
-        self.check_strong_route(pending.weak_job, strong_job)
         self._escalations.take_far(far_boundary_key, pending)
         self._submit_strong_with_sbd(
             strong_job,
@@ -1092,7 +1123,6 @@ class StrongEscalation:
         if pending.wsd_arrival_ticks is None:
             raise RuntimeError("terminal strong submission requires the weak_decoder_to_strong_decoder send")
         strong_job = self._build_pending_strong_job(pending)
-        self.check_strong_route(pending.weak_job, strong_job)
         self._escalations.take_terminal(operation_id, pending)
         self._submit_strong_with_sbd(
             strong_job,

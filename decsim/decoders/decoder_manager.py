@@ -130,9 +130,6 @@ class DecoderManager:
         unit_pools: Optional[dict] = None,
         num_units: int = 1,
         bulk_strong: bool = False,
-        service_gate=None,
-        apply_service_boundary=None,
-        stage_admission=None,
         lane_policy=None,
         log_name: str = "DecoderCluster",
         capture_enabled: bool = False,
@@ -143,8 +140,11 @@ class DecoderManager:
         services,
         on_window_decoded: Callable,
         on_strong_window_decoded: Callable,
+        link=None,
     ):
         self.engine = engine
+        # the link the split gap's sibling input rides; None sends nothing
+        self.link = link
         self.router = router
         self.decoder_memory_transfer = (
             staging_module.CancellableDecoderMemoryTransfer(engine)
@@ -155,9 +155,6 @@ class DecoderManager:
         self.scheduler = scheduler
         self.lane_policy = lane_policy
         self.bulk_strong = bulk_strong
-        self.service_gate = service_gate
-        self.apply_service_boundary = apply_service_boundary
-        self.stage_admission = stage_admission
         # request_key -> job parked in its slot, a boundary still owed
         self._parked_service: dict = {}
         # (pool, unit) -> jobs whose input occupies or reserves a slot
@@ -662,8 +659,8 @@ class DecoderManager:
         A startable job takes any unit with a free input slot and claims
         compute when that unit's compute is free. A boundary-blocked job
         takes an input slot only (its DMA overlaps other work, Tomasulo's
-        reservation station), and only once the window manager's
-        stage_admission says its release is already resolving, so parked
+        reservation station), and only once its gate
+        (WindowInputGate.may_stage) says its release is already resolving, so parked
         work can never squat a slot against the decode that must free it.
 
         When every unit is computing, a job with input to move is staged
@@ -692,9 +689,9 @@ class DecoderManager:
         return unit, False
 
     def _is_staging_refused(self, job: message.DecodeJob) -> bool:
-        if self.stage_admission is None:
+        if job.gate is None:
             return False
-        return not self.stage_admission(job)
+        return not job.gate.may_stage(job)
 
     def _has_room(
         self, slot: tuple, job: message.DecodeJob, resident_capacity: int
@@ -1234,10 +1231,10 @@ class DecoderManager:
         if gated and self._is_boundary_owed(job):
             self._park(job)
             return
-        if self.apply_service_boundary is not None:
+        if job.gate is not None:
             # the seam mask is XORed into the landed input exactly once,
             # at the moment the decode actually starts
-            self.apply_service_boundary(job)
+            job.gate.mask_input(job)
         job.service_started = True
         if job.window is not None:
             job.window.service_began = True
@@ -1258,9 +1255,9 @@ class DecoderManager:
         self._track_pipelined_start(job, latency_ticks, interval_ticks, depth)
 
     def _is_boundary_owed(self, job: message.DecodeJob) -> bool:
-        if self.service_gate is None:
+        if job.gate is None:
             return False
-        return not self.service_gate(job)
+        return not job.gate.may_start(job)
 
     def _park(self, job: message.DecodeJob) -> None:
         self._parked_service[job.request_key] = job
@@ -1362,20 +1359,25 @@ class DecoderManager:
         sibling: message.DecodeJob,
         primary: message.DecodeJob,
     ) -> int:
-        window_manager = getattr(self.services, "wm", None)
-        if window_manager is None:
+        if self.link is None:
             on_landed()
             return 0
-        payload_bits = window_manager._job_payload_bits(sibling)
+        payload_bits = sibling.payload_bits()
         # the link attribution is the window's, so the transfer rides
         # the primary job's window identity; the landing is the
         # sibling's own
-        return window_manager._send_job_transfer(
-            message.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER,
-            primary,
-            payload_bits=payload_bits,
-            on_delivered=on_landed,
+        path = message.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER
+        attribution = message.TransferAttribution.for_job(
+            primary, primary.request_key
         )
+        now_ticks = self.engine.now
+        expected_delay_ticks = self.link.expected_delay_ticks(
+            path, payload_bits, now_ticks
+        )
+        self.link.send(
+            path, payload_bits, now_ticks, attribution, lambda _t: on_landed()
+        )
+        return expected_delay_ticks
 
     def _gap_sibling_done(self, key: tuple, sibling_weight) -> None:
         """One gap half landed; conclude the window if the other is in."""

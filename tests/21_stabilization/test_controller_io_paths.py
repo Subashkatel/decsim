@@ -17,7 +17,8 @@ from decsim.controller.syndrome_packing import SyndromePacking
 from decsim.decoders.decoders import PresetLatencyDecoder
 from decsim.engine import Engine
 from decsim.links.fabric import LinkFabric
-from decsim.message import Decision, QPUReadout, RunOperationBody, WINDOW_INPUT_ROUTE
+from decsim.message import (Decision, QPUReadout, RunOperationBody,
+                            SyndromePacketRoute, WINDOW_INPUT_ROUTE)
 from decsim.pauli_frame.pauli_frame import PauliFrameConfig
 from decsim.qpu.round_policies import FixedRounds
 
@@ -97,6 +98,65 @@ def test_packing_charges_its_assembly_time_for_every_round(fabric):
         ("PACKED", microseconds_to_ticks(2 + 3 + 1)),
     ]
     assert len(receiver.packets) == 1
+
+
+class _FeedbackMemoryReceiver:
+    def __init__(self):
+        self.source_operation_ids = []
+
+    def accept_feedback_memory_round(self, source_operation_id):
+        self.source_operation_ids.append(source_operation_id)
+
+
+def test_feedback_memory_rounds_pipeline_onto_wbd_without_a_landing_wait(
+        fabric):
+    """A feedback-memory round leaves the controller at its own completion
+    tick, not at the previous round's landing. No referent's sender waits
+    for a packet to land before sending the next: Yang et al. 2605.04892
+    and Google 2408.13687 stream every round to the decoder, Caune et al.
+    2410.05202 publish each classified result as it is produced, gem5's
+    dma_device.cc queues the next request behind the front of transmitList
+    and ns-3's point-to-point device starts the next packet at
+    TransmitComplete. Two rounds one QEC cycle apart on a 5 us WBD land one
+    cycle apart; a sender that waited would land them 5 us apart."""
+    engine = Engine(verbose=False)
+    receiver = _FeedbackMemoryReceiver()
+    settings = fabric["declared_profile"](
+        controller_to_weak_buffer=False, controller_to_strong_buffer=False)
+    links = LinkFabric(settings, engine)
+    packing = SyndromePacking(
+        engine, links=links, t_pack=0, packing_context_capacity=None,
+        window_input_receiver=None, feedback_memory_receiver=receiver)
+    controller = Controller(
+        engine, qpu=None, window_manager=None, syndrome_packing=packing,
+        measurement_signal_to_classical_bits_ticks=microseconds_to_ticks(3),
+        links=links, resolved_operations=(), resolved_patches=(),
+        idle_policy=None, feedback_streams=None)
+    route = SyndromePacketRoute.feedback_memory_round(7)
+
+    def readout(round_index):
+        controller.accept_qpu_readout(
+            QPUReadout(("idle", 7, "patch-a"), "patch-a", round_index,
+                       bits=[1], size_bits=1),
+            route)
+    engine.schedule(0, lambda: readout(1), label="round 1 readout")
+    engine.schedule(microseconds_to_ticks(1), lambda: readout(2),
+                    label="round 2 readout")
+    engine.run()
+
+    ticks_by_kind = {}
+    for event in packing.round_events:
+        ticks_by_kind.setdefault(event.kind, []).append(event.tick)
+    declared = fabric["DECLARED_US"]
+    qc_and_binary = declared["qpu_to_controller"] + declared["binary"]
+    wbd = declared["weak_buffer_to_weak_decoder"]
+    assert ticks_by_kind["PACKED"] == [
+        microseconds_to_ticks(qc_and_binary),
+        microseconds_to_ticks(qc_and_binary + 1)]
+    assert ticks_by_kind["FEEDBACK_MEMORY_DELIVERED"] == [
+        microseconds_to_ticks(qc_and_binary + wbd),
+        microseconds_to_ticks(qc_and_binary + 1 + wbd)]
+    assert receiver.source_operation_ids == [7, 7]
 
 
 def _feedback_run(fabric, *, controller_output_us):

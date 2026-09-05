@@ -453,18 +453,22 @@ class SyndromePacking:
         ordered_kinds = kinds[self._next_route_index:] + kinds[:self._next_route_index]
         for kind in ordered_kinds:
             route_queue = self._route_queues[kind]
-            if not route_queue:
-                continue
-            if kind is SyndromePacketRouteKind.WINDOW_INPUT:
-                progressed = self._drain_window_input_queue(route_queue)
-            else:
-                progressed = self._attempt_head(self._contexts[route_queue[0]])
-            if progressed:
+            if route_queue and self._drain_route_queue(route_queue):
                 self._next_route_index = (kinds.index(kind) + 1) % len(kinds)
 
-    def _drain_window_input_queue(self, route_queue) -> bool:
-        """Rounds pipeline onto CWB: every waiting round behind in-flight ones
-        is sent in order; a refused round stops the walk."""
+    def _drain_route_queue(self, route_queue) -> bool:
+        """Rounds pipeline onto their link: every waiting round behind in-flight
+        ones is sent in completion order, on both routes; a refused
+        window-input round stops the walk so Buffer 0 sees rounds in order.
+        The sender never waits for a round to land before sending the next:
+        the DAQs of Yang et al. (arXiv 2605.04892) and the control
+        electronics of Google (arXiv 2408.13687) stream every round to the
+        decoder, Caune et al. (arXiv 2410.05202) publish each classified
+        result as it is produced, gem5's DmaPort queues the next request
+        behind the front of transmitList (src/dev/dma_device.cc) and ns-3's
+        point-to-point device starts the next packet at TransmitComplete
+        (point-to-point-net-device.cc); the FIFO channel keeps delivery
+        order."""
         progressed = False
         for identity in list(route_queue):
             context = self._contexts[identity]
@@ -536,6 +540,8 @@ class SyndromePacking:
     # ---- feedback memory: WBD
 
     def _transmit_feedback_memory_round(self, context: _PackingContext) -> None:
+        """Send on WBD once; the next memory round follows at its own
+        completion tick, not at this one's landing (`_drain_route_queue`)."""
         packet = context.packet
         source_operation_id = context.route.source_operation_id
         self._send(

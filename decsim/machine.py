@@ -69,6 +69,7 @@ import decsim.links.link_profiles as link_profiles
 import decsim.links.settings as link_settings
 import decsim.message as message
 import decsim.observe.link_traffic as link_traffic
+import decsim.observe.decode_records as decode_records_module
 import decsim.observe.metrics as metrics
 import decsim.observe.round_events as round_events_module
 import decsim.observe.round_store_occupancy as round_store_occupancy_module
@@ -365,6 +366,7 @@ class Machine:
     transmitter: round_transmission.RoundTransmitter
     round_events: round_events_module.RoundEventRecorder
     decoder_manager: decoder_manager_module.DecoderManager
+    decode_records: decode_records_module.DecodeRecordLedger
     active_decoder: Optional[Any]
     factory: Any
     syndrome_source: Any
@@ -416,10 +418,13 @@ class Machine:
         # The decoder manager is built first, so the requester takes the
         # decode queue by constructor and every job carries its return
         # path. The services seam is the escalation the window manager
-        # builds until slice 7 dissolves it; the factory is bound by name
-        # until slice 6.
+        # builds until slice 7 dissolves it.
+        _check_strong_route(settings, pool.router)
+        decode_records = decode_records_module.DecodeRecordLedger(
+            is_enabled=observation.record_switching_windows
+        )
         decoder_manager = _decoder_manager(
-            engine, settings, escalation_policy, pool, links
+            engine, escalation_policy, pool, links, decode_records
         )
         window_manager = _window_manager(
             engine,
@@ -436,7 +441,6 @@ class Machine:
             on_workload_complete=lambda: factory.shutdown(),
         )
         decoder_manager.services = window_manager.escalation
-        _check_strong_route(settings, decoder_manager)
         strong_round_writer = _strong_round_writer(
             engine, links, strong_round_store, window_manager, round_events
         )
@@ -511,7 +515,7 @@ class Machine:
         qpu.connect_readout_receiver(controller)
         qpu.connect_completion_receiver(execution_runtime.body_done)
         qpu.connect_idle_receiver(idle_rounds.emit_idle_round)
-        metric_list = _metrics(observation, window_manager, decoder_manager)
+        metric_list = _metrics(observation, window_manager, decode_records)
         metric_bindings = _metric_bindings(metric_list)
         seed_roots = _seed_roots(
             code=plan.code,
@@ -523,7 +527,6 @@ class Machine:
             escalation_policy=escalation_policy,
             scheduler=pool.scheduler,
             decoder_memory_transfer=decoder_manager.service.staging.transport,
-            lane_policy=pool.lane_policy,
             boundary_policy=plan.boundary_policy,
             window_interaction=plan.window_interaction,
             idle_policy=plan.idle_policy,
@@ -572,6 +575,7 @@ class Machine:
             transmitter=transmitter,
             round_events=round_events,
             decoder_manager=decoder_manager,
+            decode_records=decode_records,
             active_decoder=pool.active,
             factory=factory,
             syndrome_source=plan.device,
@@ -671,7 +675,6 @@ class _DecoderPool:
     unit_pools: dict
     decoder_memory: Optional[decoder_memory_module.DecoderMemoryConfig]
     scheduler: Any
-    lane_policy: Any
 
 
 def _row(table: dict, section: str, kind):
@@ -1007,7 +1010,6 @@ def _decoder_pool(settings: MachineSettings, plan: _Plan) -> _DecoderPool:
         unit_pools=dict(unit_pools),
         decoder_memory=decoder_memory,
         scheduler=scheduler,
-        lane_policy=manager.lane_policy,
     )
 
 
@@ -1343,10 +1345,10 @@ class _LateWiring:
 
 def _decoder_manager(
     engine: engine_module.Engine,
-    settings: MachineSettings,
     escalation_policy,
     pool: _DecoderPool,
     links,
+    decode_records: decode_records_module.DecodeRecordLedger,
 ) -> decoder_manager_module.DecoderManager:
     return decoder_manager_module.DecoderManager(
         engine,
@@ -1355,18 +1357,18 @@ def _decoder_manager(
         scheduler=pool.scheduler,
         unit_pools=pool.unit_pools,
         bulk_strong=escalation_policy.bulk_strong,
-        capture_enabled=settings.observation.record_switching_windows,
         decoder_memory=pool.decoder_memory,
         escalation_policy=escalation_policy,
         services=None,
+        records=decode_records,
     )
 
 
-def _check_strong_route(settings: MachineSettings, decoder_manager) -> None:
+def _check_strong_route(settings: MachineSettings, router) -> None:
     """A switching run routes a strong job away from the weak decoder.
 
-    The wiring check the escalation ran on every strong job, run once
-    here on probe jobs: one decoder for both hints is the user's mistake.
+    Run once on probe jobs: one decoder for both hints is the user's
+    mistake.
     """
     if settings.escalation.kind != "switching":
         return
@@ -1374,7 +1376,14 @@ def _check_strong_route(settings: MachineSettings, decoder_manager) -> None:
     strong_probe = message.DecodeJob(
         op_id=-1, window_id=0, n_rounds=0, hint="strong"
     )
-    decoder_manager.check_strong_route(weak_probe, strong_probe)
+    strong_decoder = router.route(strong_probe)
+    weak_decoder = router.route(weak_probe)
+    if strong_decoder is weak_decoder:
+        raise ValueError(
+            "the strong tier routes to the same decoder as the weak tier; "
+            "give strong_decoder its own kind, or a router that sends "
+            "hint 'strong' to a distinct decoder"
+        )
 
 
 def _factory(
@@ -1439,12 +1448,12 @@ def _patch_by_identity(plan: _Plan) -> dict:
 def _metrics(
     observation: observe_settings.ObservationSettings,
     window_manager,
-    decoder_manager,
+    decode_records: decode_records_module.DecodeRecordLedger,
 ) -> list:
     """The observers the settings ask for; a test adds its own to the engine."""
     if not observation.record_switching_windows:
         return []
-    records = metrics.WindowSwitchingRecords(window_manager, decoder_manager)
+    records = metrics.WindowSwitchingRecords(window_manager, decode_records)
     return [records]
 
 

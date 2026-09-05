@@ -146,7 +146,7 @@ class GapJoins:
         self, job: message.DecodeJob, key: tuple
     ) -> message.DecodeJob:
         """The other forced-class solve over the primary's landed rounds."""
-        masked_fragments = fragments_in(job.decoder_input)
+        masked_fragments = job.decoder_input.fragments()
         round_count = len(job.decoder_input.rounds)
         return message.DecodeJob(
             op_id=job.op_id,
@@ -187,14 +187,6 @@ class GapJoins:
             path, payload_bits, now_ticks, attribution, lambda _t: on_landed()
         )
         return expected_delay_ticks
-
-
-def fragments_in(decoder_input) -> list:
-    """The landed fragments of a unit's input, round by round."""
-    fragments = []
-    for round_input in decoder_input.rounds:
-        fragments.extend(round_input.fragments)
-    return fragments
 
 
 def _attach_gap(

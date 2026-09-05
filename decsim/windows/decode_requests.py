@@ -16,7 +16,6 @@ import dataclasses
 import functools
 from typing import Callable, Optional
 
-import decsim.decoders.decoder_memory as decoder_memory
 import decsim.message as message
 
 
@@ -82,7 +81,7 @@ class DecodeRequestBuilder:
         """The tier's decode job for one complete window, read from store."""
         request_key = self.new_request_key(window.op_id, window.k, tier)
         payloads = self.assemble_payloads(window, store)
-        payload_round_count = decoder_memory.count_decoder_input_round_demand(
+        payload_round_count = message.distinct_round_count(
             payloads
         )
         round_count = (

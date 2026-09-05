@@ -14,7 +14,7 @@ import numpy
 
 import decsim.decoders.decoder as decoder_module
 import decsim.decoders.tesseract.window_decoder as tesseract_window_decoder
-import decsim.decoders.window_decode_results as window_decode_results
+import decsim.decoders.decoder as decoder_module
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.message as message
 
@@ -81,9 +81,9 @@ class TesseractCheckedDecoder(decoder_module.DecoderBase):
         model = job.dem
         if model is None or result.logical_observables is None:
             return result
-        syndrome = window_decode_results.payload_syndrome(job)
+        syndrome = decoder_module.payload_syndrome(job)
         outcome = self.referee.decode(model, syndrome)
-        succeeded = window_decode_results.BackendDecodeStatus.SUCCEEDED
+        succeeded = decoder_module.BackendDecodeStatus.SUCCEEDED
         if outcome.status is not succeeded:
             return result
         referee_flips = _owned_observable_flips(model, outcome)

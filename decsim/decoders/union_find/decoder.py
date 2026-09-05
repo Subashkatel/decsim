@@ -11,7 +11,7 @@ from typing import Optional
 
 import decsim.decoders.decoder as decoder_module
 import decsim.decoders.union_find.window_decoder as window_decoder
-import decsim.decoders.window_decode_results as window_decode_results
+import decsim.decoders.decoder as decoder_module
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.message as message
 
@@ -79,14 +79,14 @@ class UnionFindDecoder(decoder_module.WindowDecoderBase):
                 "Union-Find growth evidence requires a window error model"
             )
         faults = model.require_faults(self.fault_representation)
-        syndrome = window_decode_results.payload_syndrome(job)
-        window_decode_results.check_syndrome_size(job, syndrome, faults)
+        syndrome = decoder_module.payload_syndrome(job)
+        decoder_module.check_syndrome_size(job, syndrome, faults)
         graph = self.compiled_for(faults, model)
         started_ns = time.perf_counter_ns()
         hard_evidence = window_decoder.decode_graph(graph, syndrome)
         finished_ns = time.perf_counter_ns()
         decode_status = _status_of(hard_evidence)
-        hard_result = window_decode_results.result_from_selected_faults(
+        hard_result = decoder_module.result_from_selected_faults(
             job,
             model,
             faults,
@@ -99,5 +99,5 @@ class UnionFindDecoder(decoder_module.WindowDecoderBase):
 
 def _status_of(evidence: window_decoder.UnionFindHardEvidence):
     if evidence.unmatched_detectors:
-        return window_decode_results.BackendDecodeStatus.INVALID_CORRECTION
+        return decoder_module.BackendDecodeStatus.INVALID_CORRECTION
     return None

@@ -87,10 +87,16 @@ class DecoderSettings:
         """A tier section: kind, units, unit memory and the engine card."""
         engine = section["engine"]
         engine_megahertz = clocks.megahertz(engine["clock"])
+        unit_memory_rounds = section["unit_memory_rounds"]
+        if unit_memory_rounds is not None and unit_memory_rounds < 1:
+            raise ValueError(
+                "unit_memory_rounds must be at least one round, or null "
+                f"for an unbounded unit memory (got {unit_memory_rounds})"
+            )
         return cls(
             kind=section["kind"],
             units=section["units"],
-            unit_memory_rounds=section["unit_memory_rounds"],
+            unit_memory_rounds=unit_memory_rounds,
             fetch_cycles_per_round=engine["fetch_cycles_per_round"],
             release_cycles_per_job=engine["release_cycles_per_job"],
             engine_megahertz=engine_megahertz,
@@ -104,15 +110,14 @@ class DecoderManagerSettings:
     A router picks the decoder for each job (CodeRouter by code name,
     SwitchingRouter by tier); given, it replaces the one the root builds
     from the two tier sections. The scheduler orders the ready queue
-    (FifoScheduler by default), the lane policy picks a unit, unit_pools
-    names each pool's unit count (built from the tiers' units by
-    default) and decoder_memory bounds each pool's input memory in
-    rounds (built from the active tier's unit_memory_rounds by default).
+    (FifoScheduler by default), unit_pools names each pool's unit count
+    (built from the tiers' units by default) and decoder_memory bounds
+    each pool's input memory in rounds (built from the active tier's
+    unit_memory_rounds by default).
     """
 
     router: Optional[Any] = None
     scheduler: Optional[Any] = None
-    lane_policy: Optional[Any] = None
     unit_pools: Optional[Mapping[str, int]] = None
     decoder_memory: Optional[decoder_memory_module.DecoderMemoryConfig] = None
 

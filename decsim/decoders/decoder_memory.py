@@ -51,13 +51,7 @@ class DecoderMemoryConfig:
     capacity_rounds_by_pool: Mapping[str, int]
 
     def __post_init__(self) -> None:
-        copied = {}
-        for pool, capacity in self.capacity_rounds_by_pool.items():
-            if capacity < 1:
-                raise ValueError(
-                    f"pool {pool!r} needs a positive int round capacity"
-                )
-            copied[pool] = capacity
+        copied = dict(self.capacity_rounds_by_pool)
         frozen = types.MappingProxyType(copied)
         object.__setattr__(self, "capacity_rounds_by_pool", frozen)
 
@@ -87,6 +81,13 @@ class DecoderInput:
     request_key: Optional[message.DecoderRequestKey]
     rounds: tuple[MaterializedSyndromeRound, ...]
 
+    def fragments(self) -> list:
+        """The landed fragments, round by round."""
+        fragments = []
+        for round_input in self.rounds:
+            fragments.extend(round_input.fragments)
+        return fragments
+
 
 @dataclasses.dataclass(frozen=True)
 class DecoderMemorySnapshot:
@@ -98,25 +99,6 @@ class DecoderMemorySnapshot:
     occupied_rounds: int
     peak_occupied_rounds: int
     admissions: int
-
-
-def count_decoder_input_round_demand(payloads) -> int:
-    """The distinct syndrome rounds a set of payloads stores.
-
-    The number of ``(operation_id, round_index)`` identities, which is
-    exactly the number of rounds ``materialize_decoder_input`` groups
-    them into. A decode job is priced and admitted for this count, the
-    rounds the decoder actually reads: a sliding-window decoder's work
-    scales with the rounds in its window (Skoric et al. 2209.08552,
-    tau_W over n_W), a final window can be smaller than a regular one
-    with the whole window as core (Tan et al. 2209.09219), and no window
-    implementation feeds rounds beyond the data (Gong et al.
-    sliding-window decoder; cudaq-qec sliding_window).
-    """
-    round_identities = set()
-    for payload in payloads:
-        round_identities.add((payload.operation_id, payload.round_index))
-    return len(round_identities)
 
 
 def materialize_decoder_input(job: message.DecodeJob) -> DecoderInput:
@@ -227,27 +209,20 @@ def _check_detector_row_layout(
 
     The operation, the round order and the dense positions in each round
     must match; a wrong layout would decode the wrong syndrome silently.
+    Every model that reaches a job is a WindowErrorModel.
     """
-    model = getattr(job, "dem", None)
+    model = job.dem
     if model is None:
-        return
-    missing_layout_member = object()
-    detector_ids = getattr(model, "detector_ids", missing_layout_member)
-    defect_positions = getattr(model, "defect_positions", missing_layout_member)
-    if detector_ids is missing_layout_member:
-        return
-    if defect_positions is missing_layout_member:
         return
     input_rows = _input_row_identities(job, rounds)
     model_rows = _model_row_identities(
-        job.op_id, detector_ids, defect_positions
+        job.op_id, model.detector_ids, model.defect_positions
     )
     if input_rows != model_rows:
-        label = getattr(job, "label", "")
-        raise ValueError(
-            f"{label}: canonical decoder-input row layout {input_rows!r} "
-            "does not match the window error model's row layout "
-            f"{model_rows!r}"
+        raise RuntimeError(
+            f"{job.label}: canonical decoder-input row layout "
+            f"{input_rows!r} does not match the window error model's row "
+            f"layout {model_rows!r}"
         )
 
 
@@ -261,9 +236,8 @@ def _input_row_identities(
             round_input.operation_id, job.op_id
         )
         if not is_same_operation:
-            label = getattr(job, "label", "")
-            raise ValueError(
-                f"{label}: model-backed decoder-input round operation "
+            raise RuntimeError(
+                f"{job.label}: model-backed decoder-input round operation "
                 f"{round_input.operation_id!r} does not match job operation "
                 f"{job.op_id!r}"
             )

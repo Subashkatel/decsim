@@ -13,12 +13,14 @@ from decsim.decoders.minimum_weight_perfect_matching.decoder import (
     PyMatchingDecoder,
 )
 from decsim.decoders.union_find.decoder import UnionFindDecoder
-from decsim.decoders.window_decode_results import (
+from decsim.decoders.backend_outcome import (
     BackendDecodeOutcome,
-    BackendDecodeStatus,
     BackendFailureReason,
-    result_from_selected_faults,
     selected_faults_of,
+)
+from decsim.decoders.decoder import (
+    BackendDecodeStatus,
+    result_from_selected_faults,
 )
 from decsim.detector_error_model.fault_model_contracts import (
     FaultRepresentation,

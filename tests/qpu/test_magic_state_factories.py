@@ -25,7 +25,7 @@ class DecodeLog:
         self.latency_ticks = latency_ticks
         self.submitted = []
 
-    def submit_decode(self, round_count, on_done, label):
+    def enqueue_without_input(self, round_count, on_done, label):
         self.submitted.append((self.engine.now, round_count, label))
         self.engine.schedule(self.latency_ticks, on_done)
 

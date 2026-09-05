@@ -135,7 +135,7 @@ class IdleRoundAccounting:
         patch_record = self.geometry_by_patch[patch]
         geometry = patch_record.code_geometry
         rounds = idle_round_count + geometry.buffer_round_count
-        self.decode_queue.submit_decode(
+        self.decode_queue.enqueue_without_input(
             rounds,
             on_done=_ignore_completion,
             code=geometry.code_name,

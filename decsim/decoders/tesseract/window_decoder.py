@@ -20,15 +20,16 @@ from typing import Optional
 import numpy
 import stim
 
-import decsim.decoders.window_decode_results as window_decode_results
+import decsim.decoders.backend_outcome as backend_outcome
+import decsim.decoders.decoder as decoder_module
 import decsim.detector_error_model.fault_identity_validation as fault_identity
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.seeding as seeding
 
 _DETECTOR_ORDER_METHODS = frozenset({"index", "breadth_first", "coordinate"})
 _SEED_LIMIT = 1 << 64
-_Status = window_decode_results.BackendDecodeStatus
-_Reason = window_decode_results.BackendFailureReason
+_Status = backend_outcome.BackendDecodeStatus
+_Reason = backend_outcome.BackendFailureReason
 
 
 @dataclasses.dataclass(frozen=True)
@@ -91,18 +92,14 @@ class TesseractWindowDecoder(seeding._AtomicRunSeedConsumer):
         self._worker_process_id = os.getpid()
         self._worker_thread_id = None
 
-    def decode(
-        self, model, syndrome
-    ) -> window_decode_results.BackendDecodeOutcome:
+    def decode(self, model, syndrome) -> backend_outcome.BackendDecodeOutcome:
         """An immutable, parity-validated outcome from one backend call."""
         physical_faults = model.require_faults(
             fault_models.FaultRepresentation.PHYSICAL
         )
         syndrome_array = _checked_syndrome(syndrome, physical_faults)
         if physical_faults.check.shape[1] == 0:
-            return window_decode_results.empty_fault_model_outcome(
-                syndrome_array
-            )
+            return backend_outcome.empty_fault_model_outcome(syndrome_array)
         try:
             backend_decoder = self._compiled_decoder(model, physical_faults)
         except _BackendConstructionError:
@@ -495,7 +492,7 @@ def _outcome_of(
     low_confidence: bool,
     physical_faults,
     syndrome_array,
-) -> window_decode_results.BackendDecodeOutcome:
+) -> backend_outcome.BackendDecodeOutcome:
     """The outcome of one backend answer: its status and its correction."""
     fault_count = physical_faults.check.shape[1]
     correction, invalid_reason = _correction_from_error_indices(
@@ -505,11 +502,11 @@ def _outcome_of(
         return _failed_outcome(
             status=_Status.INVALID_CORRECTION, reason=invalid_reason
         )
-    reconstructed = window_decode_results.parity_product(
+    reconstructed = decoder_module.parity_product(
         physical_faults.check, correction
     )
-    correction_tuple = window_decode_results.bit_tuple(correction)
-    reconstructed_tuple = window_decode_results.bit_tuple(reconstructed)
+    correction_tuple = decoder_module.bit_tuple(correction)
+    reconstructed_tuple = decoder_module.bit_tuple(reconstructed)
     if low_confidence:
         return _failed_outcome(
             status=_Status.LOW_CONFIDENCE,
@@ -524,7 +521,7 @@ def _outcome_of(
             physical_correction=correction_tuple,
             reconstructed_syndrome=reconstructed_tuple,
         )
-    return window_decode_results.BackendDecodeOutcome(
+    return backend_outcome.BackendDecodeOutcome(
         status=_Status.SUCCEEDED,
         failure_reason=None,
         physical_correction=correction_tuple,
@@ -538,12 +535,12 @@ def _outcome_of(
 
 def _failed_outcome(
     *,
-    status: window_decode_results.BackendDecodeStatus,
-    reason: window_decode_results.BackendFailureReason,
+    status: backend_outcome.BackendDecodeStatus,
+    reason: backend_outcome.BackendFailureReason,
     physical_correction=None,
     reconstructed_syndrome=None,
-) -> window_decode_results.BackendDecodeOutcome:
-    return window_decode_results.BackendDecodeOutcome(
+) -> backend_outcome.BackendDecodeOutcome:
+    return backend_outcome.BackendDecodeOutcome(
         status=status,
         failure_reason=reason,
         physical_correction=physical_correction,

@@ -3,7 +3,7 @@
 from typing import Optional
 
 import decsim.decoders.decoder as decoder_module
-import decsim.decoders.window_decode_results as window_decode_results
+import decsim.decoders.decoder as decoder_module
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.message as message
 
@@ -139,7 +139,7 @@ class SoftOutputDecoder(decoder_module.DecoderBase):
         result, base_decode_ns = self.base.decode_timed(job)
         started_ns = time.perf_counter_ns()
         if metric is not None:
-            syndrome = window_decode_results.payload_syndrome(job)
+            syndrome = decoder_module.payload_syndrome(job)
             result.soft_output = metric.evaluate(syndrome)
         finished_ns = time.perf_counter_ns()
         evaluate_ns = finished_ns - started_ns
@@ -198,7 +198,7 @@ class ParallelGapDecoder(SoftOutputDecoder):
         metric = self._metric_for(job.dem)
         if metric is None:
             return result, base_decode_ns
-        syndrome = window_decode_results.payload_syndrome(job)
+        syndrome = decoder_module.payload_syndrome(job)
         paired = metric.paired_evaluate(syndrome)
         result.soft_output = paired.soft_output
         slower_solve_ns = max(paired.forced_solve_ns)
@@ -229,7 +229,7 @@ class SplitGapDecoder(SoftOutputDecoder):
         metric = self._metric_for(job.dem)
         if metric is None:
             return result, base_decode_ns
-        syndrome = window_decode_results.payload_syndrome(job)
+        syndrome = decoder_module.payload_syndrome(job)
         weight, elapsed_ns = metric.forced_class_solve(
             syndrome, self.FORCED_CLASS
         )
@@ -284,7 +284,7 @@ class GapHalfDecoder(decoder_module.DecoderBase):
         )
         if metric is None:
             return result, 0
-        syndrome = window_decode_results.payload_syndrome(job)
+        syndrome = decoder_module.payload_syndrome(job)
         weight, elapsed_ns = metric.forced_class_solve(
             syndrome, self.FORCED_CLASS
         )

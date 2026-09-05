@@ -143,6 +143,21 @@ class DecodeQueue(Protocol):
         none.
         """
 
+    def enqueue_without_input(
+        self,
+        round_count: int,
+        on_done: Callable[[], None],
+        label: str = "external",
+        code: Optional[str] = None,
+        spatial_nodes: Optional[int] = None,
+        hint: Optional[str] = None,
+    ) -> None:
+        """Queue a self-contained decode of the rounds; on_done at its end.
+
+        A factory's correction decode or an idle decode: no syndrome
+        data, so no transport and no unit memory.
+        """
+
     def withdraw_window(self, window_key: tuple) -> None:
         """Take back a window's not-yet-started decode; it is superseded."""
 

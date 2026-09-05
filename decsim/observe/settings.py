@@ -17,13 +17,16 @@ class ObservationSettings:
     received, holds and emitted). check_windows_with tesseract re-decodes
     every window with the Tesseract referee and counts disagreements,
     never priced. record_switching_windows keeps every request and
-    service record for the switching views (a Python-only knob).
+    service record for the switching views; round_store_occupancy builds
+    the L5 listener on Buffer 0 (both Python-only knobs until slice 10's
+    surface commit names them in the yaml).
     """
 
     trace: str = "off"
     log_component_io: bool = False
     check_windows_with: str = "none"
     record_switching_windows: bool = False
+    round_store_occupancy: bool = False
 
     @classmethod
     def from_yaml(cls, section: Mapping) -> "ObservationSettings":

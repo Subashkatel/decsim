@@ -113,12 +113,6 @@ class RoundAssembler:
     def _open_context(self, identity, round_key, route, fragment_count):
         context = _PackingContext(identity, round_key, route, fragment_count)
         self.workspace.context_by_identity[identity] = context
-        timeout_ticks = self.settings.reassembly_timeout_ticks
-        if timeout_ticks is not None:
-            expire = functools.partial(self._expire_reassembly, identity)
-            self.engine.schedule(
-                timeout_ticks, expire, label="syndrome reassembly timeout"
-            )
         return context
 
     def _finish_packing(self, context) -> None:
@@ -154,19 +148,6 @@ class RoundAssembler:
         formed = tuple(events)
         fragment = dataclasses.replace(raw, bits=formed, size_bits=len(formed))
         return (fragment,)
-
-    def _expire_reassembly(self, identity) -> None:
-        context = self.workspace.context_by_identity.get(identity)
-        if context is None:
-            return
-        self.recorder.reassembly_timed_out()
-        self.workspace.forget(context)
-        received = len(context.fragments)
-        raise RuntimeError(
-            f"syndrome reassembly {identity!r} timed out at tick "
-            f"{self.engine.now}: received {received}/"
-            f"{context.fragment_count} fragments"
-        )
 
 
 @dataclasses.dataclass

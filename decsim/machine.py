@@ -70,6 +70,7 @@ import decsim.message as message
 import decsim.observe.link_traffic as link_traffic
 import decsim.observe.metrics as metrics
 import decsim.observe.round_events as round_events_module
+import decsim.observe.round_store_occupancy as round_store_occupancy_module
 import decsim.observe.settings as observe_settings
 import decsim.pauli_frame.conditional_release as conditional_release_module
 import decsim.pauli_frame.pauli_frame as pauli_frame_module
@@ -342,6 +343,9 @@ class Machine:
     traffic_ledger: link_traffic.TrafficLedger
     conditional_release: conditional_release_module.ConditionalRelease
     round_store: round_store_module.RoundStore
+    round_store_occupancy: Optional[
+        round_store_occupancy_module.RoundStoreOccupancy
+    ]
     strong_round_store: Optional[round_store_module.RoundStore]
     strong_round_writer: Optional[strong_round_writer_module.StrongRoundWriter]
     pauli_frame: Optional[pauli_frame_module.PauliFrame]
@@ -391,7 +395,10 @@ class Machine:
         held_rounds = round_writes.HeldRounds(
             settings.controller.packing_overflow, round_events
         )
-        round_store = _round_store(settings.round_store, held_rounds)
+        round_store_occupancy = _round_store_occupancy(observation, engine)
+        round_store = _round_store(
+            settings.round_store, held_rounds, round_store_occupancy
+        )
         strong_round_store = _strong_round_store(
             settings.strong_round_store, escalation_policy, held_rounds
         )
@@ -546,6 +553,7 @@ class Machine:
             traffic_ledger=traffic_ledger,
             conditional_release=conditional_release,
             round_store=round_store,
+            round_store_occupancy=round_store_occupancy,
             strong_round_store=strong_round_store,
             strong_round_writer=strong_round_writer,
             pauli_frame=pauli_frame,
@@ -1104,10 +1112,21 @@ def _staged_unit(
 def _round_store(
     settings: round_store_settings.RoundStoreSettings,
     held_rounds: round_writes.HeldRounds,
+    listener,
 ):
     """Buffer 0; a freed slot retries the rounds held for room."""
     row = _row(ROUND_STORES, "round_store.kind", settings.kind)
-    return row(settings, on_slot_freed=held_rounds.retry)
+    return row(settings, on_slot_freed=held_rounds.retry, listener=listener)
+
+
+def _round_store_occupancy(
+    observation: observe_settings.ObservationSettings,
+    engine: engine_module.Engine,
+):
+    """The L5 listener on Buffer 0, only when the observation asks."""
+    if not observation.round_store_occupancy:
+        return None
+    return round_store_occupancy_module.RoundStoreOccupancy(engine)
 
 
 def _strong_round_store(

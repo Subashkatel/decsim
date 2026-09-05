@@ -138,8 +138,6 @@ class DecoderManager:
         ] = None,
         escalation_policy,
         services,
-        on_window_decoded: Callable,
-        on_strong_window_decoded: Callable,
         link=None,
     ):
         self.engine = engine
@@ -188,8 +186,6 @@ class DecoderManager:
         self.escalation_policy = escalation_policy
         # the EscalationServices seam (the window manager)
         self.services = services
-        self.on_window_decoded = on_window_decoded
-        self.on_strong_window_decoded = on_strong_window_decoded
         if unit_pools is None:
             unit_pools = {"default": num_units}
         _check_unit_pools(unit_pools)
@@ -241,7 +237,9 @@ class DecoderManager:
 
     # ---------------------------------------------------------- admission
 
-    def enqueue(self, job: message.DecodeJob, send_input=None) -> None:
+    def enqueue(
+        self, job: message.DecodeJob, send_input=None, on_decoded=None
+    ) -> None:
         """Admit once and queue the request; its rounds stay in Buffer 0.
 
         ``send_input(on_landed)`` is called at dispatch, after a unit is
@@ -250,6 +248,7 @@ class DecoderManager:
         accelerator pattern: invoke the unit, then DMA its input into that
         unit's memory, then compute; Aladdin aladdin_sys_connection.h and
         dma_interface.h). ``None`` means the job carries no syndrome data.
+        ``on_decoded(job, result)`` is where the result goes.
         """
         _refuse_spent_job(job)
         if job.strong_decode_for is not None:
@@ -259,6 +258,7 @@ class DecoderManager:
             self.strong.admit_weak(job, self.engine.now)
         job.submitted = True
         job.send_input = send_input
+        job.on_decoded = on_decoded
         self._enqueue_now(job)
 
     def submit_decode(
@@ -1520,7 +1520,7 @@ class DecoderManager:
         if awaiting:
             self._await_strong_result(job, key, directive)
         job.awaiting_strong_result = awaiting  # BEFORE the commit callback
-        self.on_window_decoded(job, result)
+        job.on_decoded(job, result)
         processing = RequestProcessingOutcome.PRIMARY_FORWARDED_FOR_DELIVERY
         if awaiting:
             processing = RequestProcessingOutcome.WEAK_AWAITED_STRONG
@@ -1572,7 +1572,8 @@ class DecoderManager:
         """
         if not self.strong.complete(held):
             return
-        self.on_strong_window_decoded(held.completion)
+        request_job = held.request_job
+        request_job.on_decoded(request_job, held.completion.result)
         self._record_request(
             held.request_job,
             held.completion.result,

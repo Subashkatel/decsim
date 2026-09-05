@@ -84,10 +84,14 @@ import decsim.seeding as seeding
 import decsim.syndrome_buffer.round_store as round_store_module
 import decsim.syndrome_buffer.settings as round_store_settings
 import decsim.syndrome_buffer.strong_round_writer as strong_round_writer_module
+import decsim.windows.committed_rounds as committed_rounds
 import decsim.windows.decode_requests as decode_requests
+import decsim.windows.operation_results as operation_results
 import decsim.windows.round_retention as round_retention_module
 import decsim.windows.round_tracker as round_tracker_module
 import decsim.windows.settings as window_settings
+import decsim.windows.window_boundaries as window_boundaries
+import decsim.windows.window_commits as window_commits
 import decsim.windows.window_interactions as window_interactions
 import decsim.windows.window_manager as window_manager_module
 import decsim.windows.window_planner as window_planner_module
@@ -409,23 +413,12 @@ class Machine:
         )
         pauli_frame = _pauli_frame(settings.pauli_frame, engine)
         # The decoder manager is built first, so the requester takes the
-        # decode queue by constructor. Its result callbacks bind the window
-        # manager by name until structural D puts on_decoded on the job;
-        # the services seam is the escalation the window manager builds
-        # until slice 7 dissolves it. The factory is bound by name until
-        # slice 6.
+        # decode queue by constructor and every job carries its return
+        # path. The services seam is the escalation the window manager
+        # builds until slice 7 dissolves it; the factory is bound by name
+        # until slice 6.
         decoder_manager = _decoder_manager(
-            engine,
-            settings,
-            escalation_policy,
-            pool,
-            links,
-            on_window_decoded=lambda job, result: window_manager.on_decode_done(
-                job, result
-            ),
-            on_strong_window_decoded=lambda completion: (
-                window_manager.on_strong_decode_done(completion)
-            ),
+            engine, settings, escalation_policy, pool, links
         )
         window_manager = _window_manager(
             engine,
@@ -1244,8 +1237,32 @@ def _window_manager(
     builder = decode_requests.DecodeRequestBuilder(
         engine, planner, tracker, plan.window_interaction, transfers
     )
+    ledger = committed_rounds.LogicalLedger()
+    results = operation_results.OperationResults(
+        planner,
+        tracker,
+        retention,
+        ledger,
+        conditional_release,
+        on_workload_complete,
+    )
+    publisher = window_commits.CorrectionPublisher(transfers, pauli_frame)
+    # the courier's landing callback and the committer's escalation are
+    # the facade's; this stands in for it at wiring time (slice 7 builds
+    # the escalation on its own and retires the stand-in)
+    facade = _FacadeToCome()
+    courier = window_boundaries.BoundaryCourier(
+        planner,
+        transfers,
+        plan.window_interaction,
+        plan.boundary_policy,
+        facade.accept_boundary,
+    )
+    committer = window_commits.WindowCommitter(
+        engine, planner, tracker, courier, publisher, facade, results
+    )
     requester = decode_requests.DecodeRequester(
-        tracker, retention, builder, decode_queue, escalation_policy
+        tracker, retention, builder, decode_queue, escalation_policy, committer
     )
     window_manager = window_manager_module.WindowManager(
         engine,
@@ -1255,14 +1272,31 @@ def _window_manager(
         transfers=transfers,
         builder=builder,
         requester=requester,
-        conditional_release=conditional_release,
-        boundary_policy=plan.boundary_policy,
+        courier=courier,
+        results=results,
         window_interaction=plan.window_interaction,
         feedback_boundary_mode=settings.workload.feedback_boundary_mode,
-        pauli_frame=pauli_frame,
-        on_workload_complete=on_workload_complete,
     )
+    facade.window_manager = window_manager
     return window_manager
+
+
+class _FacadeToCome:
+    """The windows facade, for the two components built before it.
+
+    The courier tells the facade when a boundary landed and the committer
+    tells the facade's escalation when a weak window committed; the
+    escalation is the facade's until slice 7 builds it on its own.
+    """
+
+    def __init__(self) -> None:
+        self.window_manager = None
+
+    def accept_boundary(self, key: tuple, is_unblocked: bool) -> None:
+        self.window_manager.accept_boundary(key, is_unblocked)
+
+    def after_weak_commit(self, key: tuple) -> None:
+        self.window_manager.escalation.after_weak_commit(key)
 
 
 def _decoder_manager(
@@ -1271,9 +1305,6 @@ def _decoder_manager(
     escalation_policy,
     pool: _DecoderPool,
     links,
-    *,
-    on_window_decoded,
-    on_strong_window_decoded,
 ) -> decoder_manager_module.DecoderManager:
     return decoder_manager_module.DecoderManager(
         engine,
@@ -1287,8 +1318,6 @@ def _decoder_manager(
         decoder_memory=pool.decoder_memory,
         escalation_policy=escalation_policy,
         services=None,
-        on_window_decoded=on_window_decoded,
-        on_strong_window_decoded=on_strong_window_decoded,
     )
 
 

@@ -177,11 +177,9 @@ def test_a_spent_job_is_refused_by_the_manager():
         num_units=1,
         escalation_policy=policy,
         services=None,
-        on_window_decoded=lambda _job, _result: None,
-        on_strong_window_decoded=None,
     )
     request_key = message.DecoderRequestKey(1, 0, message.DecoderTier.WEAK, 0)
     job = _job(request_key=request_key)
-    manager.enqueue(job)
+    manager.enqueue(job, None, lambda _job, _result: None)
     with pytest.raises(RuntimeError, match="submitted once"):
-        manager.enqueue(job)
+        manager.enqueue(job, None, lambda _job, _result: None)

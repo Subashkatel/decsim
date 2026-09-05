@@ -19,6 +19,15 @@ import decsim.windows.window_interactions as window_interactions
 import decsim.windows.window_transfers as window_transfers
 
 
+class _EagerPolicy:
+    def on_commit(self, _window, *, final) -> bool:
+        del final
+        return True
+
+
+_EAGER = _EagerPolicy()
+
+
 def test_a_stale_delivery_is_ignored_and_the_edge_releases_once():
     engine = engine_module.Engine(verbose=False)
     operation = message.Operation(
@@ -46,14 +55,8 @@ def test_a_stale_delivery_is_ignored_and_the_edge_releases_once():
     windows = {(1, 0): source, (1, 1): dependent}
     checks = []
 
-    def check_window(key) -> None:
+    def on_boundary_received(key, _is_unblocked) -> None:
         checks.append((engine.now, key))
-
-    def window_infos() -> dict:
-        infos = {}
-        for window_key, window in windows.items():
-            infos[window_key] = message.WindowInfo.from_window(window)
-        return infos
 
     planner = types.SimpleNamespace(
         windows_by_key=windows,
@@ -63,18 +66,10 @@ def test_a_stale_delivery_is_ignored_and_the_edge_releases_once():
     profile = link_profiles.logical_reference_profile()
     links = fabric.LinkFabric(profile, engine)
     interaction = window_interactions.DefaultWindowInteraction()
-    requester = types.SimpleNamespace(release_parked=lambda _key: None)
     transfers = window_transfers.WindowTransfers(engine, links)
-    manager = types.SimpleNamespace(
-        engine=engine,
-        transfers=transfers,
-        planner=planner,
-        window_interaction=interaction,
-        requester=requester,
-        check_window=check_window,
+    courier = window_boundaries.BoundaryCourier(
+        planner, transfers, interaction, _EAGER, on_boundary_received
     )
-    manager._window_infos = window_infos
-    courier = window_boundaries.BoundaryCourier(manager)
     key = message.DecoderRequestKey(1, 0, message.DecoderTier.WEAK, 0)
     boundary_v1 = {4: [1, 0, 0]}
     boundary_v2 = {4: [0, 1, 0]}

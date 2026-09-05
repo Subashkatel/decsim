@@ -4,16 +4,16 @@ A boundary is the residual defects at a window's commit edge, produced by
 the decoder at decode done and delivered to dependent windows over
 decoder_to_decoder; a held boundary waits for a final result. Versions
 make late deliveries harmless: every send bumps the source's version and
-each delivery's version, and a receiver only accepts the latest. The
-courier works on the window manager's tables (windows, models, links,
-the interaction) and is built by the manager; slice 5's structural D
-gives it its own record per source window and its own collaborators.
+each delivery's version, and a receiver only accepts the latest. Each
+source window has one record here; the courier owns the boundary policy
+(when a committed window may ship) and the interaction (what a boundary
+is and how it merges), and tells the window side when a delivery landed.
 """
 
 import copy
 import dataclasses
 import functools
-from typing import Optional
+from typing import Callable, Optional
 
 import decsim.message as message
 
@@ -23,38 +23,80 @@ class HeldBoundary:
     """A boundary kept back until the window's result is final (Held)."""
 
     source_request_key: message.DecoderRequestKey
-    operation_id: object
+    operation: message.Operation
     boundary: object
 
 
 class BoundaryCourier:
     """Delivers committed boundaries, versioned, held until final."""
 
-    def __init__(self, window_manager):
-        self.window_manager = window_manager
-        self._committed_boundaries: dict[tuple, object] = {}
-        self._boundary_versions: dict[tuple, int] = {}
-        self._boundary_delivery_versions: dict[tuple, int] = {}
-        self._released_boundary_dependencies: set[tuple] = set()
-        self._held_boundary: dict[tuple, HeldBoundary] = {}
+    def __init__(
+        self,
+        planner,
+        transfers,
+        interaction,
+        boundary_policy,
+        on_boundary_received: Callable[[tuple, bool], None],
+    ) -> None:
+        self.planner = planner
+        self.transfers = transfers
+        self.interaction = interaction
+        self.boundary_policy = boundary_policy
+        # (source window key, is_unblocked): a delivery landed in a window;
+        # True when it was the last boundary a shipped window owed
+        self.on_boundary_received = on_boundary_received
+        self.record_by_window: dict = {}
 
-    # ---- what the manager asks
+    # ---- what the committer asks
 
-    def hold(self, key: tuple, held: HeldBoundary) -> None:
-        """Keep a boundary back until the window's result is final."""
-        self._held_boundary[key] = held
+    def hand_on(
+        self,
+        window: message.Window,
+        operation: message.Operation,
+        result: message.DecodeResult,
+        request_key: message.DecoderRequestKey,
+        is_final: bool,
+    ) -> None:
+        """Ship the decoder's boundary to dependent windows, or hold it."""
+        boundary = self.interaction.boundary_from_result(result, None)
+        if self.boundary_policy.on_commit(window, final=is_final):
+            self.send(
+                window, operation, boundary, source_request_key=request_key
+            )
+            return
+        record = self._record(window.key)
+        record.held = HeldBoundary(request_key, operation, boundary)
 
-    def take_held(self, key: tuple) -> Optional[HeldBoundary]:
-        """The boundary held for the window, taken out; None when none."""
-        return self._held_boundary.pop(key, None)
+    def ship_held(
+        self,
+        window: message.Window,
+        result: message.DecodeResult,
+        request_key: message.DecoderRequestKey,
+    ) -> None:
+        """The window's result is final: a boundary held for it ships now."""
+        record = self._record(window.key)
+        held = record.held
+        if held is None:
+            return
+        record.held = None
+        boundary = self.interaction.boundary_from_result(result, held.boundary)
+        self.send(
+            window, held.operation, boundary, source_request_key=request_key
+        )
 
     def has_committed(self, key: tuple) -> bool:
         """True once the window has shipped a boundary."""
-        return key in self._committed_boundaries
+        record = self.record_by_window.get(key)
+        if record is None:
+            return False
+        return record.has_committed
 
     def committed(self, key: tuple):
         """The boundary the window shipped, or None."""
-        return self._committed_boundaries.get(key)
+        record = self.record_by_window.get(key)
+        if record is None:
+            return None
+        return record.committed
 
     def invalidate(self, window: message.Window) -> None:
         """A window is about to be decoded again.
@@ -63,20 +105,20 @@ class BoundaryCourier:
         so advancing the versions makes its scheduled delivery a no-op;
         its own shipped and held boundaries are gone.
         """
-        key = window.key
-        version = self._boundary_versions.get(key, 0)
-        self._boundary_versions[key] = version + 1
+        record = self._record(window.key)
+        record.version += 1
         for dependency in window.deps:
-            delivery_key = (dependency, key)
-            delivery_version = self._boundary_delivery_versions.get(
-                delivery_key, 0
+            source = self._record(dependency)
+            delivery_version = source.delivery_version_by_dependent.get(
+                window.key, 0
             )
-            self._boundary_delivery_versions[delivery_key] = (
+            source.delivery_version_by_dependent[window.key] = (
                 delivery_version + 1
             )
-            self._released_boundary_dependencies.discard(delivery_key)
-        self._committed_boundaries.pop(key, None)
-        self._held_boundary.pop(key, None)
+            source.released_dependents.discard(window.key)
+        record.committed = None
+        record.has_committed = False
+        record.held = None
 
     # ---- delivery
 
@@ -92,48 +134,86 @@ class BoundaryCourier:
 
         A new version supersedes any delivery in flight.
         """
-        source_key = (window.op_id, window.k)
+        source_key = window.key
+        record = self._record(source_key)
         targets = self._targets(window)
-        version = self._boundary_versions.get(source_key, 0)
-        version += 1
-        deliveries = []
+        record.version += 1
+        record.committed = boundary
+        record.has_committed = True
         for dependent_key in targets:
-            delivery_key = (source_key, dependent_key)
-            delivery_version = self._boundary_delivery_versions.get(
-                delivery_key, 0
+            delivery_version = record.delivery_version_by_dependent.get(
+                dependent_key, 0
             )
             delivery_version += 1
-            deliveries.append((dependent_key, delivery_key, delivery_version))
-        self._boundary_versions[source_key] = version
-        self._committed_boundaries[source_key] = boundary
-        for dependent_key, delivery_key, delivery_version in deliveries:
-            self._boundary_delivery_versions[delivery_key] = delivery_version
+            record.delivery_version_by_dependent[dependent_key] = (
+                delivery_version
+            )
             self._send_one(
                 window,
                 operation,
                 boundary,
                 source_request_key,
-                source_key,
                 dependent_key,
-                version,
+                record.version,
                 delivery_version,
             )
+
+    def merge_available(
+        self, source_key: tuple, destination: message.Window, boundary
+    ) -> None:
+        """Merge an already-delivered predecessor into a newly built window."""
+        record = self._record(source_key)
+        delivery_revision = record.delivery_version_by_dependent.get(
+            destination.key, 0
+        )
+        source_round_count = self.planner.round_count_of(source_key[0])
+        delivery = message.BoundaryDelivery(
+            source_key=source_key,
+            destination_key=destination.key,
+            source_revision=record.version,
+            delivery_revision=delivery_revision,
+            latest_source_revision=record.version,
+            latest_delivery_revision=delivery_revision,
+            source_operation_round_count=source_round_count,
+            dependency_released=True,
+            payload=boundary,
+        )
+        update = self._propose_boundary_update(delivery, destination)
+        if update.release_dependency:
+            raise RuntimeError(
+                f"window interaction released boundary dependency "
+                f"{(source_key, destination.key)} more than once"
+            )
+        if update.accepted:
+            destination.boundary_in = update.state
+
+    # ---- private
+
+    def _record(self, key: tuple) -> "_BoundaryRecord":
+        record = self.record_by_window.get(key)
+        if record is None:
+            record = _BoundaryRecord()
+            self.record_by_window[key] = record
+        return record
 
     def _targets(self, window: message.Window) -> tuple:
         """The dependents the interaction selects, absorbed ones left out."""
         window_info = message.WindowInfo.from_window(window)
-        window_infos = self.window_manager._window_infos()
-        interaction = self.window_manager.window_interaction
-        selected = interaction.boundary_targets(window_info, window_infos)
+        window_infos = self._window_infos()
+        selected = self.interaction.boundary_targets(window_info, window_infos)
         targets = []
         for dependent_key in selected:
-            dependent = self.window_manager.planner.windows_by_key[
-                dependent_key
-            ]
+            dependent = self.planner.windows_by_key[dependent_key]
             if dependent.is_absorbed:
                 continue
             targets.append(dependent_key)
         return tuple(targets)
+
+    def _window_infos(self) -> dict:
+        infos = {}
+        for key, window in self.planner.windows_by_key.items():
+            infos[key] = message.WindowInfo.from_window(window)
+        return infos
 
     def _send_one(
         self,
@@ -141,7 +221,6 @@ class BoundaryCourier:
         operation: message.Operation,
         boundary,
         source_request_key: message.DecoderRequestKey,
-        source_key: tuple,
         dependent_key: tuple,
         version: int,
         delivery_version: int,
@@ -152,7 +231,7 @@ class BoundaryCourier:
         )
         relation = message.BoundaryTransferRelation(
             source_request_key,
-            source_key,
+            window.key,
             dependent_key,
             version,
             delivery_version,
@@ -163,44 +242,11 @@ class BoundaryCourier:
             dependent_key,
             operation.id,
             boundary,
-            source_key,
+            window.key,
             version,
             delivery_version,
         )
-        self.window_manager.transfers.send_boundary(attribution, receive)
-
-    def merge_available(
-        self, source_key: tuple, destination: message.Window, boundary
-    ) -> None:
-        """Merge an already-delivered predecessor into a newly built window."""
-        delivery_key = (source_key, destination.key)
-        source_revision = self._boundary_versions.get(source_key, 0)
-        delivery_revision = self._boundary_delivery_versions.get(
-            delivery_key, 0
-        )
-        source_round_count = self._operation_round_count(source_key[0])
-        delivery = message.BoundaryDelivery(
-            source_key=source_key,
-            destination_key=destination.key,
-            source_revision=source_revision,
-            delivery_revision=delivery_revision,
-            latest_source_revision=source_revision,
-            latest_delivery_revision=delivery_revision,
-            source_operation_round_count=source_round_count,
-            dependency_released=True,
-            payload=boundary,
-        )
-        update = self._propose_boundary_update(delivery, destination)
-        if update.release_dependency:
-            raise RuntimeError(
-                f"window interaction released boundary dependency "
-                f"{delivery_key} more than once"
-            )
-        if update.accepted:
-            destination.boundary_in = update.state
-
-    def _operation_round_count(self, operation_id) -> int:
-        return self.window_manager.planner.round_count_of(operation_id)
+        self.transfers.send_boundary(attribution, receive)
 
     def _receive_boundary(
         self,
@@ -213,36 +259,41 @@ class BoundaryCourier:
         _transfer=None,
     ) -> None:
         """A delivery landed: merge it if current, release the edge once."""
-        delivery_key = (source_key, key)
-        window = self.window_manager.planner.windows_by_key[key]
-        dependency_released = (
-            delivery_key in self._released_boundary_dependencies
+        record = self._record(source_key)
+        window = self.planner.windows_by_key[key]
+        dependency_released = key in record.released_dependents
+        latest_delivery_revision = record.delivery_version_by_dependent.get(
+            key, 0
         )
-        latest_source_revision = self._boundary_versions.get(source_key, 0)
-        latest_delivery_revision = self._boundary_delivery_versions.get(
-            delivery_key, 0
-        )
-        source_round_count = self._operation_round_count(source_operation_id)
+        source_round_count = self.planner.round_count_of(source_operation_id)
         delivery = message.BoundaryDelivery(
             source_key=source_key,
             destination_key=key,
             source_revision=version,
             delivery_revision=delivery_version,
-            latest_source_revision=latest_source_revision,
+            latest_source_revision=record.version,
             latest_delivery_revision=latest_delivery_revision,
             source_operation_round_count=source_round_count,
             dependency_released=dependency_released,
             payload=defects,
         )
         update = self._propose_boundary_update(delivery, window)
+        delivery_key = (source_key, key)
         self._check_update(update, window, delivery_key, dependency_released)
         if update.accepted:
             window.boundary_in = update.state
             if update.release_dependency:
-                self._released_boundary_dependencies.add(delivery_key)
+                record.released_dependents.add(key)
                 window.deps_remaining -= 1
-        self._wake_parked_decode(key, window)
-        self.window_manager.check_window(key)
+        is_unblocked = self._is_unblocked_now(window)
+        self.on_boundary_received(key, is_unblocked)
+
+    @staticmethod
+    def _is_unblocked_now(window: message.Window) -> bool:
+        """The last boundary arrived for a shipped window still waiting."""
+        if not window.queued or window.committed:
+            return False
+        return window.deps_remaining == 0
 
     def _check_update(
         self,
@@ -271,14 +322,6 @@ class BoundaryCourier:
                 f"{delivery_key}, but it is not a live dependency"
             )
 
-    def _wake_parked_decode(self, key: tuple, window: message.Window) -> None:
-        """The last boundary arrived for a shipped window: wake its decode."""
-        if not window.queued or window.committed:
-            return
-        if window.deps_remaining != 0:
-            return
-        self.window_manager.requester.release_parked(key)
-
     def _propose_boundary_update(
         self, delivery: message.BoundaryDelivery, destination: message.Window
     ) -> message.BoundaryUpdate:
@@ -290,14 +333,14 @@ class BoundaryCourier:
                 f"boundary state for {delivery.destination_key} must support "
                 "deep copying before merge_boundary"
             ) from error
-        model = self.window_manager.planner.model_by_window.get(destination.key)
+        model = self.planner.model_by_window.get(destination.key)
         detector_positions = None
         if model is not None:
             detector_positions = model.defect_positions
         destination_info = message.WindowInfo.from_window(
             destination, detector_positions=detector_positions
         )
-        update = self.window_manager.window_interaction.merge_boundary(
+        update = self.interaction.merge_boundary(
             delivery, destination_info, candidate_state
         )
         if not update.accepted and update.release_dependency:
@@ -306,3 +349,15 @@ class BoundaryCourier:
                 f"{delivery.destination_key} cannot release a dependency"
             )
         return update
+
+
+class _BoundaryRecord:
+    """One source window's boundary: shipped, versioned, held, delivered."""
+
+    def __init__(self) -> None:
+        self.committed = None
+        self.has_committed = False
+        self.version = 0
+        self.delivery_version_by_dependent: dict = {}
+        self.released_dependents: set = set()
+        self.held: Optional[HeldBoundary] = None

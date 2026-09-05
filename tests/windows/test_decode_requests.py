@@ -25,8 +25,9 @@ class _RecordingQueue:
         self.enqueued = []
         self.withdrawn = []
 
-    def enqueue(self, job, send_input=None) -> None:
+    def enqueue(self, job, send_input=None, on_decoded=None) -> None:
         job.submitted = True
+        job.on_decoded = on_decoded
         self.enqueued.append((job, send_input))
 
     def withdraw_window(self, window_key) -> None:
@@ -44,6 +45,10 @@ class _Link:
         self, _path, _payload_bits, _now_ticks, _attribution, on_delivered
     ):
         on_delivered(None)
+
+
+def _ignore_result(_job, _result) -> None:
+    """The requester's tests read the queue, not the result."""
 
 
 def _fragment(round_index, bits=None) -> message.RetainedSyndromeFragment:
@@ -104,8 +109,16 @@ class _Fixture:
         )
         self.queue = _RecordingQueue()
         policy = weak_strong_switching.Baseline()
+        committer = types.SimpleNamespace(
+            accept_result=_ignore_result, accept_strong_result=_ignore_result
+        )
         self.requester = decode_requests.DecodeRequester(
-            self.tracker, self.retention, self.builder, self.queue, policy
+            self.tracker,
+            self.retention,
+            self.builder,
+            self.queue,
+            policy,
+            committer,
         )
         self.retention.register_window((1, 0), self.window)
 
@@ -134,6 +147,7 @@ def test_a_complete_window_is_requested_once():
     (job, send_input) = fixture.queue.enqueued[0]
     assert job.window is fixture.window
     assert job.gate is fixture.builder
+    assert job.on_decoded is _ignore_result
     assert [payload.round_index for payload in job.payloads] == [1, 2, 3, 4, 5]
     assert fixture.window.queued
     assert fixture.window.t_queued == 0

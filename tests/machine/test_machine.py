@@ -16,11 +16,16 @@ import pytest
 import decsim.config as config
 import decsim.decoders.decoder as decoder_module
 import decsim.decoders.settings as decoder_settings
+import decsim.decoders.staged_decoder as staged_decoder
 import decsim.decoders.union_find.decoder as union_find_decoder
 import decsim.engine as engine_module
+import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
 import decsim.message as message
 import decsim.qpu.cycle_clock as cycle_clock
+import decsim.qpu.round_policies as round_policies
+import decsim.qpu.settings as qpu_settings
+import decsim.qpu.stim_device as stim_device
 import decsim.qpu.syndrome_devices as syndrome_devices
 import decsim.syndrome_buffer.settings as round_store_settings
 import experiments.experiment_config as experiment_config
@@ -178,3 +183,66 @@ def test_the_three_post_construction_binds_reach_their_components():
     manager = machine.decoder_manager
     assert machine.window_manager.release_service == manager.release_parked
     assert machine.window_manager.withdraw_decode == manager.withdraw_window
+
+
+def _two_patch_memory(weak_decoder) -> machine_module.MachineSettings:
+    """Two memory operations on two patches; the second starts at round 4.
+
+    Patch 1 idles for four rounds first, and the default idle policy
+    (separate_decode_jobs) charges that idle region as one load-only
+    decode job, a job without a window model.
+    """
+    circuit = workload_settings.memory_circuit(
+        "surface_code:rotated_memory_z", 6, 3, 0.003
+    )
+    first = message.Operation(
+        id=1, name="mem0", qubits=(0,), patches=(0,), circuit=circuit
+    )
+    late = message.Operation(
+        id=2,
+        name="mem1",
+        qubits=(1,),
+        patches=(1,),
+        circuit=circuit,
+        scheduled_start_round=4,
+    )
+    rounds = round_policies.FixedRounds(6)
+    workload = workload_settings.WorkloadSettings(
+        operations=(first, late), rounds_policy=rounds
+    )
+    device = stim_device.StimDevice()
+    qpu = qpu_settings.QpuSettings(distance=3, device=device)
+    return machine_module.MachineSettings(
+        workload=workload, qpu=qpu, weak_decoder=weak_decoder
+    )
+
+
+def test_a_load_only_job_on_a_measured_unit_holds_it_for_zero_algorithm_ticks():
+    """A job without a model spends no host time on the measured row.
+
+    The unit's algorithm stage is zero ticks for it, while every window
+    with a model holds the unit for its measured time.
+    """
+    weak_decoder = decoder_settings.DecoderSettings(
+        kind="pymatching", engine_megahertz=250.0
+    )
+    settings = _two_patch_memory(weak_decoder)
+    machine = machine_module.Machine.build(settings, 0)
+    result = machine.run()
+    assert result.terminal_status == "complete"
+    unit = machine.active_decoder
+    algorithm = [
+        record
+        for record in unit.stage_records
+        if record.stage == staged_decoder.ALGORITHM_STAGE
+    ]
+    operation_ids = {1, 2}
+    load_only = [r for r in algorithm if r.op_id not in operation_ids]
+    windows = [r for r in algorithm if r.op_id in operation_ids]
+    assert len(load_only) == 1
+    assert len(windows) == 2
+    idle_ticks = [r.end_ticks - r.start_ticks for r in load_only]
+    assert idle_ticks == [0]
+    assert all(r.end_ticks > r.start_ticks for r in windows)
+    idle_lines = [line for line in machine.engine.log_lines if "mem(" in line]
+    assert any("algorithm mem(" in line for line in idle_lines)

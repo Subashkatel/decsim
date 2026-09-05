@@ -454,13 +454,25 @@ class StrongEscalation:
     absorbs the windows it covers and restarts the weak chain past it), when
     the deferred job is submitted (the far weak boundary, or the terminal
     data), and how the strong result's selection reaches the decoder side.
-    It works on the window manager's own tables (windows, holds, models,
-    links), so it is constructed with the manager and reads its state
-    directly; it is the one object outside the manager allowed to.
+    It works on the window components it is built with (the planner, the
+    tracker, the retention, the request builder, the transfers, the
+    requester, the ledger and the interaction); slice 7 dissolves it
+    into the decoder side, so its width is recorded, not split.
     """
 
-    def __init__(self, window_manager):
-        self.wm = window_manager
+    def __init__(
+        self, engine, planner, tracker, retention, builder, transfers,
+        requester, ledger, interaction,
+    ):
+        self.engine = engine
+        self.planner = planner
+        self.tracker = tracker
+        self.retention = retention
+        self.builder = builder
+        self.transfers = transfers
+        self.requester = requester
+        self.ledger = ledger
+        self.interaction = interaction
         self._escalations = _EscalationRegistry()
         # strong request keys whose WSD selection has arrived, and the
         # SBD landings waiting for one that has not
@@ -483,7 +495,7 @@ class StrongEscalation:
         """Queue a strong job now; its SBD input is sent at dispatch."""
         submission = self._strong_submission(
             strong_job, wsd_arrival_ticks=wsd_arrival_ticks)
-        self.wm.requester.enqueue(submission)
+        self.requester.enqueue(submission)
 
     def _strong_submission(
         self,
@@ -500,17 +512,17 @@ class StrongEscalation:
         """
         request_key = strong_job.request_key
         window_key = strong_job.strong_decode_for
-        sb1 = self.wm.retention.strong_store
+        sb1 = self.retention.strong_store
         if sb1.has_hold(PotentialStrong(window_key)):
-            self.wm.retention.transfer_hold(
+            self.retention.transfer_hold(
                 PotentialStrong(window_key), StrongInputInFlight(request_key), sb1)
         elif sb1.has_hold(PendingStrong(request_key)):
-            self.wm.retention.transfer_hold(
+            self.retention.transfer_hold(
                 PendingStrong(request_key), StrongInputInFlight(request_key), sb1)
         else:
             packet_ids = round_retention.round_identities_of(strong_job.payloads)
             sb1.register_hold(StrongInputInFlight(request_key), packet_ids)
-        self.wm.retention.bind_input_hold(
+        self.retention.bind_input_hold(
             strong_job, StrongInputInFlight(request_key), sb1)
         payload_bits = strong_job.payload_bits()
         context_identities = round_retention.round_identities_of(
@@ -526,12 +538,12 @@ class StrongEscalation:
                     return
                 self._land_after_selection(request_key, on_landed)
 
-            expected_delay_ticks = self.wm.transfers.send_for_job(
+            expected_delay_ticks = self.transfers.send_for_job(
                 LinkPath.STRONG_BUFFER_TO_STRONG_DECODER, strong_job, payload_bits=payload_bits,
                 on_delivered=landed)
             if wsd_arrival_ticks is None:
                 return expected_delay_ticks
-            selection_delay_ticks = wsd_arrival_ticks - self.wm.engine.now
+            selection_delay_ticks = wsd_arrival_ticks - self.engine.now
             return max(expected_delay_ticks, selection_delay_ticks)
 
         return Submission(strong_job, send_input)
@@ -542,7 +554,7 @@ class StrongEscalation:
         """A serial strong job: its context was held when the policy built
         it; it queues now with a send that also waits for the selection."""
         request_key = strong_job.request_key
-        sb1 = self.wm.retention.strong_store
+        sb1 = self.retention.strong_store
         payload_bits = strong_job.payload_bits()
         context_identities = round_retention.round_identities_of(
             strong_job.payloads)
@@ -552,13 +564,13 @@ class StrongEscalation:
             def landed() -> None:
                 self._land_after_selection(request_key, on_landed)
 
-            expected_delay_ticks = self.wm.transfers.send_for_job(
+            expected_delay_ticks = self.transfers.send_for_job(
                 LinkPath.STRONG_BUFFER_TO_STRONG_DECODER, strong_job, payload_bits=payload_bits,
                 on_delivered=landed)
-            selection_delay_ticks = wsd_arrival_ticks - self.wm.engine.now
+            selection_delay_ticks = wsd_arrival_ticks - self.engine.now
             return max(expected_delay_ticks, selection_delay_ticks)
 
-        self.wm.requester.enqueue(Submission(strong_job, send_input))
+        self.requester.enqueue(Submission(strong_job, send_input))
 
     def _land_after_selection(self, request_key: DecoderRequestKey,
                               on_landed: Callable[[], None]) -> None:
@@ -583,10 +595,10 @@ class StrongEscalation:
             self._selection_delivered(strong_request_key)
             on_selection_delivered()
 
-        expected_delay_ticks = self.wm.transfers.send_for_job(
+        expected_delay_ticks = self.transfers.send_for_job(
             LinkPath.WEAK_DECODER_TO_STRONG_DECODER, weak_job, payload_bits=None,
             request_key=strong_request_key, on_delivered=delivered)
-        return self.wm.engine.now + expected_delay_ticks
+        return self.engine.now + expected_delay_ticks
     def prepare_strong_selection(
         self,
         weak_job: DecodeJob,
@@ -605,7 +617,7 @@ class StrongEscalation:
             pending = self._escalations.update_wsd_arrival(
                 pending, wsd_arrival_ticks)
             if (pending.phase is _EscalationPhase.WAITING_TERMINAL_DATA
-                    and self.wm.tracker.strong_rounds_arrived(pending.key[0]) >=
+                    and self.tracker.strong_rounds_arrived(pending.key[0]) >=
                     pending.resolved_region.plan.context_hi):
                 self._submit_terminal_strong(pending.key[0], pending)
             return
@@ -631,11 +643,11 @@ class StrongEscalation:
         The job is priced for the context rounds that exist: a window at
         the operation's edge has a shorter context than commit + 2 buffer."""
         key = (weak_job.op_id, weak_job.window_id)
-        weak_window = self.wm.planner.windows_by_key[key]
-        op = self.wm.tracker.operation_by_id[weak_job.op_id]
+        weak_window = self.planner.windows_by_key[key]
+        op = self.tracker.operation_by_id[weak_job.op_id]
         strong_window = self._strong_context_window(weak_window)
-        model_round_count = self.wm.tracker.round_count_for_window(op.id, strong_window)
-        builder = self.wm.builder
+        model_round_count = self.tracker.round_count_for_window(op.id, strong_window)
+        builder = self.builder
         left_exclusions = (
             ((1, strong_window.commit_lo - 1),)
             if strong_window.commit_lo > 1
@@ -649,31 +661,31 @@ class StrongEscalation:
         )
         request_key = builder.new_request_key(
             weak_job.op_id, weak_job.window_id, DecoderTier.STRONG)
-        context_reads = self.wm.retention.read_keys_for_bounds(
+        context_reads = self.retention.read_keys_for_bounds(
             weak_job.op_id, strong_window.buffer_lo, strong_window.buffer_hi,
             strong_window)
         missing = [round_key for round_key in context_reads
-                   if round_key[1] <= self.wm.tracker.rounds_arrived(
+                   if round_key[1] <= self.tracker.rounds_arrived(
                        round_key[0])
-                   and self.wm.retention.strong_store.retained_fragments(round_key)
+                   and self.retention.strong_store.retained_fragments(round_key)
                    is None]
         if missing:
             raise RuntimeError(
                 f"strong context for {key} arrived at Buffer 0 but is not "
                 f"stored in syndrome buffer 1: {missing} (controller_to_strong_buffer lag "
                 f"beyond the escalation margin, or an early release)")
-        builder.stamp_first_round(strong_window, self.wm.retention.strong_store)
+        builder.stamp_first_round(strong_window, self.retention.strong_store)
         payloads = builder.assemble_payloads(
-            strong_window, self.wm.retention.strong_store)
+            strong_window, self.retention.strong_store)
         return DecodeJob(
             op_id=weak_job.op_id, window_id=weak_job.window_id,
             n_rounds=count_decoder_input_round_demand(payloads),
-            ready_time=self.wm.engine.now,
+            ready_time=self.engine.now,
             label=label, hint="strong",
             spatial_nodes=weak_job.spatial_nodes, code=weak_job.code,
             dem=dem, payloads=payloads,
             attempt=1, window=strong_window, strong_decode_for=key,
-            request_key=request_key, request_created_ticks=self.wm.engine.now,
+            request_key=request_key, request_created_ticks=self.engine.now,
             gate=builder)
     def _strong_context_window(self, weak_window: Window) -> Window:
         buffer_lo, commit_lo, commit_hi, buffer_hi = \
@@ -691,7 +703,7 @@ class StrongEscalation:
         round is stored (waiting_terminal_data). One strong job per
         escalation; duplicates raise."""
         key = (weak_job.op_id, weak_job.window_id)
-        existing_contribution = self.wm.ledger.contributions.get(key)
+        existing_contribution = self.ledger.contributions.get(key)
         if (
             self._escalations.peek_key(key) is not None
             or (
@@ -705,18 +717,18 @@ class StrongEscalation:
         if weak_job.strong_label is None:
             raise RuntimeError(
                 f"double-window escalation {key} needs a declared strong label")
-        strong_request_key = self.wm.builder.new_request_key(
+        strong_request_key = self.builder.new_request_key(
             weak_job.op_id, weak_job.window_id, DecoderTier.STRONG)
-        strong_request_created_ticks = self.wm.engine.now
-        weak_window = self.wm.planner.windows_by_key[key]
+        strong_request_created_ticks = self.engine.now
+        weak_window = self.planner.windows_by_key[key]
         op_id, escalated_index = key
-        round_count = self.wm.tracker.round_count_for_window(op_id, weak_window)
+        round_count = self.tracker.round_count_for_window(op_id, weak_window)
         later_windows = [
-            self.wm.planner.windows_by_key[(op_id, window_index)]
-            for window_index in self.wm.planner.window_indices_of(op_id)
+            self.planner.windows_by_key[(op_id, window_index)]
+            for window_index in self.planner.window_indices_of(op_id)
             if window_index > escalated_index
         ]
-        plan = self.wm.window_interaction.plan_strong_region(
+        plan = self.interaction.plan_strong_region(
             WindowInfo.from_window(weak_window),
             [WindowInfo.from_window(window) for window in later_windows],
             round_count,
@@ -746,10 +758,10 @@ class StrongEscalation:
 
         restart_model = None
         if restart_key is not None:
-            proposed_restart = deepcopy(self.wm.planner.windows_by_key[restart_key])
+            proposed_restart = deepcopy(self.planner.windows_by_key[restart_key])
             proposed_restart.buffer_lo = plan.restart_buffer_lo
             restart_model = self._build_strong_window_model(
-                self.wm.tracker.operation_by_id[op_id],
+                self.tracker.operation_by_id[op_id],
                 proposed_restart,
                 round_count,
                 resolved_region.restart_fault_exclusion_ranges,
@@ -763,35 +775,35 @@ class StrongEscalation:
             n_rounds=plan.context_hi - plan.context_lo + 1,
         )
         strong_model = self._build_strong_window_model(
-            self.wm.tracker.operation_by_id[op_id], strong_window, round_count,
+            self.tracker.operation_by_id[op_id], strong_window, round_count,
             resolved_region.strong_fault_exclusion_ranges)
         logical_candidate = self._strong_window_ownership_candidate(
             key, resolved_region)
         guard = None
         if restart_key is not None:
             guard = RephaseGuard(strong_request_key)
-            sb1 = self.wm.retention.strong_store
+            sb1 = self.retention.strong_store
             # the restart window's weak reads must still sit under its own
             # window hold; once its weak decode is built the hold moves to
             # the job, and a rephase can no longer claim those rounds
-            if not self.wm.retention.weak_store.has_hold(restart_key):
+            if not self.retention.weak_store.has_hold(restart_key):
                 raise RuntimeError(
                     f"strong-region plan for {key} requires restart window "
                     f"{restart_key}'s weak reads under its window hold, "
                     f"which is no longer live (its weak decode already "
                     f"consumed them)")
-            guarded_weak = list(self.wm.retention.weak_store.hold_round_identities(restart_key))
+            guarded_weak = list(self.retention.weak_store.hold_round_identities(restart_key))
             guarded_weak += list(resolved_region.restart_read_keys)
             guarded_strong = list(sb1.hold_round_identities(PotentialStrong(key)))
             guarded_strong += list(sb1.hold_round_identities(PotentialStrong(restart_key)))
             guarded_strong += [(op_id, round_index) for round_index in
                                range(plan.context_lo, plan.context_hi + 1)]
-            guarded_strong += self.wm.retention.strong_context_read_keys(
+            guarded_strong += self.retention.strong_context_read_keys(
                 proposed_restart, list(resolved_region.restart_read_keys))
-            self.wm.retention.weak_store.register_hold(guard, guarded_weak)
+            self.retention.weak_store.register_hold(guard, guarded_weak)
             sb1.register_hold(guard, guarded_strong)
         try:
-            self.wm.ledger.contributions = logical_candidate
+            self.ledger.contributions = logical_candidate
             phase = (
                 _EscalationPhase.WAITING_TERMINAL_DATA
                 if restart_key is None
@@ -813,8 +825,8 @@ class StrongEscalation:
                 self._escalations.register_terminal(pending, op_id)
             else:
                 self._escalations.register_far(pending, restart_key)
-            self.wm.retention.transfer_potential_to_pending(key, strong_request_key)
-            self.wm.retention.strong_store.replace_hold(
+            self.retention.transfer_potential_to_pending(key, strong_request_key)
+            self.retention.strong_store.replace_hold(
                 PendingStrong(strong_request_key),
                 [(op_id, round_index) for round_index in
                  range(plan.context_lo, plan.context_hi + 1)])
@@ -827,7 +839,7 @@ class StrongEscalation:
                 if restart_key is None
                 else "the far-side weak boundary"
             )
-            self.wm.engine.log(
+            self.engine.log(
                 "DecoderCluster",
                 f"{pending.label}: strong window rounds {plan.commit_lo}-"
                 f"{plan.commit_hi} assigned; weak chain skips "
@@ -842,13 +854,14 @@ class StrongEscalation:
                     plan.commit_hi,
                     plan.restart_seam_fault_owner,
                 )
-                self.wm.check_window(restart_key)  # its absorbed dep is gone
+                restart = self.planner.windows_by_key[restart_key]
+                self.requester.request_if_ready(restart, self)  # its absorbed dep is gone
             return strong_request_key
         finally:
             if guard is not None:
-                self.wm.retention.release_hold_if_live(guard)
-                self.wm.retention.release_hold_if_live(
-                    guard, self.wm.retention.strong_store)
+                self.retention.release_hold_if_live(guard)
+                self.retention.release_hold_if_live(
+                    guard, self.retention.strong_store)
     def _defer_crossing_strong_escalation(
         self, weak_job: DecodeJob, weak_window: Window, later_windows: list,
         round_count: int, plan: StrongRegionPlan, crossing_window: Window,
@@ -872,7 +885,7 @@ class StrongEscalation:
         }
         candidate = {
             owner_key: contribution
-            for owner_key, contribution in self.wm.ledger.contributions.items()
+            for owner_key, contribution in self.ledger.contributions.items()
             if owner_key not in replaced_owner_keys
         }
         for other_key, contribution in candidate.items():
@@ -928,7 +941,7 @@ class StrongEscalation:
                 f"{window.commit_hi} across the strong-region edge "
                 f"{plan.commit_hi}")
         for absorbed_key in absorbed:
-            absorbed_window = self.wm.planner.windows_by_key[absorbed_key]
+            absorbed_window = self.planner.windows_by_key[absorbed_key]
             if absorbed_window.committed or absorbed_window.t_done is not None:
                 raise RuntimeError(
                     f"cannot absorb window {absorbed_key}: already "
@@ -937,7 +950,7 @@ class StrongEscalation:
                 # early-shipped at data-complete but parked on the
                 # escalated window's boundary, which will never arrive
                 # (the strong window owns it); withdraw the unstarted attempt
-                self.wm.requester.withdraw(absorbed_window)
+                self.requester.withdraw(absorbed_window)
         expected_restart = next(
             (window.key for window in later_windows
              if window.commit_lo > plan.commit_hi),
@@ -951,7 +964,7 @@ class StrongEscalation:
                     f"terminal strong-region plan for {key} cannot define "
                     f"restart seam data")
         else:
-            restart = self.wm.planner.windows_by_key[expected_restart]
+            restart = self.planner.windows_by_key[expected_restart]
             if restart.commit_lo != plan.commit_hi + 1:
                 raise RuntimeError(
                     f"strong-region plan for {key} ends at "
@@ -963,7 +976,7 @@ class StrongEscalation:
                 raise RuntimeError(
                     f"strong-region restart {expected_restart} needs a "
                     f"buffer start in 1-{restart.commit_lo}")
-            restart_reads = self.wm.retention.read_keys_for_bounds(
+            restart_reads = self.retention.read_keys_for_bounds(
                 restart.op_id, plan.restart_buffer_lo, restart.buffer_hi,
                 restart)
 
@@ -989,10 +1002,10 @@ class StrongEscalation:
         # the strong window's context lives in syndrome buffer 1; the
         # restart window's weak reads stay retained in Buffer 0 by its
         # own window hold
-        self.wm.retention.require_retained(
+        self.retention.require_retained(
             context_reads, f"strong-region plan for {key}",
-            self.wm.retention.strong_store)
-        self.wm.retention.require_retained(
+            self.retention.strong_store)
+        self.retention.require_retained(
             list(restart_reads), f"strong-region plan for {key}")
         return _ResolvedStrongRegion(
             plan=plan,
@@ -1007,21 +1020,21 @@ class StrongEscalation:
         fault_exclusions: tuple,
     ):
         """Build through the historical or explicit multi-range device port."""
-        resolved = self.wm.planner.resolved_operation_by_id[operation.id]
-        return self.wm.planner.models.strong_model_for_operation(
+        resolved = self.planner.resolved_operation_by_id[operation.id]
+        return self.planner.models.strong_model_for_operation(
             operation, resolved, window, round_count, fault_exclusions)
     def _reslice_restart_window(
         self, restart_key: tuple, buffer_lo: int, model,
         strong_window_hi: int, seam_owner: SeamFaultOwner,
     ) -> None:
         """Install a restart model prepared before plan mutation."""
-        restart = self.wm.planner.windows_by_key[restart_key]
+        restart = self.planner.windows_by_key[restart_key]
         restart.buffer_lo = buffer_lo
         restart.n_rounds = restart.buffer_hi - restart.buffer_lo + 1
-        self.wm.retention.replace_window_reads(restart_key, restart)
+        self.retention.replace_window_reads(restart_key, restart)
         if model is not None:
-            self.wm.planner.model_by_window[restart_key] = model
-        self.wm.engine.log("DecoderCluster",
+            self.planner.model_by_window[restart_key] = model
+        self.engine.log("DecoderCluster",
                         f"restart window {restart_key} re-sliced across strong window "
                         f"edge {strong_window_hi} (reads rounds {restart.buffer_lo}-"
                         f"{restart.buffer_hi}; crossing faults owned by "
@@ -1031,7 +1044,7 @@ class StrongEscalation:
     ) -> None:
         """A strong-window-covered window is never weak-decoded: count it committed
         with no logical contribution and unhook the restart window."""
-        window = self.wm.planner.windows_by_key[key]
+        window = self.planner.windows_by_key[key]
         if window.queued or window.committed:
             raise RuntimeError(f"cannot absorb window {key}: already "
                                f"{'queued' if window.queued else 'committed'}")
@@ -1039,15 +1052,15 @@ class StrongEscalation:
         window.committed = True
         window.is_absorbed = True
         if restart_key is not None:
-            restart = self.wm.planner.windows_by_key[restart_key]
+            restart = self.planner.windows_by_key[restart_key]
             if key in restart.deps:
                 restart.deps.remove(key)
                 restart.deps_remaining -= 1
             if restart_key in window.dependents:
                 window.dependents.remove(restart_key)
-        self.wm.retention.release_hold_if_live(key)
+        self.retention.release_hold_if_live(key)
         absorbed = PotentialStrong(key)
-        sb1 = self.wm.retention.strong_store
+        sb1 = self.retention.strong_store
         needed = set(sb1.hold_round_identities(absorbed))
         replacements = set(sb1.hold_round_identities(replacement))
         if restart_key is not None:
@@ -1056,7 +1069,7 @@ class StrongEscalation:
         if not needed <= replacements:
             raise RuntimeError("absorption replacement does not cover packets")
         sb1.release_hold(absorbed)
-        self.wm.engine.log("DecoderCluster",
+        self.engine.log("DecoderCluster",
                         f"window {key} absorbed into the strong window "
                         f"(weak chain skips it)")
     def _build_pending_strong_job(
@@ -1073,8 +1086,8 @@ class StrongEscalation:
         weak_job = pending.weak_job
         strong_window = pending.strong_window
         dem = pending.strong_model
-        payloads = self.wm.builder.assemble_payloads(
-            strong_window, self.wm.retention.strong_store)
+        payloads = self.builder.assemble_payloads(
+            strong_window, self.retention.strong_store)
         covered = {payload.round_index for payload in payloads}
         plan = pending.resolved_region.plan
         needed = set(range(plan.context_lo, plan.context_hi + 1))
@@ -1084,19 +1097,19 @@ class StrongEscalation:
                 f"{sorted(covered)} but it needs "
                 f"{plan.context_lo}-{plan.context_hi}; a strong window may "
                 "only start once every required round is retained")
-        self.wm.builder.stamp_first_round(
-            strong_window, self.wm.retention.strong_store)
+        self.builder.stamp_first_round(
+            strong_window, self.retention.strong_store)
         return DecodeJob(
             op_id=key[0], window_id=key[1],
             n_rounds=count_decoder_input_round_demand(payloads),
-            ready_time=self.wm.engine.now,
+            ready_time=self.engine.now,
             label=pending.label, hint="strong",
             spatial_nodes=weak_job.spatial_nodes, code=weak_job.code,
             dem=dem, payloads=payloads,
             attempt=1, window=strong_window, strong_decode_for=key,
             request_key=pending.strong_request_key,
             request_created_ticks=pending.strong_request_created_ticks,
-            gate=self.wm.builder)
+            gate=self.builder)
     def _submit_far_strong(
         self,
         far_boundary_key: tuple,
@@ -1110,7 +1123,7 @@ class StrongEscalation:
             strong_job,
             wsd_arrival_ticks=pending.wsd_arrival_ticks,
         )
-        self.wm.engine.log(
+        self.engine.log(
             "DecoderCluster",
             f"{pending.label}: far-side weak boundary determined -> "
             "strong window submitted",
@@ -1128,7 +1141,7 @@ class StrongEscalation:
             strong_job,
             wsd_arrival_ticks=pending.wsd_arrival_ticks,
         )
-        self.wm.engine.log(
+        self.engine.log(
             "DecoderCluster",
             f"{pending.label}: terminal data complete -> strong window submitted",
         )
@@ -1139,7 +1152,7 @@ class StrongEscalation:
         if pending is None:
             return
         if (
-            self.wm.tracker.strong_rounds_arrived(op_id)
+            self.tracker.strong_rounds_arrived(op_id)
             >= pending.resolved_region.plan.context_hi
         ):
             self._submit_terminal_strong(op_id, pending)

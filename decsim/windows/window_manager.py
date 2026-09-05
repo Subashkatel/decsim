@@ -12,18 +12,19 @@ the OperationResults'; the facade receives rounds and wires them, the
 shape of gem5's cache (BaseCache owns its MSHR queue, write buffer and
 tags, each one job, and implements the ports: src/mem/cache/base.hh).
 The strong tier is StrongEscalation's (NoStrongTier when the policy
-never escalates), built here until slice 7 dissolves its services seam.
-One round reads as accept_window_input, requester.request_if_ready,
-job.on_decoded (committer.accept_result), results.deliver_if_final.
+never escalates), on the same components, until slice 7 dissolves its
+services seam. One round reads as accept_window_input,
+requester.request_if_ready, job.on_decoded (committer.accept_result),
+results.deliver_if_final.
 
-Wide state recorded: the facade holds the components the escalation
-still reaches through it (structural E moves the escalation onto them).
+Wide state recorded: ten attributes, the seven components a round
+crosses, the escalation the arrivals wake, the interaction that gives a
+new window its first boundary and the workload's feedback mode.
 """
 
 import dataclasses
 from typing import Optional, Protocol, runtime_checkable
 
-import decsim.decoders.strong_escalation as strong_escalation
 import decsim.message as message
 
 
@@ -91,11 +92,10 @@ class WindowManager:
         planner,
         tracker,
         retention,
-        transfers,
-        builder,
         requester,
         courier,
         results,
+        escalation,
         window_interaction,
         feedback_boundary_mode: str = "trailing_buffer",
     ):
@@ -103,16 +103,12 @@ class WindowManager:
         self.planner = planner
         self.tracker = tracker
         self.retention = retention
-        self.transfers = transfers
-        self.builder = builder
         self.requester = requester
         self.courier = courier
         self.results = results
+        self.escalation = escalation
         self.window_interaction = window_interaction
         self.feedback_boundary_mode = feedback_boundary_mode
-        self.escalation = strong_escalation.NoStrongTier()
-        if retention.is_strong_context_retained:
-            self.escalation = strong_escalation.StrongEscalation(self)
         for window in self.planner.windows_by_key.values():
             window_info = message.WindowInfo.from_window(window)
             window.boundary_in = self.window_interaction.initial_boundary_state(

@@ -237,7 +237,7 @@ def truth_view(window_manager, device) -> TruthView:
     observables = tuple(sorted(truth.items(),
                                key=lambda item: stable_identity_order_key(item[0])))
     predictions = tuple(sorted(
-        window_manager.op_results.items(),
+        window_manager.result_by_operation.items(),
         key=lambda item: stable_identity_order_key(item[0]),
     ))
     return TruthView(observables=observables, predictions=predictions)

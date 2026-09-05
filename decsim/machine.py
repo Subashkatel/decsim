@@ -1165,7 +1165,7 @@ def _strong_round_writer(
         engine,
         links,
         strong_round_store,
-        on_round_stored=window_manager._on_room_round_stored,
+        on_round_stored=window_manager.accept_room_round,
         recorder=round_events,
     )
 
@@ -1215,9 +1215,7 @@ def _window_manager(
     return window_manager_module.WindowManager(
         engine,
         scheme=plan.scheme,
-        code_geometry=run_plan.code_geometry,
         resolved_operations=run_plan.resolved_operations,
-        resolved_patches=run_plan.resolved_patches,
         links=links,
         conditional_release=conditional_release,
         boundary_policy=plan.boundary_policy,
@@ -1379,16 +1377,14 @@ def _load_program(
                 operation.id, operation.blocked_by
             )
     for operation in plan.planned_operations:
-        window_manager.register_op(operation)
+        window_manager.register_operation(operation)
     run_plan = plan.run_plan
-    window_manager.load_execution_plan(run_plan.execution, run_plan.buffering)
+    window_manager.load_plan(run_plan.execution, run_plan.buffering)
     resolved_by_id = {}
     for resolved in run_plan.resolved_operations:
         resolved_by_id[resolved.operation_id] = resolved
     for stream in plan.dynamic_streams:
-        window_manager._register_dynamic_stream(
-            stream, resolved_by_id[stream.id]
-        )
+        window_manager.register_stream(stream, resolved_by_id[stream.id])
     for _name, metric in metric_bindings:
         engine.add_metric(metric)
     program = message.ExecutionProgram(
@@ -1399,7 +1395,7 @@ def _load_program(
     )
     streams.load(program)
     for operation in program.operations:
-        window_manager.register_op(operation)
+        window_manager.register_operation(operation)
     idle_rounds.load(program)
     execution_runtime.load_program(program)
 
@@ -1448,7 +1444,7 @@ def _operation_result(
 ) -> LogicalOperationResult:
     """One operation's predicted observables beside the sampled truth."""
     operation_id = operation.id
-    logical = machine.window_manager.op_results.get(operation_id)
+    logical = machine.window_manager.result_by_operation.get(operation_id)
     bits = None
     status = "no_logical_output"
     if logical is not None:

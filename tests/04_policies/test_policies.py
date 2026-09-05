@@ -503,13 +503,13 @@ def test_memory_filled_trailing_buffer_is_flagged():
     flagged = [window for window in completed.window_manager.windows.values()
                if window.buffer_filled_by_memory]
     assert len(flagged) >= 1
-    assert completed.window_manager.memory_filled_buffer_windows == len(flagged)
     for window in flagged:
         # the flag marks the approximation; the release itself stands
         assert window.t_data_complete is not None
         assert window.t_done is not None
-    assert any(line for line in completed.engine.log_lines
-               if "buffer filled by memory rounds" in line)
+    filled_lines = [line for line in completed.engine.log_lines
+                    if "buffer filled by memory rounds" in line]
+    assert len(filled_lines) == len(flagged)
 
 
 def test_single_operation_run_charges_no_idle_work():
@@ -535,7 +535,8 @@ def test_single_operation_run_charges_no_idle_work():
     completed.run()
 
     assert completed.idle_rounds.emitted_count == 0
-    assert completed.window_manager.memory_filled_buffer_windows == 0
+    assert not any("buffer filled by memory rounds" in line
+                   for line in completed.engine.log_lines)
     assert not _idle_decode_labels(completed)
 
 

@@ -236,7 +236,7 @@ def test_final_results_use_the_sink_while_provisional_and_delivery_legs_bypass_i
     manager.engine = final_engine
     manager.pauli_frame = sink
     manager.windows = {(4, 1): SimpleNamespace(t_done=None, k=1)}
-    manager._ops = {4: SimpleNamespace(name="logical")}
+    manager._operation_by_id = {4: SimpleNamespace(name="logical")}
     manager._send_window_transfer = (
         lambda path, window, op, request_key, payload_bits, on_delivered:
             final_engine.schedule(4, on_delivered))
@@ -283,7 +283,7 @@ def test_final_results_use_the_sink_while_provisional_and_delivery_legs_bypass_i
             "at the strong commit")
     )
     strong.windows = {(4, 1): SimpleNamespace(op_id=4, k=1)}
-    strong._ops = {4: SimpleNamespace(name="logical")}
+    strong._operation_by_id = {4: SimpleNamespace(name="logical")}
     strong._send_window_transfer = (
         lambda path, window, op, request_key, payload_bits, on_delivered:
             engine.schedule(5, on_delivered))
@@ -338,8 +338,7 @@ def test_escalated_strong_final_folds_into_the_frame_and_gates_the_commit():
         commit_correction=lambda **kwargs: frame_calls.append(kwargs)
     )
     manager.windows = {(4, 1): SimpleNamespace(op_id=4, k=1)}
-    manager._ops = {4: SimpleNamespace(id=4, name="logical")}
-    manager.op_strong_commit_time = {}
+    manager._operation_by_id = {4: SimpleNamespace(id=4, name="logical")}
     manager._selected_request_keys = None
     finished = []
     manager._finish_strong_commit = (
@@ -363,8 +362,7 @@ def test_frameless_strong_commit_finishes_directly():
     manager.engine = engine
     manager.pauli_frame = None
     manager.windows = {(4, 1): SimpleNamespace(op_id=4, k=1)}
-    manager._ops = {4: SimpleNamespace(id=4, name="logical")}
-    manager.op_strong_commit_time = {}
+    manager._operation_by_id = {4: SimpleNamespace(id=4, name="logical")}
     manager._selected_request_keys = None
     finished = []
     manager._finish_strong_commit = (
@@ -388,7 +386,7 @@ def test_final_result_rides_its_tiers_output_link():
         manager.engine = engine
         manager.pauli_frame = None
         manager.windows = {(4, 1): SimpleNamespace(t_done=None, k=1)}
-        manager._ops = {4: SimpleNamespace(name="logical")}
+        manager._operation_by_id = {4: SimpleNamespace(name="logical")}
         paths = []
         def send(path, window, op, request_key, payload_bits, on_delivered,
                  paths=paths):

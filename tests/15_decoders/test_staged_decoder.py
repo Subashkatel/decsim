@@ -288,7 +288,22 @@ def test_measured_wall_clock_algorithm_holds_the_unit_for_the_real_call():
     operation = Operation(
         id=1, name="memory", qubits=(0,), patches=(0,), circuit=circuit
     )
-    unit = StagedDecoder(PyMatchingDecoder(latency_model=None), _timing())
+
+    class RecordingPyMatching(PyMatchingDecoder):
+        """The measured row, keeping every call's nanoseconds."""
+
+        def __init__(self):
+            PyMatchingDecoder.__init__(self, latency_model=None)
+            self.elapsed_ns = []
+
+        def decode_timed(self, job):
+            result, elapsed_ns = PyMatchingDecoder.decode_timed(self, job)
+            self.elapsed_ns.append(elapsed_ns)
+            return result, elapsed_ns
+
+    measured = RecordingPyMatching()
+    timing = _timing()
+    unit = StagedDecoder(measured, timing)
     settings = MachineSettings(
         workload=WorkloadSettings(
             operations=[operation], rounds_policy=FixedRounds(6)
@@ -301,8 +316,12 @@ def test_measured_wall_clock_algorithm_holds_the_unit_for_the_real_call():
     assert result.terminal_status == "complete"
     algorithm = [r for r in unit.stage_records if r.stage == ALGORITHM_STAGE]
     assert algorithm
-    for record in algorithm:
-        assert record.end_ticks > record.start_ticks
+    assert len(measured.elapsed_ns) == len(algorithm)
+    for record, elapsed_ns in zip(algorithm, measured.elapsed_ns):
+        assert elapsed_ns > 0
+        held = record.end_ticks - record.start_ticks
+        elapsed_microseconds = elapsed_ns / 1000.0
+        assert held == microseconds_to_ticks(elapsed_microseconds)
     assert unit.occupancy(_job()) is None
     with pytest.raises(NotImplementedError, match="measured on the host"):
         PyMatchingDecoder(latency_model=None).latency(_job())

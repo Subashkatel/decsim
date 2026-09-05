@@ -17,6 +17,7 @@ from decsim.decoders.window_decode_results import (
     BackendDecodeOutcome,
     BackendDecodeStatus,
     BackendFailureReason,
+    result_from_selected_faults,
     selected_faults_of,
 )
 from decsim.detector_error_model.fault_model_contracts import (
@@ -129,6 +130,14 @@ def test_backend_outcome_with_a_correction_is_committed_with_its_status():
     selected, status = selected_faults_of(nonconverged)
     assert status is BackendDecodeStatus.NONCONVERGED
     assert selected == (1, 0)
+    model = _window(BOUNDARYLESS)
+    faults = model.require_faults(FaultRepresentation.GRAPHLIKE)
+    job = _job(model, [1, 0, 1, 0])
+    result = result_from_selected_faults(
+        job, model, faults, selected, decode_status=status
+    )
+    assert result.decode_status is BackendDecodeStatus.NONCONVERGED
+    assert result.correction.tolist() == [1, 0]
 
 
 def test_backend_outcome_without_a_correction_is_structural():

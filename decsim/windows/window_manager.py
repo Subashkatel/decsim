@@ -12,10 +12,9 @@ the OperationResults'; the facade receives rounds and wires them, the
 shape of gem5's cache (BaseCache owns its MSHR queue, write buffer and
 tags, each one job, and implements the ports: src/mem/cache/base.hh).
 The strong tier is StrongEscalation's (NoStrongTier when the policy
-never escalates), on the same components, until slice 7 dissolves its
-services seam. One round reads as accept_window_input,
-requester.request_if_ready, job.on_decoded (committer.accept_result),
-results.deliver_if_final.
+never escalates), on the same components. One round reads as
+accept_window_input, requester.request_if_ready, job.on_decoded
+(committer.accept_result), results.deliver_if_final.
 
 Wide state recorded: ten attributes, the seven components a round
 crosses, the escalation the arrivals wake, the interaction that gives a

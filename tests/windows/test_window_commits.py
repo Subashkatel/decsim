@@ -90,8 +90,10 @@ class _Fixture:
         self.courier = _RecordingCourier()
         self.results = _RecordingResults()
         self.escalation = types.SimpleNamespace(
-            after_weak_commit=lambda key: self.after_weak.append(key)
+            escalate=lambda job: self.escalated.append(job),
+            after_weak_commit=lambda key: self.after_weak.append(key),
         )
+        self.escalated = []
         self.after_weak = []
         self.transfers = _Transfers(self.engine, 4)
         self.frame = _Frame(self.engine, frame_ticks)

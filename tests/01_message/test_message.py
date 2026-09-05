@@ -499,14 +499,6 @@ def test_strong_completion_accepts_matching_strong_identity():
     assert_frozen(completion)
 
 
-def test_decode_outcome_pairs_result_with_job():
-    job = message.DecodeJob(op_id=4, window_id=2, n_rounds=3)
-    result = message.DecodeResult(op_id=4, window_id=2)
-    outcome = message.DecodeOutcome(job, result)
-    assert outcome.job is job
-    assert outcome.result is result
-
-
 def test_soft_output_does_not_enforce_weight_relationships():
     """Soft output accepts weights without enforcing a relationship to the gap."""
     output = message.SoftOutput(gap=10, source=object(), w_min=20, w_comp=-5)

@@ -3,16 +3,17 @@
 Baseline decodes every window on the weak tier and keeps every result;
 StrongOnly decodes every window once on the strong tier; Switching
 decodes weak first and escalates a window whose confidence falls below
-the threshold (Toshio et al. 2510.25222 Sec. III A). The threshold is a
-fixed value, a per-code register, or the online calibrator that adapts
-it across a sweep point's shots. The routing between the tiers is the
-SwitchingRouter's (decoders.py); the decoder manager owns the units,
-hold-or-deliver and cancellation.
+the threshold (Toshio et al. 2510.25222 Sec. III A). A policy decides
+and is told (gem5's conditional predictor, src/cpu/pred/conditional.hh):
+it builds no job; the window side plans and submits the strong re-decode
+(strong_escalation.py) and the decoder manager owns the units,
+hold-or-deliver and cancellation. The threshold is a fixed value, a
+per-code register, or the online calibrator that adapts it across a
+sweep point's shots.
 
-Wide state recorded: ThresholdRegister sets eight attributes,
-OnlineThresholdController nine and Switching eight. Slice 7's
-structural commits make the threshold a ThresholdSource row and trim
-Switching to the EscalationPolicy port (design note
+Wide state recorded: ThresholdRegister sets eight attributes and
+OnlineThresholdController nine. Slice 7's structural C makes the
+threshold a ThresholdSource row (design note
 docs/rewrite/notes/slice_07_escalation.md, section 3), so the width is
 recorded, not split.
 """
@@ -337,146 +338,92 @@ class OnlineGapCalibrator:
         self.trajectory.append((tracker.window_count, tracker.threshold, event))
 
 
-class Baseline:
-    """Plain windowed decoding: submit the weak job, accept every outcome."""
+class EscalationPolicyBase:
+    """The defaults a policy row inherits (sinter's Decoder shape).
+
+    A row declares primary_tier, requires_strong_context and
+    bulk_strong and answers verdict_for_weak_result; the rest has a
+    default here: every run shape is served, the primary tier alone
+    decodes a ready window, and nothing is learned from a strong result.
+    """
+
+    def check_plan(self, plan: message.RunShape) -> None:
+        """Every run shape is served."""
+        del plan
+
+    def tiers_for_ready_window(self, window: message.Window) -> tuple:
+        """The primary tier alone."""
+        del window
+        return (self.primary_tier,)
+
+    def learn_from_strong_result(self, window_key: tuple, result) -> None:
+        """Nothing is learned."""
+        del window_key
+        del result
+
+
+class Baseline(EscalationPolicyBase):
+    """Plain windowed decoding: every window once on the weak tier, kept."""
 
     requires_strong_context = False
     bulk_strong = False
-    double_window = False
     primary_tier = message.DecoderTier.WEAK
 
-    def validate_declared_run(
-        self,
-        *,
-        scheme,
-        boundary_policy,
-        has_dynamic_streams,
-        static_decode_plan_selected,
-        has_frontend,
-    ) -> None:
-        """Every run shape decodes weakly."""
-        del scheme
-        del boundary_policy
-        del has_dynamic_streams
-        del static_decode_plan_selected
-        del has_frontend
-
-    def validate_operations(self, operations) -> None:
-        """Every workload decodes weakly."""
-        del operations
-
-    def validate_code_geometry(self, geometry) -> None:
-        """Every window geometry decodes weakly."""
-        del geometry
-
-    def on_window_ready(self, window, weak_job, services) -> list:
-        """The weak job, alone."""
-        del window
-        del services
-        return [message.Submission(weak_job)]
-
-    def on_decode_outcome(self, outcome, services) -> message.OutcomeDirective:
+    def verdict_for_weak_result(self, job, result) -> message.Verdict:
         """Every result is final."""
-        del services
-        if outcome.job.strong_decode_for is not None:
-            return message.OutcomeDirective(message.Directive.FINALIZE_STRONG)
-        return message.OutcomeDirective(message.Directive.FINALIZE)
+        del job
+        del result
+        return message.Verdict.KEEP
 
 
-class StrongOnly:
+class StrongOnly(EscalationPolicyBase):
     """The strong tier decodes the plan's windows directly.
 
-    No weak decode, no verdict, no escalation. The machine is
-    data-woken: syndrome buffer 1 stores a round and its signal drives
-    window readiness, the shape of LILLIPUT's FIFO-fed decoder and
-    Google's streaming decoder. Every window job carries tier STRONG,
-    reads its rounds from syndrome buffer 1 over
-    strong_buffer_to_strong_decoder, and rides strong_decoder_to_frame
-    home; the escalation machinery (the selection link, the ledger, the
-    context windows, the strong windows) is never engaged.
+    No weak decode, no escalation. The machine is data-woken: syndrome
+    buffer 1 stores a round and its signal drives window readiness, the
+    shape of LILLIPUT's FIFO-fed decoder and Google's streaming decoder.
+    Every window job carries tier STRONG, reads its rounds from syndrome
+    buffer 1 over strong_buffer_to_strong_decoder, and rides
+    strong_decoder_to_frame home; the escalation machinery (the
+    selection link, the ledger, the context windows, the strong windows)
+    is never engaged.
     """
 
     requires_strong_context = False
     bulk_strong = False
-    double_window = False
     primary_tier = message.DecoderTier.STRONG
 
-    def validate_declared_run(
-        self,
-        *,
-        scheme,
-        boundary_policy,
-        has_dynamic_streams,
-        static_decode_plan_selected,
-        has_frontend,
-    ) -> None:
+    def check_plan(self, plan: message.RunShape) -> None:
         """A static plan; dynamic streams re-point live window reads."""
-        del scheme
-        del boundary_policy
-        del static_decode_plan_selected
-        del has_frontend
-        if has_dynamic_streams:
+        if plan.has_dynamic_streams:
             raise ValueError(
                 "strong-only runs support static plans; dynamic streams "
                 "re-point live window reads and are not wired to the "
                 "room-side store yet"
             )
 
-    def validate_operations(self, operations) -> None:
-        """Every workload decodes on the strong tier."""
-        del operations
-
-    def validate_code_geometry(self, geometry) -> None:
-        """Every window geometry decodes on the strong tier."""
-        del geometry
-
-    def on_window_ready(self, window, weak_job, services) -> list:
-        """The pre-built job is the window's job.
-
-        The submit path already stamped it with the primary tier, the
-        primary store's payloads and the strong_buffer_to_strong_decoder
-        transfer.
-        """
-        del window
-        del services
-        return [message.Submission(weak_job)]
-
-    def on_decode_outcome(self, outcome, services) -> message.OutcomeDirective:
-        """Every result is final."""
-        del outcome
-        del services
-        return message.OutcomeDirective(message.Directive.FINALIZE)
+    def verdict_for_weak_result(self, job, result) -> message.Verdict:
+        """Every result is final: the strong tier decoded it."""
+        del job
+        del result
+        return message.Verdict.KEEP
 
 
-class Switching:
+class Switching(EscalationPolicyBase):
     """Weak decoder first; escalate to a strong decoder on low confidence.
 
     The confidence threshold gates keep-weak only for the exact
-    configured source (soft_output.gap >= threshold); serial mode
-    escalates after the weak_decoder_to_strong_decoder hop;
-    run_both_at_once starts the strong sibling with the weak and cancels
-    it on confidence (the paper's Step 1); bulk_strong batches queued
-    serial redos (timing-only). The redo covers commit + 2 buffer rounds
-    (the paper's two-sided context).
-
-    With double_window, the strong window contains the suspicious
-    commit region plus one buffer on each side. It starts at the
-    suspicious commit and extends forward; the weak chain skips the
-    windows it absorbs and restarts past it; the strong result owns the
-    whole extent; the strong job starts only after both of its
-    boundaries are weak-determined (left: the commits before it, right:
-    the restart window's commit, or the terminal boundary). The weak
-    pipeline never waits on strong work.
-
-    Seam modelling: both faces of the strong window are decoded as
-    two-sided windows: one buffer of raw context per face, exact
-    fault-ownership partition, no folded decoded defects (folding at a
-    raw-read face double-counts). Unlike the paper's exactly-r_strong
-    read with weak-pinned faces, the context reads are extra: seam-edge
-    accuracy is slightly optimistic, and the strong window is priced
-    for the whole context it reads rather than the r_strong rounds it
-    commits, so its decode cost is conservative against Theorem 1
-    rather than optimistic.
+    configured source (soft_output.gap >= threshold). run_both_at_once
+    starts the strong sibling with the weak job and cancels it on
+    confidence (the paper's Step 1, Toshio et al. 2510.25222 Sec. III A);
+    otherwise the strong re-decode starts at the verdict, after the
+    weak_decoder_to_strong_decoder hop (the serial modification of the
+    same section), and bulk_strong batches queued serial redos
+    (timing-only). How the strong window is laid out is the run's shape
+    (escalation.double_window: the two-sided context, or the forward
+    window of Sec. III C), planned by the window side
+    (strong_escalation.py); check_plan holds the policy's knobs against
+    that shape once, at build.
     """
 
     requires_strong_context = True
@@ -490,17 +437,14 @@ class Switching:
         bulk_strong: bool = False,
         threshold_register: Optional[ThresholdRegister] = None,
         threshold_calibrator: Optional[OnlineGapCalibrator] = None,
-        double_window: bool = False,
     ) -> None:
-        _refuse_contradicting_modes(
-            run_both_at_once, bulk_strong, double_window
-        )
+        _refuse_bulk_with_parallel(run_both_at_once, bulk_strong)
         _refuse_register_mismatch(
             confidence_threshold, expected_source, threshold_register
         )
         if threshold_calibrator is not None:
             _refuse_calibrator_contradictions(
-                threshold_register, run_both_at_once, double_window
+                threshold_register, run_both_at_once
             )
         self.confidence_threshold = confidence_threshold
         self.expected_source = expected_source
@@ -508,7 +452,6 @@ class Switching:
         self.threshold_calibrator = threshold_calibrator
         self.run_both_at_once = run_both_at_once
         self.bulk_strong = bulk_strong
-        self.double_window = double_window
 
     def run_seed_children(self) -> tuple:
         """The optional register that selects confidence thresholds."""
@@ -518,94 +461,36 @@ class Switching:
         child = message.RunSeedChild((segment,), self.threshold_register)
         return (child,)
 
-    # ---- the hooks
+    # ---- the port
 
-    def on_window_ready(self, window, weak_job, services) -> list:
-        """The weak job, and the strong sibling when both run at once."""
-        del window
-        submissions = [message.Submission(weak_job)]
-        if self.run_both_at_once:
-            label = _strong_label_of(weak_job)
-            strong = services.make_strong_job(weak_job, label)
-            submissions.append(strong)
-        return submissions
-
-    def on_decode_outcome(self, outcome, services) -> message.OutcomeDirective:
-        """Keep a confident weak result; otherwise await the strong one."""
-        job = outcome.job
-        if job.strong_decode_for is not None:
-            if self.threshold_calibrator is not None:
-                self.threshold_calibrator.absorb_strong_result(
-                    job.strong_decode_for, outcome.result
-                )
-            return message.OutcomeDirective(message.Directive.FINALIZE_STRONG)
-        if job.attempt != 0:
-            return message.OutcomeDirective(message.Directive.FINALIZE)
-        if self._keep_weak_outcome(outcome.result, job):
-            # the pool cancels the parallel sibling
-            return message.OutcomeDirective(message.Directive.FINALIZE)
-        extra = None
-        strong_request_key = None
-        if self.double_window:
-            # the window manager submits the strong window after the
-            # far-side weak boundary is ready
-            strong_request_key = services.defer_strong_escalation(job)
-        elif not self.run_both_at_once:
-            label = _strong_label_of(job)
-            extra = services.make_strong_job(job, label)
-            strong_request_key = extra.job.request_key
-        return message.OutcomeDirective(
-            message.Directive.AWAIT_STRONG,
-            extra=extra,
-            strong_request_key=strong_request_key,
-        )
-
-    # ---- validation
-
-    def validate_declared_run(
-        self,
-        *,
-        scheme,
-        boundary_policy,
-        has_dynamic_streams,
-        static_decode_plan_selected,
-        has_frontend,
-    ) -> None:
+    def check_plan(self, plan: message.RunShape) -> None:
         """Refuse a run shape the escalation cannot serve."""
-        _refuse_flush_terminal(scheme)
-        if not self.double_window:
-            _refuse_eager_serial_boundaries(boundary_policy)
+        _refuse_flush_terminal(plan.scheme)
+        if not plan.is_double_window:
+            _refuse_eager_serial_boundaries(plan.boundary_policy)
             return
-        _refuse_double_window_scheme(scheme, boundary_policy)
-        if has_dynamic_streams or static_decode_plan_selected:
-            raise ValueError(
-                "double_window skips statically planned windows when a "
-                "strong window is assigned; stream windows created or "
-                "folded at runtime (dynamic_streams/decode_ops) are not "
-                "supported yet"
-            )
-        if has_frontend:
-            raise ValueError(
-                "double_window is validated for explicit ops= workloads; "
-                "frontend-built operation chains are not supported yet"
-            )
+        self._refuse_double_window_contradictions()
+        _refuse_double_window_scheme(plan.scheme, plan.boundary_policy)
+        _refuse_double_window_run(plan)
 
-    def validate_operations(self, operations) -> None:
-        """A double window needs one single-patch stream per operation."""
-        if not self.double_window:
-            return
-        for operation in operations:
-            if operation.decoder_boundary_predecessors:
-                raise ValueError(
-                    "double_window supports one single-patch stream per "
-                    "operation; decoder-boundary chains would let a strong "
-                    "window cross an operation seam before its far "
-                    "boundary exists"
-                )
+    def tiers_for_ready_window(self, window: message.Window) -> tuple:
+        """The weak tier, and the strong tier too when both run at once."""
+        del window
+        if self.run_both_at_once:
+            return (message.DecoderTier.WEAK, message.DecoderTier.STRONG)
+        return (message.DecoderTier.WEAK,)
 
-    def validate_code_geometry(self, geometry) -> None:
-        """Every window geometry switches."""
-        del geometry
+    def verdict_for_weak_result(self, job, result) -> message.Verdict:
+        """Keep a confident weak result; otherwise escalate its window."""
+        if self._keep_weak_outcome(result, job):
+            # a kept result cancels the parallel sibling
+            return message.Verdict.KEEP
+        return message.Verdict.ESCALATE
+
+    def learn_from_strong_result(self, window_key: tuple, result) -> None:
+        """The calibrator labels an audit from the strong result."""
+        if self.threshold_calibrator is not None:
+            self.threshold_calibrator.absorb_strong_result(window_key, result)
 
     # ---- the keep decision
 
@@ -652,32 +537,33 @@ class Switching:
             )
         return self.threshold_calibrator.decide_keep(result, job)
 
+    def _refuse_double_window_contradictions(self) -> None:
+        """A forward strong window starts late; these knobs start it early."""
+        if self.run_both_at_once:
+            raise ValueError(
+                "double_window defers the strong start until the far weak "
+                "boundary exists; run_both_at_once starts it immediately "
+                "(the two policies contradict; pick one)"
+            )
+        if self.bulk_strong:
+            raise ValueError(
+                "double_window + bulk_strong is not supported: deferred "
+                "strong windows are submitted one per escalation"
+            )
+        if self.threshold_calibrator is not None:
+            raise ValueError(
+                "online threshold calibration is serial-only: an "
+                "audit label compares one window's weak and strong "
+                "committed observables, and a double-window strong "
+                "result owns a larger extent than the audited window"
+            )
 
-def _strong_label_of(job) -> str:
-    label = getattr(job, "strong_label", None)
-    if label is None:
-        return f"strong({job.label})"
-    return label
 
-
-def _refuse_contradicting_modes(
-    run_both_at_once: bool, bulk_strong: bool, double_window: bool
-) -> None:
+def _refuse_bulk_with_parallel(run_both_at_once: bool, bulk_strong: bool):
     if bulk_strong and run_both_at_once:
         raise ValueError(
             "bulk_strong is only meaningful in serial mode "
             "(run_both_at_once=False)"
-        )
-    if double_window and run_both_at_once:
-        raise ValueError(
-            "double_window defers the strong start until the far weak "
-            "boundary exists; run_both_at_once starts it immediately "
-            "(the two policies contradict; pick one)"
-        )
-    if double_window and bulk_strong:
-        raise ValueError(
-            "double_window + bulk_strong is not supported: deferred "
-            "strong windows are submitted one per escalation"
         )
 
 
@@ -700,9 +586,7 @@ def _refuse_register_mismatch(
 
 
 def _refuse_calibrator_contradictions(
-    threshold_register: Optional[ThresholdRegister],
-    run_both_at_once: bool,
-    double_window: bool,
+    threshold_register: Optional[ThresholdRegister], run_both_at_once: bool
 ) -> None:
     if threshold_register is not None:
         raise ValueError(
@@ -715,13 +599,6 @@ def _refuse_calibrator_contradictions(
             "online threshold calibration is meaningless with "
             "run_both_at_once: the strong decoder already runs "
             "for every window, so there is nothing to audit"
-        )
-    if double_window:
-        raise ValueError(
-            "online threshold calibration is serial-only: an "
-            "audit label compares one window's weak and strong "
-            "committed observables, and a double-window strong "
-            "result owns a larger extent than the audited window"
         )
 
 
@@ -760,3 +637,27 @@ def _refuse_double_window_scheme(scheme, boundary_policy) -> None:
             "the Held boundary policy would make later windows wait for "
             "the strong result and deadlock the strong window"
         )
+
+
+def _refuse_double_window_run(plan: message.RunShape) -> None:
+    """A double window needs static, explicit, single-patch operations."""
+    if plan.has_dynamic_streams or plan.has_static_decode_plan:
+        raise ValueError(
+            "double_window skips statically planned windows when a "
+            "strong window is assigned; stream windows created or "
+            "folded at runtime (dynamic_streams/decode_ops) are not "
+            "supported yet"
+        )
+    if plan.has_frontend:
+        raise ValueError(
+            "double_window is validated for explicit ops= workloads; "
+            "frontend-built operation chains are not supported yet"
+        )
+    for operation in plan.operations:
+        if operation.decoder_boundary_predecessors:
+            raise ValueError(
+                "double_window supports one single-patch stream per "
+                "operation; decoder-boundary chains would let a strong "
+                "window cross an operation seam before its far "
+                "boundary exists"
+            )

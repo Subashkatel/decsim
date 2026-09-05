@@ -4,7 +4,7 @@ import pytest
 
 from decsim.controller import policies
 from decsim.controller.idle_rounds import IdleRoundAccounting
-from decsim.message import RunSeedReservation, SoftOutputSource
+from decsim.message import RunSeedReservation, RunShape, SoftOutputSource
 from decsim.controller.policies import Eager, ExtendStream, Held, Ignore, SeparateDecodeJobs
 from decsim.ports import IdlePolicy
 from decsim.windows.window_manager import BoundaryPolicy
@@ -223,40 +223,40 @@ def test_policy_module_has_no_registry_or_string_selector():
     assert not hasattr(policies, "from_mode")
 
 
-def test_switching_validates_builtin_boundary_contexts():
-    """Switching rejects boundary policies that conflict with serial or double windows."""
+def _run_shape(boundary_policy, *, is_double_window=False,
+               has_dynamic_streams=False):
     scheme = SlidingWindowScheme(
         terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD
     )
-    common = {
-        "scheme": scheme,
-        "static_decode_plan_selected": False,
-        "has_frontend": False,
-    }
+    return RunShape(
+        scheme=scheme,
+        boundary_policy=boundary_policy,
+        operations=(),
+        is_double_window=is_double_window,
+        has_dynamic_streams=has_dynamic_streams,
+        has_static_decode_plan=False,
+        has_frontend=False,
+    )
+
+
+def test_switching_validates_builtin_boundary_contexts():
+    """Switching rejects boundary policies that conflict with serial or double windows."""
     switching = Switching(1.0, switching_source())
+    eager_serial = _run_shape(Eager())
+    held_streams = _run_shape(Held(), has_dynamic_streams=True)
+    held_double_window = _run_shape(Held(), is_double_window=True)
+    eager_streams = _run_shape(Eager(), has_dynamic_streams=True)
 
     with pytest.raises(ValueError, match="serial switching requires Held"):
-        switching.validate_declared_run(
-            boundary_policy=Eager(), has_dynamic_streams=False, **common
-        )
-    switching.validate_declared_run(
-        boundary_policy=Held(), has_dynamic_streams=True, **common
-    )
+        switching.check_plan(eager_serial)
+    switching.check_plan(held_streams)
 
-    double_window_switching = Switching(
-        1.0, switching_source(), double_window=True
-    )
     with pytest.raises(ValueError, match="Held boundary policy"):
-        double_window_switching.validate_declared_run(
-            boundary_policy=Held(), has_dynamic_streams=False, **common
-        )
+        switching.check_plan(held_double_window)
 
-    Baseline().validate_declared_run(
-        boundary_policy=Eager(), has_dynamic_streams=True, **common
-    )
-    Baseline().validate_declared_run(
-        boundary_policy=Held(), has_dynamic_streams=True, **common
-    )
+    baseline = Baseline()
+    baseline.check_plan(eager_streams)
+    baseline.check_plan(held_streams)
 
 
 def test_extend_stream_relays_idle_rounds_into_a_live_stream():
@@ -671,9 +671,11 @@ def test_switching_refuses_a_second_threshold_owner_and_double_window():
     with pytest.raises(ValueError, match="nothing to audit"):
         Switching(1.0, switching_source(), run_both_at_once=True,
                   threshold_calibrator=calibrator)
+    calibrated = Switching(1.0, switching_source(),
+                           threshold_calibrator=calibrator)
+    double_window_plan = _run_shape(Eager(), is_double_window=True)
     with pytest.raises(ValueError, match="serial-only"):
-        Switching(1.0, switching_source(), double_window=True,
-                  threshold_calibrator=calibrator)
+        calibrated.check_plan(double_window_plan)
 
 
 def test_switching_keep_decision_delegates_to_the_calibrator():

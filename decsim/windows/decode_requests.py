@@ -7,9 +7,11 @@ qldpc/decoders/sinter.py decode_shots_to_error; cudaq-x keeps raw
 rounds and applies syndrome_mods at assembly). The builder is the job's
 WindowInputGate: may_stage says whether a blocked job may take an input
 slot yet, may_start whether the landed job may decode, mask_input folds
-the boundary into the landed input once. The requester enqueues the
-policy's submissions, weak and strong alike, on the DecodeQueue port
-with each job's input send.
+the boundary into the landed input once. The requester builds the
+primary tier's job, asks the escalation policy which tiers decode the
+window now, and enqueues one submission per tier on the DecodeQueue
+port with each job's input send; a strong sibling's submission is the
+strong tier's window side's.
 """
 
 import dataclasses
@@ -81,9 +83,7 @@ class DecodeRequestBuilder:
         """The tier's decode job for one complete window, read from store."""
         request_key = self.new_request_key(window.op_id, window.k, tier)
         payloads = self.assemble_payloads(window, store)
-        payload_round_count = message.distinct_round_count(
-            payloads
-        )
+        payload_round_count = message.distinct_round_count(payloads)
         round_count = (
             payload_round_count + window.batched_preceding_idle_round_count
         )
@@ -325,16 +325,16 @@ class DecodeRequester:
         self.escalation_policy = escalation_policy
         self.committer = committer
 
-    def request_ready_windows(self, windows, services) -> None:
+    def request_ready_windows(self, windows, escalation) -> None:
         """Request each window that has its data, in the given order.
 
-        services is what the escalation policy may ask of the window side
-        when a window is ready (the EscalationServices seam).
+        escalation is the strong tier's window side, which builds the
+        strong sibling when the policy decodes both tiers at once.
         """
         for window in windows:
-            self.request_if_ready(window, services)
+            self.request_if_ready(window, escalation)
 
-    def request_if_ready(self, window: message.Window, services) -> None:
+    def request_if_ready(self, window: message.Window, escalation) -> None:
         """If the window has its data, submit it through the policy."""
         if window.queued or window.committed:
             return
@@ -351,21 +351,31 @@ class DecodeRequester:
             # input at the decoder when it arrives (qLDPC net_error /
             # cudaq-x syndrome_mods / LILLIPUT's state register)
             window.blocked_logged = True
-        self.request(window, operation, services)
+        self.request(window, operation, escalation)
 
     def request(
-        self, window: message.Window, operation: message.Operation, services
+        self, window: message.Window, operation: message.Operation, escalation
     ) -> None:
-        """Build the primary job, ask the policy, enqueue its submissions."""
+        """Build the primary job, ask the policy its tiers, enqueue each.
+
+        The primary tier's job is the one built here; a strong tier the
+        policy names too gets its sibling from the escalation (the
+        paper's Step 1, both decoders started on the same window).
+        """
         store = self.retention.primary_store
         self.builder.stamp_first_round(window, store)
         window.t_queued = self.builder.engine.now
-        tier = self.retention.primary_tier
-        job = self.builder.build(window, operation, tier, store)
+        primary_tier = self.retention.primary_tier
+        job = self.builder.build(window, operation, primary_tier, store)
         window.queued = True
-        submissions = self.escalation_policy.on_window_ready(
-            window, job, services
-        )
+        tiers = self.escalation_policy.tiers_for_ready_window(window)
+        submissions = []
+        for tier in tiers:
+            if tier is primary_tier:
+                submissions.append(message.Submission(job))
+            else:
+                sibling = escalation.parallel_strong_submission(job)
+                submissions.append(sibling)
         for submission in submissions:
             self._submit(submission, window.key)
 

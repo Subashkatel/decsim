@@ -164,8 +164,7 @@ def switching_run(*, rounds=6, escalation_probability, ops=None,
     router = SwitchingRouter(weak=weak,
                              strong=PresetLatencyDecoder(DECLARED_US["strong"]))
     policy = Switching(0.5, SAMPLED_CONFIDENCE_SOURCE,
-                       run_both_at_once=run_both_at_once,
-                       double_window=double_window)
+                       run_both_at_once=run_both_at_once)
     settings = MachineSettings(
         workload=WorkloadSettings(
             operations=(ops if ops is not None else [memory_op(1)]),
@@ -174,7 +173,7 @@ def switching_run(*, rounds=6, escalation_probability, ops=None,
         windows=WindowSettings(
             scheme=sliding_scheme(),
             # serial switching requires Held boundaries; double_window rejects
-            # them (weak_strong_switching.validate_declared_run)
+            # them (weak_strong_switching.Switching.check_plan)
             boundary_policy=(None if double_window else Held())),
         decoder_manager=DecoderManagerSettings(
             router=router,
@@ -182,7 +181,7 @@ def switching_run(*, rounds=6, escalation_probability, ops=None,
                         else {"default": 1, "strong": 1}),
             decoder_memory=(None if weak_memory_rounds is None else
                             DecoderMemoryConfig({"default": weak_memory_rounds}))),
-        escalation=EscalationSettings(policy=policy),
+        escalation=EscalationSettings(policy=policy, double_window=double_window),
         links=declared_profile(controller_to_weak_buffer=True, controller_to_strong_buffer=True, strong_buffer_us=strong_buffer_us),
         controller=declared_timing(),
         pauli_frame=PauliFrameConfig(commit_microseconds=DECLARED_US["frame"]),

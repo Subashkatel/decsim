@@ -177,15 +177,14 @@ def test_a_yaml_section_nobody_owns_is_refused_naming_the_sections():
         )
 
 
-def test_the_post_construction_binds_reach_their_components():
-    """The debt slices 6 and 7 retire: the binds are made, not left None."""
+def test_the_constructor_wiring_reaches_its_components():
+    """Every cross-reference is made by constructor, none left None."""
     settings = machine_module.MachineSettings()
     machine = machine_module.Machine.build(settings)
     assert machine.qpu.readout_receiver is machine.controller
     assert machine.execution_runtime.issuer is machine.issuer
     manager = machine.decoder_manager
     assert machine.window_manager.requester.decode_queue is manager
-    assert manager.services is machine.window_manager.escalation
 
 
 MEMORY_ROUNDS = 6

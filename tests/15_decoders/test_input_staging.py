@@ -202,7 +202,6 @@ def _standalone_pool(units, transfer_us, compute_us, decoder=None):
         scheduler=FifoScheduler(),
         num_units=units,
         escalation_policy=Baseline(),
-        services=None,
     )
     compute_start = {}
     original_begin = manager.service.begin
@@ -282,7 +281,6 @@ def test_a_job_without_input_waits_in_the_queue_for_free_compute():
         scheduler=FifoScheduler(),
         num_units=2,
         escalation_policy=None,
-        services=None,
     )
     done = {}
     for label, arrival in (("a", 0.0), ("b", 1.0), ("c", 2.0)):

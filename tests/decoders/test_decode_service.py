@@ -120,7 +120,7 @@ def _recording(manager, engine):
 
 
 def test_a_job_starts_when_its_input_landed_and_the_gate_allows():
-    engine = engine_module.Engine(verbose=False)
+    engine = engine_module.Engine()
     decoder = decoders.PresetLatencyDecoder(1.0)
     manager = _manager(engine, decoder)
     starts = _recording(manager, engine)
@@ -138,7 +138,7 @@ def test_a_job_starts_when_its_input_landed_and_the_gate_allows():
 
 
 def test_a_parked_job_keeps_its_slot_and_releases_the_compute():
-    engine = engine_module.Engine(verbose=False)
+    engine = engine_module.Engine()
     decoder = decoders.PresetLatencyDecoder(1.0)
     manager = _manager(engine, decoder)
     starts = _recording(manager, engine)
@@ -164,7 +164,7 @@ def test_the_second_slots_transfer_overlaps_the_compute():
     # T = 1 us, C = 2 us, three windows ready at once (rowD2's two-slot
     # law): w0 lands at 1 and computes 1..3; w1 landed at 1 and waits for
     # the compute until 3; w2 takes w0's slot at 3, lands at 4, starts 5
-    engine = engine_module.Engine(verbose=False)
+    engine = engine_module.Engine()
     decoder = decoders.PresetLatencyDecoder(2.0)
     manager = _manager(engine, decoder)
     starts = _recording(manager, engine)
@@ -184,7 +184,7 @@ def test_the_second_slots_transfer_overlaps_the_compute():
 def test_a_pipelined_unit_issues_at_its_initiation_interval():
     # II = 0.5 us, C = 4 us, full depth: three windows landing at once
     # start 0.5 us apart and each returns 4 us after its start
-    engine = engine_module.Engine(verbose=False)
+    engine = engine_module.Engine()
     timing = staged_decoder.UnitTiming((), (), 1.0, initiation_interval_us=0.5)
     algorithm = decoders.PresetLatencyDecoder(4.0)
     decoder = staged_decoder.StagedDecoder(algorithm, timing)

@@ -552,7 +552,7 @@ def _feedback_chain(idle_policy=None):
 def _idle_decode_labels(completed) -> set:
     """The distinct synthetic idle-decode jobs the run charged."""
     labels = set()
-    for line in completed.engine.log_lines:
+    for line in completed.observation.log.lines:
         start = line.find("mem(")
         if start != -1:
             labels.add(line[start : line.index(")", start) + 1])
@@ -587,7 +587,7 @@ def test_memory_filled_trailing_buffer_is_flagged():
 
     filled_lines = [
         line
-        for line in completed.engine.log_lines
+        for line in completed.observation.log.lines
         if "buffer filled by memory rounds" in line
     ]
     assert len(filled_lines) >= 1
@@ -628,6 +628,6 @@ def test_single_operation_run_charges_no_idle_work():
     assert completed.idle_rounds.emitted_count == 0
     assert not any(
         "buffer filled by memory rounds" in line
-        for line in completed.engine.log_lines
+        for line in completed.observation.log.lines
     )
     assert not _idle_decode_labels(completed)

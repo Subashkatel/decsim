@@ -77,7 +77,7 @@ def test_random_traces_match_the_point_to_point_closed_form_property():
         bits = [generator.choice([1, 17, 64, 289, 4096]) for _ in range(count)]
         rate = generator.choice([0.5, 1.0, 7.0, 64.0, 1000.0, 12345.0])
         propagation = generator.randrange(0, 300)
-        engine = decsim.engine.Engine(verbose=False)
+        engine = decsim.engine.Engine()
         channel = bounded_channel(engine, rate, propagation)
         delivered = []
         for arrival, payload in zip(arrivals, bits):
@@ -88,7 +88,7 @@ def test_random_traces_match_the_point_to_point_closed_form_property():
 
 
 def test_delivery_is_send_plus_serialization_plus_latency():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     channel = bounded_channel(engine, 1000.0, 300)
     delivered = []
     send_at(engine, channel, 10, 8, 0, delivered)
@@ -105,7 +105,7 @@ def test_delivery_is_send_plus_serialization_plus_latency():
 
 
 def test_an_unbounded_channel_delivers_at_send_plus_latency():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     channel = unbounded_channel(engine, 7)
     delivered = []
     send_at(engine, channel, 10, 1000, 0, delivered)
@@ -117,7 +117,7 @@ def test_an_unbounded_channel_delivers_at_send_plus_latency():
 
 
 def test_two_sends_serialize_on_the_wire():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     channel = bounded_channel(engine, 1000.0, 0)
     delivered = []
     send_at(engine, channel, 10, 8, 0, delivered)
@@ -133,7 +133,7 @@ def test_two_sends_serialize_on_the_wire():
 
 
 def test_an_unbounded_channel_never_queues():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     channel = unbounded_channel(engine, 7)
     delivered = []
     send_at(engine, channel, 10, 1000, 0, delivered)
@@ -145,7 +145,7 @@ def test_an_unbounded_channel_never_queues():
 
 
 def test_a_request_at_the_wires_free_tick_waits_zero():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     channel = bounded_channel(engine, 1000.0, 0)
     delivered = []
     send_at(engine, channel, 10, 8, 0, delivered)
@@ -157,7 +157,7 @@ def test_a_request_at_the_wires_free_tick_waits_zero():
 
 
 def test_a_fractional_tick_of_serialization_rounds_up():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     channel = bounded_channel(engine, 3.0, 0)
     delivered = []
     send_at(engine, channel, 0, 1, 0, delivered)
@@ -167,7 +167,7 @@ def test_a_fractional_tick_of_serialization_rounds_up():
 
 
 def test_serialization_uses_the_decimal_rate_written_on_the_card():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     channel = bounded_channel(engine, 0.20846, 0)
     delivered = []
     send_at(engine, channel, 0, 400_310_292, 0, delivered)
@@ -177,7 +177,7 @@ def test_serialization_uses_the_decimal_rate_written_on_the_card():
 
 
 def test_a_per_lane_rate_serializes_at_the_aggregate_rate():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     capacity = link_settings.CapacitySettings(
         0.7, link_settings.QuantityBasis.PER_LANE, 3, "test"
     )
@@ -191,7 +191,7 @@ def test_a_per_lane_rate_serializes_at_the_aggregate_rate():
 
 
 def test_a_setup_waits_for_the_previous_setup_on_the_channel():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     channel = unbounded_channel(engine, 0)
     delivered = []
     send_at(engine, channel, 10, 8, 5, delivered)
@@ -205,7 +205,7 @@ def test_a_setup_waits_for_the_previous_setup_on_the_channel():
 
 
 def test_setups_on_two_channels_are_independent():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     slow = unbounded_channel(engine, 0)
     fast = unbounded_channel(engine, 0)
     delivered_slow = []
@@ -220,7 +220,7 @@ def test_setups_on_two_channels_are_independent():
 
 
 def test_a_setup_after_the_engine_went_idle_costs_only_its_own_ticks():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     channel = unbounded_channel(engine, 0)
     delivered = []
     send_at(engine, channel, 10, 8, 5, delivered)
@@ -238,7 +238,7 @@ def test_two_paths_with_setups_on_one_channel_take_the_wire_in_setup_order():
     engine, so the wire starts are 15, 8015 and 16015 and B's setup ends
     at 25.
     """
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     channel = bounded_channel(engine, 1000.0, 0)
     delivered = []
     send_at(engine, channel, 10, 8, 5, delivered)
@@ -252,7 +252,7 @@ def test_two_paths_with_setups_on_one_channel_take_the_wire_in_setup_order():
 
 
 def test_a_zero_setup_request_goes_to_the_wire_ahead_of_anothers_setup():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     channel = bounded_channel(engine, 1000.0, 0)
     delivered = []
     send_at(engine, channel, 10, 8, 5, delivered)
@@ -270,7 +270,7 @@ def test_a_zero_setup_request_goes_to_the_wire_ahead_of_anothers_setup():
 
 
 def test_a_request_with_no_setup_leaves_the_setup_engine_untouched():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     channel = unbounded_channel(engine, 0)
     delivered = []
     send_at(engine, channel, 10, 8, 5, delivered)
@@ -294,7 +294,7 @@ def test_a_setup_ending_as_a_zero_setup_request_arrives_follows_event_order():
     15 was enqueued before the setup that ends at 15, so it takes the
     wire first.
     """
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     channel = bounded_channel(engine, 1000.0, 0)
     delivered = []
     send_at(engine, channel, 15, 8, 0, delivered)
@@ -311,7 +311,7 @@ def test_a_setup_ending_as_a_zero_setup_request_arrives_follows_event_order():
 
 
 def test_setup_serialization_and_propagation_add_up():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     channel = bounded_channel(engine, 1000.0, 300)
     delivered = []
     send_at(engine, channel, 0, 8, 5, delivered)
@@ -330,7 +330,7 @@ def test_setup_serialization_and_propagation_add_up():
 
 
 def test_an_empty_payload_pays_setup_and_latency_only():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     channel = bounded_channel(engine, 1000.0, 7)
     delivered = []
     send_at(engine, channel, 10, 0, 5, delivered)
@@ -341,7 +341,7 @@ def test_an_empty_payload_pays_setup_and_latency_only():
 
 
 def test_a_transfer_with_no_payload_size_rides_an_unbounded_channel():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     channel = unbounded_channel(engine, 9)
     delivered = []
     send_at(engine, channel, 7, None, 0, delivered)
@@ -352,7 +352,7 @@ def test_a_transfer_with_no_payload_size_rides_an_unbounded_channel():
 
 
 def test_the_expected_delay_is_the_delivery_when_nothing_overtakes():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     channel = bounded_channel(engine, 1000.0, 300)
     delivered = []
     expected = []
@@ -371,7 +371,7 @@ def test_the_expected_delay_is_the_delivery_when_nothing_overtakes():
 
 
 def test_the_expected_delay_leaves_the_channel_untouched():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     channel = bounded_channel(engine, 1000.0, 0)
     channel.expected_delay_ticks(8, 10, 5)
     delivered = []

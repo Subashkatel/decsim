@@ -13,6 +13,7 @@ import pytest
 
 import decsim.engine
 import decsim.message as message
+import decsim.observe.log_writers as log_writers
 import decsim.qpu.code_geometry as code_geometry
 import decsim.qpu.cycle_clock as cycle_clock
 import decsim.qpu.syndrome_devices as syndrome_devices
@@ -76,7 +77,7 @@ class SplitSource(syndrome_devices.TimingOnlyDevice):
 
 
 def clocked_qpu(cycle_ticks, source=None):
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     log = ReadoutLog(engine)
     if source is None:
         source = syndrome_devices.TimingOnlyDevice()
@@ -116,11 +117,13 @@ def test_every_round_lands_on_a_boundary_of_the_1100_ns_cycle():
 
 def test_a_round_is_logged_as_fired_with_its_place_in_the_body():
     engine, qpu, log = clocked_qpu(1_100_000)
+    lines = log_writers.LogWriter()
+    engine.line.connect(lines.write)
     body = memory_body(1, 3, 1_100_000)
     qpu.issue(body)
     engine.schedule(3_300_000, qpu.finish)
     engine.run()
-    assert engine.log_lines == [
+    assert lines.lines == [
         "[  1.100 us] QPU: memory fires round 1/3",
         "[  2.200 us] QPU: memory fires round 2/3",
         "[  3.300 us] QPU: memory fires round 3/3",

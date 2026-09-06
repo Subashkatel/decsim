@@ -48,7 +48,7 @@ class _Capture:
 
 
 def _qpu(cycle):
-    engine = Engine(verbose=False)
+    engine = Engine()
     capture = _Capture(engine)
     qpu = QPUDevice(
         engine, TimingOnlyDevice(), cycle, readout_receiver=capture,

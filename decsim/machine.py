@@ -75,7 +75,9 @@ import decsim.links.settings as link_settings
 import decsim.message as message
 import decsim.observe.decode_records as decode_records_module
 import decsim.observe.link_traffic as link_traffic
+import decsim.observe.log_writers as log_writers
 import decsim.observe.metrics as metrics
+import decsim.observe.observation as observation_module
 import decsim.observe.round_events as round_events_module
 import decsim.observe.round_store_occupancy as round_store_occupancy_module
 import decsim.observe.settings as observe_settings
@@ -334,14 +336,6 @@ class LogicalOperationResult:
 
 
 @dataclasses.dataclass(frozen=True)
-class MetricResultRecord:
-    """One metric's final value under its name."""
-
-    name: str
-    value: Any
-
-
-@dataclasses.dataclass(frozen=True)
 class RunResult:
     """What one completed run computed; the gate hashes these fields."""
 
@@ -353,7 +347,6 @@ class RunResult:
     fully_done_ticks: int
     operation_results: tuple
     link_traffic: dict
-    metric_results: tuple
 
 
 @dataclasses.dataclass(frozen=True)
@@ -368,6 +361,7 @@ class Machine:
 
     settings: MachineSettings
     engine: engine_module.Engine
+    observation: observation_module.Observation
     links: fabric.LinkFabric
     traffic_ledger: link_traffic.TrafficLedger
     conditional_release: conditional_release_module.ConditionalRelease
@@ -408,10 +402,8 @@ class Machine:
         """
         root_seed = _root_seed(seed)
         observation = settings.observation
-        engine = engine_module.Engine(
-            verbose=observation.prints_trace,
-            io_trace=observation.log_component_io,
-        )
+        engine = engine_module.Engine()
+        log = _connect_log(observation, engine)
         escalation_policy = _escalation_policy(settings.escalation)
         plan = _plan(settings, escalation_policy)
         pool = _decoder_pool(settings, plan)
@@ -531,8 +523,6 @@ class Machine:
         qpu.connect_readout_receiver(controller)
         qpu.connect_completion_receiver(execution_runtime.body_done)
         qpu.connect_idle_receiver(idle_rounds.emit_idle_round)
-        metric_list = _metrics(observation, window_manager, decode_records)
-        metric_bindings = _metric_bindings(metric_list)
         seed_roots = _seed_roots(
             code=plan.code,
             scheme=plan.scheme,
@@ -558,7 +548,6 @@ class Machine:
             # the retained-storage observer is gone; its seed path segment
             # is a result (seeding hashes the segment names) and stays
             memory_model=None,
-            metrics=metric_bindings,
         )
         seeding.bind_run_seed(root_seed, seed_roots)
         conditional_release.connect(
@@ -571,12 +560,14 @@ class Machine:
             streams,
             idle_rounds,
             execution_runtime,
-            engine,
-            metric_bindings,
+        )
+        listeners = _observation(
+            observation, engine, log, window_manager, decoder_manager
         )
         return cls(
             settings=settings,
             engine=engine,
+            observation=listeners,
             links=links,
             traffic_ledger=traffic_ledger,
             conditional_release=conditional_release,
@@ -1522,38 +1513,66 @@ def _patch_by_identity(plan: _Plan) -> dict:
     return patch_by_identity
 
 
-def _metrics(
+# ------------------------------------------------------- the listeners
+
+
+def _connect_log(
     observation: observe_settings.ObservationSettings,
+    engine: engine_module.Engine,
+) -> log_writers.LogWriter:
+    """The narrator's listeners: the record always, the console when asked.
+
+    Connecting a listener to io_line is what turns the component I/O
+    lines on, gem5's named debug flag (src/base/debug.hh Flag).
+    """
+    log = log_writers.LogWriter()
+    engine.line.connect(log.write)
+    if observation.log_component_io:
+        engine.io_line.connect(log.write)
+    if observation.prints_trace:
+        printer = log_writers.ConsolePrinter()
+        engine.line.connect(printer.write)
+        if observation.log_component_io:
+            engine.io_line.connect(printer.write)
+    return log
+
+
+def _observation(
+    observation: observe_settings.ObservationSettings,
+    engine: engine_module.Engine,
+    log: log_writers.LogWriter,
     window_manager,
-    decode_records: decode_records_module.DecodeRecordLedger,
-) -> list:
-    """The observers the settings ask for; a test adds its own to the engine."""
-    if not observation.record_switching_windows:
-        return []
-    records = metrics.WindowSwitchingRecords(window_manager, decode_records)
-    return [records]
-
-
-def _metric_bindings(metric_list: list) -> tuple:
-    bindings = []
-    for metric in metric_list:
-        bindings.append((metric.name, metric))
-    return tuple(bindings)
+    decoder_manager,
+) -> observation_module.Observation:
+    """The sampled metrics the section asks for, connected to action_done."""
+    decode_backlog = None
+    if observation.backlog_trace:
+        decode_backlog = metrics.DecodeBacklog(window_manager, decoder_manager)
+        engine.action_done.connect(decode_backlog.observe)
+    decoder_utilization = None
+    if observation.decoder_utilization:
+        decoder_utilization = metrics.DecoderUtilization(decoder_manager)
+        engine.action_done.connect(decoder_utilization.observe)
+    decoder_memory_occupancy = None
+    if observation.decoder_memory_occupancy:
+        decoder_memory_occupancy = metrics.DecoderMemoryOccupancy(
+            decoder_manager
+        )
+        engine.action_done.connect(decoder_memory_occupancy.observe)
+    return observation_module.Observation(
+        log=log,
+        decode_backlog=decode_backlog,
+        decoder_utilization=decoder_utilization,
+        decoder_memory_occupancy=decoder_memory_occupancy,
+    )
 
 
 def _seed_roots(**parts) -> tuple:
     """The seed path of every stochastic owner; the segments are results."""
-    metric_bindings = parts.pop("metrics")
     roots = []
     for name, value in parts.items():
         path = (message.RunSeedPathSegment("field", name),)
         roots.append((path, value))
-    for name, metric in metric_bindings:
-        path = (
-            message.RunSeedPathSegment("field", "metrics"),
-            message.RunSeedPathSegment("string_key", name),
-        )
-        roots.append((path, metric))
     return tuple(roots)
 
 
@@ -1564,8 +1583,6 @@ def _load_program(
     streams,
     idle_rounds,
     execution_runtime,
-    engine: engine_module.Engine,
-    metric_bindings: tuple,
 ) -> None:
     """Register the workload with every component that reads it.
 
@@ -1583,8 +1600,6 @@ def _load_program(
     window_manager.install_planned_holds(run_plan.buffering)
     for stream in plan.dynamic_streams:
         window_manager.register_stream(stream)
-    for _name, metric in metric_bindings:
-        engine.add_metric(metric)
     program = message.ExecutionProgram(
         plan.operations,
         plan.decode_operations,
@@ -1618,11 +1633,6 @@ def _capture_result(machine: Machine) -> RunResult:
         operation = operation_by_id[operation_id]
         row = _operation_result(machine, operation, truth_for)
         rows.append(row)
-    metric_rows = []
-    for metric in engine.metrics:
-        value = metric.result()
-        metric_row = MetricResultRecord(metric.name, value)
-        metric_rows.append(metric_row)
     link_traffic = machine.traffic_ledger.traffic_json_value()
     return RunResult(
         terminal_status="complete",
@@ -1633,7 +1643,6 @@ def _capture_result(machine: Machine) -> RunResult:
         fully_done_ticks=engine.now,
         operation_results=tuple(rows),
         link_traffic=link_traffic,
-        metric_results=tuple(metric_rows),
     )
 
 

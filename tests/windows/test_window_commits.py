@@ -80,7 +80,7 @@ class _Transfers:
 
 class _Fixture:
     def __init__(self, frame_ticks: int = 3) -> None:
-        self.engine = engine_module.Engine(verbose=False)
+        self.engine = engine_module.Engine()
         self.window = message.Window(
             op_id=4, k=1, commit_lo=4, commit_hi=6, buffer_hi=8, n_rounds=5
         )

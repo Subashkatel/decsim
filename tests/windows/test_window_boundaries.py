@@ -29,7 +29,7 @@ _EAGER = _EagerPolicy()
 
 
 def test_a_stale_delivery_is_ignored_and_the_edge_releases_once():
-    engine = engine_module.Engine(verbose=False)
+    engine = engine_module.Engine()
     operation = message.Operation(
         id=1, name="memory", qubits=(0,), patches=(0,)
     )

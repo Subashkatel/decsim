@@ -99,7 +99,7 @@ class _DecodeQueue:
 
 
 def _redecode(shape):
-    engine = engine_module.Engine(verbose=False)
+    engine = engine_module.Engine()
     transfers = _Transfers()
     queue = _DecodeQueue()
     on_strong_decoded = object()  # opaque: the committer's return path

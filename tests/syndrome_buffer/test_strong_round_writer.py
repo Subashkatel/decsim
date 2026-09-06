@@ -83,7 +83,7 @@ def free_writer(engine, on_round_stored=None):
 
 
 def test_a_write_lands_after_the_crossing_and_the_listener_hears_it_once():
-    engine = engine_module.Engine(verbose=False)
+    engine = engine_module.Engine()
     listener = RecordingListener()
     stored = []
     writer = priced_writer(
@@ -106,7 +106,7 @@ def test_a_write_lands_after_the_crossing_and_the_listener_hears_it_once():
 
 
 def test_the_writer_counts_a_write_in_flight_as_room_taken():
-    engine = engine_module.Engine(verbose=False)
+    engine = engine_module.Engine()
     writer = priced_writer(engine, rounds=1)
     writer.store.register_hold("reader", [(1, 1)])
 
@@ -123,7 +123,7 @@ def test_the_writer_counts_a_write_in_flight_as_room_taken():
 
 
 def test_an_unpriced_crossing_stores_at_the_write():
-    engine = engine_module.Engine(verbose=False)
+    engine = engine_module.Engine()
     stored = []
     writer = free_writer(
         engine, on_round_stored=lambda *key: stored.append(key)
@@ -139,7 +139,7 @@ def test_an_unpriced_crossing_stores_at_the_write():
 
 
 def test_a_round_whose_readers_resolved_while_crossing_is_dropped_at_landing():
-    engine = engine_module.Engine(verbose=False)
+    engine = engine_module.Engine()
     writer = priced_writer(engine)
     writer.store.register_hold("reader", [(1, 1)])
 
@@ -154,7 +154,7 @@ def test_a_round_whose_readers_resolved_while_crossing_is_dropped_at_landing():
 
 
 def test_settlement_reports_a_write_still_in_flight():
-    engine = engine_module.Engine(verbose=False)
+    engine = engine_module.Engine()
     writer = priced_writer(engine)
     writer.store.register_hold("reader", [(1, 1)])
     first = packet(1)

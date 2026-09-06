@@ -18,8 +18,11 @@ class ObservationSettings:
     every window with the Tesseract referee and counts disagreements,
     never priced. record_switching_windows keeps every request and
     service record for the switching views; round_store_occupancy builds
-    the L5 listener on Buffer 0 (both Python-only knobs until slice 10's
-    surface commit names them in the yaml).
+    the L5 listener on Buffer 0; backlog_trace builds the decode backlog
+    sampler the D7 harness reads; decoder_utilization and
+    decoder_memory_occupancy build the unit-count and memory sweeps'
+    samplers (Python-only knobs until slice 10's surface commit names
+    them in the yaml).
     """
 
     trace: str = "off"
@@ -27,6 +30,9 @@ class ObservationSettings:
     check_windows_with: str = "none"
     record_switching_windows: bool = False
     round_store_occupancy: bool = False
+    backlog_trace: bool = False
+    decoder_utilization: bool = False
+    decoder_memory_occupancy: bool = False
 
     @classmethod
     def from_yaml(cls, section: Mapping) -> "ObservationSettings":

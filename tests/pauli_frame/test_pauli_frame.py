@@ -32,7 +32,7 @@ def do_nothing():
 
 
 def frame_with_commit_ticks(commit_ticks):
-    engine = Engine(verbose=False)
+    engine = Engine()
     frame = PauliFrame(engine, commit_ticks=commit_ticks)
     return engine, frame
 

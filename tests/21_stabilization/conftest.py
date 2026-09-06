@@ -95,11 +95,11 @@ def declared_qpu(round_us=ROUND_US):
 
 
 def run_machine(settings, seed=0, make_metrics=None):
-    """Build the machine, add the test's own metrics, run it."""
+    """Build the machine, connect the test's own probes, run it."""
     machine = Machine.build(settings, seed)
     if make_metrics is not None:
         for metric in make_metrics(machine):
-            machine.engine.add_metric(metric)
+            machine.engine.action_done.connect(metric.observe)
     machine.run()
     return machine
 
@@ -192,8 +192,8 @@ def switching_run(*, rounds=6, escalation_probability, ops=None,
 
 
 class OccupancyProbe:
-    """Metric recording each store's live-round timeline, for hold-lifetime
-    assertions (observe runs after every engine event)."""
+    """Probe recording each store's live-round timeline, for hold-lifetime
+    assertions (observe runs after every engine action)."""
 
     name = "hold_occupancy_probe"
 
@@ -202,15 +202,15 @@ class OccupancyProbe:
         self.buffer0_timeline = []
         self.sb1_timeline = []
 
-    def observe(self, engine):
+    def observe(self, tick):
         live_upstream = self.window_manager.retention.weak_store.occupancy
         if not self.buffer0_timeline or self.buffer0_timeline[-1][1] != live_upstream:
-            self.buffer0_timeline.append((engine.now, live_upstream))
+            self.buffer0_timeline.append((tick, live_upstream))
         room_store = self.window_manager.retention.strong_store
         if room_store is not None:
             live_room = room_store.occupancy
             if not self.sb1_timeline or self.sb1_timeline[-1][1] != live_room:
-                self.sb1_timeline.append((engine.now, live_room))
+                self.sb1_timeline.append((tick, live_room))
 
     def result(self):
         return {"buffer0": list(self.buffer0_timeline),

@@ -45,7 +45,7 @@ def test_cwb_delivers_rounds_in_order(fabric):
     """Buffer 0 receives rounds 1..6 in strictly increasing order."""
     completed = fabric["weak_only_run"](rounds=6, io_trace=True)
     arrival_order = [
-        fabric["log_index"](completed.engine.log_lines,
+        fabric["log_index"](completed.observation.log.lines,
                             f"round {round_index} of mem1 arrived")
         for round_index in range(1, 7)
     ]
@@ -61,9 +61,9 @@ def test_weak_primary_readiness_is_buffer0_not_sb1(fabric):
     # window (1,0) reads rounds 1..6: complete at 6 + qc 2 + binary 3 + cwb 4
     assert first_window.t_data_complete == microseconds_to_ticks(6 + 2 + 3 + 4)
     buffer0_complete = fabric["log_index"](
-        completed.engine.log_lines, "round 6 of mem1 arrived")
+        completed.observation.log.lines, "round 6 of mem1 arrived")
     sb1_landing = fabric["log_index"](
-        completed.engine.log_lines, "received round 6 of op 1 from controller_to_strong_buffer")
+        completed.observation.log.lines, "received round 6 of op 1 from controller_to_strong_buffer")
     assert buffer0_complete < sb1_landing
 
 

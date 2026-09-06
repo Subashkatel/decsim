@@ -66,7 +66,7 @@ class _Fixture:
     """One six-round operation with one window reading rounds 1 to 5."""
 
     def __init__(self) -> None:
-        self.engine = engine_module.Engine(verbose=False)
+        self.engine = engine_module.Engine()
         self.operation = message.Operation(1, "memory", (0,), patches=(0,))
         self.window = message.Window(
             op_id=1, k=0, commit_lo=1, commit_hi=3, buffer_hi=5, n_rounds=5

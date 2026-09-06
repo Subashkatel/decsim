@@ -214,7 +214,7 @@ def test_dropped_round_is_an_accounted_terminal_state():
     from decsim.message import WINDOW_INPUT_ROUTE
     from decsim.observe.round_events import RoundEventRecorder
 
-    engine = Engine(verbose=False)
+    engine = Engine()
     recorder = RoundEventRecorder(engine)
     recorder.record("EMITTED", 1, 1, WINDOW_INPUT_ROUTE, patch_id=0)
     recorder.record("PACKED", 1, 1, WINDOW_INPUT_ROUTE)
@@ -245,7 +245,7 @@ def test_reassembly_context_drop_is_an_accounted_terminal_state():
     from decsim.message import WINDOW_INPUT_ROUTE
     from decsim.observe.round_events import RoundEventRecorder
 
-    engine = Engine(verbose=False)
+    engine = Engine()
     recorder = RoundEventRecorder(engine)
     recorder.record("EMITTED", 1, 1, WINDOW_INPUT_ROUTE, patch_id=0)
     recorder.record("EMITTED", 1, 2, WINDOW_INPUT_ROUTE, patch_id=0)

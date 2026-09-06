@@ -14,6 +14,7 @@ is the delay between a request and its delivery.
 import pytest
 
 import decsim.engine
+import decsim.observe.log_writers as log_writers
 import decsim.qpu.magic_state_factories as magic_state_factories
 
 
@@ -55,7 +56,7 @@ def chain(engine, levels, **settings):
 
 
 def test_the_infinite_factory_delivers_at_once():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     factory = magic_state_factories.InfiniteFactory(engine)
     delivered = []
     factory.request(1, lambda: delivered.append(engine.now))
@@ -63,7 +64,7 @@ def test_the_infinite_factory_delivers_at_once():
 
 
 def test_a_state_arrives_after_the_attempt_and_the_return_trip():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     factory = single_stage(engine, return_ticks=30)
     delivered = []
     factory.request(1, lambda: delivered.append(engine.now))
@@ -74,7 +75,7 @@ def test_a_state_arrives_after_the_attempt_and_the_return_trip():
 
 
 def test_a_warm_store_delivers_without_a_stall():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     factory = single_stage(engine, initial_store=1)
     delivered = []
     factory.request(1, lambda: delivered.append(engine.now))
@@ -84,7 +85,7 @@ def test_a_warm_store_delivers_without_a_stall():
 
 
 def test_eleven_correction_decodes_run_in_parallel_before_delivery():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     decoder = DecodeLog(engine, latency_ticks=40)
     factory = magic_state_factories.DistillationFactory(
         engine,
@@ -108,7 +109,7 @@ def test_eleven_correction_decodes_run_in_parallel_before_delivery():
 
 
 def test_the_return_trip_after_the_decodes_is_the_deliver_stage():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     decoder = DecodeLog(engine, latency_ticks=40)
     factory = magic_state_factories.DistillationFactory(
         engine,
@@ -128,7 +129,7 @@ def test_the_return_trip_after_the_decodes_is_the_deliver_stage():
 
 
 def test_a_delivered_state_carries_the_tick_of_every_stage():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     decoder = DecodeLog(engine, latency_ticks=40)
     factory = magic_state_factories.DistillationFactory(
         engine,
@@ -154,7 +155,7 @@ def test_a_delivered_state_carries_the_tick_of_every_stage():
 
 
 def test_two_units_hold_two_states_in_flight_at_the_peak():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     factory = magic_state_factories.DistillationFactory(
         engine,
         unit_count=2,
@@ -181,17 +182,19 @@ def test_two_units_hold_two_states_in_flight_at_the_peak():
 
 
 def test_a_failed_attempt_is_discarded_and_retried():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
+    log = log_writers.LogWriter()
+    engine.line.connect(log.write)
     factory = single_stage(engine, success_probability=0.5, seed=2)
     delivered = []
     factory.request(1, lambda: delivered.append(engine.now))
     engine.run()
     assert delivered == [300]
     assert factory.produced_count == 1
-    assert engine.log_lines[1] == (
+    assert log.lines[1] == (
         "[  0.000 us] Factory: a unit's distillation DISCARDED, retrying"
     )
-    assert engine.log_lines[2] == (
+    assert log.lines[2] == (
         "[  0.000 us] Factory: a unit's distillation DISCARDED, retrying"
     )
 
@@ -208,12 +211,12 @@ def eight_requests(factory, note):
 
 
 def test_a_fixed_seed_gives_the_same_eight_delivery_ticks_in_another_engine():
-    first_engine = decsim.engine.Engine(verbose=False)
+    first_engine = decsim.engine.Engine()
     first = single_stage(first_engine, success_probability=0.5, seed=2)
     first_delivered = []
     eight_requests(first, lambda: first_delivered.append(first_engine.now))
     first_engine.run()
-    second_engine = decsim.engine.Engine(verbose=False)
+    second_engine = decsim.engine.Engine()
     second = single_stage(second_engine, success_probability=0.5, seed=2)
     second_delivered = []
     eight_requests(second, lambda: second_delivered.append(second_engine.now))
@@ -223,7 +226,7 @@ def test_a_fixed_seed_gives_the_same_eight_delivery_ticks_in_another_engine():
 
 
 def test_another_seed_gives_another_delivery_sequence():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     factory = single_stage(engine, success_probability=0.5, seed=3)
     delivered = []
     eight_requests(factory, lambda: delivered.append(engine.now))
@@ -235,7 +238,7 @@ def test_the_latency_maximum_is_kept_over_several_deliveries():
     # The first state waits 50 ticks in the buffer before a request takes
     # it (total 150); the refill is taken as soon as it is ready (total
     # 100), so the maximum is the earlier delivery's.
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     factory = single_stage(
         engine, production_mode="continuous", buffer_capacity=1
     )
@@ -254,7 +257,9 @@ def test_the_latency_maximum_is_kept_over_several_deliveries():
 
 
 def test_the_single_stage_log_names_the_request_the_ready_state_and_delivery():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
+    log = log_writers.LogWriter()
+    engine.line.connect(log.write)
     factory = magic_state_factories.DistillationFactory(
         engine,
         unit_count=1,
@@ -266,7 +271,7 @@ def test_the_single_stage_log_names_the_request_the_ready_state_and_delivery():
     )
     factory.request(1, lambda: None)
     engine.run()
-    assert engine.log_lines == [
+    assert log.lines == [
         "[  0.000 us] Factory: op#1 requests a magic state "
         "(store 0, waiting 1)",
         "[  2.500 us] Factory: magic state ready (store now 1)",
@@ -276,7 +281,7 @@ def test_the_single_stage_log_names_the_request_the_ready_state_and_delivery():
 
 
 def test_continuous_production_keeps_the_buffer_full_ahead_of_demand():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     factory = magic_state_factories.DistillationFactory(
         engine,
         unit_count=2,
@@ -295,7 +300,7 @@ def test_continuous_production_keeps_the_buffer_full_ahead_of_demand():
 
 
 def test_continuous_production_refills_the_slot_a_delivery_takes():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     factory = magic_state_factories.DistillationFactory(
         engine,
         unit_count=2,
@@ -319,7 +324,7 @@ def test_continuous_production_refills_the_slot_a_delivery_takes():
 
 
 def test_a_shut_down_factory_launches_no_attempt():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     factory = magic_state_factories.DistillationFactory(
         engine,
         unit_count=2,
@@ -337,7 +342,7 @@ def test_a_shut_down_factory_launches_no_attempt():
 
 
 def test_a_cancelled_request_is_never_delivered():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     factory = single_stage(engine)
     delivered = []
     ticket = factory.request(1, lambda: delivered.append(engine.now))
@@ -349,13 +354,13 @@ def test_a_cancelled_request_is_never_delivered():
 
 
 def test_an_unknown_production_mode_is_refused():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     with pytest.raises(ValueError, match="production_mode must be"):
         single_stage(engine, production_mode="batch")
 
 
 def test_correction_decodes_need_a_decode_service():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     with pytest.raises(ValueError, match="decode_service is required"):
         magic_state_factories.DistillationFactory(
             engine, 1, 1, None, 0, correction_decode_count=11
@@ -363,7 +368,7 @@ def test_correction_decodes_need_a_decode_service():
 
 
 def test_a_decode_service_without_correction_decodes_is_refused():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     decoder = DecodeLog(engine, latency_ticks=1)
     with pytest.raises(ValueError, match="decode_service must be None"):
         magic_state_factories.DistillationFactory(
@@ -372,7 +377,7 @@ def test_a_decode_service_without_correction_decodes_is_refused():
 
 
 def test_a_negative_correction_decode_count_is_refused():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     decoder = DecodeLog(engine, latency_ticks=1)
     with pytest.raises(ValueError, match="must be nonnegative"):
         magic_state_factories.DistillationFactory(
@@ -381,7 +386,7 @@ def test_a_negative_correction_decode_count_is_refused():
 
 
 def test_a_factory_without_a_unit_is_refused():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     with pytest.raises(ValueError, match="unit_count must be positive"):
         magic_state_factories.DistillationFactory(
             engine, 0, 1, None, 0, correction_decode_count=0
@@ -389,7 +394,7 @@ def test_a_factory_without_a_unit_is_refused():
 
 
 def test_one_final_state_costs_fifteen_prepared_states_and_one_round():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     level = magic_state_factories.DistillLevel(
         unit_count=1, distance=3, logical_cycles_per_round=13
     )
@@ -406,7 +411,7 @@ def test_one_final_state_costs_fifteen_prepared_states_and_one_round():
 
 
 def test_a_second_request_waits_for_a_second_round():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     level = magic_state_factories.DistillLevel(
         unit_count=1, distance=3, logical_cycles_per_round=13
     )
@@ -426,7 +431,7 @@ def test_a_second_request_waits_for_a_second_round():
 
 
 def test_two_queued_requests_stall_for_the_sum_of_their_waits():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     level = magic_state_factories.DistillLevel(
         unit_count=1, distance=3, logical_cycles_per_round=13
     )
@@ -438,7 +443,7 @@ def test_two_queued_requests_stall_for_the_sum_of_their_waits():
 
 
 def test_a_failed_preparation_is_counted_and_retried():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     level = magic_state_factories.DistillLevel(unit_count=1, distance=3)
     factory = chain(
         engine, [level], preparation_success_probability=0.5, seed=1
@@ -452,14 +457,14 @@ def test_a_failed_preparation_is_counted_and_retried():
 
 
 def test_a_preparation_success_probability_above_one_is_refused():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     level = magic_state_factories.DistillLevel(unit_count=1, distance=3)
     with pytest.raises(ValueError, match=r"in \[0, 1\]"):
         chain(engine, [level], preparation_success_probability=2)
 
 
 def test_a_failed_round_discards_its_inputs_and_is_counted():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     level = magic_state_factories.DistillLevel(
         unit_count=1, distance=3, success_probability=0.5
     )
@@ -475,7 +480,9 @@ def test_a_failed_round_discards_its_inputs_and_is_counted():
 
 
 def test_the_chain_log_names_a_failed_round_and_a_distilled_round():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
+    log = log_writers.LogWriter()
+    engine.line.connect(log.write)
     level = magic_state_factories.DistillLevel(
         unit_count=1, distance=3, success_probability=0.5
     )
@@ -492,7 +499,7 @@ def test_the_chain_log_names_a_failed_round_and_a_distilled_round():
     factory.request(1, lambda: delivered.append(engine.now))
     engine.run()
     assert delivered == [800_000]
-    assert engine.log_lines == [
+    assert log.lines == [
         "[  0.000 us] Factory: op#1 requests a magic state "
         "(top-level store 0, waiting 1)",
         "[  0.400 us] Factory: level 1 distillation failed "
@@ -505,7 +512,7 @@ def test_the_chain_log_names_a_failed_round_and_a_distilled_round():
 
 
 def test_a_chains_correction_decodes_carry_their_level_label():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     decoder = DecodeLog(engine, latency_ticks=40)
     level = magic_state_factories.DistillLevel(unit_count=1, distance=3)
     factory = chain(
@@ -526,7 +533,7 @@ def test_a_chains_correction_decodes_carry_their_level_label():
 
 
 def test_an_explicit_cycle_count_wins_over_the_default_at_a_higher_level():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     levels = [
         magic_state_factories.DistillLevel(unit_count=1, distance=3),
         magic_state_factories.DistillLevel(
@@ -543,7 +550,7 @@ def test_a_second_level_round_takes_fifteen_logical_cycles_by_default():
     # loading its inputs takes two more. With round_ticks=10 and d=3 a
     # first-level round is 390 ticks and a second-level round 450; the
     # fifteen first-level rounds end at 10 + 15 * 390 = 5860.
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     levels = [
         magic_state_factories.DistillLevel(unit_count=1, distance=3),
         magic_state_factories.DistillLevel(unit_count=1, distance=3),
@@ -557,7 +564,7 @@ def test_a_second_level_round_takes_fifteen_logical_cycles_by_default():
 
 
 def test_a_two_level_chain_feeds_fifteen_first_level_states_to_the_top():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     levels = [
         magic_state_factories.DistillLevel(unit_count=1, distance=3),
         magic_state_factories.DistillLevel(unit_count=1, distance=3),
@@ -574,7 +581,7 @@ def test_a_two_level_chain_feeds_fifteen_first_level_states_to_the_top():
 
 
 def test_a_continuous_chain_fills_its_buffer_before_any_request():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     level = magic_state_factories.DistillLevel(unit_count=1, distance=3)
     factory = chain(
         engine, [level], production_mode="continuous", buffer_capacity=1
@@ -586,7 +593,7 @@ def test_a_continuous_chain_fills_its_buffer_before_any_request():
 
 
 def test_a_continuous_chain_refills_the_state_a_delivery_takes():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     level = magic_state_factories.DistillLevel(unit_count=1, distance=3)
     factory = chain(
         engine, [level], production_mode="continuous", buffer_capacity=1
@@ -603,7 +610,7 @@ def test_a_continuous_chain_refills_the_state_a_delivery_takes():
 
 
 def test_a_cancelled_chain_request_starts_no_round():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     level = magic_state_factories.DistillLevel(unit_count=1, distance=3)
     factory = chain(engine, [level])
     delivered = []
@@ -617,7 +624,7 @@ def test_a_cancelled_chain_request_starts_no_round():
 
 
 def test_a_shut_down_chain_serves_no_request():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     level = magic_state_factories.DistillLevel(unit_count=1, distance=3)
     factory = chain(engine, [level])
     factory.shutdown()
@@ -630,13 +637,13 @@ def test_a_shut_down_chain_serves_no_request():
 
 
 def test_continuous_production_refuses_an_empty_buffer_capacity():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     with pytest.raises(ValueError, match="buffer_capacity >= 1"):
         single_stage(engine, production_mode="continuous", buffer_capacity=0)
 
 
 def test_a_continuous_chain_refuses_an_empty_buffer_capacity():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     level = magic_state_factories.DistillLevel(unit_count=1, distance=3)
     with pytest.raises(ValueError, match="buffer_capacity >= 1"):
         chain(engine, [level], production_mode="continuous", buffer_capacity=0)

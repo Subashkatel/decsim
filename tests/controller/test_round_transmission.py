@@ -144,7 +144,7 @@ def transmitter_with(engine, profile, windows=None):
 
 
 def test_a_priced_hop_publishes_at_delivery_and_stamps_the_store():
-    engine = engine_module.Engine(verbose=False)
+    engine = engine_module.Engine()
     profile = priced_cwb_profile()
     transmitter, store, windows, recorder, _ledger = transmitter_with(
         engine, profile
@@ -165,7 +165,7 @@ def test_a_priced_hop_publishes_at_delivery_and_stamps_the_store():
 
 
 def test_a_free_hop_publishes_as_the_round_is_stored():
-    engine = engine_module.Engine(verbose=False)
+    engine = engine_module.Engine()
     profile = link_profiles.logical_reference_profile()
     transmitter, store, windows, recorder, _ledger = transmitter_with(
         engine, profile
@@ -183,7 +183,7 @@ def test_a_free_hop_publishes_as_the_round_is_stored():
 
 
 def test_a_memory_round_tells_the_windows_at_delivery_and_frees_its_slot():
-    engine = engine_module.Engine(verbose=False)
+    engine = engine_module.Engine()
     profile = five_microsecond_wbd_profile()
     transmitter, store, windows, recorder, _ledger = transmitter_with(
         engine, profile
@@ -203,7 +203,7 @@ def test_a_memory_round_tells_the_windows_at_delivery_and_frees_its_slot():
 
 
 def test_memory_rounds_pipeline_onto_the_link_without_a_landing_wait():
-    engine = engine_module.Engine(verbose=False)
+    engine = engine_module.Engine()
     profile = five_microsecond_wbd_profile()
     transmitter, store, windows, _recorder, _ledger = transmitter_with(
         engine, profile
@@ -247,7 +247,7 @@ def test_rounds_sent_at_one_tick_leave_in_completion_order(
     (point-to-point-net-device.cc): no arbitration event between the
     routes.
     """
-    engine = engine_module.Engine(verbose=False)
+    engine = engine_module.Engine()
     profile = five_microsecond_wbd_profile(bits_per_microsecond=1000.0)
     transmitter, store, windows, _recorder, ledger = transmitter_with(
         engine, profile, windows=DispatchingWindows

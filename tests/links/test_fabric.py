@@ -135,7 +135,7 @@ def send_on(engine, fabric, path, payload_bits, tick, attribution, delivered):
 
 
 def test_two_paths_on_one_channel_share_its_queue():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     shared = bounded_path("shared", 1000.0, 300)
     fabric = fabric_with(
         engine, qpu_to_controller=shared, controller_to_weak_buffer=shared
@@ -163,7 +163,7 @@ def test_two_paths_on_one_channel_share_its_queue():
 
 
 def test_two_channels_with_the_same_numbers_and_different_names_are_two_wires():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     first_wire = bounded_path("first", 1000.0, 0)
     second_wire = bounded_path("second", 1000.0, 0)
     fabric = fabric_with(
@@ -193,7 +193,7 @@ def test_two_channels_with_the_same_numbers_and_different_names_are_two_wires():
 
 
 def test_two_paths_with_setups_on_one_channel_share_its_setup_engine():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     shared = unbounded_path("shared", 0, setup_ticks=5)
     fabric = fabric_with(
         engine,
@@ -227,7 +227,7 @@ def test_two_paths_with_setups_on_one_channel_share_its_setup_engine():
 
 
 def test_a_path_with_no_setup_never_waits_for_another_paths_setup():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     with_setup = unbounded_path("shared", 0, setup_ticks=5)
     without_setup = unbounded_path("shared", 0)
     fabric = fabric_with(
@@ -263,7 +263,7 @@ def test_a_path_with_no_setup_never_waits_for_another_paths_setup():
 
 
 def test_a_free_path_costs_nothing():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     fabric = fabric_with(engine)
     delivered = []
     first_round = round_attribution(1)
@@ -277,7 +277,7 @@ def test_a_free_path_costs_nothing():
 
 
 def test_an_actual_payload_is_priced_and_named_by_its_source():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     listener = Listener()
     fabric = fabric_with(engine, listener)
     delivered = []
@@ -294,7 +294,7 @@ def test_an_actual_payload_is_priced_and_named_by_its_source():
 
 
 def test_a_missing_payload_takes_the_cards_default():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     listener = Listener()
     bus_word = default_path("bus", 32)
     fabric = fabric_with(engine, listener, frame_to_controller=bus_word)
@@ -320,7 +320,7 @@ def test_a_missing_payload_takes_the_cards_default():
 
 
 def test_an_unsized_transfer_rides_an_unbounded_channel_unresolved():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     listener = Listener()
     fabric = fabric_with(engine, listener)
     delivered = []
@@ -336,7 +336,7 @@ def test_an_unsized_transfer_rides_an_unbounded_channel_unresolved():
 
 
 def test_a_bounded_channel_refuses_a_transfer_with_no_payload_size():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     bounded = bounded_path("bounded", 1000.0, 0)
     fabric = fabric_with(engine, controller_to_weak_buffer=bounded)
     attribution = round_attribution(1)
@@ -347,7 +347,7 @@ def test_a_bounded_channel_refuses_a_transfer_with_no_payload_size():
 
 
 def test_an_actual_payload_on_a_path_without_a_source_is_refused():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     default_only = default_path("default", 100)
     fabric = fabric_with(engine, qpu_to_controller=default_only)
     attribution = round_attribution(1)
@@ -356,7 +356,7 @@ def test_an_actual_payload_on_a_path_without_a_source_is_refused():
 
 
 def test_the_listener_sees_every_transfer_once_in_order():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     listener = Listener()
     fabric = fabric_with(engine, listener)
     delivered = []
@@ -377,7 +377,7 @@ def test_the_listener_sees_every_transfer_once_in_order():
 
 
 def test_the_listener_sees_the_transfer_before_the_caller():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     listener = Listener()
     fabric = fabric_with(engine, listener)
     seen_by_caller = []
@@ -393,7 +393,7 @@ def test_the_listener_sees_the_transfer_before_the_caller():
 
 
 def test_a_fabric_with_no_listener_runs():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     fabric = fabric_with(engine)
     delivered = []
     first_round = round_attribution(1)
@@ -405,7 +405,7 @@ def test_a_fabric_with_no_listener_runs():
 
 
 def test_an_optional_path_is_wired_only_when_the_card_names_it():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     store = unbounded_path("store", 3)
     with_store = fabric_with(engine, controller_to_strong_buffer=store)
     without_store = fabric_with(engine)
@@ -415,7 +415,7 @@ def test_an_optional_path_is_wired_only_when_the_card_names_it():
 
 
 def test_the_expected_delay_prices_the_paths_payload_rule():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     capacity = link_settings.CapacitySettings(1000.0, AGGREGATE, None, "test")
     channel = link_settings.ChannelSettings("bounded", 300, capacity, "test")
     payload = link_settings.PayloadSettings(8, AGGREGATE, None, "test default")
@@ -427,7 +427,7 @@ def test_the_expected_delay_prices_the_paths_payload_rule():
 
 
 def test_the_expected_delay_includes_the_paths_setup():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     with_setup = unbounded_path("store", 3, setup_ticks=5)
     fabric = fabric_with(engine, controller_to_strong_buffer=with_setup)
     assert (
@@ -436,6 +436,6 @@ def test_the_expected_delay_includes_the_paths_setup():
 
 
 def test_the_fabric_fills_the_link_port():
-    engine = decsim.engine.Engine(verbose=False)
+    engine = decsim.engine.Engine()
     fabric = fabric_with(engine)
     assert isinstance(fabric, ports.Link)

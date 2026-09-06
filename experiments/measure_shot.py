@@ -469,7 +469,7 @@ def _write_trace(machine: machine_module.Machine, run_dir, label: str) -> None:
     """
     trace_dir = run_dir / "trace"
     trace_dir.mkdir(parents=True, exist_ok=True)
-    text = "\n".join(machine.engine.log_lines)
+    text = "\n".join(machine.observation.log.lines)
     trace_path = trace_dir / f"{label}.log"
     contents = text + "\n"
     trace_path.write_text(contents)

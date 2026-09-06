@@ -16,6 +16,7 @@ import decsim.decoders.schedulers as schedulers
 import decsim.escalation.policies as escalation_policies
 import decsim.engine as engine_module
 import decsim.message as message
+import decsim.observe.log_writers as log_writers
 from decsim.decoders.decoder_manager import DecoderManager
 
 
@@ -66,7 +67,9 @@ def _window_job():
 
 
 def test_a_fake_row_through_the_pool_decodes_the_window_once():
-    engine = engine_module.Engine(verbose=False)
+    engine = engine_module.Engine()
+    log = log_writers.LogWriter()
+    engine.line.connect(log.write)
     row = FixedRow()
     manager = _manager(engine, row)
     delivered = []
@@ -81,12 +84,12 @@ def test_a_fake_row_through_the_pool_decodes_the_window_once():
     tick, result = delivery
     assert tick == config.microseconds_to_ticks(2.0)
     assert result.logical_observables == (1,)
-    assert "DecoderCluster: START DECODE mem W0" in engine.log_lines[-1]
+    assert "DecoderCluster: START DECODE mem W0" in log.lines[-1]
     manager.check_decode_work_settled()
 
 
 def test_a_spent_job_is_refused():
-    engine = engine_module.Engine(verbose=False)
+    engine = engine_module.Engine()
     row = FixedRow()
     manager = _manager(engine, row)
     job = _window_job()
@@ -96,7 +99,7 @@ def test_a_spent_job_is_refused():
 
 
 def test_a_withdrawn_window_leaves_the_queue_and_the_ledger():
-    engine = engine_module.Engine(verbose=False)
+    engine = engine_module.Engine()
     row = FixedRow()
     manager = _manager(engine, row)
     busy = _window_job()

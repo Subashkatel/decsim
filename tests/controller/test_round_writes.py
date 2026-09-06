@@ -88,7 +88,7 @@ def writer_with(
 
 
 def test_a_round_with_no_room_is_held_and_written_in_order_when_a_slot_frees():
-    engine = engine_module.Engine(verbose=False)
+    engine = engine_module.Engine()
     writer, weak_store, transmitter, recorder = writer_with(
         engine, weak_rounds=1
     )
@@ -114,7 +114,7 @@ def test_a_round_with_no_room_is_held_and_written_in_order_when_a_slot_frees():
 
 
 def test_a_published_round_is_recorded_at_its_storage_when_the_hop_is_free():
-    engine = engine_module.Engine(verbose=False)
+    engine = engine_module.Engine()
     writer, weak_store, _transmitter, recorder = writer_with(engine)
     first = packed(1)
 
@@ -128,7 +128,7 @@ def test_a_published_round_is_recorded_at_its_storage_when_the_hop_is_free():
 
 
 def test_a_strong_primary_window_round_takes_one_hop_into_the_strong_store():
-    engine = engine_module.Engine(verbose=False)
+    engine = engine_module.Engine()
     strong_writer = RecordingStrongWriter()
     writer, weak_store, transmitter, _recorder = writer_with(
         engine, strong_writer=strong_writer, publishes_from_strong_store=True
@@ -146,7 +146,7 @@ def test_a_strong_primary_window_round_takes_one_hop_into_the_strong_store():
 
 
 def test_a_full_strong_store_holds_the_round_too():
-    engine = engine_module.Engine(verbose=False)
+    engine = engine_module.Engine()
     strong_writer = RecordingStrongWriter(room=False)
     writer, weak_store, transmitter, _recorder = writer_with(
         engine, strong_writer=strong_writer
@@ -162,7 +162,7 @@ def test_a_full_strong_store_holds_the_round_too():
 
 
 def test_the_drop_knob_drops_a_round_that_found_no_room():
-    engine = engine_module.Engine(verbose=False)
+    engine = engine_module.Engine()
     writer, _weak_store, transmitter, recorder = writer_with(
         engine, weak_rounds=1, on_full=DROP
     )

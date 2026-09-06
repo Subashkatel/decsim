@@ -1528,7 +1528,7 @@ def _data_movement(
     observation: observe_settings.ObservationSettings,
 ) -> Optional[data_movement_module.DataMovement]:
     """The copy, reference and move counters, only when the section asks."""
-    if not observation.data_movement and not observation.writes_trace:
+    if not observation.data_movement:
         return None
     return data_movement_module.DataMovement()
 

@@ -32,21 +32,25 @@ POINT_LOG_SHA256 = "74c2e7aee37a"
 PHASES = ("M", "X", "i", "C", "s", "t", "f")
 
 
-def _settings(trace_path=None):
+def _settings(trace_path=None, data_movement=False):
     from experiments.experiment_config import load_experiment
 
-    config = load_experiment(SUITE / "weak_decoder_baseline.yaml")
+    config_path = SUITE / "weak_decoder_baseline.yaml"
+    config = load_experiment(config_path)
     settings = config.point_settings(**POINT)
     if trace_path is None:
-        return settings
+        trace = "off"
+    else:
+        trace = str(trace_path)
     observation = dataclasses.replace(
-        settings.observation, trace=str(trace_path)
+        settings.observation, trace=trace, data_movement=data_movement
     )
     return dataclasses.replace(settings, observation=observation)
 
 
-def _run(trace_path=None):
-    machine = machine_module.Machine.build(_settings(trace_path), SEED)
+def _run(trace_path=None, data_movement=False):
+    point = _settings(trace_path, data_movement)
+    machine = machine_module.Machine.build(point, SEED)
     result = machine.run()
     return machine, result
 
@@ -56,7 +60,7 @@ def traced(tmp_path_factory):
     """One traced run of gate point 1, with its file already written."""
     directory = tmp_path_factory.mktemp("trace")
     path = directory / "point1.trace.json"
-    machine, result = _run(path)
+    machine, result = _run(path, data_movement=True)
     machine.observation.trace_writer.write(str(path))
     document = json.loads(path.read_text())
     return machine, result, document
@@ -101,10 +105,32 @@ def test_the_trace_moves_no_tick_and_narrates_the_same_log(tmp_path):
 
 def test_a_run_with_no_trace_builds_no_writer():
     """The section did not ask, so nothing is connected."""
-    machine = machine_module.Machine.build(_settings(), SEED)
+    point = _settings()
+    machine = machine_module.Machine.build(point, SEED)
 
     assert machine.observation.trace_writer is None
     assert machine.observation.data_movement is None
+
+
+def test_the_trace_is_not_a_reason_to_build_the_counters(tmp_path):
+    """Every listener is built because the section asked, and only then.
+
+    The law of the slice is that a run with the trace off is the same
+    run as one with it on, in the results as well as the log, so the
+    RunResult's data movement counters are None in both when the
+    section asked for the trace alone.
+    """
+    trace_path = tmp_path / "on.trace.json"
+    plain_machine, plain_result = _run()
+    traced_machine, traced_result = _run(trace_path)
+
+    assert traced_machine.observation.trace_writer is not None
+    assert traced_machine.observation.data_movement is None
+    assert plain_machine.observation.data_movement is None
+    plain_fields = dataclasses.asdict(plain_result)
+    traced_fields = dataclasses.asdict(traced_result)
+    assert traced_fields == plain_fields
+    assert traced_result.data_movement is None
 
 
 def test_every_event_carries_the_fields_its_phase_declares(traced):

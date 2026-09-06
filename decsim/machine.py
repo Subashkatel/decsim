@@ -76,6 +76,7 @@ import decsim.message as message
 import decsim.observe.command_events as command_events_module
 import decsim.observe.controller_counters as controller_counters_module
 import decsim.observe.decode_records as decode_records_module
+import decsim.observe.flight_recorder as flight_recorder_module
 import decsim.observe.link_traffic as link_traffic
 import decsim.observe.log_writers as log_writers
 import decsim.observe.metrics as metrics
@@ -601,6 +602,9 @@ class Machine:
             queue_depth=queue_depth,
             controller_counters=controller_counters,
             command_events=command_events,
+            round_events=round_events,
+            pauli_frame=pauli_frame,
+            execution_runtime=execution_runtime,
         )
         return cls(
             settings=settings,
@@ -1647,6 +1651,9 @@ def _observation(
     queue_depth: queue_depth_module.QueueDepthLog,
     controller_counters: controller_counters_module.ControllerCounters,
     command_events: command_events_module.CommandEvents,
+    round_events,
+    pauli_frame,
+    execution_runtime,
 ) -> observation_module.Observation:
     """Every listener of the run: the connected ones, and the sampled ones.
 
@@ -1667,9 +1674,18 @@ def _observation(
             decoder_manager
         )
         engine.action_done.connect(decoder_memory_occupancy.observe)
+    flight_recorder = flight_recorder_module.FlightRecorder(
+        round_events,
+        window_ledger,
+        runtime_stamps,
+        command_events,
+        pauli_frame,
+        execution_runtime,
+    )
     return observation_module.Observation(
         log=log,
         windows=window_ledger,
+        flight_recorder=flight_recorder,
         decode_records=decode_records,
         runtime_stamps=runtime_stamps,
         queue_depth=queue_depth,

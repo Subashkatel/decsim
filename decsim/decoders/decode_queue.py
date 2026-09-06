@@ -21,10 +21,11 @@ DEFAULT_POOL = "default"
 
 
 class WaitingJobs:
-    """One ready queue per pool and the depth samples over time.
+    """One ready queue per pool, and the depth reported at every change.
 
-    Trace source: job_enqueued(job) as a job joins its queue; the job
-    names the rounds it references in the store.
+    Trace sources: job_enqueued(job) as a job joins its queue, the job
+    naming the rounds it references in the store; depth_changed(tick,
+    depth) whenever the jobs waiting over every pool change.
     """
 
     def __init__(
@@ -40,11 +41,10 @@ class WaitingJobs:
         self.waiting_by_pool: dict[str, list] = {}
         for pool in pools:
             self.waiting_by_pool[pool] = []
-        # (tick, jobs waiting over every pool) at every change
-        self.depth_samples: list[tuple[int, int]] = []
         self.strong_requests = strong_requests
         self.is_bulk_strong = is_bulk_strong
         self.job_enqueued = trace_source.TraceSource()
+        self.depth_changed = trace_source.TraceSource()
 
     def pool_of(self, job: message.DecodeJob) -> str:
         """The pool a job queues in: its hint when a pool has that name."""
@@ -104,9 +104,9 @@ class WaitingJobs:
         return total
 
     def sample_depth(self) -> None:
-        """Record the total depth now."""
+        """Report the total depth now."""
         depth = self.total()
-        self.depth_samples.append((self.engine.now, depth))
+        self.depth_changed.fire(self.engine.now, depth)
 
     def drain_in_scheduler_order(self, pool: str) -> list:
         """Empty the pool's queue into a list, next job first."""

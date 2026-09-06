@@ -45,6 +45,7 @@ import enum
 from typing import Optional, Protocol, runtime_checkable
 
 import decsim.message as message
+import decsim.observe.trace_source as trace_source
 import decsim.windows.round_retention as round_retention
 
 LOG_SOURCE = "DecoderCluster"
@@ -225,6 +226,8 @@ class ForwardWindow:
     weak-determined: the commits before it, and the restart window's
     commit or the terminal boundary. The weak pipeline never waits on
     strong work. One strong job per escalation; a second is refused.
+    Trace source: window_absorbed(key, owner_key) for every window the
+    strong window at owner_key covers.
     """
 
     def __init__(
@@ -247,6 +250,7 @@ class ForwardWindow:
         self.ledger = ledger
         self.interaction = interaction
         self.pending = _PendingWindows()
+        self.window_absorbed = trace_source.TraceSource()
 
     # ---- the shape
 
@@ -326,6 +330,7 @@ class ForwardWindow:
             pending_hold = message.PendingStrong(strong_request_key)
             for absorbed_key in resolved_region.absorbed_window_keys:
                 self._absorb_window(absorbed_key, restart_key, pending_hold)
+                self.window_absorbed.fire(absorbed_key, key)
             self._log_assignment(held, resolved_region)
             if restart_key is not None:
                 self._restart_weak_chain(restart_key, plan, restart_model)

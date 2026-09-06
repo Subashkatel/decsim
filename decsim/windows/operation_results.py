@@ -42,11 +42,14 @@ class OperationResults:
 
     def install_window_contribution(
         self, window: message.Window, logical_observables
-    ) -> None:
-        """The window owns its commit range, unless a strong window does."""
+    ) -> message.LogicalContribution:
+        """The window owns its commit range, unless a strong window does.
+
+        Returns the contribution that owns the window's rounds.
+        """
         existing = self.ledger.get(window.key)
         if existing is not None and existing.ownership_kind == "strong_window":
-            return
+            return existing
         contribution = message.LogicalContribution(
             owner_key=window.key,
             commit_lo=window.commit_lo,
@@ -55,6 +58,7 @@ class OperationResults:
             logical_observables=logical_observables,
         )
         self.ledger.install(contribution)
+        return contribution
 
     def replace_prediction(self, key: tuple, logical_observables) -> None:
         """A strong result replaces the owner's prediction."""

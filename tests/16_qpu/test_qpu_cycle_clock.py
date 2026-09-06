@@ -5,6 +5,7 @@ device_manager._generate_syndrome_round; Google 2207.06431 readout every cycle).
 from decsim.qpu.syndrome_devices import TimingOnlyDevice
 from decsim.engine import Engine
 from decsim.message import Operation, RunOperationBody
+from decsim.observe.command_events import CommandEvents
 from decsim.qpu.cycle_clock import QPUDevice
 
 CYCLE = 10
@@ -127,12 +128,14 @@ def test_a_command_starts_on_the_cycle_boundary_at_or_after_its_arrival():
         command = RunOperationBody(operation=operation, round_ticks=cycle, round_count=2,
                                    source_round_count=2, emits_detector_data=False,
                                    finalizes_stream_round=False)
+        commands = CommandEvents()
+        qpu.command_event.connect(commands.command_event)
         # an idle patch keeps the clock ticking
         qpu._idle_by_patch[9] = _IdlePatch(0, 0)
         engine.schedule(arrival, lambda: qpu.issue(command))
         engine.schedule(arrival + 5 * cycle, qpu.finish)
         engine.run()
-        return dict((event.kind, event.tick) for event in qpu.command_events)["STARTED"]
+        return dict((event.kind, event.tick) for event in commands.events)["STARTED"]
 
     for arrival in (0, 1, 99, 100, 101, 250, 300):
         assert start_tick(arrival) == qpu_boundary(arrival, cycle)

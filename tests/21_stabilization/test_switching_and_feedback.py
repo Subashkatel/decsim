@@ -205,7 +205,7 @@ def test_decode_jobs_are_priced_for_the_rounds_they_read(fabric):
         probability_for=lambda job: 1.0 if job.window_id == 0 else 0.0,
     )
     view = switching_records_view(
-        completed.window_manager, completed.decode_records
+        completed.observation.windows, completed.observation.decode_records
     )
     by_request = {
         (r.request_key.window_id, r.request_key.tier): r for r in view.requests
@@ -299,7 +299,7 @@ def test_no_feedback_when_none_is_required(fabric):
     """No blocked successor, no result return: no release and no OC or
     CQ traffic."""
     completed = fabric["weak_only_run"](rounds=6)
-    assert completed.execution_runtime.decode_release_time == {}
+    assert completed.observation.runtime_stamps.decode_release == {}
     transfers = completed.traffic_ledger.traffic_json_value().get(
         "transfers", []
     )
@@ -314,16 +314,16 @@ def test_release_travels_oc_then_cq_with_exact_cost(fabric):
     command reaches the QPU after CQ and starts on that boundary."""
     ops = [fabric["memory_op"](1), fabric["memory_op"](2, blocked_by=1)]
     completed = fabric["weak_only_run"](rounds=6, ops=ops)
-    runtime = completed.execution_runtime
+    stamps = completed.observation.runtime_stamps
     frame_records = completed.pauli_frame.snapshot().records
     blocker_commit = next(
         r.committed_ticks for r in frame_records if r.window_key == (1, 0)
     )
 
-    assert runtime.decode_release_time[
+    assert stamps.decode_release[
         2
     ] == blocker_commit + microseconds_to_ticks(2)
-    assert runtime.op_start_time[2] == blocker_commit + microseconds_to_ticks(
+    assert stamps.op_start[2] == blocker_commit + microseconds_to_ticks(
         2 + 2
     )
 
@@ -331,9 +331,9 @@ def test_release_travels_oc_then_cq_with_exact_cost(fabric):
 def test_successor_cannot_start_before_its_release(fabric):
     ops = [fabric["memory_op"](1), fabric["memory_op"](2, blocked_by=1)]
     completed = fabric["weak_only_run"](rounds=6, ops=ops)
-    runtime = completed.execution_runtime
-    assert runtime.op_start_time[2] >= runtime.decode_release_time[2]
-    assert runtime.op_start_time[1] == 0
+    stamps = completed.observation.runtime_stamps
+    assert stamps.op_start[2] >= stamps.decode_release[2]
+    assert stamps.op_start[1] == 0
 
 
 def test_decoder_manager_cannot_bypass_the_controller(fabric):

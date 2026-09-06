@@ -15,6 +15,7 @@ import pytest
 import decsim.controller.idle_rounds as idle_rounds_module
 import decsim.controller.policies as policies
 import decsim.message as message
+import decsim.observe.controller_counters as controller_counters
 
 
 class RecordingQpu:
@@ -76,9 +77,17 @@ def accounting_with(policy, streams=None):
     return accounting, qpu, demand
 
 
+def counters_on(accounting):
+    """A counters listener on the accounting's one source."""
+    counters = controller_counters.ControllerCounters()
+    accounting.idle_round_emitted.connect(counters.idle_round_emitted)
+    return counters
+
+
 def test_the_rounds_emitted_on_a_patch_are_claimed_once_by_the_operation():
     ignore = policies.Ignore()
     accounting, qpu, _demand = accounting_with(ignore)
+    counters = counters_on(accounting)
     operation = accounting.operation_by_id[7]
 
     accounting.emit_idle_round(7, "patch-a", 1)
@@ -90,7 +99,7 @@ def test_the_rounds_emitted_on_a_patch_are_claimed_once_by_the_operation():
     third_claim = accounting.claim(operation)
 
     assert (first_claim, second_claim, third_claim) == (2, 0, 1)
-    assert accounting.emitted_count == 4
+    assert counters.idle_rounds == 4
     assert qpu.memory_rounds == [
         (7, "patch-a", 1),
         (7, "patch-a", 2),
@@ -140,11 +149,12 @@ def test_a_patch_on_a_live_protected_stream_emits_through_the_stream():
     streams = RecordingStreams(live_patches=("patch-a",))
     ignore = policies.Ignore()
     accounting, qpu, _demand = accounting_with(ignore, streams)
+    counters = counters_on(accounting)
 
     accounting.emit_idle_round(7, "patch-a", 1)
 
     assert qpu.memory_rounds == []
-    assert accounting.emitted_count == 0
+    assert counters.idle_rounds == 0
 
 
 def test_the_charged_policy_costs_one_job_per_region_and_the_remainder():

@@ -1,4 +1,4 @@
-"""The record ledger: a listener that keeps a record only when enabled."""
+"""The record ledger: a listener on the two terminal sources."""
 
 import decsim.message as message
 import decsim.observe.decode_records as decode_records
@@ -26,7 +26,7 @@ def _job():
 
 
 def test_a_request_and_its_service_are_recorded_at_their_end():
-    ledger = decode_records.DecodeRecordLedger(is_enabled=True)
+    ledger = decode_records.DecodeRecordLedger()
     job = _job()
     result = message.DecodeResult(1, 0)
     outcome = message.RequestProcessingOutcome.PRIMARY_FORWARDED_FOR_DELIVERY
@@ -40,13 +40,3 @@ def test_a_request_and_its_service_are_recorded_at_their_end():
     assert request.terminal_processing_outcome is outcome
     assert service.service_ticks == 25
     assert service.completed_request_keys == (job.request_key,)
-
-
-def test_a_disabled_ledger_keeps_nothing():
-    ledger = decode_records.DecodeRecordLedger(is_enabled=False)
-    job = _job()
-    outcome = message.RequestProcessingOutcome.PRIMARY_FORWARDED_FOR_DELIVERY
-    ledger.request_ended(job, None, outcome, 40)
-    ledger.service_ended(job, 40)
-    assert ledger.requests == []
-    assert ledger.services == []

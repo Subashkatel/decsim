@@ -28,7 +28,6 @@ import decsim.decoders.decoder_pool as decoder_pool_module
 import decsim.decoders.gap_joins as gap_joins_module
 import decsim.decoders.strong_requests as strong_requests_module
 import decsim.message as message
-import decsim.observe.decode_records as decode_records
 
 
 class DecoderManager:
@@ -48,12 +47,9 @@ class DecoderManager:
         ] = None,
         escalation_policy,
         link=None,
-        records: Optional[decode_records.DecodeRecordLedger] = None,
     ):
         if unit_pools is None:
             unit_pools = {"default": num_units}
-        if records is None:
-            records = decode_records.DecodeRecordLedger(is_enabled=False)
         pool = decoder_pool_module.DecoderPool(
             router, unit_pools, decoder_memory
         )
@@ -89,7 +85,6 @@ class DecoderManager:
             engine,
             escalation_policy,
             self.strong_requests,
-            records,
             cancel_strong=self.cancel_strong,
         )
 

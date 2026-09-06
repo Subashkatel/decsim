@@ -74,10 +74,11 @@ def test_feedback_operation_command_traverses_controller_output_and_cq(fabric):
         record.committed_ticks for record in completed.pauli_frame.snapshot().records
         if record.window_key == (1, 0))
 
-    assert runtime.decode_release_time[2] == blocker_commit + microseconds_to_ticks(2)  # OC
-    assert runtime.op_start_time[2] == blocker_commit + microseconds_to_ticks(2 + 3 + 2)
+    stamps = completed.observation.runtime_stamps
+    assert stamps.decode_release[2] == blocker_commit + microseconds_to_ticks(2)  # OC
+    assert stamps.op_start[2] == blocker_commit + microseconds_to_ticks(2 + 3 + 2)
 
-    arrivals = [event for event in completed.qpu.command_events
+    arrivals = [event for event in completed.observation.command_events.events
                 if event.kind == "ARRIVED" and event.command.operation.id == 2]
     assert len(arrivals) == 1
     assert arrivals[0].tick == blocker_commit + microseconds_to_ticks(2 + 3 + 2)
@@ -100,18 +101,18 @@ def test_output_latency_changes_arrival_but_not_decision_availability(fabric):
     zero.engine.run()
     delayed.engine.run()
 
-    assert (zero.execution_runtime.decode_release_time[2]
-            == delayed.execution_runtime.decode_release_time[2])
-    assert (delayed.execution_runtime.op_start_time[2]
-            - zero.execution_runtime.op_start_time[2]) == microseconds_to_ticks(3)
+    assert (zero.observation.runtime_stamps.decode_release[2]
+            == delayed.observation.runtime_stamps.decode_release[2])
+    assert (delayed.observation.runtime_stamps.op_start[2]
+            - zero.observation.runtime_stamps.op_start[2]) == microseconds_to_ticks(3)
 
 
 def test_non_aligned_controller_arrival_waits_for_next_qec_boundary(fabric):
     completed = _feedback_run(fabric, controller_output_us=0.016)
     completed.engine.run()
-    arrival = next(event.tick for event in completed.qpu.command_events
+    arrival = next(event.tick for event in completed.observation.command_events.events
                    if event.kind == "ARRIVED" and event.command.operation.id == 2)
-    start = completed.execution_runtime.op_start_time[2]
+    start = completed.observation.runtime_stamps.op_start[2]
 
     assert arrival % microseconds_to_ticks(1.0) == microseconds_to_ticks(0.016)
     assert start == ((arrival // microseconds_to_ticks(1.0)) + 1) * microseconds_to_ticks(1.0)
@@ -123,10 +124,10 @@ def test_preloaded_program_command_is_not_charged_as_online_feedback(fabric):
     completed = _feedback_run(fabric, controller_output_us=3.0)
     completed.engine.run()
 
-    root_arrival = next(event for event in completed.qpu.command_events
+    root_arrival = next(event for event in completed.observation.command_events.events
                         if event.kind == "ARRIVED" and event.command.operation.id == 1)
     assert root_arrival.tick == 0
-    assert completed.execution_runtime.op_start_time[1] == 0
+    assert completed.observation.runtime_stamps.op_start[1] == 0
     assert any(event.kind == "PRELOADED_COMMAND" and event.operation_id == 1
                for event in completed.round_events.output_events)
 
@@ -156,7 +157,7 @@ def test_result_return_carries_the_same_decision_through_output_and_cq(fabric):
         ("CONTROL_DECISION_ISSUED", commit + microseconds_to_ticks(2 + 3)),
     ]
     assert output[1].payload is output[0].payload
-    assert completed.execution_runtime.result_return_time_by_operation[1] == \
+    assert completed.observation.runtime_stamps.result_return[1] == \
         commit + microseconds_to_ticks(2 + 3 + 2)
 
 

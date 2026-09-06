@@ -18,6 +18,7 @@ from typing import Any, Callable, Optional
 
 import decsim.engine
 import decsim.message as message
+import decsim.observe.trace_source as trace_source
 import decsim.ports as ports
 
 # Patches and operation ids are opaque identities chosen by the workload;
@@ -38,7 +39,10 @@ class QPUDevice:
     """Runs issued operation bodies on one QEC cycle clock.
 
     Every cycle emits one syndrome round per running operation and per
-    idle patch. The receivers may arrive later through connect_*.
+    idle patch. The receivers may arrive later through connect_*. Trace
+    sources: command_event(QPUCommandEvent) when a command arrives and
+    when it starts; round_emitted(readout) for every readout a round
+    hands to the controller.
     """
 
     def __init__(
@@ -58,7 +62,8 @@ class QPUDevice:
         self.readout_receiver = readout_receiver
         self.completion_receiver = completion_receiver
         self.idle_receiver = idle_receiver
-        self.command_events: list[QPUCommandEvent] = []
+        self.command_event = trace_source.TraceSource()
+        self.round_emitted = trace_source.TraceSource()
         self._running_by_operation_id: dict = {}
         self._idle_by_patch: dict = {}
         self._commands_waiting: list[message.RunOperationBody] = []
@@ -95,7 +100,7 @@ class QPUDevice:
                 "zero-duration detector emitters must finalize a stream round"
             )
         event = QPUCommandEvent("ARRIVED", self.engine.now, command)
-        self.command_events.append(event)
+        self.command_event.fire(event)
         self._commands_waiting.append(command)
         boundary = self.next_boundary()
         self._schedule_boundary(boundary)
@@ -207,7 +212,7 @@ class QPUDevice:
     def _start_command(self, command: message.RunOperationBody) -> None:
         operation = command.operation
         event = QPUCommandEvent("STARTED", self.engine.now, command)
-        self.command_events.append(event)
+        self.command_event.fire(event)
         for patch in patches_of(operation):
             self._idle_by_patch.pop(patch, None)
         if command.round_count == 0:
@@ -265,6 +270,7 @@ class QPUDevice:
             readout = dataclasses.replace(
                 payload, n_fragments=fragment_count, fragment_index=index
             )
+            self.round_emitted.fire(readout)
             self.readout_receiver.accept_qpu_readout(
                 readout, message.WINDOW_INPUT_ROUTE
             )

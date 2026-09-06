@@ -155,7 +155,7 @@ def test_escalations_equal_gaps_below_the_threshold_equal_strong_frame_writes():
     machine = machine_module.Machine.build(settings, 1)
     machine.run()
     weak_gaps = []
-    for record in machine.decode_records.requests:
+    for record in machine.observation.decode_records.requests:
         is_weak = record.request_key.tier is message.DecoderTier.WEAK
         if is_weak and record.soft_output is not None:
             weak_gaps.append(record.soft_output.gap)

@@ -96,7 +96,7 @@ def test_strong_primary_rounds_never_enter_the_weak_path(fabric):
     assert transfers_by_path["controller_to_strong_buffer"] == 6
     (record,) = completed.pauli_frame.snapshot().records
     assert record.tier == "strong"
-    (request,) = completed.decode_records.requests
+    (request,) = completed.observation.decode_records.requests
     assert request.request_key.tier is DecoderTier.STRONG
     assert request.terminal_processing_outcome.value == "primary_forwarded_for_delivery"
 

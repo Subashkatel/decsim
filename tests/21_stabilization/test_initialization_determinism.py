@@ -65,7 +65,7 @@ def test_scheduled_start_round_delays_the_root(fabric):
     op = Operation(id=1, name="late", qubits=(1,), patches=(1,),
                    scheduled_start_round=4)
     completed = fabric["weak_only_run"](rounds=6, ops=[op])
-    assert completed.execution_runtime.op_start_time[1] == microseconds_to_ticks(4 * fabric["ROUND_US"])
+    assert completed.observation.runtime_stamps.op_start[1] == microseconds_to_ticks(4 * fabric["ROUND_US"])
 
 
 def test_component_boundaries_are_structural(fabric):
@@ -90,4 +90,4 @@ def test_every_program_operation_is_registered(fabric):
 
     assert {1, 2} <= set(window_manager.tracker.operation_by_id)
     assert 1 in window_manager.tracker.arrivals_by_operation
-    assert set(completed.execution_runtime.body_done_time) == {1, 2}
+    assert set(completed.observation.runtime_stamps.body_done) == {1, 2}

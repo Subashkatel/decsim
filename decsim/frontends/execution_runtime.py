@@ -5,10 +5,13 @@ round has passed, its magic state (if any) is ready, its feedback release
 (if any) has arrived and the controller's issuer lets it onto the QPU.
 Resources (qubits, patches) are claimed at request and freed when the
 body is done; two operations never hold one resource without a
-dependency edge between them. The timestamp maps are the run's record of
-every operation's life. The issuer hears each start through on_started
-(SimPy's callback on the event): the runtime never receives a call back
-from the controller.
+dependency edge between them. The runtime keeps which operations have
+started, finished and been released; the ticks of every operation's
+life go out on its trace sources (operation_issued, operation_started,
+body_finished, decode_released, result_returned, each with the
+operation id and the tick) and the runtime stamps listener keeps them.
+The issuer hears each start through on_started (SimPy's callback on the
+event): the runtime never receives a call back from the controller.
 """
 
 import functools
@@ -17,6 +20,7 @@ from typing import Any, Callable, Protocol, runtime_checkable
 
 import decsim.engine
 import decsim.message as message
+import decsim.observe.trace_source as trace_source
 
 
 @runtime_checkable
@@ -88,12 +92,11 @@ class ResourceLedger:
 
 
 class ExecutionRuntime:
-    """Own the program DAG, readiness, and timestamps.
+    """Own the program DAG, readiness, and the operations' lifecycle.
 
-    The ledger owns resources. The timestamp maps (op_start_time,
-    body_done_time, decode_release_time, result_return_time_by_operation)
-    are keyed by operation id; membership in a map is the operation's
-    lifecycle state.
+    The ledger owns resources. The three id sets (started, finished,
+    released) are the operations' lifecycle state; the ticks are fired,
+    not kept.
     """
 
     def __init__(
@@ -115,11 +118,14 @@ class ExecutionRuntime:
         self.schedule_released = set()
         self.requested = set()
         self.state_ready = set()
-        self.op_start_time = {}
-        self.body_done_time = {}
-        self.decode_release_time = {}
-        self.result_return_time_by_operation = {}
-        self.last_finish_time = 0
+        self.started_operation_ids = set()
+        self.finished_operation_ids = set()
+        self.released_operation_ids = set()
+        self.operation_issued = trace_source.TraceSource()
+        self.operation_started = trace_source.TraceSource()
+        self.body_finished = trace_source.TraceSource()
+        self.decode_released = trace_source.TraceSource()
+        self.result_returned = trace_source.TraceSource()
 
     @property
     def workload_complete(self) -> bool:
@@ -127,8 +133,7 @@ class ExecutionRuntime:
         if self.program is None:
             return False
         indexed = self.operations.keys()
-        finished = self.body_done_time.keys()
-        return indexed == finished
+        return indexed == self.finished_operation_ids
 
     def load_program(self, program: message.ExecutionProgram) -> None:
         """Index the operations, build the dependency graph, start the roots."""
@@ -147,25 +152,25 @@ class ExecutionRuntime:
         for operation in program.operations:
             self._attempt_start(operation)
 
-    def operation_started(
+    def note_start_boundary(
         self, operation: message.Operation, boundary_tick: int
     ) -> None:
         """The QPU has the operation's command: it starts at this boundary."""
-        self.op_start_time[operation.id] = boundary_tick
+        self.operation_started.fire(operation.id, boundary_tick)
 
     def body_done(self, operation: message.Operation) -> None:
         """A body finished: record it, free resources, release successors."""
         assert operation.id in self.operations, (
             f"operation {operation.id!r} is not in the program"
         )
-        assert operation.id in self.op_start_time, (
+        assert operation.id in self.started_operation_ids, (
             f"{operation.name} finished before it started"
         )
-        assert operation.id not in self.body_done_time, (
+        assert operation.id not in self.finished_operation_ids, (
             f"{operation.name} finished twice"
         )
-        self.body_done_time[operation.id] = self.engine.now
-        self.last_finish_time = max(self.last_finish_time, self.engine.now)
+        self.finished_operation_ids.add(operation.id)
+        self.body_finished.fire(operation.id, self.engine.now)
         self.engine.log("ExecutionRuntime", f"{operation.name} body done")
         self.resources.release(operation)
         self.issuer.before_successor_release(operation)
@@ -192,9 +197,9 @@ class ExecutionRuntime:
             successor = self.operations[successor_id]
             if successor.blocked_by is None:
                 continue
-            if successor.id in self.op_start_time:
+            if successor.id in self.started_operation_ids:
                 continue
-            if successor.id not in self.decode_release_time:
+            if successor.id not in self.released_operation_ids:
                 return True
         return False
 
@@ -213,7 +218,7 @@ class ExecutionRuntime:
         operation_id = decision.target_operation_id
         operation = self.operations[operation_id]
         if not decision.releases_operation:
-            self.result_return_time_by_operation[operation_id] = self.engine.now
+            self.result_returned.fire(operation_id, self.engine.now)
             self.engine.log(
                 "ExecutionRuntime",
                 f"received result return for {operation.name}",
@@ -222,10 +227,11 @@ class ExecutionRuntime:
         assert operation.blocked_by is not None, (
             f"a release targets {operation.name}, which is not feedback-blocked"
         )
-        assert operation_id not in self.decode_release_time, (
+        assert operation_id not in self.released_operation_ids, (
             f"{operation.name} was released twice"
         )
-        self.decode_release_time[operation_id] = self.engine.now
+        self.released_operation_ids.add(operation_id)
+        self.decode_released.fire(operation_id, self.engine.now)
         self.engine.log(
             "ExecutionRuntime",
             f"CONSUMED release for {operation.name}; now trying to start",
@@ -280,21 +286,22 @@ class ExecutionRuntime:
 
     def _maybe_begin(self, operation: message.Operation) -> None:
         """Issue the operation when every start gate is open."""
-        if operation.id in self.op_start_time:
+        if operation.id in self.started_operation_ids:
             return
         if operation.id not in self.state_ready:
             return
         is_blocked = operation.blocked_by is not None
-        if is_blocked and operation.id not in self.decode_release_time:
+        if is_blocked and operation.id not in self.released_operation_ids:
             return
         if not self.issuer.can_start(operation):
             return
-        # A provisional stamp marks the operation as started before the
-        # issuer issues it: issuing can retry ready operations, and a
-        # reentrant _maybe_begin must not issue this one twice. The QPU's
-        # actual start boundary then replaces the stamp (operation_started).
-        self.op_start_time[operation.id] = self.engine.now
-        on_started = functools.partial(self.operation_started, operation)
+        # The operation counts as started before the issuer issues it:
+        # issuing can retry ready operations, and a reentrant _maybe_begin
+        # must not issue this one twice. The stamps listener hears the
+        # issue now and the QPU's actual start boundary when it comes.
+        self.started_operation_ids.add(operation.id)
+        self.operation_issued.fire(operation.id, self.engine.now)
+        on_started = functools.partial(self.note_start_boundary, operation)
         self.issuer.issue_operation(operation, on_started)
 
 

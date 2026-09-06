@@ -106,7 +106,7 @@ GATE_SWITCHING_CARD = {
 
 def _strong_request_record(machine, window_id: int):
     view = run_views.switching_records_view(
-        machine.window_manager, machine.decode_records
+        machine.observation.windows, machine.observation.decode_records
     )
     for record in view.requests:
         is_window = record.request_key.window_id == window_id

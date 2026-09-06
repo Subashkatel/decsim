@@ -12,6 +12,7 @@ from decsim.controller.policies import (
     Ignore,
     SeparateDecodeJobs,
 )
+from decsim.observe.controller_counters import ControllerCounters
 from decsim.ports import IdlePolicy
 from decsim.windows.window_manager import BoundaryPolicy
 from decsim.controller.settings import IdlePolicySettings
@@ -392,6 +393,8 @@ def test_controller_accounts_every_idle_round_except_on_a_live_protected_stream(
     protected stream emits through that stream instead."""
     idle_policy = ExternalIdlePolicy()
     controller, engine, qpu, _ = make_controller(idle_policy)
+    counters = ControllerCounters()
+    controller.idle_round_emitted.connect(counters.idle_round_emitted)
 
     controller.emit_idle_round(7, "patch-a", 1)
     controller.emit_idle_round(7, "patch-a", 2)
@@ -399,7 +402,7 @@ def test_controller_accounts_every_idle_round_except_on_a_live_protected_stream(
     controller.emit_idle_round(7, "patch-a", 3)
 
     assert qpu.feedback_rounds == [(7, "patch-a", 1), (7, "patch-a", 2)]
-    assert controller.emitted_count == 2
+    assert counters.idle_rounds == 2
     assert engine.scheduled == []
 
 
@@ -571,10 +574,10 @@ def test_idle_rounds_cost_decode_jobs_by_default():
 
     assert _idle_decode_labels(charged), "the default charged no idle work"
     assert not _idle_decode_labels(optimistic)
-    assert optimistic.idle_rounds.emitted_count > 0
+    assert optimistic.observation.controller_counters.idle_rounds > 0
     assert (
-        charged.idle_rounds.emitted_count
-        >= optimistic.idle_rounds.emitted_count
+        charged.observation.controller_counters.idle_rounds
+        >= optimistic.observation.controller_counters.idle_rounds
     )
 
 
@@ -625,7 +628,7 @@ def test_single_operation_run_charges_no_idle_work():
     completed = Machine.build(settings, 13)
     completed.run()
 
-    assert completed.idle_rounds.emitted_count == 0
+    assert completed.observation.controller_counters.idle_rounds == 0
     assert not any(
         "buffer filled by memory rounds" in line
         for line in completed.observation.log.lines

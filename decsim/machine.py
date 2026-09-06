@@ -73,14 +73,19 @@ import decsim.links.fabric as fabric
 import decsim.links.link_profiles as link_profiles
 import decsim.links.settings as link_settings
 import decsim.message as message
+import decsim.observe.command_events as command_events_module
+import decsim.observe.controller_counters as controller_counters_module
 import decsim.observe.decode_records as decode_records_module
 import decsim.observe.link_traffic as link_traffic
 import decsim.observe.log_writers as log_writers
 import decsim.observe.metrics as metrics
 import decsim.observe.observation as observation_module
+import decsim.observe.queue_depth as queue_depth_module
 import decsim.observe.round_events as round_events_module
 import decsim.observe.round_store_occupancy as round_store_occupancy_module
+import decsim.observe.runtime_stamps as runtime_stamps_module
 import decsim.observe.settings as observe_settings
+import decsim.observe.window_ledger as window_ledger_module
 import decsim.pauli_frame.conditional_release as conditional_release_module
 import decsim.pauli_frame.pauli_frame as pauli_frame_module
 import decsim.qpu.cycle_clock as cycle_clock
@@ -378,7 +383,6 @@ class Machine:
     transmitter: round_transmission.RoundTransmitter
     round_events: round_events_module.RoundEventRecorder
     decoder_manager: decoder_manager_module.DecoderManager
-    decode_records: decode_records_module.DecodeRecordLedger
     active_decoder: Optional[Any]
     factory: Any
     syndrome_source: Any
@@ -432,17 +436,25 @@ class Machine:
         # strong redecode take the decode queue by constructor and every
         # job carries its return path.
         _check_strong_route(settings, pool.router)
-        decode_records = decode_records_module.DecodeRecordLedger(
-            is_enabled=observation.record_switching_windows
-        )
+        # Every listener is built before the component it hears, so a
+        # source fired while the program loads is already heard.
+        window_ledger = window_ledger_module.WindowLedger()
+        runtime_stamps = runtime_stamps_module.RuntimeStamps()
+        queue_depth = queue_depth_module.QueueDepthLog()
+        controller_counters = controller_counters_module.ControllerCounters()
+        command_events = command_events_module.CommandEvents()
+        decode_records = _decode_records(observation)
         decoder_manager = _decoder_manager(
-            engine, settings, escalation_policy, pool, links, decode_records
+            engine, settings, escalation_policy, pool, links
         )
+        _connect_decode_records(decoder_manager, decode_records)
+        decoder_manager.queue.depth_changed.connect(queue_depth.depth_changed)
         window_manager = _window_manager(
             engine,
             settings,
             escalation_policy,
             plan,
+            window_ledger=window_ledger,
             links=links,
             conditional_release=conditional_release,
             fault_model_requirement_for=pool.router.fault_model_requirement_for,
@@ -486,6 +498,7 @@ class Machine:
             settings.magic_state_factory, engine, decoder_manager, plan
         )
         qpu = cycle_clock.QPUDevice(engine, plan.device, plan.round_ticks)
+        qpu.command_event.connect(command_events.command_event)
         pulse_ticks = settings.controller.decision_to_pulse_ticks()
         instruction_output = instruction_output_module.InstructionOutput(
             engine, links, qpu, pulse_ticks
@@ -502,6 +515,9 @@ class Machine:
         patch_by_identity = _patch_by_identity(plan)
         idle_rounds = idle_rounds_module.IdleRoundAccounting(
             plan.idle_policy, decoder_manager, patch_by_identity, streams, qpu
+        )
+        idle_rounds.idle_round_emitted.connect(
+            controller_counters.idle_round_emitted
         )
         issuer = operation_issue.OperationIssuer(
             engine,
@@ -529,6 +545,7 @@ class Machine:
             factory=factory,
             resource_claims_by_operation_id=plan.resource_claims,
         )
+        _connect_runtime_stamps(execution_runtime, runtime_stamps)
         # The QPU's receivers arrive through its constructor once the
         # qpu lane builds the controller first.
         qpu.connect_readout_receiver(controller)
@@ -573,7 +590,17 @@ class Machine:
             execution_runtime,
         )
         listeners = _observation(
-            observation, engine, log, window_manager, decoder_manager
+            observation,
+            engine,
+            log,
+            window_manager,
+            decoder_manager,
+            window_ledger=window_ledger,
+            decode_records=decode_records,
+            runtime_stamps=runtime_stamps,
+            queue_depth=queue_depth,
+            controller_counters=controller_counters,
+            command_events=command_events,
         )
         return cls(
             settings=settings,
@@ -593,7 +620,6 @@ class Machine:
             transmitter=transmitter,
             round_events=round_events,
             decoder_manager=decoder_manager,
-            decode_records=decode_records,
             active_decoder=pool.active,
             factory=factory,
             syndrome_source=plan.device,
@@ -1256,6 +1282,7 @@ def _window_manager(
     escalation_policy,
     plan: _Plan,
     *,
+    window_ledger: window_ledger_module.WindowLedger,
     links,
     conditional_release,
     fault_model_requirement_for,
@@ -1277,6 +1304,8 @@ def _window_manager(
         models,
         plan.planned_operations,
     )
+    window_ledger.load_planned(planner.windows_by_key)
+    planner.window_planned.connect(window_ledger.window_planned)
     tracker = round_tracker_module.RoundTracker(plan.scheme, planner)
     retention = round_retention_module.RoundRetention(
         syndrome_buffer,
@@ -1324,6 +1353,7 @@ def _window_manager(
         committer_redecode,
         results,
     )
+    committer.window_committed.connect(window_ledger.window_committed)
     requester = decode_requests.DecodeRequester(
         tracker, retention, builder, decode_queue, escalation_policy, committer
     )
@@ -1341,6 +1371,7 @@ def _window_manager(
         plan.window_interaction,
         decode_queue,
         committer.accept_strong_result,
+        window_ledger,
     )
     late.strong_redecode = strong_redecode
     window_manager = window_manager_module.WindowManager(
@@ -1373,6 +1404,7 @@ def _strong_redecode(
     interaction,
     decode_queue,
     on_strong_decoded,
+    window_ledger: window_ledger_module.WindowLedger,
 ):
     """The window side of the strong tier, or None when never escalating.
 
@@ -1392,6 +1424,7 @@ def _strong_redecode(
             ledger,
             interaction,
         )
+        shape.window_absorbed.connect(window_ledger.window_absorbed)
     else:
         shape = strong_window_shapes.ContextWindow(
             engine, planner, tracker, retention, builder
@@ -1429,7 +1462,6 @@ def _decoder_manager(
     escalation_policy,
     pool: _DecoderPool,
     links,
-    decode_records: decode_records_module.DecodeRecordLedger,
 ) -> decoder_manager_module.DecoderManager:
     return decoder_manager_module.DecoderManager(
         engine,
@@ -1440,8 +1472,40 @@ def _decoder_manager(
         bulk_strong=settings.decoder_manager.bulk_strong,
         decoder_memory=pool.decoder_memory,
         escalation_policy=escalation_policy,
-        records=decode_records,
     )
+
+
+def _decode_records(
+    observation: observe_settings.ObservationSettings,
+) -> Optional[decode_records_module.DecodeRecordLedger]:
+    """The switching study's record ledger, only when the section asks."""
+    if not observation.record_switching_windows:
+        return None
+    return decode_records_module.DecodeRecordLedger()
+
+
+def _connect_decode_records(
+    decoder_manager: decoder_manager_module.DecoderManager,
+    decode_records: Optional[decode_records_module.DecodeRecordLedger],
+) -> None:
+    """The ledger hears both terminal outcomes; the decoder runs without it."""
+    if decode_records is None:
+        return
+    outcomes = decoder_manager.outcomes
+    outcomes.request_ended.connect(decode_records.request_ended)
+    outcomes.service_ended.connect(decode_records.service_ended)
+
+
+def _connect_runtime_stamps(
+    execution_runtime: execution_runtime_module.ExecutionRuntime,
+    stamps: runtime_stamps_module.RuntimeStamps,
+) -> None:
+    """The stamps hear every tick of an operation's life."""
+    execution_runtime.operation_issued.connect(stamps.operation_issued)
+    execution_runtime.operation_started.connect(stamps.operation_started)
+    execution_runtime.body_finished.connect(stamps.body_finished)
+    execution_runtime.decode_released.connect(stamps.decode_released)
+    execution_runtime.result_returned.connect(stamps.result_returned)
 
 
 def _check_strong_route(settings: MachineSettings, router) -> None:
@@ -1576,8 +1640,19 @@ def _observation(
     log: log_writers.LogWriter,
     window_manager,
     decoder_manager,
+    *,
+    window_ledger: window_ledger_module.WindowLedger,
+    decode_records: Optional[decode_records_module.DecodeRecordLedger],
+    runtime_stamps: runtime_stamps_module.RuntimeStamps,
+    queue_depth: queue_depth_module.QueueDepthLog,
+    controller_counters: controller_counters_module.ControllerCounters,
+    command_events: command_events_module.CommandEvents,
 ) -> observation_module.Observation:
-    """The sampled metrics the section asks for, connected to action_done."""
+    """Every listener of the run: the connected ones, and the sampled ones.
+
+    The sampled metrics the section asks for connect to action_done
+    here; the rest are already connected to the sources they hear.
+    """
     decode_backlog = None
     if observation.backlog_trace:
         decode_backlog = metrics.DecodeBacklog(window_manager, decoder_manager)
@@ -1594,6 +1669,12 @@ def _observation(
         engine.action_done.connect(decoder_memory_occupancy.observe)
     return observation_module.Observation(
         log=log,
+        windows=window_ledger,
+        decode_records=decode_records,
+        runtime_stamps=runtime_stamps,
+        queue_depth=queue_depth,
+        controller_counters=controller_counters,
+        command_events=command_events,
         decode_backlog=decode_backlog,
         decoder_utilization=decoder_utilization,
         decoder_memory_occupancy=decoder_memory_occupancy,
@@ -1672,7 +1753,7 @@ def _capture_result(machine: Machine) -> RunResult:
         event_queue_empty=True,
         decode_work_settled=True,
         execution_workload_complete=True,
-        execution_done_ticks=execution_runtime.last_finish_time,
+        execution_done_ticks=machine.observation.runtime_stamps.last_finish,
         fully_done_ticks=engine.now,
         operation_results=tuple(rows),
         link_traffic=link_traffic,

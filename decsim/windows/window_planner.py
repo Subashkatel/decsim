@@ -17,6 +17,7 @@ import types
 from typing import Optional
 
 import decsim.message as message
+import decsim.observe.trace_source as trace_source
 
 
 class WindowModels:
@@ -115,7 +116,11 @@ class WindowModels:
 
 
 class WindowPlanner:
-    """Which windows exist: the plan's, and a stream's as it grows."""
+    """Which windows exist: the plan's, and a stream's as it grows.
+
+    Trace source: window_planned(window) for every window a stream lays
+    after build; the plan's own windows exist before anyone listens.
+    """
 
     def __init__(
         self,
@@ -134,6 +139,7 @@ class WindowPlanner:
         self.models = models
         self.model_by_window: dict = {}
         self.growth_by_stream: dict = {}
+        self.window_planned = trace_source.TraceSource()
         for operation in planned_operations:
             self._build_operation_models(operation)
 
@@ -328,6 +334,7 @@ class WindowPlanner:
         self.plan.window_count[stream_id] += 1
         self.plan.total_windows += 1
         growth.next_window_index += 1
+        self.window_planned.fire(window)
         return window
 
 

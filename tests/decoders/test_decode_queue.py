@@ -15,6 +15,7 @@ import decsim.config as config
 import decsim.decoders.decoders as decoders
 import decsim.decoders.schedulers as schedulers
 import decsim.engine as engine_module
+import decsim.observe.queue_depth as queue_depth
 from decsim.decoders.decoder_manager import DecoderManager
 
 SERVICE_MICROSECONDS = 1.0
@@ -156,15 +157,18 @@ def test_a_job_waits_in_scheduler_order():
     assert starts == {"a": 0, "c": SERVICE_TICKS, "b": 2 * SERVICE_TICKS}
 
 
-def test_the_depth_is_sampled_at_every_change():
+def test_the_depth_is_reported_at_every_change():
     engine = engine_module.Engine()
     manager = _manager(engine, 1)
+    depth_log = queue_depth.QueueDepthLog()
+    manager.queue.depth_changed.connect(depth_log.depth_changed)
     _submit(manager, "a")
     _submit(manager, "b")
     engine.run()
     # a queues and leaves at once; b queues behind a's compute and
     # leaves when a's decode ends
     depths = []
-    for _tick, depth in manager.queue.depth_samples:
+    for _tick, depth in depth_log.samples:
         depths.append(depth)
     assert depths == [1, 0, 1, 0]
+    assert depth_log.peak == 1

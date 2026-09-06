@@ -13,6 +13,7 @@ import pytest
 
 import decsim.engine
 import decsim.message as message
+import decsim.observe.command_events as command_events_module
 import decsim.observe.log_writers as log_writers
 import decsim.qpu.code_geometry as code_geometry
 import decsim.qpu.cycle_clock as cycle_clock
@@ -132,6 +133,8 @@ def test_a_round_is_logged_as_fired_with_its_place_in_the_body():
 
 def test_a_command_arriving_mid_cycle_starts_on_the_next_boundary():
     engine, qpu, log = clocked_qpu(921_000)
+    commands = command_events_module.CommandEvents()
+    qpu.command_event.connect(commands.command_event)
     body = memory_body(1, 1, 921_000)
 
     def issue_body():
@@ -140,7 +143,7 @@ def test_a_command_arriving_mid_cycle_starts_on_the_next_boundary():
     engine.schedule(500_000, issue_body)
     engine.schedule(1_842_000, qpu.finish)
     engine.run()
-    assert qpu.command_events == [
+    assert commands.events == [
         cycle_clock.QPUCommandEvent("ARRIVED", 500_000, body),
         cycle_clock.QPUCommandEvent("STARTED", 921_000, body),
     ]
@@ -149,6 +152,8 @@ def test_a_command_arriving_mid_cycle_starts_on_the_next_boundary():
 
 def test_a_command_arriving_on_a_boundary_starts_on_that_boundary():
     engine, qpu, log = clocked_qpu(1_250_000)
+    commands = command_events_module.CommandEvents()
+    qpu.command_event.connect(commands.command_event)
     body = memory_body(1, 1, 1_250_000)
 
     def issue_body():
@@ -157,7 +162,7 @@ def test_a_command_arriving_on_a_boundary_starts_on_that_boundary():
     engine.schedule(1_250_000, issue_body)
     engine.schedule(2_500_000, qpu.finish)
     engine.run()
-    assert qpu.command_events == [
+    assert commands.events == [
         cycle_clock.QPUCommandEvent("ARRIVED", 1_250_000, body),
         cycle_clock.QPUCommandEvent("STARTED", 1_250_000, body),
     ]

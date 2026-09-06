@@ -13,6 +13,7 @@ from typing import Optional
 import decsim.decoders.decoder_memory as decoder_memory
 import decsim.message as message
 import decsim.observe.decode_records as decode_records
+import decsim.observe.window_ledger as window_ledger_module
 
 
 @dataclasses.dataclass(frozen=True)
@@ -46,26 +47,10 @@ class DecoderMemoryView:
 
 
 @dataclasses.dataclass(frozen=True)
-class FinalWindowRow:
-    """One window at the end of the run: its extents and its owner."""
-
-    destination_key: tuple[object, int]
-    weak_buffer_lo: int
-    weak_commit_lo: int
-    weak_commit_hi: int
-    weak_buffer_hi: int
-    final_commit_lo: Optional[int]
-    final_commit_hi: Optional[int]
-    window_disposition: str
-    absorbed_into: Optional[tuple[object, int]]
-    selected_request_key: Optional[message.DecoderRequestKey]
-
-
-@dataclasses.dataclass(frozen=True)
 class SwitchingRecordsView:
     """The switching study's three tables at the end of the run."""
 
-    windows: tuple[FinalWindowRow, ...]
+    windows: tuple[window_ledger_module.FinalWindowRow, ...]
     requests: tuple[decode_records.TerminalRequestRecord, ...]
     services: tuple[decode_records.TerminalServiceRecord, ...]
 
@@ -142,19 +127,14 @@ def decoder_memory_view(decoder_manager) -> DecoderMemoryView:
 
 
 def switching_records_view(
-    window_manager, records: decode_records.DecodeRecordLedger
+    windows: window_ledger_module.WindowLedger,
+    records: decode_records.DecodeRecordLedger,
 ) -> SwitchingRecordsView:
     """Compose the terminal owner facts without duplicating transfer timing."""
-    rows = []
-    window_items = window_manager.windows.items()
-    for key, window in sorted(window_items, key=_first_identity_order):
-        row = _final_window_row(key, window, window_manager.ledger)
-        rows.append(row)
-    return SwitchingRecordsView(
-        tuple(rows),
-        tuple(records.requests),
-        tuple(records.services),
-    )
+    final_rows = windows.final_rows()
+    requests = tuple(records.requests)
+    services = tuple(records.services)
+    return SwitchingRecordsView(final_rows, requests, services)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -268,25 +248,21 @@ def event_ledger(completed) -> RunLedgerView:
     round_events = completed.round_events
     rounds = _round_chains(rows, round_events.events)
     stored_of_round = _store_landings(rows, round_events.stored_rounds, rounds)
-    windows = completed.window_manager.windows
+    windows = completed.observation.windows.windows
     frame_prev = _window_chains(rows, windows, rounds, stored_of_round)
     committed_of_op = _frame_commits(rows, completed.pauli_frame, frame_prev)
     operations = completed.execution_runtime.operations
     outputs = _output_path(
         rows, round_events.output_events, operations, committed_of_op
     )
-    release_time = completed.execution_runtime.decode_release_time
+    stamps = completed.observation.runtime_stamps
     released_of_op = _releases(
-        rows, release_time, operations, outputs, committed_of_op
+        rows, stamps.decode_release, operations, outputs, committed_of_op
     )
     _rewire_commands_through_releases(outputs, released_of_op)
-    qpu = getattr(completed, "qpu", None)
-    command_events = getattr(qpu, "command_events", ())
+    command_events = completed.observation.command_events.events
     _qpu_commands(rows, command_events, outputs)
-    return_time = getattr(
-        completed.execution_runtime, "result_return_time_by_operation", {}
-    )
-    _result_returns(rows, return_time, outputs)
+    _result_returns(rows, stamps.result_return, outputs)
     events = rows.numbered_events()
     return RunLedgerView(events=events)
 
@@ -304,54 +280,6 @@ def _unit_name(unit) -> tuple:
 
 def _event_id(event: LedgerEvent) -> int:
     return event.event_id
-
-
-def _final_window_row(key, window, ledger) -> FinalWindowRow:
-    """One window's final disposition, from the logical ledger."""
-    contribution = ledger.contributions.get(key)
-    absorbed = window.is_absorbed
-    absorbed_into = None
-    final_commit_lo = None
-    final_commit_hi = None
-    disposition = "absorbed"
-    selected_request_key = None
-    if absorbed:
-        absorbed_into = _absorbing_owner(key, window, ledger)
-    elif contribution is None:
-        raise RuntimeError(f"final window {key} has no logical contribution")
-    else:
-        final_commit_lo = contribution.commit_lo
-        final_commit_hi = contribution.commit_hi
-        disposition = contribution.ownership_kind
-        selected_request_key = window.published_request_key
-    return FinalWindowRow(
-        key,
-        window.start_round,
-        window.commit_lo,
-        window.commit_hi,
-        window.buffer_hi,
-        final_commit_lo,
-        final_commit_hi,
-        disposition,
-        absorbed_into,
-        selected_request_key,
-    )
-
-
-def _absorbing_owner(key, window, ledger) -> tuple:
-    """The one strong window whose commit region covers the absorbed one."""
-    owners = []
-    for owner, value in ledger.contributions.items():
-        if value.ownership_kind != "strong_window":
-            continue
-        if value.commit_lo > window.commit_lo:
-            continue
-        if value.commit_hi < window.commit_hi:
-            continue
-        owners.append(owner)
-    if len(owners) != 1:
-        raise RuntimeError(f"absorbed window {key} has no unique owner")
-    return owners[0]
 
 
 _ROUND_TERMINALS = ("PUBLISHED", "DROPPED", "FEEDBACK_MEMORY_DELIVERED")

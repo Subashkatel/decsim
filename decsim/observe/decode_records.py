@@ -1,8 +1,9 @@
 """The switching study's terminal records, per request and per service.
 
-A listener on the decoder side's two terminal callbacks; it never reads
-the decoder. Built disabled unless the observation section asks for the
-switching windows, so the decoder runs with no record kept.
+A listener on the decode outcomes' request_ended and service_ended
+sources; it never reads the decoder. Built and connected only when the
+observation section asks for the switching windows, so the decoder runs
+with no record kept.
 """
 
 import dataclasses
@@ -49,8 +50,7 @@ class TerminalServiceRecord:
 class DecodeRecordLedger:
     """The request and service records, in the order they ended."""
 
-    def __init__(self, is_enabled: bool = False) -> None:
-        self.is_enabled = is_enabled
+    def __init__(self) -> None:
         self.requests: list[TerminalRequestRecord] = []
         self.services: list[TerminalServiceRecord] = []
 
@@ -62,8 +62,6 @@ class DecodeRecordLedger:
         decode_output_ticks: Optional[int],
     ) -> None:
         """One request reached its terminal outcome."""
-        if not self.is_enabled:
-            return
         window = job.window
         local_fragments = ()
         if job.decoder_input is not None:
@@ -93,8 +91,6 @@ class DecodeRecordLedger:
 
     def service_ended(self, job: message.DecodeJob, now: int) -> None:
         """One physical decode ended, with every request it served."""
-        if not self.is_enabled:
-            return
         if job.service_key is None:
             return
         original = job.service_original_request_keys

@@ -14,6 +14,8 @@ backlog bound via Battistel 2303.00054).
 
 import dataclasses
 
+import decsim.observe.trace_source as trace_source
+
 
 @dataclasses.dataclass
 class _PatchIdle:
@@ -22,11 +24,14 @@ class _PatchIdle:
     unclaimed: int = 0
     uncharged: int = 0
     last_round_index: int = 0
-    emitted: int = 0
 
 
 class IdleRoundAccounting:
-    """Routes each idle round by the policy and charges the decodes."""
+    """Routes each idle round by the policy and charges the decodes.
+
+    Trace source: idle_round_emitted(operation_id, patch, round_index)
+    for every idle round the policy relayed.
+    """
 
     def __init__(self, policy, decode_queue, geometry_by_patch, streams, qpu):
         self.policy = policy
@@ -36,19 +41,12 @@ class IdleRoundAccounting:
         self.qpu = qpu
         self.operation_by_id: dict = {}
         self.idle_by_patch: dict = {}
+        self.idle_round_emitted = trace_source.TraceSource()
 
     def load(self, program) -> None:
         """Know the operations an idle patch names."""
         for operation in program.operations:
             self.operation_by_id[operation.id] = operation
-
-    @property
-    def emitted_count(self) -> int:
-        """Every idle round emitted so far, over all patches."""
-        total = 0
-        for idle in self.idle_by_patch.values():
-            total += idle.emitted
-        return total
 
     def emit_idle_round(self, operation_id, patch, round_index: int) -> None:
         """One idle cycle of a patch nobody is operating on.
@@ -63,7 +61,7 @@ class IdleRoundAccounting:
         self.policy.relay(self, operation, patch, round_index)
         idle = self._idle(patch)
         idle.unclaimed += 1
-        idle.emitted += 1
+        self.idle_round_emitted.fire(operation_id, patch, round_index)
 
     def claim(self, operation) -> int:
         """The idle rounds on the operation's patches since the last claim."""

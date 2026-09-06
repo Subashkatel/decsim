@@ -8,8 +8,8 @@ job, so the window side commits it as final or provisionally and asks
 the strong tier itself; a strong result teaches the policy and becomes
 one completion per member request, delivered to each destination that
 waits for it now and held for one whose selection is still crossing the
-weak-to-strong link (StrongRequests). Every terminal outcome is
-reported to the record ledger.
+weak-to-strong link (StrongRequests). Every terminal outcome goes out on
+request_ended and service_ended; the record ledger listens.
 """
 
 from typing import Callable, Optional
@@ -22,8 +22,10 @@ import decsim.observe.trace_source as trace_source
 class DecodeOutcomes:
     """Concludes weak and strong results and reports every terminal one.
 
-    Trace source: verdict_given(window_key, request_key, verdict) as the
-    policy answers each weak result.
+    Trace sources: verdict_given(window_key, request_key, verdict) as the
+    policy answers each weak result; request_ended(job, result, outcome,
+    decode_output_ticks) and service_ended(job, tick) at every terminal
+    outcome.
     """
 
     def __init__(
@@ -31,17 +33,16 @@ class DecodeOutcomes:
         engine,
         escalation_policy,
         strong_requests: strong_requests_module.StrongRequests,
-        records,
         cancel_strong: Callable[[tuple], None],
     ) -> None:
         self.engine = engine
         self.escalation_policy = escalation_policy
         self.strong_requests = strong_requests
-        # the listener on the two terminal callbacks
-        self.records = records
         # the manager's cancel, for a weak result the policy keeps
         self.cancel_strong = cancel_strong
         self.verdict_given = trace_source.TraceSource()
+        self.request_ended = trace_source.TraceSource()
+        self.service_ended = trace_source.TraceSource()
 
     def conclude_weak(
         self, job: message.DecodeJob, result: message.DecodeResult
@@ -67,8 +68,8 @@ class DecodeOutcomes:
         )
         if is_escalated:
             processing = message.RequestProcessingOutcome.WEAK_AWAITED_STRONG
-        self.records.request_ended(job, result, processing, self.engine.now)
-        self.records.service_ended(job, self.engine.now)
+        self.request_ended.fire(job, result, processing, self.engine.now)
+        self.service_ended.fire(job, self.engine.now)
 
     def conclude_strong(
         self,
@@ -87,7 +88,7 @@ class DecodeOutcomes:
         )
         for held in deliveries:
             self.complete_strong(held)
-        self.records.service_ended(job, self.engine.now)
+        self.service_ended.fire(job, self.engine.now)
 
     def complete_strong(
         self, held: strong_requests_module.HeldStrongCompletion
@@ -100,7 +101,7 @@ class DecodeOutcomes:
             return
         request_job = held.request_job
         request_job.on_decoded(request_job, held.result)
-        self.records.request_ended(
+        self.request_ended.fire(
             held.request_job,
             held.result,
             message.RequestProcessingOutcome.STRONG_FORWARDED_FOR_DELIVERY,
@@ -123,8 +124,8 @@ class DecodeOutcomes:
         decode_output_ticks: Optional[int],
     ) -> None:
         """A request ended outside a conclusion: cancelled or withdrawn."""
-        self.records.request_ended(job, result, outcome, decode_output_ticks)
+        self.request_ended.fire(job, result, outcome, decode_output_ticks)
 
     def report_service(self, job: message.DecodeJob) -> None:
         """A physical decode ended outside its conclusion: aborted."""
-        self.records.service_ended(job, self.engine.now)
+        self.service_ended.fire(job, self.engine.now)

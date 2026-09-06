@@ -14,6 +14,7 @@ import functools
 from typing import Callable
 
 import decsim.message as message
+import decsim.observe.trace_source as trace_source
 import decsim.windows.window_transfers as window_transfers
 
 
@@ -76,7 +77,9 @@ class WindowCommitter:
     publisher, the strong redecode and the results are the four the
     commit hands to; the strong redecode (None when the run never
     escalates) hears an escalated result before its provisional commit
-    and every weak commit after it.
+    and every weak commit after it. Trace source: window_committed(
+    window, contribution), the window's record and the contribution
+    that owns its rounds, at every commit.
     """
 
     def __init__(
@@ -96,6 +99,7 @@ class WindowCommitter:
         self.publisher = publisher
         self.strong_redecode = strong_redecode
         self.results = results
+        self.window_committed = trace_source.TraceSource()
 
     def accept_result(
         self, job: message.DecodeJob, result: message.DecodeResult
@@ -161,11 +165,12 @@ class WindowCommitter:
             f"DECODE DONE {operation.name} W{window.k} "
             f"[commit {window.commit_lo}-{window.commit_hi}]{status_note}",
         )
-        self.results.install_window_contribution(
+        contribution = self.results.install_window_contribution(
             window, result.logical_observables
         )
         if is_final:
             window.published_request_key = request_key
+        self.window_committed.fire(window, contribution)
         self.results.note_window_committed(window, is_final)
         if not is_final:
             # provisional: the boundary leaves with the commit

@@ -129,8 +129,8 @@ def test_gap_records_decide_the_selected_tier(tmp_path):
         settings = replace(settings, observation=observation)
         completed = Machine.build(settings, seed)
         completed.run()
-        view = switching_records_view(completed.window_manager,
-                                      completed.decode_records)
+        view = switching_records_view(completed.observation.windows,
+                                      completed.observation.decode_records)
         gap_by_window = {}
         for record in view.requests:
             if record.request_key.tier is not DecoderTier.WEAK:

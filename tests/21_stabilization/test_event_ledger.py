@@ -205,10 +205,14 @@ def _ledger_of(recorder):
 
     completed = SimpleNamespace(
         round_events=recorder,
-        window_manager=SimpleNamespace(windows={}),
         pauli_frame=None,
-        execution_runtime=SimpleNamespace(
-            decode_release_time={}, operations={}
+        execution_runtime=SimpleNamespace(operations={}),
+        observation=SimpleNamespace(
+            windows=SimpleNamespace(windows={}),
+            runtime_stamps=SimpleNamespace(
+                decode_release={}, result_return={}
+            ),
+            command_events=SimpleNamespace(events=()),
         ),
     )
     return event_ledger(completed)

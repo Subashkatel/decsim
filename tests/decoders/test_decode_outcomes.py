@@ -31,13 +31,11 @@ class _Policy:
 def _outcomes(verdict, cancelled):
     engine = engine_module.Engine()
     requests = strong_requests_module.StrongRequests()
-    records = decode_records.DecodeRecordLedger(is_enabled=False)
     policy = _Policy(verdict)
     outcomes = decode_outcomes.DecodeOutcomes(
         engine,
         policy,
         requests,
-        records,
         cancel_strong=cancelled.append,
     )
     return outcomes, requests, policy
@@ -134,3 +132,43 @@ def test_a_selection_that_lands_after_the_strong_result_releases_it():
     outcomes.select_strong_result((1, 0), strong_key)
     assert delivered == [(strong_job, result)]
     assert requests.unsettled() == {}
+
+
+def test_the_terminal_sources_carry_every_ended_request_and_service():
+    """The record ledger connects and hears both; nothing else is needed."""
+    cancelled = []
+    outcomes, requests, _policy = _outcomes(message.Verdict.KEEP, cancelled)
+    ledger = decode_records.DecodeRecordLedger()
+    outcomes.request_ended.connect(ledger.request_ended)
+    outcomes.service_ended.connect(ledger.service_ended)
+    delivered = []
+    job = _weak_job(delivered)
+    job.request_key = message.DecoderRequestKey(
+        1, 0, message.DecoderTier.WEAK, 0
+    )
+    job.service_key = message.DecoderServiceKey(0)
+    job.service_original_request_keys = (job.request_key,)
+    job.service_dispatch_ticks = 0
+    job.window = message.Window(
+        op_id=1, k=0, commit_lo=1, commit_hi=3, buffer_hi=5, n_rounds=5
+    )
+    requests.admit(job, now=0)
+    result = message.DecodeResult(1, 0)
+    outcomes.conclude_weak(job, result)
+    (request,) = ledger.requests
+    (service,) = ledger.services
+    assert request.request_key == job.request_key
+    assert service.completed_request_keys == (job.request_key,)
+
+
+def test_a_run_with_no_listener_concludes_the_same_way():
+    """Rule 7: the outcomes work with nothing connected to their sources."""
+    cancelled = []
+    outcomes, requests, policy = _outcomes(message.Verdict.KEEP, cancelled)
+    delivered = []
+    job = _weak_job(delivered)
+    requests.admit(job, now=0)
+    result = message.DecodeResult(1, 0)
+    outcomes.conclude_weak(job, result)
+    assert delivered == [(job, result)]
+    assert policy.learned == []

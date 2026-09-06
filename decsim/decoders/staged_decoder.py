@@ -27,6 +27,7 @@ from typing import Callable, Optional
 import decsim.config as config
 import decsim.decoders.decoder as decoder_module
 import decsim.message as message
+import decsim.observe.trace_source as trace_source
 
 ALGORITHM_STAGE = "algorithm"
 
@@ -118,6 +119,10 @@ class StagedDecoder(decoder_module.DecoderBase):
     The wrapped decoder starts the algorithm stage on its own terms
     (priced, or measured on the host clock); the result reaches on_result
     when the last stage ends (None when the job was cancelled meanwhile).
+    Trace source: stage_recorded(record), one DecoderStageRecord per
+    stage, fired when the stage's end is known (at entry for a priced
+    stage, at the result for the algorithm), the lane a hardware model
+    fills in for its own stages.
     """
 
     log_name = "DecoderEngine"
@@ -128,6 +133,7 @@ class StagedDecoder(decoder_module.DecoderBase):
         self.fault_model_requirement = decoder.fault_model_requirement
         self._running: dict = {}
         self.stage_records: list[DecoderStageRecord] = []
+        self.stage_recorded = trace_source.TraceSource()
 
     def run_seed_children(self) -> tuple:
         """The wrapped decoder under the segment decoder."""
@@ -239,6 +245,7 @@ class StagedDecoder(decoder_module.DecoderBase):
             job.op_id, job.window_id, name, cycles, start, end
         )
         self.stage_records.append(record)
+        self.stage_recorded.fire(record)
         next_index = index + 1
         engine.schedule(
             ticks,
@@ -267,6 +274,7 @@ class StagedDecoder(decoder_module.DecoderBase):
                 engine.now,
             )
             self.stage_records.append(record)
+            self.stage_recorded.fire(record)
             next_index = index + 1
             self._enter(running, engine, steps, next_index)
 

@@ -16,6 +16,7 @@ from collections.abc import Mapping
 from typing import Any, Optional
 
 import decsim.message as message
+import decsim.observe.trace_source as trace_source
 
 
 class DecoderMemoryCapacityError(RuntimeError):
@@ -136,7 +137,12 @@ def materialize_decoder_input(job: message.DecodeJob) -> DecoderInput:
 
 
 class DecoderMemory:
-    """The input memory of one decoder unit."""
+    """The input memory of one decoder unit.
+
+    Trace sources: deposited(job, decoder_input) when a job's rounds land
+    here, taken(job) when they are freed; a residence in this memory runs
+    between the two (data_path.md hop 6).
+    """
 
     def __init__(
         self, pool: str, unit: int, capacity_rounds: Optional[int]
@@ -147,6 +153,13 @@ class DecoderMemory:
         self._inputs: dict = {}  # request key -> DecoderInput
         self.peak_occupied_rounds = 0
         self.admissions = 0
+        self.deposited = trace_source.TraceSource()
+        self.taken = trace_source.TraceSource()
+
+    @property
+    def name(self) -> str:
+        """The unit's memory as the trace names it."""
+        return f"unit {self.pool}#{self.unit} memory"
 
     @property
     def occupied_rounds(self) -> int:
@@ -175,12 +188,15 @@ class DecoderMemory:
         self._inputs[key] = decoder_input
         self.peak_occupied_rounds = max(self.peak_occupied_rounds, needed)
         self.admissions += 1
+        self.deposited.fire(job, decoder_input)
         return decoder_input
 
     def take(self, job: message.DecodeJob) -> None:
         """Free the job's rounds; a job this unit never held is ignored."""
         key = _memory_key(job)
-        self._inputs.pop(key, None)
+        taken = self._inputs.pop(key, None)
+        if taken is not None:
+            self.taken.fire(job)
 
     def snapshot(self) -> DecoderMemorySnapshot:
         """The memory's counters as one immutable record."""

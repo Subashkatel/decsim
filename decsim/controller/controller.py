@@ -13,11 +13,16 @@ feedback streams (feedback_streams.py) keep the protected regions.
 
 import decsim.controller.settings as controller_settings
 import decsim.message as message
-import decsim.observe.round_events as round_events
+import decsim.observe.trace_source as trace_source
 
 
 class Controller:
-    """The readout intake; implements the ReadoutReceiver port."""
+    """The readout intake; implements the ReadoutReceiver port.
+
+    Trace sources: round_event(RoundEvent) with kind EMITTED as a readout
+    leaves the QPU; copy_made(round_key, bits, "readout", "controller
+    intake") for the intake's copy of the bits (data_path.md hop 1).
+    """
 
     def __init__(
         self,
@@ -25,15 +30,13 @@ class Controller:
         link,
         settings: controller_settings.ControllerSettings,
         assembler,
-        recorder=None,
     ) -> None:
         self.engine = engine
         self.link = link
         self.settings = settings
         self.assembler = assembler
-        if recorder is None:
-            recorder = round_events.NoRoundEvents()
-        self.recorder = recorder
+        self.round_event = trace_source.TraceSource()
+        self.copy_made = trace_source.TraceSource()
 
     def accept_qpu_readout(
         self, readout: message.QPUReadout, route: message.SyndromePacketRoute
@@ -44,13 +47,19 @@ class Controller:
         """
         fragment = message.RetainedSyndromeFragment.from_readout(readout)
         fragment_count = readout.n_fragments
-        self.recorder.record(
+        round_key = (fragment.operation_id, fragment.round_index)
+        self.copy_made.fire(
+            round_key, readout.size_bits, "readout", "controller intake"
+        )
+        emitted = message.RoundEvent.of(
             "EMITTED",
+            self.engine.now,
             fragment.operation_id,
             fragment.round_index,
             route,
-            patch_id=fragment.patch_id,
+            fragment.patch_id,
         )
+        self.round_event.fire(emitted)
         attribution = message.TransferAttribution.for_round(
             fragment.operation_id, (fragment.patch_id,), fragment.round_index
         )

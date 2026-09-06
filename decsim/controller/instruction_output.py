@@ -14,17 +14,23 @@ import functools
 from typing import Callable
 
 import decsim.message as message
+import decsim.observe.trace_source as trace_source
 
 
 class InstructionOutput:
-    """The digital-to-QPU path; implements the InstructionReceiver port."""
+    """The digital-to-QPU path; implements the InstructionReceiver port.
 
-    def __init__(self, engine, link, qpu, pulse_ticks: int, recorder) -> None:
+    Trace source: output_event(ControllerOutputEvent) with kinds
+    PRELOADED_COMMAND, DECISION_AVAILABLE, CONTROL_DECISION_ISSUED and
+    CONTROL_PULSE_COMMAND_ISSUED, each carrying its payload.
+    """
+
+    def __init__(self, engine, link, qpu, pulse_ticks: int) -> None:
         self.engine = engine
         self.link = link
         self.qpu = qpu
         self.pulse_ticks = pulse_ticks
-        self.recorder = recorder
+        self.output_event = trace_source.TraceSource()
 
     def start_preloaded(
         self,
@@ -33,7 +39,7 @@ class InstructionOutput:
     ) -> None:
         """A command prepared before the run starts at the next boundary."""
         operation_id = command.operation.id
-        self.recorder.output("PRELOADED_COMMAND", operation_id, command)
+        self._fire("PRELOADED_COMMAND", operation_id, command)
         self._start(command, on_started)
 
     def send_command(
@@ -68,7 +74,7 @@ class InstructionOutput:
         )
 
         def at_controller(_transfer=None):
-            self.recorder.output(
+            self._fire(
                 "DECISION_AVAILABLE", decision.target_operation_id, decision
             )
             if decision.releases_operation:
@@ -126,7 +132,7 @@ class InstructionOutput:
             deliver(payload)
 
         def output_ready():
-            self.recorder.output(event_kind, operation_id, payload)
+            self._fire(event_kind, operation_id, payload)
             if self.link is None:
                 deliver(payload)
                 return
@@ -141,3 +147,9 @@ class InstructionOutput:
         self.engine.schedule(
             self.pulse_ticks, output_ready, label="controller-output-ready"
         )
+
+    def _fire(self, kind: str, operation_id, payload) -> None:
+        event = message.ControllerOutputEvent(
+            kind, self.engine.now, operation_id, payload
+        )
+        self.output_event.fire(event)

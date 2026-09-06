@@ -19,10 +19,16 @@ import functools
 from typing import Callable, Optional
 
 import decsim.message as message
+import decsim.observe.trace_source as trace_source
 
 
 class DecodeRequestBuilder:
-    """Builds one request from a complete window; the job's input gate."""
+    """Builds one request from a complete window; the job's input gate.
+
+    Trace source: copy_made(job, bits, memory_name, "masked view") when
+    the boundary mask is folded into a second copy of the landed input
+    (data_path.md, correction 2 moves that copy behind the port).
+    """
 
     def __init__(
         self, engine, planner, tracker, interaction, transfers
@@ -33,6 +39,7 @@ class DecodeRequestBuilder:
         self.interaction = interaction
         self.transfers = transfers
         self.next_request_sequence = 0
+        self.copy_made = trace_source.TraceSource()
 
     # ---- building a request
 
@@ -212,6 +219,8 @@ class DecodeRequestBuilder:
         job.decoder_input = dataclasses.replace(
             job.decoder_input, rounds=tuple(masked_rounds)
         )
+        bits = _input_bit_count(job.decoder_input)
+        self.copy_made.fire(job, bits, job.memory.name, "masked view")
 
     # ---- private
 
@@ -432,6 +441,16 @@ class DecodeRequester:
         )
         submission = message.Submission(job, send_input)
         self.enqueue(submission)
+
+
+def _input_bit_count(decoder_input) -> Optional[int]:
+    """The bits of a landed input; None when any fragment has no bits."""
+    bit_count = 0
+    for fragment in decoder_input.fragments():
+        if fragment.bits is None:
+            return None
+        bit_count += len(fragment.bits)
+    return bit_count
 
 
 def _fragment_patch_order(fragment):

@@ -252,6 +252,21 @@ class RoundEvent:
     patch_id: object = None
     route: str = ""
 
+    @classmethod
+    def of(
+        cls,
+        kind: str,
+        tick: int,
+        operation_id,
+        round_index: int,
+        route: SyndromePacketRoute,
+        patch_id=None,
+    ) -> "RoundEvent":
+        """One transition on a route, named by the route's kind."""
+        return cls(
+            kind, tick, operation_id, round_index, patch_id, route.kind.name
+        )
+
 
 @dataclass(frozen=True)
 class ControllerOutputEvent:

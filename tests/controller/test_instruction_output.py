@@ -24,8 +24,9 @@ def test_a_release_is_delivered_when_it_reaches_the_controller():
     link = fabric_module.LinkFabric(reference, engine)
     recorder = round_events.RoundEventRecorder(engine)
     output = instruction_output.InstructionOutput(
-        engine, link, None, PULSE_TICKS, recorder
+        engine, link, None, PULSE_TICKS
     )
+    output.output_event.connect(recorder.output)
     crossing_ticks = link.expected_delay_ticks(
         message.LinkPath.FRAME_TO_CONTROLLER, None, 0
     )
@@ -51,8 +52,9 @@ def test_a_result_return_pays_the_pulse_cost_and_the_crossing_to_the_qpu():
     link = fabric_module.LinkFabric(reference, engine)
     recorder = round_events.RoundEventRecorder(engine)
     output = instruction_output.InstructionOutput(
-        engine, link, None, PULSE_TICKS, recorder
+        engine, link, None, PULSE_TICKS
     )
+    output.output_event.connect(recorder.output)
     to_controller = link.expected_delay_ticks(
         message.LinkPath.FRAME_TO_CONTROLLER, None, 0
     )

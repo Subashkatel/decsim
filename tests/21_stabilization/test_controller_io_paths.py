@@ -164,7 +164,8 @@ def test_controller_output_without_a_link_still_pays_local_processing():
     engine = Engine()
     delivered = []
     recorder = RoundEventRecorder(engine)
-    output = InstructionOutput(engine, None, None, 17, recorder)
+    output = InstructionOutput(engine, None, None, 17)
+    output.output_event.connect(recorder.output)
     decision = Decision(9, releases_operation=False)
 
     output.relay_instruction(decision, delivered.append)

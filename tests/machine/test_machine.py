@@ -340,9 +340,9 @@ def test_the_cluster_gap_is_not_a_tier_kind_under_any_escalation(
 class CountingRoundStore(round_store_module.RoundStore):
     """A table row for the plug-in test: the store, counting its writes."""
 
-    def __init__(self, settings, *, on_slot_freed=None, listener=None):
+    def __init__(self, settings, *, on_slot_freed=None):
         round_store_module.RoundStore.__init__(
-            self, settings, on_slot_freed=on_slot_freed, listener=listener
+            self, settings, on_slot_freed=on_slot_freed
         )
         self.stored_count = 0
 

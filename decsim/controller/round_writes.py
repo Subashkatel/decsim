@@ -17,20 +17,26 @@ from typing import Callable
 
 import decsim.controller.settings as controller_settings
 import decsim.message as message
+import decsim.observe.trace_source as trace_source
 
 
 class HeldRounds:
-    """The waiting line in front of the stores, and what a full store does."""
+    """The waiting line in front of the stores, and what a full store does.
+
+    Trace source: round_event(RoundEvent) with kind STALLED when a round
+    is held for room, DROPPED when the policy drops it.
+    """
 
     def __init__(
         self,
+        engine,
         on_full: controller_settings.PackingOverflowPolicy,
-        recorder,
     ) -> None:
+        self.engine = engine
         # (held round, the admission it retries), in completion order
         self.waiting: list = []
         self.on_full = on_full
-        self.recorder = recorder
+        self.round_event = trace_source.TraceSource()
 
     def refuse(
         self,
@@ -45,12 +51,22 @@ class HeldRounds:
         operation_id, round_index = packed.round_key
         drop = controller_settings.PackingOverflowPolicy.DROP_ROUND
         if self.on_full is drop:
-            self.recorder.round_dropped(operation_id, round_index, packed.route)
+            dropped = message.RoundEvent.of(
+                "DROPPED",
+                self.engine.now,
+                operation_id,
+                round_index,
+                packed.route,
+            )
+            self.round_event.fire(dropped)
             return False
         if self._is_holding(packed):
             return False
         self.waiting.append((packed, admit))
-        self.recorder.record("STALLED", operation_id, round_index, packed.route)
+        stalled = message.RoundEvent.of(
+            "STALLED", self.engine.now, operation_id, round_index, packed.route
+        )
+        self.round_event.fire(stalled)
         return False
 
     def retry(self) -> None:
@@ -75,18 +91,25 @@ class HeldRounds:
 
 
 class RoundWriter:
-    """Writes a finished round into Buffer 0 and the strong store, or holds."""
+    """Writes a finished round into Buffer 0 and the strong store, or holds.
+
+    Trace sources: round_event(RoundEvent) with kind PUBLISHED when the
+    round is published as it is stored; copy_made(round_key, bits,
+    "controller assembler", "Buffer 0") for the write (data_path.md hop
+    3). It narrates Buffer 0's intake on the engine's io_line.
+    """
 
     def __init__(
         self,
+        engine,
         weak_store,
         strong_writer,
         *,
         publishes_from_strong_store: bool,
         held_rounds: HeldRounds,
         transmitter,
-        recorder,
     ) -> None:
+        self.engine = engine
         self.weak_store = weak_store
         self.strong_writer = strong_writer
         # a strong-primary plan reads its windows from the room side, so a
@@ -95,7 +118,8 @@ class RoundWriter:
         self.publishes_from_strong_store = publishes_from_strong_store
         self.held_rounds = held_rounds
         self.transmitter = transmitter
-        self.recorder = recorder
+        self.round_event = trace_source.TraceSource()
+        self.copy_made = trace_source.TraceSource()
 
     def admit(self, packed: message.PackedRound) -> bool:
         """Write the round where it belongs; False when it had to wait."""
@@ -115,15 +139,24 @@ class RoundWriter:
             packed.packet, publication_tick=publication_tick
         )
         operation_id, round_index = packed.round_key
+        self.copy_made.fire(
+            packed.round_key,
+            packed.wire_bits,
+            "controller assembler",
+            "Buffer 0",
+        )
         if publication_tick is not None:
-            self.recorder.record(
+            published = message.RoundEvent.of(
                 "PUBLISHED",
+                publication_tick,
                 operation_id,
                 round_index,
                 packed.route,
-                tick=publication_tick,
             )
-        self.recorder.weak_store_received(packed.packet, self.weak_store)
+            self.round_event.fire(published)
+        self.engine.log_io(
+            "Buffer 0", lambda: _received_text(packed.packet, self.weak_store)
+        )
         if self.strong_writer is not None:
             # the dual write: the same round leaves for the room side in
             # parallel with its Buffer 0 publication
@@ -154,3 +187,12 @@ class RoundWriter:
         self.strong_writer.write(
             packed.packet, packet_bits=packed.wire_bits, attribution=attribution
         )
+
+
+def _received_text(packet: message.SyndromeRoundPacket, weak_store) -> str:
+    defects = packet.defects_text()
+    holds = weak_store.held_rounds_description()
+    return (
+        f"received round {packet.round_index} of "
+        f"op {packet.operation_id} from packing; {defects}; holds {holds}"
+    )

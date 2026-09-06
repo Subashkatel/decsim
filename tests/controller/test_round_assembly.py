@@ -49,14 +49,16 @@ def rounds_in_flight(capacity, held=0, on_route=0):
 def assembler_with(engine, packed, recorder, **settings_fields):
     settings = controller_settings.ControllerSettings(**settings_fields)
     bound = rounds_in_flight(settings.packing_rounds_in_flight)
-    return round_assembly.RoundAssembler(
+    assembler = round_assembly.RoundAssembler(
         engine,
         settings,
         form_round=None,
         on_packed=packed.append,
         rounds_in_flight=bound,
-        recorder=recorder,
     )
+    if recorder is not None:
+        assembler.round_event.connect(recorder.record)
+    return assembler
 
 
 def test_a_two_fragment_round_is_packed_once_after_the_packing_time():
@@ -94,7 +96,7 @@ def test_a_two_fragment_round_is_packed_once_after_the_packing_time():
 def test_a_full_workspace_stops_the_run_naming_the_setting():
     engine = engine_module.Engine()
     packed = []
-    recorder = round_events.NoRoundEvents()
+    recorder = None
     assembler = assembler_with(
         engine, packed, recorder, packing_rounds_in_flight=1
     )
@@ -120,7 +122,6 @@ def test_the_bound_counts_rounds_held_and_on_their_route():
     """
     engine = engine_module.Engine()
     settings = controller_settings.ControllerSettings()
-    recorder = round_events.NoRoundEvents()
     full = rounds_in_flight(2, held=1, on_route=1)
     packed = []
     assembler = round_assembly.RoundAssembler(
@@ -129,7 +130,6 @@ def test_the_bound_counts_rounds_held_and_on_their_route():
         form_round=None,
         on_packed=packed.append,
         rounds_in_flight=full,
-        recorder=recorder,
     )
     first = fragment(1)
 
@@ -181,7 +181,6 @@ def test_detection_events_are_formed_once_from_the_merged_bits():
         return (0, 1, 1)
 
     settings = controller_settings.ControllerSettings()
-    recorder = round_events.NoRoundEvents()
     unbounded = rounds_in_flight(None)
     assembler = round_assembly.RoundAssembler(
         engine,
@@ -189,7 +188,6 @@ def test_detection_events_are_formed_once_from_the_merged_bits():
         form_round=form_round,
         on_packed=packed.append,
         rounds_in_flight=unbounded,
-        recorder=recorder,
     )
     first = fragment(1, fragment_index=0, bits=(1, 0))
     second = fragment(1, fragment_index=1, bits=(0, 1))
@@ -207,7 +205,7 @@ def test_detection_events_are_formed_once_from_the_merged_bits():
 
 def test_settlement_reports_a_round_still_in_assembly():
     engine = engine_module.Engine()
-    recorder = round_events.NoRoundEvents()
+    recorder = None
     assembler = assembler_with(engine, [], recorder)
     first = fragment(1, fragment_index=0)
     assembler.add(first, 2, message.WINDOW_INPUT_ROUTE)

@@ -61,7 +61,9 @@ def _wired_profile(*, latency_us=0.25, bandwidth=100.0, source="Q-062 test card"
 
 def _fabric_and_ledger(settings, engine):
     ledger = TrafficLedger(settings)
-    return LinkFabric(settings, engine, ledger), ledger
+    fabric = LinkFabric(settings, engine)
+    fabric.transfer_delivered.connect(ledger.on_transfer)
+    return fabric, ledger
 
 
 def _send(engine, fabric, path, payload_bits, attribution):

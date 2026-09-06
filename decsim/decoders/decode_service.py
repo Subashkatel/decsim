@@ -27,6 +27,7 @@ import decsim.decoders.decoder_unit as decoder_unit_module
 import decsim.decoders.gap_joins as gap_joins_module
 import decsim.decoders.strong_requests as strong_requests_module
 import decsim.message as message
+import decsim.observe.trace_source as trace_source
 
 
 class DecodeService:
@@ -38,7 +39,10 @@ class DecodeService:
     and the two calls back to the manager: on_completed(job, result) at
     every decode's end, and dispatch() wherever compute frees inside an
     engine event, so the non-reentrant dispatch loop runs from the same
-    points it always did.
+    points it always did. Four trace sources, each carrying (job, unit):
+    job_dispatched when the job takes its slot, input_landed when every
+    transfer of its input has landed, job_started when its decode
+    begins, job_finished when its compute ends.
     """
 
     def __init__(
@@ -58,6 +62,10 @@ class DecodeService:
         self.gap_joins = gap_joins
         self.on_completed = on_completed
         self.dispatch = dispatch
+        self.job_dispatched = trace_source.TraceSource()
+        self.input_landed = trace_source.TraceSource()
+        self.job_started = trace_source.TraceSource()
+        self.job_finished = trace_source.TraceSource()
 
     # ------------------------------------------ what the dispatcher asks
 
@@ -120,6 +128,7 @@ class DecodeService:
         if job.window is not None:
             job.window.t_dispatch = self.engine.now
         self._log_assignment(pool, job, claim_compute)
+        self.job_dispatched.fire(job, unit)
         self._stage_input(job, unit)
         if claim_compute:
             self._predict_compute_free(job)
@@ -141,6 +150,7 @@ class DecodeService:
         self.gap_joins.spawn(job)
         decoder = self.pool.decoder_for(job)
         self.engine.log(decode_queue.LOG_SOURCE, f"START DECODE {job.label}")
+        self.job_started.fire(job, job.unit)
         self._predict_compute_free(job)
         pipeline = self._pipeline_of(decoder, job)
         if job.decoder_input is not None:
@@ -193,6 +203,7 @@ class DecodeService:
             f"unit {unit.name} SRAM",
             lambda: _emitted_description(job, unit),
         )
+        self.job_finished.fire(job, unit)
         self._offer_compute(unit)
 
     def evict(self, job: message.DecodeJob) -> None:
@@ -378,6 +389,7 @@ class DecodeService:
             f"unit {unit.name} SRAM",
             lambda: _landed_description(job, unit),
         )
+        self.input_landed.fire(job, unit)
         holder = unit.holder
         if holder is job:
             # this job holds or was reserved the unit's compute

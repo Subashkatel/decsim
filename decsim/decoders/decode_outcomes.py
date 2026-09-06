@@ -16,10 +16,15 @@ from typing import Callable, Optional
 
 import decsim.decoders.strong_requests as strong_requests_module
 import decsim.message as message
+import decsim.observe.trace_source as trace_source
 
 
 class DecodeOutcomes:
-    """Concludes weak and strong results and reports every terminal one."""
+    """Concludes weak and strong results and reports every terminal one.
+
+    Trace source: verdict_given(window_key, request_key, verdict) as the
+    policy answers each weak result.
+    """
 
     def __init__(
         self,
@@ -36,6 +41,7 @@ class DecodeOutcomes:
         self.records = records
         # the manager's cancel, for a weak result the policy keeps
         self.cancel_strong = cancel_strong
+        self.verdict_given = trace_source.TraceSource()
 
     def conclude_weak(
         self, job: message.DecodeJob, result: message.DecodeResult
@@ -49,6 +55,7 @@ class DecodeOutcomes:
         """
         key = (job.op_id, job.window_id)
         verdict = self.escalation_policy.verdict_for_weak_result(job, result)
+        self.verdict_given.fire(key, job.request_key, verdict)
         self.strong_requests.resolve_weak(key)
         is_escalated = verdict is message.Verdict.ESCALATE
         if not is_escalated:

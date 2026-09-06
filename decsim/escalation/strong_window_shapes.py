@@ -545,15 +545,18 @@ class ForwardWindow:
         return guard
 
     def _require_restart_claim(self, key: tuple, restart_key: tuple) -> None:
-        """The restart window still claims its reads and the re-read range."""
+        """The restart window still claims its reads and the re-read range.
+
+        The claim ends only when the window before the restart window
+        commits, at absorption, or at the end of this plan, and the
+        absorbed windows are checked uncommitted first, so no runtime
+        path reaches a released claim here: an invariant, not a check.
+        """
         claim = message.PotentialRestart(restart_key)
-        if not self.retention.weak_store.has_hold(claim):
-            raise RuntimeError(
-                f"strong-region plan for {key} requires restart window "
-                f"{restart_key}'s Buffer 0 reads under its potential "
-                f"restart hold, which is no longer live (the window "
-                f"before it already committed)"
-            )
+        assert self.retention.weak_store.has_hold(claim), (
+            f"strong-region plan for {key}: restart window {restart_key}'s "
+            f"potential restart hold is no longer live"
+        )
 
     def _guarded_strong_reads(
         self,

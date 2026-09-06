@@ -632,7 +632,7 @@ class Machine:
             command_events=command_events,
             round_events=round_events,
             pauli_frame=pauli_frame,
-            execution_runtime=execution_runtime,
+            operations=plan.operations,
             trace_writer=trace_writer,
             data_movement=data_movement,
         )
@@ -1852,6 +1852,18 @@ def _connect_round_events(
     instruction_output.output_event.connect(round_events.output)
 
 
+def _frame_corrections(
+    pauli_frame,
+) -> flight_recorder_module.FrameCorrections:
+    """The frame's accepted and landed corrections, for the recorder."""
+    corrections = flight_recorder_module.FrameCorrections()
+    if pauli_frame is None:
+        return corrections
+    pauli_frame.correction_accepted.connect(corrections.correction_accepted)
+    pauli_frame.correction_committed.connect(corrections.correction_committed)
+    return corrections
+
+
 def _decoder_utilization(
     engine: engine_module.Engine, decoder_manager
 ) -> metrics.DecoderUtilization:
@@ -1921,7 +1933,7 @@ def _observation(
     command_events: command_events_module.CommandEvents,
     round_events,
     pauli_frame,
-    execution_runtime,
+    operations: tuple,
     trace_writer: Optional[trace_writer_module.TraceWriter],
     data_movement: Optional[data_movement_module.DataMovement],
 ) -> observation_module.Observation:
@@ -1942,13 +1954,14 @@ def _observation(
         decoder_memory_occupancy = _decoder_memory_occupancy(
             engine, decoder_manager
         )
+    corrections = _frame_corrections(pauli_frame)
     flight_recorder = flight_recorder_module.FlightRecorder(
         round_events,
         window_ledger,
         runtime_stamps,
         command_events,
-        pauli_frame,
-        execution_runtime,
+        corrections,
+        operations,
     )
     return observation_module.Observation(
         log=log,

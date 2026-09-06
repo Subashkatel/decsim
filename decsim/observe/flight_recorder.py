@@ -1,12 +1,13 @@
 """The flight recorder: one causal row per hardware transition of a run.
 
 A listener over listeners. It holds the round event recorder, the window
-ledger, the runtime stamps and the command events of one run, and on
-`events` walks them in pipeline order, giving each transition its causal
-predecessor so a round or a window can be followed from the QPU to the
-frame. It also reads the frame's own commit records and the program's
-operations, the two facts no listener owns. It records nothing itself
-and writes nothing back.
+ledger, the runtime stamps, the command events and the frame
+corrections of one run, and on `events` walks them in pipeline order,
+giving each transition its causal predecessor so a round or a window can
+be followed from the QPU to the frame. The program's operations are
+handed to it at build, because the dependency edge between two
+operations is a fact of the workload and not of any listener. It reads
+no component, records nothing itself and writes nothing back.
 """
 
 import dataclasses
@@ -24,16 +25,16 @@ class FlightRecorder:
         windows,
         runtime_stamps,
         command_events,
-        pauli_frame,
-        execution_runtime,
+        corrections: "FrameCorrections",
+        operations: tuple,
     ) -> None:
         self.round_events = round_events
         self.windows = windows
         self.runtime_stamps = runtime_stamps
         self.command_events = command_events
-        # the frame's own commit records and the program's operations
-        self.pauli_frame = pauli_frame
-        self.execution_runtime = execution_runtime
+        self.corrections = corrections
+        # the workload's operations, for the dependency edges
+        self.operations = operations
 
     @property
     def events(self) -> "RunLedgerView":
@@ -49,8 +50,8 @@ class FlightRecorder:
         rounds = _round_chains(rows, round_events.events)
         stored = _store_landings(rows, round_events.stored_rounds, rounds)
         frame_prev = _window_chains(rows, self.windows.windows, rounds, stored)
-        committed_of_op = _frame_commits(rows, self.pauli_frame, frame_prev)
-        operations = self.execution_runtime.operations
+        committed_of_op = _frame_commits(rows, self.corrections, frame_prev)
+        operations = _operations_by_id(self.operations)
         outputs = _output_path(
             rows, round_events.output_events, operations, committed_of_op
         )
@@ -63,6 +64,27 @@ class FlightRecorder:
         _result_returns(rows, stamps.result_return, outputs)
         numbered = rows.numbered_events()
         return RunLedgerView(events=numbered)
+
+
+class FrameCorrections:
+    """The frame's corrections, as accepted and as landed.
+
+    A listener on PauliFrame.correction_accepted and
+    correction_committed; the flight recorder pairs the two for each
+    window's write, and the frame keeps no reader of its own.
+    """
+
+    def __init__(self) -> None:
+        self.accepted: list = []
+        self.committed: list = []
+
+    def correction_accepted(self, record) -> None:
+        """One window's correction was taken and its write charged."""
+        self.accepted.append(record)
+
+    def correction_committed(self, record) -> None:
+        """One window's write has landed in the frame."""
+        self.committed.append(record)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -358,13 +380,18 @@ def _window_stamp_rows(
     return row
 
 
-def _frame_commits(rows: _LedgerRows, frame, frame_prev: dict) -> dict:
-    """Every frame record as accepted then committed; the last commit per op."""
+def _frame_commits(
+    rows: _LedgerRows, corrections: "FrameCorrections", frame_prev: dict
+) -> dict:
+    """Every correction as accepted then committed; the last commit per op.
+
+    A correction the frame accepted but whose write never landed has an
+    accepted row and no committed row, so the ledger says what happened
+    rather than what was expected to.
+    """
     committed_of_op: dict = {}
-    if frame is None:
-        return committed_of_op
-    snapshot = frame.snapshot()
-    for record in snapshot.records:
+    landed = _landed_identities(corrections.committed)
+    for record in corrections.accepted:
         op_id, window_id = record.window_key
         prev = frame_prev.get(record.window_key)
         accepted = rows.add(
@@ -375,6 +402,9 @@ def _frame_commits(rows: _LedgerRows, frame, frame_prev: dict) -> dict:
             route=record.tier,
             prev=prev,
         )
+        identity = id(record)
+        if identity not in landed:
+            continue
         committed = rows.add(
             "FRAME_COMMITTED",
             record.committed_ticks,
@@ -388,6 +418,23 @@ def _frame_commits(rows: _LedgerRows, frame, frame_prev: dict) -> dict:
         if best is None or committed["tick"] > best["tick"]:
             committed_of_op[op_id] = committed
     return committed_of_op
+
+
+def _landed_identities(records) -> set:
+    """The identity of every correction whose write landed."""
+    landed = set()
+    for record in records:
+        identity = id(record)
+        landed.add(identity)
+    return landed
+
+
+def _operations_by_id(operations: tuple) -> dict:
+    """The workload's operations, looked up by their identity."""
+    by_id = {}
+    for operation in operations:
+        by_id[operation.id] = operation
+    return by_id
 
 
 @dataclasses.dataclass

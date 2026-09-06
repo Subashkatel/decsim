@@ -122,7 +122,8 @@ class StagedDecoder(decoder_module.DecoderBase):
     Trace source: stage_recorded(record), one DecoderStageRecord per
     stage, fired when the stage's end is known (at entry for a priced
     stage, at the result for the algorithm), the lane a hardware model
-    fills in for its own stages.
+    fills in for its own stages. The decoder keeps no history; the run's
+    StageLedger (observe/stage_records.py) holds what it fires.
     """
 
     log_name = "DecoderEngine"
@@ -132,7 +133,6 @@ class StagedDecoder(decoder_module.DecoderBase):
         self.timing = timing
         self.fault_model_requirement = decoder.fault_model_requirement
         self._running: dict = {}
-        self.stage_records: list[DecoderStageRecord] = []
         self.stage_recorded = trace_source.TraceSource()
 
     def run_seed_children(self) -> tuple:
@@ -203,14 +203,6 @@ class StagedDecoder(decoder_module.DecoderBase):
             running.aborted = True
         self.decoder.cancel(job)
 
-    def stage_records_for(self, op_id: int, window_id: int) -> tuple:
-        """One window's stage records, in stage order."""
-        records = []
-        for record in self.stage_records:
-            if record.op_id == op_id and record.window_id == window_id:
-                records.append(record)
-        return tuple(records)
-
     def _steps(self, job: message.DecodeJob) -> list:
         """(name, cycles, ticks) per stage; the algorithm's time is its own."""
         ticks = self.timing.stage_ticks(job)
@@ -244,7 +236,6 @@ class StagedDecoder(decoder_module.DecoderBase):
         record = DecoderStageRecord(
             job.op_id, job.window_id, name, cycles, start, end
         )
-        self.stage_records.append(record)
         self.stage_recorded.fire(record)
         next_index = index + 1
         engine.schedule(
@@ -273,7 +264,6 @@ class StagedDecoder(decoder_module.DecoderBase):
                 start,
                 engine.now,
             )
-            self.stage_records.append(record)
             self.stage_recorded.fire(record)
             next_index = index + 1
             self._enter(running, engine, steps, next_index)

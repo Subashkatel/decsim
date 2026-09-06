@@ -242,10 +242,9 @@ def test_a_load_only_job_on_a_measured_unit_holds_it_for_zero_algorithm_ticks():
     machine = machine_module.Machine.build(settings, 0)
     result = machine.run()
     assert result.terminal_status == "complete"
-    unit = machine.active_decoder
     algorithm = [
         record
-        for record in unit.stage_records
+        for record in machine.observation.stages.records
         if record.stage == staged_decoder.ALGORITHM_STAGE
     ]
     operation_ids = {1, 2}
@@ -256,7 +255,9 @@ def test_a_load_only_job_on_a_measured_unit_holds_it_for_zero_algorithm_ticks():
     idle_ticks = [r.end_ticks - r.start_ticks for r in load_only]
     assert idle_ticks == [0]
     assert all(r.end_ticks > r.start_ticks for r in windows)
-    idle_lines = [line for line in machine.observation.log.lines if "mem(" in line]
+    idle_lines = [
+        line for line in machine.observation.log.lines if "mem(" in line
+    ]
     assert any("algorithm mem(" in line for line in idle_lines)
 
 
@@ -370,6 +371,8 @@ def test_a_new_round_store_is_one_class_and_one_table_row():
         del machine_module.ROUND_STORES["counting"]
     assert result.terminal_status == "complete"
     assert type(machine.round_store) is CountingRoundStore
-    fired = [line for line in machine.observation.log.lines if "fires round" in line]
+    fired = [
+        line for line in machine.observation.log.lines if "fires round" in line
+    ]
     assert machine.round_store.stored_count == len(fired)
     assert fired

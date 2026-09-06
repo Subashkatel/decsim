@@ -322,12 +322,12 @@ def collect_samples(
     output_path = OUTPUT_LINK[escalation_kind]
     window_items = machine.observation.windows.windows.items()
     all_windows = sorted(window_items)
-    unit = machine.active_decoder
+    stages = machine.observation.stages
     for (op_id, window_id), window in all_windows:
         frame_record = frame_by_window.get(window_id)
         if frame_record is None or window.t_done is None:
             continue
-        stage_us = _stage_microseconds(unit, op_id, window_id)
+        stage_us = _stage_microseconds(stages, op_id, window_id)
         points = window_points_us(
             window,
             frame_record,
@@ -393,10 +393,10 @@ def _span_microseconds(end_ticks: int, start_ticks: int) -> float:
     return ticks_to_microseconds(span_ticks)
 
 
-def _stage_microseconds(unit, op_id, window_id) -> dict:
-    """The unit's recorded duration of each stage, in microseconds."""
+def _stage_microseconds(stages, op_id, window_id) -> dict:
+    """The recorded duration of each of a window's stages, in microseconds."""
     stage_us = {}
-    for record in unit.stage_records_for(op_id, window_id):
+    for record in stages.records_for(op_id, window_id):
         stage_us[record.stage] = _span_microseconds(
             record.end_ticks, record.start_ticks
         )

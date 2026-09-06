@@ -49,6 +49,9 @@ THREAD_ORDER = (
 )
 
 PROCESS_ID = 1
+# the controller's packing workspace draws on the controller's own lane
+ASSEMBLER_THREAD = "Controller"
+ASSEMBLER_COUNTER = "controller assembler rounds"
 
 
 def round_text(round_key) -> str:
@@ -85,8 +88,10 @@ class TraceWriter:
         # (thread, key); each writes one X at its end
         self._open_residence: dict[tuple, dict] = {}
         self._open_service: dict[tuple, dict] = {}
-        # the rounds whose flow has started, so a step never precedes it
+        # the rounds and windows whose flow has started, so a step never
+        # precedes its start
         self._flowing_rounds: set = set()
+        self._flowing_windows: set = set()
         # which unit is decoding each window, so a stage lands on its
         # lane: the stage record names the window, not the unit
         self._unit_thread_by_window: dict[tuple, str] = {}
@@ -160,6 +165,24 @@ class TraceWriter:
         name = f"{target_name} copy"
         self._instant(thread, name, "copy", args)
 
+    def round_in_assembly(self, capacity, event) -> None:
+        """The controller's packing workspace holds one more round, or one less.
+
+        The workspace is the one bounded controller-side structure
+        (controller.packing_rounds_in_flight, data_path.md's residence
+        table): a round enters at its first fragment and leaves when it
+        is packed, or when it is dropped for want of room.
+        """
+        round_key = (event.operation_id, event.round_index)
+        if event.kind == "BINARY_AVAILABLE":
+            self._begin_assembly(capacity, round_key, event)
+            return
+        if event.kind == "PACKED":
+            self._end_assembly(round_key, "packed")
+            return
+        if event.kind == "DROPPED":
+            self._end_assembly(round_key, "dropped, workspace full")
+
     def command_event(self, event) -> None:
         """A command arrived at the QPU or started on a boundary."""
         kind = event.kind.lower()
@@ -198,13 +221,19 @@ class TraceWriter:
         duration = transfer.delivery_ticks - start
         self._complete(thread, name, category, start, duration, args)
         self._flow_over_move(thread, attribution, transfer)
+        if attribution.window_id is not None:
+            window_key = (attribution.operation_id, attribution.window_id)
+            self._step_window_flow(thread, window_key, start)
 
     # ---- the stores
 
-    def round_stored(self, store_name: str, capacity, round_key) -> None:
+    def round_stored(
+        self, store_name: str, capacity, round_key, packet
+    ) -> None:
         """A round takes a slot in the store."""
         args = {
             "round": round_text(round_key),
+            "bits": _packet_bits(packet),
             "transfer": "copy",
             "capacity": capacity,
             "slot_taken": self.engine.now,
@@ -269,6 +298,16 @@ class TraceWriter:
         name = f"W{window.k} planned"
         self._instant("Window planner", name, "window", args)
 
+    def window_ready(self, window: message.Window) -> None:
+        """Every round the window reads is readable in its store."""
+        args = {
+            "window": window_text(window.key),
+            "rounds": f"{window.start_round}..{window.buffer_hi}",
+            "commit": f"{window.commit_lo}..{window.commit_hi}",
+        }
+        name = f"W{window.k} ready"
+        self._instant("Window planner", name, "window", args)
+
     def job_enqueued(self, job: message.DecodeJob) -> None:
         """A window's decode request joins its ready queue."""
         window_key = (job.op_id, job.window_id)
@@ -280,6 +319,7 @@ class TraceWriter:
         self._begin_residence(
             "Window planner", job.request_key, name, "window,queue", args
         )
+        self._start_window_flow("Window planner", window_key)
 
     def depth_changed(self, tick: int, depth: int) -> None:
         """The jobs waiting over every pool changed."""
@@ -332,12 +372,16 @@ class TraceWriter:
             "request": request_text(job.request_key),
             "bits": _landed_bits(job),
             "transfer": "copy",
+            "capacity": unit.memory.capacity_rounds,
+            "slot_taken": _dispatch_tick(job),
+            "data_ready": self.engine.now,
         }
         name = f"W{job.window_id} input in memory"
         self._begin_residence(
             thread, job.request_key, name, "window,residence", args
         )
         self._end_flow(thread, job)
+        self._step_window_flow(thread, window_key, self.engine.now)
 
     def job_started(self, job: message.DecodeJob, unit) -> None:
         """The unit began this job's physical decode."""
@@ -381,13 +425,27 @@ class TraceWriter:
         duration = record.end_ticks - start
         self._complete(thread, record.stage, "stage", start, duration, args)
 
+    def memory_deposited(
+        self, memory_name: str, _job: message.DecodeJob, decoder_input
+    ) -> None:
+        """One job's rounds landed in a unit's memory."""
+        unit_name = _unit_of_memory(memory_name)
+        thread = _unit_thread(unit_name)
+        counter = f"{memory_name} rounds"
+        rounds = len(decoder_input.rounds)
+        self._count(thread, counter, rounds)
+
     def memory_taken(
-        self, unit_name: str, job: message.DecodeJob, _decoder_input
+        self, memory_name: str, job: message.DecodeJob, decoder_input
     ) -> None:
         """The unit's memory freed the job's rounds."""
+        unit_name = _unit_of_memory(memory_name)
         thread = _unit_thread(unit_name)
         closing = {"freed": self.engine.now, "freed_reason": "decode done"}
         self._end_residence(thread, job.request_key, closing)
+        counter = f"{memory_name} rounds"
+        rounds = len(decoder_input.rounds)
+        self._count(thread, counter, -rounds)
 
     # ---- the frame
 
@@ -404,6 +462,7 @@ class TraceWriter:
         key = (record.window_key, record.run_sequence)
         name = f"{window} correction"
         self._begin_residence("Frame", key, name, "window,residence", args)
+        self._end_window_flow("Frame", record.window_key, self.engine.now)
 
     def correction_committed(self, record) -> None:
         """The frame's write for one window has landed."""
@@ -488,6 +547,30 @@ class TraceWriter:
         self._counter_value[name] = value
         self._counter(thread, name, {"rounds": value}, self.engine.now)
 
+    def _begin_assembly(self, capacity, round_key, event) -> None:
+        """The round's first fragment opens its place in the workspace."""
+        if (ASSEMBLER_THREAD, round_key) in self._open_residence:
+            return
+        args = {
+            "round": round_text(round_key),
+            "transfer": "copy",
+            "capacity": capacity,
+            "slot_taken": event.tick,
+        }
+        name = f"assemble round {round_key[1]}"
+        self._begin_residence(
+            ASSEMBLER_THREAD, round_key, name, "round,residence", args
+        )
+        self._count(ASSEMBLER_THREAD, ASSEMBLER_COUNTER, 1)
+
+    def _end_assembly(self, round_key, reason: str) -> None:
+        """The round left the workspace, packed or dropped."""
+        if (ASSEMBLER_THREAD, round_key) not in self._open_residence:
+            return
+        closing = {"freed": self.engine.now, "freed_reason": reason}
+        self._end_residence(ASSEMBLER_THREAD, round_key, closing)
+        self._count(ASSEMBLER_THREAD, ASSEMBLER_COUNTER, -1)
+
     def _begin_residence(
         self, thread: str, key, name: str, category: str, args: dict
     ) -> None:
@@ -527,26 +610,34 @@ class TraceWriter:
                 phase = "t"
             else:
                 self._flowing_rounds.add(round_key)
-            self._flow(phase, thread, round_key, transfer.send_ticks)
+            self._round_flow(phase, thread, round_key, transfer.send_ticks)
 
     def _step_flow(self, thread: str, round_key) -> None:
         if round_key not in self._flowing_rounds:
             return
-        self._flow("t", thread, round_key, self.engine.now)
+        self._round_flow("t", thread, round_key, self.engine.now)
 
     def _end_flow(self, thread: str, job: message.DecodeJob) -> None:
         for round_key in _job_round_keys(job):
             if round_key not in self._flowing_rounds:
                 continue
-            self._flow("f", thread, round_key, self.engine.now)
+            self._round_flow("f", thread, round_key, self.engine.now)
             self._flowing_rounds.discard(round_key)
 
-    def _flow(self, phase: str, thread: str, round_key, tick: int) -> None:
+    def _flow(
+        self,
+        phase: str,
+        thread: str,
+        flow_id: str,
+        name: str,
+        category: str,
+        tick: int,
+    ) -> None:
         row = {
             "ph": phase,
-            "name": f"round {round_key[1]}",
-            "cat": "round",
-            "id": round_text(round_key),
+            "name": name,
+            "cat": category,
+            "id": flow_id,
             "ts": _microseconds(tick),
             "pid": PROCESS_ID,
             "tid": self._tid(thread),
@@ -555,6 +646,40 @@ class TraceWriter:
         if phase == "f":
             row["bp"] = "e"
         self.events.append(row)
+
+    def _round_flow(
+        self, phase: str, thread: str, round_key, tick: int
+    ) -> None:
+        """One hop of a round's own chain, from the QPU to a unit's memory."""
+        flow_id = round_text(round_key)
+        name = f"round {round_key[1]}"
+        self._flow(phase, thread, flow_id, name, "round", tick)
+
+    def _window_flow(
+        self, phase: str, thread: str, window_key, tick: int
+    ) -> None:
+        """One hop of a window's chain, from its queue to the frame."""
+        flow_id = _window_flow_id(window_key)
+        name = f"W{window_key[1]}"
+        self._flow(phase, thread, flow_id, name, "window", tick)
+
+    def _start_window_flow(self, thread: str, window_key) -> None:
+        """A window's chain begins where its request joins the queue."""
+        self._flowing_windows.add(window_key)
+        self._window_flow("s", thread, window_key, self.engine.now)
+
+    def _step_window_flow(self, thread: str, window_key, tick: int) -> None:
+        """One more hop of a chain that has begun; an unstarted one waits."""
+        if window_key not in self._flowing_windows:
+            return
+        self._window_flow("t", thread, window_key, tick)
+
+    def _end_window_flow(self, thread: str, window_key, tick: int) -> None:
+        """The chain ends where the frame holds the window's correction."""
+        if window_key not in self._flowing_windows:
+            return
+        self._window_flow("f", thread, window_key, tick)
+        self._flowing_windows.discard(window_key)
 
 
 def _complete_event(
@@ -638,6 +763,20 @@ def _unit_thread(unit_name: str) -> str:
     return f"Decoder unit {unit_name}"
 
 
+def _window_flow_id(window_key) -> str:
+    """A window's flow id, kept apart from a round key's own text."""
+    text = window_text(window_key)
+    return f"window {text}"
+
+
+def _dispatch_tick(job: message.DecodeJob) -> Optional[int]:
+    """When the unit took the job's slot; None for a windowless job."""
+    window = job.window
+    if window is None:
+        return None
+    return window.t_dispatch
+
+
 def _key_text(key) -> str:
     if isinstance(key, tuple) and len(key) == 2:
         return round_text(key)
@@ -689,6 +828,16 @@ def _rounds_of(attribution) -> tuple:
     for index in range(attribution.first_round, last_round):
         keys.append((attribution.operation_id, index))
     return tuple(keys)
+
+
+def _packet_bits(packet) -> Optional[int]:
+    """The bits one stored round holds, None when a fragment carries none."""
+    total = 0
+    for fragment in packet.fragments:
+        if fragment.bits is None:
+            return None
+        total += len(fragment.bits)
+    return total
 
 
 def _landed_bits(job: message.DecodeJob) -> Optional[int]:

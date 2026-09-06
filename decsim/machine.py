@@ -453,7 +453,7 @@ class Machine:
         controller_counters = controller_counters_module.ControllerCounters()
         command_events = command_events_module.CommandEvents()
         stages = _connect_stage_records(pool)
-        trace_writer = _trace_writer(observation, engine, settings)
+        trace_writer = _trace_writer(observation, engine, settings, seed)
         data_movement = _data_movement(observation)
         decode_records = _decode_records(observation)
         decoder_manager = _decoder_manager(
@@ -1519,12 +1519,21 @@ def _trace_writer(
     observation: observe_settings.ObservationSettings,
     engine: engine_module.Engine,
     settings: MachineSettings,
+    seed: Optional[int],
 ) -> Optional[trace_writer_module.TraceWriter]:
     """The Chrome trace writer, only when the section names a path."""
     if not observation.writes_trace:
         return None
-    name = f"decsim {settings.workload.kind} {settings.workload.code_task}"
+    name = _process_name(settings, seed)
     return trace_writer_module.TraceWriter(engine, name)
+
+
+def _process_name(settings: MachineSettings, seed: Optional[int]) -> str:
+    """The point the trace is of, so two files are told apart at a glance."""
+    kind = settings.escalation.kind
+    distance = settings.qpu.distance
+    probability = settings.workload.physical_error_probability
+    return f"decsim {kind} d{distance} p{probability} seed{seed}"
 
 
 def _data_movement(
@@ -1588,6 +1597,11 @@ def _connect_data_path(
         window_manager,
     ):
         source.connect(trace_writer.copy_made)
+    in_assembly = functools.partial(
+        trace_writer.round_in_assembly,
+        assembler.settings.packing_rounds_in_flight,
+    )
+    assembler.round_event.connect(in_assembly)
     _connect_store_trace(trace_writer, round_store, "Buffer 0")
     if strong_round_store is not None:
         _connect_store_trace(trace_writer, strong_round_store, "Buffer 1")
@@ -1666,8 +1680,13 @@ def _connect_decoder_trace(
     service.job_started.connect(trace_writer.job_started)
     service.job_finished.connect(trace_writer.job_finished)
     for unit in decoder_manager.pool.units():
-        taken = functools.partial(trace_writer.memory_taken, unit.name)
-        unit.memory.taken.connect(taken)
+        memory = unit.memory
+        deposited = functools.partial(
+            trace_writer.memory_deposited, memory.name
+        )
+        memory.deposited.connect(deposited)
+        taken = functools.partial(trace_writer.memory_taken, memory.name)
+        memory.taken.connect(taken)
     for decoder in _staged_decoders(pool):
         decoder.stage_recorded.connect(trace_writer.stage_recorded)
 
@@ -1706,6 +1725,8 @@ def _connect_window_trace(
 ) -> None:
     """The windows a stream lays, their verdicts, commits and absorptions."""
     window_manager.planner.window_planned.connect(trace_writer.window_planned)
+    builder = window_manager.requester.builder
+    builder.window_data_complete.connect(trace_writer.window_ready)
     window_manager.requester.committer.window_committed.connect(
         trace_writer.window_committed
     )

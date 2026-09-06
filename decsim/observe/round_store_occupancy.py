@@ -23,7 +23,7 @@ class RoundStoreOccupancy:
         self.residence_sum = 0
         self.arrivals = 0
 
-    def round_stored(self, round_key) -> None:
+    def round_stored(self, round_key, _packet) -> None:
         """One more round in the store from now on."""
         self.arrivals += 1
         self.stored_tick_by_key[round_key] = self.engine.now

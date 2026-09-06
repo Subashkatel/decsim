@@ -66,7 +66,7 @@ def test_an_output_event_carries_the_payload_itself():
 def test_a_strong_store_landing_is_kept_with_its_tick():
     engine = engine_module.Engine()
     recorder = round_events.RoundEventRecorder(engine)
-    landing = functools.partial(recorder.round_stored, (1, 4))
+    landing = functools.partial(recorder.round_stored, (1, 4), None)
     engine.schedule(12, landing)
 
     engine.run()

@@ -25,9 +25,12 @@ import decsim.observe.trace_source as trace_source
 class DecodeRequestBuilder:
     """Builds one request from a complete window; the job's input gate.
 
-    Trace source: copy_made(job, bits, memory_name, "masked view") when
+    Trace sources: copy_made(job, bits, memory_name, "masked view") when
     the boundary mask is folded into a second copy of the landed input
-    (data_path.md, correction 2 moves that copy behind the port).
+    (data_path.md, correction 2 moves that copy behind the port);
+    window_data_complete(window) when the last round the window reads is
+    readable in its store, which is the moment the window may be
+    requested.
     """
 
     def __init__(
@@ -40,6 +43,7 @@ class DecodeRequestBuilder:
         self.transfers = transfers
         self.next_request_sequence = 0
         self.copy_made = trace_source.TraceSource()
+        self.window_data_complete = trace_source.TraceSource()
 
     # ---- building a request
 
@@ -72,6 +76,7 @@ class DecodeRequestBuilder:
         if window.t_data_complete is not None:
             return
         window.t_data_complete = self.engine.now
+        self.window_data_complete.fire(window)
         if not self.tracker.is_buffer_filled_by_memory(window):
             return
         self.engine.log(

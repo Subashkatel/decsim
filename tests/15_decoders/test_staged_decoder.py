@@ -17,6 +17,7 @@ from decsim.decoders.staged_decoder import (
     UnitTiming,
 )
 from decsim.engine import Engine
+from decsim.observe.stage_records import StageLedger
 from decsim.message import (
     DecodeJob,
     DecodeResult,
@@ -65,6 +66,13 @@ def _job(window_id=0, n_rounds=3):
     )
 
 
+def _stages(decoder) -> StageLedger:
+    """A ledger hearing this decoder's stages, as the Machine builds one."""
+    ledger = StageLedger()
+    decoder.stage_recorded.connect(ledger.stage_recorded)
+    return ledger
+
+
 def _run(decoder, engine, job):
     seen = {}
 
@@ -81,10 +89,11 @@ def test_stages_before_algorithm_after_in_order_with_ticks():
     engine = Engine()
     inner = _RecordingInner(engine)
     decoder = StagedDecoder(inner, _timing())
+    stages = _stages(decoder)
 
     seen = _run(decoder, engine, _job(n_rounds=3))
 
-    records = decoder.stage_records_for(1, 0)
+    records = stages.records_for(1, 0)
     algorithm_ticks = microseconds_to_ticks(2.0)
     assert [
         (r.stage, r.cycles, r.start_ticks, r.end_ticks) for r in records
@@ -107,10 +116,11 @@ def test_the_result_is_produced_when_the_algorithm_time_ends():
     engine = Engine()
     inner = _RecordingInner(engine, latency_us=5.0)
     decoder = StagedDecoder(inner, _timing())
+    stages = _stages(decoder)
 
     _run(decoder, engine, _job())
 
-    algorithm = decoder.stage_records_for(1, 0)[1]
+    algorithm = stages.records_for(1, 0)[1]
     assert inner.decode_ticks == [algorithm.end_ticks]
 
 
@@ -131,10 +141,11 @@ def test_hardware_stages_are_data_with_free_names():
         after=(DecoderStage("correction_output", cycles_per_job=4),),
     )
     decoder = StagedDecoder(_RecordingInner(engine, 0.0), timing)
+    stages = _stages(decoder)
 
     _run(decoder, engine, _job(n_rounds=2))
 
-    assert [(r.stage, r.cycles) for r in decoder.stage_records_for(1, 0)] == [
+    assert [(r.stage, r.cycles) for r in stages.records_for(1, 0)] == [
         ("syndrome_ingest", 4),
         ("predecode", 6),
         (ALGORITHM_STAGE, None),
@@ -242,15 +253,16 @@ def test_end_to_end_stim_memory_run_through_the_timed_decoder():
     assert [r.logical_observables for r in staged_result.operation_results] == [
         r.logical_observables for r in bare_result.operation_results
     ]
-    windows = sorted({(r.op_id, r.window_id) for r in timed.stage_records})
+    stages = staged.observation.stages
+    windows = stages.windows()
     assert windows
     for key in windows:
-        names = [r.stage for r in timed.stage_records_for(*key)]
+        names = [r.stage for r in stages.records_for(*key)]
         assert names == ["fetch", ALGORITHM_STAGE, "release"]
     spans = sorted(
         (
-            timed.stage_records_for(*key)[0].start_ticks,
-            timed.stage_records_for(*key)[-1].end_ticks,
+            stages.records_for(*key)[0].start_ticks,
+            stages.records_for(*key)[-1].end_ticks,
         )
         for key in windows
     )
@@ -314,7 +326,8 @@ def test_measured_wall_clock_algorithm_holds_the_unit_for_the_real_call():
     completed = Machine.build(settings, 3)
     result = completed.run()
     assert result.terminal_status == "complete"
-    algorithm = [r for r in unit.stage_records if r.stage == ALGORITHM_STAGE]
+    stage_records = completed.observation.stages.records
+    algorithm = [r for r in stage_records if r.stage == ALGORITHM_STAGE]
     assert algorithm
     assert len(measured.elapsed_ns) == len(algorithm)
     for record, elapsed_ns in zip(algorithm, measured.elapsed_ns):
@@ -331,6 +344,7 @@ def test_cancel_stops_the_remaining_stages_and_never_calls_on_done():
     engine = Engine()
     inner = _RecordingInner(engine, latency_us=5.0)
     decoder = StagedDecoder(inner, _timing())
+    stages = _stages(decoder)
     job = _job()
     done = []
     decoder.start(job, engine, lambda _result: done.append(engine.now))
@@ -338,7 +352,7 @@ def test_cancel_stops_the_remaining_stages_and_never_calls_on_done():
     engine.run()
     assert done == []
     assert inner.decode_ticks == []
-    assert [r.stage for r in decoder.stage_records_for(1, 0)] == ["fetch"]
+    assert [r.stage for r in stages.records_for(1, 0)] == ["fetch"]
 
 
 def test_a_hardware_stage_may_not_be_named_algorithm():

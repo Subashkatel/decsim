@@ -183,12 +183,8 @@ def timeline_plot(config: ExperimentConfig, path: Path) -> None:
                 alpha=alpha,
             )
 
-        stages = {
-            record.stage: record
-            for record in completed.active_decoder.stage_records_for(
-                1, window_id
-            )
-        }
+        stage_records = completed.observation.stages.records_for(1, window_id)
+        stages = {record.stage: record for record in stage_records}
         read_hi = min(window.buffer_hi, rounds)
         stored_tick = microseconds_to_ticks(
             stored_row[read_hi]["delivery_ticks"]

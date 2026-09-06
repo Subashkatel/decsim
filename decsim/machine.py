@@ -88,6 +88,7 @@ import decsim.observe.round_events as round_events_module
 import decsim.observe.result_ledger as result_ledger_module
 import decsim.observe.round_store_occupancy as round_store_occupancy_module
 import decsim.observe.runtime_stamps as runtime_stamps_module
+import decsim.observe.stage_records as stage_records_module
 import decsim.observe.settings as observe_settings
 import decsim.observe.trace_writer as trace_writer_module
 import decsim.observe.window_ledger as window_ledger_module
@@ -451,6 +452,7 @@ class Machine:
         queue_depth = queue_depth_module.QueueDepthLog()
         controller_counters = controller_counters_module.ControllerCounters()
         command_events = command_events_module.CommandEvents()
+        stages = _connect_stage_records(pool)
         trace_writer = _trace_writer(observation, engine, settings)
         data_movement = _data_movement(observation)
         decode_records = _decode_records(observation)
@@ -630,6 +632,7 @@ class Machine:
             queue_depth=queue_depth,
             controller_counters=controller_counters,
             command_events=command_events,
+            stages=stages,
             round_events=round_events,
             pauli_frame=pauli_frame,
             operations=plan.operations,
@@ -1852,6 +1855,16 @@ def _connect_round_events(
     instruction_output.output_event.connect(round_events.output)
 
 
+def _connect_stage_records(
+    pool: "_DecoderPool",
+) -> stage_records_module.StageLedger:
+    """The run's stage history, heard from every routed decoder."""
+    stages = stage_records_module.StageLedger()
+    for decoder in _staged_decoders(pool):
+        decoder.stage_recorded.connect(stages.stage_recorded)
+    return stages
+
+
 def _frame_corrections(
     pauli_frame,
 ) -> flight_recorder_module.FrameCorrections:
@@ -1931,6 +1944,7 @@ def _observation(
     queue_depth: queue_depth_module.QueueDepthLog,
     controller_counters: controller_counters_module.ControllerCounters,
     command_events: command_events_module.CommandEvents,
+    stages: stage_records_module.StageLedger,
     round_events,
     pauli_frame,
     operations: tuple,
@@ -1976,6 +1990,7 @@ def _observation(
         queue_depth=queue_depth,
         controller_counters=controller_counters,
         command_events=command_events,
+        stages=stages,
         decode_backlog=decode_backlog,
         decoder_utilization=decoder_utilization,
         decoder_memory_occupancy=decoder_memory_occupancy,

@@ -17,12 +17,13 @@ import decsim.observe.controller_counters as controller_counters_module
 import decsim.observe.data_movement as data_movement_module
 import decsim.observe.decode_records as decode_records_module
 import decsim.observe.flight_recorder as flight_recorder_module
+import decsim.observe.link_traffic as link_traffic
 import decsim.observe.log_writers as log_writers
 import decsim.observe.metrics as metrics
-import decsim.observe.link_traffic as link_traffic
 import decsim.observe.queue_depth as queue_depth_module
 import decsim.observe.result_ledger as result_ledger_module
 import decsim.observe.runtime_stamps as runtime_stamps_module
+import decsim.observe.stage_records as stage_records_module
 import decsim.observe.trace_writer as trace_writer_module
 import decsim.observe.window_ledger as window_ledger_module
 
@@ -43,6 +44,7 @@ class Observation:
     queue_depth: queue_depth_module.QueueDepthLog
     controller_counters: controller_counters_module.ControllerCounters
     command_events: command_events_module.CommandEvents
+    stages: stage_records_module.StageLedger
     decode_backlog: Optional[metrics.DecodeBacklog]
     decoder_utilization: Optional[metrics.DecoderUtilization]
     decoder_memory_occupancy: Optional[metrics.DecoderMemoryOccupancy]

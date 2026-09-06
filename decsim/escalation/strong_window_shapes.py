@@ -42,7 +42,7 @@ the number of components a re-slice reaches.
 import copy
 import dataclasses
 import enum
-from typing import Optional, Protocol, runtime_checkable
+from typing import Any, Optional, Protocol, runtime_checkable
 
 import decsim.message as message
 import decsim.observe.trace_source as trace_source
@@ -74,7 +74,16 @@ class DeferredStrongJob:
 
 @runtime_checkable
 class StrongWindowShape(Protocol):
-    """How the strong tier's window is laid out, as the redecode sees it."""
+    """How the strong tier's window is laid out, as the redecode sees it.
+
+    window_absorbed(key, owner_key) is the shape's one trace source: the
+    forward window fires it for every weak window a strong one covers,
+    and a shape that absorbs nothing exposes the silent source, so the
+    machine connects the ledger and the trace without asking which shape
+    it built.
+    """
+
+    window_absorbed: Any
 
     def plan(self, weak_job: message.DecodeJob) -> StrongAssignment:
         """Assign the strong window; build its job now or hold it."""
@@ -106,8 +115,11 @@ class ContextWindow:
 
     The job is built the moment it is asked for and priced for the
     context rounds that exist: a window at the operation's edge has a
-    shorter context than commit + 2 buffer.
+    shorter context than commit + 2 buffer. This shape absorbs no weak
+    window, so its window_absorbed source is the silent one.
     """
+
+    window_absorbed = trace_source.SILENT
 
     def __init__(self, engine, planner, tracker, retention, builder) -> None:
         self.engine = engine

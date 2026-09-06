@@ -192,9 +192,19 @@ class Decoder(Protocol):
     dispatch, calls start once the input has landed, and cancel when the
     request is withdrawn; a decoder measured on the host clock answers
     occupancy with None and start decides its own time.
+
+    stage_recorded is the port's data-side stage callback
+    (docs/rewrite/notes/data_path.md section 5): a trace source the row
+    fires once per internal stage with a DecoderStageRecord, so an ASIC
+    model's engines or a GPU model's kernels reach the trace and the
+    stage ledger under their own names. A row with no internal stages
+    exposes the silent source DecoderBase gives it and fires nothing;
+    the machine connects the stage listeners to every row without asking
+    what the row is.
     """
 
     fault_model_requirement: Any
+    stage_recorded: Any
 
     def decode(self, job: message.DecodeJob) -> message.DecodeResult:
         """The window's correction and its logical observables."""

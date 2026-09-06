@@ -51,6 +51,7 @@ import decsim.controller.round_writes as round_writes
 import decsim.controller.settings as controller_settings
 import decsim.decoders.belief_matching.decoder as belief_matching
 import decsim.decoders.belief_propagation_osd.decoder as belief_propagation_osd
+import decsim.decoders.decoder as decoder_module
 import decsim.decoders.decoder_manager as decoder_manager_module
 import decsim.decoders.decoder_memory as decoder_memory_module
 import decsim.decoders.decoders as decoders
@@ -1464,11 +1465,11 @@ def _strong_redecode(
             ledger,
             interaction,
         )
-        shape.window_absorbed.connect(window_ledger.window_absorbed)
     else:
         shape = strong_window_shapes.ContextWindow(
             engine, planner, tracker, retention, builder
         )
+    shape.window_absorbed.connect(window_ledger.window_absorbed)
     return strong_redecode_module.StrongRedecode(
         engine, shape, transfers, decode_queue, on_strong_decoded
     )
@@ -1688,33 +1689,36 @@ def _connect_decoder_trace(
         memory.deposited.connect(deposited)
         taken = functools.partial(trace_writer.memory_taken, memory.name)
         memory.taken.connect(taken)
-    for decoder in _staged_decoders(pool):
+    for decoder in _routed_decoders(pool):
         decoder.stage_recorded.connect(trace_writer.stage_recorded)
 
 
-def _staged_decoders(pool: "_DecoderPool") -> list:
-    """Every routed decoder that reports its internal stages.
+def _routed_decoders(pool: "_DecoderPool") -> list:
+    """Every decoder row the router can reach, in the order the walk finds.
 
-    The router's seed children are the tiers and the per-code rows; a
-    row that wraps another (the confidence and check wrappers) reports
-    its own children the same way, so the walk finds a staged decoder
-    wherever it sits.
+    A row is a row of the Decoder port's table (decoders/decoder.py's
+    DecoderBase), and every row carries stage_recorded, so the walk asks
+    nothing about what a row has. The recursion asks the seeding
+    protocol whether a value names children of its own: the routers name
+    the tiers and the per-code rows, and a row that wraps another (the
+    confidence, staged and check wrappers) names its inner decoder the
+    same way.
     """
     found = []
     seen = set()
     pending = [pool.router]
     while pending:
         decoder = pending.pop()
-        if decoder is None or id(decoder) in seen:
-            continue
         identity = id(decoder)
-        seen.add(identity)
-        if hasattr(decoder, "stage_recorded"):
-            found.append(decoder)
-        children = getattr(decoder, "run_seed_children", None)
-        if children is None:
+        if decoder is None or identity in seen:
             continue
-        for child in children():
+        seen.add(identity)
+        if isinstance(decoder, decoder_module.DecoderBase):
+            found.append(decoder)
+        if not isinstance(decoder, seeding.RunSeedComposite):
+            continue
+        children = decoder.run_seed_children()
+        for child in children:
             pending.append(child.child)
     return found
 
@@ -1733,10 +1737,10 @@ def _connect_window_trace(
     )
     decoder_manager.outcomes.verdict_given.connect(trace_writer.verdict_given)
     strong_redecode = window_manager.strong_redecode
-    shape = getattr(strong_redecode, "shape", None)
-    absorbed = getattr(shape, "window_absorbed", None)
-    if absorbed is not None:
-        absorbed.connect(trace_writer.window_absorbed)
+    if strong_redecode is None:
+        return
+    shape = strong_redecode.shape
+    shape.window_absorbed.connect(trace_writer.window_absorbed)
 
 
 def _decode_records(
@@ -1882,7 +1886,7 @@ def _connect_stage_records(
 ) -> stage_records_module.StageLedger:
     """The run's stage history, heard from every routed decoder."""
     stages = stage_records_module.StageLedger()
-    for decoder in _staged_decoders(pool):
+    for decoder in _routed_decoders(pool):
         decoder.stage_recorded.connect(stages.stage_recorded)
     return stages
 

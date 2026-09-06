@@ -37,6 +37,9 @@ def _primary():
         op_id=1, k=0, commit_lo=1, commit_hi=1, buffer_hi=1, n_rounds=1
     )
     model = object()
+    # a job whose input has landed sits in some unit's memory, and the
+    # sibling's copy is named after it
+    memory = decoder_memory.DecoderMemory("default", 0, None)
     return message.DecodeJob(
         op_id=1,
         window_id=0,
@@ -45,6 +48,7 @@ def _primary():
         decoder_input=decoder_input,
         label="mem W0",
         window=window,
+        memory=memory,
     )
 
 

@@ -381,7 +381,9 @@ class TraceWriter:
         duration = record.end_ticks - start
         self._complete(thread, record.stage, "stage", start, duration, args)
 
-    def memory_taken(self, unit_name: str, job: message.DecodeJob) -> None:
+    def memory_taken(
+        self, unit_name: str, job: message.DecodeJob, _decoder_input
+    ) -> None:
         """The unit's memory freed the job's rounds."""
         thread = _unit_thread(unit_name)
         closing = {"freed": self.engine.now, "freed_reason": "decode done"}

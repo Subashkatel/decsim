@@ -1852,6 +1852,37 @@ def _connect_round_events(
     instruction_output.output_event.connect(round_events.output)
 
 
+def _decoder_utilization(
+    engine: engine_module.Engine, decoder_manager
+) -> metrics.DecoderUtilization:
+    """The busy-unit integral, stepping at the pool's claims and returns."""
+    pool = decoder_manager.pool
+    units_by_pool = {}
+    for name, units in pool.units_by_pool.items():
+        units_by_pool[name] = len(units)
+    utilization = metrics.DecoderUtilization(engine, units_by_pool)
+    pool.unit_busy.connect(utilization.unit_busy)
+    pool.unit_freed.connect(utilization.unit_freed)
+    return utilization
+
+
+def _decoder_memory_occupancy(
+    engine: engine_module.Engine, decoder_manager
+) -> metrics.DecoderMemoryOccupancy:
+    """The held-round integral of every unit memory, at deposit and take."""
+    units = decoder_manager.pool.units()
+    capacity_by_unit = {}
+    for unit in units:
+        capacity_by_unit[unit.name] = unit.memory.capacity_rounds
+    occupancy = metrics.DecoderMemoryOccupancy(engine, capacity_by_unit)
+    for unit in units:
+        deposited = functools.partial(occupancy.deposited, unit.name)
+        unit.memory.deposited.connect(deposited)
+        taken = functools.partial(occupancy.taken, unit.name)
+        unit.memory.taken.connect(taken)
+    return occupancy
+
+
 def _connect_log(
     observation: observe_settings.ObservationSettings,
     engine: engine_module.Engine,
@@ -1905,14 +1936,12 @@ def _observation(
         engine.action_done.connect(decode_backlog.observe)
     decoder_utilization = None
     if observation.decoder_utilization:
-        decoder_utilization = metrics.DecoderUtilization(decoder_manager)
-        engine.action_done.connect(decoder_utilization.observe)
+        decoder_utilization = _decoder_utilization(engine, decoder_manager)
     decoder_memory_occupancy = None
     if observation.decoder_memory_occupancy:
-        decoder_memory_occupancy = metrics.DecoderMemoryOccupancy(
-            decoder_manager
+        decoder_memory_occupancy = _decoder_memory_occupancy(
+            engine, decoder_manager
         )
-        engine.action_done.connect(decoder_memory_occupancy.observe)
     flight_recorder = flight_recorder_module.FlightRecorder(
         round_events,
         window_ledger,

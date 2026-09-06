@@ -18,12 +18,18 @@ from typing import Callable, Optional
 import decsim.decoders.decoder_memory as decoder_memory_module
 import decsim.decoders.decoder_unit as decoder_unit_module
 import decsim.message as message
+import decsim.observe.trace_source as trace_source
 
 DEFAULT_POOL = "default"
 
 
 class DecoderPool:
-    """The units of every pool and the free ones, by pool name."""
+    """The units of every pool and the free ones, by pool name.
+
+    Trace sources: unit_busy(unit) when a job takes a unit's compute out
+    of the free list, unit_freed(unit) when the compute goes back, so a
+    listener integrates the busy units without sampling the list.
+    """
 
     def __init__(
         self,
@@ -38,6 +44,8 @@ class DecoderPool:
         self.units_by_pool: dict[str, list] = {}
         # the units whose compute is back in the pool, in return order
         self.free_by_pool: dict[str, list] = {}
+        self.unit_busy = trace_source.TraceSource()
+        self.unit_freed = trace_source.TraceSource()
         for pool, unit_count in unit_pools.items():
             capacity = None
             if decoder_memory is not None:
@@ -110,11 +118,13 @@ class DecoderPool:
         free = self.free_by_pool[unit.pool]
         free.remove(unit)
         unit.claim_compute(job)
+        self.unit_busy.fire(unit)
 
     def release(self, unit: decoder_unit_module.DecoderUnit) -> None:
         """The unit's compute goes back to its pool."""
         free = self.free_by_pool[unit.pool]
         free.append(unit)
+        self.unit_freed.fire(unit)
 
 
 def _earliest_freeing(units: list) -> decoder_unit_module.DecoderUnit:

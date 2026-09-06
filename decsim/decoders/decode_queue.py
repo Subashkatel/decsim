@@ -14,13 +14,18 @@ from typing import Optional
 
 import decsim.decoders.strong_requests as strong_requests_module
 import decsim.message as message
+import decsim.observe.trace_source as trace_source
 
 LOG_SOURCE = "DecoderCluster"
 DEFAULT_POOL = "default"
 
 
 class WaitingJobs:
-    """One ready queue per pool and the depth samples over time."""
+    """One ready queue per pool and the depth samples over time.
+
+    Trace source: job_enqueued(job) as a job joins its queue; the job
+    names the rounds it references in the store.
+    """
 
     def __init__(
         self,
@@ -39,6 +44,7 @@ class WaitingJobs:
         self.depth_samples: list[tuple[int, int]] = []
         self.strong_requests = strong_requests
         self.is_bulk_strong = is_bulk_strong
+        self.job_enqueued = trace_source.TraceSource()
 
     def pool_of(self, job: message.DecodeJob) -> str:
         """The pool a job queues in: its hint when a pool has that name."""
@@ -59,6 +65,7 @@ class WaitingJobs:
             f"{job.label} READY -> enqueue "
             f"({pool_tag}ready-queue length = {queue_length})",
         )
+        self.job_enqueued.fire(job)
         self.sample_depth()
 
     def add_quietly(self, job: message.DecodeJob) -> None:
@@ -66,6 +73,7 @@ class WaitingJobs:
         pool = self.pool_of(job)
         queue = self.waiting_by_pool[pool]
         queue.append(job)
+        self.job_enqueued.fire(job)
         self.sample_depth()
 
     def remove(self, job: message.DecodeJob) -> bool:

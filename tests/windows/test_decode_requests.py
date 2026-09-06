@@ -169,6 +169,7 @@ def test_a_blocked_window_ships_raw_rounds_and_is_masked_at_start():
     job.decoder_input = decoder_memory.DecoderInput(
         1, 0, job.request_key, (landed,)
     )
+    job.memory = decoder_memory.DecoderMemory("default", 0, None)
     fixture.builder.mask_input(job)
     (masked,) = job.decoder_input.rounds[0].fragments
     assert masked.bits == (1, 0, 1)

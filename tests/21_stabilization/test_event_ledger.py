@@ -191,6 +191,15 @@ def test_check_detects_a_disappeared_round():
         RunLedgerView(events=(orphan,)).check()
 
 
+def _record(recorder, kind, operation_id, round_index, patch_id=None):
+    from decsim.message import WINDOW_INPUT_ROUTE, RoundEvent
+
+    event = RoundEvent.of(
+        kind, 0, operation_id, round_index, WINDOW_INPUT_ROUTE, patch_id
+    )
+    recorder.record(event)
+
+
 def _ledger_of(recorder):
     from types import SimpleNamespace
 
@@ -216,12 +225,12 @@ def test_dropped_round_is_an_accounted_terminal_state():
 
     engine = Engine()
     recorder = RoundEventRecorder(engine)
-    recorder.record("EMITTED", 1, 1, WINDOW_INPUT_ROUTE, patch_id=0)
-    recorder.record("PACKED", 1, 1, WINDOW_INPUT_ROUTE)
-    recorder.record("PUBLISHED", 1, 1, WINDOW_INPUT_ROUTE)
-    recorder.record("EMITTED", 1, 2, WINDOW_INPUT_ROUTE, patch_id=0)
-    recorder.record("PACKED", 1, 2, WINDOW_INPUT_ROUTE)
-    recorder.round_dropped(1, 2, WINDOW_INPUT_ROUTE)
+    _record(recorder, "EMITTED", 1, 1, patch_id=0)
+    _record(recorder, "PACKED", 1, 1)
+    _record(recorder, "PUBLISHED", 1, 1)
+    _record(recorder, "EMITTED", 1, 2, patch_id=0)
+    _record(recorder, "PACKED", 1, 2)
+    _record(recorder, "DROPPED", 1, 2)
 
     ledger = _ledger_of(recorder)
     ledger.check()
@@ -247,11 +256,11 @@ def test_reassembly_context_drop_is_an_accounted_terminal_state():
 
     engine = Engine()
     recorder = RoundEventRecorder(engine)
-    recorder.record("EMITTED", 1, 1, WINDOW_INPUT_ROUTE, patch_id=0)
-    recorder.record("EMITTED", 1, 2, WINDOW_INPUT_ROUTE, patch_id=0)
-    recorder.round_dropped(1, 2, WINDOW_INPUT_ROUTE, patch_id=0)
-    recorder.record("PACKED", 1, 1, WINDOW_INPUT_ROUTE)
-    recorder.record("PUBLISHED", 1, 1, WINDOW_INPUT_ROUTE)
+    _record(recorder, "EMITTED", 1, 1, patch_id=0)
+    _record(recorder, "EMITTED", 1, 2, patch_id=0)
+    _record(recorder, "DROPPED", 1, 2, patch_id=0)
+    _record(recorder, "PACKED", 1, 1)
+    _record(recorder, "PUBLISHED", 1, 1)
 
     ledger = _ledger_of(recorder)
     ledger.check()

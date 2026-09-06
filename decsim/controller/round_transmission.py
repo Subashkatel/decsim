@@ -20,18 +20,23 @@ import functools
 from typing import Optional
 
 import decsim.message as message
+import decsim.observe.trace_source as trace_source
 
 
 class RoundTransmitter:
-    """Sends a stored round on its route and tells the windows at delivery."""
+    """Sends a stored round on its route and tells the windows at delivery.
 
-    def __init__(self, engine, link, weak_store, windows, recorder) -> None:
+    Trace source: round_event(RoundEvent) with kinds CWB_SENT, PUBLISHED
+    and FEEDBACK_MEMORY_DELIVERED.
+    """
+
+    def __init__(self, engine, link, weak_store, windows) -> None:
         self.engine = engine
         self.link = link
         self.weak_store = weak_store
         self.windows = windows
-        self.recorder = recorder
         self.in_flight = 0
+        self.round_event = trace_source.TraceSource()
 
     def publication_tick_at_storage(
         self, route: message.SyndromePacketRoute
@@ -87,20 +92,14 @@ class RoundTransmitter:
             self.windows.accept_window_input(packed.packet)
             self._leave_after_publication()
             return
-        operation_id, round_index = packed.round_key
-        self.recorder.record(
-            "CWB_SENT", operation_id, round_index, packed.route
-        )
+        self._fire("CWB_SENT", packed)
         publish = functools.partial(self._publish, packed)
         self._send(message.LinkPath.CONTROLLER_TO_WEAK_BUFFER, packed, publish)
 
     def _publish(self, packed: message.PackedRound) -> None:
         """The round reached Buffer 0: stamp it, record it, wake the windows."""
         self.weak_store.mark_publication_tick(packed.round_key, self.engine.now)
-        operation_id, round_index = packed.round_key
-        self.recorder.record(
-            "PUBLISHED", operation_id, round_index, packed.route
-        )
+        self._fire("PUBLISHED", packed)
         self.windows.accept_window_input(packed.packet)
         self._leave_after_publication()
 
@@ -125,12 +124,16 @@ class RoundTransmitter:
         """The memory round landed: tell the windows and free its slot."""
         source_operation_id = packed.route.source_operation_id
         self.windows.accept_feedback_memory_round(source_operation_id)
-        operation_id, round_index = packed.round_key
-        self.recorder.record(
-            "FEEDBACK_MEMORY_DELIVERED", operation_id, round_index, packed.route
-        )
+        self._fire("FEEDBACK_MEMORY_DELIVERED", packed)
         self.weak_store.release_round(packed.round_key)
         self._leave()
+
+    def _fire(self, kind: str, packed: message.PackedRound) -> None:
+        operation_id, round_index = packed.round_key
+        event = message.RoundEvent.of(
+            kind, self.engine.now, operation_id, round_index, packed.route
+        )
+        self.round_event.fire(event)
 
     def _send(self, path: message.LinkPath, packed, on_delivered) -> None:
         attribution = message.TransferAttribution.for_packet(packed.packet)

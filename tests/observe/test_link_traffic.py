@@ -120,9 +120,8 @@ class Run:
         settings = link_settings.FabricSettings(profile_name="test", **wiring)
         self.engine = decsim.engine.Engine()
         self.ledger = link_traffic.TrafficLedger(settings)
-        self.fabric = fabric_module.LinkFabric(
-            settings, self.engine, self.ledger
-        )
+        self.fabric = fabric_module.LinkFabric(settings, self.engine)
+        self.fabric.transfer_delivered.connect(self.ledger.on_transfer)
 
     def send(self, path, payload_bits, tick, attribution):
         delay = tick - self.engine.now
@@ -440,3 +439,16 @@ def test_an_empty_ledger_reports_every_path_with_zero_counters():
     assert counts == [0] * 10
     assert report["transfers"] == []
     assert report["path_order"][-1] == "controller_to_strong_buffer"
+
+
+def test_a_second_listener_hears_the_same_transfers_the_ledger_counts():
+    run = Run()
+    heard = []
+    run.fabric.transfer_delivered.connect(heard.append)
+    first = round_attribution(1)
+    second = round_attribution(2)
+    run.send(message.LinkPath.QPU_TO_CONTROLLER, 8, 0, first)
+    run.send(message.LinkPath.QPU_TO_CONTROLLER, 8, 5, second)
+    run.engine.run()
+    snapshot = run.ledger.snapshot()
+    assert tuple(heard) == snapshot.transfers

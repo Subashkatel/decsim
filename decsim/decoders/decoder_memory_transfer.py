@@ -10,6 +10,7 @@ supplied transport cannot bypass decoder memory.
 from typing import Callable, Optional, Protocol, runtime_checkable
 
 import decsim.message as message
+import decsim.observe.trace_source as trace_source
 
 SendInput = Callable[[Callable[[], None]], int]
 
@@ -38,11 +39,17 @@ class DecoderMemoryTransfer(Protocol):
 
 
 class DecoderInputStaging:
-    """Stages a job's input into a unit's memory and frees it again."""
+    """Stages a job's input into a unit's memory and frees it again.
+
+    Trace source: copy_made(job, bits, store_name, memory_name) at every
+    landing that deposits rounds, the copy out of the store into the
+    unit's own memory (data_path.md hops 5 and 9).
+    """
 
     def __init__(self, transport, engine):
         self.transport = transport
         self.engine = engine
+        self.copy_made = trace_source.TraceSource()
 
     def stage(
         self,
@@ -61,9 +68,13 @@ class DecoderInputStaging:
 
         def land(_delivered: message.DecodeJob) -> None:
             job.input_landing_ticks = self.engine.now
+            bits = job.payload_bits()
             job.decoder_input = memory.deposit(job)
             job.payloads = []
             job.memory = memory
+            if job.decoder_input.rounds:
+                store_name = _store_name_of(job)
+                self.copy_made.fire(job, bits, store_name, memory.name)
             hold = job.input_hold
             if hold is not None:  # Buffer 0 may drop the rounds now
                 hold()
@@ -154,6 +165,14 @@ class CancellableDecoderMemoryTransfer:
         """Suppress the landing of a request that has not landed yet."""
         key = _transfer_key(job)
         self._in_flight_keys.discard(key)
+
+
+def _store_name_of(job: message.DecodeJob) -> str:
+    """The store a job's rounds came from: its tier's (data_path.md 3)."""
+    key = job.request_key
+    if key is not None and key.tier is message.DecoderTier.STRONG:
+        return "Buffer 1"
+    return "Buffer 0"
 
 
 def _transfer_key(job: message.DecodeJob):

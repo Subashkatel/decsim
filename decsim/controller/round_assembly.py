@@ -20,10 +20,16 @@ from typing import Callable, Optional
 
 import decsim.controller.settings as controller_settings
 import decsim.message as message
+import decsim.observe.trace_source as trace_source
 
 
 class RoundAssembler:
-    """Fragments in, one packed round out, after the packing time."""
+    """Fragments in, one packed round out, after the packing time.
+
+    Trace sources: round_event(RoundEvent) with kinds BINARY_AVAILABLE,
+    PACKED and DROPPED; copy_made(round_key, bits, "controller intake",
+    "controller assembler") for the merged round (data_path.md hop 2).
+    """
 
     def __init__(
         self,
@@ -33,7 +39,6 @@ class RoundAssembler:
         form_round: Optional[Callable],
         on_packed: Callable[[message.PackedRound], None],
         rounds_in_flight: "RoundsInFlight",
-        recorder,
     ) -> None:
         self.engine = engine
         self.settings = settings
@@ -42,7 +47,8 @@ class RoundAssembler:
         self.form_round = form_round
         self.workspace = _Workspace(rounds_in_flight, settings.packing_overflow)
         self.on_packed = on_packed
-        self.recorder = recorder
+        self.round_event = trace_source.TraceSource()
+        self.copy_made = trace_source.TraceSource()
 
     def add(
         self,
@@ -51,13 +57,15 @@ class RoundAssembler:
         route: message.SyndromePacketRoute,
     ) -> None:
         """Take one fragment; the round is packed when its last one arrives."""
-        self.recorder.record(
+        available = message.RoundEvent.of(
             "BINARY_AVAILABLE",
+            self.engine.now,
             fragment.operation_id,
             fragment.round_index,
             route,
-            patch_id=fragment.patch_id,
+            fragment.patch_id,
         )
+        self.round_event.fire(available)
         round_key = (fragment.operation_id, fragment.round_index)
         if self.workspace.is_dropped(round_key):
             return
@@ -104,12 +112,15 @@ class RoundAssembler:
             )
         dropped = self.workspace.refuse(round_key, self.engine.now)
         if dropped:
-            self.recorder.round_dropped(
+            drop = message.RoundEvent.of(
+                "DROPPED",
+                self.engine.now,
                 fragment.operation_id,
                 fragment.round_index,
                 route,
-                patch_id=fragment.patch_id,
+                fragment.patch_id,
             )
+            self.round_event.fire(drop)
         return None
 
     def _open_context(self, identity, round_key, route, fragment_count):
@@ -120,11 +131,20 @@ class RoundAssembler:
     def _finish_packing(self, context) -> None:
         """The round is complete: merge, form detection events, hand on."""
         operation_id, round_index = context.round_key
-        self.recorder.record("PACKED", operation_id, round_index, context.route)
+        packed_event = message.RoundEvent.of(
+            "PACKED", self.engine.now, operation_id, round_index, context.route
+        )
+        self.round_event.fire(packed_event)
         raw_fragments = _merge_fragments_by_patch(context.fragments)
         # the links carry the raw measurement bits; detection events exist
         # only from the decoder input (Buffer 0) onward
         wire_bits = _fragment_bits(raw_fragments)
+        self.copy_made.fire(
+            context.round_key,
+            wire_bits,
+            "controller intake",
+            "controller assembler",
+        )
         formed_fragments = self._form_detection_events(raw_fragments)
         packet = message.SyndromeRoundPacket(
             operation_id=operation_id,

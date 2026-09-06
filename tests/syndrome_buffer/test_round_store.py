@@ -25,7 +25,6 @@ import decsim.controller.round_writes as round_writes
 import decsim.controller.settings as controller_settings
 import decsim.engine as engine_module
 import decsim.message as message
-import decsim.observe.round_events as round_events
 import decsim.syndrome_buffer.round_store as round_store_module
 import decsim.syndrome_buffer.settings as round_store_settings
 
@@ -54,15 +53,19 @@ def packed(round_index: int) -> message.PackedRound:
 
 
 def held_rounds() -> round_writes.HeldRounds:
-    no_events = round_events.NoRoundEvents()
-    return round_writes.HeldRounds(STALL, no_events)
+    engine = engine_module.Engine()
+    return round_writes.HeldRounds(engine, STALL)
 
 
 def store(rounds=None, on_slot_freed=None, listener=None):
     settings = round_store_settings.RoundStoreSettings(rounds=rounds)
-    return round_store_module.RoundStore(
-        settings, on_slot_freed=on_slot_freed, listener=listener
+    the_store = round_store_module.RoundStore(
+        settings, on_slot_freed=on_slot_freed
     )
+    if listener is not None:
+        the_store.round_stored.connect(listener.round_stored)
+        the_store.round_released.connect(listener.round_released)
+    return the_store
 
 
 class RecordingListener:
@@ -286,3 +289,29 @@ def test_settlement_reports_a_hold_on_a_round_never_written():
 
     with pytest.raises(RuntimeError, match=r"unresolved holds on \[\(1, 5\)\]"):
         the_store.check_settled()
+
+
+def test_the_hold_sources_carry_the_token_and_its_rounds():
+    heard = []
+    the_store = store()
+
+    def registered(holder, keys):
+        heard.append(("registered", holder, keys))
+
+    def transferred(old, new):
+        heard.append(("transferred", old, new))
+
+    def released(holder):
+        heard.append(("released", holder))
+
+    the_store.hold_registered.connect(registered)
+    the_store.hold_transferred.connect(transferred)
+    the_store.hold_released.connect(released)
+    the_store.register_hold("window", [(1, 1), (1, 2)])
+    the_store.transfer_hold("window", "job")
+    the_store.release_hold("job")
+    assert heard == [
+        ("registered", "window", ((1, 1), (1, 2))),
+        ("transferred", "window", "job"),
+        ("released", "job"),
+    ]

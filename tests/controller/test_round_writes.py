@@ -70,20 +70,22 @@ def writer_with(
     on_full=STALL,
 ):
     recorder = round_events.RoundEventRecorder(engine)
-    held = round_writes.HeldRounds(on_full, recorder)
+    held = round_writes.HeldRounds(engine, on_full)
+    held.round_event.connect(recorder.record)
     settings = round_store_settings.RoundStoreSettings(rounds=weak_rounds)
     weak_store = round_store_module.RoundStore(
         settings, on_slot_freed=held.retry
     )
     transmitter = RecordingTransmitter(engine)
     writer = round_writes.RoundWriter(
+        engine,
         weak_store,
         strong_writer,
         publishes_from_strong_store=publishes_from_strong_store,
         held_rounds=held,
         transmitter=transmitter,
-        recorder=recorder,
     )
+    writer.round_event.connect(recorder.record)
     return writer, weak_store, transmitter, recorder
 
 
@@ -175,3 +177,27 @@ def test_the_drop_knob_drops_a_round_that_found_no_room():
     assert transmitter.sent == [1]
     assert recorder.packing_drops == 1
     assert writer.held_rounds.count == 0
+
+
+def test_the_buffer_0_line_is_narrated_only_on_the_io_line():
+    import decsim.observe.log_writers as log_writers
+
+    engine = engine_module.Engine()
+    log = log_writers.LogWriter()
+    engine.io_line.connect(log.write)
+    writer, _weak_store, _transmitter, _recorder = writer_with(engine)
+    silent_engine = engine_module.Engine()
+    silent_log = log_writers.LogWriter()
+    silent_engine.line.connect(silent_log.write)
+    silent_writer, _store, _sent, _events = writer_with(silent_engine)
+    first = packed(1)
+
+    writer.admit(first)
+    silent_writer.admit(first)
+
+    assert silent_log.lines == []
+    (line,) = log.lines
+    assert line.endswith(
+        "Buffer 0: received round 1 of op 1 from packing; "
+        "defects {0}; holds op 1 rounds 1 (1)"
+    )

@@ -33,9 +33,12 @@ class RecordingAssembler:
 
 
 def controller_with(engine, links, assembler, recorder, settings=SETTINGS):
-    return controller_module.Controller(
-        engine, links, settings, assembler, recorder
+    controller = controller_module.Controller(
+        engine, links, settings, assembler
     )
+    if recorder is not None:
+        controller.round_event.connect(recorder.record)
+    return controller
 
 
 def test_a_readout_reaches_the_assembler_after_the_crossing_and_the_delay():
@@ -71,7 +74,7 @@ def test_a_readout_with_no_delay_reaches_the_assembler_at_the_crossing():
     reference = link_profiles.logical_reference_profile()
     links = fabric_module.LinkFabric(reference, engine)
     assembler = RecordingAssembler(engine)
-    recorder = round_events.NoRoundEvents()
+    recorder = None
     controller = controller_with(
         engine, links, assembler, recorder, settings=FREE_SETTINGS
     )

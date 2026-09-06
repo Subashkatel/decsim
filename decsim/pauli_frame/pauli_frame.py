@@ -20,6 +20,7 @@ from typing import Any, Callable, Optional
 
 import decsim.config as config
 import decsim.message as message
+import decsim.observe.trace_source as trace_source
 
 ObservableBits = tuple[int, ...]
 
@@ -106,7 +107,13 @@ class PauliFrameSnapshot:
 
 
 class PauliFrame:
-    """Keeps every committed correction and charges each write once."""
+    """Keeps every committed correction and charges each write once.
+
+    Trace sources: correction_accepted(record) when a window's
+    correction is taken and its write charged, correction_committed(
+    record) when the write has landed; the record is the frame's own
+    PauliFrameCommitRecord.
+    """
 
     def __init__(self, engine, *, commit_ticks: int) -> None:
         self.engine = engine
@@ -117,6 +124,8 @@ class PauliFrame:
         # A stream id is whatever the front end chose; the frame never
         # looks inside it.
         self._windows_by_stream: dict[Any, list[tuple]] = {}
+        self.correction_accepted = trace_source.TraceSource()
+        self.correction_committed = trace_source.TraceSource()
 
     def commit_correction(
         self, *, window_key, logical_observables, request_key, on_committed
@@ -145,6 +154,7 @@ class PauliFrame:
         self._records.append(record)
         pending = _PendingWrite(record, on_committed)
         self._pending_by_window[window_key] = pending
+        self.correction_accepted.fire(record)
         self._charge_write(window_key)
 
     def frame_for_stream(self, stream_id) -> Optional[ObservableBits]:
@@ -243,6 +253,7 @@ class PauliFrame:
                 f"{record.logical_observables}; holds {held} window corrections"
             ),
         )
+        self.correction_committed.fire(record)
         pending.on_committed()
 
 

@@ -66,7 +66,10 @@ def priced_writer(engine, rounds=None, listener=None, on_round_stored=None):
     )
     link = fabric_module.LinkFabric(settings, engine)
     store_settings = round_store_settings.RoundStoreSettings(rounds=rounds)
-    store = round_store_module.RoundStore(store_settings, listener=listener)
+    store = round_store_module.RoundStore(store_settings)
+    if listener is not None:
+        store.round_stored.connect(listener.round_stored)
+        store.round_released.connect(listener.round_released)
     return strong_round_writer.StrongRoundWriter(
         engine, link, store, on_round_stored=on_round_stored
     )

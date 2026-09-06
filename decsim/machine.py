@@ -412,18 +412,21 @@ class Machine:
             engine
         )
         traffic_ledger = link_traffic.TrafficLedger(settings.links)
-        links = fabric.LinkFabric(settings.links, engine, traffic_ledger)
+        links = fabric.LinkFabric(settings.links, engine)
+        links.transfer_delivered.connect(traffic_ledger.on_transfer)
         round_events = round_events_module.RoundEventRecorder(engine)
         held_rounds = round_writes.HeldRounds(
-            settings.controller.packing_overflow, round_events
+            engine, settings.controller.packing_overflow
         )
-        round_store_occupancy = _round_store_occupancy(observation, engine)
-        round_store = _round_store(
-            settings.round_store, held_rounds, round_store_occupancy
+        round_store = _round_store(settings.round_store, held_rounds)
+        round_store_occupancy = _round_store_occupancy(
+            observation, engine, round_store
         )
         strong_round_store = _strong_round_store(
             settings.strong_round_store, escalation_policy, held_rounds
         )
+        if strong_round_store is not None:
+            strong_round_store.round_stored.connect(round_events.round_stored)
         pauli_frame = _pauli_frame(settings.pauli_frame, engine)
         # The decoder manager is built first, so the requester and the
         # strong redecode take the decode queue by constructor and every
@@ -450,21 +453,21 @@ class Machine:
             on_workload_complete=lambda: factory.shutdown(),
         )
         strong_round_writer = _strong_round_writer(
-            engine, links, strong_round_store, window_manager, round_events
+            engine, links, strong_round_store, window_manager
         )
         transmitter = round_transmission.RoundTransmitter(
-            engine, links, round_store, window_manager, round_events
+            engine, links, round_store, window_manager
         )
         publishes_from_strong_store = (
             window_manager.retention.primary_store is not round_store
         )
         round_writer = round_writes.RoundWriter(
+            engine,
             round_store,
             strong_round_writer,
             publishes_from_strong_store=publishes_from_strong_store,
             held_rounds=held_rounds,
             transmitter=transmitter,
-            recorder=round_events,
         )
         form_round = getattr(plan.device, "form_round", None)
         rounds_in_flight = round_assembly.RoundsInFlight(
@@ -478,7 +481,6 @@ class Machine:
             form_round=form_round,
             on_packed=round_writer.admit,
             rounds_in_flight=rounds_in_flight,
-            recorder=round_events,
         )
         factory = _factory(
             settings.magic_state_factory, engine, decoder_manager, plan
@@ -486,7 +488,7 @@ class Machine:
         qpu = cycle_clock.QPUDevice(engine, plan.device, plan.round_ticks)
         pulse_ticks = settings.controller.decision_to_pulse_ticks()
         instruction_output = instruction_output_module.InstructionOutput(
-            engine, links, qpu, pulse_ticks, round_events
+            engine, links, qpu, pulse_ticks
         )
         streams = _feedback_streams(
             engine,
@@ -510,7 +512,16 @@ class Machine:
             instruction_output,
         )
         controller = controller_module.Controller(
-            engine, links, settings.controller, assembler, round_events
+            engine, links, settings.controller, assembler
+        )
+        _connect_round_events(
+            round_events,
+            controller,
+            assembler,
+            held_rounds,
+            round_writer,
+            transmitter,
+            instruction_output,
         )
         execution_runtime = execution_runtime_module.ExecutionRuntime(
             engine,
@@ -1161,21 +1172,24 @@ def _staged_unit(
 def _round_store(
     settings: round_store_settings.RoundStoreSettings,
     held_rounds: round_writes.HeldRounds,
-    listener,
 ):
     """Buffer 0; a freed slot retries the rounds held for room."""
     row = _row(ROUND_STORES, "round_store.kind", settings.kind)
-    return row(settings, on_slot_freed=held_rounds.retry, listener=listener)
+    return row(settings, on_slot_freed=held_rounds.retry)
 
 
 def _round_store_occupancy(
     observation: observe_settings.ObservationSettings,
     engine: engine_module.Engine,
+    round_store,
 ):
     """The L5 listener on Buffer 0, only when the observation asks."""
     if not observation.round_store_occupancy:
         return None
-    return round_store_occupancy_module.RoundStoreOccupancy(engine)
+    occupancy = round_store_occupancy_module.RoundStoreOccupancy(engine)
+    round_store.round_stored.connect(occupancy.round_stored)
+    round_store.round_released.connect(occupancy.round_released)
+    return occupancy
 
 
 def _strong_round_store(
@@ -1199,7 +1213,6 @@ def _strong_round_writer(
     links: fabric.LinkFabric,
     strong_round_store,
     window_manager,
-    round_events,
 ):
     """The crossing into the room-side store; the window manager hears it."""
     if strong_round_store is None:
@@ -1209,7 +1222,6 @@ def _strong_round_writer(
         links,
         strong_round_store,
         on_round_stored=window_manager.accept_room_round,
-        recorder=round_events,
     )
 
 
@@ -1514,6 +1526,27 @@ def _patch_by_identity(plan: _Plan) -> dict:
 
 
 # ------------------------------------------------------- the listeners
+
+
+def _connect_round_events(
+    round_events: round_events_module.RoundEventRecorder,
+    controller,
+    assembler,
+    held_rounds,
+    round_writer,
+    transmitter,
+    instruction_output,
+) -> None:
+    """The flight recorder hears every round event and controller output."""
+    for component in (
+        controller,
+        assembler,
+        held_rounds,
+        round_writer,
+        transmitter,
+    ):
+        component.round_event.connect(round_events.record)
+    instruction_output.output_event.connect(round_events.output)
 
 
 def _connect_log(

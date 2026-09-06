@@ -3,40 +3,40 @@
 LinkFabric is the root of the links and the one object the other
 components hold; it implements the Link port. send(path, ...) selects the
 payload the path is priced with, sends it on the path's channel, and at
-delivery hands the finished transfer first to the listener (the traffic
-ledger, when one is given) and then to the caller's continuation. Two
-paths whose settings name the same channel share its wire and its setup
-engine. The shape is gem5's: a SimObject owns its parameters and its
-children and is reached through its ports (src/sim/sim_object.hh,
-src/mem/port.hh).
+delivery fires the finished transfer's record on transfer_delivered (the
+traffic ledger and the trace writer listen) before the caller's
+continuation runs. Two paths whose settings name the same channel share
+its wire and its setup engine. The shape is gem5's: a SimObject owns its
+parameters and its children and is reached through its ports
+(src/sim/sim_object.hh, src/mem/port.hh); the trace source is ns-3's
+TracedCallback fired at the device's transition
+(point-to-point-net-device.cc TransmitComplete).
 """
 
 import dataclasses
-from typing import Optional, Protocol
+from typing import Optional
 
 import decsim.engine
 import decsim.links.channel as channel_module
 import decsim.links.settings as link_settings
 import decsim.message as message
-
-
-class TransferListener(Protocol):
-    """What a fabric tells its observer: every finished transfer, once."""
-
-    def on_transfer(self, record: message.TransferRecord) -> None:
-        """One transfer was delivered."""
+import decsim.observe.trace_source as trace_source
 
 
 class LinkFabric:
-    """One run's fabric: the wired paths on their channels."""
+    """One run's fabric: the wired paths on their channels.
+
+    Trace source: transfer_delivered(record), one TransferRecord per
+    delivered transfer, carrying the path, the attribution and the
+    Transfer with its send, serializer and delivery ticks.
+    """
 
     def __init__(
         self,
         fabric_settings: link_settings.FabricSettings,
         engine: decsim.engine.Engine,
-        listener: Optional[TransferListener] = None,
     ):
-        self._listener = listener
+        self.transfer_delivered = trace_source.TraceSource()
         self._channel_by_name: dict[str, channel_module.Channel] = {}
         self._binding_by_path: dict[message.LinkPath, _PathBinding] = {}
         self._send_count = 0
@@ -115,8 +115,8 @@ class LinkFabric:
     def _finish(
         self, outgoing: "_Outgoing", transfer: message.Transfer
     ) -> None:
-        """At delivery: the ledger sees the transfer, then the caller."""
-        if self._listener is not None:
+        """At delivery: the listeners hear the transfer, then the caller."""
+        if self.transfer_delivered.has_listeners:
             record = message.TransferRecord(
                 request_sequence=outgoing.request_sequence,
                 path=outgoing.path,
@@ -126,7 +126,7 @@ class LinkFabric:
                 payload_source=outgoing.payload_source,
                 transfer=transfer,
             )
-            self._listener.on_transfer(record)
+            self.transfer_delivered.fire(record)
         outgoing.on_delivered(transfer)
 
 

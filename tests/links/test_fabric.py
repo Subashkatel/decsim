@@ -66,7 +66,10 @@ def fabric_with(engine, listener=None, **paths):
     )
     wiring.update(paths)
     settings = link_settings.FabricSettings(profile_name="test", **wiring)
-    return fabric_module.LinkFabric(settings, engine, listener)
+    fabric = fabric_module.LinkFabric(settings, engine)
+    if listener is not None:
+        fabric.transfer_delivered.connect(listener.on_transfer)
+    return fabric
 
 
 def round_attribution(round_index):

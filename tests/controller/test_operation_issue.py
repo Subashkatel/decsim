@@ -68,8 +68,10 @@ def resolved(operation_id, round_ticks=1000, round_count=6):
 
 def issuer_with(engine, qpu, idle_rounds, windows, recorder, link=None):
     output = instruction_output.InstructionOutput(
-        engine, link, qpu, PULSE_TICKS, recorder
+        engine, link, qpu, PULSE_TICKS
     )
+    if recorder is not None:
+        output.output_event.connect(recorder.output)
     streams = feedback_streams.NoFeedbackStreams()
     resolved_operations = (resolved(1), resolved(2))
     return operation_issue.OperationIssuer(
@@ -114,7 +116,7 @@ def test_the_idle_rounds_claimed_at_the_issue_are_prepended_for_the_windows():
     qpu = RecordingQpu()
     idle_rounds = RecordingIdleRounds(claimed=4)
     windows = RecordingWindows()
-    recorder = round_events.NoRoundEvents()
+    recorder = None
     issuer = issuer_with(engine, qpu, idle_rounds, windows, recorder)
     operation = message.Operation(1, "memory", (0,), patches=(0,))
 
@@ -155,7 +157,7 @@ def test_the_last_release_stops_the_qpu():
     qpu = RecordingQpu()
     idle_rounds = RecordingIdleRounds()
     windows = RecordingWindows()
-    recorder = round_events.NoRoundEvents()
+    recorder = None
     issuer = issuer_with(engine, qpu, idle_rounds, windows, recorder)
     operation = message.Operation(1, "memory", (0,), patches=(0,))
 

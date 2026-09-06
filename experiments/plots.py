@@ -29,8 +29,16 @@ from decsim.machine import Machine
 from experiments.experiment_config import ExperimentConfig
 from experiments.measure_shot import INPUT_LINK, OUTPUT_LINK
 
-WINDOW_COLORS = ("tab:blue", "tab:orange", "tab:green", "tab:red",
-                 "tab:purple", "tab:brown", "tab:pink", "tab:olive")
+WINDOW_COLORS = (
+    "tab:blue",
+    "tab:orange",
+    "tab:green",
+    "tab:red",
+    "tab:purple",
+    "tab:brown",
+    "tab:pink",
+    "tab:olive",
+)
 MAX_LEGEND_WINDOWS = 8
 
 
@@ -46,6 +54,7 @@ def card_label(algorithm) -> str:
 
 # ---- the window timeline ---------------------------------------------------
 
+
 def timeline_plot(config: ExperimentConfig, path: Path) -> None:
     """One shot at the first sweep point, seed 0, every stage in time."""
     import matplotlib.pyplot as plt
@@ -57,15 +66,24 @@ def timeline_plot(config: ExperimentConfig, path: Path) -> None:
     algorithm = config.active_decoder.kind
     settings = config.point_settings(
         physical_error_probability=physical_error_probability,
-        distance=distance, round_period_us=round_period_us)
+        distance=distance,
+        round_period_us=round_period_us,
+    )
     completed = Machine.build(settings, 0)
     result = completed.run()
 
     input_path = INPUT_LINK[config.settings.escalation.kind]
     output_path = OUTPUT_LINK[config.settings.escalation.kind]
-    store_path = "controller_to_strong_buffer" if config.settings.escalation.kind == "strong_only" else "controller_to_weak_buffer"
-    store_name = ("syndrome buffer 1" if config.settings.escalation.kind == "strong_only"
-                  else "buffer 0")
+    store_path = (
+        "controller_to_strong_buffer"
+        if config.settings.escalation.kind == "strong_only"
+        else "controller_to_weak_buffer"
+    )
+    store_name = (
+        "syndrome buffer 1"
+        if config.settings.escalation.kind == "strong_only"
+        else "buffer 0"
+    )
 
     transfers = result.link_traffic["transfers"]
 
@@ -74,8 +92,11 @@ def timeline_plot(config: ExperimentConfig, path: Path) -> None:
         for transfer in transfers:
             if transfer["path"] != path_name:
                 continue
-            key = (transfer["attribution"]["round_lo"] if by_round
-                   else transfer["attribution"]["window_id"])
+            key = (
+                transfer["attribution"]["round_lo"]
+                if by_round
+                else transfer["attribution"]["window_id"]
+            )
             selected[key] = transfer
         return selected
 
@@ -84,35 +105,61 @@ def timeline_plot(config: ExperimentConfig, path: Path) -> None:
     input_link = on(input_path, by_round=False)
     dd = on("decoder_to_decoder", by_round=False)
     output_link = on(output_path, by_round=False)
-    windows = {window_id: window for (_, window_id), window
-               in sorted(completed.window_manager.windows.items())}
-    frame_records = {record.window_key[1]: record
-                     for record in completed.pauli_frame.snapshot().records}
+    windows = {
+        window_id: window
+        for (_, window_id), window in sorted(
+            completed.observation.windows.windows.items()
+        )
+    }
+    frame_records = {
+        record.window_key[1]: record
+        for record in completed.pauli_frame.snapshot().records
+    }
     rounds = config.settings.workload.rounds_per_shot.rounds_for(distance)
 
     rows = ["qpu round", "qc link"]
     if store:
         rows.append(f"{store_name} link")
-    rows += [f"{store_name} fill", "wait", f"transfer ({input_path})",
-             "fetch", "algorithm", "release", "dd handoff",
-             f"{output_path} link", "frame commit"]
+    rows += [
+        f"{store_name} fill",
+        "wait",
+        f"transfer ({input_path})",
+        "fetch",
+        "algorithm",
+        "release",
+        "dd handoff",
+        f"{output_path} link",
+        "frame commit",
+    ]
     row_index = {name: index for index, name in enumerate(rows)}
 
     figure, axis = plt.subplots(figsize=(11, 0.45 * len(rows) + 1.6))
     for round_number in sorted(qc):
         sent = microseconds_to_ticks(qc[round_number]["send_ticks"])
         shade = "0.55" if round_number % 2 else "0.75"
-        axis.barh(row_index["qpu round"], round_period_us,
-                  left=sent - round_period_us, color=shade, height=0.55)
-        axis.barh(row_index["qc link"],
-                  microseconds_to_ticks(qc[round_number]["delivery_ticks"]) - sent,
-                  left=sent, color=shade, height=0.55)
+        axis.barh(
+            row_index["qpu round"],
+            round_period_us,
+            left=sent - round_period_us,
+            color=shade,
+            height=0.55,
+        )
+        axis.barh(
+            row_index["qc link"],
+            microseconds_to_ticks(qc[round_number]["delivery_ticks"]) - sent,
+            left=sent,
+            color=shade,
+            height=0.55,
+        )
         if round_number in store:
-            axis.barh(row_index[f"{store_name} link"],
-                      microseconds_to_ticks(store[round_number]["delivery_ticks"])
-                      - microseconds_to_ticks(store[round_number]["send_ticks"]),
-                      left=microseconds_to_ticks(store[round_number]["send_ticks"]),
-                      color=shade, height=0.55)
+            axis.barh(
+                row_index[f"{store_name} link"],
+                microseconds_to_ticks(store[round_number]["delivery_ticks"])
+                - microseconds_to_ticks(store[round_number]["send_ticks"]),
+                left=microseconds_to_ticks(store[round_number]["send_ticks"]),
+                color=shade,
+                height=0.55,
+            )
 
     # the round's landing tick in the store the windows read
     stored_row = store if store else qc
@@ -124,73 +171,123 @@ def timeline_plot(config: ExperimentConfig, path: Path) -> None:
         color = WINDOW_COLORS[window_id % len(WINDOW_COLORS)]
 
         def bar(row, start, end, window_id=window_id, color=color, alpha=1.0):
-            lane = (row_index[row]
-                    + (window_id - (lane_count - 1) / 2) * (0.5 / lane_count))
-            axis.barh(lane, end - start, left=start, color=color,
-                      height=0.17, alpha=alpha)
+            lane = row_index[row] + (window_id - (lane_count - 1) / 2) * (
+                0.5 / lane_count
+            )
+            axis.barh(
+                lane,
+                end - start,
+                left=start,
+                color=color,
+                height=0.17,
+                alpha=alpha,
+            )
 
-        stages = {record.stage: record
-                  for record in completed.active_decoder.stage_records_for(1, window_id)}
+        stages = {
+            record.stage: record
+            for record in completed.active_decoder.stage_records_for(
+                1, window_id
+            )
+        }
         read_hi = min(window.buffer_hi, rounds)
-        stored_tick = microseconds_to_ticks(stored_row[read_hi]["delivery_ticks"])
+        stored_tick = microseconds_to_ticks(
+            stored_row[read_hi]["delivery_ticks"]
+        )
         window_ranges.append(
             f"window {window_id}: "
             f"commits {window.commit_lo}-{window.commit_hi}, "
-            f"reads {window.start_round}-{read_hi}")
+            f"reads {window.start_round}-{read_hi}"
+        )
         # commit rounds land solid; the trailing buffer reads land lighter
         commit_stored = microseconds_to_ticks(
-            stored_row[min(window.commit_hi, rounds)]["delivery_ticks"])
-        bar(f"{store_name} fill", microseconds_to_ticks(window.t_first_round), commit_stored)
+            stored_row[min(window.commit_hi, rounds)]["delivery_ticks"]
+        )
+        bar(
+            f"{store_name} fill",
+            microseconds_to_ticks(window.t_first_round),
+            commit_stored,
+        )
         if read_hi > window.commit_hi:
             bar(f"{store_name} fill", commit_stored, stored_tick, alpha=0.45)
         bar("wait", stored_tick, microseconds_to_ticks(window.t_dispatch))
         if window_id in input_link:
-            bar(f"transfer ({input_path})",
+            bar(
+                f"transfer ({input_path})",
                 microseconds_to_ticks(input_link[window_id]["send_ticks"]),
-                microseconds_to_ticks(input_link[window_id]["delivery_ticks"]))
+                microseconds_to_ticks(input_link[window_id]["delivery_ticks"]),
+            )
         for stage in ("fetch", "algorithm", "release"):
             if stage in stages:
-                bar(stage, microseconds_to_ticks(stages[stage].start_ticks),
-                    microseconds_to_ticks(stages[stage].end_ticks))
+                bar(
+                    stage,
+                    microseconds_to_ticks(stages[stage].start_ticks),
+                    microseconds_to_ticks(stages[stage].end_ticks),
+                )
         if window_id in dd:
-            bar("dd handoff", microseconds_to_ticks(dd[window_id]["send_ticks"]),
-                microseconds_to_ticks(dd[window_id]["delivery_ticks"]))
+            bar(
+                "dd handoff",
+                microseconds_to_ticks(dd[window_id]["send_ticks"]),
+                microseconds_to_ticks(dd[window_id]["delivery_ticks"]),
+            )
         if window_id in output_link:
-            bar(f"{output_path} link",
+            bar(
+                f"{output_path} link",
                 microseconds_to_ticks(output_link[window_id]["send_ticks"]),
-                microseconds_to_ticks(output_link[window_id]["delivery_ticks"]))
+                microseconds_to_ticks(output_link[window_id]["delivery_ticks"]),
+            )
         if window_id in frame_records:
-            bar("frame commit",
+            bar(
+                "frame commit",
                 microseconds_to_ticks(frame_records[window_id].accepted_ticks),
-                microseconds_to_ticks(frame_records[window_id].committed_ticks))
+                microseconds_to_ticks(frame_records[window_id].committed_ticks),
+            )
 
     axis.set_yticks(range(len(rows)))
     axis.set_yticklabels(rows, fontsize=9)
     axis.invert_yaxis()
     axis.set_xlabel("time from shot start (µs)")
-    timeline_titles = {"weak_baseline": "Weak only path timeline",
-                       "strong_only": "Strong only path timeline",
-                       "switching": "Switching path timeline"}
-    axis.set_title(timeline_titles.get(config.settings.escalation.kind, config.name), pad=22)
+    timeline_titles = {
+        "weak_baseline": "Weak only path timeline",
+        "strong_only": "Strong only path timeline",
+        "switching": "Switching path timeline",
+    }
+    axis.set_title(
+        timeline_titles.get(config.settings.escalation.kind, config.name),
+        pad=22,
+    )
     commit_rounds = config.settings.windows.commit_rounds or distance
     buffer_rounds = config.settings.windows.buffer_rounds or distance
-    axis.text(0.5, 1.005,
-              f"d={distance} {config.settings.workload.code_task.split(':')[0]}"
-              f" · {config.settings.windows.kind} windows: commit {commit_rounds},"
-              f" buffer {buffer_rounds} rounds"
-              f" · rounds every {round_period_us:g} µs"
-              f" · algorithm {card_label(algorithm)}"
-              f" · p={physical_error_probability:g}",
-              transform=axis.transAxes, ha="center", va="bottom",
-              fontsize=8.5, color="0.35")
+    axis.text(
+        0.5,
+        1.005,
+        f"d={distance} {config.settings.workload.code_task.split(':')[0]}"
+        f" · {config.settings.windows.kind} windows: commit {commit_rounds},"
+        f" buffer {buffer_rounds} rounds"
+        f" · rounds every {round_period_us:g} µs"
+        f" · algorithm {card_label(algorithm)}"
+        f" · p={physical_error_probability:g}",
+        transform=axis.transAxes,
+        ha="center",
+        va="bottom",
+        fontsize=8.5,
+        color="0.35",
+    )
     handles = [plt.Rectangle((0, 0), 1, 1, color="0.6")]
     labels = ["rounds"]
     for window_id in list(windows)[:MAX_LEGEND_WINDOWS]:
-        handles.append(plt.Rectangle(
-            (0, 0), 1, 1, color=WINDOW_COLORS[window_id % len(WINDOW_COLORS)]))
-        labels.append(window_ranges[window_id]
-                      if window_id < len(window_ranges)
-                      else f"window {window_id}")
+        handles.append(
+            plt.Rectangle(
+                (0, 0),
+                1,
+                1,
+                color=WINDOW_COLORS[window_id % len(WINDOW_COLORS)],
+            )
+        )
+        labels.append(
+            window_ranges[window_id]
+            if window_id < len(window_ranges)
+            else f"window {window_id}"
+        )
     if len(windows) > MAX_LEGEND_WINDOWS:
         labels[-1] += "  (…)"
     handles.append(plt.Rectangle((0, 0), 1, 1, color="0.4", alpha=0.45))
@@ -205,6 +302,7 @@ def timeline_plot(config: ExperimentConfig, path: Path) -> None:
 
 # ---- the logical error rate ------------------------------------------------
 
+
 def ler_groups(rows: list) -> list:
     """(distance, round time, rows sorted by p) for every distance and
     round time that swept more than one physical error rate: the papers'
@@ -214,9 +312,12 @@ def ler_groups(rows: list) -> list:
     groups = []
     for distance in distances:
         for period in periods:
-            group = [row for row in rows
-                     if row["distance"] == distance
-                     and row["round_period_us"] == period]
+            group = [
+                row
+                for row in rows
+                if row["distance"] == distance
+                and row["round_period_us"] == period
+            ]
             probabilities = {row["physical_error_probability"] for row in group}
             if len(probabilities) < 2:
                 continue
@@ -226,7 +327,7 @@ def ler_groups(rows: list) -> list:
 
 
 def decoder_title(config: ExperimentConfig) -> str:
-    """"pymatching decoder (weak)" / "belief matching decoder (strong)".
+    """ "pymatching decoder (weak)" / "belief matching decoder (strong)".
     A numeric card reads as pymatching: the card prices latency but its
     corrections come from the same MWPM path."""
     algorithm = config.active_decoder.kind
@@ -239,41 +340,56 @@ def _power_of_ten_label(value: float) -> str:
     """5e-4 -> $5{\\times}10^{-4}$, 1e-3 -> $10^{-3}$: the y axis's
     notation."""
     exponent = math.floor(math.log10(value))
-    mantissa = value / 10.0 ** exponent
+    mantissa = value / 10.0**exponent
     if math.isclose(mantissa, 1.0):
         return f"$10^{{{exponent}}}$"
     return f"${mantissa:g}{{\\times}}10^{{{exponent}}}$"
 
 
-def ler_plot(rows: list, path: Path,
-             title: str = "Logical error rate") -> None:
+def ler_plot(rows: list, path: Path, title: str = "Logical error rate") -> None:
     """Logical error rate against physical error rate, Wilson 95% bars, one
     line per card and round time that swept more than one p."""
     import matplotlib.pyplot as plt
+
     figure, axis = plt.subplots(figsize=(4.8, 3.6))
     groups = ler_groups(rows)
     plotted_periods = {period for _, period, _ in groups}
     for distance, period, group in groups:
         probabilities = [row["physical_error_probability"] for row in group]
         rates = [row["logical_error_rate"] for row in group]
-        lower = [row["logical_error_rate"] - row["ler_wilson_low"]
-                 for row in group]
-        upper = [row["ler_wilson_high"] - row["logical_error_rate"]
-                 for row in group]
-        label = (f"d={distance}" if len(plotted_periods) == 1
-                 else f"d={distance}, {period:g} µs")
-        axis.errorbar(probabilities, rates, yerr=[lower, upper], fmt="o-",
-                      capsize=3, label=label)
+        lower = [
+            row["logical_error_rate"] - row["ler_wilson_low"] for row in group
+        ]
+        upper = [
+            row["ler_wilson_high"] - row["logical_error_rate"] for row in group
+        ]
+        label = (
+            f"d={distance}"
+            if len(plotted_periods) == 1
+            else f"d={distance}, {period:g} µs"
+        )
+        axis.errorbar(
+            probabilities,
+            rates,
+            yerr=[lower, upper],
+            fmt="o-",
+            capsize=3,
+            label=label,
+        )
     axis.set_xscale("log")
     axis.set_yscale("log")
     # a decades-only log axis labels two of our seven p values; tick
     # every swept p, in the y axis's power-of-ten notation
     swept = sorted({row["physical_error_probability"] for row in rows})
     axis.set_xticks(swept)
-    axis.set_xticklabels([_power_of_ten_label(probability)
-                          for probability in swept], fontsize=8,
-                         rotation=30, ha="right")
+    axis.set_xticklabels(
+        [_power_of_ten_label(probability) for probability in swept],
+        fontsize=8,
+        rotation=30,
+        ha="right",
+    )
     from matplotlib.ticker import NullFormatter
+
     axis.xaxis.set_minor_formatter(NullFormatter())
     axis.set_xlabel("Physical error rate")
     axis.set_ylabel("Logical error rate")
@@ -286,7 +402,7 @@ def ler_plot(rows: list, path: Path,
 
 
 def _csv_tier_label(algorithm_field: str) -> str:
-    """"pymatching (weak)" / "belief matching (strong)" from ler.csv's
+    """ "pymatching (weak)" / "belief matching (strong)" from ler.csv's
     algorithm column. A numeric card reads as pymatching, the same
     ruling as decoder_title."""
     try:
@@ -303,6 +419,7 @@ def _ler_rows_at_probability(run_dir, probability: float) -> list:
     """A run's ler.csv rows at one physical error rate, sorted by
     distance; a run that never swept that p is refused."""
     import csv
+
     with open(Path(run_dir) / "ler.csv") as handle:
         all_rows = list(csv.DictReader(handle))
     selected_rows = []
@@ -316,8 +433,7 @@ def _ler_rows_at_probability(run_dir, probability: float) -> list:
     return selected_rows
 
 
-def _draw_measured_ler_points(axis, rows: list, color: str,
-                              label: str) -> None:
+def _draw_measured_ler_points(axis, rows: list, color: str, label: str) -> None:
     """The failures > 0 rows: a connected line with Wilson 95% bars."""
     distances = []
     rates = []
@@ -329,12 +445,20 @@ def _draw_measured_ler_points(axis, rows: list, color: str,
         rates.append(rate)
         bars_below.append(rate - float(row["ler_wilson_low"]))
         bars_above.append(float(row["ler_wilson_high"]) - rate)
-    axis.errorbar(distances, rates, yerr=[bars_below, bars_above],
-                  fmt="o-", capsize=3, color=color, label=label)
+    axis.errorbar(
+        distances,
+        rates,
+        yerr=[bars_below, bars_above],
+        fmt="o-",
+        capsize=3,
+        color=color,
+        label=label,
+    )
 
 
-def ler_vs_distance_plot(run_dirs: list, probability: float,
-                         path: Path) -> None:
+def ler_vs_distance_plot(
+    run_dirs: list, probability: float, path: Path
+) -> None:
     """Both tiers' logical error rate against code distance at one
     physical error rate, from each run's ler.csv. Measured points carry
     Wilson 95% bars; a zero-failure point cannot sit on a log axis, so
@@ -344,6 +468,7 @@ def ler_vs_distance_plot(run_dirs: list, probability: float,
         <out.png>
     """
     import matplotlib
+
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
@@ -397,7 +522,8 @@ def _shot_rows(run_dir) -> list:
     if not shots_path.exists():
         raise FileNotFoundError(
             f"{run_dir} has no shots.csv; the stage breakdown reads the "
-            f"per-shot stage means a closed-loop run records")
+            f"per-shot stage means a closed-loop run records"
+        )
     with open(shots_path) as handle:
         return list(csv.DictReader(handle))
 
@@ -414,7 +540,8 @@ def _median_stage_us_by_distance(rows: list) -> dict:
     for row in rows:
         distance = int(row["distance"])
         per_stage = samples_by_distance.setdefault(
-            distance, [[] for _ in STAGE_BREAKDOWN_STAGES])
+            distance, [[] for _ in STAGE_BREAKDOWN_STAGES]
+        )
         for stage_index, (column, _) in enumerate(STAGE_BREAKDOWN_STAGES):
             per_stage[stage_index].append(float(row[column]))
     return {
@@ -430,6 +557,7 @@ def stage_breakdown_plot(run_dir, path: Path) -> None:
         python -m experiments.plots stage_breakdown <run_dir> <out.png>
     """
     import matplotlib
+
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
@@ -444,12 +572,20 @@ def stage_breakdown_plot(run_dir, path: Path) -> None:
     bar_positions = range(len(distances))
     stacked_left = [0.0] * len(distances)
     for stage_index, (_, stage_label) in enumerate(STAGE_BREAKDOWN_STAGES):
-        stage_widths = [medians_by_distance[distance][stage_index] / unit_divisor
-                        for distance in distances]
-        axis.barh(bar_positions, stage_widths, left=stacked_left,
-                  height=0.6, label=stage_label)
-        stacked_left = [left + width
-                        for left, width in zip(stacked_left, stage_widths)]
+        stage_widths = [
+            medians_by_distance[distance][stage_index] / unit_divisor
+            for distance in distances
+        ]
+        axis.barh(
+            bar_positions,
+            stage_widths,
+            left=stacked_left,
+            height=0.6,
+            label=stage_label,
+        )
+        stacked_left = [
+            left + width for left, width in zip(stacked_left, stage_widths)
+        ]
     for position, total in zip(bar_positions, stacked_left):
         label = f"{total:.3g}" if total < 100 else f"{total:,.0f}"
         axis.text(total, position, f"  {label}", va="center", fontsize=8)
@@ -464,7 +600,8 @@ def stage_breakdown_plot(run_dir, path: Path) -> None:
     }
     algorithm = rows[0]["algorithm"]
     title = breakdown_titles.get(
-        algorithm, f"Time breakdown: {card_label(algorithm)}")
+        algorithm, f"Time breakdown: {card_label(algorithm)}"
+    )
     axis.set_title(title)
     axis.legend(fontsize=7, ncol=3)
     figure.tight_layout()
@@ -473,6 +610,7 @@ def stage_breakdown_plot(run_dir, path: Path) -> None:
 
 
 # ---- the decode latency ----------------------------------------------------
+
 
 def latency_samples_by_distance(measurements: list) -> dict:
     """distance -> every window's algorithm-stage wall clock in us, pooled
@@ -483,9 +621,13 @@ def latency_samples_by_distance(measurements: list) -> dict:
     pooled = {}
     for measurement in measurements:
         pooled.setdefault(measurement.distance, []).extend(
-            measurement.samples["algorithm"])
-    return {distance: samples for distance, samples in sorted(pooled.items())
-            if samples}
+            measurement.samples["algorithm"]
+        )
+    return {
+        distance: samples
+        for distance, samples in sorted(pooled.items())
+        if samples
+    }
 
 
 def _log_decade_axis(axis, log_values: list) -> None:
@@ -497,42 +639,64 @@ def _log_decade_axis(axis, log_values: list) -> None:
     highest = math.ceil(max(max(values) for values in log_values))
     ticks = list(range(lowest, highest + 1))
     axis.set_yticks(ticks)
-    axis.set_yticklabels([f"{10.0 ** tick:g}" for tick in ticks])
+    axis.set_yticklabels([f"{10.0**tick:g}" for tick in ticks])
 
 
-def _latency_violins(axis, pooled: dict, positions: list, width: float,
-                     color: str, label: str) -> None:
+def _latency_violins(
+    axis, pooled: dict, positions: list, width: float, color: str, label: str
+) -> None:
     """One violin per distance on log10(us) values, median marked."""
-    log_samples = [[math.log10(sample) for sample in pooled[distance]]
-                   for distance in pooled]
-    parts = axis.violinplot(log_samples, positions=positions, widths=width,
-                            showmedians=True, showextrema=False)
+    log_samples = [
+        [math.log10(sample) for sample in pooled[distance]]
+        for distance in pooled
+    ]
+    parts = axis.violinplot(
+        log_samples,
+        positions=positions,
+        widths=width,
+        showmedians=True,
+        showextrema=False,
+    )
     for body in parts["bodies"]:
         body.set_facecolor(color)
         body.set_alpha(0.6)
     parts["cmedians"].set_color(color)
     maxima = [max(samples) for samples in log_samples]
-    axis.plot(positions, maxima, "v", color=color, markersize=4,
-              label=f"{label} (worst window marked)")
+    axis.plot(
+        positions,
+        maxima,
+        "v",
+        color=color,
+        markersize=4,
+        label=f"{label} (worst window marked)",
+    )
 
 
 def _deadline_line(axis, distances: list, round_period_us: float) -> None:
     # the deadline: a new window arrives every d rounds (the code's
     # default commit region), so decode must beat d x round period
-    deadline_log_us = [math.log10(distance * round_period_us)
-                       for distance in distances]
-    axis.plot(distances, deadline_log_us, "--", color="grey",
-              label=f"window generation ({round_period_us:g} µs rounds)")
+    deadline_log_us = [
+        math.log10(distance * round_period_us) for distance in distances
+    ]
+    axis.plot(
+        distances,
+        deadline_log_us,
+        "--",
+        color="grey",
+        label=f"window generation ({round_period_us:g} µs rounds)",
+    )
 
 
-def latency_plot(config: ExperimentConfig, measurements: list,
-                 path: Path) -> None:
+def latency_plot(
+    config: ExperimentConfig, measurements: list, path: Path
+) -> None:
     """Decode wall clock per window against code distance: one violin
     per d (median marked, worst window flagged), microsecond log axis,
     with the window-generation deadline drawn as the throughput
     boundary. The violin/deadline shape follows Helios Fig. 7, Google
     Fig. 4d and SWIPER Fig. 3."""
     import matplotlib.pyplot as plt
+
     pooled = latency_samples_by_distance(measurements)
     distances = list(pooled)
     round_period_us = measurements[0].round_period_us
@@ -542,8 +706,13 @@ def latency_plot(config: ExperimentConfig, measurements: list,
     figure, axis = plt.subplots(figsize=(4.8, 3.6))
     _latency_violins(axis, pooled, distances, 1.4, "C0", algorithm)
     _deadline_line(axis, distances, round_period_us)
-    _log_decade_axis(axis, [[math.log10(sample) for sample in samples]
-                            for samples in pooled.values()])
+    _log_decade_axis(
+        axis,
+        [
+            [math.log10(sample) for sample in samples]
+            for samples in pooled.values()
+        ],
+    )
     axis.set_xticks(distances)
     axis.set_xlabel("Code distance")
     axis.set_ylabel("Decode wall clock per window (µs)")
@@ -564,6 +733,7 @@ def combined_latency_plot(sample_files: list, path: Path) -> None:
     """
     import csv
     import matplotlib
+
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
@@ -577,7 +747,8 @@ def combined_latency_plot(sample_files: list, path: Path) -> None:
         pooled = {}
         for row in rows:
             pooled.setdefault(int(row["distance"]), []).append(
-                float(row["algorithm_us"]))
+                float(row["algorithm_us"])
+            )
         pooled = dict(sorted(pooled.items()))
         distances = sorted(set(distances) | set(pooled))
         round_period_us = float(rows[0]["round_period_us"])
@@ -586,7 +757,8 @@ def combined_latency_plot(sample_files: list, path: Path) -> None:
         _latency_violins(axis, pooled, list(pooled), 1.4, color, algorithm)
         all_log_values.extend(
             [math.log10(sample) for sample in samples]
-            for samples in pooled.values())
+            for samples in pooled.values()
+        )
     _deadline_line(axis, distances, round_period_us)
     _log_decade_axis(axis, all_log_values)
     axis.set_xticks(distances)
@@ -600,12 +772,17 @@ def combined_latency_plot(sample_files: list, path: Path) -> None:
     plt.close(figure)
 
 
-def plots(config: ExperimentConfig, rows: list, report_dir: Path,
-          measurements: list = None) -> None:
+def plots(
+    config: ExperimentConfig,
+    rows: list,
+    report_dir: Path,
+    measurements: list = None,
+) -> None:
     """timeline.png always; ler.png when more than one p was swept;
     latency.png when more than one distance was swept with a wall-clock
     algorithm."""
     import matplotlib
+
     matplotlib.use("Agg")
     timeline_plot(config, report_dir / "timeline.png")
     if len({row["physical_error_probability"] for row in rows}) > 1:
@@ -613,22 +790,26 @@ def plots(config: ExperimentConfig, rows: list, report_dir: Path,
     # a named algorithm charges measured wall clock; a numeric card is a
     # fixed latency, flat in d, so its figure would be a horizontal line
     measured_wall_clock = isinstance(config.active_decoder.kind, str)
-    swept_distances = {measurement.distance
-                       for measurement in measurements or ()}
+    swept_distances = {
+        measurement.distance for measurement in measurements or ()
+    }
     if measured_wall_clock and len(swept_distances) > 1:
         latency_plot(config, measurements, report_dir / "latency.png")
 
 
 def main(argv) -> None:
-    usage = ("usage: python -m experiments.plots "
-             "latency <run_dir> <run_dir> <out.png>\n"
-             "       python -m experiments.plots "
-             "ler_vs_d <run_dir> <run_dir> <p> <out.png>\n"
-             "       python -m experiments.plots "
-             "stage_breakdown <run_dir> <out.png>")
+    usage = (
+        "usage: python -m experiments.plots "
+        "latency <run_dir> <run_dir> <out.png>\n"
+        "       python -m experiments.plots "
+        "ler_vs_d <run_dir> <run_dir> <p> <out.png>\n"
+        "       python -m experiments.plots "
+        "stage_breakdown <run_dir> <out.png>"
+    )
     if len(argv) == 5 and argv[1] == "latency":
-        sample_files = [Path(run_dir) / "latency_samples.csv"
-                        for run_dir in argv[2:4]]
+        sample_files = [
+            Path(run_dir) / "latency_samples.csv" for run_dir in argv[2:4]
+        ]
         combined_latency_plot(sample_files, Path(argv[4]))
         print(argv[4])
     elif len(argv) == 6 and argv[1] == "ler_vs_d":

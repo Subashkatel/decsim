@@ -12,10 +12,16 @@ window is final.
 from typing import Callable, Optional
 
 import decsim.message as message
+import decsim.observe.trace_source as trace_source
 
 
 class OperationResults:
-    """Delivers each operation's and segment's result once it is final."""
+    """Delivers each operation's and segment's result once it is final.
+
+    Trace source: operation_result_delivered(operation_id,
+    logical_observables) at every delivery, and with None when a
+    delivery is withdrawn; the result ledger listens.
+    """
 
     def __init__(
         self,
@@ -32,11 +38,7 @@ class OperationResults:
         self.ledger = ledger
         self.conditional_release = conditional_release
         self.deliveries = _Deliveries(on_workload_complete)
-
-    @property
-    def result_by_operation(self) -> dict:
-        """Every delivered result by operation id."""
-        return self.deliveries.result_by_operation
+        self.operation_result_delivered = trace_source.TraceSource()
 
     # ---- what the committer tells
 
@@ -205,10 +207,7 @@ class OperationResults:
         self.conditional_release.release_waiters(operation)
 
     def _record_result(self, operation_id, logical_observables) -> None:
-        if logical_observables is None:
-            self.deliveries.result_by_operation.pop(operation_id, None)
-            return
-        self.deliveries.result_by_operation[operation_id] = logical_observables
+        self.operation_result_delivered.fire(operation_id, logical_observables)
 
     def _release_segment_if_committed(
         self,
@@ -320,7 +319,6 @@ class _Deliveries:
 
     def __init__(self, on_workload_complete) -> None:
         self.workload_done = _Once(on_workload_complete)
-        self.result_by_operation: dict = {}
         self.finished_operation_ids: set = set()
         self.segment_results_sent: set = set()
         self.committed_round_count_by_stream: dict = {}

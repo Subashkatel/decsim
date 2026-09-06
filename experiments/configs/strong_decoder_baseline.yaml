@@ -83,4 +83,4 @@ idle_policy: separate_decode_jobs
 observation:
   check_windows_with: none
   log_component_io: false
-  trace: off
+  log: off

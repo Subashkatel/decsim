@@ -81,7 +81,7 @@ def _stim_run(*, round_us=1.0, scheme=None, units=1, policy=None):
 
 def _gaps(completed):
     dones = sorted(
-        w.t_done for _, w in completed.window_manager.windows.items()
+        w.t_done for _, w in completed.observation.windows.windows.items()
     )
     return sorted({b - a for a, b in zip(dones, dones[1:])})
 
@@ -98,7 +98,7 @@ def test_parked_decode_starts_at_the_boundary_arrival():
     """The landed input waits parked; the decode begins the tick the last
     boundary lands (predecessor done + dd 0.5)."""
     completed, _ = _stim_run()
-    windows = dict(sorted(completed.window_manager.windows.items()))
+    windows = dict(sorted(completed.observation.windows.windows.items()))
     dones = {k: w.t_done for (_, k), w in windows.items()}
     for (_, k), window in windows.items():
         if k == 0 or window.t_done is None:
@@ -112,7 +112,7 @@ def test_relaxed_stream_parks_only_the_clamped_terminal_window():
     window but the terminal pair's dependent ever waits parked past its
     data-complete plus the transfer."""
     completed, _ = _stim_run(round_us=3.0)
-    windows = dict(sorted(completed.window_manager.windows.items()))
+    windows = dict(sorted(completed.observation.windows.windows.items()))
     late = [
         k
         for (_, k), w in windows.items()
@@ -129,6 +129,6 @@ def test_tan_seams_never_deadlock_the_unit():
     boundaries. It must wait in its slot, not on the unit: every window
     decodes and the answer is right, on a single unit."""
     completed, result = _stim_run(scheme=TanSandwichScheme(), units=1)
-    windows = completed.window_manager.windows.values()
+    windows = completed.observation.windows.windows.values()
     assert all(w.t_done is not None for w in windows)
     assert result.operation_results[0].logical_failure is False

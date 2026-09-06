@@ -19,7 +19,7 @@ def test_weak_only_pipeline_arithmetic(fabric):
     """qc 2 + binary 3 + cwb 4 publishes round r at r+9; wbd 5 + weak 10
     finish the single window; wdo 2 + frame 1 commit the correction."""
     completed = fabric["weak_only_run"](rounds=6)
-    window = completed.window_manager.windows[(1, 0)]
+    window = completed.observation.windows.windows[(1, 0)]
 
     assert window.t_first_round == microseconds_to_ticks(1 + 2 + 3 + 4)          # round 1 published
     assert window.t_data_complete == microseconds_to_ticks(6 + 2 + 3 + 4)        # round 6 published
@@ -35,7 +35,7 @@ def test_weak_only_pipeline_arithmetic(fabric):
 def test_unpriced_cwb_publishes_at_packing(fabric):
     """Without the CWB edge the round is public at packing completion."""
     completed = fabric["weak_only_run"](rounds=6, controller_to_weak_buffer=False)
-    window = completed.window_manager.windows[(1, 0)]
+    window = completed.observation.windows.windows[(1, 0)]
     assert window.t_first_round == microseconds_to_ticks(1 + 2 + 3)
     assert window.t_data_complete == microseconds_to_ticks(6 + 2 + 3)
 
@@ -57,7 +57,7 @@ def test_weak_primary_readiness_is_buffer0_not_sb1(fabric):
     Buffer 0 publication; the room-side landing follows later."""
     completed = fabric["switching_run"](escalation_probability=0.0,
                                         rounds=9, io_trace=True)
-    first_window = completed.window_manager.windows[(1, 0)]
+    first_window = completed.observation.windows.windows[(1, 0)]
     # window (1,0) reads rounds 1..6: complete at 6 + qc 2 + binary 3 + cwb 4
     assert first_window.t_data_complete == microseconds_to_ticks(6 + 2 + 3 + 4)
     buffer0_complete = fabric["log_index"](
@@ -71,7 +71,7 @@ def test_strong_primary_readiness_is_sb1(fabric):
     """Strong-primary readiness waits for the csb landing: round r is
     ready at r + qc 2 + binary 3 + csb 7."""
     completed = fabric["strong_only_run"](rounds=6)
-    window = completed.window_manager.windows[(1, 0)]
+    window = completed.observation.windows.windows[(1, 0)]
     assert window.t_first_round == microseconds_to_ticks(1 + 2 + 3 + 7)
     assert window.t_data_complete == microseconds_to_ticks(6 + 2 + 3 + 7)
     # sbd 6 then the strong decode 30
@@ -89,7 +89,7 @@ def test_strong_primary_rounds_never_enter_the_weak_path(fabric):
     readout-to-decoder FIFO, Das et al. ASPLOS 2022; Google's streaming
     decoder, Nature 2024)."""
     completed = fabric["strong_only_run"](rounds=6, record=True)
-    link_traffic = completed.traffic_ledger.traffic_json_value()
+    link_traffic = completed.observation.traffic.traffic_json_value()
     transfers_by_path = {edge["path"]: edge["counters"]["transfer_count"]
                          for edge in link_traffic["semantic_edges"]}
     assert transfers_by_path["controller_to_weak_buffer"] == 0

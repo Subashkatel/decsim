@@ -388,7 +388,7 @@ def test_ledger_holds_over_randomized_configurations(fabric, seed):
     for event in ledger.events:
         if event.kind == "EMITTED":
             emitted_hi[event.op] = max(emitted_hi.get(event.op, 0), event.round)
-    for window in completed.window_manager.windows.values():
+    for window in completed.observation.windows.windows.values():
         if window.t_done is None:
             continue
         # a sliding window's lookahead range is clamped to the operation's

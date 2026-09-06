@@ -9,6 +9,7 @@ correction of a stream is the sum over its committed windows).
 import types
 
 import decsim.message as message
+import decsim.observe.result_ledger as result_ledger
 import decsim.windows.committed_rounds as committed_rounds
 import decsim.windows.operation_results as operation_results
 
@@ -86,6 +87,10 @@ class _Fixture:
             self.release,
             lambda: self.completions.append("done"),
         )
+        self.delivered = result_ledger.ResultLedger()
+        self.results.operation_result_delivered.connect(
+            self.delivered.operation_result_delivered
+        )
 
     def _windows_of(self, _operation_id) -> list:
         windows = self.windows.values()
@@ -109,7 +114,7 @@ def test_the_result_is_the_xor_over_every_window_delivered_once():
     assert fixture.release.released == []
     fixture.commit((1, 1), (1, 1))
     assert fixture.release.released == [1]
-    assert fixture.results.result_by_operation == {1: (0, 1)}
+    assert fixture.delivered.result_by_operation == {1: (0, 1)}
     assert fixture.store.closed == [1]
     assert fixture.completions == ["done"]
     fixture.results.deliver_if_final(fixture.operation)
@@ -129,7 +134,7 @@ def test_a_window_awaiting_strong_holds_the_operation_result():
     )
     fixture.results.deliver_if_final(fixture.operation)
     assert fixture.release.released == [1]
-    assert fixture.results.result_by_operation == {1: (1, 0)}
+    assert fixture.delivered.result_by_operation == {1: (1, 0)}
 
 
 def test_a_segment_releases_when_the_committed_prefix_covers_it():
@@ -141,7 +146,7 @@ def test_a_segment_releases_when_the_committed_prefix_covers_it():
     fixture.results.bind_required_stream_end(2, 3)
     fixture.commit((1, 0), (1, 1))
     assert fixture.release.released[0] == 2
-    assert fixture.results.result_by_operation[2] == (1, 1)
+    assert fixture.delivered.result_by_operation[2] == (1, 1)
     assert fixture.results.committed_prefix_round_count(1) == 3
 
 
@@ -163,4 +168,4 @@ def test_a_timing_only_window_leaves_no_result():
     fixture.commit((1, 0), None)
     fixture.commit((1, 1), (1, 1))
     assert fixture.release.released == [1]
-    assert fixture.results.result_by_operation == {}
+    assert fixture.delivered.result_by_operation == {}

@@ -273,3 +273,15 @@ observation:                       # what a run records beyond its results
                                    # chrome://tracing
   trace_shots: [0]                 # the shots the trace is written for; a sweep point
                                    # of 2000 shots writes one file, not 2000
+  record_switching_windows: false  # true keeps every decode request and service record
+                                   # for the switching study's per-window rows
+  round_store_occupancy: false     # true samples Buffer 0's held-round count at every
+                                   # change, the occupancy the L5 harness reads
+  backlog_trace: false             # true samples the undecoded-round backlog after
+                                   # every action, the step function the D7 harness reads
+  decoder_utilization: false       # true integrates each decoder unit's busy time,
+                                   # thrust 2's sweep over unit count
+  decoder_memory_occupancy: false  # true samples each unit memory's held-round count,
+                                   # thrust 2's sweep over unit memory
+  data_movement: false             # true counts the copies, references and moves of
+                                   # every round, on the RunResult without the trace

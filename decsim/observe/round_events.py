@@ -34,7 +34,7 @@ class RoundEventRecorder:
         """One transition on the controller's digital-to-QPU path."""
         self.output_events.append(event)
 
-    def round_stored(self, round_key) -> None:
+    def round_stored(self, round_key, _packet) -> None:
         """A round landed in the strong store."""
         operation_id, round_index = round_key
         self.stored_rounds.append((self.engine.now, operation_id, round_index))

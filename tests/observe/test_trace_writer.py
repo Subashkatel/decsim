@@ -30,6 +30,7 @@ SEED = 0
 POINT_LOG_SHA256 = "74c2e7aee37a"
 
 PHASES = ("M", "X", "i", "C", "s", "t", "f")
+_METADATA_NAMES = ("process_name", "thread_name", "thread_sort_index")
 
 
 def _settings(trace_path=None, data_movement=False):
@@ -62,13 +63,16 @@ def traced(tmp_path_factory):
     path = directory / "point1.trace.json"
     machine, result = _run(path, data_movement=True)
     machine.observation.trace_writer.write(str(path))
-    document = json.loads(path.read_text())
+    text = path.read_text()
+    document = json.loads(text)
     return machine, result, document
 
 
 def _log_sha(machine) -> str:
     text = "\n".join(machine.observation.log.lines)
-    return hashlib.sha256(text.encode()).hexdigest()
+    encoded = text.encode()
+    digest = hashlib.sha256(encoded)
+    return digest.hexdigest()
 
 
 def _by_phase(document, phase) -> list:
@@ -85,18 +89,19 @@ def _flow_of(document, flow_id) -> list:
 
 def test_the_trace_moves_no_tick_and_narrates_the_same_log(tmp_path):
     """Rule: the writer is a listener, so the run is the same run."""
+    trace_path = tmp_path / "on.trace.json"
     plain, plain_result = _run()
-    traced, traced_result = _run(tmp_path / "on.trace.json")
+    traced, traced_result = _run(trace_path)
+    plain_sha = _log_sha(plain)
+    plain_frame = plain.pauli_frame.snapshot()
+    traced_frame = traced.pauli_frame.snapshot()
 
-    assert _log_sha(plain) == _log_sha(traced)
-    assert _log_sha(plain).startswith(POINT_LOG_SHA256)
+    assert plain_sha == _log_sha(traced)
+    assert plain_sha.startswith(POINT_LOG_SHA256)
     assert plain.engine.now == traced.engine.now
     assert plain_result.link_traffic == traced_result.link_traffic
     assert plain_result.operation_results == traced_result.operation_results
-    assert (
-        plain.pauli_frame.snapshot().records
-        == traced.pauli_frame.snapshot().records
-    )
+    assert plain_frame.records == traced_frame.records
     assert (
         plain.observation.queue_depth.samples
         == traced.observation.queue_depth.samples
@@ -137,35 +142,13 @@ def test_every_event_carries_the_fields_its_phase_declares(traced):
     """The JSON schema of the trace note's section 2, checked row by row."""
     _machine, _result, document = traced
     tids_with_events = set()
-    named_tids = {}
 
     for row in document:
-        assert row["ph"] in PHASES, row
-        assert row["pid"] == 1
-        assert isinstance(row["tid"], int)
-        if row["ph"] == "M":
-            assert row["name"] in (
-                "process_name",
-                "thread_name",
-                "thread_sort_index",
-            )
-            if row["name"] == "thread_name":
-                named_tids[row["tid"]] = row["args"]["name"]
-            continue
-        assert isinstance(row["ts"], float)
-        assert isinstance(row["args"]["tick"], int)
-        assert row["args"]["tick"] / 1_000_000 == row["ts"]
-        tids_with_events.add(row["tid"])
-        if row["ph"] == "X":
-            assert isinstance(row["dur"], float)
-            assert row["dur"] >= 0
-        if row["ph"] == "i":
-            assert row["s"] == "t"
-        if row["ph"] in ("s", "t", "f"):
-            assert isinstance(row["id"], str)
-        if row["ph"] == "f":
-            assert row["bp"] == "e"
+        _check_row(row)
+        if row["ph"] != "M":
+            tids_with_events.add(row["tid"])
 
+    named_tids = _thread_names(document)
     assert tids_with_events <= set(named_tids)
 
 
@@ -175,8 +158,11 @@ def test_every_flow_event_lies_inside_a_complete_event_on_its_thread(traced):
     spans_by_tid = {}
     for row in _by_phase(document, "X"):
         start = row["args"]["tick"]
-        end = start + int(round(row["dur"] * 1_000_000))
-        spans_by_tid.setdefault(row["tid"], []).append((start, end))
+        microseconds = row["dur"] * 1_000_000
+        duration = round(microseconds)
+        end = start + int(duration)
+        spans = spans_by_tid.setdefault(row["tid"], [])
+        spans.append((start, end))
 
     for row in document:
         if row["ph"] not in ("s", "t", "f"):
@@ -211,14 +197,14 @@ def test_round_ones_first_hops_are_the_notes_worked_example(traced):
     ]
     assert [row["args"]["bits"] for row in moves] == [8, 8]
 
-    residences = [
-        row
-        for row in _by_phase(document, "X")
-        if row["cat"] == "round,residence" and row["args"]["round"] == "1:1"
-    ]
-    (residence,) = residences
+    residence = _one(document, "X", "round 1")
+    assert residence["cat"] == "round,residence"
     assert residence["args"]["tick"] == 1_004_000
     assert residence["dur"] == 5.008
+    # the store holds detection events, four per round at d 3 memory z;
+    # the eight of the note's example are the raw measurement bits the
+    # links carry, which stop at the assembler (round_assembly.py)
+    assert residence["args"]["bits"] == 4
     assert residence["args"]["data_ready"] == 1_008_000
     assert residence["args"]["freed"] == 6_012_000
     assert residence["args"]["capacity"] is None
@@ -318,6 +304,133 @@ def test_the_data_movement_counts_are_the_hop_tables(traced):
     assert by_path["controller intake -> controller assembler"]["rounds"] == 30
     assert by_path["controller assembler -> Buffer 0"]["rounds"] == 30
     assert by_path["Buffer 0 -> unit default#0 memory"]["rounds"] == 54
+
+
+def test_a_windows_flow_joins_its_queue_its_moves_its_unit_and_the_frame(
+    traced,
+):
+    """The second flow of the trace note's section 2, for W0.
+
+    A window's chain is its own, apart from the round flows: it begins
+    where the request joins the ready queue, steps over the input move,
+    the unit's memory and the result move (and over the boundary move
+    out to the next window), and ends where the frame holds the
+    correction.
+    """
+    _machine, _result, document = traced
+    threads = _thread_names(document)
+    flow = _flow_of(document, "window 1:0")
+    lanes = []
+    for row in flow:
+        lanes.append((row["ph"], threads[row["tid"]], row["args"]["tick"]))
+
+    assert lanes == [
+        ("s", "Window planner", 6_008_000),
+        ("t", "weak_buffer_to_weak_decoder", 6_008_000),
+        ("t", "Decoder unit default#0", 6_012_000),
+        ("t", "decoder_to_decoder", 6_104_000),
+        ("t", "weak_decoder_to_frame", 6_104_000),
+        ("f", "Frame", 6_108_000),
+    ]
+    for row in flow:
+        assert row["cat"] == "window"
+        assert row["name"] == "W0"
+
+
+def test_every_window_is_ready_when_its_last_round_is_readable(traced):
+    """One W ready instant per window, at that round's own data_ready.
+
+    The moment is the input gate's: the window's data is complete when
+    the last round it reads is published in the store, which is the tick
+    the store residence records as data_ready for that round.
+    """
+    machine, _result, document = traced
+    ready = []
+    for row in _by_phase(document, "i"):
+        if row["name"].endswith(" ready"):
+            ready.append(row)
+    windows = machine.observation.windows.windows
+
+    assert len(ready) == len(windows)
+    assert len(ready) == 9
+    for row in ready:
+        read_rounds = row["args"]["rounds"]
+        first_and_last = read_rounds.split("..")
+        last_round = first_and_last[1]
+        residence = _one(document, "X", f"round {last_round}")
+        assert row["args"]["tick"] == residence["args"]["data_ready"]
+
+
+def test_the_unit_memory_counter_peaks_at_the_memorys_high_water_mark(traced):
+    """The C track of the unit's memory is the memory's own occupancy."""
+    machine, _result, document = traced
+    (unit,) = machine.decoder_manager.pool.units()
+    name = f"{unit.memory.name} rounds"
+    values = []
+    for row in _by_phase(document, "C"):
+        if row["name"] == name:
+            values.append(row["args"]["rounds"])
+
+    assert values
+    assert max(values) == unit.memory.peak_occupied_rounds
+    assert values[-1] == unit.memory.occupied_rounds
+
+
+def test_the_assembler_workspace_holds_round_one_until_it_is_packed(traced):
+    """The one bounded controller-side structure, as a residence.
+
+    A round enters the packing workspace at its first fragment and
+    leaves when it is packed; the point prices no packing time, so round
+    1 is in and out at 1.004 us. The counter carries the occupancy and
+    the residence carries the bound the yaml sets, unbounded here.
+    """
+    _machine, _result, document = traced
+    residence = _one(document, "X", "assemble round 1")
+
+    assert residence["cat"] == "round,residence"
+    assert residence["args"]["tick"] == 1_004_000
+    assert residence["dur"] == 0.0
+    assert residence["args"]["slot_taken"] == 1_004_000
+    assert residence["args"]["freed"] == 1_004_000
+    assert residence["args"]["freed_reason"] == "packed"
+    assert residence["args"]["capacity"] is None
+    steps = []
+    for row in _by_phase(document, "C"):
+        if row["name"] == "controller assembler rounds":
+            steps.append(row["args"]["rounds"])
+    assert max(steps) == 1
+    assert steps[-1] == 0
+
+
+def _check_row(row) -> None:
+    """One event of the trace against the fields its phase declares."""
+    assert row["ph"] in PHASES, row
+    assert row["pid"] == 1
+    assert isinstance(row["tid"], int)
+    if row["ph"] == "M":
+        assert row["name"] in _METADATA_NAMES
+        return
+    assert isinstance(row["ts"], float)
+    assert isinstance(row["args"]["tick"], int)
+    assert row["args"]["tick"] / 1_000_000 == row["ts"]
+    if row["ph"] == "X":
+        assert isinstance(row["dur"], float)
+        assert row["dur"] >= 0
+    if row["ph"] == "i":
+        assert row["s"] == "t"
+    if row["ph"] in ("s", "t", "f"):
+        assert isinstance(row["id"], str)
+    if row["ph"] == "f":
+        assert row["bp"] == "e"
+
+
+def _thread_names(document) -> dict:
+    """Every named lane of the trace, by its tid."""
+    names = {}
+    for row in document:
+        if row["name"] == "thread_name":
+            names[row["tid"]] = row["args"]["name"]
+    return names
 
 
 def _one(document, phase, name) -> dict:

@@ -11,9 +11,9 @@ never refuses a write, it answers room first. A round's status (its
 packet, its publication tick) lives on its record, gem5's CacheBlk.
 
 The store reports through trace sources (observe/trace_source.py) and
-runs with no listener: round_stored(round_key) when a slot is taken,
-round_published(round_key, tick) when the round's data is ready for the
-windows, round_released(round_key) when the slot frees;
+runs with no listener: round_stored(round_key, packet) when a slot is
+taken, round_published(round_key, tick) when the round's data is ready
+for the windows, round_released(round_key) when the slot frees;
 hold_registered(holder, round_keys), hold_transferred(old_holder,
 new_holder) and hold_released(holder) for the consumers' tokens.
 """
@@ -87,7 +87,7 @@ class RoundStore:
         stored = _StoredRound(packet)
         stored.publication_tick = publication_tick
         self.round_by_key[round_key] = stored
-        self.round_stored.fire(round_key)
+        self.round_stored.fire(round_key, packet)
         if publication_tick is not None:
             self.round_published.fire(round_key, publication_tick)
 

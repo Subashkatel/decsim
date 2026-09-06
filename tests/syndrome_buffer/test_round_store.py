@@ -73,7 +73,7 @@ class RecordingListener:
         self.stored = []
         self.released = []
 
-    def round_stored(self, round_key):
+    def round_stored(self, round_key, _packet):
         self.stored.append(round_key)
 
     def round_released(self, round_key):

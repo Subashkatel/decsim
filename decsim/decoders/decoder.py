@@ -25,6 +25,7 @@ import numpy
 import decsim.config as config
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.message as message
+import decsim.observe.trace_source as trace_source
 
 OnResult = Callable[[Optional[message.DecodeResult]], None]
 
@@ -48,10 +49,15 @@ class DecoderBase(abc.ABC):
     instead: decode_timed runs now and the result is delivered after
     the measured ticks. cancel does nothing, occupancy is latency, and
     the pipeline depth is one: the unit holds compute for the whole
-    decode.
+    decode. stage_recorded is the port's stage source (data_path.md
+    section 5's data-side callback): a row with internal stages replaces
+    it with one of its own and fires a record per stage, and a row
+    without leaves this silent one, so the machine connects the stage
+    listeners to every row by name.
     """
 
     fault_model_requirement = fault_models.NO_FAULT_MODEL_REQUIRED
+    stage_recorded = trace_source.SILENT
 
     @abc.abstractmethod
     def decode(self, job: message.DecodeJob) -> message.DecodeResult:

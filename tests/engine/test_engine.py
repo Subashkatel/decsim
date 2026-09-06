@@ -35,7 +35,7 @@ def record_arrival(ran, arrival_index):
 def test_random_programs_run_in_time_priority_arrival_order():
     rng = random.Random(7)
     for _ in range(200):
-        engine = Engine(verbose=False)
+        engine = Engine()
         request_count = rng.randint(1, 30)
         requests = []
         for _ in range(request_count):
@@ -51,7 +51,7 @@ def test_random_programs_run_in_time_priority_arrival_order():
 
 
 def test_an_action_sees_its_own_due_tick_as_now():
-    engine = Engine(verbose=False)
+    engine = Engine()
     seen = []
     engine.schedule(5, lambda: seen.append(engine.now))
     engine.schedule(2, lambda: seen.append(engine.now))
@@ -61,7 +61,7 @@ def test_an_action_sees_its_own_due_tick_as_now():
 
 
 def test_actions_scheduled_while_running_join_the_same_order():
-    engine = Engine(verbose=False)
+    engine = Engine()
     ran = []
 
     def schedule_two_more():
@@ -83,10 +83,45 @@ def test_actions_scheduled_while_running_join_the_same_order():
 
 
 def test_a_negative_delay_is_refused():
-    engine = Engine(verbose=False)
+    engine = Engine()
     try:
         engine.schedule(-1, lambda: None)
     except ValueError as error:
         assert "past" in str(error)
     else:
         raise AssertionError("a negative delay was accepted")
+
+
+def test_action_done_carries_the_tick_after_every_action():
+    engine = Engine()
+    heard = []
+    engine.action_done.connect(heard.append)
+    engine.schedule(2, lambda: None)
+    engine.schedule(3, lambda: None)
+    engine.run()
+    assert heard == [2, 3]
+
+
+def test_the_engine_runs_the_same_ticks_with_no_listener_at_all():
+    def program(engine, seen):
+        engine.schedule(5, lambda: seen.append(engine.now))
+        engine.schedule(2, lambda: seen.append(engine.now))
+        engine.schedule(2, lambda: engine.log("worker", "ready"))
+
+    bare = Engine()
+    bare_seen = []
+    program(bare, bare_seen)
+    bare.run()
+    heard = Engine()
+    heard_seen = []
+    heard_lines = []
+    heard_ticks = []
+    heard.line.connect(heard_lines.append)
+    heard.action_done.connect(heard_ticks.append)
+    program(heard, heard_seen)
+    heard.run()
+    assert bare_seen == [2, 5]
+    assert heard_seen == [2, 5]
+    assert heard_ticks == [2, 2, 5]
+    assert heard_lines == ["[  0.000 us] worker: ready"]
+    assert bare.now == heard.now

@@ -69,7 +69,7 @@ def _ignore(_job, _result):
 
 
 def test_a_blocked_job_never_displaces_a_startable_one():
-    engine = engine_module.Engine(verbose=False)
+    engine = engine_module.Engine()
     decoder = decoders.PresetLatencyDecoder(4.0)
     router = decoders.CodeRouter(decoder)
     scheduler = schedulers.FifoScheduler()

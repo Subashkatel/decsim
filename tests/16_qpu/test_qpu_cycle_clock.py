@@ -21,7 +21,7 @@ class _Capture:
 
 
 def _qpu():
-    engine = Engine(verbose=False)
+    engine = Engine()
     capture = _Capture()
     capture.engine = engine
     qpu = QPUDevice(engine, TimingOnlyDevice(), CYCLE, readout_receiver=capture,
@@ -118,7 +118,7 @@ def test_a_command_starts_on_the_cycle_boundary_at_or_after_its_arrival():
     cycle = 100
 
     def start_tick(arrival):
-        engine = Engine(verbose=False)
+        engine = Engine()
         qpu = QPUDevice(engine, SilentModel(), cycle,
                         completion_receiver=lambda operation: None,
                         idle_receiver=lambda *_: None)

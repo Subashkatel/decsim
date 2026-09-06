@@ -39,7 +39,7 @@ def test_serial_escalation_timeline_is_exact(fabric):
     completed = fabric["switching_run"](
         escalation_probability=1.0, rounds=9, io_trace=True
     )
-    lines = completed.engine.log_lines
+    lines = completed.observation.log.lines
     assert fabric["log_tick"](
         lines, "START DECODE strong(mem1 W0)"
     ) == microseconds_to_ticks(36)
@@ -119,7 +119,7 @@ def test_double_window_terminal_submits_exactly_once(fabric):
         probability_for=lambda job: 1.0 if job.window_id == 2 else 0.0,
         io_trace=True,
     )
-    lines = completed.engine.log_lines
+    lines = completed.observation.log.lines
     assert (
         sum(
             "terminal data complete -> strong window submitted" in line
@@ -148,7 +148,7 @@ def test_double_window_absorbs_covered_windows(fabric):
     )
     assert any(
         "weak chain skips 2 window(s)" in line
-        for line in completed.engine.log_lines
+        for line in completed.observation.log.lines
     )
     records = completed.pauli_frame.snapshot().records
     assert [(r.window_key, r.tier) for r in records] == [
@@ -168,7 +168,7 @@ def test_double_window_far_boundary_waits_for_the_restart_commit(fabric):
         round_us=4.0,
         io_trace=True,
     )
-    lines = completed.engine.log_lines
+    lines = completed.observation.log.lines
     deferred = fabric["log_index"](
         lines, "strong start deferred until the far-side weak boundary"
     )
@@ -280,7 +280,7 @@ def test_bulk_strong_batches_queued_escalations_into_one_decode(fabric):
         pauli_frame=PauliFrameConfig(commit_microseconds=declared["frame"]),
     )
     completed = fabric["run_machine"](settings, 0)
-    log_lines = completed.engine.log_lines
+    log_lines = completed.observation.log.lines
     assert any("strong-batch x2" in line for line in log_lines)
     records = completed.pauli_frame.snapshot().records
     assert sorted((record.window_key, record.tier) for record in records) == [

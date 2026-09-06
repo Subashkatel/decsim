@@ -161,7 +161,7 @@ def test_result_return_carries_the_same_decision_through_output_and_cq(fabric):
 
 
 def test_controller_output_without_a_link_still_pays_local_processing():
-    engine = Engine(verbose=False)
+    engine = Engine()
     delivered = []
     recorder = RoundEventRecorder(engine)
     output = InstructionOutput(engine, None, None, 17, recorder)

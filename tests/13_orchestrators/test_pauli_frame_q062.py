@@ -210,7 +210,7 @@ def test_runtime_satisfies_the_declared_keyword_only_correction_seam():
 
 def test_frame_owner_is_a_named_seed_root_and_snapshot_is_non_destructive():
     owner = object()
-    roots = machine_module._seed_roots(pauli_frame=owner, metrics=())
+    roots = machine_module._seed_roots(pauli_frame=owner)
     expected_path = (RunSeedPathSegment("field", "pauli_frame"),)
     assert roots == ((expected_path, owner),)
 

@@ -60,7 +60,7 @@ def assembler_with(engine, packed, recorder, **settings_fields):
 
 
 def test_a_two_fragment_round_is_packed_once_after_the_packing_time():
-    engine = engine_module.Engine(verbose=False)
+    engine = engine_module.Engine()
     packed = []
     recorder = round_events.RoundEventRecorder(engine)
     assembler = assembler_with(
@@ -92,7 +92,7 @@ def test_a_two_fragment_round_is_packed_once_after_the_packing_time():
 
 
 def test_a_full_workspace_stops_the_run_naming_the_setting():
-    engine = engine_module.Engine(verbose=False)
+    engine = engine_module.Engine()
     packed = []
     recorder = round_events.NoRoundEvents()
     assembler = assembler_with(
@@ -118,7 +118,7 @@ def test_the_bound_counts_rounds_held_and_on_their_route():
     One round held for store room and one on its route count against
     the bound before any round is in assembly.
     """
-    engine = engine_module.Engine(verbose=False)
+    engine = engine_module.Engine()
     settings = controller_settings.ControllerSettings()
     recorder = round_events.NoRoundEvents()
     full = rounds_in_flight(2, held=1, on_route=1)
@@ -144,7 +144,7 @@ def test_the_bound_counts_rounds_held_and_on_their_route():
 
 
 def test_the_drop_knob_drops_only_the_round_that_found_no_context():
-    engine = engine_module.Engine(verbose=False)
+    engine = engine_module.Engine()
     packed = []
     recorder = round_events.RoundEventRecorder(engine)
     assembler = assembler_with(
@@ -172,7 +172,7 @@ def test_the_drop_knob_drops_only_the_round_that_found_no_context():
 
 
 def test_detection_events_are_formed_once_from_the_merged_bits():
-    engine = engine_module.Engine(verbose=False)
+    engine = engine_module.Engine()
     packed = []
     formed_from = []
 
@@ -206,7 +206,7 @@ def test_detection_events_are_formed_once_from_the_merged_bits():
 
 
 def test_settlement_reports_a_round_still_in_assembly():
-    engine = engine_module.Engine(verbose=False)
+    engine = engine_module.Engine()
     recorder = round_events.NoRoundEvents()
     assembler = assembler_with(engine, [], recorder)
     first = fragment(1, fragment_index=0)

@@ -7,6 +7,7 @@ narrates appears only when the engine's I/O trace is on.
 
 import decsim.engine as engine_module
 import decsim.message as message
+import decsim.observe.log_writers as log_writers
 import decsim.observe.round_events as round_events
 import decsim.syndrome_buffer.round_store as round_store_module
 import decsim.syndrome_buffer.settings as round_store_settings
@@ -25,7 +26,7 @@ def packet(round_index):
 
 
 def test_an_event_carries_the_engine_tick_unless_one_is_given():
-    engine = engine_module.Engine(verbose=False)
+    engine = engine_module.Engine()
     recorder = round_events.RoundEventRecorder(engine)
     engine.schedule(
         40,
@@ -43,7 +44,7 @@ def test_an_event_carries_the_engine_tick_unless_one_is_given():
 
 
 def test_a_dropped_round_is_counted_and_recorded_as_dropped():
-    engine = engine_module.Engine(verbose=False)
+    engine = engine_module.Engine()
     recorder = round_events.RoundEventRecorder(engine)
 
     recorder.round_dropped(1, 2, message.WINDOW_INPUT_ROUTE, patch_id=0)
@@ -54,7 +55,7 @@ def test_a_dropped_round_is_counted_and_recorded_as_dropped():
 
 
 def test_an_output_event_carries_the_payload_itself():
-    engine = engine_module.Engine(verbose=False)
+    engine = engine_module.Engine()
     recorder = round_events.RoundEventRecorder(engine)
     decision = message.Decision(9, releases_operation=False)
 
@@ -70,7 +71,7 @@ def test_an_output_event_carries_the_payload_itself():
 
 
 def test_a_strong_store_landing_is_kept_with_its_tick():
-    engine = engine_module.Engine(verbose=False)
+    engine = engine_module.Engine()
     recorder = round_events.RoundEventRecorder(engine)
     engine.schedule(12, lambda: recorder.round_stored(1, 4))
 
@@ -80,9 +81,13 @@ def test_a_strong_store_landing_is_kept_with_its_tick():
 
 
 def test_the_buffer_0_line_is_narrated_only_on_the_io_trace():
-    silent_engine = engine_module.Engine(verbose=False, io_trace=False)
+    silent_engine = engine_module.Engine()
+    silent_log = log_writers.LogWriter()
+    silent_engine.line.connect(silent_log.write)
     silent = round_events.RoundEventRecorder(silent_engine)
-    narrating_engine = engine_module.Engine(verbose=False, io_trace=True)
+    narrating_engine = engine_module.Engine()
+    narrating_log = log_writers.LogWriter()
+    narrating_engine.io_line.connect(narrating_log.write)
     narrating = round_events.RoundEventRecorder(narrating_engine)
     settings = round_store_settings.RoundStoreSettings()
     store = round_store_module.RoundStore(settings)
@@ -92,8 +97,8 @@ def test_the_buffer_0_line_is_narrated_only_on_the_io_trace():
     silent.weak_store_received(first, store)
     narrating.weak_store_received(first, store)
 
-    assert silent_engine.log_lines == []
-    (line,) = narrating_engine.log_lines
+    assert silent_log.lines == []
+    (line,) = narrating_log.lines
     assert line.endswith(
         "Buffer 0: received round 1 of op 1 from packing; "
         "defects {0}; holds op 1 rounds 1 (1)"

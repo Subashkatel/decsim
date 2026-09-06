@@ -118,7 +118,7 @@ class Run:
         )
         wiring.update(paths)
         settings = link_settings.FabricSettings(profile_name="test", **wiring)
-        self.engine = decsim.engine.Engine(verbose=False)
+        self.engine = decsim.engine.Engine()
         self.ledger = link_traffic.TrafficLedger(settings)
         self.fabric = fabric_module.LinkFabric(
             settings, self.engine, self.ledger

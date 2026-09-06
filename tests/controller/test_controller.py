@@ -39,7 +39,7 @@ def controller_with(engine, links, assembler, recorder, settings=SETTINGS):
 
 
 def test_a_readout_reaches_the_assembler_after_the_crossing_and_the_delay():
-    engine = engine_module.Engine(verbose=False)
+    engine = engine_module.Engine()
     reference = link_profiles.logical_reference_profile()
     links = fabric_module.LinkFabric(reference, engine)
     assembler = RecordingAssembler(engine)
@@ -67,7 +67,7 @@ def test_a_readout_reaches_the_assembler_after_the_crossing_and_the_delay():
 
 
 def test_a_readout_with_no_delay_reaches_the_assembler_at_the_crossing():
-    engine = engine_module.Engine(verbose=False)
+    engine = engine_module.Engine()
     reference = link_profiles.logical_reference_profile()
     links = fabric_module.LinkFabric(reference, engine)
     assembler = RecordingAssembler(engine)

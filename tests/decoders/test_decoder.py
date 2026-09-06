@@ -70,7 +70,7 @@ def _job(**fields) -> message.DecodeJob:
 
 
 def _started(row, job):
-    engine = engine_module.Engine(verbose=False)
+    engine = engine_module.Engine()
     delivered = []
 
     def on_result(result):

@@ -15,6 +15,7 @@ import decsim.controller.instruction_output as instruction_output
 import decsim.controller.operation_issue as operation_issue
 import decsim.engine as engine_module
 import decsim.message as message
+import decsim.observe.log_writers as log_writers
 import decsim.observe.round_events as round_events
 
 BOUNDARY_TICK = 3000
@@ -81,7 +82,9 @@ def ignore_boundary(boundary) -> None:
 
 
 def test_a_preloaded_operation_starts_at_the_next_boundary_and_says_so():
-    engine = engine_module.Engine(verbose=False)
+    engine = engine_module.Engine()
+    log = log_writers.LogWriter()
+    engine.line.connect(log.write)
     qpu = RecordingQpu()
     idle_rounds = RecordingIdleRounds()
     windows = RecordingWindows()
@@ -102,12 +105,12 @@ def test_a_preloaded_operation_starts_at_the_next_boundary_and_says_so():
     assert kinds == ["PRELOADED_COMMAND"]
     assert idle_rounds.ended == [(1, 0)]
     assert windows.prepended == []
-    (line,) = engine.log_lines
+    (line,) = log.lines
     assert line.endswith("Controller: START memory  (Clifford, qubits (0,))")
 
 
 def test_the_idle_rounds_claimed_at_the_issue_are_prepended_for_the_windows():
-    engine = engine_module.Engine(verbose=False)
+    engine = engine_module.Engine()
     qpu = RecordingQpu()
     idle_rounds = RecordingIdleRounds(claimed=4)
     windows = RecordingWindows()
@@ -121,7 +124,7 @@ def test_the_idle_rounds_claimed_at_the_issue_are_prepended_for_the_windows():
 
 
 def test_a_feedback_blocked_operation_pays_the_pulse_cost_before_it_starts():
-    engine = engine_module.Engine(verbose=False)
+    engine = engine_module.Engine()
     qpu = RecordingQpu()
     idle_rounds = RecordingIdleRounds()
     windows = RecordingWindows()
@@ -148,7 +151,7 @@ def test_a_feedback_blocked_operation_pays_the_pulse_cost_before_it_starts():
 
 
 def test_the_last_release_stops_the_qpu():
-    engine = engine_module.Engine(verbose=False)
+    engine = engine_module.Engine()
     qpu = RecordingQpu()
     idle_rounds = RecordingIdleRounds()
     windows = RecordingWindows()

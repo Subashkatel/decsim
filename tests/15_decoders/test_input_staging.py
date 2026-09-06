@@ -195,7 +195,7 @@ def _standalone_pool(units, transfer_us, compute_us, decoder=None):
         RetainedSyndromeFragment,
     )
 
-    engine = Engine(verbose=False)
+    engine = Engine()
     manager = DecoderManager(
         engine,
         router=CodeRouter(decoder or PresetLatencyDecoder(compute_us)),
@@ -274,7 +274,7 @@ def test_a_job_without_input_waits_in_the_queue_for_free_compute():
     from decsim.decoders.schedulers import FifoScheduler
     from decsim.engine import Engine
 
-    engine = Engine(verbose=False)
+    engine = Engine()
     manager = DecoderManager(
         engine,
         router=CodeRouter(PresetLatencyDecoder(4.0)),

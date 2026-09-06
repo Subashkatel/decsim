@@ -187,7 +187,7 @@ def frame_tiers(machine) -> list:
 def log_lines_containing(machine, needle: str) -> list:
     """Every log line that contains the needle."""
     lines = []
-    for line in machine.engine.log_lines:
+    for line in machine.observation.log.lines:
         if needle in line:
             lines.append(line)
     return lines

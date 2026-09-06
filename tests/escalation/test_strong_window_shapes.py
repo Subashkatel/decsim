@@ -175,7 +175,7 @@ def test_the_forward_window_is_submitted_once_at_the_far_boundary_commit():
         round_microseconds=4.0,
     )
     machine.run()
-    lines = machine.engine.log_lines
+    lines = machine.observation.log.lines
     deferred_lines = fabric.log_lines_containing(
         machine, "deferred until the far-side weak boundary"
     )
@@ -269,7 +269,7 @@ def _run_statuses(result) -> list:
 def _log_index(machine, needle: str) -> int:
     lines = fabric.log_lines_containing(machine, needle)
     assert lines, needle
-    return machine.engine.log_lines.index(lines[0])
+    return machine.observation.log.lines.index(lines[0])
 
 
 def _claim(machine, window_index: int):
@@ -326,7 +326,7 @@ def test_the_restart_window_keeps_its_re_read_rounds_across_the_withdrawals():
         "(reads rounds 16-24; crossing faults owned by strong_region)"
     ) in resliced[0]
     withdrawn_restart = _log_index(machine, "WITHDRAW memory W6")
-    assert withdrawn_restart < machine.engine.log_lines.index(resliced[0])
+    assert withdrawn_restart < machine.observation.log.lines.index(resliced[0])
     assert not machine.window_manager.strong_redecode.has_pending()
 
 

@@ -66,7 +66,7 @@ class FakeWeakDecoder(decoder_module.DecoderBase):
 
 
 def test_readouts_reach_the_receiver_in_cycle_order_cycle_ticks_apart():
-    engine = engine_module.Engine(verbose=False)
+    engine = engine_module.Engine()
     receiver = RecordingReceiver(engine)
     device = syndrome_devices.TimingOnlyDevice()
 
@@ -117,7 +117,7 @@ def test_a_new_decoder_is_one_class_and_one_table_row():
     assert result.terminal_status == "complete"
     assert type(machine.active_decoder.decoder) is FakeWeakDecoder
     decode_lines = [
-        line for line in machine.engine.log_lines if "decode" in line
+        line for line in machine.observation.log.lines if "decode" in line
     ]
     assert decode_lines
 
@@ -256,7 +256,7 @@ def test_a_load_only_job_on_a_measured_unit_holds_it_for_zero_algorithm_ticks():
     idle_ticks = [r.end_ticks - r.start_ticks for r in load_only]
     assert idle_ticks == [0]
     assert all(r.end_ticks > r.start_ticks for r in windows)
-    idle_lines = [line for line in machine.engine.log_lines if "mem(" in line]
+    idle_lines = [line for line in machine.observation.log.lines if "mem(" in line]
     assert any("algorithm mem(" in line for line in idle_lines)
 
 
@@ -280,7 +280,7 @@ def test_the_cluster_gap_decoder_runs_as_a_python_built_tier():
     assert result.terminal_status == "complete"
     observables = result.operation_results[0].logical_observables
     assert observables == (0,)
-    assert len(machine.engine.log_lines) == 19
+    assert len(machine.observation.log.lines) == 19
 
 
 TIER_ROWS = (
@@ -370,6 +370,6 @@ def test_a_new_round_store_is_one_class_and_one_table_row():
         del machine_module.ROUND_STORES["counting"]
     assert result.terminal_status == "complete"
     assert type(machine.round_store) is CountingRoundStore
-    fired = [line for line in machine.engine.log_lines if "fires round" in line]
+    fired = [line for line in machine.observation.log.lines if "fires round" in line]
     assert machine.round_store.stored_count == len(fired)
     assert fired

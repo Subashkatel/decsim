@@ -78,7 +78,7 @@ def _run(decoder, engine, job):
 
 
 def test_stages_before_algorithm_after_in_order_with_ticks():
-    engine = Engine(verbose=False)
+    engine = Engine()
     inner = _RecordingInner(engine)
     decoder = StagedDecoder(inner, _timing())
 
@@ -104,7 +104,7 @@ def test_stages_before_algorithm_after_in_order_with_ticks():
 
 
 def test_the_result_is_produced_when_the_algorithm_time_ends():
-    engine = Engine(verbose=False)
+    engine = Engine()
     inner = _RecordingInner(engine, latency_us=5.0)
     decoder = StagedDecoder(inner, _timing())
 
@@ -122,7 +122,7 @@ def test_algorithm_time_is_the_wrapped_decoder_latency_only():
 
 
 def test_hardware_stages_are_data_with_free_names():
-    engine = Engine(verbose=False)
+    engine = Engine()
     timing = _timing(
         before=(
             DecoderStage("syndrome_ingest", cycles_per_round=2),
@@ -143,7 +143,7 @@ def test_hardware_stages_are_data_with_free_names():
 
 
 def test_cancelled_job_still_holds_the_unit_but_skips_the_algorithm():
-    engine = Engine(verbose=False)
+    engine = Engine()
     inner = _RecordingInner(engine)
     decoder = StagedDecoder(inner, _timing())
     job = _job()
@@ -156,7 +156,7 @@ def test_cancelled_job_still_holds_the_unit_but_skips_the_algorithm():
 
 
 def test_result_reaches_the_callback():
-    engine = Engine(verbose=False)
+    engine = Engine()
     decoder = StagedDecoder(_RecordingInner(engine), _timing())
     job = _job()
     seen = _run(decoder, engine, job)
@@ -257,7 +257,7 @@ def test_end_to_end_stim_memory_run_through_the_timed_decoder():
     assert all(
         a_end <= b_start for (_, a_end), (b_start, _) in zip(spans, spans[1:])
     )
-    assert any(ALGORITHM_STAGE in line for line in staged.engine.log_lines)
+    assert any(ALGORITHM_STAGE in line for line in staged.observation.log.lines)
 
 
 def test_measured_wall_clock_algorithm_holds_the_unit_for_the_real_call():
@@ -328,7 +328,7 @@ def test_measured_wall_clock_algorithm_holds_the_unit_for_the_real_call():
 
 
 def test_cancel_stops_the_remaining_stages_and_never_calls_on_done():
-    engine = Engine(verbose=False)
+    engine = Engine()
     inner = _RecordingInner(engine, latency_us=5.0)
     decoder = StagedDecoder(inner, _timing())
     job = _job()

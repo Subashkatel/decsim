@@ -49,7 +49,7 @@ def _primary():
 
 
 def _joins(enqueue):
-    engine = engine_module.Engine(verbose=False)
+    engine = engine_module.Engine()
     return gap_joins_module.GapJoins(engine, None, enqueue, is_enabled=True)
 
 

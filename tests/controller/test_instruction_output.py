@@ -19,7 +19,7 @@ PULSE_TICKS = 17
 
 
 def test_a_release_is_delivered_when_it_reaches_the_controller():
-    engine = engine_module.Engine(verbose=False)
+    engine = engine_module.Engine()
     reference = link_profiles.logical_reference_profile()
     link = fabric_module.LinkFabric(reference, engine)
     recorder = round_events.RoundEventRecorder(engine)
@@ -46,7 +46,7 @@ def test_a_release_is_delivered_when_it_reaches_the_controller():
 
 
 def test_a_result_return_pays_the_pulse_cost_and_the_crossing_to_the_qpu():
-    engine = engine_module.Engine(verbose=False)
+    engine = engine_module.Engine()
     reference = link_profiles.logical_reference_profile()
     link = fabric_module.LinkFabric(reference, engine)
     recorder = round_events.RoundEventRecorder(engine)

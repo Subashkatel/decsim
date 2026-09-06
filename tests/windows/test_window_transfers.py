@@ -24,7 +24,7 @@ class _RecordingLink:
 
 
 def test_a_window_send_carries_its_round_range_and_request_key():
-    engine = engine_module.Engine(verbose=False)
+    engine = engine_module.Engine()
     link = _RecordingLink()
     transfers = window_transfers.WindowTransfers(engine, link)
     operation = message.Operation(1, "memory", (0,), patches=(3, 2))
@@ -59,7 +59,7 @@ def test_a_window_send_carries_its_round_range_and_request_key():
 
 
 def test_a_job_send_returns_the_delay_the_link_expects():
-    engine = engine_module.Engine(verbose=False)
+    engine = engine_module.Engine()
     link = _RecordingLink()
     transfers = window_transfers.WindowTransfers(engine, link)
     window = message.Window(
@@ -90,7 +90,7 @@ def test_a_result_is_one_bit_per_logical_observable():
 
 
 def test_an_input_that_rides_no_link_lands_now_or_after_the_delay():
-    engine = engine_module.Engine(verbose=False)
+    engine = engine_module.Engine()
     profile = link_profiles.logical_reference_profile()
     link = fabric.LinkFabric(profile, engine)
     transfers = window_transfers.WindowTransfers(engine, link)

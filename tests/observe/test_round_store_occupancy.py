@@ -33,7 +33,7 @@ def packet(round_index: int) -> message.SyndromeRoundPacket:
 def run_random_trace(seed: int):
     """Stores at random ticks, each released a random time later."""
     generator = random.Random(seed)
-    engine = engine_module.Engine(verbose=False)
+    engine = engine_module.Engine()
     listener = round_store_occupancy.RoundStoreOccupancy(engine)
     settings = round_store_settings.RoundStoreSettings()
     store = round_store_module.RoundStore(settings, listener=listener)
@@ -64,7 +64,7 @@ def test_the_occupancy_integral_equals_the_residence_sum_over_random_traces():
 
 
 def test_the_peak_is_the_most_rounds_stored_at_once():
-    engine = engine_module.Engine(verbose=False)
+    engine = engine_module.Engine()
     listener = round_store_occupancy.RoundStoreOccupancy(engine)
     settings = round_store_settings.RoundStoreSettings()
     store = round_store_module.RoundStore(settings, listener=listener)
@@ -82,7 +82,7 @@ def test_the_peak_is_the_most_rounds_stored_at_once():
 
 
 def test_the_time_average_is_the_integral_over_the_span():
-    engine = engine_module.Engine(verbose=False)
+    engine = engine_module.Engine()
     listener = round_store_occupancy.RoundStoreOccupancy(engine)
     settings = round_store_settings.RoundStoreSettings()
     store = round_store_module.RoundStore(settings, listener=listener)

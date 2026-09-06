@@ -50,7 +50,7 @@ def _manager(engine, units, scheduler=None):
 
 def _start_ticks(arrivals, units, scheduler=None):
     """The tick each input-less job's decode began, in arrival order."""
-    engine = engine_module.Engine(verbose=False)
+    engine = engine_module.Engine()
     manager = _manager(engine, units, scheduler)
     starts = {}
     original_begin = manager.service.begin
@@ -138,7 +138,7 @@ def test_poisson_arrivals_on_one_unit_wait_pollaczek_khinchine_property():
 def test_a_job_waits_in_scheduler_order():
     # one unit: a takes it at 0; b (3 rounds) and c (2 rounds) wait, and
     # the shorter c is served first though b was admitted earlier
-    engine = engine_module.Engine(verbose=False)
+    engine = engine_module.Engine()
     scheduler = ShortestJobFirst()
     manager = _manager(engine, 1, scheduler)
     starts = {}
@@ -157,7 +157,7 @@ def test_a_job_waits_in_scheduler_order():
 
 
 def test_the_depth_is_sampled_at_every_change():
-    engine = engine_module.Engine(verbose=False)
+    engine = engine_module.Engine()
     manager = _manager(engine, 1)
     _submit(manager, "a")
     _submit(manager, "b")

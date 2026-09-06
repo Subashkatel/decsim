@@ -95,7 +95,7 @@ def closed_form(arrivals, holds, capacity):
 
 def run_trace(arrivals, holds, capacity):
     """The trace through the store: enter ticks, in round order."""
-    engine = engine_module.Engine(verbose=False)
+    engine = engine_module.Engine()
     held = held_rounds()
     the_store = store(rounds=capacity, on_slot_freed=held.retry)
     enters = {}

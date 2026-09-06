@@ -29,7 +29,7 @@ class _Policy:
 
 
 def _outcomes(verdict, cancelled):
-    engine = engine_module.Engine(verbose=False)
+    engine = engine_module.Engine()
     requests = strong_requests_module.StrongRequests()
     records = decode_records.DecodeRecordLedger(is_enabled=False)
     policy = _Policy(verdict)

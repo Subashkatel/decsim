@@ -1,26 +1,16 @@
 """Frozen views of a run's state.
 
-The sampled metrics (observe/metrics.py) take a view after every action
-and the switching study reads one at the end of the run. Each builder
-receives the owners it reads and writes nothing back; the flight
+The decode backlog sampler (observe/metrics.py) takes a view after every
+action and the switching study reads one at the end of the run. Each
+builder receives the owners it reads and writes nothing back; the flight
 recorder that used to live here is observe/flight_recorder.py.
 """
 
 import dataclasses
 
-import decsim.decoders.decoder_memory as decoder_memory
 import decsim.message as message
 import decsim.observe.decode_records as decode_records
 import decsim.observe.window_ledger as window_ledger_module
-
-
-@dataclasses.dataclass(frozen=True)
-class UtilizationView:
-    """Decoder-unit occupancy across all pools at one instant."""
-
-    busy_units: int
-    total_units: int
-    per_pool: tuple  # ((pool_name, busy, total), ...)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -38,35 +28,12 @@ class BacklogView:
 
 
 @dataclasses.dataclass(frozen=True)
-class DecoderMemoryView:
-    """Every decoder unit's input memory at one instant, one row per unit."""
-
-    per_unit: tuple[decoder_memory.DecoderMemorySnapshot, ...]
-
-
-@dataclasses.dataclass(frozen=True)
 class SwitchingRecordsView:
     """The switching study's three tables at the end of the run."""
 
     windows: tuple[window_ledger_module.FinalWindowRow, ...]
     requests: tuple[decode_records.TerminalRequestRecord, ...]
     services: tuple[decode_records.TerminalServiceRecord, ...]
-
-
-def utilization_view(decoder_manager) -> UtilizationView:
-    """Snapshot decoder occupancy from the pool's units."""
-    pool = decoder_manager.pool
-    per_pool = []
-    busy = 0
-    total = 0
-    for name in sorted(pool.units_by_pool):
-        pool_total = len(pool.units_by_pool[name])
-        free_count = pool.free_count(name)
-        pool_busy = pool_total - free_count
-        per_pool.append((name, pool_busy, pool_total))
-        busy += pool_busy
-        total += pool_total
-    return UtilizationView(busy, total, tuple(per_pool))
 
 
 def backlog_view(
@@ -109,21 +76,6 @@ def backlog_view(
     )
 
 
-def decoder_memory_view(decoder_manager) -> DecoderMemoryView:
-    """Snapshot every unit's input memory, pool by pool.
-
-    Units are listed by name so the view's order does not depend on the
-    order the pools were built in.
-    """
-    units = decoder_manager.pool.units()
-    by_name = sorted(units, key=_unit_name)
-    rows = []
-    for unit in by_name:
-        snapshot = unit.memory.snapshot()
-        rows.append(snapshot)
-    return DecoderMemoryView(per_unit=tuple(rows))
-
-
 def switching_records_view(
     windows: window_ledger_module.WindowLedger,
     records: decode_records.DecodeRecordLedger,
@@ -137,7 +89,3 @@ def switching_records_view(
 
 def _first_identity_order(item) -> tuple:
     return message.stable_identity_order_key(item[0])
-
-
-def _unit_name(unit) -> tuple:
-    return (unit.pool, unit.index)

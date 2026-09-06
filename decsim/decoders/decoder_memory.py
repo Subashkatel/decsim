@@ -140,8 +140,9 @@ class DecoderMemory:
     """The input memory of one decoder unit.
 
     Trace sources: deposited(job, decoder_input) when a job's rounds land
-    here, taken(job) when they are freed; a residence in this memory runs
-    between the two (data_path.md hop 6).
+    here, taken(job, decoder_input) when they are freed; a residence in
+    this memory runs between the two (data_path.md hop 6), and both
+    carry the rounds so a listener counts what is held.
     """
 
     def __init__(
@@ -196,7 +197,7 @@ class DecoderMemory:
         key = _memory_key(job)
         taken = self._inputs.pop(key, None)
         if taken is not None:
-            self.taken.fire(job)
+            self.taken.fire(job, taken)
 
     def snapshot(self) -> DecoderMemorySnapshot:
         """The memory's counters as one immutable record."""

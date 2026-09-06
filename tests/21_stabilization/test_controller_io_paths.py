@@ -53,7 +53,7 @@ def test_results_and_decisions_cross_links_at_their_own_size(fabric):
     processor, Fruitwala et al. 2404.15260). The reference card carries no
     system-wide aggregate on these paths."""
     completed = _feedback_run(fabric, controller_output_us=0.0)
-    transfers = completed.traffic_ledger.traffic_json_value()["transfers"]
+    transfers = completed.observation.traffic.traffic_json_value()["transfers"]
     payload_by_path = {}
     for transfer in transfers:
         payload_by_path.setdefault(transfer["path"], set()).add(

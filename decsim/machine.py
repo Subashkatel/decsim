@@ -30,6 +30,7 @@ facade and the strong redecode built after them.
 
 import copy
 import dataclasses
+import functools
 from collections.abc import Mapping
 from typing import Any, Optional
 
@@ -75,6 +76,7 @@ import decsim.links.settings as link_settings
 import decsim.message as message
 import decsim.observe.command_events as command_events_module
 import decsim.observe.controller_counters as controller_counters_module
+import decsim.observe.data_movement as data_movement_module
 import decsim.observe.decode_records as decode_records_module
 import decsim.observe.flight_recorder as flight_recorder_module
 import decsim.observe.link_traffic as link_traffic
@@ -83,9 +85,11 @@ import decsim.observe.metrics as metrics
 import decsim.observe.observation as observation_module
 import decsim.observe.queue_depth as queue_depth_module
 import decsim.observe.round_events as round_events_module
+import decsim.observe.result_ledger as result_ledger_module
 import decsim.observe.round_store_occupancy as round_store_occupancy_module
 import decsim.observe.runtime_stamps as runtime_stamps_module
 import decsim.observe.settings as observe_settings
+import decsim.observe.trace_writer as trace_writer_module
 import decsim.observe.window_ledger as window_ledger_module
 import decsim.pauli_frame.conditional_release as conditional_release_module
 import decsim.pauli_frame.pauli_frame as pauli_frame_module
@@ -353,6 +357,9 @@ class RunResult:
     fully_done_ticks: int
     operation_results: tuple
     link_traffic: dict
+    # the copies, references and moves of the data path; None unless the
+    # observation section asked for them
+    data_movement: Optional[dict]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -369,7 +376,6 @@ class Machine:
     engine: engine_module.Engine
     observation: observation_module.Observation
     links: fabric.LinkFabric
-    traffic_ledger: link_traffic.TrafficLedger
     conditional_release: conditional_release_module.ConditionalRelease
     round_store: round_store_module.RoundStore
     round_store_occupancy: Optional[
@@ -440,10 +446,13 @@ class Machine:
         # Every listener is built before the component it hears, so a
         # source fired while the program loads is already heard.
         window_ledger = window_ledger_module.WindowLedger()
+        result_ledger = result_ledger_module.ResultLedger()
         runtime_stamps = runtime_stamps_module.RuntimeStamps()
         queue_depth = queue_depth_module.QueueDepthLog()
         controller_counters = controller_counters_module.ControllerCounters()
         command_events = command_events_module.CommandEvents()
+        trace_writer = _trace_writer(observation, engine, settings)
+        data_movement = _data_movement(observation)
         decode_records = _decode_records(observation)
         decoder_manager = _decoder_manager(
             engine, settings, escalation_policy, pool, links
@@ -456,6 +465,7 @@ class Machine:
             escalation_policy,
             plan,
             window_ledger=window_ledger,
+            result_ledger=result_ledger,
             links=links,
             conditional_release=conditional_release,
             fault_model_requirement_for=pool.router.fault_model_requirement_for,
@@ -582,6 +592,22 @@ class Machine:
         conditional_release.connect(
             instruction_output, execution_runtime.on_decision
         )
+        _connect_data_path(
+            trace_writer,
+            data_movement,
+            links=links,
+            qpu=qpu,
+            controller=controller,
+            assembler=assembler,
+            round_writer=round_writer,
+            round_store=round_store,
+            strong_round_store=strong_round_store,
+            strong_round_writer=strong_round_writer,
+            decoder_manager=decoder_manager,
+            window_manager=window_manager,
+            pauli_frame=pauli_frame,
+            pool=pool,
+        )
         _load_program(
             plan,
             conditional_release,
@@ -597,6 +623,8 @@ class Machine:
             window_manager,
             decoder_manager,
             window_ledger=window_ledger,
+            result_ledger=result_ledger,
+            traffic_ledger=traffic_ledger,
             decode_records=decode_records,
             runtime_stamps=runtime_stamps,
             queue_depth=queue_depth,
@@ -605,13 +633,14 @@ class Machine:
             round_events=round_events,
             pauli_frame=pauli_frame,
             execution_runtime=execution_runtime,
+            trace_writer=trace_writer,
+            data_movement=data_movement,
         )
         return cls(
             settings=settings,
             engine=engine,
             observation=listeners,
             links=links,
-            traffic_ledger=traffic_ledger,
             conditional_release=conditional_release,
             round_store=round_store,
             round_store_occupancy=round_store_occupancy,
@@ -1287,6 +1316,7 @@ def _window_manager(
     plan: _Plan,
     *,
     window_ledger: window_ledger_module.WindowLedger,
+    result_ledger: result_ledger_module.ResultLedger,
     links,
     conditional_release,
     fault_model_requirement_for,
@@ -1358,6 +1388,9 @@ def _window_manager(
         results,
     )
     committer.window_committed.connect(window_ledger.window_committed)
+    results.operation_result_delivered.connect(
+        result_ledger.operation_result_delivered
+    )
     requester = decode_requests.DecodeRequester(
         tracker, retention, builder, decode_queue, escalation_policy, committer
     )
@@ -1477,6 +1510,208 @@ def _decoder_manager(
         decoder_memory=pool.decoder_memory,
         escalation_policy=escalation_policy,
     )
+
+
+def _trace_writer(
+    observation: observe_settings.ObservationSettings,
+    engine: engine_module.Engine,
+    settings: MachineSettings,
+) -> Optional[trace_writer_module.TraceWriter]:
+    """The Chrome trace writer, only when the section names a path."""
+    if not observation.writes_trace:
+        return None
+    name = f"decsim {settings.workload.kind} {settings.workload.code_task}"
+    return trace_writer_module.TraceWriter(engine, name)
+
+
+def _data_movement(
+    observation: observe_settings.ObservationSettings,
+) -> Optional[data_movement_module.DataMovement]:
+    """The copy, reference and move counters, only when the section asks."""
+    if not observation.data_movement and not observation.writes_trace:
+        return None
+    return data_movement_module.DataMovement()
+
+
+def _connect_data_path(
+    trace_writer: Optional[trace_writer_module.TraceWriter],
+    data_movement: Optional[data_movement_module.DataMovement],
+    *,
+    links,
+    qpu,
+    controller,
+    assembler,
+    round_writer,
+    round_store,
+    strong_round_store,
+    strong_round_writer,
+    decoder_manager,
+    window_manager,
+    pauli_frame,
+    pool: "_DecoderPool",
+) -> None:
+    """Hand the trace and the counters every source of the data path.
+
+    The hops and residences of docs/rewrite/notes/data_path.md sections
+    3 and 4, each from the component where it happens; a run with
+    neither listener connects nothing and fires into empty lists.
+    """
+    if data_movement is not None:
+        qpu.round_emitted.connect(data_movement.round_emitted)
+        links.transfer_delivered.connect(data_movement.transfer_delivered)
+        _connect_store_counts(data_movement, round_store)
+        if strong_round_store is not None:
+            _connect_store_counts(data_movement, strong_round_store)
+        for source in _copy_sources(
+            controller,
+            assembler,
+            round_writer,
+            strong_round_writer,
+            decoder_manager,
+            window_manager,
+        ):
+            source.connect(data_movement.copy_made)
+    if trace_writer is None:
+        return
+    qpu.round_emitted.connect(trace_writer.round_emitted)
+    qpu.command_event.connect(trace_writer.command_event)
+    links.transfer_delivered.connect(trace_writer.transfer_delivered)
+    for source in _copy_sources(
+        controller,
+        assembler,
+        round_writer,
+        strong_round_writer,
+        decoder_manager,
+        window_manager,
+    ):
+        source.connect(trace_writer.copy_made)
+    _connect_store_trace(trace_writer, round_store, "Buffer 0")
+    if strong_round_store is not None:
+        _connect_store_trace(trace_writer, strong_round_store, "Buffer 1")
+    _connect_decoder_trace(trace_writer, decoder_manager, pool)
+    _connect_window_trace(trace_writer, window_manager, decoder_manager)
+    if pauli_frame is not None:
+        pauli_frame.correction_accepted.connect(
+            trace_writer.correction_accepted
+        )
+        pauli_frame.correction_committed.connect(
+            trace_writer.correction_committed
+        )
+
+
+def _connect_store_counts(
+    data_movement: data_movement_module.DataMovement, store
+) -> None:
+    """One store's references: registered, transferred and released."""
+    store.hold_registered.connect(data_movement.hold_registered)
+    store.hold_transferred.connect(data_movement.hold_transferred)
+    store.hold_released.connect(data_movement.hold_released)
+
+
+def _copy_sources(
+    controller,
+    assembler,
+    round_writer,
+    strong_round_writer,
+    decoder_manager,
+    window_manager,
+) -> list:
+    """Every copy_made source of the data path, in hop order."""
+    sources = [
+        controller.copy_made,
+        assembler.copy_made,
+        round_writer.copy_made,
+    ]
+    if strong_round_writer is not None:
+        sources.append(strong_round_writer.copy_made)
+    sources.append(decoder_manager.service.staging.copy_made)
+    sources.append(window_manager.requester.builder.copy_made)
+    return sources
+
+
+def _connect_store_trace(
+    trace_writer: trace_writer_module.TraceWriter, store, store_name: str
+) -> None:
+    """One store's residences, its occupancy and its holds."""
+    capacity = store.settings.rounds
+    stored = functools.partial(trace_writer.round_stored, store_name, capacity)
+    store.round_stored.connect(stored)
+    published = functools.partial(trace_writer.round_published, store_name)
+    store.round_published.connect(published)
+    released = functools.partial(trace_writer.round_released, store_name)
+    store.round_released.connect(released)
+    registered = functools.partial(trace_writer.hold_registered, store_name)
+    store.hold_registered.connect(registered)
+    transferred = functools.partial(trace_writer.hold_transferred, store_name)
+    store.hold_transferred.connect(transferred)
+    hold_released = functools.partial(trace_writer.hold_released, store_name)
+    store.hold_released.connect(hold_released)
+
+
+def _connect_decoder_trace(
+    trace_writer: trace_writer_module.TraceWriter,
+    decoder_manager,
+    pool: "_DecoderPool",
+) -> None:
+    """The ready queue, the units' services, their memories and stages."""
+    queue = decoder_manager.queue
+    queue.job_enqueued.connect(trace_writer.job_enqueued)
+    queue.depth_changed.connect(trace_writer.depth_changed)
+    service = decoder_manager.service
+    service.job_dispatched.connect(trace_writer.job_dispatched)
+    service.input_landed.connect(trace_writer.input_landed)
+    service.job_started.connect(trace_writer.job_started)
+    service.job_finished.connect(trace_writer.job_finished)
+    for unit in decoder_manager.pool.units():
+        taken = functools.partial(trace_writer.memory_taken, unit.name)
+        unit.memory.taken.connect(taken)
+    for decoder in _staged_decoders(pool):
+        decoder.stage_recorded.connect(trace_writer.stage_recorded)
+
+
+def _staged_decoders(pool: "_DecoderPool") -> list:
+    """Every routed decoder that reports its internal stages.
+
+    The router's seed children are the tiers and the per-code rows; a
+    row that wraps another (the confidence and check wrappers) reports
+    its own children the same way, so the walk finds a staged decoder
+    wherever it sits.
+    """
+    found = []
+    seen = set()
+    pending = [pool.router]
+    while pending:
+        decoder = pending.pop()
+        if decoder is None or id(decoder) in seen:
+            continue
+        identity = id(decoder)
+        seen.add(identity)
+        if hasattr(decoder, "stage_recorded"):
+            found.append(decoder)
+        children = getattr(decoder, "run_seed_children", None)
+        if children is None:
+            continue
+        for child in children():
+            pending.append(child.child)
+    return found
+
+
+def _connect_window_trace(
+    trace_writer: trace_writer_module.TraceWriter,
+    window_manager,
+    decoder_manager,
+) -> None:
+    """The windows a stream lays, their verdicts, commits and absorptions."""
+    window_manager.planner.window_planned.connect(trace_writer.window_planned)
+    window_manager.requester.committer.window_committed.connect(
+        trace_writer.window_committed
+    )
+    decoder_manager.outcomes.verdict_given.connect(trace_writer.verdict_given)
+    strong_redecode = window_manager.strong_redecode
+    shape = getattr(strong_redecode, "shape", None)
+    absorbed = getattr(shape, "window_absorbed", None)
+    if absorbed is not None:
+        absorbed.connect(trace_writer.window_absorbed)
 
 
 def _decode_records(
@@ -1630,7 +1865,7 @@ def _connect_log(
     engine.line.connect(log.write)
     if observation.log_component_io:
         engine.io_line.connect(log.write)
-    if observation.prints_trace:
+    if observation.prints_log:
         printer = log_writers.ConsolePrinter()
         engine.line.connect(printer.write)
         if observation.log_component_io:
@@ -1646,6 +1881,8 @@ def _observation(
     decoder_manager,
     *,
     window_ledger: window_ledger_module.WindowLedger,
+    result_ledger: result_ledger_module.ResultLedger,
+    traffic_ledger: link_traffic.TrafficLedger,
     decode_records: Optional[decode_records_module.DecodeRecordLedger],
     runtime_stamps: runtime_stamps_module.RuntimeStamps,
     queue_depth: queue_depth_module.QueueDepthLog,
@@ -1654,6 +1891,8 @@ def _observation(
     round_events,
     pauli_frame,
     execution_runtime,
+    trace_writer: Optional[trace_writer_module.TraceWriter],
+    data_movement: Optional[data_movement_module.DataMovement],
 ) -> observation_module.Observation:
     """Every listener of the run: the connected ones, and the sampled ones.
 
@@ -1685,7 +1924,11 @@ def _observation(
     return observation_module.Observation(
         log=log,
         windows=window_ledger,
+        results=result_ledger,
+        traffic=traffic_ledger,
         flight_recorder=flight_recorder,
+        trace_writer=trace_writer,
+        data_movement=data_movement,
         decode_records=decode_records,
         runtime_stamps=runtime_stamps,
         queue_depth=queue_depth,
@@ -1763,7 +2006,8 @@ def _capture_result(machine: Machine) -> RunResult:
         operation = operation_by_id[operation_id]
         row = _operation_result(machine, operation, truth_for)
         rows.append(row)
-    link_traffic = machine.traffic_ledger.traffic_json_value()
+    link_traffic = machine.observation.traffic.traffic_json_value()
+    data_movement = _data_movement_value(machine.observation)
     return RunResult(
         terminal_status="complete",
         event_queue_empty=True,
@@ -1773,7 +2017,18 @@ def _capture_result(machine: Machine) -> RunResult:
         fully_done_ticks=engine.now,
         operation_results=tuple(rows),
         link_traffic=link_traffic,
+        data_movement=data_movement,
     )
+
+
+def _data_movement_value(
+    observation: observation_module.Observation,
+) -> Optional[dict]:
+    """The data-path counters the result carries, when they were built."""
+    counters = observation.data_movement
+    if counters is None:
+        return None
+    return counters.json_value()
 
 
 def _operation_result(
@@ -1781,7 +2036,7 @@ def _operation_result(
 ) -> LogicalOperationResult:
     """One operation's predicted observables beside the sampled truth."""
     operation_id = operation.id
-    logical = machine.window_manager.result_by_operation.get(operation_id)
+    logical = machine.observation.results.observables_for(operation_id)
     bits = None
     status = "no_logical_output"
     if logical is not None:

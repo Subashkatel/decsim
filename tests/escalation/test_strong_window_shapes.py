@@ -99,7 +99,7 @@ GATE_SWITCHING_CARD = {
     "observation": {
         "check_windows_with": "none",
         "log_component_io": True,
-        "trace": "off",
+        "log": "off",
     },
 }
 

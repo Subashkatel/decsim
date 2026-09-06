@@ -595,7 +595,7 @@ def test_memory_filled_trailing_buffer_is_flagged():
     ]
     assert len(filled_lines) >= 1
     # the log marks the approximation; the release itself stands
-    for window in completed.window_manager.windows.values():
+    for window in completed.observation.windows.windows.values():
         assert window.t_data_complete is not None
         assert window.t_done is not None
 

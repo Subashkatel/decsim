@@ -259,8 +259,17 @@ observation:                       # what a run records beyond its results
   log_component_io: false          # true adds component I/O lines to the trace:
                                    # what each store and unit received, holds
                                    # (rounds, residents), and emitted
-  trace: off                       # off | print | file | both. The engine narrator:
+  log: off                         # off | print | file | both. The engine narrator:
                                    # print shows it live on screen; file writes each
                                    # shot's full line record to
-                                   # results/<name>/trace/p<p>_algo<card>_round<T>us_seed<n>.log;
+                                   # results/<name>/log/p<p>_algo<card>_round<T>us_seed<n>.log;
                                    # both does both
+  trace: off                       # off | chrome | <path>. The Chrome trace of the
+                                   # data path: where every round and window sat, for
+                                   # how long, and whether each hop copied the bits or
+                                   # referenced them. chrome writes one file per traced
+                                   # shot next to the results; a path writes there
+                                   # instead (.gz compresses). Opens in Perfetto or
+                                   # chrome://tracing
+  trace_shots: [0]                 # the shots the trace is written for; a sweep point
+                                   # of 2000 shots writes one file, not 2000

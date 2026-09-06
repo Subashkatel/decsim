@@ -43,7 +43,7 @@ def _weak_run():
 
 def test_a_committed_window_publishes_the_request_that_decoded_it():
     machine = _weak_run()
-    windows = machine.window_manager.windows
+    windows = machine.observation.windows.windows
     assert windows
     for key, window in windows.items():
         assert window.committed
@@ -55,7 +55,7 @@ def test_a_committed_window_publishes_the_request_that_decoded_it():
 
 def test_no_window_of_a_weak_run_is_absorbed():
     machine = _weak_run()
-    for window in machine.window_manager.windows.values():
+    for window in machine.observation.windows.windows.values():
         assert window.is_absorbed is False
 
 

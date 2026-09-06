@@ -93,22 +93,25 @@ class ShotMeasurement:
 def measure_shot(shot: collect.Shot, run_dir=None) -> ShotMeasurement:
     """Read one collected shot's numbers off its machine and result.
 
-    run_dir receives the trace file when trace: file|both is on; None
-    writes nothing beyond the returned measurement.
+    run_dir receives the log file when log: file|both is on and the
+    Chrome trace when trace names one and the shot is in trace_shots;
+    None writes nothing beyond the returned measurement.
     """
     settings = shot.task.settings
     physical_error_probability = settings.workload.physical_error_probability
     distance = settings.qpu.distance
     round_period_us = settings.qpu.round_period_microseconds
-    if run_dir is not None and settings.observation.writes_trace:
-        label = _shot_label(
-            settings,
-            physical_error_probability,
-            distance,
-            round_period_us,
-            shot.seed,
-        )
-        _write_trace(shot.machine, run_dir, label)
+    label = _shot_label(
+        settings,
+        physical_error_probability,
+        distance,
+        round_period_us,
+        shot.seed,
+    )
+    if run_dir is not None and settings.observation.writes_log:
+        _write_log(shot.machine, run_dir, label)
+    if run_dir is not None:
+        _write_trace(shot, run_dir, label)
     return _measurement(
         settings,
         shot.machine,
@@ -317,7 +320,7 @@ def collect_samples(
     samples["cwb_per_round"] = cwb_delays_us(transfers)
     input_path = INPUT_LINK[escalation_kind]
     output_path = OUTPUT_LINK[escalation_kind]
-    window_items = machine.window_manager.windows.items()
+    window_items = machine.observation.windows.windows.items()
     all_windows = sorted(window_items)
     unit = machine.active_decoder
     for (op_id, window_id), window in all_windows:
@@ -403,7 +406,7 @@ def _stage_microseconds(unit, op_id, window_id) -> dict:
 def _decoded_span_microseconds(machine: machine_module.Machine) -> float:
     """First round into any window to the last frame commit, in us."""
     first_round_ticks = []
-    for window in machine.window_manager.windows.values():
+    for window in machine.observation.windows.windows.values():
         if window.t_first_round is not None:
             first_round_ticks.append(window.t_first_round)
     first_round_tick = min(first_round_ticks)
@@ -462,14 +465,38 @@ def _shot_label(
     )
 
 
-def _write_trace(machine: machine_module.Machine, run_dir, label: str) -> None:
+def _write_trace(shot, run_dir, label: str) -> None:
+    """The shot's Chrome trace, when the section asked and named it.
+
+    trace: chrome names the file after the point, under trace/; a path
+    of its own is written where it says. Only the shots trace_shots
+    names are written, so a sweep point of two thousand shots writes
+    one file (trace_and_viewer.md section 10, ruling 1).
+    """
+    observation = shot.task.settings.observation
+    if not observation.writes_trace:
+        return
+    if shot.seed not in observation.trace_shots:
+        return
+    writer = shot.machine.observation.trace_writer
+    path = observation.trace_path
+    if path is None:
+        trace_dir = run_dir / "trace"
+        trace_dir.mkdir(parents=True, exist_ok=True)
+        path = trace_dir / f"{label}.trace.json"
+    writer.write(str(path))
+
+
+def _write_log(machine: machine_module.Machine, run_dir, label: str) -> None:
     """One file per shot with the engine narrator's full line record.
 
-    The same lines trace: print shows live.
+    The same lines log: print shows live. The Chrome trace of the data
+    path is a separate file under trace/, written for the shots
+    observation.trace_shots names.
     """
-    trace_dir = run_dir / "trace"
-    trace_dir.mkdir(parents=True, exist_ok=True)
+    log_dir = run_dir / "log"
+    log_dir.mkdir(parents=True, exist_ok=True)
     text = "\n".join(machine.observation.log.lines)
-    trace_path = trace_dir / f"{label}.log"
+    log_path = log_dir / f"{label}.log"
     contents = text + "\n"
-    trace_path.write_text(contents)
+    log_path.write_text(contents)

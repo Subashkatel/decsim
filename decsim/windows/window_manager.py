@@ -121,11 +121,6 @@ class WindowManager:
         return self.results.ledger
 
     @property
-    def result_by_operation(self) -> dict:
-        """Every delivered result by operation id."""
-        return self.results.result_by_operation
-
-    @property
     def windows(self) -> dict:
         """Every window by key; the planner's table."""
         return self.planner.windows_by_key

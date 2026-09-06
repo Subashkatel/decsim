@@ -68,7 +68,7 @@ def request_text(request_key) -> str:
     if request_key is None:
         return ""
     return (
-        f"{request_key.op_id}:{request_key.window_id}:"
+        f"{request_key.operation_id}:{request_key.window_id}:"
         f"{request_key.tier.value}:{request_key.run_sequence}"
     )
 
@@ -91,6 +91,7 @@ class TraceWriter:
         # lane: the stage record names the window, not the unit
         self._unit_thread_by_window: dict[tuple, str] = {}
         self._counter_value: dict[str, int] = {}
+        self._unnamed_threads = 0
 
     # ---- the file
 
@@ -102,11 +103,39 @@ class TraceWriter:
             json.dump(document, handle)
 
     def document(self) -> list:
-        """The metadata events, then every event, in one list."""
-        rows = [self._process_name_event()]
-        for thread, tid in sorted(self._tid_by_thread.items(), key=_by_tid):
-            rows.append(_thread_name_event(tid, thread))
+        """The metadata events, then every event, in one list.
+
+        A residence still open when the file is written ends at the
+        clock's tick with that reason, so every X the reader sees has a
+        length; the writer keeps it open, so a later call sees it again
+        with the longer one.
+        """
+        process = self._process_name_event()
+        rows = [process]
+        threads = self._tid_by_thread.items()
+        for thread, tid in sorted(threads, key=_by_tid):
+            named = _thread_name_event(tid, thread)
+            rows.append(named)
+            sorted_event = _thread_sort_event(tid)
+            rows.append(sorted_event)
         rows.extend(self.events)
+        open_rows = self._still_open()
+        rows.extend(open_rows)
+        return rows
+
+    def _still_open(self) -> list:
+        """One X per residence the run never ended, closed at now."""
+        rows = []
+        for (thread, _key), open_row in self._open_residence.items():
+            args = dict(open_row["args"])
+            args["freed_reason"] = "end of run"
+            tid = self._tid(thread)
+            start = open_row["start"]
+            duration = self.engine.now - start
+            row = _complete_event(
+                tid, open_row["name"], open_row["cat"], start, duration, args
+            )
+            rows.append(row)
         return rows
 
     # ---- the QPU and the controller
@@ -114,38 +143,29 @@ class TraceWriter:
     def round_emitted(self, readout: message.QPUReadout) -> None:
         """One readout leaves the QPU."""
         round_key = (readout.operation_id, readout.round_index)
-        self._instant(
-            "QPU",
-            f"emitted round {readout.round_index}",
-            "round",
-            {"round": round_text(round_key), "bits": readout.size_bits},
-        )
+        args = {"round": round_text(round_key), "bits": readout.size_bits}
+        name = f"emitted round {readout.round_index}"
+        self._instant("QPU", name, "round", args)
 
     def copy_made(self, key, bits, source_name: str, target_name: str) -> None:
         """Bits duplicated into a structure the receiver owns."""
         thread = _copy_thread(target_name)
-        self._instant(
-            thread,
-            f"{target_name} copy",
-            "copy",
-            {
-                "key": _key_text(key),
-                "bits": bits,
-                "from": source_name,
-                "to": target_name,
-                "transfer": "copy",
-            },
-        )
+        args = {
+            "key": _key_text(key),
+            "bits": bits,
+            "from": source_name,
+            "to": target_name,
+            "transfer": "copy",
+        }
+        name = f"{target_name} copy"
+        self._instant(thread, name, "copy", args)
 
     def command_event(self, event) -> None:
         """A command arrived at the QPU or started on a boundary."""
-        self._instant(
-            "QPU",
-            f"command {event.kind.lower()}",
-            "command",
-            {"operation": event.command.operation.id},
-            tick=event.tick,
-        )
+        kind = event.kind.lower()
+        name = f"command {kind}"
+        args = {"operation": event.command.operation.id}
+        self._instant("QPU", name, "command", args, tick=event.tick)
 
     # ---- the links
 
@@ -163,35 +183,40 @@ class TraceWriter:
             "operation": attribution.operation_id,
         }
         if attribution.window_id is not None:
-            args["window"] = window_text(
-                (attribution.operation_id, attribution.window_id)
-            )
+            window_key = (attribution.operation_id, attribution.window_id)
+            args["window"] = window_text(window_key)
         if attribution.first_round is not None:
-            args["rounds"] = f"{attribution.first_round}..{attribution.last_round}"
+            first = attribution.first_round
+            last = attribution.last_round
+            args["rounds"] = f"{first}..{last}"
         name = _move_name(attribution)
-        self._complete(
-            thread,
-            name,
-            "link",
-            transfer.send_ticks,
-            transfer.delivery_ticks - transfer.send_ticks,
-            args,
-        )
+        if attribution.window_id is None:
+            category = "round,link"
+        else:
+            category = "window,link"
+        start = transfer.send_ticks
+        duration = transfer.delivery_ticks - start
+        self._complete(thread, name, category, start, duration, args)
         self._flow_over_move(thread, attribution, transfer)
 
     # ---- the stores
 
-    def round_stored(self, store_name: str, round_key) -> None:
+    def round_stored(self, store_name: str, capacity, round_key) -> None:
         """A round takes a slot in the store."""
+        args = {
+            "round": round_text(round_key),
+            "transfer": "copy",
+            "capacity": capacity,
+            "slot_taken": self.engine.now,
+        }
+        _operation_id, round_index = round_key
+        name = f"round {round_index}"
         self._begin_residence(
-            store_name,
-            round_key,
-            f"round {round_key[1]}",
-            "round,residence",
-            {"round": round_text(round_key), "transfer": "copy"},
+            store_name, round_key, name, "round,residence", args
         )
         self._step_flow(store_name, round_key)
-        self._count(store_name, f"{store_name} rounds", 1)
+        counter = f"{store_name} rounds"
+        self._count(store_name, counter, 1)
 
     def round_published(self, store_name: str, round_key, tick: int) -> None:
         """The round's bits are readable in the store."""
@@ -202,148 +227,131 @@ class TraceWriter:
 
     def round_released(self, store_name: str, round_key) -> None:
         """The round's last holder let go; the slot is free."""
-        self._end_residence(store_name, round_key, {"freed": self.engine.now})
-        self._count(store_name, f"{store_name} rounds", -1)
+        closing = {
+            "freed": self.engine.now,
+            "freed_reason": "last hold released",
+        }
+        self._end_residence(store_name, round_key, closing)
+        counter = f"{store_name} rounds"
+        self._count(store_name, counter, -1)
 
     def hold_registered(self, store_name: str, holder, round_keys) -> None:
         """One consumer token keeps the listed rounds alive."""
-        self._instant(
-            store_name,
-            "hold registered",
-            "hold",
-            {
-                "holder": _holder_text(holder),
-                "rounds": _rounds_text(round_keys),
-                "transfer": "reference",
-            },
-        )
+        args = {
+            "holder": _holder_text(holder),
+            "rounds": _rounds_text(round_keys),
+            "transfer": "reference",
+        }
+        self._instant(store_name, "hold registered", "hold", args)
 
     def hold_transferred(self, store_name: str, old_holder, new_holder) -> None:
         """A live hold moves to a new token, freeing nothing."""
-        self._instant(
-            store_name,
-            "hold transferred",
-            "hold",
-            {
-                "holder": _holder_text(old_holder),
-                "to_holder": _holder_text(new_holder),
-                "transfer": "reference",
-            },
-        )
+        args = {
+            "holder": _holder_text(old_holder),
+            "to_holder": _holder_text(new_holder),
+            "transfer": "reference",
+        }
+        self._instant(store_name, "hold transferred", "hold", args)
 
     def hold_released(self, store_name: str, holder) -> None:
         """A hold ends; rounds with no other holder are freed next."""
-        self._instant(
-            store_name,
-            "hold released",
-            "hold",
-            {"holder": _holder_text(holder)},
-        )
+        args = {"holder": _holder_text(holder)}
+        self._instant(store_name, "hold released", "hold", args)
 
     # ---- the window side
 
     def window_planned(self, window: message.Window) -> None:
         """A stream laid one more window."""
-        self._instant(
-            "Window planner",
-            f"W{window.k} planned",
-            "window",
-            {
-                "window": window_text(window.key),
-                "commit": f"{window.commit_lo}..{window.commit_hi}",
-            },
-        )
+        args = {
+            "window": window_text(window.key),
+            "commit": f"{window.commit_lo}..{window.commit_hi}",
+        }
+        name = f"W{window.k} planned"
+        self._instant("Window planner", name, "window", args)
 
     def job_enqueued(self, job: message.DecodeJob) -> None:
         """A window's decode request joins its ready queue."""
+        window_key = (job.op_id, job.window_id)
+        args = {
+            "window": window_text(window_key),
+            "request": request_text(job.request_key),
+        }
+        name = f"W{job.window_id} queued"
         self._begin_residence(
-            "Window planner",
-            job.request_key,
-            f"W{job.window_id} queued",
-            "window,queue",
-            {
-                "window": window_text((job.op_id, job.window_id)),
-                "request": request_text(job.request_key),
-            },
+            "Window planner", job.request_key, name, "window,queue", args
         )
 
     def depth_changed(self, tick: int, depth: int) -> None:
         """The jobs waiting over every pool changed."""
-        self._counter(
-            "Window planner", "ready queue depth", {"jobs": depth}, tick
-        )
+        values = {"jobs": depth}
+        self._counter("Window planner", "ready queue depth", values, tick)
 
     def verdict_given(self, window_key, request_key, verdict) -> None:
         """The policy answered one weak result."""
-        self._instant(
-            "Window planner",
-            "verdict",
-            "window",
-            {
-                "window": window_text(window_key),
-                "request": request_text(request_key),
-                "verdict": verdict.value,
-            },
-        )
+        args = {
+            "window": window_text(window_key),
+            "request": request_text(request_key),
+            "verdict": _verdict_text(verdict),
+        }
+        self._instant("Window planner", "verdict", "window", args)
 
     def window_committed(self, window: message.Window, contribution) -> None:
         """A window committed under the contribution that owns its rounds."""
-        self._instant(
-            "Window planner",
-            f"W{window.k} committed",
-            "window",
-            {
-                "window": window_text(window.key),
-                "owner": window_text(contribution.owner_key),
-                "commit": f"{contribution.commit_lo}..{contribution.commit_hi}",
-                "ownership": contribution.ownership_kind,
-            },
-        )
+        commit_lo = contribution.commit_lo
+        commit_hi = contribution.commit_hi
+        args = {
+            "window": window_text(window.key),
+            "owner": window_text(contribution.owner_key),
+            "commit": f"{commit_lo}..{commit_hi}",
+            "ownership": contribution.ownership_kind,
+        }
+        name = f"W{window.k} committed"
+        self._instant("Window planner", name, "window", args)
 
     def window_absorbed(self, key, owner_key) -> None:
         """A strong window covers the window; the weak chain skips it."""
-        self._instant(
-            "Window planner",
-            "window absorbed",
-            "window",
-            {"window": window_text(key), "into": window_text(owner_key)},
-        )
+        args = {
+            "window": window_text(key),
+            "into": window_text(owner_key),
+        }
+        self._instant("Window planner", "window absorbed", "window", args)
 
     # ---- the decoder units
 
     def job_dispatched(self, job: message.DecodeJob, unit) -> None:
         """The job left the ready queue for a unit."""
-        self._end_residence(
-            "Window planner", job.request_key, {"unit": unit.name}
-        )
+        closing = {"unit": unit.name}
+        self._end_residence("Window planner", job.request_key, closing)
 
     def input_landed(self, job: message.DecodeJob, unit) -> None:
         """The job's input is in the unit's own memory."""
+        thread = _unit_thread(unit.name)
+        window_key = (job.op_id, job.window_id)
+        args = {
+            "window": window_text(window_key),
+            "request": request_text(job.request_key),
+            "bits": _landed_bits(job),
+            "transfer": "copy",
+        }
+        name = f"W{job.window_id} input in memory"
         self._begin_residence(
-            _unit_thread(unit.name),
-            job.request_key,
-            f"W{job.window_id} input in memory",
-            "window,residence",
-            {
-                "window": window_text((job.op_id, job.window_id)),
-                "request": request_text(job.request_key),
-                "bits": job.payload_bits(),
-                "transfer": "copy",
-            },
+            thread, job.request_key, name, "window,residence", args
         )
-        self._end_flow(_unit_thread(unit.name), job)
+        self._end_flow(thread, job)
 
     def job_started(self, job: message.DecodeJob, unit) -> None:
         """The unit began this job's physical decode."""
         thread = _unit_thread(unit.name)
-        self._unit_thread_by_window[(job.op_id, job.window_id)] = thread
+        window_key = (job.op_id, job.window_id)
+        self._unit_thread_by_window[window_key] = thread
+        args = {
+            "request": request_text(job.request_key),
+            "service": _service_text(job.service_key),
+        }
         key = ("service", job.request_key)
         self._open_service[(thread, key)] = {
             "start": self.engine.now,
-            "args": {
-                "request": request_text(job.request_key),
-                "service": str(job.service_key),
-            },
+            "args": args,
         }
 
     def job_finished(self, job: message.DecodeJob, unit) -> None:
@@ -353,14 +361,11 @@ class TraceWriter:
         open_row = self._open_service.pop((thread, key), None)
         if open_row is None:
             return
-        self._complete(
-            thread,
-            f"W{job.window_id} service",
-            "window,service",
-            open_row["start"],
-            self.engine.now - open_row["start"],
-            open_row["args"],
-        )
+        start = open_row["start"]
+        duration = self.engine.now - start
+        name = f"W{job.window_id} service"
+        args = open_row["args"]
+        self._complete(thread, name, "window,service", start, duration, args)
 
     def stage_recorded(self, record) -> None:
         """One stage of one job on the lane of the unit that started it."""
@@ -368,61 +373,47 @@ class TraceWriter:
         thread = self._unit_thread_by_window.get(window_key)
         if thread is None:
             return
-        self._complete(
-            thread,
-            record.stage,
-            "stage",
-            record.start_ticks,
-            record.end_ticks - record.start_ticks,
-            {
-                "window": window_text((record.op_id, record.window_id)),
-                "cycles": record.cycles,
-            },
-        )
+        args = {
+            "window": window_text(window_key),
+            "cycles": record.cycles,
+        }
+        start = record.start_ticks
+        duration = record.end_ticks - start
+        self._complete(thread, record.stage, "stage", start, duration, args)
 
     def memory_taken(self, unit_name: str, job: message.DecodeJob) -> None:
         """The unit's memory freed the job's rounds."""
         thread = _unit_thread(unit_name)
-        self._end_residence(
-            thread, job.request_key, {"freed": self.engine.now}
-        )
+        closing = {"freed": self.engine.now, "freed_reason": "decode done"}
+        self._end_residence(thread, job.request_key, closing)
 
     # ---- the frame
 
     def correction_accepted(self, record) -> None:
         """The frame took one window's correction."""
-        self._begin_residence(
-            "Frame",
-            (record.window_key, record.run_sequence),
-            f"{window_text(record.window_key)} correction",
-            "window,residence",
-            {
-                "window": window_text(record.window_key),
-                "tier": record.tier,
-                "run_sequence": record.run_sequence,
-                "accepted": record.accepted_ticks,
-                "transfer": "copy",
-            },
-        )
+        window = window_text(record.window_key)
+        args = {
+            "window": window,
+            "tier": record.tier,
+            "run_sequence": record.run_sequence,
+            "accepted": record.accepted_ticks,
+            "transfer": "copy",
+        }
+        key = (record.window_key, record.run_sequence)
+        name = f"{window} correction"
+        self._begin_residence("Frame", key, name, "window,residence", args)
 
     def correction_committed(self, record) -> None:
         """The frame's write for one window has landed."""
-        self._instant(
-            "Frame",
-            f"{window_text(record.window_key)} committed",
-            "window",
-            {
-                "window": window_text(record.window_key),
-                "tier": record.tier,
-                "observables": list(record.logical_observables),
-            },
-            tick=record.committed_ticks,
-        )
-
-    def close_open_residences(self) -> None:
-        """End every residence still open at the end of the run."""
-        for (thread, key) in list(self._open_residence):
-            self._end_residence(thread, key, {"freed_reason": "end of run"})
+        window = window_text(record.window_key)
+        args = {
+            "window": window,
+            "tier": record.tier,
+            "observables": list(record.logical_observables),
+        }
+        name = f"{window} committed"
+        tick = record.committed_ticks
+        self._instant("Frame", name, "window", args, tick=tick)
 
     # ---- private
 
@@ -436,17 +427,24 @@ class TraceWriter:
         }
 
     def _tid(self, thread: str) -> int:
+        """The thread's lane: its rank in THREAD_ORDER, or after them all."""
         known = self._tid_by_thread.get(thread)
         if known is not None:
             return known
-        allocated = len(self._tid_by_thread) + 1
+        if thread in THREAD_ORDER:
+            allocated = THREAD_ORDER.index(thread) + 1
+        else:
+            allocated = len(THREAD_ORDER) + 1 + self._unnamed_threads
+            self._unnamed_threads += 1
         self._tid_by_thread[thread] = allocated
         return allocated
 
     def _instant(
         self, thread: str, name: str, category: str, args: dict, tick=None
     ) -> None:
-        exact = self.engine.now if tick is None else tick
+        exact = tick
+        if tick is None:
+            exact = self.engine.now
         row = {
             "ph": "i",
             "s": "t",
@@ -468,21 +466,11 @@ class TraceWriter:
         duration: int,
         args: dict,
     ) -> None:
-        row = {
-            "ph": "X",
-            "name": name,
-            "cat": category,
-            "ts": _microseconds(start),
-            "dur": _microseconds(duration),
-            "pid": PROCESS_ID,
-            "tid": self._tid(thread),
-            "args": dict(args, tick=start),
-        }
+        tid = self._tid(thread)
+        row = _complete_event(tid, name, category, start, duration, args)
         self.events.append(row)
 
-    def _counter(
-        self, thread: str, name: str, values: dict, tick: int
-    ) -> None:
+    def _counter(self, thread: str, name: str, values: dict, tick: int) -> None:
         row = {
             "ph": "C",
             "name": name,
@@ -512,23 +500,30 @@ class TraceWriter:
         open_row = self._open_residence.pop((thread, key), None)
         if open_row is None:
             return
-        args = dict(open_row["args"], **closing)
-        self._complete(
-            thread,
-            open_row["name"],
-            open_row["cat"],
-            open_row["start"],
-            self.engine.now - open_row["start"],
-            args,
-        )
+        args = dict(open_row["args"])
+        args.update(closing)
+        start = open_row["start"]
+        duration = self.engine.now - start
+        name = open_row["name"]
+        category = open_row["cat"]
+        self._complete(thread, name, category, start, duration, args)
 
     def _flow_over_move(self, thread, attribution, transfer) -> None:
-        """Start or step the flow of every round the move carries."""
+        """Start or step the flow of every round the move carries.
+
+        A window's move steps the flows of the rounds it reads and never
+        starts one: a round's flow begins at its own hop out of the QPU
+        and ends when its bits land in a unit's memory.
+        """
+        carries_window = attribution.window_id is not None
         for round_key in _rounds_of(attribution):
-            if round_key in self._flowing_rounds:
+            is_flowing = round_key in self._flowing_rounds
+            if not is_flowing and carries_window:
+                continue
+            phase = "s"
+            if is_flowing:
                 phase = "t"
             else:
-                phase = "s"
                 self._flowing_rounds.add(round_key)
             self._flow(phase, thread, round_key, transfer.send_ticks)
 
@@ -560,6 +555,27 @@ class TraceWriter:
         self.events.append(row)
 
 
+def _complete_event(
+    tid: int,
+    name: str,
+    category: str,
+    start: int,
+    duration: int,
+    args: dict,
+) -> dict:
+    """One X: a residence or a service, written with its length."""
+    return {
+        "ph": "X",
+        "name": name,
+        "cat": category,
+        "ts": _microseconds(start),
+        "dur": _microseconds(duration),
+        "pid": PROCESS_ID,
+        "tid": tid,
+        "args": dict(args, tick=start),
+    }
+
+
 def _microseconds(ticks: int) -> float:
     return ticks / config.TICKS_PER_MICROSECOND
 
@@ -578,8 +594,19 @@ def _thread_name_event(tid: int, thread: str) -> dict:
     }
 
 
+def _thread_sort_event(tid: int) -> dict:
+    """The lane order a viewer draws: the tid is already the rank."""
+    return {
+        "ph": "M",
+        "name": "thread_sort_index",
+        "pid": PROCESS_ID,
+        "tid": tid,
+        "args": {"sort_index": tid},
+    }
+
+
 def _open_for(path: str):
-    """gzip when the path says so, a plain file otherwise."""
+    """A gzip file when the path says so, a plain one otherwise."""
     if path.endswith(".gz"):
         import gzip
 
@@ -591,13 +618,18 @@ def _copy_thread(target_name: str) -> str:
     """The thread a copy into this structure belongs on."""
     if target_name.startswith("Buffer"):
         return target_name
-    if target_name == "controller intake":
-        return "Controller"
-    if target_name == "controller assembler":
+    if target_name in ("controller intake", "controller assembler"):
         return "Controller"
     if target_name == "masked view":
         return "Window planner"
-    return _unit_thread(target_name)
+    unit_name = _unit_of_memory(target_name)
+    return _unit_thread(unit_name)
+
+
+def _unit_of_memory(memory_name: str) -> str:
+    """`unit default#0 memory` names the unit `default#0`."""
+    without_prefix = memory_name.removeprefix("unit ")
+    return without_prefix.removesuffix(" memory")
 
 
 def _unit_thread(unit_name: str) -> str:
@@ -613,7 +645,20 @@ def _key_text(key) -> str:
 
 
 def _holder_text(holder) -> str:
-    return type(holder).__name__
+    """The hold token as the args name it: its kind and what it holds."""
+    if isinstance(holder, tuple):
+        return window_text(holder)
+    kind = type(holder)
+    kind_name = kind.__name__
+    request_key = getattr(holder, "request_key", None)
+    if request_key is not None:
+        request = request_text(request_key)
+        return f"{kind_name} {request}"
+    window_key = getattr(holder, "window_key", None)
+    if window_key is not None:
+        window = window_text(window_key)
+        return f"{kind_name} {window}"
+    return kind_name
 
 
 def _rounds_text(round_keys) -> str:
@@ -638,9 +683,38 @@ def _rounds_of(attribution) -> tuple:
     if attribution.first_round is None:
         return ()
     keys = []
-    for index in range(attribution.first_round, attribution.last_round + 1):
+    last_round = attribution.last_round + 1
+    for index in range(attribution.first_round, last_round):
         keys.append((attribution.operation_id, index))
     return tuple(keys)
+
+
+def _landed_bits(job: message.DecodeJob) -> Optional[int]:
+    """The bits of the input in the unit's memory, None when unknown."""
+    decoder_input = job.decoder_input
+    if decoder_input is None:
+        return None
+    total = 0
+    for fragment in decoder_input.fragments():
+        if fragment.bits is None:
+            return None
+        total += len(fragment.bits)
+    return total
+
+
+def _verdict_text(verdict) -> str:
+    """The verdict as its own name."""
+    name = getattr(verdict, "name", None)
+    if name is None:
+        return str(verdict)
+    return name.lower()
+
+
+def _service_text(service_key) -> str:
+    """A service key as the args carry it: its run-wide ordinal."""
+    if service_key is None:
+        return ""
+    return str(service_key.run_sequence)
 
 
 def _job_round_keys(job: message.DecodeJob) -> tuple:

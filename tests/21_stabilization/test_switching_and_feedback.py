@@ -300,7 +300,7 @@ def test_no_feedback_when_none_is_required(fabric):
     CQ traffic."""
     completed = fabric["weak_only_run"](rounds=6)
     assert completed.observation.runtime_stamps.decode_release == {}
-    transfers = completed.traffic_ledger.traffic_json_value().get(
+    transfers = completed.observation.traffic.traffic_json_value().get(
         "transfers", []
     )
     assert not any(

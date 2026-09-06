@@ -88,7 +88,7 @@ def _run(*, units=1, decode_us=5.0, capacity=None):
 def _events(completed):
     """(sbd send tick, delivery tick) per window plus per-window stamps."""
     sends = {}
-    for row in completed.traffic_ledger.traffic_json_value()["transfers"]:
+    for row in completed.observation.traffic.traffic_json_value()["transfers"]:
         if row["path"] == "strong_buffer_to_strong_decoder":
             sends[row["attribution"]["window_id"]] = (
                 row["send_ticks"],
@@ -96,7 +96,7 @@ def _events(completed):
             )
     stamps = {
         k: (w.t_dispatch, w.t_done)
-        for (_, k), w in completed.window_manager.windows.items()
+        for (_, k), w in completed.observation.windows.windows.items()
     }
     return sends, stamps
 
@@ -104,7 +104,7 @@ def _events(completed):
 def test_results_are_correct_and_every_window_decodes():
     completed, result = _run()
     assert result.operation_results[0].logical_failure is False
-    windows = completed.window_manager.windows.values()
+    windows = completed.observation.windows.windows.values()
     assert all(w.t_done is not None for w in windows)
 
 

@@ -158,7 +158,7 @@ def test_readout_bits_per_round_equal_stims_measurement_counts(recorded):
     completed = Machine.build(settings, 0)
     completed.run()
     bits_by_round = defaultdict(int)
-    for record in completed.traffic_ledger.snapshot().transfers:
+    for record in completed.observation.traffic.snapshot().transfers:
         if record.path is LinkPath.QPU_TO_CONTROLLER:
             bits_by_round[record.attribution.first_round] += (
                 record.transfer.payload_bits

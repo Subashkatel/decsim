@@ -89,7 +89,7 @@ def _backlog_run(
 
 def _windows(completed, n_ops=4):
     return [
-        completed.window_manager.windows[(op_id, 0)]
+        completed.observation.windows.windows[(op_id, 0)]
         for op_id in range(1, n_ops + 1)
     ]
 
@@ -245,7 +245,7 @@ def test_pipelined_strong_primary_is_the_plain_path_and_works(fabric):
         controller_to_strong_buffer=True,
         escalation_policy=StrongOnly(),
     )
-    window = completed.window_manager.windows[(1, 0)]
+    window = completed.observation.windows.windows[(1, 0)]
     assert window.t_done == microseconds_to_ticks(21 + SERVICE_US)
 
 

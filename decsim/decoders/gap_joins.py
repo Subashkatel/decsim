@@ -17,6 +17,10 @@ from typing import Callable, Optional
 import decsim.confidence.complementary as complementary
 import decsim.decoders.decode_queue as decode_queue
 import decsim.message as message
+import decsim.observe.trace_source as trace_source
+
+# the structure the sibling's own copy of the rounds lands in
+GAP_SIBLING_INPUT = "gap sibling input"
 
 
 @dataclasses.dataclass
@@ -30,7 +34,13 @@ class _GapJoin:
 
 
 class GapJoins:
-    """Spawns each window's sibling half and joins the two weights."""
+    """Spawns each window's sibling half and joins the two weights.
+
+    Trace source: copy_made(primary, bits, memory_name, "gap sibling
+    input") where the pair is formed, because the sibling takes its own
+    copy of the primary's landed rounds instead of holding Buffer 0 for
+    a second read (data_path.md section 8's copy table).
+    """
 
     def __init__(
         self,
@@ -49,6 +59,7 @@ class GapJoins:
         # (op_id, window_id) -> the join, from the sibling's spawn until
         # the join concludes the window
         self.joins_by_window: dict[tuple, _GapJoin] = {}
+        self.copy_made = trace_source.TraceSource()
 
     def spawn(self, job: message.DecodeJob) -> None:
         """Submit the other forced-class solve to the gap pool.
@@ -70,6 +81,10 @@ class GapJoins:
             return
         sibling = self._sibling_job(job, key)
         self.joins_by_window[key] = _GapJoin()
+        payload_bits = sibling.payload_bits()
+        self.copy_made.fire(
+            job, payload_bits, job.memory.name, GAP_SIBLING_INPUT
+        )
         self.engine.log(
             decode_queue.LOG_SOURCE,
             f"SPLIT GAP {job.label}: sibling submitted to the gap pool",

@@ -1642,6 +1642,7 @@ def _copy_sources(
     if strong_round_writer is not None:
         sources.append(strong_round_writer.copy_made)
     sources.append(decoder_manager.service.staging.copy_made)
+    sources.append(decoder_manager.service.gap_joins.copy_made)
     sources.append(window_manager.requester.builder.copy_made)
     return sources
 

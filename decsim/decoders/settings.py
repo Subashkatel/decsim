@@ -24,10 +24,11 @@ THRESHOLD_SOURCES = ("fixed", "table", "online")
 GAP_COMPUTATIONS = ("serial", "parallel_pair", "split_pair")
 # How many of the strong region's buffer regions the restarted weak
 # window re-reads under the double window (Toshio 2510.25222 Sec. III C,
-# Fig. 12). 0 is the paper: the weak decoder resumes on the commit plus
-# buffer rounds stored after the strong region and reads nothing inside
-# it. 1 is decsim's forward window, which reads one buffer region of the
-# strong region as the restart window's far-boundary context.
+# Fig. 12). 0, the default, is the paper: the weak decoder resumes on
+# the commit plus buffer rounds stored after the strong region and reads
+# nothing inside it. 1 reads one buffer region of the strong region as
+# the restart window's far-boundary context, which is what decsim's
+# forward window did until 2026-09-07.
 RESTART_REREAD_BUFFER_REGIONS = (0, 1)
 ESCALATION_KEYS = (
     "kind",
@@ -268,7 +269,7 @@ class EscalationSettings:
     threshold_column: Optional[str] = None
     online: Optional[OnlineThresholdSettings] = None
     double_window: bool = False
-    restart_reread_buffer_regions: int = 1
+    restart_reread_buffer_regions: int = 0
     gap_computation: str = "serial"
     gap_units: int = 1
     policy: Optional[ports.EscalationPolicy] = None
@@ -438,7 +439,7 @@ def _switching_settings(
 
 def _restart_reread_buffer_regions(section: Mapping) -> int:
     """How far into the strong region the restart window re-reads."""
-    regions = section.get("restart_reread_buffer_regions", 1)
+    regions = section.get("restart_reread_buffer_regions", 0)
     if regions not in RESTART_REREAD_BUFFER_REGIONS:
         raise ValueError(
             "escalation.restart_reread_buffer_regions must be 0, the "

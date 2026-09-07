@@ -206,7 +206,7 @@ def compile_plan(
     fallback_round_microseconds=2.0,
     retain_strong_context=False,
     double_window=False,
-    restart_reread_buffer_regions=1,
+    restart_reread_buffer_regions=0,
     open_ended=False,
 ):
     selected_code = code or RecordingCode()
@@ -277,7 +277,7 @@ def test_buffering_plan_accounts_for_overlap_successors_and_open_streams():
         execution,
         retain_strong_context=False,
         double_window=False,
-        restart_reread_buffer_regions=1,
+        restart_reread_buffer_regions=0,
     )
     assert weak_only.weak_holds == (
         ((1, 0), ((1, 1), (1, 2), (1, 3), (1, 4), (1, 5), (2, 1), (3, 1))),
@@ -293,7 +293,7 @@ def test_buffering_plan_accounts_for_overlap_successors_and_open_streams():
         execution,
         retain_strong_context=False,
         double_window=False,
-        restart_reread_buffer_regions=1,
+        restart_reread_buffer_regions=0,
         has_open_ended_dynamic_streams=True,
     )
     assert open_ended.sufficient_live_rounds is None
@@ -384,13 +384,13 @@ def test_strong_buffering_extends_context_and_unions_shared_rounds():
         execution,
         retain_strong_context=True,
         double_window=False,
-        restart_reread_buffer_regions=1,
+        restart_reread_buffer_regions=0,
     )
     doubled = _plan_syndrome_buffering(
         execution,
         retain_strong_context=True,
         double_window=True,
-        restart_reread_buffer_regions=1,
+        restart_reread_buffer_regions=0,
     )
 
     owner, ordinary_rounds = ordinary.potential_holds[0]

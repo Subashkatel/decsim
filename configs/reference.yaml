@@ -74,7 +74,7 @@ escalation:
 #                                  # chain keeps committing past an escalated
 #                                  # strong window; false = serial escalation
 #                                  # with Held boundaries
-#   restart_reread_buffer_regions: 1  # double window only: how many of the
+#   restart_reread_buffer_regions: 0  # double window only: how many of the
 #                                  # strong region's buffer regions the
 #                                  # restarted weak window re-reads. 0 is the
 #                                  # paper (Toshio 2510.25222 Sec. III C lines

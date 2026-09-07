@@ -26,8 +26,8 @@ from typing import Callable, Optional
 
 import decsim.config as config
 import decsim.decoders.decoder as decoder_module
-import decsim.message as message
 import decsim.observe.trace_source as trace_source
+import decsim.records.decoding as decoding_records
 import decsim.records.seeds as seed_records
 
 ALGORITHM_STAGE = "algorithm"
@@ -45,7 +45,7 @@ class DecoderStage:
         if self.cycles_per_job < 0 or self.cycles_per_round < 0:
             raise ValueError(f"stage {self.name!r} cycles must be nonnegative")
 
-    def cycles_for(self, job: message.DecodeJob) -> int:
+    def cycles_for(self, job: decoding_records.DecodeJob) -> int:
         """The stage's cycles for one job: per job plus per round."""
         round_cycles = self.cycles_per_round * job.n_rounds
         return self.cycles_per_job + round_cycles
@@ -78,7 +78,7 @@ class UnitTiming:
                 )
         _check_pipeline(self.initiation_interval_us, self.pipeline_depth)
 
-    def stage_ticks(self, job: message.DecodeJob) -> dict:
+    def stage_ticks(self, job: decoding_records.DecodeJob) -> dict:
         """Ticks per stage, by name.
 
         Cut from the cumulative cycle count, so the stages sum to exactly
@@ -142,11 +142,13 @@ class StagedDecoder(decoder_module.DecoderBase):
         child = seed_records.RunSeedChild(path, self.decoder)
         return (child,)
 
-    def decode(self, job: message.DecodeJob) -> message.DecodeResult:
+    def decode(
+        self, job: decoding_records.DecodeJob
+    ) -> decoding_records.DecodeResult:
         """The wrapped decoder's result; the stages add no correction."""
         return self.decoder.decode(job)
 
-    def latency(self, job: message.DecodeJob) -> int:
+    def latency(self, job: decoding_records.DecodeJob) -> int:
         """The stages' ticks plus the wrapped decoder's latency."""
         stage_ticks = self.timing.stage_ticks(job)
         stage_values = stage_ticks.values()
@@ -154,7 +156,7 @@ class StagedDecoder(decoder_module.DecoderBase):
         algorithm = self.decoder.latency(job)
         return stages + algorithm
 
-    def occupancy(self, job: message.DecodeJob) -> Optional[int]:
+    def occupancy(self, job: decoding_records.DecodeJob) -> Optional[int]:
         """The initiation interval when pipelined, else the whole latency.
 
         None when the wrapped decoder is measured on the host clock: the
@@ -171,7 +173,7 @@ class StagedDecoder(decoder_module.DecoderBase):
         stages = sum(stage_values)
         return stages + algorithm
 
-    def pipeline_depth(self, job: message.DecodeJob) -> int:
+    def pipeline_depth(self, job: decoding_records.DecodeJob) -> int:
         """The declared depth, or the full pipeline ceil(latency / interval)."""
         interval_ticks = self.timing.initiation_interval_ticks()
         if interval_ticks is None:
@@ -185,9 +187,9 @@ class StagedDecoder(decoder_module.DecoderBase):
 
     def start(
         self,
-        job: message.DecodeJob,
+        job: decoding_records.DecodeJob,
         engine,
-        on_result: Callable[[Optional[message.DecodeResult]], None],
+        on_result: Callable[[Optional[decoding_records.DecodeResult]], None],
     ) -> None:
         """Walk the stages as engine events on the unit the manager granted."""
         running = _RunningDecode(job, on_result)
@@ -196,7 +198,7 @@ class StagedDecoder(decoder_module.DecoderBase):
         self._running[key] = running
         self._enter(running, engine, steps, 0)
 
-    def cancel(self, job: message.DecodeJob) -> None:
+    def cancel(self, job: decoding_records.DecodeJob) -> None:
         """Abort a running job: no further stages, no completion callback."""
         key = _key(job)
         running = self._running.pop(key, None)
@@ -204,7 +206,7 @@ class StagedDecoder(decoder_module.DecoderBase):
             running.aborted = True
         self.decoder.cancel(job)
 
-    def _steps(self, job: message.DecodeJob) -> list:
+    def _steps(self, job: decoding_records.DecodeJob) -> list:
         """(name, cycles, ticks) per stage; the algorithm's time is its own."""
         ticks = self.timing.stage_ticks(job)
         steps = []
@@ -255,7 +257,9 @@ class StagedDecoder(decoder_module.DecoderBase):
             job.payloads = job.decoder_input.fragments()
         start = engine.now
 
-        def on_algorithm_result(result: Optional[message.DecodeResult]) -> None:
+        def on_algorithm_result(
+            result: Optional[decoding_records.DecodeResult],
+        ) -> None:
             running.result = result
             record = DecoderStageRecord(
                 job.op_id,
@@ -274,9 +278,9 @@ class StagedDecoder(decoder_module.DecoderBase):
 
 @dataclasses.dataclass
 class _RunningDecode:
-    job: message.DecodeJob
-    on_result: Callable[[Optional[message.DecodeResult]], None]
-    result: Optional[message.DecodeResult] = None
+    job: decoding_records.DecodeJob
+    on_result: Callable[[Optional[decoding_records.DecodeResult]], None]
+    result: Optional[decoding_records.DecodeResult] = None
     aborted: bool = False
 
 
@@ -302,7 +306,7 @@ def _check_pipeline(
         raise ValueError("pipeline_depth must be at least 1")
 
 
-def _key(job: message.DecodeJob):
+def _key(job: decoding_records.DecodeJob):
     """Window jobs carry a request key; a merged strong batch a service key."""
     if job.request_key is not None:
         return job.request_key
@@ -310,13 +314,13 @@ def _key(job: message.DecodeJob):
 
 
 def _hardware_step(
-    stage: DecoderStage, job: message.DecodeJob, ticks: dict
+    stage: DecoderStage, job: decoding_records.DecodeJob, ticks: dict
 ) -> tuple:
     cycles = stage.cycles_for(job)
     return stage.name, cycles, ticks[stage.name]
 
 
-def _stage_text(name: str, job: message.DecodeJob, cycles) -> str:
+def _stage_text(name: str, job: decoding_records.DecodeJob, cycles) -> str:
     text = f"{name} {job.label}"
     if cycles is not None:
         text += f" ({cycles} cycles)"

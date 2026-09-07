@@ -27,7 +27,7 @@ import decsim.decoders.decoder_memory_transfer as staging_module
 import decsim.decoders.decoder_pool as decoder_pool_module
 import decsim.decoders.gap_joins as gap_joins_module
 import decsim.decoders.strong_requests as strong_requests_module
-import decsim.message as message
+import decsim.records.decoding as decoding_records
 import decsim.records.windows as window_records
 
 
@@ -97,7 +97,7 @@ class DecoderManager:
     # ---------------------------------------------------------- admission
 
     def enqueue(
-        self, job: message.DecodeJob, send_input=None, on_decoded=None
+        self, job: decoding_records.DecodeJob, send_input=None, on_decoded=None
     ) -> None:
         """Admit once and queue the request; its rounds stay in Buffer 0.
 
@@ -138,7 +138,7 @@ class DecoderManager:
         storage: its decoder-input round demand is zero and it charges no
         round credits.
         """
-        job = message.DecodeJob(
+        job = decoding_records.DecodeJob(
             op_id=-1,
             window_id=0,
             n_rounds=round_count,
@@ -202,7 +202,7 @@ class DecoderManager:
         self.outcomes.report_request(
             job,
             None,
-            message.RequestProcessingOutcome.WEAK_WITHDRAWN_FOR_STRONG_WINDOW,
+            decoding_records.RequestProcessingOutcome.WEAK_WITHDRAWN_FOR_STRONG_WINDOW,
             None,
         )
         self.queue.engine.log(
@@ -244,7 +244,7 @@ class DecoderManager:
             self.outcomes.report_request(
                 held.request_job,
                 held.result,
-                message.RequestProcessingOutcome.STRONG_COMPLETED_DISCARDED,
+                decoding_records.RequestProcessingOutcome.STRONG_COMPLETED_DISCARDED,
                 held.decode_output_ticks,
             )
         live = self.strong_requests.take_live(key)
@@ -292,7 +292,7 @@ class DecoderManager:
 
     # ------------------------------------------------- the decode's end
 
-    def decode_completed(self, job: message.DecodeJob, result) -> None:
+    def decode_completed(self, job: decoding_records.DecodeJob, result) -> None:
         """One decode finished: free the unit and settle the outcome."""
         if job.cancelled:
             self.service.discard_cancelled(job)
@@ -309,7 +309,7 @@ class DecoderManager:
             return
         self._weak_decode_done(job, result)
 
-    def _gap_half_done(self, job: message.DecodeJob, result) -> None:
+    def _gap_half_done(self, job: decoding_records.DecodeJob, result) -> None:
         job.completed = True
         self.service.free(job)
         self.service.release_input(job)
@@ -326,7 +326,9 @@ class DecoderManager:
             self._finish_weak(held_job, held_result)
         self.dispatcher.run()
 
-    def _strong_decode_done(self, job: message.DecodeJob, result) -> None:
+    def _strong_decode_done(
+        self, job: decoding_records.DecodeJob, result
+    ) -> None:
         self.service.release_input(job)
         now = self.queue.engine.now
         deliveries = self.strong_requests.deliveries_for(job, result, now)
@@ -337,7 +339,7 @@ class DecoderManager:
         self.outcomes.conclude_strong(job, result, deliveries)
         self.dispatcher.run()
 
-    def _external_decode_done(self, job: message.DecodeJob) -> None:
+    def _external_decode_done(self, job: decoding_records.DecodeJob) -> None:
         job.completed = True
         self.service.free(job)
         # An external job that carried syndrome payloads through the
@@ -355,7 +357,9 @@ class DecoderManager:
         job.on_done()
         self.dispatcher.run()
 
-    def _weak_decode_done(self, job: message.DecodeJob, result) -> None:
+    def _weak_decode_done(
+        self, job: decoding_records.DecodeJob, result
+    ) -> None:
         job.completed = True
         self.service.free(job)
         key = (job.op_id, job.window_id)
@@ -368,7 +372,7 @@ class DecoderManager:
             return
         self._finish_weak(job, joined_result)
 
-    def _finish_weak(self, job: message.DecodeJob, result) -> None:
+    def _finish_weak(self, job: decoding_records.DecodeJob, result) -> None:
         """The weak outcome concluded; the memory and the queue move on."""
         self.outcomes.conclude_weak(job, result)
         self.service.release_input(job)
@@ -387,7 +391,7 @@ class DecoderManager:
         self.outcomes.report_request(
             live.request_job,
             None,
-            message.RequestProcessingOutcome.STRONG_CANCELLED_WHILE_STAGED,
+            decoding_records.RequestProcessingOutcome.STRONG_CANCELLED_WHILE_STAGED,
             None,
         )
 
@@ -403,7 +407,7 @@ class DecoderManager:
         self.outcomes.report_request(
             live.request_job,
             None,
-            message.RequestProcessingOutcome.STRONG_CANCELLED_BEFORE_DISPATCH,
+            decoding_records.RequestProcessingOutcome.STRONG_CANCELLED_BEFORE_DISPATCH,
             None,
         )
 
@@ -417,7 +421,7 @@ class DecoderManager:
             self.outcomes.report_request(
                 live.request_job,
                 None,
-                message.RequestProcessingOutcome.STRONG_CANCELLED_MEMBER_SERVICE_CONTINUED,
+                decoding_records.RequestProcessingOutcome.STRONG_CANCELLED_MEMBER_SERVICE_CONTINUED,
                 None,
             )
             return
@@ -429,7 +433,7 @@ class DecoderManager:
         self.outcomes.report_request(
             live.request_job,
             None,
-            message.RequestProcessingOutcome.STRONG_CANCELLED_DURING_SERVICE,
+            decoding_records.RequestProcessingOutcome.STRONG_CANCELLED_DURING_SERVICE,
             None,
         )
 
@@ -443,7 +447,7 @@ class DecoderManager:
         return None
 
 
-def _refuse_spent_job(job: message.DecodeJob) -> None:
+def _refuse_spent_job(job: decoding_records.DecodeJob) -> None:
     """A DecodeJob is submitted once; a live or terminal one is refused."""
     spent = _spent_state(job)
     if spent is None:
@@ -455,7 +459,7 @@ def _refuse_spent_job(job: message.DecodeJob) -> None:
     )
 
 
-def _spent_state(job: message.DecodeJob) -> Optional[str]:
+def _spent_state(job: decoding_records.DecodeJob) -> Optional[str]:
     if job.cancelled:
         return "cancelled"
     if job.completed:
@@ -465,13 +469,15 @@ def _spent_state(job: message.DecodeJob) -> Optional[str]:
     return None
 
 
-def _is_boundary_owed(job: message.DecodeJob) -> bool:
+def _is_boundary_owed(job: decoding_records.DecodeJob) -> bool:
     if job.gate is None:
         return False
     return not job.gate.may_start(job)
 
 
-def _is_live_weak_window_job(job: message.DecodeJob, window_key: tuple) -> bool:
+def _is_live_weak_window_job(
+    job: decoding_records.DecodeJob, window_key: tuple
+) -> bool:
     key = (job.op_id, job.window_id)
     if key != window_key:
         return False

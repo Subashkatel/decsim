@@ -30,6 +30,7 @@ import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
 import decsim.qpu.stim_device as stim_device
 import decsim.qpu.syndrome_devices as syndrome_devices
+import decsim.records.decoding as decoding_records
 import decsim.syndrome_buffer.round_store as round_store_module
 import decsim.syndrome_buffer.settings as round_store_settings
 
@@ -57,12 +58,14 @@ class FakeWeakDecoder(decoder_module.DecoderBase):
     def __init__(self, latency_model=None):
         del latency_model
 
-    def latency(self, job: message.DecodeJob) -> int:
+    def latency(self, job: decoding_records.DecodeJob) -> int:
         del job
         return CYCLE_TICKS
 
-    def decode(self, job: message.DecodeJob) -> message.DecodeResult:
-        return message.DecodeResult(job.op_id, job.window_id)
+    def decode(
+        self, job: decoding_records.DecodeJob
+    ) -> decoding_records.DecodeResult:
+        return decoding_records.DecodeResult(job.op_id, job.window_id)
 
 
 def test_readouts_reach_the_receiver_in_cycle_order_cycle_ticks_apart():

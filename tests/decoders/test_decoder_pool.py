@@ -10,7 +10,7 @@ import pytest
 
 import decsim.decoders.decoder_pool as decoder_pool
 import decsim.decoders.decoders as decoders
-import decsim.message as message
+import decsim.records.decoding as decoding_records
 
 
 def _pool(unit_count):
@@ -20,7 +20,9 @@ def _pool(unit_count):
 
 
 def _job(label):
-    return message.DecodeJob(op_id=1, window_id=0, n_rounds=1, label=label)
+    return decoding_records.DecodeJob(
+        op_id=1, window_id=0, n_rounds=1, label=label
+    )
 
 
 def _no_demand(_job):

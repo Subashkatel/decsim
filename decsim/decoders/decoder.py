@@ -24,12 +24,12 @@ import numpy
 
 import decsim.config as config
 import decsim.detector_error_model.fault_model_contracts as fault_models
-import decsim.message as message
 import decsim.observe.trace_source as trace_source
+import decsim.records.decoding as decoding_records
 import decsim.records.seeds as seed_records
 import decsim.records.windows as window_records
 
-OnResult = Callable[[Optional[message.DecodeResult]], None]
+OnResult = Callable[[Optional[decoding_records.DecodeResult]], None]
 
 
 class BackendDecodeStatus(enum.Enum):
@@ -64,15 +64,17 @@ class DecoderBase(abc.ABC):
     window_checked = trace_source.SILENT
 
     @abc.abstractmethod
-    def decode(self, job: message.DecodeJob) -> message.DecodeResult:
+    def decode(
+        self, job: decoding_records.DecodeJob
+    ) -> decoding_records.DecodeResult:
         """The window's correction and its logical observables."""
 
     @abc.abstractmethod
-    def latency(self, job: message.DecodeJob) -> int:
+    def latency(self, job: decoding_records.DecodeJob) -> int:
         """The whole job's service time in ticks, known at dispatch."""
 
     def start(
-        self, job: message.DecodeJob, engine, on_result: OnResult
+        self, job: decoding_records.DecodeJob, engine, on_result: OnResult
     ) -> None:
         """Run the job on the engine; on_result runs once at its output.
 
@@ -90,34 +92,36 @@ class DecoderBase(abc.ABC):
             label=f"decode_done({job.label})",
         )
 
-    def cancel(self, job: message.DecodeJob) -> None:
+    def cancel(self, job: decoding_records.DecodeJob) -> None:
         """Stop a started job; the default decoder has nothing to stop."""
         del job
 
-    def occupancy(self, job: message.DecodeJob) -> Optional[int]:
+    def occupancy(self, job: decoding_records.DecodeJob) -> Optional[int]:
         """Ticks the unit's compute is held from the start; None if measured."""
         return self.latency(job)
 
-    def pipeline_depth(self, job: message.DecodeJob) -> int:
+    def pipeline_depth(self, job: decoding_records.DecodeJob) -> int:
         """Decodes that may be in flight on one unit; one is no pipeline."""
         del job
         return 1
 
-    def decode_timed(self, job: message.DecodeJob) -> tuple:
+    def decode_timed(self, job: decoding_records.DecodeJob) -> tuple:
         """(result, nanoseconds the decode took on the host clock)."""
         started_ns = time.perf_counter_ns()
         result = self.decode(job)
         finished_ns = time.perf_counter_ns()
         return result, finished_ns - started_ns
 
-    def _deliver(self, job: message.DecodeJob, on_result: OnResult) -> None:
+    def _deliver(
+        self, job: decoding_records.DecodeJob, on_result: OnResult
+    ) -> None:
         result = None
         if not job.cancelled and job.on_done is None:
             result = self.decode(job)
         on_result(result)
 
     def _start_measured(
-        self, job: message.DecodeJob, engine, on_result: OnResult
+        self, job: decoding_records.DecodeJob, engine, on_result: OnResult
     ) -> None:
         """Run the real call now; hold the unit for as long as it took."""
         result = None
@@ -164,7 +168,7 @@ class WindowDecoderBase(DecoderBase):
     def decode_window(self, backend, model, faults, syndrome) -> tuple:
         """(selected faults, decode status or None) of one backend call."""
 
-    def latency(self, job: message.DecodeJob) -> int:
+    def latency(self, job: decoding_records.DecodeJob) -> int:
         """The latency model's time; a measured decoder has none in advance."""
         if self.latency_model is None:
             raise NotImplementedError(
@@ -173,22 +177,24 @@ class WindowDecoderBase(DecoderBase):
             )
         return self.latency_model.latency(job)
 
-    def occupancy(self, job: message.DecodeJob) -> Optional[int]:
+    def occupancy(self, job: decoding_records.DecodeJob) -> Optional[int]:
         """The latency model's time, or None when measured."""
         if self.latency_model is None:
             return None
         return self.latency(job)
 
-    def decode(self, job: message.DecodeJob) -> message.DecodeResult:
+    def decode(
+        self, job: decoding_records.DecodeJob
+    ) -> decoding_records.DecodeResult:
         """The correction of one window, or the empty result without a model."""
         result, _elapsed_ns = self.decode_timed(job)
         return result
 
-    def decode_timed(self, job: message.DecodeJob) -> tuple:
+    def decode_timed(self, job: decoding_records.DecodeJob) -> tuple:
         """(result, nanoseconds of the backend call alone)."""
         model = job.dem
         if model is None:
-            return message.DecodeResult(job.op_id, job.window_id), 0
+            return decoding_records.DecodeResult(job.op_id, job.window_id), 0
         faults = model.require_faults(self.fault_representation)
         syndrome = payload_syndrome(job)
         check_syndrome_size(job, syndrome, faults)
@@ -246,7 +252,7 @@ def bit_tuple(array) -> tuple:
     return tuple(bits)
 
 
-def payload_syndrome(job: message.DecodeJob):
+def payload_syndrome(job: decoding_records.DecodeJob):
     """Concatenate payload bits into one syndrome vector."""
     if not job.payloads:
         return numpy.zeros(0, dtype=numpy.uint8)
@@ -260,7 +266,7 @@ def payload_syndrome(job: message.DecodeJob):
 
 
 def check_syndrome_size(
-    job: message.DecodeJob, syndrome, placed_faults
+    job: decoding_records.DecodeJob, syndrome, placed_faults
 ) -> None:
     """Fail when payload bits and detector rows do not line up."""
     detector_count = placed_faults.check.shape[0]
@@ -274,8 +280,12 @@ def check_syndrome_size(
 
 
 def result_from_selected_faults(
-    job: message.DecodeJob, model, placed_faults, selected, decode_status=None
-) -> message.DecodeResult:
+    job: decoding_records.DecodeJob,
+    model,
+    placed_faults,
+    selected,
+    decode_status=None,
+) -> decoding_records.DecodeResult:
     """Keep the owned selected faults and convert them into a DecodeResult.
 
     ``decode_status`` marks a best-effort correction (None = succeeded).
@@ -299,7 +309,7 @@ def result_from_selected_faults(
     boundary_data = window_records.DependencyResidual(
         detector_ids=residual_detector_ids, defects=defects
     )
-    return message.DecodeResult(
+    return decoding_records.DecodeResult(
         job.op_id,
         job.window_id,
         correction=correction,

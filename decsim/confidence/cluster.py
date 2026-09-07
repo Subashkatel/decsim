@@ -34,17 +34,17 @@ import decsim.decoders.decoder as decoder_module
 import decsim.decoders.union_find.decoder as union_find_decoder
 import decsim.decoders.union_find.window_decoder as window_decoder
 import decsim.detector_error_model.fault_model_contracts as fault_models
-import decsim.message as message
+import decsim.records.decoding as decoding_records
 
 _BINARY64_LN_TEN = float.fromhex("0x1.26bb1bbb55516p+1")
 
 
 def union_find_cluster_gap_source(
     weight_step: float = 0.1,
-) -> message.SoftOutputSource:
+) -> decoding_records.SoftOutputSource:
     """The source of a cluster gap at one absolute natural-log weight step."""
     normalized_step = window_decoder.normalized_weight_step(weight_step)
-    return message.SoftOutputSource(
+    return decoding_records.SoftOutputSource(
         method="cluster_gap",
         cluster_origin="union_find_decoder",
         growth_schedule="weighted_global_fair",
@@ -78,28 +78,30 @@ class UnionFindClusterGapDecoder(decoder_module.DecoderBase):
         """The hard decoder's seed paths; the gap draws nothing."""
         return self.base.run_seed_children()
 
-    def latency(self, job: message.DecodeJob) -> int:
+    def latency(self, job: decoding_records.DecodeJob) -> int:
         """The base decoder's timing; the gap adds no latency."""
         return self.base.latency(job)
 
-    def occupancy(self, job: message.DecodeJob) -> Optional[int]:
+    def occupancy(self, job: decoding_records.DecodeJob) -> Optional[int]:
         """The base decoder's occupancy; None when it is measured."""
         return self.base.occupancy(job)
 
-    def pipeline_depth(self, job: message.DecodeJob) -> int:
+    def pipeline_depth(self, job: decoding_records.DecodeJob) -> int:
         """The base decoder's pipeline depth."""
         return self.base.pipeline_depth(job)
 
-    def cancel(self, job: message.DecodeJob) -> None:
+    def cancel(self, job: decoding_records.DecodeJob) -> None:
         """Stop the base decoder's job."""
         self.base.cancel(job)
 
-    def decode(self, job: message.DecodeJob) -> message.DecodeResult:
+    def decode(
+        self, job: decoding_records.DecodeJob
+    ) -> decoding_records.DecodeResult:
         """Decode once, compute the cluster gap, attach the confidence."""
         result, _elapsed_nanoseconds = self.decode_timed(job)
         return result
 
-    def decode_timed(self, job: message.DecodeJob) -> tuple:
+    def decode_timed(self, job: decoding_records.DecodeJob) -> tuple:
         """(the result with its confidence, nanoseconds of decode and gap)."""
         model = job.dem
         if model is None:
@@ -110,7 +112,7 @@ class UnionFindClusterGapDecoder(decoder_module.DecoderBase):
         gap = _cluster_gap(decoded_window.hard_evidence, self.base.weight_step)
         finished = time.perf_counter_ns()
         source = union_find_cluster_gap_source(self.base.weight_step)
-        decoded_window.hard_result.soft_output = message.SoftOutput(
+        decoded_window.hard_result.soft_output = decoding_records.SoftOutput(
             gap=gap, source=source
         )
         gap_nanoseconds = finished - started

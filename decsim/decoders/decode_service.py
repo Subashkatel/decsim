@@ -26,8 +26,8 @@ import decsim.decoders.decoder_pool as decoder_pool_module
 import decsim.decoders.decoder_unit as decoder_unit_module
 import decsim.decoders.gap_joins as gap_joins_module
 import decsim.decoders.strong_requests as strong_requests_module
-import decsim.message as message
 import decsim.observe.trace_source as trace_source
+import decsim.records.decoding as decoding_records
 
 
 class DecodeService:
@@ -52,7 +52,7 @@ class DecodeService:
         staging: staging_module.DecoderInputStaging,
         strong_requests: strong_requests_module.StrongRequests,
         gap_joins: gap_joins_module.GapJoins,
-        on_completed: Callable[[message.DecodeJob, object], None],
+        on_completed: Callable[[decoding_records.DecodeJob, object], None],
         dispatch: Callable[[], None],
     ) -> None:
         self.engine = engine
@@ -69,7 +69,7 @@ class DecodeService:
 
     # ------------------------------------------ what the dispatcher asks
 
-    def resident_capacity(self, job: message.DecodeJob) -> int:
+    def resident_capacity(self, job: decoding_records.DecodeJob) -> int:
         """Residents a unit holds for this job's route.
 
         Two (the depth-1 access-execute machine) unless the routed decoder
@@ -82,14 +82,14 @@ class DecodeService:
         depth = decoder.pipeline_depth(job)
         return depth + 1
 
-    def carries_input(self, job: message.DecodeJob) -> bool:
+    def carries_input(self, job: decoding_records.DecodeJob) -> bool:
         """The job moves syndrome data into a unit's memory."""
         if job.send_input is not None:
             return True
         demand = self.memory_demand(job)
         return demand > 0
 
-    def memory_demand(self, job: message.DecodeJob) -> int:
+    def memory_demand(self, job: decoding_records.DecodeJob) -> int:
         """The rounds a job's input occupies in unit memory.
 
         The distinct rounds of its payloads, the same count the deposit
@@ -101,16 +101,16 @@ class DecodeService:
         if strong_requests_module.is_merged_batch(job):
             demand = 0
             for member in self.strong_requests.members_of(job):
-                demand += message.distinct_round_count(member.payloads)
+                demand += decoding_records.distinct_round_count(member.payloads)
             return demand
-        return message.distinct_round_count(job.payloads)
+        return decoding_records.distinct_round_count(job.payloads)
 
     # -------------------------------------------------- dispatch and start
 
     def dispatch_to(
         self,
         pool: str,
-        job: message.DecodeJob,
+        job: decoding_records.DecodeJob,
         unit: decoder_unit_module.DecoderUnit,
         claim_compute: bool,
     ) -> None:
@@ -133,7 +133,9 @@ class DecodeService:
         if claim_compute:
             self._predict_compute_free(job)
 
-    def begin(self, job: message.DecodeJob, gated: bool = True) -> None:
+    def begin(
+        self, job: decoding_records.DecodeJob, gated: bool = True
+    ) -> None:
         """The unit's memory holds the input: start the decode."""
         if job.cancelled:  # cancelled while its input was in flight
             return
@@ -164,7 +166,7 @@ class DecodeService:
         interval_ticks, latency_ticks, depth = pipeline
         self._track_pipelined_start(job, latency_ticks, interval_ticks, depth)
 
-    def restart_parked(self, job: message.DecodeJob) -> None:
+    def restart_parked(self, job: decoding_records.DecodeJob) -> None:
         """A released job takes the unit's compute if it can have it now."""
         unit = job.unit
         holder = unit.holder
@@ -188,7 +190,7 @@ class DecodeService:
 
     # ------------------------------------------------------- the unit's end
 
-    def free(self, job: message.DecodeJob) -> None:
+    def free(self, job: decoding_records.DecodeJob) -> None:
         """Compute finished: drop the job from its slot and offer the compute.
 
         The ping-pong swap at compute end.
@@ -206,7 +208,7 @@ class DecodeService:
         self.job_finished.fire(job, unit)
         self._offer_compute(unit)
 
-    def evict(self, job: message.DecodeJob) -> None:
+    def evict(self, job: decoding_records.DecodeJob) -> None:
         """Drop a job from its slot before its decode started.
 
         Compute it held or reserved passes onward.
@@ -219,23 +221,23 @@ class DecodeService:
             unit.release_compute()
             self._offer_compute(unit)
 
-    def abort(self, job: message.DecodeJob) -> None:
+    def abort(self, job: decoding_records.DecodeJob) -> None:
         """Stop a running decode: the decoder, its input, its slot."""
         decoder = self.pool.decoder_for(job)
         decoder.cancel(job)
         self.staging.cancel(job)
         self.free(job)
 
-    def discard_cancelled(self, job: message.DecodeJob) -> None:
+    def discard_cancelled(self, job: decoding_records.DecodeJob) -> None:
         """A cancelled decode reported its end: retire its flight and input."""
         self._end_flight(job, offer_now=True)
         self.staging.release(job)
 
-    def release_input(self, job: message.DecodeJob) -> None:
+    def release_input(self, job: decoding_records.DecodeJob) -> None:
         """Free the job's rounds from its unit's memory; none held is fine."""
         self.staging.release(job)
 
-    def cancel_input(self, job: message.DecodeJob) -> None:
+    def cancel_input(self, job: decoding_records.DecodeJob) -> None:
         """Drop the job from transport and storage, then free its hold."""
         self.staging.cancel(job)
 
@@ -306,7 +308,7 @@ class DecodeService:
 
     # ------------------------------------------------- dispatch, private
 
-    def _assign_service_key(self, job: message.DecodeJob) -> None:
+    def _assign_service_key(self, job: decoding_records.DecodeJob) -> None:
         """One service key per decode, shared by every request it serves."""
         members = job.service_original_request_keys
         if not members and job.request_key is not None:
@@ -318,14 +320,14 @@ class DecodeService:
         for key in members:
             run_sequences.append(key.run_sequence)
         first_sequence = min(run_sequences)
-        job.service_key = message.DecoderServiceKey(first_sequence)
+        job.service_key = decoding_records.DecoderServiceKey(first_sequence)
         job.service_dispatch_ticks = self.engine.now
         for member in self.strong_requests.members_of(job):
             member.service_key = job.service_key
             member.service_dispatch_ticks = self.engine.now
 
     def _log_assignment(
-        self, pool: str, job: message.DecodeJob, claim_compute: bool
+        self, pool: str, job: decoding_records.DecodeJob, claim_compute: bool
     ) -> None:
         waited_ticks = self.engine.now - job.ready_time
         waited = config.format_ticks(waited_ticks)
@@ -343,7 +345,9 @@ class DecodeService:
         )
 
     def _stage_input(
-        self, job: message.DecodeJob, unit: decoder_unit_module.DecoderUnit
+        self,
+        job: decoding_records.DecodeJob,
+        unit: decoder_unit_module.DecoderUnit,
     ) -> None:
         """Move every member request's rounds into this unit's memory.
 
@@ -355,7 +359,7 @@ class DecodeService:
         source = f"unit {unit.name} SRAM"
         remaining = len(members)
 
-        def landed(_member: message.DecodeJob) -> None:
+        def landed(_member: decoding_records.DecodeJob) -> None:
             nonlocal remaining
             remaining -= 1
             if remaining > 0:
@@ -367,11 +371,11 @@ class DecodeService:
             self.staging.stage(member, memory, landed)
 
     def _log_input_receiving(
-        self, source: str, member: message.DecodeJob
+        self, source: str, member: decoding_records.DecodeJob
     ) -> None:
         self.engine.log_io(source, lambda: _receiving_text(member))
 
-    def _transfer_members(self, job: message.DecodeJob) -> list:
+    def _transfer_members(self, job: decoding_records.DecodeJob) -> list:
         members = []
         for member in self.strong_requests.members_of(job):
             if member is not job:
@@ -381,7 +385,9 @@ class DecodeService:
         return members
 
     def _input_landed(
-        self, job: message.DecodeJob, unit: decoder_unit_module.DecoderUnit
+        self,
+        job: decoding_records.DecodeJob,
+        unit: decoder_unit_module.DecoderUnit,
     ) -> None:
         """Every transfer landed: start now, or wait for the unit's compute."""
         job.input_landed = True
@@ -403,12 +409,12 @@ class DecodeService:
         # otherwise the compute is busy: the compute offer picks this
         # job up at the next compute end
 
-    def _is_boundary_owed(self, job: message.DecodeJob) -> bool:
+    def _is_boundary_owed(self, job: decoding_records.DecodeJob) -> bool:
         if job.gate is None:
             return False
         return not job.gate.may_start(job)
 
-    def _park(self, job: message.DecodeJob) -> None:
+    def _park(self, job: decoding_records.DecodeJob) -> None:
         job.is_parked = True
         self.engine.log(
             decode_queue.LOG_SOURCE,
@@ -418,7 +424,7 @@ class DecodeService:
 
     # ------------------------------------------------- the compute, private
 
-    def _release_compute_claim(self, job: message.DecodeJob) -> None:
+    def _release_compute_claim(self, job: decoding_records.DecodeJob) -> None:
         """Tomasulo's rule at the boundary hazard.
 
         A parked job keeps its input slot but never the unit's compute.
@@ -456,7 +462,7 @@ class DecodeService:
             return
         self.pool.release(unit)
 
-    def _predict_compute_free(self, job: message.DecodeJob) -> None:
+    def _predict_compute_free(self, job: decoding_records.DecodeJob) -> None:
         """Record when the compute this job holds frees.
 
         The decode starts once its input has landed and runs for the
@@ -479,7 +485,7 @@ class DecodeService:
 
     # ------------------------------------------------- the pipelined unit
 
-    def _pipeline_of(self, decoder, job: message.DecodeJob):
+    def _pipeline_of(self, decoder, job: decoding_records.DecodeJob):
         """(interval, latency, depth) of a pipelined start, else None.
 
         A unit pipelines when its occupancy is shorter than its latency
@@ -507,7 +513,7 @@ class DecodeService:
 
     def _track_pipelined_start(
         self,
-        job: message.DecodeJob,
+        job: decoding_records.DecodeJob,
         latency_ticks: int,
         interval_ticks: int,
         depth: int,
@@ -523,7 +529,7 @@ class DecodeService:
     def _initiation_complete(
         self,
         unit: decoder_unit_module.DecoderUnit,
-        job: message.DecodeJob,
+        job: decoding_records.DecodeJob,
         depth: int,
     ) -> None:
         """The pipelined unit's intake is free again.
@@ -549,7 +555,9 @@ class DecodeService:
         self._offer_compute(unit)
         self.dispatch()
 
-    def _end_flight(self, job: message.DecodeJob, offer_now: bool) -> None:
+    def _end_flight(
+        self, job: decoding_records.DecodeJob, offer_now: bool
+    ) -> None:
         """A pipelined decode left the unit (done or cancelled).
 
         Retire its flight and lift a full-pipeline stall. The caller's
@@ -574,7 +582,7 @@ class DecodeService:
             self.dispatch()
 
 
-def _is_outside_pipelined_model(job: message.DecodeJob) -> bool:
+def _is_outside_pipelined_model(job: decoding_records.DecodeJob) -> bool:
     if job.strong_decode_for is not None:
         return True
     if job.gap_sibling_for is not None:
@@ -583,28 +591,28 @@ def _is_outside_pipelined_model(job: message.DecodeJob) -> bool:
 
 
 def _emitted_description(
-    job: message.DecodeJob, unit: decoder_unit_module.DecoderUnit
+    job: decoding_records.DecodeJob, unit: decoder_unit_module.DecoderUnit
 ) -> str:
     holds = unit.describe_residents()
     return f"emitted {job.label} result; holds {holds}"
 
 
 def _landed_description(
-    job: message.DecodeJob, unit: decoder_unit_module.DecoderUnit
+    job: decoding_records.DecodeJob, unit: decoder_unit_module.DecoderUnit
 ) -> str:
     defects = job_defects_text(job)
     holds = unit.describe_residents()
     return f"{job.label} input landed; {defects}; holds {holds}"
 
 
-def _receiving_text(member: message.DecodeJob) -> str:
+def _receiving_text(member: decoding_records.DecodeJob) -> str:
     return (
         f"receiving {member.label} input "
         f"({member.n_rounds} rounds from the round store)"
     )
 
 
-def job_defects_text(job: message.DecodeJob) -> str:
+def job_defects_text(job: decoding_records.DecodeJob) -> str:
     """The landed window input's cargo, sparse, for the I/O trace.
 
     The set detection-event indices of the rounds now in this unit's

@@ -30,12 +30,13 @@ import decsim.pauli_frame.pauli_frame as pauli_frame_module
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
 import decsim.qpu.stim_device as stim_device
+import decsim.records.decoding as decoding_records
 import decsim.records.windows as window_records
 import decsim.windows.settings as window_settings
 import decsim.windows.windowing_schemes as windowing_schemes
 import tests.escalation.declared_fabric as fabric
 
-SOURCE = message.SoftOutputSource(
+SOURCE = decoding_records.SoftOutputSource(
     method="matching-gap",
     cluster_origin="decoder",
     growth_schedule="uniform",
@@ -44,7 +45,7 @@ SOURCE = message.SoftOutputSource(
     weight_step_natural_log=1.0,
     references=(),
 )
-OTHER_SOURCE = message.SoftOutputSource(
+OTHER_SOURCE = decoding_records.SoftOutputSource(
     method="cluster-gap",
     cluster_origin="union-find",
     growth_schedule="uniform",
@@ -56,7 +57,7 @@ OTHER_SOURCE = message.SoftOutputSource(
 WINDOW = window_records.Window(
     op_id=1, k=1, commit_lo=4, commit_hi=6, buffer_hi=9, n_rounds=6
 )
-JOB = message.DecodeJob(op_id=1, window_id=1, n_rounds=6)
+JOB = decoding_records.DecodeJob(op_id=1, window_id=1, n_rounds=6)
 WEAK_TIER = (window_records.DecoderTier.WEAK,)
 STRONG_TIER = (window_records.DecoderTier.STRONG,)
 BOTH_TIERS = (
@@ -65,11 +66,11 @@ BOTH_TIERS = (
 )
 
 
-def _result(gap, source=SOURCE) -> message.DecodeResult:
+def _result(gap, source=SOURCE) -> decoding_records.DecodeResult:
     soft_output = None
     if gap is not None:
-        soft_output = message.SoftOutput(gap=gap, source=source)
-    return message.DecodeResult(
+        soft_output = decoding_records.SoftOutput(gap=gap, source=source)
+    return decoding_records.DecodeResult(
         1, 1, logical_observables=(0,), soft_output=soft_output
     )
 
@@ -188,7 +189,7 @@ def test_baseline_keeps_every_weak_result():
     assert baseline.tiers_for_ready_window(WINDOW) == WEAK_TIER
     unsure = _result(0.0)
     verdict = baseline.verdict_for_weak_result(JOB, unsure)
-    assert verdict is message.Verdict.KEEP
+    assert verdict is decoding_records.Verdict.KEEP
 
 
 def test_strong_only_decodes_every_window_on_the_strong_tier_once():
@@ -198,7 +199,7 @@ def test_strong_only_decodes_every_window_on_the_strong_tier_once():
     assert strong_only.tiers_for_ready_window(WINDOW) == STRONG_TIER
     timing_only = _result(None)
     verdict = strong_only.verdict_for_weak_result(JOB, timing_only)
-    assert verdict is message.Verdict.KEEP
+    assert verdict is decoding_records.Verdict.KEEP
 
 
 def test_switching_keeps_at_the_threshold_and_escalates_below_it():
@@ -210,9 +211,9 @@ def test_switching_keeps_at_the_threshold_and_escalates_below_it():
     kept = switching.verdict_for_weak_result(JOB, at_threshold)
     escalated = switching.verdict_for_weak_result(JOB, below_threshold)
     unsure = switching.verdict_for_weak_result(JOB, timing_only)
-    assert kept is message.Verdict.KEEP
-    assert escalated is message.Verdict.ESCALATE
-    assert unsure is message.Verdict.ESCALATE
+    assert kept is decoding_records.Verdict.KEEP
+    assert escalated is decoding_records.Verdict.ESCALATE
+    assert unsure is decoding_records.Verdict.ESCALATE
 
 
 def test_switching_decodes_both_tiers_at_once_when_asked():
@@ -237,8 +238,8 @@ def test_a_strong_result_teaches_the_online_source():
     confident = _result(5.0)
     # the kept window is audited, so its verdict escalates
     verdict = switching.verdict_for_weak_result(JOB, confident)
-    assert verdict is message.Verdict.ESCALATE
-    revised = message.DecodeResult(1, 1, logical_observables=(1,))
+    assert verdict is decoding_records.Verdict.ESCALATE
+    revised = decoding_records.DecodeResult(1, 1, logical_observables=(1,))
     switching.learn_from_strong_result((1, 1), revised)
     assert online.controller.raise_count == 1
 
@@ -348,10 +349,10 @@ class _AlwaysEscalate(policies.EscalationPolicyBase):
     requires_strong_context = True
     primary_tier = window_records.DecoderTier.WEAK
 
-    def verdict_for_weak_result(self, job, result) -> message.Verdict:
+    def verdict_for_weak_result(self, job, result) -> decoding_records.Verdict:
         del job
         del result
-        return message.Verdict.ESCALATE
+        return decoding_records.Verdict.ESCALATE
 
 
 def test_a_policy_row_added_to_the_table_runs_a_switching_point(monkeypatch):

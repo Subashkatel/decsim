@@ -11,23 +11,23 @@ committer's return path (SimPy's callback on the event).
 import decsim.engine as engine_module
 import decsim.escalation.strong_redecode as strong_redecode_module
 import decsim.escalation.strong_window_shapes as shapes
-import decsim.message as message
+import decsim.records.decoding as decoding_records
 import decsim.records.windows as window_records
 
 WINDOW_KEY = (1, 2)
 
 
-def _weak_job() -> message.DecodeJob:
-    return message.DecodeJob(
+def _weak_job() -> decoding_records.DecodeJob:
+    return decoding_records.DecodeJob(
         op_id=1, window_id=2, n_rounds=6, strong_label="strong(mem1 W2)"
     )
 
 
-def _strong_job(sequence: int) -> message.DecodeJob:
+def _strong_job(sequence: int) -> decoding_records.DecodeJob:
     request_key = window_records.DecoderRequestKey(
         1, 2, window_records.DecoderTier.STRONG, sequence
     )
-    return message.DecodeJob(
+    return decoding_records.DecodeJob(
         op_id=1,
         window_id=2,
         n_rounds=9,

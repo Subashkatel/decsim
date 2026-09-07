@@ -19,7 +19,7 @@ import math
 from typing import Callable, Optional
 
 import decsim.decoders.decoder_memory as decoder_memory_module
-import decsim.message as message
+import decsim.records.decoding as decoding_records
 
 
 @dataclasses.dataclass
@@ -33,7 +33,7 @@ class ComputeClaim:
     the pool's least-work-left order.
     """
 
-    holder: Optional[message.DecodeJob] = None
+    holder: Optional[decoding_records.DecodeJob] = None
     expected_free_ticks: float = math.inf
 
 
@@ -49,8 +49,8 @@ class PipelineFlights:
     """
 
     flights: list = dataclasses.field(default_factory=list)
-    intake_job: Optional[message.DecodeJob] = None
-    stalled_owner: Optional[message.DecodeJob] = None
+    intake_job: Optional[decoding_records.DecodeJob] = None
+    stalled_owner: Optional[decoding_records.DecodeJob] = None
     stalled_depth: int = 0
 
 
@@ -68,7 +68,7 @@ class DecoderUnit:
         self.memory = memory
         # jobs whose input occupies or reserves a slot (in transfer or
         # landed), in dispatch order; at most the resident capacity
-        self.residents: list[message.DecodeJob] = []
+        self.residents: list[decoding_records.DecodeJob] = []
         self.compute = ComputeClaim()
         self.pipeline = PipelineFlights()
 
@@ -78,7 +78,7 @@ class DecoderUnit:
         return f"{self.pool}#{self.index}"
 
     @property
-    def holder(self) -> Optional[message.DecodeJob]:
+    def holder(self) -> Optional[decoding_records.DecodeJob]:
         """The job holding or reserving the compute; None when free."""
         return self.compute.holder
 
@@ -86,9 +86,9 @@ class DecoderUnit:
 
     def has_room(
         self,
-        job: message.DecodeJob,
+        job: decoding_records.DecodeJob,
         resident_capacity: int,
-        memory_demand_of: Callable[[message.DecodeJob], int],
+        memory_demand_of: Callable[[decoding_records.DecodeJob], int],
     ) -> bool:
         """Whether a slot is free and the memory holds the job beside the rest.
 
@@ -121,12 +121,12 @@ class DecoderUnit:
             live.append(resident)
         return live
 
-    def admit(self, job: message.DecodeJob) -> None:
+    def admit(self, job: decoding_records.DecodeJob) -> None:
         """The job takes a slot; its input moves into this unit's memory."""
         self.residents.append(job)
         job.unit = self
 
-    def evict(self, job: message.DecodeJob) -> None:
+    def evict(self, job: decoding_records.DecodeJob) -> None:
         """The job leaves its slot."""
         if job in self.residents:
             self.residents.remove(job)
@@ -134,7 +134,7 @@ class DecoderUnit:
 
     def oldest_landed_resident_ready_to_start(
         self,
-    ) -> Optional[message.DecodeJob]:
+    ) -> Optional[decoding_records.DecodeJob]:
         """The first resident whose input landed and that may compute now."""
         for resident in self.residents:
             if is_past_start(resident):
@@ -148,7 +148,7 @@ class DecoderUnit:
 
     def oldest_landing_resident_that_may_start(
         self,
-    ) -> Optional[message.DecodeJob]:
+    ) -> Optional[decoding_records.DecodeJob]:
         """The first resident in flight whose window owes no boundary."""
         for resident in self.residents:
             if is_past_start(resident):
@@ -182,7 +182,7 @@ class DecoderUnit:
 
     # ----------------------------------------------------- the compute
 
-    def claim_compute(self, job: message.DecodeJob) -> None:
+    def claim_compute(self, job: decoding_records.DecodeJob) -> None:
         """The job holds the compute from now until its decode ends."""
         self.compute.holder = job
 
@@ -199,7 +199,9 @@ class DecoderUnit:
 
     # ---------------------------------------------------- the pipeline
 
-    def add_flight(self, job: message.DecodeJob, latency_ticks: int) -> None:
+    def add_flight(
+        self, job: decoding_records.DecodeJob, latency_ticks: int
+    ) -> None:
         """A pipelined decode started; it retires in issue order.
 
         A hardware pipeline retires in issue order, so every in-flight
@@ -223,7 +225,7 @@ class DecoderUnit:
             )
         self.pipeline.intake_job = job
 
-    def take_flight(self, job: message.DecodeJob) -> bool:
+    def take_flight(self, job: decoding_records.DecodeJob) -> bool:
         """Retire the job's flight; whether it was in flight here."""
         flights = self.pipeline.flights
         for flight in flights:
@@ -243,12 +245,12 @@ class DecoderUnit:
             labels.append(flight_job.label)
         return labels
 
-    def stall(self, owner: message.DecodeJob, depth: int) -> None:
+    def stall(self, owner: decoding_records.DecodeJob, depth: int) -> None:
         """The pipeline is full: the owner keeps the compute claim."""
         self.pipeline.stalled_owner = owner
         self.pipeline.stalled_depth = depth
 
-    def lift_stall(self) -> Optional[message.DecodeJob]:
+    def lift_stall(self) -> Optional[decoding_records.DecodeJob]:
         """The stalled owner whose claim may go, once a flight retired.
 
         None when nothing was stalled, the pipeline is still full, or
@@ -267,7 +269,7 @@ class DecoderUnit:
             return None
         return owner
 
-    def _resident_phase(self, resident: message.DecodeJob) -> str:
+    def _resident_phase(self, resident: decoding_records.DecodeJob) -> str:
         if self.compute.holder is resident and resident.service_started:
             return "computing"
         if resident.is_parked:
@@ -277,7 +279,7 @@ class DecoderUnit:
         return "capturing"
 
 
-def is_startable(job: message.DecodeJob) -> bool:
+def is_startable(job: decoding_records.DecodeJob) -> bool:
     """A job whose window owes no boundary may hold compute.
 
     Anything windowless (external, strong context, merged batch) always
@@ -289,7 +291,7 @@ def is_startable(job: message.DecodeJob) -> bool:
     return window.deps_remaining <= 0
 
 
-def is_past_start(job: message.DecodeJob) -> bool:
+def is_past_start(job: decoding_records.DecodeJob) -> bool:
     """A job that never starts again; an in-flight decode stays resident."""
     if job.cancelled:
         return True

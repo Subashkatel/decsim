@@ -25,8 +25,8 @@ import pathlib
 import pytest
 
 import decsim.machine as machine_module
-import decsim.message as message
 import decsim.observe.run_views as run_views
+import decsim.records.decoding as decoding_records
 import decsim.records.windows as window_records
 import tests.escalation.declared_fabric as fabric
 
@@ -215,7 +215,7 @@ def test_a_second_escalation_of_one_window_is_refused():
     )
     machine.run()
     shape = machine.window_manager.strong_redecode.shape
-    again = message.DecodeJob(
+    again = decoding_records.DecodeJob(
         op_id=1, window_id=2, n_rounds=3, strong_label="strong(mem1 W2)"
     )
     with pytest.raises(RuntimeError, match="duplicate strong escalation"):
@@ -275,7 +275,7 @@ def _log_index(machine, needle: str) -> int:
 
 def _claim(machine, window_index: int):
     store = machine.window_manager.retention.weak_store
-    claim = message.PotentialRestart((1, window_index))
+    claim = decoding_records.PotentialRestart((1, window_index))
     if not store.has_hold(claim):
         return None
     return store.hold_round_identities(claim)

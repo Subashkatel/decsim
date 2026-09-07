@@ -7,6 +7,7 @@ from dataclasses import FrozenInstanceError, dataclass, fields
 import pytest
 
 import decsim.decoders.decoder_memory as decoder_memory
+import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
 from decsim.decoders.decoder_memory import (
     DecoderInput,
@@ -31,7 +32,7 @@ from decsim.detector_error_model.window_model_builders import (
 )
 from decsim.frontends.settings import WorkloadSettings
 from decsim.machine import Machine, MachineSettings
-from decsim.message import DecodeJob, Operation
+from decsim.message import Operation
 from decsim.qpu.round_policies import FixedRounds
 from decsim.qpu.settings import QpuSettings
 from decsim.qpu.stim_device import StimDevice
@@ -97,8 +98,8 @@ def make_job(
     window_id: object = 7,
     request_key: object | None = None,
     dem: object = None,
-) -> DecodeJob:
-    return DecodeJob(
+) -> decoding_records.DecodeJob:
+    return decoding_records.DecodeJob(
         op_id=op_id,
         window_id=window_id,
         n_rounds=len(payloads or []),

@@ -20,7 +20,7 @@ from typing import Optional
 
 import decsim.decoders.decoder as decoder_module
 import decsim.detector_error_model.fault_model_contracts as fault_models
-import decsim.message as message
+import decsim.records.decoding as decoding_records
 import decsim.records.seeds as seed_records
 
 # the cache value meaning "this model was inspected and the signal has
@@ -85,28 +85,30 @@ class SoftOutputDecoder(decoder_module.DecoderBase):
         signal_child = seed_records.RunSeedChild((signal_segment,), self.signal)
         return (base_child, signal_child)
 
-    def latency(self, job: message.DecodeJob) -> int:
+    def latency(self, job: decoding_records.DecodeJob) -> int:
         """The base decoder's timing; the soft output adds no latency."""
         return self.base.latency(job)
 
-    def occupancy(self, job: message.DecodeJob) -> Optional[int]:
+    def occupancy(self, job: decoding_records.DecodeJob) -> Optional[int]:
         """The base decoder's occupancy; None when it is measured."""
         return self.base.occupancy(job)
 
-    def pipeline_depth(self, job: message.DecodeJob) -> int:
+    def pipeline_depth(self, job: decoding_records.DecodeJob) -> int:
         """The base decoder's pipeline depth."""
         return self.base.pipeline_depth(job)
 
-    def cancel(self, job: message.DecodeJob) -> None:
+    def cancel(self, job: decoding_records.DecodeJob) -> None:
         """Stop the base decoder's job."""
         self.base.cancel(job)
 
-    def decode(self, job: message.DecodeJob) -> message.DecodeResult:
+    def decode(
+        self, job: decoding_records.DecodeJob
+    ) -> decoding_records.DecodeResult:
         """The base decode with the soft output attached when available."""
         result, _elapsed_nanoseconds = self.decode_timed(job)
         return result
 
-    def decode_timed(self, job: message.DecodeJob) -> tuple:
+    def decode_timed(self, job: decoding_records.DecodeJob) -> tuple:
         """The base's measured call plus the timed soft-output evaluation."""
         metric = self._metric_for(job.dem)
         result, base_nanoseconds = self.base.decode_timed(job)
@@ -158,7 +160,7 @@ class ParallelGapDecoder(SoftOutputDecoder):
         SoftOutputDecoder.__init__(self, base, signal)
         self.combine_nanoseconds = combine_nanoseconds
 
-    def decode_timed(self, job: message.DecodeJob) -> tuple:
+    def decode_timed(self, job: decoding_records.DecodeJob) -> tuple:
         """The base decode for the payload; the pair for the gap and time."""
         result, base_nanoseconds = self.base.decode_timed(job)
         metric = self._metric_for(job.dem)
@@ -187,7 +189,7 @@ class SplitGapDecoder(SoftOutputDecoder):
 
     FORCED_CLASS = 0
 
-    def decode_timed(self, job: message.DecodeJob) -> tuple:
+    def decode_timed(self, job: decoding_records.DecodeJob) -> tuple:
         """The base decode for the payload; this half's solve for the time."""
         result, base_nanoseconds = self.base.decode_timed(job)
         metric = self._metric_for(job.dem)
@@ -220,7 +222,7 @@ class GapHalfDecoder(decoder_module.DecoderBase):
         self.signal = signal
         self._metrics_by_model_identity: dict = {}
 
-    def latency(self, job: message.DecodeJob) -> int:
+    def latency(self, job: decoding_records.DecodeJob) -> int:
         """A measured decoder has no latency before its call."""
         del job
         raise NotImplementedError(
@@ -228,19 +230,21 @@ class GapHalfDecoder(decoder_module.DecoderBase):
             "for the forced solve's time"
         )
 
-    def occupancy(self, job: message.DecodeJob) -> Optional[int]:
+    def occupancy(self, job: decoding_records.DecodeJob) -> Optional[int]:
         """None: the unit cannot say in advance when it frees."""
         del job
         return None
 
-    def decode(self, job: message.DecodeJob) -> message.DecodeResult:
+    def decode(
+        self, job: decoding_records.DecodeJob
+    ) -> decoding_records.DecodeResult:
         """The forced-class weight on an otherwise empty result."""
         result, _elapsed_nanoseconds = self.decode_timed(job)
         return result
 
-    def decode_timed(self, job: message.DecodeJob) -> tuple:
+    def decode_timed(self, job: decoding_records.DecodeJob) -> tuple:
         """The forced solve and its wall clock; nothing without a metric."""
-        result = message.DecodeResult(job.op_id, job.window_id)
+        result = decoding_records.DecodeResult(job.op_id, job.window_id)
         metric = cached_metric_for_model(
             self._metrics_by_model_identity, self.signal, job.dem
         )

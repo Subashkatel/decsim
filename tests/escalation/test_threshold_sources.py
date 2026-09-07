@@ -14,20 +14,22 @@ import types
 import pytest
 
 import decsim.escalation.threshold_sources as threshold_sources
-import decsim.message as message
+import decsim.records.decoding as decoding_records
 
 SOURCE = object()  # opaque: the sources compare gaps, never sources
 
 
-def _result(gap: float, logical_observables=(0,)) -> message.DecodeResult:
-    soft_output = message.SoftOutput(gap=gap, source=SOURCE)
-    return message.DecodeResult(
+def _result(
+    gap: float, logical_observables=(0,)
+) -> decoding_records.DecodeResult:
+    soft_output = decoding_records.SoftOutput(gap=gap, source=SOURCE)
+    return decoding_records.DecodeResult(
         1, 4, logical_observables=logical_observables, soft_output=soft_output
     )
 
 
-def _job(window_id: int = 4) -> message.DecodeJob:
-    return message.DecodeJob(op_id=1, window_id=window_id, n_rounds=3)
+def _job(window_id: int = 4) -> decoding_records.DecodeJob:
+    return decoding_records.DecodeJob(op_id=1, window_id=window_id, n_rounds=3)
 
 
 def _controller(
@@ -137,14 +139,18 @@ def test_an_online_threshold_audits_kept_windows_and_learns_from_the_strong():
     assert kept is False
     audited = online.summary()
     assert audited["pending_audits"] == 1
-    clean_strong = message.DecodeResult(1, 4, logical_observables=(1, 0))
+    clean_strong = decoding_records.DecodeResult(
+        1, 4, logical_observables=(1, 0)
+    )
     online.learn_from_strong_result((1, 4), clean_strong)
     assert controller.raise_count == 0
     labeled = online.summary()
     assert labeled["pending_audits"] == 0
     fifth = _job(5)
     online.decide_keep(fifth, confident)
-    revised_strong = message.DecodeResult(1, 5, logical_observables=(0, 0))
+    revised_strong = decoding_records.DecodeResult(
+        1, 5, logical_observables=(0, 0)
+    )
     online.learn_from_strong_result((1, 5), revised_strong)
     assert controller.raise_count == 1
     # a strong result that answers no audit (an ordinary escalation) is
@@ -168,7 +174,7 @@ def test_an_audit_needs_the_weak_observables_for_its_label():
     controller = _controller(target=0.0, threshold=0.0, step=0.0)
     draws = random.Random(0)
     online = threshold_sources.OnlineThreshold(controller, draws)
-    soft_output = message.SoftOutput(gap=5.0, source=SOURCE)
+    soft_output = decoding_records.SoftOutput(gap=5.0, source=SOURCE)
     timing_only = types.SimpleNamespace(
         soft_output=soft_output, logical_observables=None
     )

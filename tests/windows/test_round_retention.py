@@ -13,7 +13,7 @@ C: the restart window re-reads one buffer into the strong region).
 
 import types
 
-import decsim.message as message
+import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
 import decsim.syndrome_buffer.round_store as round_store_module
@@ -85,12 +85,12 @@ def test_the_hold_moves_to_the_request_and_releases_when_the_input_lands():
     request_key = window_records.DecoderRequestKey(
         1, 0, window_records.DecoderTier.WEAK, 0
     )
-    job = message.DecodeJob(
+    job = decoding_records.DecodeJob(
         op_id=1, window_id=0, n_rounds=5, request_key=request_key
     )
     retention.bind_input_hold(job, (1, 0))
     assert not store.has_hold((1, 0))
-    input_hold = message.DecoderInputHold(request_key)
+    input_hold = decoding_records.DecoderInputHold(request_key)
     assert store.has_hold(input_hold)
     assert retention.holds_input(job)
     assert store.occupancy == 5
@@ -136,7 +136,7 @@ def test_a_potential_restart_read_outlives_the_landing_and_follows_a_reslice():
         op_id=1, k=1, commit_lo=4, commit_hi=6, buffer_hi=9, n_rounds=6
     )
     retention.register_window((1, 1), window)
-    claim = message.PotentialRestart((1, 1))
+    claim = decoding_records.PotentialRestart((1, 1))
     claimed = [(1, index) for index in range(1, 10)]
     store.register_hold(claim, claimed)
     for round_index in range(1, 10):
@@ -145,7 +145,7 @@ def test_a_potential_restart_read_outlives_the_landing_and_follows_a_reslice():
     request_key = window_records.DecoderRequestKey(
         1, 1, window_records.DecoderTier.WEAK, 0
     )
-    job = message.DecodeJob(
+    job = decoding_records.DecodeJob(
         op_id=1, window_id=1, n_rounds=6, request_key=request_key
     )
     retention.bind_input_hold(job, (1, 1))

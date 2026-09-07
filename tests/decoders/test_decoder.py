@@ -10,7 +10,7 @@ import decsim.config as config
 import decsim.decoders.decoder as decoder_module
 import decsim.decoders.decoders as decoders
 import decsim.engine as engine_module
-import decsim.message as message
+import decsim.records.decoding as decoding_records
 
 MEASURED_NS = 2500
 
@@ -23,7 +23,7 @@ class FixedRow(decoder_module.DecoderBase):
         return 3
 
     def decode(self, job):
-        return message.DecodeResult(
+        return decoding_records.DecodeResult(
             job.op_id, job.window_id, logical_observables=(1,)
         )
 
@@ -40,7 +40,7 @@ class MeasuredRow(decoder_module.DecoderBase):
         return None
 
     def decode(self, job):
-        return message.DecodeResult(job.op_id, job.window_id)
+        return decoding_records.DecodeResult(job.op_id, job.window_id)
 
     def decode_timed(self, job):
         result = self.decode(job)
@@ -63,8 +63,8 @@ class EmptyWindowRow(decoder_module.WindowDecoderBase):
         raise AssertionError("no model, nothing to decode")
 
 
-def _job(**fields) -> message.DecodeJob:
-    return message.DecodeJob(
+def _job(**fields) -> decoding_records.DecodeJob:
+    return decoding_records.DecodeJob(
         op_id=1, window_id=0, n_rounds=2, label="W0", **fields
     )
 

@@ -15,6 +15,7 @@ from typing import Callable
 
 import decsim.message as message
 import decsim.observe.trace_source as trace_source
+import decsim.records.decoding as decoding_records
 import decsim.records.windows as window_records
 import decsim.windows.window_transfers as window_transfers
 
@@ -30,7 +31,7 @@ class CorrectionPublisher:
         self,
         window: window_records.Window,
         operation: message.Operation,
-        result: message.DecodeResult,
+        result: decoding_records.DecodeResult,
         request_key: window_records.DecoderRequestKey,
         on_committed: Callable[[], None],
     ) -> None:
@@ -54,7 +55,7 @@ class CorrectionPublisher:
     def _commit(
         self,
         window_key: tuple,
-        result: message.DecodeResult,
+        result: decoding_records.DecodeResult,
         request_key: window_records.DecoderRequestKey,
         on_committed: Callable[[], None],
     ) -> None:
@@ -103,7 +104,9 @@ class WindowCommitter:
         self.window_committed = trace_source.TraceSource()
 
     def accept_result(
-        self, job: message.DecodeJob, result: message.DecodeResult
+        self,
+        job: decoding_records.DecodeJob,
+        result: decoding_records.DecodeResult,
     ) -> None:
         """A primary decode finished: hand the boundary on, publish, commit.
 
@@ -130,7 +133,9 @@ class WindowCommitter:
         )
 
     def accept_strong_result(
-        self, job: message.DecodeJob, result: message.DecodeResult
+        self,
+        job: decoding_records.DecodeJob,
+        result: decoding_records.DecodeResult,
     ) -> None:
         """A strong decode finished: publish it, then finalize the window."""
         key = (job.request_key.operation_id, job.request_key.window_id)
@@ -147,7 +152,7 @@ class WindowCommitter:
         self,
         window: window_records.Window,
         operation: message.Operation,
-        result: message.DecodeResult,
+        result: decoding_records.DecodeResult,
         request_key: window_records.DecoderRequestKey,
         is_final: bool,
     ) -> None:
@@ -184,7 +189,7 @@ class WindowCommitter:
         self,
         window: window_records.Window,
         operation: message.Operation,
-        result: message.DecodeResult,
+        result: decoding_records.DecodeResult,
         request_key: window_records.DecoderRequestKey,
     ) -> None:
         """The strong result is the window's final one.

@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
+import decsim.records.decoding as decoding_records
 import decsim.records.seeds as seed_records
 from decsim.controller import policies
 from decsim.controller.idle_rounds import IdleRoundAccounting
@@ -18,7 +19,6 @@ from decsim.escalation.policies import Baseline, Switching
 from decsim.escalation.threshold_sources import FixedThreshold
 from decsim.frontends.settings import WorkloadSettings
 from decsim.machine import Machine, MachineSettings
-from decsim.message import RunShape, SoftOutputSource
 from decsim.observe.controller_counters import ControllerCounters
 from decsim.ports import IdlePolicy
 from decsim.qpu.settings import QpuSettings
@@ -154,7 +154,7 @@ def make_controller(idle_policy, *, live_streams=()):
 
 
 def switching_source():
-    return SoftOutputSource(
+    return decoding_records.SoftOutputSource(
         method="matching-gap",
         cluster_origin="decoder",
         growth_schedule="uniform",
@@ -258,7 +258,7 @@ def _run_shape(
     scheme = SlidingWindowScheme(
         terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD
     )
-    return RunShape(
+    return decoding_records.RunShape(
         scheme=scheme,
         boundary_policy=boundary_policy,
         operations=(),

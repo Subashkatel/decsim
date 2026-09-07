@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+import decsim.records.decoding as decoding_records
 import decsim.records.windows as window_records
 from decsim.config import TICKS_PER_MICROSECOND
 from decsim.frontends.planner import (
@@ -21,7 +22,6 @@ from decsim.message import (
     Operation,
     OperationPlanningView,
     OpKind,
-    PotentialStrong,
     ResolvedCodeGeometry,
     ResolvedOperationPlanning,
 )
@@ -324,7 +324,7 @@ def test_strong_buffering_extends_context_and_unions_shared_rounds():
     )
 
     owner, ordinary_rounds = ordinary.potential_holds[0]
-    assert owner == PotentialStrong((1, 0))
+    assert owner == decoding_records.PotentialStrong((1, 0))
     assert ordinary_rounds == tuple((1, index) for index in range(1, 7))
     assert doubled.potential_holds[0][1] == (
         (1, 1),

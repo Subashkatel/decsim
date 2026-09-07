@@ -10,6 +10,7 @@ import functools
 from typing import Callable, Optional
 
 import decsim.message as message
+import decsim.records.decoding as decoding_records
 import decsim.records.windows as window_records
 
 
@@ -46,7 +47,7 @@ class WindowTransfers:
     def send_for_job(
         self,
         path: message.LinkPath,
-        job: message.DecodeJob,
+        job: decoding_records.DecodeJob,
         *,
         payload_bits: Optional[int],
         request_key: Optional[window_records.DecoderRequestKey] = None,
@@ -70,7 +71,7 @@ class WindowTransfers:
 
     def send_selection(
         self,
-        weak_job: message.DecodeJob,
+        weak_job: decoding_records.DecodeJob,
         strong_request_key: window_records.DecoderRequestKey,
         on_delivered: Callable[[], None],
     ) -> int:
@@ -113,7 +114,7 @@ class WindowTransfers:
 
 
 def result_payload_bits(
-    result: message.DecodeResult, operation: message.Operation
+    result: decoding_records.DecodeResult, operation: message.Operation
 ) -> int:
     """A result reaches the frame as one bit per logical observable.
 

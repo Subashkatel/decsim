@@ -9,7 +9,7 @@ with no record kept.
 import dataclasses
 from typing import Optional
 
-import decsim.message as message
+import decsim.records.decoding as decoding_records
 import decsim.records.windows as window_records
 
 
@@ -28,16 +28,16 @@ class TerminalRequestRecord:
     ready_ticks: int
     dispatch_ticks: Optional[int]
     decode_output_ticks: Optional[int]
-    service_key: Optional[message.DecoderServiceKey]
-    soft_output: Optional[message.SoftOutput]
-    terminal_processing_outcome: message.RequestProcessingOutcome
+    service_key: Optional[decoding_records.DecoderServiceKey]
+    soft_output: Optional[decoding_records.SoftOutput]
+    terminal_processing_outcome: decoding_records.RequestProcessingOutcome
 
 
 @dataclasses.dataclass(frozen=True)
 class TerminalServiceRecord:
     """One decode service at its end: the requests it served and its ticks."""
 
-    service_key: message.DecoderServiceKey
+    service_key: decoding_records.DecoderServiceKey
     pool: str
     original_request_keys: tuple[window_records.DecoderRequestKey, ...]
     completed_request_keys: tuple[window_records.DecoderRequestKey, ...]
@@ -57,9 +57,9 @@ class DecodeRecordLedger:
 
     def request_ended(
         self,
-        job: message.DecodeJob,
-        result: Optional[message.DecodeResult],
-        outcome: message.RequestProcessingOutcome,
+        job: decoding_records.DecodeJob,
+        result: Optional[decoding_records.DecodeResult],
+        outcome: decoding_records.RequestProcessingOutcome,
         decode_output_ticks: Optional[int],
     ) -> None:
         """One request reached its terminal outcome."""
@@ -90,7 +90,7 @@ class DecodeRecordLedger:
         )
         self.requests.append(record)
 
-    def service_ended(self, job: message.DecodeJob, now: int) -> None:
+    def service_ended(self, job: decoding_records.DecodeJob, now: int) -> None:
         """One physical decode ended, with every request it served."""
         if job.service_key is None:
             return

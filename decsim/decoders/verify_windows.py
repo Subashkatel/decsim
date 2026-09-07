@@ -16,8 +16,8 @@ import numpy
 import decsim.decoders.decoder as decoder_module
 import decsim.decoders.tesseract.window_decoder as tesseract_window_decoder
 import decsim.detector_error_model.fault_model_contracts as fault_models
-import decsim.message as message
 import decsim.observe.trace_source as trace_source
+import decsim.records.decoding as decoding_records
 import decsim.records.seeds as seed_records
 
 
@@ -52,36 +52,40 @@ class TesseractCheckedDecoder(decoder_module.DecoderBase):
             children.append(inner_child)
         return tuple(children)
 
-    def latency(self, job: message.DecodeJob) -> int:
+    def latency(self, job: decoding_records.DecodeJob) -> int:
         """The inner decoder's latency; the referee is never priced."""
         return self.inner.latency(job)
 
-    def occupancy(self, job: message.DecodeJob) -> Optional[int]:
+    def occupancy(self, job: decoding_records.DecodeJob) -> Optional[int]:
         """The inner decoder's occupancy; None when it is measured."""
         return self.inner.occupancy(job)
 
-    def pipeline_depth(self, job: message.DecodeJob) -> int:
+    def pipeline_depth(self, job: decoding_records.DecodeJob) -> int:
         """The inner decoder's pipeline depth."""
         return self.inner.pipeline_depth(job)
 
-    def cancel(self, job: message.DecodeJob) -> None:
+    def cancel(self, job: decoding_records.DecodeJob) -> None:
         """Stop the inner decoder's job."""
         self.inner.cancel(job)
 
-    def decode(self, job: message.DecodeJob) -> message.DecodeResult:
+    def decode(
+        self, job: decoding_records.DecodeJob
+    ) -> decoding_records.DecodeResult:
         """The inner result, after the referee has checked it."""
         result = self.inner.decode(job)
         return self._checked(job, result)
 
-    def decode_timed(self, job: message.DecodeJob) -> tuple:
+    def decode_timed(self, job: decoding_records.DecodeJob) -> tuple:
         """The inner decoder's measured call; the referee's is untimed."""
         result, elapsed_ns = self.inner.decode_timed(job)
         checked = self._checked(job, result)
         return checked, elapsed_ns
 
     def _checked(
-        self, job: message.DecodeJob, result: message.DecodeResult
-    ) -> message.DecodeResult:
+        self,
+        job: decoding_records.DecodeJob,
+        result: decoding_records.DecodeResult,
+    ) -> decoding_records.DecodeResult:
         model = job.dem
         if model is None or result.logical_observables is None:
             return result

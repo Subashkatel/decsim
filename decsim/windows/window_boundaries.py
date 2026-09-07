@@ -16,6 +16,7 @@ import functools
 from typing import Callable, Optional
 
 import decsim.message as message
+import decsim.records.decoding as decoding_records
 import decsim.records.windows as window_records
 
 
@@ -54,7 +55,7 @@ class BoundaryCourier:
         self,
         window: window_records.Window,
         operation: message.Operation,
-        result: message.DecodeResult,
+        result: decoding_records.DecodeResult,
         request_key: window_records.DecoderRequestKey,
         is_final: bool,
     ) -> None:
@@ -71,7 +72,7 @@ class BoundaryCourier:
     def ship_held(
         self,
         window: window_records.Window,
-        result: message.DecodeResult,
+        result: decoding_records.DecodeResult,
         request_key: window_records.DecoderRequestKey,
     ) -> None:
         """The window's result is final: a boundary held for it ships now."""

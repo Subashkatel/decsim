@@ -19,7 +19,7 @@ one strong re-decode per escalated window).
 import dataclasses
 from typing import Optional
 
-import decsim.message as message
+import decsim.records.decoding as decoding_records
 import decsim.records.identity as identity_records
 import decsim.records.windows as window_records
 
@@ -40,8 +40,8 @@ class LiveStrongRequest:
     it.
     """
 
-    request_job: message.DecodeJob
-    service_job: message.DecodeJob
+    request_job: decoding_records.DecodeJob
+    service_job: decoding_records.DecodeJob
 
 
 @dataclasses.dataclass(frozen=True)
@@ -51,8 +51,8 @@ class HeldStrongCompletion:
     The request job carries the request key the result answers.
     """
 
-    request_job: message.DecodeJob
-    result: message.DecodeResult
+    request_job: decoding_records.DecodeJob
+    result: decoding_records.DecodeResult
     decode_output_ticks: int
 
 
@@ -81,7 +81,7 @@ class StrongRequests:
 
     # ------------------------------------------------------ admission
 
-    def admit(self, job: message.DecodeJob, now: int) -> None:
+    def admit(self, job: decoding_records.DecodeJob, now: int) -> None:
         """Open the request's place: a strong destination, or a weak attempt.
 
         A gap half is neither tier: it feeds the join, not the ledger.
@@ -95,7 +95,7 @@ class StrongRequests:
             return
         self.admit_weak(job, now)
 
-    def admit_strong(self, job: message.DecodeJob, now: int) -> None:
+    def admit_strong(self, job: decoding_records.DecodeJob, now: int) -> None:
         """Give one destination's next strong result to this request."""
         key = job.strong_decode_for
         if key in self.running_by_window or key in self.held_by_window:
@@ -106,7 +106,7 @@ class StrongRequests:
         self.running_by_window[key] = LiveStrongRequest(job, job)
         job.request_admitted_ticks = now
 
-    def admit_weak(self, job: message.DecodeJob, now: int) -> None:
+    def admit_weak(self, job: decoding_records.DecodeJob, now: int) -> None:
         """Open one destination window's decode attempt."""
         key = (job.op_id, job.window_id)
         if key in self.unresolved_weak_windows:
@@ -126,7 +126,7 @@ class StrongRequests:
         """
         self.unresolved_weak_windows.remove(key)
 
-    def is_live_request(self, job: message.DecodeJob) -> bool:
+    def is_live_request(self, job: decoding_records.DecodeJob) -> bool:
         """Whether the strong job still carries its destination's request.
 
         A request cancelled while its input crossed the link is not.
@@ -142,7 +142,7 @@ class StrongRequests:
         """The request live for the destination, or None."""
         return self.running_by_window.get(key)
 
-    def members_of(self, service_job: message.DecodeJob) -> list:
+    def members_of(self, service_job: decoding_records.DecodeJob) -> list:
         """The request jobs one physical decode serves, in admission order."""
         members = []
         for live in self.running_by_window.values():
@@ -175,7 +175,10 @@ class StrongRequests:
     # --------------------------------------------- batching and service
 
     def register_batch(
-        self, window_keys: list, request_jobs: list, batch: message.DecodeJob
+        self,
+        window_keys: list,
+        request_jobs: list,
+        batch: decoding_records.DecodeJob,
     ) -> None:
         """One merged batch now serves every member request."""
         for window_key, request_job in zip(window_keys, request_jobs):
@@ -183,7 +186,7 @@ class StrongRequests:
                 request_job, batch
             )
 
-    def finish_service(self, service_job: message.DecodeJob) -> None:
+    def finish_service(self, service_job: decoding_records.DecodeJob) -> None:
         """The physical decode ended; its requests are no longer running."""
         entries = self.running_by_window.items()
         entries = tuple(entries)
@@ -199,7 +202,7 @@ class StrongRequests:
         """Drop and return the destination's held completion, if any."""
         return self.held_by_window.pop(key, None)
 
-    def has_survivors(self, service_job: message.DecodeJob) -> bool:
+    def has_survivors(self, service_job: decoding_records.DecodeJob) -> bool:
         """Whether any request the decode serves is still live."""
         for live in self.running_by_window.values():
             if live.service_job is service_job:
@@ -263,8 +266,8 @@ class StrongRequests:
 
     def deliveries_for(
         self,
-        service_job: message.DecodeJob,
-        result: message.DecodeResult,
+        service_job: decoding_records.DecodeJob,
+        result: decoding_records.DecodeResult,
         now: int,
     ) -> tuple:
         """Per-request completions of one finished strong decode.
@@ -293,7 +296,9 @@ class StrongRequests:
             )
         deliveries = []
         for key, request in zip(keys, requests):
-            empty = message.DecodeResult(op_id=key[0], window_id=key[1])
+            empty = decoding_records.DecodeResult(
+                op_id=key[0], window_id=key[1]
+            )
             held = HeldStrongCompletion(request, empty, now)
             deliveries.append(held)
         return tuple(deliveries)
@@ -342,14 +347,14 @@ class StrongRequests:
         return tuple(sorted(records, key=_snapshot_order))
 
 
-def is_merged_batch(job: message.DecodeJob) -> bool:
+def is_merged_batch(job: decoding_records.DecodeJob) -> bool:
     """A batch serves several strong requests and has no request itself."""
     if job.request_key is not None:
         return False
     return job.strong_decode_for is not None
 
 
-def _populated_accuracy_fields(result: message.DecodeResult) -> list:
+def _populated_accuracy_fields(result: decoding_records.DecodeResult) -> list:
     populated = []
     for field_name in ACCURACY_FIELDS:
         value = getattr(result, field_name)
@@ -358,7 +363,7 @@ def _populated_accuracy_fields(result: message.DecodeResult) -> list:
     return populated
 
 
-def _phase_of(job: message.DecodeJob, queued_matches) -> str:
+def _phase_of(job: decoding_records.DecodeJob, queued_matches) -> str:
     for candidate in queued_matches:
         if candidate is not job:
             raise RuntimeError("strong-work identity collision in ready queues")

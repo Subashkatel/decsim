@@ -20,8 +20,8 @@ new_holder) and hold_released(holder) for the consumers' tokens.
 
 from typing import Callable, Optional
 
-import decsim.message as message
 import decsim.observe.trace_source as trace_source
+import decsim.records.decoding as decoding_records
 import decsim.records.identity as identity_records
 import decsim.records.rounds as round_records
 import decsim.syndrome_buffer.round_holds as round_holds
@@ -263,7 +263,7 @@ class RoundStore:
         references = set()
         for round_key in keys:
             references.add(round_key[0])
-        if type(holder) is message.RephaseGuard:
+        if type(holder) is decoding_records.RephaseGuard:
             references.add(holder.request_key.operation_id)
         for operation_id in references:
             self._open(operation_id)

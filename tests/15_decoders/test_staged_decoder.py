@@ -7,6 +7,7 @@ answers on a Stim memory circuit.
 
 import pytest
 
+import decsim.records.decoding as decoding_records
 import decsim.records.windows as window_records
 from decsim.config import microseconds_to_ticks
 from decsim.decoders.decoder import DecoderBase
@@ -18,7 +19,6 @@ from decsim.decoders.staged_decoder import (
     UnitTiming,
 )
 from decsim.engine import Engine
-from decsim.message import DecodeJob, DecodeResult
 from decsim.observe.stage_records import StageLedger
 
 MHZ = 250.0
@@ -47,11 +47,11 @@ class _RecordingInner(DecoderBase):
 
     def decode(self, job):
         self.decode_ticks.append(self.engine.now)
-        return DecodeResult(job.op_id, job.window_id)
+        return decoding_records.DecodeResult(job.op_id, job.window_id)
 
 
 def _job(window_id=0, n_rounds=3):
-    return DecodeJob(
+    return decoding_records.DecodeJob(
         op_id=1,
         window_id=window_id,
         n_rounds=n_rounds,

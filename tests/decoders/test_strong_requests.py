@@ -7,7 +7,7 @@ selected by the weak side and consumed by the window that asked.
 import pytest
 
 import decsim.decoders.strong_requests as strong_requests_module
-import decsim.message as message
+import decsim.records.decoding as decoding_records
 import decsim.records.windows as window_records
 from decsim.decoders.strong_requests import HeldStrongCompletion
 
@@ -19,7 +19,7 @@ def _request_key(sequence):
 
 
 def _strong_job(request_key, window_key=(1, 0)):
-    return message.DecodeJob(
+    return decoding_records.DecodeJob(
         op_id=1,
         window_id=0,
         n_rounds=9,
@@ -29,7 +29,7 @@ def _strong_job(request_key, window_key=(1, 0)):
 
 
 def _held(job, now=50):
-    result = message.DecodeResult(1, 0)
+    result = decoding_records.DecodeResult(1, 0)
     return HeldStrongCompletion(job, result, now)
 
 
@@ -97,8 +97,8 @@ def test_a_destination_keeps_at_most_one_unconsumed_strong_result():
 
 def test_a_second_weak_decode_of_an_unresolved_window_is_refused():
     requests = strong_requests_module.StrongRequests()
-    first = message.DecodeJob(op_id=1, window_id=0, n_rounds=3)
-    second = message.DecodeJob(op_id=1, window_id=0, n_rounds=3)
+    first = decoding_records.DecodeJob(op_id=1, window_id=0, n_rounds=3)
+    second = decoding_records.DecodeJob(op_id=1, window_id=0, n_rounds=3)
     requests.admit(first, now=0)
     with pytest.raises(RuntimeError, match="decodes once at a time"):
         requests.admit(second, now=1)
@@ -111,7 +111,7 @@ def test_a_merged_batch_splits_into_one_empty_completion_per_member():
         1, 1, window_records.DecoderTier.STRONG, 2
     )
     first = _strong_job(first_key, window_key=(1, 0))
-    second = message.DecodeJob(
+    second = decoding_records.DecodeJob(
         op_id=1,
         window_id=1,
         n_rounds=9,
@@ -120,11 +120,11 @@ def test_a_merged_batch_splits_into_one_empty_completion_per_member():
     )
     requests.admit_strong(first, now=0)
     requests.admit_strong(second, now=0)
-    batch = message.DecodeJob(
+    batch = decoding_records.DecodeJob(
         op_id=-1, window_id=0, n_rounds=18, strong_decode_for=(1, 0)
     )
     requests.register_batch([(1, 0), (1, 1)], [first, second], batch)
-    result = message.DecodeResult(-1, 0)
+    result = decoding_records.DecodeResult(-1, 0)
     deliveries = requests.deliveries_for(batch, result, now=40)
     assert [held.request_job for held in deliveries] == [first, second]
     assert [held.request_job.request_key for held in deliveries] == [
@@ -143,10 +143,10 @@ def test_a_merged_batch_may_carry_no_accuracy_bearing_field():
     second = _strong_job(second_key, window_key=(1, 1))
     requests.admit_strong(first, now=0)
     requests.admit_strong(second, now=0)
-    batch = message.DecodeJob(
+    batch = decoding_records.DecodeJob(
         op_id=-1, window_id=0, n_rounds=18, strong_decode_for=(1, 0)
     )
     requests.register_batch([(1, 0), (1, 1)], [first, second], batch)
-    result = message.DecodeResult(-1, 0, logical_observables=(1,))
+    result = decoding_records.DecodeResult(-1, 0, logical_observables=(1,))
     with pytest.raises(RuntimeError, match="accuracy-bearing"):
         requests.deliveries_for(batch, result, now=40)

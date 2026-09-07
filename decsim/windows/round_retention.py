@@ -23,6 +23,7 @@ import functools
 from typing import Optional
 
 import decsim.message as message
+import decsim.records.decoding as decoding_records
 import decsim.records.windows as window_records
 
 
@@ -96,7 +97,7 @@ class RoundRetention:
         strong = self.strong_context_read_keys(window, weak)
         self.weak_store.register_hold(key, weak)
         if self.is_strong_context_retained:
-            potential = message.PotentialStrong(key)
+            potential = decoding_records.PotentialStrong(key)
             held = weak + strong
             self.strong_store.register_hold(potential, held)
 
@@ -115,7 +116,7 @@ class RoundRetention:
             window.op_id, window.start_round, window.buffer_hi, window
         )
         strong = self.strong_context_read_keys(window, weak)
-        potential = message.PotentialStrong(key)
+        potential = decoding_records.PotentialStrong(key)
         if self.strong_store is not None and self.strong_store.has_hold(
             potential
         ):
@@ -123,13 +124,13 @@ class RoundRetention:
             self.strong_store.replace_hold(potential, held)
         if self.weak_store.has_hold(key):
             self.weak_store.replace_hold(key, weak)
-        restart = message.PotentialRestart(key)
+        restart = decoding_records.PotentialRestart(key)
         if self.weak_store.has_hold(restart):
             self.weak_store.replace_hold(restart, weak)
 
     def release_restart_reads(self, key: tuple) -> None:
         """No earlier escalation can re-slice the window: its claim ends."""
-        restart = message.PotentialRestart(key)
+        restart = decoding_records.PotentialRestart(key)
         self.release_hold_if_live(restart)
 
     def reset_clipped_window_reads(self, window: window_records.Window) -> None:
@@ -201,19 +202,19 @@ class RoundRetention:
 
     def transfer_potential_to_pending(self, window_key, request_key) -> tuple:
         """A window's possible strong read becomes an admitted request's."""
-        potential = message.PotentialStrong(window_key)
-        pending = message.PendingStrong(request_key)
+        potential = decoding_records.PotentialStrong(window_key)
+        pending = decoding_records.PendingStrong(request_key)
         return self.transfer_hold(potential, pending, self.strong_store)
 
-    def holds_input(self, job: message.DecodeJob) -> bool:
+    def holds_input(self, job: decoding_records.DecodeJob) -> bool:
         """Whether the job's input hold is already live in Buffer 0."""
         if job.request_key is None:
             return False
-        owner = message.DecoderInputHold(job.request_key)
+        owner = decoding_records.DecoderInputHold(job.request_key)
         return self.weak_store.has_hold(owner)
 
     def bind_input_hold(
-        self, job: message.DecodeJob, previous_owner, store=None
+        self, job: decoding_records.DecodeJob, previous_owner, store=None
     ) -> None:
         """Transfer upstream retention to an admitted input request.
 
@@ -222,12 +223,12 @@ class RoundRetention:
         transfer.
         """
         store = self.store_for(store)
-        owner = message.DecoderInputHold(job.request_key)
+        owner = decoding_records.DecoderInputHold(job.request_key)
         if previous_owner != owner:
             _move_hold_to_input(store, previous_owner, owner, job)
         job.input_hold = functools.partial(store.release_hold, owner)
 
-    def hold_strong_input(self, job: message.DecodeJob) -> None:
+    def hold_strong_input(self, job: decoding_records.DecodeJob) -> None:
         """The strong job's context becomes its input hold in syndrome buffer 1.
 
         The window's potential strong read or the request's pending
@@ -236,9 +237,9 @@ class RoundRetention:
         rounds stay stored until the input lands in the unit's memory.
         """
         strong_store = self.strong_store
-        in_flight = message.StrongInputInFlight(job.request_key)
-        potential = message.PotentialStrong(job.strong_decode_for)
-        pending = message.PendingStrong(job.request_key)
+        in_flight = decoding_records.StrongInputInFlight(job.request_key)
+        potential = decoding_records.PotentialStrong(job.strong_decode_for)
+        pending = decoding_records.PendingStrong(job.request_key)
         if strong_store.has_hold(potential):
             self.transfer_hold(potential, in_flight, strong_store)
         elif strong_store.has_hold(pending):
@@ -324,7 +325,7 @@ def _is_released(store, arrived_for, round_key: tuple) -> bool:
 
 
 def _move_hold_to_input(
-    store, previous_owner, owner, job: message.DecodeJob
+    store, previous_owner, owner, job: decoding_records.DecodeJob
 ) -> None:
     """The window's hold becomes the request's, or a fresh one is made."""
     if store.has_hold(previous_owner):

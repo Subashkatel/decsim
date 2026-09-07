@@ -11,7 +11,7 @@ what it heard.
 import dataclasses
 from typing import Optional
 
-import decsim.message as message
+import decsim.records.decoding as decoding_records
 import decsim.records.identity as identity_records
 import decsim.records.windows as window_records
 
@@ -51,7 +51,7 @@ class WindowLedger:
     def window_committed(
         self,
         window: window_records.Window,
-        contribution: message.LogicalContribution,
+        contribution: decoding_records.LogicalContribution,
     ) -> None:
         """A window committed under the contribution that owns its rounds."""
         self.windows[window.key] = window

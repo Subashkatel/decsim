@@ -10,7 +10,7 @@ windows. Row W5 checks the ledger against a per-round oracle.
 
 from typing import Optional
 
-import decsim.message as message
+import decsim.records.decoding as decoding_records
 
 OWNERSHIP_KINDS = ("ordinary_window", "strong_window")
 BOUNDARY_POLICIES = ("strict", "stream_segment")
@@ -20,10 +20,14 @@ class LogicalLedger:
     """The contributions by owner key, and one observable arity per stream."""
 
     def __init__(self):
-        self.contributions: dict[tuple, message.LogicalContribution] = {}
+        self.contributions: dict[
+            tuple, decoding_records.LogicalContribution
+        ] = {}
         self._arity_by_stream: dict[object, int] = {}
 
-    def get(self, owner_key: tuple) -> Optional[message.LogicalContribution]:
+    def get(
+        self, owner_key: tuple
+    ) -> Optional[decoding_records.LogicalContribution]:
         """The owner's contribution, or None."""
         return self.contributions.get(owner_key)
 
@@ -31,7 +35,9 @@ class LogicalLedger:
         """A window is decoded again: its contribution is gone until commit."""
         self.contributions.pop(owner_key, None)
 
-    def install(self, contribution: message.LogicalContribution) -> None:
+    def install(
+        self, contribution: decoding_records.LogicalContribution
+    ) -> None:
         """Record who owns an extent.
 
         An owner never changes kind or extent, extents never overlap,
@@ -102,7 +108,7 @@ class LogicalLedger:
             raise RuntimeError(
                 f"result for {owner_key} has no logical contribution owner"
             )
-        replaced = message.LogicalContribution(
+        replaced = decoding_records.LogicalContribution(
             owner_key=contribution.owner_key,
             commit_lo=contribution.commit_lo,
             commit_hi=contribution.commit_hi,
@@ -112,7 +118,7 @@ class LogicalLedger:
         self.install(replaced)
 
     def _check_no_overlap(
-        self, contribution: message.LogicalContribution
+        self, contribution: decoding_records.LogicalContribution
     ) -> None:
         stream_id = contribution.owner_key[0]
         for other_key, other in self.contributions.items():
@@ -128,7 +134,9 @@ class LogicalLedger:
                     f"{other.commit_lo}-{other.commit_hi}"
                 )
 
-    def _check_arity(self, contribution: message.LogicalContribution) -> None:
+    def _check_arity(
+        self, contribution: decoding_records.LogicalContribution
+    ) -> None:
         """One stream has one arity, set by its first functional owner."""
         logical_observables = contribution.logical_observables
         if logical_observables is None:
@@ -161,7 +169,7 @@ class LogicalLedger:
         return covering
 
 
-def _refuse_extent(contribution: message.LogicalContribution) -> None:
+def _refuse_extent(contribution: decoding_records.LogicalContribution) -> None:
     raise ValueError(
         f"logical contribution {contribution.owner_key} has invalid "
         f"extent {contribution.commit_lo}-{contribution.commit_hi}"
@@ -169,8 +177,8 @@ def _refuse_extent(contribution: message.LogicalContribution) -> None:
 
 
 def _check_ownership_unchanged(
-    previous: message.LogicalContribution,
-    contribution: message.LogicalContribution,
+    previous: decoding_records.LogicalContribution,
+    contribution: decoding_records.LogicalContribution,
 ) -> None:
     same_extent = previous.commit_lo == contribution.commit_lo
     if previous.commit_hi != contribution.commit_hi:
@@ -188,14 +196,15 @@ def _check_ownership_unchanged(
 
 
 def _overlaps(
-    left: message.LogicalContribution, right: message.LogicalContribution
+    left: decoding_records.LogicalContribution,
+    right: decoding_records.LogicalContribution,
 ) -> bool:
     if left.commit_lo > right.commit_hi:
         return False
     return right.commit_lo <= left.commit_hi
 
 
-def _extent_order(contribution: message.LogicalContribution) -> tuple:
+def _extent_order(contribution: decoding_records.LogicalContribution) -> tuple:
     owner_text = repr(contribution.owner_key)
     return (contribution.commit_lo, contribution.commit_hi, owner_text)
 
@@ -231,7 +240,7 @@ def _relation_of(covered_lo: int, cursor: int) -> str:
 
 
 def _check_inside_interval(
-    contribution: message.LogicalContribution,
+    contribution: decoding_records.LogicalContribution,
     commit_lo: int,
     commit_hi: int,
     boundary_policy: str,

@@ -21,7 +21,7 @@ import decsim.decoders.settings as decoder_settings
 import decsim.decoders.staged_decoder as staged_decoder
 import decsim.decoders.union_find.decoder as union_find_decoder
 import decsim.engine as engine_module
-import decsim.front.experiment as experiment_config
+import decsim.front.experiment as experiment
 import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
 import decsim.message as message
@@ -102,8 +102,8 @@ def test_readouts_reach_the_receiver_in_cycle_order_cycle_ticks_apart():
 def test_a_new_decoder_is_one_class_and_one_table_row():
     """Gate point 1's settings run to completion on a decoder added as a row."""
     config_path = CONFIGS / "weak_decoder_baseline.yaml"
-    experiment = experiment_config.load_experiment(config_path)
-    settings = experiment.point_settings(
+    config = experiment.load_experiment(config_path)
+    settings = config.point_settings(
         physical_error_probability=0.003, distance=3, round_period_us=1.0
     )
     weak_decoder = dataclasses.replace(settings.weak_decoder, kind="fake")
@@ -125,8 +125,8 @@ def test_a_new_decoder_is_one_class_and_one_table_row():
 def test_a_second_table_row_runs_gate_point_one():
     """Gate point 1's settings run to completion on the union_find row."""
     config_path = CONFIGS / "weak_decoder_baseline.yaml"
-    experiment = experiment_config.load_experiment(config_path)
-    settings = experiment.point_settings(
+    config = experiment.load_experiment(config_path)
+    settings = config.point_settings(
         physical_error_probability=0.003, distance=3, round_period_us=1.0
     )
     weak_decoder = dataclasses.replace(settings.weak_decoder, kind="union_find")
@@ -357,8 +357,8 @@ class CountingRoundStore(round_store_module.RoundStore):
 def test_a_new_round_store_is_one_class_and_one_table_row():
     """Gate point 1's settings run to completion on a store added as a row."""
     config_path = CONFIGS / "weak_decoder_baseline.yaml"
-    experiment = experiment_config.load_experiment(config_path)
-    settings = experiment.point_settings(
+    config = experiment.load_experiment(config_path)
+    settings = config.point_settings(
         physical_error_probability=0.003, distance=3, round_period_us=1.0
     )
     round_store = dataclasses.replace(settings.round_store, kind="counting")

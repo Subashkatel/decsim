@@ -33,6 +33,8 @@ import decsim.qpu.stim_device as stim_device
 import decsim.qpu.syndrome_devices as syndrome_devices
 import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
+import decsim.records.seeds as seed_records
+import decsim.seeding as seeding
 import decsim.syndrome_buffer.round_store as round_store_module
 import decsim.syndrome_buffer.settings as round_store_settings
 import decsim.windows.settings as window_settings
@@ -438,3 +440,80 @@ def test_a_policy_written_outside_decsim_is_used_on_its_own_axis():
     assert type(with_idle.window_manager.courier.boundary_policy) is (
         boundary_policies.Eager
     )
+
+
+class SeedRecordingPolicy:
+    """A boundary policy that records the seed the root derived for it."""
+
+    def __init__(self):
+        self.reserved_seeds = []
+
+    def on_commit(self, window, final: bool) -> bool:
+        del window
+        return final
+
+    def reserve_run_seed(self, seed):
+        self.reserved_seeds.append(seed)
+        source = "derived"
+        if seed is None:
+            source = "entropy"
+        return seed_records.RunSeedReservation(source, seed, None)
+
+    def commit_run_seed(self, reservation):
+        del reservation
+
+    def cancel_run_seed(self, reservation):
+        del reservation
+
+
+def _machine_with_seed(policy, seed):
+    windows = window_settings.WindowSettings(boundary_policy=policy)
+    settings = machine_module.MachineSettings(windows=windows)
+    return machine_module.Machine.build(settings, seed)
+
+
+def test_a_component_gets_the_seed_derived_from_the_runs_seed_and_its_path():
+    policy = SeedRecordingPolicy()
+    _machine_with_seed(policy, 31)
+    path = (seed_records.RunSeedPathSegment("field", "boundary_policy"),)
+    expected = seeding.derive_component_seed(31, path)
+    assert policy.reserved_seeds == [expected]
+
+
+def test_a_run_without_a_seed_leaves_every_component_on_entropy():
+    policy = SeedRecordingPolicy()
+    _machine_with_seed(policy, None)
+    assert policy.reserved_seeds == [None]
+
+
+def test_an_integral_seed_of_another_type_is_taken_as_its_value():
+    """A numpy integer or an int subclass from a sweep is one int here."""
+
+    class IntegerSubclass(int):
+        pass
+
+    policy = SeedRecordingPolicy()
+    swept_seed = IntegerSubclass(31)
+    _machine_with_seed(policy, swept_seed)
+    path = (seed_records.RunSeedPathSegment("field", "boundary_policy"),)
+    expected = seeding.derive_component_seed(31, path)
+    assert policy.reserved_seeds == [expected]
+
+
+def test_a_seed_outside_the_unsigned_64_bit_range_is_refused():
+    settings = machine_module.MachineSettings()
+    one_past_the_widest_seed = 1 << 64
+    with pytest.raises(ValueError, match=r"seed must be in \[0, 2\*\*64\)"):
+        machine_module.Machine.build(settings, one_past_the_widest_seed)
+
+
+def test_a_negative_seed_is_refused():
+    settings = machine_module.MachineSettings()
+    with pytest.raises(ValueError, match=r"seed must be in \[0, 2\*\*64\)"):
+        machine_module.Machine.build(settings, -1)
+
+
+def test_a_seed_that_is_not_a_number_is_refused():
+    settings = machine_module.MachineSettings()
+    with pytest.raises(ValueError):
+        machine_module.Machine.build(settings, "x")

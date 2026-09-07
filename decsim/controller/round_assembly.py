@@ -21,6 +21,7 @@ from typing import Callable, Optional
 import decsim.controller.settings as controller_settings
 import decsim.message as message
 import decsim.observe.trace_source as trace_source
+import decsim.records.identity as identity_records
 
 
 class RoundAssembler:
@@ -300,7 +301,7 @@ def _merge_fragments_by_patch(fragments) -> tuple:
 
 def _index_of_patch(fragments: list, patch_id) -> Optional[int]:
     for index, fragment in enumerate(fragments):
-        if message.same_stable_identity(fragment.patch_id, patch_id):
+        if identity_records.same_stable_identity(fragment.patch_id, patch_id):
             return index
     return None
 

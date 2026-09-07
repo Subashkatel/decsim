@@ -6,7 +6,7 @@ import decsim.decoders.backend_outcome as backend_outcome
 import decsim.decoders.decoder as decoder_module
 import decsim.decoders.relay_belief_propagation.window_decoder as window_decoder
 import decsim.detector_error_model.fault_model_contracts as fault_models
-import decsim.message as message
+import decsim.records.seeds as seed_records
 
 
 class RelayBeliefPropagationDecoder(decoder_module.WindowDecoderBase):
@@ -46,11 +46,15 @@ class RelayBeliefPropagationDecoder(decoder_module.WindowDecoderBase):
 
     def run_seed_children(self) -> tuple:
         """The timing and fixed-gamma owners at stable semantic paths."""
-        latency_path = (message.RunSeedPathSegment("field", "latency_model"),)
-        decoder_path = (message.RunSeedPathSegment("field", "window_decoder"),)
+        latency_path = (
+            seed_records.RunSeedPathSegment("field", "latency_model"),
+        )
+        decoder_path = (
+            seed_records.RunSeedPathSegment("field", "window_decoder"),
+        )
         return (
-            message.RunSeedChild(latency_path, self.latency_model),
-            message.RunSeedChild(decoder_path, self.window_decoder),
+            seed_records.RunSeedChild(latency_path, self.latency_model),
+            seed_records.RunSeedChild(decoder_path, self.window_decoder),
         )
 
     def compile(self, faults, model):

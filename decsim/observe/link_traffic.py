@@ -13,6 +13,7 @@ from typing import Optional
 
 import decsim.links.settings as link_settings
 import decsim.message as message
+import decsim.records.identity as identity_records
 
 
 @dataclasses.dataclass(frozen=True)
@@ -272,13 +273,13 @@ def _transfer_json(record: message.TransferRecord, alias_by_channel) -> dict:
     attribution = record.attribution
     patch_ids = []
     for patch_id in attribution.patch_ids:
-        patch_json = message.stable_identity_json(patch_id)
+        patch_json = identity_records.stable_identity_json(patch_id)
         patch_ids.append(patch_json)
     return {
         "path": record.path.value,
         "physical_alias": alias_by_channel[record.channel],
         "attribution": {
-            "operation_id": message.stable_identity_json(
+            "operation_id": identity_records.stable_identity_json(
                 attribution.operation_id
             ),
             "patch_ids": patch_ids,
@@ -313,17 +314,19 @@ def _relation_json(relation) -> Optional[dict]:
         key = relation.request_key
     value = {
         "request_key": {
-            "operation_id": message.stable_identity_json(key.operation_id),
+            "operation_id": identity_records.stable_identity_json(
+                key.operation_id
+            ),
             "window_id": key.window_id,
             "tier": key.tier.value,
             "run_sequence": key.run_sequence,
         }
     }
     if is_boundary:
-        value["source_window_key"] = message.stable_identity_json(
+        value["source_window_key"] = identity_records.stable_identity_json(
             relation.source_window_key
         )
-        value["destination_window_key"] = message.stable_identity_json(
+        value["destination_window_key"] = identity_records.stable_identity_json(
             relation.destination_window_key
         )
         value["source_revision"] = relation.source_revision

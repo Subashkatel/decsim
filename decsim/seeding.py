@@ -13,7 +13,7 @@ import threading
 from collections.abc import Iterable
 from typing import Any, Optional, Protocol, runtime_checkable
 
-import decsim.message as message
+import decsim.records.seeds as seed_records
 
 _NAMESPACE = b"decsim.run-seed.v1"
 _UNSEEDED_SOURCES = ("explicit_local", "entropy")
@@ -64,13 +64,17 @@ class RunSeedConsumer(Protocol):
 
     def reserve_run_seed(
         self, seed: Optional[int]
-    ) -> message.RunSeedReservation:
+    ) -> seed_records.RunSeedReservation:
         """Prepare the state a commit installs, leaving the active one."""
 
-    def commit_run_seed(self, reservation: message.RunSeedReservation) -> None:
+    def commit_run_seed(
+        self, reservation: seed_records.RunSeedReservation
+    ) -> None:
         """Install the prepared state and close the binding."""
 
-    def cancel_run_seed(self, reservation: message.RunSeedReservation) -> None:
+    def cancel_run_seed(
+        self, reservation: seed_records.RunSeedReservation
+    ) -> None:
         """Drop the pending reservation without touching the active state."""
 
 
@@ -78,7 +82,7 @@ class RunSeedConsumer(Protocol):
 class RunSeedComposite(Protocol):
     """A component whose stochastic children are bound under its path."""
 
-    def run_seed_children(self) -> Iterable[message.RunSeedChild]:
+    def run_seed_children(self) -> Iterable[seed_records.RunSeedChild]:
         """The children, each with its path relative to this component."""
 
 
@@ -110,7 +114,7 @@ class _AtomicRunSeedConsumer:
     def _install_run_seed_state(self, prepared_state) -> None:
         raise NotImplementedError
 
-    def reserve_run_seed(self, seed) -> message.RunSeedReservation:
+    def reserve_run_seed(self, seed) -> seed_records.RunSeedReservation:
         """Prepare the state a commit installs, leaving the active one."""
         with self._run_seed_lock:
             self._refuse_second_binding(seed)
@@ -119,7 +123,7 @@ class _AtomicRunSeedConsumer:
             if source == "entropy":
                 proposed_seed = None
             prepared_state = self._prepare_run_seed_state(effective_seed)
-            reservation = message.RunSeedReservation(
+            reservation = seed_records.RunSeedReservation(
                 proposed_seed_source=source,
                 proposed_seed=proposed_seed,
                 prepared_state=prepared_state,
@@ -127,13 +131,17 @@ class _AtomicRunSeedConsumer:
             self._pending_run_seed = reservation
             return reservation
 
-    def cancel_run_seed(self, reservation: message.RunSeedReservation) -> None:
+    def cancel_run_seed(
+        self, reservation: seed_records.RunSeedReservation
+    ) -> None:
         """Drop the pending reservation; a stale one is ignored."""
         with self._run_seed_lock:
             if self._pending_run_seed is reservation:
                 self._pending_run_seed = None
 
-    def commit_run_seed(self, reservation: message.RunSeedReservation) -> None:
+    def commit_run_seed(
+        self, reservation: seed_records.RunSeedReservation
+    ) -> None:
         """Install the prepared state and close the binding."""
         with self._run_seed_lock:
             self._install_run_seed_state(reservation.prepared_state)
@@ -271,7 +279,7 @@ def _encode_path(path) -> bytes:
 
 
 def _check_seed_source(
-    seed: Optional[int], reservation: message.RunSeedReservation
+    seed: Optional[int], reservation: seed_records.RunSeedReservation
 ) -> None:
     """A leaf bound without a run seed must say where its seed came from."""
     if seed is not None:

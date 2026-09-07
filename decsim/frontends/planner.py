@@ -12,6 +12,7 @@ from typing import Callable, Optional
 
 import decsim.config as config
 import decsim.message as message
+import decsim.records.identity as identity_records
 
 
 @dataclasses.dataclass(frozen=True)
@@ -256,7 +257,7 @@ def _note_patches(operation, patches_by_key: dict) -> None:
     if not patch_ids:
         patch_ids = (0,)
     for patch_id in patch_ids:
-        key = message.stable_identity_bytes(patch_id)
+        key = identity_records.stable_identity_bytes(patch_id)
         patches_by_key.setdefault(key, patch_id)
 
 
@@ -488,7 +489,9 @@ class _HoldSet:
         """Every round any hold names; None when a stream never ends."""
         if is_open_ended:
             return None
-        ordered = sorted(self._live_rounds, key=message.stable_identity_bytes)
+        ordered = sorted(
+            self._live_rounds, key=identity_records.stable_identity_bytes
+        )
         return tuple(ordered)
 
 
@@ -771,11 +774,15 @@ def _check_static_membership(operation, static_owners: tuple) -> None:
 def _stream_owner(operation, owners: tuple):
     """The declared owner of the operation's stream, or None."""
     if not owners:
-        is_own = message.same_stable_identity(operation.stream_id, operation.id)
+        is_own = identity_records.same_stable_identity(
+            operation.stream_id, operation.id
+        )
         if is_own:
             return operation
         return None
     for candidate in owners:
-        if message.same_stable_identity(candidate.id, operation.stream_id):
+        if identity_records.same_stable_identity(
+            candidate.id, operation.stream_id
+        ):
             return candidate
     return None

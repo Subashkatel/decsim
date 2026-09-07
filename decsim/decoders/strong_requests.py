@@ -20,6 +20,7 @@ import dataclasses
 from typing import Optional
 
 import decsim.message as message
+import decsim.records.identity as identity_records
 
 ACCURACY_FIELDS = (
     "correction",
@@ -334,7 +335,7 @@ class StrongRequests:
             phase = _phase_of(job, queued_matches)
             destination_keys = sorted(
                 keys_by_identity[identity],
-                key=message.stable_identity_order_key,
+                key=identity_records.stable_identity_order_key,
             )
             records.append((tuple(destination_keys), phase, job.n_rounds))
         return tuple(sorted(records, key=_snapshot_order))
@@ -375,6 +376,6 @@ def _snapshot_order(record: tuple) -> tuple:
     destination_keys, phase, round_count = record
     ordered_keys = []
     for key in destination_keys:
-        order_key = message.stable_identity_order_key(key)
+        order_key = identity_records.stable_identity_order_key(key)
         ordered_keys.append(order_key)
     return tuple(ordered_keys), phase, round_count

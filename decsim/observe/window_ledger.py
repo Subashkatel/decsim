@@ -12,6 +12,7 @@ import dataclasses
 from typing import Optional
 
 import decsim.message as message
+import decsim.records.identity as identity_records
 
 
 @dataclasses.dataclass(frozen=True)
@@ -100,4 +101,4 @@ class WindowLedger:
 
 
 def _first_identity_order(item) -> tuple:
-    return message.stable_identity_order_key(item[0])
+    return identity_records.stable_identity_order_key(item[0])

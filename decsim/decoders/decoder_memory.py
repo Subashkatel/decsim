@@ -17,6 +17,7 @@ from typing import Any, Optional
 
 import decsim.message as message
 import decsim.observe.trace_source as trace_source
+import decsim.records.identity as identity_records
 
 
 class DecoderMemoryCapacityError(RuntimeError):
@@ -221,7 +222,7 @@ def _memory_key(job: message.DecodeJob):
 def _round_order_key(item: tuple) -> tuple:
     identity, _fragments = item
     operation_id, round_index = identity
-    order = message.stable_identity_order_key(operation_id)
+    order = identity_records.stable_identity_order_key(operation_id)
     return order, round_index
 
 
@@ -255,7 +256,7 @@ def _input_row_identities(
     """(operation, round, position) of every bit the input carries."""
     identities = []
     for round_input in rounds:
-        is_same_operation = message.same_stable_identity(
+        is_same_operation = identity_records.same_stable_identity(
             round_input.operation_id, job.op_id
         )
         if not is_same_operation:

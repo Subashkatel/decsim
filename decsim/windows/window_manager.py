@@ -25,6 +25,7 @@ import dataclasses
 from typing import Optional, Protocol, runtime_checkable
 
 import decsim.message as message
+import decsim.records.identity as identity_records
 
 
 @runtime_checkable
@@ -361,7 +362,8 @@ class WindowManager:
         """
         rows = []
         ordered_ids = sorted(
-            self.tracker.operation_by_id, key=message.stable_identity_order_key
+            self.tracker.operation_by_id,
+            key=identity_records.stable_identity_order_key,
         )
         for operation_id in ordered_ids:
             operation = self.tracker.operation_by_id[operation_id]

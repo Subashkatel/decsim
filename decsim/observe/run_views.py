@@ -8,9 +8,9 @@ recorder that used to live here is observe/flight_recorder.py.
 
 import dataclasses
 
-import decsim.message as message
 import decsim.observe.decode_records as decode_records
 import decsim.observe.window_ledger as window_ledger_module
+import decsim.records.identity as identity_records
 
 
 @dataclasses.dataclass(frozen=True)
@@ -88,4 +88,4 @@ def switching_records_view(
 
 
 def _first_identity_order(item) -> tuple:
-    return message.stable_identity_order_key(item[0])
+    return identity_records.stable_identity_order_key(item[0])

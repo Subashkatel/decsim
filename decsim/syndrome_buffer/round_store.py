@@ -22,6 +22,7 @@ from typing import Callable, Optional
 
 import decsim.message as message
 import decsim.observe.trace_source as trace_source
+import decsim.records.identity as identity_records
 import decsim.syndrome_buffer.round_holds as round_holds
 import decsim.syndrome_buffer.settings as round_store_settings
 
@@ -144,10 +145,14 @@ class RoundStore:
         """Retire an operation once none of its rounds or holds are live."""
         live_rounds = []
         for round_key in self.round_by_key:
-            if message.same_stable_identity(round_key[0], operation_id):
+            if identity_records.same_stable_identity(
+                round_key[0], operation_id
+            ):
                 live_rounds.append(round_key)
         if live_rounds:
-            ordered = sorted(live_rounds, key=message.stable_identity_order_key)
+            ordered = sorted(
+                live_rounds, key=identity_records.stable_identity_order_key
+            )
             raise RuntimeError(
                 f"operation {operation_id!r} has live buffer rounds {ordered!r}"
             )

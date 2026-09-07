@@ -5,22 +5,21 @@ from types import SimpleNamespace
 
 import pytest
 
-from decsim.message import RunSeedChild, RunSeedPathSegment, RunSeedReservation
+import decsim.records.seeds as seed_records
 from decsim.machine import Machine, MachineSettings
-from decsim.windows.settings import WindowSettings
 from decsim.seeding import (
     _AtomicRunSeedConsumer,
     _RandomSeedConsumer,
     bind_run_seed,
     derive_component_seed,
 )
-
+from decsim.windows.settings import WindowSettings
 
 MAX_SEED = (1 << 64) - 1
 
 
 def field(name):
-    return RunSeedPathSegment("field", name)
+    return seed_records.RunSeedPathSegment("field", name)
 
 
 def join_threads(threads):
@@ -87,7 +86,7 @@ class RecordingConsumer:
     def reserve_run_seed(self, seed):
         self.events.append(("reserve", self.name, seed))
         source = "entropy" if seed is None else "derived"
-        reservation = RunSeedReservation(source, seed, self.name)
+        reservation = seed_records.RunSeedReservation(source, seed, self.name)
         self.reservations.append(reservation)
         return reservation
 
@@ -115,11 +114,11 @@ class DualComponent(RecordingConsumer):
         return self.children
 
 
-class ChildRecordSubclass(RunSeedChild):
+class ChildRecordSubclass(seed_records.RunSeedChild):
     pass
 
 
-class ReservationSubclass(RunSeedReservation):
+class ReservationSubclass(seed_records.RunSeedReservation):
     pass
 
 
@@ -179,7 +178,9 @@ def test_reservation_refusals_follow_transaction_precedence(
     consumer._stochastic_use_started = used
     consumer._run_seed_claimed = claimed
     if pending:
-        consumer._pending_run_seed = RunSeedReservation("derived", 1, None)
+        consumer._pending_run_seed = seed_records.RunSeedReservation(
+            "derived", 1, None
+        )
 
     before = (
         consumer._stochastic_use_started,
@@ -337,20 +338,24 @@ def test_random_consumer_accepts_entropy_preparation_without_comparing_outputs()
     ("root", "path", "expected"),
     [
         (0, (), 4535200295187781575),
-        (1, (RunSeedPathSegment("field", "device"),), 14587833418448047332),
+        (
+            1,
+            (seed_records.RunSeedPathSegment("field", "device"),),
+            14587833418448047332,
+        ),
         (
             MAX_SEED,
             (
-                RunSeedPathSegment("field", "metrics"),
-                RunSeedPathSegment("string_key", "latency"),
+                seed_records.RunSeedPathSegment("field", "metrics"),
+                seed_records.RunSeedPathSegment("string_key", "latency"),
             ),
             3551856422068386999,
         ),
         (
             23,
             (
-                RunSeedPathSegment("none_key", None),
-                RunSeedPathSegment("integer_key", -2),
+                seed_records.RunSeedPathSegment("none_key", None),
+                seed_records.RunSeedPathSegment("integer_key", -2),
             ),
             351941757342560240,
         ),
@@ -378,15 +383,15 @@ def stable_binder_trace(reverse):
     child_early = RecordingConsumer("child-early", events)
     child_late = RecordingConsumer("child-late", events)
     dual_children = [
-        RunSeedChild((field("z_child"),), child_late),
-        RunSeedChild((field("a_child"),), child_early),
+        seed_records.RunSeedChild((field("z_child"),), child_late),
+        seed_records.RunSeedChild((field("a_child"),), child_early),
     ]
     if reverse:
         dual_children.reverse()
     dual = DualComponent("dual", dual_children, events)
     middle_leaf = RecordingConsumer("middle-leaf", events)
     composite = ChildrenComposite(
-        (RunSeedChild((field("leaf"),), middle_leaf),)
+        (seed_records.RunSeedChild((field("leaf"),), middle_leaf),)
     )
     last = RecordingConsumer("last", events)
     roots = [
@@ -431,14 +436,17 @@ def test_binder_dispatches_duck_typed_roles_in_stable_preorder():
     [
         ((), ""),
         ((field("device"),), "device"),
-        ((RunSeedPathSegment("string_key", "latency"),), "['latency']"),
-        ((RunSeedPathSegment("none_key", None),), "[None]"),
-        ((RunSeedPathSegment("integer_key", -2),), "[-2]"),
+        (
+            (seed_records.RunSeedPathSegment("string_key", "latency"),),
+            "['latency']",
+        ),
+        ((seed_records.RunSeedPathSegment("none_key", None),), "[None]"),
+        ((seed_records.RunSeedPathSegment("integer_key", -2),), "[-2]"),
         (
             (
                 field("metrics"),
-                RunSeedPathSegment("string_key", "latency"),
-                RunSeedPathSegment("integer_key", 3),
+                seed_records.RunSeedPathSegment("string_key", "latency"),
+                seed_records.RunSeedPathSegment("integer_key", 3),
             ),
             "metrics.['latency'].[3]",
         ),
@@ -463,8 +471,8 @@ def test_binder_rejects_duplicate_sibling_paths_for_same_or_distinct_objects(
     second = first if same_child else object()
     composite = ChildrenComposite(
         (
-            RunSeedChild((field("leaf"),), first),
-            RunSeedChild((field("leaf"),), second),
+            seed_records.RunSeedChild((field("leaf"),), first),
+            seed_records.RunSeedChild((field("leaf"),), second),
         )
     )
 
@@ -475,15 +483,17 @@ def test_binder_rejects_duplicate_sibling_paths_for_same_or_distinct_objects(
 def test_binder_rejects_self_and_multinode_cycles_with_both_paths():
     """Self and multi-node cycles report both the current path and first identity path."""
     self_cycle = ChildrenComposite([])
-    self_cycle.children = (RunSeedChild((field("again"),), self_cycle),)
+    self_cycle.children = (
+        seed_records.RunSeedChild((field("again"),), self_cycle),
+    )
     with pytest.raises(ValueError) as self_error:
         bind_run_seed(1, [((field("root"),), self_cycle)])
     assert str(self_error.value) == "seed cycle from root.again to root"
 
     first = ChildrenComposite([])
     second = ChildrenComposite([])
-    first.children = (RunSeedChild((field("second"),), second),)
-    second.children = (RunSeedChild((field("first"),), first),)
+    first.children = (seed_records.RunSeedChild((field("second"),), second),)
+    second.children = (seed_records.RunSeedChild((field("first"),), first),)
     with pytest.raises(ValueError) as multi_error:
         bind_run_seed(1, [((field("root"),), first)])
     assert str(multi_error.value) == "seed cycle from root.second.first to root"
@@ -495,8 +505,8 @@ def test_binder_reserves_shared_alias_at_first_sorted_path_once():
     leaf = RecordingConsumer("leaf", events)
     composite = ChildrenComposite(
         (
-            RunSeedChild((field("z_path"),), leaf),
-            RunSeedChild((field("a_path"),), leaf),
+            seed_records.RunSeedChild((field("z_path"),), leaf),
+            seed_records.RunSeedChild((field("a_path"),), leaf),
         )
     )
 
@@ -512,7 +522,7 @@ def test_binder_reserves_shared_alias_at_first_sorted_path_once():
 @pytest.mark.parametrize(
     "record_factory",
     [
-        lambda child: RunSeedChild((field("leaf"),), child),
+        lambda child: seed_records.RunSeedChild((field("leaf"),), child),
         lambda child: ChildRecordSubclass((field("leaf"),), child),
         lambda child: SimpleNamespace(
             relative_path=(field("leaf"),), child=child
@@ -664,7 +674,7 @@ def test_binder_accepts_both_unseeded_sources_without_checking_proposed_seed(
 @pytest.mark.parametrize(
     "reservation_factory",
     [
-        lambda seed: RunSeedReservation("derived", seed, "state"),
+        lambda seed: seed_records.RunSeedReservation("derived", seed, "state"),
         lambda seed: ReservationSubclass("derived", seed, "state"),
         lambda seed: SimpleNamespace(
             proposed_seed_source="derived",

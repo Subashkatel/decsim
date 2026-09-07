@@ -34,7 +34,7 @@ class SoftOutput:
     gap: float
     source: SoftOutputSource
     decoded_class_weight: Optional[float] = None
-    w_comp: Optional[float] = None
+    complementary_class_weight: Optional[float] = None
 
 
 # ---- consumer hold tokens: who keeps rounds in a round store and why

@@ -141,7 +141,7 @@ def test_the_signal_has_no_metric_for_a_model_without_an_observable():
 
 
 def test_the_gap_is_the_weight_difference_of_the_two_classes():
-    """One shot: g = |w_comp - decoded_class_weight|, both on the result."""
+    """One shot: g is the two class weights' difference, both reported."""
     circuit = windows.memory_circuit(3, ROUNDS, 0.001)
     requirement = fault_models.GRAPHLIKE_FAULT_MODEL_REQUIRED
     model = windows.whole_circuit_window(circuit, ROUNDS, requirement)
@@ -150,9 +150,15 @@ def test_the_gap_is_the_weight_difference_of_the_two_classes():
     events, _observables = windows.sampled_shots(circuit, 1, 3)
     syndrome = windows.row_syndrome(model, events[0])
     soft_output = metric.evaluate(syndrome)
-    difference = soft_output.w_comp - soft_output.decoded_class_weight
+    difference = (
+        soft_output.complementary_class_weight
+        - soft_output.decoded_class_weight
+    )
     assert soft_output.gap == pytest.approx(abs(difference))
-    assert soft_output.w_comp >= soft_output.decoded_class_weight
+    assert (
+        soft_output.complementary_class_weight
+        >= soft_output.decoded_class_weight
+    )
     assert numpy.isfinite(soft_output.gap)
 
 
@@ -189,5 +195,7 @@ def test_the_minimum_weight_is_the_window_decoders_own_matching_weight():
     assert soft_output.decoded_class_weight == pytest.approx(
         2.2540580520993854, abs=1e-6
     )
-    assert soft_output.w_comp == pytest.approx(2.772588722239781, abs=1e-6)
+    assert soft_output.complementary_class_weight == pytest.approx(
+        2.772588722239781, abs=1e-6
+    )
     assert soft_output.gap == pytest.approx(0.5185306701404, abs=1e-6)

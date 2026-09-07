@@ -1,11 +1,12 @@
 """The complementary gap: the confidence of one MWPM window decode.
 
-g_comp = |w_comp - decoded_class_weight| (Toshio et al. 2510.25222
-Sec. III A, text lines 480-495 of tmp/papers/txt; the method of Gidney
-et al. 2312.04522): the minimum-weight matching gives
+g_comp = |complementary_class_weight - decoded_class_weight| (Toshio
+et al. 2510.25222 Sec. III A, text lines 480-495 of tmp/papers/txt; the
+method of Gidney et al. 2312.04522): the minimum-weight matching gives
 decoded_class_weight and the decoded class, and the same graph with one
 virtual detector that pins the observable to the other class gives
-w_comp. A small gap is a decoder unsure of its class.
+complementary_class_weight. A small gap is a decoder unsure of its
+class.
 ComplementaryGap is the ConfidenceSignal row (decsim/ports.py): it
 declares the source and builds one metric per window model for the
 confidence wrappers (decoder.py).
@@ -126,8 +127,8 @@ class ComplementaryGapMetric:
         """The soft output of one syndrome: the gap and the two weights.
 
         decoded_class_weight is the minimum-weight matching's weight,
-        w_comp the weight of the matching forced into the other class
-        (Toshio et al. 2510.25222 Sec. III A).
+        complementary_class_weight the weight of the matching forced
+        into the other class (Toshio et al. 2510.25222 Sec. III A).
         """
         bits = _syndrome_bits(syndrome)
         correction, minimum_weight = self._matching.decode(
@@ -140,14 +141,14 @@ class ComplementaryGapMetric:
             forced_bits, return_weight=True
         )
         decoded_class_weight = float(minimum_weight)
-        w_comp = float(complementary_weight)
-        difference = w_comp - decoded_class_weight
+        complementary_class_weight = float(complementary_weight)
+        difference = complementary_class_weight - decoded_class_weight
         gap = abs(difference)
         return decoding_records.SoftOutput(
             gap=gap,
             source=COMPLEMENTARY_GAP_SOURCE,
             decoded_class_weight=decoded_class_weight,
-            w_comp=w_comp,
+            complementary_class_weight=complementary_class_weight,
         )
 
     def forced_class_solve(self, syndrome, forced_class: int) -> tuple:
@@ -192,14 +193,14 @@ class ComplementaryGapMetric:
         predicted_class = int(is_class_one_lighter)
         decoded_class_weight = forced_weights[predicted_class]
         complementary_class = 1 - predicted_class
-        w_comp = forced_weights[complementary_class]
-        difference = w_comp - decoded_class_weight
+        complementary_class_weight = forced_weights[complementary_class]
+        difference = complementary_class_weight - decoded_class_weight
         gap = abs(difference)
         soft_output = decoding_records.SoftOutput(
             gap=gap,
             source=COMPLEMENTARY_GAP_SOURCE,
             decoded_class_weight=decoded_class_weight,
-            w_comp=w_comp,
+            complementary_class_weight=complementary_class_weight,
         )
         return PairedGapEvaluation(
             soft_output=soft_output,

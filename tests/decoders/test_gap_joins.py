@@ -1,9 +1,9 @@
 """The gap join's law: the weight difference, once both halves report.
 
-The gap is w_comp minus decoded_class_weight, and neither half of the
-pair can name it alone. Toshio et al. 2510.25222 (the complementary
-gap between the two forced logical classes); Gidney et al. 2312.04522
-Fig. 10.
+The gap is complementary_class_weight minus decoded_class_weight, and
+neither half of the pair can name it alone. Toshio et al. 2510.25222
+(the complementary gap between the two forced logical classes); Gidney
+et al. 2312.04522 Fig. 10.
 """
 
 import decsim.decoders.decoder_memory as decoder_memory
@@ -79,7 +79,7 @@ def test_the_sibling_is_enqueued_at_service_start_with_the_landed_rounds():
     assert joins.unresolved_windows() == [(1, 0)]
 
 
-def test_the_gap_is_w_comp_minus_the_decoded_weight_once_both_report():
+def test_the_gap_is_the_two_class_weights_difference_once_both_report():
     enqueued = _Enqueued()
     joins = _joins(enqueued)
     primary = _primary()
@@ -90,7 +90,7 @@ def test_the_gap_is_w_comp_minus_the_decoded_weight_once_both_report():
     assert joined_job is primary
     assert joined_result.soft_output.gap == 2.0
     assert joined_result.soft_output.decoded_class_weight == 3.0
-    assert joined_result.soft_output.w_comp == 5.0
+    assert joined_result.soft_output.complementary_class_weight == 5.0
     assert joins.unresolved_windows() == []
 
 

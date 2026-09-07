@@ -151,6 +151,10 @@ def test_a_wider_restart_re_read_and_another_kind_are_refused(tmp_path):
     wide_path = write_config(tmp_path, wide_card)
     with pytest.raises(ValueError, match="must be 0, the paper's restart"):
         load_experiment(wide_path)
+    flag_card = _restart_width_card(True)
+    flag_path = write_config(tmp_path, flag_card)
+    with pytest.raises(ValueError, match="must be 0, the paper's restart"):
+        load_experiment(flag_path)
     weak_card = {
         "escalation": {
             "kind": "weak_baseline",

@@ -93,3 +93,12 @@ def test_the_fake_bit_source_cannot_finalize_a_stream_round():
     fake_bits = syndrome_devices.SyndromeBitDevice(code, seed=1)
     with pytest.raises(ValueError, match="finalize"):
         fake_bits.finalize_stream_round(operation, 3)
+
+
+def test_the_fake_bit_device_names_its_code_card_as_its_seed_child():
+    """The card shapes every payload, so the seed walk reaches it here."""
+    code = code_geometry.SurfaceCodeModel(distance=3)
+    device = syndrome_devices.SyndromeBitDevice(code, seed=1)
+    children = device.run_seed_children()
+    assert len(children) == 1
+    assert children[0].child is code

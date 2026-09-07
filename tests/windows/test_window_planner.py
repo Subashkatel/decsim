@@ -13,6 +13,8 @@ static plan).
 
 import types
 
+import pytest
+
 import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.windows.built_window_models as built_window_models
@@ -236,3 +238,54 @@ def test_idle_rounds_fold_only_into_a_batch_style_operation():
     planner.prepend_idle_rounds(7, 4)
     planner.prepend_idle_rounds(7, 0)
     assert window.batched_preceding_idle_round_count == 4
+
+
+def _geometry(*, buffer_round_count, justification):
+    """A d=3 surface geometry with the buffer width and justification given."""
+    return program_records.ResolvedCodeGeometry(
+        code_name="rotated surface code (d=3)",
+        distance=3,
+        commit_round_count=3,
+        buffer_round_count=buffer_round_count,
+        minimum_leading_buffer_round_count=3,
+        minimum_trailing_buffer_round_count=3,
+        one_patch_spatial_node_count=9,
+        window_floor_justification=justification,
+    )
+
+
+def test_a_buffer_below_the_papers_floor_is_refused_unless_the_card_says_why():
+    """The (d, d) floor is Skoric's and Tan's; below it accuracy degrades.
+
+    A card may still run below the floor, deliberately, by writing down
+    why (Skoric 2209.08552, Tan PRX Quantum 4, 040344, Bombin
+    2303.04846); the scheme refuses a silent one.
+    """
+    scheme = windowing_schemes.SlidingWindowScheme()
+    bare = _geometry(buffer_round_count=0, justification=None)
+    with pytest.raises(
+        ValueError, match="is below the trailing buffering floor 3"
+    ):
+        scheme.validate_buffer(bare)
+    justified = _geometry(
+        buffer_round_count=0, justification="a zero buffer on purpose"
+    )
+    scheme.validate_buffer(justified)
+
+
+def test_a_justification_on_a_card_at_the_floor_is_refused_as_stale():
+    scheme = windowing_schemes.SlidingWindowScheme()
+    geometry = _geometry(buffer_round_count=3, justification="stale")
+    with pytest.raises(
+        ValueError, match="is not below the trailing buffering floor 3"
+    ):
+        scheme.validate_buffer(geometry)
+
+
+def test_the_parallel_scheme_refuses_unequal_commit_and_buffer_widths():
+    """Skoric's block A/B construction fixes ncom = nbuf = d."""
+    scheme = windowing_schemes.ParallelWindowScheme()
+    with pytest.raises(
+        ValueError, match="requires commit_round_count == buffer_round_count"
+    ):
+        scheme.plan_operation(1, 30, commit_round_count=3, buffer_round_count=4)

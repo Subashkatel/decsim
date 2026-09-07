@@ -48,3 +48,44 @@ def test_a_card_period_saves_a_run_period_shorter_than_one_tick():
     settings = machine_module.MachineSettings(qpu=qpu)
     machine = machine_module.Machine.build(settings)
     assert machine.qpu.cycle_ticks == 2_000_000
+
+
+def test_a_cadence_that_is_not_a_finite_number_is_refused():
+    card = code_geometry.SurfaceCodeModel(round_microseconds=float("inf"))
+    qpu = qpu_settings.QpuSettings(code=card)
+    settings = machine_module.MachineSettings(qpu=qpu)
+    with pytest.raises(
+        ValueError, match="resolved round_us must be a finite real number"
+    ):
+        machine_module.Machine.build(settings)
+
+
+def test_a_distance_that_is_not_a_whole_number_is_refused_by_name():
+    """The card holds what the yaml said; the plan is where it must be a count.
+
+    A geometry that is zero or fractional never terminates: the round
+    count, the window sizes and the node counts all derive from it.
+    """
+    card = code_geometry.SurfaceCodeModel(distance=3.5)
+    qpu = qpu_settings.QpuSettings(code=card)
+    settings = machine_module.MachineSettings(qpu=qpu)
+    with pytest.raises(TypeError, match="distance must be an int >= 1"):
+        machine_module.Machine.build(settings)
+
+
+def test_a_distance_of_zero_is_refused_by_name():
+    card = code_geometry.SurfaceCodeModel(distance=0)
+    qpu = qpu_settings.QpuSettings(code=card)
+    settings = machine_module.MachineSettings(qpu=qpu)
+    with pytest.raises(TypeError, match="distance must be an int >= 1"):
+        machine_module.Machine.build(settings)
+
+
+def test_a_commit_width_of_zero_is_refused_by_name():
+    card = code_geometry.SurfaceCodeModel(commit_rounds_override=0)
+    qpu = qpu_settings.QpuSettings(code=card)
+    settings = machine_module.MachineSettings(qpu=qpu)
+    with pytest.raises(
+        TypeError, match="commit_round_count must be an int >= 1"
+    ):
+        machine_module.Machine.build(settings)

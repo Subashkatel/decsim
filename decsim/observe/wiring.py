@@ -31,10 +31,12 @@ import decsim.observe.log_writers as log_writers
 import decsim.observe.metrics as metrics
 import decsim.observe.observation as observation_module
 import decsim.observe.queue_depth as queue_depth_module
+import decsim.observe.referee_audit as referee_audit_module
 import decsim.observe.result_ledger as result_ledger_module
 import decsim.observe.round_events as round_events_module
 import decsim.observe.round_store_occupancy as round_store_occupancy_module
 import decsim.observe.runtime_stamps as runtime_stamps_module
+import decsim.observe.sampled_shots as sampled_shots_module
 import decsim.observe.settings as observe_settings
 import decsim.observe.stage_records as stage_records_module
 import decsim.observe.trace_writer as trace_writer_module
@@ -51,6 +53,7 @@ def observe(
     traffic_ledger: link_traffic.TrafficLedger,
     links,
     qpu,
+    syndrome_source,
     controller,
     idle_rounds,
     assembler,
@@ -91,6 +94,8 @@ def observe(
     controller_counters = _connect_controller_counters(idle_rounds)
     command_events = _connect_command_events(qpu)
     stages = _connect_stage_records(pool)
+    referee_audit = _connect_referee_audit(pool)
+    sampled_shots = _connect_sampled_shots(syndrome_source)
     decode_records = _decode_records(observation)
     _connect_decode_records(decoder_manager, decode_records)
     trace_writer = _trace_writer(observation, engine, process_name)
@@ -126,6 +131,8 @@ def observe(
         controller_counters=controller_counters,
         command_events=command_events,
         stages=stages,
+        referee_audit=referee_audit,
+        sampled_shots=sampled_shots,
         round_events=round_events,
         round_store_occupancy=round_store_occupancy,
         pauli_frame=pauli_frame,
@@ -483,6 +490,23 @@ def _connect_stage_records(
     return stages
 
 
+def _connect_referee_audit(pool) -> referee_audit_module.RefereeAudit:
+    """The referee's checks, heard from every routed decoder row."""
+    audit = referee_audit_module.RefereeAudit()
+    for decoder in _routed_decoders(pool):
+        decoder.window_checked.connect(audit.window_checked)
+    return audit
+
+
+def _connect_sampled_shots(
+    syndrome_source,
+) -> sampled_shots_module.SampledShots:
+    """Every shot the source draws, with the circuit it was drawn from."""
+    shots = sampled_shots_module.SampledShots()
+    syndrome_source.shot_sampled.connect(shots.shot_sampled)
+    return shots
+
+
 def _frame_corrections(
     pauli_frame,
 ) -> flight_recorder_module.FrameCorrections:
@@ -563,6 +587,8 @@ def _assembled(
     controller_counters: controller_counters_module.ControllerCounters,
     command_events: command_events_module.CommandEvents,
     stages: stage_records_module.StageLedger,
+    referee_audit: referee_audit_module.RefereeAudit,
+    sampled_shots: sampled_shots_module.SampledShots,
     round_events,
     round_store_occupancy,
     pauli_frame,
@@ -602,6 +628,7 @@ def _assembled(
         results=result_ledger,
         traffic=traffic_ledger,
         flight_recorder=flight_recorder,
+        frame_corrections=corrections,
         trace_writer=trace_writer,
         data_movement=data_movement,
         decode_records=decode_records,
@@ -610,6 +637,8 @@ def _assembled(
         controller_counters=controller_counters,
         command_events=command_events,
         stages=stages,
+        referee_audit=referee_audit,
+        sampled_shots=sampled_shots,
         decode_backlog=decode_backlog,
         decoder_utilization=decoder_utilization,
         decoder_memory_occupancy=decoder_memory_occupancy,

@@ -290,9 +290,15 @@ class SyndromeSource(Protocol):
     Payload bits are raw measurement bits per round; a source with a
     detector formation table also offers form_round, which syndrome
     packing calls once per complete round.
+
+    shot_sampled(operation, detection_events) is the port's shot source:
+    a row that draws a whole shot fires it once per fresh shot, and a row
+    that draws nothing carries the silent source, so a listener connects
+    to every row by name.
     """
 
     operation_circuit_scope: str
+    shot_sampled: Any
 
     def begin_operation(
         self,

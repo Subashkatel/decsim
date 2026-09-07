@@ -2,10 +2,11 @@
 
 After every tier decode, the official Tesseract backend re-decodes the
 same window input and the owned observable contributions are compared;
-the count of disagreements is the run's accuracy audit. Never priced:
-the engine reads timing from the inner decoder alone. The linked fault
-models are built whole-circuit, with memory linear in circuit length
-(verified through d=9 x 1000 rounds).
+each comparison fires window_checked, and the audit that counts them is
+a listener (observe/referee_audit.py). Never priced: the engine reads
+timing from the inner decoder alone. The linked fault models are built
+whole-circuit, with memory linear in circuit length (verified through
+d=9 x 1000 rounds).
 """
 
 from typing import Optional
@@ -14,9 +15,9 @@ import numpy
 
 import decsim.decoders.decoder as decoder_module
 import decsim.decoders.tesseract.window_decoder as tesseract_window_decoder
-import decsim.decoders.decoder as decoder_module
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.message as message
+import decsim.observe.trace_source as trace_source
 
 
 class TesseractCheckedDecoder(decoder_module.DecoderBase):
@@ -24,6 +25,9 @@ class TesseractCheckedDecoder(decoder_module.DecoderBase):
 
     Timing is the inner decoder's in every respect; the referee's own
     call is never charged.
+
+    Trace source: window_checked(window_key, is_agreement) once per
+    window the referee reached a verdict on.
     """
 
     def __init__(self, inner: decoder_module.DecoderBase):
@@ -31,8 +35,7 @@ class TesseractCheckedDecoder(decoder_module.DecoderBase):
         self.referee = tesseract_window_decoder.TesseractWindowDecoder()
         # The referee reads the physical view, the tier the graphlike one.
         self.fault_model_requirement = fault_models.LINKED_FAULT_MODELS_REQUIRED
-        self.windows_checked = 0
-        self.window_disagreements = 0
+        self.window_checked = trace_source.TraceSource()
 
     def run_seed_children(self) -> tuple:
         """The referee under its own path, the inner decoder's under inner."""
@@ -87,9 +90,9 @@ class TesseractCheckedDecoder(decoder_module.DecoderBase):
         if outcome.status is not succeeded:
             return result
         referee_flips = _owned_observable_flips(model, outcome)
-        self.windows_checked += 1
-        if referee_flips != tuple(result.logical_observables):
-            self.window_disagreements += 1
+        window_key = (job.op_id, job.window_id)
+        is_agreement = referee_flips == tuple(result.logical_observables)
+        self.window_checked.fire(window_key, is_agreement)
         return result
 
 

@@ -5,8 +5,9 @@ connects it to the sources it hears, and keeps it here so the front,
 the gate and the experiments read a run's numbers from its listeners
 and never from a component. The log writer, the window ledger, the
 flight recorder, the runtime stamps, the queue depth, the controller
-counters and the command events are always there; the ones a study
-asks for are None when the section did not ask.
+counters, the command events, the frame's corrections, the referee's
+audit and the sampled shots are always there; the ones a study asks for
+are None when the section did not ask.
 """
 
 import dataclasses
@@ -21,10 +22,12 @@ import decsim.observe.link_traffic as link_traffic
 import decsim.observe.log_writers as log_writers
 import decsim.observe.metrics as metrics
 import decsim.observe.queue_depth as queue_depth_module
+import decsim.observe.referee_audit as referee_audit_module
 import decsim.observe.result_ledger as result_ledger_module
 import decsim.observe.round_events as round_events_module
 import decsim.observe.round_store_occupancy as occupancy_module
 import decsim.observe.runtime_stamps as runtime_stamps_module
+import decsim.observe.sampled_shots as sampled_shots_module
 import decsim.observe.stage_records as stage_records_module
 import decsim.observe.trace_writer as trace_writer_module
 import decsim.observe.window_ledger as window_ledger_module
@@ -39,6 +42,7 @@ class Observation:
     results: result_ledger_module.ResultLedger
     traffic: link_traffic.TrafficLedger
     flight_recorder: flight_recorder_module.FlightRecorder
+    frame_corrections: flight_recorder_module.FrameCorrections
     trace_writer: Optional[trace_writer_module.TraceWriter]
     data_movement: Optional[data_movement_module.DataMovement]
     decode_records: Optional[decode_records_module.DecodeRecordLedger]
@@ -52,3 +56,5 @@ class Observation:
     decoder_memory_occupancy: Optional[metrics.DecoderMemoryOccupancy]
     round_events: round_events_module.RoundEventRecorder
     round_store_occupancy: Optional[occupancy_module.RoundStoreOccupancy]
+    referee_audit: referee_audit_module.RefereeAudit
+    sampled_shots: sampled_shots_module.SampledShots

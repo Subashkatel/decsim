@@ -1,9 +1,11 @@
 """The experiment figures.
 
-timeline.png   one shot of the first sweep point, seed 0: every stage of
-               every window on its own row, in real time, the weak
-               baseline's figure style (commit reads solid, buffer reads
-               lighter, geometry in the subtitle)
+timeline.png   one traced shot, read from its Chrome trace file: every
+               stage of every window on its own row, in real time, the
+               weak baseline's figure style (commit reads solid, buffer
+               reads lighter, geometry in the subtitle). `decsim run
+               --trace`, or `trace: chrome` in the observation section,
+               writes the file this reads
 ler.png        logical error rate vs physical error rate, Wilson 95%
                bars, drawn when more than one p was swept
 latency.png    decode wall clock per window vs code distance, violins,
@@ -25,10 +27,10 @@ import math
 import statistics
 import sys
 from pathlib import Path
+from typing import Optional
 
 import decsim.config as config_module
-import decsim.front.measure as measure
-import decsim.machine as machine_module
+import decsim.front.trace_file as trace_file
 
 WINDOW_COLORS = (
     "tab:blue",
@@ -69,8 +71,12 @@ USAGE = (
     "       python -m decsim.front.plots "
     "ler_vs_d <run_dir> <run_dir> <p> <out.png>\n"
     "       python -m decsim.front.plots "
-    "stage_breakdown <run_dir> <out.png>"
+    "stage_breakdown <run_dir> <out.png>\n"
+    "       python -m decsim.front.plots "
+    "timeline <trace_file> <out.png>"
 )
+# where collect_command leaves the traces of the shots it traced
+TRACE_DIR = "trace"
 
 
 def ticks_to_microseconds(ticks) -> float:
@@ -85,43 +91,49 @@ def card_label(algorithm) -> str:
     return f"{algorithm:g} µs"
 
 
-def timeline_plot(config, path: Path) -> None:
-    """One shot at the first sweep point, seed 0, every stage in time."""
+def timeline_plot(trace_path, path: Path) -> None:
+    """One traced shot's hops and stages, in the time they happened.
+
+    Drawn from that shot's Chrome trace file alone (`decsim run --trace`,
+    or `trace: chrome` in the yaml's observation section): the trace
+    records where every round and window sat and for how long, so this
+    builds no machine and runs nothing.
+    """
     import matplotlib.pyplot as plt
 
-    point = _first_sweep_point(config)
-    settings = config.point_settings(
-        physical_error_probability=point.physical_error_probability,
-        distance=point.distance,
-        round_period_us=point.round_period_us,
-    )
-    completed = machine_module.Machine.build(settings, 0)
-    result = completed.run()
-    escalation_kind = config.settings.escalation.kind
-    lanes = _timeline_lanes(escalation_kind)
-    transfers = result.link_traffic["transfers"]
-    qpu_link = _transfers_by_round(transfers, "qpu_to_controller")
-    store = _transfers_by_round(transfers, lanes.store_path)
-    hops = _window_hops(completed, transfers, lanes)
-    windows = _timeline_windows(completed)
-    rows = _timeline_rows(lanes, store)
-    lane_count = max(len(windows), 3)
+    document = trace_file.load(trace_path)
+    shot = _timeline_shot(document)
+    lanes = _timeline_lanes(document)
+    rows = _timeline_rows(lanes, shot)
+    lane_count = max(len(shot.windows), 3)
     height = 0.45 * len(rows) + 1.6
     figure, axis = plt.subplots(figsize=(11, height))
     timeline = _TimelineAxes(axis, rows, lane_count)
-    _draw_rounds(timeline, lanes, point.round_period_us, qpu_link, store)
-    stored_row = store
-    if not store:
-        stored_row = qpu_link
-    rounds = config.settings.workload.rounds_per_shot.rounds_for(point.distance)
-    window_ranges = _draw_windows(
-        timeline, lanes, hops, windows, stored_row, rounds
-    )
-    _label_timeline(timeline, config, point)
-    _add_timeline_legend(timeline, windows, window_ranges)
+    _draw_rounds(timeline, lanes, shot)
+    window_ranges = _draw_windows(timeline, lanes, shot)
+    _label_timeline(timeline, document, shot)
+    _add_timeline_legend(timeline, shot.windows, window_ranges)
     figure.tight_layout()
     figure.savefig(path, dpi=200)
     plt.close(figure)
+
+
+def first_trace_file(run_dir) -> Optional[Path]:
+    """The first trace file of a run folder, None when nothing traced.
+
+    A sweep writes one file per traced shot under trace/, named after the
+    point (front/measure.py); the first in name order is the first
+    point's, which is the shot the timeline draws.
+    """
+    trace_dir = Path(run_dir) / TRACE_DIR
+    if not trace_dir.is_dir():
+        return None
+    entries = trace_dir.iterdir()
+    found = sorted(entries)
+    for path in found:
+        if path.is_file():
+            return path
+    return None
 
 
 def ler_groups(rows: list) -> list:
@@ -356,17 +368,21 @@ def combined_latency_plot(sample_files: list, path: Path) -> None:
 
 
 def plots(config, rows: list, report_dir: Path, measurements=None) -> None:
-    """timeline.png always, ler.png and latency.png when the sweep asks.
+    """The figures of one run folder, each one drawn when its input is there.
 
-    ler.png needs more than one p; latency.png needs more than one
-    distance under a wall-clock algorithm, because a numeric card is a
-    fixed latency, flat in d, so its figure would be a horizontal line.
+    timeline.png needs a traced shot, so it is drawn only when the
+    observation section asked for a trace; ler.png needs more than one
+    p; latency.png needs more than one distance under a wall-clock
+    algorithm, because a numeric card is a fixed latency, flat in d, so
+    its figure would be a horizontal line.
     """
     import matplotlib
 
     matplotlib.use("Agg")
-    timeline_path = report_dir / "timeline.png"
-    timeline_plot(config, timeline_path)
+    trace_path = first_trace_file(report_dir)
+    if trace_path is not None:
+        timeline_path = report_dir / "timeline.png"
+        timeline_plot(trace_path, timeline_path)
     probabilities = _column_values(rows, "physical_error_probability")
     if len(probabilities) > 1:
         ler_path = report_dir / "ler.png"
@@ -400,25 +416,21 @@ def main(argv) -> None:
         stage_breakdown_plot(argv[2], out_path)
         print(argv[3])
         return
+    if len(argv) == 4 and argv[1] == "timeline":
+        out_path = Path(argv[3])
+        timeline_plot(argv[2], out_path)
+        print(argv[3])
+        return
     print(USAGE, file=sys.stderr)
     raise SystemExit(2)
 
 
 @dataclasses.dataclass(frozen=True)
-class _SweepPoint:
-    """The sweep point the timeline draws: the figure's first point."""
-
-    physical_error_probability: float
-    distance: int
-    round_period_us: float
-
-
-@dataclasses.dataclass(frozen=True)
 class _TimelineLanes:
-    """Which link each hop of the timeline reads, and the store's name.
+    """Which link each hop of the traced shot crossed, and its store.
 
-    The escalation kind picks the wires: weak_baseline moves windows on
-    weak_buffer_to_weak_decoder, strong_only on
+    Read off the channels the trace names: a weak run moves windows on
+    weak_buffer_to_weak_decoder, a strong-only run on
     strong_buffer_to_strong_decoder.
     """
 
@@ -429,14 +441,35 @@ class _TimelineLanes:
 
 
 @dataclasses.dataclass(frozen=True)
-class _WindowHops:
-    """One shot's per-window lookups, keyed by window id."""
+class _Span:
+    """One bar of the figure: when it started and when it ended, in us."""
 
-    input_link: dict
-    decoder_handoff: dict
-    output_link: dict
-    frame_records: dict
-    stages: object
+    start_us: float
+    end_us: float
+
+
+@dataclasses.dataclass(frozen=True)
+class _TimelineWindow:
+    """One window of the traced shot: its rounds and its two instants."""
+
+    window_id: int
+    read_lo: int
+    read_hi: int
+    commit_lo: int
+    commit_hi: int
+    dispatch_us: float
+
+
+@dataclasses.dataclass(frozen=True)
+class _TimelineShot:
+    """Everything the timeline draws, read off one trace document."""
+
+    round_period_us: float
+    moves_by_round: dict  # (channel, round number) -> _Span
+    moves_by_window: dict  # (channel, window id) -> _Span
+    windows: dict  # window id -> _TimelineWindow
+    stages: dict  # (window id, stage name) -> _Span
+    frame: dict  # window id -> _Span, accepted to committed
 
 
 class _TimelineAxes:
@@ -484,86 +517,168 @@ def _row_index(rows: list) -> dict:
     return index_by_row
 
 
-def _first_sweep_point(config) -> _SweepPoint:
-    """The first point of the first sweep block: the timeline's shot."""
-    block = config.sweep[0]
-    return _SweepPoint(
-        physical_error_probability=block.physical_error_probabilities[0],
-        distance=block.distances[0],
-        round_period_us=block.round_periods_microseconds[0],
-    )
-
-
-def _timeline_lanes(escalation_kind: str) -> _TimelineLanes:
-    """The links and the store name this escalation kind moves data on."""
+def _timeline_lanes(document) -> _TimelineLanes:
+    """The links this shot moved data on, and the store it filled."""
+    channels = document.channels()
     store_path = "controller_to_weak_buffer"
     store_name = "buffer 0"
-    if escalation_kind == "strong_only":
+    input_path = "weak_buffer_to_weak_decoder"
+    output_path = "weak_decoder_to_frame"
+    if store_path not in channels:
         store_path = "controller_to_strong_buffer"
         store_name = "syndrome buffer 1"
+    if input_path not in channels:
+        input_path = "strong_buffer_to_strong_decoder"
+    if output_path not in channels:
+        output_path = "strong_decoder_to_frame"
     return _TimelineLanes(
-        input_path=measure.INPUT_LINK[escalation_kind],
-        output_path=measure.OUTPUT_LINK[escalation_kind],
+        input_path=input_path,
+        output_path=output_path,
         store_path=store_path,
         store_name=store_name,
     )
 
 
-def _transfers_by_round(transfers: list, path_name: str) -> dict:
-    """The last transfer on one path per round index it carried."""
-    selected = {}
-    for transfer in transfers:
-        if transfer["path"] != path_name:
-            continue
-        round_index = transfer["attribution"]["round_lo"]
-        selected[round_index] = transfer
-    return selected
-
-
-def _transfers_by_window(transfers: list, path_name: str) -> dict:
-    """The last transfer on one path per window id it carried."""
-    selected = {}
-    for transfer in transfers:
-        if transfer["path"] != path_name:
-            continue
-        window_id = transfer["attribution"]["window_id"]
-        selected[window_id] = transfer
-    return selected
-
-
-def _window_hops(completed, transfers: list, lanes: _TimelineLanes):
-    """Every per-window lookup the window bars read."""
-    frame_snapshot = completed.pauli_frame.snapshot()
-    frame_records = {}
-    for record in frame_snapshot.records:
-        frame_records[record.window_key[1]] = record
-    input_link = _transfers_by_window(transfers, lanes.input_path)
-    handoff = _transfers_by_window(transfers, "decoder_to_decoder")
-    output_link = _transfers_by_window(transfers, lanes.output_path)
-    return _WindowHops(
-        input_link=input_link,
-        decoder_handoff=handoff,
-        output_link=output_link,
-        frame_records=frame_records,
-        stages=completed.observation.stages,
+def _timeline_shot(document) -> _TimelineShot:
+    """Every span the figure draws, indexed by round, window and stage."""
+    moves_by_round = {}
+    moves_by_window = {}
+    for event in document.of_phase("X"):
+        _index_move(event, moves_by_round, moves_by_window)
+    windows = _timeline_windows(document)
+    stages = _timeline_stages(document)
+    frame = _frame_spans(document)
+    round_period_us = _round_period_microseconds(moves_by_round)
+    return _TimelineShot(
+        round_period_us=round_period_us,
+        moves_by_round=moves_by_round,
+        moves_by_window=moves_by_window,
+        windows=windows,
+        stages=stages,
+        frame=frame,
     )
 
 
-def _timeline_windows(completed) -> dict:
-    """Window id -> the run's window record, in window order."""
-    ledger = completed.observation.windows
-    items = ledger.windows.items()
-    ordered = sorted(items)
+def _index_move(event: dict, by_round: dict, by_window: dict) -> None:
+    """One link move filed under the round or the window it carried."""
+    channel = event["args"].get("channel")
+    if channel is None:
+        return
+    span = _span_of(event)
+    window_id = trace_file.window_id_of(event)
+    if window_id is not None:
+        by_window[(channel, window_id)] = span
+        return
+    rounds_text = event["args"].get("rounds")
+    if rounds_text is None:
+        return
+    round_lo, _round_hi = trace_file.range_of(rounds_text)
+    by_round[(channel, round_lo)] = span
+
+
+def _timeline_windows(document) -> dict:
+    """Window id -> the rounds it reads and the tick its unit took it."""
+    dispatch_us = {}
+    for event in document.of_phase("X"):
+        if not event["name"].endswith(" queued"):
+            continue
+        window_id = trace_file.window_id_of(event)
+        dispatch_ticks = trace_file.end_tick_of(event)
+        dispatch_us[window_id] = ticks_to_microseconds(dispatch_ticks)
     windows = {}
-    for key, window in ordered:
-        windows[key[1]] = window
+    for event in document.of_phase("i"):
+        if not event["name"].endswith(" ready"):
+            continue
+        window = _timeline_window(event, dispatch_us)
+        windows[window.window_id] = window
     return windows
 
 
-def _timeline_rows(lanes: _TimelineLanes, store: dict) -> list:
+def _timeline_window(event: dict, dispatch_us: dict) -> _TimelineWindow:
+    """One window's rounds and the moment its unit was assigned."""
+    window_id = trace_file.window_id_of(event)
+    read_lo, read_hi = trace_file.range_of(event["args"]["rounds"])
+    commit_lo, commit_hi = trace_file.range_of(event["args"]["commit"])
+    ready_ticks = trace_file.tick_of(event)
+    ready_us = ticks_to_microseconds(ready_ticks)
+    dispatch = dispatch_us.get(window_id, ready_us)
+    return _TimelineWindow(
+        window_id=window_id,
+        read_lo=read_lo,
+        read_hi=read_hi,
+        commit_lo=commit_lo,
+        commit_hi=commit_hi,
+        dispatch_us=dispatch,
+    )
+
+
+def _timeline_stages(document) -> dict:
+    """(window id, stage) -> the span the decoder engine spent in it."""
+    stages = {}
+    for event in document.of_phase("X"):
+        if event["cat"] != "stage":
+            continue
+        window_id = trace_file.window_id_of(event)
+        stages[(window_id, event["name"])] = _span_of(event)
+    return stages
+
+
+def _frame_spans(document) -> dict:
+    """Window id -> the span from the frame accepting a write to landing."""
+    accepted_us = {}
+    for event in document.of_phase("X"):
+        if not event["name"].endswith(" correction"):
+            continue
+        window_id = trace_file.window_id_of(event)
+        accepted_ticks = trace_file.tick_of(event)
+        accepted_us[window_id] = ticks_to_microseconds(accepted_ticks)
+    spans = {}
+    for event in document.of_phase("i"):
+        if not event["name"].endswith(" committed"):
+            continue
+        window_id = trace_file.window_id_of(event)
+        committed_ticks = trace_file.tick_of(event)
+        committed = ticks_to_microseconds(committed_ticks)
+        accepted = accepted_us.get(window_id, committed)
+        spans[window_id] = _Span(start_us=accepted, end_us=committed)
+    return spans
+
+
+def _span_of(event: dict) -> _Span:
+    """A complete event's bar, from its own ticks and not its float ts."""
+    start_ticks = trace_file.tick_of(event)
+    end_ticks = trace_file.end_tick_of(event)
+    start_us = ticks_to_microseconds(start_ticks)
+    end_us = ticks_to_microseconds(end_ticks)
+    return _Span(start_us=start_us, end_us=end_us)
+
+
+def _round_period_microseconds(moves_by_round: dict) -> float:
+    """The shot's round period, as the median gap between QPU sends.
+
+    The trace records when each round left the QPU, not the period the
+    yaml set; on a shot whose rounds are evenly spaced the two are the
+    same number, and the bar is drawn one period wide as before.
+    """
+    sends = []
+    for (channel, _round_number), span in moves_by_round.items():
+        if channel != "qpu_to_controller":
+            continue
+        sends.append(span.start_us)
+    ordered = sorted(sends)
+    gaps = []
+    for earlier, later in zip(ordered, ordered[1:]):
+        gap = later - earlier
+        gaps.append(gap)
+    if not gaps:
+        return 0.0
+    return statistics.median(gaps)
+
+
+def _timeline_rows(lanes: _TimelineLanes, shot: _TimelineShot) -> list:
     """The timeline's row labels, top to bottom, one per hop."""
     rows = ["qpu round", "qc link"]
-    if store:
+    if _stored_rounds(lanes, shot):
         rows.append(f"{lanes.store_name} link")
     rows.append(f"{lanes.store_name} fill")
     rows.append("wait")
@@ -577,101 +692,99 @@ def _timeline_rows(lanes: _TimelineLanes, store: dict) -> list:
     return rows
 
 
+def _stored_rounds(lanes: _TimelineLanes, shot: _TimelineShot) -> dict:
+    """Round number -> its move into the store, empty when none was made."""
+    return _moves_on(shot.moves_by_round, lanes.store_path)
+
+
+def _moves_on(moves_by_key: dict, channel: str) -> dict:
+    """One channel's moves, keyed by the round or window they carried."""
+    found = {}
+    for (path, key), span in moves_by_key.items():
+        if path == channel:
+            found[key] = span
+    return found
+
+
 def _draw_rounds(
-    timeline: _TimelineAxes,
-    lanes: _TimelineLanes,
-    round_period_us: float,
-    qpu_link: dict,
-    store: dict,
+    timeline: _TimelineAxes, lanes: _TimelineLanes, shot: _TimelineShot
 ) -> None:
     """Every round's QPU time, its QC hop, and its hop into the store."""
+    qpu_link = _moves_on(shot.moves_by_round, "qpu_to_controller")
+    store = _stored_rounds(lanes, shot)
     for round_number in sorted(qpu_link):
         shade = "0.75"
         if round_number % 2:
             shade = "0.55"
-        sent = ticks_to_microseconds(qpu_link[round_number]["send_ticks"])
-        round_start = sent - round_period_us
-        timeline.round_bar("qpu round", round_start, round_period_us, shade)
-        delivered = ticks_to_microseconds(
-            qpu_link[round_number]["delivery_ticks"]
+        sent = qpu_link[round_number].start_us
+        round_start = sent - shot.round_period_us
+        timeline.round_bar(
+            "qpu round", round_start, shot.round_period_us, shade
         )
-        link_time = delivered - sent
+        link_time = qpu_link[round_number].end_us - sent
         timeline.round_bar("qc link", sent, link_time, shade)
         if round_number not in store:
             continue
-        store_sent = ticks_to_microseconds(store[round_number]["send_ticks"])
-        store_delivered = ticks_to_microseconds(
-            store[round_number]["delivery_ticks"]
-        )
-        store_time = store_delivered - store_sent
+        store_span = store[round_number]
+        store_time = store_span.end_us - store_span.start_us
         timeline.round_bar(
-            f"{lanes.store_name} link", store_sent, store_time, shade
+            f"{lanes.store_name} link", store_span.start_us, store_time, shade
         )
 
 
 def _draw_windows(
-    timeline: _TimelineAxes,
-    lanes: _TimelineLanes,
-    hops: _WindowHops,
-    windows: dict,
-    stored_row: dict,
-    rounds: int,
+    timeline: _TimelineAxes, lanes: _TimelineLanes, shot: _TimelineShot
 ) -> list:
     """Every decoded window's stages, and the legend text for each."""
+    stored = _stored_rounds(lanes, shot)
+    if not stored:
+        stored = _moves_on(shot.moves_by_round, "qpu_to_controller")
     window_ranges = []
-    for window_id, window in windows.items():
-        if window.t_done is None:
+    windows = shot.windows.items()
+    for window_id, window in sorted(windows):
+        if window_id not in shot.frame:
             continue
         color = WINDOW_COLORS[window_id % len(WINDOW_COLORS)]
-        read_hi = min(window.buffer_hi, rounds)
-        range_text = _window_range_text(window, window_id, read_hi)
+        range_text = _window_range_text(window)
         window_ranges.append(range_text)
-        _draw_store_fill(
-            timeline, lanes, window, window_id, color, stored_row, rounds
+        _draw_store_fill(timeline, lanes, window, color, stored)
+        stored_tick = stored[window.read_hi].end_us
+        timeline.window_bar(
+            "wait", stored_tick, window.dispatch_us, window_id, color
         )
-        stored_tick = ticks_to_microseconds(
-            stored_row[read_hi]["delivery_ticks"]
-        )
-        dispatched = ticks_to_microseconds(window.t_dispatch)
-        timeline.window_bar("wait", stored_tick, dispatched, window_id, color)
-        _draw_window_transfers(timeline, lanes, hops, window_id, color)
-        _draw_window_stages(timeline, hops, window_id, color)
+        _draw_window_transfers(timeline, lanes, shot, window_id, color)
+        _draw_window_stages(timeline, shot, window_id, color)
     return window_ranges
 
 
-def _window_range_text(window, window_id: int, read_hi: int) -> str:
+def _window_range_text(window: _TimelineWindow) -> str:
     """The legend line for one window: what it commits and what it reads."""
     return (
-        f"window {window_id}: "
+        f"window {window.window_id}: "
         f"commits {window.commit_lo}-{window.commit_hi}, "
-        f"reads {window.start_round}-{read_hi}"
+        f"reads {window.read_lo}-{window.read_hi}"
     )
 
 
 def _draw_store_fill(
     timeline: _TimelineAxes,
     lanes: _TimelineLanes,
-    window,
-    window_id: int,
+    window: _TimelineWindow,
     color: str,
-    stored_row: dict,
-    rounds: int,
+    stored: dict,
 ) -> None:
     """The window's rounds landing in the store it reads.
 
     Commit rounds land solid; the trailing buffer reads land lighter.
     """
     row = f"{lanes.store_name} fill"
-    first_round = ticks_to_microseconds(window.t_first_round)
-    last_commit_round = min(window.commit_hi, rounds)
-    commit_stored = ticks_to_microseconds(
-        stored_row[last_commit_round]["delivery_ticks"]
-    )
+    window_id = window.window_id
+    first_round = stored[window.read_lo].end_us
+    commit_stored = stored[window.commit_hi].end_us
     timeline.window_bar(row, first_round, commit_stored, window_id, color)
-    read_hi = min(window.buffer_hi, rounds)
-    if read_hi <= window.commit_hi:
+    if window.read_hi <= window.commit_hi:
         return
-    stored_tick = ticks_to_microseconds(stored_row[read_hi]["delivery_ticks"])
+    stored_tick = stored[window.read_hi].end_us
     timeline.window_bar(
         row, commit_stored, stored_tick, window_id, color, alpha=0.45
     )
@@ -680,7 +793,7 @@ def _draw_store_fill(
 def _draw_window_transfers(
     timeline: _TimelineAxes,
     lanes: _TimelineLanes,
-    hops: _WindowHops,
+    shot: _TimelineShot,
     window_id: int,
     color: str,
 ) -> None:
@@ -688,63 +801,59 @@ def _draw_window_transfers(
     _draw_transfer_bar(
         timeline,
         f"transfer ({lanes.input_path})",
-        hops.input_link,
+        shot,
+        lanes.input_path,
         window_id,
         color,
     )
     _draw_transfer_bar(
-        timeline, "dd handoff", hops.decoder_handoff, window_id, color
+        timeline, "dd handoff", shot, "decoder_to_decoder", window_id, color
     )
     _draw_transfer_bar(
         timeline,
         f"{lanes.output_path} link",
-        hops.output_link,
+        shot,
+        lanes.output_path,
         window_id,
         color,
     )
-    if window_id not in hops.frame_records:
-        return
-    record = hops.frame_records[window_id]
-    accepted = ticks_to_microseconds(record.accepted_ticks)
-    committed = ticks_to_microseconds(record.committed_ticks)
-    timeline.window_bar("frame commit", accepted, committed, window_id, color)
+    commit = shot.frame[window_id]
+    timeline.window_bar(
+        "frame commit", commit.start_us, commit.end_us, window_id, color
+    )
 
 
 def _draw_transfer_bar(
     timeline: _TimelineAxes,
     row: str,
-    by_window: dict,
+    shot: _TimelineShot,
+    channel: str,
     window_id: int,
     color: str,
 ) -> None:
     """One link hop's bar, when the window crossed that link."""
-    if window_id not in by_window:
+    span = shot.moves_by_window.get((channel, window_id))
+    if span is None:
         return
-    transfer = by_window[window_id]
-    sent = ticks_to_microseconds(transfer["send_ticks"])
-    delivered = ticks_to_microseconds(transfer["delivery_ticks"])
-    timeline.window_bar(row, sent, delivered, window_id, color)
+    timeline.window_bar(row, span.start_us, span.end_us, window_id, color)
 
 
 def _draw_window_stages(
-    timeline: _TimelineAxes, hops: _WindowHops, window_id: int, color: str
+    timeline: _TimelineAxes,
+    shot: _TimelineShot,
+    window_id: int,
+    color: str,
 ) -> None:
     """The decoder engine's fetch, algorithm and release bars."""
-    stage_records = hops.stages.records_for(1, window_id)
-    stages = {}
-    for record in stage_records:
-        stages[record.stage] = record
     for stage in ("fetch", "algorithm", "release"):
-        if stage not in stages:
+        span = shot.stages.get((window_id, stage))
+        if span is None:
             continue
-        record = stages[stage]
-        started = ticks_to_microseconds(record.start_ticks)
-        ended = ticks_to_microseconds(record.end_ticks)
-        timeline.window_bar(stage, started, ended, window_id, color)
+        timeline.window_bar(stage, span.start_us, span.end_us, window_id, color)
 
 
 def _label_timeline(
-    timeline: _TimelineAxes, config, point: _SweepPoint
+    timeline: _TimelineAxes, document, shot: _TimelineShot
 ) -> None:
     """The timeline's axes labels, title and geometry subtitle."""
     axis = timeline.axis
@@ -752,10 +861,10 @@ def _label_timeline(
     axis.set_yticklabels(timeline.rows, fontsize=9)
     axis.invert_yaxis()
     axis.set_xlabel("time from shot start (µs)")
-    escalation_kind = config.settings.escalation.kind
-    title = TIMELINE_TITLES.get(escalation_kind, config.name)
+    escalation_kind = _escalation_kind(document)
+    title = TIMELINE_TITLES.get(escalation_kind, document.process_name)
     axis.set_title(title, pad=22)
-    subtitle = _timeline_subtitle(config, point)
+    subtitle = _timeline_subtitle(document, shot)
     axis.text(
         0.5,
         1.005,
@@ -768,23 +877,28 @@ def _label_timeline(
     )
 
 
-def _timeline_subtitle(config, point: _SweepPoint) -> str:
-    """The geometry line above the timeline: code, windows, rounds, card."""
-    distance = point.distance
-    commit_rounds = config.settings.windows.commit_rounds or distance
-    buffer_rounds = config.settings.windows.buffer_rounds or distance
-    code_task = config.settings.workload.code_task
-    code_words = code_task.split(":")
-    code_name = code_words[0]
-    algorithm = config.active_decoder.kind
-    algorithm_text = card_label(algorithm)
+def _escalation_kind(document) -> str:
+    """The escalation kind the traced run used, from its process name."""
+    words = document.process_name.split()
+    if len(words) < 2:
+        return ""
+    return words[1]
+
+
+def _timeline_subtitle(document, shot: _TimelineShot) -> str:
+    """The geometry line above the timeline: the point and its windows."""
+    words = document.process_name.split()
+    point_text = " ".join(words[2:])
+    if not shot.windows:
+        return point_text
+    first_id = min(shot.windows)
+    first = shot.windows[first_id]
+    commit_rounds = first.commit_hi - first.commit_lo + 1
+    buffer_rounds = first.read_hi - first.commit_hi
     return (
-        f"d={distance} {code_name}"
-        f" · {config.settings.windows.kind} windows: commit {commit_rounds},"
-        f" buffer {buffer_rounds} rounds"
-        f" · rounds every {point.round_period_us:g} µs"
-        f" · algorithm {algorithm_text}"
-        f" · p={point.physical_error_probability:g}"
+        f"{point_text}"
+        f" · windows: commit {commit_rounds}, buffer {buffer_rounds} rounds"
+        f" · rounds every {shot.round_period_us:g} µs"
     )
 
 
@@ -796,7 +910,7 @@ def _add_timeline_legend(
 
     handles = [plt.Rectangle((0, 0), 1, 1, color="0.6")]
     labels = ["rounds"]
-    window_ids = list(windows)
+    window_ids = sorted(windows)
     legend_windows = window_ids[:MAX_LEGEND_WINDOWS]
     for window_id in legend_windows:
         color = WINDOW_COLORS[window_id % len(WINDOW_COLORS)]

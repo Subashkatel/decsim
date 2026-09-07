@@ -23,6 +23,7 @@ import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.detector_error_model.window_model_builders as window_models
 import decsim.detector_error_model.window_slicer as window_slicer
 import decsim.message as message
+import decsim.observe.trace_source as trace_source
 import decsim.seeding as seeding
 
 # Stream ids, operation ids and patches are opaque identities chosen by
@@ -39,6 +40,10 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
     reason. A non-empty terminal_detector_ids entry says the stream's
     final data readout arrives as its own fragment, through
     finalize_stream_round.
+
+    Trace source: shot_sampled(operation, detection_events) once per
+    fresh shot, with the whole-circuit detection events a reference
+    decode reads.
     """
 
     operation_circuit_scope = "per_operation"
@@ -73,6 +78,7 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         self._sample_key_by_operation_id: dict = {}
         self._stream_model_by_id: dict = {}
         self._source_binding_by_key: dict = {}
+        self.shot_sampled = trace_source.TraceSource()
 
     def sampled_truth(self) -> dict:
         """Every sampled observable-flip vector, by operation or stream."""
@@ -434,6 +440,7 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         shot = _SampledShot(packets, table, former, formed_events, formed_truth)
         self._shot_by_key[key] = shot
         self._sample_key_by_operation_id[operation.id] = key
+        self.shot_sampled.fire(operation, formed_events)
 
     def _measurement_row(
         self, sampler: stim.CompiledMeasurementSampler

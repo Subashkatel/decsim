@@ -9,10 +9,14 @@ hands each Shot to the caller's measure, which returns the caller's row.
 Two tasks with the same strong id (sinter's content hash, _task.py
 strong_id_value: the json text of the values, sha256) are one task. The
 online threshold calibrator lives on the task so every shot of a point
-shares it, which is why shots are serial; a worker pool is a later
-commit.
+shares it, which is why shots stay serial and the process pool is over
+tasks (sinter's --processes, _main_collect.py:83); rows come back in
+task order whatever order the tasks finish in. A shard runs the tasks
+whose index modulo n is i, so a Slurm array covers a sweep and
+`decsim combine` folds the folders.
 """
 
+import concurrent.futures
 import dataclasses
 import hashlib
 import json
@@ -92,22 +96,99 @@ def collect(
     tasks: Iterable[Task],
     measure: Callable[[Shot], Any],
     on_task_done: Optional[Callable[[Task], None]] = None,
+    *,
+    processes: int = 1,
+    shard: Optional[tuple] = None,
 ) -> list:
     """Every shot of every task, measured; one row per shot, in order.
 
     A task named twice runs once, with the larger shot count (seeds are
     0 to shots - 1, so the larger count covers the smaller). on_task_done
-    runs after a task's last shot, sinter's progress_callback.
+    runs after a task's last shot, sinter's progress_callback. `shard`
+    is (index, count) and keeps the tasks whose position modulo count is
+    index; `processes` above one runs whole tasks in a worker pool, so
+    `measure` must be a module-level callable or a partial of one.
+    """
+    unique = unique_tasks(tasks)
+    selected = shard_of(unique, shard)
+    if processes > 1:
+        return _collected_in_a_pool(selected, measure, on_task_done, processes)
+    rows = []
+    for task in selected:
+        task_rows, ran = run_task(task, measure)
+        rows.extend(task_rows)
+        if on_task_done is not None:
+            on_task_done(ran)
+    return rows
+
+
+def shard_of(tasks: list, shard: Optional[tuple]) -> list:
+    """The tasks of one shard: position modulo count equals index."""
+    if shard is None:
+        return tasks
+    index, count = shard
+    is_countable = count >= 1
+    is_in_range = 0 <= index < count
+    if not is_countable or not is_in_range:
+        raise ValueError(
+            f"shard {index}/{count} is not a shard; write i/n with n at "
+            "least 1 and i between 0 and n - 1"
+        )
+    selected = []
+    for position, task in enumerate(tasks):
+        if position % count == index:
+            selected.append(task)
+    return selected
+
+
+def run_task(task: Task, measure: Callable[[Shot], Any]) -> tuple:
+    """Every seed of one task, measured, and the task that ran them.
+
+    The task comes back because its online threshold calibrator learned
+    over these shots, and in a pool that learning happened in another
+    process.
     """
     rows = []
-    for task in unique_tasks(tasks):
-        for seed in range(task.shots):
-            shot = run_shot(task, seed)
-            row = measure(shot)
-            rows.append(row)
+    for seed in range(task.shots):
+        shot = run_shot(task, seed)
+        row = measure(shot)
+        rows.append(row)
+    return rows, task
+
+
+def _collected_in_a_pool(
+    tasks: list,
+    measure: Callable[[Shot], Any],
+    on_task_done: Optional[Callable[[Task], None]],
+    processes: int,
+) -> list:
+    """Whole tasks in worker processes; the rows read back in task order."""
+    futures = _submitted(tasks, measure, processes)
+    rows = []
+    for future in futures:
+        task_rows, ran = future.result()
+        rows.extend(task_rows)
         if on_task_done is not None:
-            on_task_done(task)
+            on_task_done(ran)
     return rows
+
+
+def _submitted(
+    tasks: list, measure: Callable[[Shot], Any], processes: int
+) -> list:
+    """Every task handed to the pool, in task order.
+
+    The pool is shut down when the last future has been read, which the
+    caller does in this same order, so a task's rows are appended where
+    the task sits and not where it finished.
+    """
+    pool = concurrent.futures.ProcessPoolExecutor(processes)
+    futures = []
+    for task in tasks:
+        future = pool.submit(run_task, task, measure)
+        futures.append(future)
+    pool.shutdown(wait=False)
+    return futures
 
 
 def unique_tasks(tasks: Iterable[Task]) -> list:

@@ -10,6 +10,9 @@ readme = "README.md"
 requires-python = ">=3.9"
 dependencies = []
 
+[project.scripts]
+decsim = "decsim.front.command:main"
+
 [project.optional-dependencies]
 stim = ["stim"]
 pymatching = ["pymatching"]

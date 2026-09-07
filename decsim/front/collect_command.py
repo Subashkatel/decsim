@@ -1,13 +1,16 @@
-"""Collect one experiment: every shot of every sweep point of one yaml.
+"""`decsim collect`: every shot of every sweep point of one yaml.
 
 The config is the experiment; this module only orchestrates. It collects
 every shot of every sweep point (decsim.collect), summarizes one row per
 point, and writes sweep.csv, links.csv and the figures into the run
 folder (run_folder). Rerunning the same config reproduces the same rows
-(seeds 0..shots-1 per point; only the wall-clock column varies).
+(seeds 0..shots-1 per point; only the wall-clock column varies), and so
+does running it with a process pool or in shards that `decsim combine`
+folds back together.
 """
 
 import csv
+import functools
 import math
 import sys
 from pathlib import Path
@@ -20,73 +23,53 @@ import decsim.front.plots as plots
 import decsim.front.report as report
 import decsim.front.run_folder as run_folder
 
-CONFIGS_DIR = Path("configs")
 NATS_TO_DECIBELS = 10.0 / math.log(10.0)
 
 
-def resolved_description(config) -> list:
-    """What this run will actually do, echoed before the first shot.
-
-    An edit that did not land shows up here immediately: a config that
-    extends another replaces its base's keys whole, so a `sweep` edited in
-    the base never reaches a child that declares its own.
-    """
-    file_names = []
-    for path in config.config_files:
-        file_names.append(str(path))
-    files = " <- ".join(file_names)
-    settings = config.settings
-    unit = config.active_decoder
-    tier = settings.escalation.decodes_on
-    lines = [
-        f"config: {files}",
-        f"escalation: {settings.escalation.kind}, "
-        f"{settings.workload.code_task}, "
-        f"{settings.workload.rounds_per_shot} rounds per shot",
-        f"windows: {settings.windows.kind}",
-        f"decoder: the {tier} tier, kind {unit.kind}, "
-        f"{unit.units} unit(s), engine at {unit.engine_megahertz} MHz",
-    ]
-    for index, block in enumerate(config.sweep, start=1):
-        block_line = _sweep_block_line(index, block)
-        lines.append(block_line)
-    log_line = _log_line(settings)
-    lines.append(log_line)
-    return lines
-
-
-def run_sweep(config, run_dir: Optional[Path] = None) -> list:
+def run_sweep(
+    config,
+    run_dir: Optional[Path] = None,
+    *,
+    processes: int = 1,
+    shard: Optional[tuple] = None,
+) -> list:
     """Every shot of every point of the config's sweep blocks, measured.
 
-    A point named by more than one block runs once; run_dir receives
-    the trace files and the online threshold records.
+    A point named by more than one block runs once; run_dir receives the
+    trace files and the online threshold records. The measure handed to
+    the pool is a partial of a module-level function, so a worker
+    process can unpickle it.
     """
     tasks = config.tasks()
+    measure_shot = functools.partial(measure.measure_shot, run_dir=run_dir)
+    on_task_done = functools.partial(_report_point_done, run_dir=run_dir)
+    return collect.collect(
+        tasks,
+        measure_shot,
+        on_task_done,
+        processes=processes,
+        shard=shard,
+    )
 
-    def measure_shot(shot: collect.Shot) -> measure.ShotMeasurement:
-        return measure.measure_shot(shot, run_dir)
 
-    def on_task_done(task: collect.Task) -> None:
-        _report_point_done(task, run_dir)
-
-    return collect.collect(tasks, measure_shot, on_task_done)
-
-
-def run_experiment(config_path) -> tuple:
+def run_experiment(
+    config_path,
+    out_dir: Optional[Path] = None,
+    *,
+    processes: int = 1,
+    shard: Optional[tuple] = None,
+) -> tuple:
     """One full experiment: sweep, summary, report, figures.
 
     Returns the results folder and the summary rows.
     """
     config = experiment.load_experiment(config_path)
-    run_dir = run_folder.new_run_dir(config)
+    run_dir = run_folder.run_dir_for(config, out_dir)
     run_folder.snapshot_code_state(config, run_dir)
     started_utc = run_folder.utc_now()
     run_folder.write_manifest(config, run_dir, started_utc)
-    description = resolved_description(config)
-    description.append(f"run dir: {run_dir}\n")
-    description_text = "\n".join(description)
-    print(description_text, file=sys.stderr)
-    measurements = run_sweep(config, run_dir)
+    _echo_description(config, run_dir, shard)
+    measurements = run_sweep(config, run_dir, processes=processes, shard=shard)
     rows = report.summarize(measurements)
     report.write_report(rows, run_dir, measurements)
     plots.plots(config, rows, run_dir, measurements)
@@ -97,52 +80,20 @@ def run_experiment(config_path) -> tuple:
     return run_dir, rows
 
 
-def main(argv) -> None:
-    """The command line: one config path."""
-    if len(argv) != 2:
-        usage = _usage()
-        print(usage, file=sys.stderr)
-        raise SystemExit(2)
-    run_dir, rows = run_experiment(argv[1])
-    lines = report.terminal_lines(rows)
-    report_text = "\n".join(lines)
-    print(report_text)
-    print(f"\nevery column: {run_dir}/sweep.csv")
+def _echo_description(config, run_dir: Path, shard: Optional[tuple]) -> None:
+    """The resolved experiment, before the first shot, as gem5 dumps it."""
+    description = experiment.resolved_description(config)
+    if shard is not None:
+        index, count = shard
+        description.append(f"shard: {index} of {count}")
+    description.append(f"run dir: {run_dir}\n")
+    description_text = "\n".join(description)
+    print(description_text, file=sys.stderr)
 
 
-def _sweep_block_line(index: int, block) -> str:
-    """One sweep block's three axes and its shot count, as one line."""
-    probabilities = list(block.physical_error_probabilities)
-    distances = list(block.distances)
-    periods = list(block.round_periods_microseconds)
-    return (
-        f"sweep block {index}: p {probabilities}, d {distances}, "
-        f"round period {periods} us, {block.shots} shots"
-    )
-
-
-def _log_line(settings) -> str:
-    """What the engine narrator will record for this run."""
-    log_line = f"log: {settings.observation.log}"
-    if settings.observation.log_component_io:
-        log_line += " with component I/O"
-    return log_line
-
-
-def _usage() -> str:
-    """The command line, with the shipped config names listed."""
-    names = []
-    found = CONFIGS_DIR.glob("*.yaml")
-    for path in sorted(found):
-        names.append(path.stem)
-    listed = ", ".join(names)
-    return (
-        "usage: python -m decsim.front.collect_command configs/<name>.yaml\n"
-        f"configs: {listed}"
-    )
-
-
-def _report_point_done(task: collect.Task, run_dir: Optional[Path]) -> None:
+def _report_point_done(
+    task: collect.Task, run_dir: Optional[Path] = None
+) -> None:
     """The progress line, and the online threshold's record when it ran."""
     point = task.metadata
     physical_error_probability = point["physical_error_probability"]
@@ -206,7 +157,3 @@ def _threshold_summary_line(summary: dict, threshold_db: float) -> str:
         f"{summary['raises']} raises, {summary['relaxes']} relaxes, "
         f"{summary['pending_audits']} pending"
     )
-
-
-if __name__ == "__main__":
-    main(sys.argv)

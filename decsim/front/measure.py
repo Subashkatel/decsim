@@ -103,13 +103,7 @@ def measure_shot(shot: collect.Shot, run_dir=None) -> ShotMeasurement:
     physical_error_probability = settings.workload.physical_error_probability
     distance = settings.qpu.distance
     round_period_us = settings.qpu.round_period_microseconds
-    label = _shot_label(
-        settings,
-        physical_error_probability,
-        distance,
-        round_period_us,
-        shot.seed,
-    )
+    label = shot_label(settings, shot.seed)
     observation = shot.machine.observation
     if run_dir is not None and settings.observation.writes_log:
         _write_log(observation, run_dir, label)
@@ -365,6 +359,18 @@ def trace_path_for_shot(path: str, seed: int, trace_shots) -> str:
     return str(seeded)
 
 
+def shot_label(settings: machine_module.MachineSettings, seed: int) -> str:
+    """The name a shot's log and trace files carry: its point and seed."""
+    physical_error_probability = settings.workload.physical_error_probability
+    distance = settings.qpu.distance
+    round_period_us = settings.qpu.round_period_microseconds
+    algorithm = active_decoder_kind(settings)
+    return (
+        f"p{physical_error_probability:g}_d{distance}_algo{algorithm}"
+        f"_round{round_period_us:g}us_seed{seed}"
+    )
+
+
 def _measurement(
     settings: machine_module.MachineSettings,
     observation: observation_module.Observation,
@@ -555,20 +561,6 @@ def _maxes(samples: dict) -> dict:
     for point, values in samples.items():
         maxes[point] = _max_or_zero(values)
     return maxes
-
-
-def _shot_label(
-    settings: machine_module.MachineSettings,
-    physical_error_probability: float,
-    distance: int,
-    round_period_us: float,
-    seed: int,
-) -> str:
-    algorithm = active_decoder_kind(settings)
-    return (
-        f"p{physical_error_probability:g}_d{distance}_algo{algorithm}"
-        f"_round{round_period_us:g}us_seed{seed}"
-    )
 
 
 def _write_trace(shot, run_dir, label: str) -> None:

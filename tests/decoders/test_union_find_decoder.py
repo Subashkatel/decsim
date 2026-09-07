@@ -7,8 +7,9 @@ uniform growth; ldpc's peeling decoder (ldpc.union_find_decoder) is the
 referent. Every syndrome an error produces is satisfiable: both
 decoders reproduce it, and on a single fault both name that fault.
 ldpc's decoder does not return on an unsatisfiable syndrome, so the
-unsatisfiable side is decsim's own
-(tests/15_decoders/test_union_find_unsatisfiable.py).
+unsatisfiable side is decsim's own: best effort, as PECOS (grow until
+no progress, then peel) and ldpc (return the decoding) do, with the
+detectors the correction leaves unexplained reported in the evidence.
 """
 
 import random
@@ -17,7 +18,9 @@ import numpy
 import scipy.sparse
 from ldpc.union_find_decoder import UnionFindDecoder as LdpcUnionFind
 
+import decsim.decoders.decoder as decoder_module
 import decsim.decoders.union_find.decoder as union_find
+import decsim.decoders.union_find.window_decoder as window_decoder
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
@@ -116,6 +119,28 @@ def _random_error(rng) -> numpy.ndarray:
     return numpy.array(bits, dtype=numpy.uint8)
 
 
+def growth_graph(check, priors):
+    """The weighted growth graph of one hand-written check matrix."""
+    matrix = numpy.asarray(check, dtype=numpy.uint8)
+    prior_array = numpy.asarray(priors, dtype=float)
+    fault_count = matrix.shape[1]
+    observables = numpy.zeros((1, fault_count), dtype=numpy.uint8)
+    owned = numpy.ones(fault_count, dtype=bool)
+    source_fault_ids = tuple(range(fault_count))
+    placed = fault_models.PlacedFaultModel(
+        representation=GRAPHLIKE,
+        check=matrix,
+        priors=prior_array,
+        observables=observables,
+        owned=owned,
+        source_fault_ids=source_fault_ids,
+        boundary_flips={},
+    )
+    return window_decoder.graph_from_model(
+        placed, location="hand-written window", weight_step=0.1
+    )
+
+
 def test_both_decoders_reproduce_every_syndrome_an_error_produces():
     """A property test: 200 random errors, both corrections reproduce them."""
     model = _model()
@@ -154,3 +179,61 @@ def test_a_single_fault_is_named_by_both_decoders():
         assert decsim_correction.tolist() == ldpc_correction.tolist()
         selected_count = decsim_correction.sum()
         assert int(selected_count) == 1
+
+
+def test_an_unsatisfiable_syndrome_is_marked_and_a_satisfiable_one_is_not():
+    """This row's failure policy is the matching row's policy.
+
+    Detectors 0 to 3 form a boundaryless 4-cycle, so a single defect
+    there can reach neither another defect nor a boundary and no
+    correction reproduces it. The row still commits its best effort and
+    carries INVALID_CORRECTION, exactly as the PyMatching row does for
+    the syndrome PyMatching refuses; a pair on the same cycle is one
+    fault and carries no status at all.
+    """
+    model = _model()
+    row = union_find.UnionFindDecoder(weight_step=0.1)
+    unsatisfiable = [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    unsatisfiable_job = _job(model, unsatisfiable)
+    unsatisfiable_result = row.decode(unsatisfiable_job)
+    invalid = decoder_module.BackendDecodeStatus.INVALID_CORRECTION
+    assert unsatisfiable_result.decode_status is invalid
+    satisfiable = [1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    satisfiable_job = _job(model, satisfiable)
+    satisfiable_result = row.decode(satisfiable_job)
+    assert satisfiable_result.decode_status is None
+
+
+def test_an_isolated_defect_is_left_unmatched_without_raising():
+    """A defect on a detector with no edge at all cannot be explained.
+
+    Detector 0 carries a boundary edge and detector 1 carries none, so
+    the cluster on detector 1 has nothing to grow along. Best effort,
+    as PECOS (grow until no progress, then peel) and ldpc (return the
+    decoding) do: nothing raises and the evidence names the detector
+    the correction leaves behind.
+    """
+    graph = growth_graph([[1], [0]], [0.1])
+    syndrome = numpy.asarray([0, 1], dtype=numpy.uint8)
+    evidence = window_decoder.decode_graph(graph, syndrome)
+    assert evidence.selected_faults == (0,)
+    assert evidence.unmatched_detectors == (1,)
+
+
+def test_an_odd_cluster_with_no_boundary_stops_growing_and_peels_partially():
+    """The growth-termination law: the grower halts, it does not spin.
+
+    Delfosse and Nickerson 1709.06218 (Algorithm 1, step 4) grows every
+    odd cluster by one half-edge per round and stops only when no
+    cluster is odd. On two disjoint boundaryless edges with one defect
+    each, both clusters swallow their single edge and then have no
+    half-edge left to grow, so growth ends with both still odd, the
+    forest peels what it can, and the evidence names the two detectors
+    that stay unexplained.
+    """
+    check = [[1, 0], [0, 1], [1, 0], [0, 1]]
+    graph = growth_graph(check, [0.1, 0.1])
+    syndrome = numpy.asarray([1, 1, 0, 0], dtype=numpy.uint8)
+    evidence = window_decoder.decode_graph(graph, syndrome)
+    assert evidence.selected_faults == (0, 0)
+    assert evidence.unmatched_detectors == (0, 1)

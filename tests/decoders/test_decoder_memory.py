@@ -12,13 +12,23 @@ The rounds are ordered here, once, so a decoder reads them in the order
 the detector rows were formed in: rounds ascending by operation and
 round index, and within one round the fragments in arrival order, which
 is the order the QPU stamped their slots in.
+
+The capacity also decides whether the unit overlaps a transfer with a
+compute at all: it is a depth-1 decoupled access-execute machine (Smith
+1982; TI's EDMA ping-pong, SPRAAN4A), and two input slots are only
+usable when the SRAM holds both windows.
 """
 
 import pytest
 
+import decsim.config as config
+import decsim.decoders.decoder_manager as decoder_manager_module
 import decsim.decoders.decoder_memory as decoder_memory
 import decsim.decoders.decoders as decoders
+import decsim.decoders.schedulers as schedulers
 import decsim.decoders.settings as decoder_settings
+import decsim.engine as engine_module
+import decsim.escalation.policies as escalation_policies
 import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
 import decsim.qpu.round_policies as round_policies
@@ -39,22 +49,22 @@ def fragment(operation_id, round_index, fragment_index, bits=(0, 1)):
     )
 
 
-def job_of(payloads, label="w0"):
+def job_of(payloads, label="w0", window_id=7):
     return decoding_records.DecodeJob(
         op_id=41,
-        window_id=7,
+        window_id=window_id,
         n_rounds=len(payloads),
         payloads=list(payloads),
         label=label,
     )
 
 
-def timing_only_job(label, round_count):
+def timing_only_job(label, round_count, window_id=7):
     payloads = []
     for round_index in range(round_count):
         round_fragment = fragment(1, round_index, 0)
         payloads.append(round_fragment)
-    return job_of(payloads, label)
+    return job_of(payloads, label, window_id)
 
 
 def test_materialization_orders_the_rounds_and_keeps_each_rounds_order():
@@ -82,9 +92,9 @@ def test_materialization_orders_the_rounds_and_keeps_each_rounds_order():
 
 
 def test_a_pool_the_yaml_leaves_out_holds_as_many_rounds_as_it_is_given():
-    config = decoder_memory.DecoderMemoryConfig({"default": 6})
-    assert config.capacity_for("default") == 6
-    assert config.capacity_for("strong") is None
+    memory_config = decoder_memory.DecoderMemoryConfig({"default": 6})
+    assert memory_config.capacity_for("default") == 6
+    assert memory_config.capacity_for("strong") is None
 
 
 def test_a_deposited_job_occupies_its_rounds_until_it_is_taken():
@@ -172,3 +182,78 @@ def test_a_unit_too_small_for_its_window_stops_the_run():
     machine = machine_module.Machine.build(settings)
     with pytest.raises(decoder_memory.DecoderMemoryCapacityError):
         machine.run()
+
+
+def landing_after(engine, transfer_ticks):
+    """A send_input whose input lands after a fixed delay, no link between."""
+
+    def send_input(on_landed) -> int:
+        engine.schedule(transfer_ticks, on_landed)
+        return transfer_ticks
+
+    return send_input
+
+
+def window_completion_ticks(
+    capacity_rounds, transfer_microseconds, compute_microseconds
+):
+    """The tick each of three three-round windows completes at, by label.
+
+    One unit whose decoder is priced at compute_microseconds, an input
+    that lands transfer_microseconds after the unit is assigned, and a
+    memory of capacity_rounds rounds.
+    """
+    engine = engine_module.Engine()
+    decoder = decoders.PresetLatencyDecoder(compute_microseconds)
+    router = decoders.CodeRouter(decoder)
+    scheduler = schedulers.FifoScheduler()
+    memory_config = decoder_memory.DecoderMemoryConfig(
+        {"default": capacity_rounds}
+    )
+    policy = escalation_policies.Baseline()
+    manager = decoder_manager_module.DecoderManager(
+        engine,
+        router=router,
+        scheduler=scheduler,
+        num_units=1,
+        decoder_memory=memory_config,
+        escalation_policy=policy,
+    )
+    transfer_ticks = config.microseconds_to_ticks(transfer_microseconds)
+    send_input = landing_after(engine, transfer_ticks)
+    completion_ticks = {}
+
+    def record_completion(job, result) -> None:
+        del result
+        completion_ticks[job.label] = engine.now
+
+    for window_id in range(3):
+        label = f"w{window_id}"
+        job = timing_only_job(label, 3, window_id)
+        manager.enqueue(job, send_input, record_completion)
+    engine.run()
+    manager.check_decode_work_settled()
+    return completion_ticks
+
+
+def test_a_memory_that_fits_one_window_and_not_two_serializes_the_cadence():
+    """Two input slots are usable only when the SRAM holds two windows.
+
+    The unit overlaps the next window's transfer with the current
+    compute (Smith 1982's decoupled access-execute; TI's EDMA
+    ping-pong, SPRAAN4A), and decoder_memory.py charges every resident,
+    so a memory sized for one three-round window admits no second
+    resident. The transfer then starts only once the resident leaves
+    and successive completions are transfer plus compute apart, where a
+    memory that holds two is compute bound at the larger of the two.
+    The run still finishes: a tight memory is slow, not fatal.
+    """
+    tight = window_completion_ticks(3, 2.0, 5.0)
+    roomy = window_completion_ticks(6, 2.0, 5.0)
+    serial_sum_ticks = config.microseconds_to_ticks(7.0)
+    compute_ticks = config.microseconds_to_ticks(5.0)
+    assert sorted(tight) == ["w0", "w1", "w2"]
+    assert tight["w1"] - tight["w0"] == serial_sum_ticks
+    assert tight["w2"] - tight["w1"] == serial_sum_ticks
+    assert roomy["w1"] - roomy["w0"] == compute_ticks
+    assert roomy["w2"] - roomy["w1"] == compute_ticks

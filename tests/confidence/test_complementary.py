@@ -9,7 +9,8 @@ at p = 1e-3 (the sandbox harness rowD6's law). Here 400 shots of a d=3,
 each populated bin's Wilson 95 percent interval; the two forced-class
 solves of the pair must agree with the plain solve on the minimum
 weight (min(w_forced) == w_plain, the whole-window consistency of
-Sec. III A).
+Sec. III A). The hand-written graph at the end pins the gap to the
+window decoder's own minimum, which no sampled circuit can isolate.
 """
 
 import math
@@ -19,6 +20,8 @@ import pytest
 import stim
 
 import decsim.confidence.complementary as complementary
+import decsim.decoders.minimum_weight_perfect_matching.decoder as adapter
+import decsim.decoders.minimum_weight_perfect_matching.weights as weights_module
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import tests.decoders.windows as windows
 
@@ -26,6 +29,26 @@ DECIBELS_PER_NAT = 10.0 * math.log10(math.e)
 ROUNDS = 30
 SHOTS = 400
 MINIMUM_BIN_SAMPLES = 30
+GRAPHLIKE = fault_models.FaultRepresentation.GRAPHLIKE
+
+
+def placed_faults(check, priors, observables):
+    """One window's graphlike faults from a hand-written check matrix."""
+    matrix = numpy.asarray(check, dtype=numpy.uint8)
+    prior_array = numpy.asarray(priors, dtype=float)
+    observable_matrix = numpy.asarray(observables, dtype=numpy.uint8)
+    fault_count = matrix.shape[1]
+    owned = numpy.ones(fault_count, dtype=bool)
+    source_fault_ids = tuple(range(fault_count))
+    return fault_models.PlacedFaultModel(
+        representation=GRAPHLIKE,
+        check=matrix,
+        priors=prior_array,
+        observables=observable_matrix,
+        owned=owned,
+        source_fault_ids=source_fault_ids,
+        boundary_flips={},
+    )
 
 
 def _fitted_failure_probability(gap_decibels: float) -> float:
@@ -131,3 +154,38 @@ def test_the_gap_is_the_weight_difference_of_the_two_classes():
     assert soft_output.gap == pytest.approx(abs(difference))
     assert soft_output.w_comp >= soft_output.w_min
     assert numpy.isfinite(soft_output.gap)
+
+
+def test_the_minimum_weight_is_the_window_decoders_own_matching_weight():
+    """The gap is measured from the decoder's minimum, not another graph's.
+
+    The metric's base matching merges parallel faults as independent
+    errors, p1(1 - p2) + p2(1 - p1), exactly as the PyMatching row's
+    graph does (the convention of Stim's detector error models and of
+    PyMatching's model loader), so w_min is the weight that row
+    reports for the same solve and the gap is that decoder's own
+    confidence. Two parallel 0.05 columns on detector 0 combine to
+    0.095, and the other logical class runs through detector 1's two
+    0.2 edges. Faults that flip the observable are boundary faults
+    here, as they are for a logical operator supported on the code
+    boundary (Stim's memory circuits), which the augmented-detector
+    solve requires.
+    """
+    check = numpy.asarray([[1, 1, 1, 0], [0, 0, 1, 1]], dtype=numpy.uint8)
+    priors = numpy.asarray([0.05, 0.05, 0.2, 0.2])
+    observables = numpy.asarray([[1, 1, 0, 0]], dtype=numpy.uint8)
+    edge_weights = weights_module.matching_weights(priors)
+    metric = complementary.ComplementaryGapMetric(
+        check, observables, edge_weights
+    )
+    faults = placed_faults(check, priors, observables)
+    row = adapter.PyMatchingDecoder()
+    row_matching = row.compile(faults)
+    syndrome = numpy.asarray([1, 0], dtype=numpy.uint8)
+    _correction, row_weight = row_matching.decode(syndrome, return_weight=True)
+    soft_output = metric.evaluate(syndrome)
+    # ln((1 - 0.095) / 0.095) and 2 ln(0.8 / 0.2)
+    assert row_weight == pytest.approx(2.2540580520993854, abs=1e-6)
+    assert soft_output.w_min == pytest.approx(2.2540580520993854, abs=1e-6)
+    assert soft_output.w_comp == pytest.approx(2.772588722239781, abs=1e-6)
+    assert soft_output.gap == pytest.approx(0.5185306701404, abs=1e-6)

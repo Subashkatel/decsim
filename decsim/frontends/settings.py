@@ -10,6 +10,7 @@ import decsim.frontends.circuit_frontend as circuit_frontend
 import decsim.message as message
 import decsim.ports as ports
 import decsim.qpu.round_policies as round_policies
+import decsim.windows.built_window_models as built_window_models
 
 FEEDBACK_BOUNDARY_MODES = ("trailing_buffer", "measurement_closed")
 
@@ -61,9 +62,11 @@ class WorkloadSettings:
     line-based text IR), qlx (a lowered QLX program). The other fields
     are Python-only: the decode owners, the dynamic streams and
     protected regions of a feedback workload, the round policy
-    (GateRounds by default; the memory circuit fixes its rounds), and
-    the feedback boundary mode every operation takes unless it names its
-    own.
+    (GateRounds by default; the memory circuit fixes its rounds), the
+    feedback boundary mode every operation takes unless it names its
+    own, and the window error models a task built once for all of its
+    shots (built_window_models; a Machine built alone gets none and
+    builds its own).
     """
 
     kind: str = "circuit_list"
@@ -79,6 +82,7 @@ class WorkloadSettings:
     protected_regions: tuple = ()
     rounds_policy: Optional[round_policies.RoundsPolicy] = None
     feedback_boundary_mode: str = "trailing_buffer"
+    built_models: Optional[built_window_models.BuiltWindowModels] = None
 
     def __post_init__(self) -> None:
         if self.feedback_boundary_mode not in FEEDBACK_BOUNDARY_MODES:

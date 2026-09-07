@@ -16,6 +16,7 @@ import decsim.message as message
 import decsim.qpu.code_geometry as code_geometry
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
+import decsim.windows.built_window_models as built_window_models
 import decsim.windows.window_boundaries as window_boundaries
 import decsim.windows.window_interactions as window_interactions
 import decsim.windows.window_manager as window_manager_module
@@ -122,7 +123,8 @@ def _stream_planner() -> window_planner.WindowPlanner:
         round_count=9,
         spatial_node_count=17,
     )
-    models = window_planner.WindowModels(None, lambda _code_name: None)
+    built = built_window_models.BuiltWindowModels()
+    models = window_planner.WindowModels(None, lambda _code_name: None, built)
     scheme = windowing_schemes.SlidingWindowScheme()
     return window_planner.WindowPlanner(
         scheme, [resolved], plan, models, planned_operations=()

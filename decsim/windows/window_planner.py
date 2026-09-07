@@ -18,6 +18,7 @@ from typing import Optional
 
 import decsim.message as message
 import decsim.observe.trace_source as trace_source
+import decsim.windows.built_window_models as built_window_models
 
 
 class WindowModels:
@@ -27,9 +28,15 @@ class WindowModels:
     every question answers None or nothing.
     """
 
-    def __init__(self, error_model_provider, fault_model_requirement_for):
+    def __init__(
+        self,
+        error_model_provider,
+        fault_model_requirement_for,
+        built_models: built_window_models.BuiltWindowModels,
+    ) -> None:
         self.provider = error_model_provider
         self.fault_model_requirement_for = fault_model_requirement_for
+        self.built_models = built_models
 
     def has_provider(self) -> bool:
         """Whether the source builds models at all."""
@@ -43,11 +50,22 @@ class WindowModels:
     def models_for_operation(
         self, operation, resolved_operation, windows: list, protocol
     ) -> list:
-        """One model per window of a planned operation, or none."""
+        """One model per window of a planned operation, or none.
+
+        Built once per task: the models are a function of the circuit
+        and the window plan, so the shots of one sweep point share them
+        (built_window_models).
+        """
         if self.provider is None:
             return []
         requirement = self.requirement_for(resolved_operation)
-        return self.provider.window_models_for_operation(
+        key = _model_key(
+            operation, resolved_operation, windows, requirement, protocol
+        )
+        held = self.built_models.models_of(key)
+        if held:
+            return held
+        models = self.provider.window_models_for_operation(
             operation,
             windows,
             resolved_operation.round_count,
@@ -55,6 +73,8 @@ class WindowModels:
             fault_exclusion_ranges=(),
             window_protocol=protocol,
         )
+        self.built_models.remember(key, models)
+        return models
 
     def model_for_stream(self, stream_id, window: message.Window):
         """The model of one window of a dynamic stream, or None."""
@@ -113,6 +133,41 @@ class WindowModels:
             fault_model_requirement=requirement,
             fault_exclusion_ranges=fault_exclusion_ranges,
         )
+
+
+def _model_key(
+    operation, resolved_operation, windows: list, requirement, protocol
+) -> tuple:
+    """What one operation's window models are a function of.
+
+    The circuit and its rounds, every window's span, dependencies and
+    closed boundaries, the decoder's fault-model requirement and the
+    window protocol: exactly the arguments the builder is given
+    (qpu/stim_device.py window_models_for_operation), and nothing a seed
+    touches.
+    """
+    circuit_text = str(operation.circuit)
+    plan = []
+    for window in windows:
+        deps = tuple(window.deps)
+        span = (
+            window.key,
+            window.start_round,
+            window.commit_lo,
+            window.commit_hi,
+            window.buffer_hi,
+            deps,
+            window.closed_temporal_boundaries,
+        )
+        plan.append(span)
+    return (
+        operation.id,
+        circuit_text,
+        resolved_operation.round_count,
+        tuple(plan),
+        requirement,
+        protocol,
+    )
 
 
 class WindowPlanner:

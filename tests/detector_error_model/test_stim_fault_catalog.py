@@ -279,3 +279,19 @@ def test_the_two_models_priors_agree_to_a_fixed_absolute_bound():
         circuit, fault_model_contracts.LINKED_FAULT_MODELS_REQUIRED
     )
     assert catalogs[PHYSICAL].priors == (0.2,)
+
+
+def test_a_prior_disagreement_just_above_the_bound_is_refused():
+    """1e-9 is far above float rounding, so it is a model disagreement.
+
+    The accepting test above pins one side of the 1e-15 bound; this
+    pins the other, so that widening the bound fails here.
+    """
+    perturbed = 0.2 + 1e-9
+    circuit = StandInCircuit(
+        "error(0.2) D1 D2 ^ D2 D3\n", f"error({perturbed!r}) D1 D3\n"
+    )
+    with pytest.raises(ValueError, match="disagree on physical faults"):
+        stim_fault_catalog.prepare_fault_catalogs(
+            circuit, fault_model_contracts.LINKED_FAULT_MODELS_REQUIRED
+        )

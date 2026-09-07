@@ -277,7 +277,7 @@ class QPUDevice:
             if fragment_index is not None:
                 index = fragment_index
             readout = dataclasses.replace(
-                payload, n_fragments=fragment_count, fragment_index=index
+                payload, fragment_count=fragment_count, fragment_index=index
             )
             self.round_emitted.fire(readout)
             self.readout_receiver.accept_qpu_readout(

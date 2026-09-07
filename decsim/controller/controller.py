@@ -49,7 +49,7 @@ class Controller:
         The fragment reaches the assembler after the readout delay.
         """
         fragment = round_records.RetainedSyndromeFragment.from_readout(readout)
-        fragment_count = readout.n_fragments
+        fragment_count = readout.fragment_count
         round_key = (fragment.operation_id, fragment.round_index)
         self.copy_made.fire(
             round_key, readout.size_bits, "readout", "controller intake"

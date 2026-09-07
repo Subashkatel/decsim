@@ -1,9 +1,15 @@
-"""The LER-vs-distance figure: both tiers at one p from their ler.csv.
+"""The LER-vs-distance figure: both tiers at one p from their sweep.csv.
 
 The figure's contract: measured points carry Wilson bars, a
 zero-failure point is left off (a log axis cannot hold zero, so the
 curve ends at the last distance that saw failures), and a run that
 never swept the requested p is refused rather than silently dropped.
+
+The two folders here are `decsim collect` folders written by hand: the
+columns are the first ten of sweep.csv, in the order report.summarize
+writes them, which is every column the figure reads. Writing them
+rather than running the sweep is what lets one tier hold a
+zero-failure point at d 5.
 """
 
 import csv
@@ -13,26 +19,28 @@ import pytest
 import decsim.front.refusal as refusal
 from decsim.front.plots import ler_vs_distance_plot
 
-LER_FIELDS = [
+# The first ten columns of sweep.csv (decsim/front/report.py
+# summarize_point), which is all the figure reads.
+SWEEP_FIELDS = [
     "distance",
     "physical_error_probability",
     "algorithm",
+    "round_period_us",
     "shots",
-    "failures",
+    "windows_per_shot",
+    "logical_failures",
     "logical_error_rate",
-    "ler_per_d_rounds",
     "ler_wilson_low",
     "ler_wilson_high",
-    "wall_seconds_per_shot",
-    "round_period_us",
 ]
 
 
-def write_ler_csv(run_dir, algorithm, points):
+def write_sweep_csv(run_dir, algorithm, points):
     """points: (distance, p, shots, failures, rate, low, high) rows."""
     run_dir.mkdir()
-    with open(run_dir / "ler.csv", "w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=LER_FIELDS)
+    sweep_path = run_dir / "sweep.csv"
+    with open(sweep_path, "w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=SWEEP_FIELDS)
         writer.writeheader()
         for distance, p, shots, failures, rate, low, high in points:
             writer.writerow(
@@ -40,21 +48,20 @@ def write_ler_csv(run_dir, algorithm, points):
                     "distance": distance,
                     "physical_error_probability": p,
                     "algorithm": algorithm,
+                    "round_period_us": 1.0,
                     "shots": shots,
-                    "failures": failures,
+                    "windows_per_shot": distance,
+                    "logical_failures": failures,
                     "logical_error_rate": rate,
-                    "ler_per_d_rounds": rate / 10,
                     "ler_wilson_low": low,
                     "ler_wilson_high": high,
-                    "wall_seconds_per_shot": 0.01,
-                    "round_period_us": 0.0,
                 }
             )
     return run_dir
 
 
 def two_tier_runs(tmp_path):
-    weak = write_ler_csv(
+    weak = write_sweep_csv(
         tmp_path / "weak",
         "0.028",
         [
@@ -62,7 +69,7 @@ def two_tier_runs(tmp_path):
             (5, 0.001, 1000, 1, 1e-3, 2e-4, 6e-3),
         ],
     )
-    strong = write_ler_csv(
+    strong = write_sweep_csv(
         tmp_path / "strong",
         "belief_matching",
         [
@@ -82,13 +89,14 @@ def test_figure_written_with_zero_failure_point_left_off(tmp_path):
 
 def test_run_without_the_requested_p_is_refused(tmp_path):
     weak, strong = two_tier_runs(tmp_path)
+    figure_path = tmp_path / "ler_vs_d.png"
     with pytest.raises(ValueError, match="p=0.002"):
-        ler_vs_distance_plot([weak, strong], 0.002, tmp_path / "ler_vs_d.png")
+        ler_vs_distance_plot([weak, strong], 0.002, figure_path)
 
 
-def test_a_run_without_ler_csv_is_refused(tmp_path):
-    empty_run = tmp_path / "no_ler"
+def test_a_run_without_sweep_csv_is_refused(tmp_path):
+    empty_run = tmp_path / "no_sweep"
     empty_run.mkdir()
     figure_path = tmp_path / "ler_vs_d.png"
-    with pytest.raises(refusal.RefusalError, match="ler.csv"):
+    with pytest.raises(refusal.RefusalError, match="sweep.csv"):
         ler_vs_distance_plot([empty_run], 0.001, figure_path)

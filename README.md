@@ -182,7 +182,7 @@ its `kind`, a row of the tables at the top of `decsim/machine.py`.
 - `frontends/`: workload builders that produce `Operation` lists.
 - `front/`: the way in. The `decsim` command set, the yaml experiment and
   its sweep, one shot to one row, the csv report, the figures, the run
-  folder, the flow view over a trace file, and the offline LER lane.
+  folder, and the flow view over a trace file.
 - `collect.py`: tasks and the shots collected from them, sinter's shape:
   a process pool over tasks, shards, and one window model build per task.
 - `configs/`: the yaml experiments, gem5's `configs/`. `results/`: their

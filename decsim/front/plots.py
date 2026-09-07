@@ -14,7 +14,7 @@ latency.png    decode wall clock per window vs code distance, violins,
                <run_dir> <run_dir> --figure latency`, reading each run's
                latency_samples.csv
 ler vs d       both tiers' logical error rate against code distance at
-               one physical error rate, from each run's ler.csv:
+               one physical error rate, from each run's sweep.csv:
                `decsim plot <run_dir> <run_dir> --figure ler_vs_d
                --probability <p>`
 
@@ -200,7 +200,7 @@ def ler_vs_distance_plot(
 ) -> None:
     """Both tiers' logical error rate against code distance at one p.
 
-    Read from each run's ler.csv. Measured points carry Wilson 95% bars;
+    Read from each run's sweep.csv. Measured points carry Wilson 95% bars;
     a zero-failure point cannot sit on a log axis, so its curve simply
     ends at the last distance that saw failures.
 
@@ -1087,18 +1087,18 @@ def _csv_rows(path) -> list:
 
 
 def _ler_rows_at_probability(run_dir, probability: float) -> list:
-    """A run's ler.csv rows at one p, sorted by distance.
+    """A run's sweep.csv rows at one p, sorted by distance.
 
     A run that never swept that p is refused.
     """
-    ler_path = Path(run_dir) / "ler.csv"
-    if not ler_path.is_file():
+    sweep_path = Path(run_dir) / "sweep.csv"
+    if not sweep_path.is_file():
         raise refusal.RefusalError(
-            f"{run_dir} has no ler.csv; the ler_vs_d figure reads the "
-            "logical error rate per distance that `decsim.front.offline "
-            "merge` writes"
+            f"{run_dir} has no sweep.csv; the ler_vs_d figure reads the "
+            "logical_error_rate, ler_wilson_low and ler_wilson_high "
+            "columns of a `decsim collect` run folder"
         )
-    all_rows = _csv_rows(ler_path)
+    all_rows = _csv_rows(sweep_path)
     selected_rows = []
     for row in all_rows:
         row_probability = float(row["physical_error_probability"])
@@ -1121,7 +1121,7 @@ def _rows_with_failures(rows: list, swept_distances: set) -> list:
     measured_rows = []
     for row in rows:
         swept_distances.add(int(row["distance"]))
-        if int(row["failures"]) > 0:
+        if int(row["logical_failures"]) > 0:
             measured_rows.append(row)
     return measured_rows
 

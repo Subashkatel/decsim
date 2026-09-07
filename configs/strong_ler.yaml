@@ -1,8 +1,15 @@
-# The strong tier's offline LER sweep (plot 1). Runs through
-# decsim.front.offline; every key is documented in reference.yaml.
-# Shot counts sized from the 2026-08-27 pilot cost table: >= 100
-# failures where reachable, ~400 core-hours total; sub-threshold
-# points at d >= 7 plot as upper bounds.
+# The strong tier's LER sweep (plot 1). Runs with `decsim collect`;
+# every key is documented in reference.yaml. Shot counts sized from the
+# 2026-08-27 pilot cost table: >= 100 failures where reachable, ~400
+# core-hours total; sub-threshold points at d >= 7 plot as upper bounds.
+#
+# 1.4 M shots is a Slurm array, not one job: per array task run
+# `decsim collect configs/strong_ler.yaml --out $RUN/$ID
+# --shots-per-unit N --shard $ID/$COUNT`, then `decsim combine $RUN/*`.
+# The arithmetic: 16 h / (seconds per shot) = shots a task, so
+# N * ceil(1.4e6 / N / COUNT) must stay under that; the weak card's
+# 0.22 s at d7 makes that 262,000, and belief matching is slower, so
+# take the seconds per shot from a pilot at the sweep's largest d.
 
 extends: strong_decoder_baseline.yaml
 

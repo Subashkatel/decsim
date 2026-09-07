@@ -80,15 +80,39 @@ def run_experiment(
         shard=shard,
         shots_per_unit=shots_per_unit,
     )
+    if not measurements:
+        _report_no_work_unit()
+        _finish_the_manifest(config, run_dir, started_utc)
+        return run_dir, []
     record = report.record_of(measurements)
     rows = report.summarize(record.shots, record.window_samples)
     report.write_report(rows, run_dir, record)
     plots.plots(config, rows, run_dir, measurements)
+    _finish_the_manifest(config, run_dir, started_utc)
+    return run_dir, rows
+
+
+def _report_no_work_unit() -> None:
+    """One line for a run that held no work unit of the sweep.
+
+    A Slurm array sized above the sweep's unit count leaves its last
+    shards nothing to run. That is the array's shape and not a
+    failure, so the folder keeps its manifest, no csv is written and
+    the command exits 0; `decsim combine` skips such a folder.
+    """
+    print(
+        "no work unit of this sweep fell to this run, so it wrote no rows "
+        "beyond its manifest",
+        file=sys.stderr,
+    )
+
+
+def _finish_the_manifest(config, run_dir: Path, started_utc: str) -> None:
+    """The manifest again, now carrying the time the run ended."""
     finished_utc = run_folder.utc_now()
     run_folder.write_manifest(
         config, run_dir, started_utc, finished_utc=finished_utc
     )
-    return run_dir, rows
 
 
 def _echo_description(config, run_dir: Path, shard: Optional[tuple]) -> None:

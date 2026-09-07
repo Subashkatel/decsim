@@ -34,6 +34,7 @@ import functools
 import json
 import math
 import statistics
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -42,14 +43,6 @@ import decsim.front.measure as measure
 import decsim.front.refusal as refusal
 
 BULKY_FIELDS = ("samples", "means", "maxes", "link_totals")
-# The files combine folds, and how each one is put back in the order a
-# single run would have written it: the summaries point by point in
-# sweep-point order (summarize, link_rows), the per-shot files by the
-# point's place in the sweep's task order and then by seed. Both orders
-# come from the rows and the sweep, never from the order the folders
-# were named.
-POINT_ORDERED_FILES = ("sweep.csv", "links.csv", "window_samples.csv")
-TASK_ORDERED_FILES = ("shots.csv", "shot_links.csv", "latency_samples.csv")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -329,42 +322,51 @@ def read_rows(path: Path) -> list:
     return rows
 
 
-def combine(run_dirs: list, out_dir: Path) -> list:
-    """Fold several run folders' rows into one report, and return its rows.
+def read_record(run_dirs: list, positions: dict) -> RunRecord:
+    """Several folders' additive files as one record, in a run's order.
 
-    Folding is a concatenation, not a re-aggregation: sinter's combine
-    adds rows with the same strong id, and here no two rows share one.
-    A point in two folders is refused, because a point's summary is not
-    additive: its `<point>_median_us` and `<point>_p99_us` columns are
-    percentiles over every decoded window of every shot of that point
-    pooled, and no run folder records those windows, so two summaries
-    of one point cannot be made into the summary of their shots. Give
-    each shard whole points (`--shard` without `--shots-per-unit`) and
-    the fold is exact.
+    The per-shot rows go back where the sweep says they belong, the
+    task's place and then the seed, so the folder order and the shard
+    indices play no part; the window samples' counts add.
+    """
+    shots = _rows_of_every_folder(run_dirs, "shots.csv")
+    shot_links = _rows_of_every_folder(run_dirs, "shot_links.csv")
+    samples = _rows_of_every_folder(run_dirs, "window_samples.csv")
+    latency = _rows_of_every_folder(run_dirs, "latency_samples.csv")
+    counts = _counts_of_rows(samples)
+    ordered_shots = _in_task_and_seed_order(shots, positions)
+    ordered_links = _in_task_and_seed_order(shot_links, positions)
+    ordered_samples = _rows_of_counts(counts)
+    ordered_latency = _in_task_and_seed_order(latency, positions)
+    return RunRecord(
+        ordered_shots, ordered_links, ordered_samples, ordered_latency
+    )
+
+
+def combine(run_dirs: list, out_dir: Path) -> list:
+    """Fold several run folders into one report, and return its rows.
+
+    A run folder records only additive facts, so folding is reading
+    them all back as one record and deriving the summaries from it
+    through the same summarize and link_rows a single run uses. Serial,
+    pooled and sharded runs of one config therefore write the same
+    rows, along whatever cut `--shots-per-unit` gave the shards: a
+    point split across two shards folds exactly, because its median and
+    p99 come from the per-value counts and not from a shard's summary.
 
     The rows come back in the order one unsharded run would have
     written them, read off the rows themselves and the sweep every
     folder's manifest records, so `combine b a` writes what
-    `combine a b` writes.
+    `combine a b` writes. What two folders may not share is a shot: one
+    seeded run in both of them would be counted twice.
     """
-    summaries = _rows_of_every_folder(run_dirs, "sweep.csv")
-    combined = _in_sweep_point_order(summaries)
-    _refuse_a_repeated_point(combined, run_dirs)
     positions = _one_sweeps_task_positions(run_dirs)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    for name in POINT_ORDERED_FILES:
-        rows = _rows_of_every_folder(run_dirs, name)
-        if not rows:
-            continue
-        ordered = _in_sweep_point_order(rows)
-        _write_combined(ordered, out_dir, name)
-    for name in TASK_ORDERED_FILES:
-        rows = _rows_of_every_folder(run_dirs, name)
-        if not rows:
-            continue
-        ordered = _in_task_and_seed_order(rows, positions)
-        _write_combined(ordered, out_dir, name)
-    return combined
+    folders = _folders_that_ran_shots(run_dirs)
+    record = read_record(folders, positions)
+    _refuse_a_repeated_shot(record.shots, folders)
+    rows = summarize(record.shots, record.window_samples)
+    write_report(rows, out_dir, record)
+    return rows
 
 
 def write_report(
@@ -505,12 +507,6 @@ def _typed_value(text: str):
         return text
 
 
-def _write_combined(rows: list, out_dir: Path, name: str) -> None:
-    """One folded file, written where the combined report goes."""
-    path = out_dir / name
-    write_csv(rows, path)
-
-
 def _one_sweeps_task_positions(run_dirs: list) -> dict:
     """Where every point of the folded sweep sits in its task order.
 
@@ -558,6 +554,82 @@ def _refuse_folders_of_different_sweeps(
         )
 
 
+def _refuse_a_repeated_shot(shots: list, run_dirs: list) -> None:
+    """One seeded run in two folders would be counted twice.
+
+    A point may be split across folders now, since its summary is
+    derived from additive rows, but a shot may not: the same seed of
+    the same point is the same run.
+    """
+    seen = set()
+    for row in shots:
+        point = sweep_point_of(row)
+        shot = (point, row["seed"])
+        if shot in seen:
+            _refuse_the_folders(row, run_dirs)
+        seen.add(shot)
+
+
+def _refuse_the_folders(row: dict, run_dirs: list) -> None:
+    """Say which shot is doubled and in which folders it was found."""
+    listed = _named(run_dirs)
+    shot = (
+        f"d {row['distance']}, p {row['physical_error_probability']}, "
+        f"algorithm {row['algorithm']}, "
+        f"round period {row['round_period_us']} us, seed {row['seed']}"
+    )
+    raise refusal.RefusalError(
+        f"the shot {shot} is in more than one of {listed}; a shot is one "
+        "seeded run of one sweep point, so folding both folders would "
+        "count it twice"
+    )
+
+
+def _folders_that_ran_shots(run_dirs: list) -> list:
+    """The folders with a shots.csv; one without is skipped, out loud.
+
+    A shard whose index selected no work unit writes its manifest and
+    no rows, which is not an error and is nothing to fold.
+    """
+    folders = []
+    for run_dir in run_dirs:
+        path = Path(run_dir) / "shots.csv"
+        if path.is_file():
+            folders.append(run_dir)
+            continue
+        _say_the_folder_is_skipped(run_dir)
+    if not folders:
+        _refuse_folders_without_shots(run_dirs)
+    return folders
+
+
+def _say_the_folder_is_skipped(run_dir) -> None:
+    """One line on stderr for a folder that holds no shot."""
+    print(
+        f"decsim: {run_dir} has no shots.csv, so combine skips it; "
+        "a shard whose index selected no work unit writes no rows",
+        file=sys.stderr,
+    )
+
+
+def _refuse_folders_without_shots(run_dirs: list) -> None:
+    """Nothing to fold: not one of the folders holds a shot."""
+    listed = _named(run_dirs)
+    raise refusal.RefusalError(
+        f"none of {listed} holds a shots.csv, so there is nothing to "
+        "combine; a run folder records its shots there, and a shard that "
+        "selected no work unit records none"
+    )
+
+
+def _named(run_dirs: list) -> str:
+    """The folders as one comma-separated list, for a refusal."""
+    names = []
+    for run_dir in run_dirs:
+        names.append(str(run_dir))
+    return ", ".join(names)
+
+
 def _in_task_and_seed_order(rows: list, positions: dict) -> list:
     """Per-shot rows in the sweep's own order: the task, then the seed.
 
@@ -589,46 +661,6 @@ def _rows_of_every_folder(run_dirs: list, name: str) -> list:
         for row in read_rows(path):
             rows.append(row)
     return rows
-
-
-def _in_sweep_point_order(rows: list) -> list:
-    """Csv rows sorted the way a single run would have written them."""
-    return sorted(rows, key=_row_point_order)
-
-
-def _row_point_order(row: dict) -> tuple:
-    """A csv row's sweep point, in the order summarize writes points."""
-    point = sweep_point_of(row)
-    return _sweep_point_order(point)
-
-
-def _refuse_a_repeated_point(rows: list, run_dirs: list) -> None:
-    """A point in two folders means these are not shards of one sweep."""
-    seen = set()
-    for row in rows:
-        point = _row_point_order(row)
-        if point in seen:
-            _refuse_the_folders(row, run_dirs)
-        seen.add(point)
-
-
-def _refuse_the_folders(row: dict, run_dirs: list) -> None:
-    """Say which point is doubled and in which folders it was found."""
-    names = []
-    for run_dir in run_dirs:
-        names.append(str(run_dir))
-    listed = ", ".join(names)
-    point = (
-        f"d {row['distance']}, p {row['physical_error_probability']}, "
-        f"algorithm {row['algorithm']}, "
-        f"round period {row['round_period_us']} us"
-    )
-    raise refusal.RefusalError(
-        f"the point {point} is in more than one of {listed}; a point's "
-        "summary is not additive, since its median and p99 columns are "
-        "over its pooled decoded windows and no run folder records them, "
-        "so give each shard whole points: --shard without --shots-per-unit"
-    )
 
 
 def _rows_at_point(rows: list, point: tuple) -> list:

@@ -31,6 +31,15 @@ FOUR_POINT_SWEEP = {
 }
 
 
+EVERY_FILE = (
+    "sweep.csv",
+    "links.csv",
+    "shots.csv",
+    "shot_links.csv",
+    "window_samples.csv",
+)
+
+
 def _rows(path):
     with open(path, newline="") as handle:
         reader = csv.DictReader(handle)
@@ -140,7 +149,7 @@ def test_a_pooled_collect_writes_the_serial_collects_rows(tmp_path):
             "4",
         ]
     )
-    for name in ("sweep.csv", "shots.csv", "links.csv"):
+    for name in EVERY_FILE:
         serial = _rows_without_wall_clock(serial_dir, name)
         pooled = _rows_without_wall_clock(pooled_dir, name)
         assert serial == pooled
@@ -175,7 +184,7 @@ def test_two_shards_combined_are_the_unsharded_collects_rows(tmp_path):
             str(combined_dir),
         ]
     )
-    for name in ("sweep.csv", "shots.csv", "links.csv"):
+    for name in EVERY_FILE:
         whole = _rows_without_wall_clock(whole_dir, name)
         combined = _rows_without_wall_clock(combined_dir, name)
         assert whole == combined
@@ -184,6 +193,7 @@ def test_two_shards_combined_are_the_unsharded_collects_rows(tmp_path):
 def test_combine_writes_the_same_rows_whichever_order_the_shards_come_in(
     tmp_path,
 ):
+    """The shards split every point's seeds, so every file is folded."""
     wall_clock_unit = {
         **yaml_configs.MINIMAL_CONFIG["weak_decoder"],
         "kind": "pymatching",
@@ -198,7 +208,16 @@ def test_combine_writes_the_same_rows_whichever_order_the_shards_come_in(
     backwards_dir = tmp_path / "backwards"
     command.main(["collect", str(config_path), "--out", str(serial_dir)])
     command.main(
-        ["collect", str(config_path), "--out", str(first_dir), "--shard", "0/2"]
+        [
+            "collect",
+            str(config_path),
+            "--out",
+            str(first_dir),
+            "--shots-per-unit",
+            "1",
+            "--shard",
+            "0/2",
+        ]
     )
     command.main(
         [
@@ -206,6 +225,8 @@ def test_combine_writes_the_same_rows_whichever_order_the_shards_come_in(
             str(config_path),
             "--out",
             str(second_dir),
+            "--shots-per-unit",
+            "1",
             "--shard",
             "1/2",
         ]
@@ -229,7 +250,8 @@ def test_combine_writes_the_same_rows_whichever_order_the_shards_come_in(
         ]
     )
 
-    for name in ("sweep.csv", "links.csv", "shots.csv", "latency_samples.csv"):
+    every_file = EVERY_FILE + ("latency_samples.csv",)
+    for name in every_file:
         forwards_path = forwards_dir / name
         backwards_path = backwards_dir / name
         assert forwards_path.read_bytes() == backwards_path.read_bytes()
@@ -310,19 +332,28 @@ def test_a_unit_size_that_splits_a_point_writes_the_serial_runs_rows(
         ]
     )
 
-    for name in ("sweep.csv", "shots.csv", "links.csv"):
+    for name in EVERY_FILE:
         serial = _rows_without_wall_clock(serial_dir, name)
         assert _rows_without_wall_clock(split_dir, name) == serial
         assert _rows_without_wall_clock(pooled_dir, name) == serial
 
 
-def test_shards_that_split_one_points_seeds_are_refused_by_combine(
-    tmp_path, capsys
+def test_shards_that_split_every_points_seeds_fold_to_the_serial_rows(
+    tmp_path,
 ):
+    """The additive record's whole point: a folded point is the point.
+
+    Every point of the sweep is split, seed 0 to one shard and seed 1
+    to the other, so no shard holds a whole point and every summary
+    column has to come out of the additive files.
+    """
     config_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)
+    serial_dir = tmp_path / "serial"
     first_dir = tmp_path / "shard0"
     second_dir = tmp_path / "shard1"
-    combined_dir = tmp_path / "combined"
+    forwards_dir = tmp_path / "forwards"
+    backwards_dir = tmp_path / "backwards"
+    command.main(["collect", str(config_path), "--out", str(serial_dir)])
     command.main(
         [
             "collect",
@@ -347,23 +378,78 @@ def test_shards_that_split_one_points_seeds_are_refused_by_combine(
             "1/2",
         ]
     )
+    command.main(
+        [
+            "combine",
+            str(first_dir),
+            str(second_dir),
+            "--out",
+            str(forwards_dir),
+        ]
+    )
+    command.main(
+        [
+            "combine",
+            str(second_dir),
+            str(first_dir),
+            "--out",
+            str(backwards_dir),
+        ]
+    )
+
+    for name in EVERY_FILE:
+        serial = _rows_without_wall_clock(serial_dir, name)
+        assert _rows_without_wall_clock(forwards_dir, name) == serial
+    for name in EVERY_FILE:
+        forwards_path = forwards_dir / name
+        backwards_path = backwards_dir / name
+        assert forwards_path.read_bytes() == backwards_path.read_bytes()
+
+
+def test_a_shard_with_no_work_unit_says_so_and_writes_no_rows(tmp_path, capsys):
+    """A Slurm array wider than the sweep's units is a shape, not a fault."""
+    config_path = yaml_configs.write_config(tmp_path, {})
+    out_dir = tmp_path / "empty"
     capsys.readouterr()
-    with pytest.raises(SystemExit) as stopped:
-        command.main(
-            [
-                "combine",
-                str(first_dir),
-                str(second_dir),
-                "--out",
-                str(combined_dir),
-            ]
-        )
+    command.main(
+        ["collect", str(config_path), "--out", str(out_dir), "--shard", "1/2"]
+    )
 
     printed = capsys.readouterr()
-    assert stopped.value.code == 1
-    assert printed.err.count("\n") == 1
-    assert "is in more than one of" in printed.err
-    assert "--shard without --shots-per-unit" in printed.err
+    manifest_path = out_dir / "manifest.json"
+    sweep_path = out_dir / "sweep.csv"
+    assert manifest_path.is_file()
+    assert not sweep_path.exists()
+    assert "wrote no rows beyond its manifest" in printed.err
+
+
+def test_combine_skips_a_folder_that_ran_no_shot(tmp_path, capsys):
+    config_path = yaml_configs.write_config(tmp_path, {})
+    whole_dir = tmp_path / "whole"
+    empty_dir = tmp_path / "empty"
+    combined_dir = tmp_path / "combined"
+    command.main(
+        ["collect", str(config_path), "--out", str(whole_dir), "--shard", "0/2"]
+    )
+    command.main(
+        ["collect", str(config_path), "--out", str(empty_dir), "--shard", "1/2"]
+    )
+    capsys.readouterr()
+    command.main(
+        [
+            "combine",
+            str(whole_dir),
+            str(empty_dir),
+            "--out",
+            str(combined_dir),
+        ]
+    )
+
+    printed = capsys.readouterr()
+    assert "has no shots.csv, so combine skips it" in printed.err
+    whole = _rows_without_wall_clock(whole_dir, "sweep.csv")
+    combined = _rows_without_wall_clock(combined_dir, "sweep.csv")
+    assert combined == whole
 
 
 def test_every_shard_of_a_sweep_runs_a_share_of_its_points(tmp_path):
@@ -413,7 +499,7 @@ def test_a_shard_outside_its_count_is_refused(tmp_path, capsys):
     assert not out_dir.exists()
 
 
-def test_combining_two_folders_that_hold_the_same_point_is_refused(
+def test_combining_two_folders_that_hold_the_same_shot_is_refused(
     tmp_path, capsys
 ):
     config_path = yaml_configs.write_config(tmp_path, {})

@@ -3,12 +3,14 @@
 # 2026-08-27 pilot cost table: >= 100 failures where reachable, ~350
 # core-hours total; d 9 and 11 at the two lowest p plot as upper bounds.
 #
-# 10.4 M shots is a Slurm array, not one job: per array task run
-# `decsim collect configs/weak_ler.yaml --out $RUN/$ID
-# --shots-per-unit N --shard $ID/$COUNT`, then `decsim combine $RUN/*`.
-# The arithmetic: 16 h / 0.22 s per shot at d7 = 262,000 shots a task,
-# so N * ceil(10.4e6 / N / COUNT) must stay under that; N 50000 with
-# COUNT 200 gives each task two units of 3.1 h.
+# 10.4 M shots is a Slurm array, not one job:
+# `RUN=results/weak_ler sbatch -a 0-199 slurm/slurm_run.sh
+# configs/weak_ler.yaml --shots-per-unit 50000`, then
+# `decsim combine $RUN/*`. The arithmetic: 16 h / 0.22 s per shot at d7
+# = 262,000 shots a task, so the shots a task runs must stay under that.
+# The sweep is 35 points and 10,425,000 shots, which N 50000 cuts into
+# 225 work units, so with COUNT 200 twenty five tasks take two units
+# (100,000 shots, 6.11 h) and the other 175 take one (3.06 h).
 
 extends: weak_decoder_baseline.yaml
 

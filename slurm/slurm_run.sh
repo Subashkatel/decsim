@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
-# One closed-loop experiment as a cluster job:
-#   sbatch -J <name> -o <log> slurm/slurm_run.sh <config.yaml>
-# One array task per shard:
-#   sbatch -a 0-3 slurm/slurm_run.sh <config.yaml> 4
+# One experiment as a cluster job. Every argument after the config
+# reaches `decsim collect` as written; an array task adds its own shard
+# and its own folder under $RUN, so the whole sweep is one line:
+#   RUN=results/weak_ler sbatch -a 0-199 slurm/slurm_run.sh \
+#     configs/weak_ler.yaml --shots-per-unit 50000
+# then `decsim combine $RUN/*` folds the tasks' folders into one report.
+# Without an array this runs the whole sweep in one job, and --out and
+# --processes pass through like anything else.
 #SBATCH --partition=cpu
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -11,8 +15,15 @@
 #SBATCH --time=16:00:00
 set -euo pipefail
 cd "$SLURM_SUBMIT_DIR"
-shard=()
-if [ "$#" -ge 2 ]; then
-  shard=(--shard "${SLURM_ARRAY_TASK_ID}/$2")
+config=$1
+shift
+task=()
+if [ -n "${SLURM_ARRAY_TASK_ID:-}" ]; then
+  run_dir=${RUN:?an array task needs RUN, the folder its shards write in}
+  task=(
+    --shard "${SLURM_ARRAY_TASK_ID}/${SLURM_ARRAY_TASK_COUNT}"
+    --out "${run_dir}/${SLURM_ARRAY_TASK_ID}"
+  )
 fi
-exec "${DECSIM_PYTHON:-.venv/bin/python}" -m decsim collect "$1" "${shard[@]}"
+exec "${DECSIM_PYTHON:-.venv/bin/python}" -m decsim collect \
+  "$config" "${task[@]}" "$@"

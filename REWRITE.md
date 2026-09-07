@@ -215,7 +215,7 @@ public one in the module and carry a leading underscore. A package's
 `__init__.py` holds the package docstring and nothing else.
 
 A record used by one component lives next to it. A record shared by two
-or more components lives in `message.py`.
+or more components lives in `decsim/records/`, one module per record family.
 
 Every public signature is annotated. An `engine` parameter is typed
 `Engine`. `Any` is used only for an opaque identity, with a comment that
@@ -239,7 +239,7 @@ depends on ports, never on another component's class.
 
 Which ports exist is decided by the pipeline, not by taste: one port per
 neighbour in the list under "The target", point 2, one method per
-handoff, and the record that crosses it defined in `message.py`.
+handoff, and the record that crosses it defined in `decsim/records/`.
 Observation (metrics, ledgers, the traffic report) is reached through
 callbacks a component fires, never through a port, so a component can
 run with no observer at all. The port file is therefore the map of the
@@ -284,9 +284,9 @@ simplest law that the gate can pin.
 ## Rule 9. Google Python style, enforced
 
 The Google Python Style Guide applies wherever the rules above are
-silent. Import modules, not names: `import decsim.message as message`,
-then `message.Decision`; the exceptions are `typing`, `dataclasses`,
-`collections.abc` and `enum`. No module uses `from __future__ import
+silent. Import modules, not names: `import decsim.records.program as
+program_records`, then `program_records.Decision`; the exceptions are
+`typing`, `dataclasses`, `collections.abc` and `enum`. No module uses `from __future__ import
 annotations`; `Optional[X]` is written out because the package runs on
 Python 3.9.
 

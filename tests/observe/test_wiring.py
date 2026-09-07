@@ -128,6 +128,25 @@ def test_no_source_is_heard_twice_by_one_listener_class():
     assert len(census) > 30
 
 
+def test_every_source_has_a_listener_when_every_knob_is_on():
+    """A source nothing hears is a fire into an empty list for every run.
+
+    With every knob on, each source a component declares is wired here
+    or it is dead (rule 5); a new source added to a component without a
+    connection in wiring.py fails this test by name.
+    """
+    point = gate_point.settings(**EVERY_KNOB)
+    machine = machine_module.Machine.build(point, gate_point.SEED)
+
+    census = _walk(machine)
+    unheard = []
+    for owner_name, source_name, source in census:
+        if not source.has_listeners:
+            unheard.append((owner_name, source_name))
+
+    assert unheard == []
+
+
 def test_every_listener_the_section_asks_for_is_built_and_heard():
     """A knob on builds its listener; a knob off leaves the field None."""
     asked_point = gate_point.settings(**EVERY_KNOB)

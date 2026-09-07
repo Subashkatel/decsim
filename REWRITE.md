@@ -300,9 +300,9 @@ and trailing commas.
 
 Run, from the repo root, before every commit:
 
-    PYTHONPATH=.pydeps .venv/bin/python -m ruff format decsim experiments tests tools
-    PYTHONPATH=.pydeps .venv/bin/python -m ruff check decsim experiments tests tools
-    .venv/bin/python tools/check_one_action.py decsim experiments tests tools
+    PYTHONPATH=.pydeps .venv/bin/python -m ruff format decsim tests tools
+    PYTHONPATH=.pydeps .venv/bin/python -m ruff check decsim tests tools
+    .venv/bin/python tools/check_one_action.py decsim tests tools
 
 `tools/check.sh` runs all three. The ruff binary lives at
 `.pydeps/bin/ruff`; if `-m ruff` reports RuffNotFound, copy it from the

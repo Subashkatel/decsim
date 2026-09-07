@@ -16,10 +16,10 @@ runs skip the data path and charge modeled latencies instead.
 ## Requirements
 
 - Python 3.9 or newer. The core package imports no third-party libraries.
-- Runs on real syndrome data need the `experiments` extra:
+- Runs on real syndrome data need the `run` extra:
 
 ```bash
-python -m pip install -e ".[experiments]"
+python -m pip install -e ".[run]"
 ```
 
 ## Quickstart

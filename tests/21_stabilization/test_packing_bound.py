@@ -76,5 +76,5 @@ def test_a_bound_of_six_clears_twelve_rounds(fabric):
 
     completed = fabric["run_machine"](settings, 0)
 
-    assert completed.round_events.packing_drops == 0
+    assert completed.observation.round_events.packing_drops == 0
     assert completed.engine.now == RUN_END_TICK

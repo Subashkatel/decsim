@@ -33,12 +33,20 @@ def _feedback_run(fabric, *, controller_output_us):
         packing_microseconds_per_round=fabric["DECLARED_US"]["pack"],
     )
     settings = MachineSettings(
-        workload=WorkloadSettings(operations=operations, rounds_policy=FixedRounds(6)),
+        workload=WorkloadSettings(
+            operations=operations, rounds_policy=FixedRounds(6)
+        ),
         qpu=QpuSettings(distance=3, round_period_microseconds=1.0),
-        weak_decoder=DecoderSettings(decoder=PresetLatencyDecoder(fabric["DECLARED_US"]["weak"])),
-        links=fabric["declared_profile"](controller_to_weak_buffer=True, controller_to_strong_buffer=False),
+        weak_decoder=DecoderSettings(
+            decoder=PresetLatencyDecoder(fabric["DECLARED_US"]["weak"])
+        ),
+        links=fabric["declared_profile"](
+            controller_to_weak_buffer=True, controller_to_strong_buffer=False
+        ),
         controller=controller,
-        pauli_frame=PauliFrameConfig(commit_microseconds=fabric["DECLARED_US"]["frame"]),
+        pauli_frame=PauliFrameConfig(
+            commit_microseconds=fabric["DECLARED_US"]["frame"]
+        ),
     )
     return fabric["run_machine"](settings)
 
@@ -57,7 +65,8 @@ def test_results_and_decisions_cross_links_at_their_own_size(fabric):
     payload_by_path = {}
     for transfer in transfers:
         payload_by_path.setdefault(transfer["path"], set()).add(
-            transfer["payload_bits"])
+            transfer["payload_bits"]
+        )
     assert payload_by_path["weak_decoder_to_frame"] == {1}
     assert payload_by_path["frame_to_controller"] == {32}
     assert payload_by_path["controller_to_qpu"] == {128}
@@ -71,25 +80,40 @@ def test_feedback_operation_command_traverses_controller_output_and_cq(fabric):
     completed.engine.run()
     runtime = completed.execution_runtime
     blocker_commit = next(
-        record.committed_ticks for record in completed.pauli_frame.snapshot().records
-        if record.window_key == (1, 0))
+        record.committed_ticks
+        for record in completed.pauli_frame.snapshot().records
+        if record.window_key == (1, 0)
+    )
 
     stamps = completed.observation.runtime_stamps
-    assert stamps.decode_release[2] == blocker_commit + microseconds_to_ticks(2)  # OC
-    assert stamps.op_start[2] == blocker_commit + microseconds_to_ticks(2 + 3 + 2)
+    assert stamps.decode_release[2] == blocker_commit + microseconds_to_ticks(
+        2
+    )  # OC
+    assert stamps.op_start[2] == blocker_commit + microseconds_to_ticks(
+        2 + 3 + 2
+    )
 
-    arrivals = [event for event in completed.observation.command_events.events
-                if event.kind == "ARRIVED" and event.command.operation.id == 2]
+    arrivals = [
+        event
+        for event in completed.observation.command_events.events
+        if event.kind == "ARRIVED" and event.command.operation.id == 2
+    ]
     assert len(arrivals) == 1
     assert arrivals[0].tick == blocker_commit + microseconds_to_ticks(2 + 3 + 2)
     assert isinstance(arrivals[0].command, RunOperationBody)
     assert arrivals[0].command.operation == runtime.operations[2]
 
-    output = [event for event in completed.round_events.output_events
-              if event.operation_id == 2]
+    output = [
+        event
+        for event in completed.observation.round_events.output_events
+        if event.operation_id == 2
+    ]
     assert [(event.kind, event.tick) for event in output] == [
         ("DECISION_AVAILABLE", blocker_commit + microseconds_to_ticks(2)),
-        ("CONTROL_PULSE_COMMAND_ISSUED", blocker_commit + microseconds_to_ticks(2 + 3)),
+        (
+            "CONTROL_PULSE_COMMAND_ISSUED",
+            blocker_commit + microseconds_to_ticks(2 + 3),
+        ),
     ]
     assert output[0].payload.target_operation_id == 2
     assert output[1].payload is arrivals[0].command
@@ -101,21 +125,30 @@ def test_output_latency_changes_arrival_but_not_decision_availability(fabric):
     zero.engine.run()
     delayed.engine.run()
 
-    assert (zero.observation.runtime_stamps.decode_release[2]
-            == delayed.observation.runtime_stamps.decode_release[2])
-    assert (delayed.observation.runtime_stamps.op_start[2]
-            - zero.observation.runtime_stamps.op_start[2]) == microseconds_to_ticks(3)
+    assert (
+        zero.observation.runtime_stamps.decode_release[2]
+        == delayed.observation.runtime_stamps.decode_release[2]
+    )
+    assert (
+        delayed.observation.runtime_stamps.op_start[2]
+        - zero.observation.runtime_stamps.op_start[2]
+    ) == microseconds_to_ticks(3)
 
 
 def test_non_aligned_controller_arrival_waits_for_next_qec_boundary(fabric):
     completed = _feedback_run(fabric, controller_output_us=0.016)
     completed.engine.run()
-    arrival = next(event.tick for event in completed.observation.command_events.events
-                   if event.kind == "ARRIVED" and event.command.operation.id == 2)
+    arrival = next(
+        event.tick
+        for event in completed.observation.command_events.events
+        if event.kind == "ARRIVED" and event.command.operation.id == 2
+    )
     start = completed.observation.runtime_stamps.op_start[2]
 
     assert arrival % microseconds_to_ticks(1.0) == microseconds_to_ticks(0.016)
-    assert start == ((arrival // microseconds_to_ticks(1.0)) + 1) * microseconds_to_ticks(1.0)
+    assert start == (
+        (arrival // microseconds_to_ticks(1.0)) + 1
+    ) * microseconds_to_ticks(1.0)
 
 
 def test_preloaded_program_command_is_not_charged_as_online_feedback(fabric):
@@ -124,12 +157,17 @@ def test_preloaded_program_command_is_not_charged_as_online_feedback(fabric):
     completed = _feedback_run(fabric, controller_output_us=3.0)
     completed.engine.run()
 
-    root_arrival = next(event for event in completed.observation.command_events.events
-                        if event.kind == "ARRIVED" and event.command.operation.id == 1)
+    root_arrival = next(
+        event
+        for event in completed.observation.command_events.events
+        if event.kind == "ARRIVED" and event.command.operation.id == 1
+    )
     assert root_arrival.tick == 0
     assert completed.observation.runtime_stamps.op_start[1] == 0
-    assert any(event.kind == "PRELOADED_COMMAND" and event.operation_id == 1
-               for event in completed.round_events.output_events)
+    assert any(
+        event.kind == "PRELOADED_COMMAND" and event.operation_id == 1
+        for event in completed.observation.round_events.output_events
+    )
 
 
 def test_result_return_carries_the_same_decision_through_output_and_cq(fabric):
@@ -137,28 +175,44 @@ def test_result_return_carries_the_same_decision_through_output_and_cq(fabric):
     controller = ControllerSettings(
         readout_to_bits_microseconds=fabric["DECLARED_US"]["binary"],
         packing_microseconds_per_round=fabric["DECLARED_US"]["pack"],
-        decision_to_pulse_microseconds=3.0)
+        decision_to_pulse_microseconds=3.0,
+    )
     settings = MachineSettings(
-        workload=WorkloadSettings(operations=(operation,), rounds_policy=FixedRounds(6)),
+        workload=WorkloadSettings(
+            operations=(operation,), rounds_policy=FixedRounds(6)
+        ),
         qpu=QpuSettings(distance=3, round_period_microseconds=1.0),
-        weak_decoder=DecoderSettings(decoder=PresetLatencyDecoder(fabric["DECLARED_US"]["weak"])),
-        links=fabric["declared_profile"](controller_to_weak_buffer=True, controller_to_strong_buffer=False), controller=controller,
-        pauli_frame=PauliFrameConfig(commit_microseconds=fabric["DECLARED_US"]["frame"]),
+        weak_decoder=DecoderSettings(
+            decoder=PresetLatencyDecoder(fabric["DECLARED_US"]["weak"])
+        ),
+        links=fabric["declared_profile"](
+            controller_to_weak_buffer=True, controller_to_strong_buffer=False
+        ),
+        controller=controller,
+        pauli_frame=PauliFrameConfig(
+            commit_microseconds=fabric["DECLARED_US"]["frame"]
+        ),
     )
     completed = fabric["run_machine"](settings)
     completed.engine.run()
-    commit = next(record.committed_ticks
-                  for record in completed.pauli_frame.snapshot().records)
+    commit = next(
+        record.committed_ticks
+        for record in completed.pauli_frame.snapshot().records
+    )
 
-    output = [event for event in completed.round_events.output_events
-              if event.operation_id == 1 and event.kind != "PRELOADED_COMMAND"]
+    output = [
+        event
+        for event in completed.observation.round_events.output_events
+        if event.operation_id == 1 and event.kind != "PRELOADED_COMMAND"
+    ]
     assert [(event.kind, event.tick) for event in output] == [
         ("DECISION_AVAILABLE", commit + microseconds_to_ticks(2)),
         ("CONTROL_DECISION_ISSUED", commit + microseconds_to_ticks(2 + 3)),
     ]
     assert output[1].payload is output[0].payload
-    assert completed.observation.runtime_stamps.result_return[1] == \
-        commit + microseconds_to_ticks(2 + 3 + 2)
+    assert completed.observation.runtime_stamps.result_return[
+        1
+    ] == commit + microseconds_to_ticks(2 + 3 + 2)
 
 
 def test_controller_output_without_a_link_still_pays_local_processing():
@@ -174,8 +228,10 @@ def test_controller_output_without_a_link_still_pays_local_processing():
 
     assert delivered == [decision]
     assert engine.now == 17
-    assert [(event.kind, event.tick, event.payload)
-            for event in recorder.output_events] == [
+    assert [
+        (event.kind, event.tick, event.payload)
+        for event in recorder.output_events
+    ] == [
         ("DECISION_AVAILABLE", 0, decision),
         ("CONTROL_DECISION_ISSUED", 17, decision),
     ]
@@ -188,7 +244,8 @@ def test_qubic_500_mhz_eight_cycle_controller_fixture_is_parameter_driven():
     cycles = 8
     controller_output_us = cycles / clock_hz * 1_000_000
     timing = ControllerSettings(
-        decision_to_pulse_microseconds=controller_output_us)
+        decision_to_pulse_microseconds=controller_output_us
+    )
 
     assert controller_output_us == 0.016
     assert timing.decision_to_pulse_ticks() == microseconds_to_ticks(0.016)
@@ -201,8 +258,7 @@ def test_qubicml_500_mhz_27_cycle_discriminator_fixture_is_parameter_driven():
     clock_hz = 500_000_000
     inference_cycles = 27
     classification_us = inference_cycles / clock_hz * 1_000_000
-    timing = ControllerSettings(
-        readout_to_bits_microseconds=classification_us)
+    timing = ControllerSettings(readout_to_bits_microseconds=classification_us)
 
     assert classification_us == 0.054
     assert timing.readout_to_bits_ticks() == microseconds_to_ticks(0.054)

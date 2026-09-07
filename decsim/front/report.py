@@ -41,6 +41,7 @@ from typing import Optional
 import decsim.front.experiment as experiment
 import decsim.front.measure as measure
 import decsim.front.refusal as refusal
+import decsim.front.run_folder as run_folder
 
 BULKY_FIELDS = ("samples", "means", "maxes", "link_totals")
 
@@ -359,13 +360,28 @@ def combine(run_dirs: list, out_dir: Path) -> list:
     folder's manifest records, so `combine b a` writes what
     `combine a b` writes. What two folders may not share is a shot: one
     seeded run in both of them would be counted twice.
+
+    The combined folder is itself a run folder: the additive files and a
+    manifest recording the sweep every folded folder shares, so a shard
+    that lands after the fold folds into it in turn, which is the shape
+    a Slurm array finishing in waves has.
     """
-    positions = _one_sweeps_task_positions(run_dirs)
+    started_utc = run_folder.utc_now()
+    recorded_config = _one_sweeps_config(run_dirs)
+    positions = experiment.task_positions(recorded_config["sweep"])
     folders = _folders_that_ran_shots(run_dirs)
     record = read_record(folders, positions)
     _refuse_a_repeated_shot(record.shots, folders)
     rows = summarize(record.shots, record.window_samples)
     write_report(rows, out_dir, record)
+    finished_utc = run_folder.utc_now()
+    run_folder.write_combined_manifest(
+        recorded_config,
+        out_dir,
+        run_dirs,
+        started_utc,
+        finished_utc=finished_utc,
+    )
     return rows
 
 
@@ -507,21 +523,21 @@ def _typed_value(text: str):
         return text
 
 
-def _one_sweeps_task_positions(run_dirs: list) -> dict:
-    """Where every point of the folded sweep sits in its task order.
+def _one_sweeps_config(run_dirs: list) -> dict:
+    """The resolved config every folded folder recorded.
 
     A shard's rows say which point they belong to, not where that point
-    sits in the sweep, so the order comes from the resolved config each
-    folder's manifest records. Folders that recorded different configs
-    are refused: they are not shards of one sweep.
+    sits in the sweep, so the sweep order comes from the resolved config
+    each folder's manifest records, and the combined folder records it
+    again for the next fold. Folders that recorded different configs are
+    refused: they are not shards of one sweep.
     """
     recorded_configs = []
     for run_dir in run_dirs:
         recorded = _manifest_config(run_dir)
         recorded_configs.append(recorded)
     _refuse_folders_of_different_sweeps(run_dirs, recorded_configs)
-    first_config = recorded_configs[0]
-    return experiment.task_positions(first_config["sweep"])
+    return recorded_configs[0]
 
 
 def _manifest_config(run_dir) -> dict:

@@ -71,7 +71,8 @@ def run_experiment(
     run_dir = run_folder.run_dir_for(config, out_dir)
     run_folder.snapshot_code_state(config, run_dir)
     started_utc = run_folder.utc_now()
-    run_folder.write_manifest(config, run_dir, started_utc)
+    how_it_ran = {"shard": shard, "shots_per_unit": shots_per_unit}
+    run_folder.write_manifest(config, run_dir, started_utc, **how_it_ran)
     _echo_description(config, run_dir, shard)
     measurements = run_sweep(
         config,
@@ -82,13 +83,13 @@ def run_experiment(
     )
     if not measurements:
         _report_no_work_unit()
-        _finish_the_manifest(config, run_dir, started_utc)
+        _finish_the_manifest(config, run_dir, started_utc, how_it_ran)
         return run_dir, []
     record = report.record_of(measurements)
     rows = report.summarize(record.shots, record.window_samples)
     report.write_report(rows, run_dir, record)
     plots.plots(config, rows, run_dir, measurements)
-    _finish_the_manifest(config, run_dir, started_utc)
+    _finish_the_manifest(config, run_dir, started_utc, how_it_ran)
     return run_dir, rows
 
 
@@ -107,11 +108,17 @@ def _report_no_work_unit() -> None:
     )
 
 
-def _finish_the_manifest(config, run_dir: Path, started_utc: str) -> None:
+def _finish_the_manifest(
+    config, run_dir: Path, started_utc: str, how_it_ran: dict
+) -> None:
     """The manifest again, now carrying the time the run ended."""
     finished_utc = run_folder.utc_now()
     run_folder.write_manifest(
-        config, run_dir, started_utc, finished_utc=finished_utc
+        config,
+        run_dir,
+        started_utc,
+        finished_utc=finished_utc,
+        **how_it_ran,
     )
 
 

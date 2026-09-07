@@ -47,6 +47,19 @@ class SweepBlock:
     round_periods_microseconds: tuple
     shots: int
 
+    def points(self) -> list:
+        """Its cross product, one (p, distance, round period) per point."""
+        axes = itertools.product(
+            self.physical_error_probabilities,
+            self.distances,
+            self.round_periods_microseconds,
+        )
+        points = []
+        for physical_error_probability, distance, round_period_us in axes:
+            point = (physical_error_probability, distance, round_period_us)
+            points.append(point)
+        return points
+
 
 @dataclasses.dataclass(frozen=True)
 class ExperimentConfig:
@@ -63,20 +76,20 @@ class ExperimentConfig:
         """One task per sweep point, blocks in order, each block a product."""
         tasks = []
         for block in self.sweep:
-            points = itertools.product(
-                block.physical_error_probabilities,
-                block.distances,
-                block.round_periods_microseconds,
-            )
-            for physical_error_probability, distance, round_period_us in points:
-                task = self.point_task(
-                    physical_error_probability=physical_error_probability,
-                    distance=distance,
-                    round_period_us=round_period_us,
-                    shots=block.shots,
-                )
+            for point in block.points():
+                task = self._point_task(point, block.shots)
                 tasks.append(task)
         return tasks
+
+    def _point_task(self, point: tuple, shots: int) -> collect.Task:
+        """The task of one (p, distance, round period) point."""
+        physical_error_probability, distance, round_period_us = point
+        return self.point_task(
+            physical_error_probability=physical_error_probability,
+            distance=distance,
+            round_period_us=round_period_us,
+            shots=shots,
+        )
 
     def point_task(
         self,
@@ -158,6 +171,24 @@ def resolved_description(config: ExperimentConfig) -> list:
     return lines
 
 
+def task_positions(recorded_sweep: list) -> dict:
+    """Each sweep point's place in the task order of a recorded sweep.
+
+    A run folder's manifest records the resolved config
+    (decsim/front/run_folder.py write_manifest), so the sweep's own task
+    order is recoverable from the folder alone, without the yaml and
+    whatever order the folders are named in. It is the order tasks()
+    makes: the blocks in order, each block its cross product, a point
+    named twice keeping its first place (decsim/collect.py unique_tasks
+    merges the repeat away).
+    """
+    positions = {}
+    for recorded_block in recorded_sweep:
+        block = _recorded_block(recorded_block)
+        _place_a_blocks_points(positions, block)
+    return positions
+
+
 def load_experiment(path) -> ExperimentConfig:
     """Read one yaml file, its extends chain applied, into settings."""
     path = Path(path)
@@ -201,6 +232,28 @@ def _settings_of(sections: dict, path: Path) -> machine.MachineSettings:
         )
     except ValueError as refused:
         raise refusal.RefusalError(f"{path}: {refused}") from refused
+
+
+def _place_a_blocks_points(positions: dict, block: SweepBlock) -> None:
+    """One block's points, each keeping the first place it was given."""
+    for point in block.points():
+        if point in positions:
+            continue
+        positions[point] = len(positions)
+
+
+def _recorded_block(recorded_block: dict) -> SweepBlock:
+    """One sweep block as a manifest's resolved config recorded it."""
+    return SweepBlock(
+        physical_error_probabilities=tuple(
+            recorded_block["physical_error_probabilities"]
+        ),
+        distances=tuple(recorded_block["distances"]),
+        round_periods_microseconds=tuple(
+            recorded_block["round_periods_microseconds"]
+        ),
+        shots=recorded_block["shots"],
+    )
 
 
 def _files_line(config: ExperimentConfig) -> str:

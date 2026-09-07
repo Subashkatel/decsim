@@ -48,6 +48,21 @@ def _rows_without_wall_clock(run_dir, name):
     return stripped
 
 
+def _point_and_seed_of_every_row(run_dir, name):
+    path = run_dir / name
+    rows = _rows(path)
+    order = []
+    for row in rows:
+        point_and_seed = (
+            row["distance"],
+            row["physical_error_probability"],
+            row["round_period_us"],
+            row["seed"],
+        )
+        order.append(point_and_seed)
+    return order
+
+
 def test_an_unknown_verb_prints_the_verbs_and_fails():
     with pytest.raises(SystemExit):
         command.main(["decode-everything"])
@@ -164,6 +179,105 @@ def test_two_shards_combined_are_the_unsharded_collects_rows(tmp_path):
         whole = _rows_without_wall_clock(whole_dir, name)
         combined = _rows_without_wall_clock(combined_dir, name)
         assert whole == combined
+
+
+def test_combine_writes_the_same_rows_whichever_order_the_shards_come_in(
+    tmp_path,
+):
+    wall_clock_unit = {
+        **yaml_configs.MINIMAL_CONFIG["weak_decoder"],
+        "kind": "pymatching",
+    }
+    config_path = yaml_configs.write_config(
+        tmp_path, {**FOUR_POINT_SWEEP, "weak_decoder": wall_clock_unit}
+    )
+    serial_dir = tmp_path / "serial"
+    first_dir = tmp_path / "shard0"
+    second_dir = tmp_path / "shard1"
+    forwards_dir = tmp_path / "forwards"
+    backwards_dir = tmp_path / "backwards"
+    command.main(["collect", str(config_path), "--out", str(serial_dir)])
+    command.main(
+        ["collect", str(config_path), "--out", str(first_dir), "--shard", "0/2"]
+    )
+    command.main(
+        [
+            "collect",
+            str(config_path),
+            "--out",
+            str(second_dir),
+            "--shard",
+            "1/2",
+        ]
+    )
+    command.main(
+        [
+            "combine",
+            str(first_dir),
+            str(second_dir),
+            "--out",
+            str(forwards_dir),
+        ]
+    )
+    command.main(
+        [
+            "combine",
+            str(second_dir),
+            str(first_dir),
+            "--out",
+            str(backwards_dir),
+        ]
+    )
+
+    for name in ("sweep.csv", "links.csv", "shots.csv", "latency_samples.csv"):
+        forwards_path = forwards_dir / name
+        backwards_path = backwards_dir / name
+        assert forwards_path.read_bytes() == backwards_path.read_bytes()
+    for name in ("shots.csv", "latency_samples.csv"):
+        serial = _point_and_seed_of_every_row(serial_dir, name)
+        combined = _point_and_seed_of_every_row(forwards_dir, name)
+        assert serial == combined
+
+
+def test_combining_folders_of_two_different_sweeps_is_refused(
+    tmp_path, capsys
+):
+    first_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)
+    second_path = tmp_path / "other.yaml"
+    other_text = first_path.read_text()
+    second_path.write_text(other_text.replace("shots: 2", "shots: 3"))
+    first_dir = tmp_path / "first"
+    second_dir = tmp_path / "second"
+    combined_dir = tmp_path / "combined"
+    command.main(
+        ["collect", str(first_path), "--out", str(first_dir), "--shard", "0/2"]
+    )
+    command.main(
+        [
+            "collect",
+            str(second_path),
+            "--out",
+            str(second_dir),
+            "--shard",
+            "1/2",
+        ]
+    )
+    capsys.readouterr()
+    with pytest.raises(SystemExit) as stopped:
+        command.main(
+            [
+                "combine",
+                str(first_dir),
+                str(second_dir),
+                "--out",
+                str(combined_dir),
+            ]
+        )
+
+    printed = capsys.readouterr()
+    assert stopped.value.code == 1
+    assert printed.err.count("\n") == 1
+    assert "ran a different experiment from" in printed.err
 
 
 def test_every_shard_of_a_sweep_runs_a_share_of_its_points(tmp_path):

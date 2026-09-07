@@ -8,16 +8,21 @@ timing-only device with a preset-latency weak decoder.
 
 import types
 
+import pytest
+
 import decsim.decoders.decoders as decoders
+import decsim.decoders.minimum_weight_perfect_matching.decoder as mwpm
 import decsim.decoders.settings as decoder_settings
 import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
 import decsim.qpu.code_geometry as code_geometry
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
+import decsim.qpu.stim_device as stim_device
 import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.windows.built_window_models as built_window_models
+import decsim.windows.settings as window_settings
 import decsim.windows.window_boundaries as window_boundaries
 import decsim.windows.window_interactions as window_interactions
 import decsim.windows.window_manager as window_manager_module
@@ -136,3 +141,65 @@ def _stream_planner() -> window_planner.WindowPlanner:
     return window_planner.WindowPlanner(
         scheme, [resolved], plan, models, planned_operations=()
     )
+
+
+def _tan_memory_circuit():
+    """A 27-round d=3 rotated memory at the reference noise strength."""
+    stim = pytest.importorskip("stim")
+    probability = 0.003
+    return stim.Circuit.generated(
+        "surface_code:rotated_memory_z",
+        rounds=27,
+        distance=3,
+        after_clifford_depolarization=probability,
+        before_measure_flip_probability=probability,
+        after_reset_flip_probability=probability,
+        before_round_data_depolarization=probability,
+    )
+
+
+def _tan_sandwich_run(unit_count):
+    """A 27-round d=3 Stim memory under Tan's sandwich schedule.
+
+    A type-2 seam window fills before the two cores beside it and reads
+    both of their boundaries (Tan et al. 2209.09219, supplement S8), so
+    it becomes ready first and must wait in its input slot rather than on
+    the unit: on one unit a seam that holds the compute while it waits
+    for its neighbours would stop the run.
+    """
+    circuit = _tan_memory_circuit()
+    memory = program_records.Operation(
+        id=1, name="memory", qubits=(0,), patches=(0,), circuit=circuit
+    )
+    rounds_policy = round_policies.FixedRounds(27)
+    workload = workload_settings.WorkloadSettings(
+        operations=[memory], rounds_policy=rounds_policy
+    )
+    device = stim_device.StimDevice()
+    qpu = qpu_settings.QpuSettings(
+        distance=3, round_period_microseconds=1.0, device=device
+    )
+    inner = decoders.PresetLatencyDecoder(5.0)
+    decoder = mwpm.PyMatchingDecoder(inner)
+    weak_decoder = decoder_settings.DecoderSettings(
+        decoder=decoder, units=unit_count
+    )
+    scheme = windowing_schemes.TanSandwichScheme()
+    windows = window_settings.WindowSettings(scheme=scheme)
+    settings = machine_module.MachineSettings(
+        workload=workload,
+        qpu=qpu,
+        weak_decoder=weak_decoder,
+        windows=windows,
+    )
+    machine = machine_module.Machine.build(settings, 3)
+    result = machine.run()
+    return machine, result
+
+
+def test_a_tan_seam_waits_in_its_slot_and_never_holds_the_only_unit():
+    machine, result = _tan_sandwich_run(unit_count=1)
+    windows = machine.observation.windows.windows.values()
+    undecoded = [window for window in windows if window.t_done is None]
+    assert undecoded == []
+    assert result.operation_results[0].logical_failure is False

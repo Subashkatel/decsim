@@ -1,9 +1,10 @@
 """`decsim collect`: every shot of every sweep point of one yaml.
 
 The config is the experiment; this module only orchestrates. It collects
-every shot of every sweep point (decsim.collect), summarizes one row per
-point, and writes sweep.csv, links.csv and the figures into the run
-folder (run_folder). Rerunning the same config reproduces the same rows
+every shot of every sweep point (decsim.collect), records the shots'
+additive facts, derives one row per point from them, and writes both
+plus the figures into the run folder (report, run_folder, plots).
+Rerunning the same config reproduces the same rows
 (seeds 0..shots-1 per point; only the wall-clock column varies), and so
 does running it with a process pool or in shards that `decsim combine`
 folds back together.
@@ -79,8 +80,9 @@ def run_experiment(
         shard=shard,
         shots_per_unit=shots_per_unit,
     )
-    rows = report.summarize(measurements)
-    report.write_report(rows, run_dir, measurements)
+    record = report.record_of(measurements)
+    rows = report.summarize(record.shots, record.window_samples)
+    report.write_report(rows, run_dir, record)
     plots.plots(config, rows, run_dir, measurements)
     finished_utc = run_folder.utc_now()
     run_folder.write_manifest(

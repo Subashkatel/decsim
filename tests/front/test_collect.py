@@ -27,6 +27,7 @@ import decsim.front.collect_command as run
 import decsim.front.experiment as experiment_config
 import decsim.front.measure as measure_shot
 import decsim.front.report as sweep_report
+import decsim.windows.built_window_models as built_window_models
 
 THIS_FILE = pathlib.Path(__file__)
 DATA = THIS_FILE.parent / "data"
@@ -167,3 +168,69 @@ def test_every_shot_of_a_point_shares_the_tasks_calibrator(tmp_path):
     shot_settings = task.shot_settings()
     escalation = shot_settings.escalation
     assert escalation.online_threshold is task.online_threshold
+
+
+def _predictions_of(rows) -> list:
+    """What each shot decoded, the fields no timing knob can move."""
+    decoded = []
+    for row in rows:
+        decoded.append(
+            (
+                row.seed,
+                row.windows,
+                row.logical_failure,
+                row.direct_failure,
+                row.direct_mismatch,
+            )
+        )
+    return decoded
+
+
+def test_a_tasks_shots_decode_the_same_with_the_models_built_once():
+    """The task's own referent: sinter compiles once per task."""
+    config = experiment_config.load_experiment(REFERENCE_YAML)
+    task = config.point_task(
+        physical_error_probability=0.001,
+        distance=3,
+        round_period_us=1.0,
+        shots=4,
+    )
+
+    shared, _ran = collect.run_task(task, measure_shot.measure_shot)
+    alone = []
+    for seed in range(task.shots):
+        shot = collect.run_shot(task, seed)
+        row = measure_shot.measure_shot(shot)
+        alone.append(row)
+
+    assert _predictions_of(shared) == _predictions_of(alone)
+
+
+def test_the_first_shot_builds_the_models_and_the_rest_read_them():
+    config = experiment_config.load_experiment(REFERENCE_YAML)
+    task = config.point_task(
+        physical_error_probability=0.001,
+        distance=3,
+        round_period_us=1.0,
+        shots=3,
+    )
+    built = built_window_models.BuiltWindowModels()
+
+    for seed in range(task.shots):
+        collect.run_shot(task, seed, built_models=built)
+
+    assert built.builds == 1
+    assert built.reuses == 2
+
+
+def test_a_machine_built_alone_builds_its_own_models():
+    config = experiment_config.load_experiment(REFERENCE_YAML)
+    task = config.point_task(
+        physical_error_probability=0.001,
+        distance=3,
+        round_period_us=1.0,
+        shots=1,
+    )
+    settings = task.shot_settings()
+
+    assert settings.workload.built_models is None

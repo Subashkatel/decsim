@@ -14,6 +14,7 @@ static plan).
 import types
 
 import decsim.message as message
+import decsim.windows.built_window_models as built_window_models
 import decsim.windows.window_planner as window_planner
 import decsim.windows.windowing_schemes as windowing_schemes
 
@@ -70,7 +71,8 @@ class _FiniteSource:
 
 
 def _planner(source=None) -> window_planner.WindowPlanner:
-    models = window_planner.WindowModels(source, lambda _code_name: None)
+    built = built_window_models.BuiltWindowModels()
+    models = window_planner.WindowModels(source, lambda _code_name: None, built)
     scheme = windowing_schemes.SlidingWindowScheme()
     resolved = [_resolved("stream", 9)]
     plan = _empty_plan()
@@ -174,7 +176,8 @@ def test_idle_rounds_fold_only_into_a_batch_style_operation():
     )
     plan.windows[(7, 0)] = window
     plan.batch_preceding_idle_rounds_by_operation[7] = True
-    models = window_planner.WindowModels(None, lambda _code_name: None)
+    built = built_window_models.BuiltWindowModels()
+    models = window_planner.WindowModels(None, lambda _code_name: None, built)
     scheme = windowing_schemes.NaiveOnlineScheme()
     resolved = [_resolved(7, 6)]
     planner = window_planner.WindowPlanner(

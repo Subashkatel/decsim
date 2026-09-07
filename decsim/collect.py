@@ -11,9 +11,11 @@ strong_id_value: the json text of the values, sha256) are one task. The
 online threshold calibrator lives on the task so every shot of a point
 shares it, which is why shots stay serial and the process pool is over
 tasks (sinter's --processes, _main_collect.py:83); rows come back in
-task order whatever order the tasks finish in. A shard runs the tasks
-whose index modulo n is i, so a Slurm array covers a sweep and
-`decsim combine` folds the folders.
+task order whatever order the tasks finish in. A task's window error
+models are built by its first shot and read by the rest, as sinter
+compiles its decoder once per task. A shard runs the tasks whose index
+modulo n is i, so a Slurm array covers a sweep and `decsim combine`
+folds the folders.
 """
 
 import concurrent.futures
@@ -26,6 +28,7 @@ from collections.abc import Callable, Iterable, Mapping
 from typing import Any, Optional
 
 import decsim.machine as machine_module
+import decsim.windows.built_window_models as built_window_models
 
 
 @dataclasses.dataclass(frozen=True)
@@ -71,14 +74,22 @@ class Task:
         digest = hashlib.sha256(encoded)
         return digest.hexdigest()
 
-    def shot_settings(self) -> machine_module.MachineSettings:
-        """The settings one shot runs, with the point's online threshold."""
-        if self.online_threshold is None:
-            return self.settings
-        escalation = dataclasses.replace(
-            self.settings.escalation, online_threshold=self.online_threshold
-        )
-        return dataclasses.replace(self.settings, escalation=escalation)
+    def shot_settings(
+        self, built_models=None
+    ) -> machine_module.MachineSettings:
+        """The settings one shot runs: the point's threshold and models."""
+        settings = self.settings
+        if self.online_threshold is not None:
+            escalation = dataclasses.replace(
+                settings.escalation, online_threshold=self.online_threshold
+            )
+            settings = dataclasses.replace(settings, escalation=escalation)
+        if built_models is not None:
+            workload = dataclasses.replace(
+                settings.workload, built_models=built_models
+            )
+            settings = dataclasses.replace(settings, workload=workload)
+        return settings
 
 
 @dataclasses.dataclass(frozen=True)
@@ -146,11 +157,13 @@ def run_task(task: Task, measure: Callable[[Shot], Any]) -> tuple:
 
     The task comes back because its online threshold calibrator learned
     over these shots, and in a pool that learning happened in another
-    process.
+    process. The window error models are built here and not on the task,
+    so a worker's models never travel back through a pickle.
     """
+    built_models = built_window_models.BuiltWindowModels()
     rows = []
     for seed in range(task.shots):
-        shot = run_shot(task, seed)
+        shot = run_shot(task, seed, built_models=built_models)
         row = measure(shot)
         rows.append(row)
     return rows, task
@@ -214,9 +227,15 @@ def unique_tasks(tasks: Iterable[Task]) -> list:
     return list(unique)
 
 
-def run_shot(task: Task, seed: int) -> Shot:
-    """Build the task's machine for the seed and run it, timed."""
-    settings = task.shot_settings()
+def run_shot(task: Task, seed: int, *, built_models=None) -> Shot:
+    """Build the task's machine for the seed and run it, timed.
+
+    built_models is the task's window error model cache: the first shot
+    fills it and the rest read it, which is most of a shot's build time
+    at a large distance. A shot run on its own passes none and builds
+    its own models.
+    """
+    settings = task.shot_settings(built_models)
     wall_start = time.perf_counter()
     machine = machine_module.Machine.build(settings, seed)
     result = machine.run()

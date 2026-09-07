@@ -87,6 +87,7 @@ import decsim.seeding as seeding
 import decsim.syndrome_buffer.round_store as round_store_module
 import decsim.syndrome_buffer.settings as round_store_settings
 import decsim.syndrome_buffer.strong_round_writer as strong_round_writer_module
+import decsim.windows.built_window_models as built_window_models
 import decsim.windows.committed_rounds as committed_rounds
 import decsim.windows.decode_requests as decode_requests
 import decsim.windows.operation_results as operation_results
@@ -1251,8 +1252,11 @@ def _window_manager(
 ) -> window_manager_module.WindowManager:
     """The windows facade over its six components, wired by constructor."""
     run_plan = plan.run_plan
+    built_models = settings.workload.built_models
+    if built_models is None:
+        built_models = built_window_models.BuiltWindowModels()
     models = window_planner_module.WindowModels(
-        plan.error_model_provider, fault_model_requirement_for
+        plan.error_model_provider, fault_model_requirement_for, built_models
     )
     planner = window_planner_module.WindowPlanner(
         plan.scheme,

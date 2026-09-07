@@ -440,7 +440,8 @@ def _switching_settings(
 def _restart_reread_buffer_regions(section: Mapping) -> int:
     """How far into the strong region the restart window re-reads."""
     regions = section.get("restart_reread_buffer_regions", 0)
-    if regions not in RESTART_REREAD_BUFFER_REGIONS:
+    is_a_count = type(regions) is int
+    if not is_a_count or regions not in RESTART_REREAD_BUFFER_REGIONS:
         raise ValueError(
             "escalation.restart_reread_buffer_regions must be 0, the "
             "paper's restart on the rounds stored after the strong "

@@ -11,7 +11,6 @@ from typing import Optional
 
 import decsim.decoders.decoder as decoder_module
 import decsim.decoders.union_find.window_decoder as window_decoder
-import decsim.decoders.decoder as decoder_module
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.message as message
 

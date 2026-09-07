@@ -43,15 +43,15 @@ def run_dir_for(config, out_dir=None) -> Path:
 
 
 def combined_run_dir(out_dir=None) -> Path:
-    """Where `decsim combine` writes: the folder asked for, or a fresh one."""
+    """Where `decsim combine` writes: the folder asked for, or a fresh one.
+
+    Only the path: the report makes the folder once the fold is accepted,
+    so a refused combine leaves nothing behind.
+    """
     if out_dir is not None:
-        run_dir = Path(out_dir)
-        run_dir.mkdir(parents=True, exist_ok=True)
-        return run_dir
+        return Path(out_dir)
     stamp = _utc_stamp()
-    run_dir = RESULTS_DIR / f"{stamp}-combined"
-    run_dir.mkdir(parents=True, exist_ok=True)
-    return run_dir
+    return RESULTS_DIR / f"{stamp}-combined"
 
 
 def new_run_dir(config) -> Path:

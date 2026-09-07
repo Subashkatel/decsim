@@ -151,8 +151,8 @@ class RelayBeliefPropagationWindowDecoder(seeding._AtomicRunSeedConsumer):
         with self._run_seed_lock:
             if self._pending_run_seed is not None:
                 raise RuntimeError(
-                    "RelayBeliefPropagationWindowDecoder cannot compile while a run-seed "
-                    "reservation is pending"
+                    "RelayBeliefPropagationWindowDecoder cannot compile while "
+                    "a run-seed reservation is pending"
                 )
             self._stochastic_use_started = True
             if self._effective_gamma_table_seed is None:

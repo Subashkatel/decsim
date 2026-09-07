@@ -3,7 +3,7 @@
 Idle rounds are decoder workload in every reference system (SWIPER
 2412.05115: one UNWANTED_IDLE round per unused patch per cycle; XQsim;
 Terhal's backlog bound via Battistel 2303.00054). The policies' own laws
-are tests/04_policies; here the accounting's: the rounds emitted on a
+are test_policies.py; here the accounting's: the rounds emitted on a
 patch are claimed once by the operation that takes the patch, and a patch
 on a live protected stream emits through the stream, not here.
 """

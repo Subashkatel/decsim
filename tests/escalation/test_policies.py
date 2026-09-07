@@ -9,6 +9,7 @@ conditional predictor (src/cpu/pred/conditional.hh): a row answers and
 is told; the root acts.
 """
 
+import dataclasses
 import math
 
 import pytest
@@ -385,3 +386,60 @@ class _Draws:
 
     def random(self) -> float:
         return 0.0
+
+
+def _serial_switching_settings(
+    boundary_policy,
+) -> machine_module.MachineSettings:
+    """Serial switching (no double window) with the boundary policy given."""
+    lookahead = windowing_schemes.SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD
+    scheme = windowing_schemes.SlidingWindowScheme(terminal_policy=lookahead)
+    windows = window_settings.WindowSettings(
+        scheme=scheme, boundary_policy=boundary_policy
+    )
+    weak_decoder = decoder_settings.DecoderSettings(kind="pymatching")
+    strong_decoder = decoder_settings.DecoderSettings(kind="belief_matching")
+    escalation = decoder_settings.EscalationSettings(
+        kind="switching", gap_threshold_nats=1.0
+    )
+    return machine_module.MachineSettings(
+        windows=windows,
+        weak_decoder=weak_decoder,
+        strong_decoder=strong_decoder,
+        escalation=escalation,
+    )
+
+
+def test_serial_switching_refuses_eager_boundaries_at_build():
+    """A provisional boundary shipped eagerly is never corrected.
+
+    Under serial switching the weak result may be revised by the strong
+    decoder, so the boundary waits for the final result; Eager would
+    hand a successor a correction the strong tier later replaces.
+    """
+    eager = boundary_policies.Eager()
+    settings = _serial_switching_settings(eager)
+    with pytest.raises(
+        ValueError, match="serial switching requires Held boundaries"
+    ):
+        machine_module.Machine.build(settings, 0)
+
+
+def test_the_double_window_refuses_held_boundaries_at_build():
+    """The far boundary IS the restart window's weak commit.
+
+    Toshio 2510.25222 Sec. III C: under the double window the weak chain
+    keeps committing while the strong region decodes, so holding the
+    weak boundaries until the strong result arrives would deadlock the
+    strong window on itself.
+    """
+    settings = _double_window_settings(3, 3)
+    held = boundary_policies.Held()
+    windows = window_settings.WindowSettings(
+        commit_rounds=3, buffer_rounds=3, boundary_policy=held
+    )
+    settings = dataclasses.replace(settings, windows=windows)
+    with pytest.raises(
+        ValueError, match="the Held boundary policy would make later windows"
+    ):
+        machine_module.Machine.build(settings, 0)

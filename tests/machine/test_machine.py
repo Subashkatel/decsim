@@ -15,6 +15,8 @@ import pytest
 
 import decsim.confidence.cluster as cluster
 import decsim.config as config
+import decsim.controller.policies as boundary_policies
+import decsim.controller.settings as controller_settings
 import decsim.decoders.decoder as decoder_module
 import decsim.decoders.decoders as decoders
 import decsim.decoders.settings as decoder_settings
@@ -33,6 +35,7 @@ import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
 import decsim.syndrome_buffer.round_store as round_store_module
 import decsim.syndrome_buffer.settings as round_store_settings
+import decsim.windows.settings as window_settings
 
 THIS_FILE = pathlib.Path(__file__)
 TESTS_DIRECTORY = THIS_FILE.parents[1]
@@ -379,3 +382,59 @@ def test_a_new_round_store_is_one_class_and_one_table_row():
     ]
     assert machine.round_store.stored_count == len(fired)
     assert fired
+
+
+class RecordingBoundaryPolicy:
+    """A boundary policy written outside decsim: one method, plain names."""
+
+    def on_commit(self, window, final: bool) -> bool:
+        del window
+        return final
+
+
+class RecordingIdlePolicy:
+    """An idle policy written outside decsim: the two the port asks for."""
+
+    def relay(self, idle_rounds, operation, patch, round_index: int) -> None:
+        idle_rounds.emit_memory_round(operation, patch, round_index)
+
+    def end_idle_period(self, idle_rounds, operation, patch) -> None:
+        del idle_rounds, operation, patch
+
+
+def test_the_default_policies_are_eager_boundaries_and_charged_idle_rounds():
+    """Two builds of the same settings each get their own policy objects."""
+    settings = machine_module.MachineSettings()
+    first = machine_module.Machine.build(settings)
+    second = machine_module.Machine.build(settings)
+    first_boundary = first.window_manager.courier.boundary_policy
+    second_boundary = second.window_manager.courier.boundary_policy
+    assert type(first_boundary) is boundary_policies.Eager
+    assert type(second_boundary) is boundary_policies.Eager
+    assert first_boundary is not second_boundary
+    assert type(first.idle_rounds.policy) is (
+        boundary_policies.SeparateDecodeJobs
+    )
+    assert first.idle_rounds.policy is not second.idle_rounds.policy
+
+
+def test_a_policy_written_outside_decsim_is_used_on_its_own_axis():
+    """The two policy axes are independent: one given, the other default."""
+    boundary_policy = RecordingBoundaryPolicy()
+    windows = window_settings.WindowSettings(boundary_policy=boundary_policy)
+    boundary_settings = machine_module.MachineSettings(windows=windows)
+    with_boundary = machine_module.Machine.build(boundary_settings)
+    idle_policy = RecordingIdlePolicy()
+    idle_row = controller_settings.IdlePolicySettings(policy=idle_policy)
+    idle_settings = machine_module.MachineSettings(idle_policy=idle_row)
+    with_idle = machine_module.Machine.build(idle_settings)
+    assert with_boundary.window_manager.courier.boundary_policy is (
+        boundary_policy
+    )
+    assert type(with_boundary.idle_rounds.policy) is (
+        boundary_policies.SeparateDecodeJobs
+    )
+    assert with_idle.idle_rounds.policy is idle_policy
+    assert type(with_idle.window_manager.courier.boundary_policy) is (
+        boundary_policies.Eager
+    )

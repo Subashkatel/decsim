@@ -1,0 +1,90 @@
+"""The two policy seams a run fills: boundaries and idle rounds.
+
+boundary_policy answers one question for the window manager, whether a
+committed boundary ships now (Eager) or only when its result is final
+(Held). idle_policy answers one for the idle accounting, how the rounds
+of a patch that waits travel and what they cost.
+
+The three idle rows are three defensible cards, not one right answer.
+Idle rounds are decoder workload in every reference system, so the
+charged row is the default: SWIPER emits one UNWANTED_IDLE round per
+unused patch per cycle and windows it like any other (ISCA 2025,
+2412.05115, device_manager), XQsim decodes every patch under each
+RUN_ESM (ISCA 2022), and Terhal's backlog bound charges the decoder for
+every generated round (via Battistel 2303.00054). Ignore is the
+optimistic card, valid for latency studies of the active path, since
+only data feeding the next non-Clifford decision is latency critical
+(Skoric 2209.08552). ExtendStream is XQsim's continuous stream.
+
+The charged row's own arithmetic (one job per commit region, one shorter
+job for the remainder) is pinned in test_idle_rounds.py, where the
+accounting that counts the regions lives.
+"""
+
+import decsim.controller.policies as policies
+
+
+class RecordingIdleRounds:
+    """The accounting the policies call: what each policy asked for."""
+
+    def __init__(self, is_stream_live=False):
+        self.is_stream_live = is_stream_live
+        self.memory_rounds = []
+        self.stream_rounds = []
+
+    def emit_memory_round(self, operation, patch, round_index):
+        self.memory_rounds.append((operation, patch, round_index))
+
+    def extend_live_stream(self, operation, patch):
+        if not self.is_stream_live:
+            return False
+        self.stream_rounds.append((operation, patch))
+        return True
+
+
+def test_eager_ships_a_provisional_boundary():
+    eager = policies.Eager()
+    window = object()
+    assert eager.on_commit(window, final=False) is True
+
+
+def test_eager_ships_a_final_boundary():
+    eager = policies.Eager()
+    window = object()
+    assert eager.on_commit(window, final=True) is True
+
+
+def test_held_holds_a_provisional_boundary():
+    held = policies.Held()
+    window = object()
+    assert held.on_commit(window, final=False) is False
+
+
+def test_held_ships_a_final_boundary():
+    held = policies.Held()
+    window = object()
+    assert held.on_commit(window, final=True) is True
+
+
+def test_ignore_sends_the_idle_round_as_a_memory_round():
+    ignore = policies.Ignore()
+    idle_rounds = RecordingIdleRounds()
+    ignore.relay(idle_rounds, "operation", "patch-a", 3)
+    assert idle_rounds.memory_rounds == [("operation", "patch-a", 3)]
+    assert idle_rounds.stream_rounds == []
+
+
+def test_extend_stream_sends_the_idle_round_into_a_live_stream():
+    extend = policies.ExtendStream()
+    idle_rounds = RecordingIdleRounds(is_stream_live=True)
+    extend.relay(idle_rounds, "operation", "patch-a", 3)
+    assert idle_rounds.stream_rounds == [("operation", "patch-a")]
+    assert idle_rounds.memory_rounds == []
+
+
+def test_extend_stream_sends_a_memory_round_when_no_stream_is_live():
+    extend = policies.ExtendStream()
+    idle_rounds = RecordingIdleRounds(is_stream_live=False)
+    extend.relay(idle_rounds, "operation", "patch-a", 3)
+    assert idle_rounds.memory_rounds == [("operation", "patch-a", 3)]
+    assert idle_rounds.stream_rounds == []

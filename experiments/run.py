@@ -3,9 +3,9 @@
 The config is the experiment; this module only orchestrates. It collects
 every shot of every sweep point (decsim.collect), summarizes one row per
 point, and writes sweep.csv, links.csv and the figures to
-experiments/results/<name>/. Rerunning the same config reproduces the
-same rows (seeds 0..shots-1 per point; only the wall-clock column
-varies).
+experiments/results/<utc stamp>-<name>/. Rerunning the same config
+reproduces the same rows (seeds 0..shots-1 per point; only the
+wall-clock column varies).
 """
 
 import csv

@@ -127,6 +127,27 @@ def test_show_lists_every_sections_kind_of_every_shipped_config():
         assert "trace: " in text
 
 
+def test_show_names_the_hops_the_card_leaves_unwired():
+    """An unwired hop is free, not the reference profile's numbers.
+
+    controller_to_strong_buffer is absent from logical_reference
+    (decsim/links/link_profiles.py logical_reference_profile), so a null
+    card there prices nothing at all; the resolved print says so rather
+    than let the reader take null for reference numbers.
+    """
+    config_path = CONFIGS_DIR / "reference.yaml"
+    config = experiment.load_experiment(config_path)
+    lines = experiment.resolved_description(config)
+    text = "\n".join(lines)
+    assert "unwired and so free: controller_to_strong_buffer" in text
+
+    wired_path = CONFIGS_DIR / "strong_decoder_baseline.yaml"
+    wired = experiment.load_experiment(wired_path)
+    wired_lines = experiment.resolved_description(wired)
+    wired_text = "\n".join(wired_lines)
+    assert "every hop wired" in wired_text
+
+
 def test_run_prints_the_result_fields_the_gate_hashes():
     config_path = gate_point.CONFIG_PATH
     lines = run_command.run_one_shot(config_path, seed=0)

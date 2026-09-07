@@ -219,6 +219,19 @@ class FabricSettings:
                 raise ValueError(f"{path.value} is a required link path")
         return tuple(wired_paths)
 
+    def unwired_paths(self) -> tuple:
+        """The optional paths this card leaves out, in vocabulary order.
+
+        An unwired hop is not priced at all: nothing is charged for it,
+        which is a different card from a hop priced at zero latency.
+        """
+        unwired_paths = []
+        for path in transfer_records.LinkPath:
+            path_settings = getattr(self, path.value)
+            if path_settings is None:
+                unwired_paths.append(path)
+        return tuple(unwired_paths)
+
     def path_settings(self, path: transfer_records.LinkPath) -> PathSettings:
         """The setting of one wired path."""
         return getattr(self, path.value)

@@ -168,6 +168,8 @@ def resolved_description(config: ExperimentConfig) -> list:
     lines = [_files_line(config)]
     for line in _section_lines(config.settings):
         lines.append(line)
+    links_line = _links_line(config.settings.links)
+    lines.append(links_line)
     for index, block in enumerate(config.sweep, start=1):
         block_line = _sweep_block_line(index, block)
         lines.append(block_line)
@@ -280,6 +282,21 @@ def _section_lines(settings: machine.MachineSettings) -> list:
             continue
         lines.append(f"{field.name}: kind {kind}")
     return lines
+
+
+def _links_line(links) -> str:
+    """The fabric card, and the hops it leaves unwired.
+
+    An unwired hop is free: nothing at all is charged for it, so it is
+    named here rather than left to be read as a priced path.
+    """
+    unwired = []
+    for path in links.unwired_paths():
+        unwired.append(path.value)
+    if not unwired:
+        return f"links: card {links.profile_name}, every hop wired"
+    listed = ", ".join(unwired)
+    return f"links: card {links.profile_name}, unwired and so free: {listed}"
 
 
 def _sweep_block_line(index: int, block: SweepBlock) -> str:

@@ -46,14 +46,13 @@ import dataclasses
 import enum
 from typing import Any, Optional, Protocol, runtime_checkable
 
+import decsim.decoders.decode_queue as decode_queue_module
 import decsim.observe.trace_source as trace_source
 import decsim.records.decoding as decoding_records
 import decsim.records.identity as identity_records
 import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.windows.round_retention as round_retention
-
-LOG_SOURCE = "DecoderCluster"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -670,7 +669,7 @@ class ForwardWindow:
         self.retention.release_restart_reads(key)
         self._release_absorbed_strong_hold(key, restart_key, replacement)
         self.engine.log(
-            LOG_SOURCE,
+            decode_queue_module.LOG_SOURCE,
             f"window {key} absorbed into the strong window "
             f"(weak chain skips it)",
         )
@@ -716,7 +715,7 @@ class ForwardWindow:
             readiness_description = "terminal data"
         absorbed_count = len(resolved_region.absorbed_window_keys)
         self.engine.log(
-            LOG_SOURCE,
+            decode_queue_module.LOG_SOURCE,
             f"{held.label}: strong window rounds {plan.commit_lo}-"
             f"{plan.commit_hi} assigned; weak chain skips "
             f"{absorbed_count} window(s); "
@@ -762,7 +761,7 @@ class ForwardWindow:
             self.planner.model_by_window[restart_key] = model
         seam_owner_name = seam_owner.name.lower()
         self.engine.log(
-            LOG_SOURCE,
+            decode_queue_module.LOG_SOURCE,
             f"restart window {restart_key} re-sliced across strong window "
             f"edge {strong_window_hi} (reads rounds {restart.buffer_lo}-"
             f"{restart.buffer_hi}; crossing faults owned by "

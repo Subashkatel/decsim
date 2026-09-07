@@ -89,7 +89,7 @@ def test_a_fake_row_through_the_pool_decodes_the_window_once():
     tick, result = delivery
     assert tick == config.microseconds_to_ticks(2.0)
     assert result.logical_observables == (1,)
-    assert "DecoderCluster: START DECODE mem W0" in log.lines[-1]
+    assert "Decoder manager: START DECODE mem W0" in log.lines[-1]
     manager.check_decode_work_settled()
 
 

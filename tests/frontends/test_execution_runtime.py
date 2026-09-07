@@ -198,7 +198,8 @@ def test_a_magic_state_operation_claims_its_qubits_then_waits_for_one():
     operation = program_records.Operation(
         1, "t-gate", ("data",), clifford=False
     )
-    claim = program_records.ResourceClaim("qubit", frozenset({"data"}))
+    data_qubits = frozenset({"data"})
+    claim = program_records.ResourceClaim("qubit", data_qubits)
     claims = {1: [claim]}
     operations = (operation,)
     runtime, engine, issuer, factory, stamps = runtime_over(
@@ -242,8 +243,10 @@ def test_a_blocked_operation_starts_when_both_of_its_gates_are_open():
 def test_a_claim_publishes_every_resource_of_the_operation_or_none():
     holder = operation_named(3)
     contender = program_records.Operation(2, "contender", ())
-    free_claim = program_records.ResourceClaim("qubit", frozenset({"free"}))
-    busy_claim = program_records.ResourceClaim("qubit", frozenset({"busy"}))
+    free_qubits = frozenset({"free"})
+    free_claim = program_records.ResourceClaim("qubit", free_qubits)
+    busy_qubits = frozenset({"busy"})
+    busy_claim = program_records.ResourceClaim("qubit", busy_qubits)
     claims = {2: [free_claim, busy_claim]}
     operations = (contender,)
     runtime, _engine, _issuer, _factory, _stamps = runtime_over(
@@ -252,8 +255,9 @@ def test_a_claim_publishes_every_resource_of_the_operation_or_none():
     runtime.operations.update({2: contender, 3: holder})
     runtime.resources.holder_by_resource[("qubit", "busy")] = 3
 
+    name_of = name_of_holder(runtime)
     with pytest.raises(RuntimeError, match="share qubit resource"):
-        runtime.resources.claim(contender, name_of_holder(runtime))
+        runtime.resources.claim(contender, name_of)
 
     assert runtime.resources.holder_by_resource == {("qubit", "busy"): 3}
 
@@ -264,8 +268,9 @@ def test_an_operation_that_lists_one_qubit_twice_is_refused():
     runtime, _engine, _issuer, _factory, _stamps = runtime_over(operations)
     runtime.operations[1] = operation
 
+    name_of = name_of_holder(runtime)
     with pytest.raises(RuntimeError, match="lists a qubit more than once"):
-        runtime.resources.claim(operation, name_of_holder(runtime))
+        runtime.resources.claim(operation, name_of)
 
     assert runtime.resources.holder_by_resource == {}
 

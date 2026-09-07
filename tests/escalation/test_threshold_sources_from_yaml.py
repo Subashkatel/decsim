@@ -46,10 +46,12 @@ def source_config(tmp_path, switching_card: dict, shots: int = 1):
     config_path = switching_config(tmp_path, 20.0)
     import yaml
 
-    raw = yaml.safe_load(config_path.read_text())
+    config_text = config_path.read_text()
+    raw = yaml.safe_load(config_text)
     raw["escalation"] = {"kind": "switching", **switching_card}
     raw["sweep"][0]["shots"] = shots
-    config_path.write_text(yaml.safe_dump(raw))
+    edited_text = yaml.safe_dump(raw)
+    config_path.write_text(edited_text)
     return config_path
 
 
@@ -65,7 +67,8 @@ def calibration_table(tmp_path) -> str:
 
 
 def test_fixed_is_the_default_source(tmp_path):
-    config = load_experiment(switching_config(tmp_path, 20.0))
+    config_path = switching_config(tmp_path, 20.0)
+    config = load_experiment(config_path)
     assert config.settings.escalation.threshold_source == "fixed"
     resolved = resolve_gap_threshold_nats(
         config, physical_error_probability=NEAR_THRESHOLD_P, distance=3
@@ -81,18 +84,17 @@ def test_fixed_is_the_default_source(tmp_path):
 
 def test_table_source_resolves_the_sweep_point_and_refuses_others(tmp_path):
     table = calibration_table(tmp_path)
-    config = load_experiment(
-        source_config(
-            tmp_path, {"threshold_source": "table", "threshold_table": table}
-        )
-    )
+    wilson_card = {"threshold_source": "table", "threshold_table": table}
+    wilson_path = source_config(tmp_path, wilson_card)
+    config = load_experiment(wilson_path)
     assert config.settings.escalation.gap_threshold_decibels is None
     assert config.settings.escalation.threshold_column == "gth_eq4_wilson"
 
     resolved = resolve_gap_threshold_nats(
         config, physical_error_probability=NEAR_THRESHOLD_P, distance=3
     )
-    assert math.isclose(resolved * NATS_TO_DB, 19.5)
+    resolved_decibels = resolved * NATS_TO_DB
+    assert math.isclose(resolved_decibels, 19.5)
 
     with pytest.raises(ValueError, match="no row for d=3 p=0.002"):
         resolve_gap_threshold_nats(
@@ -103,100 +105,87 @@ def test_table_source_resolves_the_sweep_point_and_refuses_others(tmp_path):
             config, physical_error_probability=NEAR_THRESHOLD_P, distance=7
         )
 
-    brute = load_experiment(
-        source_config(
-            tmp_path,
-            {
-                "threshold_source": "table",
-                "threshold_table": table,
-                "threshold_column": "gth_brute_force",
-            },
-        )
-    )
+    brute_card = {
+        "threshold_source": "table",
+        "threshold_table": table,
+        "threshold_column": "gth_brute_force",
+    }
+    brute_path = source_config(tmp_path, brute_card)
+    brute = load_experiment(brute_path)
     resolved = resolve_gap_threshold_nats(
         brute, physical_error_probability=NEAR_THRESHOLD_P, distance=3
     )
-    assert math.isclose(resolved * NATS_TO_DB, 2.5)
+    resolved_decibels = resolved * NATS_TO_DB
+    assert math.isclose(resolved_decibels, 2.5)
 
 
 def test_table_source_key_guards(tmp_path):
     table = calibration_table(tmp_path)
+    both_sources_card = {
+        "threshold_source": "table",
+        "threshold_table": table,
+        "gap_threshold_db": 20.0,
+    }
+    both_sources_path = source_config(tmp_path, both_sources_card)
     with pytest.raises(ValueError, match="drop gap_threshold_db"):
-        load_experiment(
-            source_config(
-                tmp_path,
-                {
-                    "threshold_source": "table",
-                    "threshold_table": table,
-                    "gap_threshold_db": 20.0,
-                },
-            )
-        )
+        load_experiment(both_sources_path)
+    no_table_card = {"threshold_source": "table"}
+    no_table_path = source_config(tmp_path, no_table_card)
     with pytest.raises(ValueError, match="needs threshold_table"):
-        load_experiment(source_config(tmp_path, {"threshold_source": "table"}))
+        load_experiment(no_table_path)
+    fixed_with_table_card = {
+        "gap_threshold_db": 20.0,
+        "threshold_table": table,
+    }
+    fixed_with_table_path = source_config(tmp_path, fixed_with_table_card)
     with pytest.raises(ValueError, match="belong to"):
-        load_experiment(
-            source_config(
-                tmp_path, {"gap_threshold_db": 20.0, "threshold_table": table}
-            )
-        )
+        load_experiment(fixed_with_table_path)
+    missing_table_card = {
+        "threshold_source": "table",
+        "threshold_table": "missing.csv",
+    }
+    missing_table_path = source_config(tmp_path, missing_table_card)
+    missing_table = load_experiment(missing_table_path)
     with pytest.raises(ValueError, match="does not exist"):
         resolve_gap_threshold_nats(
-            load_experiment(
-                source_config(
-                    tmp_path,
-                    {
-                        "threshold_source": "table",
-                        "threshold_table": "missing.csv",
-                    },
-                )
-            ),
+            missing_table,
             physical_error_probability=NEAR_THRESHOLD_P,
             distance=3,
         )
 
 
 def test_online_card_guards(tmp_path):
+    double_window_card = {
+        "threshold_source": "online",
+        "gap_threshold_db": 20.0,
+        "double_window": True,
+    }
+    double_window_path = source_config(tmp_path, double_window_card)
     with pytest.raises(ValueError, match="serial-only"):
-        load_experiment(
-            source_config(
-                tmp_path,
-                {
-                    "threshold_source": "online",
-                    "gap_threshold_db": 20.0,
-                    "double_window": True,
-                },
-            )
-        )
+        load_experiment(double_window_path)
+    fixed_with_online_card = {
+        "gap_threshold_db": 20.0,
+        "online": {"audit_rate": 0.1},
+    }
+    fixed_with_online_path = source_config(tmp_path, fixed_with_online_card)
     with pytest.raises(ValueError, match="online card belongs"):
-        load_experiment(
-            source_config(
-                tmp_path,
-                {"gap_threshold_db": 20.0, "online": {"audit_rate": 0.1}},
-            )
-        )
+        load_experiment(fixed_with_online_path)
+    unknown_key_card = {
+        "threshold_source": "online",
+        "gap_threshold_db": 20.0,
+        "online": {"audit_probability": 0.1},
+    }
+    unknown_key_path = source_config(tmp_path, unknown_key_card)
     with pytest.raises(ValueError, match="does not know"):
-        load_experiment(
-            source_config(
-                tmp_path,
-                {
-                    "threshold_source": "online",
-                    "gap_threshold_db": 20.0,
-                    "online": {"audit_probability": 0.1},
-                },
-            )
-        )
+        load_experiment(unknown_key_path)
+    high_audit_rate_card = {
+        "threshold_source": "online",
+        "gap_threshold_db": 20.0,
+        "online": {"audit_rate": 1.5},
+    }
+    high_audit_rate_path = source_config(tmp_path, high_audit_rate_card)
     with pytest.raises(ValueError, match="audit_rate"):
-        load_experiment(
-            source_config(
-                tmp_path,
-                {
-                    "threshold_source": "online",
-                    "gap_threshold_db": 20.0,
-                    "online": {"audit_rate": 1.5},
-                },
-            )
-        )
+        load_experiment(high_audit_rate_path)
 
 
 def test_online_source_learns_across_a_point_and_records_the_path(tmp_path):
@@ -205,21 +194,17 @@ def test_online_source_learns_across_a_point_and_records_the_path(tmp_path):
     Its window count spans all shots, every audit resolves, and the
     trajectory csv lands in the run dir.
     """
-    config = load_experiment(
-        source_config(
-            tmp_path,
-            {
-                "threshold_source": "online",
-                "gap_threshold_db": 15.0,
-                "online": {
-                    "audit_rate": 0.3,
-                    "target_escalation_rate": 0.2,
-                    "max_escalation_rate": 0.5,
-                },
-            },
-            shots=2,
-        )
-    )
+    online_card = {
+        "threshold_source": "online",
+        "gap_threshold_db": 15.0,
+        "online": {
+            "audit_rate": 0.3,
+            "target_escalation_rate": 0.2,
+            "max_escalation_rate": 0.5,
+        },
+    }
+    config_path = source_config(tmp_path, online_card, shots=2)
+    config = load_experiment(config_path)
     run_dir = tmp_path / "results"
     run_dir.mkdir()
 
@@ -230,15 +215,19 @@ def test_online_source_learns_across_a_point_and_records_the_path(tmp_path):
     calibrator = online_threshold_calibrator(
         config, physical_error_probability=NEAR_THRESHOLD_P, distance=3
     )
-    assert calibrator.summary()["windows"] == 0  # a fresh one is fresh
-    trajectory_files = list(run_dir.glob("online_threshold_*.csv"))
+    summary = calibrator.summary()
+    assert summary["windows"] == 0  # a fresh one is fresh
+    trajectory_paths = run_dir.glob("online_threshold_*.csv")
+    trajectory_files = list(trajectory_paths)
     assert len(trajectory_files) == 1
-    header, first_row = trajectory_files[0].read_text().splitlines()[:2]
+    trajectory_text = trajectory_files[0].read_text()
+    trajectory_rows = trajectory_text.splitlines()
+    header, first_row = trajectory_rows[:2]
     assert header == "window_count,threshold_db,event"
     assert first_row == "0,15.0,start"
-    last_window_count = int(
-        trajectory_files[0].read_text().splitlines()[-1].split(",")[0]
-    )
+    last_row = trajectory_rows[-1]
+    last_fields = last_row.split(",")
+    last_window_count = int(last_fields[0])
     assert last_window_count > windows_per_shot  # learned across shots
 
 
@@ -247,21 +236,17 @@ def test_online_source_reproduces_its_decisions(tmp_path):
 
     Rerunning the point reruns the same audits.
     """
-    config = load_experiment(
-        source_config(
-            tmp_path,
-            {
-                "threshold_source": "online",
-                "gap_threshold_db": 15.0,
-                "online": {
-                    "audit_rate": 0.3,
-                    "target_escalation_rate": 0.2,
-                    "max_escalation_rate": 0.5,
-                },
-            },
-            shots=2,
-        )
-    )
+    online_card = {
+        "threshold_source": "online",
+        "gap_threshold_db": 15.0,
+        "online": {
+            "audit_rate": 0.3,
+            "target_escalation_rate": 0.2,
+            "max_escalation_rate": 0.5,
+        },
+    }
+    config_path = source_config(tmp_path, online_card, shots=2)
+    config = load_experiment(config_path)
 
     first = run_sweep(config, None)
     second = run_sweep(config, None)

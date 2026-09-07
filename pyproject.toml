@@ -31,13 +31,23 @@ include = ["decsim*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
-# The rewrite's style gate (REWRITE.md rule 7): Google Python style, 80
-# columns, Google docstrings. The one-action rule is checked separately by
-# tools/check_one_action.py.
+# The rewrite's style gate (REWRITE.md rule 9): Google Python style, 80
+# columns, Google docstrings. The one-action rule of rule 1 is checked
+# separately by tools/check_one_action.py.
 [tool.ruff]
 line-length = 80
 target-version = "py39"
-extend-exclude = [".pydeps", ".venv", "tmp", "archive", "results"]
+# tests/data holds the frozen QLX artifacts and the scripts that
+# produced them inside the QLX container. They are provenance, not
+# decsim code, and are kept exactly as they ran.
+extend-exclude = [
+    ".pydeps",
+    ".venv",
+    "tmp",
+    "archive",
+    "results",
+    "tests/data",
+]
 
 [tool.ruff.lint]
 # SIM is off on purpose: it asks for inline conditionals and merged

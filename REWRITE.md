@@ -304,11 +304,17 @@ Run, from the repo root, before every commit:
     PYTHONPATH=.pydeps .venv/bin/python -m ruff check decsim tests tools
     .venv/bin/python tools/check_one_action.py decsim tests tools
 
-`tools/check.sh` runs all three. The ruff binary lives at
-`.pydeps/bin/ruff`; if `-m ruff` reports RuffNotFound, copy it from the
-ruff wheel's `data/scripts/ruff` into that folder. From a worktree, run
-the main checkout's interpreter with `PYTHONPATH=.` and confirm
-`decsim.__file__` is the worktree before trusting any result.
+`tools/check.sh` runs all three, on the whole tree when given no paths.
+The ruff binary lives at `.pydeps/bin/ruff`; if `-m ruff` reports
+RuffNotFound, copy it from the ruff wheel's `data/scripts/ruff` into
+that folder. A worktree has no `.venv`, so pass the main checkout's
+interpreter and dependency folder to the script:
+
+    DECSIM_PYTHON=/path/to/decsim/.venv/bin/python \
+    DECSIM_PYDEPS=/path/to/decsim/.pydeps tools/check.sh
+
+For anything you run by hand from a worktree, set `PYTHONPATH=.` and
+confirm `decsim.__file__` is the worktree before trusting any result.
 
 ## Tests
 

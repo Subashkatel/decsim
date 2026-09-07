@@ -24,7 +24,8 @@ from tests.front.yaml_configs import write_config
 
 def split_config(tmp_path, gap_threshold_db: float, gap_units: int = 1):
     path = switching_config(tmp_path, gap_threshold_db)
-    raw = yaml.safe_load(path.read_text())
+    config_text = path.read_text()
+    raw = yaml.safe_load(config_text)
     raw["escalation"]["gap_computation"] = "split_pair"
     raw["escalation"]["gap_units"] = gap_units
     return write_config(tmp_path, raw)
@@ -66,26 +67,32 @@ def test_the_gap_sibling_copies_the_primarys_landed_rounds(tmp_path):
 
 def test_gap_units_requires_split_pair(tmp_path):
     path = switching_config(tmp_path, 20.0)
-    raw = yaml.safe_load(path.read_text())
+    config_text = path.read_text()
+    raw = yaml.safe_load(config_text)
     raw["escalation"]["gap_units"] = 2
+    edited_path = write_config(tmp_path, raw)
     with pytest.raises(ValueError, match="gap_units"):
-        load_experiment(write_config(tmp_path, raw))
+        load_experiment(edited_path)
 
 
 def test_split_pair_refuses_double_window(tmp_path):
     path = switching_config(tmp_path, 20.0)
-    raw = yaml.safe_load(path.read_text())
+    config_text = path.read_text()
+    raw = yaml.safe_load(config_text)
     raw["escalation"]["gap_computation"] = "split_pair"
     raw["escalation"]["double_window"] = True
+    edited_path = write_config(tmp_path, raw)
     with pytest.raises(ValueError, match="serial switching only"):
-        load_experiment(write_config(tmp_path, raw))
+        load_experiment(edited_path)
 
 
 def test_split_pair_refuses_a_priced_card_weak_tier(tmp_path):
     path = split_config(tmp_path, 20.0)
-    raw = yaml.safe_load(path.read_text())
+    config_text = path.read_text()
+    raw = yaml.safe_load(config_text)
     raw["weak_decoder"]["kind"] = 0.028
-    config = load_experiment(write_config(tmp_path, raw))
+    edited_path = write_config(tmp_path, raw)
+    config = load_experiment(edited_path)
     with pytest.raises(ValueError, match="wall-clock"):
         build_decoder_unit(config.settings, "weak")
 
@@ -96,7 +103,8 @@ def test_the_two_forced_solves_reassemble_the_serial_gap():
         serial = metric.evaluate(shot_events)
         weight_class_0, _ = metric.forced_class_solve(shot_events, 0)
         weight_class_1, _ = metric.forced_class_solve(shot_events, 1)
-        joined_gap = abs(weight_class_0 - weight_class_1)
+        weight_difference = weight_class_0 - weight_class_1
+        joined_gap = abs(weight_difference)
         assert joined_gap == pytest.approx(serial.gap, abs=1e-9)
         assert min(weight_class_0, weight_class_1) == pytest.approx(
             serial.w_min, abs=1e-9
@@ -104,8 +112,10 @@ def test_the_two_forced_solves_reassemble_the_serial_gap():
 
 
 def test_split_pair_matches_serial_decisions_and_doubles_wbd(tmp_path):
-    serial = load_experiment(switching_config(tmp_path, 20.0))
-    split = load_experiment(split_config(tmp_path, 20.0, gap_units=2))
+    serial_path = switching_config(tmp_path, 20.0)
+    serial = load_experiment(serial_path)
+    split_path = split_config(tmp_path, 20.0, gap_units=2)
+    split = load_experiment(split_path)
     for seed in range(4):
         serial_shot = measured_shot(serial, seed)
         split_shot = measured_shot(split, seed)
@@ -125,8 +135,10 @@ def test_split_pair_matches_serial_decisions_and_doubles_wbd(tmp_path):
 
 
 def test_split_pair_threshold_edges_still_pin_the_plumbing(tmp_path):
-    never = load_experiment(split_config(tmp_path, 0.0))
-    always = load_experiment(split_config(tmp_path, 10000.0))
+    never_path = split_config(tmp_path, 0.0)
+    never = load_experiment(never_path)
+    always_path = split_config(tmp_path, 10000.0)
+    always = load_experiment(always_path)
     never_shot = measured_shot(never, 0)
     always_shot = measured_shot(always, 0)
     assert (

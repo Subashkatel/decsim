@@ -41,7 +41,8 @@ def wall_clock_config(tmp_path, distances):
 
 
 def test_every_decoded_window_contributes_one_latency_sample(tmp_path):
-    config = load_experiment(wall_clock_config(tmp_path, [3]))
+    config_path = wall_clock_config(tmp_path, [3])
+    config = load_experiment(config_path)
     measurement = measure_point_shot(
         config,
         physical_error_probability=0.001,
@@ -55,7 +56,8 @@ def test_every_decoded_window_contributes_one_latency_sample(tmp_path):
 
 
 def test_latency_samples_pool_over_shots_per_distance(tmp_path):
-    config = load_experiment(wall_clock_config(tmp_path, [3, 5]))
+    config_path = wall_clock_config(tmp_path, [3, 5])
+    config = load_experiment(config_path)
     measurements = [
         measure_point_shot(
             config,
@@ -117,12 +119,14 @@ def test_combined_figure_reads_two_runs_sample_files(tmp_path, monkeypatch):
 
     monkeypatch.chdir(tmp_path)
 
-    weak_run_dir, rows = run_experiment(wall_clock_config(tmp_path, [3, 5]))
+    weak_config_path = wall_clock_config(tmp_path, [3, 5])
+    weak_run_dir, rows = run_experiment(weak_config_path)
+    strong_decoder_section = strong_unit("belief_matching")
     strong_path = write_config(
         tmp_path,
         {
             "escalation": {"kind": "strong_only"},
-            **strong_unit("belief_matching"),
+            **strong_decoder_section,
             "sweep": [
                 {
                     "physical_error_probability": [0.001],
@@ -136,13 +140,10 @@ def test_combined_figure_reads_two_runs_sample_files(tmp_path, monkeypatch):
     strong_run_dir, rows = run_experiment(strong_path)
 
     combined = tmp_path / "latency_combined.png"
-    combined_latency_plot(
-        [
-            weak_run_dir / "latency_samples.csv",
-            strong_run_dir / "latency_samples.csv",
-        ],
-        combined,
-    )
+    weak_samples_path = weak_run_dir / "latency_samples.csv"
+    strong_samples_path = strong_run_dir / "latency_samples.csv"
+    sample_paths = [weak_samples_path, strong_samples_path]
+    combined_latency_plot(sample_paths, combined)
     assert combined.exists()
 
 

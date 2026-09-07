@@ -37,6 +37,7 @@ NEAR_THRESHOLD_P = 0.008
 
 
 def switching_config(tmp_path, gap_threshold_db: float, rounds: int = 30):
+    escalation = {"kind": "switching", "gap_threshold_db": gap_threshold_db}
     weak_unit = {
         "weak_decoder": {
             "kind": "pymatching",
@@ -49,29 +50,22 @@ def switching_config(tmp_path, gap_threshold_db: float, rounds: int = 30):
             },
         }
     }
-    return write_config(
-        tmp_path,
-        {
-            "escalation": {
-                "kind": "switching",
-                "gap_threshold_db": gap_threshold_db,
-            },
-            "workload": {
-                **MINIMAL_CONFIG["workload"],
-                "rounds_per_shot": rounds,
-            },
-            **weak_unit,
-            **strong_unit("belief_matching"),
-            "sweep": [
-                {
-                    "physical_error_probability": [NEAR_THRESHOLD_P],
-                    "distance": [3],
-                    "round_period_us": [1.0],
-                    "shots": 1,
-                }
-            ],
-        },
-    )
+    workload = {**MINIMAL_CONFIG["workload"], "rounds_per_shot": rounds}
+    sweep_point = {
+        "physical_error_probability": [NEAR_THRESHOLD_P],
+        "distance": [3],
+        "round_period_us": [1.0],
+        "shots": 1,
+    }
+    strong_decoder = strong_unit("belief_matching")
+    card = {
+        "escalation": escalation,
+        "workload": workload,
+        **weak_unit,
+        **strong_decoder,
+        "sweep": [sweep_point],
+    }
+    return write_config(tmp_path, card)
 
 
 def measured_shot(config, seed: int):
@@ -87,42 +81,33 @@ def measured_shot(config, seed: int):
 def test_switching_config_requires_both_tiers_and_the_card(tmp_path):
     from decsim.machine import Machine
 
-    weak_only = load_experiment(
-        write_config(
-            tmp_path,
-            {"escalation": {"kind": "switching", "gap_threshold_db": 20.0}},
-        )
-    )
+    weak_only_card = {
+        "escalation": {"kind": "switching", "gap_threshold_db": 20.0}
+    }
+    weak_only_path = write_config(tmp_path, weak_only_card)
+    weak_only = load_experiment(weak_only_path)
     with pytest.raises(ValueError, match="escalates to the strong_decoder"):
-        Machine.build(
-            weak_only.point_settings(
-                physical_error_probability=NEAR_THRESHOLD_P,
-                distance=3,
-                round_period_us=1.0,
-            )
+        weak_only_settings = weak_only.point_settings(
+            physical_error_probability=NEAR_THRESHOLD_P,
+            distance=3,
+            round_period_us=1.0,
         )
+        Machine.build(weak_only_settings)
+    strong_decoder = strong_unit("belief_matching")
+    no_threshold_card = {"escalation": {"kind": "switching"}}
+    no_threshold_card.update(strong_decoder)
+    no_threshold_path = write_config(tmp_path, no_threshold_card)
     with pytest.raises(ValueError, match="needs gap_threshold_db"):
-        load_experiment(
-            write_config(
-                tmp_path,
-                {
-                    "escalation": {"kind": "switching"},
-                    **strong_unit("belief_matching"),
-                },
-            )
-        )
+        load_experiment(no_threshold_path)
+    weak_baseline_card = {
+        "escalation": {
+            "kind": "weak_baseline",
+            "gap_threshold_db": 20.0,
+        }
+    }
+    weak_baseline_path = write_config(tmp_path, weak_baseline_card)
     with pytest.raises(ValueError, match="never escalates"):
-        load_experiment(
-            write_config(
-                tmp_path,
-                {
-                    "escalation": {
-                        "kind": "weak_baseline",
-                        "gap_threshold_db": 20.0,
-                    }
-                },
-            )
-        )
+        load_experiment(weak_baseline_path)
 
 
 def _restart_width_card(regions: int) -> dict:
@@ -176,10 +161,13 @@ def test_a_wider_restart_re_read_and_another_kind_are_refused(tmp_path):
 
 
 def test_threshold_converts_decibels_to_natural_log_weight(tmp_path):
-    config = load_experiment(switching_config(tmp_path, 20.0))
+    config_path = switching_config(tmp_path, 20.0)
+    config = load_experiment(config_path)
+    log_of_ten = math.log(10.0)
+    expected_nats = 2.0 * log_of_ten
     assert config.settings.escalation.gap_threshold_decibels == 20.0
     assert math.isclose(
-        config.settings.escalation.gap_threshold_nats, 2.0 * math.log(10.0)
+        config.settings.escalation.gap_threshold_nats, expected_nats
     )
 
 
@@ -188,7 +176,8 @@ def test_every_window_commits_once_across_both_output_links(tmp_path):
 
     Escalations ride WSD then SBD then DO; kept windows ride WDO.
     """
-    config = load_experiment(switching_config(tmp_path, 20.0))
+    config_path = switching_config(tmp_path, 20.0)
+    config = load_experiment(config_path)
     found_escalation = False
     for seed in range(6):
         measurement = measured_shot(config, seed)
@@ -210,7 +199,8 @@ def test_every_window_commits_once_across_both_output_links(tmp_path):
 
 
 def test_zero_threshold_never_escalates(tmp_path):
-    config = load_experiment(switching_config(tmp_path, 0.0))
+    config_path = switching_config(tmp_path, 0.0)
+    config = load_experiment(config_path)
     measurement = measured_shot(config, seed=0)
     links = measurement.link_totals
     assert links["weak_decoder_to_strong_decoder"]["transfers"] == 0
@@ -219,7 +209,8 @@ def test_zero_threshold_never_escalates(tmp_path):
 
 
 def test_unreachable_threshold_escalates_every_window(tmp_path):
-    config = load_experiment(switching_config(tmp_path, 1e6))
+    config_path = switching_config(tmp_path, 1e6)
+    config = load_experiment(config_path)
     measurement = measured_shot(config, seed=0)
     links = measurement.link_totals
     assert (
@@ -228,6 +219,28 @@ def test_unreachable_threshold_escalates_every_window(tmp_path):
     )
     assert links["strong_decoder_to_frame"]["transfers"] == measurement.windows
     assert links["weak_decoder_to_frame"]["transfers"] == 0
+
+
+def gaps_by_window(view, weak_tier) -> dict:
+    """Every weak request's gap, keyed by the window it decoded."""
+    gaps = {}
+    for record in view.requests:
+        if record.request_key.tier is not weak_tier:
+            continue
+        assert record.soft_output is not None
+        window_key = (
+            record.request_key.operation_id,
+            record.request_key.window_id,
+        )
+        gaps[window_key] = record.soft_output.gap
+    return gaps
+
+
+def expected_tier_of(gap, threshold_nats, weak_tier, strong_tier):
+    """The tier the escalation decision selects for one recorded gap."""
+    if gap >= threshold_nats:
+        return weak_tier
+    return strong_tier
 
 
 def test_gap_records_decide_the_selected_tier(tmp_path):
@@ -245,8 +258,11 @@ def test_gap_records_decide_the_selected_tier(tmp_path):
     from decsim.machine import Machine
     from decsim.observe.run_views import switching_records_view
 
-    config = load_experiment(switching_config(tmp_path, 20.0))
+    config_path = switching_config(tmp_path, 20.0)
+    config = load_experiment(config_path)
     threshold_nats = config.settings.escalation.gap_threshold_nats
+    weak_tier = window_records.DecoderTier.WEAK
+    strong_tier = window_records.DecoderTier.STRONG
     for seed in range(4):
         settings = config.point_settings(
             physical_error_probability=NEAR_THRESHOLD_P,
@@ -262,23 +278,14 @@ def test_gap_records_decide_the_selected_tier(tmp_path):
         view = switching_records_view(
             completed.observation.windows, completed.observation.decode_records
         )
-        gap_by_window = {}
-        for record in view.requests:
-            if record.request_key.tier is not window_records.DecoderTier.WEAK:
-                continue
-            assert record.soft_output is not None
-            window_key = (
-                record.request_key.operation_id,
-                record.request_key.window_id,
-            )
-            gap_by_window[window_key] = record.soft_output.gap
+        gap_by_window = gaps_by_window(view, weak_tier)
         for row in view.windows:
             gap = gap_by_window[row.destination_key]
             selected_tier = row.selected_request_key.tier
-            if gap >= threshold_nats:
-                assert selected_tier is window_records.DecoderTier.WEAK
-            else:
-                assert selected_tier is window_records.DecoderTier.STRONG
+            expected_tier = expected_tier_of(
+                gap, threshold_nats, weak_tier, strong_tier
+            )
+            assert selected_tier is expected_tier
 
 
 # ---- the declared-tick timeline of the two variants

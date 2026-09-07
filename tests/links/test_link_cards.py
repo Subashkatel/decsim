@@ -46,8 +46,10 @@ CARD_YAML = (
 
 
 def test_the_setup_cost_key_reaches_the_path(tmp_path):
-    (tmp_path / "overhead_card.yaml").write_text(CARD_YAML)
-    card = load_experiment(tmp_path / "overhead_card.yaml").settings.links
+    card_path = tmp_path / "overhead_card.yaml"
+    card_path.write_text(CARD_YAML)
+    config = load_experiment(card_path)
+    card = config.settings.links
     assert (
         card.weak_buffer_to_weak_decoder.setup_ticks
         == microseconds_to_ticks(0.4)
@@ -56,8 +58,10 @@ def test_the_setup_cost_key_reaches_the_path(tmp_path):
 
 
 def test_the_latency_and_rate_keys_reach_the_channel(tmp_path):
-    (tmp_path / "card.yaml").write_text(CARD_YAML)
-    card = load_experiment(tmp_path / "card.yaml").settings.links
+    card_path = tmp_path / "card.yaml"
+    card_path.write_text(CARD_YAML)
+    config = load_experiment(card_path)
+    card = config.settings.links
     assert (
         card.weak_buffer_to_weak_decoder.channel.name
         == "weak_buffer_to_weak_decoder"

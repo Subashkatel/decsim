@@ -61,22 +61,18 @@ def write_sweep_csv(run_dir, algorithm, points):
 
 
 def two_tier_runs(tmp_path):
-    weak = write_sweep_csv(
-        tmp_path / "weak",
-        "0.028",
-        [
-            (3, 0.001, 1000, 7, 7e-3, 3e-3, 1.4e-2),
-            (5, 0.001, 1000, 1, 1e-3, 2e-4, 6e-3),
-        ],
-    )
-    strong = write_sweep_csv(
-        tmp_path / "strong",
-        "belief_matching",
-        [
-            (3, 0.001, 1000, 6, 6e-3, 2e-3, 1.2e-2),
-            (5, 0.001, 1000, 0, 0.0, 0.0, 3.8e-3),
-        ],
-    )
+    weak_run_dir = tmp_path / "weak"
+    weak_points = [
+        (3, 0.001, 1000, 7, 7e-3, 3e-3, 1.4e-2),
+        (5, 0.001, 1000, 1, 1e-3, 2e-4, 6e-3),
+    ]
+    weak = write_sweep_csv(weak_run_dir, "0.028", weak_points)
+    strong_run_dir = tmp_path / "strong"
+    strong_points = [
+        (3, 0.001, 1000, 6, 6e-3, 2e-3, 1.2e-2),
+        (5, 0.001, 1000, 0, 0.0, 0.0, 3.8e-3),
+    ]
+    strong = write_sweep_csv(strong_run_dir, "belief_matching", strong_points)
     return weak, strong
 
 

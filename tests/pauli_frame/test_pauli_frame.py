@@ -104,3 +104,80 @@ def test_the_settings_refuse_a_free_write_without_a_reason():
         PauliFrameConfig(commit_microseconds=0.0)
     settings = PauliFrameConfig(commit_microseconds=0.004)
     assert settings.commit_ticks() == 4000
+
+
+def test_a_stream_whose_corrections_change_width_is_refused_when_read():
+    """One stream's observables are one width; two widths cannot be XORed.
+
+    A window's correction is one bit per logical observable of its
+    operation, so a change of width means two operations' results
+    reached one stream, and folding them would silently drop bits.
+    """
+    engine, frame = frame_with_commit_ticks(0)
+    commit(frame, ("stream", 0), (1, 0))
+    commit(frame, ("stream", 1), (0, 1, 0))
+    with pytest.raises(RuntimeError, match="changed its number of observables"):
+        frame.frame_for_stream("stream")
+
+
+def test_a_second_correction_arriving_while_the_first_is_pending_is_refused():
+    """The write in flight counts as a write: the refusal does not wait."""
+    engine, frame = frame_with_commit_ticks(4)
+    continued = []
+
+    def note_continuation():
+        continued.append(engine.now)
+
+    commit(frame, ("stream", 0), (1,), on_committed=note_continuation)
+    with pytest.raises(RuntimeError, match="second write"):
+        commit(frame, ("stream", 0), (0,), tier=Tier.STRONG)
+    engine.run()
+    assert continued == [4]
+    snapshot = frame.snapshot()
+    assert snapshot.commit_count == 1
+    assert snapshot.pending_write_count == 0
+
+
+def test_the_frame_keeps_its_own_copy_of_the_observables_it_was_given():
+    """A caller may reuse its buffer; the committed correction is fixed."""
+    engine, frame = frame_with_commit_ticks(0)
+    callers_buffer = [1, 0, 1]
+    commit(frame, ("stream", 0), callers_buffer)
+    callers_buffer[0] = 0
+    assert frame.frame_for_stream("stream") == (1, 0, 1)
+
+
+def test_a_snapshot_does_not_change_when_the_frame_does():
+    engine, frame = frame_with_commit_ticks(0)
+    commit(frame, ("stream", 0), (1, 0))
+    before = frame.snapshot()
+    commit(frame, ("stream", 1), (1, 1))
+    after = frame.snapshot()
+    assert before.commit_count == 1
+    assert after.commit_count == 2
+
+
+def test_a_write_cost_that_is_not_a_duration_is_refused():
+    with pytest.raises(ValueError, match="finite and not negative"):
+        PauliFrameConfig(commit_microseconds=-1.0)
+
+
+def test_a_write_cost_that_rounds_to_no_ticks_is_refused():
+    with pytest.raises(ValueError, match="rounds to zero ticks"):
+        PauliFrameConfig(commit_microseconds=1e-12)
+
+
+def test_a_justification_beside_a_priced_write_is_refused_as_stale():
+    with pytest.raises(ValueError, match="needs a free write"):
+        PauliFrameConfig(
+            commit_microseconds=1.0,
+            zero_commit_cost_justification="an idealized register write",
+        )
+
+
+def test_a_free_write_with_a_reason_is_accepted_and_charges_nothing():
+    settings = PauliFrameConfig(
+        commit_microseconds=0.0,
+        zero_commit_cost_justification="an idealized register write",
+    )
+    assert settings.commit_ticks() == 0

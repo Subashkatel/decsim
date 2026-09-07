@@ -11,7 +11,7 @@ import statistics
 from pathlib import Path
 from typing import Optional
 
-import experiments.measure_shot as measure_shot
+import decsim.front.measure as measure
 
 BULKY_FIELDS = ("samples", "means", "maxes", "link_totals")
 
@@ -106,7 +106,7 @@ def summarize_point(group: list) -> dict:
         "load": _mean_of(group, "load"),
         "sim_wall_seconds_per_shot": _mean_of(group, "sim_wall_seconds"),
     }
-    for name in measure_shot.POINTS:
+    for name in measure.POINTS:
         _add_point_columns(row, group, name)
     return row
 
@@ -165,7 +165,7 @@ def shot_rows(measurements: list) -> list:
     rows = []
     for measurement in measurements:
         row = _scalar_fields(measurement)
-        for name in measure_shot.POINTS:
+        for name in measure.POINTS:
             row[f"{name}_mean_us"] = measurement.means[name]
         rows.append(row)
     return rows

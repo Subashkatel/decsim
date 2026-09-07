@@ -25,7 +25,7 @@ include = ["decsim*"]
 # docs/ holds cloned third-party artifacts (e.g. the SWIPER repo) whose own
 # test suites must not be collected by our `python -m pytest -q` entry point.
 [tool.pytest.ini_options]
-testpaths = ["tests", "experiments/tests"]
+testpaths = ["tests"]
 
 # The rewrite's style gate (REWRITE.md rule 7): Google Python style, 80
 # columns, Google docstrings. The one-action rule is checked separately by
@@ -33,7 +33,7 @@ testpaths = ["tests", "experiments/tests"]
 [tool.ruff]
 line-length = 80
 target-version = "py39"
-extend-exclude = [".pydeps", ".venv", "tmp", "archive"]
+extend-exclude = [".pydeps", ".venv", "tmp", "archive", "results"]
 
 [tool.ruff.lint]
 # SIM is off on purpose: it asks for inline conditionals and merged
@@ -52,10 +52,9 @@ ignore = [
 convention = "google"
 
 [tool.ruff.lint.isort]
-known-first-party = ["decsim", "experiments"]
+known-first-party = ["decsim", "tests"]
 
 [tool.ruff.lint.per-file-ignores]
 # A test module keeps its docstring (it names the source it checks
 # against); test functions and helper classes need none.
 "tests/**" = ["D101", "D102", "D103", "D104"]
-"experiments/tests/**" = ["D101", "D102", "D103", "D104"]

@@ -37,12 +37,12 @@ def test_a_run_with_every_listener_connected_has_the_same_ticks_as_a_bare_one():
     import pathlib
 
     import decsim.machine as machine_module
-    from experiments.experiment_config import load_experiment
+    from decsim.front.experiment import load_experiment
 
     here = pathlib.Path(__file__)
     repository = here.resolve()
     repository = repository.parents[2]
-    config_path = repository / "experiments/configs/weak_decoder_baseline.yaml"
+    config_path = repository / "configs/weak_decoder_baseline.yaml"
     config = load_experiment(config_path)
     settings = config.point_settings(
         physical_error_probability=0.003, distance=3, round_period_us=1.0

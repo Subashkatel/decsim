@@ -9,11 +9,11 @@ ler.png        logical error rate vs physical error rate, Wilson 95%
 latency.png    decode wall clock per window vs code distance, violins,
                drawn when a wall-clock algorithm swept more than one d;
                the cross-tier combined figure comes from
-               `python -m experiments.plots latency <run_dir> <run_dir>
+               `python -m decsim.front.plots latency <run_dir> <run_dir>
                <out.png>` reading each run's latency_samples.csv
 ler vs d       both tiers' logical error rate against code distance at
                one physical error rate, from each run's ler.csv:
-               `python -m experiments.plots ler_vs_d <run_dir> <run_dir>
+               `python -m decsim.front.plots ler_vs_d <run_dir> <run_dir>
                <p> <out.png>`
 
 Every time is in microseconds.
@@ -27,8 +27,8 @@ import sys
 from pathlib import Path
 
 import decsim.config as config_module
+import decsim.front.measure as measure
 import decsim.machine as machine_module
-import experiments.measure_shot as measure_shot
 
 WINDOW_COLORS = (
     "tab:blue",
@@ -64,11 +64,11 @@ STAGE_BREAKDOWN_STAGES = (
     ("frame_commit_mean_us", "frame commit"),
 )
 USAGE = (
-    "usage: python -m experiments.plots "
+    "usage: python -m decsim.front.plots "
     "latency <run_dir> <run_dir> <out.png>\n"
-    "       python -m experiments.plots "
+    "       python -m decsim.front.plots "
     "ler_vs_d <run_dir> <run_dir> <p> <out.png>\n"
-    "       python -m experiments.plots "
+    "       python -m decsim.front.plots "
     "stage_breakdown <run_dir> <out.png>"
 )
 
@@ -195,7 +195,7 @@ def ler_vs_distance_plot(
     a zero-failure point cannot sit on a log axis, so its curve simply
     ends at the last distance that saw failures.
 
-        python -m experiments.plots ler_vs_d <run_dir> <run_dir> <p>
+        python -m decsim.front.plots ler_vs_d <run_dir> <run_dir> <p>
         <out.png>
     """
     import matplotlib
@@ -229,7 +229,7 @@ def stage_breakdown_plot(run_dir, path: Path) -> None:
 
     From syndrome arrival in the buffer to the Pauli-frame commit.
 
-        python -m experiments.plots stage_breakdown <run_dir> <out.png>
+        python -m decsim.front.plots stage_breakdown <run_dir> <out.png>
     """
     import matplotlib
 
@@ -319,7 +319,7 @@ def combined_latency_plot(sample_files: list, path: Path) -> None:
     legible: the tiers sit decades apart, which is itself the figure's
     message.
 
-        python -m experiments.plots latency <run_dir> <run_dir> <out.png>
+        python -m decsim.front.plots latency <run_dir> <run_dir> <out.png>
     """
     import matplotlib
 
@@ -502,8 +502,8 @@ def _timeline_lanes(escalation_kind: str) -> _TimelineLanes:
         store_path = "controller_to_strong_buffer"
         store_name = "syndrome buffer 1"
     return _TimelineLanes(
-        input_path=measure_shot.INPUT_LINK[escalation_kind],
-        output_path=measure_shot.OUTPUT_LINK[escalation_kind],
+        input_path=measure.INPUT_LINK[escalation_kind],
+        output_path=measure.OUTPUT_LINK[escalation_kind],
         store_path=store_path,
         store_name=store_name,
     )

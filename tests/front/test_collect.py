@@ -23,14 +23,14 @@ import yaml
 
 import decsim.collect as collect
 import decsim.decoders.settings as decoder_settings
-import experiments.experiment_config as experiment_config
-import experiments.measure_shot as measure_shot
-import experiments.run as run
-import experiments.sweep_report as sweep_report
+import decsim.front.collect_command as run
+import decsim.front.experiment as experiment_config
+import decsim.front.measure as measure_shot
+import decsim.front.report as sweep_report
 
 THIS_FILE = pathlib.Path(__file__)
 DATA = THIS_FILE.parent / "data"
-CONFIGS = THIS_FILE.parents[2] / "experiments" / "configs"
+CONFIGS = THIS_FILE.parents[2] / "configs"
 REFERENCE_YAML = CONFIGS / "reference.yaml"
 # The sweep.csv columns that carry the decoder's measured wall clock.
 WALL_CLOCK_POINTS = (

@@ -1,8 +1,8 @@
 #!/bin/bash
 # One offline shard per array task, one shards.tsv line each:
-#   python -m experiments.offline_run plan configs/<name>.yaml [seeds_per_shard]
-#   sbatch --array=1-<N> experiments/slurm_offline.sh <run_dir>
-#   python -m experiments.offline_run merge <run_dir>
+#   python -m decsim.front.offline plan configs/<name>.yaml [seeds_per_shard]
+#   sbatch --array=1-<N> slurm/slurm_offline.sh <run_dir>
+#   python -m decsim.front.offline merge <run_dir>
 #SBATCH --job-name=decsim-offline
 #SBATCH --partition=cpu
 #SBATCH --nodes=1

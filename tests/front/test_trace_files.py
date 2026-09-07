@@ -8,7 +8,7 @@ same file, so the seed goes into the name before its suffixes
 per traced shot).
 """
 
-from experiments.measure_shot import trace_path_for_shot
+from decsim.front.measure import trace_path_for_shot
 
 
 def test_one_traced_shot_keeps_the_path_the_yaml_gave():

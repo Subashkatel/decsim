@@ -1,8 +1,14 @@
-# The weak tier's offline LER sweep (plot 1). Runs through
-# decsim.front.offline; every key is documented in reference.yaml.
-# Shot counts sized from the 2026-08-27 pilot cost table: >= 100
-# failures where reachable, ~350 core-hours total; d 9 and 11 at the
-# two lowest p plot as upper bounds.
+# The weak tier's LER sweep (plot 1). Runs with `decsim collect`;
+# every key is documented in reference.yaml. Shot counts sized from the
+# 2026-08-27 pilot cost table: >= 100 failures where reachable, ~350
+# core-hours total; d 9 and 11 at the two lowest p plot as upper bounds.
+#
+# 10.4 M shots is a Slurm array, not one job: per array task run
+# `decsim collect configs/weak_ler.yaml --out $RUN/$ID
+# --shots-per-unit N --shard $ID/$COUNT`, then `decsim combine $RUN/*`.
+# The arithmetic: 16 h / 0.22 s per shot at d7 = 262,000 shots a task,
+# so N * ceil(10.4e6 / N / COUNT) must stay under that; N 50000 with
+# COUNT 200 gives each task two units of 3.1 h.
 
 extends: weak_decoder_baseline.yaml
 

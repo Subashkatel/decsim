@@ -418,7 +418,9 @@ def test_the_strong_context_lives_until_the_escalated_window_commits():
     until that write lands. The escalated window reads all six rounds
     of the operation, and its strong input transfer lands long before
     the commit; a store that freed the rounds at the transfer would
-    show a fall before the committed tick.
+    show a fall before the committed tick. The declared fabric gives
+    the release its exact tick as well, 84.5 us here: 71.0 for the
+    commit and the declared hops back to the store after it.
     """
     machine = fabric.switching_machine(rounds=6, escalated_windows={0})
     probe = declared_run.OccupancyProbe(machine.window_manager)
@@ -431,9 +433,11 @@ def test_the_strong_context_lives_until_the_escalated_window_commits():
     snapshot = machine.pauli_frame.snapshot()
     strong_record = snapshot.records[0]
     expected_committed = decsim_config.microseconds_to_ticks(71.0)
+    expected_released = decsim_config.microseconds_to_ticks(84.5)
 
     assert strong_record.window_key == (1, 0)
     assert strong_record.tier == "strong"
     assert strong_record.committed_ticks == expected_committed
     assert peak == 6
     assert first_fall > expected_committed
+    assert first_fall == expected_released

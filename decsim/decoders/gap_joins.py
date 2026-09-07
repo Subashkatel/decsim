@@ -218,12 +218,12 @@ def _attach_gap(
     primary_weight = result.gap_half_weight
     if primary_weight is None or sibling_weight is None:
         return
-    w_min = min(primary_weight, sibling_weight)
+    decoded_class_weight = min(primary_weight, sibling_weight)
     w_comp = max(primary_weight, sibling_weight)
-    gap = w_comp - w_min
+    gap = w_comp - decoded_class_weight
     result.soft_output = decoding_records.SoftOutput(
         gap=gap,
         source=complementary.COMPLEMENTARY_GAP_SOURCE,
-        w_min=w_min,
+        decoded_class_weight=decoded_class_weight,
         w_comp=w_comp,
     )

@@ -69,7 +69,7 @@ def _wilson_interval(failures: int, count: int) -> tuple:
 
 
 def _gaps_and_failures() -> tuple:
-    """Per shot: the gap in decibels, the class's wrongness, both w_min.
+    """Per shot: the gap in decibels, the class's wrongness, both weights.
 
     The plain solve's minimum weight and the paired solves' minimum
     weight are returned as two lists.
@@ -93,8 +93,8 @@ def _gaps_and_failures() -> tuple:
         gap_decibels.append(decibels)
         failed = paired.predicted_class != truth
         failures.append(failed)
-        plain_minimum_weights.append(plain.w_min)
-        paired_minimum_weights.append(paired.soft_output.w_min)
+        plain_minimum_weights.append(plain.decoded_class_weight)
+        paired_minimum_weights.append(paired.soft_output.decoded_class_weight)
     return gap_decibels, failures, plain_minimum_weights, paired_minimum_weights
 
 
@@ -141,7 +141,7 @@ def test_the_signal_has_no_metric_for_a_model_without_an_observable():
 
 
 def test_the_gap_is_the_weight_difference_of_the_two_classes():
-    """One shot: g = |w_comp - w_min|, both weights on the result."""
+    """One shot: g = |w_comp - decoded_class_weight|, both on the result."""
     circuit = windows.memory_circuit(3, ROUNDS, 0.001)
     requirement = fault_models.GRAPHLIKE_FAULT_MODEL_REQUIRED
     model = windows.whole_circuit_window(circuit, ROUNDS, requirement)
@@ -150,9 +150,9 @@ def test_the_gap_is_the_weight_difference_of_the_two_classes():
     events, _observables = windows.sampled_shots(circuit, 1, 3)
     syndrome = windows.row_syndrome(model, events[0])
     soft_output = metric.evaluate(syndrome)
-    difference = soft_output.w_comp - soft_output.w_min
+    difference = soft_output.w_comp - soft_output.decoded_class_weight
     assert soft_output.gap == pytest.approx(abs(difference))
-    assert soft_output.w_comp >= soft_output.w_min
+    assert soft_output.w_comp >= soft_output.decoded_class_weight
     assert numpy.isfinite(soft_output.gap)
 
 
@@ -162,9 +162,9 @@ def test_the_minimum_weight_is_the_window_decoders_own_matching_weight():
     The metric's base matching merges parallel faults as independent
     errors, p1(1 - p2) + p2(1 - p1), exactly as the PyMatching row's
     graph does (the convention of Stim's detector error models and of
-    PyMatching's model loader), so w_min is the weight that row
-    reports for the same solve and the gap is that decoder's own
-    confidence. Two parallel 0.05 columns on detector 0 combine to
+    PyMatching's model loader), so decoded_class_weight is the weight
+    that row reports for the same solve and the gap is that decoder's
+    own confidence. Two parallel 0.05 columns on detector 0 combine to
     0.095, and the other logical class runs through detector 1's two
     0.2 edges. Faults that flip the observable are boundary faults
     here, as they are for a logical operator supported on the code
@@ -186,6 +186,8 @@ def test_the_minimum_weight_is_the_window_decoders_own_matching_weight():
     soft_output = metric.evaluate(syndrome)
     # ln((1 - 0.095) / 0.095) and 2 ln(0.8 / 0.2)
     assert row_weight == pytest.approx(2.2540580520993854, abs=1e-6)
-    assert soft_output.w_min == pytest.approx(2.2540580520993854, abs=1e-6)
+    assert soft_output.decoded_class_weight == pytest.approx(
+        2.2540580520993854, abs=1e-6
+    )
     assert soft_output.w_comp == pytest.approx(2.772588722239781, abs=1e-6)
     assert soft_output.gap == pytest.approx(0.5185306701404, abs=1e-6)

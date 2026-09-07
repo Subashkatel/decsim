@@ -33,7 +33,7 @@ class SoftOutput:
 
     gap: float
     source: SoftOutputSource
-    w_min: Optional[float] = None
+    decoded_class_weight: Optional[float] = None
     w_comp: Optional[float] = None
 
 

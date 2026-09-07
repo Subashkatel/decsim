@@ -64,7 +64,9 @@ def test_paired_evaluate_matches_serial_evaluate_shot_for_shot():
         serial = metric.evaluate(shot_events)
         paired = metric.paired_evaluate(shot_events)
         assert paired.soft_output.gap == pytest.approx(serial.gap, abs=1e-9)
-        assert paired.soft_output.w_min == pytest.approx(serial.w_min, abs=1e-9)
+        assert paired.soft_output.decoded_class_weight == pytest.approx(
+            serial.decoded_class_weight, abs=1e-9
+        )
         assert len(paired.forced_solve_nanoseconds) == 2
         assert all(t > 0 for t in paired.forced_solve_nanoseconds)
 
@@ -84,7 +86,7 @@ def test_the_forced_pair_reproduces_the_unconstrained_solve():
         observable_parity = observable_bits % 2
         plain_class = int(observable_parity[0])
         paired = metric.paired_evaluate(shot_events)
-        assert paired.soft_output.w_min == pytest.approx(
+        assert paired.soft_output.decoded_class_weight == pytest.approx(
             float(plain_weight), abs=1e-9
         )
         if paired.soft_output.gap > 1e-9:

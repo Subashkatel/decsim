@@ -60,9 +60,9 @@ abstract class in `decsim/ports.py` and one table of rows at the top
 of `decsim/machine.py`. Two parts are pluggable through their own
 settings section instead. The link fabric is built from the `links`
 section, a number card read by `link_profiles.from_yaml` and wired by
-`fabric.LinkFabric`, so a card of your own is a card file and not a
-row. The threshold source is `escalation.threshold_source`: fixed and
-table both reach the root as a threshold in nats, resolved per sweep
+`fabric.LinkFabric`, so a card of your own is numbers in that section,
+not a row. The threshold source is `escalation.threshold_source`: fixed
+and table both reach the root as a threshold in nats, resolved per sweep
 point by the front, and online reaches it as the calibrator object
 itself (`_threshold_source`).
 

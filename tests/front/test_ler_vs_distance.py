@@ -10,6 +10,7 @@ import csv
 
 import pytest
 
+import decsim.front.refusal as refusal
 from decsim.front.plots import ler_vs_distance_plot
 
 LER_FIELDS = [
@@ -83,3 +84,11 @@ def test_run_without_the_requested_p_is_refused(tmp_path):
     weak, strong = two_tier_runs(tmp_path)
     with pytest.raises(ValueError, match="p=0.002"):
         ler_vs_distance_plot([weak, strong], 0.002, tmp_path / "ler_vs_d.png")
+
+
+def test_a_run_without_ler_csv_is_refused(tmp_path):
+    empty_run = tmp_path / "no_ler"
+    empty_run.mkdir()
+    figure_path = tmp_path / "ler_vs_d.png"
+    with pytest.raises(refusal.RefusalError, match="ler.csv"):
+        ler_vs_distance_plot([empty_run], 0.001, figure_path)

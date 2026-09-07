@@ -114,6 +114,36 @@ def test_an_unknown_packing_overflow_word_is_refused(tmp_path):
         experiment.load_experiment(config_path)
 
 
+def test_the_bulk_strong_key_reaches_the_decoder_manager(tmp_path):
+    config_path = write_config(
+        tmp_path, {"decoder_manager": {"bulk_strong": True}}
+    )
+    config = experiment.load_experiment(config_path)
+    assert config.settings.decoder_manager.bulk_strong is True
+
+
+def test_the_default_decoder_manager_does_not_batch(tmp_path):
+    config_path = write_config(tmp_path, {})
+    config = experiment.load_experiment(config_path)
+    assert config.settings.decoder_manager.bulk_strong is False
+
+
+def test_a_bulk_strong_that_is_not_a_flag_is_refused(tmp_path):
+    config_path = write_config(
+        tmp_path, {"decoder_manager": {"bulk_strong": "batch"}}
+    )
+    sentence = "decoder_manager.bulk_strong must be true or false, got 'batch'"
+    with pytest.raises(ValueError, match=sentence):
+        experiment.load_experiment(config_path)
+
+
+def test_an_unknown_decoder_manager_key_is_refused(tmp_path):
+    config_path = write_config(tmp_path, {"decoder_manager": {"units": 2}})
+    sentence = r"decoder_manager does not know \['units'\]"
+    with pytest.raises(ValueError, match=sentence):
+        experiment.load_experiment(config_path)
+
+
 def test_a_mode_without_its_tier_is_refused(tmp_path):
     from decsim.machine import Machine
 

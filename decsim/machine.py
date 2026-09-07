@@ -204,6 +204,7 @@ SECTIONS = (
     "windows",
     "weak_decoder",
     "strong_decoder",
+    "decoder_manager",
     "escalation",
     "pauli_frame",
     "workload",
@@ -218,8 +219,7 @@ class MachineSettings:
     Every field has a default, so a Python caller names only what
     differs from a timing-only run of three-qubit surface code patches
     with no decoder at all. links is the fabric card; the reference card
-    prices propagation only. decoder_manager holds the manager's
-    Python-only knobs; magic_state_factory has no yaml key today.
+    prices propagation only. magic_state_factory has no yaml key today.
     """
 
     clocks: config.ClockSettings = config.ClockSettings()
@@ -286,6 +286,7 @@ class MachineSettings:
                 kind=sections["idle_policy"]
             )
         escalation_section = sections.get("escalation", {})
+        decoder_manager_section = sections.get("decoder_manager", {})
         observation_section = sections.get("observation", {})
         qpu = qpu_settings.QpuSettings.from_yaml(sections["qpu"])
         controller = controller_settings.ControllerSettings.from_yaml(
@@ -301,6 +302,9 @@ class MachineSettings:
         windows = window_settings.WindowSettings.from_yaml(sections["windows"])
         weak_decoder = _tier_settings(sections, "weak_decoder", clocks)
         strong_decoder = _tier_settings(sections, "strong_decoder", clocks)
+        decoder_manager = decoder_settings.DecoderManagerSettings.from_yaml(
+            decoder_manager_section
+        )
         escalation = decoder_settings.EscalationSettings.from_yaml(
             escalation_section, base_directory
         )
@@ -324,6 +328,7 @@ class MachineSettings:
             windows=windows,
             weak_decoder=weak_decoder,
             strong_decoder=strong_decoder,
+            decoder_manager=decoder_manager,
             escalation=escalation,
             pauli_frame=pauli_frame,
             workload=workload,

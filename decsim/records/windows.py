@@ -57,7 +57,7 @@ class Window:
     buffer_hi: int  # last round it reads (trailing buffer)
     # planned rounds from start_round to buffer_hi; the job is priced for
     # the rounds that exist
-    n_rounds: int
+    round_count: int
     buffer_lo: Optional[int] = (
         None  # leading-buffer start (for two-sided A windows)
     )
@@ -116,7 +116,7 @@ class WindowInfo:
     commit_lo: int
     commit_hi: int
     buffer_hi: int
-    n_rounds: int
+    round_count: int
     buffer_lo: Optional[int]
     deps: tuple
     dependents: tuple
@@ -139,7 +139,7 @@ class WindowInfo:
             commit_lo=window.commit_lo,
             commit_hi=window.commit_hi,
             buffer_hi=window.buffer_hi,
-            n_rounds=window.n_rounds,
+            round_count=window.round_count,
             buffer_lo=window.buffer_lo,
             deps=tuple(window.deps),
             dependents=tuple(window.dependents),

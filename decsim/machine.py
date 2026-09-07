@@ -1454,10 +1454,10 @@ def _check_strong_route(settings: MachineSettings, router) -> None:
     if settings.escalation.kind != "switching":
         return
     weak_probe = decoding_records.DecodeJob(
-        operation_id=-1, window_id=0, n_rounds=0
+        operation_id=-1, window_id=0, round_count=0
     )
     strong_probe = decoding_records.DecodeJob(
-        operation_id=-1, window_id=0, n_rounds=0, hint="strong"
+        operation_id=-1, window_id=0, round_count=0, hint="strong"
     )
     strong_decoder = router.route(strong_probe)
     weak_decoder = router.route(weak_probe)

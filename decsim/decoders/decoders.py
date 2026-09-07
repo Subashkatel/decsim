@@ -111,7 +111,7 @@ class SwitchingRouter:
 class FunctionLatencyDecoder(decoder_module.DecoderBase):
     """Timing-only decoder priced by a caller-supplied function.
 
-    The function maps a job to microseconds; any factor (n_rounds,
+    The function maps a job to microseconds; any factor (round_count,
     spatial_nodes, code, attempt) is on the job. One-off models belong
     next to the experiment that uses them; the named classes below are
     the established parameterizations of this one.
@@ -163,8 +163,8 @@ class PerRoundDecoder(decoder_module.DecoderBase):
         self.tau_us = tau_us
 
     def latency(self, job: decoding_records.DecodeJob) -> int:
-        """n_rounds times tau, in ticks."""
-        microseconds = job.n_rounds * self.tau_us
+        """round_count times tau, in ticks."""
+        microseconds = job.round_count * self.tau_us
         return config.microseconds_to_ticks(microseconds)
 
     def decode(
@@ -256,7 +256,7 @@ def switch_probability_per_round(gamma_switch: float, d: int):
 
     def probability(job: decoding_records.DecodeJob) -> float:
         window = job.window
-        commit_rounds = job.n_rounds
+        commit_rounds = job.round_count
         if window is not None:
             commit_rounds = window.commit_hi - window.commit_lo + 1
         if commit_rounds <= 0:

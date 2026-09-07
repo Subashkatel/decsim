@@ -176,7 +176,7 @@ class DecoderUnit:
         for resident in self.residents:
             phase = self._resident_phase(resident)
             parts.append(
-                f"{resident.label} {phase}, {resident.n_rounds} rounds"
+                f"{resident.label} {phase}, {resident.round_count} rounds"
             )
         return "; ".join(parts)
 

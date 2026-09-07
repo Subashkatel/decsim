@@ -25,7 +25,7 @@ def _weak_window_info(commit_lo: int) -> window_records.WindowInfo:
         commit_lo=commit_lo,
         commit_hi=commit_hi,
         buffer_hi=buffer_hi,
-        n_rounds=6,
+        round_count=6,
     )
     return window_records.WindowInfo.from_window(window)
 

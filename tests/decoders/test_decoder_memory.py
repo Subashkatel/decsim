@@ -53,7 +53,7 @@ def job_of(payloads, label="w0", window_id=7):
     return decoding_records.DecodeJob(
         operation_id=41,
         window_id=window_id,
-        n_rounds=len(payloads),
+        round_count=len(payloads),
         payloads=list(payloads),
         label=label,
     )

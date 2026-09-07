@@ -219,7 +219,10 @@ def test_a_second_escalation_of_one_window_is_refused():
     machine.run()
     shape = machine.window_manager.strong_redecode.shape
     again = decoding_records.DecodeJob(
-        operation_id=1, window_id=2, n_rounds=3, strong_label="strong(mem1 W2)"
+        operation_id=1,
+        window_id=2,
+        round_count=3,
+        strong_label="strong(mem1 W2)",
     )
     with pytest.raises(RuntimeError, match="duplicate strong escalation"):
         shape.plan(again)

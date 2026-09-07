@@ -74,7 +74,7 @@ class _Model:
 def _job() -> decoding_records.DecodeJob:
     model = _Model()
     return decoding_records.DecodeJob(
-        operation_id=1, window_id=0, n_rounds=3, dem=model
+        operation_id=1, window_id=0, round_count=3, dem=model
     )
 
 

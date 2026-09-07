@@ -561,7 +561,7 @@ def _add_operation_windows(windows: dict, operation_id, operation_plan) -> None:
             commit_lo=geometry.commit_lo,
             commit_hi=geometry.commit_hi,
             buffer_hi=geometry.buffer_hi,
-            n_rounds=geometry.round_count,
+            round_count=geometry.round_count,
             buffer_lo=geometry.buffer_lo,
             closed_temporal_boundaries=geometry.closed_temporal_boundaries,
         )

@@ -7,7 +7,12 @@ import decsim.records.windows as window_records
 
 def _job():
     window = window_records.Window(
-        operation_id=1, k=0, commit_lo=1, commit_hi=3, buffer_hi=5, n_rounds=5
+        operation_id=1,
+        k=0,
+        commit_lo=1,
+        commit_hi=3,
+        buffer_hi=5,
+        round_count=5,
     )
     request_key = window_records.DecoderRequestKey(
         1, 0, window_records.DecoderTier.WEAK, 0
@@ -16,7 +21,7 @@ def _job():
     return decoding_records.DecodeJob(
         operation_id=1,
         window_id=0,
-        n_rounds=5,
+        round_count=5,
         request_key=request_key,
         window=window,
         request_created_ticks=10,

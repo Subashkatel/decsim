@@ -197,7 +197,7 @@ def _batch_job(jobs: list, window_keys: list) -> decoding_records.DecodeJob:
     total_rounds = 0
     earliest_ready_time = jobs[0].ready_time
     for job in jobs:
-        total_rounds += job.n_rounds
+        total_rounds += job.round_count
         earliest_ready_time = min(earliest_ready_time, job.ready_time)
     first_window_key: Optional[tuple] = None
     if window_keys:
@@ -206,7 +206,7 @@ def _batch_job(jobs: list, window_keys: list) -> decoding_records.DecodeJob:
     return decoding_records.DecodeJob(
         operation_id=-1,
         window_id=0,
-        n_rounds=total_rounds,
+        round_count=total_rounds,
         ready_time=earliest_ready_time,
         label=f"strong-batch x{batch_size} ({total_rounds}r)",
         hint="strong",

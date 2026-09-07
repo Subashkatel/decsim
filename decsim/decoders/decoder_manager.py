@@ -141,7 +141,7 @@ class DecoderManager:
         job = decoding_records.DecodeJob(
             operation_id=-1,
             window_id=0,
-            n_rounds=round_count,
+            round_count=round_count,
             ready_time=self.queue.engine.now,
             on_done=on_done,
             label=label,

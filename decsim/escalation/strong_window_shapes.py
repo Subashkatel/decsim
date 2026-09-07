@@ -160,7 +160,7 @@ class ContextWindow:
         job = decoding_records.DecodeJob(
             operation_id=weak_job.operation_id,
             window_id=weak_job.window_id,
-            n_rounds=payload_round_count,
+            round_count=payload_round_count,
             ready_time=self.engine.now,
             label=weak_job.strong_label,
             hint="strong",
@@ -756,7 +756,7 @@ class ForwardWindow:
         """Install the restart window's re-sliced reads and their model."""
         restart = self.planner.windows_by_key[restart_key]
         restart.buffer_lo = buffer_lo
-        restart.n_rounds = restart.buffer_hi - restart.buffer_lo + 1
+        restart.round_count = restart.buffer_hi - restart.buffer_lo + 1
         self.retention.replace_window_reads(restart_key, restart)
         if model is not None:
             self.planner.model_by_window[restart_key] = model
@@ -791,7 +791,7 @@ class ForwardWindow:
         job = decoding_records.DecodeJob(
             operation_id=key[0],
             window_id=key[1],
-            n_rounds=payload_round_count,
+            round_count=payload_round_count,
             ready_time=self.engine.now,
             label=held.label,
             hint="strong",
@@ -930,7 +930,7 @@ class _PendingWindows:
         records = []
         for key, held in self.by_key.items():
             phase_name = phase_names[held.phase]
-            record = (key, phase_name, held.strong_window.n_rounds)
+            record = (key, phase_name, held.strong_window.round_count)
             records.append(record)
         ordered = sorted(records, key=_work_record_order)
         return tuple(ordered)
@@ -985,7 +985,7 @@ def _context_window_of(
         commit_hi=commit_hi,
         buffer_hi=context_hi,
         buffer_lo=context_lo,
-        n_rounds=round_count,
+        round_count=round_count,
     )
     strong_window.boundary_in = weak_window.boundary_in
     return strong_window
@@ -1020,7 +1020,7 @@ def _strong_window_of(
         commit_hi=plan.commit_hi,
         buffer_hi=plan.context_hi,
         buffer_lo=plan.context_lo,
-        n_rounds=round_count,
+        round_count=round_count,
     )
 
 

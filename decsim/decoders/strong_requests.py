@@ -343,7 +343,7 @@ class StrongRequests:
                 keys_by_identity[identity],
                 key=identity_records.stable_identity_order_key,
             )
-            records.append((tuple(destination_keys), phase, job.n_rounds))
+            records.append((tuple(destination_keys), phase, job.round_count))
         return tuple(sorted(records, key=_snapshot_order))
 
 

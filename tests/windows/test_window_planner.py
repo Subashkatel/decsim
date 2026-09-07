@@ -216,7 +216,7 @@ def test_the_seal_clips_the_window_holding_the_last_round():
     assert (second.commit_lo, second.commit_hi) == (4, 5)
     clipped = planner.trim_stream_tail("stream", 5)
     assert clipped is second
-    assert (second.commit_hi, second.buffer_hi, second.n_rounds) == (5, 7, 4)
+    assert (second.commit_hi, second.buffer_hi, second.round_count) == (5, 7, 4)
     assert (first.commit_hi, first.buffer_hi) == (3, 5)
     assert planner.trim_stream_tail("stream", 20) is None
 
@@ -224,7 +224,12 @@ def test_the_seal_clips_the_window_holding_the_last_round():
 def test_idle_rounds_fold_only_into_a_batch_style_operation():
     plan = _empty_plan()
     window = window_records.Window(
-        operation_id=7, k=0, commit_lo=1, commit_hi=6, buffer_hi=6, n_rounds=6
+        operation_id=7,
+        k=0,
+        commit_lo=1,
+        commit_hi=6,
+        buffer_hi=6,
+        round_count=6,
     )
     plan.windows[(7, 0)] = window
     plan.batch_preceding_idle_rounds_by_operation[7] = True

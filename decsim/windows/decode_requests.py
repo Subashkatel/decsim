@@ -112,7 +112,7 @@ class DecodeRequestBuilder:
         return decoding_records.DecodeJob(
             operation_id=window.operation_id,
             window_id=window.k,
-            n_rounds=round_count,
+            round_count=round_count,
             ready_time=self.engine.now,
             spatial_nodes=spatial_nodes,
             payloads=payloads,
@@ -248,12 +248,12 @@ class DecodeRequestBuilder:
         body_rounds = self.tracker.round_count_for_window(operation.id, window)
         idle_rounds = window.batched_preceding_idle_round_count
         if idle_rounds:
-            effective_rounds = window.n_rounds + idle_rounds
+            effective_rounds = window.round_count + idle_rounds
             return (
                 f"{operation.name} [whole op, {effective_rounds} rounds: "
                 f"{idle_rounds} idle + {body_rounds} body]"
             )
-        return f"{operation.name} [whole op, {window.n_rounds} rounds]"
+        return f"{operation.name} [whole op, {window.round_count} rounds]"
 
     def _append_overflow_payloads(
         self,

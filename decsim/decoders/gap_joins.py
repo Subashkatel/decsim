@@ -169,7 +169,7 @@ class GapJoins:
         return decoding_records.DecodeJob(
             operation_id=job.operation_id,
             window_id=job.window_id,
-            n_rounds=round_count,
+            round_count=round_count,
             dem=job.dem,
             payloads=masked_fragments,
             ready_time=self.engine.now,

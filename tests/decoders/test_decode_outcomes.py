@@ -54,7 +54,7 @@ def _delivering_to(delivered):
 def _weak_job(delivered):
     on_decoded = _delivering_to(delivered)
     return decoding_records.DecodeJob(
-        operation_id=1, window_id=0, n_rounds=3, on_decoded=on_decoded
+        operation_id=1, window_id=0, round_count=3, on_decoded=on_decoded
     )
 
 
@@ -102,7 +102,7 @@ def test_a_strong_result_teaches_the_policy_and_reaches_its_destination_once():
     strong_job = decoding_records.DecodeJob(
         operation_id=1,
         window_id=0,
-        n_rounds=9,
+        round_count=9,
         strong_decode_for=(1, 0),
         request_key=strong_key,
         on_decoded=on_decoded,
@@ -131,7 +131,7 @@ def test_a_selection_that_lands_after_the_strong_result_releases_it():
     strong_job = decoding_records.DecodeJob(
         operation_id=1,
         window_id=0,
-        n_rounds=9,
+        round_count=9,
         strong_decode_for=(1, 0),
         request_key=strong_key,
         on_decoded=on_decoded,
@@ -165,7 +165,12 @@ def test_the_terminal_sources_carry_every_ended_request_and_service():
     job.service_original_request_keys = (job.request_key,)
     job.service_dispatch_ticks = 0
     job.window = window_records.Window(
-        operation_id=1, k=0, commit_lo=1, commit_hi=3, buffer_hi=5, n_rounds=5
+        operation_id=1,
+        k=0,
+        commit_lo=1,
+        commit_hi=3,
+        buffer_hi=5,
+        round_count=5,
     )
     requests.admit(job, now=0)
     result = decoding_records.DecodeResult(1, 0)

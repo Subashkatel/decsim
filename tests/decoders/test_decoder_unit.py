@@ -20,12 +20,12 @@ def _unit(capacity_rounds=None):
 
 def _job(label, rounds=1):
     return decoding_records.DecodeJob(
-        operation_id=1, window_id=0, n_rounds=rounds, label=label
+        operation_id=1, window_id=0, round_count=rounds, label=label
     )
 
 
 def _demand(job):
-    return job.n_rounds
+    return job.round_count
 
 
 def test_a_unit_holds_two_inputs_and_one_compute():

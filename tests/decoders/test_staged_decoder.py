@@ -90,7 +90,7 @@ def fetch_and_release_timing():
     return staged_decoder.UnitTiming(before, after, MEGAHERTZ)
 
 
-def decode_job(window_id=0, n_rounds=3):
+def decode_job(window_id=0, round_count=3):
     """A weak-tier window job with nothing to decode."""
     request_key = window_records.DecoderRequestKey(
         1, window_id, window_records.DecoderTier.WEAK, window_id
@@ -98,7 +98,7 @@ def decode_job(window_id=0, n_rounds=3):
     return decoding_records.DecodeJob(
         operation_id=1,
         window_id=window_id,
-        n_rounds=n_rounds,
+        round_count=round_count,
         label=f"W{window_id}",
         request_key=request_key,
     )
@@ -174,7 +174,7 @@ def test_the_result_is_produced_when_the_algorithm_stage_time_ends():
     timing = fetch_and_release_timing()
     decoder = staged_decoder.StagedDecoder(inner, timing)
     ledger = ledger_hearing(decoder)
-    job = decode_job(n_rounds=3)
+    job = decode_job(round_count=3)
     run_to_completion(decoder, engine, job)
     records = ledger.records_for(1, 0)
     algorithm = records[1]
@@ -197,7 +197,7 @@ def test_the_wrapper_adds_no_time_when_it_has_no_hardware_stages():
     inner = decoders.PerRoundDecoder(tau_us=0.5)
     timing = staged_decoder.UnitTiming((), (), MEGAHERTZ)
     decoder = staged_decoder.StagedDecoder(inner, timing)
-    job = decode_job(n_rounds=4)
+    job = decode_job(round_count=4)
     inner_ticks = inner.latency(job)
     assert inner_ticks == config.microseconds_to_ticks(2.0)
     assert decoder.latency(job) == inner_ticks
@@ -221,7 +221,7 @@ def test_the_hardware_stages_run_in_order_with_their_names_and_cycles():
     inner = RecordingInner(engine, latency_microseconds=0.0)
     decoder = staged_decoder.StagedDecoder(inner, timing)
     ledger = ledger_hearing(decoder)
-    job = decode_job(n_rounds=2)
+    job = decode_job(round_count=2)
     run_to_completion(decoder, engine, job)
     records = ledger.records_for(1, 0)
     named_cycles = [(record.stage, record.cycles) for record in records]
@@ -245,7 +245,7 @@ def test_a_job_cancelled_before_it_starts_holds_the_unit_but_never_decodes():
     inner = RecordingInner(engine, latency_microseconds=2.0)
     timing = fetch_and_release_timing()
     decoder = staged_decoder.StagedDecoder(inner, timing)
-    job = decode_job(n_rounds=3)
+    job = decode_job(round_count=3)
     job.cancelled = True
     delivered = run_to_completion(decoder, engine, job)
     algorithm_ticks = config.microseconds_to_ticks(2.0)
@@ -269,7 +269,7 @@ def test_a_cancel_during_a_hardware_stage_stops_the_remaining_stages():
     timing = fetch_and_release_timing()
     decoder = staged_decoder.StagedDecoder(inner, timing)
     ledger = ledger_hearing(decoder)
-    job = decode_job(n_rounds=3)
+    job = decode_job(round_count=3)
     delivered = []
 
     def on_result(result):
@@ -324,7 +324,7 @@ def test_the_unpipelined_unit_holds_its_compute_for_the_whole_decode():
     inner = decoders.PresetLatencyDecoder(4.0)
     timing = fetch_and_release_timing()
     decoder = staged_decoder.StagedDecoder(inner, timing)
-    job = decode_job(n_rounds=3)
+    job = decode_job(round_count=3)
     algorithm_ticks = config.microseconds_to_ticks(4.0)
     stage_ticks = 4 * CYCLE_TICKS
     whole_job_ticks = stage_ticks + algorithm_ticks
@@ -346,7 +346,7 @@ def test_a_pipelined_unit_frees_its_intake_after_the_initiation_interval():
     )
     inner = decoders.PresetLatencyDecoder(4.0)
     decoder = staged_decoder.StagedDecoder(inner, timing)
-    job = decode_job(n_rounds=3)
+    job = decode_job(round_count=3)
     assert decoder.occupancy(job) == config.microseconds_to_ticks(0.5)
     assert decoder.pipeline_depth(job) == 8
     declared_timing = staged_decoder.UnitTiming(
@@ -364,7 +364,7 @@ def test_the_stage_partition_does_not_change_the_whole_job_time():
     describes the same unit rather than a slower one, and no partition
     accumulates a rounding error at the clock.
     """
-    job = decode_job(n_rounds=3)
+    job = decode_job(round_count=3)
     whole = staged_decoder.DecoderStage("whole", cycles_per_job=2)
     first = staged_decoder.DecoderStage("first", cycles_per_job=1)
     second = staged_decoder.DecoderStage("second", cycles_per_job=1)

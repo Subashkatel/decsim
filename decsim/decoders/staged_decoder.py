@@ -47,7 +47,7 @@ class DecoderStage:
 
     def cycles_for(self, job: decoding_records.DecodeJob) -> int:
         """The stage's cycles for one job: per job plus per round."""
-        round_cycles = self.cycles_per_round * job.n_rounds
+        round_cycles = self.cycles_per_round * job.round_count
         return self.cycles_per_job + round_cycles
 
 

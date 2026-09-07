@@ -223,8 +223,8 @@ round_store:                       # Buffer 0, the upstream round store
                                    # controller holds the finished round and
                                    # publishes it in order once a slot frees,
                                    # the backpressure real systems apply to their
-                                   # source; drop_round and fail_stop are
-                                   # Python-level study knobs. null = unbounded
+                                   # source; controller.packing_overflow chooses
+                                   # that hold or a drop. null = unbounded
 
 strong_round_store:                # syndrome buffer 1, the strong-side store
                                    # (exists only when the escalation uses it)

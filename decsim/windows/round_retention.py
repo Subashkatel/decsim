@@ -7,11 +7,12 @@ room-side store as a potential strong read (Skoric et al. 2209.08552:
 the buffer region is re-read by the next window). At admission the
 window's hold becomes the request's and is released once the input
 lands in the unit's memory. Under the double window a window that an
-earlier window bounds also keeps its reads and one buffer before them
-as a potential restart read (PotentialRestart, planned in
+earlier window bounds also keeps the rounds its restart decode would
+read as a potential restart read (PotentialRestart, planned in
 frontends/planner.py), past its own request and landing: an earlier
-escalation may re-slice it as the restart window that re-reads one
-buffer into the strong region (Toshio et al. 2510.25222 Sec. III C).
+escalation may re-slice it as the restart window, which re-reads
+escalation.restart_reread_buffer_regions buffer regions of the strong
+region (Toshio et al. 2510.25222 Sec. III C).
 The read ends when the window before it commits, or when the window is
 re-sliced or absorbed. The stores hold slots and holders; which
 rounds a window needs is decided here, gem5's split between the cache

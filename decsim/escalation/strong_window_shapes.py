@@ -22,16 +22,18 @@ is slightly optimistic, and the strong window is priced for the whole
 context it reads rather than the r_strong rounds it commits, so its
 decode cost is conservative against Theorem 1 rather than optimistic.
 
-The restart window's weak decode reads its buffer into the strong
-region from Buffer 0, so those rounds, the last absorbed window's
-commit rounds, must still be stored when the plan lands, whether the
-absorbed windows' inputs are in flight or already landed in a unit.
-Every window an earlier window bounds claims its reads and one buffer
-before them at planning (PotentialRestart, frontends/planner.py), past
-its own request and landing; the plan withdraws the stale weak requests
-of the windows it rewrites, re-slices the restart window, requests its
-weak decode afresh and only then ends the claim (Sec. III C: the weak
-decoder resumes past the strong region once its rounds are stored).
+The restart window's weak decode may read back into the strong region
+from Buffer 0 (escalation.restart_reread_buffer_regions buffer
+regions), so those rounds, the last absorbed window's commit rounds,
+must still be stored when the plan lands, whether the absorbed
+windows' inputs are in flight or already landed in a unit. Every
+window an earlier window bounds claims exactly the rounds its restart
+decode would read at planning (PotentialRestart,
+frontends/planner.py), past its own request and landing; the plan
+withdraws the stale weak requests of the windows it rewrites, re-slices
+the restart window, requests its weak decode afresh and only then ends
+the claim (Sec. III C: the weak decoder resumes past the strong region
+once its rounds are stored).
 
 Wide state recorded: ForwardWindow sets nine attributes, the eight
 window components its layout touches and its registry of pending

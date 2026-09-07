@@ -82,7 +82,7 @@ def test_a_window_is_final_once_its_request_is_published():
 def test_a_streams_later_window_waits_on_the_previous_ones_boundary():
     """Each later overlapping stream window depends on its predecessor."""
     manager = object.__new__(window_manager_module.WindowManager)
-    manager.window_interaction = window_interactions.DefaultWindowInteraction()
+    manager.window_interaction = window_interactions.DefaultWindowInteraction(1)
     manager.planner = _stream_planner()
     manager.tracker = types.SimpleNamespace(is_sealed=lambda _stream_id: False)
     manager.courier = window_boundaries.BoundaryCourier(

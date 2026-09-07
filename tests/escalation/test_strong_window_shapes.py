@@ -9,13 +9,16 @@ boundaries are weak-determined: the restart window's commit, or the
 terminal data (Sec. III C, Fig. 12). A d=3 sliding window commits 3
 rounds and buffers 3, so r_strong is 9 rounds.
 
-The restart window's weak decode re-reads one buffer into the strong
+The restart window's weak decode re-reads
+escalation.restart_reread_buffer_regions buffer regions of the strong
 region from Buffer 0 (Sec. III C: the weak decoder resumes past the
-strong region once its rounds are stored), so the last absorbed
-window's commit rounds must still be stored when the plan lands, in a
-backlog regime where the absorbed windows' inputs are in flight or have
-already landed in a unit. The gate's switching card, priced on both
-tiers so the run is deterministic, is the regime the reviewer found.
+strong region once its rounds are stored), so at width 1 the last
+absorbed window's commit rounds must still be stored when the plan
+lands, in a backlog regime where the absorbed windows' inputs are in
+flight or have already landed in a unit. At width 0 the restart begins
+on the round after the strong region. The gate's switching card, priced
+on both tiers so the run is deterministic, is the regime the reviewer
+found.
 """
 
 import copy
@@ -231,6 +234,7 @@ def _gate_double_window_machine(
     weak_microseconds: float,
     strong_microseconds: float,
     weak_units: int,
+    reread_buffer_regions: int,
 ) -> machine_module.Machine:
     """The gate's switching card with double_window on, both tiers priced.
 
@@ -246,6 +250,9 @@ def _gate_double_window_machine(
     sections["weak_decoder"]["units"] = weak_units
     sections["strong_decoder"]["kind"] = strong_microseconds
     sections["escalation"]["double_window"] = True
+    sections["escalation"]["restart_reread_buffer_regions"] = (
+        reread_buffer_regions
+    )
     base_directory = pathlib.Path(".")
     settings = machine_module.MachineSettings.from_mapping(
         sections, name="switching_validation", base_directory=base_directory
@@ -310,7 +317,7 @@ def test_the_restart_window_keeps_its_re_read_rounds_across_the_withdrawals():
     sentence; now W6's own claim carries the rounds across W5's
     withdrawal and W6's stale request is withdrawn and rebuilt.
     """
-    machine = _gate_double_window_machine(3, 3, 40.0, 5.0, 1)
+    machine = _gate_double_window_machine(3, 3, 40.0, 5.0, 1, 1)
     result = machine.run()
     assert _run_statuses(result) == [(1, "logical_observables")]
     assert fabric.frame_tiers(machine) == [
@@ -333,7 +340,7 @@ def test_the_restart_window_keeps_its_re_read_rounds_across_the_withdrawals():
 
 def test_the_re_read_rounds_survive_with_commit_four_and_buffer_four():
     """The reviewer's second shape: W2 escalates, W5 re-reads 17-20."""
-    machine = _gate_double_window_machine(4, 4, 40.0, 5.0, 1)
+    machine = _gate_double_window_machine(4, 4, 40.0, 5.0, 1, 1)
     result = machine.run()
     assert _run_statuses(result) == [(1, "logical_observables")]
     assert fabric.frame_tiers(machine) == [
@@ -357,7 +364,7 @@ def test_the_re_read_rounds_survive_the_absorbed_inputs_landing_first():
     holder the re-read rounds 16-18 and W6's own 19-21 would be gone
     before the plan runs; W6's claim keeps them past both landings.
     """
-    machine = _gate_double_window_machine(3, 3, 40.0, 5.0, 2)
+    machine = _gate_double_window_machine(3, 3, 40.0, 5.0, 2, 1)
     result = machine.run()
     landed_absorbed = _log_index(
         machine, "memory W5 [commit 16-18] input landed"
@@ -375,6 +382,33 @@ def test_the_re_read_rounds_survive_the_absorbed_inputs_landing_first():
         ((1, 2), "weak"),
         ((1, 3), "strong"),
         ((1, 9), "strong"),
+        ((1, 6), "strong"),
+    ]
+
+
+def test_the_paper_width_restarts_on_the_round_after_the_strong_region():
+    """The eaa316d reproduction at re-read width 0, two weak units.
+
+    The absorbed W5 and the restart W6 land in unit memory before W3's
+    verdict. With no re-read W6 begins at round 19, the round after the
+    strong region, and owns the faults of the rounds it reads (Toshio
+    2510.25222 Sec. III C, Fig. 12); the run completes as it does with
+    one buffer region of re-read, and W9 keeps its weak result.
+    """
+    machine = _gate_double_window_machine(3, 3, 40.0, 5.0, 2, 0)
+    result = machine.run()
+    assert _run_statuses(result) == [(1, "logical_observables")]
+    resliced = fabric.log_lines_containing(machine, "re-sliced")
+    assert (
+        "restart window (1, 6) re-sliced across strong window edge 18 "
+        "(reads rounds 19-24; crossing faults owned by restart_window)"
+    ) in resliced[0]
+    assert fabric.frame_tiers(machine) == [
+        ((1, 0), "weak"),
+        ((1, 1), "weak"),
+        ((1, 2), "weak"),
+        ((1, 3), "strong"),
+        ((1, 9), "weak"),
         ((1, 6), "strong"),
     ]
 

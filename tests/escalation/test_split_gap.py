@@ -107,7 +107,7 @@ def test_the_two_forced_solves_reassemble_the_serial_gap():
         joined_gap = abs(weight_difference)
         assert joined_gap == pytest.approx(serial.gap, abs=1e-9)
         assert min(weight_class_0, weight_class_1) == pytest.approx(
-            serial.w_min, abs=1e-9
+            serial.decoded_class_weight, abs=1e-9
         )
 
 

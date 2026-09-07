@@ -1,13 +1,14 @@
 """The complementary gap: the confidence of one MWPM window decode.
 
-g_comp = |w_comp - w_min| (Toshio et al. 2510.25222 Sec. III A, text
-lines 480-495 of tmp/papers/txt; the method of Gidney et al.
-2312.04522): the minimum-weight matching gives w_min and the decoded
-class, and the same graph with one virtual detector that pins the
-observable to the other class gives w_comp. A small gap is a decoder
-unsure of its class. ComplementaryGap is the ConfidenceSignal row
-(decsim/ports.py): it declares the source and builds one metric per
-window model for the confidence wrappers (decoder.py).
+g_comp = |w_comp - decoded_class_weight| (Toshio et al. 2510.25222
+Sec. III A, text lines 480-495 of tmp/papers/txt; the method of Gidney
+et al. 2312.04522): the minimum-weight matching gives
+decoded_class_weight and the decoded class, and the same graph with one
+virtual detector that pins the observable to the other class gives
+w_comp. A small gap is a decoder unsure of its class.
+ComplementaryGap is the ConfidenceSignal row (decsim/ports.py): it
+declares the source and builds one metric per window model for the
+confidence wrappers (decoder.py).
 """
 
 import dataclasses
@@ -89,7 +90,8 @@ class ComplementaryGapMetric:
         # parallel faults (a window restriction folds distinct faults onto
         # one edge) combine as independent errors, the convention of
         # PyMatching's detector-error-model loader and of the window
-        # decoder, so w_min here is the window decoder's minimum weight
+        # decoder, so decoded_class_weight here is the window decoder's
+        # own minimum weight
         priors = 1 / (1 + numpy.exp(self.weights))
         self._matching = _matching_over(self.check_matrix, self.weights, priors)
         observable_row = self.observable_matrix[0:1, :]
@@ -123,9 +125,9 @@ class ComplementaryGapMetric:
     def evaluate(self, syndrome) -> decoding_records.SoftOutput:
         """The soft output of one syndrome: the gap and the two weights.
 
-        w_min is the minimum-weight matching's weight, w_comp the weight
-        of the matching forced into the other class (Toshio et al.
-        2510.25222 Sec. III A).
+        decoded_class_weight is the minimum-weight matching's weight,
+        w_comp the weight of the matching forced into the other class
+        (Toshio et al. 2510.25222 Sec. III A).
         """
         bits = _syndrome_bits(syndrome)
         correction, minimum_weight = self._matching.decode(
@@ -137,12 +139,15 @@ class ComplementaryGapMetric:
         _, complementary_weight = self._augmented_matching.decode(
             forced_bits, return_weight=True
         )
-        w_min = float(minimum_weight)
+        decoded_class_weight = float(minimum_weight)
         w_comp = float(complementary_weight)
-        difference = w_comp - w_min
+        difference = w_comp - decoded_class_weight
         gap = abs(difference)
         return decoding_records.SoftOutput(
-            gap=gap, source=COMPLEMENTARY_GAP_SOURCE, w_min=w_min, w_comp=w_comp
+            gap=gap,
+            source=COMPLEMENTARY_GAP_SOURCE,
+            decoded_class_weight=decoded_class_weight,
+            w_comp=w_comp,
         )
 
     def forced_class_solve(self, syndrome, forced_class: int) -> tuple:
@@ -170,9 +175,10 @@ class ComplementaryGapMetric:
         Each solve constrains the observable to one class by setting the
         augmented virtual-detector bit, so neither depends on the other:
         this is the form two matching cores compute side by side. The
-        unconstrained minimum weight w_min equals the smaller forced
-        weight, the prediction is the winning class, and the gap is the
-        weight difference; evaluate computes the same object serially.
+        unconstrained minimum weight decoded_class_weight equals the
+        smaller forced weight, the prediction is the winning class, and
+        the gap is the weight difference; evaluate computes the same
+        object serially.
         Each solve carries its own wall-clock time so a caller can model
         the pair's latency as the slower core, not the sum.
         """
@@ -184,13 +190,16 @@ class ComplementaryGapMetric:
             solve_nanoseconds.append(elapsed)
         is_class_one_lighter = forced_weights[1] < forced_weights[0]
         predicted_class = int(is_class_one_lighter)
-        w_min = forced_weights[predicted_class]
+        decoded_class_weight = forced_weights[predicted_class]
         complementary_class = 1 - predicted_class
         w_comp = forced_weights[complementary_class]
-        difference = w_comp - w_min
+        difference = w_comp - decoded_class_weight
         gap = abs(difference)
         soft_output = decoding_records.SoftOutput(
-            gap=gap, source=COMPLEMENTARY_GAP_SOURCE, w_min=w_min, w_comp=w_comp
+            gap=gap,
+            source=COMPLEMENTARY_GAP_SOURCE,
+            decoded_class_weight=decoded_class_weight,
+            w_comp=w_comp,
         )
         return PairedGapEvaluation(
             soft_output=soft_output,

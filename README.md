@@ -51,10 +51,11 @@ settings = experiment.point_settings(
 result = Machine.build(settings, seed=0).run()
 ```
 
-`result` is the immutable outcome: the run's timing, one logical result per
-operation, the link traffic, and the metric values. The `Machine` keeps its
-components (`qpu`, `controller`, `window_manager`, `decoder_manager`, the
-frame) for inspection after the run.
+`result` is the immutable outcome: how the run ended and when, one logical
+result per operation, the link traffic per path and, when the observation
+section asked for it, the data movement. The `Machine` keeps its components
+(`qpu`, `controller`, `window_manager`, `decoder_manager`, `pauli_frame`) for
+inspection after the run.
 
 A yaml describes a sweep, so one point of it names one machine.
 `configs/reference.yaml` documents every key the yaml layer reads, section

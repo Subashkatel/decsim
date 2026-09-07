@@ -83,6 +83,7 @@ import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
 import decsim.qpu.stim_device as stim_device
 import decsim.qpu.syndrome_devices as syndrome_devices
+import decsim.records.seeds as seed_records
 import decsim.seeding as seeding
 import decsim.syndrome_buffer.round_store as round_store_module
 import decsim.syndrome_buffer.settings as round_store_settings
@@ -1526,7 +1527,7 @@ def _seed_roots(**parts) -> tuple:
     """The seed path of every stochastic owner; the segments are results."""
     roots = []
     for name, value in parts.items():
-        path = (message.RunSeedPathSegment("field", name),)
+        path = (seed_records.RunSeedPathSegment("field", name),)
         roots.append((path, value))
     return tuple(roots)
 

@@ -3,6 +3,8 @@ from dataclasses import FrozenInstanceError
 import numpy as np
 import pytest
 
+import decsim.records.identity as identity_records
+import decsim.records.seeds as seed_records
 from decsim import message
 
 
@@ -80,31 +82,32 @@ def assert_frozen(value):
 
 def test_stable_string_accepts_exact_scalar_text_only():
     """Stable strings exclude subclasses, nonstrings, and surrogate code points."""
+
     class StringSubclass(str):
         pass
 
-    assert message.is_stable_string("")
-    assert message.is_stable_string("logical-π")
-    assert not message.is_stable_string(StringSubclass("logical"))
-    assert not message.is_stable_string(3)
-    assert not message.is_stable_string("\ud800")
+    assert identity_records.is_stable_identity("")
+    assert identity_records.is_stable_identity("logical-π")
+    assert not identity_records.is_stable_identity(StringSubclass("logical"))
+    assert not identity_records.is_stable_identity(3.0)
+    assert not identity_records.is_stable_identity("\ud800")
 
 
 def test_stable_identity_accepts_recursive_exact_values_only():
     """Stable identities contain only exact integers, scalar strings, and tuples."""
-    assert message.is_stable_identity((1, "patch", (2, "round")))
-    assert message.is_stable_identity(())
-    assert not message.is_stable_identity(True)
-    assert not message.is_stable_identity([1, "patch"])
-    assert not message.is_stable_identity((1, object()))
+    assert identity_records.is_stable_identity((1, "patch", (2, "round")))
+    assert identity_records.is_stable_identity(())
+    assert not identity_records.is_stable_identity(True)
+    assert not identity_records.is_stable_identity([1, "patch"])
+    assert not identity_records.is_stable_identity((1, object()))
 
 
 def test_stable_identity_comparison_rejects_cross_type_equality():
     """Stable identity comparison never aliases values of different runtime types."""
-    assert message.same_stable_identity((1, "1"), (1, "1"))
-    assert not message.same_stable_identity(1, True)
-    assert not message.same_stable_identity((1,), (True,))
-    assert not message.same_stable_identity((1,), (1, 2))
+    assert identity_records.same_stable_identity((1, "1"), (1, "1"))
+    assert not identity_records.same_stable_identity(1, True)
+    assert not identity_records.same_stable_identity((1,), (True,))
+    assert not identity_records.same_stable_identity((1,), (1, 2))
 
 
 def test_canonical_identity_bytes_are_injective_across_identity_kinds():
@@ -117,7 +120,9 @@ def test_canonical_identity_bytes_are_injective_across_identity_kinds():
         (1, "1"),
         ((1,),),
     )
-    encodings = tuple(message.stable_identity_bytes(value) for value in identities)
+    encodings = tuple(
+        identity_records.stable_identity_bytes(value) for value in identities
+    )
     assert len(set(encodings)) == len(identities)
     encoded_integer = b"I" + (1).to_bytes(8, "big") + b"1"
     encoded_string = b"S" + (1).to_bytes(8, "big") + b"1"
@@ -134,14 +139,16 @@ def test_canonical_identity_bytes_are_injective_across_identity_kinds():
     assert encodings[0] == encoded_integer
     assert encodings[1] == encoded_string
     assert encodings[2] == encoded_tuple
-    assert message.stable_identity_bytes("π") == encoded_unicode
+    assert identity_records.stable_identity_bytes("π") == encoded_unicode
 
 
 def test_stable_identity_ordering_and_json_preserve_typed_structure():
     """Stable identity ordering and JSON use the canonical typed representation."""
     identity = (3, "patch", (4,))
-    assert message.stable_identity_order_key(identity) == message.stable_identity_bytes(identity)
-    assert message.stable_identity_json(identity) == {
+    assert identity_records.stable_identity_order_key(
+        identity
+    ) == identity_records.stable_identity_bytes(identity)
+    assert identity_records.stable_identity_json(identity) == {
         "kind": "tuple",
         "value": None,
         "items": [
@@ -150,9 +157,7 @@ def test_stable_identity_ordering_and_json_preserve_typed_structure():
             {
                 "kind": "tuple",
                 "value": None,
-                "items": [
-                    {"kind": "integer", "value": "4", "items": None}
-                ],
+                "items": [{"kind": "integer", "value": "4", "items": None}],
             },
         ],
     }
@@ -161,10 +166,10 @@ def test_stable_identity_ordering_and_json_preserve_typed_structure():
 def test_seed_path_segments_have_distinct_framed_encodings():
     """Seed path segments encode field, string, none, and integer edges distinctly."""
     segments = (
-        message.RunSeedPathSegment("field", "node"),
-        message.RunSeedPathSegment("string_key", "node"),
-        message.RunSeedPathSegment("none_key", None),
-        message.RunSeedPathSegment("integer_key", 12),
+        seed_records.RunSeedPathSegment("field", "node"),
+        seed_records.RunSeedPathSegment("string_key", "node"),
+        seed_records.RunSeedPathSegment("none_key", None),
+        seed_records.RunSeedPathSegment("integer_key", 12),
     )
     encodings = tuple(segment.canonical_bytes() for segment in segments)
     assert len(set(encodings)) == len(encodings)
@@ -181,13 +186,13 @@ def test_seed_path_segments_have_distinct_framed_encodings():
 def test_seed_path_segments_reject_unknown_kinds():
     """An unknown segment kind has no canonical encoding."""
     with pytest.raises(KeyError):
-        message.RunSeedPathSegment("unknown", "value").canonical_bytes()
+        seed_records.RunSeedPathSegment("unknown", "value").canonical_bytes()
 
 
 def test_seed_child_skips_container_validation_and_is_frozen():
     """Seed child edges retain supplied paths without constructor shape checks."""
     child = object()
-    edge = message.RunSeedChild(relative_path=[], child=child)
+    edge = seed_records.RunSeedChild(relative_path=[], child=child)
     assert edge.relative_path == []
     assert edge.child is child
     assert_frozen(edge)
@@ -196,7 +201,7 @@ def test_seed_child_skips_container_validation_and_is_frozen():
 def test_seed_reservation_skips_source_seed_validation_and_is_frozen():
     """Seed reservations retain inconsistent proposals without constructor checks."""
     prepared_state = object()
-    reservation = message.RunSeedReservation("entropy", 19, prepared_state)
+    reservation = seed_records.RunSeedReservation("entropy", 19, prepared_state)
     assert reservation.proposed_seed_source == "entropy"
     assert reservation.proposed_seed == 19
     assert reservation.prepared_state is prepared_state
@@ -312,7 +317,9 @@ def test_resolved_planning_skips_noncount_type_validation():
         one_patch_spatial_node_count=5,
         window_floor_justification="unchecked",
     )
-    operation_plan = message.ResolvedOperationPlanning(object(), object(), 0, 1, 1)
+    operation_plan = message.ResolvedOperationPlanning(
+        object(), object(), 0, 1, 1
+    )
     patch_plan = message.ResolvedPatchPlanning(object(), object(), 1, 1)
     assert geometry.code_name is not None
     assert operation_plan.code_geometry is not None
@@ -395,7 +402,9 @@ def test_boundary_delivery_is_current_only_at_both_latest_revisions():
 def test_boundary_update_carries_policy_decisions_and_is_frozen():
     """Boundary updates carry policy state and acceptance and release decisions."""
     state = object()
-    update = message.BoundaryUpdate(state, accepted=True, release_dependency=False)
+    update = message.BoundaryUpdate(
+        state, accepted=True, release_dependency=False
+    )
     assert update.state is state
     assert update.accepted
     assert not update.release_dependency
@@ -411,7 +420,10 @@ def test_strong_region_plan_skips_runtime_type_checks():
 
 def test_window_protocol_exposes_distinct_scientific_tags():
     """Window protocols distinguish generic and graphlike scientific contracts."""
-    assert message.WindowProtocol.GENERIC is not message.WindowProtocol.TAN_ZERO_SEAM_GRAPHLIKE
+    assert (
+        message.WindowProtocol.GENERIC
+        is not message.WindowProtocol.TAN_ZERO_SEAM_GRAPHLIKE
+    )
 
 
 # Decode jobs and results
@@ -436,7 +448,9 @@ def test_soft_output_source_normalizes_weight_step_without_text_checks():
 def test_soft_output_normalizes_numbers_without_source_instance_validation():
     """Soft output accepts any source and normalizes valid numeric fields to floats."""
     source = object()
-    output = message.SoftOutput(gap=2, source=source, w_min=-3, w_comp=float("inf"))
+    output = message.SoftOutput(
+        gap=2, source=source, w_min=-3, w_comp=float("inf")
+    )
     assert output.source is source
     assert output.gap == 2.0
     infinite_gap_output = message.SoftOutput(gap=float("inf"), source=source)
@@ -449,7 +463,9 @@ def test_soft_output_normalizes_numbers_without_source_instance_validation():
 
 def test_decoder_keys_preserve_request_and_service_identity():
     """Decoder keys carry operation, window, tier, and run-sequence identity."""
-    request_key = message.DecoderRequestKey((4, "op"), 2, message.DecoderTier.STRONG, 7)
+    request_key = message.DecoderRequestKey(
+        (4, "op"), 2, message.DecoderTier.STRONG, 7
+    )
     service_key = message.DecoderServiceKey(8)
     assert request_key.operation_id == (4, "op")
     assert request_key.window_id == 2
@@ -504,7 +520,9 @@ def test_runtime_artifacts_carry_fields_and_are_frozen():
     """Runtime artifacts preserve resource, decision, and program-load fields immutably."""
     claim = message.ResourceClaim("qubits", frozenset({"q0"}))
     decision = message.Decision(4, releases_operation=False)
-    program = message.ExecutionProgram(["operation"], ["decode"], ["stream"], ["region"])
+    program = message.ExecutionProgram(
+        ["operation"], ["decode"], ["stream"], ["region"]
+    )
     assert claim.ids == frozenset({"q0"})
     assert not decision.releases_operation
     assert program.operations == ["operation"]
@@ -523,7 +541,9 @@ def test_protected_region_skips_identity_and_endpoint_validation():
 def test_readiness_messages_carry_local_successor_and_tail_state():
     """Readiness messages carry successor progress, memory progress, and tail state."""
     successor = message.SuccessorReadiness(5, rounds_arrived=2, round_count=3)
-    readiness = message.WindowReadiness(1, 3, (successor,), 2, tail_closed=False)
+    readiness = message.WindowReadiness(
+        1, 3, (successor,), 2, tail_closed=False
+    )
     assert readiness.successors == (successor,)
     assert readiness.memory_rounds_arrived == 2
     assert not readiness.tail_closed
@@ -577,8 +597,12 @@ def test_operation_magic_state_need_uses_override_then_clifford_fallback():
     """Magic-state need follows an explicit override before the Clifford fallback."""
     assert not make_operation(clifford=True).needs_magic_state
     assert make_operation(clifford=False).needs_magic_state
-    assert not make_operation(clifford=False, consumes_magic_state=False).needs_magic_state
-    assert make_operation(clifford=True, consumes_magic_state=True).needs_magic_state
+    assert not make_operation(
+        clifford=False, consumes_magic_state=False
+    ).needs_magic_state
+    assert make_operation(
+        clifford=True, consumes_magic_state=True
+    ).needs_magic_state
 
 
 def test_operation_planning_view_snapshots_configuration_without_circuit():

@@ -26,6 +26,7 @@ import decsim.config as config
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.message as message
 import decsim.observe.trace_source as trace_source
+import decsim.records.seeds as seed_records
 
 OnResult = Callable[[Optional[message.DecodeResult]], None]
 
@@ -150,8 +151,8 @@ class WindowDecoderBase(DecoderBase):
 
     def run_seed_children(self) -> tuple:
         """The latency model that controls simulated service time."""
-        path = (message.RunSeedPathSegment("field", "latency_model"),)
-        child = message.RunSeedChild(path, self.latency_model)
+        path = (seed_records.RunSeedPathSegment("field", "latency_model"),)
+        child = seed_records.RunSeedChild(path, self.latency_model)
         return (child,)
 
     @abc.abstractmethod

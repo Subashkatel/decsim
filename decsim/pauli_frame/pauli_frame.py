@@ -19,8 +19,8 @@ from collections.abc import Mapping
 from typing import Any, Callable, Optional
 
 import decsim.config as config
-import decsim.message as message
 import decsim.observe.trace_source as trace_source
+import decsim.records.identity as identity_records
 
 ObservableBits = tuple[int, ...]
 
@@ -181,7 +181,8 @@ class PauliFrame:
     def snapshot(self) -> PauliFrameSnapshot:
         """A frozen copy of what the frame holds now."""
         stream_ids = sorted(
-            self._windows_by_stream, key=message.stable_identity_order_key
+            self._windows_by_stream,
+            key=identity_records.stable_identity_order_key,
         )
         frames = []
         for stream_id in stream_ids:

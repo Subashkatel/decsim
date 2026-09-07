@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
+import decsim.records.seeds as seed_records
 from decsim.controller import policies
 from decsim.controller.idle_rounds import IdleRoundAccounting
 from decsim.controller.policies import (
@@ -17,7 +18,7 @@ from decsim.escalation.policies import Baseline, Switching
 from decsim.escalation.threshold_sources import FixedThreshold
 from decsim.frontends.settings import WorkloadSettings
 from decsim.machine import Machine, MachineSettings
-from decsim.message import RunSeedReservation, RunShape, SoftOutputSource
+from decsim.message import RunShape, SoftOutputSource
 from decsim.observe.controller_counters import ControllerCounters
 from decsim.ports import IdlePolicy
 from decsim.qpu.settings import QpuSettings
@@ -413,7 +414,7 @@ def test_run_seed_binding_uses_distinct_policy_paths():
     class SeededBoundary(ExternalBoundaryPolicy):
         def reserve_run_seed(self, seed):
             events.append(("reserve", "boundary", seed))
-            return RunSeedReservation("derived", seed, None)
+            return seed_records.RunSeedReservation("derived", seed, None)
 
         def commit_run_seed(self, reservation):
             events.append(("commit", "boundary", reservation.proposed_seed))
@@ -424,7 +425,7 @@ def test_run_seed_binding_uses_distinct_policy_paths():
     class SeededIdle(ExternalIdlePolicy):
         def reserve_run_seed(self, seed):
             events.append(("reserve", "idle", seed))
-            return RunSeedReservation("derived", seed, None)
+            return seed_records.RunSeedReservation("derived", seed, None)
 
         def commit_run_seed(self, reservation):
             events.append(("commit", "idle", reservation.proposed_seed))

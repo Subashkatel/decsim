@@ -5,8 +5,8 @@ from types import SimpleNamespace
 import pytest
 
 import decsim.machine as machine_module
+import decsim.records.seeds as seed_records
 from decsim.machine import MachineSettings
-from decsim.message import RunSeedPathSegment
 from decsim.pauli_frame.pauli_frame import PauliFrame as RuntimePauliFrame
 from decsim.pauli_frame.pauli_frame import PauliFrameConfig
 from decsim.ports import Frame as PauliFramePort
@@ -245,7 +245,7 @@ def test_runtime_satisfies_the_declared_keyword_only_correction_seam():
 def test_frame_owner_is_a_named_seed_root_and_snapshot_is_non_destructive():
     owner = object()
     roots = machine_module._seed_roots(pauli_frame=owner)
-    expected_path = (RunSeedPathSegment("field", "pauli_frame"),)
+    expected_path = (seed_records.RunSeedPathSegment("field", "pauli_frame"),)
     assert roots == ((expected_path, owner),)
 
     frame = RuntimePauliFrame(ManualEngine(), commit_ticks=0)

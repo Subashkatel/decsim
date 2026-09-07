@@ -16,6 +16,7 @@ closed feedback boundaries) lives here; its geometry is the planner's.
 from typing import Optional
 
 import decsim.message as message
+import decsim.records.identity as identity_records
 import decsim.windows.windowing_schemes as windowing_schemes
 
 
@@ -214,7 +215,7 @@ class RoundTracker:
         """What the scheme sees when deciding whether a window has its data."""
         successor_ids = sorted(
             self.planner.successors_by_operation[window.op_id],
-            key=message.stable_identity_order_key,
+            key=identity_records.stable_identity_order_key,
         )
         successors = []
         for successor_id in successor_ids:

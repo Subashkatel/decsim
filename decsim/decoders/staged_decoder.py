@@ -28,6 +28,7 @@ import decsim.config as config
 import decsim.decoders.decoder as decoder_module
 import decsim.message as message
 import decsim.observe.trace_source as trace_source
+import decsim.records.seeds as seed_records
 
 ALGORITHM_STAGE = "algorithm"
 
@@ -137,8 +138,8 @@ class StagedDecoder(decoder_module.DecoderBase):
 
     def run_seed_children(self) -> tuple:
         """The wrapped decoder under the segment decoder."""
-        path = (message.RunSeedPathSegment("field", "decoder"),)
-        child = message.RunSeedChild(path, self.decoder)
+        path = (seed_records.RunSeedPathSegment("field", "decoder"),)
+        child = seed_records.RunSeedChild(path, self.decoder)
         return (child,)
 
     def decode(self, job: message.DecodeJob) -> message.DecodeResult:

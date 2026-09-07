@@ -46,6 +46,7 @@ from typing import Any, Optional, Protocol, runtime_checkable
 
 import decsim.message as message
 import decsim.observe.trace_source as trace_source
+import decsim.records.identity as identity_records
 import decsim.windows.round_retention as round_retention
 
 LOG_SOURCE = "DecoderCluster"
@@ -1185,4 +1186,4 @@ def _check_every_round_retained(held: _PendingWindow, payloads: list) -> None:
 
 
 def _work_record_order(record: tuple) -> bytes:
-    return message.stable_identity_order_key(record[0])
+    return identity_records.stable_identity_order_key(record[0])

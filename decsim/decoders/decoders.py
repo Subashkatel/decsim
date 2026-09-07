@@ -14,6 +14,7 @@ import decsim.config as config
 import decsim.decoders.decoder as decoder_module
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.message as message
+import decsim.records.seeds as seed_records
 import decsim.seeding as seeding
 
 SAMPLED_CONFIDENCE_SOURCE = message.SoftOutputSource(
@@ -41,11 +42,11 @@ class CodeRouter:
 
     def run_seed_children(self) -> tuple:
         """The routed decoders under stable semantic paths."""
-        default_path = (message.RunSeedPathSegment("field", "default"),)
-        children = [message.RunSeedChild(default_path, self.default)]
+        default_path = (seed_records.RunSeedPathSegment("field", "default"),)
+        children = [seed_records.RunSeedChild(default_path, self.default)]
         for key, decoder in self.by_code.items():
             path = _by_code_path(key)
-            child = message.RunSeedChild(path, decoder)
+            child = seed_records.RunSeedChild(path, decoder)
             children.append(child)
         return tuple(children)
 
@@ -78,15 +79,15 @@ class SwitchingRouter:
 
     def run_seed_children(self) -> tuple:
         """Every routed decoder tier under its own path."""
-        weak_path = (message.RunSeedPathSegment("field", "weak"),)
-        strong_path = (message.RunSeedPathSegment("field", "strong"),)
+        weak_path = (seed_records.RunSeedPathSegment("field", "weak"),)
+        strong_path = (seed_records.RunSeedPathSegment("field", "strong"),)
         children = [
-            message.RunSeedChild(weak_path, self.weak),
-            message.RunSeedChild(strong_path, self.strong),
+            seed_records.RunSeedChild(weak_path, self.weak),
+            seed_records.RunSeedChild(strong_path, self.strong),
         ]
         if self.gap is not None:
-            gap_path = (message.RunSeedPathSegment("field", "gap"),)
-            gap_child = message.RunSeedChild(gap_path, self.gap)
+            gap_path = (seed_records.RunSeedPathSegment("field", "gap"),)
+            gap_child = seed_records.RunSeedChild(gap_path, self.gap)
             children.append(gap_child)
         return tuple(children)
 
@@ -121,8 +122,8 @@ class FunctionLatencyDecoder(decoder_module.DecoderBase):
 
     def run_seed_children(self) -> tuple:
         """The callback that controls simulated service time."""
-        path = (message.RunSeedPathSegment("field", "latency_us_for"),)
-        child = message.RunSeedChild(path, self.latency_us_for)
+        path = (seed_records.RunSeedPathSegment("field", "latency_us_for"),)
+        child = seed_records.RunSeedChild(path, self.latency_us_for)
         return (child,)
 
     def latency(self, job: message.DecodeJob) -> int:
@@ -201,11 +202,13 @@ class SampledConfidenceDecoder(
 
     def run_seed_children(self) -> tuple:
         """The inner decoder and the optional probability callback."""
-        inner_path = (message.RunSeedPathSegment("field", "inner"),)
-        children = [message.RunSeedChild(inner_path, self.inner)]
+        inner_path = (seed_records.RunSeedPathSegment("field", "inner"),)
+        children = [seed_records.RunSeedChild(inner_path, self.inner)]
         if self.probability_for is not None:
-            path = (message.RunSeedPathSegment("field", "probability_for"),)
-            child = message.RunSeedChild(path, self.probability_for)
+            path = (
+                seed_records.RunSeedPathSegment("field", "probability_for"),
+            )
+            child = seed_records.RunSeedChild(path, self.probability_for)
             children.append(child)
         return tuple(children)
 
@@ -268,10 +271,10 @@ def _check_probability(value, field_name: str) -> float:
 def _by_code_path(key) -> tuple:
     """The seed path of one by-code route: the field, then its key."""
     if key is None:
-        key_segment = message.RunSeedPathSegment("none_key", None)
+        key_segment = seed_records.RunSeedPathSegment("none_key", None)
     else:
-        key_segment = message.RunSeedPathSegment("string_key", key)
-    return (message.RunSeedPathSegment("field", "by_code"), key_segment)
+        key_segment = seed_records.RunSeedPathSegment("string_key", key)
+    return (seed_records.RunSeedPathSegment("field", "by_code"), key_segment)
 
 
 def _fault_model_requirement_for(

@@ -11,106 +11,7 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import Any, Callable, Optional, Union
 
-
-def is_stable_string(value: Any) -> bool:
-    return type(value) is str and all(
-        not 0xD800 <= ord(character) <= 0xDFFF for character in value
-    )
-
-
-def is_stable_identity(value: Any) -> bool:
-    value_type = type(value)
-    if value_type is int:
-        return True
-    if value_type is str:
-        return is_stable_string(value)
-    if value_type is tuple:
-        return all(is_stable_identity(item) for item in value)
-    return False
-
-
-def same_stable_identity(left: Any, right: Any) -> bool:
-    """Compare stable identities without Python's cross-type equality."""
-    if type(left) is not type(right):
-        return False
-    if type(left) is tuple:
-        return len(left) == len(right) and all(
-            same_stable_identity(left_item, right_item)
-            for left_item, right_item in zip(left, right)
-        )
-    if type(left) is int or type(left) is str:
-        return left == right
-    return False
-
-
-def stable_identity_bytes(identity: Any) -> bytes:
-    if type(identity) is int:
-        encoded = str(identity).encode("ascii")
-        return b"I" + len(encoded).to_bytes(8, "big") + encoded
-    if type(identity) is str:
-        encoded = identity.encode("utf-8")
-        return b"S" + len(encoded).to_bytes(8, "big") + encoded
-    encoded_items = tuple(stable_identity_bytes(item) for item in identity)
-    return (
-        b"T"
-        + len(encoded_items).to_bytes(8, "big")
-        + b"".join(
-            len(item).to_bytes(8, "big") + item for item in encoded_items
-        )
-    )
-
-
-def stable_identity_order_key(identity: Any) -> bytes:
-    return stable_identity_bytes(identity)
-
-
-def stable_identity_json(identity: Any) -> dict:
-    if type(identity) is int:
-        return {"kind": "integer", "value": str(identity), "items": None}
-    if type(identity) is str:
-        return {"kind": "string", "value": identity, "items": None}
-    items = [stable_identity_json(item) for item in identity]
-    return {"kind": "tuple", "value": None, "items": items}
-
-
-_SEED_PATH_TAG = {"field": b"F", "string_key": b"S"}
-
-
-@dataclass(frozen=True)
-class RunSeedPathSegment:
-    """One framed semantic edge in the run-level seed component graph."""
-
-    kind: str
-    value: Any
-
-    def canonical_bytes(self) -> bytes:
-        """Return the normative typed and length-framed seed-path bytes; an
-        unknown kind has no tag and fails here."""
-        if self.kind == "none_key":
-            return b"N" + (0).to_bytes(4, "big")
-        if self.kind == "integer_key":
-            encoded_value = str(self.value).encode("ascii")
-            return b"I" + len(encoded_value).to_bytes(4, "big") + encoded_value
-        encoded_value = self.value.encode()
-        tag = _SEED_PATH_TAG[self.kind]
-        return tag + len(encoded_value).to_bytes(4, "big") + encoded_value
-
-
-@dataclass(frozen=True)
-class RunSeedChild:
-    """One semantic child edge exposed by a seed-graph composite."""
-
-    relative_path: tuple[RunSeedPathSegment, ...]
-    child: Any
-
-
-@dataclass(frozen=True, eq=False)
-class RunSeedReservation:
-    """A leaf-owned prepared RNG replacement plus manifest seed provenance."""
-
-    proposed_seed_source: str
-    proposed_seed: Optional[int]
-    prepared_state: Any = field(repr=False)
+import decsim.records.identity as identity_records
 
 
 class SyndromePacketRouteKind(Enum):
@@ -919,7 +820,7 @@ class TransferAttribution:
     ) -> "TransferAttribution":
         """One round of one operation, its patches in stable order."""
         ordered_patch_ids = tuple(
-            sorted(patch_ids, key=stable_identity_order_key)
+            sorted(patch_ids, key=identity_records.stable_identity_order_key)
         )
         return cls(
             operation_id=operation_id,
@@ -935,7 +836,7 @@ class TransferAttribution:
     ) -> "TransferAttribution":
         """A window's transfer: the operation's patches, the rounds it reads."""
         ordered_patches = sorted(
-            operation.patches, key=stable_identity_order_key
+            operation.patches, key=identity_records.stable_identity_order_key
         )
         first_round, last_round = _read_range(window)
         return cls(
@@ -954,7 +855,7 @@ class TransferAttribution:
         patches = {}
         for payload in payloads:
             patch_id = payload.patch_id
-            order_key = stable_identity_order_key(patch_id)
+            order_key = identity_records.stable_identity_order_key(patch_id)
             patches[order_key] = patch_id
         ordered_keys = sorted(patches)
         patch_ids = tuple(patches[key] for key in ordered_keys)

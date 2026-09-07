@@ -17,6 +17,7 @@ import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.message as message
 import decsim.observe.trace_source as trace_source
 import decsim.qpu.code_geometry as code_geometry
+import decsim.records.seeds as seed_records
 import decsim.seeding as seeding
 
 # Stream ids and patches are opaque identities chosen by the workload; Any
@@ -142,10 +143,10 @@ class SyndromeBitDevice(seeding._RandomSeedConsumer):
         self.one_payload_per_patch = one_payload_per_patch
         self._initialize_run_seed_state(seed)
 
-    def run_seed_children(self) -> tuple[message.RunSeedChild, ...]:
+    def run_seed_children(self) -> tuple[seed_records.RunSeedChild, ...]:
         """The code card, which shapes every payload."""
-        segment = message.RunSeedPathSegment("field", "code")
-        return (message.RunSeedChild((segment,), self.code),)
+        segment = seed_records.RunSeedPathSegment("field", "code")
+        return (seed_records.RunSeedChild((segment,), self.code),)
 
     def begin_operation(
         self,

@@ -21,6 +21,7 @@ from typing import Optional
 import decsim.decoders.decoder as decoder_module
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.message as message
+import decsim.records.seeds as seed_records
 
 # the cache value meaning "this model was inspected and the signal has
 # no metric for it"; distinct from a missing key, which means "not built
@@ -78,10 +79,10 @@ class SoftOutputDecoder(decoder_module.DecoderBase):
 
         The signal's seed segment keeps the name the results carry.
         """
-        base_segment = message.RunSeedPathSegment("field", "base")
-        base_child = message.RunSeedChild((base_segment,), self.base)
-        signal_segment = message.RunSeedPathSegment("field", "metric_cls")
-        signal_child = message.RunSeedChild((signal_segment,), self.signal)
+        base_segment = seed_records.RunSeedPathSegment("field", "base")
+        base_child = seed_records.RunSeedChild((base_segment,), self.base)
+        signal_segment = seed_records.RunSeedPathSegment("field", "metric_cls")
+        signal_child = seed_records.RunSeedChild((signal_segment,), self.signal)
         return (base_child, signal_child)
 
     def latency(self, job: message.DecodeJob) -> int:

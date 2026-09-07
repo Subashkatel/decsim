@@ -18,6 +18,7 @@ import decsim.decoders.tesseract.window_decoder as tesseract_window_decoder
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.message as message
 import decsim.observe.trace_source as trace_source
+import decsim.records.seeds as seed_records
 
 
 class TesseractCheckedDecoder(decoder_module.DecoderBase):
@@ -39,15 +40,15 @@ class TesseractCheckedDecoder(decoder_module.DecoderBase):
 
     def run_seed_children(self) -> tuple:
         """The referee under its own path, the inner decoder's under inner."""
-        referee_path = (message.RunSeedPathSegment("field", "referee"),)
-        children = [message.RunSeedChild(referee_path, self.referee)]
+        referee_path = (seed_records.RunSeedPathSegment("field", "referee"),)
+        children = [seed_records.RunSeedChild(referee_path, self.referee)]
         inner_children = getattr(self.inner, "run_seed_children", None)
         if inner_children is None:
             return tuple(children)
-        inner_segment = (message.RunSeedPathSegment("field", "inner"),)
+        inner_segment = (seed_records.RunSeedPathSegment("field", "inner"),)
         for child in inner_children():
             path = inner_segment + child.relative_path
-            inner_child = message.RunSeedChild(path, child.child)
+            inner_child = seed_records.RunSeedChild(path, child.child)
             children.append(inner_child)
         return tuple(children)
 

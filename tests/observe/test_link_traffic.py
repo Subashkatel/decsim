@@ -13,6 +13,7 @@ import decsim.links.fabric as fabric_module
 import decsim.links.settings as link_settings
 import decsim.message as message
 import decsim.observe.link_traffic as link_traffic
+import decsim.records.identity as identity_records
 
 PATH = message.LinkPath
 AGGREGATE = link_settings.QuantityBasis.AGGREGATE
@@ -287,9 +288,9 @@ def test_the_traffic_json_writes_a_transfers_timing_and_identity():
     run.engine.run()
     report = run.ledger.traffic_json_value()
     transfer = report["transfers"][0]
-    operation_json = message.stable_identity_json(OPERATION_ID)
-    first_patch_json = message.stable_identity_json(1)
-    second_patch_json = message.stable_identity_json(2)
+    operation_json = identity_records.stable_identity_json(OPERATION_ID)
+    first_patch_json = identity_records.stable_identity_json(1)
+    second_patch_json = identity_records.stable_identity_json(2)
     assert transfer["path"] == "strong_buffer_to_strong_decoder"
     assert transfer["physical_alias"] == "channel-1"
     assert transfer["payload_bits"] == 4
@@ -390,8 +391,8 @@ def test_the_traffic_json_writes_a_boundary_relation():
     run.engine.run()
     report = run.ledger.traffic_json_value()
     relation = report["transfers"][0]["attribution"]["relation"]
-    source_json = message.stable_identity_json((OPERATION_ID, 3))
-    destination_json = message.stable_identity_json((OPERATION_ID, 4))
+    source_json = identity_records.stable_identity_json((OPERATION_ID, 3))
+    destination_json = identity_records.stable_identity_json((OPERATION_ID, 4))
     assert relation["source_window_key"] == source_json
     assert relation["destination_window_key"] == destination_json
     assert relation["source_revision"] == 2

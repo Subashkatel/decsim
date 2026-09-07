@@ -20,6 +20,7 @@ from typing import Callable, Optional
 
 import decsim.message as message
 import decsim.observe.trace_source as trace_source
+import decsim.records.identity as identity_records
 
 
 class DecodeRequestBuilder:
@@ -459,4 +460,4 @@ def _input_bit_count(decoder_input) -> Optional[int]:
 
 
 def _fragment_patch_order(fragment):
-    return message.stable_identity_order_key(fragment.patch_id)
+    return identity_records.stable_identity_order_key(fragment.patch_id)

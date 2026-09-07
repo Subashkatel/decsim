@@ -96,8 +96,9 @@ def _stable_columns(row: dict) -> dict:
 def test_reference_yaml_rows_equal_the_old_runners_sweep_and_links(tmp_path):
     config = experiment_config.load_experiment(REFERENCE_YAML)
     measurements = run.run_sweep(config, None)
-    summary_rows = sweep_report.summarize(measurements)
-    link_rows = sweep_report.link_rows(measurements)
+    record = sweep_report.record_of(measurements)
+    summary_rows = sweep_report.summarize(record.shots, record.window_samples)
+    link_rows = sweep_report.link_rows(record.shot_links)
     sweep_now = _written_rows(summary_rows, tmp_path, "sweep.csv")
     links_now = _written_rows(link_rows, tmp_path, "links.csv")
     sweep_path = DATA / "reference_sweep.csv"
@@ -314,3 +315,42 @@ def test_two_points_under_one_cache_do_not_share_models():
 
     assert built.builds == 3
     assert built.reuses == 0
+
+
+def test_the_summary_off_the_written_files_is_the_summary_of_the_shots(
+    tmp_path,
+):
+    """The precondition sinter meets: a folder's rows rebuild its rows.
+
+    sinter/_data/_task_stats.py keeps only additive fields, sums them in
+    __add__ and derives every rate from the summed row. A decsim run
+    folder records the same way, so reading its files back and
+    summarizing them returns the rows the run wrote.
+    """
+    config = experiment_config.load_experiment(REFERENCE_YAML)
+    task = config.point_task(
+        physical_error_probability=0.001,
+        distance=3,
+        round_period_us=1.0,
+        shots=3,
+    )
+    whole_task = collect.Unit(task, 0, task.shots)
+    measurements, _ran = collect.run_unit(whole_task, measure_shot.measure_shot)
+    record = sweep_report.record_of(measurements)
+    sweep_report.write_record(record, tmp_path)
+    shots_path = tmp_path / "shots.csv"
+    samples_path = tmp_path / "window_samples.csv"
+    shot_links_path = tmp_path / "shot_links.csv"
+
+    read_shots = sweep_report.read_rows(shots_path)
+    read_samples = sweep_report.read_rows(samples_path)
+    read_shot_links = sweep_report.read_rows(shot_links_path)
+
+    measured_summary = sweep_report.summarize(
+        record.shots, record.window_samples
+    )
+    read_summary = sweep_report.summarize(read_shots, read_samples)
+    assert read_summary == measured_summary
+    measured_links = sweep_report.link_rows(record.shot_links)
+    read_links = sweep_report.link_rows(read_shot_links)
+    assert read_links == measured_links

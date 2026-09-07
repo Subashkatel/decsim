@@ -1,11 +1,35 @@
-"""Shot measurements -> one row per sweep point -> sweep.csv and links.csv.
+"""Shot measurements -> a run folder's additive facts -> the summaries.
 
-The summary pools every decoded window of a point's shots for its medians
-and p99s, and averages the per-shot means for its means; the logical error
-rate carries its Wilson 95% interval. Nothing here runs a simulation.
+A run folder records only facts that add up: one row per shot (its
+scalar fields, and each latency point's mean and max over the shot's
+windows), one row per shot per link (that shot's own ledger counters),
+and one row per distinct microsecond value of each latency point with
+how many of the point's windows carried it. Every summary column is
+derived from those rows at read time, which is sinter's shape
+(sinter/_data/_task_stats.py: TaskStats holds shots, errors, discards,
+seconds and a Counter of custom counts, __add__ sums them, and every
+rate or interval is computed from the summed row); gem5 keeps its
+Distribution statistics the same way, as counts per bucket summed
+across simulations. So sweep.csv and links.csv read the same whether
+one process ran every shot or a Slurm array ran a seed range each, and
+`decsim combine` builds them through this module's own summarize and
+link_rows.
+
+The per-value counts file stays small because every sample is a whole
+number of ticks divided by the ticks in a microsecond
+(measure.ticks_to_microseconds). Under a fixed-latency decoder card,
+which is what an LER sweep of a million shots runs, a point's windows
+take one of a handful of tick spans, so the file's length follows the
+spread of the values and not the shot count. A wall-clock decoder
+prices its measured decode into the simulated clock and spreads the
+values wide, and those runs are the timing sweeps of hundreds of shots,
+which already write one row per window in latency_samples.csv.
+
+Nothing here runs a simulation.
 """
 
 import csv
+import dataclasses
 import functools
 import json
 import math
@@ -24,8 +48,26 @@ BULKY_FIELDS = ("samples", "means", "maxes", "link_totals")
 # point's place in the sweep's task order and then by seed. Both orders
 # come from the rows and the sweep, never from the order the folders
 # were named.
-POINT_ORDERED_FILES = ("sweep.csv", "links.csv")
-TASK_ORDERED_FILES = ("shots.csv", "latency_samples.csv")
+POINT_ORDERED_FILES = ("sweep.csv", "links.csv", "window_samples.csv")
+TASK_ORDERED_FILES = ("shots.csv", "shot_links.csv", "latency_samples.csv")
+
+
+@dataclasses.dataclass(frozen=True)
+class RunRecord:
+    """The additive facts one or more run folders hold.
+
+    Each field is a list of csv rows and each list is one file of the
+    run folder: shots.csv, shot_links.csv, window_samples.csv and
+    latency_samples.csv. No field holds a summary, so two folders'
+    records join by concatenation (the window samples' counts add), and
+    the summaries derived from the join are the summaries a single run
+    over the same shots would have written.
+    """
+
+    shots: list
+    shot_links: list
+    window_samples: list
+    latency_samples: list
 
 
 def wilson_interval(failures: int, shots: int, z: float = 1.96) -> tuple:
@@ -46,88 +88,102 @@ def wilson_interval(failures: int, shots: int, z: float = 1.96) -> tuple:
     return (max(0.0, low), min(1.0, high))
 
 
-def percentile(values: list, fraction: float) -> float:
-    """The value at `fraction` of the sorted samples, nearest rank."""
-    if not values:
+def percentile_of_counts(multiset: dict, fraction: float) -> float:
+    """The value at `fraction` of the samples, nearest rank.
+
+    multiset maps a microsecond value to how many samples carry it.
+    Expanding it and sorting gives the list this walks in place, so a
+    point's percentile is the same however its shots were split across
+    processes or shards.
+    """
+    total = _total_count(multiset)
+    if total == 0:
         return 0.0
-    ordered = sorted(values)
-    last_index = len(ordered) - 1
+    last_index = total - 1
     position = fraction * last_index
     rounded = round(position)
     index = min(last_index, int(rounded))
-    return ordered[index]
+    return _value_at_index(multiset, index)
 
 
-def sweep_point_of(measurement) -> tuple:
-    """The point a shot belongs to: distance, p, algorithm, round period."""
+def sweep_point_of(row: dict) -> tuple:
+    """The point a row belongs to: distance, p, algorithm, round period."""
     return (
-        measurement.distance,
-        measurement.physical_error_probability,
-        measurement.algorithm,
-        measurement.round_period_us,
+        row["distance"],
+        row["physical_error_probability"],
+        row["algorithm"],
+        row["round_period_us"],
     )
 
 
-def grouped_by_sweep_point(measurements: list) -> list:
-    """(sweep point, that point's shots) pairs, in a stable order."""
+def grouped_by_sweep_point(rows: list) -> list:
+    """(sweep point, that point's rows) pairs, in a stable order."""
     points = set()
-    for measurement in measurements:
-        point = sweep_point_of(measurement)
+    for row in rows:
+        point = sweep_point_of(row)
         points.add(point)
     ordered_points = sorted(points, key=_sweep_point_order)
     groups = []
     for point in ordered_points:
-        group = _shots_at_point(measurements, point)
+        group = _rows_at_point(rows, point)
         groups.append((point, group))
     return groups
 
 
-def summarize_point(group: list) -> dict:
+def summarize_point(shots: list, counts: dict) -> dict:
     """One sweep point: means over seeds of per-shot means, max of maxes."""
-    point = sweep_point_of(group[0])
+    point = sweep_point_of(shots[0])
     distance, physical_error_probability, algorithm, round_period_us = point
-    failures = _count_true(group, "logical_failure")
-    shots = len(group)
-    ler_low, ler_high = wilson_interval(failures, shots)
+    failures = _count_true(shots, "logical_failure")
+    shot_count = len(shots)
+    ler_low, ler_high = wilson_interval(failures, shot_count)
     row = {
         "distance": distance,
         "physical_error_probability": physical_error_probability,
         "algorithm": algorithm,
         "round_period_us": round_period_us,
-        "shots": shots,
-        "windows_per_shot": _mean_of(group, "windows"),
+        "shots": shot_count,
+        "windows_per_shot": _mean_of(shots, "windows"),
         "logical_failures": failures,
-        "logical_error_rate": failures / shots,
+        "logical_error_rate": failures / shot_count,
         "ler_wilson_low": ler_low,
         "ler_wilson_high": ler_high,
-        "direct_pymatching_failures": _count_true(group, "direct_failure"),
+        "direct_pymatching_failures": _count_true(shots, "direct_failure"),
         "prediction_mismatches_vs_direct": _count_true(
-            group, "direct_mismatch"
+            shots, "direct_mismatch"
         ),
         "throughput_windows_per_us": _mean_of(
-            group, "throughput_windows_per_us"
+            shots, "throughput_windows_per_us"
         ),
-        "throughput_rounds_per_us": _mean_of(group, "throughput_rounds_per_us"),
-        "max_queued_windows": _max_of(group, "max_queued_windows"),
+        "throughput_rounds_per_us": _mean_of(shots, "throughput_rounds_per_us"),
+        "max_queued_windows": _max_of(shots, "max_queued_windows"),
         "tesseract_windows_checked": _sum_of(
-            group, "tesseract_windows_checked"
+            shots, "tesseract_windows_checked"
         ),
         "tesseract_window_disagreements": _sum_of(
-            group, "tesseract_window_disagreements"
+            shots, "tesseract_window_disagreements"
         ),
-        "load": _mean_of(group, "load"),
-        "sim_wall_seconds_per_shot": _mean_of(group, "sim_wall_seconds"),
+        "load": _mean_of(shots, "load"),
+        "sim_wall_seconds_per_shot": _mean_of(shots, "sim_wall_seconds"),
     }
     for name in measure.POINTS:
-        _add_point_columns(row, group, name)
+        multiset = counts.get((point, name), {})
+        _add_point_columns(row, shots, name, multiset)
     return row
 
 
-def summarize(measurements: list) -> list:
-    """One row per sweep point, in a stable order."""
+def summarize(shots: list, window_samples: list) -> list:
+    """One row per sweep point, in a stable order.
+
+    The two arguments are the additive files a run folder writes: the
+    per-shot rows and the per-value counts. The same code runs whether
+    they were just measured in this process or read back out of the
+    folders `decsim combine` was given.
+    """
+    counts = _counts_of_rows(window_samples)
     rows = []
-    for _point, group in grouped_by_sweep_point(measurements):
-        row = summarize_point(group)
+    for _point, group in grouped_by_sweep_point(shots):
+        row = summarize_point(group, counts)
         rows.append(row)
     return rows
 
@@ -154,33 +210,64 @@ def terminal_lines(rows: list) -> list:
     return joined_blocks.split("\n")
 
 
-def link_rows(measurements: list) -> list:
+def link_rows(shot_links: list) -> list:
     """One row per sweep point per link, averaged over the point's shots.
 
-    The totals come straight off each run's TrafficCounters; nothing
+    The totals came straight off each shot's TrafficCounters; nothing
     here re-counts transfers.
     """
     rows = []
-    for point, group in grouped_by_sweep_point(measurements):
-        paths = sorted(group[0].link_totals)
-        for path in paths:
+    for point, group in grouped_by_sweep_point(shot_links):
+        for path in _links_of(group):
             row = _link_row(point, group, path)
             rows.append(row)
     return rows
 
 
 def shot_rows(measurements: list) -> list:
-    """One row per shot: every scalar field plus each point's mean.
+    """One row per shot: its scalars, then each point's mean and max.
 
-    Any aggregate can then be re-cut without rerunning the sweep.
+    Any aggregate can then be re-cut without rerunning the sweep, and a
+    point's mean and max columns fold over any set of shots.
     """
     rows = []
     for measurement in measurements:
         row = _scalar_fields(measurement)
         for name in measure.POINTS:
             row[f"{name}_mean_us"] = measurement.means[name]
+        for name in measure.POINTS:
+            row[f"{name}_max_us"] = measurement.maxes[name]
         rows.append(row)
     return rows
+
+
+def shot_link_rows(measurements: list) -> list:
+    """One row per shot per link: that shot's own ledger counters.
+
+    links.csv is the mean of these over a point's shots. They are a
+    file of their own rather than sixty more columns of shots.csv
+    because the link set is data and not schema: the counters are the
+    columns links.csv already has, so the summary is a mean over rows,
+    and a topology with another link adds rows and moves no column.
+    """
+    rows = []
+    for measurement in measurements:
+        point = _measured_point(measurement)
+        for path in sorted(measurement.link_totals):
+            row = _shot_link_row(point, measurement, path)
+            rows.append(row)
+    return rows
+
+
+def window_sample_rows(measurements: list) -> list:
+    """One row per point, latency point and distinct value: its count.
+
+    The multiset of a point's window samples, which is all its median
+    and p99 columns need and all a shard has to record for another
+    process to reach the same numbers.
+    """
+    counts = _counts_of_samples(measurements)
+    return _rows_of_counts(counts)
 
 
 def latency_sample_rows(measurements: list) -> list:
@@ -208,6 +295,27 @@ def latency_sample_rows(measurements: list) -> list:
             }
             rows.append(row)
     return rows
+
+
+def record_of(measurements: list) -> RunRecord:
+    """The additive facts of the shots this process measured."""
+    shots = shot_rows(measurements)
+    links = shot_link_rows(measurements)
+    samples = window_sample_rows(measurements)
+    latency = latency_sample_rows(measurements)
+    return RunRecord(shots, links, samples, latency)
+
+
+def write_record(record: RunRecord, report_dir: Path) -> None:
+    """The record's four files; one with no rows is not written."""
+    shots_path = report_dir / "shots.csv"
+    _write_rows(record.shots, shots_path)
+    links_path = report_dir / "shot_links.csv"
+    _write_rows(record.shot_links, links_path)
+    samples_path = report_dir / "window_samples.csv"
+    _write_rows(record.window_samples, samples_path)
+    latency_path = report_dir / "latency_samples.csv"
+    _write_rows(record.latency_samples, latency_path)
 
 
 def read_rows(path: Path) -> list:
@@ -260,29 +368,113 @@ def combine(run_dirs: list, out_dir: Path) -> list:
 
 
 def write_report(
-    rows: list, report_dir: Path, measurements: Optional[list] = None
+    rows: list, report_dir: Path, record: Optional[RunRecord] = None
 ) -> None:
-    """sweep.csv per point, and the per-shot files when measurements come.
+    """sweep.csv per point, and the additive files when a record comes.
 
-    shots.csv is one row per shot, links.csv the per-link ledger totals
-    and latency_samples.csv one row per decoded window of a wall-clock
-    algorithm.
+    links.csv is derived from the record's per-shot link rows, so a
+    combined folder's file is built the way a single run's file was.
     """
     report_dir.mkdir(parents=True, exist_ok=True)
     sweep_path = report_dir / "sweep.csv"
     write_csv(rows, sweep_path)
-    if not measurements:
+    if record is None:
         return
-    shots_path = report_dir / "shots.csv"
-    per_shot = shot_rows(measurements)
-    write_csv(per_shot, shots_path)
+    write_record(record, report_dir)
+    per_link = link_rows(record.shot_links)
     links_path = report_dir / "links.csv"
-    per_link = link_rows(measurements)
     write_csv(per_link, links_path)
-    samples = latency_sample_rows(measurements)
-    if samples:
-        samples_path = report_dir / "latency_samples.csv"
-        write_csv(samples, samples_path)
+
+
+def _write_rows(rows: list, path: Path) -> None:
+    """One file of the record, left unwritten when it has no rows."""
+    if not rows:
+        return
+    write_csv(rows, path)
+
+
+def _total_count(multiset: dict) -> int:
+    """How many samples the multiset holds."""
+    total = 0
+    for count in multiset.values():
+        total += count
+    return total
+
+
+def _value_at_index(multiset: dict, index: int) -> float:
+    """The value at that place in the multiset's sorted samples."""
+    ordered = sorted(multiset)
+    at_index = ordered[-1]
+    seen = 0
+    for value in ordered:
+        seen += multiset[value]
+        if index < seen:
+            at_index = value
+            break
+    return at_index
+
+
+def _counts_of_samples(measurements: list) -> dict:
+    """(point, latency point) -> value -> how many windows carried it."""
+    counts = {}
+    for measurement in measurements:
+        point = _measured_point(measurement)
+        for name, values in measurement.samples.items():
+            at_this_name = counts.setdefault((point, name), {})
+            _count_the_values(at_this_name, values)
+    return counts
+
+
+def _count_the_values(multiset: dict, values: list) -> None:
+    """Add one shot's samples of one latency point to the multiset."""
+    for value in values:
+        already = multiset.get(value, 0)
+        multiset[value] = already + 1
+
+
+def _counts_of_rows(window_samples: list) -> dict:
+    """The same multisets, read back off window_samples.csv rows."""
+    counts = {}
+    for row in window_samples:
+        point = sweep_point_of(row)
+        key = (point, row["name"])
+        at_this_name = counts.setdefault(key, {})
+        value = row["value_us"]
+        already = at_this_name.get(value, 0)
+        at_this_name[value] = already + row["count"]
+    return counts
+
+
+def _rows_of_counts(counts: dict) -> list:
+    """The multisets as rows: point order, then point-list order, value."""
+    rows = []
+    for key in sorted(counts, key=_point_and_name_order):
+        multiset = counts[key]
+        for row in _rows_of_one_multiset(key, multiset):
+            rows.append(row)
+    return rows
+
+
+def _rows_of_one_multiset(key: tuple, multiset: dict) -> list:
+    """One latency point's counts at one sweep point, by rising value."""
+    point, name = key
+    columns = _point_columns(point)
+    rows = []
+    for value in sorted(multiset):
+        row = dict(columns)
+        row["name"] = name
+        row["value_us"] = value
+        row["count"] = multiset[value]
+        rows.append(row)
+    return rows
+
+
+def _point_and_name_order(key: tuple) -> tuple:
+    """A (point, latency point) key where a single run would write it."""
+    point, name = key
+    place = measure.POINTS.index(name)
+    point_order = _sweep_point_order(point)
+    return (point_order, place)
 
 
 def _typed_row(row: dict) -> dict:
@@ -370,7 +562,7 @@ def _in_task_and_seed_order(rows: list, positions: dict) -> list:
     """Per-shot rows in the sweep's own order: the task, then the seed.
 
     Sorting is stable, so a point's several rows for one seed (one per
-    decoded window) keep the order the run wrote them in.
+    decoded window, or one per link) keep the order the run wrote them.
     """
     order = functools.partial(_row_task_and_seed, positions)
     return sorted(rows, key=order)
@@ -406,12 +598,7 @@ def _in_sweep_point_order(rows: list) -> list:
 
 def _row_point_order(row: dict) -> tuple:
     """A csv row's sweep point, in the order summarize writes points."""
-    point = (
-        row["distance"],
-        row["physical_error_probability"],
-        row["algorithm"],
-        row["round_period_us"],
-    )
+    point = sweep_point_of(row)
     return _sweep_point_order(point)
 
 
@@ -444,13 +631,34 @@ def _refuse_the_folders(row: dict, run_dirs: list) -> None:
     )
 
 
-def _shots_at_point(measurements: list, point: tuple) -> list:
-    """Every shot of one sweep point, in the order it was measured."""
+def _rows_at_point(rows: list, point: tuple) -> list:
+    """Every row of one sweep point, in the order it was written."""
     group = []
-    for measurement in measurements:
-        if sweep_point_of(measurement) == point:
-            group.append(measurement)
+    for row in rows:
+        if sweep_point_of(row) == point:
+            group.append(row)
     return group
+
+
+def _measured_point(measurement) -> tuple:
+    """The sweep point one measured shot belongs to."""
+    return (
+        measurement.distance,
+        measurement.physical_error_probability,
+        measurement.algorithm,
+        measurement.round_period_us,
+    )
+
+
+def _point_columns(point: tuple) -> dict:
+    """The four columns that name a sweep point."""
+    distance, physical_error_probability, algorithm, round_period_us = point
+    return {
+        "distance": distance,
+        "physical_error_probability": physical_error_probability,
+        "algorithm": algorithm,
+        "round_period_us": round_period_us,
+    }
 
 
 def _scalar_fields(measurement) -> dict:
@@ -460,6 +668,17 @@ def _scalar_fields(measurement) -> dict:
         if name in BULKY_FIELDS:
             continue
         row[name] = getattr(measurement, name)
+    return row
+
+
+def _shot_link_row(point: tuple, measurement, path: str) -> dict:
+    """One shot's ledger counters on one link."""
+    row = _point_columns(point)
+    row["seed"] = measurement.seed
+    row["link"] = path
+    counters = measurement.link_totals[path]
+    for counter, value in counters.items():
+        row[counter] = value
     return row
 
 
@@ -475,58 +694,52 @@ def _sweep_point_order(point: tuple) -> tuple:
     )
 
 
-def _count_true(group: list, field: str) -> int:
+def _count_true(rows: list, field: str) -> int:
     """How many of the point's shots have that flag set."""
     count = 0
-    for measurement in group:
-        flag = getattr(measurement, field)
+    for row in rows:
+        flag = row[field]
         count += bool(flag)
     return count
 
 
-def _sum_of(group: list, field: str):
+def _sum_of(rows: list, field: str):
     """The field summed over the point's shots."""
     total = 0
-    for measurement in group:
-        total += getattr(measurement, field)
+    for row in rows:
+        total += row[field]
     return total
 
 
-def _mean_of(group: list, field: str) -> float:
-    """The field averaged over the point's shots."""
+def _mean_of(rows: list, field: str) -> float:
+    """The field averaged over the rows, in the order they were written."""
     values = []
-    for measurement in group:
-        value = getattr(measurement, field)
-        values.append(value)
+    for row in rows:
+        values.append(row[field])
     return statistics.fmean(values)
 
 
-def _max_of(group: list, field: str):
-    """The field's largest value over the point's shots."""
+def _max_of(rows: list, field: str):
+    """The field's largest value over the rows."""
     values = []
-    for measurement in group:
-        value = getattr(measurement, field)
-        values.append(value)
+    for row in rows:
+        values.append(row[field])
     return max(values)
 
 
-def _add_point_columns(row: dict, group: list, name: str) -> None:
+def _add_point_columns(
+    row: dict, shots: list, name: str, multiset: dict
+) -> None:
     """One latency point's mean, median, p99 and max columns.
 
-    The mean averages the per-shot means; the median and p99 come from
-    every decoded window of every shot pooled.
+    The mean averages the per-shot means and the max takes the largest
+    per-shot max, both off the per-shot rows; the median and p99 come
+    from the multiset of every decoded window of the point.
     """
-    pooled = []
-    per_shot_means = []
-    per_shot_maxes = []
-    for measurement in group:
-        pooled.extend(measurement.samples[name])
-        per_shot_means.append(measurement.means[name])
-        per_shot_maxes.append(measurement.maxes[name])
-    row[f"{name}_mean_us"] = statistics.fmean(per_shot_means)
-    row[f"{name}_median_us"] = percentile(pooled, 0.50)
-    row[f"{name}_p99_us"] = percentile(pooled, 0.99)
-    row[f"{name}_max_us"] = max(per_shot_maxes)
+    row[f"{name}_mean_us"] = _mean_of(shots, f"{name}_mean_us")
+    row[f"{name}_median_us"] = percentile_of_counts(multiset, 0.50)
+    row[f"{name}_p99_us"] = percentile_of_counts(multiset, 0.99)
+    row[f"{name}_max_us"] = _max_of(shots, f"{name}_max_us")
 
 
 def _terminal_block(row: dict) -> str:
@@ -559,40 +772,42 @@ def _algorithm_text(algorithm) -> str:
     return f"{algorithm:g} us"
 
 
-def _link_row(point: tuple, group: list, path: str) -> dict:
+def _links_of(shot_links: list) -> list:
+    """Every link these rows carry, in the order links.csv lists them."""
+    paths = set()
+    for row in shot_links:
+        paths.add(row["link"])
+    return sorted(paths)
+
+
+def _link_row(point: tuple, shot_links: list, path: str) -> dict:
     """One link's averaged counters at one sweep point."""
-    distance, physical_error_probability, algorithm, round_period_us = point
-    per_shot = []
-    for measurement in group:
-        per_shot.append(measurement.link_totals[path])
-    transfers = _mean_of_counter(per_shot, "transfers")
-    payload_bits = _mean_of_counter(per_shot, "payload_bits")
+    at_this_link = _rows_of_one_link(shot_links, path)
+    transfers = _mean_of(at_this_link, "transfers")
+    payload_bits = _mean_of(at_this_link, "payload_bits")
     bits_per_transfer = 0.0
     if transfers:
         bits_per_transfer = payload_bits / transfers
-    return {
-        "distance": distance,
-        "physical_error_probability": physical_error_probability,
-        "algorithm": algorithm,
-        "round_period_us": round_period_us,
-        "link": path,
-        "transfers_per_shot": transfers,
-        "payload_bits_per_shot": payload_bits,
-        "bits_per_transfer": bits_per_transfer,
-        "unknown_payload_transfers_per_shot": _mean_of_counter(
-            per_shot, "unknown_payload_transfers"
-        ),
-        "queue_wait_us_per_shot": _mean_of_counter(per_shot, "queue_wait_us"),
-        "serialization_us_per_shot": _mean_of_counter(
-            per_shot, "serialization_us"
-        ),
-        "propagation_us_per_shot": _mean_of_counter(per_shot, "propagation_us"),
-    }
+    row = _point_columns(point)
+    row["link"] = path
+    row["transfers_per_shot"] = transfers
+    row["payload_bits_per_shot"] = payload_bits
+    row["bits_per_transfer"] = bits_per_transfer
+    row["unknown_payload_transfers_per_shot"] = _mean_of(
+        at_this_link, "unknown_payload_transfers"
+    )
+    row["queue_wait_us_per_shot"] = _mean_of(at_this_link, "queue_wait_us")
+    row["serialization_us_per_shot"] = _mean_of(
+        at_this_link, "serialization_us"
+    )
+    row["propagation_us_per_shot"] = _mean_of(at_this_link, "propagation_us")
+    return row
 
 
-def _mean_of_counter(per_shot: list, counter: str) -> float:
-    """One ledger counter averaged over a point's shots."""
-    values = []
-    for totals in per_shot:
-        values.append(totals[counter])
-    return statistics.fmean(values)
+def _rows_of_one_link(shot_links: list, path: str) -> list:
+    """Every shot's row on one link, in the order the shots ran."""
+    rows = []
+    for row in shot_links:
+        if row["link"] == path:
+            rows.append(row)
+    return rows

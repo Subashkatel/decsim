@@ -533,7 +533,7 @@ def test_outside_name_annotation_is_declared_but_not_runtime_validated():
 
 @pytest.mark.parametrize("broken_selector", ("operation", "patch"))
 def test_layout_selectors_must_return_the_exact_declared_code(broken_selector):
-    """program_records.Operation and patch layout selectors reject equal but distinct code objects."""
+    """Operation and patch layout selectors reject equal but distinct code objects."""
     declared = SurfaceCodeModel()
     alternate = SurfaceCodeModel()
     layout = IdentityBreakingLayout(declared, alternate, broken_selector)

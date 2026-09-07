@@ -70,6 +70,16 @@ escalation:
 #     min_escalation_rate: 1e-5    # the target's floor
 #     max_escalation_rate: 0.30    # the target's cap: the Theorem 1 backlog
 #                                  # bound on strong duty
+#   run_both_at_once: false        # Toshio 2510.25222 Sec. III A Step 1 (lines
+#                                  # 598-600): the strong decoder starts with the
+#                                  # weak one on the same syndrome and is cancelled
+#                                  # when the weak result is confident. false, the
+#                                  # default, is the same section's on-demand
+#                                  # variant (lines 631-640): the strong decode
+#                                  # starts at the verdict, after the
+#                                  # weak_decoder_to_strong_decoder hop, which the
+#                                  # paper expects to cost little because the
+#                                  # switching rate decays with the code distance
 #   double_window: false           # the paper's Sec. III C scheme: the weak
 #                                  # chain keeps committing past an escalated
 #                                  # strong window; false = serial escalation
@@ -186,10 +196,9 @@ links:                             # one card per path; null = the logical_refer
   controller_to_strong_buffer: null
                                    # controller -> syndrome buffer 1 (the strong
                                    # buffer), one round. Parallel switching
-                                   # (run_both_at_once, a Python-level Switching
-                                   # knob) builds the strong job at weak
-                                   # readiness, so this hop must not lag the
-                                   # buffer 0 publication path
+                                   # (escalation.run_both_at_once) builds the strong
+                                   # job at weak readiness, so this hop must not lag
+                                   # the buffer 0 publication path
                                    # (controller_to_weak_buffer); a slower one
                                    # refuses loudly at strong-job build
                                    # ("controller_to_strong_buffer lag beyond

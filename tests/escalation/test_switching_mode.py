@@ -160,6 +160,63 @@ def test_a_wider_restart_re_read_and_another_kind_are_refused(tmp_path):
         load_experiment(weak_path)
 
 
+def _parallel_variant_card(run_both_at_once) -> dict:
+    """The switching card with Sec. III A's Step 1 asked for, or not."""
+    escalation = {
+        "kind": "switching",
+        "gap_threshold_db": 20.0,
+        "run_both_at_once": run_both_at_once,
+    }
+    strong_decoder = strong_unit("belief_matching")
+    card = {"escalation": escalation}
+    card.update(strong_decoder)
+    return card
+
+
+def _strong_request_counts(tmp_path, card: dict):
+    """One shot of the switching card, and its strong-request counts."""
+    from decsim.machine import Machine
+
+    tmp_path.mkdir()
+    config_path = write_config(tmp_path, card)
+    config = load_experiment(config_path)
+    settings = config.point_settings(
+        physical_error_probability=NEAR_THRESHOLD_P,
+        distance=3,
+        round_period_us=1.0,
+    )
+    machine = Machine.build(settings, 0)
+    machine.run()
+    return machine.decoder_manager.strong_requests.counts
+
+
+def test_the_yaml_asks_for_the_papers_parallel_variant(tmp_path):
+    """Toshio 2510.25222 Sec. III A: Step 1 runs both decoders at once.
+
+    The default is the same section's on-demand variant (lines 631-640),
+    where a confident window makes no strong request at all; under
+    run_both_at_once every window's strong sibling starts and a
+    confident window cancels it.
+    """
+    on_demand_card = _parallel_variant_card(False)
+    parallel_card = _parallel_variant_card(True)
+    on_demand_directory = tmp_path / "on_demand"
+    parallel_directory = tmp_path / "parallel"
+    on_demand = _strong_request_counts(on_demand_directory, on_demand_card)
+    parallel = _strong_request_counts(parallel_directory, parallel_card)
+
+    assert on_demand.cancelled == 0
+    assert parallel.cancelled > 0
+
+
+def test_a_run_both_at_once_that_is_not_a_flag_is_refused(tmp_path):
+    card = _parallel_variant_card("yes")
+    config_path = write_config(tmp_path, card)
+    sentence = "escalation.run_both_at_once must be true or false, got 'yes'"
+    with pytest.raises(ValueError, match=sentence):
+        load_experiment(config_path)
+
+
 def test_threshold_converts_decibels_to_natural_log_weight(tmp_path):
     config_path = switching_config(tmp_path, 20.0)
     config = load_experiment(config_path)

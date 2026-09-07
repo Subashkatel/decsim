@@ -754,7 +754,9 @@ def _escalation_policy(settings: decoder_settings.EscalationSettings):
     if row is escalation_policies.Switching:
         threshold = _threshold_source(settings)
         signal = _confidence_signal()
-        return escalation_policies.Switching(threshold, signal.source)
+        return escalation_policies.Switching(
+            threshold, signal.source, run_both_at_once=settings.run_both_at_once
+        )
     return row()
 
 

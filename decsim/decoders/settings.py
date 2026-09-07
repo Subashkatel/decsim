@@ -33,6 +33,7 @@ RESTART_REREAD_BUFFER_REGIONS = (0, 1)
 ESCALATION_KEYS = (
     "kind",
     "gap_threshold_db",
+    "run_both_at_once",
     "double_window",
     "restart_reread_buffer_regions",
     "gap_computation",
@@ -243,7 +244,10 @@ class EscalationSettings:
     given, table looks the sweep point up in an offline calibration csv
     (threshold_column, calibrated for this run's window geometry),
     online starts there and adapts it across a point's shots, serial
-    switching only; double_window is the paper's Sec. III C scheme, and
+    switching only; run_both_at_once is Sec. III A's Step 1, the strong
+    decoder started with the weak one and cancelled on confidence
+    (false, the default, is the same section's on-demand variant, lines
+    631-640); double_window is the paper's Sec. III C scheme, and
     restart_reread_buffer_regions is how many of the strong region's
     buffer regions the restarted weak window re-reads under it;
     gap_computation is where the two forced solves run (serial on one
@@ -260,6 +264,7 @@ class EscalationSettings:
     threshold_table: Optional[str] = None
     threshold_column: Optional[str] = None
     online: Optional[OnlineThresholdSettings] = None
+    run_both_at_once: bool = False
     double_window: bool = False
     restart_reread_buffer_regions: int = 0
     gap_computation: str = "serial"
@@ -399,12 +404,8 @@ def _switching_settings(
         threshold_column = str(raw_column)
     online = _online_settings(section, threshold_source)
     gap_computation, gap_units = _gap_computation(section)
-    double_window = section.get("double_window", False)
-    if double_window not in (True, False):
-        raise ValueError(
-            "escalation.double_window must be true or false, got "
-            f"{double_window!r}"
-        )
+    run_both_at_once = _switching_boolean(section, "run_both_at_once")
+    double_window = _switching_boolean(section, "double_window")
     _check_serial_only(gap_computation, threshold_source, double_window)
     reread_regions = _restart_reread_buffer_regions(section)
     threshold_table = section.get("threshold_table")
@@ -416,12 +417,23 @@ def _switching_settings(
         threshold_table=threshold_table,
         threshold_column=threshold_column,
         online=online,
+        run_both_at_once=run_both_at_once,
         double_window=double_window,
         restart_reread_buffer_regions=reread_regions,
         gap_computation=gap_computation,
         gap_units=gap_units,
         base_directory=base_directory,
     )
+
+
+def _switching_boolean(section: Mapping, key: str) -> bool:
+    """One of the switching section's on-or-off knobs, off when silent."""
+    value = section.get(key, False)
+    if value not in (True, False):
+        raise ValueError(
+            f"escalation.{key} must be true or false, got {value!r}"
+        )
+    return value
 
 
 def _restart_reread_buffer_regions(section: Mapping) -> int:

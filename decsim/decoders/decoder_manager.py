@@ -32,7 +32,11 @@ import decsim.records.windows as window_records
 
 
 class DecoderManager:
-    """Admits, cancels, withdraws, releases and settles every decode."""
+    """Admits, cancels, withdraws, releases and settles every decode.
+
+    Seven attributes: the six one-job components the module docstring
+    names, and the engine it logs and reads the clock on.
+    """
 
     def __init__(
         self,
@@ -51,6 +55,7 @@ class DecoderManager:
     ):
         if unit_pools is None:
             unit_pools = {"default": num_units}
+        self.engine = engine
         pool = decoder_pool_module.DecoderPool(
             router, unit_pools, decoder_memory
         )
@@ -94,6 +99,10 @@ class DecoderManager:
         """The pool the dispatcher and the service share."""
         return self.service.pool
 
+    def copy_sources(self) -> list:
+        """The copy_made sources of the manager's own hops, in hop order."""
+        return [self.service.staging.copy_made, self.gap_joins.copy_made]
+
     # ---------------------------------------------------------- admission
 
     def enqueue(
@@ -110,7 +119,7 @@ class DecoderManager:
         ``on_decoded(job, result)`` is where the result goes.
         """
         _refuse_spent_job(job)
-        self.strong_requests.admit(job, self.queue.engine.now)
+        self.strong_requests.admit(job, self.engine.now)
         job.submitted = True
         job.send_input = send_input
         job.on_decoded = on_decoded
@@ -142,7 +151,7 @@ class DecoderManager:
             operation_id=-1,
             window_id=0,
             round_count=round_count,
-            ready_time=self.queue.engine.now,
+            ready_time=self.engine.now,
             on_done=on_done,
             label=label,
             code=code,
@@ -205,7 +214,7 @@ class DecoderManager:
             decoding_records.RequestProcessingOutcome.WEAK_WITHDRAWN_FOR_STRONG_WINDOW,
             None,
         )
-        self.queue.engine.log(
+        self.engine.log(
             decode_queue.LOG_SOURCE,
             f"WITHDRAW {job.label} (invalidated before start)",
         )
@@ -313,7 +322,7 @@ class DecoderManager:
         job.completed = True
         self.service.free(job)
         self.service.release_input(job)
-        self.queue.engine.log(
+        self.engine.log(
             decode_queue.LOG_SOURCE, f"DECODE DONE {job.label} (gap half)"
         )
         sibling_weight = None
@@ -330,7 +339,7 @@ class DecoderManager:
         self, job: decoding_records.DecodeJob, result
     ) -> None:
         self.service.release_input(job)
-        now = self.queue.engine.now
+        now = self.engine.now
         deliveries = self.strong_requests.deliveries_for(job, result, now)
         job.completed = True
         self.service.free(job)
@@ -350,7 +359,7 @@ class DecoderManager:
         self.service.release_input(job)
         pool_tag = decode_queue.pool_tag_of(job.pool)
         free_now = self.service.free_unit_count(job.pool)
-        self.queue.engine.log(
+        self.engine.log(
             decode_queue.LOG_SOURCE,
             f"DECODE DONE {job.label} ({pool_tag}units free now {free_now})",
         )
@@ -362,8 +371,7 @@ class DecoderManager:
     ) -> None:
         job.completed = True
         self.service.free(job)
-        key = (job.operation_id, job.window_id)
-        if key in self.gap_joins.joins_by_window:
+        if self.gap_joins.has_join(job):
             # the unit is free either way; the OUTCOME waits at the join
             self.service.release_input(job)
         joined_result = self.gap_joins.take_weak_result(job, result)

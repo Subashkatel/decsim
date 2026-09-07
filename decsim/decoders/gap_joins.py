@@ -59,7 +59,7 @@ class GapJoins:
         self.is_enabled = is_enabled
         # (operation_id, window_id) -> the join, from the sibling's spawn until
         # the join concludes the window
-        self.joins_by_window: dict[tuple, _GapJoin] = {}
+        self._joins_by_window: dict[tuple, _GapJoin] = {}
         self.copy_made = trace_source.TraceSource()
 
     def spawn(self, job: decoding_records.DecodeJob) -> None:
@@ -78,10 +78,10 @@ class GapJoins:
         if not self._wants_sibling(job):
             return
         key = (job.operation_id, job.window_id)
-        if key in self.joins_by_window:
+        if key in self._joins_by_window:
             return
         sibling = self._sibling_job(job, key)
-        self.joins_by_window[key] = _GapJoin()
+        self._joins_by_window[key] = _GapJoin()
         payload_bits = sibling.payload_bits()
         self.copy_made.fire(
             job, payload_bits, job.memory.name, GAP_SIBLING_INPUT
@@ -106,7 +106,7 @@ class GapJoins:
         and comes back from sibling_done.
         """
         key = (job.operation_id, job.window_id)
-        join = self.joins_by_window.get(key)
+        join = self._joins_by_window.get(key)
         if join is None:
             return result
         if not join.sibling_reported:
@@ -117,7 +117,7 @@ class GapJoins:
                 f"GAP JOIN {job.label}: holding for the sibling half",
             )
             return None
-        del self.joins_by_window[key]
+        del self._joins_by_window[key]
         _attach_gap(result, join.sibling_weight)
         return result
 
@@ -128,7 +128,7 @@ class GapJoins:
 
         None while the primary decode is still running.
         """
-        join = self.joins_by_window.get(key)
+        join = self._joins_by_window.get(key)
         if join is None:
             raise RuntimeError(
                 f"gap sibling finished for window {key} with no join entry"
@@ -137,13 +137,18 @@ class GapJoins:
         join.sibling_weight = sibling_weight
         if join.held_weak_job is None:
             return None
-        del self.joins_by_window[key]
+        del self._joins_by_window[key]
         _attach_gap(join.held_weak_result, sibling_weight)
         return join.held_weak_job, join.held_weak_result
 
+    def has_join(self, job: decoding_records.DecodeJob) -> bool:
+        """Whether this job's window has a rendezvous still open."""
+        key = (job.operation_id, job.window_id)
+        return key in self._joins_by_window
+
     def unresolved_windows(self) -> list:
         """The windows whose join has not concluded, sorted."""
-        return sorted(self.joins_by_window)
+        return sorted(self._joins_by_window)
 
     def _wants_sibling(self, job: decoding_records.DecodeJob) -> bool:
         if not self.is_enabled:

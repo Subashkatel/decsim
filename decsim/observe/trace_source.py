@@ -32,6 +32,11 @@ class TraceSource:
             listener(*values)
 
     @property
+    def listeners(self) -> tuple:
+        """Everyone hearing this source, in connection order."""
+        return tuple(self._listeners)
+
+    @property
     def has_listeners(self) -> bool:
         """Whether anyone hears this source; asked before costly work."""
         return bool(self._listeners)
@@ -50,6 +55,11 @@ class SilentSource:
     def connect(self, listener: Callable) -> None:
         """There is nothing to hear, so the listener is not kept."""
         del listener
+
+    @property
+    def listeners(self) -> tuple:
+        """No one, because the event never happens."""
+        return ()
 
     @property
     def has_listeners(self) -> bool:

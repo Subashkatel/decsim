@@ -259,7 +259,7 @@ def test_one_rounds_flow_chain_equals_the_round_events_recorded(traced):
     """The file's chain for round 1 is the recorder's chain for round 1."""
     machine, _result, document = traced
     recorded = []
-    for event in machine.round_events.events:
+    for event in machine.observation.round_events.events:
         if (event.operation_id, event.round_index) != (1, 1):
             continue
         recorded.append((event.kind, event.tick))

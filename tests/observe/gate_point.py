@@ -89,7 +89,7 @@ def captured_fields(machine, result) -> dict:
         "max_queue_depth": max(depths, default=0),
         "runtime_timestamps": _stamp_rows(stamps),
         "controller_idle_rounds": observation.controller_counters.idle_rounds,
-        "packing_drops": machine.round_events.packing_drops,
+        "packing_drops": machine.observation.round_events.packing_drops,
         "strong_needed": strong_requests.counts.needed,
         "strong_cancelled": strong_requests.counts.cancelled,
     }

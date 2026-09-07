@@ -22,6 +22,8 @@ import decsim.observe.log_writers as log_writers
 import decsim.observe.metrics as metrics
 import decsim.observe.queue_depth as queue_depth_module
 import decsim.observe.result_ledger as result_ledger_module
+import decsim.observe.round_events as round_events_module
+import decsim.observe.round_store_occupancy as occupancy_module
 import decsim.observe.runtime_stamps as runtime_stamps_module
 import decsim.observe.stage_records as stage_records_module
 import decsim.observe.trace_writer as trace_writer_module
@@ -48,3 +50,5 @@ class Observation:
     decode_backlog: Optional[metrics.DecodeBacklog]
     decoder_utilization: Optional[metrics.DecoderUtilization]
     decoder_memory_occupancy: Optional[metrics.DecoderMemoryOccupancy]
+    round_events: round_events_module.RoundEventRecorder
+    round_store_occupancy: Optional[occupancy_module.RoundStoreOccupancy]

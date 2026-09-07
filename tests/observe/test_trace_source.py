@@ -63,5 +63,5 @@ def test_a_run_with_every_listener_connected_has_the_same_ticks_as_a_bare_one():
     heard_frame = heard.pauli_frame.snapshot()
     assert heard_frame.records == bare_frame.records
     assert heard.observation.log.lines == bare.observation.log.lines
-    assert heard.round_store_occupancy.arrivals == 30
+    assert heard.observation.round_store_occupancy.arrivals == 30
     assert heard.observation.decode_backlog.peak > 0

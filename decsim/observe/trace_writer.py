@@ -473,10 +473,11 @@ class TraceWriter:
         """The frame's write for one window has landed."""
         window = window_text(record.window_key)
         key = (record.window_key, record.run_sequence)
-        landed = {
-            "committed": record.committed_ticks,
-            "observables": list(record.logical_observables),
-        }
+        landed = {"committed": record.committed_ticks}
+        # a timing-only decoder predicts nothing, and the port allows it
+        # (decsim/ports.py Decoder.decode), so the write may have no bits
+        if record.logical_observables is not None:
+            landed["observables"] = list(record.logical_observables)
         self._learn_on_residence("Frame", key, landed)
         args = {"window": window, "tier": record.tier}
         name = f"{window} committed"

@@ -13,6 +13,7 @@ import json
 
 import pytest
 
+import decsim.decoders.decoders as decoders
 import decsim.machine as machine_module
 import tests.observe.gate_point as gate_point
 
@@ -456,3 +457,47 @@ def test_the_observation_section_names_the_log_and_the_trace_apart():
 
     with pytest.raises(ValueError, match="observation.log must be one of"):
         observe_settings.ObservationSettings.from_yaml({"log": "chrome"})
+
+
+def _timing_only_row(latency_model=None):
+    """A DECODERS row on the shipped timing-only decoder."""
+    del latency_model
+    return decoders.PresetLatencyDecoder(1.0)
+
+
+def _is_a_correction(row) -> bool:
+    """The residence of one window's correction on the frame's lane."""
+    is_complete = row["ph"] == "X"
+    return is_complete and row["name"].endswith(" correction")
+
+
+def test_a_write_with_no_prediction_is_traced_without_observables(tmp_path):
+    """A result may carry no observables, and the residence then names none.
+
+    decsim/ports.py's Decoder.decode returns a result whose correction
+    and logical observables are optional, and PresetLatencyDecoder
+    leaves both unset; the frame carries that None into its record.
+    So the writer names the bits of a write only when the write has
+    some, and the trace of a timing-only run is written rather than
+    raising on the frame's commit.
+    """
+    trace_path = tmp_path / "timing_only.trace.json"
+    point = _settings(trace_path)
+    weak_decoder = dataclasses.replace(point.weak_decoder, kind="timing_only")
+    point = dataclasses.replace(point, weak_decoder=weak_decoder)
+    machine_module.DECODERS["timing_only"] = _timing_only_row
+    try:
+        machine = machine_module.Machine.build(point, SEED)
+        result = machine.run()
+    finally:
+        del machine_module.DECODERS["timing_only"]
+    machine.observation.trace_writer.write(str(trace_path))
+    text = trace_path.read_text()
+    document = json.loads(text)
+    corrections = [row for row in document if _is_a_correction(row)]
+
+    assert result.terminal_status == "complete"
+    assert corrections
+    for row in corrections:
+        assert "committed" in row["args"]
+        assert "observables" not in row["args"]

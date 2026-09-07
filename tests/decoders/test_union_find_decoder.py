@@ -19,7 +19,7 @@ from ldpc.union_find_decoder import UnionFindDecoder as LdpcUnionFind
 
 import decsim.decoders.union_find.decoder as union_find
 import decsim.detector_error_model.fault_model_contracts as fault_models
-import decsim.message as message
+import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
 
 # rows 0..3 and 4..7 are two boundaryless 4-cycles, rows 8..11 a chain
@@ -72,7 +72,7 @@ def _model():
     )
 
 
-def _job(model, syndrome) -> message.DecodeJob:
+def _job(model, syndrome) -> decoding_records.DecodeJob:
     bits = []
     for bit in syndrome:
         bits.append(int(bit))
@@ -85,7 +85,7 @@ def _job(model, syndrome) -> message.DecodeJob:
         size_bits=len(bits),
         fragment_index=0,
     )
-    return message.DecodeJob(
+    return decoding_records.DecodeJob(
         op_id=1,
         window_id=0,
         n_rounds=1,

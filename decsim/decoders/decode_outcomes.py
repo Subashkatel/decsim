@@ -15,8 +15,8 @@ request_ended and service_ended; the record ledger listens.
 from typing import Callable, Optional
 
 import decsim.decoders.strong_requests as strong_requests_module
-import decsim.message as message
 import decsim.observe.trace_source as trace_source
+import decsim.records.decoding as decoding_records
 import decsim.records.windows as window_records
 
 
@@ -46,7 +46,9 @@ class DecodeOutcomes:
         self.service_ended = trace_source.TraceSource()
 
     def conclude_weak(
-        self, job: message.DecodeJob, result: message.DecodeResult
+        self,
+        job: decoding_records.DecodeJob,
+        result: decoding_records.DecodeResult,
     ) -> None:
         """Put the weak result to the policy and deliver it with the verdict.
 
@@ -59,23 +61,22 @@ class DecodeOutcomes:
         verdict = self.escalation_policy.verdict_for_weak_result(job, result)
         self.verdict_given.fire(key, job.request_key, verdict)
         self.strong_requests.resolve_weak(key)
-        is_escalated = verdict is message.Verdict.ESCALATE
+        is_escalated = verdict is decoding_records.Verdict.ESCALATE
         if not is_escalated:
             self.cancel_strong(key)  # no-op unless one is live/held
         job.awaiting_strong_result = is_escalated  # BEFORE the commit callback
         job.on_decoded(job, result)
-        processing = (
-            message.RequestProcessingOutcome.PRIMARY_FORWARDED_FOR_DELIVERY
-        )
+        outcomes = decoding_records.RequestProcessingOutcome
+        processing = outcomes.PRIMARY_FORWARDED_FOR_DELIVERY
         if is_escalated:
-            processing = message.RequestProcessingOutcome.WEAK_AWAITED_STRONG
+            processing = outcomes.WEAK_AWAITED_STRONG
         self.request_ended.fire(job, result, processing, self.engine.now)
         self.service_ended.fire(job, self.engine.now)
 
     def conclude_strong(
         self,
-        job: message.DecodeJob,
-        result: message.DecodeResult,
+        job: decoding_records.DecodeJob,
+        result: decoding_records.DecodeResult,
         deliveries: tuple,
     ) -> None:
         """The strong decode ended: teach the policy, deliver each completion.
@@ -105,7 +106,7 @@ class DecodeOutcomes:
         self.request_ended.fire(
             held.request_job,
             held.result,
-            message.RequestProcessingOutcome.STRONG_FORWARDED_FOR_DELIVERY,
+            decoding_records.RequestProcessingOutcome.STRONG_FORWARDED_FOR_DELIVERY,
             held.decode_output_ticks,
         )
 
@@ -119,14 +120,14 @@ class DecodeOutcomes:
 
     def report_request(
         self,
-        job: message.DecodeJob,
-        result: Optional[message.DecodeResult],
-        outcome: message.RequestProcessingOutcome,
+        job: decoding_records.DecodeJob,
+        result: Optional[decoding_records.DecodeResult],
+        outcome: decoding_records.RequestProcessingOutcome,
         decode_output_ticks: Optional[int],
     ) -> None:
         """A request ended outside a conclusion: cancelled or withdrawn."""
         self.request_ended.fire(job, result, outcome, decode_output_ticks)
 
-    def report_service(self, job: message.DecodeJob) -> None:
+    def report_service(self, job: decoding_records.DecodeJob) -> None:
         """A physical decode ended outside its conclusion: aborted."""
         self.service_ended.fire(job, self.engine.now)

@@ -183,6 +183,7 @@ def _standalone_pool(units, transfer_us, compute_us, decoder=None):
     Returns (engine, manager, submit(index, arrival), compute start
     ticks by window).
     """
+    import decsim.records.decoding as decoding_records
     import decsim.records.rounds as round_records
     import decsim.records.windows as window_records
     from decsim.decoders.decoder_manager import DecoderManager
@@ -190,7 +191,6 @@ def _standalone_pool(units, transfer_us, compute_us, decoder=None):
     from decsim.decoders.schedulers import FifoScheduler
     from decsim.engine import Engine
     from decsim.escalation.policies import Baseline
-    from decsim.message import DecodeJob
 
     engine = Engine()
     manager = DecoderManager(
@@ -218,7 +218,7 @@ def _standalone_pool(units, transfer_us, compute_us, decoder=None):
             size_bits=2,
             fragment_index=0,
         )
-        job = DecodeJob(
+        job = decoding_records.DecodeJob(
             op_id=1,
             window_id=index,
             n_rounds=1,

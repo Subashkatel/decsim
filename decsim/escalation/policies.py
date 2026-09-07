@@ -12,7 +12,7 @@ threshold comes from is its ThresholdSource (threshold_sources.py).
 """
 
 import decsim.controller.policies as boundary_policies
-import decsim.message as message
+import decsim.records.decoding as decoding_records
 import decsim.records.windows as window_records
 import decsim.windows.windowing_schemes as windowing_schemes
 
@@ -26,7 +26,7 @@ class EscalationPolicyBase:
     nothing is learned from a strong result.
     """
 
-    def check_plan(self, plan: message.RunShape) -> None:
+    def check_plan(self, plan: decoding_records.RunShape) -> None:
         """Every run shape is served."""
         del plan
 
@@ -47,11 +47,11 @@ class Baseline(EscalationPolicyBase):
     requires_strong_context = False
     primary_tier = window_records.DecoderTier.WEAK
 
-    def verdict_for_weak_result(self, job, result) -> message.Verdict:
+    def verdict_for_weak_result(self, job, result) -> decoding_records.Verdict:
         """Every result is final."""
         del job
         del result
-        return message.Verdict.KEEP
+        return decoding_records.Verdict.KEEP
 
 
 class StrongOnly(EscalationPolicyBase):
@@ -70,7 +70,7 @@ class StrongOnly(EscalationPolicyBase):
     requires_strong_context = False
     primary_tier = window_records.DecoderTier.STRONG
 
-    def check_plan(self, plan: message.RunShape) -> None:
+    def check_plan(self, plan: decoding_records.RunShape) -> None:
         """A static plan; dynamic streams re-point live window reads."""
         if plan.has_dynamic_streams:
             raise ValueError(
@@ -79,11 +79,11 @@ class StrongOnly(EscalationPolicyBase):
                 "room-side store yet"
             )
 
-    def verdict_for_weak_result(self, job, result) -> message.Verdict:
+    def verdict_for_weak_result(self, job, result) -> decoding_records.Verdict:
         """Every result is final: the strong tier decoded it."""
         del job
         del result
-        return message.Verdict.KEEP
+        return decoding_records.Verdict.KEEP
 
 
 class Switching(EscalationPolicyBase):
@@ -109,7 +109,7 @@ class Switching(EscalationPolicyBase):
     def __init__(
         self,
         threshold,
-        expected_source: message.SoftOutputSource,
+        expected_source: decoding_records.SoftOutputSource,
         run_both_at_once: bool = False,
     ) -> None:
         if run_both_at_once and threshold.audits_by_escalating:
@@ -122,7 +122,7 @@ class Switching(EscalationPolicyBase):
         self.expected_source = expected_source
         self.run_both_at_once = run_both_at_once
 
-    def check_plan(self, plan: message.RunShape) -> None:
+    def check_plan(self, plan: decoding_records.RunShape) -> None:
         """Refuse a run shape the escalation cannot serve."""
         _refuse_flush_terminal(plan.scheme)
         if plan.is_bulk_strong and self.run_both_at_once:
@@ -148,7 +148,7 @@ class Switching(EscalationPolicyBase):
             )
         return (window_records.DecoderTier.WEAK,)
 
-    def verdict_for_weak_result(self, job, result) -> message.Verdict:
+    def verdict_for_weak_result(self, job, result) -> decoding_records.Verdict:
         """Keep a confident weak result; otherwise escalate its window.
 
         The decision is made exactly once per window, since an online
@@ -156,7 +156,7 @@ class Switching(EscalationPolicyBase):
         """
         soft_output = result.soft_output
         if soft_output is None:
-            return message.Verdict.ESCALATE
+            return decoding_records.Verdict.ESCALATE
         if soft_output.source != self.expected_source:
             raise ValueError(
                 "decoder confidence source does not match the switching "
@@ -164,15 +164,15 @@ class Switching(EscalationPolicyBase):
             )
         if self.threshold.decide_keep(job, result):
             # a kept result cancels the parallel sibling
-            return message.Verdict.KEEP
-        return message.Verdict.ESCALATE
+            return decoding_records.Verdict.KEEP
+        return decoding_records.Verdict.ESCALATE
 
     def learn_from_strong_result(self, window_key: tuple, result) -> None:
         """The threshold source hears the strong tier's answer."""
         self.threshold.learn_from_strong_result(window_key, result)
 
     def _refuse_double_window_contradictions(
-        self, plan: message.RunShape
+        self, plan: decoding_records.RunShape
     ) -> None:
         """A forward strong window starts late and alone; these knobs do not."""
         if self.run_both_at_once:
@@ -232,7 +232,7 @@ def _refuse_double_window_scheme(scheme, boundary_policy) -> None:
         )
 
 
-def _refuse_crossing_strong_region(plan: message.RunShape) -> None:
+def _refuse_crossing_strong_region(plan: decoding_records.RunShape) -> None:
     """The forward strong window must end where a weak commit region ends.
 
     The shipped interaction's strong region is commit plus two buffers
@@ -259,7 +259,7 @@ def _refuse_crossing_strong_region(plan: message.RunShape) -> None:
     )
 
 
-def _refuse_double_window_run(plan: message.RunShape) -> None:
+def _refuse_double_window_run(plan: decoding_records.RunShape) -> None:
     """A double window needs static, explicit, single-patch operations."""
     if plan.has_dynamic_streams or plan.has_static_decode_plan:
         raise ValueError(

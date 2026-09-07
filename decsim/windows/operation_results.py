@@ -13,6 +13,7 @@ from typing import Callable, Optional
 
 import decsim.message as message
 import decsim.observe.trace_source as trace_source
+import decsim.records.decoding as decoding_records
 import decsim.records.windows as window_records
 
 
@@ -45,7 +46,7 @@ class OperationResults:
 
     def install_window_contribution(
         self, window: window_records.Window, logical_observables
-    ) -> message.LogicalContribution:
+    ) -> decoding_records.LogicalContribution:
         """The window owns its commit range, unless a strong window does.
 
         Returns the contribution that owns the window's rounds.
@@ -53,7 +54,7 @@ class OperationResults:
         existing = self.ledger.get(window.key)
         if existing is not None and existing.ownership_kind == "strong_window":
             return existing
-        contribution = message.LogicalContribution(
+        contribution = decoding_records.LogicalContribution(
             owner_key=window.key,
             commit_lo=window.commit_lo,
             commit_hi=window.commit_hi,
@@ -79,7 +80,7 @@ class OperationResults:
         for dependent_key in window.dependents:
             self.retention.release_restart_reads(dependent_key)
         if is_final and self.retention.strong_store is not None:
-            potential = message.PotentialStrong(window.key)
+            potential = decoding_records.PotentialStrong(window.key)
             self.retention.release_hold_if_live(
                 potential, self.retention.strong_store
             )

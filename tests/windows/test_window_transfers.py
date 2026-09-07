@@ -8,6 +8,7 @@ import decsim.engine as engine_module
 import decsim.links.fabric as fabric
 import decsim.links.link_profiles as link_profiles
 import decsim.message as message
+import decsim.records.decoding as decoding_records
 import decsim.records.windows as window_records
 import decsim.windows.window_transfers as window_transfers
 
@@ -71,7 +72,7 @@ def test_a_job_send_returns_the_delay_the_link_expects():
     request_key = window_records.DecoderRequestKey(
         1, 0, window_records.DecoderTier.WEAK, 0
     )
-    job = message.DecodeJob(
+    job = decoding_records.DecodeJob(
         op_id=1, window_id=0, n_rounds=5, window=window, request_key=request_key
     )
     expected = transfers.send_for_job(
@@ -88,9 +89,9 @@ def test_a_job_send_returns_the_delay_the_link_expects():
 
 def test_a_result_is_one_bit_per_logical_observable():
     operation = message.Operation(1, "memory", (0,), patches=(0, 1, 2))
-    with_bits = message.DecodeResult(1, 0, logical_observables=(0, 1))
+    with_bits = decoding_records.DecodeResult(1, 0, logical_observables=(0, 1))
     assert window_transfers.result_payload_bits(with_bits, operation) == 2
-    timing_only = message.DecodeResult(1, 0)
+    timing_only = decoding_records.DecodeResult(1, 0)
     assert window_transfers.result_payload_bits(timing_only, operation) == 3
 
 

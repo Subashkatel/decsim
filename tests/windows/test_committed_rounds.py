@@ -12,12 +12,12 @@ queries here are fixed; the harness runs the random ones.
 
 import pytest
 
-import decsim.message as message
+import decsim.records.decoding as decoding_records
 import decsim.windows.committed_rounds as committed_rounds
 
 
 def _contribution(index, commit_lo, commit_hi, observables):
-    return message.LogicalContribution(
+    return decoding_records.LogicalContribution(
         ("s", index), commit_lo, commit_hi, "ordinary_window", observables
     )
 

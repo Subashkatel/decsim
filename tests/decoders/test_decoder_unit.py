@@ -10,7 +10,7 @@ import pytest
 
 import decsim.decoders.decoder_memory as decoder_memory
 import decsim.decoders.decoder_unit as decoder_unit
-import decsim.message as message
+import decsim.records.decoding as decoding_records
 
 
 def _unit(capacity_rounds=None):
@@ -19,7 +19,9 @@ def _unit(capacity_rounds=None):
 
 
 def _job(label, rounds=1):
-    return message.DecodeJob(op_id=1, window_id=0, n_rounds=rounds, label=label)
+    return decoding_records.DecodeJob(
+        op_id=1, window_id=0, n_rounds=rounds, label=label
+    )
 
 
 def _demand(job):

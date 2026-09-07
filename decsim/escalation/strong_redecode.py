@@ -18,6 +18,7 @@ import functools
 from typing import Callable, Optional
 
 import decsim.message as message
+import decsim.records.decoding as decoding_records
 import decsim.records.windows as window_records
 
 LOG_SOURCE = "DecoderCluster"
@@ -33,7 +34,7 @@ class StrongRedecode:
         transfers,
         decode_queue,
         on_strong_decoded: Callable[
-            [message.DecodeJob, message.DecodeResult], None
+            [decoding_records.DecodeJob, decoding_records.DecodeResult], None
         ],
     ) -> None:
         self.engine = engine
@@ -47,8 +48,8 @@ class StrongRedecode:
     # ---- the two entries
 
     def parallel_strong_submission(
-        self, weak_job: message.DecodeJob
-    ) -> message.Submission:
+        self, weak_job: decoding_records.DecodeJob
+    ) -> decoding_records.Submission:
         """The strong sibling started with the weak job (the paper's Step 1).
 
         Its context is held and its send built now; the verdict selects
@@ -58,9 +59,9 @@ class StrongRedecode:
         assignment = self.shape.plan(weak_job)
         self.selections.remember_sibling(key, assignment.request_key)
         send_input = self._strong_input_send(assignment.job, None)
-        return message.Submission(assignment.job, send_input)
+        return decoding_records.Submission(assignment.job, send_input)
 
-    def escalate(self, weak_job: message.DecodeJob) -> None:
+    def escalate(self, weak_job: decoding_records.DecodeJob) -> None:
         """Ask the strong tier to re-decode the weak job's window.
 
         The selection rides weak_decoder_to_strong_decoder and the
@@ -130,7 +131,9 @@ class StrongRedecode:
     # ---- private: submitting a strong job with its input send
 
     def _enqueue(
-        self, strong_job: message.DecodeJob, selection_arrival_ticks: int
+        self,
+        strong_job: decoding_records.DecodeJob,
+        selection_arrival_ticks: int,
     ) -> None:
         """Queue the strong job; its input is sent at dispatch."""
         send_input = self._strong_input_send(
@@ -142,7 +145,7 @@ class StrongRedecode:
 
     def _strong_input_send(
         self,
-        strong_job: message.DecodeJob,
+        strong_job: decoding_records.DecodeJob,
         selection_arrival_ticks: Optional[int],
     ) -> Callable[[Callable[[], None]], int]:
         """The job's input send, its payload bits fixed now.
@@ -159,7 +162,7 @@ class StrongRedecode:
 
     def _send_strong_input(
         self,
-        strong_job: message.DecodeJob,
+        strong_job: decoding_records.DecodeJob,
         payload_bits: Optional[int],
         selection_arrival_ticks: Optional[int],
         on_landed: Callable[[], None],
@@ -193,7 +196,7 @@ class StrongRedecode:
 
     def _send_selection(
         self,
-        weak_job: message.DecodeJob,
+        weak_job: decoding_records.DecodeJob,
         strong_request_key: window_records.DecoderRequestKey,
     ) -> int:
         """Send the window's selection; returns the tick it is expected.

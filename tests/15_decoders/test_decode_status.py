@@ -8,6 +8,7 @@ run.
 import numpy as np
 import pytest
 
+import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
 from decsim.decoders.backend_outcome import (
     BackendDecodeOutcome,
@@ -28,7 +29,6 @@ from decsim.detector_error_model.fault_model_contracts import (
     PlacedFaultModel,
     WindowErrorModel,
 )
-from decsim.message import DecodeJob
 
 
 def _window(check):
@@ -67,7 +67,7 @@ def _job(model, syndrome):
         size_bits=len(syndrome),
         fragment_index=0,
     )
-    return DecodeJob(
+    return decoding_records.DecodeJob(
         op_id=1,
         window_id=0,
         n_rounds=1,

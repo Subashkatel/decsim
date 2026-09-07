@@ -23,6 +23,7 @@ from typing import Optional
 
 import decsim.config as config
 import decsim.message as message
+import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
 
@@ -307,7 +308,7 @@ class TraceWriter:
         name = f"W{window.k} ready"
         self._instant("Window planner", name, "window", args)
 
-    def job_enqueued(self, job: message.DecodeJob) -> None:
+    def job_enqueued(self, job: decoding_records.DecodeJob) -> None:
         """A window's decode request joins its ready queue."""
         window_key = (job.op_id, job.window_id)
         args = {
@@ -359,12 +360,12 @@ class TraceWriter:
 
     # ---- the decoder units
 
-    def job_dispatched(self, job: message.DecodeJob, unit) -> None:
+    def job_dispatched(self, job: decoding_records.DecodeJob, unit) -> None:
         """The job left the ready queue for a unit."""
         closing = {"unit": unit.name}
         self._end_residence("Window planner", job.request_key, closing)
 
-    def input_landed(self, job: message.DecodeJob, unit) -> None:
+    def input_landed(self, job: decoding_records.DecodeJob, unit) -> None:
         """The job's input is in the unit's own memory."""
         thread = _unit_thread(unit.name)
         window_key = (job.op_id, job.window_id)
@@ -385,7 +386,7 @@ class TraceWriter:
         self._end_flow(thread, job)
         self._step_window_flow(thread, window_key, self.engine.now)
 
-    def job_started(self, job: message.DecodeJob, unit) -> None:
+    def job_started(self, job: decoding_records.DecodeJob, unit) -> None:
         """The unit began this job's physical decode."""
         thread = _unit_thread(unit.name)
         window_key = (job.op_id, job.window_id)
@@ -400,7 +401,7 @@ class TraceWriter:
             "args": args,
         }
 
-    def job_finished(self, job: message.DecodeJob, unit) -> None:
+    def job_finished(self, job: decoding_records.DecodeJob, unit) -> None:
         """The unit's physical decode ended."""
         thread = _unit_thread(unit.name)
         key = ("service", job.request_key)
@@ -428,7 +429,7 @@ class TraceWriter:
         self._complete(thread, record.stage, "stage", start, duration, args)
 
     def memory_deposited(
-        self, memory_name: str, _job: message.DecodeJob, decoder_input
+        self, memory_name: str, _job: decoding_records.DecodeJob, decoder_input
     ) -> None:
         """One job's rounds landed in a unit's memory."""
         unit_name = _unit_of_memory(memory_name)
@@ -438,7 +439,7 @@ class TraceWriter:
         self._count(thread, counter, rounds)
 
     def memory_taken(
-        self, memory_name: str, job: message.DecodeJob, decoder_input
+        self, memory_name: str, job: decoding_records.DecodeJob, decoder_input
     ) -> None:
         """The unit's memory freed the job's rounds."""
         unit_name = _unit_of_memory(memory_name)
@@ -649,7 +650,7 @@ class TraceWriter:
             return
         self._round_flow("t", thread, round_key, self.engine.now)
 
-    def _end_flow(self, thread: str, job: message.DecodeJob) -> None:
+    def _end_flow(self, thread: str, job: decoding_records.DecodeJob) -> None:
         for round_key in _job_round_keys(job):
             if round_key not in self._flowing_rounds:
                 continue
@@ -809,7 +810,7 @@ def _window_flow_id(window_key) -> str:
     return f"window {text}"
 
 
-def _dispatch_tick(job: message.DecodeJob) -> Optional[int]:
+def _dispatch_tick(job: decoding_records.DecodeJob) -> Optional[int]:
     """When the unit took the job's slot; None for a windowless job."""
     window = job.window
     if window is None:
@@ -826,7 +827,7 @@ def _copied_identity(key) -> dict:
     """
     if isinstance(key, tuple) and len(key) == 2:
         return {"round": round_text(key)}
-    if isinstance(key, message.DecodeJob):
+    if isinstance(key, decoding_records.DecodeJob):
         window_key = (key.op_id, key.window_id)
         window = window_text(window_key)
         rounds = _job_rounds_text(key)
@@ -834,7 +835,7 @@ def _copied_identity(key) -> dict:
     return {"key": str(key)}
 
 
-def _job_rounds_text(job: message.DecodeJob) -> str:
+def _job_rounds_text(job: decoding_records.DecodeJob) -> str:
     """The rounds a job's landed input holds, as `lo..hi`."""
     decoder_input = job.decoder_input
     if decoder_input is None:
@@ -904,7 +905,7 @@ def _packet_bits(packet) -> Optional[int]:
     return total
 
 
-def _landed_bits(job: message.DecodeJob) -> Optional[int]:
+def _landed_bits(job: decoding_records.DecodeJob) -> Optional[int]:
     """The bits of the input in the unit's memory, None when unknown."""
     decoder_input = job.decoder_input
     if decoder_input is None:
@@ -932,7 +933,7 @@ def _service_text(service_key) -> str:
     return str(service_key.run_sequence)
 
 
-def _job_round_keys(job: message.DecodeJob) -> tuple:
+def _job_round_keys(job: decoding_records.DecodeJob) -> tuple:
     """The rounds a landed job's input covers."""
     decoder_input: Optional[message.DecoderInput] = job.decoder_input
     if decoder_input is None:

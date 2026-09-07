@@ -83,6 +83,7 @@ import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
 import decsim.qpu.stim_device as stim_device
 import decsim.qpu.syndrome_devices as syndrome_devices
+import decsim.records.decoding as decoding_records
 import decsim.records.seeds as seed_records
 import decsim.records.windows as window_records
 import decsim.seeding as seeding
@@ -798,7 +799,7 @@ def _plan(settings: MachineSettings, escalation_policy) -> _Plan:
     has_frontend = settings.workload.kind in ("surgery_ir", "qlx")
     commit_round_count = code.commit_rounds()
     buffer_round_count = code.buffer_rounds()
-    run_shape = message.RunShape(
+    run_shape = decoding_records.RunShape(
         scheme=scheme,
         boundary_policy=boundary_policy,
         operations=views,
@@ -1406,7 +1407,7 @@ class _LateWiring:
     def accept_boundary(self, key: tuple, is_unblocked: bool) -> None:
         self.window_manager.accept_boundary(key, is_unblocked)
 
-    def escalate(self, job: message.DecodeJob) -> None:
+    def escalate(self, job: decoding_records.DecodeJob) -> None:
         self.strong_redecode.escalate(job)
 
     def submit_if_far_boundary_committed(self, key: tuple) -> None:
@@ -1448,8 +1449,8 @@ def _check_strong_route(settings: MachineSettings, router) -> None:
     """
     if settings.escalation.kind != "switching":
         return
-    weak_probe = message.DecodeJob(op_id=-1, window_id=0, n_rounds=0)
-    strong_probe = message.DecodeJob(
+    weak_probe = decoding_records.DecodeJob(op_id=-1, window_id=0, n_rounds=0)
+    strong_probe = decoding_records.DecodeJob(
         op_id=-1, window_id=0, n_rounds=0, hint="strong"
     )
     strong_decoder = router.route(strong_probe)

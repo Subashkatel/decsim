@@ -46,6 +46,7 @@ from typing import Any, Optional, Protocol, runtime_checkable
 
 import decsim.message as message
 import decsim.observe.trace_source as trace_source
+import decsim.records.decoding as decoding_records
 import decsim.records.identity as identity_records
 import decsim.records.windows as window_records
 import decsim.windows.round_retention as round_retention
@@ -63,14 +64,14 @@ class StrongAssignment:
     """
 
     request_key: window_records.DecoderRequestKey
-    job: Optional[message.DecodeJob]
+    job: Optional[decoding_records.DecodeJob]
 
 
 @dataclasses.dataclass(frozen=True)
 class DeferredStrongJob:
     """A held strong job its condition released, with its selection's tick."""
 
-    job: message.DecodeJob
+    job: decoding_records.DecodeJob
     selection_arrival_ticks: int
 
 
@@ -87,7 +88,7 @@ class StrongWindowShape(Protocol):
 
     window_absorbed: Any
 
-    def plan(self, weak_job: message.DecodeJob) -> StrongAssignment:
+    def plan(self, weak_job: decoding_records.DecodeJob) -> StrongAssignment:
         """Assign the strong window; build its job now or hold it."""
 
     def note_selection_sent(
@@ -130,7 +131,7 @@ class ContextWindow:
         self.retention = retention
         self.builder = builder
 
-    def plan(self, weak_job: message.DecodeJob) -> StrongAssignment:
+    def plan(self, weak_job: decoding_records.DecodeJob) -> StrongAssignment:
         """The two-sided context job, built now, its context held."""
         key = (weak_job.op_id, weak_job.window_id)
         weak_window = self.planner.windows_by_key[key]
@@ -153,8 +154,8 @@ class ContextWindow:
         strong_store = self.retention.strong_store
         self.builder.stamp_first_round(strong_window, strong_store)
         payloads = self.builder.assemble_payloads(strong_window, strong_store)
-        payload_round_count = message.distinct_round_count(payloads)
-        job = message.DecodeJob(
+        payload_round_count = decoding_records.distinct_round_count(payloads)
+        job = decoding_records.DecodeJob(
             op_id=weak_job.op_id,
             window_id=weak_job.window_id,
             n_rounds=payload_round_count,
@@ -270,7 +271,7 @@ class ForwardWindow:
 
     # ---- the shape
 
-    def plan(self, weak_job: message.DecodeJob) -> StrongAssignment:
+    def plan(self, weak_job: decoding_records.DecodeJob) -> StrongAssignment:
         """Lay out the forward strong window; hold its job until it may start.
 
         The strong window absorbs the windows it covers. Its job waits for
@@ -345,7 +346,7 @@ class ForwardWindow:
             self.pending.register(held, operation_id, restart_key)
             self._hold_strong_context(key, strong_request_key, plan)
             self._withdraw_stale_requests(resolved_region)
-            pending_hold = message.PendingStrong(strong_request_key)
+            pending_hold = decoding_records.PendingStrong(strong_request_key)
             for absorbed_key in resolved_region.absorbed_window_keys:
                 self._absorb_window(absorbed_key, restart_key, pending_hold)
                 self.window_absorbed.fire(absorbed_key, key)
@@ -535,7 +536,7 @@ class ForwardWindow:
                 candidate[owner_key] = contribution
         for other_key, contribution in candidate.items():
             _refuse_overlapping_contribution(key, plan, other_key, contribution)
-        candidate[key] = message.LogicalContribution(
+        candidate[key] = decoding_records.LogicalContribution(
             owner_key=key,
             commit_lo=plan.commit_lo,
             commit_hi=plan.commit_hi,
@@ -551,7 +552,7 @@ class ForwardWindow:
         proposed_restart: Optional[window_records.Window],
         strong_request_key: window_records.DecoderRequestKey,
         resolved_region: "_ResolvedStrongRegion",
-    ) -> Optional[message.RephaseGuard]:
+    ) -> Optional[decoding_records.RephaseGuard]:
         """Hold the restart window's strong context while the plan lands.
 
         Syndrome buffer 1 loses the absorbed windows' potential strong
@@ -563,7 +564,7 @@ class ForwardWindow:
         if restart_key is None:
             return None
         self._require_restart_claim(key, restart_key)
-        guard = message.RephaseGuard(strong_request_key)
+        guard = decoding_records.RephaseGuard(strong_request_key)
         guarded_strong = self._guarded_strong_reads(
             key, restart_key, proposed_restart, resolved_region
         )
@@ -578,7 +579,7 @@ class ForwardWindow:
         absorbed windows are checked uncommitted first, so no runtime
         path reaches a released claim here: an invariant, not a check.
         """
-        claim = message.PotentialRestart(restart_key)
+        claim = decoding_records.PotentialRestart(restart_key)
         assert self.retention.weak_store.has_hold(claim), (
             f"strong-region plan for {key}: restart window {restart_key}'s "
             f"potential restart hold is no longer live"
@@ -592,8 +593,8 @@ class ForwardWindow:
         resolved_region: "_ResolvedStrongRegion",
     ) -> list:
         strong_store = self.retention.strong_store
-        escalated_potential = message.PotentialStrong(key)
-        restart_potential = message.PotentialStrong(restart_key)
+        escalated_potential = decoding_records.PotentialStrong(key)
+        restart_potential = decoding_records.PotentialStrong(restart_key)
         escalated_identities = strong_store.hold_round_identities(
             escalated_potential
         )
@@ -639,7 +640,7 @@ class ForwardWindow:
     ) -> None:
         """The window's potential strong read becomes the request's hold."""
         self.retention.transfer_potential_to_pending(key, strong_request_key)
-        pending_hold = message.PendingStrong(strong_request_key)
+        pending_hold = decoding_records.PendingStrong(strong_request_key)
         context_keys = _context_round_keys(key[0], plan)
         self.retention.strong_store.replace_hold(pending_hold, context_keys)
 
@@ -684,13 +685,13 @@ class ForwardWindow:
     ) -> None:
         """Drop the absorbed window's potential read; the request holds it."""
         strong_store = self.retention.strong_store
-        absorbed = message.PotentialStrong(key)
+        absorbed = decoding_records.PotentialStrong(key)
         needed_identities = strong_store.hold_round_identities(absorbed)
         needed = set(needed_identities)
         replacement_identities = strong_store.hold_round_identities(replacement)
         replacements = set(replacement_identities)
         if restart_key is not None:
-            restart_potential = message.PotentialStrong(restart_key)
+            restart_potential = decoding_records.PotentialStrong(restart_key)
             restart_identities = strong_store.hold_round_identities(
                 restart_potential
             )
@@ -767,7 +768,7 @@ class ForwardWindow:
 
     def _build_pending_strong_job(
         self, held: "_PendingWindow"
-    ) -> message.DecodeJob:
+    ) -> decoding_records.DecodeJob:
         """The strong window's job, once both of its boundaries exist.
 
         The strong window commits all r_strong rounds and reads one
@@ -781,8 +782,8 @@ class ForwardWindow:
         payloads = self.builder.assemble_payloads(strong_window, strong_store)
         _check_every_round_retained(held, payloads)
         self.builder.stamp_first_round(strong_window, strong_store)
-        payload_round_count = message.distinct_round_count(payloads)
-        job = message.DecodeJob(
+        payload_round_count = decoding_records.distinct_round_count(payloads)
+        job = decoding_records.DecodeJob(
             op_id=key[0],
             window_id=key[1],
             n_rounds=payload_round_count,
@@ -828,7 +829,7 @@ class _PendingWindow:
     """Everything kept from the plan until the one strong-job submission."""
 
     key: tuple
-    weak_job: message.DecodeJob
+    weak_job: decoding_records.DecodeJob
     label: str
     resolved_region: _ResolvedStrongRegion
     strong_window: window_records.Window
@@ -957,7 +958,7 @@ class _PendingWindows:
 
 
 def _released(
-    held: _PendingWindow, job: message.DecodeJob
+    held: _PendingWindow, job: decoding_records.DecodeJob
 ) -> DeferredStrongJob:
     """The held window's job with its selection's tick."""
     assert held.selection_arrival_ticks is not None, held.key
@@ -1167,7 +1168,7 @@ def _refuse_overlapping_contribution(
     key: tuple,
     plan: window_records.StrongRegionPlan,
     other_key: tuple,
-    contribution: message.LogicalContribution,
+    contribution: decoding_records.LogicalContribution,
 ) -> None:
     if other_key[0] != key[0]:
         return

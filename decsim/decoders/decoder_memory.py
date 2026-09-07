@@ -15,8 +15,8 @@ import types
 from collections.abc import Mapping
 from typing import Any, Optional
 
-import decsim.message as message
 import decsim.observe.trace_source as trace_source
+import decsim.records.decoding as decoding_records
 import decsim.records.identity as identity_records
 import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
@@ -111,7 +111,7 @@ class DecoderMemorySnapshot:
     admissions: int
 
 
-def materialize_decoder_input(job: message.DecodeJob) -> DecoderInput:
+def materialize_decoder_input(job: decoding_records.DecodeJob) -> DecoderInput:
     """Build one immutable decoder memory input from a job's fragments."""
     fragments_by_round: dict = {}
     for payload in job.payloads:
@@ -173,7 +173,7 @@ class DecoderMemory:
             occupied += len(decoder_input.rounds)
         return occupied
 
-    def deposit(self, job: message.DecodeJob) -> DecoderInput:
+    def deposit(self, job: decoding_records.DecodeJob) -> DecoderInput:
         """Materialize one job's rounds into this unit's memory."""
         key = _memory_key(job)
         if key in self._inputs:
@@ -195,7 +195,7 @@ class DecoderMemory:
         self.deposited.fire(job, decoder_input)
         return decoder_input
 
-    def take(self, job: message.DecodeJob) -> None:
+    def take(self, job: decoding_records.DecodeJob) -> None:
         """Free the job's rounds; a job this unit never held is ignored."""
         key = _memory_key(job)
         taken = self._inputs.pop(key, None)
@@ -214,7 +214,7 @@ class DecoderMemory:
         )
 
 
-def _memory_key(job: message.DecodeJob):
+def _memory_key(job: decoding_records.DecodeJob):
     """A window job is held under its request key, any other under itself."""
     if job.request_key is not None:
         return job.request_key
@@ -229,7 +229,8 @@ def _round_order_key(item: tuple) -> tuple:
 
 
 def _check_detector_row_layout(
-    job: message.DecodeJob, rounds: tuple[MaterializedSyndromeRound, ...]
+    job: decoding_records.DecodeJob,
+    rounds: tuple[MaterializedSyndromeRound, ...],
 ) -> None:
     """A model-backed input lies in the model's rows, or the run stops.
 
@@ -253,7 +254,8 @@ def _check_detector_row_layout(
 
 
 def _input_row_identities(
-    job: message.DecodeJob, rounds: tuple[MaterializedSyndromeRound, ...]
+    job: decoding_records.DecodeJob,
+    rounds: tuple[MaterializedSyndromeRound, ...],
 ) -> tuple:
     """(operation, round, position) of every bit the input carries."""
     identities = []

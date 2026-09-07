@@ -7,7 +7,7 @@ logical classes); Gidney et al. 2312.04522 Fig. 10.
 import decsim.decoders.decoder_memory as decoder_memory
 import decsim.decoders.gap_joins as gap_joins_module
 import decsim.engine as engine_module
-import decsim.message as message
+import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
 
@@ -42,7 +42,7 @@ def _primary():
     # a job whose input has landed sits in some unit's memory, and the
     # sibling's copy is named after it
     memory = decoder_memory.DecoderMemory("default", 0, None)
-    return message.DecodeJob(
+    return decoding_records.DecodeJob(
         op_id=1,
         window_id=0,
         n_rounds=1,
@@ -77,7 +77,7 @@ def test_the_gap_is_w_comp_minus_w_min_once_both_halves_report():
     joins = _joins(enqueued)
     primary = _primary()
     joins.spawn(primary)
-    result = message.DecodeResult(1, 0, gap_half_weight=3.0)
+    result = decoding_records.DecodeResult(1, 0, gap_half_weight=3.0)
     assert joins.take_weak_result(primary, result) is None
     joined_job, joined_result = joins.sibling_done((1, 0), 5.0)
     assert joined_job is primary
@@ -93,7 +93,7 @@ def test_a_sibling_that_reports_first_joins_at_the_primary_result():
     primary = _primary()
     joins.spawn(primary)
     assert joins.sibling_done((1, 0), 4.0) is None
-    result = message.DecodeResult(1, 0, gap_half_weight=6.0)
+    result = decoding_records.DecodeResult(1, 0, gap_half_weight=6.0)
     joined = joins.take_weak_result(primary, result)
     assert joined is result
     assert joined.soft_output.gap == 2.0
@@ -104,7 +104,7 @@ def test_a_missing_half_leaves_no_soft_output():
     joins = _joins(enqueued)
     primary = _primary()
     joins.spawn(primary)
-    result = message.DecodeResult(1, 0, gap_half_weight=3.0)
+    result = decoding_records.DecodeResult(1, 0, gap_half_weight=3.0)
     joins.take_weak_result(primary, result)
     _joined_job, joined_result = joins.sibling_done((1, 0), None)
     assert joined_result.soft_output is None

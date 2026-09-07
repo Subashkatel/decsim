@@ -18,7 +18,7 @@ decibels.
 import dataclasses
 import math
 
-import decsim.message as message
+import decsim.records.decoding as decoding_records
 
 
 class FixedThreshold:
@@ -30,14 +30,16 @@ class FixedThreshold:
         self.threshold_nats = threshold_nats
 
     def decide_keep(
-        self, job: message.DecodeJob, result: message.DecodeResult
+        self,
+        job: decoding_records.DecodeJob,
+        result: decoding_records.DecodeResult,
     ) -> bool:
         """The gap against the threshold, both in nats."""
         del job
         return result.soft_output.gap >= self.threshold_nats
 
     def learn_from_strong_result(
-        self, window_key: tuple, result: message.DecodeResult
+        self, window_key: tuple, result: decoding_records.DecodeResult
     ) -> None:
         """A fixed threshold learns nothing."""
         del window_key
@@ -245,7 +247,9 @@ class OnlineThreshold:
         self._record("start")
 
     def decide_keep(
-        self, job: message.DecodeJob, result: message.DecodeResult
+        self,
+        job: decoding_records.DecodeJob,
+        result: decoding_records.DecodeResult,
     ) -> bool:
         """True keeps the weak result, False escalates.
 
@@ -271,7 +275,7 @@ class OnlineThreshold:
         return not escalated
 
     def learn_from_strong_result(
-        self, window_key: tuple, result: message.DecodeResult
+        self, window_key: tuple, result: decoding_records.DecodeResult
     ) -> None:
         """A strong result arrived; if it answers an audit, label it."""
         weak_observables = self._pending_audits.pop(window_key, None)

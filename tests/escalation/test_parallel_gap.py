@@ -12,6 +12,7 @@ import numpy
 import pytest
 from scipy.sparse import csr_matrix
 
+import decsim.records.decoding as decoding_records
 from decsim.confidence.complementary import (
     COMPLEMENTARY_GAP_SOURCE,
     ComplementaryGapMetric,
@@ -24,7 +25,6 @@ from decsim.detector_error_model.fault_model_contracts import (
 )
 from decsim.front.experiment import load_experiment
 from decsim.machine import build_decoder_unit
-from decsim.message import DecodeJob, DecodeResult, SoftOutput
 from tests.escalation.test_switching_mode import (
     measured_shot,
     switching_config,
@@ -112,8 +112,8 @@ class StubWeakDecoder(DecoderBase):
     def occupancy(self, _job):
         return None
 
-    def decode(self, job) -> DecodeResult:
-        return DecodeResult(
+    def decode(self, job) -> decoding_records.DecodeResult:
+        return decoding_records.DecodeResult(
             op_id=job.op_id,
             window_id=job.window_id,
             logical_observables=(self.prediction,),
@@ -126,7 +126,9 @@ class StubWeakDecoder(DecoderBase):
 class StubPairedMetric:
     def __init__(self, predicted_class: int, gap: float, solve_ns: tuple):
         self.evaluation = PairedGapEvaluation(
-            soft_output=SoftOutput(gap=gap, source=COMPLEMENTARY_GAP_SOURCE),
+            soft_output=decoding_records.SoftOutput(
+                gap=gap, source=COMPLEMENTARY_GAP_SOURCE
+            ),
             predicted_class=predicted_class,
             forced_solve_nanoseconds=solve_ns,
         )
@@ -146,8 +148,10 @@ class StubSignal:
         return self.metric
 
 
-def paired_job() -> DecodeJob:
-    job = DecodeJob(op_id=0, window_id=0, n_rounds=1, dem=OneObservableModel())
+def paired_job() -> decoding_records.DecodeJob:
+    job = decoding_records.DecodeJob(
+        op_id=0, window_id=0, n_rounds=1, dem=OneObservableModel()
+    )
     job.payloads = []
     return job
 

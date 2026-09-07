@@ -9,8 +9,8 @@ supplied transport cannot bypass decoder memory.
 
 from typing import Callable, Optional, Protocol, runtime_checkable
 
-import decsim.message as message
 import decsim.observe.trace_source as trace_source
+import decsim.records.decoding as decoding_records
 import decsim.records.windows as window_records
 
 SendInput = Callable[[Callable[[], None]], int]
@@ -29,13 +29,13 @@ class DecoderMemoryTransfer(Protocol):
 
     def deliver(
         self,
-        job: message.DecodeJob,
+        job: decoding_records.DecodeJob,
         send_input: Optional[SendInput],
-        receiver: Callable[[message.DecodeJob], None],
+        receiver: Callable[[decoding_records.DecodeJob], None],
     ) -> int:
         """Send the input and land the job at delivery; the expected delay."""
 
-    def cancel(self, job: message.DecodeJob) -> None:
+    def cancel(self, job: decoding_records.DecodeJob) -> None:
         """Suppress the landing of a request that has not landed yet."""
 
 
@@ -54,9 +54,9 @@ class DecoderInputStaging:
 
     def stage(
         self,
-        job: message.DecodeJob,
+        job: decoding_records.DecodeJob,
         memory,
-        on_landed: Callable[[message.DecodeJob], None],
+        on_landed: Callable[[decoding_records.DecodeJob], None],
     ) -> None:
         """Send the input over its link, then land it in the unit's memory.
 
@@ -67,7 +67,7 @@ class DecoderInputStaging:
         send_input = job.send_input
         job.send_input = None
 
-        def land(_delivered: message.DecodeJob) -> None:
+        def land(_delivered: decoding_records.DecodeJob) -> None:
             job.input_landing_ticks = self.engine.now
             bits = job.payload_bits()
             job.decoder_input = memory.deposit(job)
@@ -85,7 +85,7 @@ class DecoderInputStaging:
         expected_delay_ticks = self.transport.deliver(job, send_input, land)
         job.input_landing_ticks = self.engine.now + expected_delay_ticks
 
-    def cancel(self, job: message.DecodeJob) -> None:
+    def cancel(self, job: decoding_records.DecodeJob) -> None:
         """Drop one job from transport and storage, then free its hold.
 
         Every step is idempotent, so a request in transport, waiting for
@@ -99,7 +99,7 @@ class DecoderInputStaging:
             hold()
             job.input_hold = None
 
-    def release(self, job: message.DecodeJob) -> None:
+    def release(self, job: decoding_records.DecodeJob) -> None:
         """Free the job's rounds from its unit's memory; none held is fine."""
         memory = job.memory
         if memory is not None:
@@ -136,9 +136,9 @@ class CancellableDecoderMemoryTransfer:
 
     def deliver(
         self,
-        job: message.DecodeJob,
+        job: decoding_records.DecodeJob,
         send_input: Optional[SendInput],
-        receiver: Callable[[message.DecodeJob], None],
+        receiver: Callable[[decoding_records.DecodeJob], None],
     ) -> int:
         """Send the input and land it at delivery; no input lands now.
 
@@ -162,13 +162,13 @@ class CancellableDecoderMemoryTransfer:
             return 0
         return send_input(complete)
 
-    def cancel(self, job: message.DecodeJob) -> None:
+    def cancel(self, job: decoding_records.DecodeJob) -> None:
         """Suppress the landing of a request that has not landed yet."""
         key = _transfer_key(job)
         self._in_flight_keys.discard(key)
 
 
-def _store_name_of(job: message.DecodeJob) -> str:
+def _store_name_of(job: decoding_records.DecodeJob) -> str:
     """The store a job's rounds came from: its tier's (data_path.md 3)."""
     key = job.request_key
     if key is not None and key.tier is window_records.DecoderTier.STRONG:
@@ -176,14 +176,14 @@ def _store_name_of(job: message.DecodeJob) -> str:
     return "Buffer 0"
 
 
-def _transfer_key(job: message.DecodeJob):
+def _transfer_key(job: decoding_records.DecodeJob):
     """A window job flies under its request key, any other under itself."""
     if job.request_key is not None:
         return job.request_key
     return id(job)
 
 
-def _is_among(member: message.DecodeJob, released: list) -> bool:
+def _is_among(member: decoding_records.DecodeJob, released: list) -> bool:
     for done in released:
         if done is member:
             return True

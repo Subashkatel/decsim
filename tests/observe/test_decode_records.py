@@ -1,7 +1,7 @@
 """The record ledger: a listener on the two terminal sources."""
 
-import decsim.message as message
 import decsim.observe.decode_records as decode_records
+import decsim.records.decoding as decoding_records
 import decsim.records.windows as window_records
 
 
@@ -12,8 +12,8 @@ def _job():
     request_key = window_records.DecoderRequestKey(
         1, 0, window_records.DecoderTier.WEAK, 0
     )
-    service_key = message.DecoderServiceKey(0)
-    return message.DecodeJob(
+    service_key = decoding_records.DecoderServiceKey(0)
+    return decoding_records.DecodeJob(
         op_id=1,
         window_id=0,
         n_rounds=5,
@@ -31,8 +31,10 @@ def _job():
 def test_a_request_and_its_service_are_recorded_at_their_end():
     ledger = decode_records.DecodeRecordLedger()
     job = _job()
-    result = message.DecodeResult(1, 0)
-    outcome = message.RequestProcessingOutcome.PRIMARY_FORWARDED_FOR_DELIVERY
+    result = decoding_records.DecodeResult(1, 0)
+    outcome = (
+        decoding_records.RequestProcessingOutcome.PRIMARY_FORWARDED_FOR_DELIVERY
+    )
     ledger.request_ended(job, result, outcome, 40)
     ledger.service_ended(job, 40)
     (request,) = ledger.requests

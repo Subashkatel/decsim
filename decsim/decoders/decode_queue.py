@@ -13,8 +13,8 @@ change for the switching study.
 from typing import Optional
 
 import decsim.decoders.strong_requests as strong_requests_module
-import decsim.message as message
 import decsim.observe.trace_source as trace_source
+import decsim.records.decoding as decoding_records
 
 LOG_SOURCE = "DecoderCluster"
 DEFAULT_POOL = "default"
@@ -46,13 +46,13 @@ class WaitingJobs:
         self.job_enqueued = trace_source.TraceSource()
         self.depth_changed = trace_source.TraceSource()
 
-    def pool_of(self, job: message.DecodeJob) -> str:
+    def pool_of(self, job: decoding_records.DecodeJob) -> str:
         """The pool a job queues in: its hint when a pool has that name."""
         if job.hint in self.waiting_by_pool:
             return job.hint
         return DEFAULT_POOL
 
-    def add(self, job: message.DecodeJob) -> None:
+    def add(self, job: decoding_records.DecodeJob) -> None:
         """Put one admitted job at the back of its pool's queue, logged."""
         job.ready_time = self.engine.now
         pool = self.pool_of(job)
@@ -68,7 +68,7 @@ class WaitingJobs:
         self.job_enqueued.fire(job)
         self.sample_depth()
 
-    def add_quietly(self, job: message.DecodeJob) -> None:
+    def add_quietly(self, job: decoding_records.DecodeJob) -> None:
         """Put a job carrying no input in its queue; no READY line."""
         pool = self.pool_of(job)
         queue = self.waiting_by_pool[pool]
@@ -76,7 +76,7 @@ class WaitingJobs:
         self.job_enqueued.fire(job)
         self.sample_depth()
 
-    def remove(self, job: message.DecodeJob) -> bool:
+    def remove(self, job: decoding_records.DecodeJob) -> bool:
         """Take the job out of whichever queue holds it; whether one did."""
         for queue in self.waiting_by_pool.values():
             if job in queue:
@@ -122,14 +122,14 @@ class WaitingJobs:
         queue = self.waiting_by_pool[pool]
         queue.extend(ordered)
 
-    def next(self, pool: str) -> message.DecodeJob:
+    def next(self, pool: str) -> decoding_records.DecodeJob:
         """Remove and return the pool's next job by the scheduler's rule."""
         queue = self.waiting_by_pool[pool]
         if self.is_bulk_strong and pool != DEFAULT_POOL:
             return self._merge_strong_batch(queue)
         return self.scheduler.pop(queue)
 
-    def _merge_strong_batch(self, queue: list) -> message.DecodeJob:
+    def _merge_strong_batch(self, queue: list) -> decoding_records.DecodeJob:
         """Batch every queued strong job (timing-only) into one decode.
 
         A batch that found no unit last time waits in the queue like any
@@ -174,7 +174,7 @@ def pool_tag_of(pool: str) -> str:
     return f"{pool} "
 
 
-def _refuse_bits_in_bulk_strong(job: message.DecodeJob) -> None:
+def _refuse_bits_in_bulk_strong(job: decoding_records.DecodeJob) -> None:
     """bulk_strong merges timing-only strong re-decodes; bits would be lost."""
     has_model = job.dem is not None
     has_bits = False
@@ -188,7 +188,7 @@ def _refuse_bits_in_bulk_strong(job: message.DecodeJob) -> None:
         )
 
 
-def _batch_job(jobs: list, window_keys: list) -> message.DecodeJob:
+def _batch_job(jobs: list, window_keys: list) -> decoding_records.DecodeJob:
     """One timing-only decode serving every member request.
 
     The batch is decoded like any strong job: its timing-only result is
@@ -203,7 +203,7 @@ def _batch_job(jobs: list, window_keys: list) -> message.DecodeJob:
     if window_keys:
         first_window_key = window_keys[0]
     batch_size = len(jobs)
-    return message.DecodeJob(
+    return decoding_records.DecodeJob(
         op_id=-1,
         window_id=0,
         n_rounds=total_rounds,

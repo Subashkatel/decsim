@@ -12,7 +12,7 @@ from typing import Optional
 import decsim.decoders.decoder as decoder_module
 import decsim.decoders.union_find.window_decoder as window_decoder
 import decsim.detector_error_model.fault_model_contracts as fault_models
-import decsim.message as message
+import decsim.records.decoding as decoding_records
 
 
 @dataclasses.dataclass(frozen=True)
@@ -23,7 +23,7 @@ class UnionFindDecodedWindow:
     the same region WindowDecoderBase.decode_timed times.
     """
 
-    hard_result: message.DecodeResult
+    hard_result: decoding_records.DecodeResult
     hard_evidence: window_decoder.UnionFindHardEvidence
     backend_ns: int
 
@@ -69,7 +69,7 @@ class UnionFindDecoder(decoder_module.WindowDecoderBase):
         return evidence.selected_faults, _status_of(evidence)
 
     def decode_with_growth_evidence(
-        self, job: message.DecodeJob
+        self, job: decoding_records.DecodeJob
     ) -> UnionFindDecodedWindow:
         """One hard result, immutable evidence and the timed backend call."""
         model = job.dem

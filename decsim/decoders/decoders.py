@@ -13,11 +13,11 @@ from typing import Optional
 import decsim.config as config
 import decsim.decoders.decoder as decoder_module
 import decsim.detector_error_model.fault_model_contracts as fault_models
-import decsim.message as message
+import decsim.records.decoding as decoding_records
 import decsim.records.seeds as seed_records
 import decsim.seeding as seeding
 
-SAMPLED_CONFIDENCE_SOURCE = message.SoftOutputSource(
+SAMPLED_CONFIDENCE_SOURCE = decoding_records.SoftOutputSource(
     method="sampled_confidence",
     cluster_origin="synthetic",
     growth_schedule="bernoulli_per_window",
@@ -50,7 +50,7 @@ class CodeRouter:
             children.append(child)
         return tuple(children)
 
-    def route(self, job: message.DecodeJob):
+    def route(self, job: decoding_records.DecodeJob):
         """The decoder for this job: by code, the default when unmapped."""
         return self.by_code.get(job.code, self.default)
 
@@ -91,7 +91,7 @@ class SwitchingRouter:
             children.append(gap_child)
         return tuple(children)
 
-    def route(self, job: message.DecodeJob):
+    def route(self, job: decoding_records.DecodeJob):
         """Strong decoder for escalated jobs, weak for everything else."""
         if job.hint == "gap" and self.gap is not None:
             return self.gap
@@ -126,14 +126,16 @@ class FunctionLatencyDecoder(decoder_module.DecoderBase):
         child = seed_records.RunSeedChild(path, self.latency_us_for)
         return (child,)
 
-    def latency(self, job: message.DecodeJob) -> int:
+    def latency(self, job: decoding_records.DecodeJob) -> int:
         """Service time in ticks, priced by the caller's function."""
         microseconds = self.latency_us_for(job)
         return config.microseconds_to_ticks(microseconds)
 
-    def decode(self, job: message.DecodeJob) -> message.DecodeResult:
+    def decode(
+        self, job: decoding_records.DecodeJob
+    ) -> decoding_records.DecodeResult:
         """An empty timing-only result."""
-        return message.DecodeResult(job.op_id, job.window_id)
+        return decoding_records.DecodeResult(job.op_id, job.window_id)
 
 
 class PresetLatencyDecoder(decoder_module.DecoderBase):
@@ -142,14 +144,16 @@ class PresetLatencyDecoder(decoder_module.DecoderBase):
     def __init__(self, latency_us: float = 1.0):
         self.latency_us = latency_us
 
-    def latency(self, job: message.DecodeJob) -> int:
+    def latency(self, job: decoding_records.DecodeJob) -> int:
         """The preset latency in ticks, whatever the job."""
         del job
         return config.microseconds_to_ticks(self.latency_us)
 
-    def decode(self, job: message.DecodeJob) -> message.DecodeResult:
+    def decode(
+        self, job: decoding_records.DecodeJob
+    ) -> decoding_records.DecodeResult:
         """An empty timing-only result."""
-        return message.DecodeResult(job.op_id, job.window_id)
+        return decoding_records.DecodeResult(job.op_id, job.window_id)
 
 
 class PerRoundDecoder(decoder_module.DecoderBase):
@@ -158,14 +162,16 @@ class PerRoundDecoder(decoder_module.DecoderBase):
     def __init__(self, tau_us: float = 1.0):
         self.tau_us = tau_us
 
-    def latency(self, job: message.DecodeJob) -> int:
+    def latency(self, job: decoding_records.DecodeJob) -> int:
         """n_rounds times tau, in ticks."""
         microseconds = job.n_rounds * self.tau_us
         return config.microseconds_to_ticks(microseconds)
 
-    def decode(self, job: message.DecodeJob) -> message.DecodeResult:
+    def decode(
+        self, job: decoding_records.DecodeJob
+    ) -> decoding_records.DecodeResult:
         """An empty timing-only result."""
-        return message.DecodeResult(job.op_id, job.window_id)
+        return decoding_records.DecodeResult(job.op_id, job.window_id)
 
 
 class SampledConfidenceDecoder(
@@ -212,11 +218,13 @@ class SampledConfidenceDecoder(
             children.append(child)
         return tuple(children)
 
-    def latency(self, job: message.DecodeJob) -> int:
+    def latency(self, job: decoding_records.DecodeJob) -> int:
         """The weak decode latency; the strong path is a separate job."""
         return self.inner.latency(job)
 
-    def decode(self, job: message.DecodeJob) -> message.DecodeResult:
+    def decode(
+        self, job: decoding_records.DecodeJob
+    ) -> decoding_records.DecodeResult:
         """Weak-decode the window, then attach the sampled soft output."""
         result = self.inner.decode(job)
         escalation_probability = self.escalation_probability
@@ -230,7 +238,7 @@ class SampledConfidenceDecoder(
         confidence_gap = 1.0
         if draw < escalation_probability:
             confidence_gap = 0.0
-        result.soft_output = message.SoftOutput(
+        result.soft_output = decoding_records.SoftOutput(
             gap=confidence_gap, source=SAMPLED_CONFIDENCE_SOURCE
         )
         return result
@@ -246,7 +254,7 @@ def switch_probability_per_round(gamma_switch: float, d: int):
     if d <= 0:
         raise ValueError(f"d must be positive; got {d!r}")
 
-    def probability(job: message.DecodeJob) -> float:
+    def probability(job: decoding_records.DecodeJob) -> float:
         window = job.window
         commit_rounds = job.n_rounds
         if window is not None:

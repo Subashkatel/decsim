@@ -17,8 +17,8 @@ from typing import Callable, Optional
 
 import decsim.decoders.decoder_memory as decoder_memory_module
 import decsim.decoders.decoder_unit as decoder_unit_module
-import decsim.message as message
 import decsim.observe.trace_source as trace_source
+import decsim.records.decoding as decoding_records
 
 DEFAULT_POOL = "default"
 
@@ -60,7 +60,7 @@ class DecoderPool:
             self.units_by_pool[pool] = units
             self.free_by_pool[pool] = list(units)
 
-    def decoder_for(self, job: message.DecodeJob):
+    def decoder_for(self, job: decoding_records.DecodeJob):
         """The decoder the job runs on, by the router's rule."""
         return self.router.route(job)
 
@@ -84,11 +84,11 @@ class DecoderPool:
     def offer(
         self,
         pool: str,
-        job: message.DecodeJob,
+        job: decoding_records.DecodeJob,
         *,
         carries_input: bool,
         resident_capacity: int,
-        memory_demand_of: Callable[[message.DecodeJob], int],
+        memory_demand_of: Callable[[decoding_records.DecodeJob], int],
     ) -> Optional[tuple]:
         """(unit, has free compute) for this job, or None.
 
@@ -112,7 +112,9 @@ class DecoderPool:
         return unit, False
 
     def claim(
-        self, unit: decoder_unit_module.DecoderUnit, job: message.DecodeJob
+        self,
+        unit: decoder_unit_module.DecoderUnit,
+        job: decoding_records.DecodeJob,
     ) -> None:
         """The job takes the unit's compute out of the pool."""
         free = self.free_by_pool[unit.pool]

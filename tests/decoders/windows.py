@@ -4,7 +4,7 @@ import numpy
 import stim
 
 import decsim.detector_error_model.window_model_builders as builders
-import decsim.message as message
+import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
 
 
@@ -37,7 +37,7 @@ def row_syndrome(model, shot):
     return events[rows].astype(numpy.uint8)
 
 
-def job_for(model, shot, window_id: int = 0) -> message.DecodeJob:
+def job_for(model, shot, window_id: int = 0) -> decoding_records.DecodeJob:
     """A decode job carrying one shot's detection events in row order."""
     syndrome = row_syndrome(model, shot)
     bits = bit_tuple(syndrome)
@@ -49,7 +49,7 @@ def job_for(model, shot, window_id: int = 0) -> message.DecodeJob:
         size_bits=len(bits),
         fragment_index=0,
     )
-    return message.DecodeJob(
+    return decoding_records.DecodeJob(
         op_id=1,
         window_id=window_id,
         n_rounds=1,

@@ -18,6 +18,7 @@ import decsim.confidence.complementary as complementary
 import decsim.decoders.decode_queue as decode_queue
 import decsim.message as message
 import decsim.observe.trace_source as trace_source
+import decsim.records.decoding as decoding_records
 
 # the structure the sibling's own copy of the rounds lands in
 GAP_SIBLING_INPUT = "gap sibling input"
@@ -29,8 +30,8 @@ class _GapJoin:
 
     sibling_weight: Optional[float] = None
     sibling_reported: bool = False
-    held_weak_job: Optional[message.DecodeJob] = None
-    held_weak_result: Optional[message.DecodeResult] = None
+    held_weak_job: Optional[decoding_records.DecodeJob] = None
+    held_weak_result: Optional[decoding_records.DecodeResult] = None
 
 
 class GapJoins:
@@ -61,7 +62,7 @@ class GapJoins:
         self.joins_by_window: dict[tuple, _GapJoin] = {}
         self.copy_made = trace_source.TraceSource()
 
-    def spawn(self, job: message.DecodeJob) -> None:
+    def spawn(self, job: decoding_records.DecodeJob) -> None:
         """Submit the other forced-class solve to the gap pool.
 
         Fired at the primary weak decode's service start: the boundary
@@ -95,8 +96,10 @@ class GapJoins:
         )
 
     def take_weak_result(
-        self, job: message.DecodeJob, result: message.DecodeResult
-    ) -> Optional[message.DecodeResult]:
+        self,
+        job: decoding_records.DecodeJob,
+        result: decoding_records.DecodeResult,
+    ) -> Optional[decoding_records.DecodeResult]:
         """The primary decode finished: its result with the gap attached.
 
         None while the sibling half is still out; the result is held
@@ -142,7 +145,7 @@ class GapJoins:
         """The windows whose join has not concluded, sorted."""
         return sorted(self.joins_by_window)
 
-    def _wants_sibling(self, job: message.DecodeJob) -> bool:
+    def _wants_sibling(self, job: decoding_records.DecodeJob) -> bool:
         if not self.is_enabled:
             return False
         if job.strong_decode_for is not None:
@@ -158,12 +161,12 @@ class GapJoins:
         return job.decoder_input is not None
 
     def _sibling_job(
-        self, job: message.DecodeJob, key: tuple
-    ) -> message.DecodeJob:
+        self, job: decoding_records.DecodeJob, key: tuple
+    ) -> decoding_records.DecodeJob:
         """The other forced-class solve over the primary's landed rounds."""
         masked_fragments = job.decoder_input.fragments()
         round_count = len(job.decoder_input.rounds)
-        return message.DecodeJob(
+        return decoding_records.DecodeJob(
             op_id=job.op_id,
             window_id=job.window_id,
             n_rounds=round_count,
@@ -180,8 +183,8 @@ class GapJoins:
     def _send_sibling_input(
         self,
         on_landed: Callable[[], None],
-        sibling: message.DecodeJob,
-        primary: message.DecodeJob,
+        sibling: decoding_records.DecodeJob,
+        primary: decoding_records.DecodeJob,
     ) -> int:
         if self.link is None:
             on_landed()
@@ -205,7 +208,7 @@ class GapJoins:
 
 
 def _attach_gap(
-    result: message.DecodeResult, sibling_weight: Optional[float]
+    result: decoding_records.DecodeResult, sibling_weight: Optional[float]
 ) -> None:
     """Build the SoftOutput from the two forced-class weights.
 
@@ -218,7 +221,7 @@ def _attach_gap(
     w_min = min(primary_weight, sibling_weight)
     w_comp = max(primary_weight, sibling_weight)
     gap = w_comp - w_min
-    result.soft_output = message.SoftOutput(
+    result.soft_output = decoding_records.SoftOutput(
         gap=gap,
         source=complementary.COMPLEMENTARY_GAP_SOURCE,
         w_min=w_min,

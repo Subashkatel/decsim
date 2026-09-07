@@ -24,6 +24,7 @@ fires, never through a port, so every component runs with no observer.
 from typing import Any, Callable, Optional, Protocol, runtime_checkable
 
 import decsim.message as message
+import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
 
@@ -116,13 +117,13 @@ class WindowInputGate(Protocol):
     window's boundary (qLDPC's net_error folded into the next window).
     """
 
-    def may_stage(self, job: message.DecodeJob) -> bool:
+    def may_stage(self, job: decoding_records.DecodeJob) -> bool:
         """Whether a blocked job may occupy an input slot yet."""
 
-    def may_start(self, job: message.DecodeJob) -> bool:
+    def may_start(self, job: decoding_records.DecodeJob) -> bool:
         """Whether the landed job owes no boundary and may decode."""
 
-    def mask_input(self, job: message.DecodeJob) -> None:
+    def mask_input(self, job: decoding_records.DecodeJob) -> None:
         """Fold the window's boundary into the landed input, once."""
 
 
@@ -132,10 +133,13 @@ class DecodeQueue(Protocol):
 
     def enqueue(
         self,
-        job: message.DecodeJob,
+        job: decoding_records.DecodeJob,
         send_input: Optional[Callable[[Callable[[], None]], int]] = None,
         on_decoded: Optional[
-            Callable[[message.DecodeJob, message.DecodeResult], None]
+            Callable[
+                [decoding_records.DecodeJob, decoding_records.DecodeResult],
+                None,
+            ]
         ] = None,
     ) -> None:
         """Admit a job once; send_input(on_landed) moves its input later.
@@ -212,27 +216,29 @@ class Decoder(Protocol):
     fault_model_requirement: Any
     stage_recorded: Any
 
-    def decode(self, job: message.DecodeJob) -> message.DecodeResult:
+    def decode(
+        self, job: decoding_records.DecodeJob
+    ) -> decoding_records.DecodeResult:
         """The window's correction and its logical observables."""
 
-    def latency(self, job: message.DecodeJob) -> int:
+    def latency(self, job: decoding_records.DecodeJob) -> int:
         """The whole job's service time in ticks, known at dispatch."""
 
     def start(
         self,
-        job: message.DecodeJob,
+        job: decoding_records.DecodeJob,
         engine,
-        on_result: Callable[[Optional[message.DecodeResult]], None],
+        on_result: Callable[[Optional[decoding_records.DecodeResult]], None],
     ) -> None:
         """Run the job on the unit; on_result runs once at its output."""
 
-    def cancel(self, job: message.DecodeJob) -> None:
+    def cancel(self, job: decoding_records.DecodeJob) -> None:
         """Stop a started job; on_result never runs for it."""
 
-    def occupancy(self, job: message.DecodeJob) -> Optional[int]:
+    def occupancy(self, job: decoding_records.DecodeJob) -> Optional[int]:
         """Ticks the unit's compute is held from the start; None if measured."""
 
-    def pipeline_depth(self, job: message.DecodeJob) -> int:
+    def pipeline_depth(self, job: decoding_records.DecodeJob) -> int:
         """Decodes that may be in flight on one unit; one is no pipeline."""
 
 
@@ -396,7 +402,7 @@ class EscalationPolicy(Protocol):
     # window, and the strong tier's window side.
     requires_strong_context: bool
 
-    def check_plan(self, plan: message.RunShape) -> None:
+    def check_plan(self, plan: decoding_records.RunShape) -> None:
         """Refuse, with a sentence, a run shape the policy cannot serve."""
 
     def tiers_for_ready_window(
@@ -405,12 +411,14 @@ class EscalationPolicy(Protocol):
         """The tiers that decode the complete window now, primary first."""
 
     def verdict_for_weak_result(
-        self, job: message.DecodeJob, result: message.DecodeResult
-    ) -> message.Verdict:
+        self,
+        job: decoding_records.DecodeJob,
+        result: decoding_records.DecodeResult,
+    ) -> decoding_records.Verdict:
         """Keep the weak result as final, or escalate its window."""
 
     def learn_from_strong_result(
-        self, window_key: tuple, result: message.DecodeResult
+        self, window_key: tuple, result: decoding_records.DecodeResult
     ) -> None:
         """The strong tier answered for the window; a source may learn."""
 
@@ -430,12 +438,14 @@ class ThresholdSource(Protocol):
     audits_by_escalating: bool
 
     def decide_keep(
-        self, job: message.DecodeJob, result: message.DecodeResult
+        self,
+        job: decoding_records.DecodeJob,
+        result: decoding_records.DecodeResult,
     ) -> bool:
         """True keeps the weak result; the result carries its soft output."""
 
     def learn_from_strong_result(
-        self, window_key: tuple, result: message.DecodeResult
+        self, window_key: tuple, result: decoding_records.DecodeResult
     ) -> None:
         """The strong tier answered for the window; the source may learn."""
 
@@ -444,7 +454,7 @@ class ThresholdSource(Protocol):
 class ConfidenceMetric(Protocol):
     """One window model's confidence, as the wrappers evaluate it."""
 
-    def evaluate(self, syndrome) -> message.SoftOutput:
+    def evaluate(self, syndrome) -> decoding_records.SoftOutput:
         """The soft output of one syndrome (Toshio 2510.25222 Sec. III A)."""
 
 
@@ -465,7 +475,7 @@ class ConfidenceSignal(Protocol):
     rather than a row on it.
     """
 
-    source: message.SoftOutputSource
+    source: decoding_records.SoftOutputSource
     fault_model_requirement: Any
 
     def metric_for(self, window_model) -> Optional[ConfidenceMetric]:

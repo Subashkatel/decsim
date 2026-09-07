@@ -3,6 +3,7 @@ from dataclasses import FrozenInstanceError
 import numpy as np
 import pytest
 
+import decsim.records.decoding as decoding_records
 import decsim.records.identity as identity_records
 import decsim.records.rounds as round_records
 import decsim.records.seeds as seed_records
@@ -61,7 +62,7 @@ def make_soft_output_source(**overrides):
         "references": ("source",),
     }
     values.update(overrides)
-    return message.SoftOutputSource(**values)
+    return decoding_records.SoftOutputSource(**values)
 
 
 def make_operation(**overrides):
@@ -464,12 +465,14 @@ def test_soft_output_source_normalizes_weight_step_without_text_checks():
 def test_soft_output_normalizes_numbers_without_source_instance_validation():
     """Soft output accepts any source and normalizes valid numeric fields to floats."""
     source = object()
-    output = message.SoftOutput(
+    output = decoding_records.SoftOutput(
         gap=2, source=source, w_min=-3, w_comp=float("inf")
     )
     assert output.source is source
     assert output.gap == 2.0
-    infinite_gap_output = message.SoftOutput(gap=float("inf"), source=source)
+    infinite_gap_output = decoding_records.SoftOutput(
+        gap=float("inf"), source=source
+    )
     assert output.w_min == -3.0
     assert output.w_comp == float("inf")
     assert infinite_gap_output.gap == float("inf")
@@ -482,7 +485,7 @@ def test_decoder_keys_preserve_request_and_service_identity():
     request_key = window_records.DecoderRequestKey(
         (4, "op"), 2, window_records.DecoderTier.STRONG, 7
     )
-    service_key = message.DecoderServiceKey(8)
+    service_key = decoding_records.DecoderServiceKey(8)
     assert request_key.operation_id == (4, "op")
     assert request_key.window_id == 2
     assert request_key.tier is window_records.DecoderTier.STRONG
@@ -494,7 +497,7 @@ def test_decoder_keys_preserve_request_and_service_identity():
 
 def test_decode_job_is_mutable_and_has_no_detector_count_property():
     """Decode jobs retain mutable lifecycle state without a detector-count convenience property."""
-    job = message.DecodeJob(op_id=4, window_id=2, n_rounds=3)
+    job = decoding_records.DecodeJob(op_id=4, window_id=2, n_rounds=3)
     job.completed = True
     assert job.completed
     assert not hasattr(job, "detector_count")
@@ -502,10 +505,10 @@ def test_decode_job_is_mutable_and_has_no_detector_count_property():
 
 def test_decode_result_supports_timing_only_and_richer_results():
     """Decode results allow timing-only defaults and optional correction data."""
-    timing_only = message.DecodeResult(op_id=4, window_id=2)
-    soft_output = message.SoftOutput(gap=1, source=object())
+    timing_only = decoding_records.DecodeResult(op_id=4, window_id=2)
+    soft_output = decoding_records.SoftOutput(gap=1, source=object())
     boundary_data = object()
-    rich = message.DecodeResult(
+    rich = decoding_records.DecodeResult(
         op_id=4,
         window_id=2,
         correction="X",
@@ -523,7 +526,9 @@ def test_decode_result_supports_timing_only_and_richer_results():
 
 def test_soft_output_does_not_enforce_weight_relationships():
     """Soft output accepts weights without enforcing a relationship to the gap."""
-    output = message.SoftOutput(gap=10, source=object(), w_min=20, w_comp=-5)
+    output = decoding_records.SoftOutput(
+        gap=10, source=object(), w_min=20, w_comp=-5
+    )
     assert output.gap == 10.0
     assert output.w_min == 20.0
     assert output.w_comp == -5.0

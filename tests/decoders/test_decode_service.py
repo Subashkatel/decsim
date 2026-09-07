@@ -16,7 +16,7 @@ import decsim.decoders.schedulers as schedulers
 import decsim.decoders.staged_decoder as staged_decoder
 import decsim.engine as engine_module
 import decsim.escalation.policies as escalation_policies
-import decsim.message as message
+import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
 from decsim.decoders.decoder_manager import DecoderManager
@@ -62,7 +62,7 @@ def _job(index, gate=None, deps_remaining=0):
         n_rounds=1,
         deps_remaining=deps_remaining,
     )
-    return message.DecodeJob(
+    return decoding_records.DecodeJob(
         op_id=1,
         window_id=index,
         n_rounds=1,

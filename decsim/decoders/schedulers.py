@@ -6,14 +6,16 @@ M-for-N scheduler the thing to vary.
 
 from typing import Protocol, runtime_checkable
 
-import decsim.message as message
+import decsim.records.decoding as decoding_records
 
 
 @runtime_checkable
 class Scheduler(Protocol):
     """Which ready job a decoder pool serves next."""
 
-    def pop(self, queue: list[message.DecodeJob]) -> message.DecodeJob:
+    def pop(
+        self, queue: list[decoding_records.DecodeJob]
+    ) -> decoding_records.DecodeJob:
         """Remove and return the next job of one pool's ready queue."""
 
 
@@ -25,6 +27,8 @@ class FifoScheduler:
     makes no unsupported deadline, cost, or microarchitecture claim.
     """
 
-    def pop(self, queue: list[message.DecodeJob]) -> message.DecodeJob:
+    def pop(
+        self, queue: list[decoding_records.DecodeJob]
+    ) -> decoding_records.DecodeJob:
         """Remove the ready job admitted earliest."""
         return queue.pop(0)

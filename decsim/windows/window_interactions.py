@@ -14,7 +14,7 @@ import dataclasses
 from collections.abc import Mapping
 from typing import Any, Optional, Protocol, runtime_checkable
 
-import decsim.message as message
+import decsim.records.decoding as decoding_records
 import decsim.records.windows as window_records
 
 
@@ -26,7 +26,7 @@ class WindowInteraction(Protocol):
         """The boundary a window starts with."""
 
     def boundary_from_result(
-        self, result: Optional[message.DecodeResult], fallback: Any
+        self, result: Optional[decoding_records.DecodeResult], fallback: Any
     ) -> Any:
         """The boundary a decode result carries, else the fallback."""
 

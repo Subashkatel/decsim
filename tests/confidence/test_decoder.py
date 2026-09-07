@@ -8,9 +8,9 @@ base decoder's, the signal only supplies the confidence.
 import decsim.confidence.decoder as confidence_decoder
 import decsim.decoders.decoder as decoder_module
 import decsim.detector_error_model.fault_model_contracts as fault_models
-import decsim.message as message
+import decsim.records.decoding as decoding_records
 
-SOURCE = message.SoftOutputSource(
+SOURCE = decoding_records.SoftOutputSource(
     method="stub",
     cluster_origin="stub",
     growth_schedule="stub",
@@ -34,8 +34,8 @@ class _Base(decoder_module.DecoderBase):
         del job
         return None
 
-    def decode(self, job) -> message.DecodeResult:
-        return message.DecodeResult(
+    def decode(self, job) -> decoding_records.DecodeResult:
+        return decoding_records.DecodeResult(
             job.op_id, job.window_id, logical_observables=(1,)
         )
 
@@ -48,9 +48,9 @@ class _Metric:
     def __init__(self, gap: float) -> None:
         self.gap = gap
 
-    def evaluate(self, syndrome) -> message.SoftOutput:
+    def evaluate(self, syndrome) -> decoding_records.SoftOutput:
         del syndrome
-        return message.SoftOutput(gap=self.gap, source=SOURCE)
+        return decoding_records.SoftOutput(gap=self.gap, source=SOURCE)
 
 
 class _Signal:
@@ -71,9 +71,11 @@ class _Model:
     """A window model the wrapper caches its metric by (weakly referenced)."""
 
 
-def _job() -> message.DecodeJob:
+def _job() -> decoding_records.DecodeJob:
     model = _Model()
-    return message.DecodeJob(op_id=1, window_id=0, n_rounds=3, dem=model)
+    return decoding_records.DecodeJob(
+        op_id=1, window_id=0, n_rounds=3, dem=model
+    )
 
 
 def test_the_wrapper_attaches_the_signals_soft_output_to_the_base_result():

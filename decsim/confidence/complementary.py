@@ -22,9 +22,9 @@ import decsim.decoders.minimum_weight_perfect_matching.weights as weights_module
 import decsim.detector_error_model.fault_identity_validation as fault_identity
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.detector_error_model.stim_fault_catalog as stim_fault_catalog
-import decsim.message as message
+import decsim.records.decoding as decoding_records
 
-COMPLEMENTARY_GAP_SOURCE = message.SoftOutputSource(
+COMPLEMENTARY_GAP_SOURCE = decoding_records.SoftOutputSource(
     method="complementary_gap",
     cluster_origin="mwpm_opposite_logical",
     growth_schedule="minimum_weight_matching",
@@ -120,7 +120,7 @@ class ComplementaryGapMetric:
         weights = weights_module.matching_weights(faults.priors)
         return cls(faults.check, faults.observables, weights)
 
-    def evaluate(self, syndrome) -> message.SoftOutput:
+    def evaluate(self, syndrome) -> decoding_records.SoftOutput:
         """The soft output of one syndrome: the gap and the two weights.
 
         w_min is the minimum-weight matching's weight, w_comp the weight
@@ -141,7 +141,7 @@ class ComplementaryGapMetric:
         w_comp = float(complementary_weight)
         difference = w_comp - w_min
         gap = abs(difference)
-        return message.SoftOutput(
+        return decoding_records.SoftOutput(
             gap=gap, source=COMPLEMENTARY_GAP_SOURCE, w_min=w_min, w_comp=w_comp
         )
 
@@ -189,7 +189,7 @@ class ComplementaryGapMetric:
         w_comp = forced_weights[complementary_class]
         difference = w_comp - w_min
         gap = abs(difference)
-        soft_output = message.SoftOutput(
+        soft_output = decoding_records.SoftOutput(
             gap=gap, source=COMPLEMENTARY_GAP_SOURCE, w_min=w_min, w_comp=w_comp
         )
         return PairedGapEvaluation(
@@ -239,7 +239,7 @@ class ComplementaryGapMetric:
 class PairedGapEvaluation:
     """One window's gap computed as two parallel forced-class solves."""
 
-    soft_output: message.SoftOutput
+    soft_output: decoding_records.SoftOutput
     predicted_class: int
     forced_solve_nanoseconds: tuple
 

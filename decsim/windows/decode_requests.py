@@ -20,6 +20,7 @@ from typing import Callable, Optional
 
 import decsim.message as message
 import decsim.observe.trace_source as trace_source
+import decsim.records.decoding as decoding_records
 import decsim.records.identity as identity_records
 import decsim.records.windows as window_records
 
@@ -93,11 +94,11 @@ class DecodeRequestBuilder:
         operation: message.Operation,
         tier: window_records.DecoderTier,
         store,
-    ) -> message.DecodeJob:
+    ) -> decoding_records.DecodeJob:
         """The tier's decode job for one complete window, read from store."""
         request_key = self.new_request_key(window.op_id, window.k, tier)
         payloads = self.assemble_payloads(window, store)
-        payload_round_count = message.distinct_round_count(payloads)
+        payload_round_count = decoding_records.distinct_round_count(payloads)
         round_count = (
             payload_round_count + window.batched_preceding_idle_round_count
         )
@@ -105,7 +106,7 @@ class DecodeRequestBuilder:
         geometry = self.planner.code_geometry_of(operation.id)
         model = self.planner.model_by_window.get(window.key)
         label = self._job_label(window, operation)
-        return message.DecodeJob(
+        return decoding_records.DecodeJob(
             op_id=window.op_id,
             window_id=window.k,
             n_rounds=round_count,
@@ -159,7 +160,7 @@ class DecodeRequestBuilder:
         return payloads
 
     def input_send(
-        self, job: message.DecodeJob, path: message.LinkPath
+        self, job: decoding_records.DecodeJob, path: message.LinkPath
     ) -> Callable[[Callable[[], None]], int]:
         """The job's input send: at dispatch it rides the path into the unit.
 
@@ -175,7 +176,7 @@ class DecodeRequestBuilder:
 
     # ---- the WindowInputGate port
 
-    def may_stage(self, job: message.DecodeJob) -> bool:
+    def may_stage(self, job: decoding_records.DecodeJob) -> bool:
         """May this boundary-blocked job occupy an input slot yet?
 
         Only when every unmet dependency is already resolving without
@@ -193,7 +194,7 @@ class DecodeRequestBuilder:
                 return False
         return True
 
-    def may_start(self, job: message.DecodeJob) -> bool:
+    def may_start(self, job: decoding_records.DecodeJob) -> bool:
         """May this landed job start its decode?
 
         False parks the job in its slot until its window's last boundary
@@ -205,7 +206,7 @@ class DecodeRequestBuilder:
             return True
         return window.deps_remaining <= 0
 
-    def mask_input(self, job: message.DecodeJob) -> None:
+    def mask_input(self, job: decoding_records.DecodeJob) -> None:
         """XOR the window's boundary mask into the landed decoder input.
 
         The unit's stored copy stays raw (cudaq-x keeps raw rounds and
@@ -282,7 +283,7 @@ class DecodeRequestBuilder:
 
     def _send_input(
         self,
-        job: message.DecodeJob,
+        job: decoding_records.DecodeJob,
         path: message.LinkPath,
         payload_bits: Optional[int],
         on_landed: Callable[[], None],
@@ -394,7 +395,7 @@ class DecodeRequester:
         submissions = []
         for tier in tiers:
             if tier is primary_tier:
-                primary = message.Submission(job)
+                primary = decoding_records.Submission(job)
                 submissions.append(primary)
             else:
                 sibling = strong_redecode.parallel_strong_submission(job)
@@ -402,7 +403,7 @@ class DecodeRequester:
         for submission in submissions:
             self._submit(submission, window.key)
 
-    def enqueue(self, submission: message.Submission) -> None:
+    def enqueue(self, submission: decoding_records.Submission) -> None:
         """Admit one submission with its input send and its return path.
 
         A strong job's result finalizes its window; a primary job's
@@ -432,7 +433,9 @@ class DecodeRequester:
         """The window's last boundary arrived: its parked decode may start."""
         self.decode_queue.release_parked(window_key)
 
-    def _submit(self, submission: message.Submission, key: tuple) -> None:
+    def _submit(
+        self, submission: decoding_records.Submission, key: tuple
+    ) -> None:
         """A strong submission carries its send; a weak one gets its input."""
         job = submission.job
         if job.strong_decode_for is not None:
@@ -440,7 +443,7 @@ class DecodeRequester:
             return
         if job.submitted or self.retention.holds_input(job):
             resend = self.builder.resend_held_input()
-            submission = message.Submission(job, resend)
+            submission = decoding_records.Submission(job, resend)
             self.enqueue(submission)
             return
         store = self.retention.primary_store
@@ -448,7 +451,7 @@ class DecodeRequester:
         send_input = self.builder.input_send(
             job, self.retention.primary_input_path
         )
-        submission = message.Submission(job, send_input)
+        submission = decoding_records.Submission(job, send_input)
         self.enqueue(submission)
 
 

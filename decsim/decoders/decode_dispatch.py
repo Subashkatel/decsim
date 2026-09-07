@@ -17,7 +17,7 @@ import decsim.decoders.decode_queue as decode_queue_module
 import decsim.decoders.decode_service as decode_service_module
 import decsim.decoders.decoder_pool as decoder_pool_module
 import decsim.decoders.decoder_unit as decoder_unit_module
-import decsim.message as message
+import decsim.records.decoding as decoding_records
 
 
 class DecodeDispatcher:
@@ -83,7 +83,7 @@ class DecodeDispatcher:
         return None
 
     def _eligible_unit(
-        self, pool: str, job: message.DecodeJob
+        self, pool: str, job: decoding_records.DecodeJob
     ) -> Optional[tuple]:
         """(unit, claim_compute) for this job, or None.
 
@@ -115,7 +115,7 @@ class DecodeDispatcher:
         return unit, claim_compute
 
 
-def _is_staging_refused(job: message.DecodeJob) -> bool:
+def _is_staging_refused(job: decoding_records.DecodeJob) -> bool:
     if job.gate is None:
         return False
     return not job.gate.may_stage(job)

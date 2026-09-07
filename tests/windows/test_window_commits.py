@@ -10,6 +10,7 @@ import types
 
 import decsim.engine as engine_module
 import decsim.message as message
+import decsim.records.decoding as decoding_records
 import decsim.records.windows as window_records
 import decsim.windows.window_commits as window_commits
 
@@ -113,9 +114,9 @@ class _Fixture:
             self.results,
         )
 
-    def job(self, tier, sequence, awaiting=False) -> message.DecodeJob:
+    def job(self, tier, sequence, awaiting=False) -> decoding_records.DecodeJob:
         request_key = window_records.DecoderRequestKey(4, 1, tier, sequence)
-        job = message.DecodeJob(
+        job = decoding_records.DecodeJob(
             op_id=4, window_id=1, n_rounds=5, request_key=request_key
         )
         job.awaiting_strong_result = awaiting
@@ -125,7 +126,7 @@ class _Fixture:
 def test_the_boundary_leaves_at_decode_done_before_the_frame_commit():
     fixture = _Fixture()
     job = fixture.job(window_records.DecoderTier.WEAK, 0)
-    result = message.DecodeResult(4, 1, logical_observables=(1, 0))
+    result = decoding_records.DecodeResult(4, 1, logical_observables=(1, 0))
     fixture.engine.schedule(
         10, lambda: fixture.committer.accept_result(job, result)
     )
@@ -151,7 +152,7 @@ def test_the_boundary_leaves_at_decode_done_before_the_frame_commit():
 def test_a_window_awaiting_strong_commits_provisionally_and_is_not_final():
     fixture = _Fixture()
     job = fixture.job(window_records.DecoderTier.WEAK, 0, awaiting=True)
-    result = message.DecodeResult(4, 1, logical_observables=(1, 0))
+    result = decoding_records.DecodeResult(4, 1, logical_observables=(1, 0))
     fixture.committer.accept_result(job, result)
     assert fixture.transfers.sent == []
     assert fixture.frame.commits == []
@@ -164,10 +165,12 @@ def test_a_window_awaiting_strong_commits_provisionally_and_is_not_final():
 def test_a_strong_result_replaces_the_weak_prediction_and_ships_the_held():
     fixture = _Fixture()
     weak = fixture.job(window_records.DecoderTier.WEAK, 0, awaiting=True)
-    weak_result = message.DecodeResult(4, 1, logical_observables=(1, 0))
+    weak_result = decoding_records.DecodeResult(
+        4, 1, logical_observables=(1, 0)
+    )
     fixture.committer.accept_result(weak, weak_result)
     strong = fixture.job(window_records.DecoderTier.STRONG, 1)
-    result = message.DecodeResult(4, 1, logical_observables=(0, 1))
+    result = decoding_records.DecodeResult(4, 1, logical_observables=(0, 1))
     fixture.engine.schedule(
         20, lambda: fixture.committer.accept_strong_result(strong, result)
     )
@@ -193,7 +196,7 @@ def test_a_frameless_run_commits_at_the_delivery():
     request_key = window_records.DecoderRequestKey(
         4, 1, window_records.DecoderTier.WEAK, 0
     )
-    result = message.DecodeResult(4, 1, logical_observables=(1,))
+    result = decoding_records.DecodeResult(4, 1, logical_observables=(1,))
     publisher.publish(
         window,
         operation,

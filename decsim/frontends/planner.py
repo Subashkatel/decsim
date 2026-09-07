@@ -12,6 +12,7 @@ from typing import Callable, Optional
 
 import decsim.config as config
 import decsim.message as message
+import decsim.records.decoding as decoding_records
 import decsim.records.identity as identity_records
 import decsim.records.windows as window_records
 
@@ -403,7 +404,7 @@ def _hold_restart_reads(
     lower_start = window.commit_lo - buffer_rounds
     lower = max(1, lower_start)
     round_keys = _read_keys(execution, operation_id, lower, window.buffer_hi)
-    owner = message.PotentialRestart((operation_id, window.k))
+    owner = decoding_records.PotentialRestart((operation_id, window.k))
     weak.add(owner, round_keys, round_keys)
 
 
@@ -437,7 +438,7 @@ def _hold_strong_context(
     lower = max(1, context_start)
     upper = commit_hi + buffer_rounds
     potential = _read_keys(execution, operation_id, lower, upper)
-    owner = message.PotentialStrong((operation_id, window.k))
+    owner = decoding_records.PotentialStrong((operation_id, window.k))
     arrived = _arrived_by_buffer(potential, operation_id, window.buffer_hi)
     strong.add(owner, potential, arrived)
 

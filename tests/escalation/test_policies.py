@@ -361,16 +361,9 @@ class _AlwaysEscalate(policies.EscalationPolicyBase):
 
 
 def test_a_policy_row_added_to_the_table_runs_a_switching_point(monkeypatch):
-    """One class and its table rows.
-
-    The kind goes in ESCALATIONS, and its tier in the settings'
-    TIER_BY_ESCALATION_KIND, which the front reads.
-    """
+    """One class and one ESCALATIONS row; the row declares its tier."""
     monkeypatch.setitem(
         machine_module.ESCALATIONS, "always_escalate", _AlwaysEscalate
-    )
-    monkeypatch.setitem(
-        decoder_settings.TIER_BY_ESCALATION_KIND, "always_escalate", "weak"
     )
     escalation = decoder_settings.EscalationSettings(kind="always_escalate")
     machine = fabric.switching_machine(

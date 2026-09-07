@@ -146,9 +146,14 @@ class ExperimentConfig:
         )
 
     @property
+    def active_tier(self) -> str:
+        """The tier that decodes the plan's windows: weak or strong."""
+        return machine.escalation_tier(self.settings.escalation)
+
+    @property
     def active_decoder(self) -> machine.decoder_settings.DecoderSettings:
-        """The tier that decodes the plan's windows."""
-        tier = self.settings.escalation.decodes_on
+        """The decoder card of the tier that decodes the plan's windows."""
+        tier = self.active_tier
         return getattr(self.settings, f"{tier}_decoder")
 
 

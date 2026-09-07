@@ -161,7 +161,7 @@ def decoder_title(config) -> str:
     if isinstance(algorithm, str):
         name = algorithm
     spelled = name.replace("_", " ")
-    tier = config.settings.escalation.decodes_on
+    tier = config.active_tier
     return f"{spelled} decoder ({tier})"
 
 

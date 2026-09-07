@@ -32,6 +32,7 @@ import decsim.decoders.staged_decoder as staged_decoder
 import decsim.decoders.union_find.decoder as union_find_decoder
 import decsim.detector_error_model.detector_chronology as detector_chronology
 import decsim.engine as engine_module
+import decsim.escalation.policies as escalation_policies
 import decsim.front.experiment as experiment
 import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
@@ -44,6 +45,7 @@ import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
 import decsim.records.seeds as seed_records
 import decsim.records.transfers as transfer_records
+import decsim.records.windows as window_records
 import decsim.seeding as seeding
 import decsim.syndrome_buffer.round_store as round_store_module
 import decsim.syndrome_buffer.settings as round_store_settings
@@ -398,6 +400,44 @@ def test_a_new_round_store_is_one_class_and_one_table_row():
     ]
     assert machine.round_store.stored_count == len(fired)
     assert fired
+
+
+class AlwaysStrongEscalation(escalation_policies.EscalationPolicyBase):
+    """An escalation row written outside decsim: the strong tier decodes."""
+
+    requires_strong_context = False
+    primary_tier = window_records.DecoderTier.STRONG
+
+    def verdict_for_weak_result(self, job, result):
+        """The strong result is final."""
+        del job
+        del result
+        return decoding_records.Verdict.KEEP
+
+
+def test_a_new_escalation_kind_is_one_class_and_one_table_row():
+    """The row declares its tier, so no second table names the kind."""
+    config_path = CONFIGS / "strong_decoder_baseline.yaml"
+    config = experiment.load_experiment(config_path)
+    settings = config.point_settings(
+        physical_error_probability=0.003, distance=3, round_period_us=1.0
+    )
+    escalation = dataclasses.replace(settings.escalation, kind="always_strong")
+    settings = dataclasses.replace(settings, escalation=escalation)
+    machine_module.ESCALATIONS["always_strong"] = AlwaysStrongEscalation
+    try:
+        assert machine_module.escalation_tier(escalation) == "strong"
+        machine = machine_module.Machine.build(settings, 0)
+        result = machine.run()
+    finally:
+        del machine_module.ESCALATIONS["always_strong"]
+    assert result.terminal_status == "complete"
+    snapshot = machine.pauli_frame.snapshot()
+    tiers = []
+    for record in snapshot.records:
+        tiers.append(record.tier)
+    assert tiers
+    assert set(tiers) == {"strong"}
 
 
 class RecordingBoundaryPolicy:

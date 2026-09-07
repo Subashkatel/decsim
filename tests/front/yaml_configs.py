@@ -38,11 +38,12 @@ def measure_point_shot(
     config, *, physical_error_probability, distance, round_period_us, seed
 ):
     """One seeded shot at one sweep point, collected and measured."""
+    shots = seed + 1
     task = config.point_task(
         physical_error_probability=physical_error_probability,
         distance=distance,
         round_period_us=round_period_us,
-        shots=seed + 1,
+        shots=shots,
     )
     shot = collect.run_shot(task, seed)
     return measure.measure_shot(shot)
@@ -107,7 +108,8 @@ def write_config(tmp_path, overrides: dict) -> Path:
     raw = dict(MINIMAL_CONFIG)
     raw.update(overrides)
     config_path = tmp_path / "unit_test_config.yaml"
-    config_path.write_text(yaml.safe_dump(raw))
+    config_text = yaml.safe_dump(raw)
+    config_path.write_text(config_text)
     return config_path
 
 

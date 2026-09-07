@@ -21,7 +21,8 @@ from tests.front.yaml_configs import (
 
 
 def test_reference_config_defines_both_tiers_and_the_mode_picks_weak():
-    config = experiment.load_experiment(CONFIGS_DIR / "reference.yaml")
+    reference_path = CONFIGS_DIR / "reference.yaml"
+    config = experiment.load_experiment(reference_path)
     settings = config.settings
     assert settings.weak_decoder.kind == "pymatching"
     assert settings.strong_decoder.kind == "belief_matching"
@@ -252,7 +253,9 @@ def test_a_run_writes_its_manifest_and_per_shot_records(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     run_dir, rows = collect_command.run_experiment(config_path)
 
-    manifest = json.loads((run_dir / "manifest.json").read_text())
+    manifest_path = run_dir / "manifest.json"
+    manifest_text = manifest_path.read_text()
+    manifest = json.loads(manifest_text)
     assert manifest["versions"]["stim"]
     assert (
         manifest["resolved_config"]["settings"]["escalation"]["kind"]
@@ -260,8 +263,10 @@ def test_a_run_writes_its_manifest_and_per_shot_records(tmp_path, monkeypatch):
     )
     assert manifest["started_utc"] and manifest["finished_utc"]
 
-    with open(run_dir / "shots.csv") as handle:
-        shots = list(csv.DictReader(handle))
+    shots_csv_path = run_dir / "shots.csv"
+    with open(shots_csv_path) as handle:
+        reader = csv.DictReader(handle)
+        shots = list(reader)
     assert len(shots) == 1 and shots[0]["seed"] == "0"
 
     assert run_dir.name.endswith("-unit_test_config")

@@ -261,7 +261,8 @@ def test_the_priced_weak_store_hop_is_unbounded_when_no_rate_is_given():
 
 
 def test_a_run_without_a_card_uses_the_reference_card():
-    default_machine = machine.Machine.build(machine.MachineSettings())
+    default_settings = machine.MachineSettings()
+    default_machine = machine.Machine.build(default_settings)
     default_result = default_machine.run()
     reference = link_profiles.logical_reference_profile()
     explicit_settings = machine.MachineSettings(links=reference)

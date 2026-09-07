@@ -42,13 +42,10 @@ def test_weak_unit_loop_matches_direct_pymatching(tmp_path):
 
 
 def test_strong_unit_runs_belief_matching(tmp_path):
-    config_path = write_config(
-        tmp_path,
-        {
-            "escalation": {"kind": "strong_only"},
-            **strong_unit("belief_matching"),
-        },
-    )
+    strong_decoder = strong_unit("belief_matching")
+    card = {"escalation": {"kind": "strong_only"}}
+    card.update(strong_decoder)
+    config_path = write_config(tmp_path, card)
     config = experiment.load_experiment(config_path)
     measurement = measure_point_shot(
         config,

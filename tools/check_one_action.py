@@ -4,7 +4,8 @@ Usage:
     python tools/check_one_action.py <file or directory> ...
 
 Exit status is 1 when anything is reported. Vendored files, dependency
-folders and scratch folders are skipped (EXCLUDED_PARTS).
+folders and scratch folders are skipped (EXCLUDED_PARTS), as are the
+frozen artifact folders of EXCLUDED_PATHS.
 
 What is reported, by kind:
     nested call         a call, other than an allowed built-in, anywhere
@@ -77,6 +78,9 @@ EXCLUDED_PARTS = frozenset(
         "stimcircuits",
     }
 )
+# tests/data holds the frozen QLX artifacts and the scripts that produced
+# them inside the QLX container: provenance, kept exactly as it ran.
+EXCLUDED_PATHS = ("tests/data",)
 MAX_FUNCTION_LINES = 40
 MAX_BLOCK_DEPTH = 2
 MAX_ATTRIBUTES = 6
@@ -435,9 +439,13 @@ def check_file(path):
 
 
 def is_excluded(path):
-    """True when any part of the path names a skipped folder or file."""
+    """True when the path names a skipped folder or file."""
     for part in path.parts:
         if part in EXCLUDED_PARTS:
+            return True
+    text = path.as_posix()
+    for excluded in EXCLUDED_PATHS:
+        if excluded in text:
             return True
     return False
 

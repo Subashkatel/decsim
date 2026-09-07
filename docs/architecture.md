@@ -53,20 +53,31 @@ reports one row per path.
 | Pauli frame | `pauli_frame/` | one correction per window | the folded frame per stream, and the release of what waited |
 | Observation | `observe/` | callbacks every component fires | the metrics, the traffic ledger, the trace |
 
-The syndrome source, the round store, the decoder, the link, the
-escalation policy, the threshold source, the confidence signal, the
-windowing scheme, the idle policy and the workload are the pluggable
-parts: each has its abstract class in `decsim/ports.py` and one table of
-rows in `decsim/machine.py`.
+The syndrome source, the round store, the decoder, the escalation
+policy, the confidence signal, the windowing scheme, the idle policy
+and the workload are the pluggable parts a table picks: each has its
+abstract class in `decsim/ports.py` and one table of rows at the top
+of `decsim/machine.py`. Two parts are pluggable through their own
+settings section instead. The link fabric is built from the `links`
+section, a number card read by `link_profiles.from_yaml` and wired by
+`fabric.LinkFabric`, so a card of your own is a card file and not a
+row. The threshold source is `escalation.threshold_source`: fixed and
+table both reach the root as a threshold in nats, resolved per sweep
+point by the front, and online reaches it as the calibrator object
+itself (`_threshold_source`).
 
 ## The hops, one row each
 
-A hop is one pair of neighbours and one link path. "Move" means the bits
-leave the sender; "copy" means both sides hold them afterwards.
+A hop is one pair of neighbours and one link path. The traffic ledger
+books every transfer as one of three words
+(`decsim/observe/data_movement.py`): a move leaves the bits behind, a
+copy ends with both sides holding them, and a reference hands over an
+object both sides read, which is what a store's hold books rather
+than a hop of its own.
 
 | Hop | Path | Bits |
 | --- | --- | --- |
-| Readout electronics to controller | `qpu_to_controller` | move, one bit per measure qubit per round |
+| Readout electronics to controller | `qpu_to_controller` | move, one bit per measure qubit per round, and on the last round the data readout too, one bit per data qubit |
 | Controller to syndrome buffer 0 | `controller_to_weak_buffer` | move, the packed round |
 | Controller to syndrome buffer 1 | `controller_to_strong_buffer` | copy, the same round in parallel |
 | Buffer 0 to a weak unit's input slot | `weak_buffer_to_weak_decoder` | copy, the window's rounds |

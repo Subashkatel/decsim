@@ -73,15 +73,23 @@ decsim collect configs/weak_ler.yaml --processes 8
 decsim collect configs/weak_ler.yaml --shard 0/4
 decsim combine results/<first> results/<second>
 decsim plot results/<run> --figure timeline
+decsim plot results/<run> --figure ler_vs_d --probability 0.001
 decsim trace follow results/<run>/trace/<shot>.trace.json --round 1:1
 ```
+
+`configs/weak_ler.yaml` is the real thing: 35 points and 10.4 million
+shots, sized for a Slurm array, and its own header says how to launch
+one. For a smoke run take `configs/reference.yaml`, whose sweep is two
+shots at one point.
 
 `collect` runs every point of the sweep and writes a run folder.
 `--processes` gives each worker one task, `--shard i/n` gives one Slurm
 array task its share of the work units, and `--shots-per-unit` sets how
 many shots a unit is: a smaller unit trades the per-task window-model
 cache for shards that fit a time limit. `combine` folds the shards of one
-sweep into one folder's rows.
+sweep into one folder's rows. `plot` draws one figure from a run
+folder; `ler_vs_d` reads one probability out of the sweep, so it asks
+for `--probability`.
 
 ## Where the output lands
 

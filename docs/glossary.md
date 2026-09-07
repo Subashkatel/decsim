@@ -1,6 +1,6 @@
 # Glossary
 
-decsim's names are full words (`REWRITE.md` rule 3), and the papers'
+decsim's names are full words (`REWRITE.md` rule 2), and the papers'
 names are letters and acronyms. This page is the map, both ways: what
 the code calls a thing, what the literature calls it, and where in the
 literature to read it.
@@ -52,7 +52,7 @@ The abbreviations the earlier code used are gone.
 
 ## The renamed modules
 
-Rule 3 spelled the acronyms out. If you are coming from the earlier
+Rule 2 spelled the acronyms out. If you are coming from the earlier
 tree or from a paper's notation, this is where each thing went.
 
 | Now | Was |
@@ -61,13 +61,25 @@ tree or from a paper's notation, this is where each thing went.
 | `decsim/machine.py`, `decsim/front/experiment.py` | `decsim/run_spec.py`, `decsim/run_configuration.py` |
 | `decsim/decoders/minimum_weight_perfect_matching/decoder.py` | `decsim/decoders/mwpm/window_decoder.py` |
 | `decsim/decoders/belief_propagation_osd/decoder.py` | `decsim/decoders/bposd/window_decoder.py` |
-| `decsim/detector_error_model/` | `dem` in every name it appeared in |
+| `decsim/ports.py` | `decsim/protocols.py` |
+| `decsim/detector_error_model/` | `dem` in the module and file names |
 | `decsim/detector_error_model/stim_fault_catalog.py` | `stim_dem_catalog.py` |
 | `decsim/syndrome_buffer/round_store.py`, `strong_round_writer.py` | `syndrome_buffer.py`, `syndrome_buffer_1.py` |
 | `decsim/controller/round_assembly.py`, `round_writes.py`, `round_transmission.py` | `controller/syndrome_packing.py` |
 | `decsim/escalation/` | `decoders/weak_strong_switching.py` |
 | `decsim/links/fabric.py`, `channel.py` | `links/links.py` |
 | `decsim/observe/link_traffic.py` | `links/link_traffic_report.py` |
+| `decsim/decoders/relay_belief_propagation/` | `decoders/relay_bp/` |
+| `decsim/decoders/belief_matching/decoder.py` | `belief_matching/window_decoder.py` |
+| `decsim/decoders/staged_decoder.py` | `decoders/decoder_engine.py` |
+| `decsim/escalation/strong_redecode.py`, `strong_window_shapes.py` | `decoders/strong_escalation.py` |
+| `decsim/decoders/decode_outcomes.py`, `backend_outcome.py` | `decoders/window_decode_results.py` |
+| `decsim/windows/window_planner.py`, `round_tracker.py` | `windows/dynamic_windows.py`, dissolved into them |
+
+One acronym is only half gone. The modules and the files spell it
+out, and the code has not caught up: `DecodeJob.dem`, the field every
+plug-in decoder reads, and the other `dem` names beside it still carry
+it. A rule 2 surface commit for them is owed.
 
 ## Words this code means precisely
 

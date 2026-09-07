@@ -131,20 +131,22 @@ class RoundAssembler:
     def _finish_packing(self, context) -> None:
         """The round is complete: merge, form detection events, hand on."""
         operation_id, round_index = context.round_key
-        packed_event = message.RoundEvent.of(
-            "PACKED", self.engine.now, operation_id, round_index, context.route
-        )
-        self.round_event.fire(packed_event)
         raw_fragments = _merge_fragments_by_patch(context.fragments)
         # the links carry the raw measurement bits; detection events exist
         # only from the decoder input (Buffer 0) onward
         wire_bits = _fragment_bits(raw_fragments)
+        # the merge is what packs the round, so it is reported before the
+        # round is packed, and the workspace's residence knows its bits
         self.copy_made.fire(
             context.round_key,
             wire_bits,
             "controller intake",
             "controller assembler",
         )
+        packed_event = message.RoundEvent.of(
+            "PACKED", self.engine.now, operation_id, round_index, context.route
+        )
+        self.round_event.fire(packed_event)
         formed_fragments = self._form_detection_events(raw_fragments)
         packet = message.SyndromeRoundPacket(
             operation_id=operation_id,

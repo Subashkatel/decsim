@@ -63,6 +63,7 @@ class ObservationSettings:
     @classmethod
     def from_yaml(cls, section: Mapping) -> "ObservationSettings":
         """The `observation` section, every key optional."""
+        _refuse_a_section_that_is_not_a_block(section)
         _refuse_an_unknown_key(section)
         log = _log_mode(section)
         trace = _trace_word_or_path(section)
@@ -110,6 +111,16 @@ class ObservationSettings:
         if self.trace in ("off", CHROME_TRACE):
             return None
         return self.trace
+
+
+def _refuse_a_section_that_is_not_a_block(section) -> None:
+    """The section is a block of keys; a bare value names none of them."""
+    if isinstance(section, Mapping):
+        return
+    raise ValueError(
+        f"the observation section must be a block of keys, got {section!r}; "
+        f"the observation keys are {OBSERVATION_KEYS}"
+    )
 
 
 def _refuse_an_unknown_key(section: Mapping) -> None:

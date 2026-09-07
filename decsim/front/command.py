@@ -10,12 +10,13 @@ loads Stim. The console script and `python -m decsim` both land here.
     decsim combine <run_dir>... [--out DIR]
     decsim show <yaml>
     decsim plot <run_dir>... [--figure NAME] [--out PATH] [--probability P]
+    decsim trace follow <file> --round k:n | --window k:n [--html PATH]
 """
 
 import sys
 from typing import Optional
 
-VERBS = ("run", "collect", "combine", "show", "plot")
+VERBS = ("run", "collect", "combine", "show", "plot", "trace")
 HELP_WORDS = ("help", "-h", "--help")
 
 
@@ -37,6 +38,8 @@ def main(argv: Optional[list] = None) -> None:
         return _show(rest)
     if verb == "plot":
         return _plot(rest)
+    if verb == "trace":
+        return _trace(rest)
     _report_no_verb(verb)
 
 
@@ -149,6 +152,13 @@ def _plot(argv: list) -> None:
         parsed.figure, parsed.run_dirs, parsed.out, parsed.probability
     )
     print(out_path)
+
+
+def _trace(argv: list) -> None:
+    """One round's or one window's path through one shot's trace file."""
+    import decsim.front.trace_follow as trace_follow
+
+    trace_follow.main(argv)
 
 
 def _shard_of(text: Optional[str]) -> Optional[tuple]:

@@ -79,6 +79,19 @@ def test_the_sibling_is_enqueued_at_service_start_with_the_landed_rounds():
     assert joins.unresolved_windows() == [(1, 0)]
 
 
+def test_a_window_has_a_join_from_the_spawn_until_both_halves_report():
+    enqueued = _Enqueued()
+    joins = _joins(enqueued)
+    primary = _primary()
+    assert joins.has_join(primary) is False
+    joins.spawn(primary)
+    assert joins.has_join(primary) is True
+    result = decoding_records.DecodeResult(1, 0, gap_half_weight=3.0)
+    joins.take_weak_result(primary, result)
+    joins.sibling_done((1, 0), 5.0)
+    assert joins.has_join(primary) is False
+
+
 def test_the_gap_is_the_two_class_weights_difference_once_both_report():
     enqueued = _Enqueued()
     joins = _joins(enqueued)

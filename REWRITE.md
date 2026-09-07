@@ -102,10 +102,10 @@ failure.
 ## Rule 2. Names are full words that say what the thing is
 
 No abbreviations. No acronyms except these, which are words in this field
-and stay: qpu, id, io, xor, yaml, json. The glossary in the sandbox at
-docs/architecture/TERMINOLOGY.md maps every plain name to the exact term
-the literature uses, so `minimum_weight_perfect_matching` is listed
-beside "MWPM".
+and stay: qpu, id, io, xor, yaml, json. docs/glossary.md maps every plain
+name to the exact term the literature uses, so
+`minimum_weight_perfect_matching` is listed beside "MWPM", and it carries
+the renamed modules too.
 
     wm            -> window_manager
     dem           -> detector_error_model

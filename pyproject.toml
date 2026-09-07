@@ -26,8 +26,9 @@ bb-decoders = ["quits==1.1.0", "relay-bp==0.2.2", "tesseract-decoder==0.1.1.dev2
 where = ["."]
 include = ["decsim*"]
 
-# docs/ holds cloned third-party artifacts (e.g. the SWIPER repo) whose own
-# test suites must not be collected by our `python -m pytest -q` entry point.
+# tests/ is the whole suite, and the only place with tests: `python -m pytest
+# -q` collects it and nothing else. docs/ holds the four pages a reader
+# starts from (architecture, glossary, plug_in_a_component, reading_a_trace).
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 

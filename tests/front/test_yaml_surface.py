@@ -14,6 +14,7 @@ import decsim.front.report as report
 from tests.front.yaml_configs import (
     CONFIGS_DIR,
     MINIMAL_CONFIG,
+    SHIPPED_CONFIGS,
     measure_point_shot,
     write_config,
 )
@@ -36,9 +37,16 @@ def test_reference_config_defines_both_tiers_and_the_mode_picks_weak():
 
 
 def test_every_shipped_config_loads():
-    for config_path in sorted(CONFIGS_DIR.glob("*.yaml")):
+    for name in SHIPPED_CONFIGS:
+        config_path = CONFIGS_DIR / name
         config = experiment.load_experiment(config_path)
-        assert config.active_decoder is not None, config_path.name
+        assert config.active_decoder is not None, name
+
+
+def test_every_config_the_tests_name_is_shipped():
+    for name in SHIPPED_CONFIGS:
+        config_path = CONFIGS_DIR / name
+        assert config_path.is_file(), name
 
 
 def test_controller_cycle_card_reaches_both_runtime_paths(tmp_path):

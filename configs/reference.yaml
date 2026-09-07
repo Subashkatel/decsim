@@ -143,6 +143,20 @@ controller:                        # controller work per round, in cycles of its
                                    # conditional together: an upper bound here
   packing_rounds_in_flight: null   # packing assembly workspace: rounds in flight
                                    # through the packing stage. null = unbounded
+  packing_overflow: stall          # stall | drop_round: what the controller does
+                                   # with a finished round Buffer 0 (or the packing
+                                   # workspace) cannot take. stall holds it upstream
+                                   # and writes it in order once a slot frees, the
+                                   # backpressure real-time stacks apply to their
+                                   # source (Caune et al. 2410.05202: the sequencer
+                                   # polls the decoder's status register and stalls);
+                                   # under stall a full packing workspace stops the
+                                   # run. drop_round drops it instead, ns-3's drop
+                                   # tail (point-to-point-net-device.cc Send:
+                                   # Enqueue false, the packet is dropped).
+                                   # LILLIPUT's readout buffer overwrites the latest
+                                   # value (2108.06569), a storage choice neither
+                                   # word models
 
 clocks:                            # clock domain name -> MHz; a link prices its
                                    # cycles on the domain it names. More domains

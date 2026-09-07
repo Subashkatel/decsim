@@ -552,6 +552,7 @@ class Machine:
             traffic_ledger=traffic_ledger,
             links=links,
             qpu=qpu,
+            syndrome_source=plan.device,
             controller=controller,
             idle_rounds=idle_rounds,
             assembler=assembler,

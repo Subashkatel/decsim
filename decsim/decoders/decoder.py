@@ -53,11 +53,13 @@ class DecoderBase(abc.ABC):
     section 5's data-side callback): a row with internal stages replaces
     it with one of its own and fires a record per stage, and a row
     without leaves this silent one, so the machine connects the stage
-    listeners to every row by name.
+    listeners to every row by name. window_checked is the same shape for
+    a row that audits its own answer against a referee.
     """
 
     fault_model_requirement = fault_models.NO_FAULT_MODEL_REQUIRED
     stage_recorded = trace_source.SILENT
+    window_checked = trace_source.SILENT
 
     @abc.abstractmethod
     def decode(self, job: message.DecodeJob) -> message.DecodeResult:

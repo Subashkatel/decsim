@@ -15,6 +15,7 @@ from typing import Any, Optional
 
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.message as message
+import decsim.observe.trace_source as trace_source
 import decsim.qpu.code_geometry as code_geometry
 import decsim.seeding as seeding
 
@@ -26,6 +27,8 @@ class TimingOnlyDevice:
     """Emits payloads without bits, so a run prices timing alone."""
 
     operation_circuit_scope = "none"
+    # nothing is sampled here, so the port's shot source never fires
+    shot_sampled = trace_source.SILENT
 
     def begin_operation(
         self,
@@ -124,6 +127,8 @@ class SyndromeBitDevice(seeding._RandomSeedConsumer):
     """Emits seeded random bits shaped like the code card's syndrome."""
 
     operation_circuit_scope = "none"
+    # the bits are drawn per round, not per shot, so nothing fires here
+    shot_sampled = trace_source.SILENT
 
     def __init__(
         self,

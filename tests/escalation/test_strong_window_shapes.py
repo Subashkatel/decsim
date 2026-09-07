@@ -288,19 +288,20 @@ def _claim(machine, window_index: int):
     return store.hold_round_identities(claim)
 
 
-def test_a_double_window_plan_claims_one_buffer_before_each_bounded_window():
-    """The plan's claims: a window's reads and one buffer before them.
+def test_a_double_window_plan_claims_the_rounds_a_restart_would_read():
+    """The plan's claims at the default re-read width, which is 0.
 
-    The first window, and every window of an ordinary run, claims
-    nothing.
+    A bounded window claims exactly its own reads, since a restart of
+    it would begin on its first committed round. The first window, and
+    every window of an ordinary run, claims nothing.
     """
     doubled = fabric.switching_machine(
         rounds=15, escalated_windows=set(), double_window=True
     )
-    # W1 commits 4-6 and reads to 9: one buffer before is 1-3
-    assert _claim(doubled, 1) == tuple((1, index) for index in range(1, 10))
+    # W1 commits 4-6 and reads to 9
+    assert _claim(doubled, 1) == tuple((1, index) for index in range(4, 10))
     # W4 commits 13-15 and reads to 18, clipped at the operation's end
-    assert _claim(doubled, 4) == tuple((1, index) for index in range(10, 16))
+    assert _claim(doubled, 4) == tuple((1, index) for index in range(13, 16))
     assert _claim(doubled, 0) is None
     ordinary = fabric.switching_machine(rounds=15, escalated_windows=set())
     for window_index in range(5):

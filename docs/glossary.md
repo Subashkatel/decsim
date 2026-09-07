@@ -76,10 +76,12 @@ tree or from a paper's notation, this is where each thing went.
 | `decsim/decoders/decode_outcomes.py`, `backend_outcome.py` | `decoders/window_decode_results.py` |
 | `decsim/windows/window_planner.py`, `round_tracker.py` | `windows/dynamic_windows.py`, dissolved into them |
 
-One acronym is only half gone. The modules and the files spell it
-out, and the code has not caught up: `DecodeJob.dem`, the field every
-plug-in decoder reads, and the other `dem` names beside it still carry
-it. A rule 2 surface commit for them is owed.
+The acronym is gone from decsim's own names too. The field every
+plug-in decoder reads is `DecodeJob.detector_error_model`, and every
+reader and both builders spell it out. `dem` survives only as an
+upstream keyword argument decsim passes through: the `dem=` of
+tesseract_decoder's `TesseractConfig` and of sinter's
+`compile_decoder_for_dem`.
 
 ## Words this code means precisely
 
@@ -90,7 +92,7 @@ it. A rule 2 surface commit for them is owed.
 - **operation**: one logical operation of the workload, the unit a
   workload is written in and the unit the QPU runs.
 - **window key, request, service**: the window `(operation_id,
-  window_id)`, the decode asked for it (`DecoderRequestKey`, which
+  window_index)`, the decode asked for it (`DecoderRequestKey`, which
   carries the tier), and the run of that decode on a unit
   (`DecoderServiceKey`).
 - **move, copy, reference**: whether a hop leaves the bits behind, ends

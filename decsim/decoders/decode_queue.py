@@ -16,7 +16,10 @@ import decsim.decoders.strong_requests as strong_requests_module
 import decsim.observe.trace_source as trace_source
 import decsim.records.decoding as decoding_records
 
-LOG_SOURCE = "DecoderCluster"
+# The decoder manager component's name in the narrator (docs/
+# architecture.md's component table). It lives here because every part of
+# the manager imports this module, and the manager's facade imports them.
+LOG_SOURCE = "Decoder manager"
 DEFAULT_POOL = "default"
 
 

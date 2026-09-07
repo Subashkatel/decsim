@@ -17,11 +17,10 @@ with the committer's accept_strong_result as the return path.
 import functools
 from typing import Callable, Optional
 
+import decsim.decoders.decode_queue as decode_queue_module
 import decsim.records.decoding as decoding_records
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
-
-LOG_SOURCE = "DecoderCluster"
 
 
 class StrongRedecode:
@@ -101,7 +100,7 @@ class StrongRedecode:
             return
         self._enqueue(deferred.job, deferred.selection_arrival_ticks)
         self.engine.log(
-            LOG_SOURCE,
+            decode_queue_module.LOG_SOURCE,
             f"{deferred.job.label}: far-side weak boundary determined -> "
             "strong window submitted",
         )
@@ -113,7 +112,7 @@ class StrongRedecode:
             return
         self._enqueue(deferred.job, deferred.selection_arrival_ticks)
         self.engine.log(
-            LOG_SOURCE,
+            decode_queue_module.LOG_SOURCE,
             f"{deferred.job.label}: terminal data complete -> "
             "strong window submitted",
         )

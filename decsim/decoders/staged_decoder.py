@@ -30,6 +30,9 @@ import decsim.observe.trace_source as trace_source
 import decsim.records.decoding as decoding_records
 import decsim.records.seeds as seed_records
 
+# The decoder unit component's name in the narrator (docs/
+# architecture.md's component table).
+LOG_SOURCE = "Decoder unit"
 ALGORITHM_STAGE = "algorithm"
 
 
@@ -126,8 +129,6 @@ class StagedDecoder(decoder_module.DecoderBase):
     fills in for its own stages. The decoder keeps no history; the run's
     StageLedger (observe/stage_records.py) holds what it fires.
     """
-
-    log_name = "DecoderEngine"
 
     def __init__(self, decoder, timing: UnitTiming):
         self.decoder = decoder
@@ -230,7 +231,7 @@ class StagedDecoder(decoder_module.DecoderBase):
             return
         name, cycles, ticks = steps[index]
         text = _stage_text(name, job, cycles)
-        engine.log(self.log_name, text)
+        engine.log(LOG_SOURCE, text)
         if name == ALGORITHM_STAGE:
             self._enter_algorithm(running, engine, steps, index)
             return

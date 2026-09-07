@@ -18,6 +18,7 @@ import dataclasses
 import functools
 from typing import Callable, Optional
 
+import decsim.decoders.decode_queue as decode_queue_module
 import decsim.observe.trace_source as trace_source
 import decsim.records.decoding as decoding_records
 import decsim.records.identity as identity_records
@@ -86,7 +87,7 @@ class DecodeRequestBuilder:
         if not self.tracker.is_buffer_filled_by_memory(window):
             return
         self.engine.log(
-            "DecoderCluster",
+            decode_queue_module.LOG_SOURCE,
             f"{operation.name} W{window.window_index} buffer filled by "
             f"memory rounds (time-only, no syndrome content)",
         )

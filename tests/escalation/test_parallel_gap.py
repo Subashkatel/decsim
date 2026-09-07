@@ -120,7 +120,7 @@ class StubWeakDecoder(DecoderBase):
 
     def decode(self, job) -> decoding_records.DecodeResult:
         return decoding_records.DecodeResult(
-            op_id=job.op_id,
+            operation_id=job.operation_id,
             window_id=job.window_id,
             logical_observables=(self.prediction,),
         )
@@ -158,7 +158,7 @@ class StubSignal:
 def paired_job() -> decoding_records.DecodeJob:
     window_model = OneObservableModel()
     job = decoding_records.DecodeJob(
-        op_id=0, window_id=0, n_rounds=1, dem=window_model
+        operation_id=0, window_id=0, n_rounds=1, dem=window_model
     )
     job.payloads = []
     return job

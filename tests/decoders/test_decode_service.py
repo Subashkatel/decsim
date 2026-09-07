@@ -61,7 +61,7 @@ def _job(index, gate=None, deps_remaining=0):
         1, index, window_records.DecoderTier.WEAK, index
     )
     window = window_records.Window(
-        op_id=1,
+        operation_id=1,
         k=index,
         commit_lo=1,
         commit_hi=1,
@@ -70,7 +70,7 @@ def _job(index, gate=None, deps_remaining=0):
         deps_remaining=deps_remaining,
     )
     return decoding_records.DecodeJob(
-        op_id=1,
+        operation_id=1,
         window_id=index,
         n_rounds=1,
         payloads=[payload],

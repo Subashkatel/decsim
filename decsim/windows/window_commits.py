@@ -116,10 +116,10 @@ class WindowCommitter:
         now), then commits provisionally, its boundary leaving with the
         commit.
         """
-        key = (job.op_id, job.window_id)
+        key = (job.operation_id, job.window_id)
         window = self.planner.windows_by_key[key]
         window.t_done = self.engine.now
-        operation = self.tracker.operation_by_id[job.op_id]
+        operation = self.tracker.operation_by_id[job.operation_id]
         is_final = not job.awaiting_strong_result
         if not is_final:
             self.strong_redecode.escalate(job)
@@ -141,7 +141,7 @@ class WindowCommitter:
         """A strong decode finished: publish it, then finalize the window."""
         key = (job.request_key.operation_id, job.request_key.window_id)
         window = self.planner.windows_by_key[key]
-        operation = self.tracker.operation_by_id[window.op_id]
+        operation = self.tracker.operation_by_id[window.operation_id]
         finish = functools.partial(
             self.finish_strong, window, operation, result, job.request_key
         )

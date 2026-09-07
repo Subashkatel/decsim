@@ -204,7 +204,7 @@ def _batch_job(jobs: list, window_keys: list) -> decoding_records.DecodeJob:
         first_window_key = window_keys[0]
     batch_size = len(jobs)
     return decoding_records.DecodeJob(
-        op_id=-1,
+        operation_id=-1,
         window_id=0,
         n_rounds=total_rounds,
         ready_time=earliest_ready_time,

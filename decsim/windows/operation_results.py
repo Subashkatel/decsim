@@ -76,7 +76,7 @@ class OperationResults:
         No earlier escalation can re-slice its dependents now, so their
         potential restart reads end.
         """
-        self._update_committed_round_count(window.op_id)
+        self._update_committed_round_count(window.operation_id)
         for dependent_key in window.dependents:
             self.retention.release_restart_reads(dependent_key)
         if is_final and self.retention.strong_store is not None:

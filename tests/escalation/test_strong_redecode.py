@@ -19,7 +19,7 @@ WINDOW_KEY = (1, 2)
 
 def _weak_job() -> decoding_records.DecodeJob:
     return decoding_records.DecodeJob(
-        op_id=1, window_id=2, n_rounds=6, strong_label="strong(mem1 W2)"
+        operation_id=1, window_id=2, n_rounds=6, strong_label="strong(mem1 W2)"
     )
 
 
@@ -28,7 +28,7 @@ def _strong_job(sequence: int) -> decoding_records.DecodeJob:
         1, 2, window_records.DecoderTier.STRONG, sequence
     )
     return decoding_records.DecodeJob(
-        op_id=1,
+        operation_id=1,
         window_id=2,
         n_rounds=9,
         label="strong(mem1 W2)",

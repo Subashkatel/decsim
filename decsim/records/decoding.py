@@ -140,7 +140,7 @@ class DecodeJob:
     memory.
     """
 
-    op_id: int  # operation the window belongs to
+    operation_id: int  # operation the window belongs to
     window_id: int  # window index within that op
     # rounds the decoder processes: the distinct rounds landed in its
     # input, plus batched idle rounds
@@ -183,10 +183,10 @@ class DecodeJob:
     # back-reference to the source window
     window: Optional[window_records.Window] = None
     strong_decode_for: Optional[tuple] = (
-        None  # (op_id, window_id) this strong job re-decodes
+        None  # (operation_id, window_id) this strong job re-decodes
     )
     gap_sibling_for: Optional[tuple] = (
-        None  # (op_id, window_id) whose split-gap half this job solves
+        None  # (operation_id, window_id) whose split-gap half this job solves
     )
     awaiting_strong_result: bool = (
         False  # weak result held non-final until the strong sibling lands
@@ -249,7 +249,7 @@ class LogicalContribution:
 class DecodeResult:
     """One window result; timing-only decoders leave optional fields unset."""
 
-    op_id: int
+    operation_id: int
     window_id: int
     correction: Optional[Any] = None  # correction operator (None = timing-only)
     logical_observables: Optional[tuple[int, ...]] = None  # full prediction

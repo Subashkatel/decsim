@@ -194,7 +194,9 @@ class WindowDecoderBase(DecoderBase):
         """(result, nanoseconds of the backend call alone)."""
         model = job.dem
         if model is None:
-            return decoding_records.DecodeResult(job.op_id, job.window_id), 0
+            return decoding_records.DecodeResult(
+                job.operation_id, job.window_id
+            ), 0
         faults = model.require_faults(self.fault_representation)
         syndrome = payload_syndrome(job)
         check_syndrome_size(job, syndrome, faults)
@@ -310,7 +312,7 @@ def result_from_selected_faults(
         detector_ids=residual_detector_ids, defects=defects
     )
     return decoding_records.DecodeResult(
-        job.op_id,
+        job.operation_id,
         job.window_id,
         correction=correction,
         logical_observables=logical_observables,

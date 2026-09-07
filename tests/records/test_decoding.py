@@ -45,7 +45,7 @@ def test_a_jobs_payload_bits_add_up():
     """The job's bits are the sum of its payloads' sizes."""
     payloads = [make_payload(1), make_payload(2, size_bits=200)]
     job = decoding_records.DecodeJob(
-        op_id=1,
+        operation_id=1,
         window_id=0,
         n_rounds=2,
         payloads=payloads,
@@ -57,7 +57,7 @@ def test_one_payload_of_unknown_size_leaves_the_job_size_unknown():
     """A single unsized payload makes the whole job's size unknown."""
     payloads = [make_payload(1), make_payload(2, size_bits=None)]
     job = decoding_records.DecodeJob(
-        op_id=1,
+        operation_id=1,
         window_id=0,
         n_rounds=2,
         payloads=payloads,
@@ -67,18 +67,18 @@ def test_one_payload_of_unknown_size_leaves_the_job_size_unknown():
 
 def test_a_job_with_no_payloads_carries_no_bits():
     """An empty job is zero bits, not an unknown size."""
-    job = decoding_records.DecodeJob(op_id=1, window_id=0, n_rounds=0)
+    job = decoding_records.DecodeJob(operation_id=1, window_id=0, n_rounds=0)
     assert job.payload_bits() == 0
 
 
 def test_decode_result_supports_timing_only_and_richer_results():
     """A result leaves the correction unset until a decoder fills it."""
-    timing_only = decoding_records.DecodeResult(op_id=4, window_id=2)
+    timing_only = decoding_records.DecodeResult(operation_id=4, window_id=2)
     source = object()
     soft_output = decoding_records.SoftOutput(gap=1, source=source)
     boundary_data = object()
     rich = decoding_records.DecodeResult(
-        op_id=4,
+        operation_id=4,
         window_id=2,
         correction="X",
         logical_observables=(1, 0),

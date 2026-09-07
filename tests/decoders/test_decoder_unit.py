@@ -20,7 +20,7 @@ def _unit(capacity_rounds=None):
 
 def _job(label, rounds=1):
     return decoding_records.DecodeJob(
-        op_id=1, window_id=0, n_rounds=rounds, label=label
+        operation_id=1, window_id=0, n_rounds=rounds, label=label
     )
 
 

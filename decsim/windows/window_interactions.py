@@ -221,7 +221,7 @@ def _map_defects(
     if not defects:
         return {}
     shift = 0
-    if delivery.source_key[0] != destination.op_id:
+    if delivery.source_key[0] != destination.operation_id:
         shift = -delivery.source_operation_round_count
     return _map_shifted_defects(defects, shift, destination)
 
@@ -233,7 +233,7 @@ def _is_same_operation_residual(delivery, destination) -> bool:
         return False
     if not payload.detector_ids:
         return False
-    if delivery.source_key[0] != destination.op_id:
+    if delivery.source_key[0] != destination.operation_id:
         return False
     return destination.detector_positions is not None
 

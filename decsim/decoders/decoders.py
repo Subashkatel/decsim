@@ -135,7 +135,7 @@ class FunctionLatencyDecoder(decoder_module.DecoderBase):
         self, job: decoding_records.DecodeJob
     ) -> decoding_records.DecodeResult:
         """An empty timing-only result."""
-        return decoding_records.DecodeResult(job.op_id, job.window_id)
+        return decoding_records.DecodeResult(job.operation_id, job.window_id)
 
 
 class PresetLatencyDecoder(decoder_module.DecoderBase):
@@ -153,7 +153,7 @@ class PresetLatencyDecoder(decoder_module.DecoderBase):
         self, job: decoding_records.DecodeJob
     ) -> decoding_records.DecodeResult:
         """An empty timing-only result."""
-        return decoding_records.DecodeResult(job.op_id, job.window_id)
+        return decoding_records.DecodeResult(job.operation_id, job.window_id)
 
 
 class PerRoundDecoder(decoder_module.DecoderBase):
@@ -171,7 +171,7 @@ class PerRoundDecoder(decoder_module.DecoderBase):
         self, job: decoding_records.DecodeJob
     ) -> decoding_records.DecodeResult:
         """An empty timing-only result."""
-        return decoding_records.DecodeResult(job.op_id, job.window_id)
+        return decoding_records.DecodeResult(job.operation_id, job.window_id)
 
 
 class SampledConfidenceDecoder(

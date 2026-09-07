@@ -95,7 +95,7 @@ class TesseractCheckedDecoder(decoder_module.DecoderBase):
         if outcome.status is not succeeded:
             return result
         referee_flips = _owned_observable_flips(model, outcome)
-        window_key = (job.op_id, job.window_id)
+        window_key = (job.operation_id, job.window_id)
         is_agreement = referee_flips == tuple(result.logical_observables)
         self.window_checked.fire(window_key, is_agreement)
         return result

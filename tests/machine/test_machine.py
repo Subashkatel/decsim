@@ -91,7 +91,7 @@ class FakeWeakDecoder(decoder_module.DecoderBase):
     def decode(
         self, job: decoding_records.DecodeJob
     ) -> decoding_records.DecodeResult:
-        return decoding_records.DecodeResult(job.op_id, job.window_id)
+        return decoding_records.DecodeResult(job.operation_id, job.window_id)
 
 
 def test_readouts_reach_the_receiver_in_cycle_order_cycle_ticks_apart():
@@ -276,8 +276,8 @@ def test_a_load_only_job_on_a_measured_unit_holds_it_for_zero_algorithm_ticks():
         if record.stage == staged_decoder.ALGORITHM_STAGE
     ]
     operation_ids = {1, 2}
-    load_only = [r for r in algorithm if r.op_id not in operation_ids]
-    windows = [r for r in algorithm if r.op_id in operation_ids]
+    load_only = [r for r in algorithm if r.operation_id not in operation_ids]
+    windows = [r for r in algorithm if r.operation_id in operation_ids]
     assert len(load_only) == 1
     assert len(windows) == 2
     idle_ticks = [r.end_ticks - r.start_ticks for r in load_only]

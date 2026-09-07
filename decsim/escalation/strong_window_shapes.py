@@ -135,9 +135,9 @@ class ContextWindow:
 
     def plan(self, weak_job: decoding_records.DecodeJob) -> StrongAssignment:
         """The two-sided context job, built now, its context held."""
-        key = (weak_job.op_id, weak_job.window_id)
+        key = (weak_job.operation_id, weak_job.window_id)
         weak_window = self.planner.windows_by_key[key]
-        operation = self.tracker.operation_by_id[weak_job.op_id]
+        operation = self.tracker.operation_by_id[weak_job.operation_id]
         strong_window = _context_window_of(weak_window)
         round_count = self.tracker.round_count_for_window(
             operation.id, strong_window
@@ -148,17 +148,17 @@ class ContextWindow:
             operation, resolved, strong_window, round_count, left_exclusions
         )
         request_key = self.builder.new_request_key(
-            weak_job.op_id,
+            weak_job.operation_id,
             weak_job.window_id,
             window_records.DecoderTier.STRONG,
         )
-        self._require_context_stored(key, weak_job.op_id, strong_window)
+        self._require_context_stored(key, weak_job.operation_id, strong_window)
         strong_store = self.retention.strong_store
         self.builder.stamp_first_round(strong_window, strong_store)
         payloads = self.builder.assemble_payloads(strong_window, strong_store)
         payload_round_count = decoding_records.distinct_round_count(payloads)
         job = decoding_records.DecodeJob(
-            op_id=weak_job.op_id,
+            operation_id=weak_job.operation_id,
             window_id=weak_job.window_id,
             n_rounds=payload_round_count,
             ready_time=self.engine.now,
@@ -281,10 +281,10 @@ class ForwardWindow:
         operation's end, until every clamped strong window round is
         stored (waiting_terminal_data).
         """
-        key = (weak_job.op_id, weak_job.window_id)
+        key = (weak_job.operation_id, weak_job.window_id)
         self._refuse_second_escalation(key)
         strong_request_key = self.builder.new_request_key(
-            weak_job.op_id,
+            weak_job.operation_id,
             weak_job.window_id,
             window_records.DecoderTier.STRONG,
         )
@@ -467,7 +467,7 @@ class ForwardWindow:
         strong_exclusions, restart_exclusions = _fault_exclusions(
             plan, round_count, restart_key
         )
-        context_reads = _context_round_keys(weak_window.op_id, plan)
+        context_reads = _context_round_keys(weak_window.operation_id, plan)
         purpose = f"strong-region plan for {key}"
         # the strong window's context lives in syndrome buffer 1; the
         # restart window's weak reads, the re-read range among them, sit
@@ -502,7 +502,10 @@ class ForwardWindow:
         restart = self.planner.windows_by_key[restart_key]
         _check_restart_tiling(key, restart_key, restart, plan)
         return self.retention.read_keys_for_bounds(
-            restart.op_id, plan.restart_buffer_lo, restart.buffer_hi, restart
+            restart.operation_id,
+            plan.restart_buffer_lo,
+            restart.buffer_hi,
+            restart,
         )
 
     def _proposed_restart_window(
@@ -786,7 +789,7 @@ class ForwardWindow:
         self.builder.stamp_first_round(strong_window, strong_store)
         payload_round_count = decoding_records.distinct_round_count(payloads)
         job = decoding_records.DecodeJob(
-            op_id=key[0],
+            operation_id=key[0],
             window_id=key[1],
             n_rounds=payload_round_count,
             ready_time=self.engine.now,
@@ -976,7 +979,7 @@ def _context_window_of(
     )
     round_count = context_hi - context_lo + 1
     strong_window = window_records.Window(
-        op_id=weak_window.op_id,
+        operation_id=weak_window.operation_id,
         k=weak_window.k,
         commit_lo=commit_lo,
         commit_hi=commit_hi,
@@ -1011,7 +1014,7 @@ def _strong_window_of(
 ) -> window_records.Window:
     round_count = plan.context_hi - plan.context_lo + 1
     return window_records.Window(
-        op_id=key[0],
+        operation_id=key[0],
         k=key[1],
         commit_lo=plan.commit_lo,
         commit_hi=plan.commit_hi,

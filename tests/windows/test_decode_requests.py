@@ -77,7 +77,12 @@ class _Fixture:
             1, "memory", (0,), patches=(0,)
         )
         self.window = window_records.Window(
-            op_id=1, k=0, commit_lo=1, commit_hi=3, buffer_hi=5, n_rounds=5
+            operation_id=1,
+            k=0,
+            commit_lo=1,
+            commit_hi=3,
+            buffer_hi=5,
+            n_rounds=5,
         )
         settings = round_store_settings.RoundStoreSettings()
         self.store = round_store_module.RoundStore(settings)

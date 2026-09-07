@@ -50,8 +50,8 @@ class Window:
     [commit_lo, commit_hi].
     """
 
-    op_id: int  # operation that owns the stream
-    k: int  # window index within the op; key = (op_id, k)
+    operation_id: int  # operation that owns the stream
+    k: int  # window index within the op; key = (operation_id, k)
     commit_lo: int  # first round this window commits
     commit_hi: int  # last round this window commits
     buffer_hi: int  # last round it reads (trailing buffer)
@@ -103,15 +103,15 @@ class Window:
 
     @property
     def key(self) -> tuple:
-        """(op_id, k), the key every window collection is keyed by."""
-        return (self.op_id, self.k)
+        """(operation_id, k), the key every window collection is keyed by."""
+        return (self.operation_id, self.k)
 
 
 @dataclass(frozen=True)
 class WindowInfo:
     """Read-only geometry and topology exposed to interaction policies."""
 
-    op_id: int
+    operation_id: int
     k: int
     commit_lo: int
     commit_hi: int
@@ -134,7 +134,7 @@ class WindowInfo:
         if detector_positions is not None:
             positions = dict(detector_positions)
         return cls(
-            op_id=window.op_id,
+            operation_id=window.operation_id,
             k=window.k,
             commit_lo=window.commit_lo,
             commit_hi=window.commit_hi,
@@ -188,13 +188,13 @@ class OperationWindowPlan:
 class WindowPlan:
     """Compile-time window layout handed to the window manager."""
 
-    windows: dict  # (op_id, k) -> Window
-    window_count: dict  # op_id -> number of windows
-    op_windows: dict  # op_id -> [window keys, in k order]
-    successors: dict  # op_id -> [op ids listing it as predecessor]
-    spatial_nodes: dict  # op_id -> decoding-graph nodes per round
-    rounds_by_operation: dict  # op_id -> resolved positive round count
-    code_names: dict  # op_id -> exact resolved code name
+    windows: dict  # (operation_id, k) -> Window
+    window_count: dict  # operation_id -> number of windows
+    op_windows: dict  # operation_id -> [window keys, in k order]
+    successors: dict  # operation_id -> [op ids listing it as predecessor]
+    spatial_nodes: dict  # operation_id -> decoding-graph nodes per round
+    rounds_by_operation: dict  # operation_id -> resolved positive round count
+    code_names: dict  # operation_id -> exact resolved code name
     total_windows: int
     windowed_by_operation: dict
     batch_preceding_idle_rounds_by_operation: dict

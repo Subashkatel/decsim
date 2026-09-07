@@ -484,12 +484,12 @@ def unaccounted_rounds_of_window(window, accounted, highest):
     actual rounds, exactly as the retention reads it
     (decsim/windows/round_retention.py, read_keys_for_bounds).
     """
-    emitted_high = highest[window.op_id]
+    emitted_high = highest[window.operation_id]
     input_high = min(window.buffer_hi, emitted_high)
     stop_round = input_high + 1
     missing = []
     for round_index in range(window.start_round, stop_round):
-        key = (window.op_id, round_index)
+        key = (window.operation_id, round_index)
         if key not in accounted:
             missing.append(key)
     return missing

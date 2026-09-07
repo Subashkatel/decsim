@@ -32,7 +32,7 @@ class FixedRow(decoder_module.DecoderBase):
 
     def decode(self, job):
         return decoding_records.DecodeResult(
-            job.op_id, job.window_id, logical_observables=(1,)
+            job.operation_id, job.window_id, logical_observables=(1,)
         )
 
 
@@ -62,7 +62,7 @@ def _window_job():
         1, 0, window_records.DecoderTier.WEAK, 0
     )
     return decoding_records.DecodeJob(
-        op_id=1,
+        operation_id=1,
         window_id=0,
         n_rounds=1,
         payloads=[payload],

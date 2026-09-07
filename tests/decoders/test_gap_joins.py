@@ -36,14 +36,14 @@ def _primary():
     landed_round = decoder_memory.MaterializedSyndromeRound(1, 1, (fragment,))
     decoder_input = decoder_memory.DecoderInput(1, 0, None, (landed_round,))
     window = window_records.Window(
-        op_id=1, k=0, commit_lo=1, commit_hi=1, buffer_hi=1, n_rounds=1
+        operation_id=1, k=0, commit_lo=1, commit_hi=1, buffer_hi=1, n_rounds=1
     )
     model = object()
     # a job whose input has landed sits in some unit's memory, and the
     # sibling's copy is named after it
     memory = decoder_memory.DecoderMemory("default", 0, None)
     return decoding_records.DecodeJob(
-        op_id=1,
+        operation_id=1,
         window_id=0,
         n_rounds=1,
         dem=model,

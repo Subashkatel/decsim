@@ -72,7 +72,7 @@ def test_no_window_of_a_weak_run_is_absorbed():
 def test_a_window_is_final_once_its_request_is_published():
     """A committed window whose request is unpublished still awaits strong."""
     window = window_records.Window(
-        op_id=1, k=0, commit_lo=1, commit_hi=3, buffer_hi=5, n_rounds=5
+        operation_id=1, k=0, commit_lo=1, commit_hi=3, buffer_hi=5, n_rounds=5
     )
     window.committed = True
     assert window.published_request_key is None

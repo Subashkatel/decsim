@@ -51,7 +51,7 @@ def fragment(operation_id, round_index, fragment_index, bits=(0, 1)):
 
 def job_of(payloads, label="w0", window_id=7):
     return decoding_records.DecodeJob(
-        op_id=41,
+        operation_id=41,
         window_id=window_id,
         n_rounds=len(payloads),
         payloads=list(payloads),

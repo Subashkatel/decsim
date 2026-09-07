@@ -108,7 +108,7 @@ class StrongRequests:
 
     def admit_weak(self, job: decoding_records.DecodeJob, now: int) -> None:
         """Open one destination window's decode attempt."""
-        key = (job.op_id, job.window_id)
+        key = (job.operation_id, job.window_id)
         if key in self.unresolved_weak_windows:
             raise RuntimeError(
                 f"second weak decode for window {key} while the first is "
@@ -278,7 +278,7 @@ class StrongRequests:
         keys = []
         for request in requests:
             keys.append(request.strong_decode_for)
-        result_identity = (result.op_id, result.window_id)
+        result_identity = (result.operation_id, result.window_id)
         is_merged = len(keys) > 1
         for key in keys:
             if key != result_identity:
@@ -297,7 +297,7 @@ class StrongRequests:
         deliveries = []
         for key, request in zip(keys, requests):
             empty = decoding_records.DecodeResult(
-                op_id=key[0], window_id=key[1]
+                operation_id=key[0], window_id=key[1]
             )
             held = HeldStrongCompletion(request, empty, now)
             deliveries.append(held)

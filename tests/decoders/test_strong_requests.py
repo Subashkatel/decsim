@@ -20,7 +20,7 @@ def _request_key(sequence):
 
 def _strong_job(request_key, window_key=(1, 0)):
     return decoding_records.DecodeJob(
-        op_id=1,
+        operation_id=1,
         window_id=0,
         n_rounds=9,
         strong_decode_for=window_key,
@@ -97,8 +97,8 @@ def test_a_destination_keeps_at_most_one_unconsumed_strong_result():
 
 def test_a_second_weak_decode_of_an_unresolved_window_is_refused():
     requests = strong_requests_module.StrongRequests()
-    first = decoding_records.DecodeJob(op_id=1, window_id=0, n_rounds=3)
-    second = decoding_records.DecodeJob(op_id=1, window_id=0, n_rounds=3)
+    first = decoding_records.DecodeJob(operation_id=1, window_id=0, n_rounds=3)
+    second = decoding_records.DecodeJob(operation_id=1, window_id=0, n_rounds=3)
     requests.admit(first, now=0)
     with pytest.raises(RuntimeError, match="decodes once at a time"):
         requests.admit(second, now=1)
@@ -112,7 +112,7 @@ def test_a_merged_batch_splits_into_one_empty_completion_per_member():
     )
     first = _strong_job(first_key, window_key=(1, 0))
     second = decoding_records.DecodeJob(
-        op_id=1,
+        operation_id=1,
         window_id=1,
         n_rounds=9,
         strong_decode_for=(1, 1),
@@ -121,7 +121,7 @@ def test_a_merged_batch_splits_into_one_empty_completion_per_member():
     requests.admit_strong(first, now=0)
     requests.admit_strong(second, now=0)
     batch = decoding_records.DecodeJob(
-        op_id=-1, window_id=0, n_rounds=18, strong_decode_for=(1, 0)
+        operation_id=-1, window_id=0, n_rounds=18, strong_decode_for=(1, 0)
     )
     requests.register_batch([(1, 0), (1, 1)], [first, second], batch)
     result = decoding_records.DecodeResult(-1, 0)
@@ -144,7 +144,7 @@ def test_a_merged_batch_may_carry_no_accuracy_bearing_field():
     requests.admit_strong(first, now=0)
     requests.admit_strong(second, now=0)
     batch = decoding_records.DecodeJob(
-        op_id=-1, window_id=0, n_rounds=18, strong_decode_for=(1, 0)
+        operation_id=-1, window_id=0, n_rounds=18, strong_decode_for=(1, 0)
     )
     requests.register_batch([(1, 0), (1, 1)], [first, second], batch)
     result = decoding_records.DecodeResult(-1, 0, logical_observables=(1,))

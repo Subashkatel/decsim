@@ -36,7 +36,7 @@ class _Base(decoder_module.DecoderBase):
 
     def decode(self, job) -> decoding_records.DecodeResult:
         return decoding_records.DecodeResult(
-            job.op_id, job.window_id, logical_observables=(1,)
+            job.operation_id, job.window_id, logical_observables=(1,)
         )
 
     def decode_timed(self, job) -> tuple:
@@ -74,7 +74,7 @@ class _Model:
 def _job() -> decoding_records.DecodeJob:
     model = _Model()
     return decoding_records.DecodeJob(
-        op_id=1, window_id=0, n_rounds=3, dem=model
+        operation_id=1, window_id=0, n_rounds=3, dem=model
     )
 
 

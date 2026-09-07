@@ -22,7 +22,7 @@ class BacklogView:
 
     ready_jobs: int  # jobs waiting across every queue
     per_lane: tuple  # ((lane, queued_jobs), ...); "" = default
-    per_op_rounds: tuple  # ((op_id, rounds_waiting), ...)
+    per_op_rounds: tuple  # ((operation_id, rounds_waiting), ...)
     per_patch_rounds: tuple  # ((patch, rounds_waiting), ...)
     total_rounds: int  # system-level depth
 
@@ -60,8 +60,8 @@ def backlog_view(
     per_op = []
     per_patch: dict = {}
     total_rounds = 0
-    for op_id, patch, waiting in backlog:
-        per_op.append((op_id, waiting))
+    for operation_id, patch, waiting in backlog:
+        per_op.append((operation_id, waiting))
         per_patch[patch] = per_patch.get(patch, 0) + waiting
         total_rounds += waiting
     per_op_rounds = sorted(per_op, key=_first_identity_order)

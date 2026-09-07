@@ -24,7 +24,7 @@ class FixedRow(decoder_module.DecoderBase):
 
     def decode(self, job):
         return decoding_records.DecodeResult(
-            job.op_id, job.window_id, logical_observables=(1,)
+            job.operation_id, job.window_id, logical_observables=(1,)
         )
 
 
@@ -40,7 +40,7 @@ class MeasuredRow(decoder_module.DecoderBase):
         return None
 
     def decode(self, job):
-        return decoding_records.DecodeResult(job.op_id, job.window_id)
+        return decoding_records.DecodeResult(job.operation_id, job.window_id)
 
     def decode_timed(self, job):
         result = self.decode(job)
@@ -65,7 +65,7 @@ class EmptyWindowRow(decoder_module.WindowDecoderBase):
 
 def _job(**fields) -> decoding_records.DecodeJob:
     return decoding_records.DecodeJob(
-        op_id=1, window_id=0, n_rounds=2, label="W0", **fields
+        operation_id=1, window_id=0, n_rounds=2, label="W0", **fields
     )
 
 

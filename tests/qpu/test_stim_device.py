@@ -88,7 +88,7 @@ def recorded_device(row, **settings):
 
 def window(commit_lo, commit_hi, buffer_hi, **changes):
     return window_records.Window(
-        op_id=1,
+        operation_id=1,
         k=0,
         commit_lo=commit_lo,
         commit_hi=commit_hi,
@@ -527,7 +527,7 @@ def test_dependent_windows_split_the_fault_ownership_between_them():
     operation = memory_operation(circuit)
     leading = window(1, 2, 3)
     trailing = window_records.Window(
-        op_id=1,
+        operation_id=1,
         k=1,
         commit_lo=3,
         commit_hi=4,
@@ -566,7 +566,7 @@ def test_a_closed_boundary_needs_a_dependency_edge():
     circuit = memory_circuit(3, 4)
     operation = memory_operation(circuit)
     closed = window_records.Window(
-        op_id=1,
+        operation_id=1,
         k=0,
         commit_lo=1,
         commit_hi=4,
@@ -590,7 +590,7 @@ def test_a_window_declared_past_the_source_reads_to_its_last_round():
     circuit = memory_circuit(3, 4)
     operation = memory_operation(circuit)
     past_the_end = window_records.Window(
-        op_id=1, k=0, commit_lo=3, commit_hi=4, buffer_hi=9, n_rounds=4
+        operation_id=1, k=0, commit_lo=3, commit_hi=4, buffer_hi=9, n_rounds=4
     )
     device = stim_device.StimDevice(seed=1)
     model = device.strong_window_model_for_operation(

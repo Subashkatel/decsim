@@ -65,7 +65,7 @@ class DecodeRequestBuilder:
         """Retain arrival provenance for latency accounting."""
         if window.t_first_round is not None:
             return
-        first_round_key = (window.op_id, window.start_round)
+        first_round_key = (window.operation_id, window.start_round)
         window.t_first_round = store.publication_tick(first_round_key)
 
     def note_data_complete(
@@ -99,7 +99,7 @@ class DecodeRequestBuilder:
         store,
     ) -> decoding_records.DecodeJob:
         """The tier's decode job for one complete window, read from store."""
-        request_key = self.new_request_key(window.op_id, window.k, tier)
+        request_key = self.new_request_key(window.operation_id, window.k, tier)
         payloads = self.assemble_payloads(window, store)
         payload_round_count = decoding_records.distinct_round_count(payloads)
         round_count = (
@@ -110,7 +110,7 @@ class DecodeRequestBuilder:
         model = self.planner.model_by_window.get(window.key)
         label = self._job_label(window, operation)
         return decoding_records.DecodeJob(
-            op_id=window.op_id,
+            operation_id=window.operation_id,
             window_id=window.k,
             n_rounds=round_count,
             ready_time=self.engine.now,
@@ -133,14 +133,14 @@ class DecodeRequestBuilder:
         landed input at the decoder when the decode starts.
         """
         operation_rounds = self.tracker.effective_round_count_for_window(
-            window.op_id, window
+            window.operation_id, window
         )
         end_round = min(window.buffer_hi, operation_rounds)
         window_info = window_records.WindowInfo.from_window(window)
         payloads = []
         stop_round = end_round + 1
         for round_index in range(window.start_round, stop_round):
-            round_key = (window.op_id, round_index)
+            round_key = (window.operation_id, round_index)
             fragments = store.retained_fragments(round_key)
             self._append_round_payloads(
                 payloads, fragments, window_info, round_index
@@ -149,7 +149,7 @@ class DecodeRequestBuilder:
         if overflow <= 0:
             return payloads
         successor_ids = self.planner.successors_by_operation.get(
-            window.op_id, []
+            window.operation_id, []
         )
         for successor_id in successor_ids:
             self._append_overflow_payloads(
@@ -191,7 +191,7 @@ class DecodeRequestBuilder:
         window = job.window
         if window is None or window.deps_remaining <= 0:
             return True
-        visiting = {(window.op_id, window.k)}
+        visiting = {(window.operation_id, window.k)}
         for dependency in window.deps:
             if not self._resolving_without_new_slots(dependency, visiting):
                 return False
@@ -240,7 +240,7 @@ class DecodeRequestBuilder:
         window: window_records.Window,
         operation: program_records.Operation,
     ) -> str:
-        if self.planner.is_windowed(window.op_id):
+        if self.planner.is_windowed(window.operation_id):
             return (
                 f"{operation.name} W{window.k} "
                 f"[commit {window.commit_lo}-{window.commit_hi}]"
@@ -369,7 +369,7 @@ class DecodeRequester:
             self.builder.stamp_first_round(window, self.retention.weak_store)
         if not self.tracker.is_data_complete(window):
             return
-        operation = self.tracker.operation_by_id[window.op_id]
+        operation = self.tracker.operation_by_id[window.operation_id]
         self.builder.note_data_complete(window, operation)
         if window.deps_remaining > 0 and not window.blocked_logged:
             # raw rounds ship now; the boundary is XORed into the landed

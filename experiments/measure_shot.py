@@ -125,68 +125,6 @@ def measure_shot(shot: collect.Shot, run_dir=None) -> ShotMeasurement:
     )
 
 
-def _measurement(
-    settings: machine_module.MachineSettings,
-    machine: machine_module.Machine,
-    result: machine_module.RunResult,
-    *,
-    physical_error_probability: float,
-    distance: int,
-    round_period_us: float,
-    seed: int,
-    wall_seconds: float,
-) -> ShotMeasurement:
-    """Read every number of one completed shot off its records."""
-    escalation_kind = settings.escalation.kind
-    samples = collect_samples(machine, result, escalation_kind)
-    circuit = machine.operations[0].circuit
-    reference_prediction = direct_prediction(machine, result, circuit)
-    operation_result = result.operation_results[0]
-    truth = tuple(operation_result.observable_truth)
-    loop_prediction = tuple(operation_result.logical_observables)
-    decoded_windows = len(samples["service"])
-    rounds_per_shot = settings.workload.rounds_per_shot
-    rounds_this_shot = rounds_per_shot.rounds_for(distance)
-    span_us = _decoded_span_microseconds(machine)
-    queue_depths = []
-    for _tick, depth in machine.observation.queue_depth.samples:
-        queue_depths.append(depth)
-    load = chain_load(samples, settings, distance, round_period_us)
-    algorithm = machine.active_decoder.decoder
-    windows_checked = getattr(algorithm, "windows_checked", 0)
-    disagreements = getattr(algorithm, "window_disagreements", 0)
-    totals = link_totals(result.link_traffic)
-    means = _means(samples)
-    maxes = _maxes(samples)
-    is_logical_failure = loop_prediction != truth
-    is_direct_failure = reference_prediction != truth
-    is_direct_mismatch = loop_prediction != reference_prediction
-    windows_per_us = decoded_windows / span_us
-    rounds_per_us = rounds_this_shot / span_us
-    return ShotMeasurement(
-        physical_error_probability=physical_error_probability,
-        distance=distance,
-        round_period_us=round_period_us,
-        algorithm=active_decoder_kind(settings),
-        seed=seed,
-        windows=decoded_windows,
-        logical_failure=is_logical_failure,
-        samples=samples,
-        means=means,
-        maxes=maxes,
-        load=load,
-        direct_failure=is_direct_failure,
-        direct_mismatch=is_direct_mismatch,
-        throughput_windows_per_us=windows_per_us,
-        throughput_rounds_per_us=rounds_per_us,
-        max_queued_windows=max(queue_depths, default=0),
-        tesseract_windows_checked=windows_checked,
-        tesseract_window_disagreements=disagreements,
-        link_totals=totals,
-        sim_wall_seconds=wall_seconds,
-    )
-
-
 def ticks_to_microseconds(ticks: int) -> float:
     """A tick count as a float of microseconds, for the csv columns."""
     return ticks / config_module.TICKS_PER_MICROSECOND
@@ -226,7 +164,7 @@ def link_delay_by_window(transfers: list) -> dict:
     return delay
 
 
-def cwb_delays_us(transfers: list) -> list:
+def controller_to_weak_buffer_delays_us(transfers: list) -> list:
     """Every round's controller-to-Buffer-0 delay, in microseconds."""
     delays = []
     for row in transfers:
@@ -237,7 +175,7 @@ def cwb_delays_us(transfers: list) -> list:
     return delays
 
 
-def qc_send_ticks(transfers: list) -> dict:
+def qpu_send_ticks(transfers: list) -> dict:
     """The tick each round left the QPU (its earliest QC send), by round."""
     send = {}
     for row in transfers:
@@ -255,20 +193,20 @@ def window_points_us(
     frame_record,
     stage_us: dict,
     link_delay: dict,
-    qc_send: dict,
+    qpu_send: dict,
     input_path: str,
     output_path: str,
 ) -> dict:
     """The per-window latency points, in us, for one decoded window."""
     window_id = window.key[1]
-    last_emitted_round = max(qc_send)
+    last_emitted_round = max(qpu_send)
     last_required_round = min(window.buffer_hi, last_emitted_round)
     committed = frame_record.committed_ticks
     input_ticks = link_delay.get((input_path, window_id), 0)
     handoff_ticks = link_delay.get(("decoder_to_decoder", window_id), 0)
     output_ticks = link_delay.get((output_path, window_id), 0)
-    last_required_send = qc_send[last_required_round]
-    first_required_send = qc_send[window.start_round]
+    last_required_send = qpu_send[last_required_round]
+    first_required_send = qpu_send[window.start_round]
     return {
         "buffer_fill": _span_microseconds(
             window.t_data_complete, window.t_first_round
@@ -310,7 +248,7 @@ def collect_samples(
     """Every point's microsecond samples over the shot's decoded windows."""
     transfers = result.link_traffic["transfers"]
     link_delay = link_delay_by_window(transfers)
-    qc_send = qc_send_ticks(transfers)
+    qpu_send = qpu_send_ticks(transfers)
     frame_snapshot = machine.pauli_frame.snapshot()
     frame_by_window = {}
     for record in frame_snapshot.records:
@@ -318,7 +256,7 @@ def collect_samples(
     samples = {}
     for point in POINTS:
         samples[point] = []
-    samples["cwb_per_round"] = cwb_delays_us(transfers)
+    samples["cwb_per_round"] = controller_to_weak_buffer_delays_us(transfers)
     input_path = INPUT_LINK[escalation_kind]
     output_path = OUTPUT_LINK[escalation_kind]
     window_items = machine.observation.windows.windows.items()
@@ -334,7 +272,7 @@ def collect_samples(
             frame_record,
             stage_us,
             link_delay,
-            qc_send,
+            qpu_send,
             input_path,
             output_path,
         )
@@ -387,6 +325,168 @@ def chain_load(
     inter_arrival_us = commit_rounds * round_period_us
     chain_us = service_us + handoff_us
     return chain_us / inter_arrival_us
+
+
+def active_decoder_kind(settings: machine_module.MachineSettings):
+    """The kind of the tier that decodes the plan's windows."""
+    tier = settings.escalation.decodes_on
+    tier_settings = getattr(settings, f"{tier}_decoder")
+    return tier_settings.kind
+
+
+def trace_path_for_shot(path: str, seed: int, trace_shots) -> str:
+    """The path one shot writes to; the seed joins it when several trace.
+
+    One traced shot keeps the path the yaml gave. Several would all
+    write the same file, so each takes the seed before its suffixes:
+    run.trace.json becomes run_seed3.trace.json, and run.trace.json.gz
+    becomes run_seed3.trace.json.gz.
+    """
+    if len(trace_shots) < 2:
+        return path
+    name = pathlib.Path(path)
+    directory = name.parent
+    stem = name.name
+    first_dot = stem.find(".")
+    if first_dot < 0:
+        seeded = directory / f"{stem}_seed{seed}"
+        return str(seeded)
+    head = stem[:first_dot]
+    suffixes = stem[first_dot:]
+    seeded = directory / f"{head}_seed{seed}{suffixes}"
+    return str(seeded)
+
+
+def _measurement(
+    settings: machine_module.MachineSettings,
+    machine: machine_module.Machine,
+    result: machine_module.RunResult,
+    *,
+    physical_error_probability: float,
+    distance: int,
+    round_period_us: float,
+    seed: int,
+    wall_seconds: float,
+) -> ShotMeasurement:
+    """Read every number of one completed shot off its records."""
+    escalation_kind = settings.escalation.kind
+    samples = collect_samples(machine, result, escalation_kind)
+    verdicts = _logical_verdicts(machine, result)
+    throughput = _throughput_per_microsecond(
+        machine, settings, samples, distance
+    )
+    referee = _referee_counts(machine)
+    decoded_windows = len(samples["service"])
+    load = chain_load(samples, settings, distance, round_period_us)
+    algorithm = active_decoder_kind(settings)
+    queued = _max_queued_windows(machine)
+    totals = link_totals(result.link_traffic)
+    means = _means(samples)
+    maxes = _maxes(samples)
+    return ShotMeasurement(
+        physical_error_probability=physical_error_probability,
+        distance=distance,
+        round_period_us=round_period_us,
+        algorithm=algorithm,
+        seed=seed,
+        windows=decoded_windows,
+        logical_failure=verdicts.logical_failure,
+        samples=samples,
+        means=means,
+        maxes=maxes,
+        load=load,
+        direct_failure=verdicts.direct_failure,
+        direct_mismatch=verdicts.direct_mismatch,
+        throughput_windows_per_us=throughput.windows_per_microsecond,
+        throughput_rounds_per_us=throughput.rounds_per_microsecond,
+        max_queued_windows=queued,
+        tesseract_windows_checked=referee.windows_checked,
+        tesseract_window_disagreements=referee.window_disagreements,
+        link_totals=totals,
+        sim_wall_seconds=wall_seconds,
+    )
+
+
+@dataclasses.dataclass(frozen=True)
+class _LogicalVerdicts:
+    """Whether the loop, and whole-circuit PyMatching, reached the truth."""
+
+    logical_failure: bool
+    direct_failure: bool
+    direct_mismatch: bool
+
+
+@dataclasses.dataclass(frozen=True)
+class _Throughput:
+    """Decoded windows and QEC rounds per microsecond of the shot's span."""
+
+    windows_per_microsecond: float
+    rounds_per_microsecond: float
+
+
+@dataclasses.dataclass(frozen=True)
+class _RefereeCounts:
+    """What the window referee re-decoded and where it disagreed."""
+
+    windows_checked: int
+    window_disagreements: int
+
+
+def _logical_verdicts(
+    machine: machine_module.Machine, result: machine_module.RunResult
+) -> _LogicalVerdicts:
+    """The loop's observables beside the truth and beside the reference."""
+    circuit = machine.operations[0].circuit
+    reference_prediction = direct_prediction(machine, result, circuit)
+    operation_result = result.operation_results[0]
+    truth = tuple(operation_result.observable_truth)
+    loop_prediction = tuple(operation_result.logical_observables)
+    is_logical_failure = loop_prediction != truth
+    is_direct_failure = reference_prediction != truth
+    is_direct_mismatch = loop_prediction != reference_prediction
+    return _LogicalVerdicts(
+        logical_failure=is_logical_failure,
+        direct_failure=is_direct_failure,
+        direct_mismatch=is_direct_mismatch,
+    )
+
+
+def _throughput_per_microsecond(
+    machine: machine_module.Machine,
+    settings: machine_module.MachineSettings,
+    samples: dict,
+    distance: int,
+) -> _Throughput:
+    """Windows and rounds over the span from first round to last commit."""
+    decoded_windows = len(samples["service"])
+    rounds_per_shot = settings.workload.rounds_per_shot
+    rounds_this_shot = rounds_per_shot.rounds_for(distance)
+    span_us = _decoded_span_microseconds(machine)
+    windows_per_us = decoded_windows / span_us
+    rounds_per_us = rounds_this_shot / span_us
+    return _Throughput(
+        windows_per_microsecond=windows_per_us,
+        rounds_per_microsecond=rounds_per_us,
+    )
+
+
+def _referee_counts(machine: machine_module.Machine) -> _RefereeCounts:
+    """The referee's counters; zero when no referee wraps the decoder."""
+    algorithm = machine.active_decoder.decoder
+    windows_checked = getattr(algorithm, "windows_checked", 0)
+    disagreements = getattr(algorithm, "window_disagreements", 0)
+    return _RefereeCounts(
+        windows_checked=windows_checked,
+        window_disagreements=disagreements,
+    )
+
+
+def _max_queued_windows(machine: machine_module.Machine) -> int:
+    """The deepest the decode ready queue got over the shot."""
+    depths = []
+    for _tick, depth in machine.observation.queue_depth.samples:
+        depths.append(depth)
+    return max(depths, default=0)
 
 
 def _span_microseconds(end_ticks: int, start_ticks: int) -> float:
@@ -445,13 +545,6 @@ def _maxes(samples: dict) -> dict:
     return maxes
 
 
-def active_decoder_kind(settings: machine_module.MachineSettings):
-    """The kind of the tier that decodes the plan's windows."""
-    tier = settings.escalation.decodes_on
-    tier_settings = getattr(settings, f"{tier}_decoder")
-    return tier_settings.kind
-
-
 def _shot_label(
     settings: machine_module.MachineSettings,
     physical_error_probability: float,
@@ -490,29 +583,6 @@ def _write_trace(shot, run_dir, label: str) -> None:
     else:
         path = trace_path_for_shot(path, shot.seed, observation.trace_shots)
     writer.write(str(path))
-
-
-def trace_path_for_shot(path: str, seed: int, trace_shots) -> str:
-    """The path one shot writes to; the seed joins it when several trace.
-
-    One traced shot keeps the path the yaml gave. Several would all
-    write the same file, so each takes the seed before its suffixes:
-    run.trace.json becomes run_seed3.trace.json, and run.trace.json.gz
-    becomes run_seed3.trace.json.gz.
-    """
-    if len(trace_shots) < 2:
-        return path
-    name = pathlib.Path(path)
-    directory = name.parent
-    stem = name.name
-    first_dot = stem.find(".")
-    if first_dot < 0:
-        seeded = directory / f"{stem}_seed{seed}"
-        return str(seeded)
-    head = stem[:first_dot]
-    suffixes = stem[first_dot:]
-    seeded = directory / f"{head}_seed{seed}{suffixes}"
-    return str(seeded)
 
 
 def _write_log(machine: machine_module.Machine, run_dir, label: str) -> None:

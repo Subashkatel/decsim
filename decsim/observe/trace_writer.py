@@ -155,15 +155,14 @@ class TraceWriter:
     def copy_made(self, key, bits, source_name: str, target_name: str) -> None:
         """Bits duplicated into a structure the receiver owns."""
         thread = _copy_thread(target_name)
-        args = {
-            "key": _key_text(key),
-            "bits": bits,
-            "from": source_name,
-            "to": target_name,
-            "transfer": "copy",
-        }
+        args = _copied_identity(key)
+        args["bits"] = bits
+        args["from"] = source_name
+        args["to"] = target_name
+        args["transfer"] = "copy"
         name = f"{target_name} copy"
         self._instant(thread, name, "copy", args)
+        self._learn_bits(thread, key, bits)
 
     def round_in_assembly(self, capacity, event) -> None:
         """The controller's packing workspace holds one more round, or one less.
@@ -249,10 +248,8 @@ class TraceWriter:
 
     def round_published(self, store_name: str, round_key, tick: int) -> None:
         """The round's bits are readable in the store."""
-        open_row = self._open_residence.get((store_name, round_key))
-        if open_row is None:
-            return
-        open_row["args"]["data_ready"] = tick
+        readable = {"data_ready": tick}
+        self._learn_on_residence(store_name, round_key, readable)
 
     def round_released(self, store_name: str, round_key) -> None:
         """The round's last holder let go; the slot is free."""
@@ -370,6 +367,7 @@ class TraceWriter:
         args = {
             "window": window_text(window_key),
             "request": request_text(job.request_key),
+            "rounds": _job_rounds_text(job),
             "bits": _landed_bits(job),
             "transfer": "copy",
             "capacity": unit.memory.capacity_rounds,
@@ -467,11 +465,13 @@ class TraceWriter:
     def correction_committed(self, record) -> None:
         """The frame's write for one window has landed."""
         window = window_text(record.window_key)
-        args = {
-            "window": window,
-            "tier": record.tier,
+        key = (record.window_key, record.run_sequence)
+        landed = {
+            "committed": record.committed_ticks,
             "observables": list(record.logical_observables),
         }
+        self._learn_on_residence("Frame", key, landed)
+        args = {"window": window, "tier": record.tier}
         name = f"{window} committed"
         tick = record.committed_ticks
         self._instant("Frame", name, "window", args, tick=tick)
@@ -553,6 +553,8 @@ class TraceWriter:
             return
         args = {
             "round": round_text(round_key),
+            # the merge that packs the round tells the workspace its bits
+            "bits": None,
             "transfer": "copy",
             "capacity": capacity,
             "slot_taken": event.tick,
@@ -580,6 +582,32 @@ class TraceWriter:
             "cat": category,
             "args": dict(args),
         }
+
+    def _learn_bits(self, thread: str, key, bits) -> None:
+        """A copy names the bits of the residence it lands in, when it can.
+
+        A structure that knows its own payload keeps it; the controller's
+        packing workspace holds raw measurement fragments and learns
+        their size from the merge that packs them. Only a round names a
+        residence: a copy of a whole window names its job, and a job's
+        residence is keyed by its request.
+        """
+        if not isinstance(key, tuple):
+            return
+        open_row = self._open_residence.get((thread, key))
+        if open_row is None:
+            return
+        held = open_row["args"].get("bits")
+        if held is not None:
+            return
+        open_row["args"]["bits"] = bits
+
+    def _learn_on_residence(self, thread: str, key, learned: dict) -> None:
+        """Facts a residence hears after it opens and before it ends."""
+        open_row = self._open_residence.get((thread, key))
+        if open_row is None:
+            return
+        open_row["args"].update(learned)
 
     def _end_residence(self, thread: str, key, closing: dict) -> None:
         open_row = self._open_residence.pop((thread, key), None)
@@ -664,7 +692,15 @@ class TraceWriter:
         self._flow(phase, thread, flow_id, name, "window", tick)
 
     def _start_window_flow(self, thread: str, window_key) -> None:
-        """A window's chain begins where its request joins the queue."""
+        """A window's chain begins where its request joins the queue.
+
+        An escalated window joins the queue again under the same key.
+        That is one more hop of the same chain: a Chrome flow has one
+        start and then steps, so the second enqueue writes a `t`.
+        """
+        if window_key in self._flowing_windows:
+            self._step_window_flow(thread, window_key, self.engine.now)
+            return
         self._flowing_windows.add(window_key)
         self._window_flow("s", thread, window_key, self.engine.now)
 
@@ -777,12 +813,36 @@ def _dispatch_tick(job: message.DecodeJob) -> Optional[int]:
     return window.t_dispatch
 
 
-def _key_text(key) -> str:
+def _copied_identity(key) -> dict:
+    """What a copy carried, named as every other event names it.
+
+    A round key is a round; a decode job is a window, and the rounds it
+    reads, so a round's own path can be followed through the copy into a
+    unit's memory.
+    """
     if isinstance(key, tuple) and len(key) == 2:
-        return round_text(key)
+        return {"round": round_text(key)}
     if isinstance(key, message.DecodeJob):
-        return window_text((key.op_id, key.window_id))
-    return str(key)
+        window_key = (key.op_id, key.window_id)
+        window = window_text(window_key)
+        rounds = _job_rounds_text(key)
+        return {"window": window, "rounds": rounds}
+    return {"key": str(key)}
+
+
+def _job_rounds_text(job: message.DecodeJob) -> str:
+    """The rounds a job's landed input holds, as `lo..hi`."""
+    decoder_input = job.decoder_input
+    if decoder_input is None:
+        return ""
+    indices = []
+    for round_input in decoder_input.rounds:
+        indices.append(round_input.round_index)
+    if not indices:
+        return ""
+    low = min(indices)
+    high = max(indices)
+    return f"{low}..{high}"
 
 
 def _holder_text(holder) -> str:

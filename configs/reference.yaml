@@ -271,6 +271,20 @@ strong_decoder:                    # the accurate tier: slow, lower LER
     fetch_cycles_per_round: 1
     release_cycles_per_job: 1
 
+decoder_manager:                   # the manager that gives ready windows a unit
+  bulk_strong: false               # true serves the strong pool's queued
+                                   # re-decodes as one merged decode (Toshio
+                                   # 2510.25222 Sec. III C: the strong decoder
+                                   # processes its assigned data in bulk). The
+                                   # batch is timing-only, since one decode
+                                   # cannot carry each member window's
+                                   # correction, so it prices a bulk strong
+                                   # tier and refuses a run whose accuracy is
+                                   # coupled to the strong result; serial
+                                   # escalation only (it contradicts
+                                   # escalation.run_both_at_once and the
+                                   # double window)
+
 pauli_frame:
   clock: fridge
   write_cycles: 1                  # XOR of a correction into the frame register

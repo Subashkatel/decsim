@@ -43,6 +43,7 @@ ESCALATION_KEYS = (
     "threshold_column",
     "online",
 )
+DECODER_MANAGER_KEYS = ("bulk_strong",)
 ONLINE_KEYS = (
     "target_escalation_rate",
     "step_db",
@@ -107,18 +108,19 @@ class DecoderSettings:
 
 @dataclasses.dataclass(frozen=True)
 class DecoderManagerSettings:
-    """The decoder manager's Python-only knobs; the yaml has no section.
+    """The yaml's `decoder_manager` section, and the manager's Python knobs.
 
-    A router picks the decoder for each job (CodeRouter by code name,
-    SwitchingRouter by tier); given, it replaces the one the root builds
-    from the two tier sections. The scheduler orders the ready queue
-    (FifoScheduler by default), unit_pools names each pool's unit count
-    (built from the tiers' units by default) and decoder_memory bounds
-    each pool's input memory in rounds (built from the active tier's
-    unit_memory_rounds by default). bulk_strong serves the strong pool's
+    bulk_strong is the section's one key: it serves the strong pool's
     queued re-decodes as one merged batch (Toshio 2510.25222 Sec. III C,
     the strong decoder processes its assigned data in bulk); timing-only,
     since a batch carries no accuracy-bearing result, and serial only.
+    The rest are Python objects. A router picks the decoder for each job
+    (CodeRouter by code name, SwitchingRouter by tier); given, it
+    replaces the one the root builds from the two tier sections. The
+    scheduler orders the ready queue (FifoScheduler by default),
+    unit_pools names each pool's unit count (built from the tiers' units
+    by default) and decoder_memory bounds each pool's input memory in
+    rounds (built from the active tier's unit_memory_rounds by default).
     """
 
     router: Optional[Any] = None
@@ -126,6 +128,24 @@ class DecoderManagerSettings:
     unit_pools: Optional[Mapping[str, int]] = None
     decoder_memory: Optional[decoder_memory_module.DecoderMemoryConfig] = None
     bulk_strong: bool = False
+
+    @classmethod
+    def from_yaml(cls, section: Mapping) -> "DecoderManagerSettings":
+        """The `decoder_manager` section: the one knob the yaml reaches."""
+        unknown = set(section) - set(DECODER_MANAGER_KEYS)
+        if unknown:
+            listed = sorted(unknown)
+            raise ValueError(
+                f"decoder_manager does not know {listed}; its keys are "
+                f"{list(DECODER_MANAGER_KEYS)}"
+            )
+        bulk_strong = section.get("bulk_strong", False)
+        if bulk_strong not in (True, False):
+            raise ValueError(
+                "decoder_manager.bulk_strong must be true or false, got "
+                f"{bulk_strong!r}"
+            )
+        return cls(bulk_strong=bulk_strong)
 
 
 @dataclasses.dataclass(frozen=True)

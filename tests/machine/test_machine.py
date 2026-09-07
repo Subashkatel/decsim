@@ -517,3 +517,72 @@ def test_a_seed_that_is_not_a_number_is_refused():
     settings = machine_module.MachineSettings()
     with pytest.raises(ValueError):
         machine_module.Machine.build(settings, "x")
+
+
+class OutsideCodeCard:
+    """A code card written outside decsim: the port's methods, nothing else."""
+
+    name = "outside code card"
+    distance = 2
+
+    def rounds_per_logical_cycle(self):
+        return 2
+
+    def round_period_us(self):
+        return None
+
+    def commit_rounds(self):
+        return 2
+
+    def buffer_rounds(self):
+        return 0
+
+    def buffering_floor(self):
+        return (0, 0)
+
+    window_floor_justification = None
+
+    def spatial_nodes(self, num_patches):
+        return 4 * num_patches
+
+    def syndrome_bits_per_round(self, num_patches):
+        return 3 * num_patches
+
+
+def _resolved_geometry(machine):
+    """The geometry the run resolved, read off the issuer's table."""
+    resolved = machine.issuer.resolved_operation_by_id.values()
+    first = next(iter(resolved))
+    return first.code_geometry
+
+
+def _one_memory_operation_on(card) -> machine_module.MachineSettings:
+    """One timing-only memory operation on the code card given."""
+    operation = program_records.Operation(id=1, name="memory", qubits=(0,))
+    workload = workload_settings.WorkloadSettings(operations=[operation])
+    qpu = qpu_settings.QpuSettings(code=card)
+    decoder = decoders.PresetLatencyDecoder(0.0)
+    weak_decoder = decoder_settings.DecoderSettings(decoder=decoder)
+    return machine_module.MachineSettings(
+        workload=workload, qpu=qpu, weak_decoder=weak_decoder
+    )
+
+
+def test_a_code_card_written_outside_decsim_runs_with_no_registration():
+    """A card is a port, not a table row: nothing names it but the settings."""
+    card = OutsideCodeCard()
+    settings = _one_memory_operation_on(card)
+    machine = machine_module.Machine.build(settings)
+    result = machine.run()
+    geometry = _resolved_geometry(machine)
+    assert result.terminal_status == "complete"
+    assert geometry.code_name == "outside code card"
+
+
+def test_a_run_without_a_code_card_resolves_the_distance_three_surface():
+    settings = _one_memory_operation_on(None)
+    machine = machine_module.Machine.build(settings)
+    machine.run()
+    geometry = _resolved_geometry(machine)
+    assert geometry.code_name == "rotated surface code (d=3)"
+    assert geometry.distance == 3

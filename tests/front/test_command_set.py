@@ -73,8 +73,8 @@ def test_help_prints_the_verbs_without_failing():
 
 
 def test_show_lists_every_sections_kind_of_every_shipped_config():
-    found = CONFIGS_DIR.glob("*.yaml")
-    for config_path in sorted(found):
+    for name in yaml_configs.SHIPPED_CONFIGS:
+        config_path = CONFIGS_DIR / name
         config = experiment.load_experiment(config_path)
         lines = experiment.resolved_description(config)
         text = "\n".join(lines)
@@ -245,7 +245,8 @@ def test_combining_folders_of_two_different_sweeps_is_refused(
     first_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)
     second_path = tmp_path / "other.yaml"
     other_text = first_path.read_text()
-    second_path.write_text(other_text.replace("shots: 2", "shots: 3"))
+    more_shots = other_text.replace("shots: 2", "shots: 3")
+    second_path.write_text(more_shots)
     first_dir = tmp_path / "first"
     second_dir = tmp_path / "second"
     combined_dir = tmp_path / "combined"

@@ -15,7 +15,23 @@ import yaml
 import decsim.collect as collect
 import decsim.front.measure as measure
 
-CONFIGS_DIR = Path("configs")
+_THIS_FILE = Path(__file__)
+_TEST_FILE = _THIS_FILE.resolve()
+_REPOSITORY_ROOT = _TEST_FILE.parents[2]
+CONFIGS_DIR = _REPOSITORY_ROOT / "configs"
+# The yaml experiments this repository ships. The tests that check every
+# shipped config walk this tuple and not the folder, so a config a user
+# writes into configs/ of their own checkout fails none of them.
+SHIPPED_CONFIGS = (
+    "reference.yaml",
+    "strong_decoder_baseline.yaml",
+    "strong_latency.yaml",
+    "strong_latency_preview.yaml",
+    "strong_ler.yaml",
+    "weak_decoder_baseline.yaml",
+    "weak_latency.yaml",
+    "weak_ler.yaml",
+)
 
 
 def measure_point_shot(

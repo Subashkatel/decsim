@@ -10,6 +10,7 @@ import csv
 
 import pytest
 
+import decsim.front.refusal as refusal
 from decsim.front.plots import (
     STAGE_BREAKDOWN_STAGES,
     _median_stage_us_by_distance,
@@ -76,5 +77,5 @@ def test_figure_is_written_per_distance(tmp_path):
 def test_a_run_without_shots_csv_is_refused(tmp_path):
     empty_run = tmp_path / "empty"
     empty_run.mkdir()
-    with pytest.raises(FileNotFoundError, match="shots.csv"):
+    with pytest.raises(refusal.RefusalError, match="shots.csv"):
         stage_breakdown_plot(empty_run, tmp_path / "figure.png")

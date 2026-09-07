@@ -191,10 +191,10 @@ def test_every_shard_of_a_sweep_runs_a_share_of_its_points(tmp_path):
     assert len(second_rows) == 2
 
 
-def test_a_shard_outside_its_count_is_refused(tmp_path):
+def test_a_shard_outside_its_count_is_refused(tmp_path, capsys):
     config_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)
     out_dir = tmp_path / "out"
-    with pytest.raises(ValueError, match="is not a shard"):
+    with pytest.raises(SystemExit) as stopped:
         command.main(
             [
                 "collect",
@@ -202,17 +202,26 @@ def test_a_shard_outside_its_count_is_refused(tmp_path):
                 "--out",
                 str(out_dir),
                 "--shard",
-                "2/2",
+                "5/2",
             ]
         )
 
+    printed = capsys.readouterr()
+    assert stopped.value.code == 1
+    assert printed.err.count("\n") == 1
+    assert printed.err.startswith("decsim: --shard 5/2 is not a shard")
+    assert not out_dir.exists()
 
-def test_combining_two_folders_that_hold_the_same_point_is_refused(tmp_path):
+
+def test_combining_two_folders_that_hold_the_same_point_is_refused(
+    tmp_path, capsys
+):
     config_path = yaml_configs.write_config(tmp_path, {})
     run_dir = tmp_path / "one"
     combined_dir = tmp_path / "combined"
     command.main(["collect", str(config_path), "--out", str(run_dir)])
-    with pytest.raises(ValueError, match="more than one of"):
+    capsys.readouterr()
+    with pytest.raises(SystemExit) as stopped:
         command.main(
             [
                 "combine",
@@ -222,3 +231,65 @@ def test_combining_two_folders_that_hold_the_same_point_is_refused(tmp_path):
                 str(combined_dir),
             ]
         )
+
+    printed = capsys.readouterr()
+    assert stopped.value.code == 1
+    assert printed.err.count("\n") == 1
+    assert "is in more than one of" in printed.err
+
+
+def test_run_refuses_a_yaml_that_is_not_there(tmp_path, capsys):
+    missing = tmp_path / "not_a_config.yaml"
+    with pytest.raises(SystemExit) as stopped:
+        command.main(["run", str(missing)])
+
+    printed = capsys.readouterr()
+    assert stopped.value.code == 1
+    assert printed.err.count("\n") == 1
+    assert printed.err.startswith(f"decsim: {missing} is not a file")
+    assert "reference" in printed.err
+
+
+def test_show_refuses_a_sweep_axis_the_yaml_layer_does_not_have(
+    tmp_path, capsys
+):
+    unknown_axis = {
+        "sweep": [
+            {
+                "physical_error_probability": [0.001],
+                "distance": [3],
+                "round_period_us": [1.0],
+                "algorithm": ["pymatching"],
+                "shots": 1,
+            }
+        ]
+    }
+    config_path = yaml_configs.write_config(tmp_path, unknown_axis)
+    with pytest.raises(SystemExit) as stopped:
+        command.main(["show", str(config_path)])
+
+    printed = capsys.readouterr()
+    assert stopped.value.code == 1
+    assert printed.err.count("\n") == 1
+    assert "sweep block 1 does not know ['algorithm']" in printed.err
+
+
+def test_plot_refuses_a_figure_it_does_not_draw(tmp_path, capsys):
+    with pytest.raises(SystemExit) as stopped:
+        command.main(["plot", str(tmp_path), "--figure", "everything"])
+
+    printed = capsys.readouterr()
+    assert stopped.value.code == 1
+    assert printed.err.count("\n") == 1
+    assert printed.err.startswith("decsim: no figure named everything")
+
+
+def test_trace_refuses_an_action_it_does_not_have(tmp_path, capsys):
+    trace_path = tmp_path / "shot.json"
+    with pytest.raises(SystemExit) as stopped:
+        command.main(["trace", "summarise", str(trace_path)])
+
+    printed = capsys.readouterr()
+    assert stopped.value.code == 1
+    assert printed.err.count("\n") == 1
+    assert printed.err.startswith("decsim: decsim trace has no action")

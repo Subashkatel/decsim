@@ -263,3 +263,22 @@ def test_trace_does_only_what_it_says_it_does():
         trace_follow.main(["summarise", "somewhere.json"])
 
     assert "decsim trace has no action summarise" in str(refusal.value)
+
+
+def test_a_round_the_trace_does_not_carry_is_refused(trace_path):
+    with pytest.raises(ValueError) as refused:
+        trace_follow.main(["follow", str(trace_path), "--round", "1:999"])
+
+    assert "carries round 1:999" in str(refused.value)
+    assert "its round keys are 1:1 to 1:30, 30 in all" in str(refused.value)
+
+
+def test_a_window_the_trace_does_not_carry_is_refused(trace_path):
+    with pytest.raises(ValueError) as refused:
+        trace_follow.main(["follow", str(trace_path), "--window", "1:99"])
+
+    assert "carries window 1:99" in str(refused.value)
+    assert (
+        "its window keys are 1:0, 1:1, 1:2, 1:3, 1:4, 1:5, 1:6, 1:7, 1:8"
+        in str(refused.value)
+    )

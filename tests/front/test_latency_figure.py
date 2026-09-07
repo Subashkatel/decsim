@@ -6,6 +6,10 @@ stage-breakdown figure), drawn only for wall-clock algorithms across
 more than one distance.
 """
 
+import pytest
+
+import decsim.front.plots as plots
+import decsim.front.refusal as refusal
 from decsim.front.experiment import load_experiment
 from decsim.front.plots import latency_samples_by_distance
 from tests.front.yaml_configs import (
@@ -140,3 +144,11 @@ def test_combined_figure_reads_two_runs_sample_files(tmp_path, monkeypatch):
         combined,
     )
     assert combined.exists()
+
+
+def test_a_run_without_latency_samples_is_refused(tmp_path):
+    empty_run = tmp_path / "timing_only"
+    empty_run.mkdir()
+    figure_path = tmp_path / "figure.png"
+    with pytest.raises(refusal.RefusalError, match="latency_samples.csv"):
+        plots.figure("latency", [empty_run], figure_path)

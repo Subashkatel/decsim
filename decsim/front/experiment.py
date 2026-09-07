@@ -14,8 +14,15 @@ from pathlib import Path
 import yaml
 
 import decsim.collect as collect
+import decsim.front.refusal as refusal
 import decsim.machine as machine
 
+_THIS_FILE = Path(__file__)
+_FRONT_DIR = _THIS_FILE.resolve()
+_REPOSITORY_ROOT = _FRONT_DIR.parents[2]
+# configs/ sits beside the decsim package, gem5's configs/ beside its
+# binary; the shipped experiments are what a refused path is listed with.
+CONFIGS_DIR = _REPOSITORY_ROOT / "configs"
 SWEEP_KEYS = (
     "physical_error_probability",
     "distance",
@@ -154,18 +161,46 @@ def resolved_description(config: ExperimentConfig) -> list:
 def load_experiment(path) -> ExperimentConfig:
     """Read one yaml file, its extends chain applied, into settings."""
     path = Path(path)
+    _refuse_a_path_that_is_not_a_file(path)
     sections, config_files = _yaml_sections(path)
     sweep_section = sections.pop("sweep")
     sweep = _sweep_blocks(sweep_section)
-    settings = machine.MachineSettings.from_mapping(
-        sections, name=path.stem, base_directory=path.parent
-    )
+    settings = _settings_of(sections, path)
     return ExperimentConfig(
         name=path.stem,
         settings=settings,
         sweep=sweep,
         config_files=config_files,
     )
+
+
+def _refuse_a_path_that_is_not_a_file(path: Path) -> None:
+    """A yaml that is not there, with the shipped experiments to pick from."""
+    if path.is_file():
+        return
+    shipped_files = CONFIGS_DIR.glob("*.yaml")
+    names = []
+    for shipped in sorted(shipped_files):
+        names.append(shipped.stem)
+    listed = ", ".join(names)
+    raise refusal.RefusalError(
+        f"{path} is not a file; the shipped experiments are {listed}"
+    )
+
+
+def _settings_of(sections: dict, path: Path) -> machine.MachineSettings:
+    """The machine's settings records, one per section of the file.
+
+    A settings record checks its own section and raises ValueError
+    (REWRITE.md rule 4); the file is the front's input, so a refused key
+    reaches the user as one sentence naming the file it is in.
+    """
+    try:
+        return machine.MachineSettings.from_mapping(
+            sections, name=path.stem, base_directory=path.parent
+        )
+    except ValueError as refused:
+        raise refusal.RefusalError(f"{path}: {refused}") from refused
 
 
 def _files_line(config: ExperimentConfig) -> str:
@@ -240,7 +275,7 @@ def _sweep_block(block: dict, index: int) -> SweepBlock:
     unknown = set(block) - set(SWEEP_KEYS)
     if unknown:
         listed = sorted(unknown)
-        raise ValueError(
+        raise refusal.RefusalError(
             f"sweep block {index} does not know {listed}; its axes "
             "are physical_error_probability, distance and round_period_us, "
             "plus shots (the algorithm lives on the decoder card, not in "

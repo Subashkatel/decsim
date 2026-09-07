@@ -4,8 +4,7 @@ observation.trace names either a word (chrome, and the front names the
 file after the point) or a path of the study's own. A path plus
 trace_shots of more than one seed would have every traced shot write the
 same file, so the seed goes into the name before its suffixes
-(docs/rewrite/notes/trace_and_viewer.md section 10, ruling 1: one file
-per traced shot).
+(one file per traced shot).
 """
 
 from decsim.front.measure import trace_path_for_shot

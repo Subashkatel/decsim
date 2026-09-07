@@ -2,7 +2,7 @@
 
 The growth evidence it returns beside the hard result feeds the cluster
 gap (confidence/cluster.py) and is what the ASIC cycle model prices
-(tmp/uf-decoder-research/REPORT.md, finding 5).
+(AFS 2001.06598, Helios 2301.08419).
 """
 
 import dataclasses

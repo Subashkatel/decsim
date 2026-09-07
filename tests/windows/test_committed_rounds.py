@@ -1,6 +1,6 @@
 """The logical ledger against the per-round oracle's law.
 
-rowW5 (validation/component_matrix/rowW5_ledger/compare_round_oracle.py):
+The law:
 every round of a queried interval has exactly one owner, the owners are
 collected as a set and their observables XORed once each (the Pauli
 frame rule: PECOS pauli_frame.rs folds one mask per accepted

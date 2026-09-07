@@ -1,6 +1,6 @@
 """`decsim trace follow`: one round's or one window's path, hop by hop.
 
-The reader docs/rewrite/notes/trace_and_viewer.md section 4 asks for: it
+The reader of one round's or one window's path through a trace: it
 indexes a shot's Chrome trace by the identity keys in `args`, orders the
 hops by `args.tick` and then by the lane the pipeline puts each thread
 on, and prints where the thing sat, for how long, whether the hop copied

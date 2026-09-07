@@ -6,7 +6,7 @@ schedules no decoder work. Table rows: sliding (Skoric et al.
 2209.08552 section I.B, the overlapping recovery method), parallel
 (Skoric section I.C, block A/B), sandwich (Tan et al. 2209.09219,
 type-1 cores and type-2 seams), naive_online (one window per
-operation). The paper contract is docs/PAPER_MODEL_MAP.md.
+operation).
 """
 
 import enum

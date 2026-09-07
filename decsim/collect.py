@@ -286,7 +286,7 @@ def unique_tasks(tasks: Iterable[Task]) -> list:
 
     The merged task keeps the first block's calibrator, so an online
     switching point named in two blocks calibrates once over all its
-    shots; the old runner calibrated once per block. No shipped or
+    shots. No shipped or
     frozen yaml names an online point twice.
     """
     task_by_id = {}

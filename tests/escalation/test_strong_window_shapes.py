@@ -2,9 +2,8 @@
 
 Toshio et al. 2510.25222: the context window is the commit region with
 one buffer of context on each side, r_strong = r_com + 2 r_buf, clipped
-at the operation's edge (Sec. III A; text lines 1250-1252 of
-tmp/papers/txt); the forward window starts at the escalated commit,
-absorbs the windows it covers, and is decoded once both of its
+at the operation's edge (Sec. III A); the forward window starts at the
+escalated commit, absorbs the windows it covers, and is decoded once both of its
 boundaries are weak-determined: the restart window's commit, or the
 terminal data (Sec. III C, Fig. 12). A d=3 sliding window commits 3
 rounds and buffers 3, so r_strong is 9 rounds.
@@ -33,9 +32,7 @@ import decsim.records.decoding as decoding_records
 import decsim.records.windows as window_records
 import tests.escalation.declared_fabric as fabric
 
-# The gate's switching card (validation/responsibility_audit_2026_08_30/
-# frozen_suite/switching_validation.yaml over weak_decoder_baseline.yaml),
-# section by section as the yaml reads.
+# The gate's switching card, section by section as the yaml reads.
 ONE_FRIDGE_CYCLE = {
     "latency_cycles": 1,
     "clock": "fridge",

@@ -8,8 +8,8 @@ per DmaPort, so a setup queue belongs to a channel and two channels'
 setups are independent); Shao et al., MICRO 2016, section III.C (the DMA
 engine services descriptors one by one while the processor is free, so a
 request with no setup never waits for another's setup); the closed form
-of the row L1 harness in the sandbox validation folder, run here over
-random traces. One microsecond is 1_000_000 ticks.
+of that queue, run here over random traces. One microsecond is
+1_000_000 ticks.
 """
 
 import fractions

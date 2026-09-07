@@ -4,12 +4,12 @@ Referents: the closed form of a store of K slots with Type I blocking,
 round k enters at max(arrival k, the (k minus K)-th smallest exit among
 the rounds before it), which is the exit of round k minus K when rounds
 leave in order; that is Ciw's blocking law
-(tmp/resources/l5_buffers/Ciw/ciw/node.py: finish_service blocks when
+(Ciw's ciw/node.py: finish_service blocks when
 the next node is at node_capacity, release_blocked_individual releases
 the longest blocked one when a customer leaves); the same trace runs
 through a two-node Ciw network when Ciw imports from the resources
 folder. gem5's queue answers isFull
-before allocate (tmp/resources/gem5/src/mem/cache/queue.hh:150-153)
+before allocate (gem5 src/mem/cache/queue.hh:150-153)
 and its blocked port retries the requester (src/mem/cache/base.cc:
 clearBlocked, processSendRetry); the store never refuses a write.
 
@@ -19,9 +19,7 @@ the declared card of tests/declared_run.py.
 """
 
 import functools
-import pathlib
 import random
-import sys
 
 import pytest
 
@@ -35,10 +33,6 @@ import decsim.syndrome_buffer.settings as round_store_settings
 import tests.declared_run as declared_run
 
 STALL = controller_settings.PackingOverflowPolicy.STALL
-
-CIW_SOURCE = pathlib.Path(
-    "/scratch/gpfs/MARTONOSI/sk2415/qlx-qec-sandbox/tmp/resources/l5_buffers/Ciw"
-)
 
 
 def packet(
@@ -143,8 +137,6 @@ def run_trace(arrivals, holds, capacity):
 def ciw_trace(arrivals, holds, capacity):
     """The same trace through Ciw: node 1 blocks until node 2 has room."""
     period = arrivals[1] - arrivals[0]
-    if str(CIW_SOURCE) not in sys.path:
-        sys.path.insert(0, str(CIW_SOURCE))
     ciw = pytest.importorskip("ciw")
     arrivals_every_period = ciw.dists.Deterministic(period)
     no_service = ciw.dists.Deterministic(0.0)

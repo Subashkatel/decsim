@@ -6,7 +6,7 @@ BeliefMatching.decode (.pydeps/beliefmatching/belief_matching.py:344-358).
 ldpc's BpDecoder gives the hyperedge posteriors, the window's projection
 maps them onto matching edges, PyMatching matches with -log(posterior)
 weights. The posterior clamp is 1e-15 here and 1e-14 there. Toshio et
-al. 2510.25222 (tmp/papers) run belief matching as the accurate decoder
+al. 2510.25222 run belief matching as the accurate decoder
 invoked on demand.
 """
 

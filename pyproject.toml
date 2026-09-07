@@ -32,7 +32,7 @@ include = ["decsim*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
-# The rewrite's style gate (REWRITE.md rule 9): Google Python style, 80
+# The style gate (STYLE.md rule 9): Google Python style, 80
 # columns, Google docstrings. The one-action rule of rule 1 is checked
 # separately by tools/check_one_action.py.
 [tool.ruff]
@@ -52,7 +52,7 @@ extend-exclude = [
 
 [tool.ruff.lint]
 # SIM is off on purpose: it asks for inline conditionals and merged
-# conditions, the opposite of REWRITE.md rule 1.
+# conditions, the opposite of STYLE.md rule 1.
 select = ["E", "W", "F", "N", "D", "B", "I", "UP", "ARG"]
 ignore = [
   "D105",  # magic methods need no docstring

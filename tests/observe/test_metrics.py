@@ -11,8 +11,6 @@ first strict point (weak_decoder_baseline d 3 p 0.003 seed 0).
 import decsim.machine as machine_module
 import tests.observe.gate_point as gate_point
 
-pytestmark = gate_point.needs_the_frozen_suite
-
 
 class _MemoryWatcher:
     """The memory's own held count, read at every event it fires."""

@@ -4,7 +4,7 @@ Gidney et al. 2312.04522 (Fig. 10) and Toshio et al. 2510.25222 (Fig. 4)
 report that MWPM's complementary gap is a calibrated confidence: the
 probability that the decoder's class is wrong at a gap of g decibels is
 fitted by f(g) = 1 / (1 + 10^(0.09 g)) on 10d-round memory experiments
-at p = 1e-3 (the sandbox harness rowD6's law). Here 400 shots of a d=3,
+at p = 1e-3. Here 400 shots of a d=3,
 30-round memory are binned by nearest decibel and f(g) must lie inside
 each populated bin's Wilson 95 percent interval; the two forced-class
 solves of the pair must agree with the plain solve on the minimum

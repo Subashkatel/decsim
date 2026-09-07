@@ -3,7 +3,7 @@
 Two rows, selected by escalation.double_window (Toshio et al.
 2510.25222). ContextWindow is Sec. III A: the escalated window's commit
 region with one buffer of raw context on each side (r_strong = r_com +
-2 r_buf, text lines 1250-1252 of tmp/papers/txt), built the moment it
+2 r_buf, Sec. III A), built the moment it
 is asked for. ForwardWindow is Sec. III C and Fig. 12: a strong window
 that starts at the escalated commit and extends forward, absorbs the
 weak windows it covers, re-slices the window past it (the restart

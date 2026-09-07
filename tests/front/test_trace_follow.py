@@ -1,6 +1,6 @@
 """`decsim trace follow` against the worked example of the trace note.
 
-docs/rewrite/notes/trace_and_viewer.md section 4 prints one round's and
+The reader prints one round's and
 one window's path from gate point 1's own trace (weak_decoder_baseline
 d 3 p 0.003 seed 0), and its corrections fix two of the example's
 statements against the code: the controller's intake copy is at 1.000,
@@ -15,8 +15,6 @@ import decsim.front.trace_file as trace_file
 import decsim.front.trace_follow as trace_follow
 import decsim.machine as machine_module
 import tests.observe.gate_point as gate_point
-
-pytestmark = gate_point.needs_the_frozen_suite
 
 
 @pytest.fixture(scope="module")

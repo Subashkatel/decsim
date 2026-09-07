@@ -1,18 +1,17 @@
 """The cluster gap: the confidence of one weighted Union-Find window decode.
 
-Meister et al. 2405.07433 Definition 9 and Algorithm 2 (the PDF under
-the sandbox tmp/papers): the weighted edge intervals the hard decode
-grew are quotiented into a graph whose shortest closed walk of odd
-logical parity is the gap, in the growth's half-tick units and reported
-in decibels. The hard decode is Delfosse and Nickerson 1709.06218
-(union_find/window_decoder.py); UnionFindClusterGapDecoder is a Decoder
-over it, built in Python and given to a tier as its decoder, beside the
-confidence wrappers (decoder.py). The gap reads the hard decode's
-intervals, not the syndrome, so it cannot be a ConfidenceSignal on the
-port, and it is not a tier kind of the root's table either: it reports
-its own soft output, in decibels at its weight step, where the
-switching policy decides on the complementary gap in nats, and no yaml
-key selects another signal yet.
+Meister et al. 2405.07433 Definition 9 and Algorithm 2: the weighted edge
+intervals the hard decode grew are quotiented into a graph whose shortest
+closed walk of odd logical parity is the gap, in the growth's half-tick
+units and reported in decibels. The hard decode is Delfosse and Nickerson
+1709.06218 (union_find/window_decoder.py); UnionFindClusterGapDecoder is a
+Decoder over it, built in Python and given to a tier as its decoder, beside
+the confidence wrappers (decoder.py). The gap reads the hard decode's
+intervals, not the syndrome, so it cannot be a ConfidenceSignal on the port,
+and it is not a tier kind of the root's table either: it reports its own
+soft output, in decibels at its weight step, where the switching policy
+decides on the complementary gap in nats, and no yaml key selects another
+signal yet.
 
 The exact likelihood-ratio reading of the gap holds only in the uniform
 repetition-code setting of Meister's Theorem 10; on a surface code it is

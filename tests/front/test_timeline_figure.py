@@ -1,7 +1,7 @@
 """The timeline figure, drawn from a shot's Chrome trace file alone.
 
-The figure's source is docs/rewrite/notes/slice_11_front.md section 10
-("plots never build machines; the timeline reads a trace file"). Gate
+The figure's rule: plots never build machines; the timeline reads a
+trace file. Gate
 point 1 is the shot: every span the figure draws is compared against the
 same run's own listeners and its RunResult, so the file is proven to
 carry the figure.
@@ -16,7 +16,6 @@ import tests.observe.gate_point as gate_point
 
 matplotlib.use("Agg")
 
-pytestmark = gate_point.needs_the_frozen_suite
 
 TICKS_PER_MICROSECOND = 1000000
 

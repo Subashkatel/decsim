@@ -1,12 +1,11 @@
 """The escalation policies: one law per port method, and the paper's identity.
 
-Toshio et al. 2510.25222 Sec. IV C: the switching rate is the mass of
-the window-gap distribution below the threshold, so on one run the
-windows escalated equal the recorded weak gaps below g_th equal the
-strong corrections in the frame (the sandbox harness rowS1's identity,
-on its threshold and its complementary-gap signal). The port is gem5's
-conditional predictor (src/cpu/pred/conditional.hh): a row answers and
-is told; the root acts.
+Toshio et al. 2510.25222 Sec. IV C: the switching rate is the mass of the
+window-gap distribution below the threshold, so on one run the windows
+escalated equal the recorded weak gaps below g_th equal the strong
+corrections in the frame (one identity, checked here on its threshold and
+its complementary-gap signal). The port is gem5's conditional predictor
+(src/cpu/pred/conditional.hh): a row answers and is told; the root acts.
 """
 
 import dataclasses

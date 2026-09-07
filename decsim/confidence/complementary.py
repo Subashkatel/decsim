@@ -1,7 +1,7 @@
 """The complementary gap: the confidence of one MWPM window decode.
 
 g_comp = |complementary_class_weight - decoded_class_weight| (Toshio
-et al. 2510.25222 Sec. III A, text lines 480-495 of tmp/papers/txt; the
+et al. 2510.25222 Sec. III A; the
 method of Gidney et al. 2312.04522): the minimum-weight matching gives
 decoded_class_weight and the decoded class, and the same graph with one
 virtual detector that pins the observable to the other class gives

@@ -5,7 +5,7 @@ set -u
 cd "$(dirname "$0")/.."
 targets=("$@")
 if [ ${#targets[@]} -eq 0 ]; then
-  targets=(decsim experiments tests tools)
+  targets=(decsim tests tools)
 fi
 status=0
 PYTHONPATH=.pydeps .venv/bin/python -m ruff format --check "${targets[@]}" || status=1

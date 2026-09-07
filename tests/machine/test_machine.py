@@ -21,6 +21,7 @@ import decsim.decoders.settings as decoder_settings
 import decsim.decoders.staged_decoder as staged_decoder
 import decsim.decoders.union_find.decoder as union_find_decoder
 import decsim.engine as engine_module
+import decsim.front.experiment as experiment_config
 import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
 import decsim.message as message
@@ -31,7 +32,6 @@ import decsim.qpu.stim_device as stim_device
 import decsim.qpu.syndrome_devices as syndrome_devices
 import decsim.syndrome_buffer.round_store as round_store_module
 import decsim.syndrome_buffer.settings as round_store_settings
-import decsim.front.experiment as experiment_config
 
 THIS_FILE = pathlib.Path(__file__)
 TESTS_DIRECTORY = THIS_FILE.parents[1]

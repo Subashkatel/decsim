@@ -19,8 +19,6 @@ from typing import Optional, Union
 
 import numpy
 
-import decsim.detector_error_model.fault_identity_validation as fault_identity
-
 BOUNDARY = -1
 
 
@@ -100,9 +98,6 @@ def graph_from_model(
     """
     check = faults.check
     raw_priors = numpy.asarray(faults.priors)
-    fault_identity.validate_graphlike_matrices(
-        check, faults.observables, location=location
-    )
     fault_count = check.shape[1]
     _check_priors(raw_priors, fault_count, location)
     # observables are few rows; dense per-fault columns are cheap to read

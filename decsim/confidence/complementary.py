@@ -79,11 +79,6 @@ class ComplementaryGapMetric:
         self.check_matrix = _as_uint8_csc(check)
         self.observable_matrix = _as_uint8_dense(observables)
         self.weights = numpy.asarray(weights, dtype=float)
-        fault_identity.validate_graphlike_matrices(
-            self.check_matrix,
-            self.observable_matrix,
-            location="complementary-gap model",
-        )
         observable_count = self.observable_matrix.shape[0]
         if observable_count != 1:
             raise ValueError(

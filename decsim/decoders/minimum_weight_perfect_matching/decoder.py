@@ -14,8 +14,6 @@ import pymatching
 
 import decsim.decoders.decoder as decoder_module
 import decsim.decoders.minimum_weight_perfect_matching.weights as weights
-import decsim.decoders.decoder as decoder_module
-import decsim.detector_error_model.fault_identity_validation as fault_identity
 import decsim.detector_error_model.fault_model_contracts as fault_models
 
 WARM_UP_COLUMNS = 3
@@ -33,13 +31,8 @@ class PyMatchingDecoder(decoder_module.WindowDecoderBase):
     fault_representation = fault_models.FaultRepresentation.GRAPHLIKE
 
     def compile(self, faults, model=None):
-        """The matching graph of one placed model, validated and warm."""
+        """The matching graph of one placed model, warm."""
         del model
-        fault_identity.validate_graphlike_matrices(
-            faults.check,
-            faults.observables,
-            location="PyMatching window model",
-        )
         # PyMatching normalises the matrix it is given in place; the placed
         # matrix is frozen, so it gets a copy (one per model, cached).
         # Faults sharing the same detector endpoints are independent error
@@ -75,9 +68,7 @@ class PyMatchingDecoder(decoder_module.WindowDecoderBase):
                 raise
             fault_count = faults.check.shape[1]
             empty = numpy.zeros(fault_count, dtype=numpy.uint8)
-            invalid = (
-                decoder_module.BackendDecodeStatus.INVALID_CORRECTION
-            )
+            invalid = decoder_module.BackendDecodeStatus.INVALID_CORRECTION
             return empty, invalid
 
     def _weights_for(self, faults):

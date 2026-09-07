@@ -10,13 +10,13 @@ ler.png        logical error rate vs physical error rate, Wilson 95%
                bars, drawn when more than one p was swept
 latency.png    decode wall clock per window vs code distance, violins,
                drawn when a wall-clock algorithm swept more than one d;
-               the cross-tier combined figure comes from
-               `python -m decsim.front.plots latency <run_dir> <run_dir>
-               <out.png>` reading each run's latency_samples.csv
+               the cross-tier combined figure comes from `decsim plot
+               <run_dir> <run_dir> --figure latency`, reading each run's
+               latency_samples.csv
 ler vs d       both tiers' logical error rate against code distance at
                one physical error rate, from each run's ler.csv:
-               `python -m decsim.front.plots ler_vs_d <run_dir> <run_dir>
-               <p> <out.png>`
+               `decsim plot <run_dir> <run_dir> --figure ler_vs_d
+               --probability <p>`
 
 Every time is in microseconds.
 """
@@ -25,7 +25,6 @@ import csv
 import dataclasses
 import math
 import statistics
-import sys
 from pathlib import Path
 from typing import Optional
 
@@ -65,16 +64,13 @@ STAGE_BREAKDOWN_STAGES = (
     ("output_link_per_window_mean_us", "output link"),
     ("frame_commit_mean_us", "frame commit"),
 )
-USAGE = (
-    "usage: python -m decsim.front.plots "
-    "latency <run_dir> <run_dir> <out.png>\n"
-    "       python -m decsim.front.plots "
-    "ler_vs_d <run_dir> <run_dir> <p> <out.png>\n"
-    "       python -m decsim.front.plots "
-    "stage_breakdown <run_dir> <out.png>\n"
-    "       python -m decsim.front.plots "
-    "timeline <trace_file> <out.png>"
-)
+# every figure `decsim plot` draws, and the file each one writes
+FIGURES = {
+    "timeline": "timeline.png",
+    "stage_breakdown": "stage_breakdown.png",
+    "latency": "latency_combined.png",
+    "ler_vs_d": "ler_vs_distance.png",
+}
 # where collect_command leaves the traces of the shots it traced
 TRACE_DIR = "trace"
 
@@ -397,32 +393,62 @@ def plots(config, rows: list, report_dir: Path, measurements=None) -> None:
         latency_plot(config, measurements, latency_path)
 
 
-def main(argv) -> None:
-    """The command line: one figure name and the run folders it reads."""
-    if len(argv) == 5 and argv[1] == "latency":
-        sample_files = _sample_files(argv[2:4])
-        out_path = Path(argv[4])
+def figure(name: str, run_dirs: list, out_path=None, probability=None):
+    """Draw one named figure from run folders, and return where it went.
+
+    Every figure here reads files: a run folder's csv rows, or the
+    Chrome trace of one of its shots. The names are the rows of
+    FIGURES: what each one needs is what its run folders must hold.
+    """
+    import matplotlib
+
+    matplotlib.use("Agg")
+    if name not in FIGURES:
+        listed = ", ".join(FIGURES)
+        raise ValueError(f"no figure named {name}; the figures are {listed}")
+    first_dir = Path(run_dirs[0])
+    if out_path is None:
+        out_path = first_dir / FIGURES[name]
+    out_path = Path(out_path)
+    _draw_named_figure(name, run_dirs, out_path, probability)
+    return out_path
+
+
+def _draw_named_figure(
+    name: str, run_dirs: list, out_path: Path, probability
+) -> None:
+    """The one figure the name asks for, from the folders it was given."""
+    first_dir = Path(run_dirs[0])
+    if name == "timeline":
+        trace_path = _timeline_source(first_dir)
+        timeline_plot(trace_path, out_path)
+        return
+    if name == "stage_breakdown":
+        stage_breakdown_plot(first_dir, out_path)
+        return
+    if name == "latency":
+        sample_files = _sample_files(run_dirs)
         combined_latency_plot(sample_files, out_path)
-        print(argv[4])
         return
-    if len(argv) == 6 and argv[1] == "ler_vs_d":
-        probability = float(argv[4])
-        out_path = Path(argv[5])
-        ler_vs_distance_plot(argv[2:4], probability, out_path)
-        print(argv[5])
-        return
-    if len(argv) == 4 and argv[1] == "stage_breakdown":
-        out_path = Path(argv[3])
-        stage_breakdown_plot(argv[2], out_path)
-        print(argv[3])
-        return
-    if len(argv) == 4 and argv[1] == "timeline":
-        out_path = Path(argv[3])
-        timeline_plot(argv[2], out_path)
-        print(argv[3])
-        return
-    print(USAGE, file=sys.stderr)
-    raise SystemExit(2)
+    if probability is None:
+        raise ValueError(
+            "the ler_vs_d figure is drawn at one physical error rate; "
+            "name it with --probability"
+        )
+    ler_vs_distance_plot(run_dirs, probability, out_path)
+
+
+def _timeline_source(run_dir: Path) -> Path:
+    """The trace the timeline draws: a folder's first, or the file named."""
+    if run_dir.is_file():
+        return run_dir
+    trace_path = first_trace_file(run_dir)
+    if trace_path is None:
+        raise ValueError(
+            f"{run_dir} has no trace/ folder, so no shot of it was traced; "
+            "run it again with --trace, or `trace: chrome` in the yaml"
+        )
+    return trace_path
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1332,7 +1358,3 @@ def _sample_files(run_dirs) -> list:
         samples_path = Path(run_dir) / "latency_samples.csv"
         paths.append(samples_path)
     return paths
-
-
-if __name__ == "__main__":
-    main(sys.argv)

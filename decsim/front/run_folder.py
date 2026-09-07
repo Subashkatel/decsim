@@ -1,10 +1,11 @@
 """The run folder: where a sweep's results, config and identity land.
 
-results/<utc stamp>-<name>/, never reused; the config chain copied
-verbatim beside the rows, any uncommitted code as a patch, and a
-manifest that says which commit, container, host and package versions
-produced them. gem5 writes its output to m5out/ the same way, out of the
-code tree and never overwritten (src/python/m5/main.py --outdir).
+results/<utc stamp>-<name>/, never reused unless the caller names one
+with --out; the config chain copied verbatim beside the rows, any
+uncommitted code as a patch, and a manifest that says which commit,
+container, host and package versions produced them. gem5 writes its
+output to m5out/ the same way, out of the code tree and never
+overwritten (src/python/m5/main.py --outdir).
 """
 
 import datetime
@@ -24,6 +25,33 @@ import stim
 import decsim.collect as collect
 
 RESULTS_DIR = Path("results")
+
+
+def run_dir_for(config, out_dir=None) -> Path:
+    """Where this run writes: the folder asked for, or a fresh stamped one.
+
+    gem5's --outdir names the folder and makes it (src/python/m5/main.py:
+    102); with no --outdir it writes m5out/. A named folder is reused as
+    the caller asked, so a Slurm array can point every shard at a folder
+    of its own.
+    """
+    if out_dir is None:
+        return new_run_dir(config)
+    run_dir = Path(out_dir)
+    run_dir.mkdir(parents=True, exist_ok=True)
+    return run_dir
+
+
+def combined_run_dir(out_dir=None) -> Path:
+    """Where `decsim combine` writes: the folder asked for, or a fresh one."""
+    if out_dir is not None:
+        run_dir = Path(out_dir)
+        run_dir.mkdir(parents=True, exist_ok=True)
+        return run_dir
+    stamp = _utc_stamp()
+    run_dir = RESULTS_DIR / f"{stamp}-combined"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    return run_dir
 
 
 def new_run_dir(config) -> Path:
@@ -53,7 +81,7 @@ def snapshot_code_state(config, run_dir: Path) -> None:
     whole experiment.
     """
     config_dir = run_dir / "config"
-    config_dir.mkdir()
+    config_dir.mkdir(exist_ok=True)
     for config_file in config.config_files:
         source = Path(config_file)
         target = config_dir / source.name

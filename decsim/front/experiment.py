@@ -132,6 +132,25 @@ class ExperimentConfig:
         return getattr(self.settings, f"{tier}_decoder")
 
 
+def resolved_description(config: ExperimentConfig) -> list:
+    """What one yaml really says, after its extends chain is applied.
+
+    An edit that did not land shows up here immediately: a config that
+    extends another replaces its base's keys whole, so a `sweep` edited
+    in the base never reaches a child that declares its own. gem5 prints
+    the same thing with --dump-config (src/python/m5/main.py:241).
+    """
+    lines = [_files_line(config)]
+    for line in _section_lines(config.settings):
+        lines.append(line)
+    for index, block in enumerate(config.sweep, start=1):
+        block_line = _sweep_block_line(index, block)
+        lines.append(block_line)
+    for line in _observation_lines(config.settings.observation):
+        lines.append(line)
+    return lines
+
+
 def load_experiment(path) -> ExperimentConfig:
     """Read one yaml file, its extends chain applied, into settings."""
     path = Path(path)
@@ -147,6 +166,46 @@ def load_experiment(path) -> ExperimentConfig:
         sweep=sweep,
         config_files=config_files,
     )
+
+
+def _files_line(config: ExperimentConfig) -> str:
+    """The files this config was read from, nearest first."""
+    names = []
+    for path in config.config_files:
+        names.append(str(path))
+    joined = " <- ".join(names)
+    return f"config: {joined}"
+
+
+def _section_lines(settings: machine.MachineSettings) -> list:
+    """One line per section, its kind named where the section has one."""
+    lines = []
+    for field in dataclasses.fields(settings):
+        section = getattr(settings, field.name)
+        kind = getattr(section, "kind", None)
+        if kind is None:
+            continue
+        lines.append(f"{field.name}: kind {kind}")
+    return lines
+
+
+def _sweep_block_line(index: int, block: SweepBlock) -> str:
+    """One sweep block's three axes and its shot count, as one line."""
+    probabilities = list(block.physical_error_probabilities)
+    distances = list(block.distances)
+    periods = list(block.round_periods_microseconds)
+    return (
+        f"sweep block {index}: p {probabilities}, d {distances}, "
+        f"round period {periods} us, {block.shots} shots"
+    )
+
+
+def _observation_lines(observation) -> list:
+    """What the run will record beyond its results."""
+    log_line = f"log: {observation.log}"
+    if observation.log_component_io:
+        log_line += " with component I/O"
+    return [log_line, f"trace: {observation.trace}"]
 
 
 def _yaml_sections(path: Path) -> tuple:

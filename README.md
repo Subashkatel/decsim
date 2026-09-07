@@ -61,7 +61,10 @@ decsim trace follow results/<run>/trace/<shot>.trace.json --round 1:1
 `python -m decsim <verb>` is the same command. `collect` writes a run
 folder under `results/`, which is output and is not tracked: one row per
 shot in `shots.csv`, one per point in `sweep.csv`, one per link in
-`links.csv`, the config it ran, and the figures.
+`links.csv`, the config it ran, and the figures. The timeline figure is
+one of them whenever the run recorded a trace, since it is drawn from
+that file and not from the machine: `configs/reference.yaml` records one
+for shot 0, so its `collect` writes `timeline.png`.
 
 ### From Python alone
 

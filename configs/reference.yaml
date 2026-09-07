@@ -265,13 +265,19 @@ observation:                       # what a run records beyond its results
                                    # results/<stamp>-<name>/log/, one file per shot
                                    # named p<p>_d<d>_algo<card>_round<T>us_seed<n>.log;
                                    # both does both. results/ is not tracked
-  trace: off                       # off | chrome | <path>. The Chrome trace of the
+  trace: chrome                    # off | chrome | <path>. The Chrome trace of the
                                    # data path: where every round and window sat, for
                                    # how long, and whether each hop copied the bits or
                                    # referenced them. chrome writes one file per traced
                                    # shot next to the results; a path writes there
                                    # instead (.gz compresses). Opens in Perfetto or
-                                   # chrome://tracing
+                                   # chrome://tracing. It costs one file per traced
+                                   # shot, holding every hop of every round and window
+                                   # of that shot: 69 kB for this file's d3, 15-round
+                                   # point, growing with the rounds and windows a shot
+                                   # has. `decsim collect` draws timeline.png from it,
+                                   # and `decsim trace follow` reads one round's or
+                                   # window's path out of it
   trace_shots: [0]                 # the shots the trace is written for; a sweep point
                                    # of 2000 shots writes one file, not 2000
   record_switching_windows: false  # true keeps every decode request and service record

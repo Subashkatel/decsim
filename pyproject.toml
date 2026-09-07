@@ -19,8 +19,9 @@ pymatching = ["pymatching"]
 run = ["stim", "pymatching", "numpy", "scipy", "matplotlib"]
 bb-decoders = ["quits==1.1.0", "relay-bp==0.2.2", "tesseract-decoder==0.1.1.dev20260802231159"]
 
-# Flat layout: the decsim/ package sits at the repo root. Discover it (and its
-# subpackages decsim.adapters / decsim.frontends) from there. No package-dir remap.
+# Flat layout: the decsim/ package sits at the repo root. Discover it and every
+# subpackage (decsim.front, decsim.decoders, ...) from there. No package-dir
+# remap.
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["decsim*"]

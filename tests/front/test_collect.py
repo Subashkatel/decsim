@@ -24,7 +24,7 @@ import yaml
 import decsim.collect as collect
 import decsim.decoders.settings as decoder_settings
 import decsim.front.collect_command as run
-import decsim.front.experiment as experiment_config
+import decsim.front.experiment as experiment
 import decsim.front.measure as measure_shot
 import decsim.front.report as sweep_report
 import decsim.windows.built_window_models as built_window_models
@@ -94,7 +94,7 @@ def _stable_columns(row: dict) -> dict:
 
 
 def test_reference_yaml_rows_equal_the_old_runners_sweep_and_links(tmp_path):
-    config = experiment_config.load_experiment(REFERENCE_YAML)
+    config = experiment.load_experiment(REFERENCE_YAML)
     measurements = run.run_sweep(config, None)
     record = sweep_report.record_of(measurements)
     summary_rows = sweep_report.summarize(record.shots, record.window_samples)
@@ -115,7 +115,7 @@ def test_a_task_named_by_two_blocks_runs_once(tmp_path):
     raw["sweep"] = [raw["sweep"][0], dict(raw["sweep"][0])]
     twice_path = tmp_path / "twice.yaml"
     twice = _written_yaml(raw, twice_path)
-    config = experiment_config.load_experiment(twice)
+    config = experiment.load_experiment(twice)
     tasks = config.tasks()
     assert len(tasks) == 2
     seeds = []
@@ -129,7 +129,7 @@ def test_a_task_named_by_two_blocks_runs_once(tmp_path):
 
 
 def test_a_decoder_kind_off_the_table_is_refused_naming_the_rows():
-    config = experiment_config.load_experiment(REFERENCE_YAML)
+    config = experiment.load_experiment(REFERENCE_YAML)
     task = config.point_task(
         physical_error_probability=0.001,
         distance=3,
@@ -158,7 +158,7 @@ def test_every_shot_of_a_point_shares_the_tasks_calibrator(tmp_path):
     }
     online_path = tmp_path / "online.yaml"
     online = _written_yaml(raw, online_path)
-    config = experiment_config.load_experiment(online)
+    config = experiment.load_experiment(online)
     task = config.point_task(
         physical_error_probability=0.001,
         distance=3,
@@ -189,7 +189,7 @@ def _predictions_of(rows) -> list:
 
 def test_a_tasks_shots_decode_the_same_with_the_models_built_once():
     """The task's own referent: sinter compiles once per task."""
-    config = experiment_config.load_experiment(REFERENCE_YAML)
+    config = experiment.load_experiment(REFERENCE_YAML)
     task = config.point_task(
         physical_error_probability=0.001,
         distance=3,
@@ -209,7 +209,7 @@ def test_a_tasks_shots_decode_the_same_with_the_models_built_once():
 
 
 def test_the_first_shot_builds_the_models_and_the_rest_read_them():
-    config = experiment_config.load_experiment(REFERENCE_YAML)
+    config = experiment.load_experiment(REFERENCE_YAML)
     task = config.point_task(
         physical_error_probability=0.001,
         distance=3,
@@ -226,7 +226,7 @@ def test_the_first_shot_builds_the_models_and_the_rest_read_them():
 
 
 def test_a_machine_built_alone_builds_its_own_models():
-    config = experiment_config.load_experiment(REFERENCE_YAML)
+    config = experiment.load_experiment(REFERENCE_YAML)
     task = config.point_task(
         physical_error_probability=0.001,
         distance=3,
@@ -239,7 +239,7 @@ def test_a_machine_built_alone_builds_its_own_models():
 
 
 def test_a_task_is_one_unit_until_a_unit_size_splits_it():
-    config = experiment_config.load_experiment(REFERENCE_YAML)
+    config = experiment.load_experiment(REFERENCE_YAML)
     task = config.point_task(
         physical_error_probability=0.001,
         distance=3,
@@ -268,7 +268,7 @@ def test_a_point_with_an_online_threshold_stays_one_unit(tmp_path):
     }
     online_path = tmp_path / "online.yaml"
     online = _written_yaml(raw, online_path)
-    config = experiment_config.load_experiment(online)
+    config = experiment.load_experiment(online)
     task = config.point_task(
         physical_error_probability=0.001,
         distance=3,
@@ -288,7 +288,7 @@ def test_two_points_under_one_cache_do_not_share_models():
     Two distances also differ in their window spans, so the noisier
     point at one distance is what pins the circuit text itself.
     """
-    config = experiment_config.load_experiment(REFERENCE_YAML)
+    config = experiment.load_experiment(REFERENCE_YAML)
     built = built_window_models.BuiltWindowModels()
     at_three = config.point_task(
         physical_error_probability=0.001,
@@ -327,7 +327,7 @@ def test_the_summary_off_the_written_files_is_the_summary_of_the_shots(
     folder records the same way, so reading its files back and
     summarizing them returns the rows the run wrote.
     """
-    config = experiment_config.load_experiment(REFERENCE_YAML)
+    config = experiment.load_experiment(REFERENCE_YAML)
     task = config.point_task(
         physical_error_probability=0.001,
         distance=3,

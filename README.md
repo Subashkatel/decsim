@@ -61,10 +61,20 @@ decsim trace follow results/<run>/trace/<shot>.trace.json --round 1:1
 `python -m decsim <verb>` is the same command. `collect` writes a run
 folder under `results/`, which is output and is not tracked: one row per
 shot in `shots.csv`, one per point in `sweep.csv`, one per link in
-`links.csv`, the config it ran, and the figures. The timeline figure is
-one of them whenever the run recorded a trace, since it is drawn from
-that file and not from the machine: `configs/reference.yaml` records one
-for shot 0, so its `collect` writes `timeline.png`.
+`links.csv`, the config it ran, and the figures. `shot_links.csv` holds
+one row per shot per link, that shot's own ledger counters, and
+`links.csv` is their mean. `window_samples.csv` holds one row per
+distinct microsecond value of each latency point with how many windows
+carried it, which is where a point's median and p99 come from. The
+timeline figure is one of them whenever the run recorded a trace, since
+it is drawn from that file and not from the machine:
+`configs/reference.yaml` records one for shot 0, so its `collect` writes
+`timeline.png`.
+
+`--shard i/n` gives one array task its share of the work units and
+`--shots-per-unit` sets how many shots a unit is: a smaller unit trades
+the per-task model cache, since each unit builds the window models
+itself, for shards small enough to fit a time limit.
 
 ### From Python alone
 

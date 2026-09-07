@@ -238,7 +238,7 @@ def _check_detector_row_layout(
     must match; a wrong layout would decode the wrong syndrome silently.
     Every model that reaches a job is a WindowErrorModel.
     """
-    model = job.dem
+    model = job.detector_error_model
     if model is None:
         return
     input_rows = _input_row_identities(job, rounds)

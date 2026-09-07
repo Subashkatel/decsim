@@ -160,7 +160,10 @@ class StubSignal:
 def paired_job() -> decoding_records.DecodeJob:
     window_model = OneObservableModel()
     job = decoding_records.DecodeJob(
-        operation_id=0, window_id=0, round_count=1, dem=window_model
+        operation_id=0,
+        window_id=0,
+        round_count=1,
+        detector_error_model=window_model,
     )
     job.payloads = []
     return job

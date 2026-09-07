@@ -176,7 +176,7 @@ def pool_tag_of(pool: str) -> str:
 
 def _refuse_bits_in_bulk_strong(job: decoding_records.DecodeJob) -> None:
     """bulk_strong merges timing-only strong re-decodes; bits would be lost."""
-    has_model = job.dem is not None
+    has_model = job.detector_error_model is not None
     has_bits = False
     for payload in job.payloads:
         if payload.bits is not None:

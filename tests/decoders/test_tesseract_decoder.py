@@ -22,14 +22,14 @@ ORDER_COUNT = 4
 PHYSICAL = fault_models.FaultRepresentation.PHYSICAL
 
 
-def _direct_backend(backend, dem):
+def _direct_backend(backend, detector_error_model):
     """The official backend compiled as decsim's row compiles it."""
     order_method = backend.utils.DetOrder.DetIndex
     orders = backend.utils.build_det_orders(
-        dem, ORDER_COUNT, order_method, SEED
+        detector_error_model, ORDER_COUNT, order_method, SEED
     )
     configuration = backend.tesseract.TesseractConfig(
-        dem=dem,
+        dem=detector_error_model,
         det_beam=15,
         beam_climbing=True,
         no_revisit_dets=True,
@@ -59,10 +59,10 @@ def test_the_row_returns_the_backends_error_indices():
         detector_order_seed=SEED, detector_order_count=ORDER_COUNT
     )
     row = tesseract.TesseractDecoder(configuration=configuration)
-    dem, _coordinates = tesseract_window.detector_error_model_of(
-        model, physical
+    detector_error_model, _coordinates = (
+        tesseract_window.detector_error_model_of(model, physical)
     )
-    direct = _direct_backend(backend, dem)
+    direct = _direct_backend(backend, detector_error_model)
     for shot in detection_events:
         syndrome = windows.row_syndrome(model, shot)
         bits = syndrome.astype(bool)

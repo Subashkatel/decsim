@@ -116,7 +116,7 @@ class DecodeRequestBuilder:
             ready_time=self.engine.now,
             spatial_nodes=spatial_nodes,
             payloads=payloads,
-            dem=model,
+            detector_error_model=model,
             code=geometry.code_name,
             window=window,
             label=label,

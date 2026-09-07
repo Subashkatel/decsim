@@ -86,7 +86,7 @@ class TesseractCheckedDecoder(decoder_module.DecoderBase):
         job: decoding_records.DecodeJob,
         result: decoding_records.DecodeResult,
     ) -> decoding_records.DecodeResult:
-        model = job.dem
+        model = job.detector_error_model
         if model is None or result.logical_observables is None:
             return result
         syndrome = decoder_module.payload_syndrome(job)

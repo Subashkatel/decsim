@@ -156,7 +156,7 @@ class GapJoins:
             return False
         if job.window is None:
             return False
-        if job.dem is None:
+        if job.detector_error_model is None:
             return False
         return job.decoder_input is not None
 
@@ -170,7 +170,7 @@ class GapJoins:
             operation_id=job.operation_id,
             window_id=job.window_id,
             round_count=round_count,
-            dem=job.dem,
+            detector_error_model=job.detector_error_model,
             payloads=masked_fragments,
             ready_time=self.engine.now,
             label=f"gap({job.label})",

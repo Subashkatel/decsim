@@ -192,7 +192,7 @@ class WindowDecoderBase(DecoderBase):
 
     def decode_timed(self, job: decoding_records.DecodeJob) -> tuple:
         """(result, nanoseconds of the backend call alone)."""
-        model = job.dem
+        model = job.detector_error_model
         if model is None:
             return decoding_records.DecodeResult(
                 job.operation_id, job.window_id

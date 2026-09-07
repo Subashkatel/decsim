@@ -405,6 +405,25 @@ def test_a_stream_producer_and_its_owner_are_two_operations():
     planner.check_workload_identity([producer], [], [owner])
 
 
+def test_two_objects_with_one_id_in_one_role_are_refused_naming_it():
+    """Two entries with one id would make the runtime maps disagree.
+
+    The runtime keeps its accounts in dictionaries keyed by operation
+    id (decsim/frontends/planner.py, check_workload_identity), so two
+    distinct objects under one id would leave whichever the map dropped
+    running with another operation's accounts. The refusal names the
+    role the duplicate sits in, because that is the workload entry the
+    caller has to fix.
+    """
+    first = operation_of(1)
+    second_with_the_same_id = operation_of(1)
+    workload = (first, second_with_the_same_id)
+    with pytest.raises(
+        ValueError, match="operation id 1 appears more than once in ops"
+    ):
+        planner.check_workload_identity(workload, (), ())
+
+
 def test_one_operation_in_two_roles_is_refused():
     shared = operation_of(2)
     with pytest.raises(ValueError, match="dynamic_streams"):

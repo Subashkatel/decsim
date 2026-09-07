@@ -5,6 +5,10 @@ queue on; gem5 src/dev/dma_device.cc for the setup engine two paths
 share; the component shape of gem5 src/sim/sim_object.hh (a component
 owns its settings and its children and is observed through a callback,
 so it runs with no observer at all).
+
+The law at the end of the file reads the ledger of a whole run on the
+declared card of tests/declared_run.py: which of the wired paths a
+round actually crosses when only one decoder tier exists.
 """
 
 import pytest
@@ -15,6 +19,7 @@ import decsim.links.settings as link_settings
 import decsim.ports as ports
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
+import tests.declared_run as declared_run
 
 PATH = transfer_records.LinkPath
 AGGREGATE = link_settings.QuantityBasis.AGGREGATE
@@ -446,3 +451,34 @@ def test_the_fabric_fills_the_link_port():
     engine = decsim.engine.Engine()
     fabric = fabric_with(engine)
     assert isinstance(fabric, ports.Link)
+
+
+# The paths a whole run uses, read off the ledger the fabric feeds.
+
+
+def transfer_counts_by_path(machine):
+    """How many transfers the run put on each wired path."""
+    snapshot = machine.observation.traffic.snapshot()
+    counts = {}
+    for path_snapshot in snapshot.paths:
+        counts[path_snapshot.path] = path_snapshot.counters.transfer_count
+    return counts
+
+
+def test_a_strong_primary_round_crosses_one_path_and_only_that_one():
+    """One tier means one hop: the room-side path carries every round.
+
+    A single-tier system streams its readout to its decoder over one
+    path (LILLIPUT's readout-to-decoder FIFO, Das et al. 2108.06569;
+    Google's streaming decoder, 2408.13687), and under StrongOnly
+    (decsim/escalation/policies.py) readiness listens to the strong
+    store, so the weak store's path is wired by the card and never
+    used while each of the six rounds crosses
+    controller_to_strong_buffer once.
+    """
+    machine = declared_run.strong_only_run(rounds=6)
+
+    transfers_by_path = transfer_counts_by_path(machine)
+
+    assert transfers_by_path[PATH.CONTROLLER_TO_WEAK_BUFFER] == 0
+    assert transfers_by_path[PATH.CONTROLLER_TO_STRONG_BUFFER] == 6

@@ -414,3 +414,31 @@ def test_every_measured_algorithm_holds_the_unit_for_its_own_wall_clock():
     assert len(algorithm) == MEMORY_WINDOW_COUNT
     assert held_ticks == measured_ticks
     assert unit.occupancy(probe_job) is None
+
+
+def test_the_pipeline_parameters_are_refused_where_the_card_is_built():
+    """A card that cannot describe a pipeline is refused at construction.
+
+    A unit's card reaches decsim from a yaml section, so the four shapes
+    that have no reading as a pipeline stop there: an interval that is
+    not positive, one positive interval that rounds to zero ticks at the
+    engine's resolution, a depth below one decode, and a depth on a unit
+    that declared no interval and therefore holds its compute for the
+    whole decode (staged_decoder.py, _check_pipeline).
+    """
+    with pytest.raises(ValueError, match="positive"):
+        staged_decoder.UnitTiming((), (), MEGAHERTZ, initiation_interval_us=0.0)
+    with pytest.raises(ValueError, match="rounds to zero"):
+        staged_decoder.UnitTiming(
+            (), (), MEGAHERTZ, initiation_interval_us=1e-9
+        )
+    with pytest.raises(ValueError, match="at least 1"):
+        staged_decoder.UnitTiming(
+            (),
+            (),
+            MEGAHERTZ,
+            initiation_interval_us=1.0,
+            pipeline_depth=0,
+        )
+    with pytest.raises(ValueError, match="needs an initiation_interval_us"):
+        staged_decoder.UnitTiming((), (), MEGAHERTZ, pipeline_depth=2)

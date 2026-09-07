@@ -10,12 +10,21 @@ riding DO home. The threshold's two
 edges pin the plumbing: at 0 dB nothing escalates and the run is the
 weak tier alone; at an unreachably high threshold everything escalates
 and every window commits from the strong tier.
+
+The declared-tick runs at the end of the file pin the mode's timing and
+its two variants: every hop of one serial escalation, and the parallel
+variant's cancel and take (Sec. III A, Step 1). Their fabric is
+tests/escalation/declared_fabric.py, so every tick asserted there is
+arithmetic over declared latencies.
 """
 
 import math
 
 import pytest
 
+import decsim.config as decsim_config
+import tests.declared_run as declared_run
+import tests.escalation.declared_fabric as fabric
 from decsim.front.experiment import load_experiment
 from tests.front.yaml_configs import (
     MINIMAL_CONFIG,
@@ -270,3 +279,154 @@ def test_gap_records_decide_the_selected_tier(tmp_path):
                 assert selected_tier is window_records.DecoderTier.WEAK
             else:
                 assert selected_tier is window_records.DecoderTier.STRONG
+
+
+# ---- the declared-tick timeline of the two variants
+
+
+def test_the_serial_escalation_timeline_is_exact():
+    """Every hop of one escalation, in the order the serial mode runs them.
+
+    Toshio arXiv:2510.25222 Sec. III A, serial variant: the strong
+    re-decode cannot begin before the weak verdict has crossed
+    weak_decoder_to_strong_decoder and the room-side context has
+    crossed strong_buffer_to_strong_decoder, so its start is the later
+    of the two; and the Held boundary keeps the next window's decode
+    parked until the strong correction has committed, one
+    decoder_to_decoder hop away.
+    """
+    machine = fabric.switching_machine(rounds=9, escalated_windows={0, 1, 2})
+    machine.run()
+    log_lines = machine.observation.log.lines
+    weak_done = declared_run.log_tick(log_lines, "DECODE DONE mem1 W0")
+    strong_start = declared_run.log_tick(
+        log_lines, "START DECODE strong(mem1 W0)"
+    )
+    parked_start = declared_run.log_tick(log_lines, "START DECODE mem1 W1")
+    snapshot = machine.pauli_frame.snapshot()
+    first_record = snapshot.records[0]
+    expected_weak_done = decsim_config.microseconds_to_ticks(30.0)
+    expected_strong_start = decsim_config.microseconds_to_ticks(36.0)
+    expected_accepted = decsim_config.microseconds_to_ticks(70.0)
+    expected_committed = decsim_config.microseconds_to_ticks(71.0)
+    expected_parked_start = decsim_config.microseconds_to_ticks(71.5)
+
+    assert weak_done == expected_weak_done
+    assert strong_start == expected_strong_start
+    assert first_record.window_key == (1, 0)
+    assert first_record.tier == "strong"
+    assert first_record.accepted_ticks == expected_accepted
+    assert first_record.committed_ticks == expected_committed
+    assert parked_start == expected_parked_start
+
+
+def test_the_parallel_mode_refuses_a_room_side_lag_beyond_the_margin():
+    """The parallel strong sibling starts at once or the run stops.
+
+    Toshio arXiv:2510.25222 Sec. III A, Step 1: in the parallel variant
+    the strong decoder is handed the window's context the moment the
+    weak decode starts. On the declared card the room-side hop is 7 us
+    against Buffer 0's 4 us, so the context is not yet in syndrome
+    buffer 1 when the window becomes ready, and the shape refuses
+    loudly rather than decode a window whose context it cannot read
+    (decsim/escalation/strong_window_shapes.py).
+    """
+    machine = fabric.switching_machine(
+        rounds=9,
+        escalated_windows=set(),
+        run_both_at_once=True,
+        strong_buffer_microseconds=7.0,
+    )
+    with pytest.raises(
+        RuntimeError,
+        match="controller_to_strong_buffer lag beyond the escalation margin",
+    ):
+        machine.run()
+
+
+def test_every_strong_request_is_cancelled_when_the_weak_tier_is_confident():
+    """A confident weak result cancels its sibling and frees its context.
+
+    Toshio arXiv:2510.25222 Sec. III A, Step 1: the parallel strong
+    decode is speculative, so a confident weak result cancels it and no
+    window commits from the strong tier. The cancel also owns the
+    room-side hold the request took, and syndrome buffer 1 would report
+    an unresolved hold at the end of the run if it did not release it.
+    """
+    machine = fabric.switching_machine(
+        rounds=9,
+        escalated_windows=set(),
+        run_both_at_once=True,
+        strong_buffer_microseconds=2.0,
+    )
+    machine.run()
+    counts = machine.decoder_manager.strong_requests.counts
+    tiers = fabric.frame_tiers(machine)
+
+    assert tiers == [((1, 0), "weak"), ((1, 1), "weak"), ((1, 2), "weak")]
+    assert counts.cancelled == 3
+    assert counts.needed == 0
+    machine.strong_round_writer.check_settled()
+
+
+def test_every_window_takes_the_strong_result_when_the_weak_tier_is_not():
+    """The other edge of the parallel variant: nothing is cancelled.
+
+    Toshio arXiv:2510.25222 Sec. III A, Step 1: when every weak result
+    falls below the threshold the sibling that already ran is the
+    window's answer, so every request is needed and the frame carries
+    the strong tier alone.
+    """
+    machine = fabric.switching_machine(
+        rounds=9,
+        escalated_windows={0, 1, 2},
+        run_both_at_once=True,
+        strong_buffer_microseconds=2.0,
+    )
+    machine.run()
+    counts = machine.decoder_manager.strong_requests.counts
+    tiers = fabric.frame_tiers(machine)
+
+    assert tiers == [((1, 0), "strong"), ((1, 1), "strong"), ((1, 2), "strong")]
+    assert counts.needed == 3
+    assert counts.cancelled == 0
+
+
+def first_decrease_tick(timeline):
+    """The tick at which an occupancy timeline first falls."""
+    previous = timeline[0][1]
+    for tick, occupancy in timeline[1:]:
+        if occupancy < previous:
+            return tick
+        previous = occupancy
+    raise AssertionError("the occupancy timeline never falls")
+
+
+def test_the_strong_context_lives_until_the_escalated_window_commits():
+    """Syndrome buffer 1 frees a context after the commit, not the read.
+
+    Toshio arXiv:2510.25222 Sec. III A: the strong decoder re-decodes
+    the escalated window's whole context, and its result is the
+    window's only Pauli-frame write, so the context has to survive
+    until that write lands. The escalated window reads all six rounds
+    of the operation, and its strong input transfer lands long before
+    the commit; a store that freed the rounds at the transfer would
+    show a fall before the committed tick.
+    """
+    machine = fabric.switching_machine(rounds=6, escalated_windows={0})
+    probe = declared_run.OccupancyProbe(machine.window_manager)
+    machine.engine.action_done.connect(probe.observe)
+    machine.run()
+    timeline = probe.strong_timeline
+    occupancies = [occupancy for _, occupancy in timeline]
+    peak = max(occupancies)
+    first_fall = first_decrease_tick(timeline)
+    snapshot = machine.pauli_frame.snapshot()
+    strong_record = snapshot.records[0]
+    expected_committed = decsim_config.microseconds_to_ticks(71.0)
+
+    assert strong_record.window_key == (1, 0)
+    assert strong_record.tier == "strong"
+    assert strong_record.committed_ticks == expected_committed
+    assert peak == 6
+    assert first_fall > expected_committed

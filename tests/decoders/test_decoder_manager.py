@@ -13,6 +13,7 @@ import decsim.config as config
 import decsim.decoders.decoder as decoder_module
 import decsim.decoders.decoders as decoders
 import decsim.decoders.schedulers as schedulers
+import decsim.decoders.staged_decoder as staged_decoder
 import decsim.engine as engine_module
 import decsim.escalation.policies as escalation_policies
 import decsim.observe.log_writers as log_writers
@@ -122,3 +123,39 @@ def test_a_withdrawn_window_leaves_the_queue_and_the_ledger():
     assert waiting.unit is None
     engine.run()
     manager.check_decode_work_settled()
+
+
+def test_an_escalation_routed_to_a_pipelined_unit_is_refused():
+    """The strong escalation tier is not pipelined yet, so it refuses.
+
+    A pipelined route serves plain window and external decodes only; a
+    strong re-decode, a gap sibling and a merged batch keep occupancy
+    equal to latency until they get their own design pass, and routing
+    one to a pipelined unit would silently serialize it instead of
+    honoring the declared card (decode_service.py, _pipeline_of). The
+    escalation request is the one a switching run submits: it names the
+    destination window it re-decodes and asks for the strong pool.
+    """
+    engine = engine_module.Engine()
+    timing = staged_decoder.UnitTiming((), (), 1.0, initiation_interval_us=1.0)
+    algorithm = FixedRow()
+    strong = staged_decoder.StagedDecoder(algorithm, timing)
+    weak = FixedRow()
+    router = decoders.SwitchingRouter(weak=weak, strong=strong)
+    scheduler = schedulers.FifoScheduler()
+    policy = escalation_policies.Baseline()
+    manager = DecoderManager(
+        engine,
+        router=router,
+        scheduler=scheduler,
+        unit_pools={"default": 1, "strong": 1},
+        escalation_policy=policy,
+    )
+    job = _window_job()
+    job.hint = "strong"
+    job.strong_decode_for = (1, 0)
+    job.request_key = window_records.DecoderRequestKey(
+        1, 0, window_records.DecoderTier.STRONG, 0
+    )
+    with pytest.raises(RuntimeError, match="not pipelined yet"):
+        manager.enqueue(job, None, lambda _job, _result: None)

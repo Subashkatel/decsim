@@ -5,7 +5,8 @@ order starts at max(arrival, earliest unit free) and every unit frees at
 start + service) and the M/D/1 mean wait, Pollaczek-Khinchine
 E[W_q] = rho S / (2 (1 - rho)) (rowD1, compare_queue_laws.py). Both laws
 are computed inside the tests; the random-trace tests say so in their
-names.
+names. The batching law's referent is Toshio et al. 2510.25222, Sec.
+III C, where the accurate decoder processes its assigned data in bulk.
 """
 
 import random
@@ -16,6 +17,7 @@ import decsim.decoders.decoders as decoders
 import decsim.decoders.schedulers as schedulers
 import decsim.engine as engine_module
 import decsim.observe.queue_depth as queue_depth
+import tests.declared_run as declared_run
 from decsim.decoders.decoder_manager import DecoderManager
 
 SERVICE_MICROSECONDS = 1.0
@@ -172,3 +174,49 @@ def test_the_depth_is_reported_at_every_change():
         depths.append(depth)
     assert depths == [1, 0, 1, 0]
     assert depth_log.peak == 1
+
+
+def test_the_queued_escalations_are_served_as_one_bulk_strong_decode():
+    """The strong decoder takes the data assigned to it in bulk.
+
+    Toshio et al. 2510.25222, Sec. III C: the accurate decoder processes
+    its assigned data in bulk, so under bulk_strong every strong job
+    still waiting when the strong unit frees becomes one decode serving
+    every member request (decode_queue.py, _merge_strong_batch). Four
+    patches escalate at once against one strong unit: one job computes,
+    one sits in that unit's second input slot, and the two still queued
+    are batched into a single decode, whose result answers both
+    requests, so every window still commits from the strong tier.
+    """
+    operations = []
+    for patch in (1, 2, 3, 4):
+        operation = declared_run.memory_operation(patch)
+        operations.append(operation)
+    unit_pools = {"default": 4, "strong": 1}
+    machine = declared_run.switching_run(
+        rounds=6,
+        operations=operations,
+        escalation_probability=1.0,
+        unit_pools=unit_pools,
+        bulk_strong=True,
+    )
+    every_batch = declared_run.log_lines_containing(
+        machine, "START DECODE strong-batch"
+    )
+    paired_batch = declared_run.log_lines_containing(
+        machine, "START DECODE strong-batch x2"
+    )
+    tiers = declared_run.frame_tiers(machine)
+    committed = sorted(tiers)
+    assert len(every_batch) == 2
+    assert paired_batch == every_batch
+    assert committed == [
+        ((1, 0), "strong"),
+        ((1, 1), "strong"),
+        ((2, 0), "strong"),
+        ((2, 1), "strong"),
+        ((3, 0), "strong"),
+        ((3, 1), "strong"),
+        ((4, 0), "strong"),
+        ((4, 1), "strong"),
+    ]

@@ -20,6 +20,7 @@ import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
 import decsim.qpu.stim_device as stim_device
 import decsim.records.program as program_records
+import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
 import decsim.windows.built_window_models as built_window_models
 import decsim.windows.settings as window_settings
@@ -203,3 +204,28 @@ def test_a_tan_seam_waits_in_its_slot_and_never_holds_the_only_unit():
     undecoded = [window for window in windows if window.t_done is None]
     assert undecoded == []
     assert result.operation_results[0].logical_failure is False
+
+
+def test_a_round_arriving_after_the_last_window_committed_is_refused():
+    """The device is a plug-in, so a round past the plan is its mistake.
+
+    An operation's syndrome RAM is freed when its last window commits,
+    so a later round has nothing to land in and no window left to feed;
+    the facade stops loudly rather than accounting a round nobody reads
+    (window_manager.py, _refuse_unplanned_round).
+    """
+    machine = _weak_run()
+    fragment = round_records.RetainedSyndromeFragment(
+        operation_id=0,
+        patch_id=0,
+        round_index=2,
+        bits=None,
+        size_bits=None,
+        fragment_index=0,
+    )
+    packet = round_records.SyndromeRoundPacket(0, 2, (fragment,))
+    window_manager = machine.window_manager
+    with pytest.raises(
+        RuntimeError, match="arrived after the op's last window committed"
+    ):
+        window_manager.accept_window_input(packet)

@@ -7,18 +7,25 @@ job whose window owes a boundary keeps its slot and never the compute.
 Hennessy and Patterson App. C (rowD4, compare_pipeline_law.py): a
 pipelined unit starts one decode per initiation interval, at most depth
 in flight, each result a fixed latency after its start. The laws are
-computed inside the tests.
+computed inside the tests. The strong-primary law needs the whole
+declared fabric (tests/declared_run.py), because only a run builds the
+request whose tier the pipelined model must accept.
 """
+
+import pytest
 
 import decsim.config as config
 import decsim.decoders.decoders as decoders
 import decsim.decoders.schedulers as schedulers
+import decsim.decoders.settings as decoder_settings
 import decsim.decoders.staged_decoder as staged_decoder
 import decsim.engine as engine_module
 import decsim.escalation.policies as escalation_policies
+import decsim.machine as machine_module
 import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
+import tests.declared_run as declared_run
 from decsim.decoders.decoder_manager import DecoderManager
 
 
@@ -121,6 +128,40 @@ def _recording(manager, engine):
     return starts
 
 
+def latency_for_window(job):
+    """A row whose response depends on the window it decodes."""
+    if job.window_id == 0:
+        return 100.0
+    return 50.0
+
+
+def strong_primary_run(decoder):
+    """One three-round patch decoded by this row alone, on declared ticks.
+
+    StrongOnly makes the single row the primary tier, so its window
+    reads Buffer 1 and rides the strong-buffer path.
+    """
+    operation = declared_run.memory_operation(1)
+    workload = declared_run.declared_workload([operation], 3)
+    weak_decoder = decoder_settings.DecoderSettings(decoder=decoder)
+    policy = escalation_policies.StrongOnly()
+    escalation = decoder_settings.EscalationSettings(policy=policy)
+    qpu = declared_run.declared_qpu()
+    links = declared_run.declared_profile()
+    controller = declared_run.declared_controller()
+    frame = declared_run.declared_frame()
+    settings = machine_module.MachineSettings(
+        workload=workload,
+        qpu=qpu,
+        weak_decoder=weak_decoder,
+        escalation=escalation,
+        links=links,
+        controller=controller,
+        pauli_frame=frame,
+    )
+    return declared_run.run_machine(settings, 0)
+
+
 def test_a_job_starts_when_its_input_landed_and_the_gate_allows():
     engine = engine_module.Engine()
     decoder = decoders.PresetLatencyDecoder(1.0)
@@ -207,3 +248,132 @@ def test_a_pipelined_unit_issues_at_its_initiation_interval():
         "w2": 2 * interval + latency,
     }
     manager.check_decode_work_settled()
+
+
+def test_an_initiation_interval_stays_a_lower_bound_below_the_response():
+    """A response shorter than the interval never opens the intake early.
+
+    The intake rate is the initiation interval's alone: a new decode may
+    start every interval while each result still returns after the whole
+    latency (staged_decoder.py's module docstring, after Hennessy and
+    Patterson App. C). A one-microsecond response inside a
+    ten-microsecond interval therefore frees the result state without
+    erasing the intake cooldown, so the second start is one interval
+    after the first and not one response.
+    """
+    engine = engine_module.Engine()
+    timing = staged_decoder.UnitTiming((), (), 1.0, initiation_interval_us=10.0)
+    algorithm = decoders.PresetLatencyDecoder(1.0)
+    decoder = staged_decoder.StagedDecoder(algorithm, timing)
+    manager = _manager(engine, decoder)
+    starts = _recording(manager, engine)
+    ends = {}
+    on_decoded = _ending_in(ends, engine)
+    first = _job(0)
+    second = _job(1)
+    manager.enqueue(first, None, on_decoded)
+    manager.enqueue(second, None, on_decoded)
+    engine.run()
+    assert starts == {
+        "w0": 0,
+        "w1": config.microseconds_to_ticks(10.0),
+    }
+    assert ends == {
+        "w0": config.microseconds_to_ticks(1.0),
+        "w1": config.microseconds_to_ticks(11.0),
+    }
+    manager.check_decode_work_settled()
+
+
+def test_a_declared_pipeline_depth_bounds_the_decodes_in_flight():
+    """Depth two lets the third start wait for the first completion.
+
+    A pipelined unit holds at most its declared depth in flight
+    (Hennessy and Patterson App. C; decode_service.py,
+    _initiation_complete keeps the compute claim on a full pipeline), and
+    every in-flight decode stays resident because its input lives in the
+    unit's memory until its result emerges (resident_capacity). So with
+    a 5 us transfer, a 1 us interval, a 100 us response and four windows
+    ready at once: w0 and w1 start 5 and 6, the intake is free at 7 but
+    w2 waits until w0 completes at 105, and w3 cannot even take a slot
+    before that completion frees the memory it needs.
+    """
+    engine = engine_module.Engine()
+    timing = staged_decoder.UnitTiming(
+        (), (), 1.0, initiation_interval_us=1.0, pipeline_depth=2
+    )
+    algorithm = decoders.PresetLatencyDecoder(100.0)
+    decoder = staged_decoder.StagedDecoder(algorithm, timing)
+    manager = _manager(engine, decoder)
+    starts = _recording(manager, engine)
+    ends = {}
+    dispatches = {}
+
+    def note_dispatch(job, _unit):
+        dispatches[job.label] = engine.now
+
+    manager.service.job_dispatched.connect(note_dispatch)
+    on_decoded = _ending_in(ends, engine)
+    transfer_ticks = config.microseconds_to_ticks(5.0)
+    for index in range(4):
+        job = _job(index)
+        send_input = _send_after(engine, transfer_ticks)
+        manager.enqueue(job, send_input, on_decoded)
+    engine.run()
+    assert starts == {
+        "w0": config.microseconds_to_ticks(5.0),
+        "w1": config.microseconds_to_ticks(6.0),
+        "w2": config.microseconds_to_ticks(105.0),
+        "w3": config.microseconds_to_ticks(110.0),
+    }
+    assert ends == {
+        "w0": config.microseconds_to_ticks(105.0),
+        "w1": config.microseconds_to_ticks(106.0),
+        "w2": config.microseconds_to_ticks(205.0),
+        "w3": config.microseconds_to_ticks(210.0),
+    }
+    assert dispatches["w2"] == 0  # the third window's slot was free at once
+    assert starts["w2"] == ends["w0"]
+    assert dispatches["w3"] == ends["w0"]
+    manager.check_decode_work_settled()
+
+
+def test_a_pipelined_unit_refuses_two_in_flight_response_times():
+    """One pipelined unit takes one latency, so mixed responses refuse.
+
+    A hardware pipeline retires in issue order (Hennessy and Patterson
+    App. C), so a second decode declaring a different latency while the
+    first is in flight would complete out of order; decoder_unit.py's
+    add_flight refuses loudly instead of reordering the results.
+    """
+    engine = engine_module.Engine()
+    timing = staged_decoder.UnitTiming((), (), 1.0, initiation_interval_us=1.0)
+    algorithm = decoders.FunctionLatencyDecoder(latency_for_window)
+    decoder = staged_decoder.StagedDecoder(algorithm, timing)
+    manager = _manager(engine, decoder)
+    first = _job(0)
+    second = _job(1)
+    manager.enqueue(first, None, _ignore)
+    manager.enqueue(second, None, _ignore)
+    with pytest.raises(RuntimeError, match="completes in order"):
+        engine.run()
+
+
+def test_a_pipelined_unit_serves_a_strong_primary_window():
+    """A strong-primary window is a plain decode, so the pipeline takes it.
+
+    Only an escalation carries strong_decode_for, and the pipelined
+    model serves plain window decodes (decode_service.py, _pipeline_of):
+    a strong-primary run decodes each window once, like the weak tier,
+    so its window is priced by its own arithmetic on declared_run's
+    fabric. Three rounds end at 3, readout classification and the wire
+    publish Buffer 1 at 15, the 6 us strong-buffer transfer lands the
+    input at 21, and the 100 us row returns at 121.
+    """
+    timing = staged_decoder.UnitTiming((), (), 1.0, initiation_interval_us=1.0)
+    algorithm = decoders.PresetLatencyDecoder(100.0)
+    decoder = staged_decoder.StagedDecoder(algorithm, timing)
+    machine = strong_primary_run(decoder)
+    window = machine.observation.windows.windows[(1, 0)]
+    assert window.t_data_complete == config.microseconds_to_ticks(15.0)
+    assert window.t_done == config.microseconds_to_ticks(121.0)

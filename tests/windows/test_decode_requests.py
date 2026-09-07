@@ -3,7 +3,9 @@
 A complete window is requested once; a blocked window ships its raw
 rounds and is masked when its decode starts (qLDPC's net_error folded
 into the next window's syndrome, qldpc/decoders/sinter.py
-decode_shots_to_error); a withdrawn window is requested again fresh.
+decode_shots_to_error); a withdrawn window is requested again fresh. A
+request is priced for the rounds it reads, which the declared run shows
+on its lookahead tail (Skoric et al. 2209.08552, Tan et al. 2209.09219).
 """
 
 import types
@@ -11,6 +13,7 @@ import types
 import decsim.decoders.decoder_memory as decoder_memory
 import decsim.engine as engine_module
 import decsim.escalation.policies as escalation_policies
+import decsim.observe.run_views as run_views
 import decsim.records.program as program_records
 import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
@@ -20,6 +23,7 @@ import decsim.windows.decode_requests as decode_requests
 import decsim.windows.round_retention as round_retention
 import decsim.windows.window_interactions as window_interactions
 import decsim.windows.window_transfers as window_transfers
+import tests.declared_run as declared_run
 
 
 class _RecordingQueue:
@@ -195,3 +199,33 @@ def test_a_withdrawn_window_is_requested_again_fresh():
     (second_job, _send_input) = fixture.queue.enqueued[1]
     assert second_job is not first_job
     assert second_job.request_key.run_sequence == 1
+
+
+def test_a_decode_job_is_priced_for_the_rounds_it_reads():
+    """A window's decode reads the rounds that exist, not its plan.
+
+    Decoder work scales with the rounds actually fed (Skoric et al.
+    2209.08552, tau_W over n_W), the last window of an operation may be
+    smaller than a regular one (Tan et al. 2209.09219), and no
+    sliding-window implementation feeds rounds past the data (Gong et
+    al.'s sliding-window decoder, cudaq-qec sliding_window). On the
+    nine-round declared run the regular window 1 reads its planned
+    rounds 4 to 9, while the lookahead tail plans rounds 7 to 12 and
+    reads only the three rounds the operation ever emitted.
+    """
+    machine = declared_run.switching_run(rounds=9, record=True)
+    view = run_views.switching_records_view(
+        machine.observation.windows, machine.observation.decode_records
+    )
+    by_window = {}
+    for record in view.requests:
+        window_id = record.request_key.window_id
+        by_window[window_id] = record
+    regular = by_window[1]
+    tail = by_window[2]
+    assert regular.request_key.tier is window_records.DecoderTier.WEAK
+    assert (regular.input_round_lo, regular.input_round_hi) == (4, 9)
+    assert regular.input_round_count == 6
+    assert tail.request_key.tier is window_records.DecoderTier.WEAK
+    assert (tail.input_round_lo, tail.input_round_hi) == (7, 12)
+    assert tail.input_round_count == 3

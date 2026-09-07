@@ -6,6 +6,11 @@ a QPU device and a receiver are wired the same way and the readouts
 arrive in cycle order. The table test follows sinter's BUILT_IN_DECODERS
 (sinter/_decoding/_decoding_all_built_in_decoders.py): a new decoder is
 one class and one row.
+
+The laws at the end of the file are the ones only the whole machine
+holds: they run a declared card (tests/declared_run.py, whose every
+latency is a number the test states) and read what the composition of
+the controller, the stores, the windows and the frame produced.
 """
 
 import dataclasses
@@ -42,6 +47,7 @@ import decsim.seeding as seeding
 import decsim.syndrome_buffer.round_store as round_store_module
 import decsim.syndrome_buffer.settings as round_store_settings
 import decsim.windows.settings as window_settings
+import tests.declared_run as declared_run
 
 THIS_FILE = pathlib.Path(__file__)
 TESTS_DIRECTORY = THIS_FILE.parents[1]
@@ -793,3 +799,195 @@ def test_every_measured_bit_crosses_the_link_exactly_once(recorded_memory):
         9: 17,
     }
     assert total_bits == circuit.num_measurements
+
+
+# The whole machine on the declared card: what only the composition of
+# the controller, the stores, the windows and the frame decides.
+
+PACKING_BOUND_STOP_TICKS = {
+    1: 7_000_000,
+    2: 8_000_000,
+    3: 9_000_000,
+    4: 10_000_000,
+}
+TWELVE_ROUND_RUN_END_TICK = 54_000_000
+
+
+def published_rounds(machine):
+    """(round index, tick) of every round published, in publication order."""
+    published = []
+    for event in machine.observation.round_events.events:
+        if event.kind != "PUBLISHED":
+            continue
+        published.append((event.round_index, event.tick))
+    return published
+
+
+def publication_ticks(published):
+    """The tick of every publication, in publication order."""
+    ticks = []
+    for _round_index, tick in published:
+        ticks.append(tick)
+    return ticks
+
+
+def test_a_full_round_store_stalls_the_controller_instead_of_dropping():
+    """A round with no slot waits upstream and is published in order.
+
+    A real-time decoder backpressures its source rather than discarding
+    syndromes: the Rigetti sequencer polls the decoder's status register
+    and stalls (Caune et al. 2410.05202), and QubiC's cores block in
+    WAIT_MEAS until the readout is consumed (Fruitwala et al.
+    2404.15260); that is the STALL policy of
+    decsim/controller/settings.py. While the store has room round r is
+    published at r plus qpu_to_controller 2 plus readout_to_bits 3 plus
+    controller_to_weak_buffer 4, so rounds 1 to 7 fill a store of
+    seven at 16 us and round 8 waits past 17 us for the first window's
+    input to land instead of being dropped.
+    """
+    seven_rounds = round_store_settings.RoundStoreSettings(rounds=7)
+    machine = declared_run.weak_only_run(rounds=12, round_store=seven_rounds)
+    published = published_rounds(machine)
+    ticks = publication_ticks(published)
+    publication_tick_by_round = dict(published)
+    round_indices = list(publication_tick_by_round)
+    seventh_publication = config.microseconds_to_ticks(16.0)
+    eighth_publication_with_room = config.microseconds_to_ticks(17.0)
+    tiers = declared_run.frame_tiers(machine)
+
+    assert machine.observation.round_events.packing_drops == 0
+    assert round_indices == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+    assert ticks == sorted(ticks)
+    assert publication_tick_by_round[7] == seventh_publication
+    assert publication_tick_by_round[8] > eighth_publication_with_room
+    assert tiers == [((1, 0), "weak"), ((1, 1), "weak"), ((1, 2), "weak")]
+
+
+def test_both_stores_settle_empty_at_the_end_of_an_escalating_run():
+    """The last commit releases every hold either store placed.
+
+    A store keeps a round while any holder still needs it and frees it
+    on the last release (decsim/syndrome_buffer/round_store.py), so a
+    round left behind is a leak that grows over a sweep of shots
+    without ever failing a run. Escalating every window places the
+    longest-lived holds the machine has: the room-side context of a
+    window is held across its whole strong decode.
+    """
+    machine = declared_run.switching_run(escalation_probability=1.0, rounds=9)
+
+    assert machine.round_store.occupancy == 0
+    assert machine.strong_round_store.occupancy == 0
+    assert machine.strong_round_writer.writes_in_flight == 0
+
+
+def test_the_execution_and_the_decoding_views_agree_on_the_workload():
+    """One resolved workload reaches the sequencer and the windows.
+
+    The root resolves the workload once and hands the same plan to the
+    sequencer, which issues the operations, and to the window tracker,
+    which accounts for their rounds (decsim/machine.py, _plan). An id
+    in one view and not the other, or a planned round count the
+    arrivals never meet, leaves rounds with no readiness account.
+    """
+    machine = declared_run.weak_only_run(rounds=6)
+    sequencer = machine.execution_runtime
+    tracker = machine.window_manager.tracker
+    planner = machine.window_manager.planner
+    planned_round_count = planner.round_count_of(1)
+    arrived_round_count = tracker.rounds_arrived(1)
+
+    assert set(sequencer.operations) == {1}
+    assert set(tracker.operation_by_id) == {1}
+    assert planned_round_count == 6
+    assert arrived_round_count == 6
+
+
+def test_every_program_operation_is_registered_even_with_no_detector_data():
+    """An operation that emits nothing still gets its accounts.
+
+    The decode plan only covers operations with detector data, so the
+    execution-side registration is the only one that reaches a quiet
+    operation; without it the operation would run with no readiness
+    account and nothing would report its body done.
+    """
+    quiet = program_records.Operation(
+        id=1,
+        name="quiet",
+        qubits=(1,),
+        patches=(1,),
+        emits_detector_data=False,
+    )
+    measured = declared_run.memory_operation(2)
+    operations = [quiet, measured]
+    machine = declared_run.weak_only_run(rounds=6, operations=operations)
+    tracker = machine.window_manager.tracker
+    stamps = machine.observation.runtime_stamps
+
+    assert set(tracker.operation_by_id) == {1, 2}
+    assert 1 in tracker.arrivals_by_operation
+    assert set(stamps.body_done) == {1, 2}
+
+
+def twelve_rounds_with_packing_bound(bound):
+    """A twelve-round weak-only run on the declared card, that bound set."""
+    controller = declared_run.declared_controller(
+        packing_rounds_in_flight=bound
+    )
+    operation = declared_run.memory_operation(1)
+    workload = declared_run.declared_workload([operation], 12)
+    weak_microseconds = declared_run.DECLARED_MICROSECONDS["weak"]
+    decoder = decoders.PresetLatencyDecoder(weak_microseconds)
+    weak_decoder = decoder_settings.DecoderSettings(decoder=decoder)
+    links = declared_run.declared_profile(controller_to_strong_buffer=False)
+    qpu = declared_run.declared_qpu()
+    frame = declared_run.declared_frame()
+    return machine_module.MachineSettings(
+        workload=workload,
+        qpu=qpu,
+        weak_decoder=weak_decoder,
+        links=links,
+        controller=controller,
+        pauli_frame=frame,
+    )
+
+
+@pytest.mark.parametrize("bound", [1, 2, 3, 4])
+def test_the_packing_bound_stops_the_run_at_the_tick_it_fills(bound):
+    """A round counts against the bound until the windows hear of it.
+
+    controller.packing_rounds_in_flight bounds the whole packing stage,
+    not the assembly step alone: a round counts from its first fragment
+    until it is published (decsim/controller/settings.py). On the
+    declared card round r reaches assembly at r plus qpu_to_controller 2
+    plus readout_to_bits 3 and is published four microseconds later, so
+    under a bound of b round 1 + b arrives at 6 + b us while round 1 is
+    still on its route, and the run stops there naming the setting.
+    """
+    settings = twelve_rounds_with_packing_bound(bound)
+    machine = machine_module.Machine.build(settings, 0)
+    stop_tick = PACKING_BOUND_STOP_TICKS[bound]
+    sentence = f"the packing workspace is full at tick {stop_tick}: "
+
+    with pytest.raises(RuntimeError, match=sentence) as refusal:
+        machine.run()
+
+    named_setting = f"controller.packing_rounds_in_flight is {bound}"
+    assert named_setting in str(refusal.value)
+    assert machine.engine.now == stop_tick
+
+
+def test_a_packing_bound_of_six_clears_a_twelve_round_run():
+    """Five rounds overlap on this card, so six slots never fill.
+
+    Round r occupies the stage from 5 + r us to 9 + r us, so at most
+    five rounds are in flight at once and no round is ever held; the
+    run then ends at the last window's commit, 54 us.
+    """
+    settings = twelve_rounds_with_packing_bound(6)
+    machine = machine_module.Machine.build(settings, 0)
+
+    result = machine.run()
+
+    assert result.terminal_status == "complete"
+    assert machine.observation.round_events.packing_drops == 0
+    assert machine.engine.now == TWELVE_ROUND_RUN_END_TICK

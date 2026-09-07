@@ -6,6 +6,10 @@ isFull over allocated plus reserve); the writer counts a round crossing
 the link the same way. The link law itself is the channel's
 (tests/links/test_channel.py); here a priced controller_to_strong_buffer
 hop of 0.5 us lands the round 0.5 us after the write.
+
+The whole-run law at the end of the file places that landing in the
+pipeline: under a strong-primary policy the landing is what makes a
+window ready, on the declared card of tests/declared_run.py.
 """
 
 import pytest
@@ -19,6 +23,7 @@ import decsim.records.transfers as transfer_records
 import decsim.syndrome_buffer.round_store as round_store_module
 import decsim.syndrome_buffer.settings as round_store_settings
 import decsim.syndrome_buffer.strong_round_writer as strong_round_writer
+import tests.declared_run as declared_run
 
 LANDING_TICKS = config.microseconds_to_ticks(0.5)
 
@@ -167,3 +172,36 @@ def test_settlement_reports_a_write_still_in_flight():
 
     with pytest.raises(RuntimeError, match="1 controller_to_strong_buffer"):
         writer.check_settled()
+
+
+# ---- the landing in the whole pipeline
+
+
+def test_a_strong_primary_window_is_ready_on_the_room_side_landing():
+    """With the strong tier alone, this landing drives readiness.
+
+    Under StrongOnly (decsim/escalation/policies.py) a round travels
+    once, over controller_to_strong_buffer, so round r is ready at r
+    plus qpu_to_controller 2 plus readout_to_bits 3 plus the room-side
+    hop 7; the window then pays strong_buffer_to_strong_decoder 6 and
+    the 30 us strong decode, and its correction rides
+    strong_decoder_to_frame 4 home before the 1 us frame write. Every
+    latency is the declared card's (tests/declared_run.py).
+    """
+    machine = declared_run.strong_only_run(rounds=6)
+    windows = machine.observation.windows.windows
+    window = windows[(1, 0)]
+    snapshot = machine.pauli_frame.snapshot()
+    (record,) = snapshot.records
+    expected_first_round = config.microseconds_to_ticks(13.0)
+    expected_data_complete = config.microseconds_to_ticks(18.0)
+    expected_done = config.microseconds_to_ticks(54.0)
+    expected_accepted = config.microseconds_to_ticks(58.0)
+    expected_committed = config.microseconds_to_ticks(59.0)
+
+    assert window.t_first_round == expected_first_round
+    assert window.t_data_complete == expected_data_complete
+    assert window.t_done == expected_done
+    assert record.tier == "strong"
+    assert record.accepted_ticks == expected_accepted
+    assert record.committed_ticks == expected_committed

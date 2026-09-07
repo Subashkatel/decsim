@@ -108,6 +108,8 @@ def _collect(argv: list) -> None:
         shard=shard,
         shots_per_unit=parsed.shots_per_unit,
     )
+    if not rows:
+        return
     lines = report.terminal_lines(rows)
     text = "\n".join(lines)
     print(text)

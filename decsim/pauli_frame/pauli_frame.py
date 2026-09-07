@@ -8,9 +8,13 @@ XORed together.
 Every write costs a fixed number of ticks. The caller is called back only
 after that time has passed, so anything waiting on the write waits too.
 
-The XOR fold follows PECOS's Pauli frame accumulator. Applying a correction
-exactly once follows Riesebos (DAC 2017). One write costs one clock cycle,
-4 ns at 250 MHz (Yang et al. 2605.04892).
+The XOR fold follows PECOS's Pauli frame accumulator. Applying a
+correction exactly once follows Riesebos, "Pauli Frames for Quantum
+Computer Architectures", TU Delft MSc thesis CE-MS-2016, Sec. 3.2
+Table 3.1: a flush applies the gates in a Pauli record on the target
+qubit and then resets that record to I, so a tracked correction leaves
+the frame once. One write costs one clock cycle, 4 ns at 250 MHz (Yang
+et al. 2605.04892).
 """
 
 import dataclasses

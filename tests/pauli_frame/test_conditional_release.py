@@ -4,8 +4,11 @@ When an operation's final result is in, every operation blocked on it
 may start, one decision each; when nothing waits but the QPU itself
 needs the outcome, the one decision is a result return. The value of the
 outcome never enters: a conditional instruction starts once its
-dependency is fully decoded, whatever it decoded to (SWIPER, ISCA 2025,
-2412.05115), so nothing here reads the result's bits.
+dependency is fully decoded, whatever it decoded to (Caune et al.
+2410.05202 lines 364-367 and 1255-1262: the program stalls on the
+decoder's status register, then the conditional gate costs the same
+whichever way the result came out), so nothing here reads the result's
+bits.
 
 Every decision travels to the QPU through the controller, never straight
 from the frame, which is why the unit holds the controller it relays

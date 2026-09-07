@@ -1,8 +1,9 @@
 """The idle accounting: every idle round is routed by the policy, claimed once.
 
-Idle rounds are decoder workload in every reference system (SWIPER
-2412.05115: one UNWANTED_IDLE round per unused patch per cycle; XQsim;
-Terhal's backlog bound via Battistel 2303.00054). The policies' own laws
+Idle rounds are decoder workload: the backlog bound counts every
+generated syndrome bit against the decoder's processing rate (Terhal
+1302.3428 lines 3151-3159; Battistel et al. 2303.00054 line 144). The
+policies' own laws
 are test_policies.py; here the accounting's: the rounds emitted on a
 patch are claimed once by the operation that takes the patch, and a patch
 on a live protected stream emits through the stream, not here.

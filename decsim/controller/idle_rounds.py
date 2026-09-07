@@ -8,8 +8,9 @@ stream) and whether it is charged as decode work (one load-only job per
 commit region of idle rounds, the last one shorter). An operation that
 claims the patch takes the rounds emitted since the last claim, so the
 window manager can prepend them to its plan. Idle rounds are decoder
-workload in every reference system (SWIPER 2412.05115, XQsim, Terhal's
-backlog bound via Battistel 2303.00054).
+workload: the backlog bound counts every generated syndrome bit against
+the decoder's processing rate (Terhal 1302.3428 lines 3151-3159;
+Battistel et al. 2303.00054 line 144).
 """
 
 import dataclasses

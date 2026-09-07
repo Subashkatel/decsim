@@ -5,12 +5,14 @@ boundary_policy tells the window manager when a committed boundary ships
 waiting patch travels (Ignore, ExtendStream, SeparateDecodeJobs). Any
 object with the same methods works.
 
-Idle rounds are real decoder workload in every reference system: SWIPER
-windows idle syndrome exactly like operation syndrome (ISCA 2025,
-2412.05115, device_manager emits an UNWANTED_IDLE round per unused patch
-per cycle), XQsim decodes every patch under each RUN_ESM (ISCA 2022), and
-Terhal's backlog bound charges the decoder for every generated round (via
-Battistel 2303.00054). Deferring them is legitimate, deleting them is a
+Idle rounds are real decoder workload. Terhal's backlog bound sets the
+rate syndrome bits are generated, rgen, against the rate they are
+processed, rproc, and every generated bit counts: "the decoding should
+never lead to a increasing backlog of syndrome data" (1302.3428 lines
+3151-3159). Battistel et al. say the same per logical qubit: "the
+decoder needs to process that data at the acquisition rate or close to
+it to avoid an exponential slowdown due to an ever-growing data backlog"
+(2303.00054 line 144). Deferring them is legitimate, deleting them is a
 modeling choice: only data feeding the next non-Clifford decision is
 latency-critical (Skoric 2209.08552), so each policy below is valid for a
 different claim.

@@ -2,8 +2,7 @@
 
 Sources: Google 2207.06431 and 2408.13687 (every measure qubit is read out
 each cycle; cadences of 921 ns and 1.1 us), Krinner 2112.03708 (1.1 us),
-Yang 2605.04892 (1.25 us); SWIPER device_manager._generate_syndrome_round
-(an active patch without an instruction emits an idle round); QubiC
+Yang 2605.04892 (1.25 us); QubiC
 2404.15260 Sec. IV (a command starts on the boundary at or after its
 arrival, the boundary itself included); validation matrix row C4. One
 microsecond is 1_000_000 ticks.

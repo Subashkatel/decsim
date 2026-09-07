@@ -275,7 +275,7 @@ def latency_samples_by_distance(measurements: list) -> dict:
 
     Pooled over shots. The algorithm stage alone, because that is the
     only measured quantity and the papers' comparable number (Helios
-    Fig. 6, SWIPER Fig. 3); fetch, release and the links are priced from
+    2301.08419 Fig. 6); fetch, release and the links are priced from
     the config and belong to the stage-breakdown figure.
     """
     pooled = {}
@@ -296,7 +296,7 @@ def latency_plot(config, measurements: list, path: Path) -> None:
     One violin per d (median marked, worst window flagged), microsecond
     log axis, with the window-generation deadline drawn as the
     throughput boundary. The violin and deadline shape follows Helios
-    Fig. 7, Google Fig. 4d and SWIPER Fig. 3.
+    2301.08419 Fig. 7 and Google 2408.13687 Fig. 4d.
     """
     import matplotlib.pyplot as plt
 

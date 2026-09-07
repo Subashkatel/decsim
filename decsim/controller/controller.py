@@ -12,9 +12,9 @@ feedback streams (feedback_streams.py) keep the protected regions.
 """
 
 import decsim.controller.settings as controller_settings
-import decsim.message as message
 import decsim.observe.trace_source as trace_source
 import decsim.records.rounds as round_records
+import decsim.records.transfers as transfer_records
 
 
 class Controller:
@@ -63,7 +63,7 @@ class Controller:
             fragment.patch_id,
         )
         self.round_event.fire(emitted)
-        attribution = message.TransferAttribution.for_round(
+        attribution = transfer_records.TransferAttribution.for_round(
             fragment.operation_id, (fragment.patch_id,), fragment.round_index
         )
         readout_ticks = self.settings.readout_to_bits_ticks()
@@ -80,7 +80,7 @@ class Controller:
             )
 
         self.link.send(
-            message.LinkPath.QPU_TO_CONTROLLER,
+            transfer_records.LinkPath.QPU_TO_CONTROLLER,
             readout.size_bits,
             self.engine.now,
             attribution,

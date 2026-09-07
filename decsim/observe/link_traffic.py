@@ -12,8 +12,8 @@ import dataclasses
 from typing import Optional
 
 import decsim.links.settings as link_settings
-import decsim.message as message
 import decsim.records.identity as identity_records
+import decsim.records.transfers as transfer_records
 
 
 @dataclasses.dataclass(frozen=True)
@@ -27,7 +27,9 @@ class TrafficCounters:
     propagation_ticks: int = 0
     queue_wait_ticks: int = 0
 
-    def plus_transfer(self, transfer: message.Transfer) -> "TrafficCounters":
+    def plus_transfer(
+        self, transfer: transfer_records.Transfer
+    ) -> "TrafficCounters":
         """These counters with one more transfer added."""
         known_payload_bits = self.known_payload_bits
         unknown_payload_transfer_count = self.unknown_payload_transfer_count
@@ -89,7 +91,7 @@ class TrafficCounters:
 class PathSnapshot:
     """One wired path, its channel's alias, its counters."""
 
-    path: message.LinkPath
+    path: transfer_records.LinkPath
     physical_alias: str
     counters: TrafficCounters
 
@@ -123,9 +125,11 @@ class TrafficLedger:
     def __init__(self, fabric_settings: link_settings.FabricSettings):
         self._settings = fabric_settings
         self._alias_by_channel: dict[str, str] = {}
-        self._counters_by_path: dict[message.LinkPath, TrafficCounters] = {}
+        self._counters_by_path: dict[
+            transfer_records.LinkPath, TrafficCounters
+        ] = {}
         self._counters_by_channel: dict[str, TrafficCounters] = {}
-        self._records: list[message.TransferRecord] = []
+        self._records: list[transfer_records.TransferRecord] = []
         for path in fabric_settings.wired_paths():
             path_settings = fabric_settings.path_settings(path)
             channel_name = path_settings.channel.name
@@ -136,7 +140,7 @@ class TrafficLedger:
             self._alias_by_channel[channel_name] = alias
             self._counters_by_channel[channel_name] = TrafficCounters()
 
-    def on_transfer(self, record: message.TransferRecord) -> None:
+    def on_transfer(self, record: transfer_records.TransferRecord) -> None:
         """Count one delivered transfer for its path and its channel."""
         transfer = record.transfer
         path_counters = self._counters_by_path[record.path]
@@ -206,7 +210,7 @@ class TrafficLedger:
             "reconciliation": reconciliation,
         }
 
-    def _path_snapshot(self, path: message.LinkPath) -> PathSnapshot:
+    def _path_snapshot(self, path: transfer_records.LinkPath) -> PathSnapshot:
         path_settings = self._settings.path_settings(path)
         alias = self._alias_by_channel[path_settings.channel.name]
         return PathSnapshot(
@@ -253,7 +257,7 @@ class TrafficLedger:
         return channel_json, reconciliation_json
 
 
-def _request_sequence(record: message.TransferRecord) -> int:
+def _request_sequence(record: transfer_records.TransferRecord) -> int:
     return record.request_sequence
 
 
@@ -268,7 +272,9 @@ def _semantic_edge_json(
     }
 
 
-def _transfer_json(record: message.TransferRecord, alias_by_channel) -> dict:
+def _transfer_json(
+    record: transfer_records.TransferRecord, alias_by_channel
+) -> dict:
     transfer = record.transfer
     attribution = record.attribution
     patch_ids = []
@@ -307,7 +313,7 @@ def _transfer_json(record: message.TransferRecord, alias_by_channel) -> dict:
 def _relation_json(relation) -> Optional[dict]:
     if relation is None:
         return None
-    is_boundary = type(relation) is message.BoundaryTransferRelation
+    is_boundary = type(relation) is transfer_records.BoundaryTransferRelation
     if is_boundary:
         key = relation.source_request_key
     else:

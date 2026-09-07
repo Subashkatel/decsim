@@ -17,9 +17,9 @@ import dataclasses
 from typing import Any, Callable, Optional
 
 import decsim.engine
-import decsim.message as message
 import decsim.observe.trace_source as trace_source
 import decsim.ports as ports
+import decsim.records.program as program_records
 import decsim.records.rounds as round_records
 
 # Patches and operation ids are opaque identities chosen by the workload;
@@ -33,7 +33,7 @@ class QPUCommandEvent:
     # "ARRIVED" or "STARTED"; the event ledger reads these words.
     kind: str
     tick: int
-    command: message.RunOperationBody
+    command: program_records.RunOperationBody
 
 
 class QPUDevice:
@@ -53,7 +53,7 @@ class QPUDevice:
         cycle_ticks: int,
         readout_receiver: Optional[ports.ReadoutReceiver] = None,
         completion_receiver: Optional[
-            Callable[[message.Operation], None]
+            Callable[[program_records.Operation], None]
         ] = None,
         idle_receiver: Optional[Callable[[Any, Any, int], None]] = None,
     ):
@@ -67,7 +67,7 @@ class QPUDevice:
         self.round_emitted = trace_source.TraceSource()
         self._running_by_operation_id: dict = {}
         self._idle_by_patch: dict = {}
-        self._commands_waiting: list[message.RunOperationBody] = []
+        self._commands_waiting: list[program_records.RunOperationBody] = []
         self._scheduled_boundaries: set = set()
         self._last_emitted_boundary = 0
         self._is_finished = False
@@ -77,7 +77,7 @@ class QPUDevice:
         self.readout_receiver = receiver
 
     def connect_completion_receiver(
-        self, receiver: Callable[[message.Operation], None]
+        self, receiver: Callable[[program_records.Operation], None]
     ) -> None:
         """Wire the callback for a completed operation body."""
         self.completion_receiver = receiver
@@ -88,7 +88,7 @@ class QPUDevice:
         """Wire the callback for an idle patch's round."""
         self.idle_receiver = receiver
 
-    def issue(self, command: message.RunOperationBody) -> None:
+    def issue(self, command: program_records.RunOperationBody) -> None:
         """Queue one operation body; it starts on the next cycle boundary."""
         if command.round_ticks != self.cycle_ticks:
             raise ValueError("operation cadence must equal the QPU cycle")
@@ -126,7 +126,7 @@ class QPUDevice:
 
     def emit_idle_stream_round(
         self,
-        operation: message.Operation,
+        operation: program_records.Operation,
         stream_id: Any,
         global_round: int,
         patch: Any,
@@ -212,7 +212,7 @@ class QPUDevice:
         for command in waiting:
             self._start_command(command)
 
-    def _start_command(self, command: message.RunOperationBody) -> None:
+    def _start_command(self, command: program_records.RunOperationBody) -> None:
         operation = command.operation
         event = QPUCommandEvent("STARTED", self.engine.now, command)
         self.command_event.fire(event)
@@ -228,7 +228,9 @@ class QPUDevice:
         running = _RunningOperation(command, 0)
         self._running_by_operation_id[operation.id] = running
 
-    def _run_instant_command(self, command: message.RunOperationBody) -> None:
+    def _run_instant_command(
+        self, command: program_records.RunOperationBody
+    ) -> None:
         """A zero-round body only finalizes a stream round, then completes."""
         operation = command.operation
         if command.emits_detector_data:
@@ -238,7 +240,9 @@ class QPUDevice:
             self._deliver(payloads, operation)
         self._finish_command(command)
 
-    def _finish_command(self, command: message.RunOperationBody) -> None:
+    def _finish_command(
+        self, command: program_records.RunOperationBody
+    ) -> None:
         operation = command.operation
         for patch in patches_of(operation):
             idle = _IdlePatch(operation.id, 0)
@@ -248,7 +252,7 @@ class QPUDevice:
     def _deliver(
         self,
         payloads: list[round_records.QPUReadout],
-        operation: message.Operation,
+        operation: program_records.Operation,
     ) -> None:
         """Stamp every payload with its fragment slot and hand it on."""
         if not payloads:
@@ -281,7 +285,7 @@ class QPUDevice:
             )
 
 
-def patches_of(operation: message.Operation) -> tuple:
+def patches_of(operation: program_records.Operation) -> tuple:
     """The patches an operation occupies; its first qubit stands in for none."""
     if operation.patches:
         return tuple(operation.patches)
@@ -294,7 +298,7 @@ def patches_of(operation: message.Operation) -> tuple:
 class _RunningOperation:
     """An operation body on the QPU and how many rounds it has emitted."""
 
-    command: message.RunOperationBody
+    command: program_records.RunOperationBody
     emitted_round_count: int
 
 

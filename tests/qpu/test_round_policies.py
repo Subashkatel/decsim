@@ -15,16 +15,18 @@ count from the surface card and is not what the yaml configs use.
 
 import pytest
 
-import decsim.message as message
 import decsim.qpu.code_geometry as code_geometry
 import decsim.qpu.round_policies as round_policies
+import decsim.records.program as program_records
 
 
-def operation(operation_id, qubits=(0,), kind=message.OpKind.GENERIC):
-    workload_operation = message.Operation(
+def operation(operation_id, qubits=(0,), kind=program_records.OpKind.GENERIC):
+    workload_operation = program_records.Operation(
         id=operation_id, name="op", qubits=qubits, kind=kind
     )
-    return message.OperationPlanningView.from_operation(workload_operation)
+    return program_records.OperationPlanningView.from_operation(
+        workload_operation
+    )
 
 
 def test_a_fixed_policy_gives_every_operation_the_same_count():
@@ -55,42 +57,42 @@ def test_code_rounds_never_fall_below_one():
 def test_a_merge_costs_two_steps_of_d_rounds():
     policy = round_policies.GateRounds()
     code = code_geometry.SurfaceCodeModel(distance=5)
-    merge = operation(1, kind=message.OpKind.MERGE)
+    merge = operation(1, kind=program_records.OpKind.MERGE)
     assert policy.rounds_for(merge, code) == 10
 
 
 def test_a_measurement_costs_one_round():
     policy = round_policies.GateRounds()
     code = code_geometry.SurfaceCodeModel(distance=5)
-    measure = operation(2, kind=message.OpKind.MEASURE)
+    measure = operation(2, kind=program_records.OpKind.MEASURE)
     assert policy.rounds_for(measure, code) == 1
 
 
 def test_an_injection_costs_one_round():
     policy = round_policies.GateRounds()
     code = code_geometry.SurfaceCodeModel(distance=5)
-    inject = operation(3, kind=message.OpKind.INJECT)
+    inject = operation(3, kind=program_records.OpKind.INJECT)
     assert policy.rounds_for(inject, code) == 1
 
 
 def test_memory_costs_d_rounds():
     policy = round_policies.GateRounds()
     code = code_geometry.SurfaceCodeModel(distance=5)
-    memory = operation(4, kind=message.OpKind.MEMORY)
+    memory = operation(4, kind=program_records.OpKind.MEMORY)
     assert policy.rounds_for(memory, code) == 5
 
 
 def test_memory_on_two_qubits_still_costs_d_rounds():
     policy = round_policies.GateRounds()
     code = code_geometry.SurfaceCodeModel(distance=5)
-    memory = operation(4, qubits=(0, 1), kind=message.OpKind.MEMORY)
+    memory = operation(4, qubits=(0, 1), kind=program_records.OpKind.MEMORY)
     assert policy.rounds_for(memory, code) == 5
 
 
 def test_idle_costs_d_rounds():
     policy = round_policies.GateRounds()
     code = code_geometry.SurfaceCodeModel(distance=5)
-    idle = operation(4, qubits=(0, 1), kind=message.OpKind.IDLE)
+    idle = operation(4, qubits=(0, 1), kind=program_records.OpKind.IDLE)
     assert policy.rounds_for(idle, code) == 5
 
 
@@ -111,9 +113,9 @@ def test_a_generic_one_qubit_operation_costs_memory():
 def test_a_temporal_distance_replaces_d_for_surgery_only():
     policy = round_policies.TemporalRounds(4)
     code = code_geometry.SurfaceCodeModel(distance=7)
-    merge = operation(1, kind=message.OpKind.MERGE)
+    merge = operation(1, kind=program_records.OpKind.MERGE)
     two_qubit = operation(2, qubits=(0, 1))
-    memory = operation(3, kind=message.OpKind.MEMORY)
+    memory = operation(3, kind=program_records.OpKind.MEMORY)
     assert policy.rounds_for(merge, code) == 4
     assert policy.rounds_for(two_qubit, code) == 4
     assert policy.rounds_for(memory, code) == 7

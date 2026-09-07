@@ -204,13 +204,13 @@ def test_end_to_end_stim_memory_run_through_the_timed_decoder():
     # unit: same logical answers as the bare decoder, three stages per window
     # in the trace, no two windows overlapping on the single unit.
     stim = pytest.importorskip("stim")
+    import decsim.records.program as program_records
     from decsim.decoders.minimum_weight_perfect_matching.decoder import (
         PyMatchingDecoder,
     )
     from decsim.decoders.settings import DecoderSettings
     from decsim.frontends.settings import WorkloadSettings
     from decsim.machine import Machine, MachineSettings
-    from decsim.message import Operation
     from decsim.qpu.round_policies import FixedRounds
     from decsim.qpu.settings import QpuSettings
     from decsim.qpu.stim_device import StimDevice
@@ -225,7 +225,7 @@ def test_end_to_end_stim_memory_run_through_the_timed_decoder():
             after_reset_flip_probability=0.005,
             before_round_data_depolarization=0.005,
         )
-        operation = Operation(
+        operation = program_records.Operation(
             id=1, name="memory", qubits=(0,), patches=(0,), circuit=circuit
         )
         settings = MachineSettings(
@@ -273,13 +273,13 @@ def test_measured_wall_clock_algorithm_holds_the_unit_for_the_real_call():
     # matching call runs at algorithm start, the unit stays busy for exactly
     # the measured time, and the result is released only then.
     stim = pytest.importorskip("stim")
+    import decsim.records.program as program_records
     from decsim.decoders.minimum_weight_perfect_matching.decoder import (
         PyMatchingDecoder,
     )
     from decsim.decoders.settings import DecoderSettings
     from decsim.frontends.settings import WorkloadSettings
     from decsim.machine import Machine, MachineSettings
-    from decsim.message import Operation
     from decsim.qpu.round_policies import FixedRounds
     from decsim.qpu.settings import QpuSettings
     from decsim.qpu.stim_device import StimDevice
@@ -293,7 +293,7 @@ def test_measured_wall_clock_algorithm_holds_the_unit_for_the_real_call():
         after_reset_flip_probability=0.005,
         before_round_data_depolarization=0.005,
     )
-    operation = Operation(
+    operation = program_records.Operation(
         id=1, name="memory", qubits=(0,), patches=(0,), circuit=circuit
     )
 

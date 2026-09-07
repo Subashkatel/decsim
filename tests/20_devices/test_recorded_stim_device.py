@@ -2,6 +2,7 @@
 
 import pytest
 
+import decsim.records.program as program_records
 from decsim.decoders.decoders import PresetLatencyDecoder
 from decsim.decoders.minimum_weight_perfect_matching.decoder import (
     PyMatchingDecoder,
@@ -9,7 +10,6 @@ from decsim.decoders.minimum_weight_perfect_matching.decoder import (
 from decsim.decoders.settings import DecoderSettings
 from decsim.frontends.settings import WorkloadSettings
 from decsim.machine import Machine, MachineSettings
-from decsim.message import Operation
 from decsim.qpu.round_policies import FixedRounds
 from decsim.qpu.settings import QpuSettings
 from decsim.qpu.stim_device import RecordedStimDevice
@@ -43,7 +43,7 @@ def test_replayed_shot_forms_the_recorded_truth_and_decodes_the_recorded_bits(
     recorded,
 ):
     circuit, measurements, dets, obs, matching = recorded
-    op = Operation(
+    op = program_records.Operation(
         id=1, name="memory", qubits=(0,), patches=(0,), circuit=circuit
     )
     agree = 0
@@ -111,7 +111,7 @@ def test_sliding_windows_match_qldpc_shot_for_shot(recorded):
         circuit.detector_error_model(decompose_errors=True)
     )
     reference_predictions = reference.decode_shots(dets.astype(np.uint8))
-    op = Operation(
+    op = program_records.Operation(
         id=1, name="memory", qubits=(0,), patches=(0,), circuit=circuit
     )
     for shot in range(len(dets)):
@@ -139,11 +139,11 @@ def test_readout_bits_per_round_equal_stims_measurement_counts(recorded):
     the final round, exactly the measurement counts of Stim's circuit."""
     from collections import defaultdict
 
-    from decsim.message import LinkPath
+    import decsim.records.transfers as transfer_records
 
     circuit, measurements, _, _, _ = recorded
     rounds, distance = 9, 3
-    op = Operation(
+    op = program_records.Operation(
         id=1, name="memory", qubits=(0,), patches=(0,), circuit=circuit
     )
     settings = MachineSettings(
@@ -161,7 +161,7 @@ def test_readout_bits_per_round_equal_stims_measurement_counts(recorded):
     completed.run()
     bits_by_round = defaultdict(int)
     for record in completed.observation.traffic.snapshot().transfers:
-        if record.path is LinkPath.QPU_TO_CONTROLLER:
+        if record.path is transfer_records.LinkPath.QPU_TO_CONTROLLER:
             bits_by_round[record.attribution.first_round] += (
                 record.transfer.payload_bits
             )

@@ -12,12 +12,12 @@ microsecond is 1_000_000 ticks.
 import pytest
 
 import decsim.engine
-import decsim.message as message
 import decsim.observe.command_events as command_events_module
 import decsim.observe.log_writers as log_writers
 import decsim.qpu.code_geometry as code_geometry
 import decsim.qpu.cycle_clock as cycle_clock
 import decsim.qpu.syndrome_devices as syndrome_devices
+import decsim.records.program as program_records
 import decsim.records.rounds as round_records
 
 
@@ -95,14 +95,14 @@ def clocked_qpu(cycle_ticks, source=None):
 
 
 def memory_body(operation_id, round_count, cycle_ticks, patch=0, **changes):
-    operation = message.Operation(
+    operation = program_records.Operation(
         id=operation_id,
         name="memory",
         qubits=(patch,),
         patches=(patch,),
         **changes,
     )
-    return message.RunOperationBody(
+    return program_records.RunOperationBody(
         operation, cycle_ticks, round_count, round_count
     )
 
@@ -243,8 +243,10 @@ def test_a_running_body_begins_on_the_syndrome_source_when_it_starts():
 
 def test_a_body_without_detector_data_holds_its_patch_silently():
     engine, qpu, log = clocked_qpu(10)
-    operation = message.Operation(id=1, name="wait", qubits=(0,), patches=(0,))
-    body = message.RunOperationBody(
+    operation = program_records.Operation(
+        id=1, name="wait", qubits=(0,), patches=(0,)
+    )
+    body = program_records.RunOperationBody(
         operation, 10, 3, 3, emits_detector_data=False
     )
     qpu.issue(body)
@@ -258,7 +260,7 @@ def test_a_body_without_detector_data_holds_its_patch_silently():
 def test_a_zero_round_finalizer_delivers_the_final_readout_and_completes():
     source = FinalizingSource()
     engine, qpu, log = clocked_qpu(10, source)
-    operation = message.Operation(
+    operation = program_records.Operation(
         id=2,
         name="tail",
         qubits=(0,),
@@ -267,7 +269,7 @@ def test_a_zero_round_finalizer_delivers_the_final_readout_and_completes():
         stream_offset=2,
         finalizes_stream_round=True,
     )
-    body = message.RunOperationBody(
+    body = program_records.RunOperationBody(
         operation, 10, 0, 3, finalizes_stream_round=True
     )
     qpu.issue(body)
@@ -348,7 +350,7 @@ def test_an_idle_stream_round_carries_the_sources_bits_to_the_windows():
     code = code_geometry.SurfaceCodeModel(distance=3)
     source = syndrome_devices.SyndromeBitDevice(code, seed=1)
     engine, qpu, log = clocked_qpu(10, source)
-    operation = message.Operation(
+    operation = program_records.Operation(
         id=1, name="stream", qubits=(0,), patches=(0,), stream_id="s"
     )
     qpu.emit_idle_stream_round(operation, "s", 4, 0)
@@ -381,7 +383,9 @@ def test_a_command_with_another_cadence_is_refused():
 
 def test_an_instant_emitter_must_finalize_a_stream_round():
     engine, qpu, log = clocked_qpu(10)
-    operation = message.Operation(id=1, name="tail", qubits=(0,), patches=(0,))
-    body = message.RunOperationBody(operation, 10, 0, 3)
+    operation = program_records.Operation(
+        id=1, name="tail", qubits=(0,), patches=(0,)
+    )
+    body = program_records.RunOperationBody(operation, 10, 0, 3)
     with pytest.raises(ValueError, match="finalize"):
         qpu.issue(body)

@@ -17,8 +17,8 @@ with the committer's accept_strong_result as the return path.
 import functools
 from typing import Callable, Optional
 
-import decsim.message as message
 import decsim.records.decoding as decoding_records
+import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 
 LOG_SOURCE = "DecoderCluster"
@@ -182,7 +182,7 @@ class StrongRedecode:
                 on_landed,
             )
         expected_delay_ticks = self.transfers.send_for_job(
-            message.LinkPath.STRONG_BUFFER_TO_STRONG_DECODER,
+            transfer_records.LinkPath.STRONG_BUFFER_TO_STRONG_DECODER,
             strong_job,
             payload_bits=payload_bits,
             on_delivered=landed,

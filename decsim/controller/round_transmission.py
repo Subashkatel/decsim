@@ -19,9 +19,9 @@ of them; the packing stage's bound reads it (RoundsInFlight).
 import functools
 from typing import Optional
 
-import decsim.message as message
 import decsim.observe.trace_source as trace_source
 import decsim.records.rounds as round_records
+import decsim.records.transfers as transfer_records
 
 
 class RoundTransmitter:
@@ -86,7 +86,9 @@ class RoundTransmitter:
             )
 
     def _publishes_at_delivery(self) -> bool:
-        return self.link.is_wired(message.LinkPath.CONTROLLER_TO_WEAK_BUFFER)
+        return self.link.is_wired(
+            transfer_records.LinkPath.CONTROLLER_TO_WEAK_BUFFER
+        )
 
     def _send_window_input(self, packed: round_records.PackedRound) -> None:
         if not self._publishes_at_delivery():
@@ -95,7 +97,9 @@ class RoundTransmitter:
             return
         self._fire("CWB_SENT", packed)
         publish = functools.partial(self._publish, packed)
-        self._send(message.LinkPath.CONTROLLER_TO_WEAK_BUFFER, packed, publish)
+        self._send(
+            transfer_records.LinkPath.CONTROLLER_TO_WEAK_BUFFER, packed, publish
+        )
 
     def _publish(self, packed: round_records.PackedRound) -> None:
         """The round reached Buffer 0: stamp it, record it, wake the windows."""
@@ -118,7 +122,9 @@ class RoundTransmitter:
     def _send_feedback_memory(self, packed: round_records.PackedRound) -> None:
         deliver = functools.partial(self._deliver_feedback_memory, packed)
         self._send(
-            message.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER, packed, deliver
+            transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER,
+            packed,
+            deliver,
         )
 
     def _deliver_feedback_memory(
@@ -138,8 +144,12 @@ class RoundTransmitter:
         )
         self.round_event.fire(event)
 
-    def _send(self, path: message.LinkPath, packed, on_delivered) -> None:
-        attribution = message.TransferAttribution.for_packet(packed.packet)
+    def _send(
+        self, path: transfer_records.LinkPath, packed, on_delivered
+    ) -> None:
+        attribution = transfer_records.TransferAttribution.for_packet(
+            packed.packet
+        )
 
         def delivered(_transfer) -> None:
             on_delivered()

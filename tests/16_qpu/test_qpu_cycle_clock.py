@@ -2,8 +2,8 @@
 every live patch yields one round per cycle, idle or not (SWIPER
 device_manager._generate_syndrome_round; Google 2207.06431 readout every cycle)."""
 
+import decsim.records.program as program_records
 from decsim.engine import Engine
-from decsim.message import Operation, RunOperationBody
 from decsim.observe.command_events import CommandEvents
 from decsim.qpu.cycle_clock import QPUDevice
 from decsim.qpu.syndrome_devices import TimingOnlyDevice
@@ -46,7 +46,7 @@ def _qpu():
 
 
 def _op(op_id, patch, rounds=2, **changes):
-    return Operation(
+    return program_records.Operation(
         id=op_id,
         name=f"op{op_id}",
         qubits=(patch,),
@@ -56,7 +56,9 @@ def _op(op_id, patch, rounds=2, **changes):
 
 
 def _issue(qpu, op, rounds, **changes):
-    qpu.issue(RunOperationBody(op, CYCLE, rounds, rounds, **changes))
+    qpu.issue(
+        program_records.RunOperationBody(op, CYCLE, rounds, rounds, **changes)
+    )
 
 
 def test_operations_start_on_the_next_cycle_boundary_and_share_one_clock():
@@ -124,7 +126,7 @@ def test_operation_cadence_must_equal_the_qpu_cycle():
     engine, qpu, capture = _qpu()
     a, ra = _op(1, "A")
     try:
-        qpu.issue(RunOperationBody(a, CYCLE + 1, ra, ra))
+        qpu.issue(program_records.RunOperationBody(a, CYCLE + 1, ra, ra))
     except ValueError as error:
         assert "cadence" in str(error)
     else:
@@ -137,8 +139,8 @@ def test_a_command_starts_on_the_cycle_boundary_at_or_after_its_arrival():
     included (QubiC's pulse timestamp is the time after which the pulse
     plays, arXiv 2404.15260 Sec. IV; SWIPER starts instructions on the
     next round)."""
+    import decsim.records.program as program_records
     from decsim.engine import Engine
-    from decsim.message import Operation, RunOperationBody
     from decsim.qpu.cycle_clock import QPUDevice, _IdlePatch
 
     class SilentModel:
@@ -159,14 +161,14 @@ def test_a_command_starts_on_the_cycle_boundary_at_or_after_its_arrival():
             completion_receiver=lambda operation: None,
             idle_receiver=lambda *_: None,
         )
-        operation = Operation(
+        operation = program_records.Operation(
             id=1,
             name="op",
             qubits=(0,),
             patches=(0,),
             emits_detector_data=False,
         )
-        command = RunOperationBody(
+        command = program_records.RunOperationBody(
             operation=operation,
             round_ticks=cycle,
             round_count=2,

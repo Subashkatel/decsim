@@ -12,8 +12,9 @@ import decsim.controller.instruction_output as instruction_output
 import decsim.engine as engine_module
 import decsim.links.fabric as fabric_module
 import decsim.links.link_profiles as link_profiles
-import decsim.message as message
 import decsim.observe.round_events as round_events
+import decsim.records.program as program_records
+import decsim.records.transfers as transfer_records
 
 PULSE_TICKS = 17
 
@@ -28,9 +29,9 @@ def test_a_release_is_delivered_when_it_reaches_the_controller():
     )
     output.output_event.connect(recorder.output)
     crossing_ticks = link.expected_delay_ticks(
-        message.LinkPath.FRAME_TO_CONTROLLER, None, 0
+        transfer_records.LinkPath.FRAME_TO_CONTROLLER, None, 0
     )
-    release = message.Decision(2, releases_operation=True)
+    release = program_records.Decision(2, releases_operation=True)
     delivered = []
 
     def deliver(decision):
@@ -56,12 +57,12 @@ def test_a_result_return_pays_the_pulse_cost_and_the_crossing_to_the_qpu():
     )
     output.output_event.connect(recorder.output)
     to_controller = link.expected_delay_ticks(
-        message.LinkPath.FRAME_TO_CONTROLLER, None, 0
+        transfer_records.LinkPath.FRAME_TO_CONTROLLER, None, 0
     )
     to_qpu = link.expected_delay_ticks(
-        message.LinkPath.CONTROLLER_TO_QPU, None, 0
+        transfer_records.LinkPath.CONTROLLER_TO_QPU, None, 0
     )
-    result = message.Decision(2, releases_operation=False)
+    result = program_records.Decision(2, releases_operation=False)
     delivered = []
 
     def deliver(decision):

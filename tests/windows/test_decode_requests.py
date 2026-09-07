@@ -11,7 +11,7 @@ import types
 import decsim.decoders.decoder_memory as decoder_memory
 import decsim.engine as engine_module
 import decsim.escalation.policies as escalation_policies
-import decsim.message as message
+import decsim.records.program as program_records
 import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
 import decsim.syndrome_buffer.round_store as round_store_module
@@ -69,7 +69,9 @@ class _Fixture:
 
     def __init__(self) -> None:
         self.engine = engine_module.Engine()
-        self.operation = message.Operation(1, "memory", (0,), patches=(0,))
+        self.operation = program_records.Operation(
+            1, "memory", (0,), patches=(0,)
+        )
         self.window = window_records.Window(
             op_id=1, k=0, commit_lo=1, commit_hi=3, buffer_hi=5, n_rounds=5
         )

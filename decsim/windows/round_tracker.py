@@ -15,8 +15,8 @@ closed feedback boundaries) lives here; its geometry is the planner's.
 
 from typing import Optional
 
-import decsim.message as message
 import decsim.records.identity as identity_records
+import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.windows.windowing_schemes as windowing_schemes
 
@@ -34,7 +34,7 @@ class RoundTracker:
 
     # ---- operations and streams
 
-    def register_operation(self, operation: message.Operation) -> bool:
+    def register_operation(self, operation: program_records.Operation) -> bool:
         """Track an operation's arrivals and feedback role.
 
         True the first time the operation is seen.
@@ -48,7 +48,7 @@ class RoundTracker:
         return is_new
 
     def register_stream(
-        self, stream_operation: message.Operation, source_round_limit
+        self, stream_operation: program_records.Operation, source_round_limit
     ) -> None:
         """Track a stream's arrivals and what is known of its length."""
         stream_id = stream_operation.id

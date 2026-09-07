@@ -4,12 +4,12 @@ import inspect
 import pytest
 
 import decsim.records.decoding as decoding_records
+import decsim.records.program as program_records
 from decsim.config import microseconds_to_ticks
 from decsim.decoders.decoders import CodeRouter, PresetLatencyDecoder
 from decsim.decoders.settings import DecoderSettings
 from decsim.frontends.settings import WorkloadSettings
 from decsim.machine import Machine, MachineSettings
-from decsim.message import Operation
 from decsim.qpu.code_geometry import (
     BivariateBicycleCodeModel,
     CodeModel,
@@ -72,7 +72,7 @@ class IdentityBreakingLayout(UniformLayout):
 
 
 def make_operation():
-    return Operation(id=1, name="memory", qubits=(0,))
+    return program_records.Operation(id=1, name="memory", qubits=(0,))
 
 
 def _resolved_geometry(completed):
@@ -413,7 +413,7 @@ def test_distance_one_surface_card_has_zero_syndrome_width():
 def test_zero_patch_syndrome_device_fails_naturally_when_selecting_a_target():
     """A zero-patch device request reaches natural missing-target failure without a fake readout."""
     device = SyndromeBitDevice(SurfaceCodeModel(), seed=7)
-    empty_operation = Operation(id=1, name="empty", qubits=())
+    empty_operation = program_records.Operation(id=1, name="empty", qubits=())
     with pytest.raises(IndexError):
         device.round_payloads(empty_operation, 1)
 
@@ -533,7 +533,7 @@ def test_outside_name_annotation_is_declared_but_not_runtime_validated():
 
 @pytest.mark.parametrize("broken_selector", ("operation", "patch"))
 def test_layout_selectors_must_return_the_exact_declared_code(broken_selector):
-    """Operation and patch layout selectors reject equal but distinct code objects."""
+    """program_records.Operation and patch layout selectors reject equal but distinct code objects."""
     declared = SurfaceCodeModel()
     alternate = SurfaceCodeModel()
     layout = IdentityBreakingLayout(declared, alternate, broken_selector)

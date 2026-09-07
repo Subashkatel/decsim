@@ -25,9 +25,9 @@ from typing import Callable, Optional
 import decsim.config as config
 import decsim.engine
 import decsim.links.settings as link_settings
-import decsim.message as message
+import decsim.records.transfers as transfer_records
 
-OnDelivered = Callable[[message.Transfer], None]
+OnDelivered = Callable[[transfer_records.Transfer], None]
 
 
 class Channel:
@@ -127,7 +127,7 @@ class Channel:
         setup_ticks = request.ready_ticks - request.request_ticks
         queue_wait_ticks = start_ticks - request.ready_ticks
         total_delay_ticks = delivery_ticks - request.request_ticks
-        transfer = message.Transfer(
+        transfer = transfer_records.Transfer(
             payload_bits=request.payload_bits,
             request_ticks=request.request_ticks,
             setup_ticks=setup_ticks,

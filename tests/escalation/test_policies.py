@@ -24,13 +24,13 @@ import decsim.escalation.policies as policies
 import decsim.escalation.threshold_sources as threshold_sources
 import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
-import decsim.message as message
 import decsim.observe.settings as observe_settings
 import decsim.pauli_frame.pauli_frame as pauli_frame_module
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
 import decsim.qpu.stim_device as stim_device
 import decsim.records.decoding as decoding_records
+import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.windows.settings as window_settings
 import decsim.windows.windowing_schemes as windowing_schemes
@@ -125,7 +125,7 @@ def test_escalations_equal_gaps_below_the_threshold_equal_strong_frame_writes():
     router = decoders.SwitchingRouter(weak=weak, strong=strong)
     fixed = threshold_sources.FixedThreshold(threshold_nats)
     policy = policies.Switching(fixed, complementary.COMPLEMENTARY_GAP_SOURCE)
-    operation = message.Operation(
+    operation = program_records.Operation(
         id=1, name="memory", qubits=(0,), patches=(0,), circuit=circuit
     )
     rounds_policy = round_policies.FixedRounds(30)

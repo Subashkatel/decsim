@@ -4,24 +4,25 @@ These tests consume frozen artifacts only. They do not import or execute the
 provenance generator, dump, or probe scripts beside those artifacts.
 """
 
-from dataclasses import replace
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 import stim
 
-from decsim.qpu.stim_device import StimDevice
+import decsim.records.program as program_records
 from decsim.decoders.decoders import PerRoundDecoder
-from decsim.detector_error_model.detector_chronology import resolve_detector_rounds
-from decsim.frontends.qlx_frontend import qlx_frontend
-from decsim.message import OpKind
-from decsim.qpu.round_policies import GateRounds
 from decsim.decoders.settings import DecoderSettings
+from decsim.detector_error_model.detector_chronology import (
+    resolve_detector_rounds,
+)
+from decsim.frontends.qlx_frontend import qlx_frontend
 from decsim.frontends.settings import WorkloadSettings
 from decsim.machine import Machine, MachineSettings
+from decsim.qpu.round_policies import GateRounds
 from decsim.qpu.settings import QpuSettings
-
+from decsim.qpu.stim_device import StimDevice
 
 QLX_DATA = Path(__file__).resolve().parents[1] / "data" / "qlx"
 
@@ -42,13 +43,15 @@ def _native_physical_program():
         decode_operation_id=decode_operation_id,
     )
     program.operations = [
-        replace(operation, kind=OpKind.MEASURE)
+        replace(operation, kind=program_records.OpKind.MEASURE)
         if operation.name.startswith("measure_syndrome[")
         else operation
         for operation in program.operations
     ]
     program.decoder_operations = (
-        replace(program.decoder_operations[0], kind=OpKind.MEMORY),
+        replace(
+            program.decoder_operations[0], kind=program_records.OpKind.MEMORY
+        ),
     )
     return circuit, program, decode_operation_id
 
@@ -70,7 +73,8 @@ def _run_native_physical_program(program, device):
             kind="qlx",
             program=program,
             decode_operations=program.decoder_operations,
-            rounds_policy=GateRounds(merge_step_count=2)),
+            rounds_policy=GateRounds(merge_step_count=2),
+        ),
         # Native runtime source length, not a code-distance claim.
         qpu=QpuSettings(distance=8, device=device),
         weak_decoder=DecoderSettings(decoder=PerRoundDecoder(tau_us=0.0)),
@@ -88,12 +92,33 @@ def test_frozen_mem_surface_schedule_has_stable_structure_and_gate_rounds():
     assert tuple(
         operation.predecessors for operation in program.operations
     ) == (
-        (), (0,), (1,), (2,), (3,), (4,),
-        (5,), (6,), (7,), (8,), (9,),
+        (),
+        (0,),
+        (1,),
+        (2,),
+        (3,),
+        (4,),
+        (5,),
+        (6,),
+        (7,),
+        (8,),
+        (9,),
     )
     assert len(program.patch_of_cell) == 1
-    assert tuple(len(operation.patches) for operation in program.operations) == (
-        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    assert tuple(
+        len(operation.patches) for operation in program.operations
+    ) == (
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
     )
     start_rounds = tuple(program.start_rounds.values())
     assert start_rounds == tuple(sorted(start_rounds))
@@ -101,8 +126,9 @@ def test_frozen_mem_surface_schedule_has_stable_structure_and_gate_rounds():
 
     rounds_policy = GateRounds(merge_step_count=2)
     settings = MachineSettings(
-        workload=WorkloadSettings(kind="qlx", program=program,
-                                  rounds_policy=rounds_policy),
+        workload=WorkloadSettings(
+            kind="qlx", program=program, rounds_policy=rounds_policy
+        ),
         qpu=QpuSettings(distance=3),
     )
     completed = Machine.build(settings)
@@ -135,10 +161,11 @@ def test_frozen_mem_surface_native_round_routing_completes_without_quality_claim
         )
         for round_index in range(1, 9)
     ) == ((),) + tuple(
-        tuple(range(8 * offset, 8 * (offset + 1)))
-        for offset in range(7)
+        tuple(range(8 * offset, 8 * (offset + 1))) for offset in range(7)
     )
-    assert resolve_detector_rounds(circuit, detector_rounds, 8) == detector_rounds
+    assert (
+        resolve_detector_rounds(circuit, detector_rounds, 8) == detector_rounds
+    )
     with pytest.raises(ValueError) as coordinate_failure:
         resolve_detector_rounds(circuit, None, 8)
     assert "requires supported coordinates or explicit detector_rounds" in str(
@@ -147,17 +174,30 @@ def test_frozen_mem_surface_native_round_routing_completes_without_quality_claim
     assert program.terminal_detector_ids_by_stream == {
         decode_operation_id: (),
     }
-    measurement_rounds = program.measurement_rounds_by_stream[decode_operation_id]
+    measurement_rounds = program.measurement_rounds_by_stream[
+        decode_operation_id
+    ]
     # eight checks per submission, eight submissions, then the nine data
     # readouts fold into the last round's packet
     assert len(measurement_rounds) == 8 * 8 + 9
-    assert [measurement_rounds[index] for index in (0, 7, 8, 63, 64, 72)] == [1, 1, 2, 8, 8, 8]
+    assert [measurement_rounds[index] for index in (0, 7, 8, 63, 64, 72)] == [
+        1,
+        1,
+        2,
+        8,
+        8,
+        8,
+    ]
 
     device = _physical_device(program)
     completed, result = _run_native_physical_program(program, device)
 
-    assert completed.window_manager.planner.round_count_of(program.decoder_operations[0]
-    .id) == 8
+    assert (
+        completed.window_manager.planner.round_count_of(
+            program.decoder_operations[0].id
+        )
+        == 8
+    )
     assert tuple(
         completed.window_manager.planner.round_count_of(operation.id)
         for operation in program.operations
@@ -168,17 +208,30 @@ def test_frozen_mem_surface_native_round_routing_completes_without_quality_claim
         if operation.name.startswith("measure_syndrome[")
     ]
     round_payloads = tuple(
-        device.round_payloads(operation, 1)[0]
-        for operation in submissions
+        device.round_payloads(operation, 1)[0] for operation in submissions
     )
     assert tuple(payload.round_index for payload in round_payloads) == tuple(
         range(1, 9)
     )
     assert tuple(payload.size_bits for payload in round_payloads) == (
-        8, 8, 8, 8, 8, 8, 8, 17,
+        8,
+        8,
+        8,
+        8,
+        8,
+        8,
+        8,
+        17,
     )
     assert tuple(len(payload.bits) for payload in round_payloads) == (
-        8, 8, 8, 8, 8, 8, 8, 17,
+        8,
+        8,
+        8,
+        8,
+        8,
+        8,
+        8,
+        17,
     )
     assert result.terminal_status == "complete"
     assert result.event_queue_empty
@@ -232,7 +285,8 @@ def test_frozen_mem_surface_rejects_a_native_round_order_swap():
         program.detector_rounds_by_stream[decode_operation_id]
     )
     detector_rounds[0], detector_rounds[8] = (
-        detector_rounds[8], detector_rounds[0]
+        detector_rounds[8],
+        detector_rounds[0],
     )
     program.detector_rounds_by_stream[decode_operation_id] = detector_rounds
 

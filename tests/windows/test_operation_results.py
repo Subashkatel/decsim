@@ -8,8 +8,8 @@ correction of a stream is the sum over its committed windows).
 
 import types
 
-import decsim.message as message
 import decsim.observe.result_ledger as result_ledger
+import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.windows.committed_rounds as committed_rounds
 import decsim.windows.operation_results as operation_results
@@ -53,7 +53,9 @@ class _Fixture:
     """One six-round operation in two windows, committed by hand."""
 
     def __init__(self) -> None:
-        self.operation = message.Operation(1, "memory", (0,), patches=(0,))
+        self.operation = program_records.Operation(
+            1, "memory", (0,), patches=(0,)
+        )
         self.windows = {
             (1, 0): _window(1, 0, 1, 3),
             (1, 1): _window(1, 1, 4, 6),
@@ -142,7 +144,9 @@ def test_a_window_awaiting_strong_holds_the_operation_result():
 
 def test_a_segment_releases_when_the_committed_prefix_covers_it():
     fixture = _Fixture()
-    segment = message.Operation(2, "segment", (0,), blocked_by=1, stream_id=1)
+    segment = program_records.Operation(
+        2, "segment", (0,), blocked_by=1, stream_id=1
+    )
     fixture.results.tracker.operation_by_id[2] = segment
     fixture.results.tracker.blocking_operation_ids.add(2)
     fixture.results.bind_stream_segment(2, 1, 0)

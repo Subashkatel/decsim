@@ -11,9 +11,9 @@ import math
 from typing import Callable, Optional
 
 import decsim.config as config
-import decsim.message as message
 import decsim.records.decoding as decoding_records
 import decsim.records.identity as identity_records
+import decsim.records.program as program_records
 import decsim.records.windows as window_records
 
 
@@ -21,9 +21,9 @@ import decsim.records.windows as window_records
 class RunPlan:
     """Derived values consumed by one simulator run."""
 
-    code_geometry: message.ResolvedCodeGeometry
-    resolved_operations: tuple[message.ResolvedOperationPlanning, ...]
-    resolved_patches: tuple[message.ResolvedPatchPlanning, ...]
+    code_geometry: program_records.ResolvedCodeGeometry
+    resolved_operations: tuple[program_records.ResolvedOperationPlanning, ...]
+    resolved_patches: tuple[program_records.ResolvedPatchPlanning, ...]
     round_ticks: int
     execution: window_records.WindowPlan
     buffering: "SyndromeBufferingPlan"
@@ -48,7 +48,7 @@ class SyndromeBufferingPlan:
 
 def plan_execution(
     *,
-    operations: tuple[message.OperationPlanningView, ...],
+    operations: tuple[program_records.OperationPlanningView, ...],
     planned_operation_ids: tuple[int, ...],
     code,
     layout,
@@ -105,7 +105,7 @@ def plan_execution(
 
 
 def check_operation_graph(
-    operations: list[message.Operation],
+    operations: list[program_records.Operation],
     *,
     validate_blockers: bool = False,
     external_blocker_ids=(),
@@ -219,7 +219,7 @@ def _resolve_geometry(code, one_patch_node_count: int):
     leading, trailing = code.buffering_floor()
     commit_round_count = code.commit_rounds()
     buffer_round_count = code.buffer_rounds()
-    return message.ResolvedCodeGeometry(
+    return program_records.ResolvedCodeGeometry(
         code_name=code.name,
         distance=code.distance,
         commit_round_count=commit_round_count,
@@ -233,7 +233,7 @@ def _resolve_geometry(code, one_patch_node_count: int):
 
 def _resolve_operation(
     operation, code, layout, rounds_policy, geometry, round_ticks, base_nodes
-) -> message.ResolvedOperationPlanning:
+) -> program_records.ResolvedOperationPlanning:
     operation_code = layout.code_for_op(operation)
     if operation_code is not code:
         raise ValueError(
@@ -244,7 +244,7 @@ def _resolve_operation(
     spatial_node_count = layout.spatial_nodes_for(
         operation, base_spatial_node_count=base_nodes
     )
-    return message.ResolvedOperationPlanning(
+    return program_records.ResolvedOperationPlanning(
         operation_id=operation.id,
         code_geometry=geometry,
         round_count=round_count,
@@ -265,7 +265,7 @@ def _note_patches(operation, patches_by_key: dict) -> None:
 
 def _resolve_patches(
     patches_by_key, code, layout, geometry, round_ticks, base_nodes
-) -> list[message.ResolvedPatchPlanning]:
+) -> list[program_records.ResolvedPatchPlanning]:
     patches = []
     for patch_id in patches_by_key.values():
         patch_code = layout.code_for_patch(patch_id)
@@ -277,7 +277,7 @@ def _resolve_patches(
         spatial_node_count = layout.patch_spatial_nodes_for(
             patch_id, base_spatial_node_count=base_nodes
         )
-        planning = message.ResolvedPatchPlanning(
+        planning = program_records.ResolvedPatchPlanning(
             patch_identity=patch_id,
             code_geometry=geometry,
             round_ticks=round_ticks,
@@ -498,8 +498,8 @@ class _HoldSet:
 
 
 def _materialize_execution_plan(
-    operations: tuple[message.OperationPlanningView, ...],
-    resolved_operations: tuple[message.ResolvedOperationPlanning, ...],
+    operations: tuple[program_records.OperationPlanningView, ...],
+    resolved_operations: tuple[program_records.ResolvedOperationPlanning, ...],
     operation_window_plans: tuple[window_records.OperationWindowPlan, ...],
 ) -> window_records.WindowPlan:
     """Materialize exactly the typed scheme ledgers and direct DAG edges."""

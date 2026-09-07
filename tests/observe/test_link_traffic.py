@@ -11,12 +11,12 @@ import json
 import decsim.engine
 import decsim.links.fabric as fabric_module
 import decsim.links.settings as link_settings
-import decsim.message as message
 import decsim.observe.link_traffic as link_traffic
 import decsim.records.identity as identity_records
+import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 
-PATH = message.LinkPath
+PATH = transfer_records.LinkPath
 AGGREGATE = link_settings.QuantityBasis.AGGREGATE
 FREE_CHANNEL = link_settings.ChannelSettings("free", 0, None, "test")
 FREE_PATH = link_settings.PathSettings(FREE_CHANNEL, None, "test payload")
@@ -139,7 +139,7 @@ def ignore(_transfer):
 
 
 def round_attribution(round_index):
-    return message.TransferAttribution(
+    return transfer_records.TransferAttribution(
         operation_id=OPERATION_ID,
         patch_ids=(1, 2),
         window_id=None,
@@ -158,7 +158,7 @@ def request_key_for(window_id):
 
 
 def window_attribution(window_id, relation):
-    return message.TransferAttribution(
+    return transfer_records.TransferAttribution(
         operation_id=OPERATION_ID,
         patch_ids=(1, 2),
         window_id=window_id,
@@ -170,13 +170,13 @@ def window_attribution(window_id, relation):
 
 def requested_window(window_id):
     request_key = request_key_for(window_id)
-    relation = message.RequestTransferRelation(request_key)
+    relation = transfer_records.RequestTransferRelation(request_key)
     return window_attribution(window_id, relation)
 
 
 def boundary_attribution(window_id):
     request_key = request_key_for(window_id)
-    relation = message.BoundaryTransferRelation(
+    relation = transfer_records.BoundaryTransferRelation(
         source_request_key=request_key,
         source_window_key=(OPERATION_ID, window_id),
         destination_window_key=(OPERATION_ID, 4),
@@ -449,8 +449,8 @@ def test_a_second_listener_hears_the_same_transfers_the_ledger_counts():
     run.fabric.transfer_delivered.connect(heard.append)
     first = round_attribution(1)
     second = round_attribution(2)
-    run.send(message.LinkPath.QPU_TO_CONTROLLER, 8, 0, first)
-    run.send(message.LinkPath.QPU_TO_CONTROLLER, 8, 5, second)
+    run.send(transfer_records.LinkPath.QPU_TO_CONTROLLER, 8, 0, first)
+    run.send(transfer_records.LinkPath.QPU_TO_CONTROLLER, 8, 5, second)
     run.engine.run()
     snapshot = run.ledger.snapshot()
     assert tuple(heard) == snapshot.transfers

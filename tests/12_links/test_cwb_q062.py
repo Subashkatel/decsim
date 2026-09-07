@@ -6,6 +6,7 @@ pipeline onto it from the transmitter (decsim/controller/round_transmission.py).
 
 import pytest
 
+import decsim.records.transfers as transfer_records
 from decsim.config import microseconds_to_ticks
 from decsim.engine import Engine
 from decsim.links.fabric import LinkFabric
@@ -13,7 +14,6 @@ from decsim.links.link_profiles import (
     logical_reference_profile,
     with_controller_to_weak_buffer_path,
 )
-from decsim.message import LinkPath, TransferAttribution
 from decsim.observe.link_traffic import TrafficLedger
 
 
@@ -93,12 +93,18 @@ def test_legacy_cards_leave_optional_cwb_absent_without_changing_edge_identity()
     )
 
     assert legacy.controller_to_weak_buffer is None
-    assert LinkPath.CONTROLLER_TO_WEAK_BUFFER not in legacy.wired_paths()
+    assert (
+        transfer_records.LinkPath.CONTROLLER_TO_WEAK_BUFFER
+        not in legacy.wired_paths()
+    )
     assert not LinkFabric(legacy, Engine()).is_wired(
-        LinkPath.CONTROLLER_TO_WEAK_BUFFER
+        transfer_records.LinkPath.CONTROLLER_TO_WEAK_BUFFER
     )
     assert extended.controller_to_weak_buffer is not None
-    assert LinkPath.CONTROLLER_TO_WEAK_BUFFER in extended.wired_paths()
+    assert (
+        transfer_records.LinkPath.CONTROLLER_TO_WEAK_BUFFER
+        in extended.wired_paths()
+    )
     for path_name, edge in legacy_edges.items():
         assert getattr(extended, path_name) is edge
 
@@ -144,7 +150,7 @@ def test_cwb_traffic_uses_exact_round_attribution_payload_and_fifo_delays():
     model, ledger = _fabric_and_ledger(
         _wired_profile(latency_us=0.25, bandwidth=100.0), engine
     )
-    attribution = TransferAttribution(
+    attribution = transfer_records.TransferAttribution(
         operation_id=7,
         patch_ids=(2, 9),
         window_id=None,
@@ -154,17 +160,17 @@ def test_cwb_traffic_uses_exact_round_attribution_payload_and_fifo_delays():
 
     delivered = []
     model.send(
-        LinkPath.CONTROLLER_TO_WEAK_BUFFER,
+        transfer_records.LinkPath.CONTROLLER_TO_WEAK_BUFFER,
         300,
         10,
         attribution,
         delivered.append,
     )
     model.send(
-        LinkPath.CONTROLLER_TO_WEAK_BUFFER,
+        transfer_records.LinkPath.CONTROLLER_TO_WEAK_BUFFER,
         200,
         10,
-        TransferAttribution(
+        transfer_records.TransferAttribution(
             operation_id=7,
             patch_ids=(2, 9),
             window_id=None,
@@ -209,9 +215,9 @@ def test_finite_cwb_bandwidth_charges_serialization_plus_propagation():
     reservation = _send(
         engine,
         model,
-        LinkPath.CONTROLLER_TO_WEAK_BUFFER,
+        transfer_records.LinkPath.CONTROLLER_TO_WEAK_BUFFER,
         500,
-        TransferAttribution(
+        transfer_records.TransferAttribution(
             operation_id=1,
             patch_ids=(0,),
             window_id=None,
@@ -233,10 +239,10 @@ def test_unbounded_cwb_bandwidth_charges_propagation_only():
 
     delivered = []
     model.send(
-        LinkPath.CONTROLLER_TO_WEAK_BUFFER,
+        transfer_records.LinkPath.CONTROLLER_TO_WEAK_BUFFER,
         500,
         0,
-        TransferAttribution(
+        transfer_records.TransferAttribution(
             operation_id=1,
             patch_ids=(0,),
             window_id=None,
@@ -246,10 +252,10 @@ def test_unbounded_cwb_bandwidth_charges_propagation_only():
         delivered.append,
     )
     model.send(
-        LinkPath.CONTROLLER_TO_WEAK_BUFFER,
+        transfer_records.LinkPath.CONTROLLER_TO_WEAK_BUFFER,
         500,
         0,
-        TransferAttribution(
+        transfer_records.TransferAttribution(
             operation_id=1,
             patch_ids=(0,),
             window_id=None,
@@ -271,12 +277,12 @@ def test_rounds_pipeline_on_cwb_instead_of_stop_and_wait():
     """Fast rounds arrive at Buffer 0 spaced by the round period, not by the CWB
     latency: the link serializes them FIFO and propagation is pipelined."""
     stim = pytest.importorskip("stim")
+    import decsim.records.program as program_records
     from decsim.config import TICKS_PER_MICROSECOND
     from decsim.decoders.decoders import PresetLatencyDecoder
     from decsim.decoders.settings import DecoderSettings
     from decsim.frontends.settings import WorkloadSettings
     from decsim.machine import Machine, MachineSettings
-    from decsim.message import Operation
     from decsim.qpu.round_policies import FixedRounds
     from decsim.qpu.settings import QpuSettings
     from decsim.qpu.stim_device import StimDevice
@@ -290,7 +296,7 @@ def test_rounds_pipeline_on_cwb_instead_of_stop_and_wait():
         after_reset_flip_probability=0.001,
         before_round_data_depolarization=0.001,
     )
-    op = Operation(
+    op = program_records.Operation(
         id=1, name="memory", qubits=(0,), patches=(0,), circuit=circuit
     )
     settings = MachineSettings(

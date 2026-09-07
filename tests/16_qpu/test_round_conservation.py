@@ -29,8 +29,8 @@ import random
 
 import pytest
 
+import decsim.records.program as program_records
 from decsim.engine import Engine
-from decsim.message import Operation, RunOperationBody
 from decsim.qpu.cycle_clock import QPUDevice
 from decsim.qpu.syndrome_devices import TimingOnlyDevice
 
@@ -70,7 +70,7 @@ def _qpu(cycle):
 
 
 def _operation(op_id, patch, emits=True):
-    return Operation(
+    return program_records.Operation(
         id=op_id,
         name=f"op{op_id}",
         qubits=(patch,),
@@ -126,7 +126,7 @@ def _run_schedule(cycle, schedule, rng):
     for patch, ops in schedule.items():
         for op_id, start, rounds, emits in ops:
             operation = _operation(op_id, patch, emits=emits)
-            body = RunOperationBody(
+            body = program_records.RunOperationBody(
                 operation, cycle, rounds, rounds, emits_detector_data=emits
             )
             issue_tick = rng.randint(max(0, start - cycle + 1), start)
@@ -209,7 +209,7 @@ def test_long_event_jump_cannot_skip_rounds():
     cycle = 1000
     engine, qpu, capture = _qpu(cycle)
     operation = _operation(1, 0)
-    qpu.issue(RunOperationBody(operation, cycle, 3, 3))
+    qpu.issue(program_records.RunOperationBody(operation, cycle, 3, 3))
     engine.schedule(7777, lambda: None, label="noise")  # mid-cycle
     engine.schedule(10500, qpu.finish)
     engine.run()
@@ -232,17 +232,22 @@ def test_non_emitting_body_occupies_cycles_without_rounds():
     detector rounds resume with no skipped or extra boundary."""
     cycle = 10
     engine, qpu, capture = _qpu(cycle)
-    qpu.issue(RunOperationBody(_operation(1, 0), cycle, 2, 2))
+    qpu.issue(program_records.RunOperationBody(_operation(1, 0), cycle, 2, 2))
     silent = _operation(2, 0, emits=False)
     engine.schedule(
         25,
         lambda: qpu.issue(
-            RunOperationBody(silent, cycle, 3, 3, emits_detector_data=False)
+            program_records.RunOperationBody(
+                silent, cycle, 3, 3, emits_detector_data=False
+            )
         ),
     )
     emitter = _operation(3, 0)
     engine.schedule(
-        65, lambda: qpu.issue(RunOperationBody(emitter, cycle, 1, 1))
+        65,
+        lambda: qpu.issue(
+            program_records.RunOperationBody(emitter, cycle, 1, 1)
+        ),
     )
     engine.schedule(85, qpu.finish)
     engine.run()
@@ -262,8 +267,10 @@ def test_multi_patch_operation_attributes_rounds_to_its_first_patch():
     idle-extract individually after the body completes."""
     cycle = 10
     engine, qpu, capture = _qpu(cycle)
-    merge = Operation(id=1, name="merge", qubits=(0, 1), patches=(0, 1))
-    qpu.issue(RunOperationBody(merge, cycle, 2, 2))
+    merge = program_records.Operation(
+        id=1, name="merge", qubits=(0, 1), patches=(0, 1)
+    )
+    qpu.issue(program_records.RunOperationBody(merge, cycle, 2, 2))
     engine.schedule(45, qpu.finish)
     engine.run()
 

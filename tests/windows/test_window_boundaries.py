@@ -13,7 +13,7 @@ import types
 import decsim.engine as engine_module
 import decsim.links.fabric as fabric
 import decsim.links.link_profiles as link_profiles
-import decsim.message as message
+import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.windows.window_boundaries as window_boundaries
 import decsim.windows.window_interactions as window_interactions
@@ -31,7 +31,7 @@ _EAGER = _EagerPolicy()
 
 def test_a_stale_delivery_is_ignored_and_the_edge_releases_once():
     engine = engine_module.Engine()
-    operation = message.Operation(
+    operation = program_records.Operation(
         id=1, name="memory", qubits=(0,), patches=(0,)
     )
     source = window_records.Window(

@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 
 import decsim.records.decoding as decoding_records
+import decsim.records.program as program_records
 import decsim.records.windows as window_records
 from decsim.config import TICKS_PER_MICROSECOND
 from decsim.frontends.planner import (
@@ -17,13 +18,6 @@ from decsim.frontends.planner import (
     check_operation_graph,
     check_workload_identity,
     plan_execution,
-)
-from decsim.message import (
-    Operation,
-    OperationPlanningView,
-    OpKind,
-    ResolvedCodeGeometry,
-    ResolvedOperationPlanning,
 )
 from decsim.qpu.round_policies import (
     CodeRounds,
@@ -44,9 +38,9 @@ def operation(
     stream_id=None,
     emits_detector_data=True,
     blocked_by=None,
-    kind=OpKind.GENERIC,
+    kind=program_records.OpKind.GENERIC,
 ):
-    return Operation(
+    return program_records.Operation(
         id=operation_id,
         name=f"operation-{operation_id}",
         qubits=qubits,
@@ -61,11 +55,11 @@ def operation(
 
 
 def planning_view(value):
-    return OperationPlanningView.from_operation(value)
+    return program_records.OperationPlanningView.from_operation(value)
 
 
 def geometry(name="surface"):
-    return ResolvedCodeGeometry(
+    return program_records.ResolvedCodeGeometry(
         code_name=name,
         distance=3,
         commit_round_count=2,
@@ -78,7 +72,7 @@ def geometry(name="surface"):
 
 
 def resolved(operation_id, *, rounds=4, nodes=10, name="surface"):
-    return ResolvedOperationPlanning(
+    return program_records.ResolvedOperationPlanning(
         operation_id=operation_id,
         code_geometry=geometry(name),
         round_count=rounds,
@@ -464,11 +458,11 @@ def test_gate_rounds_apply_operation_kind_and_qubit_arity_costs():
     code = SimpleNamespace(distance=5)
     policy = GateRounds(merge_step_count=3)
     expected = {
-        OpKind.MEASURE: 1,
-        OpKind.INJECT: 1,
-        OpKind.MERGE: 15,
-        OpKind.IDLE: 5,
-        OpKind.MEMORY: 5,
+        program_records.OpKind.MEASURE: 1,
+        program_records.OpKind.INJECT: 1,
+        program_records.OpKind.MERGE: 15,
+        program_records.OpKind.IDLE: 5,
+        program_records.OpKind.MEMORY: 5,
     }
     for kind, round_count in expected.items():
         assert policy.rounds_for(operation(1, kind=kind), code) == round_count
@@ -483,9 +477,19 @@ def test_temporal_rounds_override_merges_and_delegate_other_operations():
     """Temporal rounds replace merge distance while delegating all other operation kinds."""
     fallback = SimpleNamespace(rounds_for=lambda value, code: 13)
     policy = TemporalRounds(7, base=fallback)
-    assert policy.rounds_for(operation(1, kind=OpKind.MERGE), object()) == 7
+    assert (
+        policy.rounds_for(
+            operation(1, kind=program_records.OpKind.MERGE), object()
+        )
+        == 7
+    )
     assert policy.rounds_for(operation(2, qubits=(0, 1)), object()) == 7
-    assert policy.rounds_for(operation(3, kind=OpKind.MEASURE), object()) == 13
+    assert (
+        policy.rounds_for(
+            operation(3, kind=program_records.OpKind.MEASURE), object()
+        )
+        == 13
+    )
     assert TemporalRounds(True).temporal_distance == 1
     with pytest.raises(ValueError):
         TemporalRounds(0)
@@ -510,7 +514,7 @@ def test_execution_planning_resolves_geometry_patches_seams_and_graph():
     )
 
     assert plan.round_ticks == 2_500_000
-    assert plan.code_geometry == ResolvedCodeGeometry(
+    assert plan.code_geometry == program_records.ResolvedCodeGeometry(
         code_name="surface",
         distance=3,
         commit_round_count=2,

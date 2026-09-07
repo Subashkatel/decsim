@@ -70,7 +70,6 @@ import decsim.frontends.settings as workload_settings
 import decsim.links.fabric as fabric
 import decsim.links.link_profiles as link_profiles
 import decsim.links.settings as link_settings
-import decsim.message as message
 import decsim.observe.link_traffic as link_traffic
 import decsim.observe.observation as observation_module
 import decsim.observe.settings as observe_settings
@@ -84,6 +83,7 @@ import decsim.qpu.settings as qpu_settings
 import decsim.qpu.stim_device as stim_device
 import decsim.qpu.syndrome_devices as syndrome_devices
 import decsim.records.decoding as decoding_records
+import decsim.records.program as program_records
 import decsim.records.seeds as seed_records
 import decsim.records.windows as window_records
 import decsim.seeding as seeding
@@ -773,7 +773,7 @@ def _plan(settings: MachineSettings, escalation_policy) -> _Plan:
     all_operations = _unique_operations(every_operation)
     views = []
     for operation in all_operations:
-        view = message.OperationPlanningView.from_operation(operation)
+        view = program_records.OperationPlanningView.from_operation(operation)
         views.append(view)
     views = tuple(views)
     view_by_id = {}
@@ -1558,7 +1558,7 @@ def _load_program(
     window_manager.install_planned_holds(run_plan.buffering)
     for stream in plan.dynamic_streams:
         window_manager.register_stream(stream)
-    program = message.ExecutionProgram(
+    program = program_records.ExecutionProgram(
         plan.operations,
         plan.decode_operations,
         plan.dynamic_streams,

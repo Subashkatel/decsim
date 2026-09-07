@@ -508,18 +508,18 @@ def _feedback_chain(idle_policy=None):
     idles the patch while T0's last window waits for its trailing buffer,
     exactly SWIPER Fig. 1 / Bombin's stall. Mirrors the refactor-lock
     feedback_chain spec."""
+    import decsim.records.program as program_records
     from decsim.decoders.decoders import PresetLatencyDecoder
     from decsim.frontends.circuit_frontend import CircuitFrontend
-    from decsim.message import Operation
     from decsim.qpu.code_geometry import SurfaceCodeModel
     from decsim.qpu.round_policies import FixedRounds
 
     ops = CircuitFrontend(
         [
-            Operation(
+            program_records.Operation(
                 0, "T0", (0,), clifford=False, consumes_magic_state=False
             ),
-            Operation(
+            program_records.Operation(
                 1,
                 "T1",
                 (0,),
@@ -605,15 +605,17 @@ def test_single_operation_run_charges_no_idle_work():
     """A workload whose one op keeps its patch busy every round emits no idle
     rounds, so the charged default is inert there: the single-op experiment
     sweeps are unchanged by the policy flip."""
+    import decsim.records.program as program_records
     from decsim.decoders.decoders import PresetLatencyDecoder
     from decsim.frontends.circuit_frontend import CircuitFrontend
-    from decsim.message import Operation
     from decsim.qpu.code_geometry import SurfaceCodeModel
     from decsim.qpu.round_policies import FixedRounds
 
     ops = CircuitFrontend(
         [
-            Operation(0, "M", (0,), clifford=True, consumes_magic_state=False),
+            program_records.Operation(
+                0, "M", (0,), clifford=True, consumes_magic_state=False
+            ),
         ]
     ).build()
     settings = MachineSettings(

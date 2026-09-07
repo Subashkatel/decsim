@@ -18,7 +18,7 @@ import fractions
 import math
 from typing import Optional, Union
 
-import decsim.message as message
+import decsim.records.transfers as transfer_records
 
 
 class QuantityBasis(str, enum.Enum):
@@ -210,7 +210,7 @@ class FabricSettings:
         A card that leaves out a required path is refused.
         """
         wired_paths = []
-        for path in message.LinkPath:
+        for path in transfer_records.LinkPath:
             path_settings = getattr(self, path.value)
             if path_settings is not None:
                 wired_paths.append(path)
@@ -219,7 +219,7 @@ class FabricSettings:
                 raise ValueError(f"{path.value} is a required link path")
         return tuple(wired_paths)
 
-    def path_settings(self, path: message.LinkPath) -> PathSettings:
+    def path_settings(self, path: transfer_records.LinkPath) -> PathSettings:
         """The setting of one wired path."""
         return getattr(self, path.value)
 

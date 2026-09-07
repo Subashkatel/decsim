@@ -112,7 +112,7 @@ from decsim.decoders.minimum_weight_perfect_matching.decoder import PyMatchingDe
 from decsim.decoders.settings import DecoderSettings
 from decsim.frontends.settings import WorkloadSettings
 from decsim.machine import Machine, MachineSettings
-from decsim.message import Operation
+from decsim.records.program import Operation
 from decsim.qpu.round_policies import FixedRounds
 from decsim.qpu.settings import QpuSettings
 from decsim.qpu.stim_device import StimDevice
@@ -180,7 +180,7 @@ its `kind`, a row of the tables at the top of `decsim/machine.py`.
 
 - `machine.py`: the root; `Machine.build(MachineSettings(...), seed)` builds every component and wires it, `Machine.run()` returns the `RunResult`.
 - `engine.py`: the discrete-event core (integer ticks, 1 tick = 1e-6 us).
-- `message.py`, `ports.py`: the typed objects that flow between components, and the ports (one Protocol per handoff) a component implements.
+- `records/`, `ports.py`: the frozen values that flow between components, one module per record family, and the ports (one Protocol per handoff) a component implements.
 - `qpu/`: codes and layouts, round policies, cycle clock, Stim devices, magic-state factories.
 - `controller/`: readout handling, detector formation at ingress, feedback streams.
 - `links/`: link cards with latency, bandwidth, and traffic accounting per path.

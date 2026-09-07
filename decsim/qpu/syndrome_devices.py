@@ -14,9 +14,9 @@ the payload path end to end without Stim.
 from typing import Any, Optional
 
 import decsim.detector_error_model.fault_model_contracts as fault_models
-import decsim.message as message
 import decsim.observe.trace_source as trace_source
 import decsim.qpu.code_geometry as code_geometry
+import decsim.records.program as program_records
 import decsim.records.rounds as round_records
 import decsim.records.seeds as seed_records
 import decsim.records.windows as window_records
@@ -35,14 +35,14 @@ class TimingOnlyDevice:
 
     def begin_operation(
         self,
-        operation: message.Operation,
+        operation: program_records.Operation,
         segment_round_count: int,
         source_round_count: int,
     ) -> None:
         """Nothing to sample."""
 
     def round_payloads(
-        self, operation: message.Operation, round_index: int
+        self, operation: program_records.Operation, round_index: int
     ) -> list[round_records.QPUReadout]:
         """One bitless payload on the operation's first patch."""
         target, global_round = _stream_target_and_global_round(
@@ -53,7 +53,7 @@ class TimingOnlyDevice:
 
     def idle_round_payloads(
         self,
-        operation: message.Operation,
+        operation: program_records.Operation,
         stream_id: Any,
         global_round: int,
         patch: Any,
@@ -63,7 +63,7 @@ class TimingOnlyDevice:
         return [round_records.QPUReadout(stream_id, patch, global_round)]
 
     def finalize_stream_round(
-        self, operation: message.Operation, source_round_count: int
+        self, operation: program_records.Operation, source_round_count: int
     ) -> list[round_records.QPUReadout]:
         """Refused: a stream without a circuit has no final readout."""
         del operation, source_round_count
@@ -71,7 +71,7 @@ class TimingOnlyDevice:
 
     def register_dynamic_stream(
         self,
-        stream_operation: message.Operation,
+        stream_operation: program_records.Operation,
         round_count: int,
         *,
         fault_model_requirement: fault_models.DecoderFaultModelRequirement,
@@ -79,13 +79,15 @@ class TimingOnlyDevice:
         """No circuit, so no fixed stream length."""
 
     def validate_stream_length(
-        self, stream_operation: message.Operation, stream_round_count: int
+        self,
+        stream_operation: program_records.Operation,
+        stream_round_count: int,
     ) -> None:
         """No circuit, so any length is fine."""
 
     def window_models_for_operation(
         self,
-        operation: message.Operation,
+        operation: program_records.Operation,
         windows: list[window_records.Window],
         round_count: int,
         *,
@@ -105,7 +107,7 @@ class TimingOnlyDevice:
 
     def strong_window_model_for_operation(
         self,
-        operation: message.Operation,
+        operation: program_records.Operation,
         window: window_records.Window,
         round_count: int,
         *,
@@ -116,7 +118,7 @@ class TimingOnlyDevice:
 
     def strong_window_model_for_operation_with_exclusions(
         self,
-        operation: message.Operation,
+        operation: program_records.Operation,
         window: window_records.Window,
         round_count: int,
         *,
@@ -152,14 +154,14 @@ class SyndromeBitDevice(seeding._RandomSeedConsumer):
 
     def begin_operation(
         self,
-        operation: message.Operation,
+        operation: program_records.Operation,
         segment_round_count: int,
         source_round_count: int,
     ) -> None:
         """Nothing to sample ahead of time."""
 
     def round_payloads(
-        self, operation: message.Operation, round_index: int
+        self, operation: program_records.Operation, round_index: int
     ) -> list[round_records.QPUReadout]:
         """One payload per patch, or one payload covering every patch."""
         target, global_round = _stream_target_and_global_round(
@@ -176,7 +178,7 @@ class SyndromeBitDevice(seeding._RandomSeedConsumer):
 
     def idle_round_payloads(
         self,
-        operation: message.Operation,
+        operation: program_records.Operation,
         stream_id: Any,
         global_round: int,
         patch: Any,
@@ -187,7 +189,7 @@ class SyndromeBitDevice(seeding._RandomSeedConsumer):
         return [self._payload(stream_id, patch, global_round, bits)]
 
     def finalize_stream_round(
-        self, operation: message.Operation, source_round_count: int
+        self, operation: program_records.Operation, source_round_count: int
     ) -> list[round_records.QPUReadout]:
         """Refused: a stream without a circuit has no final readout."""
         del operation, source_round_count
@@ -195,7 +197,7 @@ class SyndromeBitDevice(seeding._RandomSeedConsumer):
 
     def register_dynamic_stream(
         self,
-        stream_operation: message.Operation,
+        stream_operation: program_records.Operation,
         round_count: int,
         *,
         fault_model_requirement: fault_models.DecoderFaultModelRequirement,
@@ -203,13 +205,15 @@ class SyndromeBitDevice(seeding._RandomSeedConsumer):
         """No circuit, so no fixed stream length."""
 
     def validate_stream_length(
-        self, stream_operation: message.Operation, stream_round_count: int
+        self,
+        stream_operation: program_records.Operation,
+        stream_round_count: int,
     ) -> None:
         """No circuit, so any length is fine."""
 
     def window_models_for_operation(
         self,
-        operation: message.Operation,
+        operation: program_records.Operation,
         windows: list[window_records.Window],
         round_count: int,
         *,
@@ -229,7 +233,7 @@ class SyndromeBitDevice(seeding._RandomSeedConsumer):
 
     def strong_window_model_for_operation(
         self,
-        operation: message.Operation,
+        operation: program_records.Operation,
         window: window_records.Window,
         round_count: int,
         *,
@@ -240,7 +244,7 @@ class SyndromeBitDevice(seeding._RandomSeedConsumer):
 
     def strong_window_model_for_operation_with_exclusions(
         self,
-        operation: message.Operation,
+        operation: program_records.Operation,
         window: window_records.Window,
         round_count: int,
         *,
@@ -268,7 +272,10 @@ class SyndromeBitDevice(seeding._RandomSeedConsumer):
         )
 
     def _payload_per_patch(
-        self, operation: message.Operation, target: Any, global_round: int
+        self,
+        operation: program_records.Operation,
+        target: Any,
+        global_round: int,
     ) -> list[round_records.QPUReadout]:
         patches = operation.patches
         if not patches:
@@ -282,7 +289,7 @@ class SyndromeBitDevice(seeding._RandomSeedConsumer):
 
 
 def _stream_target_and_global_round(
-    operation: message.Operation, round_index: int
+    operation: program_records.Operation, round_index: int
 ) -> tuple:
     """The decode identity and global round of one operation round.
 
@@ -299,7 +306,7 @@ def _stream_target_and_global_round(
     return target, global_round
 
 
-def _first_patch_of(operation: message.Operation) -> Any:
+def _first_patch_of(operation: program_records.Operation) -> Any:
     if operation.patches:
         return operation.patches[0]
     return operation.qubits[0]

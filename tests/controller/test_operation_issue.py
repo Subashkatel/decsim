@@ -14,9 +14,9 @@ import decsim.controller.feedback_streams as feedback_streams
 import decsim.controller.instruction_output as instruction_output
 import decsim.controller.operation_issue as operation_issue
 import decsim.engine as engine_module
-import decsim.message as message
 import decsim.observe.log_writers as log_writers
 import decsim.observe.round_events as round_events
+import decsim.records.program as program_records
 
 BOUNDARY_TICK = 3000
 PULSE_TICKS = 17
@@ -92,7 +92,7 @@ def test_a_preloaded_operation_starts_at_the_next_boundary_and_says_so():
     windows = RecordingWindows()
     recorder = round_events.RoundEventRecorder(engine)
     issuer = issuer_with(engine, qpu, idle_rounds, windows, recorder)
-    operation = message.Operation(1, "memory", (0,), patches=(0,))
+    operation = program_records.Operation(1, "memory", (0,), patches=(0,))
     started = []
 
     issuer.issue_operation(operation, started.append)
@@ -118,7 +118,7 @@ def test_the_idle_rounds_claimed_at_the_issue_are_prepended_for_the_windows():
     windows = RecordingWindows()
     recorder = None
     issuer = issuer_with(engine, qpu, idle_rounds, windows, recorder)
-    operation = message.Operation(1, "memory", (0,), patches=(0,))
+    operation = program_records.Operation(1, "memory", (0,), patches=(0,))
 
     issuer.issue_operation(operation, ignore_boundary)
 
@@ -132,7 +132,7 @@ def test_a_feedback_blocked_operation_pays_the_pulse_cost_before_it_starts():
     windows = RecordingWindows()
     recorder = round_events.RoundEventRecorder(engine)
     issuer = issuer_with(engine, qpu, idle_rounds, windows, recorder)
-    operation = message.Operation(
+    operation = program_records.Operation(
         2, "corrected", (0,), patches=(0,), blocked_by=1
     )
     started = []
@@ -159,7 +159,7 @@ def test_the_last_release_stops_the_qpu():
     windows = RecordingWindows()
     recorder = None
     issuer = issuer_with(engine, qpu, idle_rounds, windows, recorder)
-    operation = message.Operation(1, "memory", (0,), patches=(0,))
+    operation = program_records.Operation(1, "memory", (0,), patches=(0,))
 
     issuer.after_successor_release(operation, False, False)
     running = qpu.finished

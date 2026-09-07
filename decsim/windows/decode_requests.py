@@ -18,10 +18,11 @@ import dataclasses
 import functools
 from typing import Callable, Optional
 
-import decsim.message as message
 import decsim.observe.trace_source as trace_source
 import decsim.records.decoding as decoding_records
 import decsim.records.identity as identity_records
+import decsim.records.program as program_records
+import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 
 
@@ -68,7 +69,9 @@ class DecodeRequestBuilder:
         window.t_first_round = store.publication_tick(first_round_key)
 
     def note_data_complete(
-        self, window: window_records.Window, operation: message.Operation
+        self,
+        window: window_records.Window,
+        operation: program_records.Operation,
     ) -> None:
         """Stamp the window's data-complete tick the first time it is seen.
 
@@ -91,7 +94,7 @@ class DecodeRequestBuilder:
     def build(
         self,
         window: window_records.Window,
-        operation: message.Operation,
+        operation: program_records.Operation,
         tier: window_records.DecoderTier,
         store,
     ) -> decoding_records.DecodeJob:
@@ -160,7 +163,7 @@ class DecodeRequestBuilder:
         return payloads
 
     def input_send(
-        self, job: decoding_records.DecodeJob, path: message.LinkPath
+        self, job: decoding_records.DecodeJob, path: transfer_records.LinkPath
     ) -> Callable[[Callable[[], None]], int]:
         """The job's input send: at dispatch it rides the path into the unit.
 
@@ -233,7 +236,9 @@ class DecodeRequestBuilder:
     # ---- private
 
     def _job_label(
-        self, window: window_records.Window, operation: message.Operation
+        self,
+        window: window_records.Window,
+        operation: program_records.Operation,
     ) -> str:
         if self.planner.is_windowed(window.op_id):
             return (
@@ -284,7 +289,7 @@ class DecodeRequestBuilder:
     def _send_input(
         self,
         job: decoding_records.DecodeJob,
-        path: message.LinkPath,
+        path: transfer_records.LinkPath,
         payload_bits: Optional[int],
         on_landed: Callable[[], None],
     ) -> int:
@@ -376,7 +381,7 @@ class DecodeRequester:
     def request(
         self,
         window: window_records.Window,
-        operation: message.Operation,
+        operation: program_records.Operation,
         strong_redecode,
     ) -> None:
         """Build the primary job, ask the policy its tiers, enqueue each.

@@ -16,9 +16,9 @@ from typing import Callable, Optional
 
 import decsim.confidence.complementary as complementary
 import decsim.decoders.decode_queue as decode_queue
-import decsim.message as message
 import decsim.observe.trace_source as trace_source
 import decsim.records.decoding as decoding_records
+import decsim.records.transfers as transfer_records
 
 # the structure the sibling's own copy of the rounds lands in
 GAP_SIBLING_INPUT = "gap sibling input"
@@ -193,8 +193,8 @@ class GapJoins:
         # the link attribution is the window's, so the transfer rides
         # the primary job's window identity; the landing is the
         # sibling's own
-        path = message.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER
-        attribution = message.TransferAttribution.for_job(
+        path = transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER
+        attribution = transfer_records.TransferAttribution.for_job(
             primary, primary.request_key
         )
         now_ticks = self.engine.now

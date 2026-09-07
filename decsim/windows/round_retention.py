@@ -22,8 +22,8 @@ that allocates a miss buffer and the queue that holds the entry
 import functools
 from typing import Optional
 
-import decsim.message as message
 import decsim.records.decoding as decoding_records
+import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 
 
@@ -61,11 +61,11 @@ class RoundRetention:
         return self.weak_store
 
     @property
-    def primary_input_path(self) -> message.LinkPath:
+    def primary_input_path(self) -> transfer_records.LinkPath:
         """The link the primary tier's input rides into its unit."""
         if self.primary_tier is window_records.DecoderTier.WEAK:
-            return message.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER
-        return message.LinkPath.STRONG_BUFFER_TO_STRONG_DECODER
+            return transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER
+        return transfer_records.LinkPath.STRONG_BUFFER_TO_STRONG_DECODER
 
     def store_for(self, store):
         """The given store, or Buffer 0 when none is named."""

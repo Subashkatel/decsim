@@ -19,7 +19,7 @@ from typing import Callable, Optional
 
 import decsim.config as config
 import decsim.links.settings as settings
-import decsim.message as message
+import decsim.records.transfers as transfer_records
 
 # A decoder result reaches the frame as one bit per logical observable, the
 # logical-frame convention: Caune et al. 2410.05202 return one Boolean per
@@ -272,7 +272,7 @@ def from_yaml(
     """
     source = f"configs/{name}.yaml links"
     path_names = []
-    for path in message.LinkPath:
+    for path in transfer_records.LinkPath:
         path_names.append(path.value)
     for path_name in section:
         if path_name not in path_names:

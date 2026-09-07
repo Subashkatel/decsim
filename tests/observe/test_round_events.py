@@ -8,8 +8,8 @@ round_stored sources and never schedules or decides.
 import functools
 
 import decsim.engine as engine_module
-import decsim.message as message
 import decsim.observe.round_events as round_events
+import decsim.records.program as program_records
 import decsim.records.rounds as round_records
 
 
@@ -50,7 +50,7 @@ def test_a_dropped_round_is_counted_and_kept_as_dropped():
 def test_an_output_event_carries_the_payload_itself():
     engine = engine_module.Engine()
     recorder = round_events.RoundEventRecorder(engine)
-    decision = message.Decision(9, releases_operation=False)
+    decision = program_records.Decision(9, releases_operation=False)
     event = round_records.ControllerOutputEvent(
         "DECISION_AVAILABLE", 0, 9, decision
     )

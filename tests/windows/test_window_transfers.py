@@ -7,8 +7,9 @@ result reaches the frame as one bit per logical observable.
 import decsim.engine as engine_module
 import decsim.links.fabric as fabric
 import decsim.links.link_profiles as link_profiles
-import decsim.message as message
 import decsim.records.decoding as decoding_records
+import decsim.records.program as program_records
+import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 import decsim.windows.window_transfers as window_transfers
 
@@ -29,7 +30,7 @@ def test_a_window_send_carries_its_round_range_and_request_key():
     engine = engine_module.Engine()
     link = _RecordingLink()
     transfers = window_transfers.WindowTransfers(engine, link)
-    operation = message.Operation(1, "memory", (0,), patches=(3, 2))
+    operation = program_records.Operation(1, "memory", (0,), patches=(3, 2))
     window = window_records.Window(
         op_id=1,
         k=4,
@@ -44,7 +45,7 @@ def test_a_window_send_carries_its_round_range_and_request_key():
     )
     delivered = []
     transfers.send_for_window(
-        message.LinkPath.WEAK_DECODER_TO_FRAME,
+        transfer_records.LinkPath.WEAK_DECODER_TO_FRAME,
         window,
         operation,
         request_key,
@@ -52,7 +53,7 @@ def test_a_window_send_carries_its_round_range_and_request_key():
         lambda: delivered.append(engine.now),
     )
     (path, payload_bits, now_ticks, attribution) = link.sent[0]
-    assert path is message.LinkPath.WEAK_DECODER_TO_FRAME
+    assert path is transfer_records.LinkPath.WEAK_DECODER_TO_FRAME
     assert payload_bits == 2
     assert now_ticks == 0
     assert attribution.window_id == 4
@@ -76,7 +77,7 @@ def test_a_job_send_returns_the_delay_the_link_expects():
         op_id=1, window_id=0, n_rounds=5, window=window, request_key=request_key
     )
     expected = transfers.send_for_job(
-        message.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER,
+        transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER,
         job,
         payload_bits=40,
         on_delivered=lambda: None,
@@ -88,7 +89,7 @@ def test_a_job_send_returns_the_delay_the_link_expects():
 
 
 def test_a_result_is_one_bit_per_logical_observable():
-    operation = message.Operation(1, "memory", (0,), patches=(0, 1, 2))
+    operation = program_records.Operation(1, "memory", (0,), patches=(0, 1, 2))
     with_bits = decoding_records.DecodeResult(1, 0, logical_observables=(0, 1))
     assert window_transfers.result_payload_bits(with_bits, operation) == 2
     timing_only = decoding_records.DecodeResult(1, 0)

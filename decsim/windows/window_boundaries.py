@@ -15,8 +15,9 @@ import dataclasses
 import functools
 from typing import Callable, Optional
 
-import decsim.message as message
 import decsim.records.decoding as decoding_records
+import decsim.records.program as program_records
+import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 
 
@@ -25,7 +26,7 @@ class HeldBoundary:
     """A boundary kept back until the window's result is final (Held)."""
 
     source_request_key: window_records.DecoderRequestKey
-    operation: message.Operation
+    operation: program_records.Operation
     boundary: object
 
 
@@ -54,7 +55,7 @@ class BoundaryCourier:
     def hand_on(
         self,
         window: window_records.Window,
-        operation: message.Operation,
+        operation: program_records.Operation,
         result: decoding_records.DecodeResult,
         request_key: window_records.DecoderRequestKey,
         is_final: bool,
@@ -127,7 +128,7 @@ class BoundaryCourier:
     def send(
         self,
         window: window_records.Window,
-        operation: message.Operation,
+        operation: program_records.Operation,
         boundary,
         *,
         source_request_key: window_records.DecoderRequestKey,
@@ -220,7 +221,7 @@ class BoundaryCourier:
     def _send_one(
         self,
         window: window_records.Window,
-        operation: message.Operation,
+        operation: program_records.Operation,
         boundary,
         source_request_key: window_records.DecoderRequestKey,
         dependent_key: tuple,
@@ -228,10 +229,10 @@ class BoundaryCourier:
         delivery_version: int,
     ) -> None:
         """One delivery over decoder_to_decoder, received at its landing."""
-        window_attribution = message.TransferAttribution.for_window(
+        window_attribution = transfer_records.TransferAttribution.for_window(
             window, operation, source_request_key
         )
-        relation = message.BoundaryTransferRelation(
+        relation = transfer_records.BoundaryTransferRelation(
             source_request_key,
             window.key,
             dependent_key,

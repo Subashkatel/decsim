@@ -6,8 +6,8 @@ import pytest
 
 import decsim.frontends.execution_runtime as execution_runtime
 import decsim.observe.runtime_stamps as runtime_stamps_module
+import decsim.records.program as program_records
 from decsim.frontends.execution_runtime import ExecutionRuntime
-from decsim.message import Decision, ExecutionProgram, Operation, ResourceClaim
 
 
 class RecordingEngine:
@@ -99,7 +99,7 @@ class RecordingFactory:
 
 
 def make_operation(operation_id, *, name=None, qubits=(), **changes):
-    return Operation(
+    return program_records.Operation(
         operation_id, name or f"operation-{operation_id}", qubits, **changes
     )
 
@@ -182,7 +182,7 @@ def test_construction_preserves_collaborators_and_shallow_copies_claim_mapping()
     assert runtime.resources.claims_by_operation_id[operation.id] is claim_list
     supplied_claims[2] = []
     assert 2 not in runtime.resources.claims_by_operation_id
-    claim_list.append(ResourceClaim("qubit", frozenset({"q"})))
+    claim_list.append(program_records.ResourceClaim("qubit", frozenset({"q"})))
     assert runtime.resources.claims_by_operation_id[operation.id] == claim_list
     with pytest.raises(TypeError):
         runtime.resources.claims_by_operation_id[3] = []
@@ -240,7 +240,7 @@ def test_deleted_lifecycle_latches_are_not_part_of_the_runtime_surface():
 
     for name in ("started", "done_bodies"):
         assert not hasattr(runtime, name)
-    runtime.load_program(ExecutionProgram((operation,)))
+    runtime.load_program(program_records.ExecutionProgram((operation,)))
     runtime.body_done(operation)
     for name in ("started", "done_bodies"):
         assert not hasattr(runtime, name)
@@ -255,11 +255,13 @@ def test_the_lifecycle_id_sets_are_the_only_membership_record():
     )
     controller.allowed[2] = False
 
-    runtime.load_program(ExecutionProgram((root, blocked_successor)))
+    runtime.load_program(
+        program_records.ExecutionProgram((root, blocked_successor))
+    )
     engine.now = 1
     runtime.body_done(root)
     engine.now = 2
-    runtime.on_decision(Decision(2, releases_operation=True))
+    runtime.on_decision(program_records.Decision(2, releases_operation=True))
     controller.allowed[2] = True
     runtime.retry_ready_operations()
     engine.now = 3
@@ -317,7 +319,7 @@ def test_the_lifecycle_id_sets_are_the_only_membership_record():
 def test_empty_program_completes_physically():
     """An empty loaded program is complete."""
     runtime, engine, controller, factory, _ = make_runtime()
-    program = ExecutionProgram(
+    program = program_records.ExecutionProgram(
         (),
         decode_operations=(object(),),
         dynamic_streams=(object(),),
@@ -334,7 +336,7 @@ def test_load_builds_ordered_dependency_edges_and_releases_successor_after_body(
     root = make_operation(1)
     successor = make_operation(2, predecessors=(1, 1))
     runtime, engine, controller, _, stamps = make_runtime(root, successor)
-    runtime.load_program(ExecutionProgram((root, successor)))
+    runtime.load_program(program_records.ExecutionProgram((root, successor)))
 
     assert runtime.operations == {1: root, 2: successor}
     assert runtime.dependencies_remaining == {1: 0, 2: 2}
@@ -356,20 +358,22 @@ def test_load_deliberately_leaves_graph_validation_to_the_trusted_boundary():
     first = make_operation(1, name="first")
     replacement = make_operation(1, name="replacement")
     duplicate_runtime, _, _, _, _ = make_runtime(first, replacement)
-    duplicate_runtime.load_program(ExecutionProgram((first, replacement)))
+    duplicate_runtime.load_program(
+        program_records.ExecutionProgram((first, replacement))
+    )
     assert duplicate_runtime.operations[1] is replacement
 
     left = make_operation(2, predecessors=(3,))
     right = make_operation(3, predecessors=(2,))
     cyclic_runtime, _, cyclic_controller, _, _ = make_runtime(left, right)
-    cyclic_runtime.load_program(ExecutionProgram((left, right)))
+    cyclic_runtime.load_program(program_records.ExecutionProgram((left, right)))
     assert cyclic_runtime.requested == set()
     assert cyclic_controller.issued == []
 
     orphan = make_operation(4, predecessors=(99,))
     orphan_runtime, _, _, _, _ = make_runtime(orphan)
     with pytest.raises(KeyError):
-        orphan_runtime.load_program(ExecutionProgram((orphan,)))
+        orphan_runtime.load_program(program_records.ExecutionProgram((orphan,)))
 
 
 def test_schedule_release_uses_raw_cadence_product_without_local_validation():
@@ -380,7 +384,9 @@ def test_schedule_release_uses_raw_cadence_product_without_local_validation():
     runtime, _, controller, _, _ = make_runtime(
         immediate, negative, fractional, round_ticks=-4
     )
-    runtime.load_program(ExecutionProgram((immediate, negative, fractional)))
+    runtime.load_program(
+        program_records.ExecutionProgram((immediate, negative, fractional))
+    )
 
     assert runtime.schedule_released == {1}
     assert [(tick, label) for tick, _, label in runtime.engine.scheduled] == [
@@ -394,7 +400,7 @@ def test_scheduled_callback_is_locally_idempotent_after_admission():
     """A repeated scheduled-release callback does not request or issue an operation twice."""
     operation = make_operation(1, scheduled_start_round=2, clifford=False)
     runtime, _, controller, factory, _ = make_runtime(operation, round_ticks=3)
-    runtime.load_program(ExecutionProgram((operation,)))
+    runtime.load_program(program_records.ExecutionProgram((operation,)))
     callback = runtime.engine.scheduled[0][1]
 
     callback()
@@ -411,11 +417,11 @@ def test_scheduled_callback_is_locally_idempotent_after_admission():
 def test_magic_state_request_holds_resources_until_readiness_and_issues_once():
     """Magic-state admission claims first, waits for readiness, and issues at most once."""
     operation = make_operation(1, qubits=("data",), clifford=False)
-    claims = {1: [ResourceClaim("qubit", frozenset({"data"}))]}
+    claims = {1: [program_records.ResourceClaim("qubit", frozenset({"data"}))]}
     runtime, engine, controller, factory, stamps = make_runtime(
         operation, claims=claims
     )
-    runtime.load_program(ExecutionProgram((operation,)))
+    runtime.load_program(program_records.ExecutionProgram((operation,)))
 
     assert runtime.resources.holder_by_resource == {("qubit", "data"): 1}
     assert runtime.requested == {1}
@@ -436,12 +442,12 @@ def test_feedback_and_controller_cadence_are_independent_start_gates():
     operation = make_operation(1, blocked_by=0)
     runtime, engine, controller, _, stamps = make_runtime(operation)
     controller.allowed[1] = False
-    runtime.load_program(ExecutionProgram((operation,)))
+    runtime.load_program(program_records.ExecutionProgram((operation,)))
 
     assert runtime.state_ready == {1}
     assert stamps.op_start == {}
     engine.now = 3
-    runtime.on_decision(Decision(1, releases_operation=True))
+    runtime.on_decision(program_records.Decision(1, releases_operation=True))
     assert stamps.decode_release == {1: 3}
     assert stamps.op_start == {}
 
@@ -455,7 +461,7 @@ def test_readiness_callback_deliberately_does_not_recheck_schedule_or_claim_admi
     """A direct readiness callback deliberately trusts its admission path instead of rechecking it."""
     operation = make_operation(1, scheduled_start_round=9)
     runtime, engine, controller, _, stamps = make_runtime(operation)
-    runtime.load_program(ExecutionProgram((operation,)))
+    runtime.load_program(program_records.ExecutionProgram((operation,)))
     assert runtime.requested == set()
 
     engine.now = 2
@@ -470,8 +476,8 @@ def test_claim_publication_is_ordered_and_all_or_nothing():
     operation = make_operation(1)
     claims = {
         1: [
-            ResourceClaim("qubit", frozenset({"b", "a"})),
-            ResourceClaim("ancilla", frozenset({2})),
+            program_records.ResourceClaim("qubit", frozenset({"b", "a"})),
+            program_records.ResourceClaim("ancilla", frozenset({2})),
         ]
     }
     runtime, _, _, _, _ = make_runtime(operation, claims=claims)
@@ -489,8 +495,8 @@ def test_claim_publication_is_ordered_and_all_or_nothing():
     holder = make_operation(3)
     conflict_claims = {
         2: [
-            ResourceClaim("qubit", frozenset({"new"})),
-            ResourceClaim("qubit", frozenset({"busy"})),
+            program_records.ResourceClaim("qubit", frozenset({"new"})),
+            program_records.ResourceClaim("qubit", frozenset({"busy"})),
         ]
     }
     conflict_runtime, _, _, _, _ = make_runtime(
@@ -522,8 +528,8 @@ def test_claim_rejects_duplicate_operands_and_duplicate_typed_keys_before_public
     duplicate_key = make_operation(2)
     duplicate_claims = {
         2: [
-            ResourceClaim("qubit", frozenset({"q"})),
-            ResourceClaim("qubit", frozenset({"q"})),
+            program_records.ResourceClaim("qubit", frozenset({"q"})),
+            program_records.ResourceClaim("qubit", frozenset({"q"})),
         ]
     }
     duplicate_runtime, _, _, _, _ = make_runtime(
@@ -577,13 +583,13 @@ def test_body_done_preserves_valid_release_hook_issue_and_completion_order():
     root = make_operation(1, qubits=("shared",))
     successor = make_operation(2, qubits=("shared",), predecessors=(1,))
     claims = {
-        1: [ResourceClaim("qubit", frozenset({"shared"}))],
-        2: [ResourceClaim("qubit", frozenset({"shared"}))],
+        1: [program_records.ResourceClaim("qubit", frozenset({"shared"}))],
+        2: [program_records.ResourceClaim("qubit", frozenset({"shared"}))],
     }
     runtime, engine, controller, _, stamps = make_runtime(
         root, successor, claims=claims
     )
-    runtime.load_program(ExecutionProgram((root, successor)))
+    runtime.load_program(program_records.ExecutionProgram((root, successor)))
     engine.events.clear()
 
     engine.now = 11
@@ -627,7 +633,9 @@ def test_waiting_blocked_successor_checks_only_direct_feedback_and_boundary_stat
         predecessor, blocked, unblocked
     )
     controller.allowed[2] = False
-    runtime.load_program(ExecutionProgram((predecessor, blocked, unblocked)))
+    runtime.load_program(
+        program_records.ExecutionProgram((predecessor, blocked, unblocked))
+    )
 
     assert runtime.waiting_blocked_successor(1) is True
     runtime.released_operation_ids.add(2)
@@ -645,7 +653,7 @@ def test_ready_retry_offers_state_ready_operations_in_identity_order():
     released_second = make_operation(24, blocked_by=1)
     operations = (root, never_released, released_first, released_second)
     runtime, engine, controller, _, stamps = make_runtime(*operations)
-    runtime.load_program(ExecutionProgram(operations))
+    runtime.load_program(program_records.ExecutionProgram(operations))
     assert runtime.state_ready == {1, 2, 9, 24}
     assert runtime.started_operation_ids == {1}
 
@@ -681,10 +689,10 @@ def test_decisions_keep_release_and_result_timestamps_distinct_and_latched():
     """Timing-only decisions latch feedback separately from result return and preserve early release."""
     operation = make_operation(1, blocked_by=0, clifford=False)
     runtime, engine, controller, factory, stamps = make_runtime(operation)
-    runtime.load_program(ExecutionProgram((operation,)))
+    runtime.load_program(program_records.ExecutionProgram((operation,)))
 
     engine.now = 2
-    runtime.on_decision(Decision(1, releases_operation=1))
+    runtime.on_decision(program_records.Decision(1, releases_operation=1))
     assert stamps.decode_release == {1: 2}
     assert stamps.result_return == {}
     assert stamps.op_start == {}
@@ -695,12 +703,12 @@ def test_decisions_keep_release_and_result_timestamps_distinct_and_latched():
     assert [issued.id for issued, _ in controller.issued] == [1]
 
     engine.now = 6
-    runtime.on_decision(Decision(1, releases_operation=0))
+    runtime.on_decision(program_records.Decision(1, releases_operation=0))
     assert stamps.result_return == {1: 6}
     assert stamps.decode_release == {1: 2}
 
     engine.now = 8
-    runtime.on_decision(Decision(1, releases_operation=False))
+    runtime.on_decision(program_records.Decision(1, releases_operation=False))
     assert stamps.result_return == {1: 8}
     assert stamps.decode_release == {1: 2}
 
@@ -709,15 +717,15 @@ def test_unknown_decision_target_fails_before_mutation_and_blocked_release_is_re
     """Unknown decisions fail naturally, while a valid blocked release records its timing state."""
     operation = make_operation(1, blocked_by=0)
     runtime, engine, controller, factory, stamps = make_runtime(operation)
-    runtime.load_program(ExecutionProgram((operation,)))
+    runtime.load_program(program_records.ExecutionProgram((operation,)))
     before = mutable_runtime_state(runtime, engine, controller, factory)
 
     with pytest.raises(KeyError):
-        runtime.on_decision(Decision(99))
+        runtime.on_decision(program_records.Decision(99))
     assert mutable_runtime_state(runtime, engine, controller, factory) == before
 
     engine.now = 9
-    runtime.on_decision(Decision(1))
+    runtime.on_decision(program_records.Decision(1))
     assert stamps.decode_release == {1: 9}
     assert stamps.op_start == {1: 9}
 
@@ -729,13 +737,13 @@ def test_zero_finish_time_needs_physical_completion_state_for_interpretation():
     assert unloaded.workload_complete is False
 
     empty, _, _, _, empty_stamps = make_runtime()
-    empty.load_program(ExecutionProgram(()))
+    empty.load_program(program_records.ExecutionProgram(()))
     assert empty_stamps.last_finish == 0
     assert empty.workload_complete is True
 
     operation = make_operation(1)
     completed, _, _, _, completed_stamps = make_runtime(operation)
-    completed.load_program(ExecutionProgram((operation,)))
+    completed.load_program(program_records.ExecutionProgram((operation,)))
     completed.body_done(operation)
     assert completed_stamps.last_finish == 0
     assert completed.workload_complete is True
@@ -745,10 +753,10 @@ def test_timing_endpoints_remain_distinct_from_physical_and_terminal_completion(
     """Timing-only start, body, release, and return endpoints retain distinct event meanings."""
     operation = make_operation(1, blocked_by=0)
     runtime, engine, _, _, stamps = make_runtime(operation)
-    runtime.load_program(ExecutionProgram((operation,)))
+    runtime.load_program(program_records.ExecutionProgram((operation,)))
 
     engine.now = 1
-    runtime.on_decision(Decision(1, True))
+    runtime.on_decision(program_records.Decision(1, True))
     assert stamps.op_start == {1: 1}
     engine.now = 3
     runtime.body_done(operation)
@@ -757,7 +765,7 @@ def test_timing_endpoints_remain_distinct_from_physical_and_terminal_completion(
     assert stamps.last_finish == 3
 
     engine.now = 5
-    runtime.on_decision(Decision(1, False))
+    runtime.on_decision(program_records.Decision(1, False))
     assert stamps.result_return == {1: 5}
     assert stamps.decode_release == {1: 1}
     assert stamps.last_finish == 3

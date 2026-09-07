@@ -7,8 +7,8 @@ the seam it fills is LayoutModel below.
 
 from typing import Any, Protocol, runtime_checkable
 
-import decsim.message as message
 import decsim.qpu.code_geometry as code_geometry
+import decsim.records.program as program_records
 
 # A patch identity is opaque to the layout; Any stands for it below.
 
@@ -21,7 +21,7 @@ class LayoutModel(Protocol):
     selector returns the one declared run code.
     """
 
-    def code_for_op(self, operation: message.OperationPlanningView):
+    def code_for_op(self, operation: program_records.OperationPlanningView):
         """The code the operation runs on."""
 
     def code_for_patch(self, patch_id: Any):
@@ -32,7 +32,7 @@ class LayoutModel(Protocol):
 
     def spatial_nodes_for(
         self,
-        operation: message.OperationPlanningView,
+        operation: program_records.OperationPlanningView,
         *,
         base_spatial_node_count: int,
     ) -> int:
@@ -44,8 +44,8 @@ class LayoutModel(Protocol):
         """Decoding-graph nodes per round of the patch."""
 
     def resources_for(
-        self, operation: message.OperationPlanningView
-    ) -> list[message.ResourceClaim]:
+        self, operation: program_records.OperationPlanningView
+    ) -> list[program_records.ResourceClaim]:
         """The resources the operation holds while it runs."""
 
 
@@ -61,7 +61,7 @@ class UniformLayout:
         return self.code
 
     def code_for_op(
-        self, operation: message.OperationPlanningView
+        self, operation: program_records.OperationPlanningView
     ) -> code_geometry.CodeModel:
         """The one code, whatever the operation."""
         del operation
@@ -69,7 +69,7 @@ class UniformLayout:
 
     def spatial_nodes_for(
         self,
-        operation: message.OperationPlanningView,
+        operation: program_records.OperationPlanningView,
         *,
         base_spatial_node_count: int,
     ) -> int:
@@ -85,11 +85,11 @@ class UniformLayout:
         return base_spatial_node_count
 
     def resources_for(
-        self, operation: message.OperationPlanningView
-    ) -> list[message.ResourceClaim]:
+        self, operation: program_records.OperationPlanningView
+    ) -> list[program_records.ResourceClaim]:
         """Return one qubit exclusivity claim."""
         qubits = frozenset(operation.qubits)
-        return [message.ResourceClaim("qubits", qubits)]
+        return [program_records.ResourceClaim("qubits", qubits)]
 
     def codes(self) -> list[code_geometry.CodeModel]:
         """The one code, as the list the seam asks for."""

@@ -14,8 +14,8 @@ import pytest
 
 import decsim.controller.idle_rounds as idle_rounds_module
 import decsim.controller.policies as policies
-import decsim.message as message
 import decsim.observe.controller_counters as controller_counters
+import decsim.records.program as program_records
 
 
 class RecordingQpu:
@@ -72,9 +72,13 @@ def accounting_with(policy, streams=None):
     accounting = idle_rounds_module.IdleRoundAccounting(
         policy, demand, geometry_by_patch, streams, qpu
     )
-    memory = message.Operation(7, "memory", ("patch-a",), patches=("patch-a",))
-    other = message.Operation(8, "other", ("patch-b",), patches=("patch-b",))
-    program = message.ExecutionProgram((memory, other))
+    memory = program_records.Operation(
+        7, "memory", ("patch-a",), patches=("patch-a",)
+    )
+    other = program_records.Operation(
+        8, "other", ("patch-b",), patches=("patch-b",)
+    )
+    program = program_records.ExecutionProgram((memory, other))
     accounting.load(program)
     return accounting, qpu, demand
 
@@ -122,7 +126,7 @@ def test_a_claim_that_fails_on_a_later_patch_keeps_the_earlier_claims():
     for round_index in (1, 2, 3, 4):
         accounting.emit_idle_round(7, "patch-a", round_index)
     accounting.emit_idle_round(8, "patch-b", 1)
-    malformed = message.Operation(
+    malformed = program_records.Operation(
         9, "malformed", ("q",), patches=("patch-a", [])
     )
 
@@ -139,7 +143,7 @@ def test_a_claim_that_fails_on_a_later_patch_keeps_the_earlier_claims():
 def test_an_operation_without_patches_claims_by_its_qubits():
     ignore = policies.Ignore()
     accounting, _qpu, _demand = accounting_with(ignore)
-    operation = message.Operation(9, "bare", ("patch-a", "patch-b"))
+    operation = program_records.Operation(9, "bare", ("patch-a", "patch-b"))
 
     accounting.emit_idle_round(7, "patch-a", 1)
     accounting.emit_idle_round(8, "patch-b", 1)

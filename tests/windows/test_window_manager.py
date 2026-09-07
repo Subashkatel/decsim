@@ -12,10 +12,10 @@ import decsim.decoders.decoders as decoders
 import decsim.decoders.settings as decoder_settings
 import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
-import decsim.message as message
 import decsim.qpu.code_geometry as code_geometry
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
+import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.windows.built_window_models as built_window_models
 import decsim.windows.window_boundaries as window_boundaries
@@ -26,7 +26,7 @@ import decsim.windows.windowing_schemes as windowing_schemes
 
 
 def _weak_run():
-    memory = message.Operation(0, "M", (0,), clifford=True)
+    memory = program_records.Operation(0, "M", (0,), clifford=True)
     six_rounds = round_policies.FixedRounds(6)
     workload = workload_settings.WorkloadSettings(
         operations=[memory], rounds_policy=six_rounds
@@ -91,7 +91,7 @@ def test_a_streams_later_window_waits_on_the_previous_ones_boundary():
     manager.retention = types.SimpleNamespace(
         register_window=lambda _key, _window: None
     )
-    stream = message.Operation("stream", "stream", (0,))
+    stream = program_records.Operation("stream", "stream", (0,))
     manager.planner.register_stream(stream)
 
     manager._grow_stream("stream", 4, None)

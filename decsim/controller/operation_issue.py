@@ -14,8 +14,8 @@ import dataclasses
 import types
 from typing import Callable, Optional
 
-import decsim.message as message
 import decsim.qpu.cycle_clock as cycle_clock
+import decsim.records.program as program_records
 
 
 class OperationIssuer:
@@ -41,21 +41,21 @@ class OperationIssuer:
         self.resolved_operation_by_id = types.MappingProxyType(operation_by_id)
         self.output = output
 
-    def round_ticks_for(self, operation: message.Operation) -> int:
+    def round_ticks_for(self, operation: program_records.Operation) -> int:
         """The resolved QEC cycle length of one operation, in ticks."""
         return self.resolved_operation_by_id[operation.id].round_ticks
 
-    def round_count_for(self, operation: message.Operation) -> int:
+    def round_count_for(self, operation: program_records.Operation) -> int:
         """The resolved round count of one operation."""
         return self.resolved_operation_by_id[operation.id].round_count
 
-    def can_start(self, operation: message.Operation) -> bool:
+    def can_start(self, operation: program_records.Operation) -> bool:
         """False while a protected stream holds the operation for a boundary."""
         return not self.streams.blocks_start(operation)
 
     def issue_operation(
         self,
-        operation: message.Operation,
+        operation: program_records.Operation,
         on_started: Callable[[int], None],
     ) -> None:
         """Prepare one QPU command; on_started hears its start boundary."""
@@ -73,13 +73,15 @@ class OperationIssuer:
             return
         self.output.send_command(command, on_started)
 
-    def before_successor_release(self, operation: message.Operation) -> None:
+    def before_successor_release(
+        self, operation: program_records.Operation
+    ) -> None:
         """A body finished: its protected regions close on the boundary."""
         self.streams.request_closes(operation)
 
     def after_successor_release(
         self,
-        operation: message.Operation,
+        operation: program_records.Operation,
         waits_for_blocked: bool,
         is_workload_complete: bool,
     ) -> None:
@@ -91,13 +93,13 @@ class OperationIssuer:
 
     def stream_binding_for(
         self, operation_id
-    ) -> Optional[message.StreamBinding]:
+    ) -> Optional[program_records.StreamBinding]:
         """The stream binding an operation was given, or None."""
         return self.streams.binding_for(operation_id)
 
     def _command(
-        self, operation: message.Operation
-    ) -> message.RunOperationBody:
+        self, operation: program_records.Operation
+    ) -> program_records.RunOperationBody:
         """The operation's command, bound to its stream when it has one."""
         binding = self.streams.binding_for(operation.id)
         if binding is None:
@@ -113,7 +115,7 @@ class OperationIssuer:
         source = self.resolved_operation_by_id[source_operation_id]
         round_ticks = self.round_ticks_for(operation)
         round_count = self.round_count_for(operation)
-        return message.RunOperationBody(
+        return program_records.RunOperationBody(
             operation=issued_operation,
             round_ticks=round_ticks,
             round_count=round_count,
@@ -122,7 +124,7 @@ class OperationIssuer:
             finalizes_stream_round=operation.finalizes_stream_round,
         )
 
-    def _log_start(self, operation: message.Operation) -> None:
+    def _log_start(self, operation: program_records.Operation) -> None:
         kind = "non-Clifford"
         if operation.clifford:
             kind = "Clifford"

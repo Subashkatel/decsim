@@ -12,11 +12,11 @@ import pytest
 import decsim.engine
 import decsim.links.fabric as fabric_module
 import decsim.links.settings as link_settings
-import decsim.message as message
 import decsim.ports as ports
+import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 
-PATH = message.LinkPath
+PATH = transfer_records.LinkPath
 AGGREGATE = link_settings.QuantityBasis.AGGREGATE
 FREE_CHANNEL = link_settings.ChannelSettings("free", 0, None, "test")
 FREE_PATH = link_settings.PathSettings(FREE_CHANNEL, None, "test payload")
@@ -74,7 +74,7 @@ def fabric_with(engine, listener=None, **paths):
 
 
 def round_attribution(round_index):
-    return message.TransferAttribution(
+    return transfer_records.TransferAttribution(
         operation_id=1,
         patch_ids=(0,),
         window_id=None,
@@ -84,7 +84,7 @@ def round_attribution(round_index):
 
 
 def operation_attribution(relation=None):
-    return message.TransferAttribution(
+    return transfer_records.TransferAttribution(
         operation_id=1,
         patch_ids=(0,),
         window_id=None,
@@ -101,11 +101,11 @@ def request_relation_for(window_id):
         tier=window_records.DecoderTier.WEAK,
         run_sequence=window_id,
     )
-    return message.RequestTransferRelation(request_key)
+    return transfer_records.RequestTransferRelation(request_key)
 
 
 def window_attribution(window_id, relation=None):
-    return message.TransferAttribution(
+    return transfer_records.TransferAttribution(
         operation_id=1,
         patch_ids=(0,),
         window_id=window_id,
@@ -293,7 +293,7 @@ def test_an_actual_payload_is_priced_and_named_by_its_source():
     record = listener.records[0]
     transfer = delivered[0]
     assert transfer.payload_bits == 7
-    assert record.payload_selection is message.PayloadSelection.ACTUAL
+    assert record.payload_selection is transfer_records.PayloadSelection.ACTUAL
     assert record.payload_source == "test payload"
 
 
@@ -318,7 +318,8 @@ def test_a_missing_payload_takes_the_cards_default():
     transfer = delivered[0]
     assert transfer.payload_bits == 32
     assert (
-        record.payload_selection is message.PayloadSelection.CONFIGURED_DEFAULT
+        record.payload_selection
+        is transfer_records.PayloadSelection.CONFIGURED_DEFAULT
     )
     assert record.payload_source == "test default"
 
@@ -336,7 +337,9 @@ def test_an_unsized_transfer_rides_an_unbounded_channel_unresolved():
     record = listener.records[0]
     transfer = delivered[0]
     assert transfer.payload_bits is None
-    assert record.payload_selection is message.PayloadSelection.UNRESOLVED
+    assert (
+        record.payload_selection is transfer_records.PayloadSelection.UNRESOLVED
+    )
 
 
 def test_a_bounded_channel_refuses_a_transfer_with_no_payload_size():

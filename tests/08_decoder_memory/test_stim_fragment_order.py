@@ -4,17 +4,16 @@ from collections import defaultdict
 
 import stim
 
-from decsim.qpu.stim_device import StimDevice
+import decsim.records.program as program_records
 from decsim.detector_error_model.fault_model_contracts import (
     GRAPHLIKE_FAULT_MODEL_REQUIRED,
 )
 from decsim.detector_error_model.window_model_builders import (
     build_window_error_models,
 )
-from decsim.message import Operation, RunOperationBody
 from decsim.engine import Engine
 from decsim.qpu.cycle_clock import QPUDevice
-
+from decsim.qpu.stim_device import StimDevice
 
 ROUND_COUNT = 3
 DISTANCE = 3
@@ -95,9 +94,9 @@ def _operation(
     stream_offset: int | None = None,
     fragment_index: int | None = None,
     finalizes_stream_round: bool = False,
-) -> Operation:
+) -> program_records.Operation:
     fragment_count = None if fragment_index is None else 2
-    return Operation(
+    return program_records.Operation(
         id=operation_id,
         name=f"segment {operation_id}",
         qubits=(0,),
@@ -123,7 +122,9 @@ def _split_final_round_rows(
     return ordinary_rows, terminal_rows
 
 
-def test_stim_round_packets_carry_raw_bits_that_form_the_model_row_block() -> None:
+def test_stim_round_packets_carry_raw_bits_that_form_the_model_row_block() -> (
+    None
+):
     """Each Stim round packet carries that round's raw measurement bits, and
     forming them at the decoder input yields the round's detector-row block
     in ascending row order."""
@@ -131,7 +132,9 @@ def test_stim_round_packets_carry_raw_bits_that_form_the_model_row_block() -> No
     _, rows_by_round, detector_rounds = _model_rows_by_round(circuit)
     detector_sample = circuit.compile_detector_sampler().sample(shots=1)[0]
     operation = _operation(1, circuit)
-    device = StimDevice(detector_rounds={operation.id: detector_rounds}, seed=11)
+    device = StimDevice(
+        detector_rounds={operation.id: detector_rounds}, seed=11
+    )
 
     device.begin_operation(operation, ROUND_COUNT, ROUND_COUNT)
     table = device._shot_by_key[operation.id].table
@@ -142,11 +145,18 @@ def test_stim_round_packets_carry_raw_bits_that_form_the_model_row_block() -> No
         assert len(raw_bits) == table.packet_width_by_round[round_index]
         assert payload.round_index == round_index
         assert payload.size_bits == len(raw_bits)
-        expected_block = tuple(int(detector_sample[row]) for row in detector_ids)
-        assert device.form_round(operation.id, round_index, raw_bits) == expected_block
+        expected_block = tuple(
+            int(detector_sample[row]) for row in detector_ids
+        )
+        assert (
+            device.form_round(operation.id, round_index, raw_bits)
+            == expected_block
+        )
 
 
-def test_terminal_fragment_carries_the_readout_bits_after_the_ancilla_bits() -> None:
+def test_terminal_fragment_carries_the_readout_bits_after_the_ancilla_bits() -> (
+    None
+):
     """The final round's raw packet arrives as two fragments: the ordinary
     ancilla fragment, then the data readout; together, in that order, they
     form the round's full detector-row block."""
@@ -163,29 +173,48 @@ def test_terminal_fragment_carries_the_readout_bits_after_the_ancilla_bits() -> 
     ordinary_payload = None
     final_operation = None
     for stream_offset in range(ROUND_COUNT):
-        operation = _operation(stream_offset + 1, circuit, stream_offset=stream_offset)
+        operation = _operation(
+            stream_offset + 1, circuit, stream_offset=stream_offset
+        )
         device.begin_operation(operation, 1, ROUND_COUNT)
         (ordinary_payload,) = device.round_payloads(operation, 1)
         if stream_offset + 1 < ROUND_COUNT:
-            device.form_round(STREAM_ID, stream_offset + 1, ordinary_payload.bits)
+            device.form_round(
+                STREAM_ID, stream_offset + 1, ordinary_payload.bits
+            )
         final_operation = operation
     assert ordinary_payload is not None
     assert final_operation is not None
-    (terminal_payload,) = device.finalize_stream_round(final_operation, ROUND_COUNT)
+    (terminal_payload,) = device.finalize_stream_round(
+        final_operation, ROUND_COUNT
+    )
 
     ordinary_bits = tuple(int(bit) for bit in ordinary_payload.bits)
     terminal_bits = tuple(int(bit) for bit in terminal_payload.bits)
     table = device._shot_by_key[STREAM_ID].table
-    last_packet = tuple(int(bit) for bit in device._shot_by_key[STREAM_ID].packets[ROUND_COUNT])
-    assert ordinary_bits == last_packet[:table.readout_slot_start]
-    assert terminal_bits == last_packet[table.readout_slot_start:]
-    assert len(ordinary_bits) == DISTANCE - 1      # ancilla qubits of the repetition code
-    assert terminal_payload.size_bits == DISTANCE  # data qubits read out at the end
-    assert ordinary_payload.round_index == terminal_payload.round_index == ROUND_COUNT
+    last_packet = tuple(
+        int(bit) for bit in device._shot_by_key[STREAM_ID].packets[ROUND_COUNT]
+    )
+    assert ordinary_bits == last_packet[: table.readout_slot_start]
+    assert terminal_bits == last_packet[table.readout_slot_start :]
+    assert (
+        len(ordinary_bits) == DISTANCE - 1
+    )  # ancilla qubits of the repetition code
+    assert (
+        terminal_payload.size_bits == DISTANCE
+    )  # data qubits read out at the end
+    assert (
+        ordinary_payload.round_index
+        == terminal_payload.round_index
+        == ROUND_COUNT
+    )
     expected_block = tuple(
         int(detector_sample[row]) for row in rows_by_round[ROUND_COUNT]
     )
-    assert device.form_round(STREAM_ID, ROUND_COUNT, ordinary_bits + terminal_bits) == expected_block
+    assert (
+        device.form_round(STREAM_ID, ROUND_COUNT, ordinary_bits + terminal_bits)
+        == expected_block
+    )
 
 
 class _ReadoutCapture:
@@ -213,7 +242,9 @@ def test_qpu_stamps_fragment_slots_in_detector_row_order_end_to_end() -> None:
             stream_offset=stream_offset,
             fragment_index=fragment_index,
         )
-        commands.append(RunOperationBody(operation, 1, 1, ROUND_COUNT))
+        commands.append(
+            program_records.RunOperationBody(operation, 1, 1, ROUND_COUNT)
+        )
     finalizer = _operation(
         4,
         circuit,
@@ -221,10 +252,16 @@ def test_qpu_stamps_fragment_slots_in_detector_row_order_end_to_end() -> None:
         fragment_index=1,
         finalizes_stream_round=True,
     )
-    commands.append(RunOperationBody(finalizer, 1, 0, ROUND_COUNT, finalizes_stream_round=True))
+    commands.append(
+        program_records.RunOperationBody(
+            finalizer, 1, 0, ROUND_COUNT, finalizes_stream_round=True
+        )
+    )
     commands.reverse()
 
-    def issue_next(_operation=None) -> None:      # one segment per cycle, in stream order
+    def issue_next(
+        _operation=None,
+    ) -> None:  # one segment per cycle, in stream order
         if commands:
             qpu.issue(commands.pop())
         else:
@@ -250,13 +287,15 @@ def test_qpu_stamps_fragment_slots_in_detector_row_order_end_to_end() -> None:
         for readout in capture.readouts
     ) == ((1, 0, 1), (2, 0, 1), (3, 0, 2), (3, 1, 2))
     final_round_readouts = sorted(
-        (readout for readout in capture.readouts if readout.round_index == ROUND_COUNT),
+        (
+            readout
+            for readout in capture.readouts
+            if readout.round_index == ROUND_COUNT
+        ),
         key=lambda readout: readout.fragment_index,
     )
     ordered_bits = tuple(
-        int(bit)
-        for readout in final_round_readouts
-        for bit in readout.bits
+        int(bit) for readout in final_round_readouts for bit in readout.bits
     )
     swapped_bits = tuple(
         int(bit)
@@ -264,13 +303,20 @@ def test_qpu_stamps_fragment_slots_in_detector_row_order_end_to_end() -> None:
         for bit in readout.bits
     )
     device = qpu.syndrome_source
-    last_packet = tuple(int(bit) for bit in device._shot_by_key[STREAM_ID].packets[ROUND_COUNT])
+    last_packet = tuple(
+        int(bit) for bit in device._shot_by_key[STREAM_ID].packets[ROUND_COUNT]
+    )
     assert ordered_bits == last_packet
     assert swapped_bits != last_packet
     for round_index in range(1, ROUND_COUNT):
-        (readout,) = [r for r in capture.readouts if r.round_index == round_index]
+        (readout,) = [
+            r for r in capture.readouts if r.round_index == round_index
+        ]
         device.form_round(STREAM_ID, round_index, readout.bits)
     expected_block = tuple(
         int(detector_sample[row]) for row in rows_by_round[ROUND_COUNT]
     )
-    assert device.form_round(STREAM_ID, ROUND_COUNT, ordered_bits) == expected_block
+    assert (
+        device.form_round(STREAM_ID, ROUND_COUNT, ordered_bits)
+        == expected_block
+    )

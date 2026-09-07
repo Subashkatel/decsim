@@ -22,9 +22,9 @@ import json
 from typing import Optional
 
 import decsim.config as config
-import decsim.message as message
 import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
+import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 
 # The threads in the order the pipeline uses them, so a viewer's lanes
@@ -194,7 +194,9 @@ class TraceWriter:
 
     # ---- the links
 
-    def transfer_delivered(self, record: message.TransferRecord) -> None:
+    def transfer_delivered(
+        self, record: transfer_records.TransferRecord
+    ) -> None:
         """One move, from the wire's send to the receiver's delivery."""
         transfer = record.transfer
         thread = record.path.value
@@ -935,7 +937,7 @@ def _service_text(service_key) -> str:
 
 def _job_round_keys(job: decoding_records.DecodeJob) -> tuple:
     """The rounds a landed job's input covers."""
-    decoder_input: Optional[message.DecoderInput] = job.decoder_input
+    decoder_input = job.decoder_input
     if decoder_input is None:
         return ()
     keys = []

@@ -19,8 +19,8 @@ import types
 from typing import Any, Callable, Protocol, runtime_checkable
 
 import decsim.engine
-import decsim.message as message
 import decsim.observe.trace_source as trace_source
+import decsim.records.program as program_records
 
 
 @runtime_checkable
@@ -44,7 +44,9 @@ class ResourceLedger:
         self.claims_by_operation_id = types.MappingProxyType(copied)
         self.holder_by_resource = {}
 
-    def claim(self, operation: message.Operation, name_of: Callable) -> None:
+    def claim(
+        self, operation: program_records.Operation, name_of: Callable
+    ) -> None:
         """Claim every resource of the operation, or none of them."""
         distinct_qubits = set(operation.qubits)
         if len(distinct_qubits) != len(operation.qubits):
@@ -71,7 +73,7 @@ class ResourceLedger:
         for key in keys_to_claim:
             self.holder_by_resource[key] = operation.id
 
-    def release(self, operation: message.Operation) -> None:
+    def release(self, operation: program_records.Operation) -> None:
         """Free every resource the operation holds."""
         claims = self.claims_by_operation_id[operation.id]
         held_keys = _resource_keys(claims)
@@ -135,7 +137,7 @@ class ExecutionRuntime:
         indexed = self.operations.keys()
         return indexed == self.finished_operation_ids
 
-    def load_program(self, program: message.ExecutionProgram) -> None:
+    def load_program(self, program: program_records.ExecutionProgram) -> None:
         """Index the operations, build the dependency graph, start the roots."""
         self.program = program
         for operation in program.operations:
@@ -153,12 +155,12 @@ class ExecutionRuntime:
             self._attempt_start(operation)
 
     def note_start_boundary(
-        self, operation: message.Operation, boundary_tick: int
+        self, operation: program_records.Operation, boundary_tick: int
     ) -> None:
         """The QPU has the operation's command: it starts at this boundary."""
         self.operation_started.fire(operation.id, boundary_tick)
 
-    def body_done(self, operation: message.Operation) -> None:
+    def body_done(self, operation: program_records.Operation) -> None:
         """A body finished: record it, free resources, release successors."""
         assert operation.id in self.operations, (
             f"operation {operation.id!r} is not in the program"
@@ -209,7 +211,7 @@ class ExecutionRuntime:
             operation = self.operations[operation_id]
             self._maybe_begin(operation)
 
-    def on_decision(self, decision: message.Decision) -> None:
+    def on_decision(self, decision: program_records.Decision) -> None:
         """A decision reached the controller: a release starts its operation.
 
         A result return is only recorded; a release is recorded and the
@@ -238,7 +240,9 @@ class ExecutionRuntime:
         )
         self._maybe_begin(operation)
 
-    def _release_at_scheduled_start(self, operation: message.Operation) -> None:
+    def _release_at_scheduled_start(
+        self, operation: program_records.Operation
+    ) -> None:
         round_ticks = self.issuer.round_ticks_for(operation)
         release_tick = operation.scheduled_start_round * round_ticks
         if release_tick == 0:
@@ -249,11 +253,11 @@ class ExecutionRuntime:
             release_tick, release, label=f"scheduled-start({operation.name})"
         )
 
-    def _release_scheduled(self, operation: message.Operation) -> None:
+    def _release_scheduled(self, operation: program_records.Operation) -> None:
         self.schedule_released.add(operation.id)
         self._attempt_start(operation)
 
-    def _attempt_start(self, operation: message.Operation) -> None:
+    def _attempt_start(self, operation: program_records.Operation) -> None:
         """Claim resources and ask for the magic state once the DAG allows."""
         if not self._is_admissible(operation):
             return
@@ -269,7 +273,7 @@ class ExecutionRuntime:
         on_ready = functools.partial(self._state_became_ready, operation)
         self.factory.request(operation.id, on_ready)
 
-    def _is_admissible(self, operation: message.Operation) -> bool:
+    def _is_admissible(self, operation: program_records.Operation) -> bool:
         """Predecessors done, schedule released, and not yet requested."""
         if self.dependencies_remaining[operation.id] != 0:
             return False
@@ -280,11 +284,11 @@ class ExecutionRuntime:
     def _operation_name(self, operation_id) -> str:
         return self.operations[operation_id].name
 
-    def _state_became_ready(self, operation: message.Operation) -> None:
+    def _state_became_ready(self, operation: program_records.Operation) -> None:
         self.state_ready.add(operation.id)
         self._maybe_begin(operation)
 
-    def _maybe_begin(self, operation: message.Operation) -> None:
+    def _maybe_begin(self, operation: program_records.Operation) -> None:
         """Issue the operation when every start gate is open."""
         if operation.id in self.started_operation_ids:
             return

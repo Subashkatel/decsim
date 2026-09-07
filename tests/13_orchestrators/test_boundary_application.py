@@ -6,6 +6,7 @@ A boundary-blocked job waits in its input slot, never on the unit."""
 
 import stim
 
+import decsim.records.program as program_records
 from decsim.config import microseconds_to_ticks
 from decsim.decoders.decoders import PresetLatencyDecoder
 from decsim.decoders.minimum_weight_perfect_matching.decoder import (
@@ -16,7 +17,6 @@ from decsim.escalation.policies import StrongOnly
 from decsim.frontends.settings import WorkloadSettings
 from decsim.links.link_profiles import logical_reference_profile
 from decsim.machine import Machine, MachineSettings
-from decsim.message import Operation
 from decsim.qpu.round_policies import FixedRounds
 from decsim.qpu.settings import QpuSettings
 from decsim.qpu.stim_device import StimDevice
@@ -50,7 +50,7 @@ def _stim_run(*, round_us=1.0, scheme=None, units=1, policy=None):
     settings = MachineSettings(
         workload=WorkloadSettings(
             operations=[
-                Operation(
+                program_records.Operation(
                     id=1,
                     name="memory",
                     qubits=(0,),

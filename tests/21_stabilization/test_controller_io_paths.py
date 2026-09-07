@@ -5,6 +5,7 @@ preserve the real data crossing each declared boundary and charge each
 online stage in causal order.
 """
 
+import decsim.records.program as program_records
 from decsim.config import microseconds_to_ticks
 from decsim.controller.instruction_output import InstructionOutput
 from decsim.controller.settings import ControllerSettings
@@ -14,7 +15,6 @@ from decsim.engine import Engine
 from decsim.frontends.settings import WorkloadSettings
 from decsim.links.fabric import LinkFabric
 from decsim.machine import MachineSettings
-from decsim.message import Decision, RunOperationBody
 from decsim.observe.link_traffic import TrafficLedger
 from decsim.observe.round_events import RoundEventRecorder
 from decsim.pauli_frame.pauli_frame import PauliFrameConfig
@@ -100,7 +100,7 @@ def test_feedback_operation_command_traverses_controller_output_and_cq(fabric):
     ]
     assert len(arrivals) == 1
     assert arrivals[0].tick == blocker_commit + microseconds_to_ticks(2 + 3 + 2)
-    assert isinstance(arrivals[0].command, RunOperationBody)
+    assert isinstance(arrivals[0].command, program_records.RunOperationBody)
     assert arrivals[0].command.operation == runtime.operations[2]
 
     output = [
@@ -221,7 +221,7 @@ def test_controller_output_without_a_link_still_pays_local_processing():
     recorder = RoundEventRecorder(engine)
     output = InstructionOutput(engine, None, None, 17)
     output.output_event.connect(recorder.output)
-    decision = Decision(9, releases_operation=False)
+    decision = program_records.Decision(9, releases_operation=False)
 
     output.relay_instruction(decision, delivered.append)
     engine.run()

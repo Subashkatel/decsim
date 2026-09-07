@@ -21,11 +21,11 @@ import decsim.frontends.settings as workload_settings
 import decsim.links.link_profiles as link_profiles
 import decsim.links.settings as link_settings
 import decsim.machine as machine_module
-import decsim.message as message
 import decsim.observe.settings as observe_settings
 import decsim.pauli_frame.pauli_frame as pauli_frame_module
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
+import decsim.records.program as program_records
 import decsim.windows.settings as window_settings
 import decsim.windows.windowing_schemes as windowing_schemes
 
@@ -102,7 +102,9 @@ def switching_machine(
     boundary_policy = boundary_policies.Held()
     if double_window:
         boundary_policy = None
-    operation = message.Operation(id=1, name="mem1", qubits=(1,), patches=(1,))
+    operation = program_records.Operation(
+        id=1, name="mem1", qubits=(1,), patches=(1,)
+    )
     rounds_policy = round_policies.FixedRounds(rounds)
     workload = workload_settings.WorkloadSettings(
         operations=[operation], rounds_policy=rounds_policy

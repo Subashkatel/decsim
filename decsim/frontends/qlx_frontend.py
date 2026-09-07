@@ -37,17 +37,17 @@ import json
 import types
 from typing import Any, Optional
 
-import decsim.message as message
 import decsim.qpu.round_policies as round_policies
+import decsim.records.program as program_records
 
 _KIND_BY_NAME = types.MappingProxyType(
     {
-        "mz": message.OpKind.MEASURE,
-        "mx": message.OpKind.MEASURE,
-        "measure": message.OpKind.MEASURE,
-        "inject": message.OpKind.INJECT,
-        "merge": message.OpKind.MERGE,
-        "measure_product": message.OpKind.MERGE,
+        "mz": program_records.OpKind.MEASURE,
+        "mx": program_records.OpKind.MEASURE,
+        "measure": program_records.OpKind.MEASURE,
+        "inject": program_records.OpKind.INJECT,
+        "merge": program_records.OpKind.MERGE,
+        "measure_product": program_records.OpKind.MERGE,
     }
 )
 
@@ -121,7 +121,7 @@ class QLXProgram:
     )
     measurement_rounds_by_stream: dict = dataclasses.field(default_factory=dict)
 
-    def build(self) -> list[message.Operation]:
+    def build(self) -> list[program_records.Operation]:
         """The lowered workload, for the Workload port."""
         return self.operations
 
@@ -596,14 +596,14 @@ def _blocker_of(
 
 def _operation_for(
     task: _Task, patch_of_cell: dict, blocked_by: Optional[int]
-) -> message.Operation:
+) -> program_records.Operation:
     patches = []
     for cell in task.cells:
         patches.append(patch_of_cell[cell])
     patches = tuple(patches)
-    kind = _KIND_BY_NAME.get(task.name, message.OpKind.GENERIC)
+    kind = _KIND_BY_NAME.get(task.name, program_records.OpKind.GENERIC)
     is_clifford = task.name not in ("t", "tdg", "inject")
-    return message.Operation(
+    return program_records.Operation(
         id=task.position,
         name=f"{task.name}[{task.qlx_id}]",
         qubits=patches,
@@ -624,7 +624,7 @@ def _dynamic_streams(task_count: int, generations: list) -> tuple:
     streams = []
     for index, (patch, _start, _end) in enumerate(generations):
         owner_id = task_count + index
-        owner = message.Operation(
+        owner = program_records.Operation(
             owner_id,
             f"protected[{patch}]",
             (patch,),
@@ -637,7 +637,7 @@ def _dynamic_streams(task_count: int, generations: list) -> tuple:
 def _protected_regions(dynamic_streams: tuple, generations: list) -> tuple:
     regions = []
     for owner, (patch, start, end) in zip(dynamic_streams, generations):
-        region = message.ProtectedRegion(patch, owner.id, start, end)
+        region = program_records.ProtectedRegion(patch, owner.id, start, end)
         regions.append(region)
     return tuple(regions)
 
@@ -676,7 +676,7 @@ def _add_physical_stream(
     _replace_stream_operations(
         program, measurements, terminal_operation, circuit, decode_operation_id
     )
-    owner = message.Operation(
+    owner = program_records.Operation(
         decode_operation_id,
         "QLX physical decode stream",
         (patch,),
@@ -754,7 +754,7 @@ def _one_measured_patch(measurements: list):
 
 def _terminal_operation(
     program: QLXProgram, candidates: list, measurements: list, patch
-) -> message.Operation:
+) -> program_records.Operation:
     """The one zero-duration mz on the patch after the last submission."""
     last_measurement = measurements[-1]
     matching = []
@@ -774,7 +774,7 @@ def _terminal_operation(
 def _replace_stream_operations(
     program: QLXProgram,
     measurements: list,
-    terminal_operation: Optional[message.Operation],
+    terminal_operation: Optional[program_records.Operation],
     circuit,
     decode_operation_id: int,
 ) -> None:

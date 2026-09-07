@@ -14,7 +14,7 @@ fully decoded), so nothing in this file reads the result's bits.
 
 from typing import Callable, Optional
 
-import decsim.message as message
+import decsim.records.program as program_records
 
 
 class ConditionalRelease:
@@ -38,7 +38,7 @@ class ConditionalRelease:
         waiting = self.waiting_by_blocker.setdefault(blocking_operation_id, [])
         waiting.append(blocked_operation_id)
 
-    def release_waiters(self, operation: message.Operation) -> None:
+    def release_waiters(self, operation: program_records.Operation) -> None:
         """A final result arrived: send every decision it releases."""
         for decision in self.decisions_for(operation):
             if decision.releases_operation:
@@ -53,8 +53,8 @@ class ConditionalRelease:
             self.controller.relay_instruction(decision, self.deliver_decision)
 
     def decisions_for(
-        self, operation: message.Operation
-    ) -> list[message.Decision]:
+        self, operation: program_records.Operation
+    ) -> list[program_records.Decision]:
         """The decisions one final result releases.
 
         One release per waiting operation; else a result return when the
@@ -62,7 +62,12 @@ class ConditionalRelease:
         """
         waiting = self.waiting_by_blocker.pop(operation.id, [])
         if waiting:
-            return [message.Decision(operation_id) for operation_id in waiting]
+            return [
+                program_records.Decision(operation_id)
+                for operation_id in waiting
+            ]
         if operation.requires_result_return_to_qpu:
-            return [message.Decision(operation.id, releases_operation=False)]
+            return [
+                program_records.Decision(operation.id, releases_operation=False)
+            ]
         return []

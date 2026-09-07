@@ -20,8 +20,8 @@ import dataclasses
 import functools
 from typing import Optional
 
-import decsim.message as message
 import decsim.records.identity as identity_records
+import decsim.records.program as program_records
 
 
 class NoFeedbackStreams:
@@ -256,7 +256,7 @@ class FeedbackStreams:
         return None
 
     def _bind(self, operation_id, stream_id, stream_offset) -> None:
-        binding = message.StreamBinding(stream_id, stream_offset)
+        binding = program_records.StreamBinding(stream_id, stream_offset)
         self.bindings[operation_id] = binding
         self.windows.bind_stream_operation(
             operation_id, stream_id, stream_offset

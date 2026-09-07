@@ -10,6 +10,7 @@ whose boundary has not arrived waits in its slot, never on the unit
 import pytest
 import stim
 
+import decsim.records.program as program_records
 from decsim.config import microseconds_to_ticks
 from decsim.decoders.decoder_memory import (
     DecoderMemoryCapacityError,
@@ -28,7 +29,6 @@ from decsim.escalation.policies import StrongOnly
 from decsim.frontends.settings import WorkloadSettings
 from decsim.links.link_profiles import logical_reference_profile
 from decsim.machine import Machine, MachineSettings
-from decsim.message import Operation
 from decsim.qpu.round_policies import FixedRounds
 from decsim.qpu.settings import QpuSettings
 from decsim.qpu.stim_device import StimDevice
@@ -52,7 +52,7 @@ def _run(*, units=1, decode_us=5.0, capacity=None):
     settings = MachineSettings(
         workload=WorkloadSettings(
             operations=[
-                Operation(
+                program_records.Operation(
                     id=1,
                     name="memory",
                     qubits=(0,),

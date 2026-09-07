@@ -13,9 +13,10 @@ controller preparation happened before the simulated interval.
 import functools
 from typing import Callable
 
-import decsim.message as message
 import decsim.observe.trace_source as trace_source
+import decsim.records.program as program_records
 import decsim.records.rounds as round_records
+import decsim.records.transfers as transfer_records
 
 
 class InstructionOutput:
@@ -35,7 +36,7 @@ class InstructionOutput:
 
     def start_preloaded(
         self,
-        command: message.RunOperationBody,
+        command: program_records.RunOperationBody,
         on_started: Callable[[int], None],
     ) -> None:
         """A command prepared before the run starts at the next boundary."""
@@ -45,7 +46,7 @@ class InstructionOutput:
 
     def send_command(
         self,
-        command: message.RunOperationBody,
+        command: program_records.RunOperationBody,
         on_started: Callable[[int], None],
     ) -> None:
         """A feedback-selected command pays the pulse cost and the crossing."""
@@ -57,8 +58,8 @@ class InstructionOutput:
 
     def relay_instruction(
         self,
-        decision: message.Decision,
-        deliver: Callable[[message.Decision], None],
+        decision: program_records.Decision,
+        deliver: Callable[[program_records.Decision], None],
     ) -> None:
         """Carry a Pauli-frame decision over frame_to_controller.
 
@@ -66,7 +67,7 @@ class InstructionOutput:
         crosses the output path in send_command. A result return crosses
         the output path before it is available at the QPU.
         """
-        attribution = message.TransferAttribution(
+        attribution = transfer_records.TransferAttribution(
             operation_id=decision.target_operation_id,
             patch_ids=(),
             window_id=None,
@@ -94,7 +95,7 @@ class InstructionOutput:
             )
             return
         self.link.send(
-            message.LinkPath.FRAME_TO_CONTROLLER,
+            transfer_records.LinkPath.FRAME_TO_CONTROLLER,
             None,
             self.engine.now,
             attribution,
@@ -107,7 +108,7 @@ class InstructionOutput:
 
     def _start(
         self,
-        command: message.RunOperationBody,
+        command: program_records.RunOperationBody,
         on_started: Callable[[int], None],
     ) -> None:
         """The command is at the QPU: it starts on the next cycle boundary."""
@@ -121,7 +122,7 @@ class InstructionOutput:
         The send is made at the output tick, when the pulse processing is
         done; deliver(payload) runs when the QPU has it.
         """
-        attribution = message.TransferAttribution(
+        attribution = transfer_records.TransferAttribution(
             operation_id=operation_id,
             patch_ids=(),
             window_id=None,
@@ -138,7 +139,7 @@ class InstructionOutput:
                 deliver(payload)
                 return
             self.link.send(
-                message.LinkPath.CONTROLLER_TO_QPU,
+                transfer_records.LinkPath.CONTROLLER_TO_QPU,
                 None,
                 self.engine.now,
                 attribution,

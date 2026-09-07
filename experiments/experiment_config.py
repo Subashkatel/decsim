@@ -135,11 +135,11 @@ class ExperimentConfig:
 def load_experiment(path) -> ExperimentConfig:
     """Read one yaml file, its extends chain applied, into settings."""
     path = Path(path)
-    raw, config_files = _raw_yaml(path)
-    raw_sweep = raw.pop("sweep")
-    sweep = _sweep_blocks(raw_sweep)
+    sections, config_files = _yaml_sections(path)
+    sweep_section = sections.pop("sweep")
+    sweep = _sweep_blocks(sweep_section)
     settings = machine.MachineSettings.from_mapping(
-        raw, name=path.stem, base_directory=path.parent
+        sections, name=path.stem, base_directory=path.parent
     )
     return ExperimentConfig(
         name=path.stem,
@@ -149,27 +149,29 @@ def load_experiment(path) -> ExperimentConfig:
     )
 
 
-def _raw_yaml(path: Path) -> tuple:
-    """The file's keys with its `extends` chain applied, and its files.
+def _yaml_sections(path: Path) -> tuple:
+    """The file's sections with its `extends` chain applied, and its files.
 
     The files come this file first, then the base it extends, and so on.
     A key this file names replaces the base's key whole: a child that
     declares `sweep` ignores the base's sweep entirely.
     """
     with open(path) as handle:
-        raw = yaml.safe_load(handle)
-    base_name = raw.pop("extends", None)
+        sections = yaml.safe_load(handle)
+    base_name = sections.pop("extends", None)
     if base_name is None:
-        return raw, (path,)
+        return sections, (path,)
     base_path = path.parent / base_name
-    base, base_paths = _raw_yaml(base_path)
-    base.update(raw)
-    return base, (path,) + base_paths
+    base_sections, base_paths = _yaml_sections(base_path)
+    base_sections.update(sections)
+    files = (path,) + base_paths
+    return base_sections, files
 
 
-def _sweep_blocks(raw_sweep: list) -> tuple:
+def _sweep_blocks(sweep_section: list) -> tuple:
+    """One SweepBlock per block of the yaml's sweep list, in order."""
     blocks = []
-    for index, block in enumerate(raw_sweep, start=1):
+    for index, block in enumerate(sweep_section, start=1):
         sweep_block = _sweep_block(block, index)
         blocks.append(sweep_block)
     return tuple(blocks)

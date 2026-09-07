@@ -394,3 +394,82 @@ def test_a_window_not_marked_terminal_leaves_its_front_buffer_unowned():
     assert faults.owned.sum() == 80
     assert faults.source_fault_ids[0] == 5
     assert not faults.owned[0]
+
+
+def chain_circuit():
+    """Four detectors on one qubit, each fault flipping two neighbours."""
+    return stim.Circuit("""
+        R 0
+        X_ERROR(0.1) 0
+        MR 0
+        DETECTOR(0,0,0) rec[-1]
+        X_ERROR(0.1) 0
+        MR 0
+        DETECTOR(0,0,1) rec[-1] rec[-2]
+        X_ERROR(0.1) 0
+        MR 0
+        DETECTOR(0,0,2) rec[-1] rec[-2]
+        X_ERROR(0.1) 0
+        MR 0
+        DETECTOR(0,0,3) rec[-1] rec[-2]
+        OBSERVABLE_INCLUDE(0) rec[-1]
+    """)
+
+
+def test_a_slicer_asked_for_no_fault_model_builds_no_catalog_and_no_link():
+    """The decoders' default requirement: a timing-only run needs no model.
+
+    decsim/decoders/decoder.py defaults to NO_FAULT_MODEL_REQUIRED, so a
+    preset-latency or per-round decoder costs nothing at build: no
+    catalog is read out of Stim and the window carries neither view.
+    """
+    circuit = chain_circuit()
+    requirement = fault_model_contracts.NO_FAULT_MODEL_REQUIRED
+    slicer = window_slicer.WindowSlicer(
+        circuit,
+        round_count=4,
+        detector_rounds={0: 1, 1: 2, 2: 3, 3: 4},
+        fault_model_requirement=requirement,
+    )
+    window = slicer.slice_window(1, 1, 2, 2, is_last=False)
+    assert slicer.catalogs == {}
+    assert slicer.catalog_link is None
+    assert window.graphlike_faults is None
+    assert window.physical_faults is None
+    assert window.physical_to_graphlike_detector_projection is None
+
+
+def test_a_round_no_detector_belongs_to_slices_an_empty_window():
+    """A declared map may leave a round empty, and its window is empty.
+
+    A window with no rows selects no columns, which is allowed and not
+    refused: the run still spends the round's time, and the addresses of
+    every other detector are untouched by the gap (a QLX program declares
+    such a map when a round measures nothing the decoder reads).
+    """
+    detector_rounds = {0: 1, 1: 1, 2: 3, 3: 4}
+    circuit = chain_circuit()
+    requirement = fault_model_contracts.GRAPHLIKE_FAULT_MODEL_REQUIRED
+    slicer = window_slicer.WindowSlicer(
+        circuit,
+        round_count=4,
+        detector_rounds=detector_rounds,
+        fault_model_requirement=requirement,
+    )
+
+    first = slicer.slice_window(1, 1, 1, 1, is_last=False)
+    empty = slicer.slice_window(2, 2, 2, 2, is_last=False)
+    last = slicer.slice_window(3, 3, 4, 4, is_last=True)
+
+    empty_faults = empty.require_faults(GRAPHLIKE)
+    assert empty.detector_ids == ()
+    assert empty_faults.check.shape == (0, 0)
+    assert empty_faults.observables.shape == (1, 0)
+    assert empty_faults.source_fault_ids == ()
+    assert slicer.chronology.round_by_detector == detector_rounds
+    assert first.detector_ids == (0, 1)
+    assert last.detector_ids == (2, 3)
+    assert first.defect_positions[0] == (1, 0)
+    assert first.defect_positions[1] == (1, 1)
+    assert last.defect_positions[2] == (3, 0)
+    assert last.defect_positions[3] == (4, 0)

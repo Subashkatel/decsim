@@ -8,6 +8,8 @@ circuits: one measurement block per round, and the final data readout
 folded into the last round's packet after that round's own bits.
 """
 
+import pathlib
+
 import numpy
 import pytest
 import stim
@@ -354,3 +356,154 @@ def test_a_detector_round_map_that_misses_a_detector_is_refused():
         detector_formation.build_formation_table(
             circuit, 2, detector_rounds={0: 1}
         )
+
+
+THIS_FILE = pathlib.Path(__file__)
+DATA_DIRECTORY = THIS_FILE.parents[1] / "data"
+
+
+def forms_like_stim(circuit, rounds, seed=3, shots=200):
+    """The streaming formation beside Stim's converter, shot for shot."""
+    table = detector_formation.build_formation_table(circuit, rounds)
+    sampler = circuit.compile_sampler(seed=seed)
+    measurements = sampler.sample(shots)
+    events, observables = formed_by_decsim(table, measurements)
+    stim_events, stim_observables = formed_by_stim(circuit, measurements)
+    assert numpy.array_equal(events, stim_events)
+    assert numpy.array_equal(observables, stim_observables)
+    return table
+
+
+def test_a_declared_map_folds_two_measurement_blocks_into_one_round():
+    """A QLX circuit measures Z then X ancillas as two blocks per round.
+
+    The frontend declares that packet schedule, so the round a
+    measurement belongs to comes from the map and not from the circuit's
+    detector groups: round 1 carries its bits but announces no detector,
+    and the last round's packet carries the data readout after its own
+    ancilla bits.
+    """
+    circuit_path = DATA_DIRECTORY / "qlx" / "mem_surface.stim"
+    circuit = stim.Circuit.from_file(circuit_path)
+    rounds = 8
+    checks_per_round = 8
+    measurement_count = 0
+    for instruction in circuit.flattened():
+        if instruction.name in ("M", "MR"):
+            targets = instruction.targets_copy()
+            measurement_count += len(targets)
+    measurement_rounds = {}
+    for index in range(measurement_count):
+        announced_round = index // checks_per_round + 1
+        measurement_rounds[index] = min(announced_round, rounds)
+
+    table = detector_formation.build_formation_table(
+        circuit, rounds, measurement_rounds=measurement_rounds
+    )
+
+    widths = [table.packet_width_by_round[index] for index in range(1, 9)]
+    detector_counts = []
+    for index in range(1, 9):
+        detectors = table.detectors_of_round(index)
+        detector_counts.append(len(detectors))
+    assert widths == [8] * 7 + [17]
+    assert table.readout_slot_start is None
+    assert detector_counts == [0] + [8] * 7
+    assert len(table.observables) == 1
+
+    sampler = circuit.compile_sampler(seed=3)
+    measurements = sampler.sample(100)
+    events, observables = formed_by_decsim(table, measurements)
+    stim_events, stim_observables = formed_by_stim(circuit, measurements)
+    assert numpy.array_equal(events, stim_events)
+    assert numpy.array_equal(observables, stim_observables)
+
+
+def test_a_lattice_surgery_cnot_forms_like_stim_round_for_round():
+    """Twelve rounds, a mid-circuit readout at the merge, two observables.
+
+    The circuit is a tqec lattice-surgery CNOT at k=1 (tests/data/
+    tqec_cnot_k1.stim). With no declared map every measurement block
+    belongs to the round its DETECTOR group announces, so the packet
+    widths and detector counts change from round to round.
+    """
+    circuit_path = DATA_DIRECTORY / "tqec_cnot_k1.stim"
+    circuit = stim.Circuit.from_file(circuit_path)
+
+    table = forms_like_stim(circuit, 12, seed=5, shots=150)
+
+    widths = [table.packet_width_by_round[index] for index in range(1, 13)]
+    detector_counts = []
+    for index in range(1, 13):
+        detectors = table.detectors_of_round(index)
+        detector_counts.append(len(detectors))
+    assert table.readout_slot_start is None
+    assert widths == [16, 16, 16, 28, 28, 31, 28, 28, 40, 16, 16, 34]
+    assert detector_counts == [8, 16, 16, 20, 28, 28, 24, 28, 32, 16, 16, 24]
+    assert len(table.observables) == 2
+    rounds_of_the_table = table.detector_rounds()
+    chronology_rounds = detector_chronology.resolve_detector_rounds(
+        circuit, None, 12
+    )
+    assert rounds_of_the_table == chronology_rounds
+
+
+@pytest.mark.parametrize(
+    "two_qubit_measurement", ["MZZ 0 1", "MXX 0 1", "MPP Z0*Z1"]
+)
+def test_a_pair_or_product_measurement_appends_one_record(
+    two_qubit_measurement,
+):
+    """The record count is Stim's num_measurements, not the target count.
+
+    A lattice-surgery circuit measures a pair or a product with one
+    instruction over two targets, and it appends one measurement record;
+    counting targets instead would shift every later lookback.
+    """
+    circuit = stim.Circuit(f"""
+        R 0 1 2
+        X_ERROR(0.1) 0 1 2
+        {two_qubit_measurement}
+        DETECTOR(0,0,0) rec[-1]
+        X_ERROR(0.1) 0 1 2
+        {two_qubit_measurement}
+        DETECTOR(0,0,1) rec[-1] rec[-2]
+        M 0 1 2
+        DETECTOR(0,0,2) rec[-3] rec[-2] rec[-4]
+        OBSERVABLE_INCLUDE(0) rec[-1]
+    """)
+    forms_like_stim(circuit, 2)
+
+
+def test_a_pauli_target_in_an_observable_is_not_a_record():
+    """OBSERVABLE_INCLUDE may name a Pauli beside its records."""
+    circuit = stim.Circuit("""
+        R 0 1
+        X_ERROR(0.1) 0 1
+        M 0
+        DETECTOR(0,0,0) rec[-1]
+        X_ERROR(0.1) 0 1
+        M 0
+        DETECTOR(0,0,1) rec[-1] rec[-2]
+        M 1
+        OBSERVABLE_INCLUDE(0) Z1 rec[-1]
+    """)
+    forms_like_stim(circuit, 2)
+
+
+def test_padded_and_heralded_records_shift_the_lookbacks_after_them():
+    """MPAD and HERALDED_ERASE append records no detector reads."""
+    circuit = stim.Circuit("""
+        R 0 1
+        MPAD 0
+        HERALDED_ERASE(0.1) 0
+        X_ERROR(0.1) 0 1
+        M 0
+        DETECTOR(0,0,0) rec[-1]
+        X_ERROR(0.1) 0 1
+        M 0
+        DETECTOR(0,0,1) rec[-1] rec[-2]
+        M 1
+        OBSERVABLE_INCLUDE(0) rec[-1]
+    """)
+    forms_like_stim(circuit, 2)

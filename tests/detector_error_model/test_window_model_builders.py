@@ -462,3 +462,40 @@ def test_a_declared_detector_round_map_moves_a_fault_between_windows():
     assert declared[1].detector_ids == (4, 5)
     assert owned_faults(declared[0]) == [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
     assert owned_faults(declared[1]) == [10, 11, 12]
+
+
+def test_the_one_range_and_many_range_single_window_builders_agree():
+    """Two entry points, one law: an excluded range is never committed.
+
+    The Stim device builds a strong re-decode's window through the
+    one-range entry when the escalation excludes one region and through
+    the many-range entry when it excludes several
+    (decsim/qpu/stim_device.py), so the two must place the same window.
+    """
+    circuit = surface_code_circuit(6)
+    window_entry = (1, 1, 4, 6)
+    excluded = (2, 3)
+    one_range = window_model_builders.build_single_window_error_model(
+        circuit,
+        window_entry,
+        round_count=6,
+        fault_model_requirement=GRAPHLIKE_REQUIRED,
+        exclude_faults_touching=excluded,
+    )
+    many_ranges = (
+        window_model_builders.build_single_window_error_model_with_exclusions(
+            circuit,
+            window_entry,
+            round_count=6,
+            fault_model_requirement=GRAPHLIKE_REQUIRED,
+            fault_exclusion_ranges=(excluded,),
+        )
+    )
+    one_range_faults = one_range.require_faults(GRAPHLIKE)
+    many_range_faults = many_ranges.require_faults(GRAPHLIKE)
+    assert one_range.detector_ids == many_ranges.detector_ids
+    assert one_range_faults.source_fault_ids == (
+        many_range_faults.source_fault_ids
+    )
+    assert numpy.array_equal(one_range_faults.owned, many_range_faults.owned)
+    assert owned_faults(one_range) == owned_faults(many_ranges)

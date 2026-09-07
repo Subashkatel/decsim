@@ -203,3 +203,79 @@ def test_two_physical_errors_with_the_same_identity_merge_as_independent():
     assert physical.detector_sets == ((0, 1, 2),)
     assert physical.observable_sets == ((),)
     assert physical.priors == (pytest.approx(0.26),)
+
+
+def test_the_component_columns_of_a_model_have_no_degree_bound():
+    """detector_error_model_to_faults reads the model, it does not judge it.
+
+    The graphlike bound belongs to the graphlike catalog, so a reader
+    that wants every column of a model as Stim wrote it (the
+    complementary-gap decoder builds its own matrices this way, and
+    applies the bound itself) gets a three-detector column back.
+    """
+    model = stim.DetectorErrorModel("error(0.1) D0 D1 D2\n")
+    detector_sets, _observable_sets, _priors = (
+        stim_fault_catalog.detector_error_model_to_faults(model)
+    )
+    assert detector_sets == [(0, 1, 2)]
+
+
+def test_two_faults_on_one_detector_pair_stay_apart_by_their_observables():
+    """A column is keyed by its detectors and its observables together.
+
+    Merging them would give one column the sum of two priors and lose
+    the fact that only one of them flips the logical observable.
+    """
+    circuit = StandInCircuit(
+        "error(0.1) D0 D1\nerror(0.2) D0 D1 L0\n",
+        "error(0.1) D0 D1\nerror(0.2) D0 D1 L0\n",
+    )
+    catalogs, _link = stim_fault_catalog.prepare_fault_catalogs(
+        circuit, fault_model_contracts.GRAPHLIKE_FAULT_MODEL_REQUIRED
+    )
+    graphlike = catalogs[GRAPHLIKE]
+    assert graphlike.detector_sets == ((0, 1), (0, 1))
+    assert graphlike.observable_sets == ((), (0,))
+    assert graphlike.priors == (0.1, 0.2)
+
+
+def test_two_decompositions_of_one_identity_stay_two_physical_columns():
+    """A physical column is keyed by its identity and its components.
+
+    Two mechanisms can flip the same detectors through different
+    graphlike paths; each keeps its own prior, and the link says which
+    graphlike columns each is made of. The undecomposed model sees them
+    as one error whose prior is their independent merge,
+    0.2(1-0.3) + 0.3(1-0.2) = 0.38.
+    """
+    circuit = StandInCircuit(
+        "error(0.2) D1 D2 ^ D2 D3\nerror(0.3) D1 D0 ^ D0 D3\n",
+        "error(0.38) D1 D3\n",
+    )
+    catalogs, link = stim_fault_catalog.prepare_fault_catalogs(
+        circuit, fault_model_contracts.LINKED_FAULT_MODELS_REQUIRED
+    )
+    physical = catalogs[PHYSICAL]
+    assert physical.detector_sets == ((1, 3), (1, 3))
+    assert physical.priors == (0.2, 0.3)
+    assert link.shape[1] == 2
+    assert link_rows(link, 0) == [0, 1]
+    assert link_rows(link, 1) == [2, 3]
+
+
+def test_the_two_models_priors_agree_to_a_fixed_absolute_bound():
+    """The bound is absolute, not relative: 1e-15, from float rounding.
+
+    The two Stim models are the same circuit read twice, so their priors
+    differ only by the order the products were multiplied in; the bound
+    is the size of that error and does not scale with the prior.
+    """
+    perturbed = 0.2 + 5e-16
+    assert perturbed != 0.2
+    circuit = StandInCircuit(
+        "error(0.2) D1 D2 ^ D2 D3\n", f"error({perturbed!r}) D1 D3\n"
+    )
+    catalogs, _link = stim_fault_catalog.prepare_fault_catalogs(
+        circuit, fault_model_contracts.LINKED_FAULT_MODELS_REQUIRED
+    )
+    assert catalogs[PHYSICAL].priors == (0.2,)

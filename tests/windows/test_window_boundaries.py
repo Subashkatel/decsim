@@ -66,7 +66,7 @@ def test_a_stale_delivery_is_ignored_and_the_edge_releases_once():
     )
     profile = link_profiles.logical_reference_profile()
     links = fabric.LinkFabric(profile, engine)
-    interaction = window_interactions.DefaultWindowInteraction()
+    interaction = window_interactions.DefaultWindowInteraction(1)
     transfers = window_transfers.WindowTransfers(engine, links)
     courier = window_boundaries.BoundaryCourier(
         planner, transfers, interaction, _EAGER, on_boundary_received

@@ -107,7 +107,7 @@ class _Fixture:
         )
         link = _Link()
         transfers = window_transfers.WindowTransfers(self.engine, link)
-        interaction = window_interactions.DefaultWindowInteraction()
+        interaction = window_interactions.DefaultWindowInteraction(1)
         self.builder = decode_requests.DecodeRequestBuilder(
             self.engine, self.planner, self.tracker, interaction, transfers
         )

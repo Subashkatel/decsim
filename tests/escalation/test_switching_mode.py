@@ -116,6 +116,52 @@ def test_switching_config_requires_both_tiers_and_the_card(tmp_path):
         )
 
 
+def _restart_width_card(regions: int) -> dict:
+    """The switching card with the double window and the re-read width."""
+    escalation = {
+        "kind": "switching",
+        "gap_threshold_db": 20.0,
+        "double_window": True,
+        "restart_reread_buffer_regions": regions,
+    }
+    strong_decoder = strong_unit("belief_matching")
+    card = {"escalation": escalation}
+    card.update(strong_decoder)
+    return card
+
+
+def test_both_restart_re_read_widths_load_from_the_escalation_section(
+    tmp_path,
+):
+    """0 is Toshio 2510.25222 Sec. III C, 1 is decsim's forward window."""
+    paper_card = _restart_width_card(0)
+    paper_path = write_config(tmp_path, paper_card)
+    paper = load_experiment(paper_path)
+    one_region_card = _restart_width_card(1)
+    one_region_path = write_config(tmp_path, one_region_card)
+    one_region = load_experiment(one_region_path)
+
+    assert paper.settings.escalation.restart_reread_buffer_regions == 0
+    assert one_region.settings.escalation.restart_reread_buffer_regions == 1
+
+
+def test_a_wider_restart_re_read_and_another_kind_are_refused(tmp_path):
+    """Only the two widths have a referent, and only switching restarts."""
+    wide_card = _restart_width_card(2)
+    wide_path = write_config(tmp_path, wide_card)
+    with pytest.raises(ValueError, match="must be 0, the paper's restart"):
+        load_experiment(wide_path)
+    weak_card = {
+        "escalation": {
+            "kind": "weak_baseline",
+            "restart_reread_buffer_regions": 0,
+        }
+    }
+    weak_path = write_config(tmp_path, weak_card)
+    with pytest.raises(ValueError, match="never escalates"):
+        load_experiment(weak_path)
+
+
 def test_threshold_converts_decibels_to_natural_log_weight(tmp_path):
     config = load_experiment(switching_config(tmp_path, 20.0))
     assert config.settings.escalation.gap_threshold_decibels == 20.0

@@ -69,7 +69,13 @@ class DefaultWindowInteraction:
     The boundary is a mask per (round, patch) or per round, XORed into
     the landed rounds when the decode starts; a same-operation A/B
     delivery is mapped by stable detector identity.
+    `restart_reread_buffer_regions` is how many of the strong region's
+    buffer regions the restart window re-reads
+    (escalation.restart_reread_buffer_regions).
     """
+
+    def __init__(self, restart_reread_buffer_regions: int) -> None:
+        self.restart_reread_buffer_regions = restart_reread_buffer_regions
 
     def initial_boundary_state(self, _window):
         """An empty mask."""
@@ -142,8 +148,8 @@ class DefaultWindowInteraction:
         The strong window commits from the weak window's commit start over
         commit + 2 buffer rounds (clamped at the operation's end) and reads
         one buffer of context on each side; a restart window past it
-        re-reads one buffer into the strong region, whose seam faults the
-        strong region owns.
+        re-reads restart_reread_buffer_regions buffer regions of the
+        strong region.
         """
         commit_round_count = weak_window.commit_hi - weak_window.commit_lo + 1
         buffer_round_count = weak_window.buffer_hi - weak_window.commit_hi
@@ -161,11 +167,11 @@ class DefaultWindowInteraction:
         restart_buffer_lo = None
         restart_seam_fault_owner = None
         if has_restart:
-            restart_start = commit_hi - buffer_round_count + 1
+            reread_regions = self.restart_reread_buffer_regions
+            reread_round_count = reread_regions * buffer_round_count
+            restart_start = commit_hi - reread_round_count + 1
             restart_buffer_lo = max(commit_lo, restart_start)
-            restart_seam_fault_owner = (
-                window_records.SeamFaultOwner.STRONG_REGION
-            )
+            restart_seam_fault_owner = self._restart_seam_fault_owner()
         return window_records.StrongRegionPlan(
             commit_lo=commit_lo,
             commit_hi=commit_hi,
@@ -174,6 +180,20 @@ class DefaultWindowInteraction:
             restart_buffer_lo=restart_buffer_lo,
             restart_seam_fault_owner=restart_seam_fault_owner,
         )
+
+    def _restart_seam_fault_owner(self):
+        """Which side commits the faults crossing the restart seam.
+
+        With no re-read the restart window shares no round with the
+        strong region, so it owns the faults of the rounds it reads and
+        the strong region owns nothing past its committed edge (Toshio
+        2510.25222 Sec. III C, Fig. 12). With a re-read the crossing
+        rounds are read twice, and the strong region keeps them: it
+        decoded them with both boundaries determined.
+        """
+        if self.restart_reread_buffer_regions == 0:
+            return window_records.SeamFaultOwner.RESTART_WINDOW
+        return window_records.SeamFaultOwner.STRONG_REGION
 
 
 class _DefectBoundaryState(dict):

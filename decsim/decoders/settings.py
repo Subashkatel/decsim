@@ -22,10 +22,18 @@ import decsim.ports as ports
 
 THRESHOLD_SOURCES = ("fixed", "table", "online")
 GAP_COMPUTATIONS = ("serial", "parallel_pair", "split_pair")
+# How many of the strong region's buffer regions the restarted weak
+# window re-reads under the double window (Toshio 2510.25222 Sec. III C,
+# Fig. 12). 0 is the paper: the weak decoder resumes on the commit plus
+# buffer rounds stored after the strong region and reads nothing inside
+# it. 1 is decsim's forward window, which reads one buffer region of the
+# strong region as the restart window's far-boundary context.
+RESTART_REREAD_BUFFER_REGIONS = (0, 1)
 ESCALATION_KEYS = (
     "kind",
     "gap_threshold_db",
     "double_window",
+    "restart_reread_buffer_regions",
     "gap_computation",
     "gap_units",
     "threshold_source",
@@ -242,7 +250,9 @@ class EscalationSettings:
     given, table looks the sweep point up in an offline calibration csv
     (threshold_column, calibrated for this run's window geometry),
     online starts there and adapts it across a point's shots, serial
-    switching only; double_window is the paper's Sec. III C scheme;
+    switching only; double_window is the paper's Sec. III C scheme, and
+    restart_reread_buffer_regions is how many of the strong region's
+    buffer regions the restarted weak window re-reads under it;
     gap_computation is where the two forced solves run (serial on one
     core, parallel_pair on two cores in the unit, split_pair on its own
     pool of gap_units). A Python-built policy is used as it is. The
@@ -258,6 +268,7 @@ class EscalationSettings:
     threshold_column: Optional[str] = None
     online: Optional[OnlineThresholdSettings] = None
     double_window: bool = False
+    restart_reread_buffer_regions: int = 1
     gap_computation: str = "serial"
     gap_units: int = 1
     policy: Optional[ports.EscalationPolicy] = None
@@ -407,6 +418,7 @@ def _switching_settings(
             f"{double_window!r}"
         )
     _check_serial_only(gap_computation, threshold_source, double_window)
+    reread_regions = _restart_reread_buffer_regions(section)
     threshold_table = section.get("threshold_table")
     return EscalationSettings(
         kind="switching",
@@ -417,10 +429,24 @@ def _switching_settings(
         threshold_column=threshold_column,
         online=online,
         double_window=double_window,
+        restart_reread_buffer_regions=reread_regions,
         gap_computation=gap_computation,
         gap_units=gap_units,
         base_directory=base_directory,
     )
+
+
+def _restart_reread_buffer_regions(section: Mapping) -> int:
+    """How far into the strong region the restart window re-reads."""
+    regions = section.get("restart_reread_buffer_regions", 1)
+    if regions not in RESTART_REREAD_BUFFER_REGIONS:
+        raise ValueError(
+            "escalation.restart_reread_buffer_regions must be 0, the "
+            "paper's restart on the rounds stored after the strong "
+            "region, or 1, decsim's re-read of one buffer region of it "
+            f"for the far boundary; got {regions!r}"
+        )
+    return int(regions)
 
 
 def _gap_threshold_decibels(

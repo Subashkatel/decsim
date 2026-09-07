@@ -206,6 +206,7 @@ def compile_plan(
     fallback_round_microseconds=2.0,
     retain_strong_context=False,
     double_window=False,
+    restart_reread_buffer_regions=1,
     open_ended=False,
 ):
     selected_code = code or RecordingCode()
@@ -222,6 +223,7 @@ def compile_plan(
         fallback_round_microseconds=fallback_round_microseconds,
         retain_strong_context=retain_strong_context,
         double_window=double_window,
+        restart_reread_buffer_regions=restart_reread_buffer_regions,
         has_open_ended_dynamic_streams=open_ended,
     )
     return plan, selected_code, selected_layout, selected_scheme
@@ -248,12 +250,12 @@ def test_plan_records_are_frozen_without_recursively_freezing_execution():
     )
 
 
-def test_buffering_plan_accounts_for_overlap_successors_and_open_streams():
-    """Retention ledgers include direct overflow once and suppress finite capacity for open streams."""
+def _overlapping_successor_plan() -> window_records.WindowPlan:
+    """One windowed operation whose buffer overflows into two successors."""
     first = window_records.Window(1, 0, 2, 4, 6, 5, buffer_lo=1)
     second = window_records.Window(2, 0, 1, 2, 3, 3)
     third = window_records.Window(3, 0, 1, 2, 3, 3)
-    execution = window_records.WindowPlan(
+    return window_records.WindowPlan(
         windows={(1, 0): first, (2, 0): second, (3, 0): third},
         window_count={1: 1, 2: 1, 3: 1},
         op_windows={1: [0]},
@@ -266,10 +268,16 @@ def test_buffering_plan_accounts_for_overlap_successors_and_open_streams():
         batch_preceding_idle_rounds_by_operation={1: False, 2: False, 3: False},
     )
 
+
+def test_buffering_plan_accounts_for_overlap_successors_and_open_streams():
+    """Retention ledgers include direct overflow once and suppress finite capacity for open streams."""
+    execution = _overlapping_successor_plan()
+
     weak_only = _plan_syndrome_buffering(
         execution,
         retain_strong_context=False,
         double_window=False,
+        restart_reread_buffer_regions=1,
     )
     assert weak_only.weak_holds == (
         ((1, 0), ((1, 1), (1, 2), (1, 3), (1, 4), (1, 5), (2, 1), (3, 1))),
@@ -285,9 +293,75 @@ def test_buffering_plan_accounts_for_overlap_successors_and_open_streams():
         execution,
         retain_strong_context=False,
         double_window=False,
+        restart_reread_buffer_regions=1,
         has_open_ended_dynamic_streams=True,
     )
     assert open_ended.sufficient_live_rounds is None
+
+
+def _chained_sliding_windows() -> window_records.WindowPlan:
+    """Four d=3 sliding windows of one operation, each bounded by the last.
+
+    Window 0 commits 1-3 and reads to 6, window 3 commits 10-12 and
+    reads to 15; a strong region escalated from window 0 commits 1-9.
+    """
+    windows = {}
+    for index in range(4):
+        commit_lo = 3 * index + 1
+        commit_hi = commit_lo + 2
+        buffer_hi = commit_lo + 5
+        window = window_records.Window(
+            1, index, commit_lo, commit_hi, buffer_hi, 6
+        )
+        if index:
+            window.deps = [(1, index - 1)]
+        windows[(1, index)] = window
+    return window_records.WindowPlan(
+        windows=windows,
+        window_count={1: 4},
+        op_windows={1: [0, 1, 2, 3]},
+        successors={1: []},
+        spatial_nodes={1: 1},
+        rounds_by_operation={1: 15},
+        code_names={1: "surface"},
+        total_windows=4,
+        windowed_by_operation={1: True},
+        batch_preceding_idle_rounds_by_operation={1: False},
+    )
+
+
+def test_the_potential_restart_hold_covers_what_the_restart_re_reads():
+    """The hold is exactly the restart window's re-read range.
+
+    Toshio 2510.25222 Sec. III C: with no re-read the restarted weak
+    window begins at the round after the strong region, so the hold
+    reaches no round the strong region committed; with one buffer region
+    of re-read it reaches one buffer region back, which is what the
+    plan then re-slices the window onto.
+    """
+    execution = _chained_sliding_windows()
+
+    paper = _plan_syndrome_buffering(
+        execution,
+        retain_strong_context=True,
+        double_window=True,
+        restart_reread_buffer_regions=0,
+    )
+    one_region = _plan_syndrome_buffering(
+        execution,
+        retain_strong_context=True,
+        double_window=True,
+        restart_reread_buffer_regions=1,
+    )
+
+    owner = decoding_records.PotentialRestart((1, 3))
+    paper_holds = dict(paper.weak_holds)
+    one_region_holds = dict(one_region.weak_holds)
+    paper_rounds = tuple((1, index) for index in range(10, 16))
+    one_region_rounds = tuple((1, index) for index in range(7, 16))
+
+    assert paper_holds[owner] == paper_rounds
+    assert one_region_holds[owner] == one_region_rounds
 
 
 def test_strong_buffering_extends_context_and_unions_shared_rounds():
@@ -310,11 +384,13 @@ def test_strong_buffering_extends_context_and_unions_shared_rounds():
         execution,
         retain_strong_context=True,
         double_window=False,
+        restart_reread_buffer_regions=1,
     )
     doubled = _plan_syndrome_buffering(
         execution,
         retain_strong_context=True,
         double_window=True,
+        restart_reread_buffer_regions=1,
     )
 
     owner, ordinary_rounds = ordinary.potential_holds[0]

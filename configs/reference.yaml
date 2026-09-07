@@ -74,6 +74,20 @@ escalation:
 #                                  # chain keeps committing past an escalated
 #                                  # strong window; false = serial escalation
 #                                  # with Held boundaries
+#   restart_reread_buffer_regions: 1  # double window only: how many of the
+#                                  # strong region's buffer regions the
+#                                  # restarted weak window re-reads. 0 is the
+#                                  # paper (Toshio 2510.25222 Sec. III C lines
+#                                  # 1241-1246, Fig. 12): the weak decoder
+#                                  # resumes on the commit plus buffer rounds
+#                                  # stored after the strong region and reads
+#                                  # nothing inside it, and the restart window
+#                                  # owns the faults of the rounds it reads.
+#                                  # 1 re-reads one buffer region of the strong
+#                                  # region as the restart window's far
+#                                  # boundary, and the strong region keeps the
+#                                  # crossing faults; it costs Buffer 0 one
+#                                  # more buffer region per bounded window
 #   gap_computation: serial        # serial | parallel_pair | split_pair: where
 #                                  # the two forced-class gap solves run
 #   gap_units: 1                   # split_pair only: sibling pool size

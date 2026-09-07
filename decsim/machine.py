@@ -789,9 +789,12 @@ def _plan(settings: MachineSettings, escalation_policy) -> _Plan:
     )
     scheme = _scheme(settings.windows, settings.escalation)
     boundary_policy = _boundary_policy(settings.windows, settings.escalation)
+    reread_regions = settings.escalation.restart_reread_buffer_regions
     window_interaction = settings.windows.window_interaction
     if window_interaction is None:
-        window_interaction = window_interactions.DefaultWindowInteraction()
+        window_interaction = window_interactions.DefaultWindowInteraction(
+            reread_regions
+        )
     is_sliding = type(scheme) is windowing_schemes.SlidingWindowScheme
     if dynamic_streams and not is_sliding:
         raise ValueError("dynamic streams require SlidingWindowScheme")
@@ -831,6 +834,7 @@ def _plan(settings: MachineSettings, escalation_policy) -> _Plan:
         fallback_round_microseconds=settings.qpu.round_period_microseconds,
         retain_strong_context=escalation_policy.requires_strong_context,
         double_window=settings.escalation.double_window,
+        restart_reread_buffer_regions=reread_regions,
         has_open_ended_dynamic_streams=bool(dynamic_streams),
     )
     resource_claims = {}

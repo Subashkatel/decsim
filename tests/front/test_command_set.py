@@ -8,6 +8,7 @@ command line is never the only record of a number.
 """
 
 import csv
+import json
 
 import pytest
 
@@ -70,6 +71,33 @@ def _point_and_seed_of_every_row(run_dir, name):
         )
         order.append(point_and_seed)
     return order
+
+
+def _collect_one_shard(config_path, out_dir, shard, shots_per_unit):
+    command.main(
+        [
+            "collect",
+            str(config_path),
+            "--out",
+            str(out_dir),
+            "--shard",
+            shard,
+            "--shots-per-unit",
+            str(shots_per_unit),
+        ]
+    )
+
+
+def _combined(first_dir, second_dir, out_dir):
+    command.main(
+        ["combine", str(first_dir), str(second_dir), "--out", str(out_dir)]
+    )
+
+
+def _manifest_of(run_dir):
+    path = run_dir / "manifest.json"
+    text = path.read_text()
+    return json.loads(text)
 
 
 def _seeds_of_every_shot(run_dir):
@@ -412,6 +440,55 @@ def test_shards_that_split_every_points_seeds_fold_to_the_serial_rows(
         assert forwards_path.read_bytes() == backwards_path.read_bytes()
 
 
+def test_a_combined_folder_folds_again_with_a_later_shard(tmp_path):
+    """A Slurm array finishing in waves folds each wave as it lands.
+
+    So a combined folder is a run folder: the additive files plus a
+    manifest recording the sweep, and folding it with the last shard
+    gives the rows of the run that never sharded at all.
+    """
+    config_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)
+    serial_dir = tmp_path / "serial"
+    shard_dirs = []
+    command.main(["collect", str(config_path), "--out", str(serial_dir)])
+    for index in (0, 1, 2):
+        shard_dir = tmp_path / f"shard{index}"
+        shard_dirs.append(shard_dir)
+        _collect_one_shard(config_path, shard_dir, f"{index}/3", 1)
+    first_two_dir = tmp_path / "first_two"
+    combined_dir = tmp_path / "combined"
+    _combined(shard_dirs[0], shard_dirs[1], first_two_dir)
+    _combined(first_two_dir, shard_dirs[2], combined_dir)
+    for name in EVERY_FILE:
+        serial = _rows_without_wall_clock(serial_dir, name)
+        assert _rows_without_wall_clock(combined_dir, name) == serial
+
+
+def test_a_manifest_records_the_shard_and_the_unit_size_it_ran(tmp_path):
+    """How a folder ran, beside what it ran: the array's own bookkeeping.
+
+    Nothing reads these to fold the rows, which come back in the order
+    the recorded sweep gives; they say what one of a hundred folders an
+    array left behind holds.
+    """
+    config_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)
+    whole_dir = tmp_path / "whole"
+    shard_dir = tmp_path / "shard"
+    combined_dir = tmp_path / "combined"
+    command.main(["collect", str(config_path), "--out", str(whole_dir)])
+    _collect_one_shard(config_path, shard_dir, "0/2", 1)
+    command.main(["combine", str(whole_dir), "--out", str(combined_dir)])
+    whole = _manifest_of(whole_dir)
+    sharded = _manifest_of(shard_dir)
+    combined = _manifest_of(combined_dir)
+    assert whole["shard"] is None
+    assert whole["shots_per_unit"] is None
+    assert sharded["shard"] == "0/2"
+    assert sharded["shots_per_unit"] == 1
+    assert combined["folded"] == [str(whole_dir)]
+    assert combined["resolved_config"] == whole["resolved_config"]
+
+
 def test_a_shard_with_no_work_unit_says_so_and_writes_no_rows(tmp_path, capsys):
     """A Slurm array wider than the sweep's units is a shape, not a fault."""
     config_path = yaml_configs.write_config(tmp_path, {})
@@ -505,18 +582,7 @@ def test_one_points_seeds_divide_across_two_shards(tmp_path):
     first_dir = tmp_path / "shard0"
     second_dir = tmp_path / "shard1"
     for index, out_dir in ((0, first_dir), (1, second_dir)):
-        command.main(
-            [
-                "collect",
-                str(config_path),
-                "--out",
-                str(out_dir),
-                "--shard",
-                f"{index}/2",
-                "--shots-per-unit",
-                "1",
-            ]
-        )
+        _collect_one_shard(config_path, out_dir, f"{index}/2", 1)
     first_seeds = _seeds_of_every_shot(first_dir)
     second_seeds = _seeds_of_every_shot(second_dir)
     assert first_seeds == ["0", "2"]

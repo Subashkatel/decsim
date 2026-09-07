@@ -97,11 +97,21 @@ def write_manifest(
     run_dir: Path,
     started_utc: str,
     finished_utc: Optional[str] = None,
+    *,
+    shard: Optional[tuple] = None,
+    shots_per_unit: Optional[int] = None,
 ) -> None:
     """Write the run's identity: enough to interpret or reproduce it.
 
     Sampling is deterministic from (stim version, circuit, distance,
     rounds, p, seed), so the manifest plus seeds are the raw data.
+
+    `shard` and `shots_per_unit` are facts of how this run ran, the way
+    the host and the slurm job id are: which share of the sweep's work
+    units fell to it, and how its points were cut into units. Nothing
+    reads them to fold the rows, since `decsim combine` puts the folded
+    rows in the order the recorded sweep gives; they say what a folder
+    holds when a Slurm array leaves a hundred of them behind.
     """
     json_safe_config = collect.json_value(config)
     config_files = []
@@ -110,24 +120,77 @@ def write_manifest(
     manifest = {
         "config_files": config_files,
         "resolved_config": json_safe_config,
-        "git": _git_state(),
-        "container": _container(),
-        "versions": _versions(),
-        "host": platform.node(),
-        "slurm_job_id": os.environ.get("SLURM_JOB_ID"),
-        "argv": sys.argv,
-        "started_utc": started_utc,
-        "finished_utc": finished_utc,
+        "shard": _shard_text(shard),
+        "shots_per_unit": shots_per_unit,
     }
-    manifest_path = run_dir / "manifest.json"
-    manifest_text = json.dumps(manifest, indent=2)
-    manifest_path.write_text(manifest_text)
+    how_it_ran = _how_it_ran()
+    manifest.update(how_it_ran)
+    manifest["started_utc"] = started_utc
+    manifest["finished_utc"] = finished_utc
+    _write_the_manifest(manifest, run_dir)
+
+
+def write_combined_manifest(
+    resolved_config: dict,
+    run_dir: Path,
+    folded: list,
+    started_utc: str,
+    finished_utc: Optional[str] = None,
+) -> None:
+    """A combined folder's identity: the sweep it folds, and what it folded.
+
+    A combined folder is a run folder, so it carries a manifest like any
+    other and `decsim combine` can fold it again with a shard that
+    landed later. The resolved config is the one every folded folder
+    recorded, which is what combine reads the sweep order off; the
+    folded folders' names are a fact of how this folder came about, and
+    like a run's shard they order nothing.
+    """
+    folded_names = []
+    for run_folder_path in folded:
+        folded_names.append(str(run_folder_path))
+    manifest = {
+        "resolved_config": resolved_config,
+        "folded": folded_names,
+    }
+    how_it_ran = _how_it_ran()
+    manifest.update(how_it_ran)
+    manifest["started_utc"] = started_utc
+    manifest["finished_utc"] = finished_utc
+    _write_the_manifest(manifest, run_dir)
 
 
 def utc_now() -> str:
     """This moment as an iso timestamp, for the manifest's times."""
     now = datetime.datetime.now(datetime.timezone.utc)
     return now.isoformat()
+
+
+def _write_the_manifest(manifest: dict, run_dir: Path) -> None:
+    """manifest.json, indented, in the folder it describes."""
+    manifest_path = run_dir / "manifest.json"
+    manifest_text = json.dumps(manifest, indent=2)
+    manifest_path.write_text(manifest_text)
+
+
+def _how_it_ran() -> dict:
+    """Where and by what this process ran, for either kind of manifest."""
+    return {
+        "git": _git_state(),
+        "container": _container(),
+        "versions": _versions(),
+        "host": platform.node(),
+        "slurm_job_id": os.environ.get("SLURM_JOB_ID"),
+        "argv": sys.argv,
+    }
+
+
+def _shard_text(shard: Optional[tuple]) -> Optional[str]:
+    """The shard as the user wrote it, i/n; None when there was none."""
+    if shard is None:
+        return None
+    index, count = shard
+    return f"{index}/{count}"
 
 
 def _utc_stamp() -> str:

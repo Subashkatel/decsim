@@ -6,19 +6,24 @@ rate carries its Wilson 95% interval. Nothing here runs a simulation.
 """
 
 import csv
+import functools
+import json
 import math
 import statistics
 from pathlib import Path
 from typing import Optional
 
+import decsim.front.experiment as experiment
 import decsim.front.measure as measure
 import decsim.front.refusal as refusal
 
 BULKY_FIELDS = ("samples", "means", "maxes", "link_totals")
 # The files combine folds, and how each one is put back in the order a
-# single run would have written it: the summaries are written point by
-# point in sweep-point order (summarize, link_rows), the per-shot files
-# in the order the tasks ran, which is the shards taken in turn.
+# single run would have written it: the summaries point by point in
+# sweep-point order (summarize, link_rows), the per-shot files by the
+# point's place in the sweep's task order and then by seed. Both orders
+# come from the rows and the sweep, never from the order the folders
+# were named.
 POINT_ORDERED_FILES = ("sweep.csv", "links.csv")
 TASK_ORDERED_FILES = ("shots.csv", "latency_samples.csv")
 
@@ -225,10 +230,16 @@ def combine(run_dirs: list, out_dir: Path) -> list:
     the same strong id, and here no two rows share one. A point that
     does appear twice is refused, because summing two summaries of the
     same point is not the summary of their shots.
+
+    The rows come back in the order one unsharded run would have
+    written them, read off the rows themselves and the sweep every
+    folder's manifest records, so `combine b a` writes what
+    `combine a b` writes.
     """
     summaries = _rows_of_every_folder(run_dirs, "sweep.csv")
     combined = _in_sweep_point_order(summaries)
     _refuse_a_repeated_point(combined, run_dirs)
+    positions = _one_sweeps_task_positions(run_dirs)
     out_dir.mkdir(parents=True, exist_ok=True)
     for name in POINT_ORDERED_FILES:
         rows = _rows_of_every_folder(run_dirs, name)
@@ -237,12 +248,11 @@ def combine(run_dirs: list, out_dir: Path) -> list:
         ordered = _in_sweep_point_order(rows)
         _write_combined(ordered, out_dir, name)
     for name in TASK_ORDERED_FILES:
-        by_folder = _rows_by_folder(run_dirs, name)
-        ordered = _in_task_order(by_folder)
-        if not ordered:
+        rows = _rows_of_every_folder(run_dirs, name)
+        if not rows:
             continue
+        ordered = _in_task_and_seed_order(rows, positions)
         _write_combined(ordered, out_dir, name)
-    _refuse_a_repeated_point(combined, run_dirs)
     return combined
 
 
@@ -306,68 +316,72 @@ def _write_combined(rows: list, out_dir: Path, name: str) -> None:
     write_csv(rows, path)
 
 
-def _rows_by_folder(run_dirs: list, name: str) -> list:
-    """One file's rows per folder, in the order the folders were named."""
-    by_folder = []
-    for run_dir in run_dirs:
-        path = Path(run_dir) / name
-        if not path.is_file():
-            continue
-        rows = read_rows(path)
-        by_folder.append(rows)
-    return by_folder
+def _one_sweeps_task_positions(run_dirs: list) -> dict:
+    """Where every point of the folded sweep sits in its task order.
 
-
-def _in_task_order(by_folder: list) -> list:
-    """The folders' per-shot rows back in the order the tasks ran.
-
-    Shard i holds the tasks whose index modulo n is i, so taking one
-    task from each shard in turn, again and again, is the sweep's own
-    task order.
+    A shard's rows say which point they belong to, not where that point
+    sits in the sweep, so the order comes from the resolved config each
+    folder's manifest records. Folders that recorded different configs
+    are refused: they are not shards of one sweep.
     """
-    groups_by_folder = []
-    for rows in by_folder:
-        groups = _point_groups(rows)
-        groups_by_folder.append(groups)
-    ordered = []
-    task_count = _most_tasks_in_a_shard(groups_by_folder)
-    for position in range(task_count):
-        _extend_with_one_task_each(ordered, groups_by_folder, position)
-    return ordered
+    recorded_configs = []
+    for run_dir in run_dirs:
+        recorded = _manifest_config(run_dir)
+        recorded_configs.append(recorded)
+    _refuse_folders_of_different_sweeps(run_dirs, recorded_configs)
+    first_config = recorded_configs[0]
+    return experiment.task_positions(first_config["sweep"])
 
 
-def _most_tasks_in_a_shard(groups_by_folder: list) -> int:
-    """How many tasks the fullest shard ran; zero when there are none."""
-    counts = [0]
-    for groups in groups_by_folder:
-        counts.append(len(groups))
-    return max(counts)
+def _manifest_config(run_dir) -> dict:
+    """One run folder's resolved config, as its manifest recorded it."""
+    manifest_path = Path(run_dir) / "manifest.json"
+    if not manifest_path.is_file():
+        raise refusal.RefusalError(
+            f"{run_dir} has no manifest.json; combine reads the sweep a run "
+            "folder records, so it can put the folded rows back in the "
+            "order one unsharded run would have written them"
+        )
+    manifest_text = manifest_path.read_text()
+    manifest = json.loads(manifest_text)
+    return manifest["resolved_config"]
 
 
-def _extend_with_one_task_each(
-    ordered: list, groups_by_folder: list, position: int
+def _refuse_folders_of_different_sweeps(
+    run_dirs: list, recorded_configs: list
 ) -> None:
-    """One round of the interleave: each shard's task at this position."""
-    for groups in groups_by_folder:
-        if position < len(groups):
-            ordered.extend(groups[position])
+    """Folders that ran different experiments are not one sweep's shards."""
+    first_config = recorded_configs[0]
+    first_dir = run_dirs[0]
+    for run_dir, recorded in zip(run_dirs, recorded_configs):
+        if recorded == first_config:
+            continue
+        raise refusal.RefusalError(
+            f"{run_dir} ran a different experiment from {first_dir}; combine "
+            "folds the shards of one sweep, and every shard of a sweep "
+            "records the same resolved config"
+        )
 
 
-def _point_groups(rows: list) -> list:
-    """One folder's rows cut into runs of one sweep point, order kept."""
-    groups = []
-    current = []
-    current_point = None
-    for row in rows:
-        point = _row_point_order(row)
-        if point != current_point and current:
-            groups.append(current)
-            current = []
-        current_point = point
-        current.append(row)
-    if current:
-        groups.append(current)
-    return groups
+def _in_task_and_seed_order(rows: list, positions: dict) -> list:
+    """Per-shot rows in the sweep's own order: the task, then the seed.
+
+    Sorting is stable, so a point's several rows for one seed (one per
+    decoded window) keep the order the run wrote them in.
+    """
+    order = functools.partial(_row_task_and_seed, positions)
+    return sorted(rows, key=order)
+
+
+def _row_task_and_seed(positions: dict, row: dict) -> tuple:
+    """One per-shot row's place: its point's task position, then its seed."""
+    point = (
+        row["physical_error_probability"],
+        row["distance"],
+        row["round_period_us"],
+    )
+    position = positions[point]
+    return (position, row["seed"])
 
 
 def _rows_of_every_folder(run_dirs: list, name: str) -> list:

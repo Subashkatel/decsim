@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # One closed-loop experiment as a cluster job:
-#   sbatch -J <name> -o <log> experiments/slurm_run.sh <config.yaml>
+#   sbatch -J <name> -o <log> slurm/slurm_run.sh <config.yaml>
 #SBATCH --partition=cpu
 #SBATCH --nodes=1
 #SBATCH --ntasks=1

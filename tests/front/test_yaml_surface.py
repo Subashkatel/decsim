@@ -1,120 +1,26 @@
-"""The decoder card: two tiers, two distinct units, the mode picks one.
+"""The yaml surface of the decoder card, the sweep and the run folder.
 
-The shape under test is the owner's 2026-08-26 ruling: the algorithm is
-structure on a per-tier unit card (decoder.weak / decoder.strong), never a
-sweep axis, mirroring the tiered architecture itself (Toshio arXiv
-2510.25222: lightweight decoders decode constantly, a separate accurate
-decoder is invoked on demand) and gem5's config split (structure on the
-component, parameters swept around it). These tests also keep
-reference.yaml and the loader from drifting apart.
+These tests keep configs/reference.yaml and the loader from drifting
+apart: every shipped config loads, an unknown key or a stale one is
+refused with a sentence, the swept distance reaches the rounds policy,
+and a run writes its manifest and its per-shot records.
 """
 
-from pathlib import Path
-
 import pytest
-import yaml
 
-import decsim.collect as collect
-from experiments.experiment_config import load_experiment
-from experiments.measure_shot import measure_shot
-
-CONFIGS_DIR = Path(__file__).parent.parent / "configs"
-
-
-def measure_point_shot(
-    config, *, physical_error_probability, distance, round_period_us, seed
-):
-    """One seeded shot at one sweep point, collected and measured."""
-    task = config.point_task(
-        physical_error_probability=physical_error_probability,
-        distance=distance,
-        round_period_us=round_period_us,
-        shots=seed + 1,
-    )
-    shot = collect.run_shot(task, seed)
-    return measure_shot(shot)
-
-
-# A complete runnable config, small enough for a functional test. Tests
-# override keys through the `overrides` dict (top-level replacement, the
-# same rule as `extends`).
-MINIMAL_CONFIG = {
-    "qpu": {"kind": "stim_device"},
-    "escalation": {"kind": "weak_baseline"},
-    "workload": {
-        "kind": "memory_circuit",
-        "code_task": "surface_code:rotated_memory_z",
-        "rounds_per_shot": 15,
-    },
-    "windows": {
-        "kind": "sliding",
-        "commit_rounds": None,
-        "buffer_rounds": None,
-    },
-    "sweep": [
-        {
-            "physical_error_probability": [0.001],
-            "distance": [3],
-            "round_period_us": [1.0],
-            "shots": 1,
-        }
-    ],
-    "controller": {
-        "clock": "fridge",
-        "readout_to_bits_cycles": 0,
-        "packing_cycles_per_round": 0,
-        "decision_to_pulse_cycles": 0,
-        "packing_rounds_in_flight": None,
-    },
-    "clocks": {"fridge": 250.0, "room": 250.0},
-    "links": {
-        "qpu_to_controller": {
-            "latency_cycles": 1,
-            "clock": "fridge",
-            "bits_per_cycle": None,
-        }
-    },
-    "round_store": {"rounds": None},
-    "strong_round_store": {"rounds": None},
-    "weak_decoder": {
-        "kind": 0.028,
-        "units": 1,
-        "unit_memory_rounds": None,
-        "engine": {
-            "clock": "fridge",
-            "fetch_cycles_per_round": 1,
-            "release_cycles_per_job": 1,
-        },
-    },
-    "pauli_frame": {"clock": "fridge", "write_cycles": 1},
-}
-
-
-def write_config(tmp_path, overrides: dict) -> Path:
-    raw = dict(MINIMAL_CONFIG)
-    raw.update(overrides)
-    config_path = tmp_path / "unit_test_config.yaml"
-    config_path.write_text(yaml.safe_dump(raw))
-    return config_path
-
-
-def strong_unit(algorithm) -> dict:
-    return {
-        "strong_decoder": {
-            "kind": algorithm,
-            "units": 1,
-            "unit_memory_rounds": None,
-            "engine": {
-                "clock": "room",
-                "fetch_cycles_per_round": 1,
-                "release_cycles_per_job": 1,
-            },
-        }
-    }
+import decsim.front.collect_command as collect_command
+import decsim.front.experiment as experiment
+import decsim.front.report as report
+from tests.front.yaml_configs import (
+    CONFIGS_DIR,
+    MINIMAL_CONFIG,
+    measure_point_shot,
+    write_config,
+)
 
 
 def test_reference_config_defines_both_tiers_and_the_mode_picks_weak():
-    config = load_experiment(CONFIGS_DIR / "reference.yaml")
+    config = experiment.load_experiment(CONFIGS_DIR / "reference.yaml")
     settings = config.settings
     assert settings.weak_decoder.kind == "pymatching"
     assert settings.strong_decoder.kind == "belief_matching"
@@ -131,7 +37,7 @@ def test_reference_config_defines_both_tiers_and_the_mode_picks_weak():
 
 def test_every_shipped_config_loads():
     for config_path in sorted(CONFIGS_DIR.glob("*.yaml")):
-        config = load_experiment(config_path)
+        config = experiment.load_experiment(config_path)
         assert config.active_decoder is not None, config_path.name
 
 
@@ -151,7 +57,7 @@ def test_controller_cycle_card_reaches_both_runtime_paths(tmp_path):
             },
         },
     )
-    config = load_experiment(config_path)
+    config = experiment.load_experiment(config_path)
     assert config.settings.controller.readout_to_bits_microseconds == 0.054
     assert config.settings.controller.decision_to_pulse_microseconds == 0.016
 
@@ -163,9 +69,8 @@ def test_controller_cycle_card_reaches_both_runtime_paths(tmp_path):
         completed.controller.settings.readout_to_bits_ticks()
         == microseconds_to_ticks(0.054)
     )
-    assert (
-        completed.instruction_output.pulse_ticks
-        == microseconds_to_ticks(0.016)
+    assert completed.instruction_output.pulse_ticks == microseconds_to_ticks(
+        0.016
     )
 
 
@@ -175,7 +80,7 @@ def test_a_mode_without_its_tier_is_refused(tmp_path):
     config_path = write_config(
         tmp_path, {"escalation": {"kind": "strong_only"}}
     )  # only weak_decoder is defined
-    config = load_experiment(config_path)
+    config = experiment.load_experiment(config_path)
     settings = config.point_settings(
         physical_error_probability=0.001, distance=3, round_period_us=1.0
     )
@@ -195,7 +100,7 @@ def test_unknown_algorithms_and_stale_keys_fail_loudly(tmp_path):
             }
         },
     )
-    config = load_experiment(unknown_algorithm)
+    config = experiment.load_experiment(unknown_algorithm)
     settings = config.point_settings(
         physical_error_probability=0.001, distance=3, round_period_us=1.0
     )
@@ -219,7 +124,7 @@ def test_unknown_algorithms_and_stale_keys_fail_loudly(tmp_path):
         },
     )
     with pytest.raises(ValueError, match=r"no section \['decoder'\]"):
-        load_experiment(old_flat_decoder)
+        experiment.load_experiment(old_flat_decoder)
 
     old_sweep_axis = write_config(
         tmp_path,
@@ -236,7 +141,7 @@ def test_unknown_algorithms_and_stale_keys_fail_loudly(tmp_path):
         },
     )
     with pytest.raises(ValueError, match="decoder card"):
-        load_experiment(old_sweep_axis)
+        experiment.load_experiment(old_sweep_axis)
 
     fixed_distance_key = write_config(
         tmp_path,
@@ -251,7 +156,7 @@ def test_unknown_algorithms_and_stale_keys_fail_loudly(tmp_path):
         },
     )
     with pytest.raises(KeyError):
-        load_experiment(fixed_distance_key)
+        experiment.load_experiment(fixed_distance_key)
 
 
 def test_engine_clock_must_name_a_clock_domain(tmp_path):
@@ -269,61 +174,12 @@ def test_engine_clock_must_name_a_clock_domain(tmp_path):
         },
     )
     with pytest.raises(ValueError, match="clock 'sfq' is not a clocks entry"):
-        load_experiment(config_path)
-
-
-def test_weak_unit_loop_matches_direct_pymatching(tmp_path):
-    # The functional gate: the loop with the weak unit's real MWPM reaches
-    # the same prediction as whole-circuit PyMatching on the same events.
-    config_path = write_config(
-        tmp_path,
-        {
-            "weak_decoder": {
-                **MINIMAL_CONFIG["weak_decoder"],
-                "kind": "pymatching",
-            }
-        },
-    )
-    config = load_experiment(config_path)
-    for seed in range(3):
-        measurement = measure_point_shot(
-            config,
-            physical_error_probability=0.005,
-            distance=3,
-            round_period_us=1.0,
-            seed=seed,
-        )
-        assert measurement.algorithm == "pymatching"
-        assert measurement.windows > 0
-        assert not measurement.direct_mismatch
-
-
-def test_strong_unit_runs_belief_matching(tmp_path):
-    config_path = write_config(
-        tmp_path,
-        {
-            "escalation": {"kind": "strong_only"},
-            **strong_unit("belief_matching"),
-        },
-    )
-    config = load_experiment(config_path)
-    measurement = measure_point_shot(
-        config,
-        physical_error_probability=0.001,
-        distance=3,
-        round_period_us=1.0,
-        seed=0,
-    )
-    assert measurement.algorithm == "belief_matching"
-    assert measurement.windows > 0
-    assert not measurement.logical_failure
+        experiment.load_experiment(config_path)
 
 
 def test_report_rows_carry_the_algorithm_column(tmp_path):
-    from experiments.sweep_report import link_rows, summarize
-
     config_path = write_config(tmp_path, {})
-    config = load_experiment(config_path)
+    config = experiment.load_experiment(config_path)
     measurements = [
         measure_point_shot(
             config,
@@ -334,10 +190,10 @@ def test_report_rows_carry_the_algorithm_column(tmp_path):
         )
         for seed in range(2)
     ]
-    rows = summarize(measurements)
+    rows = report.summarize(measurements)
     assert len(rows) == 1
     assert rows[0]["algorithm"] == 0.028
-    per_link = link_rows(measurements)
+    per_link = report.link_rows(measurements)
     assert per_link and all(row["algorithm"] == 0.028 for row in per_link)
 
 
@@ -361,7 +217,7 @@ def test_rounds_per_shot_scales_with_the_swept_distance(tmp_path):
             ],
         },
     )
-    config = load_experiment(config_path)
+    config = experiment.load_experiment(config_path)
     rounds_per_shot = config.settings.workload.rounds_per_shot
     assert rounds_per_shot.rounds_for(3) == 30
     assert rounds_per_shot.rounds_for(5) == 50
@@ -383,11 +239,9 @@ def test_a_run_writes_its_manifest_and_per_shot_records(tmp_path, monkeypatch):
     import csv
     import json
 
-    from experiments.run import run_experiment
-
     config_path = write_config(tmp_path, {})
     monkeypatch.chdir(tmp_path)
-    run_dir, rows = run_experiment(config_path)
+    run_dir, rows = collect_command.run_experiment(config_path)
 
     manifest = json.loads((run_dir / "manifest.json").read_text())
     assert manifest["versions"]["stim"]

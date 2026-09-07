@@ -31,11 +31,11 @@ import decsim.qpu.stim_device as stim_device
 import decsim.qpu.syndrome_devices as syndrome_devices
 import decsim.syndrome_buffer.round_store as round_store_module
 import decsim.syndrome_buffer.settings as round_store_settings
-import experiments.experiment_config as experiment_config
+import decsim.front.experiment as experiment_config
 
 THIS_FILE = pathlib.Path(__file__)
 TESTS_DIRECTORY = THIS_FILE.parents[1]
-CONFIGS = TESTS_DIRECTORY.parent / "experiments" / "configs"
+CONFIGS = TESTS_DIRECTORY.parent / "configs"
 CYCLE_TICKS = config.microseconds_to_ticks(1.0)
 
 

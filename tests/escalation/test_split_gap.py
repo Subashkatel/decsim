@@ -14,12 +14,12 @@ import dataclasses
 
 import pytest
 import yaml
-from test_decoder_units import write_config
-from test_parallel_gap import surface_code_metric
-from test_switching_mode import measured_shot, switching_config
 
+from decsim.front.experiment import load_experiment
 from decsim.machine import Machine, build_decoder_unit
-from experiments.experiment_config import load_experiment
+from tests.escalation.test_parallel_gap import surface_code_metric
+from tests.escalation.test_switching_mode import measured_shot, switching_config
+from tests.front.yaml_configs import write_config
 
 
 def split_config(tmp_path, gap_threshold_db: float, gap_units: int = 1):

@@ -11,11 +11,6 @@ loop behaves identically because the committed answer never changes.
 import numpy
 import pytest
 from scipy.sparse import csr_matrix
-from test_decoder_units import write_config
-from test_switching_mode import (
-    measured_shot,
-    switching_config,
-)
 
 from decsim.confidence.complementary import (
     COMPLEMENTARY_GAP_SOURCE,
@@ -27,9 +22,14 @@ from decsim.decoders.decoder import DecoderBase
 from decsim.detector_error_model.fault_model_contracts import (
     GRAPHLIKE_FAULT_MODEL_REQUIRED,
 )
+from decsim.front.experiment import load_experiment
 from decsim.machine import build_decoder_unit
 from decsim.message import DecodeJob, DecodeResult, SoftOutput
-from experiments.experiment_config import load_experiment
+from tests.escalation.test_switching_mode import (
+    measured_shot,
+    switching_config,
+)
+from tests.front.yaml_configs import write_config
 
 PARITY_DISTANCE = 5
 PARITY_P = 0.008
@@ -53,7 +53,9 @@ def surface_code_metric():
     detection_events, _ = sampler.sample(
         PARITY_SHOTS, separate_observables=True
     )
-    return ComplementaryGapMetric.from_detector_error_model(model), detection_events
+    return ComplementaryGapMetric.from_detector_error_model(
+        model
+    ), detection_events
 
 
 def test_paired_evaluate_matches_serial_evaluate_shot_for_shot():
@@ -74,7 +76,9 @@ def test_the_forced_pair_reproduces_the_unconstrained_solve():
     metric, detection_events = surface_code_metric()
     for shot_events in detection_events:
         bits = numpy.asarray(shot_events, dtype=numpy.uint8).ravel()
-        correction, plain_weight = metric._matching.decode(bits, return_weight=True)
+        correction, plain_weight = metric._matching.decode(
+            bits, return_weight=True
+        )
         plain_class = int(((metric.observable_matrix @ correction) % 2)[0])
         paired = metric.paired_evaluate(shot_events)
         assert paired.soft_output.w_min == pytest.approx(
@@ -153,7 +157,9 @@ def test_pair_timing_charges_the_slower_core_plus_the_join():
         predicted_class=0, gap=4.0, solve_ns=(5_000_000, 3_000_000)
     )
     wrapper = ParallelGapDecoder(
-        StubWeakDecoder(prediction=0), StubSignal(metric), combine_nanoseconds=250
+        StubWeakDecoder(prediction=0),
+        StubSignal(metric),
+        combine_nanoseconds=250,
     )
     result, elapsed_ns = wrapper.decode_timed(paired_job())
     assert elapsed_ns == 5_000_000 + 250

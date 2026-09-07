@@ -9,10 +9,10 @@ goes (2.6 of 3.0 s at d=7).
 
 Three verbs, one slurm-array pipeline:
 
-    python -m experiments.offline_run plan  configs/<name>.yaml \
+    python -m decsim.front.offline plan  configs/<name>.yaml \
         [seeds_per_shard]
-    python -m experiments.offline_run shard <run_dir> <shard_number>
-    python -m experiments.offline_run merge <run_dir>
+    python -m decsim.front.offline shard <run_dir> <shard_number>
+    python -m decsim.front.offline merge <run_dir>
 
 `plan` creates the timestamped run dir (manifest, config copies) and
 shards.tsv, one line per (distance, p, seed range); each array task runs
@@ -28,7 +28,6 @@ replace committed predictions and would not be equivalent.
 
 import csv
 import dataclasses
-import datetime
 import json
 import shutil
 import sys
@@ -38,6 +37,10 @@ from pathlib import Path
 import numpy
 
 import decsim.decoders.decoder_memory as decoder_memory
+import decsim.front.experiment as experiment
+import decsim.front.plots as plots
+import decsim.front.report as report
+import decsim.front.run_folder as run_folder
 import decsim.frontends.settings as frontend_settings
 import decsim.machine as machine_module
 import decsim.message as message
@@ -46,14 +49,18 @@ import decsim.seeding as seeding
 import decsim.windows.committed_rounds as committed_rounds
 import decsim.windows.window_interactions as window_interactions
 import decsim.windows.windowing_schemes as windowing_schemes
-import experiments.experiment_config as experiment_config
-import experiments.plots as plots
-import experiments.run as run_module
-import experiments.sweep_report as sweep_report
 
 OPERATION_ID = 1
+# the run submits its own copy of the script, so the run dir records
+# exactly how it ran even after the front moves on; the repository root
+# is two folders above this module, the same way the trace-source test
+# and the detector-model test find the tree
+_THIS_FILE = Path(__file__)
+_FRONT_DIR = _THIS_FILE.resolve()
+REPOSITORY_ROOT = _FRONT_DIR.parents[2]
+SUBMIT_SCRIPT = REPOSITORY_ROOT / "slurm" / "slurm_offline.sh"
 USAGE = (
-    "usage: python -m experiments.offline_run "
+    "usage: python -m decsim.front.offline "
     "plan <config.yaml> [seeds_per_shard] "
     "| shard <run_dir> <n> | merge <run_dir>"
 )
@@ -327,18 +334,14 @@ def plan(config_path: str, seeds_per_shard: int = None) -> Path:
     seed_count; seeds 0..shots-1 per point, split into seeds_per_shard
     chunks (default: one shard per point).
     """
-    config = experiment_config.load_experiment(config_path)
+    config = experiment.load_experiment(config_path)
     points = sweep_points(config)  # refuse bad sweeps before writing
-    run_dir = run_module.new_run_dir(config)
-    run_module.snapshot_code_state(config, run_dir)
-    # the run submits its own copy, so the run dir records exactly how
-    # it ran even after the script in experiments/ moves on
-    this_file = Path(__file__)
-    submit_script = this_file.parent / "slurm_offline.sh"
+    run_dir = run_folder.new_run_dir(config)
+    run_folder.snapshot_code_state(config, run_dir)
     submit_copy = run_dir / "slurm_offline.sh"
-    shutil.copy2(submit_script, submit_copy)
-    started_utc = _now_utc()
-    run_module.write_manifest(config, run_dir, started_utc=started_utc)
+    shutil.copy2(SUBMIT_SCRIPT, submit_copy)
+    started_utc = run_folder.utc_now()
+    run_folder.write_manifest(config, run_dir, started_utc=started_utc)
     (run_dir / "shards").mkdir()
     (run_dir / "logs").mkdir()
     lines = _shard_lines(points, seeds_per_shard)
@@ -368,7 +371,7 @@ def decode_shard(run_dir: str, shard_number: int) -> Path:
         row = _shard_row(shot, distance, probability, algorithm)
         rows.append(row)
     shard_path = run_dir / "shards" / f"shard_{shard_number}.csv"
-    sweep_report.write_csv(rows, shard_path)
+    report.write_csv(rows, shard_path)
     failures = _count_failures(rows)
     print(f"{shard_path}: {len(rows)} shots, {failures} failures")
     return shard_path
@@ -388,7 +391,7 @@ def merge(run_dir: str) -> list:
     by_point = _stream_shots(run_dir, shard_paths)
     ler_rows = _ler_rows(by_point)
     ler_path = run_dir / "ler.csv"
-    sweep_report.write_csv(ler_rows, ler_path)
+    report.write_csv(ler_rows, ler_path)
     config = _run_config(run_dir)
     title = plots.decoder_title(config)
     figure_path = run_dir / "ler.png"
@@ -536,7 +539,7 @@ def _print_submit_instructions(run_dir: Path, shard_count: int) -> None:
         f"submit: sbatch --array=1-{shard_count} "
         f"--output={run_dir}/logs/slurm-%A_%a.out "
         f"{run_dir}/slurm_offline.sh {run_dir}\n"
-        f"then:   python -m experiments.offline_run merge {run_dir}"
+        f"then:   python -m decsim.front.offline merge {run_dir}"
     )
 
 
@@ -671,7 +674,7 @@ def _ler_rows(by_point: dict) -> list:
 
 def _ler_row(distance: int, probability: float, point: dict) -> dict:
     """One sweep point's logical error rate row."""
-    low, high = sweep_report.wilson_interval(point["failures"], point["shots"])
+    low, high = report.wilson_interval(point["failures"], point["shots"])
     shot_rate = point["failures"] / point["shots"]
     survival = 1.0 - shot_rate
     per_d_rounds = 1.0 - survival**D_ROUND_CHUNKS_PER_SHOT
@@ -705,8 +708,8 @@ def _ler_line(row: dict) -> str:
 def _restamp_manifest(config, run_dir: Path) -> None:
     """The manifest again, with the merge's finish time."""
     manifest = _manifest(run_dir)
-    finished_utc = _now_utc()
-    run_module.write_manifest(
+    finished_utc = run_folder.utc_now()
+    run_folder.write_manifest(
         config,
         run_dir,
         started_utc=manifest["started_utc"],
@@ -724,7 +727,7 @@ def _run_config(run_dir: Path):
     first_file = Path(manifest["config_files"][0])
     top_of_chain = first_file.name
     config_path = run_dir / "config" / top_of_chain
-    return experiment_config.load_experiment(config_path)
+    return experiment.load_experiment(config_path)
 
 
 def _manifest(run_dir: Path) -> dict:
@@ -732,11 +735,6 @@ def _manifest(run_dir: Path) -> dict:
     manifest_path = run_dir / "manifest.json"
     manifest_text = manifest_path.read_text()
     return json.loads(manifest_text)
-
-
-def _now_utc() -> str:
-    now = datetime.datetime.now(datetime.timezone.utc)
-    return now.isoformat()
 
 
 if __name__ == "__main__":

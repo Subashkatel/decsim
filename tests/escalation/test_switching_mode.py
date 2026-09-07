@@ -1,12 +1,12 @@
-"""The switching mode: weak decode + complementary gap, conditional
-strong escalation, one commit per window.
+"""The switching mode: weak decode, gap, conditional strong escalation.
 
-The contract under test is the paper's protocol (Toshio 2510.25222
-Sec. III A, serial variant): every window decodes weak first and
-carries a gap; a gap at or above the threshold keeps the weak result;
-below it, the window crosses WSD, the strong decoder re-decodes the
-strong-window extent from syndrome buffer 1 over SBD, and the strong result is the
-window's only Pauli-frame write, riding DO home. The threshold's two
+Every window commits once. The contract under test is the paper's
+protocol (Toshio 2510.25222 Sec. III A, serial variant): every window
+decodes weak first and carries a gap; a gap at or above the threshold
+keeps the weak result; below it, the window crosses WSD, the strong
+decoder re-decodes the strong-window extent from syndrome buffer 1 over
+SBD, and the strong result is the window's only Pauli-frame write,
+riding DO home. The threshold's two
 edges pin the plumbing: at 0 dB nothing escalates and the run is the
 weak tier alone; at an unreachably high threshold everything escalates
 and every window commits from the strong tier.
@@ -15,14 +15,14 @@ and every window commits from the strong tier.
 import math
 
 import pytest
-from test_decoder_units import (
+
+from decsim.front.experiment import load_experiment
+from tests.front.yaml_configs import (
     MINIMAL_CONFIG,
     measure_point_shot,
     strong_unit,
     write_config,
 )
-
-from experiments.experiment_config import load_experiment
 
 NEAR_THRESHOLD_P = 0.008
 
@@ -125,8 +125,10 @@ def test_threshold_converts_decibels_to_natural_log_weight(tmp_path):
 
 
 def test_every_window_commits_once_across_both_output_links(tmp_path):
-    """Escalations ride WSD then SBD then DO; kept windows ride WDO; the
-    two output links together commit every window exactly once."""
+    """Every window commits exactly once, over one of the output links.
+
+    Escalations ride WSD then SBD then DO; kept windows ride WDO.
+    """
     config = load_experiment(switching_config(tmp_path, 20.0))
     found_escalation = False
     for seed in range(6):
@@ -170,12 +172,14 @@ def test_unreachable_threshold_escalates_every_window(tmp_path):
 
 
 def test_gap_records_decide_the_selected_tier(tmp_path):
-    """Every weak decode's recorded gap sits on the escalation decision's
-    dividing line: below the threshold the window's committed result is
-    the strong tier's, at or above it the weak tier's. (Serial escalation
+    """Every recorded gap sits on the escalation decision's dividing line.
+
+    Below the threshold the window's committed result is the strong
+    tier's, at or above it the weak tier's. (Serial escalation
     replaces the prediction in place, so the window stays an
     ordinary_window either way; the selected request key names the tier
-    that produced the committed result.)"""
+    that produced the committed result.)
+    """
     from dataclasses import replace
 
     from decsim.machine import Machine

@@ -39,7 +39,7 @@ needs_the_frozen_suite = pytest.mark.skipif(_suite_is_missing, reason=_REASON)
 
 def settings(**observation_changes):
     """Gate point 1's settings, with its observation section changed."""
-    from experiments.experiment_config import load_experiment
+    from decsim.front.experiment import load_experiment
 
     config_path = SUITE / "weak_decoder_baseline.yaml"
     config = load_experiment(config_path)

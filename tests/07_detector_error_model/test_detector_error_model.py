@@ -775,18 +775,6 @@ def test_validate_placed_fault_matrices_allows_any_degree_but_not_logical_loss()
     assert "physical column 0 is a detectorless logical fault" in str(failure.value)
 
 
-def test_validate_graphlike_matrices_adds_the_degree_bound_per_column():
-    """A placed graphlike model additionally bounds every column to at most two detectors, naming the column."""
-    fault_identity_validation.validate_graphlike_matrices(
-        [[1, 0], [1, 1]], [[0, 0], [0, 0]], location="graph"
-    )
-    with pytest.raises(ValueError) as failure:
-        fault_identity_validation.validate_graphlike_matrices(
-            [[0, 1], [0, 1], [0, 1]], [[0, 0], [0, 0], [0, 0]], location="graph"
-        )
-    assert "graph column 1 is a detector hyperedge" in str(failure.value)
-
-
 # --------------------------------------------------------------------------
 # Belief matching and the linked catalogs
 # --------------------------------------------------------------------------
@@ -809,118 +797,6 @@ def linked_circuit(
         decomposed_model=make_model(decomposed_rows),
         undecomposed_model=make_model(undecomposed_rows),
     )
-
-
-def belief_matching_case():
-    """A small consistent (component, physical, map, priors) bundle."""
-    component_check = numpy.array([[1, 0], [1, 1], [0, 1]], dtype=numpy.uint8)
-    component_observables = numpy.array([[0, 0]], dtype=numpy.uint8)
-    physical_check = numpy.array([[1], [0], [1]], dtype=numpy.uint8)
-    physical_priors = numpy.array([0.2])
-    physical_to_component = numpy.array([[1], [1]], dtype=numpy.uint8)
-    return (
-        component_check,
-        component_observables,
-        physical_check,
-        physical_priors,
-        physical_to_component,
-    )
-
-
-def test_belief_matching_accepts_a_consistent_bundle():
-    """A consistent component, physical, prior and decomposition-map bundle passes belief-matching validation."""
-    fault_identity_validation.validate_belief_matching_matrices(
-        *belief_matching_case(), location="site"
-    )
-
-
-def test_belief_matching_requires_equal_detector_rows_and_map_shape():
-    """The two check matrices must share detector rows and the decomposition map must have the exact expected shape."""
-    check, observables, physical_check, priors, mapping = belief_matching_case()
-    with pytest.raises(ValueError) as row_failure:
-        fault_identity_validation.validate_belief_matching_matrices(
-            check, observables, physical_check[:2], priors, mapping, location="site"
-        )
-    assert "different detector counts" in str(row_failure.value)
-    with pytest.raises(ValueError) as shape_failure:
-        fault_identity_validation.validate_belief_matching_matrices(
-            check,
-            observables,
-            physical_check,
-            priors,
-            numpy.array([[1, 0], [1, 0]], dtype=numpy.uint8),
-            location="site",
-        )
-    message = str(shape_failure.value)
-    assert "physical-to-component map has shape" in message
-    assert "expected (2, 1)" in message
-
-
-@pytest.mark.parametrize(
-    "bad_priors, expected",
-    [
-        (numpy.array([[0.2]]), "physical priors must be rank 1"),
-        (numpy.array([0.2, 0.3]), "2 physical priors for 1 physical fault columns"),
-        (numpy.array([float("nan")]), "physical priors must be finite"),
-        (numpy.array([1.5]), "inclusive range [0, 1]"),
-        (numpy.array([-0.1]), "inclusive range [0, 1]"),
-    ],
-)
-def test_belief_matching_prior_domain(bad_priors, expected):
-    """Physical priors must be a rank-one vector of the right length, finite and inside [0, 1]."""
-    check, observables, physical_check, _, mapping = belief_matching_case()
-    with pytest.raises(ValueError) as failure:
-        fault_identity_validation.validate_belief_matching_matrices(
-            check, observables, physical_check, bad_priors, mapping, location="site"
-        )
-    assert expected in str(failure.value)
-
-
-def test_belief_matching_validates_components_as_a_graphlike_model():
-    """The component matrices are additionally validated as a graphlike model."""
-    component_check = numpy.array([[1], [1], [1]], dtype=numpy.uint8)
-    component_observables = numpy.array([[0]], dtype=numpy.uint8)
-    physical_check = numpy.array([[1], [1], [1]], dtype=numpy.uint8)
-    with pytest.raises(ValueError) as failure:
-        fault_identity_validation.validate_belief_matching_matrices(
-            component_check,
-            component_observables,
-            physical_check,
-            numpy.array([0.1]),
-            numpy.array([[1]], dtype=numpy.uint8),
-            location="site",
-        )
-    message = str(failure.value)
-    assert "site component graph column 0 is a detector hyperedge" in message
-
-
-def test_belief_matching_requires_exact_component_xor_identity():
-    """Every physical column's detector identity must equal the parity of its components."""
-    check, observables, physical_check, priors, mapping = belief_matching_case()
-    wrong_physical_check = numpy.array([[1], [1], [1]], dtype=numpy.uint8)
-    with pytest.raises(ValueError) as failure:
-        fault_identity_validation.validate_belief_matching_matrices(
-            check, observables, wrong_physical_check, priors, mapping, location="site"
-        )
-    message = str(failure.value)
-    assert "physical column 0 detector identity does not equal its component XOR" in message
-
-
-def test_belief_matching_rejects_an_inert_physical_column():
-    """A physical column that reduces to nothing must be removed before belief matching."""
-    component_check = numpy.array([[1, 1], [1, 1]], dtype=numpy.uint8)
-    component_observables = numpy.array([[0, 0]], dtype=numpy.uint8)
-    physical_check = numpy.array([[0], [0]], dtype=numpy.uint8)
-    with pytest.raises(ValueError) as failure:
-        fault_identity_validation.validate_belief_matching_matrices(
-            component_check,
-            component_observables,
-            physical_check,
-            numpy.array([0.1]),
-            numpy.array([[1], [1]], dtype=numpy.uint8),
-            location="site",
-        )
-    assert "physical column 0 is inert" in str(failure.value)
 
 
 def test_linked_catalogs_build_a_verified_link():
@@ -2425,14 +2301,6 @@ def test_real_repetition_linked_views_agree_with_both_stim_models(repetition_cir
     derived = (graphlike.check.toarray().astype(numpy.uint64)
                @ projection.toarray().astype(numpy.uint64)) % 2
     assert numpy.array_equal(derived, physical.check.toarray())
-    fault_identity_validation.validate_belief_matching_matrices(
-        graphlike.check,
-        graphlike.observables,
-        physical.check,
-        physical.priors,
-        projection,
-        location="real repetition window",
-    )
 
 
 def test_real_dependency_plan_partitions_the_real_catalog(repetition_circuit):

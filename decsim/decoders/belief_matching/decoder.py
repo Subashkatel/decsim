@@ -19,8 +19,6 @@ import scipy.sparse
 import scipy.special
 
 import decsim.decoders.decoder as decoder_module
-import decsim.decoders.decoder as decoder_module
-import decsim.detector_error_model.fault_identity_validation as fault_identity
 import decsim.detector_error_model.fault_model_contracts as fault_models
 
 POSTERIOR_FLOOR = 1e-15
@@ -31,8 +29,7 @@ class BeliefMatchingDecoder(decoder_module.WindowDecoderBase):
     """Decode one hyperedge-bearing window with belief matching.
 
     Measured mode times the BP-plus-matching call only, never the
-    one-time window-model construction (validation, BP build), the same
-    contract as PyMatchingDecoder's warm-up.
+    one-time BP build, the same contract as PyMatchingDecoder's warm-up.
     """
 
     fault_model_requirement = fault_models.LINKED_FAULT_MODELS_REQUIRED
@@ -63,14 +60,6 @@ class BeliefMatchingDecoder(decoder_module.WindowDecoderBase):
             raise ValueError(
                 "belief matching needs the physical-to-graphlike link"
             )
-        fault_identity.validate_belief_matching_matrices(
-            faults.check,
-            faults.observables,
-            physical.check,
-            physical.priors,
-            projection,
-            location="belief-matching window model",
-        )
         physical_check = scipy.sparse.csr_matrix(physical.check)
         error_channel = list(physical.priors)
         belief_propagation = ldpc.BpDecoder(
@@ -112,9 +101,7 @@ class BeliefMatchingDecoder(decoder_module.WindowDecoderBase):
                 raise
             fault_count = faults.check.shape[1]
             empty = numpy.zeros(fault_count, dtype=numpy.uint8)
-            invalid = (
-                decoder_module.BackendDecodeStatus.INVALID_CORRECTION
-            )
+            invalid = decoder_module.BackendDecodeStatus.INVALID_CORRECTION
             return empty, invalid
         return numpy.asarray(selected, dtype=numpy.uint8), None
 

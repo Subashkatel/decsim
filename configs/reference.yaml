@@ -8,7 +8,7 @@
 # One section per component; a pluggable component's section carries a
 # `kind` key naming a row of the tables at the top of decsim/machine.py,
 # and each section is read by the package it configures (its
-# settings.py). Kept honest by experiments/tests/test_decoder_units.py:
+# settings.py). Kept honest by tests/front/test_yaml_surface.py:
 # the test fails if this file and the readers drift apart. Knobs the yaml
 # cannot reach are Python objects on the settings records: multi-op
 # workloads, dynamic streams, routers, escalation families, schedulers,
@@ -261,9 +261,10 @@ observation:                       # what a run records beyond its results
                                    # (rounds, residents), and emitted
   log: off                         # off | print | file | both. The engine narrator:
                                    # print shows it live on screen; file writes each
-                                   # shot's full line record to
-                                   # results/<name>/log/p<p>_algo<card>_round<T>us_seed<n>.log;
-                                   # both does both
+                                   # shot's full line record to the run folder,
+                                   # results/<stamp>-<name>/log/, one file per shot
+                                   # named p<p>_d<d>_algo<card>_round<T>us_seed<n>.log;
+                                   # both does both. results/ is not tracked
   trace: off                       # off | chrome | <path>. The Chrome trace of the
                                    # data path: where every round and window sat, for
                                    # how long, and whether each hop copied the bits or

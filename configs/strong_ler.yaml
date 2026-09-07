@@ -1,5 +1,5 @@
 # The strong tier's offline LER sweep (plot 1). Runs through
-# experiments.offline_run; every key is documented in reference.yaml.
+# decsim.front.offline; every key is documented in reference.yaml.
 # Shot counts sized from the 2026-08-27 pilot cost table: >= 100
 # failures where reachable, ~400 core-hours total; sub-threshold
 # points at d >= 7 plot as upper bounds.

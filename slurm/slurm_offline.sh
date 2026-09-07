@@ -14,5 +14,5 @@
 cd "$SLURM_SUBMIT_DIR"
 # one shard, one core; parallelism comes from the array, not from BLAS
 export OMP_NUM_THREADS=1
-exec "${DECSIM_PYTHON:-.venv/bin/python}" -m experiments.offline_run \
+exec "${DECSIM_PYTHON:-.venv/bin/python}" -m decsim.front.offline \
     shard "$1" "$SLURM_ARRAY_TASK_ID"

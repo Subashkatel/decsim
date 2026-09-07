@@ -11,6 +11,7 @@ one class and one row.
 import dataclasses
 import pathlib
 
+import numpy
 import pytest
 
 import decsim.confidence.cluster as cluster
@@ -19,9 +20,11 @@ import decsim.controller.policies as boundary_policies
 import decsim.controller.settings as controller_settings
 import decsim.decoders.decoder as decoder_module
 import decsim.decoders.decoders as decoders
+import decsim.decoders.minimum_weight_perfect_matching.decoder as mwpm
 import decsim.decoders.settings as decoder_settings
 import decsim.decoders.staged_decoder as staged_decoder
 import decsim.decoders.union_find.decoder as union_find_decoder
+import decsim.detector_error_model.detector_chronology as detector_chronology
 import decsim.engine as engine_module
 import decsim.front.experiment as experiment
 import decsim.frontends.settings as workload_settings
@@ -34,6 +37,7 @@ import decsim.qpu.syndrome_devices as syndrome_devices
 import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
 import decsim.records.seeds as seed_records
+import decsim.records.transfers as transfer_records
 import decsim.seeding as seeding
 import decsim.syndrome_buffer.round_store as round_store_module
 import decsim.syndrome_buffer.settings as round_store_settings
@@ -586,3 +590,206 @@ def test_a_run_without_a_code_card_resolves_the_distance_three_surface():
     geometry = _resolved_geometry(machine)
     assert geometry.code_name == "rotated surface code (d=3)"
     assert geometry.distance == 3
+
+
+# The replay path: recorded raw measurements through the whole loop, with
+# Stim, PyMatching and qLDPC as the referents for what comes out.
+
+RECORDED_ROUNDS = 9
+RECORDED_DISTANCE = 3
+RECORDED_SHOT_COUNT = 12
+
+
+@pytest.fixture(scope="module")
+def recorded_memory():
+    """Twelve recorded shots of a nine-round distance-three memory.
+
+    The device replays raw measurements, so Stim's own m2d converter is
+    the referent for the detector events and the observable truth it
+    should report.
+    """
+    stim = pytest.importorskip("stim")
+    probability = 0.01
+    circuit = stim.Circuit.generated(
+        "surface_code:rotated_memory_z",
+        rounds=RECORDED_ROUNDS,
+        distance=RECORDED_DISTANCE,
+        after_clifford_depolarization=probability,
+        before_measure_flip_probability=probability,
+        after_reset_flip_probability=probability,
+        before_round_data_depolarization=probability,
+    )
+    sampler = circuit.compile_sampler(seed=5)
+    measurements = sampler.sample(RECORDED_SHOT_COUNT)
+    converter = circuit.compile_m2d_converter()
+    detectors, observables = converter.convert(
+        measurements=measurements, separate_observables=True
+    )
+    return circuit, measurements, detectors, observables
+
+
+def as_bits(flags):
+    """One row of numpy flags as a tuple of ints."""
+    bits = []
+    for flag in flags:
+        bits.append(int(flag))
+    return tuple(bits)
+
+
+def replayed_run(circuit, measurements, shot):
+    """One completed run of the recorded shot through the weak tier."""
+    memory = program_records.Operation(
+        id=1, name="memory", qubits=(0,), patches=(0,), circuit=circuit
+    )
+    rounds_policy = round_policies.FixedRounds(RECORDED_ROUNDS)
+    workload = workload_settings.WorkloadSettings(
+        operations=[memory], rounds_policy=rounds_policy
+    )
+    device = stim_device.RecordedStimDevice(measurements, shot)
+    qpu = qpu_settings.QpuSettings(distance=RECORDED_DISTANCE, device=device)
+    inner = decoders.PresetLatencyDecoder(0.028)
+    decoder = mwpm.PyMatchingDecoder(inner)
+    weak_decoder = decoder_settings.DecoderSettings(decoder=decoder)
+    settings = machine_module.MachineSettings(
+        workload=workload, qpu=qpu, weak_decoder=weak_decoder
+    )
+    machine = machine_module.Machine.build(settings, shot)
+    run = machine.run()
+    return machine, run.operation_results[0]
+
+
+def test_a_replayed_shots_truth_is_the_flips_stims_converter_reports(
+    recorded_memory,
+):
+    """The run's truth is the shot's own observable flips, shot for shot.
+
+    Stim's m2d converter is what a decoder is scored against, so the
+    loop must report exactly its observable flips for the shot it
+    replayed, never the flips of another shot.
+    """
+    circuit, measurements, detectors, observables = recorded_memory
+    reported = []
+    expected = []
+    for shot in range(len(detectors)):
+        _machine, result = replayed_run(circuit, measurements, shot)
+        truth = tuple(result.observable_truth)
+        flips = as_bits(observables[shot])
+        reported.append(truth)
+        expected.append(flips)
+    assert reported == expected
+
+
+def test_the_windowed_decode_agrees_with_the_whole_shot_decode(
+    recorded_memory,
+):
+    """Windowing changes when a correction is known, not what it is.
+
+    A window decodes a slice of the shot, so an overlapping-recovery run
+    may differ from a whole-shot solve on a shot whose fault chain
+    crosses a seam (Skoric 2209.08552), and on no more than that: over
+    twelve shots at most one may differ.
+    """
+    pymatching = pytest.importorskip("pymatching")
+    circuit, measurements, detectors, _observables = recorded_memory
+    model = circuit.detector_error_model(decompose_errors=True)
+    matching = pymatching.Matching.from_detector_error_model(model)
+    agreement_count = 0
+    for shot in range(len(detectors)):
+        _machine, result = replayed_run(circuit, measurements, shot)
+        whole_shot = matching.decode(detectors[shot])
+        prediction = as_bits(whole_shot)
+        agreement_count += prediction == result.logical_observables
+    assert agreement_count >= RECORDED_SHOT_COUNT - 1
+
+
+def test_the_sliding_windows_predict_what_qldpcs_decoder_predicts(
+    recorded_memory,
+):
+    """Two implementations of one rule agree on every shot.
+
+    decsim's sliding windows and qLDPC's SlidingWindowDecoder both
+    implement overlapping recovery (Dennis quant-ph/0110143, Skoric
+    2209.08552): fed the same shots, the same geometry (window of commit
+    plus buffer, stride of commit), the same round grouping and
+    PyMatching with parallel faults merged as independent errors, they
+    predict the same bits.
+    """
+    circuit, measurements, detectors, _observables = recorded_memory
+    reference_predictions = qldpc_sliding_predictions(circuit, detectors)
+    predictions = []
+    expected = []
+    for shot in range(len(detectors)):
+        _machine, result = replayed_run(circuit, measurements, shot)
+        reference_bits = as_bits(reference_predictions[shot])
+        predictions.append(result.logical_observables)
+        expected.append(reference_bits)
+    assert predictions == expected
+
+
+def qldpc_sliding_predictions(circuit, detectors):
+    """What qLDPC's own sliding-window decoder predicts for every shot."""
+    qldpc_decoders = pytest.importorskip("qldpc.decoders")
+    round_of_detector = detector_chronology.resolve_detector_rounds(
+        circuit, None, RECORDED_ROUNDS
+    )
+
+    def time_of_detector(detector):
+        return int(round_of_detector[detector])
+
+    window_size = 2 * RECORDED_DISTANCE
+    reference = qldpc_decoders.SlidingWindowDecoder(
+        window_size=window_size,
+        stride=RECORDED_DISTANCE,
+        detector_to_time=time_of_detector,
+        decompose_errors=True,
+        with_MWPM=True,
+        merge_strategy="independent",
+    )
+    model = circuit.detector_error_model(decompose_errors=True)
+    compiled = reference.compile_decoder_for_dem(model)
+    events = detectors.astype(numpy.uint8)
+    return compiled.decode_shots(events)
+
+
+def bits_by_round_on(transfers, path):
+    """The payload bits each round put on one link path."""
+    bits = {}
+    for record in transfers:
+        if record.path is not path:
+            continue
+        first_round = record.attribution.first_round
+        carried = bits.get(first_round, 0)
+        bits[first_round] = carried + record.transfer.payload_bits
+    return bits
+
+
+def test_every_measured_bit_crosses_the_link_exactly_once(recorded_memory):
+    """The wire carries one bit per measure qubit per round, and no more.
+
+    Google 2207.06431 and 2408.13687: every measure qubit is read out
+    each cycle, which is d*d - 1 bits, and the final round adds the
+    d*d data-qubit readout. The bits the run puts on the link add up to
+    Stim's own measurement count for the circuit, so no round is lost
+    and none is sent twice.
+    """
+    circuit, measurements, _detectors, _observables = recorded_memory
+    machine, _result = replayed_run(circuit, measurements, 0)
+    traffic = machine.observation.traffic.snapshot()
+    upward = transfer_records.LinkPath.QPU_TO_CONTROLLER
+
+    bits_by_round = bits_by_round_on(traffic.transfers, upward)
+
+    round_bits = bits_by_round.values()
+    total_bits = sum(round_bits)
+    assert bits_by_round == {
+        1: 8,
+        2: 8,
+        3: 8,
+        4: 8,
+        5: 8,
+        6: 8,
+        7: 8,
+        8: 8,
+        9: 17,
+    }
+    assert total_bits == circuit.num_measurements

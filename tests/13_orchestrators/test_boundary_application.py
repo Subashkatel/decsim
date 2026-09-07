@@ -11,15 +11,15 @@ from decsim.decoders.decoders import PresetLatencyDecoder
 from decsim.decoders.minimum_weight_perfect_matching.decoder import (
     PyMatchingDecoder,
 )
+from decsim.decoders.settings import DecoderSettings, EscalationSettings
 from decsim.escalation.policies import StrongOnly
+from decsim.frontends.settings import WorkloadSettings
 from decsim.links.link_profiles import logical_reference_profile
+from decsim.machine import Machine, MachineSettings
 from decsim.message import Operation
 from decsim.qpu.round_policies import FixedRounds
-from decsim.qpu.stim_device import StimDevice
-from decsim.decoders.settings import DecoderSettings, EscalationSettings
-from decsim.frontends.settings import WorkloadSettings
-from decsim.machine import Machine, MachineSettings
 from decsim.qpu.settings import QpuSettings
+from decsim.qpu.stim_device import StimDevice
 from decsim.windows.settings import WindowSettings
 from decsim.windows.windowing_schemes import (
     SlidingTerminalPolicy,

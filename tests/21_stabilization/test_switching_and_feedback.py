@@ -11,7 +11,6 @@ import pytest
 from decsim.config import microseconds_to_ticks
 from decsim.message import DecoderTier
 
-
 # ---------------------------------------------------------------- serial
 
 
@@ -225,23 +224,23 @@ def test_bulk_strong_batches_queued_escalations_into_one_decode(fabric):
     from the strong tier. Batching the strong decoder's queued
     input is the paper's own recommendation (Toshio et al. 2510.25222,
     Sec. III C: the strong decoder processes its assigned data in bulk)."""
+    from decsim.controller.policies import Held
     from decsim.decoders.decoders import (
         SAMPLED_CONFIDENCE_SOURCE,
         PresetLatencyDecoder,
         SampledConfidenceDecoder,
         SwitchingRouter,
     )
-    from decsim.escalation.policies import Switching
-    from decsim.escalation.threshold_sources import FixedThreshold
-    from decsim.controller.policies import Held
-    from decsim.pauli_frame.pauli_frame import PauliFrameConfig
-    from decsim.qpu.round_policies import FixedRounds
     from decsim.decoders.settings import (
         DecoderManagerSettings,
         EscalationSettings,
     )
+    from decsim.escalation.policies import Switching
+    from decsim.escalation.threshold_sources import FixedThreshold
     from decsim.frontends.settings import WorkloadSettings
     from decsim.machine import MachineSettings
+    from decsim.pauli_frame.pauli_frame import PauliFrameConfig
+    from decsim.qpu.round_policies import FixedRounds
     from decsim.windows.settings import WindowSettings
     from decsim.windows.windowing_schemes import (
         SlidingTerminalPolicy,
@@ -320,12 +319,8 @@ def test_release_travels_oc_then_cq_with_exact_cost(fabric):
         r.committed_ticks for r in frame_records if r.window_key == (1, 0)
     )
 
-    assert stamps.decode_release[
-        2
-    ] == blocker_commit + microseconds_to_ticks(2)
-    assert stamps.op_start[2] == blocker_commit + microseconds_to_ticks(
-        2 + 2
-    )
+    assert stamps.decode_release[2] == blocker_commit + microseconds_to_ticks(2)
+    assert stamps.op_start[2] == blocker_commit + microseconds_to_ticks(2 + 2)
 
 
 def test_successor_cannot_start_before_its_release(fabric):

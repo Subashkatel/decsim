@@ -10,43 +10,26 @@ narrates the same log and returns the same results as one with it off.
 import dataclasses
 import hashlib
 import json
-import pathlib
 
 import pytest
 
 import decsim.machine as machine_module
+import tests.observe.gate_point as gate_point
 
-SUITE = pathlib.Path(
-    "/scratch/gpfs/MARTONOSI/sk2415/qlx-qec-sandbox/validation/"
-    "responsibility_audit_2026_08_30/frozen_suite"
-)
-POINT = {
-    "physical_error_probability": 0.003,
-    "distance": 3,
-    "round_period_us": 1.0,
-}
-SEED = 0
-# the golden log hash of the point, from the frozen suite
-POINT_LOG_SHA256 = "74c2e7aee37a"
+pytestmark = gate_point.needs_the_frozen_suite
+
+SEED = gate_point.SEED
+POINT_LOG_SHA256 = gate_point.POINT_LOG_SHA256
 
 PHASES = ("M", "X", "i", "C", "s", "t", "f")
 _METADATA_NAMES = ("process_name", "thread_name", "thread_sort_index")
 
 
 def _settings(trace_path=None, data_movement=False):
-    from experiments.experiment_config import load_experiment
-
-    config_path = SUITE / "weak_decoder_baseline.yaml"
-    config = load_experiment(config_path)
-    settings = config.point_settings(**POINT)
-    if trace_path is None:
-        trace = "off"
-    else:
+    trace = "off"
+    if trace_path is not None:
         trace = str(trace_path)
-    observation = dataclasses.replace(
-        settings.observation, trace=trace, data_movement=data_movement
-    )
-    return dataclasses.replace(settings, observation=observation)
+    return gate_point.settings(trace=trace, data_movement=data_movement)
 
 
 def _run(trace_path=None, data_movement=False):

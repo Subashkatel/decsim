@@ -9,8 +9,8 @@ decode_shots_to_error); a withdrawn window is requested again fresh.
 import types
 
 import decsim.decoders.decoder_memory as decoder_memory
-import decsim.escalation.policies as escalation_policies
 import decsim.engine as engine_module
+import decsim.escalation.policies as escalation_policies
 import decsim.message as message
 import decsim.syndrome_buffer.round_store as round_store_module
 import decsim.syndrome_buffer.settings as round_store_settings

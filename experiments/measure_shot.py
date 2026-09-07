@@ -12,6 +12,7 @@ strong_decoder_to_frame.
 """
 
 import dataclasses
+import pathlib
 import statistics
 
 import numpy
@@ -469,9 +470,11 @@ def _write_trace(shot, run_dir, label: str) -> None:
     """The shot's Chrome trace, when the section asked and named it.
 
     trace: chrome names the file after the point, under trace/; a path
-    of its own is written where it says. Only the shots trace_shots
-    names are written, so a sweep point of two thousand shots writes
-    one file (trace_and_viewer.md section 10, ruling 1).
+    of its own is written where it says, with the shot's seed in the
+    name when trace_shots asks for more than one, so no shot overwrites
+    another's file. Only the shots trace_shots names are written, so a
+    sweep point of two thousand shots writes one file
+    (trace_and_viewer.md section 10, ruling 1).
     """
     observation = shot.task.settings.observation
     if not observation.writes_trace:
@@ -484,7 +487,32 @@ def _write_trace(shot, run_dir, label: str) -> None:
         trace_dir = run_dir / "trace"
         trace_dir.mkdir(parents=True, exist_ok=True)
         path = trace_dir / f"{label}.trace.json"
+    else:
+        path = trace_path_for_shot(path, shot.seed, observation.trace_shots)
     writer.write(str(path))
+
+
+def trace_path_for_shot(path: str, seed: int, trace_shots) -> str:
+    """The path one shot writes to; the seed joins it when several trace.
+
+    One traced shot keeps the path the yaml gave. Several would all
+    write the same file, so each takes the seed before its suffixes:
+    run.trace.json becomes run_seed3.trace.json, and run.trace.json.gz
+    becomes run_seed3.trace.json.gz.
+    """
+    if len(trace_shots) < 2:
+        return path
+    name = pathlib.Path(path)
+    directory = name.parent
+    stem = name.name
+    first_dot = stem.find(".")
+    if first_dot < 0:
+        seeded = directory / f"{stem}_seed{seed}"
+        return str(seeded)
+    head = stem[:first_dot]
+    suffixes = stem[first_dot:]
+    seeded = directory / f"{head}_seed{seed}{suffixes}"
+    return str(seeded)
 
 
 def _write_log(machine: machine_module.Machine, run_dir, label: str) -> None:

@@ -4,7 +4,6 @@ import pytest
 
 from decsim.controller import policies
 from decsim.controller.idle_rounds import IdleRoundAccounting
-from decsim.message import RunSeedReservation, RunShape, SoftOutputSource
 from decsim.controller.policies import (
     Eager,
     ExtendStream,
@@ -12,21 +11,22 @@ from decsim.controller.policies import (
     Ignore,
     SeparateDecodeJobs,
 )
-from decsim.observe.controller_counters import ControllerCounters
-from decsim.ports import IdlePolicy
-from decsim.windows.window_manager import BoundaryPolicy
 from decsim.controller.settings import IdlePolicySettings
 from decsim.decoders.settings import DecoderSettings
+from decsim.escalation.policies import Baseline, Switching
+from decsim.escalation.threshold_sources import FixedThreshold
 from decsim.frontends.settings import WorkloadSettings
 from decsim.machine import Machine, MachineSettings
+from decsim.message import RunSeedReservation, RunShape, SoftOutputSource
+from decsim.observe.controller_counters import ControllerCounters
+from decsim.ports import IdlePolicy
 from decsim.qpu.settings import QpuSettings
 from decsim.windows.settings import WindowSettings
+from decsim.windows.window_manager import BoundaryPolicy
 from decsim.windows.windowing_schemes import (
     SlidingTerminalPolicy,
     SlidingWindowScheme,
 )
-from decsim.escalation.policies import Baseline, Switching
-from decsim.escalation.threshold_sources import FixedThreshold
 
 
 class ExternalBoundaryPolicy:

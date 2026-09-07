@@ -14,8 +14,8 @@ import decsim.config as config
 import decsim.decoders.decoders as decoders
 import decsim.decoders.schedulers as schedulers
 import decsim.decoders.staged_decoder as staged_decoder
-import decsim.escalation.policies as escalation_policies
 import decsim.engine as engine_module
+import decsim.escalation.policies as escalation_policies
 import decsim.message as message
 from decsim.decoders.decoder_manager import DecoderManager
 

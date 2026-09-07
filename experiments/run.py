@@ -66,10 +66,10 @@ def resolved_description(config: experiment_config.ExperimentConfig) -> list:
             f"sweep block {index}: p {probabilities}, d {distances}, "
             f"round period {periods} us, {block.shots} shots"
         )
-    trace_line = f"log: {settings.observation.log}"
+    log_line = f"log: {settings.observation.log}"
     if settings.observation.log_component_io:
-        trace_line += " with component I/O"
-    lines.append(trace_line)
+        log_line += " with component I/O"
+    lines.append(log_line)
     return lines
 
 

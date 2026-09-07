@@ -2,17 +2,17 @@
 
 import pytest
 
-from decsim.qpu.stim_device import RecordedStimDevice
 from decsim.decoders.decoders import PresetLatencyDecoder
-from decsim.message import Operation
 from decsim.decoders.minimum_weight_perfect_matching.decoder import (
     PyMatchingDecoder,
 )
-from decsim.qpu.round_policies import FixedRounds
 from decsim.decoders.settings import DecoderSettings
 from decsim.frontends.settings import WorkloadSettings
 from decsim.machine import Machine, MachineSettings
+from decsim.message import Operation
+from decsim.qpu.round_policies import FixedRounds
 from decsim.qpu.settings import QpuSettings
+from decsim.qpu.stim_device import RecordedStimDevice
 
 
 @pytest.fixture(scope="module")
@@ -92,6 +92,7 @@ def test_sliding_windows_match_qldpc_shot_for_shot(recorded):
     errors, they must predict identically on every shot."""
     qldpc_decoders = pytest.importorskip("qldpc.decoders")
     import numpy as np
+
     from decsim.detector_error_model.detector_chronology import (
         resolve_detector_rounds,
     )
@@ -137,6 +138,7 @@ def test_readout_bits_per_round_equal_stims_measurement_counts(recorded):
     d*d - 1 stabilizer bits per round, plus the d*d data-qubit readout on
     the final round, exactly the measurement counts of Stim's circuit."""
     from collections import defaultdict
+
     from decsim.message import LinkPath
 
     circuit, measurements, _, _, _ = recorded

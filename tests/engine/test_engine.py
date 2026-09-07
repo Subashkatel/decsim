@@ -125,3 +125,34 @@ def test_the_engine_runs_the_same_ticks_with_no_listener_at_all():
     assert heard_ticks == [2, 2, 5]
     assert heard_lines == ["[  0.000 us] worker: ready"]
     assert bare.now == heard.now
+
+
+def test_an_action_that_raises_stops_the_run_and_leaves_the_rest_queued():
+    """An action's exception reaches the caller unchanged.
+
+    The engine wraps no action, so a component's bug arrives as its own
+    traceback (REWRITE.md rule 4: a wrong caller is a bug and a loud
+    stop is better than a wrong number; gem5's panic, src/base/logging.hh).
+    The failing action is already off the queue, so a second run resumes
+    with what is left.
+    """
+    engine = Engine()
+    failure = RuntimeError("the component is wrong")
+    ran = []
+
+    def failing_action():
+        ran.append("failing")
+        raise failure
+
+    engine.schedule(2, failing_action)
+    engine.schedule(3, lambda: ran.append("later"))
+    try:
+        engine.run()
+    except RuntimeError as error:
+        assert error is failure
+    else:
+        raise AssertionError("the exception did not reach the caller")
+    assert ran == ["failing"]
+    assert engine.now == 2
+    engine.run()
+    assert ran == ["failing", "later"]

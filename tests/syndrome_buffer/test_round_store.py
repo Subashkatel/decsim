@@ -12,6 +12,10 @@ folder. gem5's queue answers isFull
 before allocate (tmp/resources/gem5/src/mem/cache/queue.hh:150-153)
 and its blocked port retries the requester (src/mem/cache/base.cc:
 clearBlocked, processSendRetry); the store never refuses a write.
+
+The two whole-run laws at the end of the file place the store in the
+pipeline: its publication tick is what makes a weak window ready, on
+the declared card of tests/declared_run.py.
 """
 
 import functools
@@ -21,12 +25,14 @@ import sys
 
 import pytest
 
+import decsim.config as config
 import decsim.controller.round_writes as round_writes
 import decsim.controller.settings as controller_settings
 import decsim.engine as engine_module
 import decsim.records.rounds as round_records
 import decsim.syndrome_buffer.round_store as round_store_module
 import decsim.syndrome_buffer.settings as round_store_settings
+import tests.declared_run as declared_run
 
 STALL = controller_settings.PackingOverflowPolicy.STALL
 
@@ -321,3 +327,65 @@ def test_the_hold_sources_carry_the_token_and_its_rounds():
         ("transferred", "window", "job"),
         ("released", "job"),
     ]
+
+
+# ---- the publication tick in the whole pipeline
+
+
+def test_the_weak_primary_pipeline_runs_on_the_declared_ticks():
+    """The store's publication is the window's readiness, hop by hop.
+
+    Round r becomes public once the readout has crossed
+    qpu_to_controller, been classified into bits, and crossed
+    controller_to_weak_buffer; the window that round completes is
+    queued and dispatched on that same tick, and the weak decode is
+    charged the weak_buffer_to_weak_decoder transfer before its own
+    latency. Every latency is the declared card's
+    (tests/declared_run.py), so each stamp is exact arithmetic.
+    """
+    machine = declared_run.weak_only_run(rounds=6)
+    windows = machine.observation.windows.windows
+    window = windows[(1, 0)]
+    snapshot = machine.pauli_frame.snapshot()
+    (record,) = snapshot.records
+    expected_first_round = config.microseconds_to_ticks(10.0)
+    expected_data_complete = config.microseconds_to_ticks(15.0)
+    expected_done = config.microseconds_to_ticks(30.0)
+    expected_accepted = config.microseconds_to_ticks(32.0)
+    expected_committed = config.microseconds_to_ticks(33.0)
+
+    assert window.t_first_round == expected_first_round
+    assert window.t_data_complete == expected_data_complete
+    assert window.t_queued == expected_data_complete
+    assert window.t_dispatch == expected_data_complete
+    assert window.t_done == expected_done
+    assert record.tier == "weak"
+    assert record.accepted_ticks == expected_accepted
+    assert record.committed_ticks == expected_committed
+
+
+def test_a_weak_window_is_ready_on_this_store_not_the_room_side_landing():
+    """Readiness listens to the store the weak decoder actually reads.
+
+    Toshio arXiv:2510.25222 Sec. III A: the weak tier reads the
+    fridge-side store, and syndrome buffer 1 only holds the context an
+    escalation would need. On the declared card the room-side hop is
+    7 us against this store's 4 us, so the same round lands in syndrome
+    buffer 1 three microseconds after this store published it; a
+    readiness rule that waited for the slower path would delay every
+    weak window by that lag.
+    """
+    machine = declared_run.switching_run(rounds=9, io_trace=True)
+    windows = machine.observation.windows.windows
+    first_window = windows[(1, 0)]
+    log_lines = machine.observation.log.lines
+    published = declared_run.log_tick(log_lines, "round 6 of mem1 arrived")
+    landing_line = "received round 6 of op 1 from controller_to_strong_buffer"
+    landed = declared_run.log_tick(log_lines, landing_line)
+    expected_data_complete = config.microseconds_to_ticks(15.0)
+    expected_landing = config.microseconds_to_ticks(18.0)
+
+    assert first_window.t_data_complete == expected_data_complete
+    assert published == expected_data_complete
+    assert landed == expected_landing
+    assert published < landed

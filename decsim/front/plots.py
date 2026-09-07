@@ -1092,6 +1092,12 @@ def _ler_rows_at_probability(run_dir, probability: float) -> list:
     A run that never swept that p is refused.
     """
     ler_path = Path(run_dir) / "ler.csv"
+    if not ler_path.is_file():
+        raise refusal.RefusalError(
+            f"{run_dir} has no ler.csv; the ler_vs_d figure reads the "
+            "logical error rate per distance that `decsim.front.offline "
+            "merge` writes"
+        )
     all_rows = _csv_rows(ler_path)
     selected_rows = []
     for row in all_rows:

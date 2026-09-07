@@ -1,17 +1,15 @@
-"""The front against its referents: sinter's collect, and the old runner.
+"""The front against its referents: sinter's collect, and a recorded sweep.
 
-Referent one is the runner before decsim.collect existed (rewrite-sample
-10ad11f): reference.yaml's sweep run through it, its sweep.csv and
-links.csv kept in data/. The weak decoder of reference.yaml is
-pymatching, which prices its measured wall clock, so the columns that
-carry decode time (algorithm, service, queue wait, the four totals,
-load, throughput, the queue peak and the wall seconds) vary between two
-runs of the same code; they are left out of the comparison, and the
-columns kept are exactly the ones two runs of the old runner agreed on.
-Referent two is sinter (sinter/_collection/_collection.py collect,
-sinter/_data/_task.py strong_id): a task named twice runs once, and a
-decoder off the table is refused by name (sinter/_decoding/_decoding.py
-"Unrecognized decoder").
+Referent one is a sweep of reference.yaml recorded before decsim.collect
+existed, its sweep.csv and links.csv kept in data/. The weak decoder of
+reference.yaml is pymatching, which prices its measured wall clock, so the
+columns that carry decode time (algorithm, service, queue wait, the four
+totals, load, throughput, the queue peak and the wall seconds) vary between
+two runs of the same code; they are left out of the comparison, and the
+columns kept are exactly the ones two recorded runs agreed on. Referent two
+is sinter (sinter/_collection/_collection.py collect, sinter/_data/_task.py
+strong_id): a task named twice runs once, and a decoder off the table is
+refused by name (sinter/_decoding/_decoding.py "Unrecognized decoder").
 """
 
 import csv
@@ -95,7 +93,7 @@ def _stable_columns(row: dict) -> dict:
     return stable
 
 
-def test_reference_yaml_rows_equal_the_old_runners_sweep_and_links(tmp_path):
+def test_reference_yaml_rows_equal_the_recorded_sweep_and_links(tmp_path):
     config = experiment.load_experiment(REFERENCE_YAML)
     measurements = run.run_sweep(config, None)
     record = sweep_report.record_of(measurements)

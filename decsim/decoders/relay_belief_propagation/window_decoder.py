@@ -1,8 +1,8 @@
 """Relay-BP over one placed physical window model.
 
 The official relay-bp package (Maurer et al. 2510.21600, the qLDPC
-real-time baseline; the Rust source is at tmp/reference-decoders/relay-bp,
-the wheel is not installed here) is compiled once per live model with a
+real-time baseline; the bb-decoders extra) is compiled once per live
+model with a
 fixed gamma table drawn from the run seed, and decode_detailed is called
 once per syndrome. The paper assumes 0 < p < 1/2; this adapter also
 accepts exactly p = 1/2 as a tested software-profile extension with a

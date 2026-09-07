@@ -5,7 +5,7 @@ with log-odds weights, parallel faults merged as independent errors
 (the convention of Stim detector error models and of PyMatching's DEM
 loader), one matching per live window model, warmed on three columns
 before the first timed call. Higgott and Gidney, Sparse Blossom
-(2303.15933, tmp/uf-decoder-research/papers) is the algorithm behind
+(2303.15933) is the algorithm behind
 the call.
 """
 

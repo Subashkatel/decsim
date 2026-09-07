@@ -1,7 +1,7 @@
 """One shot's Chrome trace: where every round and window sat and moved.
 
-A listener on the trace sources of slice 10, in the event model of
-docs/rewrite/notes/trace_and_viewer.md section 2: one thread per
+A listener on every component's trace sources, in one event model:
+one thread per
 component and one per wired link path, a residence or a service as an
 `X` complete event written at its end, a move as an `X` on its link's
 thread from send to delivery, a decision or a copy as an `i` instant,

@@ -4,7 +4,7 @@ The Machine builds the components; this module builds what watches them
 and connects each listener to the sources it hears, in pipeline order.
 It is the only place that knows which yaml key builds which listener, so
 a new listener is one class in observe/ and one connection here
-(REWRITE.md rule 7: observation is reached through the callbacks a
+(STYLE.md rule 7: observation is reached through the callbacks a
 component fires, never through a port, so a component runs with nothing
 connected).
 
@@ -243,9 +243,9 @@ def _connect_data_path(
 ) -> None:
     """Hand the trace and the counters every source of the data path.
 
-    The hops and residences of docs/rewrite/notes/data_path.md sections
-    3 and 4, each from the component where it happens; a run with
-    neither listener connects nothing and fires into empty lists.
+    The hops and residences of the data path's hop table, each from
+    the component where it happens; a run with neither listener connects
+    nothing and fires into empty lists.
     """
     if data_movement is not None:
         qpu.round_emitted.connect(data_movement.round_emitted)

@@ -1,7 +1,7 @@
 """The strong writer: one crossing per round, room counts writes in flight.
 
 Referent: gem5's queue counts its reserved entries as taken before they
-are allocated (tmp/resources/gem5/src/mem/cache/queue.hh:150-153,
+are allocated (gem5 src/mem/cache/queue.hh:150-153,
 isFull over allocated plus reserve); the writer counts a round crossing
 the link the same way. The link law itself is the channel's
 (tests/links/test_channel.py); here a priced controller_to_strong_buffer

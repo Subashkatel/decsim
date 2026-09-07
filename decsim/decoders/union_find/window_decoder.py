@@ -1,6 +1,6 @@
 """Prior-weighted graphlike Union-Find: weighted growth and peeling.
 
-Delfosse and Nickerson 1709.06218 (tmp/uf-decoder-research/papers):
+Delfosse and Nickerson 1709.06218:
 every odd cluster grows by one half-edge per round (Algorithm 1, step
 4), clusters that meet fuse, and the peeling decoder reads the
 correction off a spanning forest of the grown erasure (Algorithm 2).

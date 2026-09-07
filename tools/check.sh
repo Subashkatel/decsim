@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The three style checks of REWRITE.md rule 9 (and rule 1, which the
+# The three style checks of STYLE.md rule 9 (and rule 1, which the
 # one-action check enforces), on the paths given or on the whole tree.
 #
 # The interpreter and the dependency folder default to the checkout's

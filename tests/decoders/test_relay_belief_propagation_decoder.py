@@ -1,8 +1,7 @@
 """The relay_bp row against relay-bp's RelayDecoderF32 on the same model.
 
-The wheel is not installed here (only its Rust source, at
-tmp/reference-decoders/relay-bp); the identity test skips until it is
-built. The profile refusal below needs no wheel: it is decided while
+The wheel is the bb-decoders extra; the identity test skips until it
+is installed. The profile refusal below needs no wheel: it is decided while
 the profile is built, from what relay.rs does with a first leg that
 never runs.
 """
@@ -45,7 +44,7 @@ def test_the_first_relay_leg_must_run_at_least_once():
 
     relay-bp's decode_inner runs its first leg for pre_iter iterations
     and leaves the previous call's decoding in place when that loop
-    never runs (relay.rs in tmp/reference-decoders/relay-bp), so a
+    never runs (relay.rs in the relay-bp source), so a
     profile with no pre-iterations would report a stale correction for
     every window. The profile refuses it while it is built, and one
     iteration is enough, so the boundary is exclusive at zero.

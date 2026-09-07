@@ -117,7 +117,7 @@ every summary is derived from them when it is read.
   or window scheme.
 - `docs/glossary.md`: what the papers call the names this code uses.
 - `docs/reading_a_trace.md`: how to open a trace and what is in it.
-- `REWRITE.md`: the rules every line of this package is written to.
+- `STYLE.md`: the rules every line of this package is written to.
 
 ## Run the tests
 

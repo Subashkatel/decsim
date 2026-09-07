@@ -223,7 +223,7 @@ def _settings_of(sections: dict, path: Path) -> machine.MachineSettings:
     """The machine's settings records, one per section of the file.
 
     A settings record checks its own section and raises ValueError
-    (REWRITE.md rule 4); the file is the front's input, so a refused key
+    (STYLE.md rule 4); the file is the front's input, so a refused key
     reaches the user as one sentence naming the file it is in.
     """
     try:

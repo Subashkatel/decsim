@@ -11,8 +11,6 @@ import decsim.machine as machine_module
 import decsim.observe.trace_source as trace_source
 import tests.observe.gate_point as gate_point
 
-pytestmark = gate_point.needs_the_frozen_suite
-
 EVERY_KNOB = {
     "record_switching_windows": True,
     "round_store_occupancy": True,

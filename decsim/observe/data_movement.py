@@ -1,6 +1,6 @@
 """How often a run copied bits, referenced them and moved them.
 
-The counters docs/rewrite/notes/data_path.md section 8 asks for, so a
+The counters of the data path's hop table, so a
 study reads the data path without the trace file. gem5's vocabulary
 (section 2 of that note): a copy duplicates bits into a structure the
 receiver owns (mem/cache/cache_blk.hh 97-104), a reference is a handle

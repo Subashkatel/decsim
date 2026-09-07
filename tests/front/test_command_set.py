@@ -1,8 +1,7 @@
 """The `decsim` command set: the verbs, and what each one is equal to.
 
 The shape is sinter's (sinter/_command/_main.py: one command, a verb per
-first word, each verb's module imported lazily) as
-docs/rewrite/notes/slice_11_front.md section 3 sets it out. Each test
+first word, each verb's module imported lazily). Each test
 here pins a verb against what the same work done in Python returns, so a
 command line is never the only record of a number.
 """
@@ -128,9 +127,8 @@ def test_show_lists_every_sections_kind_of_every_shipped_config():
         assert "trace: " in text
 
 
-@gate_point.needs_the_frozen_suite
 def test_run_prints_the_result_fields_the_gate_hashes():
-    config_path = gate_point.SUITE / "weak_decoder_baseline.yaml"
+    config_path = gate_point.CONFIG_PATH
     lines = run_command.run_one_shot(config_path, seed=0)
     config = experiment.load_experiment(config_path)
     block = config.sweep[0]
@@ -150,9 +148,8 @@ def test_run_prints_the_result_fields_the_gate_hashes():
     assert f"truth {row.observable_truth}" in text
 
 
-@gate_point.needs_the_frozen_suite
 def test_run_with_trace_writes_the_shots_trace_file(tmp_path):
-    config_path = gate_point.SUITE / "weak_decoder_baseline.yaml"
+    config_path = gate_point.CONFIG_PATH
     run_command.run_one_shot(config_path, seed=0, out_dir=tmp_path, trace=True)
     trace_dir = tmp_path / "trace"
     entries = trace_dir.iterdir()

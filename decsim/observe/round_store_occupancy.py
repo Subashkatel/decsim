@@ -5,8 +5,8 @@ integrates the occupancy as a step function of time and sums the
 residence of every round that left, so the sample-path form of Little's
 law can be checked exactly: over a run in which every stored round is
 released, the occupancy integral equals the residence sum (Stidham
-1974, "A last word on L = lambda W"; the buffer oracles under
-tmp/resources/l5_buffers, open_issue_resources_2026-09-01.md). Built only
+1974, "A last word on L = lambda W"; Ciw's and gem5's queues as the
+oracles). Built only
 when the observation section asks; the store runs without it.
 """
 

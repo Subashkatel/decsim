@@ -131,7 +131,7 @@ def test_an_action_that_raises_stops_the_run_and_leaves_the_rest_queued():
     """An action's exception reaches the caller unchanged.
 
     The engine wraps no action, so a component's bug arrives as its own
-    traceback (REWRITE.md rule 4: a wrong caller is a bug and a loud
+    traceback (STYLE.md rule 4: a wrong caller is a bug and a loud
     stop is better than a wrong number; gem5's panic, src/base/logging.hh).
     The failing action is already off the queue, so a second run resumes
     with what is left.

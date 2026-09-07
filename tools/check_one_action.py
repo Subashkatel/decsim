@@ -1,4 +1,4 @@
-"""Check that every line of Python does one thing (REWRITE.md, rule 1).
+"""Check that every line of Python does one thing (STYLE.md, rule 1).
 
 Usage:
     python tools/check_one_action.py <file or directory> ...
@@ -31,8 +31,8 @@ What is reported, by kind:
 
 Two kinds are reports, not failures: long function and wide state. The
 40 lines is Google's prompt to think, not a limit, and the six
-attributes is this project's own number (REWRITE.md rule 1); the
-checklist row says why a function or class is that size. They are
+attributes is this project's own number (STYLE.md rule 1); the
+commit message says why a function or class is that size. They are
 printed under their own heading and do not set the exit code.
 """
 
@@ -492,7 +492,7 @@ def main(arguments):
     failure_paths = {finding.path for finding in failures}
     print(f"{len(failures)} findings in {len(failure_paths)} files")
     if reports:
-        print("reports (size prompts, recorded on the checklist row):")
+        print("reports (size prompts, recorded in the commit message):")
     for finding in reports:
         print(finding)
     if failures:

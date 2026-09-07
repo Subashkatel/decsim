@@ -205,7 +205,7 @@ class Decoder(Protocol):
     occupancy with None and start decides its own time.
 
     stage_recorded is the port's data-side stage callback
-    (docs/rewrite/notes/data_path.md section 5): a trace source the row
+    (the data path's hop table): a trace source the row
     fires once per internal stage with a DecoderStageRecord, so an ASIC
     model's engines or a GPU model's kernels reach the trace and the
     stage ledger under their own names. A row with no internal stages

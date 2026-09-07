@@ -6,7 +6,7 @@ line and exits, `panic` reports where an assumption broke
 kind, so they share one class that `decsim <verb>` catches, prints as
 one sentence and exits 1 on; everything else keeps its traceback,
 because a bug should look like a bug. It is a ValueError because that is
-what REWRITE.md rule 4 asks a boundary refusal to raise, and it carries
+what STYLE.md rule 4 asks a boundary refusal to raise, and it carries
 the Error suffix the Google Python style guide asks every exception name
 to end in.
 """

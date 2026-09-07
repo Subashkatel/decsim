@@ -438,8 +438,8 @@ class Machine:
             links=links,
             conditional_release=conditional_release,
             fault_model_requirement_for=pool.router.fault_model_requirement_for,
-            syndrome_buffer=round_store,
-            syndrome_buffer_1=strong_round_store,
+            round_store=round_store,
+            strong_round_store=strong_round_store,
             pauli_frame=pauli_frame,
             decode_queue=decoder_manager,
             on_workload_complete=lambda: factory.shutdown(),
@@ -512,8 +512,7 @@ class Machine:
             factory=factory,
             resource_claims_by_operation_id=plan.resource_claims,
         )
-        # The QPU's receivers arrive through its constructor once the
-        # qpu lane builds the controller first.
+        # The QPU's receivers arrive after the controller is built.
         qpu.connect_readout_receiver(controller)
         qpu.connect_completion_receiver(execution_runtime.body_done)
         qpu.connect_idle_receiver(idle_rounds.emit_idle_round)
@@ -1251,8 +1250,8 @@ def _window_manager(
     links,
     conditional_release,
     fault_model_requirement_for,
-    syndrome_buffer,
-    syndrome_buffer_1,
+    round_store,
+    strong_round_store,
     pauli_frame,
     decode_queue,
     on_workload_complete,
@@ -1274,8 +1273,8 @@ def _window_manager(
     )
     tracker = round_tracker_module.RoundTracker(plan.scheme, planner)
     retention = round_retention_module.RoundRetention(
-        syndrome_buffer,
-        syndrome_buffer_1,
+        round_store,
+        strong_round_store,
         planner,
         tracker,
         is_strong_context_retained=escalation_policy.requires_strong_context,

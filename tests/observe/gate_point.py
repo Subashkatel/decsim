@@ -1,10 +1,10 @@
 """Gate point 1 for the observation tests: how to run it, what it holds.
 
 weak_decoder_baseline d 3 p 0.003 seed 0, the first strict point of the
-frozen suite (validation/responsibility_audit_2026_08_30/frozen_suite in
-the sandbox beside this checkout). captured_fields returns the row the
-gate's capture.py hashes, so a test can say that a knob moved nothing.
-A checkout without the sandbox skips these tests rather than erroring.
+frozen gate: the shipped configs/weak_decoder_baseline.yaml with the
+component I/O log on, which is the one line the gate's copy of that yaml
+adds. captured_fields returns the row the gate hashes, so a test can say
+that a knob moved nothing.
 """
 
 import dataclasses
@@ -12,42 +12,31 @@ import hashlib
 import json
 import pathlib
 
-import pytest
-
 import decsim.machine as machine_module
 
-SUITE = pathlib.Path(
-    "/scratch/gpfs/MARTONOSI/sk2415/qlx-qec-sandbox/validation/"
-    "responsibility_audit_2026_08_30/frozen_suite"
-)
+_THIS_FILE = pathlib.Path(__file__)
+_ABSOLUTE_FILE = _THIS_FILE.resolve()
+CONFIGS_DIR = _ABSOLUTE_FILE.parents[2] / "configs"
+CONFIG_PATH = CONFIGS_DIR / "weak_decoder_baseline.yaml"
 POINT = {
     "physical_error_probability": 0.003,
     "distance": 3,
     "round_period_us": 1.0,
 }
 SEED = 0
-# the golden log hash of the point, from the frozen suite
+# the golden log hash of the point, from the frozen gate
 POINT_LOG_SHA256 = "74c2e7aee37a"
-
-_suite_is_missing = not SUITE.is_dir()
-_REASON = (
-    f"the frozen suite lives in the sandbox at {SUITE}, beside the "
-    "repository; this checkout does not have it"
-)
-needs_the_frozen_suite = pytest.mark.skipif(_suite_is_missing, reason=_REASON)
 
 
 def settings(**observation_changes):
     """Gate point 1's settings, with its observation section changed."""
     from decsim.front.experiment import load_experiment
 
-    config_path = SUITE / "weak_decoder_baseline.yaml"
-    config = load_experiment(config_path)
-    point = config.point_settings(**POINT)
-    if not observation_changes:
-        return point
-    observation = dataclasses.replace(point.observation, **observation_changes)
-    return dataclasses.replace(point, observation=observation)
+    config = load_experiment(CONFIG_PATH)
+    shipped = config.point_settings(**POINT)
+    changes = {"log_component_io": True, **observation_changes}
+    observation = dataclasses.replace(shipped.observation, **changes)
+    return dataclasses.replace(shipped, observation=observation)
 
 
 def run(**observation_changes):

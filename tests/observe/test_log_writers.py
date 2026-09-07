@@ -1,7 +1,7 @@
 """The narrator's two listeners: the engine builds the text, they keep it.
 
 The text is gem5's DPRINTF shape, the tick then the component's name
-then the message (src/base/trace.hh, on disk under tmp/resources/gem5).
+then the message (src/base/trace.hh).
 """
 
 import decsim.engine as engine_module

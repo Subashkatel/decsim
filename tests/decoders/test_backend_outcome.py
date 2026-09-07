@@ -102,7 +102,7 @@ def test_an_outcome_with_no_correction_is_a_contract_violation():
 
     A backend that raised upstream produced no vector at all, so there
     is no best effort to carry forward and a silent empty correction
-    would corrupt the frame; the run stops loudly instead (REWRITE.md
+    would corrupt the frame; the run stops loudly instead (STYLE.md
     rule 4).
     """
     backend_error = backend_outcome.BackendDecodeStatus.BACKEND_ERROR

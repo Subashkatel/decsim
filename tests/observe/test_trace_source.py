@@ -1,7 +1,7 @@
 """A trace source fires to its listeners in connection order, or to none.
 
 The shape is ns-3's TracedCallback (point-to-point-net-device.h:309,
-.cc:530, on disk under tmp/resources/l5_buffers): a source with no sink
+.cc:530): a source with no sink
 fires into an empty list.
 """
 

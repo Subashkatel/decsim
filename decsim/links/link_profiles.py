@@ -8,7 +8,7 @@ becomes measurable; capacity_scale sweeps the whole fabric. The with_
 functions add the optional store hops and a setup cost to either.
 
 Every number carries a source string that travels into the traffic
-report; paper locators are line numbers in tmp/references/papers/. To
+report; paper locators are arXiv numbers and sections. To
 change a number, copy a card into your own file and edit it, then pass
 it as the machine's links setting.
 """
@@ -181,7 +181,7 @@ def bandwidth_limited_profile(
         weak_window_bits,
         weak_window_bits_per_microsecond,
         "one weak window of rcom+rbuf rounds per commit region "
-        "(tmp/references/papers/2510.25222v1.txt:1150-1152, "
+        "(Toshio 2510.25222 Sec. III C, "
         '"rcom = rbuf = d")',
         ROUND_PAYLOAD_SOURCE,
     )
@@ -199,7 +199,7 @@ def bandwidth_limited_profile(
         strong_window_bits,
         strong_window_bits_per_microsecond,
         "one strong window of rcom+2rbuf rounds per commit region "
-        "(tmp/references/papers/2510.25222v1.txt:1155, "
+        "(Toshio 2510.25222 Sec. III C, "
         '"In this paper, we assume that rstrong = rcom + 2rbuf.")',
         "DecodeJob.retained_payload_size_bits",
     )

@@ -2,7 +2,7 @@
 
 The section is yaml a user writes by hand, so a stale key, the wrong
 word and a shot list that is not a list of shot numbers are refused with
-a sentence (REWRITE.md rule 4). The words are read through yaml itself
+a sentence (STYLE.md rule 4). The words are read through yaml itself
 because yaml 1.1 turns a bare `on` into True and a bare `off` into
 False, which is exactly what the refusals must catch.
 """
@@ -129,7 +129,6 @@ def test_every_study_knob_is_read_from_the_section():
     assert settings.data_movement is True
 
 
-@gate_point.needs_the_frozen_suite
 @pytest.mark.parametrize("knob", STUDY_KNOBS)
 def test_a_study_knob_moves_no_number_the_gate_hashes(knob):
     """A listener only listens: asking for one changes no result."""

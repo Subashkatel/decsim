@@ -1,7 +1,7 @@
 """The Chrome trace of gate point 1: its shape, its chains, its counts.
 
-The event model is docs/rewrite/notes/trace_and_viewer.md section 2 and
-its worked example (weak_decoder_baseline d 3 p 0.003 seed 0, the frozen
+The event model and its worked example (weak_decoder_baseline d 3
+p 0.003 seed 0, the frozen
 suite's first strict point); the copy, reference and move counts are
 data_path.md's hop table. The trace never moves a tick: a run with it on
 narrates the same log and returns the same results as one with it off.
@@ -16,8 +16,6 @@ import pytest
 import decsim.decoders.decoders as decoders
 import decsim.machine as machine_module
 import tests.observe.gate_point as gate_point
-
-pytestmark = gate_point.needs_the_frozen_suite
 
 SEED = gate_point.SEED
 POINT_LOG_SHA256 = gate_point.POINT_LOG_SHA256

@@ -2,7 +2,7 @@
 
 With uniform priors every edge has the same length, so decsim's weighted
 growth (Delfosse and Nickerson 1709.06218, Huang, Newman and Brown
-2004.04693, both in tmp/uf-decoder-research/papers) is the paper's
+2004.04693) is the paper's
 uniform growth; ldpc's peeling decoder (ldpc.union_find_decoder) is the
 referent. Every syndrome an error produces is satisfiable: both
 decoders reproduce it, and on a single fault both name that fault.

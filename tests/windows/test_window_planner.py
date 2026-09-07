@@ -1,6 +1,6 @@
 """The window planner's laws: the papers' schedules and a stream's growth.
 
-Skoric et al. 2209.08552 (tmp/papers): window k of the sliding window
+Skoric et al. 2209.08552: window k of the sliding window
 commits ncom rounds and reads nbuf past them (lines 194-203, 275-278),
 and in block A/B decoding the first A commits the first 2d rounds while
 a B window has smooth time boundaries and no buffers (lines 388-405,

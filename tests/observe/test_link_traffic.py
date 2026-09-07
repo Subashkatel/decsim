@@ -1,8 +1,8 @@
 """The traffic ledger counts what the fabric delivered and writes the JSON.
 
-Sources: the gate's golden (validation/responsibility_audit_2026_08_30)
-pins every key and value of result.link_traffic, so the key sets here are
-the pinned ones written out; a channel's counters are the sum of its
+Sources: the frozen gate's golden pins every key and value of
+result.link_traffic, so the key sets here are the pinned ones written
+out; a channel's counters are the sum of its
 paths' counters by construction (one counter stream, folded twice).
 """
 

@@ -32,6 +32,7 @@ def run_sweep(
     *,
     processes: int = 1,
     shard: Optional[tuple] = None,
+    shots_per_unit: Optional[int] = None,
 ) -> list:
     """Every shot of every point of the config's sweep blocks, measured.
 
@@ -49,6 +50,7 @@ def run_sweep(
         on_task_done,
         processes=processes,
         shard=shard,
+        shots_per_unit=shots_per_unit,
     )
 
 
@@ -58,6 +60,7 @@ def run_experiment(
     *,
     processes: int = 1,
     shard: Optional[tuple] = None,
+    shots_per_unit: Optional[int] = None,
 ) -> tuple:
     """One full experiment: sweep, summary, report, figures.
 
@@ -69,7 +72,13 @@ def run_experiment(
     started_utc = run_folder.utc_now()
     run_folder.write_manifest(config, run_dir, started_utc)
     _echo_description(config, run_dir, shard)
-    measurements = run_sweep(config, run_dir, processes=processes, shard=shard)
+    measurements = run_sweep(
+        config,
+        run_dir,
+        processes=processes,
+        shard=shard,
+        shots_per_unit=shots_per_unit,
+    )
     rows = report.summarize(measurements)
     report.write_report(rows, run_dir, measurements)
     plots.plots(config, rows, run_dir, measurements)

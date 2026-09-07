@@ -7,6 +7,7 @@ loads Stim. The console script and `python -m decsim` both land here.
 
     decsim run <yaml> [--seed N] [--out DIR] [--log ...] [--trace]
     decsim collect <yaml> [--out DIR] [--processes N] [--shard i/n]
+        [--shots-per-unit N]
     decsim combine <run_dir>... [--out DIR]
     decsim show <yaml>
     decsim plot <run_dir>... [--figure NAME] [--out PATH] [--probability P]
@@ -90,7 +91,13 @@ def _collect(argv: list) -> None:
     parser.add_argument(
         "--shard",
         default=None,
-        help="i/n: run the tasks whose index modulo n is i",
+        help="i/n: run the work units whose index modulo n is i",
+    )
+    parser.add_argument(
+        "--shots-per-unit",
+        type=int,
+        default=None,
+        help="split a point's seeds into work units of this many",
     )
     parsed = parser.parse_args(argv)
     shard = _shard_of(parsed.shard)
@@ -99,6 +106,7 @@ def _collect(argv: list) -> None:
         parsed.out,
         processes=parsed.processes,
         shard=shard,
+        shots_per_unit=parsed.shots_per_unit,
     )
     lines = report.terminal_lines(rows)
     text = "\n".join(lines)

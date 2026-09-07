@@ -196,7 +196,8 @@ def test_a_tasks_shots_decode_the_same_with_the_models_built_once():
         shots=4,
     )
 
-    shared, _ran = collect.run_task(task, measure_shot.measure_shot)
+    whole_task = collect.Unit(task, 0, task.shots)
+    shared, _ran = collect.run_unit(whole_task, measure_shot.measure_shot)
     alone = []
     for seed in range(task.shots):
         shot = collect.run_shot(task, seed)
@@ -234,3 +235,47 @@ def test_a_machine_built_alone_builds_its_own_models():
     settings = task.shot_settings()
 
     assert settings.workload.built_models is None
+
+
+def test_a_task_is_one_unit_until_a_unit_size_splits_it():
+    config = experiment_config.load_experiment(REFERENCE_YAML)
+    task = config.point_task(
+        physical_error_probability=0.001,
+        distance=3,
+        round_period_us=1.0,
+        shots=5,
+    )
+
+    whole = collect.work_units([task])
+    split = collect.work_units([task], 2)
+
+    assert whole == [collect.Unit(task, 0, 5)]
+    assert split == [
+        collect.Unit(task, 0, 2),
+        collect.Unit(task, 2, 2),
+        collect.Unit(task, 4, 1),
+    ]
+
+
+def test_a_point_with_an_online_threshold_stays_one_unit(tmp_path):
+    """The calibrator learns over the point's shots in order."""
+    raw = _reference_yaml()
+    raw["escalation"] = {
+        "kind": "switching",
+        "gap_threshold_db": 15.0,
+        "threshold_source": "online",
+    }
+    online_path = tmp_path / "online.yaml"
+    online = _written_yaml(raw, online_path)
+    config = experiment_config.load_experiment(online)
+    task = config.point_task(
+        physical_error_probability=0.001,
+        distance=3,
+        round_period_us=1.0,
+        shots=5,
+    )
+
+    units = collect.work_units([task], 1)
+
+    assert task.online_threshold is not None
+    assert units == [collect.Unit(task, 0, 5)]

@@ -9,13 +9,18 @@ hands each Shot to the caller's measure, which returns the caller's row.
 Two tasks with the same strong id (sinter's content hash, _task.py
 strong_id_value: the json text of the values, sha256) are one task. The
 online threshold calibrator lives on the task so every shot of a point
-shares it, which is why shots stay serial and the process pool is over
-tasks (sinter's --processes, _main_collect.py:83); rows come back in
-task order whatever order the tasks finish in. A task's window error
-models are built by its first shot and read by the rest, as sinter
-compiles its decoder once per task. A shard runs the tasks whose index
-modulo n is i, so a Slurm array covers a sweep and `decsim combine`
-folds the folders.
+shares it, which is why shots stay serial inside their unit.
+
+The work unit is one task's range of seeds, sinter's shape (a task's
+shots are split into batches its workers take,
+sinter/_collection/_collection_worker_state.py, capped by
+--max_batch_size): the pool (sinter's --processes,
+_main_collect.py:83) and the shard both run over units, so a point of a
+million shots fits a Slurm array's wall clock instead of one task
+having to. A unit's window error models are built by its first shot and
+read by the rest, as sinter compiles its decoder once per task. Rows
+come back in unit order whatever order the units finish in, so a run
+that splits nothing writes its rows in task and seed order.
 """
 
 import concurrent.futures
@@ -93,6 +98,20 @@ class Task:
 
 
 @dataclasses.dataclass(frozen=True)
+class Unit:
+    """The work unit: `seeds` seeds of one task, starting at first_seed.
+
+    A unit is what a worker process takes and what a shard keeps or
+    skips. Its seeds run serially and share one window error model
+    cache.
+    """
+
+    task: Task
+    first_seed: int
+    seeds: int
+
+
+@dataclasses.dataclass(frozen=True)
 class Shot:
     """One seeded run of a task: the machine, its result, its wall time."""
 
@@ -110,47 +129,65 @@ def collect(
     *,
     processes: int = 1,
     shard: Optional[tuple] = None,
+    shots_per_unit: Optional[int] = None,
 ) -> list:
     """Every shot of every task, measured; one row per shot, in order.
 
     A task named twice runs once, with the larger shot count (seeds are
-    0 to shots - 1, so the larger count covers the smaller). on_task_done
-    runs after a task's last shot, sinter's progress_callback. `shard`
-    is (index, count) and keeps the tasks whose position modulo count is
-    index; `processes` above one runs whole tasks in a worker pool, so
+    0 to shots - 1, so the larger count covers the smaller).
+    `shots_per_unit` splits a task's seeds into units of that many, so
+    the pool and the shard divide a point's shots as well as its points;
+    with none, a task is one unit. on_task_done runs after the last unit
+    of a task that this run holds, sinter's progress_callback. `shard`
+    is (index, count) and keeps the units whose position modulo count is
+    index; `processes` above one runs whole units in a worker pool, so
     `measure` must be a module-level callable or a partial of one.
     """
     unique = unique_tasks(tasks)
-    selected = shard_of(unique, shard)
+    units = work_units(unique, shots_per_unit)
+    selected = shard_of(units, shard)
     if processes > 1:
         return _collected_in_a_pool(selected, measure, on_task_done, processes)
     rows = []
-    for task in selected:
-        task_rows, ran = run_task(task, measure)
-        rows.extend(task_rows)
-        if on_task_done is not None:
-            on_task_done(ran)
+    for position, unit in enumerate(selected):
+        unit_rows, ran = run_unit(unit, measure)
+        rows.extend(unit_rows)
+        _report_a_finished_task(on_task_done, selected, position, ran)
     return rows
 
 
-def shard_of(tasks: list, shard: Optional[tuple]) -> list:
-    """The tasks of one shard: position modulo count equals index.
+def work_units(tasks: list, shots_per_unit: Optional[int] = None) -> list:
+    """Every task's seeds as work units, each task's units in seed order.
+
+    A point whose escalation calibrates its threshold online is one unit
+    however small `shots_per_unit` is: the calibrator learns over the
+    point's shots in order, so splitting them would split its state.
+    """
+    units = []
+    for task in tasks:
+        for unit in _units_of_one_task(task, shots_per_unit):
+            units.append(unit)
+    return units
+
+
+def shard_of(units: list, shard: Optional[tuple]) -> list:
+    """The units of one shard: position modulo count equals index.
 
     The command checks i and n where it reads them
     (decsim/front/command.py _shard_of), before a run folder exists.
     """
     if shard is None:
-        return tasks
+        return units
     index, count = shard
     selected = []
-    for position, task in enumerate(tasks):
+    for position, unit in enumerate(units):
         if position % count == index:
-            selected.append(task)
+            selected.append(unit)
     return selected
 
 
-def run_task(task: Task, measure: Callable[[Shot], Any]) -> tuple:
-    """Every seed of one task, measured, and the task that ran them.
+def run_unit(unit: Unit, measure: Callable[[Shot], Any]) -> tuple:
+    """Every seed of one unit, measured, and the task that ran them.
 
     The task comes back because its online threshold calibrator learned
     over these shots, and in a pool that learning happened in another
@@ -159,43 +196,86 @@ def run_task(task: Task, measure: Callable[[Shot], Any]) -> tuple:
     """
     built_models = built_window_models.BuiltWindowModels()
     rows = []
-    for seed in range(task.shots):
-        shot = run_shot(task, seed, built_models=built_models)
+    past_the_last_seed = unit.first_seed + unit.seeds
+    for seed in range(unit.first_seed, past_the_last_seed):
+        shot = run_shot(unit.task, seed, built_models=built_models)
         row = measure(shot)
         rows.append(row)
-    return rows, task
+    return rows, unit.task
+
+
+def _units_of_one_task(task: Task, shots_per_unit: Optional[int]) -> list:
+    """One task's seeds cut into units of at most `shots_per_unit`."""
+    seeds_in_a_unit = task.shots
+    if shots_per_unit is not None and task.online_threshold is None:
+        seeds_in_a_unit = min(shots_per_unit, task.shots)
+    units = []
+    for first_seed in range(0, task.shots, seeds_in_a_unit):
+        remaining = task.shots - first_seed
+        seeds = min(seeds_in_a_unit, remaining)
+        unit = Unit(task, first_seed, seeds)
+        units.append(unit)
+    return units
+
+
+def _report_a_finished_task(
+    on_task_done: Optional[Callable[[Task], None]],
+    units: list,
+    position: int,
+    ran: Task,
+) -> None:
+    """The progress callback, once per task, after its last unit here."""
+    if on_task_done is None:
+        return
+    if not _is_a_tasks_last_unit(units, position):
+        return
+    on_task_done(ran)
+
+
+def _is_a_tasks_last_unit(units: list, position: int) -> bool:
+    """Whether the next unit of this list belongs to another task.
+
+    work_units keeps a task's units together and shard_of keeps a
+    subsequence of that order, so a task's last unit in a list is the
+    one whose successor does not share its task.
+    """
+    next_position = position + 1
+    if next_position == len(units):
+        return True
+    unit = units[position]
+    later = units[next_position]
+    return later.task is not unit.task
 
 
 def _collected_in_a_pool(
-    tasks: list,
+    units: list,
     measure: Callable[[Shot], Any],
     on_task_done: Optional[Callable[[Task], None]],
     processes: int,
 ) -> list:
-    """Whole tasks in worker processes; the rows read back in task order."""
-    futures = _submitted(tasks, measure, processes)
+    """Whole units in worker processes; the rows read back in unit order."""
+    futures = _submitted(units, measure, processes)
     rows = []
-    for future in futures:
-        task_rows, ran = future.result()
-        rows.extend(task_rows)
-        if on_task_done is not None:
-            on_task_done(ran)
+    for position, future in enumerate(futures):
+        unit_rows, ran = future.result()
+        rows.extend(unit_rows)
+        _report_a_finished_task(on_task_done, units, position, ran)
     return rows
 
 
 def _submitted(
-    tasks: list, measure: Callable[[Shot], Any], processes: int
+    units: list, measure: Callable[[Shot], Any], processes: int
 ) -> list:
-    """Every task handed to the pool, in task order.
+    """Every unit handed to the pool, in unit order.
 
     The pool is shut down when the last future has been read, which the
-    caller does in this same order, so a task's rows are appended where
-    the task sits and not where it finished.
+    caller does in this same order, so a unit's rows are appended where
+    the unit sits and not where it finished.
     """
     pool = concurrent.futures.ProcessPoolExecutor(processes)
     futures = []
-    for task in tasks:
-        future = pool.submit(run_task, task, measure)
+    for unit in units:
+        future = pool.submit(run_unit, unit, measure)
         futures.append(future)
     pool.shutdown(wait=False)
     return futures

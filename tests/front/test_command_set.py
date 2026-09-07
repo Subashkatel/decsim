@@ -280,6 +280,93 @@ def test_combining_folders_of_two_different_sweeps_is_refused(
     assert "ran a different experiment from" in printed.err
 
 
+def test_a_unit_size_that_splits_a_point_writes_the_serial_runs_rows(
+    tmp_path,
+):
+    config_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)
+    serial_dir = tmp_path / "serial"
+    split_dir = tmp_path / "split"
+    pooled_dir = tmp_path / "pooled"
+    command.main(["collect", str(config_path), "--out", str(serial_dir)])
+    command.main(
+        [
+            "collect",
+            str(config_path),
+            "--out",
+            str(split_dir),
+            "--shots-per-unit",
+            "1",
+        ]
+    )
+    command.main(
+        [
+            "collect",
+            str(config_path),
+            "--out",
+            str(pooled_dir),
+            "--shots-per-unit",
+            "1",
+            "--processes",
+            "4",
+        ]
+    )
+
+    for name in ("sweep.csv", "shots.csv", "links.csv"):
+        serial = _rows_without_wall_clock(serial_dir, name)
+        assert _rows_without_wall_clock(split_dir, name) == serial
+        assert _rows_without_wall_clock(pooled_dir, name) == serial
+
+
+def test_shards_that_split_one_points_seeds_are_refused_by_combine(
+    tmp_path, capsys
+):
+    config_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)
+    first_dir = tmp_path / "shard0"
+    second_dir = tmp_path / "shard1"
+    combined_dir = tmp_path / "combined"
+    command.main(
+        [
+            "collect",
+            str(config_path),
+            "--out",
+            str(first_dir),
+            "--shots-per-unit",
+            "1",
+            "--shard",
+            "0/2",
+        ]
+    )
+    command.main(
+        [
+            "collect",
+            str(config_path),
+            "--out",
+            str(second_dir),
+            "--shots-per-unit",
+            "1",
+            "--shard",
+            "1/2",
+        ]
+    )
+    capsys.readouterr()
+    with pytest.raises(SystemExit) as stopped:
+        command.main(
+            [
+                "combine",
+                str(first_dir),
+                str(second_dir),
+                "--out",
+                str(combined_dir),
+            ]
+        )
+
+    printed = capsys.readouterr()
+    assert stopped.value.code == 1
+    assert printed.err.count("\n") == 1
+    assert "is in more than one of" in printed.err
+    assert "--shard without --shots-per-unit" in printed.err
+
+
 def test_every_shard_of_a_sweep_runs_a_share_of_its_points(tmp_path):
     config_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)
     first_dir = tmp_path / "shard0"

@@ -279,3 +279,38 @@ def test_a_point_with_an_online_threshold_stays_one_unit(tmp_path):
 
     assert task.online_threshold is not None
     assert units == [collect.Unit(task, 0, 5)]
+
+
+def test_two_points_under_one_cache_do_not_share_models():
+    """The key carries the circuit text, which is where d and p are.
+
+    Two distances also differ in their window spans, so the noisier
+    point at one distance is what pins the circuit text itself.
+    """
+    config = experiment_config.load_experiment(REFERENCE_YAML)
+    built = built_window_models.BuiltWindowModels()
+    at_three = config.point_task(
+        physical_error_probability=0.001,
+        distance=3,
+        round_period_us=1.0,
+        shots=1,
+    )
+    at_five = config.point_task(
+        physical_error_probability=0.001,
+        distance=5,
+        round_period_us=1.0,
+        shots=1,
+    )
+    noisier_at_three = config.point_task(
+        physical_error_probability=0.003,
+        distance=3,
+        round_period_us=1.0,
+        shots=1,
+    )
+
+    collect.run_shot(at_three, 0, built_models=built)
+    collect.run_shot(at_five, 0, built_models=built)
+    collect.run_shot(noisier_at_three, 0, built_models=built)
+
+    assert built.builds == 3
+    assert built.reuses == 0

@@ -2,13 +2,15 @@
 
 The wheel is not installed here (only its Rust source, at
 tmp/reference-decoders/relay-bp); the identity test skips until it is
-built. The profile refusals live in
-tests/15_decoders/test_relay_belief_propagation_profile.py.
+built. The profile refusal below needs no wheel: it is decided while
+the profile is built, from what relay.rs does with a first leg that
+never runs.
 """
 
 import pytest
 
 import decsim.decoders.relay_belief_propagation.decoder as relay
+import decsim.decoders.relay_belief_propagation.window_decoder as window_decoder
 import decsim.detector_error_model.fault_model_contracts as fault_models
 from tests.decoders import windows
 
@@ -36,3 +38,21 @@ def test_the_row_returns_the_backends_correction():
         job = windows.job_for(model, shot)
         result = row.decode(job)
         assert result.correction.tolist() == expected
+
+
+def test_the_first_relay_leg_must_run_at_least_once():
+    """A zero first leg would hand back the previous window's answer.
+
+    relay-bp's decode_inner runs its first leg for pre_iter iterations
+    and leaves the previous call's decoding in place when that loop
+    never runs (relay.rs in tmp/reference-decoders/relay-bp), so a
+    profile with no pre-iterations would report a stale correction for
+    every window. The profile refuses it while it is built, and one
+    iteration is enough, so the boundary is exclusive at zero.
+    """
+    with pytest.raises(ValueError, match="pre_iterations must be positive"):
+        window_decoder.RelayBeliefPropagationWindowDecoder(pre_iterations=0)
+    accepted = window_decoder.RelayBeliefPropagationWindowDecoder(
+        pre_iterations=1
+    )
+    assert accepted.profile.pre_iterations == 1

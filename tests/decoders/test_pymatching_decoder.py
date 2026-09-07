@@ -4,13 +4,19 @@ One d=3 memory circuit as a single window: decsim's row, a
 pymatching.Matching built directly from the window's graph, and sinter's
 pymatching row on the whole-circuit detector error model
 (.pydeps/sinter/_decoding/_decoding_pymatching.py) predict the same
-observable per shot, or tie at the same weight.
+observable per shot, or tie at the same weight. The hand-written graphs
+below check the row's own contract where the circuit cannot reach it: a
+boundaryless (toric-like) component, which PyMatching refuses to match
+at odd parity, and parallel fault columns, which Stim's detector error
+models and PyMatching's model loader merge as independent errors.
 """
 
 import numpy
 import pymatching
+import pytest
 import sinter
 
+import decsim.decoders.decoder as decoder_module
 import decsim.decoders.minimum_weight_perfect_matching.decoder as adapter
 import decsim.decoders.minimum_weight_perfect_matching.weights as weights
 import decsim.detector_error_model.fault_model_contracts as fault_models
@@ -28,6 +34,41 @@ def _window_and_shots():
     )
     detection_events, observables = windows.sampled_shots(circuit, SHOTS, 5)
     return circuit, model, detection_events, observables
+
+
+def placed_faults(check, priors, observables):
+    """One window's graphlike faults from a hand-written check matrix."""
+    matrix = numpy.asarray(check, dtype=numpy.uint8)
+    prior_array = numpy.asarray(priors, dtype=float)
+    observable_matrix = numpy.asarray(observables, dtype=numpy.uint8)
+    fault_count = matrix.shape[1]
+    owned = numpy.ones(fault_count, dtype=bool)
+    source_fault_ids = tuple(range(fault_count))
+    return fault_models.PlacedFaultModel(
+        representation=GRAPHLIKE,
+        check=matrix,
+        priors=prior_array,
+        observables=observable_matrix,
+        owned=owned,
+        source_fault_ids=source_fault_ids,
+        boundary_flips={},
+    )
+
+
+def window_of(faults, detector_count):
+    """A one-window model over the detector rows in row order."""
+    detector_ids = tuple(range(detector_count))
+    defect_positions = {}
+    for detector_id in detector_ids:
+        defect_positions[detector_id] = (1, detector_id)
+    return fault_models.WindowErrorModel(
+        detector_ids=detector_ids,
+        detector_coordinates=None,
+        defect_positions=defect_positions,
+        graphlike_faults=faults,
+        physical_faults=None,
+        physical_to_graphlike_detector_projection=None,
+    )
 
 
 def _direct_matching(faults):
@@ -86,3 +127,83 @@ def test_the_row_predicts_what_sinters_pymatching_row_predicts():
         assert weight_gap < 1e-6
         ties += 1
     assert ties < SHOTS / 10
+
+
+def test_an_unmatchable_syndrome_is_reported_and_not_raised():
+    """PyMatching refuses odd parity in a boundaryless component.
+
+    Matching.decode raises ValueError there rather than answering,
+    because no perfect matching exists. No plan produces such a
+    syndrome, so the row keeps the run going: an all-zero correction
+    marked INVALID_CORRECTION says the answer is not trustworthy
+    without stopping the machine (backend_outcome.py's policy).
+    """
+    # two boundaryless edges, (0, 2) and (1, 3): one defect on each
+    check = [[1, 0], [0, 1], [1, 0], [0, 1]]
+    faults = placed_faults(check, [0.1, 0.1], [[0, 0]])
+    model = window_of(faults, 4)
+    syndrome = numpy.asarray([1, 1, 0, 0], dtype=numpy.uint8)
+    job = windows.job_for(model, syndrome)
+    row = adapter.PyMatchingDecoder()
+    result = row.decode(job)
+    invalid = decoder_module.BackendDecodeStatus.INVALID_CORRECTION
+    assert result.decode_status is invalid
+    assert result.correction.tolist() == [0, 0]
+
+
+def test_a_satisfiable_syndrome_on_the_same_graph_has_no_status():
+    """Both defects on one boundaryless edge are that edge's fault."""
+    check = [[1, 0], [0, 1], [1, 0], [0, 1]]
+    faults = placed_faults(check, [0.1, 0.1], [[0, 0]])
+    model = window_of(faults, 4)
+    syndrome = numpy.asarray([1, 0, 1, 0], dtype=numpy.uint8)
+    job = windows.job_for(model, syndrome)
+    row = adapter.PyMatchingDecoder()
+    result = row.decode(job)
+    assert result.decode_status is None
+    assert result.correction.tolist() == [1, 0]
+
+
+def test_the_warm_up_survives_a_boundaryless_component():
+    """The compile step warms each column on its own detector set.
+
+    PyMatching builds its graph lazily and finishes warming only once
+    it has matched real defects, so compile decodes a few syndromes
+    before the first timed call. An arbitrary detector pair has no
+    perfect matching on a toric-like graph, while a column's own
+    detector set is explained by that column alone and is therefore
+    satisfiable on any graph, so the window still compiles and decodes.
+    """
+    check = [[1, 0], [0, 1], [1, 0], [0, 1]]
+    faults = placed_faults(check, [0.1, 0.1], [[0, 0]])
+    row = adapter.PyMatchingDecoder()
+    matching = row.compile(faults)
+    syndrome = numpy.asarray([1, 0, 1, 0], dtype=numpy.uint8)
+    selected = matching.decode(syndrome)
+    assert selected.tolist() == [1, 0]
+
+
+def test_two_placed_columns_with_the_same_endpoints_become_one_edge():
+    """Parallel faults merge at p1(1 - p2) + p2(1 - p1).
+
+    The convention of Stim's detector error models and of PyMatching's
+    model loader, and what a window restriction produces when distinct
+    circuit faults fold onto the same in-window endpoints. Two
+    parallel 0.05 columns between detectors 0 and 1 combine to 0.095
+    (weight 2.254) and beat the path through detector 2 at 0.2 per
+    edge (weight 2.773); the lighter column kept alone weighs 2.944,
+    so a row that did not merge them would take the path instead.
+    """
+    check = [[1, 1, 1, 0], [1, 1, 0, 1], [0, 0, 1, 1]]
+    priors = [0.05, 0.05, 0.2, 0.2]
+    faults = placed_faults(check, priors, [[1, 1, 0, 0]])
+    row = adapter.PyMatchingDecoder()
+    matching = row.compile(faults)
+    syndrome = numpy.asarray([1, 1, 0], dtype=numpy.uint8)
+    selected, weight = matching.decode(syndrome, return_weight=True)
+    selected_columns = selected.tolist()
+    parallel_count = selected_columns[0] + selected_columns[1]
+    assert parallel_count == 1
+    assert selected_columns[2] == 0
+    assert selected_columns[3] == 0
+    assert weight == pytest.approx(2.2540580520993854, abs=1e-6)

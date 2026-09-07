@@ -210,14 +210,14 @@ def test_codes_returns_a_fresh_list_without_mutating_the_layout():
 
 def test_the_hooks_take_the_planning_view_and_the_removed_aliases_stay_absent():
     """The operation hooks are annotated with the planning view the planner
-    passes; layouts imports no program_records.Operation; deleted aliases do not return."""
+    passes; layouts imports no Operation; deleted aliases do not return."""
     layout = UniformLayout(SurfaceCodeModel(distance=3))
 
     assert not hasattr(UniformLayout, "name")
     assert not hasattr(UniformLayout, "distance")
     assert not hasattr(layout, "name")
     assert not hasattr(layout, "distance")
-    assert not hasattr(layouts_module, "program_records.Operation")
+    assert not hasattr(layouts_module, "Operation")
     for method_name, parameter_name in (
         ("code_for_op", "operation"),
         ("spatial_nodes_for", "operation"),

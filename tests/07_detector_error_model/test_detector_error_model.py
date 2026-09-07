@@ -1250,7 +1250,7 @@ def test_a_detector_free_round_keeps_addresses_and_committed_coverage():
 
 
 def test_coordinates_for_rows_are_all_or_nothing():
-    """window_records.Window coordinates are returned only when every row has coordinates, otherwise nothing."""
+    """Window coordinates are returned only when every row has coordinates, otherwise nothing."""
     complete = {0: [0.0, 0.0], 1: [1.0, 2.0]}
     assert detector_chronology.coordinates_for_rows(complete, [0, 1]) == (
         (0.0, 0.0),
@@ -1927,7 +1927,7 @@ def test_slice_window_products_are_complete():
 
 
 def test_dependency_depths_and_cycle_rejection():
-    """window_records.Window depths follow the dependency edges, and negative indices or cycles are rejected."""
+    """Window depths follow the dependency edges, and negative indices or cycles are rejected."""
     assert window_ownership_dag.dependency_depths(3, ((0, 1), (1, 2))) == (
         0,
         1,

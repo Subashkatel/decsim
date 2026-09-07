@@ -4,8 +4,8 @@ A window is a range of an operation's rounds that one decode covers, so
 a request for it is a window key plus the tier that serves it and a
 run-wide ordinal; DecoderTier and DecoderRequestKey live here because a
 window records which request finally published its correction. The
-window itself is the window manager's live bookkeeping, and is the one
-record in the folder that is not frozen.
+window itself is the window manager's live bookkeeping, so it and the
+plan records that carry live state are the folder's unfrozen ones.
 """
 
 from dataclasses import dataclass, field

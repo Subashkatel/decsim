@@ -303,7 +303,7 @@ def test_a_declared_fragment_slot_is_stamped_on_the_one_payload():
     engine.run()
     payload, route = log.readouts[0]
     assert payload == round_records.QPUReadout(
-        1, 0, 1, n_fragments=3, fragment_index=1
+        1, 0, 1, fragment_count=3, fragment_index=1
     )
     assert route == round_records.WINDOW_INPUT_ROUTE
 
@@ -318,10 +318,10 @@ def test_undeclared_fragments_are_numbered_in_emission_order():
     first, _ = log.readouts[0]
     second, _ = log.readouts[1]
     assert first == round_records.QPUReadout(
-        1, 0, 1, n_fragments=2, fragment_index=0
+        1, 0, 1, fragment_count=2, fragment_index=0
     )
     assert second == round_records.QPUReadout(
-        1, 0, 1, n_fragments=2, fragment_index=1
+        1, 0, 1, fragment_count=2, fragment_index=1
     )
 
 

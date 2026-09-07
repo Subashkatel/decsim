@@ -57,7 +57,7 @@ class QPUReadout:
     round_index: int
     bits: Optional[Any] = None
     code: Optional[str] = None
-    n_fragments: int = 1
+    fragment_count: int = 1
     fragment_index: int = 0
     size_bits: Optional[int] = None
 

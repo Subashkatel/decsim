@@ -8,11 +8,7 @@ run.
 import numpy as np
 import pytest
 
-from decsim.decoders.decoders import PresetLatencyDecoder
-from decsim.decoders.minimum_weight_perfect_matching.decoder import (
-    PyMatchingDecoder,
-)
-from decsim.decoders.union_find.decoder import UnionFindDecoder
+import decsim.records.rounds as round_records
 from decsim.decoders.backend_outcome import (
     BackendDecodeOutcome,
     BackendFailureReason,
@@ -22,12 +18,17 @@ from decsim.decoders.decoder import (
     BackendDecodeStatus,
     result_from_selected_faults,
 )
+from decsim.decoders.decoders import PresetLatencyDecoder
+from decsim.decoders.minimum_weight_perfect_matching.decoder import (
+    PyMatchingDecoder,
+)
+from decsim.decoders.union_find.decoder import UnionFindDecoder
 from decsim.detector_error_model.fault_model_contracts import (
     FaultRepresentation,
     PlacedFaultModel,
     WindowErrorModel,
 )
-from decsim.message import DecodeJob, RetainedSyndromeFragment
+from decsim.message import DecodeJob
 
 
 def _window(check):
@@ -58,7 +59,7 @@ def _window(check):
 
 
 def _job(model, syndrome):
-    payload = RetainedSyndromeFragment(
+    payload = round_records.RetainedSyndromeFragment(
         operation_id=1,
         patch_id=0,
         round_index=1,

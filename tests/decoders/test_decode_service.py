@@ -17,6 +17,7 @@ import decsim.decoders.staged_decoder as staged_decoder
 import decsim.engine as engine_module
 import decsim.escalation.policies as escalation_policies
 import decsim.message as message
+import decsim.records.rounds as round_records
 from decsim.decoders.decoder_manager import DecoderManager
 
 
@@ -40,7 +41,7 @@ class _Gate:
 
 
 def _job(index, gate=None, deps_remaining=0):
-    payload = message.RetainedSyndromeFragment(
+    payload = round_records.RetainedSyndromeFragment(
         operation_id=1,
         patch_id="p",
         round_index=index,

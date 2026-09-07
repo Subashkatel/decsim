@@ -10,7 +10,7 @@ the run ledger (observe/run_views.py) is built from these rows, the
 controller's output events and the strong store's landings.
 """
 
-import decsim.message as message
+import decsim.records.rounds as round_records
 
 
 class RoundEventRecorder:
@@ -24,13 +24,13 @@ class RoundEventRecorder:
         self.stored_rounds: list = []
         self.packing_drops = 0
 
-    def record(self, event: message.RoundEvent) -> None:
+    def record(self, event: round_records.RoundEvent) -> None:
         """One transition of one round; a DROPPED one is counted."""
         self.events.append(event)
         if event.kind == "DROPPED":
             self.packing_drops += 1
 
-    def output(self, event: message.ControllerOutputEvent) -> None:
+    def output(self, event: round_records.ControllerOutputEvent) -> None:
         """One transition on the controller's digital-to-QPU path."""
         self.output_events.append(event)
 

@@ -21,15 +21,15 @@ import decsim.config as config
 import decsim.controller.round_assembly as round_assembly
 import decsim.controller.settings as controller_settings
 import decsim.engine as engine_module
-import decsim.message as message
 import decsim.observe.round_events as round_events
+import decsim.records.rounds as round_records
 
 PACKING_TICKS = config.microseconds_to_ticks(1.0)
 DROP = controller_settings.PackingOverflowPolicy.DROP_ROUND
 
 
 def fragment(round_index, fragment_index=0, bits=(1, 0)):
-    return message.RetainedSyndromeFragment(
+    return round_records.RetainedSyndromeFragment(
         operation_id=1,
         patch_id=0,
         round_index=round_index,
@@ -71,10 +71,10 @@ def test_a_two_fragment_round_is_packed_once_after_the_packing_time():
     first = fragment(1, fragment_index=0, bits=(1, 0))
     second = fragment(1, fragment_index=1, bits=(1, 1))
     add_first = functools.partial(
-        assembler.add, first, 2, message.WINDOW_INPUT_ROUTE
+        assembler.add, first, 2, round_records.WINDOW_INPUT_ROUTE
     )
     add_second = functools.partial(
-        assembler.add, second, 2, message.WINDOW_INPUT_ROUTE
+        assembler.add, second, 2, round_records.WINDOW_INPUT_ROUTE
     )
     engine.schedule(0, add_first)
     engine.schedule(5, add_second)
@@ -86,7 +86,7 @@ def test_a_two_fragment_round_is_packed_once_after_the_packing_time():
     assert merged.bits == (1, 0, 1, 1)
     assert merged.size_bits == 4
     assert round.wire_bits == 4
-    assert round.route is message.WINDOW_INPUT_ROUTE
+    assert round.route is round_records.WINDOW_INPUT_ROUTE
     packed_events = [
         event for event in recorder.events if event.kind == "PACKED"
     ]
@@ -101,16 +101,16 @@ def test_a_full_workspace_stops_the_run_naming_the_setting():
         engine, packed, recorder, packing_rounds_in_flight=1
     )
     first = fragment(1, fragment_index=0)
-    assembler.add(first, 2, message.WINDOW_INPUT_ROUTE)
+    assembler.add(first, 2, round_records.WINDOW_INPUT_ROUTE)
 
     second_round = fragment(2)
     with pytest.raises(
         RuntimeError, match="controller.packing_rounds_in_flight is 1"
     ):
-        assembler.add(second_round, 1, message.WINDOW_INPUT_ROUTE)
+        assembler.add(second_round, 1, round_records.WINDOW_INPUT_ROUTE)
 
     last = fragment(1, fragment_index=1)
-    assembler.add(last, 2, message.WINDOW_INPUT_ROUTE)
+    assembler.add(last, 2, round_records.WINDOW_INPUT_ROUTE)
     assert len(packed) == 1
 
 
@@ -134,12 +134,12 @@ def test_the_bound_counts_rounds_held_and_on_their_route():
     first = fragment(1)
 
     with pytest.raises(RuntimeError, match="held for store room: 1, on"):
-        assembler.add(first, 1, message.WINDOW_INPUT_ROUTE)
+        assembler.add(first, 1, round_records.WINDOW_INPUT_ROUTE)
     assert full.count(0) == 2
 
     room_for_one = rounds_in_flight(3, held=1, on_route=1)
     assembler.workspace.rounds_in_flight = room_for_one
-    assembler.add(first, 1, message.WINDOW_INPUT_ROUTE)
+    assembler.add(first, 1, round_records.WINDOW_INPUT_ROUTE)
     assert [round.packet.round_index for round in packed] == [1]
 
 
@@ -155,11 +155,11 @@ def test_the_drop_knob_drops_only_the_round_that_found_no_context():
         packing_overflow=DROP,
     )
     first = fragment(1, fragment_index=0)
-    assembler.add(first, 2, message.WINDOW_INPUT_ROUTE)
+    assembler.add(first, 2, round_records.WINDOW_INPUT_ROUTE)
     second_round = fragment(2)
-    assembler.add(second_round, 1, message.WINDOW_INPUT_ROUTE)
+    assembler.add(second_round, 1, round_records.WINDOW_INPUT_ROUTE)
     last = fragment(1, fragment_index=1)
-    assembler.add(last, 2, message.WINDOW_INPUT_ROUTE)
+    assembler.add(last, 2, round_records.WINDOW_INPUT_ROUTE)
 
     assert recorder.packing_drops == 1
     dropped = [
@@ -192,8 +192,8 @@ def test_detection_events_are_formed_once_from_the_merged_bits():
     first = fragment(1, fragment_index=0, bits=(1, 0))
     second = fragment(1, fragment_index=1, bits=(0, 1))
 
-    assembler.add(first, 2, message.WINDOW_INPUT_ROUTE)
-    assembler.add(second, 2, message.WINDOW_INPUT_ROUTE)
+    assembler.add(first, 2, round_records.WINDOW_INPUT_ROUTE)
+    assembler.add(second, 2, round_records.WINDOW_INPUT_ROUTE)
 
     assert formed_from == [(1, 1, (1, 0, 0, 1))]
     (round,) = packed
@@ -208,7 +208,7 @@ def test_settlement_reports_a_round_still_in_assembly():
     recorder = None
     assembler = assembler_with(engine, [], recorder)
     first = fragment(1, fragment_index=0)
-    assembler.add(first, 2, message.WINDOW_INPUT_ROUTE)
+    assembler.add(first, 2, round_records.WINDOW_INPUT_ROUTE)
 
     with pytest.raises(RuntimeError, match="incomplete syndrome packing"):
         assembler.check_settled()

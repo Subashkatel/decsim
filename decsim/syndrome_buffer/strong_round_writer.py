@@ -13,6 +13,7 @@ from typing import Callable, Optional
 
 import decsim.message as message
 import decsim.observe.trace_source as trace_source
+import decsim.records.rounds as round_records
 import decsim.syndrome_buffer.round_store as round_store_module
 
 
@@ -49,7 +50,7 @@ class StrongRoundWriter:
 
     def write(
         self,
-        packet: message.SyndromeRoundPacket,
+        packet: round_records.SyndromeRoundPacket,
         *,
         packet_bits: Optional[int],
         attribution: message.TransferAttribution,
@@ -77,7 +78,9 @@ class StrongRoundWriter:
         )
 
     def _land(
-        self, packet: message.SyndromeRoundPacket, packet_bits: Optional[int]
+        self,
+        packet: round_records.SyndromeRoundPacket,
+        packet_bits: Optional[int],
     ) -> None:
         self.store.accept_packed_round(packet, publication_tick=self.engine.now)
         round_key = (packet.operation_id, packet.round_index)
@@ -93,7 +96,7 @@ class StrongRoundWriter:
         if self.on_round_stored is not None:
             self.on_round_stored(packet.operation_id, packet.round_index)
 
-    def _received_text(self, packet: message.SyndromeRoundPacket) -> str:
+    def _received_text(self, packet: round_records.SyndromeRoundPacket) -> str:
         defects = packet.defects_text()
         holds = self.store.held_rounds_description()
         return (

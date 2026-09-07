@@ -23,6 +23,7 @@ from typing import Optional
 
 import decsim.config as config
 import decsim.message as message
+import decsim.records.rounds as round_records
 
 # The threads in the order the pipeline uses them, so a viewer's lanes
 # read top to bottom as the data flows. A thread the run never uses gets
@@ -145,7 +146,7 @@ class TraceWriter:
 
     # ---- the QPU and the controller
 
-    def round_emitted(self, readout: message.QPUReadout) -> None:
+    def round_emitted(self, readout: round_records.QPUReadout) -> None:
         """One readout leaves the QPU."""
         round_key = (readout.operation_id, readout.round_index)
         args = {"round": round_text(round_key), "bits": readout.size_bits}

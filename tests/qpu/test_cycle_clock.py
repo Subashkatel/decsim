@@ -18,6 +18,7 @@ import decsim.observe.log_writers as log_writers
 import decsim.qpu.code_geometry as code_geometry
 import decsim.qpu.cycle_clock as cycle_clock
 import decsim.qpu.syndrome_devices as syndrome_devices
+import decsim.records.rounds as round_records
 
 
 class ReadoutLog:
@@ -46,7 +47,7 @@ class FinalizingSource(syndrome_devices.TimingOnlyDevice):
     """A timing-only source whose stream finalizer emits one payload."""
 
     def finalize_stream_round(self, operation, source_round_count):
-        readout = message.QPUReadout(
+        readout = round_records.QPUReadout(
             operation.stream_id, 0, source_round_count, bits=(1, 0, 1)
         )
         return [readout]
@@ -73,7 +74,7 @@ class SplitSource(syndrome_devices.TimingOnlyDevice):
         self.payload_count = payload_count
 
     def round_payloads(self, operation, round_index):
-        payload = message.QPUReadout(operation.id, 0, round_index)
+        payload = round_records.QPUReadout(operation.id, 0, round_index)
         return [payload] * self.payload_count
 
 
@@ -273,8 +274,8 @@ def test_a_zero_round_finalizer_delivers_the_final_readout_and_completes():
     engine.schedule(5, qpu.finish)
     engine.run()
     payload, route = log.readouts[0]
-    assert payload == message.QPUReadout("s", 0, 3, bits=(1, 0, 1))
-    assert route == message.WINDOW_INPUT_ROUTE
+    assert payload == round_records.QPUReadout("s", 0, 3, bits=(1, 0, 1))
+    assert route == round_records.WINDOW_INPUT_ROUTE
     assert log.completion_ticks == [(0, 2)]
     assert log.round_ticks == [(0, 3)]
 
@@ -288,10 +289,10 @@ def test_a_declared_fragment_slot_is_stamped_on_the_one_payload():
     engine.schedule(10, qpu.finish)
     engine.run()
     payload, route = log.readouts[0]
-    assert payload == message.QPUReadout(
+    assert payload == round_records.QPUReadout(
         1, 0, 1, n_fragments=3, fragment_index=1
     )
-    assert route == message.WINDOW_INPUT_ROUTE
+    assert route == round_records.WINDOW_INPUT_ROUTE
 
 
 def test_undeclared_fragments_are_numbered_in_emission_order():
@@ -303,8 +304,10 @@ def test_undeclared_fragments_are_numbered_in_emission_order():
     engine.run()
     first, _ = log.readouts[0]
     second, _ = log.readouts[1]
-    assert first == message.QPUReadout(1, 0, 1, n_fragments=2, fragment_index=0)
-    assert second == message.QPUReadout(
+    assert first == round_records.QPUReadout(
+        1, 0, 1, n_fragments=2, fragment_index=0
+    )
+    assert second == round_records.QPUReadout(
         1, 0, 1, n_fragments=2, fragment_index=1
     )
 
@@ -350,7 +353,7 @@ def test_an_idle_stream_round_carries_the_sources_bits_to_the_windows():
     )
     qpu.emit_idle_stream_round(operation, "s", 4, 0)
     payload, route = log.readouts[0]
-    assert payload == message.QPUReadout(
+    assert payload == round_records.QPUReadout(
         "s",
         0,
         4,
@@ -358,15 +361,15 @@ def test_an_idle_stream_round_carries_the_sources_bits_to_the_windows():
         code="rotated surface code (d=3)",
         size_bits=8,
     )
-    assert route == message.WINDOW_INPUT_ROUTE
+    assert route == round_records.WINDOW_INPUT_ROUTE
 
 
 def test_a_feedback_memory_round_is_routed_to_its_source_operation():
     engine, qpu, log = clocked_qpu(10)
     qpu.emit_feedback_memory_round(7, "A", 4)
     payload, route = log.readouts[0]
-    assert payload == message.QPUReadout(("idle", 7, "A"), "A", 4)
-    assert route == message.SyndromePacketRoute.feedback_memory_round(7)
+    assert payload == round_records.QPUReadout(("idle", 7, "A"), "A", 4)
+    assert route == round_records.SyndromePacketRoute.feedback_memory_round(7)
 
 
 def test_a_command_with_another_cadence_is_refused():

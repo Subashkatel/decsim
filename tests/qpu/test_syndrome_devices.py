@@ -10,6 +10,7 @@ import pytest
 import decsim.message as message
 import decsim.qpu.code_geometry as code_geometry
 import decsim.qpu.syndrome_devices as syndrome_devices
+import decsim.records.rounds as round_records
 
 
 def first_payload(device, operation, round_index):
@@ -23,7 +24,7 @@ def test_a_timing_only_round_carries_no_bits_and_names_its_patch():
         id=4, name="memory", qubits=(2,), patches=(7,)
     )
     payload = first_payload(device, operation, 3)
-    assert payload == message.QPUReadout(4, 7, 3)
+    assert payload == round_records.QPUReadout(4, 7, 3)
 
 
 def test_a_stream_segment_reports_its_stream_and_global_round():
@@ -32,7 +33,7 @@ def test_a_stream_segment_reports_its_stream_and_global_round():
         id=4, name="tail", qubits=(2,), stream_id="s", stream_offset=6
     )
     payload = first_payload(device, operation, 2)
-    assert payload == message.QPUReadout("s", 2, 8)
+    assert payload == round_records.QPUReadout("s", 2, 8)
 
 
 def test_fake_bits_are_as_wide_as_the_syndrome():

@@ -7,6 +7,7 @@ from dataclasses import FrozenInstanceError, dataclass, fields
 import pytest
 
 import decsim.decoders.decoder_memory as decoder_memory
+import decsim.records.rounds as round_records
 from decsim.decoders.decoder_memory import (
     DecoderInput,
     DecoderMemory,
@@ -30,7 +31,7 @@ from decsim.detector_error_model.window_model_builders import (
 )
 from decsim.frontends.settings import WorkloadSettings
 from decsim.machine import Machine, MachineSettings
-from decsim.message import DecodeJob, Operation, RetainedSyndromeFragment
+from decsim.message import DecodeJob, Operation
 from decsim.qpu.round_policies import FixedRounds
 from decsim.qpu.settings import QpuSettings
 from decsim.qpu.stim_device import StimDevice
@@ -76,8 +77,8 @@ def make_fragment(
     *,
     patch_id: object | None = None,
     bits: tuple[int, ...] | None = (0, 1),
-) -> RetainedSyndromeFragment:
-    return RetainedSyndromeFragment(
+) -> round_records.RetainedSyndromeFragment:
+    return round_records.RetainedSyndromeFragment(
         operation_id=operation_id,
         patch_id=patch_id
         if patch_id is not None

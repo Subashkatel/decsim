@@ -24,7 +24,7 @@ import pytest
 import decsim.controller.round_writes as round_writes
 import decsim.controller.settings as controller_settings
 import decsim.engine as engine_module
-import decsim.message as message
+import decsim.records.rounds as round_records
 import decsim.syndrome_buffer.round_store as round_store_module
 import decsim.syndrome_buffer.settings as round_store_settings
 
@@ -35,8 +35,10 @@ CIW_SOURCE = pathlib.Path(
 )
 
 
-def packet(round_index: int, operation_id=1) -> message.SyndromeRoundPacket:
-    fragment = message.RetainedSyndromeFragment(
+def packet(
+    round_index: int, operation_id=1
+) -> round_records.SyndromeRoundPacket:
+    fragment = round_records.RetainedSyndromeFragment(
         operation_id=operation_id,
         patch_id=0,
         round_index=round_index,
@@ -44,12 +46,16 @@ def packet(round_index: int, operation_id=1) -> message.SyndromeRoundPacket:
         size_bits=2,
         fragment_index=0,
     )
-    return message.SyndromeRoundPacket(operation_id, round_index, (fragment,))
+    return round_records.SyndromeRoundPacket(
+        operation_id, round_index, (fragment,)
+    )
 
 
-def packed(round_index: int) -> message.PackedRound:
+def packed(round_index: int) -> round_records.PackedRound:
     stored = packet(round_index)
-    return message.PackedRound(stored, message.WINDOW_INPUT_ROUTE, 2)
+    return round_records.PackedRound(
+        stored, round_records.WINDOW_INPUT_ROUTE, 2
+    )
 
 
 def held_rounds() -> round_writes.HeldRounds:
@@ -103,7 +109,7 @@ def run_trace(arrivals, holds, capacity):
     the_store = store(rounds=capacity, on_slot_freed=held.retry)
     enters = {}
 
-    def admit(round: message.PackedRound) -> bool:
+    def admit(round: round_records.PackedRound) -> bool:
         if not the_store.has_room():
             return False
         the_store.accept_packed_round(round.packet, publication_tick=engine.now)
@@ -191,7 +197,7 @@ def test_a_held_round_enters_when_a_slot_frees_in_completion_order():
     the_store = store(rounds=1, on_slot_freed=held.retry)
     entered = []
 
-    def admit(round: message.PackedRound) -> bool:
+    def admit(round: round_records.PackedRound) -> bool:
         if not the_store.has_room():
             return False
         the_store.accept_packed_round(round.packet, publication_tick=0)

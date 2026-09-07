@@ -17,6 +17,7 @@ import decsim.engine as engine_module
 import decsim.escalation.policies as escalation_policies
 import decsim.message as message
 import decsim.observe.log_writers as log_writers
+import decsim.records.rounds as round_records
 from decsim.decoders.decoder_manager import DecoderManager
 
 
@@ -47,7 +48,7 @@ def _manager(engine, row):
 
 
 def _window_job():
-    payload = message.RetainedSyndromeFragment(
+    payload = round_records.RetainedSyndromeFragment(
         operation_id=1,
         patch_id="p",
         round_index=1,

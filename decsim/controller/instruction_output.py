@@ -15,6 +15,7 @@ from typing import Callable
 
 import decsim.message as message
 import decsim.observe.trace_source as trace_source
+import decsim.records.rounds as round_records
 
 
 class InstructionOutput:
@@ -149,7 +150,7 @@ class InstructionOutput:
         )
 
     def _fire(self, kind: str, operation_id, payload) -> None:
-        event = message.ControllerOutputEvent(
+        event = round_records.ControllerOutputEvent(
             kind, self.engine.now, operation_id, payload
         )
         self.output_event.fire(event)

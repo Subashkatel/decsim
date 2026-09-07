@@ -5,6 +5,7 @@ import stim
 
 import decsim.detector_error_model.window_model_builders as builders
 import decsim.message as message
+import decsim.records.rounds as round_records
 
 
 def memory_circuit(distance: int, rounds: int, p: float) -> stim.Circuit:
@@ -40,7 +41,7 @@ def job_for(model, shot, window_id: int = 0) -> message.DecodeJob:
     """A decode job carrying one shot's detection events in row order."""
     syndrome = row_syndrome(model, shot)
     bits = bit_tuple(syndrome)
-    payload = message.RetainedSyndromeFragment(
+    payload = round_records.RetainedSyndromeFragment(
         operation_id=1,
         patch_id=0,
         round_index=1,

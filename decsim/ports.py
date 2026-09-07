@@ -24,6 +24,7 @@ fires, never through a port, so every component runs with no observer.
 from typing import Any, Callable, Optional, Protocol, runtime_checkable
 
 import decsim.message as message
+import decsim.records.rounds as round_records
 
 # ------------------------------------------------ the QPU emits a readout
 
@@ -33,7 +34,9 @@ class ReadoutReceiver(Protocol):
     """The controller, as the QPU sees it: it takes every readout."""
 
     def accept_qpu_readout(
-        self, readout: message.QPUReadout, route: message.SyndromePacketRoute
+        self,
+        readout: round_records.QPUReadout,
+        route: round_records.SyndromePacketRoute,
     ) -> None:
         """Take one readout on its route (window input or feedback memory)."""
 
@@ -56,7 +59,7 @@ class RoundStore(Protocol):
 
     def accept_packed_round(
         self,
-        packet: message.SyndromeRoundPacket,
+        packet: round_records.SyndromeRoundPacket,
         *,
         publication_tick: Optional[int],
     ) -> None:
@@ -78,7 +81,7 @@ class StrongRoundStore(Protocol):
 
     def write(
         self,
-        packet: message.SyndromeRoundPacket,
+        packet: round_records.SyndromeRoundPacket,
         *,
         packet_bits: Optional[int],
         attribution: message.TransferAttribution,
@@ -93,7 +96,9 @@ class StrongRoundStore(Protocol):
 class WindowInput(Protocol):
     """The window manager, as syndrome packing sees it."""
 
-    def accept_window_input(self, packet: message.SyndromeRoundPacket) -> None:
+    def accept_window_input(
+        self, packet: round_records.SyndromeRoundPacket
+    ) -> None:
         """Publish one stored round to window readiness; never refused."""
 
 
@@ -310,12 +315,12 @@ class SyndromeSource(Protocol):
 
     def round_payloads(
         self, operation: message.Operation, round_index: int
-    ) -> list[message.QPUReadout]:
+    ) -> list[round_records.QPUReadout]:
         """The readouts of one round, one per patch or fragment."""
 
     def finalize_stream_round(
         self, operation: message.Operation, source_round_count: int
-    ) -> list[message.QPUReadout]:
+    ) -> list[round_records.QPUReadout]:
         """The stream's final data readout, as its own fragment."""
 
     def idle_round_payloads(
@@ -324,7 +329,7 @@ class SyndromeSource(Protocol):
         stream_id: Any,
         global_round: int,
         patch: Any,
-    ) -> list[message.QPUReadout]:
+    ) -> list[round_records.QPUReadout]:
         """The readouts of one idle round on a patch of a live stream."""
 
 

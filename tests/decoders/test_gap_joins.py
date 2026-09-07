@@ -8,6 +8,7 @@ import decsim.decoders.decoder_memory as decoder_memory
 import decsim.decoders.gap_joins as gap_joins_module
 import decsim.engine as engine_module
 import decsim.message as message
+import decsim.records.rounds as round_records
 
 
 class _Enqueued:
@@ -23,7 +24,7 @@ class _Enqueued:
 
 
 def _primary():
-    fragment = message.RetainedSyndromeFragment(
+    fragment = round_records.RetainedSyndromeFragment(
         operation_id=1,
         patch_id="p",
         round_index=1,

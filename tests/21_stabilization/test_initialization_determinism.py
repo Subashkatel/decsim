@@ -6,12 +6,9 @@ The initialization contract these tests pin is
 
 import pytest
 
+import decsim.records.rounds as round_records
 from decsim.config import microseconds_to_ticks
-from decsim.message import (
-    Operation,
-    RetainedSyndromeFragment,
-    SyndromeRoundPacket,
-)
+from decsim.message import Operation
 
 
 def test_execution_and_decoding_views_agree(fabric):
@@ -45,7 +42,7 @@ def test_registration_is_idempotent(fabric):
 def test_round_after_operation_close_fails(fabric):
     """A round arriving after the operation's syndrome RAM was freed refuses."""
     completed = fabric["weak_only_run"](rounds=6)
-    fragment = RetainedSyndromeFragment(
+    fragment = round_records.RetainedSyndromeFragment(
         operation_id=1,
         patch_id=1,
         round_index=2,
@@ -53,7 +50,7 @@ def test_round_after_operation_close_fails(fabric):
         size_bits=None,
         fragment_index=0,
     )
-    packet = SyndromeRoundPacket(1, 2, (fragment,))
+    packet = round_records.SyndromeRoundPacket(1, 2, (fragment,))
 
     with pytest.raises(
         RuntimeError, match="arrived after the op's last window committed"

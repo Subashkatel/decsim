@@ -40,7 +40,7 @@ def test_a_stale_delivery_is_ignored_and_the_edge_releases_once():
         commit_lo=1,
         commit_hi=3,
         buffer_hi=5,
-        n_rounds=5,
+        round_count=5,
         dependents=[(1, 1)],
     )
     dependent = window_records.Window(
@@ -49,7 +49,7 @@ def test_a_stale_delivery_is_ignored_and_the_edge_releases_once():
         commit_lo=4,
         commit_hi=6,
         buffer_hi=8,
-        n_rounds=8,
+        round_count=8,
         deps=[(1, 0)],
         deps_remaining=1,
     )

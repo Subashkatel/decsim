@@ -36,7 +36,7 @@ def _window(index, deps_remaining):
         commit_lo=1,
         commit_hi=1,
         buffer_hi=1,
-        n_rounds=1,
+        round_count=1,
         deps_remaining=deps_remaining,
     )
 
@@ -57,7 +57,7 @@ def _job(index, label, deps_remaining, gate=None):
     return decoding_records.DecodeJob(
         operation_id=1,
         window_id=index,
-        n_rounds=1,
+        round_count=1,
         payloads=[payload],
         label=label,
         request_key=request_key,

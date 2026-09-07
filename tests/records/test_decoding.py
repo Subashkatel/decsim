@@ -47,7 +47,7 @@ def test_a_jobs_payload_bits_add_up():
     job = decoding_records.DecodeJob(
         operation_id=1,
         window_id=0,
-        n_rounds=2,
+        round_count=2,
         payloads=payloads,
     )
     assert job.payload_bits() == 300
@@ -59,7 +59,7 @@ def test_one_payload_of_unknown_size_leaves_the_job_size_unknown():
     job = decoding_records.DecodeJob(
         operation_id=1,
         window_id=0,
-        n_rounds=2,
+        round_count=2,
         payloads=payloads,
     )
     assert job.payload_bits() is None
@@ -67,7 +67,7 @@ def test_one_payload_of_unknown_size_leaves_the_job_size_unknown():
 
 def test_a_job_with_no_payloads_carries_no_bits():
     """An empty job is zero bits, not an unknown size."""
-    job = decoding_records.DecodeJob(operation_id=1, window_id=0, n_rounds=0)
+    job = decoding_records.DecodeJob(operation_id=1, window_id=0, round_count=0)
     assert job.payload_bits() == 0
 
 

@@ -144,7 +144,7 @@ class DecodeJob:
     window_id: int  # window index within that op
     # rounds the decoder processes: the distinct rounds landed in its
     # input, plus batched idle rounds
-    n_rounds: int
+    round_count: int
     dem: Optional[Any] = (
         None  # window detector error model (data-path decoders)
     )

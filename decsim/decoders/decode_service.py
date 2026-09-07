@@ -608,7 +608,7 @@ def _landed_description(
 def _receiving_text(member: decoding_records.DecodeJob) -> str:
     return (
         f"receiving {member.label} input "
-        f"({member.n_rounds} rounds from the round store)"
+        f"({member.round_count} rounds from the round store)"
     )
 
 

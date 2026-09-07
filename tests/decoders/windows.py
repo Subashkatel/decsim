@@ -52,7 +52,7 @@ def job_for(model, shot, window_id: int = 0) -> decoding_records.DecodeJob:
     return decoding_records.DecodeJob(
         operation_id=1,
         window_id=window_id,
-        n_rounds=1,
+        round_count=1,
         dem=model,
         payloads=[payload],
         label=f"W{window_id}",

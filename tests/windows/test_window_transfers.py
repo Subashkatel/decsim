@@ -37,7 +37,7 @@ def test_a_window_send_carries_its_round_range_and_request_key():
         commit_lo=9,
         commit_hi=11,
         buffer_hi=13,
-        n_rounds=7,
+        round_count=7,
         buffer_lo=7,
     )
     request_key = window_records.DecoderRequestKey(
@@ -68,7 +68,12 @@ def test_a_job_send_returns_the_delay_the_link_expects():
     link = _RecordingLink()
     transfers = window_transfers.WindowTransfers(engine, link)
     window = window_records.Window(
-        operation_id=1, k=0, commit_lo=1, commit_hi=3, buffer_hi=5, n_rounds=5
+        operation_id=1,
+        k=0,
+        commit_lo=1,
+        commit_hi=3,
+        buffer_hi=5,
+        round_count=5,
     )
     request_key = window_records.DecoderRequestKey(
         1, 0, window_records.DecoderTier.WEAK, 0
@@ -76,7 +81,7 @@ def test_a_job_send_returns_the_delay_the_link_expects():
     job = decoding_records.DecodeJob(
         operation_id=1,
         window_id=0,
-        n_rounds=5,
+        round_count=5,
         window=window,
         request_key=request_key,
     )

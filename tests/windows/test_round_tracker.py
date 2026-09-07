@@ -45,7 +45,7 @@ def _window(
         commit_lo=commit_lo,
         commit_hi=commit_hi,
         buffer_hi=buffer_hi,
-        n_rounds=round_count,
+        round_count=round_count,
     )
 
 

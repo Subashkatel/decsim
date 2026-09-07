@@ -34,7 +34,7 @@ class ShortestJobFirst:
 
 
 def _round_count(job):
-    return job.n_rounds
+    return job.round_count
 
 
 def _manager(engine, units, scheduler=None):

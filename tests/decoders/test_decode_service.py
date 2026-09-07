@@ -66,13 +66,13 @@ def _job(index, gate=None, deps_remaining=0):
         commit_lo=1,
         commit_hi=1,
         buffer_hi=1,
-        n_rounds=1,
+        round_count=1,
         deps_remaining=deps_remaining,
     )
     return decoding_records.DecodeJob(
         operation_id=1,
         window_id=index,
-        n_rounds=1,
+        round_count=1,
         payloads=[payload],
         label=f"w{index}",
         request_key=request_key,

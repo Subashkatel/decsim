@@ -90,7 +90,7 @@ class _Fixture:
             commit_lo=4,
             commit_hi=6,
             buffer_hi=8,
-            n_rounds=5,
+            round_count=5,
         )
         operation = program_records.Operation(4, "logical", (0,), patches=(0,))
         planner = types.SimpleNamespace(windows_by_key={(4, 1): self.window})
@@ -123,7 +123,7 @@ class _Fixture:
     def job(self, tier, sequence, awaiting=False) -> decoding_records.DecodeJob:
         request_key = window_records.DecoderRequestKey(4, 1, tier, sequence)
         job = decoding_records.DecodeJob(
-            operation_id=4, window_id=1, n_rounds=5, request_key=request_key
+            operation_id=4, window_id=1, round_count=5, request_key=request_key
         )
         job.awaiting_strong_result = awaiting
         return job

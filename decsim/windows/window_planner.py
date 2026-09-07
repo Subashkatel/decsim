@@ -348,7 +348,7 @@ class WindowPlanner:
             if window.commit_lo <= stream_round_count <= window.commit_hi:
                 window.commit_hi = stream_round_count
                 window.buffer_hi = stream_round_count + growth.buffer_rounds
-                window.n_rounds = window.buffer_hi - window.start_round + 1
+                window.round_count = window.buffer_hi - window.start_round + 1
                 return window
         return None
 
@@ -384,7 +384,7 @@ class WindowPlanner:
             commit_lo=geometry.commit_lo,
             commit_hi=geometry.commit_hi,
             buffer_hi=geometry.buffer_hi,
-            n_rounds=round_count,
+            round_count=round_count,
             buffer_lo=buffer_lo,
         )
         self.plan.windows[window.key] = window

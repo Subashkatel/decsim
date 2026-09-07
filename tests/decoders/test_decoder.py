@@ -65,7 +65,7 @@ class EmptyWindowRow(decoder_module.WindowDecoderBase):
 
 def _job(**fields) -> decoding_records.DecodeJob:
     return decoding_records.DecodeJob(
-        operation_id=1, window_id=0, n_rounds=2, label="W0", **fields
+        operation_id=1, window_id=0, round_count=2, label="W0", **fields
     )
 
 

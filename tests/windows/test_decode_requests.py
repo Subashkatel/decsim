@@ -82,7 +82,7 @@ class _Fixture:
             commit_lo=1,
             commit_hi=3,
             buffer_hi=5,
-            n_rounds=5,
+            round_count=5,
         )
         settings = round_store_settings.RoundStoreSettings()
         self.store = round_store_module.RoundStore(settings)

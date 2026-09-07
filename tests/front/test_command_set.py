@@ -499,6 +499,32 @@ def test_a_shard_outside_its_count_is_refused(tmp_path, capsys):
     assert not out_dir.exists()
 
 
+@pytest.mark.parametrize("given", ["0", "-1"])
+def test_a_unit_size_below_one_is_refused(tmp_path, capsys, given):
+    """Zero steps `range` by nothing; -1 would run no unit at all."""
+    config_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)
+    out_dir = tmp_path / "out"
+    with pytest.raises(SystemExit) as stopped:
+        command.main(
+            [
+                "collect",
+                str(config_path),
+                "--out",
+                str(out_dir),
+                "--shots-per-unit",
+                given,
+            ]
+        )
+
+    printed = capsys.readouterr()
+    assert stopped.value.code == 1
+    assert printed.err.count("\n") == 1
+    assert printed.err.startswith(
+        f"decsim: --shots-per-unit {given} is not a unit size"
+    )
+    assert not out_dir.exists()
+
+
 def test_combining_two_folders_that_hold_the_same_shot_is_refused(
     tmp_path, capsys
 ):

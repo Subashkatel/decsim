@@ -95,18 +95,18 @@ def _collect(argv: list) -> None:
     )
     parser.add_argument(
         "--shots-per-unit",
-        type=int,
         default=None,
         help="split a point's seeds into work units of this many",
     )
     parsed = parser.parse_args(argv)
     shard = _shard_of(parsed.shard)
+    shots_per_unit = _shots_per_unit_of(parsed.shots_per_unit)
     run_dir, rows = collect_command.run_experiment(
         parsed.config,
         parsed.out,
         processes=parsed.processes,
         shard=shard,
-        shots_per_unit=parsed.shots_per_unit,
+        shots_per_unit=shots_per_unit,
     )
     if not rows:
         return
@@ -202,6 +202,33 @@ def _shard_of(text: Optional[str]) -> Optional[tuple]:
     if not 0 <= index < count:
         _refuse_the_shard(text)
     return (index, count)
+
+
+def _shots_per_unit_of(text: Optional[str]) -> Optional[int]:
+    """The --shots-per-unit argument as a count; None when not given.
+
+    The count is checked here, where it is read, as the shard is: zero
+    would step `range` by nothing and a negative number would step it
+    backwards, so every task would lose every unit and the run would
+    write a manifest and no rows.
+    """
+    if text is None:
+        return None
+    if not text.isdigit():
+        _refuse_the_shots_per_unit(text)
+    count = int(text)
+    if count < 1:
+        _refuse_the_shots_per_unit(text)
+    return count
+
+
+def _refuse_the_shots_per_unit(text: str) -> None:
+    """What a unit size is, in the sentence the user reads."""
+    raise refusal.RefusalError(
+        f"--shots-per-unit {text} is not a unit size; write a whole number "
+        "of at least 1, so --shots-per-unit 50000 cuts a point of 200,000 "
+        "shots into four units"
+    )
 
 
 def _shard_number(word: str, text: str) -> int:

@@ -53,7 +53,7 @@ def _primary():
         operation_id=1,
         window_id=0,
         round_count=1,
-        dem=model,
+        detector_error_model=model,
         decoder_input=decoder_input,
         label="mem W0",
         window=window,

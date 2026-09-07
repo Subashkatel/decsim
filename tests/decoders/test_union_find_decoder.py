@@ -92,7 +92,7 @@ def _job(model, syndrome) -> decoding_records.DecodeJob:
         operation_id=1,
         window_id=0,
         round_count=1,
-        dem=model,
+        detector_error_model=model,
         payloads=[payload],
         label="W0",
     )

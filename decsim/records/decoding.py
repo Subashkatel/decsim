@@ -145,7 +145,7 @@ class DecodeJob:
     # rounds the decoder processes: the distinct rounds landed in its
     # input, plus batched idle rounds
     round_count: int
-    dem: Optional[Any] = (
+    detector_error_model: Optional[Any] = (
         None  # window detector error model (data-path decoders)
     )
     payloads: list = field(

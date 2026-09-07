@@ -110,7 +110,7 @@ class SoftOutputDecoder(decoder_module.DecoderBase):
 
     def decode_timed(self, job: decoding_records.DecodeJob) -> tuple:
         """The base's measured call plus the timed soft-output evaluation."""
-        metric = self._metric_for(job.dem)
+        metric = self._metric_for(job.detector_error_model)
         result, base_nanoseconds = self.base.decode_timed(job)
         started = time.perf_counter_ns()
         if metric is not None:
@@ -163,7 +163,7 @@ class ParallelGapDecoder(SoftOutputDecoder):
     def decode_timed(self, job: decoding_records.DecodeJob) -> tuple:
         """The base decode for the payload; the pair for the gap and time."""
         result, base_nanoseconds = self.base.decode_timed(job)
-        metric = self._metric_for(job.dem)
+        metric = self._metric_for(job.detector_error_model)
         if metric is None:
             return result, base_nanoseconds
         syndrome = decoder_module.payload_syndrome(job)
@@ -192,7 +192,7 @@ class SplitGapDecoder(SoftOutputDecoder):
     def decode_timed(self, job: decoding_records.DecodeJob) -> tuple:
         """The base decode for the payload; this half's solve for the time."""
         result, base_nanoseconds = self.base.decode_timed(job)
-        metric = self._metric_for(job.dem)
+        metric = self._metric_for(job.detector_error_model)
         if metric is None:
             return result, base_nanoseconds
         syndrome = decoder_module.payload_syndrome(job)
@@ -246,7 +246,9 @@ class GapHalfDecoder(decoder_module.DecoderBase):
         """The forced solve and its wall clock; nothing without a metric."""
         result = decoding_records.DecodeResult(job.operation_id, job.window_id)
         metric = cached_metric_for_model(
-            self._metrics_by_model_identity, self.signal, job.dem
+            self._metrics_by_model_identity,
+            self.signal,
+            job.detector_error_model,
         )
         if metric is None:
             return result, 0

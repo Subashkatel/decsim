@@ -48,8 +48,10 @@ def test_the_row_predicts_what_beliefmatchings_matching_branch_predicts():
         circuit, ROUNDS, fault_models.LINKED_FAULT_MODELS_REQUIRED
     )
     detection_events, _ = windows.sampled_shots(circuit, SHOTS, 7)
-    dem = circuit.detector_error_model(decompose_errors=True)
-    referee = BeliefMatching(dem, max_bp_iters=30, bp_method="product_sum")
+    detector_error_model = circuit.detector_error_model(decompose_errors=True)
+    referee = BeliefMatching(
+        detector_error_model, max_bp_iters=30, bp_method="product_sum"
+    )
     row = belief_matching.BeliefMatchingDecoder(
         max_iterations=30, belief_propagation_method="product_sum"
     )

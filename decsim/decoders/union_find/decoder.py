@@ -72,7 +72,7 @@ class UnionFindDecoder(decoder_module.WindowDecoderBase):
         self, job: decoding_records.DecodeJob
     ) -> UnionFindDecodedWindow:
         """One hard result, immutable evidence and the timed backend call."""
-        model = job.dem
+        model = job.detector_error_model
         if model is None:
             raise ValueError(
                 "Union-Find growth evidence requires a window error model"

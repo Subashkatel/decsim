@@ -103,7 +103,7 @@ class UnionFindClusterGapDecoder(decoder_module.DecoderBase):
 
     def decode_timed(self, job: decoding_records.DecodeJob) -> tuple:
         """(the result with its confidence, nanoseconds of decode and gap)."""
-        model = job.dem
+        model = job.detector_error_model
         if model is None:
             return self.base.decode_timed(job)
         _require_one_logical_row(model)

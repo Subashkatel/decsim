@@ -98,15 +98,15 @@ def test_the_row_matches_pymatching_on_the_same_graph():
 
 def test_the_row_predicts_what_sinters_pymatching_row_predicts():
     circuit, model, detection_events, _ = _window_and_shots()
-    dem = circuit.detector_error_model(decompose_errors=True)
+    detector_error_model = circuit.detector_error_model(decompose_errors=True)
     sinter_row = sinter.BUILT_IN_DECODERS["pymatching"]
-    compiled = sinter_row.compile_decoder_for_dem(dem=dem)
+    compiled = sinter_row.compile_decoder_for_dem(dem=detector_error_model)
     packed = numpy.packbits(detection_events, axis=1, bitorder="little")
     predictions = compiled.decode_shots_bit_packed(
         bit_packed_detection_event_data=packed
     )
     predictions = numpy.unpackbits(predictions, axis=1, bitorder="little")
-    whole = pymatching.Matching.from_detector_error_model(dem)
+    whole = pymatching.Matching.from_detector_error_model(detector_error_model)
     row = adapter.PyMatchingDecoder()
     faults = model.require_faults(GRAPHLIKE)
     matching = row.compiled_for(faults, model)

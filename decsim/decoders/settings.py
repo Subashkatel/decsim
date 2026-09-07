@@ -54,14 +54,6 @@ ONLINE_KEYS = (
 # Decibels are 10 log10 of the likelihood ratio; matching weights are
 # its natural log: nats = decibels * ln(10) / 10.
 LN_TEN = math.log(10.0)
-# The tier each escalation kind decodes the plan's windows on. Switching
-# decodes every window on the weak tier first and escalates to the
-# strong tier.
-TIER_BY_ESCALATION_KIND = {
-    "weak_baseline": "weak",
-    "strong_only": "strong",
-    "switching": "weak",
-}
 
 
 @dataclasses.dataclass(frozen=True)
@@ -299,11 +291,6 @@ class EscalationSettings:
                 )
             return cls(kind=kind)
         return _switching_settings(section, base_directory)
-
-    @property
-    def decodes_on(self) -> str:
-        """The tier that decodes the plan's windows: weak or strong."""
-        return TIER_BY_ESCALATION_KIND[self.kind]
 
     def threshold_nats_for(
         self, physical_error_probability: float, distance: int

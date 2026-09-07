@@ -331,7 +331,7 @@ def chain_load(
 
 def active_decoder_kind(settings: machine_module.MachineSettings):
     """The kind of the tier that decodes the plan's windows."""
-    tier = settings.escalation.decodes_on
+    tier = machine_module.escalation_tier(settings.escalation)
     tier_settings = getattr(settings, f"{tier}_decoder")
     return tier_settings.kind
 

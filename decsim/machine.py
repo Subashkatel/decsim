@@ -155,6 +155,11 @@ CONFIDENCE_WRAPPERS = {
 ROUND_STORES = {
     "round_store": round_store_module.RoundStore,
 }
+# One row per escalation kind, and the row is the only place the kind's
+# facts are written: which tier decodes the plan's windows
+# (primary_tier) and whether the strong context is retained
+# (requires_strong_context) are read off the class, so a new kind is one
+# class and one row here (sinter's BUILT_IN_DECODERS shape).
 ESCALATIONS = {
     "weak_baseline": escalation_policies.Baseline,
     "strong_only": escalation_policies.StrongOnly,
@@ -643,7 +648,8 @@ def build_decoder_unit(settings: MachineSettings, tier: str):
     if tier_settings.kind is None:
         return None
     algorithm = _algorithm(tier_settings.kind, tier)
-    is_active = tier == settings.escalation.decodes_on
+    active_tier = escalation_tier(settings.escalation)
+    is_active = tier == active_tier
     is_switching = settings.escalation.kind == "switching"
     if is_active and is_switching:
         # a named row is measured on the host clock; a number is priced
@@ -727,6 +733,17 @@ def _root_seed(value) -> Optional[int]:
 
 
 # ------------------------------------------------- the escalation policy
+
+
+def escalation_tier(settings: decoder_settings.EscalationSettings) -> str:
+    """The tier the escalation kind decodes the plan's windows on.
+
+    The kind's row declares it (EscalationPolicy.primary_tier), so the
+    tier is written once, in the class, and read here by every caller
+    that holds settings and not yet a policy.
+    """
+    row = _row(ESCALATIONS, "escalation.kind", settings.kind)
+    return row.primary_tier.value
 
 
 def _escalation_policy(settings: decoder_settings.EscalationSettings):
@@ -1029,15 +1046,15 @@ def _decoder_pool(settings: MachineSettings, plan: _Plan) -> _DecoderPool:
         scheduler = schedulers.FifoScheduler()
     weak = build_decoder_unit(settings, "weak")
     strong = build_decoder_unit(settings, "strong")
+    active_tier = escalation_tier(settings.escalation)
     active = weak
-    if settings.escalation.decodes_on == "strong":
+    if active_tier == "strong":
         active = strong
     has_no_decoder = active is None and manager.router is None
     if has_no_decoder and plan.planned_operations:
-        tier = settings.escalation.decodes_on
         raise ValueError(
-            f"the plan decodes windows on the {tier} tier, which names "
-            "no decoder: give it a kind or a Python-built decoder"
+            f"the plan decodes windows on the {active_tier} tier, which "
+            "names no decoder: give it a kind or a Python-built decoder"
         )
     router = manager.router
     unit_pools = manager.unit_pools
@@ -1080,7 +1097,7 @@ def _switching_pools(settings: MachineSettings, weak, strong) -> tuple:
 def _active_tier_settings(
     settings: MachineSettings,
 ) -> decoder_settings.DecoderSettings:
-    tier = settings.escalation.decodes_on
+    tier = escalation_tier(settings.escalation)
     return getattr(settings, f"{tier}_decoder")
 
 

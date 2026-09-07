@@ -2,9 +2,9 @@
 
 from typing import Optional
 
+import decsim.decoders.backend_outcome as backend_outcome
 import decsim.decoders.decoder as decoder_module
 import decsim.decoders.relay_belief_propagation.window_decoder as window_decoder
-import decsim.decoders.backend_outcome as backend_outcome
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.message as message
 

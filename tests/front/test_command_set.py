@@ -717,3 +717,13 @@ def test_trace_refuses_an_action_it_does_not_have(tmp_path, capsys):
     assert stopped.value.code == 1
     assert printed.err.count("\n") == 1
     assert printed.err.startswith("decsim: decsim trace has no action")
+
+
+def test_a_refused_combine_leaves_no_folder(tmp_path):
+    """The out folder is made once the fold is accepted, not before."""
+    missing = tmp_path / "never_ran"
+    out_dir = tmp_path / "combined"
+    with pytest.raises(SystemExit) as exit_info:
+        command.main(["combine", str(missing), "--out", str(out_dir)])
+    assert exit_info.value.code == 1
+    assert not out_dir.exists()

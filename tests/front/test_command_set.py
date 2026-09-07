@@ -72,6 +72,12 @@ def _point_and_seed_of_every_row(run_dir, name):
     return order
 
 
+def _seeds_of_every_shot(run_dir):
+    path = run_dir / "shots.csv"
+    rows = _rows(path)
+    return [row["seed"] for row in rows]
+
+
 def test_an_unknown_verb_prints_the_verbs_and_fails():
     with pytest.raises(SystemExit):
         command.main(["decode-everything"])
@@ -475,6 +481,46 @@ def test_every_shard_of_a_sweep_runs_a_share_of_its_points(tmp_path):
     second_rows = _rows(second_path)
     assert len(first_rows) == 2
     assert len(second_rows) == 2
+
+
+def test_one_points_seeds_divide_across_two_shards(tmp_path):
+    """The unit, not the point, is what a shard selects.
+
+    This is the whole reason --shots-per-unit exists: a sweep of one
+    point can still fill a Slurm array. Its law is that shard i of n
+    runs the units whose position modulo n is i, so at one shot to a
+    unit the even seeds go to shard 0 of 2 and the odd seeds to shard 1.
+    """
+    one_point = {
+        "sweep": [
+            {
+                "physical_error_probability": [0.001],
+                "distance": [3],
+                "round_period_us": [1.0],
+                "shots": 4,
+            }
+        ]
+    }
+    config_path = yaml_configs.write_config(tmp_path, one_point)
+    first_dir = tmp_path / "shard0"
+    second_dir = tmp_path / "shard1"
+    for index, out_dir in ((0, first_dir), (1, second_dir)):
+        command.main(
+            [
+                "collect",
+                str(config_path),
+                "--out",
+                str(out_dir),
+                "--shard",
+                f"{index}/2",
+                "--shots-per-unit",
+                "1",
+            ]
+        )
+    first_seeds = _seeds_of_every_shot(first_dir)
+    second_seeds = _seeds_of_every_shot(second_dir)
+    assert first_seeds == ["0", "2"]
+    assert second_seeds == ["1", "3"]
 
 
 def test_a_shard_outside_its_count_is_refused(tmp_path, capsys):

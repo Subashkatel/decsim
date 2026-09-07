@@ -20,13 +20,13 @@ class StageLedger:
     def stage_recorded(self, record) -> None:
         """One stage of one job ended on some unit."""
         self.records.append(record)
-        key = (record.op_id, record.window_id)
+        key = (record.operation_id, record.window_id)
         window_records = self._by_window.setdefault(key, [])
         window_records.append(record)
 
-    def records_for(self, op_id, window_id) -> tuple:
+    def records_for(self, operation_id, window_id) -> tuple:
         """One window's stage records, in stage order."""
-        key = (op_id, window_id)
+        key = (operation_id, window_id)
         window_records = self._by_window.get(key, ())
         return tuple(window_records)
 

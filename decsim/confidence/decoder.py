@@ -244,7 +244,7 @@ class GapHalfDecoder(decoder_module.DecoderBase):
 
     def decode_timed(self, job: decoding_records.DecodeJob) -> tuple:
         """The forced solve and its wall clock; nothing without a metric."""
-        result = decoding_records.DecodeResult(job.op_id, job.window_id)
+        result = decoding_records.DecodeResult(job.operation_id, job.window_id)
         metric = cached_metric_for_model(
             self._metrics_by_model_identity, self.signal, job.dem
         )

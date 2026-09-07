@@ -29,7 +29,7 @@ class MagicStateFactory(Protocol):
 
     engine: Any
 
-    def request(self, op_id: int, callback: Callable[[], None]):
+    def request(self, operation_id: int, callback: Callable[[], None]):
         """Ask for one state; callback runs once it is ready."""
 
     def shutdown(self) -> None:

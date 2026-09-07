@@ -35,7 +35,7 @@ def test_a_stale_delivery_is_ignored_and_the_edge_releases_once():
         id=1, name="memory", qubits=(0,), patches=(0,)
     )
     source = window_records.Window(
-        op_id=1,
+        operation_id=1,
         k=0,
         commit_lo=1,
         commit_hi=3,
@@ -44,7 +44,7 @@ def test_a_stale_delivery_is_ignored_and_the_edge_releases_once():
         dependents=[(1, 1)],
     )
     dependent = window_records.Window(
-        op_id=1,
+        operation_id=1,
         k=1,
         commit_lo=4,
         commit_hi=6,

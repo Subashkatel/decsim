@@ -197,17 +197,17 @@ class RoundTracker:
         measurement_closed mode, a feedback source's own last round when
         it falls inside the buffer.
         """
-        stream = self.stream_by_id.get(window.op_id)
+        stream = self.stream_by_id.get(window.operation_id)
         if stream is not None:
             stream_boundary = stream.closed_boundary_for_window(window)
             if stream_boundary is not None:
                 return stream_boundary
-        operation = self.operation_by_id[window.op_id]
+        operation = self.operation_by_id[window.operation_id]
         if operation.feedback_boundary_mode != "measurement_closed":
             return None
         if operation.id not in self.blocking_operation_ids:
             return None
-        round_count = self.round_count_for_window(window.op_id, window)
+        round_count = self.round_count_for_window(window.operation_id, window)
         if window.commit_hi <= round_count < window.buffer_hi:
             return round_count
         return None
@@ -217,7 +217,7 @@ class RoundTracker:
     ) -> window_records.WindowReadiness:
         """What the scheme sees when deciding whether a window has its data."""
         successor_ids = sorted(
-            self.planner.successors_by_operation[window.op_id],
+            self.planner.successors_by_operation[window.operation_id],
             key=identity_records.stable_identity_order_key,
         )
         successors = []
@@ -229,12 +229,12 @@ class RoundTracker:
             )
             successors.append(successor)
         local_round_count = self.effective_round_count_for_window(
-            window.op_id, window
+            window.operation_id, window
         )
         closed_boundary = self.closed_boundary_round_for_window(window)
         is_tail_closed = closed_boundary is not None
-        local_rounds_arrived = self.rounds_arrived(window.op_id)
-        memory_rounds_arrived = self.memory_rounds(window.op_id)
+        local_rounds_arrived = self.rounds_arrived(window.operation_id)
+        memory_rounds_arrived = self.memory_rounds(window.operation_id)
         return window_records.WindowReadiness(
             local_rounds_arrived=local_rounds_arrived,
             local_round_count=local_round_count,
@@ -255,7 +255,7 @@ class RoundTracker:
 
     def has_first_round(self, window: window_records.Window) -> bool:
         """Whether the window's first read round has arrived."""
-        arrived = self.rounds_arrived(window.op_id)
+        arrived = self.rounds_arrived(window.operation_id)
         return arrived >= window.start_round
 
 

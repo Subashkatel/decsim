@@ -56,7 +56,7 @@ class RecordingInner(decoder_module.DecoderBase):
 
     def decode(self, job):
         self.decode_ticks.append(self.engine.now)
-        return decoding_records.DecodeResult(job.op_id, job.window_id)
+        return decoding_records.DecodeResult(job.operation_id, job.window_id)
 
 
 class ElapsedRecorder(decoder_module.DecoderBase):
@@ -96,7 +96,7 @@ def decode_job(window_id=0, n_rounds=3):
         1, window_id, window_records.DecoderTier.WEAK, window_id
     )
     return decoding_records.DecodeJob(
-        op_id=1,
+        operation_id=1,
         window_id=window_id,
         n_rounds=n_rounds,
         label=f"W{window_id}",

@@ -145,7 +145,7 @@ class TransferAttribution:
         first_round, last_round = _read_range(window)
         relation = RequestTransferRelation(request_key)
         return cls(
-            operation_id=job.op_id,
+            operation_id=job.operation_id,
             patch_ids=patch_ids,
             window_id=job.window_id,
             first_round=first_round,

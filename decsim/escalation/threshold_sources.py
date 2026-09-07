@@ -268,7 +268,7 @@ class OnlineThreshold:
                     "to produce logical observables for audit labels; "
                     "the configured weak card is timing-only"
                 )
-            key = (job.op_id, job.window_id)
+            key = (job.operation_id, job.window_id)
             self._pending_audits[key] = tuple(result.logical_observables)
             self._record("audit")
             return False

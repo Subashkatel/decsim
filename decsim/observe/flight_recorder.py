@@ -349,34 +349,34 @@ def _window_chains(
     """Every window's chain from its stamps; the last row by window key."""
     frame_prev = {}
     window_items = windows.items()
-    for (op_id, window_id), window in sorted(window_items, key=repr):
+    for (operation_id, window_id), window in sorted(window_items, key=repr):
         if window.t_data_complete is None:
             continue
-        input_key = (op_id, window.buffer_hi)
+        input_key = (operation_id, window.buffer_hi)
         prev = chains.last_of_round.get(input_key)
         if prev is None:
             prev = stored_of_round.get(input_key)
         row = rows.add(
             "WINDOW_DATA_COMPLETE",
             window.t_data_complete,
-            op_id,
+            operation_id,
             window=window_id,
             prev=prev,
         )
-        row = _window_stamp_rows(rows, window, op_id, window_id, row)
-        frame_prev[(op_id, window_id)] = row
+        row = _window_stamp_rows(rows, window, operation_id, window_id, row)
+        frame_prev[(operation_id, window_id)] = row
     return frame_prev
 
 
 def _window_stamp_rows(
-    rows: _LedgerRows, window, op_id, window_id: int, row: dict
+    rows: _LedgerRows, window, operation_id, window_id: int, row: dict
 ) -> dict:
     """The queued, assigned and done rows of one window; the last of them."""
     for kind, stamp in _WINDOW_STAMPS:
         tick = getattr(window, stamp)
         if tick is None:
             continue
-        row = rows.add(kind, tick, op_id, window=window_id, prev=row)
+        row = rows.add(kind, tick, operation_id, window=window_id, prev=row)
     return row
 
 
@@ -392,12 +392,12 @@ def _frame_commits(
     committed_of_op: dict = {}
     landed = _landed_identities(corrections.committed)
     for record in corrections.accepted:
-        op_id, window_id = record.window_key
+        operation_id, window_id = record.window_key
         prev = frame_prev.get(record.window_key)
         accepted = rows.add(
             "FRAME_ACCEPTED",
             record.accepted_ticks,
-            op_id,
+            operation_id,
             window=window_id,
             route=record.tier,
             prev=prev,
@@ -408,15 +408,15 @@ def _frame_commits(
         committed = rows.add(
             "FRAME_COMMITTED",
             record.committed_ticks,
-            op_id,
+            operation_id,
             window=window_id,
             route=record.tier,
             prev=accepted,
             status="terminal",
         )
-        best = committed_of_op.get(op_id)
+        best = committed_of_op.get(operation_id)
         if best is None or committed["tick"] > best["tick"]:
-            committed_of_op[op_id] = committed
+            committed_of_op[operation_id] = committed
     return committed_of_op
 
 
@@ -499,14 +499,14 @@ def _releases(
     """The runtime's release of every blocked operation, by operation."""
     released_of_op = {}
     release_items = release_time.items()
-    for op_id, tick in sorted(release_items, key=repr):
-        prev = outputs.decision_of_op.get(op_id)
+    for operation_id, tick in sorted(release_items, key=repr):
+        prev = outputs.decision_of_op.get(operation_id)
         if prev is None:
-            operation = operations.get(op_id)
+            operation = operations.get(operation_id)
             blocking_op = getattr(operation, "blocked_by", None)
             prev = committed_of_op.get(blocking_op)
-        released_of_op[op_id] = rows.add(
-            "DECODE_RELEASED", tick, op_id, prev=prev
+        released_of_op[operation_id] = rows.add(
+            "DECODE_RELEASED", tick, operation_id, prev=prev
         )
     return released_of_op
 
@@ -558,10 +558,14 @@ def _result_returns(
 ) -> None:
     """Every result returned to the QPU, caused by the decision it carried."""
     return_items = return_time.items()
-    for op_id, tick in sorted(return_items, key=repr):
-        prev = outputs.decision_issued_of_op.get(op_id)
+    for operation_id, tick in sorted(return_items, key=repr):
+        prev = outputs.decision_issued_of_op.get(operation_id)
         if prev is None:
-            prev = outputs.decision_of_op.get(op_id)
+            prev = outputs.decision_of_op.get(operation_id)
         rows.add(
-            "RESULT_RETURNED_TO_QPU", tick, op_id, prev=prev, status="terminal"
+            "RESULT_RETURNED_TO_QPU",
+            tick,
+            operation_id,
+            prev=prev,
+            status="terminal",
         )

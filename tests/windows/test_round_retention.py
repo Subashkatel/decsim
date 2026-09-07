@@ -65,7 +65,7 @@ def test_a_window_holds_its_read_range_plus_the_successor_overflow():
     store = _store()
     retention = _retention(store, {1: 4, 2: 9}, {1: [2]})
     window = window_records.Window(
-        op_id=1, k=0, commit_lo=1, commit_hi=3, buffer_hi=6, n_rounds=6
+        operation_id=1, k=0, commit_lo=1, commit_hi=3, buffer_hi=6, n_rounds=6
     )
     retention.register_window((1, 0), window)
     held = store.hold_round_identities((1, 0))
@@ -76,7 +76,7 @@ def test_the_hold_moves_to_the_request_and_releases_when_the_input_lands():
     store = _store()
     retention = _retention(store, {1: 6}, {1: []})
     window = window_records.Window(
-        op_id=1, k=0, commit_lo=1, commit_hi=3, buffer_hi=5, n_rounds=5
+        operation_id=1, k=0, commit_lo=1, commit_hi=3, buffer_hi=5, n_rounds=5
     )
     retention.register_window((1, 0), window)
     for round_index in (1, 2, 3, 4, 5):
@@ -86,7 +86,7 @@ def test_the_hold_moves_to_the_request_and_releases_when_the_input_lands():
         1, 0, window_records.DecoderTier.WEAK, 0
     )
     job = decoding_records.DecodeJob(
-        op_id=1, window_id=0, n_rounds=5, request_key=request_key
+        operation_id=1, window_id=0, n_rounds=5, request_key=request_key
     )
     retention.bind_input_hold(job, (1, 0))
     assert not store.has_hold((1, 0))
@@ -111,7 +111,12 @@ def test_a_clipped_tail_keeps_only_its_commit_range():
     store = _store()
     retention = _retention(store, {"stream": 9}, {"stream": []})
     window = window_records.Window(
-        op_id="stream", k=1, commit_lo=4, commit_hi=6, buffer_hi=8, n_rounds=5
+        operation_id="stream",
+        k=1,
+        commit_lo=4,
+        commit_hi=6,
+        buffer_hi=8,
+        n_rounds=5,
     )
     retention.register_window(("stream", 1), window)
     window.commit_hi = 5
@@ -123,7 +128,7 @@ def test_a_clipped_tail_keeps_only_its_commit_range():
 
 def test_strong_context_is_one_buffer_on_each_side_of_the_commit():
     window = window_records.Window(
-        op_id=1, k=2, commit_lo=7, commit_hi=9, buffer_hi=11, n_rounds=5
+        operation_id=1, k=2, commit_lo=7, commit_hi=9, buffer_hi=11, n_rounds=5
     )
     bounds = round_retention.strong_context_bounds(window)
     assert bounds == (5, 7, 9, 11)
@@ -133,7 +138,7 @@ def test_a_potential_restart_read_outlives_the_landing_and_follows_a_reslice():
     store = _store()
     retention = _retention(store, {1: 12}, {1: []})
     window = window_records.Window(
-        op_id=1, k=1, commit_lo=4, commit_hi=6, buffer_hi=9, n_rounds=6
+        operation_id=1, k=1, commit_lo=4, commit_hi=6, buffer_hi=9, n_rounds=6
     )
     retention.register_window((1, 1), window)
     claim = decoding_records.PotentialRestart((1, 1))
@@ -146,7 +151,7 @@ def test_a_potential_restart_read_outlives_the_landing_and_follows_a_reslice():
         1, 1, window_records.DecoderTier.WEAK, 0
     )
     job = decoding_records.DecodeJob(
-        op_id=1, window_id=1, n_rounds=6, request_key=request_key
+        operation_id=1, window_id=1, n_rounds=6, request_key=request_key
     )
     retention.bind_input_hold(job, (1, 1))
     job.input_hold()  # the input landed: the request's hold ends

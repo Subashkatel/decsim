@@ -20,7 +20,7 @@ def _weak_window_info(commit_lo: int) -> window_records.WindowInfo:
     commit_hi = commit_lo + 2
     buffer_hi = commit_lo + 5
     window = window_records.Window(
-        op_id=1,
+        operation_id=1,
         k=1,
         commit_lo=commit_lo,
         commit_hi=commit_hi,

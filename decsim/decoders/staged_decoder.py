@@ -106,7 +106,7 @@ class UnitTiming:
 class DecoderStageRecord:
     """One stage of one job: name, cycles charged, start and end ticks."""
 
-    op_id: int
+    operation_id: int
     window_id: int
     stage: str
     cycles: Optional[int]  # None for the algorithm, priced in time
@@ -237,7 +237,7 @@ class StagedDecoder(decoder_module.DecoderBase):
         start = engine.now
         end = start + ticks
         record = DecoderStageRecord(
-            job.op_id, job.window_id, name, cycles, start, end
+            job.operation_id, job.window_id, name, cycles, start, end
         )
         self.stage_recorded.fire(record)
         next_index = index + 1
@@ -262,7 +262,7 @@ class StagedDecoder(decoder_module.DecoderBase):
         ) -> None:
             running.result = result
             record = DecoderStageRecord(
-                job.op_id,
+                job.operation_id,
                 job.window_id,
                 ALGORITHM_STAGE,
                 None,

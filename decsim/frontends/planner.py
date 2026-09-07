@@ -556,7 +556,7 @@ def _add_operation_windows(windows: dict, operation_id, operation_plan) -> None:
     """One Window per geometry, with the plan's internal dependencies."""
     for window_index, geometry in enumerate(operation_plan.windows):
         windows[(operation_id, window_index)] = window_records.Window(
-            op_id=operation_id,
+            operation_id=operation_id,
             k=window_index,
             commit_lo=geometry.commit_lo,
             commit_hi=geometry.commit_hi,

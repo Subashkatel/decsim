@@ -53,8 +53,8 @@ def test_the_timeline_stages_are_the_runs_own_stage_records(tmp_path):
     document = trace_file.load(trace_path)
     shot = plots._timeline_shot(document)
     stages = machine.observation.stages
-    for op_id, window_id in machine.observation.windows.windows:
-        for record in stages.records_for(op_id, window_id):
+    for operation_id, window_id in machine.observation.windows.windows:
+        for record in stages.records_for(operation_id, window_id):
             drawn = shot.stages[(window_id, record.stage)]
             assert drawn.start_us == _microseconds(record.start_ticks)
             assert drawn.end_us == _microseconds(record.end_ticks)

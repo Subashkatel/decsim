@@ -93,7 +93,7 @@ class RoundRetention:
     ) -> None:
         """Register the weak and possible-strong holds of a new window."""
         weak = self.read_keys_for_bounds(
-            window.op_id, window.start_round, window.buffer_hi, window
+            window.operation_id, window.start_round, window.buffer_hi, window
         )
         strong = self.strong_context_read_keys(window, weak)
         self.weak_store.register_hold(key, weak)
@@ -114,7 +114,7 @@ class RoundRetention:
         the fresh request reads, the re-read range among them.
         """
         weak = self.read_keys_for_bounds(
-            window.op_id, window.start_round, window.buffer_hi, window
+            window.operation_id, window.start_round, window.buffer_hi, window
         )
         strong = self.strong_context_read_keys(window, weak)
         potential = decoding_records.PotentialStrong(key)
@@ -139,7 +139,7 @@ class RoundRetention:
         stop_round = window.commit_hi + 1
         new_reads = []
         for round_index in range(window.start_round, stop_round):
-            new_reads.append((window.op_id, round_index))
+            new_reads.append((window.operation_id, round_index))
         new_reads.sort()
         self.weak_store.replace_hold(window.key, new_reads)
 
@@ -182,7 +182,7 @@ class RoundRetention:
         )
         weak = set(weak_reads)
         strong = self.read_keys_for_bounds(
-            window.op_id, context_lo, context_hi, window
+            window.operation_id, context_lo, context_hi, window
         )
         return [round_key for round_key in strong if round_key not in weak]
 

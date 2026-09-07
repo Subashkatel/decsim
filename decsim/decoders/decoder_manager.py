@@ -139,7 +139,7 @@ class DecoderManager:
         round credits.
         """
         job = decoding_records.DecodeJob(
-            op_id=-1,
+            operation_id=-1,
             window_id=0,
             n_rounds=round_count,
             ready_time=self.queue.engine.now,
@@ -162,7 +162,7 @@ class DecoderManager:
         A job still in transfer passes the gate at its own landing instead.
         """
         for job in self.service.parked_jobs():
-            key = (job.op_id, job.window_id)
+            key = (job.operation_id, job.window_id)
             if key != window_key:
                 continue
             if _is_boundary_owed(job):
@@ -362,7 +362,7 @@ class DecoderManager:
     ) -> None:
         job.completed = True
         self.service.free(job)
-        key = (job.op_id, job.window_id)
+        key = (job.operation_id, job.window_id)
         if key in self.gap_joins.joins_by_window:
             # the unit is free either way; the OUTCOME waits at the join
             self.service.release_input(job)
@@ -454,7 +454,7 @@ def _refuse_spent_job(job: decoding_records.DecodeJob) -> None:
         return
     raise RuntimeError(
         f"decode job {job.label!r} for window "
-        f"({job.op_id}, {job.window_id}) has already been {spent}: a "
+        f"({job.operation_id}, {job.window_id}) has already been {spent}: a "
         "DecodeJob is submitted once, build a new one"
     )
 
@@ -478,7 +478,7 @@ def _is_boundary_owed(job: decoding_records.DecodeJob) -> bool:
 def _is_live_weak_window_job(
     job: decoding_records.DecodeJob, window_key: tuple
 ) -> bool:
-    key = (job.op_id, job.window_id)
+    key = (job.operation_id, job.window_id)
     if key != window_key:
         return False
     if job.strong_decode_for is not None:

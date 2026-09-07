@@ -85,7 +85,12 @@ class _Fixture:
     def __init__(self, frame_ticks: int = 3) -> None:
         self.engine = engine_module.Engine()
         self.window = window_records.Window(
-            op_id=4, k=1, commit_lo=4, commit_hi=6, buffer_hi=8, n_rounds=5
+            operation_id=4,
+            k=1,
+            commit_lo=4,
+            commit_hi=6,
+            buffer_hi=8,
+            n_rounds=5,
         )
         operation = program_records.Operation(4, "logical", (0,), patches=(0,))
         planner = types.SimpleNamespace(windows_by_key={(4, 1): self.window})
@@ -118,7 +123,7 @@ class _Fixture:
     def job(self, tier, sequence, awaiting=False) -> decoding_records.DecodeJob:
         request_key = window_records.DecoderRequestKey(4, 1, tier, sequence)
         job = decoding_records.DecodeJob(
-            op_id=4, window_id=1, n_rounds=5, request_key=request_key
+            operation_id=4, window_id=1, n_rounds=5, request_key=request_key
         )
         job.awaiting_strong_result = awaiting
         return job

@@ -57,7 +57,7 @@ class GapJoins:
         self.enqueue = enqueue
         # a router with a gap route turns the joins on
         self.is_enabled = is_enabled
-        # (op_id, window_id) -> the join, from the sibling's spawn until
+        # (operation_id, window_id) -> the join, from the sibling's spawn until
         # the join concludes the window
         self.joins_by_window: dict[tuple, _GapJoin] = {}
         self.copy_made = trace_source.TraceSource()
@@ -77,7 +77,7 @@ class GapJoins:
         """
         if not self._wants_sibling(job):
             return
-        key = (job.op_id, job.window_id)
+        key = (job.operation_id, job.window_id)
         if key in self.joins_by_window:
             return
         sibling = self._sibling_job(job, key)
@@ -105,7 +105,7 @@ class GapJoins:
         None while the sibling half is still out; the result is held
         and comes back from sibling_done.
         """
-        key = (job.op_id, job.window_id)
+        key = (job.operation_id, job.window_id)
         join = self.joins_by_window.get(key)
         if join is None:
             return result
@@ -167,7 +167,7 @@ class GapJoins:
         masked_fragments = job.decoder_input.fragments()
         round_count = len(job.decoder_input.rounds)
         return decoding_records.DecodeJob(
-            op_id=job.op_id,
+            operation_id=job.operation_id,
             window_id=job.window_id,
             n_rounds=round_count,
             dem=job.dem,

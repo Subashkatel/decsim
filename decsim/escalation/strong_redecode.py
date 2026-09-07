@@ -55,7 +55,7 @@ class StrongRedecode:
         Its context is held and its send built now; the verdict selects
         it or cancels it.
         """
-        key = (weak_job.op_id, weak_job.window_id)
+        key = (weak_job.operation_id, weak_job.window_id)
         assignment = self.shape.plan(weak_job)
         self.selections.remember_sibling(key, assignment.request_key)
         send_input = self._strong_input_send(assignment.job, None)
@@ -71,7 +71,7 @@ class StrongRedecode:
         behind its selection, a held one leaves when its condition fires
         (a terminal window whose tail is already stored leaves now).
         """
-        key = (weak_job.op_id, weak_job.window_id)
+        key = (weak_job.operation_id, weak_job.window_id)
         sibling_request_key = self.selections.sibling_for(key)
         if sibling_request_key is not None:
             self._send_selection(weak_job, sibling_request_key)
@@ -84,7 +84,7 @@ class StrongRedecode:
             self._enqueue(assignment.job, selection_arrival_ticks)
         else:
             self.shape.note_selection_sent(key, selection_arrival_ticks)
-            self.submit_if_terminal_data_complete(weak_job.op_id)
+            self.submit_if_terminal_data_complete(weak_job.operation_id)
         self.decode_queue.await_strong_result(key, request_key)
 
     # ---- the hooks that release a held job
@@ -204,7 +204,7 @@ class StrongRedecode:
         At the delivery a landed input waiting for it may start, and the
         decoder side accepts the selection.
         """
-        key = (weak_job.op_id, weak_job.window_id)
+        key = (weak_job.operation_id, weak_job.window_id)
         on_selection_delivered = functools.partial(
             self.decode_queue.accept_selection, key, strong_request_key
         )

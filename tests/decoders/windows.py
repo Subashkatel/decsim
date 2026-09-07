@@ -50,7 +50,7 @@ def job_for(model, shot, window_id: int = 0) -> decoding_records.DecodeJob:
         fragment_index=0,
     )
     return decoding_records.DecodeJob(
-        op_id=1,
+        operation_id=1,
         window_id=window_id,
         n_rounds=1,
         dem=model,

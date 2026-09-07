@@ -190,7 +190,7 @@ class WindowManager:
             window_info
         )
         if window.k > 0:
-            previous_key = (window.op_id, window.k - 1)
+            previous_key = (window.operation_id, window.k - 1)
             self._link_to_previous_window(previous_key, window.key, window)
         self.planner.attach_stream_model(window)
         self.retention.register_window(window.key, window)

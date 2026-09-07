@@ -331,7 +331,7 @@ class WindowPlanner:
 
     def attach_stream_model(self, window: window_records.Window) -> None:
         """Give a new stream window its model, when the source has one."""
-        model = self.models.model_for_stream(window.op_id, window)
+        model = self.models.model_for_stream(window.operation_id, window)
         if model is not None:
             self.model_by_window[window.key] = model
 
@@ -379,7 +379,7 @@ class WindowPlanner:
         buffer_lo = geometry.commit_lo
         round_count = geometry.buffer_hi - buffer_lo + 1
         window = window_records.Window(
-            op_id=stream_id,
+            operation_id=stream_id,
             k=window_index,
             commit_lo=geometry.commit_lo,
             commit_hi=geometry.commit_hi,

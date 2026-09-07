@@ -312,7 +312,7 @@ class TraceWriter:
 
     def job_enqueued(self, job: decoding_records.DecodeJob) -> None:
         """A window's decode request joins its ready queue."""
-        window_key = (job.op_id, job.window_id)
+        window_key = (job.operation_id, job.window_id)
         args = {
             "window": window_text(window_key),
             "request": request_text(job.request_key),
@@ -370,7 +370,7 @@ class TraceWriter:
     def input_landed(self, job: decoding_records.DecodeJob, unit) -> None:
         """The job's input is in the unit's own memory."""
         thread = _unit_thread(unit.name)
-        window_key = (job.op_id, job.window_id)
+        window_key = (job.operation_id, job.window_id)
         args = {
             "window": window_text(window_key),
             "request": request_text(job.request_key),
@@ -391,7 +391,7 @@ class TraceWriter:
     def job_started(self, job: decoding_records.DecodeJob, unit) -> None:
         """The unit began this job's physical decode."""
         thread = _unit_thread(unit.name)
-        window_key = (job.op_id, job.window_id)
+        window_key = (job.operation_id, job.window_id)
         self._unit_thread_by_window[window_key] = thread
         args = {
             "request": request_text(job.request_key),
@@ -418,7 +418,7 @@ class TraceWriter:
 
     def stage_recorded(self, record) -> None:
         """One stage of one job on the lane of the unit that started it."""
-        window_key = (record.op_id, record.window_id)
+        window_key = (record.operation_id, record.window_id)
         thread = self._unit_thread_by_window.get(window_key)
         if thread is None:
             return
@@ -831,7 +831,7 @@ def _copied_identity(key) -> dict:
     if isinstance(key, tuple) and len(key) == 2:
         return {"round": round_text(key)}
     if isinstance(key, decoding_records.DecodeJob):
-        window_key = (key.op_id, key.window_id)
+        window_key = (key.operation_id, key.window_id)
         window = window_text(window_key)
         rounds = _job_rounds_text(key)
         return {"window": window, "rounds": rounds}

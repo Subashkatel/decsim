@@ -224,7 +224,7 @@ def test_the_seal_clips_the_window_holding_the_last_round():
 def test_idle_rounds_fold_only_into_a_batch_style_operation():
     plan = _empty_plan()
     window = window_records.Window(
-        op_id=7, k=0, commit_lo=1, commit_hi=6, buffer_hi=6, n_rounds=6
+        operation_id=7, k=0, commit_lo=1, commit_hi=6, buffer_hi=6, n_rounds=6
     )
     plan.windows[(7, 0)] = window
     plan.batch_preceding_idle_rounds_by_operation[7] = True

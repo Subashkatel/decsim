@@ -89,7 +89,7 @@ def _job(model, syndrome) -> decoding_records.DecodeJob:
         fragment_index=0,
     )
     return decoding_records.DecodeJob(
-        op_id=1,
+        operation_id=1,
         window_id=0,
         n_rounds=1,
         dem=model,

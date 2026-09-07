@@ -86,7 +86,7 @@ class DecoderInput:
     Rounds are ordered by operation identity and round index.
     """
 
-    op_id: int
+    operation_id: int
     window_id: int
     request_key: Optional[window_records.DecoderRequestKey]
     rounds: tuple[MaterializedSyndromeRound, ...]
@@ -132,7 +132,7 @@ def materialize_decoder_input(job: decoding_records.DecodeJob) -> DecoderInput:
     rounds = tuple(rounds)
     _check_detector_row_layout(job, rounds)
     return DecoderInput(
-        op_id=job.op_id,
+        operation_id=job.operation_id,
         window_id=job.window_id,
         request_key=job.request_key,
         rounds=rounds,
@@ -243,7 +243,7 @@ def _check_detector_row_layout(
         return
     input_rows = _input_row_identities(job, rounds)
     model_rows = _model_row_identities(
-        job.op_id, model.detector_ids, model.defect_positions
+        job.operation_id, model.detector_ids, model.defect_positions
     )
     if input_rows != model_rows:
         raise RuntimeError(
@@ -261,13 +261,13 @@ def _input_row_identities(
     identities = []
     for round_input in rounds:
         is_same_operation = identity_records.same_stable_identity(
-            round_input.operation_id, job.op_id
+            round_input.operation_id, job.operation_id
         )
         if not is_same_operation:
             raise RuntimeError(
                 f"{job.label}: model-backed decoder-input round operation "
                 f"{round_input.operation_id!r} does not match job operation "
-                f"{job.op_id!r}"
+                f"{job.operation_id!r}"
             )
         round_rows = _round_row_identities(round_input)
         identities.extend(round_rows)
@@ -289,10 +289,12 @@ def _round_row_identities(round_input: MaterializedSyndromeRound) -> list:
     return identities
 
 
-def _model_row_identities(op_id, detector_ids, defect_positions) -> tuple:
+def _model_row_identities(
+    operation_id, detector_ids, defect_positions
+) -> tuple:
     """(operation, round, position) of every detector row of the model."""
     identities = []
     for detector_id in detector_ids:
         round_index, position_in_round = defect_positions[detector_id]
-        identities.append((op_id, round_index, position_in_round))
+        identities.append((operation_id, round_index, position_in_round))
     return tuple(identities)

@@ -80,8 +80,8 @@ class RecordingFactory:
         self.engine = engine
         self.callbacks = []
 
-    def request(self, op_id, callback):
-        self.engine.calls.append(("factory_request", op_id))
+    def request(self, operation_id, callback):
+        self.engine.calls.append(("factory_request", operation_id))
         self.callbacks.append(callback)
 
     def release_the_first_state(self):

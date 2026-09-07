@@ -57,7 +57,7 @@ class DecodeOutcomes:
         window side asks the strong tier for the window and commits the
         result provisionally.
         """
-        key = (job.op_id, job.window_id)
+        key = (job.operation_id, job.window_id)
         verdict = self.escalation_policy.verdict_for_weak_result(job, result)
         self.verdict_given.fire(key, job.request_key, verdict)
         self.strong_requests.resolve_weak(key)

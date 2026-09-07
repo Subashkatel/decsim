@@ -24,6 +24,7 @@ import decsim.detector_error_model.window_model_builders as window_models
 import decsim.detector_error_model.window_slicer as window_slicer
 import decsim.message as message
 import decsim.observe.trace_source as trace_source
+import decsim.records.rounds as round_records
 import decsim.seeding as seeding
 
 # Stream ids, operation ids and patches are opaque identities chosen by
@@ -156,7 +157,7 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
 
     def round_payloads(
         self, operation: message.Operation, round_index: int
-    ) -> list[message.QPUReadout]:
+    ) -> list[round_records.QPUReadout]:
         """This operation round as one raw measurement packet."""
         key = _sample_key_of(operation)
         stream_offset = 0
@@ -166,14 +167,14 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         bits = self._round_packet_bits(key, global_round)
         patch = _first_patch_or_zero(operation)
         return [
-            message.QPUReadout(
+            round_records.QPUReadout(
                 key, patch, global_round, bits=bits, size_bits=len(bits)
             )
         ]
 
     def finalize_stream_round(
         self, operation: message.Operation, source_round_count: int
-    ) -> list[message.QPUReadout]:
+    ) -> list[round_records.QPUReadout]:
         """The stream's final data readout as its own raw fragment.
 
         The refusals are the contract with the frontend that declared the
@@ -202,7 +203,7 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         bits = final_packet[table.readout_slot_start :]
         patch = _first_patch_of(operation)
         return [
-            message.QPUReadout(
+            round_records.QPUReadout(
                 key, patch, final_round, bits=bits, size_bits=len(bits)
             )
         ]
@@ -213,7 +214,7 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         stream_id: Any,
         global_round: int,
         patch: Any,
-    ) -> list[message.QPUReadout]:
+    ) -> list[round_records.QPUReadout]:
         """This idle stream round as one raw measurement packet."""
         del operation
         binding = self._source_binding_by_key[stream_id]
@@ -221,7 +222,7 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
             raise ValueError("idle round is outside the finite source")
         bits = self._round_packet_bits(stream_id, global_round)
         return [
-            message.QPUReadout(
+            round_records.QPUReadout(
                 stream_id, patch, global_round, bits=bits, size_bits=len(bits)
             )
         ]

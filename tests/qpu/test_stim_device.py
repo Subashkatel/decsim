@@ -19,6 +19,7 @@ import pytest
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.message as message
 import decsim.qpu.stim_device as stim_device
+import decsim.records.rounds as round_records
 
 stim = pytest.importorskip("stim")
 
@@ -385,7 +386,7 @@ def test_a_declared_terminal_fragment_holds_back_the_data_readout():
     readouts = device.finalize_stream_round(finalizer, 3)
     assert last_round.bits == (0, 0, 0, 0, 1, 0, 0, 1)
     assert readouts == [
-        message.QPUReadout(
+        round_records.QPUReadout(
             "s", 0, 3, bits=(0, 1, 0, 0, 0, 0, 0, 1, 0), size_bits=9
         )
     ]
@@ -398,7 +399,7 @@ def test_an_idle_stream_round_replays_the_shots_packet_of_that_round():
     device.begin_operation(head, 3, 3)
     payloads = device.idle_round_payloads(head, "s", 2, 0)
     assert payloads == [
-        message.QPUReadout(
+        round_records.QPUReadout(
             "s", 0, 2, bits=(0, 0, 0, 0, 1, 0, 0, 0), size_bits=8
         )
     ]

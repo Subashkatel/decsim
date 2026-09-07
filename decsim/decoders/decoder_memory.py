@@ -18,6 +18,7 @@ from typing import Any, Optional
 import decsim.message as message
 import decsim.observe.trace_source as trace_source
 import decsim.records.identity as identity_records
+import decsim.records.rounds as round_records
 
 
 class DecoderMemoryCapacityError(RuntimeError):
@@ -74,7 +75,7 @@ class MaterializedSyndromeRound:
 
     operation_id: Any
     round_index: int
-    fragments: tuple[message.RetainedSyndromeFragment, ...]
+    fragments: tuple[round_records.RetainedSyndromeFragment, ...]
 
 
 @dataclasses.dataclass(frozen=True)

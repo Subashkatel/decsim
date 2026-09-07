@@ -183,17 +183,13 @@ def _standalone_pool(units, transfer_us, compute_us, decoder=None):
     Returns (engine, manager, submit(index, arrival), compute start
     ticks by window).
     """
+    import decsim.records.rounds as round_records
     from decsim.decoders.decoder_manager import DecoderManager
     from decsim.decoders.decoders import CodeRouter
     from decsim.decoders.schedulers import FifoScheduler
     from decsim.engine import Engine
     from decsim.escalation.policies import Baseline
-    from decsim.message import (
-        DecodeJob,
-        DecoderRequestKey,
-        DecoderTier,
-        RetainedSyndromeFragment,
-    )
+    from decsim.message import DecodeJob, DecoderRequestKey, DecoderTier
 
     engine = Engine()
     manager = DecoderManager(
@@ -213,7 +209,7 @@ def _standalone_pool(units, transfer_us, compute_us, decoder=None):
     manager.service.begin = recording_begin
 
     def submit(index, arrival_us):
-        payload = RetainedSyndromeFragment(
+        payload = round_records.RetainedSyndromeFragment(
             operation_id=1,
             patch_id="p",
             round_index=index,

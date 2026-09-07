@@ -26,6 +26,7 @@ from typing import Optional, Protocol, runtime_checkable
 
 import decsim.message as message
 import decsim.records.identity as identity_records
+import decsim.records.rounds as round_records
 
 
 @runtime_checkable
@@ -242,7 +243,9 @@ class WindowManager:
 
     # ---- arrivals: the WindowInput port and the room-side store's signal
 
-    def accept_window_input(self, packet: message.SyndromeRoundPacket) -> None:
+    def accept_window_input(
+        self, packet: round_records.SyndromeRoundPacket
+    ) -> None:
         """Publish one stored upstream round to window readiness.
 
         Assembly-to-retention is a state transition on the same
@@ -265,7 +268,9 @@ class WindowManager:
         self.retention.release_round_if_unheld(round_key)
 
     def _refuse_unplanned_round(
-        self, packet: message.SyndromeRoundPacket, operation: message.Operation
+        self,
+        packet: round_records.SyndromeRoundPacket,
+        operation: message.Operation,
     ) -> None:
         """A round past the plan is the device's mistake (it is a plug-in)."""
         if not self.retention.weak_store.has_operation(operation.id):

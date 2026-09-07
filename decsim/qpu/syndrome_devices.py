@@ -17,6 +17,7 @@ import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.message as message
 import decsim.observe.trace_source as trace_source
 import decsim.qpu.code_geometry as code_geometry
+import decsim.records.rounds as round_records
 import decsim.records.seeds as seed_records
 import decsim.seeding as seeding
 
@@ -41,13 +42,13 @@ class TimingOnlyDevice:
 
     def round_payloads(
         self, operation: message.Operation, round_index: int
-    ) -> list[message.QPUReadout]:
+    ) -> list[round_records.QPUReadout]:
         """One bitless payload on the operation's first patch."""
         target, global_round = _stream_target_and_global_round(
             operation, round_index
         )
         patch = _first_patch_of(operation)
-        return [message.QPUReadout(target, patch, global_round)]
+        return [round_records.QPUReadout(target, patch, global_round)]
 
     def idle_round_payloads(
         self,
@@ -55,14 +56,14 @@ class TimingOnlyDevice:
         stream_id: Any,
         global_round: int,
         patch: Any,
-    ) -> list[message.QPUReadout]:
+    ) -> list[round_records.QPUReadout]:
         """One bitless payload for the idle stream round."""
         del operation
-        return [message.QPUReadout(stream_id, patch, global_round)]
+        return [round_records.QPUReadout(stream_id, patch, global_round)]
 
     def finalize_stream_round(
         self, operation: message.Operation, source_round_count: int
-    ) -> list[message.QPUReadout]:
+    ) -> list[round_records.QPUReadout]:
         """Refused: a stream without a circuit has no final readout."""
         del operation, source_round_count
         raise ValueError("TimingOnlyDevice cannot finalize a physical stream")
@@ -158,7 +159,7 @@ class SyndromeBitDevice(seeding._RandomSeedConsumer):
 
     def round_payloads(
         self, operation: message.Operation, round_index: int
-    ) -> list[message.QPUReadout]:
+    ) -> list[round_records.QPUReadout]:
         """One payload per patch, or one payload covering every patch."""
         target, global_round = _stream_target_and_global_round(
             operation, round_index
@@ -178,7 +179,7 @@ class SyndromeBitDevice(seeding._RandomSeedConsumer):
         stream_id: Any,
         global_round: int,
         patch: Any,
-    ) -> list[message.QPUReadout]:
+    ) -> list[round_records.QPUReadout]:
         """One fake-bit payload for the idle stream round."""
         del operation
         bits = self._fake_bits(1)
@@ -186,7 +187,7 @@ class SyndromeBitDevice(seeding._RandomSeedConsumer):
 
     def finalize_stream_round(
         self, operation: message.Operation, source_round_count: int
-    ) -> list[message.QPUReadout]:
+    ) -> list[round_records.QPUReadout]:
         """Refused: a stream without a circuit has no final readout."""
         del operation, source_round_count
         raise ValueError("SyndromeBitDevice cannot finalize a physical stream")
@@ -255,8 +256,8 @@ class SyndromeBitDevice(seeding._RandomSeedConsumer):
 
     def _payload(
         self, target: Any, patch: Any, global_round: int, bits: list
-    ) -> message.QPUReadout:
-        return message.QPUReadout(
+    ) -> round_records.QPUReadout:
+        return round_records.QPUReadout(
             target,
             patch,
             global_round,
@@ -267,7 +268,7 @@ class SyndromeBitDevice(seeding._RandomSeedConsumer):
 
     def _payload_per_patch(
         self, operation: message.Operation, target: Any, global_round: int
-    ) -> list[message.QPUReadout]:
+    ) -> list[round_records.QPUReadout]:
         patches = operation.patches
         if not patches:
             patches = operation.qubits

@@ -19,9 +19,9 @@ import functools
 from typing import Callable, Optional
 
 import decsim.controller.settings as controller_settings
-import decsim.message as message
 import decsim.observe.trace_source as trace_source
 import decsim.records.identity as identity_records
+import decsim.records.rounds as round_records
 
 
 class RoundAssembler:
@@ -38,7 +38,7 @@ class RoundAssembler:
         settings: controller_settings.ControllerSettings,
         *,
         form_round: Optional[Callable],
-        on_packed: Callable[[message.PackedRound], None],
+        on_packed: Callable[[round_records.PackedRound], None],
         rounds_in_flight: "RoundsInFlight",
     ) -> None:
         self.engine = engine
@@ -53,12 +53,12 @@ class RoundAssembler:
 
     def add(
         self,
-        fragment: message.RetainedSyndromeFragment,
+        fragment: round_records.RetainedSyndromeFragment,
         fragment_count: int,
-        route: message.SyndromePacketRoute,
+        route: round_records.SyndromePacketRoute,
     ) -> None:
         """Take one fragment; the round is packed when its last one arrives."""
-        available = message.RoundEvent.of(
+        available = round_records.RoundEvent.of(
             "BINARY_AVAILABLE",
             self.engine.now,
             fragment.operation_id,
@@ -113,7 +113,7 @@ class RoundAssembler:
             )
         dropped = self.workspace.refuse(round_key, self.engine.now)
         if dropped:
-            drop = message.RoundEvent.of(
+            drop = round_records.RoundEvent.of(
                 "DROPPED",
                 self.engine.now,
                 fragment.operation_id,
@@ -144,18 +144,18 @@ class RoundAssembler:
             "controller intake",
             "controller assembler",
         )
-        packed_event = message.RoundEvent.of(
+        packed_event = round_records.RoundEvent.of(
             "PACKED", self.engine.now, operation_id, round_index, context.route
         )
         self.round_event.fire(packed_event)
         formed_fragments = self._form_detection_events(raw_fragments)
-        packet = message.SyndromeRoundPacket(
+        packet = round_records.SyndromeRoundPacket(
             operation_id=operation_id,
             round_index=round_index,
             fragments=formed_fragments,
         )
         self.workspace.forget(context)
-        packed = message.PackedRound(packet, context.route, wire_bits)
+        packed = round_records.PackedRound(packet, context.route, wire_bits)
         self.on_packed(packed)
 
     def _form_detection_events(self, raw_fragments) -> tuple:
@@ -181,7 +181,7 @@ class _PackingContext:
 
     identity: tuple
     round_key: tuple
-    route: message.SyndromePacketRoute
+    route: round_records.SyndromePacketRoute
     fragment_count: int
     fragments: list = dataclasses.field(default_factory=list)
 
@@ -277,7 +277,7 @@ def _fragment_bits(fragments) -> Optional[int]:
     return sum(fragment_sizes)
 
 
-def _fragment_index(fragment: message.RetainedSyndromeFragment) -> int:
+def _fragment_index(fragment: round_records.RetainedSyndromeFragment) -> int:
     return fragment.fragment_index
 
 
@@ -307,9 +307,9 @@ def _index_of_patch(fragments: list, patch_id) -> Optional[int]:
 
 
 def _concatenated(
-    prior: message.RetainedSyndromeFragment,
-    fragment: message.RetainedSyndromeFragment,
-) -> message.RetainedSyndromeFragment:
+    prior: round_records.RetainedSyndromeFragment,
+    fragment: round_records.RetainedSyndromeFragment,
+) -> round_records.RetainedSyndromeFragment:
     """The two parts of one patch as one fragment; unknown sizes stay so."""
     bits = None
     if prior.bits is not None and fragment.bits is not None:

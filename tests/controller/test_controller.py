@@ -15,6 +15,7 @@ import decsim.links.fabric as fabric_module
 import decsim.links.link_profiles as link_profiles
 import decsim.message as message
 import decsim.observe.round_events as round_events
+import decsim.records.rounds as round_records
 
 SETTINGS = controller_settings.ControllerSettings(
     readout_to_bits_microseconds=3.0
@@ -48,14 +49,14 @@ def test_a_readout_reaches_the_assembler_after_the_crossing_and_the_delay():
     assembler = RecordingAssembler(engine)
     recorder = round_events.RoundEventRecorder(engine)
     controller = controller_with(engine, links, assembler, recorder)
-    readout = message.QPUReadout(
+    readout = round_records.QPUReadout(
         7, "patch-a", 4, bits=[True, False, 1, 0], size_bits=4
     )
     crossing_ticks = links.expected_delay_ticks(
         message.LinkPath.QPU_TO_CONTROLLER, 4, 0
     )
 
-    controller.accept_qpu_readout(readout, message.WINDOW_INPUT_ROUTE)
+    controller.accept_qpu_readout(readout, round_records.WINDOW_INPUT_ROUTE)
     engine.run()
 
     (added,) = assembler.added
@@ -64,7 +65,7 @@ def test_a_readout_reaches_the_assembler_after_the_crossing_and_the_delay():
     assert fragment.bits == (1, 0, 1, 0)
     assert fragment.size_bits == 4
     assert fragment_count == 1
-    assert route is message.WINDOW_INPUT_ROUTE
+    assert route is round_records.WINDOW_INPUT_ROUTE
     kinds_and_ticks = [(event.kind, event.tick) for event in recorder.events]
     assert kinds_and_ticks == [("EMITTED", 0)]
 
@@ -78,12 +79,12 @@ def test_a_readout_with_no_delay_reaches_the_assembler_at_the_crossing():
     controller = controller_with(
         engine, links, assembler, recorder, settings=FREE_SETTINGS
     )
-    readout = message.QPUReadout(7, "patch-a", 4, bits=[1], size_bits=1)
+    readout = round_records.QPUReadout(7, "patch-a", 4, bits=[1], size_bits=1)
     crossing_ticks = links.expected_delay_ticks(
         message.LinkPath.QPU_TO_CONTROLLER, 1, 0
     )
 
-    controller.accept_qpu_readout(readout, message.WINDOW_INPUT_ROUTE)
+    controller.accept_qpu_readout(readout, round_records.WINDOW_INPUT_ROUTE)
     engine.run()
 
     (added,) = assembler.added

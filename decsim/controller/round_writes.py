@@ -18,6 +18,7 @@ from typing import Callable
 import decsim.controller.settings as controller_settings
 import decsim.message as message
 import decsim.observe.trace_source as trace_source
+import decsim.records.rounds as round_records
 
 
 class HeldRounds:
@@ -40,8 +41,8 @@ class HeldRounds:
 
     def refuse(
         self,
-        packed: message.PackedRound,
-        admit: Callable[[message.PackedRound], bool],
+        packed: round_records.PackedRound,
+        admit: Callable[[round_records.PackedRound], bool],
     ) -> bool:
         """A round found no room: hold it for a retry, or drop it.
 
@@ -51,7 +52,7 @@ class HeldRounds:
         operation_id, round_index = packed.round_key
         drop = controller_settings.PackingOverflowPolicy.DROP_ROUND
         if self.on_full is drop:
-            dropped = message.RoundEvent.of(
+            dropped = round_records.RoundEvent.of(
                 "DROPPED",
                 self.engine.now,
                 operation_id,
@@ -63,7 +64,7 @@ class HeldRounds:
         if self._is_holding(packed):
             return False
         self.waiting.append((packed, admit))
-        stalled = message.RoundEvent.of(
+        stalled = round_records.RoundEvent.of(
             "STALLED", self.engine.now, operation_id, round_index, packed.route
         )
         self.round_event.fire(stalled)
@@ -83,7 +84,7 @@ class HeldRounds:
         """How many rounds wait."""
         return len(self.waiting)
 
-    def _is_holding(self, packed: message.PackedRound) -> bool:
+    def _is_holding(self, packed: round_records.PackedRound) -> bool:
         for held, _admit in self.waiting:
             if held is packed:
                 return True
@@ -121,7 +122,7 @@ class RoundWriter:
         self.round_event = trace_source.TraceSource()
         self.copy_made = trace_source.TraceSource()
 
-    def admit(self, packed: message.PackedRound) -> bool:
+    def admit(self, packed: round_records.PackedRound) -> bool:
         """Write the round where it belongs; False when it had to wait."""
         if self._takes_the_strong_hop_only(packed):
             if not self.strong_writer.has_room():
@@ -146,7 +147,7 @@ class RoundWriter:
             "Buffer 0",
         )
         if publication_tick is not None:
-            published = message.RoundEvent.of(
+            published = round_records.RoundEvent.of(
                 "PUBLISHED",
                 publication_tick,
                 operation_id,
@@ -172,8 +173,10 @@ class RoundWriter:
                 f"store room"
             )
 
-    def _takes_the_strong_hop_only(self, packed: message.PackedRound) -> bool:
-        window_input = message.SyndromePacketRouteKind.WINDOW_INPUT
+    def _takes_the_strong_hop_only(
+        self, packed: round_records.PackedRound
+    ) -> bool:
+        window_input = round_records.SyndromePacketRouteKind.WINDOW_INPUT
         on_window_route = packed.route.kind is window_input
         return on_window_route and self.publishes_from_strong_store
 
@@ -182,14 +185,16 @@ class RoundWriter:
             return True
         return self.strong_writer.has_room()
 
-    def _write_strong(self, packed: message.PackedRound) -> None:
+    def _write_strong(self, packed: round_records.PackedRound) -> None:
         attribution = message.TransferAttribution.for_packet(packed.packet)
         self.strong_writer.write(
             packed.packet, packet_bits=packed.wire_bits, attribution=attribution
         )
 
 
-def _received_text(packet: message.SyndromeRoundPacket, weak_store) -> str:
+def _received_text(
+    packet: round_records.SyndromeRoundPacket, weak_store
+) -> str:
     defects = packet.defects_text()
     holds = weak_store.held_rounds_description()
     return (

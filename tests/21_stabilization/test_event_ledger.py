@@ -204,10 +204,15 @@ def test_check_detects_a_disappeared_round():
 
 
 def _record(recorder, kind, operation_id, round_index, patch_id=None):
-    from decsim.message import WINDOW_INPUT_ROUTE, RoundEvent
+    import decsim.records.rounds as round_records
 
-    event = RoundEvent.of(
-        kind, 0, operation_id, round_index, WINDOW_INPUT_ROUTE, patch_id
+    event = round_records.RoundEvent.of(
+        kind,
+        0,
+        operation_id,
+        round_index,
+        round_records.WINDOW_INPUT_ROUTE,
+        patch_id,
     )
     recorder.record(event)
 

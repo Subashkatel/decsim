@@ -14,6 +14,7 @@ feedback streams (feedback_streams.py) keep the protected regions.
 import decsim.controller.settings as controller_settings
 import decsim.message as message
 import decsim.observe.trace_source as trace_source
+import decsim.records.rounds as round_records
 
 
 class Controller:
@@ -39,19 +40,21 @@ class Controller:
         self.copy_made = trace_source.TraceSource()
 
     def accept_qpu_readout(
-        self, readout: message.QPUReadout, route: message.SyndromePacketRoute
+        self,
+        readout: round_records.QPUReadout,
+        route: round_records.SyndromePacketRoute,
     ) -> None:
         """One readout crosses qpu_to_controller to the assembler.
 
         The fragment reaches the assembler after the readout delay.
         """
-        fragment = message.RetainedSyndromeFragment.from_readout(readout)
+        fragment = round_records.RetainedSyndromeFragment.from_readout(readout)
         fragment_count = readout.n_fragments
         round_key = (fragment.operation_id, fragment.round_index)
         self.copy_made.fire(
             round_key, readout.size_bits, "readout", "controller intake"
         )
-        emitted = message.RoundEvent.of(
+        emitted = round_records.RoundEvent.of(
             "EMITTED",
             self.engine.now,
             fragment.operation_id,

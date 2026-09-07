@@ -23,6 +23,7 @@ from typing import Callable, Optional
 import decsim.message as message
 import decsim.observe.trace_source as trace_source
 import decsim.records.identity as identity_records
+import decsim.records.rounds as round_records
 import decsim.syndrome_buffer.round_holds as round_holds
 import decsim.syndrome_buffer.settings as round_store_settings
 
@@ -30,7 +31,7 @@ import decsim.syndrome_buffer.settings as round_store_settings
 class _StoredRound:
     """One stored round: its packet and, once published, its tick."""
 
-    def __init__(self, packet: message.SyndromeRoundPacket) -> None:
+    def __init__(self, packet: round_records.SyndromeRoundPacket) -> None:
         self.packet = packet
         self.publication_tick: Optional[int] = None
 
@@ -74,7 +75,7 @@ class RoundStore:
 
     def accept_packed_round(
         self,
-        packet: message.SyndromeRoundPacket,
+        packet: round_records.SyndromeRoundPacket,
         *,
         publication_tick: Optional[int],
     ) -> None:

@@ -12,6 +12,7 @@ import decsim.decoders.decoder_memory as decoder_memory
 import decsim.engine as engine_module
 import decsim.escalation.policies as escalation_policies
 import decsim.message as message
+import decsim.records.rounds as round_records
 import decsim.syndrome_buffer.round_store as round_store_module
 import decsim.syndrome_buffer.settings as round_store_settings
 import decsim.windows.decode_requests as decode_requests
@@ -51,8 +52,8 @@ def _ignore_result(_job, _result) -> None:
     """The requester's tests read the queue, not the result."""
 
 
-def _fragment(round_index, bits=None) -> message.RetainedSyndromeFragment:
-    return message.RetainedSyndromeFragment(
+def _fragment(round_index, bits=None) -> round_records.RetainedSyndromeFragment:
+    return round_records.RetainedSyndromeFragment(
         operation_id=1,
         patch_id=0,
         round_index=round_index,
@@ -130,7 +131,7 @@ class _Fixture:
 
     def arrive(self, round_index: int) -> None:
         fragment = _fragment(round_index)
-        packet = message.SyndromeRoundPacket(1, round_index, (fragment,))
+        packet = round_records.SyndromeRoundPacket(1, round_index, (fragment,))
         self.store.accept_packed_round(packet, publication_tick=round_index)
         self.arrived = round_index
         self.requester.request_if_ready(self.window, None)

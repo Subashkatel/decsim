@@ -20,6 +20,7 @@ from ldpc.union_find_decoder import UnionFindDecoder as LdpcUnionFind
 import decsim.decoders.union_find.decoder as union_find
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.message as message
+import decsim.records.rounds as round_records
 
 # rows 0..3 and 4..7 are two boundaryless 4-cycles, rows 8..11 a chain
 # with boundary edges at both ends
@@ -76,7 +77,7 @@ def _job(model, syndrome) -> message.DecodeJob:
     for bit in syndrome:
         bits.append(int(bit))
     bits = tuple(bits)
-    payload = message.RetainedSyndromeFragment(
+    payload = round_records.RetainedSyndromeFragment(
         operation_id=1,
         patch_id=0,
         round_index=1,

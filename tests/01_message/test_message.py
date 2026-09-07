@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 import decsim.records.identity as identity_records
+import decsim.records.rounds as round_records
 import decsim.records.seeds as seed_records
 from decsim import message
 
@@ -18,7 +19,7 @@ def make_fragment(**overrides):
         "fragment_index": 0,
     }
     values.update(overrides)
-    return message.RetainedSyndromeFragment(**values)
+    return round_records.RetainedSyndromeFragment(**values)
 
 
 def make_window_geometry(start_round):
@@ -213,7 +214,7 @@ def test_seed_reservation_skips_source_seed_validation_and_is_frozen():
 
 def test_qpu_readout_skips_identity_round_and_fragment_validation():
     """QPU readout stores unconventional metadata without constructor validation."""
-    readout = message.QPUReadout(
+    readout = round_records.QPUReadout(
         operation_id=object(),
         patch_id=[],
         round_index=0,
@@ -228,22 +229,36 @@ def test_qpu_readout_skips_identity_round_and_fragment_validation():
     assert_frozen(readout)
 
 
-def test_binary_bits_normalize_none_lists_and_tuples():
-    """Binary bit normalization converts supported Python forms to immutable integers."""
-    assert message.normalize_binary_bits(None) is None
-    assert message.normalize_binary_bits([True, False, 1, 0]) == (1, 0, 1, 0)
-    assert message.normalize_binary_bits((0, True, 1)) == (0, 1, 1)
+def test_a_timing_only_readout_retains_no_bits():
+    """A readout with no bits stays a timing-only fragment."""
+    readout = round_records.QPUReadout(
+        operation_id="operation",
+        patch_id="patch",
+        round_index=2,
+        bits=None,
+        size_bits=2,
+    )
+    fragment = round_records.RetainedSyndromeFragment.from_readout(readout)
+    assert fragment.bits is None
 
 
-def test_binary_bits_normalize_one_dimensional_boolean_arrays():
-    """Binary bit normalization converts one-dimensional NumPy boolean arrays."""
+def test_readout_bits_from_a_boolean_array_become_zero_one_integers():
+    """A one-dimensional NumPy boolean readout normalizes to 0/1 integers."""
     bits = np.array([True, False, True], dtype=bool)
-    assert message.normalize_binary_bits(bits) == (1, 0, 1)
+    readout = round_records.QPUReadout(
+        operation_id="operation",
+        patch_id="patch",
+        round_index=2,
+        bits=bits,
+        size_bits=3,
+    )
+    fragment = round_records.RetainedSyndromeFragment.from_readout(readout)
+    assert fragment.bits == (1, 0, 1)
 
 
 def test_retained_fragment_normalizes_readout_bits():
     """Retained fragments normalize readout bits while copying transport metadata."""
-    readout = message.QPUReadout(
+    readout = round_records.QPUReadout(
         operation_id="operation",
         patch_id="patch",
         round_index=2,
@@ -252,7 +267,7 @@ def test_retained_fragment_normalizes_readout_bits():
         fragment_index=3,
         size_bits=2,
     )
-    fragment = message.RetainedSyndromeFragment.from_readout(readout)
+    fragment = round_records.RetainedSyndromeFragment.from_readout(readout)
     assert fragment.bits == (1, 0)
     assert fragment.operation_id == "operation"
     assert fragment.fragment_index == 3
@@ -262,7 +277,7 @@ def test_round_packet_preserves_supplied_fragment_order_and_is_frozen():
     """Round packets preserve supplied fragment order without sorting."""
     later_fragment = make_fragment(patch_id="patch-b", fragment_index=1)
     earlier_fragment = make_fragment(patch_id="patch-a", fragment_index=0)
-    packet = message.SyndromeRoundPacket(
+    packet = round_records.SyndromeRoundPacket(
         operation_id=7,
         round_index=3,
         fragments=(later_fragment, earlier_fragment),

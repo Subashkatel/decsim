@@ -12,14 +12,14 @@ import functools
 import random
 
 import decsim.engine as engine_module
-import decsim.message as message
 import decsim.observe.round_store_occupancy as round_store_occupancy
+import decsim.records.rounds as round_records
 import decsim.syndrome_buffer.round_store as round_store_module
 import decsim.syndrome_buffer.settings as round_store_settings
 
 
-def packet(round_index: int) -> message.SyndromeRoundPacket:
-    fragment = message.RetainedSyndromeFragment(
+def packet(round_index: int) -> round_records.SyndromeRoundPacket:
+    fragment = round_records.RetainedSyndromeFragment(
         operation_id=1,
         patch_id=0,
         round_index=round_index,
@@ -27,7 +27,7 @@ def packet(round_index: int) -> message.SyndromeRoundPacket:
         size_bits=1,
         fragment_index=0,
     )
-    return message.SyndromeRoundPacket(1, round_index, (fragment,))
+    return round_records.SyndromeRoundPacket(1, round_index, (fragment,))
 
 
 def run_random_trace(seed: int):

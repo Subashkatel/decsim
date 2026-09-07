@@ -21,6 +21,7 @@ from typing import Optional
 
 import decsim.message as message
 import decsim.observe.trace_source as trace_source
+import decsim.records.rounds as round_records
 
 
 class RoundTransmitter:
@@ -39,7 +40,7 @@ class RoundTransmitter:
         self.round_event = trace_source.TraceSource()
 
     def publication_tick_at_storage(
-        self, route: message.SyndromePacketRoute
+        self, route: round_records.SyndromePacketRoute
     ) -> Optional[int]:
         """The tick a round stored now is published, if known at storage.
 
@@ -48,14 +49,14 @@ class RoundTransmitter:
         published at delivery; a feedback-memory round is never
         published, its terminal is FEEDBACK_MEMORY_DELIVERED.
         """
-        window_input = message.SyndromePacketRouteKind.WINDOW_INPUT
+        window_input = round_records.SyndromePacketRouteKind.WINDOW_INPUT
         if route.kind is not window_input:
             return None
         if self._publishes_at_delivery():
             return None
         return self.engine.now
 
-    def send(self, packed: message.PackedRound) -> None:
+    def send(self, packed: round_records.PackedRound) -> None:
         """Send the round on its route at this tick.
 
         The departure is its own event, so the writer's own step (the
@@ -69,8 +70,8 @@ class RoundTransmitter:
         depart = functools.partial(self._depart, packed)
         self.engine.schedule(0, depart, label="round transmission")
 
-    def _depart(self, packed: message.PackedRound) -> None:
-        window_input = message.SyndromePacketRouteKind.WINDOW_INPUT
+    def _depart(self, packed: round_records.PackedRound) -> None:
+        window_input = round_records.SyndromePacketRouteKind.WINDOW_INPUT
         if packed.route.kind is window_input:
             self._send_window_input(packed)
             return
@@ -87,7 +88,7 @@ class RoundTransmitter:
     def _publishes_at_delivery(self) -> bool:
         return self.link.is_wired(message.LinkPath.CONTROLLER_TO_WEAK_BUFFER)
 
-    def _send_window_input(self, packed: message.PackedRound) -> None:
+    def _send_window_input(self, packed: round_records.PackedRound) -> None:
         if not self._publishes_at_delivery():
             self.windows.accept_window_input(packed.packet)
             self._leave_after_publication()
@@ -96,7 +97,7 @@ class RoundTransmitter:
         publish = functools.partial(self._publish, packed)
         self._send(message.LinkPath.CONTROLLER_TO_WEAK_BUFFER, packed, publish)
 
-    def _publish(self, packed: message.PackedRound) -> None:
+    def _publish(self, packed: round_records.PackedRound) -> None:
         """The round reached Buffer 0: stamp it, record it, wake the windows."""
         self.weak_store.mark_publication_tick(packed.round_key, self.engine.now)
         self._fire("PUBLISHED", packed)
@@ -114,13 +115,15 @@ class RoundTransmitter:
     def _leave(self) -> None:
         self.in_flight -= 1
 
-    def _send_feedback_memory(self, packed: message.PackedRound) -> None:
+    def _send_feedback_memory(self, packed: round_records.PackedRound) -> None:
         deliver = functools.partial(self._deliver_feedback_memory, packed)
         self._send(
             message.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER, packed, deliver
         )
 
-    def _deliver_feedback_memory(self, packed: message.PackedRound) -> None:
+    def _deliver_feedback_memory(
+        self, packed: round_records.PackedRound
+    ) -> None:
         """The memory round landed: tell the windows and free its slot."""
         source_operation_id = packed.route.source_operation_id
         self.windows.accept_feedback_memory_round(source_operation_id)
@@ -128,9 +131,9 @@ class RoundTransmitter:
         self.weak_store.release_round(packed.round_key)
         self._leave()
 
-    def _fire(self, kind: str, packed: message.PackedRound) -> None:
+    def _fire(self, kind: str, packed: round_records.PackedRound) -> None:
         operation_id, round_index = packed.round_key
-        event = message.RoundEvent.of(
+        event = round_records.RoundEvent.of(
             kind, self.engine.now, operation_id, round_index, packed.route
         )
         self.round_event.fire(event)

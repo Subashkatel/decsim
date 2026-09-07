@@ -20,6 +20,7 @@ import decsim.engine
 import decsim.message as message
 import decsim.observe.trace_source as trace_source
 import decsim.ports as ports
+import decsim.records.rounds as round_records
 
 # Patches and operation ids are opaque identities chosen by the workload;
 # Any stands for them in every signature below.
@@ -140,10 +141,12 @@ class QPUDevice:
         self, operation_id: Any, patch: Any, round_index: int
     ) -> None:
         """Deliver the timing-only round of an idle patch."""
-        payload = message.QPUReadout(
+        payload = round_records.QPUReadout(
             ("idle", operation_id, patch), patch, round_index
         )
-        route = message.SyndromePacketRoute.feedback_memory_round(operation_id)
+        route = round_records.SyndromePacketRoute.feedback_memory_round(
+            operation_id
+        )
         self.readout_receiver.accept_qpu_readout(payload, route)
 
     def _schedule_boundary(self, boundary: int) -> None:
@@ -243,7 +246,9 @@ class QPUDevice:
         self.completion_receiver(operation)
 
     def _deliver(
-        self, payloads: list[message.QPUReadout], operation: message.Operation
+        self,
+        payloads: list[round_records.QPUReadout],
+        operation: message.Operation,
     ) -> None:
         """Stamp every payload with its fragment slot and hand it on."""
         if not payloads:
@@ -272,7 +277,7 @@ class QPUDevice:
             )
             self.round_emitted.fire(readout)
             self.readout_receiver.accept_qpu_readout(
-                readout, message.WINDOW_INPUT_ROUTE
+                readout, round_records.WINDOW_INPUT_ROUTE
             )
 
 

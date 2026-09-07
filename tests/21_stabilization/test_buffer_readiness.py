@@ -7,15 +7,12 @@ adds its declared cost, so each assertion is exact arithmetic.
 
 import pytest
 
+import decsim.records.rounds as round_records
 from decsim.config import microseconds_to_ticks
 from decsim.engine import Engine
 from decsim.links.fabric import LinkFabric
 from decsim.links.link_profiles import logical_reference_profile
-from decsim.message import (
-    DecoderTier,
-    RetainedSyndromeFragment,
-    SyndromeRoundPacket,
-)
+from decsim.message import DecoderTier
 
 
 def test_weak_only_pipeline_arithmetic(fabric):

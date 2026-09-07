@@ -12,18 +12,18 @@ store; a feedback-memory round still crosses Buffer 0.
 import decsim.controller.round_writes as round_writes
 import decsim.controller.settings as controller_settings
 import decsim.engine as engine_module
-import decsim.message as message
 import decsim.observe.round_events as round_events
+import decsim.records.rounds as round_records
 import decsim.syndrome_buffer.round_store as round_store_module
 import decsim.syndrome_buffer.settings as round_store_settings
 
 STALL = controller_settings.PackingOverflowPolicy.STALL
 DROP = controller_settings.PackingOverflowPolicy.DROP_ROUND
-MEMORY_ROUTE = message.SyndromePacketRoute.feedback_memory_round(9)
+MEMORY_ROUTE = round_records.SyndromePacketRoute.feedback_memory_round(9)
 
 
-def packed(round_index, route=message.WINDOW_INPUT_ROUTE):
-    fragment = message.RetainedSyndromeFragment(
+def packed(round_index, route=round_records.WINDOW_INPUT_ROUTE):
+    fragment = round_records.RetainedSyndromeFragment(
         operation_id=1,
         patch_id=0,
         round_index=round_index,
@@ -31,8 +31,8 @@ def packed(round_index, route=message.WINDOW_INPUT_ROUTE):
         size_bits=2,
         fragment_index=0,
     )
-    packet = message.SyndromeRoundPacket(1, round_index, (fragment,))
-    return message.PackedRound(packet, route, 2)
+    packet = round_records.SyndromeRoundPacket(1, round_index, (fragment,))
+    return round_records.PackedRound(packet, route, 2)
 
 
 class RecordingTransmitter:
@@ -41,7 +41,7 @@ class RecordingTransmitter:
         self.sent = []
 
     def publication_tick_at_storage(self, route):
-        if route.kind is message.SyndromePacketRouteKind.WINDOW_INPUT:
+        if route.kind is round_records.SyndromePacketRouteKind.WINDOW_INPUT:
             return self.engine.now
         return None
 

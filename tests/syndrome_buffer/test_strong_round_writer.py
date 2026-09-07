@@ -15,6 +15,7 @@ import decsim.engine as engine_module
 import decsim.links.fabric as fabric_module
 import decsim.links.link_profiles as link_profiles
 import decsim.message as message
+import decsim.records.rounds as round_records
 import decsim.syndrome_buffer.round_store as round_store_module
 import decsim.syndrome_buffer.settings as round_store_settings
 import decsim.syndrome_buffer.strong_round_writer as strong_round_writer
@@ -22,8 +23,8 @@ import decsim.syndrome_buffer.strong_round_writer as strong_round_writer
 LANDING_TICKS = config.microseconds_to_ticks(0.5)
 
 
-def packet(round_index: int) -> message.SyndromeRoundPacket:
-    fragment = message.RetainedSyndromeFragment(
+def packet(round_index: int) -> round_records.SyndromeRoundPacket:
+    fragment = round_records.RetainedSyndromeFragment(
         operation_id=1,
         patch_id=0,
         round_index=round_index,
@@ -31,7 +32,7 @@ def packet(round_index: int) -> message.SyndromeRoundPacket:
         size_bits=3,
         fragment_index=0,
     )
-    return message.SyndromeRoundPacket(1, round_index, (fragment,))
+    return round_records.SyndromeRoundPacket(1, round_index, (fragment,))
 
 
 def attribution(round_index: int) -> message.TransferAttribution:

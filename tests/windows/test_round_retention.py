@@ -14,6 +14,7 @@ C: the restart window re-reads one buffer into the strong region).
 import types
 
 import decsim.message as message
+import decsim.records.rounds as round_records
 import decsim.syndrome_buffer.round_store as round_store_module
 import decsim.syndrome_buffer.settings as round_store_settings
 import decsim.windows.round_retention as round_retention
@@ -45,8 +46,8 @@ def _retention(store, round_counts: dict, successors: dict):
     )
 
 
-def _packet(operation_id, round_index) -> message.SyndromeRoundPacket:
-    fragment = message.RetainedSyndromeFragment(
+def _packet(operation_id, round_index) -> round_records.SyndromeRoundPacket:
+    fragment = round_records.RetainedSyndromeFragment(
         operation_id=operation_id,
         patch_id=0,
         round_index=round_index,
@@ -54,7 +55,9 @@ def _packet(operation_id, round_index) -> message.SyndromeRoundPacket:
         size_bits=None,
         fragment_index=0,
     )
-    return message.SyndromeRoundPacket(operation_id, round_index, (fragment,))
+    return round_records.SyndromeRoundPacket(
+        operation_id, round_index, (fragment,)
+    )
 
 
 def test_a_window_holds_its_read_range_plus_the_successor_overflow():

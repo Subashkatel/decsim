@@ -28,13 +28,14 @@ import decsim.links.settings as link_settings
 import decsim.message as message
 import decsim.observe.link_traffic as link_traffic
 import decsim.observe.round_events as round_events
+import decsim.records.rounds as round_records
 import decsim.syndrome_buffer.round_store as round_store_module
 import decsim.syndrome_buffer.settings as round_store_settings
 
 CWB_TICKS = config.microseconds_to_ticks(0.25)
 WBD_TICKS = config.microseconds_to_ticks(5.0)
 CYCLE_TICKS = config.microseconds_to_ticks(1.0)
-MEMORY_ROUTE = message.SyndromePacketRoute.feedback_memory_round(7)
+MEMORY_ROUTE = round_records.SyndromePacketRoute.feedback_memory_round(7)
 WBD_PATH = message.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER
 # 64 bits at 1000 bits per microsecond, one serialization on the wire
 ROUND_BITS = 64
@@ -79,8 +80,8 @@ class DispatchingWindows:
         )
 
 
-def packed(round_index, route=message.WINDOW_INPUT_ROUTE, wire_bits=2):
-    fragment = message.RetainedSyndromeFragment(
+def packed(round_index, route=round_records.WINDOW_INPUT_ROUTE, wire_bits=2):
+    fragment = round_records.RetainedSyndromeFragment(
         operation_id=1,
         patch_id=0,
         round_index=round_index,
@@ -88,8 +89,8 @@ def packed(round_index, route=message.WINDOW_INPUT_ROUTE, wire_bits=2):
         size_bits=2,
         fragment_index=0,
     )
-    packet = message.SyndromeRoundPacket(1, round_index, (fragment,))
-    return message.PackedRound(packet, route, wire_bits)
+    packet = round_records.SyndromeRoundPacket(1, round_index, (fragment,))
+    return round_records.PackedRound(packet, route, wire_bits)
 
 
 def priced_cwb_profile():
@@ -231,7 +232,7 @@ def test_memory_rounds_pipeline_onto_the_link_without_a_landing_wait():
     "first_route, memory_delivery, input_delivery, wire_order",
     [
         (MEMORY_ROUTE, 1, 2, [1, 9]),
-        (message.WINDOW_INPUT_ROUTE, 2, 1, [9, 1]),
+        (round_records.WINDOW_INPUT_ROUTE, 2, 1, [9, 1]),
     ],
 )
 def test_rounds_sent_at_one_tick_leave_in_completion_order(

@@ -10,16 +10,17 @@ import functools
 import decsim.engine as engine_module
 import decsim.message as message
 import decsim.observe.round_events as round_events
+import decsim.records.rounds as round_records
 
 
 def test_an_event_is_kept_with_the_tick_it_carries():
     engine = engine_module.Engine()
     recorder = round_events.RoundEventRecorder(engine)
-    packed = message.RoundEvent.of(
-        "PACKED", 40, 1, 3, message.WINDOW_INPUT_ROUTE
+    packed = round_records.RoundEvent.of(
+        "PACKED", 40, 1, 3, round_records.WINDOW_INPUT_ROUTE
     )
-    published = message.RoundEvent.of(
-        "PUBLISHED", 25, 1, 3, message.WINDOW_INPUT_ROUTE
+    published = round_records.RoundEvent.of(
+        "PUBLISHED", 25, 1, 3, round_records.WINDOW_INPUT_ROUTE
     )
 
     recorder.record(packed)
@@ -35,8 +36,8 @@ def test_an_event_is_kept_with_the_tick_it_carries():
 def test_a_dropped_round_is_counted_and_kept_as_dropped():
     engine = engine_module.Engine()
     recorder = round_events.RoundEventRecorder(engine)
-    dropped = message.RoundEvent.of(
-        "DROPPED", 0, 1, 2, message.WINDOW_INPUT_ROUTE, 0
+    dropped = round_records.RoundEvent.of(
+        "DROPPED", 0, 1, 2, round_records.WINDOW_INPUT_ROUTE, 0
     )
 
     recorder.record(dropped)
@@ -50,7 +51,9 @@ def test_an_output_event_carries_the_payload_itself():
     engine = engine_module.Engine()
     recorder = round_events.RoundEventRecorder(engine)
     decision = message.Decision(9, releases_operation=False)
-    event = message.ControllerOutputEvent("DECISION_AVAILABLE", 0, 9, decision)
+    event = round_records.ControllerOutputEvent(
+        "DECISION_AVAILABLE", 0, 9, decision
+    )
 
     recorder.output(event)
 

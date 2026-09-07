@@ -24,8 +24,47 @@ python -m pip install -e ".[experiments]"
 
 ## Quickstart
 
-A run is one `Machine` built from a `MachineSettings` and run once. Every
-settings field has a default; you set only what you study. This
+A run is one `Machine` built from a `MachineSettings` and run once. The
+settings come from a yaml file, which is decsim's config script, or
+from Python directly.
+
+### From a yaml
+
+```python
+from decsim.front.experiment import load_experiment
+from decsim.machine import Machine
+
+experiment = load_experiment("configs/reference.yaml")
+settings = experiment.point_settings(
+    physical_error_probability=0.001, distance=3, round_period_us=1.0)
+result = Machine.build(settings, seed=0).run()
+```
+
+A yaml names a sweep, so a point of it names one machine;
+`configs/reference.yaml` documents every key the yaml layer reads.
+
+### From the command line
+
+One command, one subcommand per word, as sinter's is:
+
+```bash
+decsim run configs/reference.yaml --seed 0 --trace   # one seeded shot
+decsim collect configs/weak_ler.yaml --processes 8   # the whole sweep
+decsim collect configs/weak_ler.yaml --shard 0/4     # one Slurm array task
+decsim combine results/<a> results/<b>               # the shards' rows
+decsim show configs/reference.yaml                   # what the yaml resolves to
+decsim plot results/<run> --figure timeline          # a figure from its files
+decsim trace follow results/<run>/trace/<shot>.trace.json --round 1:1
+```
+
+`python -m decsim <verb>` is the same command. `collect` writes a run
+folder under `results/`, which is output and is not tracked: one row per
+shot in `shots.csv`, one per point in `sweep.csv`, one per link in
+`links.csv`, the config it ran, and the figures.
+
+### From Python alone
+
+Every settings field has a default; you set only what you study. This
 timing-only run needs no dependencies:
 
 ```python
@@ -137,6 +176,13 @@ its `kind`, a row of the tables at the top of `decsim/machine.py`.
 - `decoders/`: manager, engine stages (fetch, algorithm, release), and the six backends.
 - `pauli_frame/`, `observe/`: frame commit, conditional release, and run metrics.
 - `frontends/`: workload builders that produce `Operation` lists.
+- `front/`: the way in. The `decsim` command set, the yaml experiment and
+  its sweep, one shot to one row, the csv report, the figures, the run
+  folder, the flow view over a trace file, and the offline LER lane.
+- `collect.py`: tasks and the shots collected from them, sinter's shape:
+  a process pool over tasks, shards, and one window model build per task.
+- `configs/`: the yaml experiments, gem5's `configs/`. `results/`: their
+  output, gem5's `m5out/`, not tracked.
 
 To add your own decoder, scheme, or policy, implement the matching port
 in `decsim/ports.py` and add one row to its table in `decsim/machine.py`,
@@ -147,3 +193,5 @@ or pass the instance through its settings record.
 ```bash
 python -m pytest tests
 ```
+
+The rules every line of this package is written to are in `REWRITE.md`.

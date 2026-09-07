@@ -270,7 +270,7 @@ def from_yaml(
     classification on its own line, so its qpu_to_controller card is
     link propagation only, and the fabric says so.
     """
-    source = f"experiments/configs/{name}.yaml links"
+    source = f"configs/{name}.yaml links"
     path_names = []
     for path in message.LinkPath:
         path_names.append(path.value)

@@ -239,9 +239,7 @@ def test_combine_writes_the_same_rows_whichever_order_the_shards_come_in(
         assert serial == combined
 
 
-def test_combining_folders_of_two_different_sweeps_is_refused(
-    tmp_path, capsys
-):
+def test_combining_folders_of_two_different_sweeps_is_refused(tmp_path, capsys):
     first_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)
     second_path = tmp_path / "other.yaml"
     other_text = first_path.read_text()

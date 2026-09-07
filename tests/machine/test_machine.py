@@ -15,6 +15,7 @@ the controller, the stores, the windows and the frame produced.
 
 import dataclasses
 import pathlib
+import re
 
 import numpy
 import pytest
@@ -53,6 +54,16 @@ THIS_FILE = pathlib.Path(__file__)
 TESTS_DIRECTORY = THIS_FILE.parents[1]
 CONFIGS = TESTS_DIRECTORY.parent / "configs"
 CYCLE_TICKS = config.microseconds_to_ticks(1.0)
+
+
+def tier_rows() -> str:
+    """The decoder table's rows as a refusal prints them, as a pattern.
+
+    Read from the table, so a row added to it breaks no test here:
+    that is what the plug-in page promises a new decoder costs.
+    """
+    rows = sorted(machine_module.DECODERS)
+    return re.escape(repr(rows))
 
 
 class RecordingReceiver:
@@ -160,12 +171,11 @@ def test_a_second_table_row_runs_gate_point_one():
 def test_a_decoder_kind_off_the_table_is_refused_naming_the_rows():
     weak_decoder = decoder_settings.DecoderSettings(kind="lookup_table")
     settings = machine_module.MachineSettings(weak_decoder=weak_decoder)
-    with pytest.raises(
-        ValueError,
-        match="weak_decoder.kind 'lookup_table' is not a row of its table; "
-        r"the rows are \['belief_matching', 'bposd', 'pymatching', "
-        r"'relay_bp', 'tesseract', 'union_find', 'unweighted_pymatching'\]",
-    ):
+    sentence = (
+        "weak_decoder.kind 'lookup_table' is not a row of its table; "
+        "the rows are " + tier_rows()
+    )
+    with pytest.raises(ValueError, match=sentence):
         machine_module.Machine.build(settings)
 
 
@@ -302,12 +312,6 @@ def test_the_cluster_gap_decoder_runs_as_a_python_built_tier():
     assert len(machine.observation.log.lines) == 19
 
 
-TIER_ROWS = (
-    r"\['belief_matching', 'bposd', 'pymatching', 'relay_bp', 'tesseract', "
-    r"'union_find', 'unweighted_pymatching'\]"
-)
-
-
 @pytest.mark.parametrize(
     "escalation_kind, tier",
     [
@@ -350,7 +354,7 @@ def test_the_cluster_gap_is_not_a_tier_kind_under_any_escalation(
     )
     sentence = (
         f"{tier}_decoder.kind 'union_find_cluster_gap' is not a row of its "
-        "table; the rows are " + TIER_ROWS
+        "table; the rows are " + tier_rows()
     )
     with pytest.raises(ValueError, match=sentence):
         machine_module.Machine.build(settings, 0)

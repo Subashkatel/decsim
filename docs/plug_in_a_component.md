@@ -24,6 +24,14 @@ your class and what makes it appear in a sweep. One row, nothing more.
    pipeline order, one method per handoff) and write a class with those
    methods. The Protocols are structural: you do not inherit anything.
    The record each method takes and returns lives in `decsim/records/`.
+   A port with members that are not methods says where their values
+   come from: the `Decoder`'s `fault_model_requirement` is one of the
+   four in `decsim/detector_error_model/fault_model_contracts.py`, and
+   its `stage_recorded` is a `decsim/observe/trace_source.py` source,
+   `SILENT` for a decoder with no internal stages. Inheriting
+   `decsim/decoders/decoder.py`'s `DecoderBase` gives you both, and
+   `start`, `cancel`, `occupancy` and `pipeline_depth` besides, so a
+   decoder can be `decode` and `latency` alone.
 2. **Add the row**, if a yaml needs to name it: one entry in the table
    your part belongs to in `decsim/machine.py` (`DECODERS`,
    `SYNDROME_SOURCES`, `ROUND_STORES`, `ESCALATIONS`,

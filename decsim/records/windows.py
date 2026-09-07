@@ -51,7 +51,9 @@ class Window:
     """
 
     operation_id: int  # operation that owns the stream
-    k: int  # window index within the op; key = (operation_id, k)
+    # the window's index within the operation;
+    # key = (operation_id, window_index)
+    window_index: int
     commit_lo: int  # first round this window commits
     commit_hi: int  # last round this window commits
     buffer_hi: int  # last round it reads (trailing buffer)
@@ -103,8 +105,8 @@ class Window:
 
     @property
     def key(self) -> tuple:
-        """(operation_id, k), the key every window collection is keyed by."""
-        return (self.operation_id, self.k)
+        """(operation_id, window_index), the key window collections use."""
+        return (self.operation_id, self.window_index)
 
 
 @dataclass(frozen=True)
@@ -112,7 +114,7 @@ class WindowInfo:
     """Read-only geometry and topology exposed to interaction policies."""
 
     operation_id: int
-    k: int
+    window_index: int
     commit_lo: int
     commit_hi: int
     buffer_hi: int
@@ -135,7 +137,7 @@ class WindowInfo:
             positions = dict(detector_positions)
         return cls(
             operation_id=window.operation_id,
-            k=window.k,
+            window_index=window.window_index,
             commit_lo=window.commit_lo,
             commit_hi=window.commit_hi,
             buffer_hi=window.buffer_hi,
@@ -188,9 +190,10 @@ class OperationWindowPlan:
 class WindowPlan:
     """Compile-time window layout handed to the window manager."""
 
-    windows: dict  # (operation_id, k) -> Window
+    windows: dict  # (operation_id, window_index) -> Window
     window_count: dict  # operation_id -> number of windows
-    op_windows: dict  # operation_id -> [window keys, in k order]
+    # operation_id -> [window keys, in window_index order]
+    op_windows: dict
     successors: dict  # operation_id -> [op ids listing it as predecessor]
     spatial_nodes: dict  # operation_id -> decoding-graph nodes per round
     rounds_by_operation: dict  # operation_id -> resolved positive round count

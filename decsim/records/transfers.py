@@ -119,7 +119,7 @@ class TransferAttribution:
         return cls(
             operation_id=operation.id,
             patch_ids=tuple(ordered_patches),
-            window_id=window.k,
+            window_id=window.window_index,
             first_round=first_round,
             last_round=last_round,
             relation=relation,

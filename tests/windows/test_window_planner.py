@@ -184,7 +184,7 @@ def test_a_stream_grows_one_window_when_its_commit_region_begins():
     assert planner.grow_stream("stream", 1, None) != []
     assert planner.grow_stream("stream", 3, None) == []
     created = planner.grow_stream("stream", 7, None)
-    assert [window.k for window in created] == [1, 2]
+    assert [window.window_index for window in created] == [1, 2]
     first, second, third = planner.windows_of("stream")
     assert (first.commit_lo, first.commit_hi, first.buffer_hi) == (1, 3, 5)
     assert (second.commit_lo, second.commit_hi, second.buffer_hi) == (4, 6, 8)
@@ -225,7 +225,7 @@ def test_idle_rounds_fold_only_into_a_batch_style_operation():
     plan = _empty_plan()
     window = window_records.Window(
         operation_id=7,
-        k=0,
+        window_index=0,
         commit_lo=1,
         commit_hi=6,
         buffer_hi=6,

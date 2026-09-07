@@ -33,7 +33,7 @@ def test_a_window_send_carries_its_round_range_and_request_key():
     operation = program_records.Operation(1, "memory", (0,), patches=(3, 2))
     window = window_records.Window(
         operation_id=1,
-        k=4,
+        window_index=4,
         commit_lo=9,
         commit_hi=11,
         buffer_hi=13,
@@ -69,7 +69,7 @@ def test_a_job_send_returns_the_delay_the_link_expects():
     transfers = window_transfers.WindowTransfers(engine, link)
     window = window_records.Window(
         operation_id=1,
-        k=0,
+        window_index=0,
         commit_lo=1,
         commit_hi=3,
         buffer_hi=5,

@@ -56,7 +56,12 @@ OTHER_SOURCE = decoding_records.SoftOutputSource(
     references=(),
 )
 WINDOW = window_records.Window(
-    operation_id=1, k=1, commit_lo=4, commit_hi=6, buffer_hi=9, round_count=6
+    operation_id=1,
+    window_index=1,
+    commit_lo=4,
+    commit_hi=6,
+    buffer_hi=9,
+    round_count=6,
 )
 JOB = decoding_records.DecodeJob(operation_id=1, window_id=1, round_count=6)
 WEAK_TIER = (window_records.DecoderTier.WEAK,)

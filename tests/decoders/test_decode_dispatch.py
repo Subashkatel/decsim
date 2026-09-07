@@ -32,7 +32,7 @@ class _OpenGate:
 def _window(index, deps_remaining):
     return window_records.Window(
         operation_id=1,
-        k=index,
+        window_index=index,
         commit_lo=1,
         commit_hi=1,
         buffer_hi=1,

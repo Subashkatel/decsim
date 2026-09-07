@@ -380,7 +380,7 @@ class WindowPlanner:
         round_count = geometry.buffer_hi - buffer_lo + 1
         window = window_records.Window(
             operation_id=stream_id,
-            k=window_index,
+            window_index=window_index,
             commit_lo=geometry.commit_lo,
             commit_hi=geometry.commit_hi,
             buffer_hi=geometry.buffer_hi,

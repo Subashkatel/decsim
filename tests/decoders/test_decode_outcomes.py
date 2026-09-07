@@ -166,7 +166,7 @@ def test_the_terminal_sources_carry_every_ended_request_and_service():
     job.service_dispatch_ticks = 0
     job.window = window_records.Window(
         operation_id=1,
-        k=0,
+        window_index=0,
         commit_lo=1,
         commit_hi=3,
         buffer_hi=5,

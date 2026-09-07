@@ -23,6 +23,7 @@ import functools
 from typing import Optional
 
 import decsim.message as message
+import decsim.records.windows as window_records
 
 
 class RoundRetention:
@@ -36,7 +37,7 @@ class RoundRetention:
         tracker,
         *,
         is_strong_context_retained: bool,
-        primary_tier: message.DecoderTier,
+        primary_tier: window_records.DecoderTier,
     ) -> None:
         self.weak_store = weak_store
         self.strong_store = strong_store
@@ -54,14 +55,14 @@ class RoundRetention:
         Buffer 0 for the weak lane, syndrome buffer 1 for a strong-primary
         plan.
         """
-        if self.primary_tier is message.DecoderTier.STRONG:
+        if self.primary_tier is window_records.DecoderTier.STRONG:
             return self.strong_store
         return self.weak_store
 
     @property
     def primary_input_path(self) -> message.LinkPath:
         """The link the primary tier's input rides into its unit."""
-        if self.primary_tier is message.DecoderTier.WEAK:
+        if self.primary_tier is window_records.DecoderTier.WEAK:
             return message.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER
         return message.LinkPath.STRONG_BUFFER_TO_STRONG_DECODER
 
@@ -85,7 +86,9 @@ class RoundRetention:
 
     # ---- a window's reads
 
-    def register_window(self, key: tuple, window: message.Window) -> None:
+    def register_window(
+        self, key: tuple, window: window_records.Window
+    ) -> None:
         """Register the weak and possible-strong holds of a new window."""
         weak = self.read_keys_for_bounds(
             window.op_id, window.start_round, window.buffer_hi, window
@@ -97,7 +100,9 @@ class RoundRetention:
             held = weak + strong
             self.strong_store.register_hold(potential, held)
 
-    def replace_window_reads(self, key: tuple, window: message.Window) -> None:
+    def replace_window_reads(
+        self, key: tuple, window: window_records.Window
+    ) -> None:
         """Re-point the window's live holds at its reads.
 
         The potential strong read moves first, so a shrinking weak read
@@ -127,7 +132,7 @@ class RoundRetention:
         restart = message.PotentialRestart(key)
         self.release_hold_if_live(restart)
 
-    def reset_clipped_window_reads(self, window: message.Window) -> None:
+    def reset_clipped_window_reads(self, window: window_records.Window) -> None:
         """After clipping a live tail, retain only the weak commit range."""
         stop_round = window.commit_hi + 1
         new_reads = []
@@ -141,7 +146,7 @@ class RoundRetention:
         operation_id,
         start_round: int,
         buffer_hi: int,
-        window: Optional[message.Window] = None,
+        window: Optional[window_records.Window] = None,
     ) -> list:
         """Retained payload round keys for a possibly cross-operation range."""
         operation_rounds = self.tracker.effective_round_count_for_window(
@@ -165,7 +170,7 @@ class RoundRetention:
         return reads
 
     def strong_context_read_keys(
-        self, window: message.Window, weak_reads: list
+        self, window: window_records.Window, weak_reads: list
     ) -> list:
         """Rounds kept until the strong decoder is known to need them."""
         if not self.is_strong_context_retained:
@@ -264,7 +269,9 @@ class RoundRetention:
     # ---- private
 
     def _check_store_capacities(self, buffering_plan) -> None:
-        strong_is_primary = self.primary_tier is message.DecoderTier.STRONG
+        strong_is_primary = (
+            self.primary_tier is window_records.DecoderTier.STRONG
+        )
         capacity = self.weak_store.settings.rounds
         minimum = buffering_plan.minimum_live_rounds
         if strong_is_primary:
@@ -290,7 +297,7 @@ class RoundRetention:
             )
 
 
-def strong_context_bounds(window: message.Window) -> tuple:
+def strong_context_bounds(window: window_records.Window) -> tuple:
     """(context_lo, commit_lo, commit_hi, context_hi) of a strong redo.
 
     One buffer of context on each side of the commit region, clipped at

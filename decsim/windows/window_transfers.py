@@ -10,6 +10,7 @@ import functools
 from typing import Callable, Optional
 
 import decsim.message as message
+import decsim.records.windows as window_records
 
 
 class WindowTransfers:
@@ -27,9 +28,9 @@ class WindowTransfers:
     def send_for_window(
         self,
         path: message.LinkPath,
-        window: message.Window,
+        window: window_records.Window,
         operation: message.Operation,
-        request_key: message.DecoderRequestKey,
+        request_key: window_records.DecoderRequestKey,
         payload_bits: Optional[int],
         on_delivered: Callable[[], None],
     ) -> None:
@@ -48,7 +49,7 @@ class WindowTransfers:
         job: message.DecodeJob,
         *,
         payload_bits: Optional[int],
-        request_key: Optional[message.DecoderRequestKey] = None,
+        request_key: Optional[window_records.DecoderRequestKey] = None,
         on_delivered: Callable[[], None],
     ) -> int:
         """Send in a job's name; on_delivered runs at the delivery.
@@ -70,7 +71,7 @@ class WindowTransfers:
     def send_selection(
         self,
         weak_job: message.DecodeJob,
-        strong_request_key: message.DecoderRequestKey,
+        strong_request_key: window_records.DecoderRequestKey,
         on_delivered: Callable[[], None],
     ) -> int:
         """Send a window's strong selection over weak_decoder_to_strong_decoder.

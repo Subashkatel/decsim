@@ -10,6 +10,7 @@ import types
 
 import decsim.message as message
 import decsim.observe.result_ledger as result_ledger
+import decsim.records.windows as window_records
 import decsim.windows.committed_rounds as committed_rounds
 import decsim.windows.operation_results as operation_results
 
@@ -36,9 +37,9 @@ class _Store:
         self.closed.append(operation_id)
 
 
-def _window(operation_id, index, commit_lo, commit_hi) -> message.Window:
+def _window(operation_id, index, commit_lo, commit_hi) -> window_records.Window:
     round_count = commit_hi - commit_lo + 1
-    return message.Window(
+    return window_records.Window(
         op_id=operation_id,
         k=index,
         commit_lo=commit_lo,
@@ -96,12 +97,14 @@ class _Fixture:
         windows = self.windows.values()
         return list(windows)
 
-    def commit(self, key, bits, is_final=True, tier=message.DecoderTier.WEAK):
+    def commit(
+        self, key, bits, is_final=True, tier=window_records.DecoderTier.WEAK
+    ):
         window = self.windows[key]
         window.committed = True
         self.results.install_window_contribution(window, bits)
         if is_final:
-            window.published_request_key = message.DecoderRequestKey(
+            window.published_request_key = window_records.DecoderRequestKey(
                 key[0], key[1], tier, key[1]
             )
         self.results.note_window_committed(window, is_final)
@@ -129,8 +132,8 @@ def test_a_window_awaiting_strong_holds_the_operation_result():
     assert fixture.completions == []
     window = fixture.windows[(1, 1)]
     fixture.results.replace_prediction((1, 1), (0, 0))
-    window.published_request_key = message.DecoderRequestKey(
-        1, 1, message.DecoderTier.STRONG, 7
+    window.published_request_key = window_records.DecoderRequestKey(
+        1, 1, window_records.DecoderTier.STRONG, 7
     )
     fixture.results.deliver_if_final(fixture.operation)
     assert fixture.release.released == [1]

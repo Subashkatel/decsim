@@ -13,6 +13,7 @@ import decsim.engine as engine_module
 import decsim.escalation.policies as escalation_policies
 import decsim.message as message
 import decsim.records.rounds as round_records
+import decsim.records.windows as window_records
 import decsim.syndrome_buffer.round_store as round_store_module
 import decsim.syndrome_buffer.settings as round_store_settings
 import decsim.windows.decode_requests as decode_requests
@@ -69,7 +70,7 @@ class _Fixture:
     def __init__(self) -> None:
         self.engine = engine_module.Engine()
         self.operation = message.Operation(1, "memory", (0,), patches=(0,))
-        self.window = message.Window(
+        self.window = window_records.Window(
             op_id=1, k=0, commit_lo=1, commit_hi=3, buffer_hi=5, n_rounds=5
         )
         settings = round_store_settings.RoundStoreSettings()
@@ -100,7 +101,7 @@ class _Fixture:
             self.planner,
             self.tracker,
             is_strong_context_retained=False,
-            primary_tier=message.DecoderTier.WEAK,
+            primary_tier=window_records.DecoderTier.WEAK,
         )
         link = _Link()
         transfers = window_transfers.WindowTransfers(self.engine, link)

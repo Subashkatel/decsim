@@ -2,13 +2,16 @@
 
 import decsim.message as message
 import decsim.observe.decode_records as decode_records
+import decsim.records.windows as window_records
 
 
 def _job():
-    window = message.Window(
+    window = window_records.Window(
         op_id=1, k=0, commit_lo=1, commit_hi=3, buffer_hi=5, n_rounds=5
     )
-    request_key = message.DecoderRequestKey(1, 0, message.DecoderTier.WEAK, 0)
+    request_key = window_records.DecoderRequestKey(
+        1, 0, window_records.DecoderTier.WEAK, 0
+    )
     service_key = message.DecoderServiceKey(0)
     return message.DecodeJob(
         op_id=1,

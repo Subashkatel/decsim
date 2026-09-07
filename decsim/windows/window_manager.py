@@ -27,6 +27,7 @@ from typing import Optional, Protocol, runtime_checkable
 import decsim.message as message
 import decsim.records.identity as identity_records
 import decsim.records.rounds as round_records
+import decsim.records.windows as window_records
 
 
 @runtime_checkable
@@ -38,7 +39,7 @@ class BoundaryPolicy(Protocol):
     revised, so serial switching (which can revise a result) needs Held.
     """
 
-    def on_commit(self, window: message.Window, *, final: bool) -> bool:
+    def on_commit(self, window: window_records.Window, *, final: bool) -> bool:
         """Whether to ship the boundary now."""
 
 
@@ -112,7 +113,7 @@ class WindowManager:
         self.window_interaction = window_interaction
         self.feedback_boundary_mode = feedback_boundary_mode
         for window in self.planner.windows_by_key.values():
-            window_info = message.WindowInfo.from_window(window)
+            window_info = window_records.WindowInfo.from_window(window)
             window.boundary_in = self.window_interaction.initial_boundary_state(
                 window_info
             )
@@ -177,12 +178,12 @@ class WindowManager:
         for window in created:
             self._admit_stream_window(window)
 
-    def _admit_stream_window(self, window: message.Window) -> None:
+    def _admit_stream_window(self, window: window_records.Window) -> None:
         """Connect one new stream window: its boundary, its model, its holds.
 
         If the previous boundary already arrived, apply it immediately.
         """
-        window_info = message.WindowInfo.from_window(window)
+        window_info = window_records.WindowInfo.from_window(window)
         window.boundary_in = self.window_interaction.initial_boundary_state(
             window_info
         )
@@ -193,7 +194,7 @@ class WindowManager:
         self.retention.register_window(window.key, window)
 
     def _link_to_previous_window(
-        self, previous_key: tuple, key: tuple, window: message.Window
+        self, previous_key: tuple, key: tuple, window: window_records.Window
     ) -> None:
         """A shipped boundary merges now; a held one is not available yet."""
         if self.courier.has_committed(previous_key):
@@ -254,7 +255,7 @@ class WindowManager:
         """
         operation = self.tracker.operation_by_id[packet.operation_id]
         self._refuse_unplanned_round(packet, operation)
-        if self.retention.primary_tier is not message.DecoderTier.STRONG:
+        if self.retention.primary_tier is not window_records.DecoderTier.STRONG:
             # Buffer 0 publication is the readiness authority for the weak lane
             self._count_arrival(operation, packet.round_index)
             self._update_stream(operation.id)
@@ -306,7 +307,7 @@ class WindowManager:
         """
         self.tracker.note_room_round(operation_id, round_index)
         self._wake_strong_tier(operation_id)
-        if self.retention.primary_tier is not message.DecoderTier.STRONG:
+        if self.retention.primary_tier is not window_records.DecoderTier.STRONG:
             return
         operation = self.tracker.operation_by_id[operation_id]
         stored_through = self.tracker.strong_rounds_arrived(operation_id)

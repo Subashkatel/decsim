@@ -13,6 +13,7 @@ from typing import Callable, Optional
 import decsim.config as config
 import decsim.message as message
 import decsim.records.identity as identity_records
+import decsim.records.windows as window_records
 
 
 @dataclasses.dataclass(frozen=True)
@@ -23,7 +24,7 @@ class RunPlan:
     resolved_operations: tuple[message.ResolvedOperationPlanning, ...]
     resolved_patches: tuple[message.ResolvedPatchPlanning, ...]
     round_ticks: int
-    execution: message.WindowPlan
+    execution: window_records.WindowPlan
     buffering: "SyndromeBufferingPlan"
 
 
@@ -306,7 +307,7 @@ def _planned(operations, resolved, planned_operation_ids) -> tuple:
 
 def _plan_windows(
     planned_views, planned_resolved, scheme, geometry
-) -> message.WindowPlan:
+) -> window_records.WindowPlan:
     check_operation_graph(
         list(planned_views), dependency_field="decoder_boundary_predecessors"
     )
@@ -498,8 +499,8 @@ class _HoldSet:
 def _materialize_execution_plan(
     operations: tuple[message.OperationPlanningView, ...],
     resolved_operations: tuple[message.ResolvedOperationPlanning, ...],
-    operation_window_plans: tuple[message.OperationWindowPlan, ...],
-) -> message.WindowPlan:
+    operation_window_plans: tuple[window_records.OperationWindowPlan, ...],
+) -> window_records.WindowPlan:
     """Materialize exactly the typed scheme ledgers and direct DAG edges."""
     rows = list(zip(operations, resolved_operations, operation_window_plans))
     windows = {}
@@ -512,7 +513,7 @@ def _materialize_execution_plan(
     )
     _count_window_dependencies(windows)
     tables = _operation_tables(rows)
-    return message.WindowPlan(
+    return window_records.WindowPlan(
         windows=windows,
         successors=successors,
         total_windows=len(windows),
@@ -523,7 +524,7 @@ def _materialize_execution_plan(
 def _add_operation_windows(windows: dict, operation_id, operation_plan) -> None:
     """One Window per geometry, with the plan's internal dependencies."""
     for window_index, geometry in enumerate(operation_plan.windows):
-        windows[(operation_id, window_index)] = message.Window(
+        windows[(operation_id, window_index)] = window_records.Window(
             op_id=operation_id,
             k=window_index,
             commit_lo=geometry.commit_lo,

@@ -16,7 +16,7 @@ from typing import Optional
 
 import stim
 
-import decsim.message as message
+import decsim.records.windows as window_records
 from decsim.detector_error_model import (
     fault_model_contracts,
     window_ownership_dag,
@@ -36,7 +36,9 @@ def build_window_error_models(
     fault_exclusion_ranges: Sequence[Sequence[int]],
     dependency_edges: Optional[tuple[tuple[int, int], ...]] = None,
     closed_temporal_boundary_windows: tuple[int, ...] = (),
-    window_protocol: message.WindowProtocol = message.WindowProtocol.GENERIC,
+    window_protocol: window_records.WindowProtocol = (
+        window_records.WindowProtocol.GENERIC
+    ),
 ) -> list[fault_model_contracts.WindowErrorModel]:
     """One window model per plan entry, in plan order."""
     exclusion_ranges = window_placement.checked_fault_exclusion_ranges(
@@ -136,7 +138,7 @@ _FaultsPerWindow = Optional[
 
 def _checked_plan(
     plan: list[tuple[int, ...]],
-    window_protocol: message.WindowProtocol,
+    window_protocol: window_records.WindowProtocol,
     dependency_edges: Optional[tuple[tuple[int, int], ...]],
     closed_temporal_boundary_windows: tuple[int, ...],
     fault_model_requirement: fault_model_contracts.DecoderFaultModelRequirement,

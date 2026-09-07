@@ -9,7 +9,7 @@ may be cut at, validated for the graphlike representation only.
 
 from typing import Optional
 
-import decsim.message as message
+import decsim.records.windows as window_records
 from decsim.detector_error_model import fault_model_contracts, window_slicer
 
 
@@ -45,7 +45,7 @@ def validate_closed_temporal_boundary_windows(
 
 def validate_window_protocol(
     entries: tuple[tuple[int, int, int, int], ...],
-    window_protocol: message.WindowProtocol,
+    window_protocol: window_records.WindowProtocol,
     dependency_edges: Optional[tuple[tuple[int, int], ...]],
     closed_windows: tuple[int, ...],
     fault_model_requirement: (
@@ -53,9 +53,12 @@ def validate_window_protocol(
     ),
 ) -> None:
     """Refuse a plan that does not meet its protocol's contract."""
-    if window_protocol is message.WindowProtocol.GENERIC:
+    if window_protocol is window_records.WindowProtocol.GENERIC:
         return
-    if window_protocol is not message.WindowProtocol.TAN_ZERO_SEAM_GRAPHLIKE:
+    if (
+        window_protocol
+        is not window_records.WindowProtocol.TAN_ZERO_SEAM_GRAPHLIKE
+    ):
         raise ValueError("unsupported window protocol")
     seam_indices = tuple(range(1, len(entries), 2))
     is_graphlike_only = (

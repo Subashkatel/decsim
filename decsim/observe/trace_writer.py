@@ -24,6 +24,7 @@ from typing import Optional
 import decsim.config as config
 import decsim.message as message
 import decsim.records.rounds as round_records
+import decsim.records.windows as window_records
 
 # The threads in the order the pipeline uses them, so a viewer's lanes
 # read top to bottom as the data flows. A thread the run never uses gets
@@ -287,7 +288,7 @@ class TraceWriter:
 
     # ---- the window side
 
-    def window_planned(self, window: message.Window) -> None:
+    def window_planned(self, window: window_records.Window) -> None:
         """A stream laid one more window."""
         args = {
             "window": window_text(window.key),
@@ -296,7 +297,7 @@ class TraceWriter:
         name = f"W{window.k} planned"
         self._instant("Window planner", name, "window", args)
 
-    def window_ready(self, window: message.Window) -> None:
+    def window_ready(self, window: window_records.Window) -> None:
         """Every round the window reads is readable in its store."""
         args = {
             "window": window_text(window.key),
@@ -333,7 +334,9 @@ class TraceWriter:
         }
         self._instant("Window planner", "verdict", "window", args)
 
-    def window_committed(self, window: message.Window, contribution) -> None:
+    def window_committed(
+        self, window: window_records.Window, contribution
+    ) -> None:
         """A window committed under the contribution that owns its rounds."""
         commit_lo = contribution.commit_lo
         commit_hi = contribution.commit_hi

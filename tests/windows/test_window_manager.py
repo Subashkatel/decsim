@@ -16,6 +16,7 @@ import decsim.message as message
 import decsim.qpu.code_geometry as code_geometry
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
+import decsim.records.windows as window_records
 import decsim.windows.built_window_models as built_window_models
 import decsim.windows.window_boundaries as window_boundaries
 import decsim.windows.window_interactions as window_interactions
@@ -49,7 +50,9 @@ def test_a_committed_window_publishes_the_request_that_decoded_it():
     for key, window in windows.items():
         assert window.committed
         assert window.published_request_key is not None
-        assert window.published_request_key.tier is message.DecoderTier.WEAK
+        assert (
+            window.published_request_key.tier is window_records.DecoderTier.WEAK
+        )
         assert window.published_request_key.operation_id == key[0]
         assert window.published_request_key.window_id == key[1]
 
@@ -62,14 +65,18 @@ def test_no_window_of_a_weak_run_is_absorbed():
 
 def test_a_window_is_final_once_its_request_is_published():
     """A committed window whose request is unpublished still awaits strong."""
-    window = message.Window(
+    window = window_records.Window(
         op_id=1, k=0, commit_lo=1, commit_hi=3, buffer_hi=5, n_rounds=5
     )
     window.committed = True
     assert window.published_request_key is None
-    request_key = message.DecoderRequestKey(1, 0, message.DecoderTier.STRONG, 3)
+    request_key = window_records.DecoderRequestKey(
+        1, 0, window_records.DecoderTier.STRONG, 3
+    )
     window.published_request_key = request_key
-    assert window.published_request_key.tier is message.DecoderTier.STRONG
+    assert (
+        window.published_request_key.tier is window_records.DecoderTier.STRONG
+    )
 
 
 def test_a_streams_later_window_waits_on_the_previous_ones_boundary():
@@ -102,7 +109,7 @@ def _no_boundary(_key, _is_unblocked) -> None:
 
 
 def _stream_planner() -> window_planner.WindowPlanner:
-    plan = message.WindowPlan(
+    plan = window_records.WindowPlan(
         windows={},
         window_count={},
         op_windows={},

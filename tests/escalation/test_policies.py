@@ -30,6 +30,7 @@ import decsim.pauli_frame.pauli_frame as pauli_frame_module
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
 import decsim.qpu.stim_device as stim_device
+import decsim.records.windows as window_records
 import decsim.windows.settings as window_settings
 import decsim.windows.windowing_schemes as windowing_schemes
 import tests.escalation.declared_fabric as fabric
@@ -52,13 +53,16 @@ OTHER_SOURCE = message.SoftOutputSource(
     weight_step_natural_log=0.1,
     references=(),
 )
-WINDOW = message.Window(
+WINDOW = window_records.Window(
     op_id=1, k=1, commit_lo=4, commit_hi=6, buffer_hi=9, n_rounds=6
 )
 JOB = message.DecodeJob(op_id=1, window_id=1, n_rounds=6)
-WEAK_TIER = (message.DecoderTier.WEAK,)
-STRONG_TIER = (message.DecoderTier.STRONG,)
-BOTH_TIERS = (message.DecoderTier.WEAK, message.DecoderTier.STRONG)
+WEAK_TIER = (window_records.DecoderTier.WEAK,)
+STRONG_TIER = (window_records.DecoderTier.STRONG,)
+BOTH_TIERS = (
+    window_records.DecoderTier.WEAK,
+    window_records.DecoderTier.STRONG,
+)
 
 
 def _result(gap, source=SOURCE) -> message.DecodeResult:
@@ -156,7 +160,7 @@ def test_escalations_equal_gaps_below_the_threshold_equal_strong_frame_writes():
     machine.run()
     weak_gaps = []
     for record in machine.observation.decode_records.requests:
-        is_weak = record.request_key.tier is message.DecoderTier.WEAK
+        is_weak = record.request_key.tier is window_records.DecoderTier.WEAK
         if is_weak and record.soft_output is not None:
             weak_gaps.append(record.soft_output.gap)
     below = 0
@@ -179,7 +183,7 @@ def test_escalations_equal_gaps_below_the_threshold_equal_strong_frame_writes():
 
 def test_baseline_keeps_every_weak_result():
     baseline = policies.Baseline()
-    assert baseline.primary_tier is message.DecoderTier.WEAK
+    assert baseline.primary_tier is window_records.DecoderTier.WEAK
     assert baseline.requires_strong_context is False
     assert baseline.tiers_for_ready_window(WINDOW) == WEAK_TIER
     unsure = _result(0.0)
@@ -189,7 +193,7 @@ def test_baseline_keeps_every_weak_result():
 
 def test_strong_only_decodes_every_window_on_the_strong_tier_once():
     strong_only = policies.StrongOnly()
-    assert strong_only.primary_tier is message.DecoderTier.STRONG
+    assert strong_only.primary_tier is window_records.DecoderTier.STRONG
     assert strong_only.requires_strong_context is False
     assert strong_only.tiers_for_ready_window(WINDOW) == STRONG_TIER
     timing_only = _result(None)
@@ -342,7 +346,7 @@ class _AlwaysEscalate(policies.EscalationPolicyBase):
     """A fake row: every weak result is re-decoded by the strong tier."""
 
     requires_strong_context = True
-    primary_tier = message.DecoderTier.WEAK
+    primary_tier = window_records.DecoderTier.WEAK
 
     def verdict_for_weak_result(self, job, result) -> message.Verdict:
         del job

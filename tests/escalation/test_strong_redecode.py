@@ -12,6 +12,7 @@ import decsim.engine as engine_module
 import decsim.escalation.strong_redecode as strong_redecode_module
 import decsim.escalation.strong_window_shapes as shapes
 import decsim.message as message
+import decsim.records.windows as window_records
 
 WINDOW_KEY = (1, 2)
 
@@ -23,8 +24,8 @@ def _weak_job() -> message.DecodeJob:
 
 
 def _strong_job(sequence: int) -> message.DecodeJob:
-    request_key = message.DecoderRequestKey(
-        1, 2, message.DecoderTier.STRONG, sequence
+    request_key = window_records.DecoderRequestKey(
+        1, 2, window_records.DecoderTier.STRONG, sequence
     )
     return message.DecodeJob(
         op_id=1,

@@ -21,6 +21,7 @@ from typing import Callable, Optional
 import decsim.message as message
 import decsim.observe.trace_source as trace_source
 import decsim.records.identity as identity_records
+import decsim.records.windows as window_records
 
 
 class DecodeRequestBuilder:
@@ -49,16 +50,16 @@ class DecodeRequestBuilder:
     # ---- building a request
 
     def new_request_key(
-        self, operation_id, window_id: int, tier: message.DecoderTier
-    ) -> message.DecoderRequestKey:
+        self, operation_id, window_id: int, tier: window_records.DecoderTier
+    ) -> window_records.DecoderRequestKey:
         """The next request identity, run-wide ordinal included."""
-        request_key = message.DecoderRequestKey(
+        request_key = window_records.DecoderRequestKey(
             operation_id, window_id, tier, self.next_request_sequence
         )
         self.next_request_sequence += 1
         return request_key
 
-    def stamp_first_round(self, window: message.Window, store) -> None:
+    def stamp_first_round(self, window: window_records.Window, store) -> None:
         """Retain arrival provenance for latency accounting."""
         if window.t_first_round is not None:
             return
@@ -66,7 +67,7 @@ class DecodeRequestBuilder:
         window.t_first_round = store.publication_tick(first_round_key)
 
     def note_data_complete(
-        self, window: message.Window, operation: message.Operation
+        self, window: window_records.Window, operation: message.Operation
     ) -> None:
         """Stamp the window's data-complete tick the first time it is seen.
 
@@ -88,9 +89,9 @@ class DecodeRequestBuilder:
 
     def build(
         self,
-        window: message.Window,
+        window: window_records.Window,
         operation: message.Operation,
-        tier: message.DecoderTier,
+        tier: window_records.DecoderTier,
         store,
     ) -> message.DecodeJob:
         """The tier's decode job for one complete window, read from store."""
@@ -121,7 +122,7 @@ class DecodeRequestBuilder:
             gate=self,
         )
 
-    def assemble_payloads(self, window: message.Window, store) -> list:
+    def assemble_payloads(self, window: window_records.Window, store) -> list:
         """Collect this window's raw payloads, with successor overflow rounds.
 
         The boundary is never folded here: the mask is XORed into the
@@ -131,7 +132,7 @@ class DecodeRequestBuilder:
             window.op_id, window
         )
         end_round = min(window.buffer_hi, operation_rounds)
-        window_info = message.WindowInfo.from_window(window)
+        window_info = window_records.WindowInfo.from_window(window)
         payloads = []
         stop_round = end_round + 1
         for round_index in range(window.start_round, stop_round):
@@ -217,7 +218,7 @@ class DecodeRequestBuilder:
         state = window.boundary_in
         if not state or job.decoder_input is None:
             return
-        window_info = message.WindowInfo.from_window(window)
+        window_info = window_records.WindowInfo.from_window(window)
         masked_rounds = []
         for round_input in job.decoder_input.rounds:
             masked = self._masked_round(state, window_info, round_input)
@@ -231,7 +232,7 @@ class DecodeRequestBuilder:
     # ---- private
 
     def _job_label(
-        self, window: message.Window, operation: message.Operation
+        self, window: window_records.Window, operation: message.Operation
     ) -> str:
         if self.planner.is_windowed(window.op_id):
             return (
@@ -350,7 +351,9 @@ class DecodeRequester:
         for window in windows:
             self.request_if_ready(window, strong_redecode)
 
-    def request_if_ready(self, window: message.Window, strong_redecode) -> None:
+    def request_if_ready(
+        self, window: window_records.Window, strong_redecode
+    ) -> None:
         """If the window has its data, submit it through the policy."""
         if window.queued or window.committed:
             return
@@ -371,7 +374,7 @@ class DecodeRequester:
 
     def request(
         self,
-        window: message.Window,
+        window: window_records.Window,
         operation: message.Operation,
         strong_redecode,
     ) -> None:
@@ -411,7 +414,7 @@ class DecodeRequester:
             on_decoded = self.committer.accept_strong_result
         self.decode_queue.enqueue(job, submission.send_input, on_decoded)
 
-    def withdraw(self, window: message.Window) -> None:
+    def withdraw(self, window: window_records.Window) -> None:
         """Withdraw one window's early-shipped, unstarted decode.
 
         Its submission bookkeeping is reset so it can be resubmitted fresh

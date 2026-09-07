@@ -18,6 +18,7 @@ from typing import Optional
 
 import decsim.message as message
 import decsim.observe.trace_source as trace_source
+import decsim.records.windows as window_records
 import decsim.windows.built_window_models as built_window_models
 
 
@@ -76,7 +77,7 @@ class WindowModels:
         self.built_models.remember(key, models)
         return models
 
-    def model_for_stream(self, stream_id, window: message.Window):
+    def model_for_stream(self, stream_id, window: window_records.Window):
         """The model of one window of a dynamic stream, or None."""
         if self.provider is None:
             return None
@@ -107,7 +108,7 @@ class WindowModels:
         self,
         operation,
         resolved_operation,
-        window: message.Window,
+        window: window_records.Window,
         round_count: int,
         fault_exclusion_ranges: tuple,
     ):
@@ -181,7 +182,7 @@ class WindowPlanner:
         self,
         scheme,
         resolved_operations,
-        plan: message.WindowPlan,
+        plan: window_records.WindowPlan,
         models: WindowModels,
         planned_operations,
     ) -> None:
@@ -328,7 +329,7 @@ class WindowPlanner:
             created.append(window)
         return created
 
-    def attach_stream_model(self, window: message.Window) -> None:
+    def attach_stream_model(self, window: window_records.Window) -> None:
         """Give a new stream window its model, when the source has one."""
         model = self.models.model_for_stream(window.op_id, window)
         if model is not None:
@@ -336,7 +337,7 @@ class WindowPlanner:
 
     def trim_stream_tail(
         self, stream_id, stream_round_count: int
-    ) -> Optional[message.Window]:
+    ) -> Optional[window_records.Window]:
         """Clip the one window whose commit region holds the sealed length.
 
         Its buffer follows the new commit end; the window is returned so
@@ -359,7 +360,7 @@ class WindowPlanner:
             return
         resolved = self.resolved_operation_by_id[operation.id]
         protocol = self.plan.protocol_by_operation.get(
-            operation.id, message.WindowProtocol.GENERIC
+            operation.id, window_records.WindowProtocol.GENERIC
         )
         models = self.models.models_for_operation(
             operation, resolved, windows, protocol
@@ -371,11 +372,11 @@ class WindowPlanner:
 
     def _create_stream_window(
         self, stream_id, growth: "_StreamGrowth", geometry
-    ) -> message.Window:
+    ) -> window_records.Window:
         window_index = growth.next_window_index
         buffer_lo = geometry.commit_lo
         round_count = geometry.buffer_hi - buffer_lo + 1
-        window = message.Window(
+        window = window_records.Window(
             op_id=stream_id,
             k=window_index,
             commit_lo=geometry.commit_lo,
@@ -431,7 +432,7 @@ class _StreamGrowth:
             if round_cap is not None:
                 commit_hi = min(commit_hi, round_cap)
             buffer_hi = commit_hi + self.buffer_rounds
-            geometry = message.WindowGeometry(
+            geometry = window_records.WindowGeometry(
                 buffer_lo=commit_lo,
                 commit_lo=commit_lo,
                 commit_hi=commit_hi,

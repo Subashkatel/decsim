@@ -8,6 +8,7 @@ import decsim.engine as engine_module
 import decsim.links.fabric as fabric
 import decsim.links.link_profiles as link_profiles
 import decsim.message as message
+import decsim.records.windows as window_records
 import decsim.windows.window_transfers as window_transfers
 
 
@@ -28,7 +29,7 @@ def test_a_window_send_carries_its_round_range_and_request_key():
     link = _RecordingLink()
     transfers = window_transfers.WindowTransfers(engine, link)
     operation = message.Operation(1, "memory", (0,), patches=(3, 2))
-    window = message.Window(
+    window = window_records.Window(
         op_id=1,
         k=4,
         commit_lo=9,
@@ -37,7 +38,9 @@ def test_a_window_send_carries_its_round_range_and_request_key():
         n_rounds=7,
         buffer_lo=7,
     )
-    request_key = message.DecoderRequestKey(1, 4, message.DecoderTier.WEAK, 5)
+    request_key = window_records.DecoderRequestKey(
+        1, 4, window_records.DecoderTier.WEAK, 5
+    )
     delivered = []
     transfers.send_for_window(
         message.LinkPath.WEAK_DECODER_TO_FRAME,
@@ -62,10 +65,12 @@ def test_a_job_send_returns_the_delay_the_link_expects():
     engine = engine_module.Engine()
     link = _RecordingLink()
     transfers = window_transfers.WindowTransfers(engine, link)
-    window = message.Window(
+    window = window_records.Window(
         op_id=1, k=0, commit_lo=1, commit_hi=3, buffer_hi=5, n_rounds=5
     )
-    request_key = message.DecoderRequestKey(1, 0, message.DecoderTier.WEAK, 0)
+    request_key = window_records.DecoderRequestKey(
+        1, 0, window_records.DecoderTier.WEAK, 0
+    )
     job = message.DecodeJob(
         op_id=1, window_id=0, n_rounds=5, window=window, request_key=request_key
     )

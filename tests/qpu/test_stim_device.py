@@ -20,6 +20,7 @@ import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.message as message
 import decsim.qpu.stim_device as stim_device
 import decsim.records.rounds as round_records
+import decsim.records.windows as window_records
 
 stim = pytest.importorskip("stim")
 
@@ -86,7 +87,7 @@ def recorded_device(row, **settings):
 
 
 def window(commit_lo, commit_hi, buffer_hi, **changes):
-    return message.Window(
+    return window_records.Window(
         op_id=1,
         k=0,
         commit_lo=commit_lo,
@@ -525,7 +526,7 @@ def test_dependent_windows_split_the_fault_ownership_between_them():
     circuit = memory_circuit(3, 4)
     operation = memory_operation(circuit)
     leading = window(1, 2, 3)
-    trailing = message.Window(
+    trailing = window_records.Window(
         op_id=1,
         k=1,
         commit_lo=3,
@@ -543,7 +544,7 @@ def test_dependent_windows_split_the_fault_ownership_between_them():
         4,
         fault_model_requirement=GRAPHLIKE,
         fault_exclusion_ranges=(),
-        window_protocol=message.WindowProtocol.GENERIC,
+        window_protocol=window_records.WindowProtocol.GENERIC,
     )
     leading_faults = models[0].require_faults(
         fault_models.FaultRepresentation.GRAPHLIKE
@@ -564,7 +565,7 @@ def test_a_closed_boundary_needs_a_dependency_edge():
     # closed boundary is the plan's only defect.
     circuit = memory_circuit(3, 4)
     operation = memory_operation(circuit)
-    closed = message.Window(
+    closed = window_records.Window(
         op_id=1,
         k=0,
         commit_lo=1,
@@ -581,14 +582,14 @@ def test_a_closed_boundary_needs_a_dependency_edge():
             4,
             fault_model_requirement=GRAPHLIKE,
             fault_exclusion_ranges=(),
-            window_protocol=message.WindowProtocol.GENERIC,
+            window_protocol=window_records.WindowProtocol.GENERIC,
         )
 
 
 def test_a_window_declared_past_the_source_reads_to_its_last_round():
     circuit = memory_circuit(3, 4)
     operation = memory_operation(circuit)
-    past_the_end = message.Window(
+    past_the_end = window_records.Window(
         op_id=1, k=0, commit_lo=3, commit_hi=4, buffer_hi=9, n_rounds=4
     )
     device = stim_device.StimDevice(seed=1)

@@ -8,8 +8,8 @@ deterministic; all times are exact arithmetic over the declared ticks.
 
 import pytest
 
+import decsim.records.windows as window_records
 from decsim.config import microseconds_to_ticks
-from decsim.message import DecoderTier
 
 # ---------------------------------------------------------------- serial
 
@@ -194,7 +194,7 @@ def test_decode_jobs_are_priced_for_the_rounds_they_read(fabric):
     regular one with the whole window as core (Tan et al. 2209.09219); no
     window implementation feeds rounds beyond the data (Gong et al.
     sliding-window decoder, cudaq-qec sliding_window)."""
-    from decsim.message import DecoderTier
+    import decsim.records.windows as window_records
     from decsim.observe.run_views import switching_records_view
 
     completed = fabric["switching_run"](
@@ -209,12 +209,14 @@ def test_decode_jobs_are_priced_for_the_rounds_they_read(fabric):
     by_request = {
         (r.request_key.window_id, r.request_key.tier): r for r in view.requests
     }
-    strong_first = by_request[(0, DecoderTier.STRONG)]
+    strong_first = by_request[(0, window_records.DecoderTier.STRONG)]
     assert (strong_first.input_round_lo, strong_first.input_round_hi) == (1, 6)
     assert strong_first.input_round_count == 6
-    weak_tail = by_request[(2, DecoderTier.WEAK)]
+    weak_tail = by_request[(2, window_records.DecoderTier.WEAK)]
     assert weak_tail.input_round_count == 3
-    assert by_request[(1, DecoderTier.WEAK)].input_round_count == 6
+    assert (
+        by_request[(1, window_records.DecoderTier.WEAK)].input_round_count == 6
+    )
 
 
 def test_bulk_strong_batches_queued_escalations_into_one_decode(fabric):

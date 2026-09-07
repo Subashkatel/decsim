@@ -10,6 +10,7 @@ into the next window, lines 275-278).
 import types
 
 import decsim.message as message
+import decsim.records.windows as window_records
 import decsim.windows.round_tracker as round_tracker
 import decsim.windows.windowing_schemes as windowing_schemes
 
@@ -32,9 +33,11 @@ def _operation(operation_id, **fields) -> message.Operation:
     return message.Operation(operation_id, f"op{operation_id}", (0,), **fields)
 
 
-def _window(operation_id, commit_lo, commit_hi, buffer_hi) -> message.Window:
+def _window(
+    operation_id, commit_lo, commit_hi, buffer_hi
+) -> window_records.Window:
     round_count = buffer_hi - commit_lo + 1
-    return message.Window(
+    return window_records.Window(
         op_id=operation_id,
         k=0,
         commit_lo=commit_lo,

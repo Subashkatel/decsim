@@ -10,6 +10,7 @@ import decsim.decoders.strong_requests as strong_requests_module
 import decsim.engine as engine_module
 import decsim.message as message
 import decsim.observe.decode_records as decode_records
+import decsim.records.windows as window_records
 
 
 class _Policy:
@@ -88,7 +89,9 @@ def test_a_strong_result_teaches_the_policy_and_reaches_its_destination_once():
     cancelled = []
     outcomes, requests, policy = _outcomes(message.Verdict.KEEP, cancelled)
     delivered = []
-    strong_key = message.DecoderRequestKey(1, 0, message.DecoderTier.STRONG, 5)
+    strong_key = window_records.DecoderRequestKey(
+        1, 0, window_records.DecoderTier.STRONG, 5
+    )
     on_decoded = _delivering_to(delivered)
     strong_job = message.DecodeJob(
         op_id=1,
@@ -113,7 +116,9 @@ def test_a_selection_that_lands_after_the_strong_result_releases_it():
     cancelled = []
     outcomes, requests, _policy = _outcomes(message.Verdict.KEEP, cancelled)
     delivered = []
-    strong_key = message.DecoderRequestKey(1, 0, message.DecoderTier.STRONG, 5)
+    strong_key = window_records.DecoderRequestKey(
+        1, 0, window_records.DecoderTier.STRONG, 5
+    )
     on_decoded = _delivering_to(delivered)
     strong_job = message.DecodeJob(
         op_id=1,
@@ -143,13 +148,13 @@ def test_the_terminal_sources_carry_every_ended_request_and_service():
     outcomes.service_ended.connect(ledger.service_ended)
     delivered = []
     job = _weak_job(delivered)
-    job.request_key = message.DecoderRequestKey(
-        1, 0, message.DecoderTier.WEAK, 0
+    job.request_key = window_records.DecoderRequestKey(
+        1, 0, window_records.DecoderTier.WEAK, 0
     )
     job.service_key = message.DecoderServiceKey(0)
     job.service_original_request_keys = (job.request_key,)
     job.service_dispatch_ticks = 0
-    job.window = message.Window(
+    job.window = window_records.Window(
         op_id=1, k=0, commit_lo=1, commit_hi=3, buffer_hi=5, n_rounds=5
     )
     requests.admit(job, now=0)

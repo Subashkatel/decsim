@@ -182,8 +182,8 @@ def test_gap_records_decide_the_selected_tier(tmp_path):
     """
     from dataclasses import replace
 
+    import decsim.records.windows as window_records
     from decsim.machine import Machine
-    from decsim.message import DecoderTier
     from decsim.observe.run_views import switching_records_view
 
     config = load_experiment(switching_config(tmp_path, 20.0))
@@ -205,7 +205,7 @@ def test_gap_records_decide_the_selected_tier(tmp_path):
         )
         gap_by_window = {}
         for record in view.requests:
-            if record.request_key.tier is not DecoderTier.WEAK:
+            if record.request_key.tier is not window_records.DecoderTier.WEAK:
                 continue
             assert record.soft_output is not None
             window_key = (
@@ -217,6 +217,6 @@ def test_gap_records_decide_the_selected_tier(tmp_path):
             gap = gap_by_window[row.destination_key]
             selected_tier = row.selected_request_key.tier
             if gap >= threshold_nats:
-                assert selected_tier is DecoderTier.WEAK
+                assert selected_tier is window_records.DecoderTier.WEAK
             else:
-                assert selected_tier is DecoderTier.STRONG
+                assert selected_tier is window_records.DecoderTier.STRONG

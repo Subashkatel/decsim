@@ -11,7 +11,7 @@ two candidates of the same depth leave the fault without a causal owner.
 import pytest
 import stim
 
-import decsim.message as message
+import decsim.records.windows as window_records
 from decsim.detector_error_model import (
     fault_model_contracts,
     window_model_builders,
@@ -109,7 +109,7 @@ def test_no_fault_is_owned_twice_in_a_sandwich_plan():
         fault_exclusion_ranges=(),
         dependency_edges=((0, 1), (2, 1)),
         closed_temporal_boundary_windows=(1,),
-        window_protocol=message.WindowProtocol.TAN_ZERO_SEAM_GRAPHLIKE,
+        window_protocol=window_records.WindowProtocol.TAN_ZERO_SEAM_GRAPHLIKE,
     )
     before_owns = owned_faults(models[0])
     seam_owns = owned_faults(models[1])
@@ -135,7 +135,7 @@ def test_the_seam_leaves_out_what_its_neighbours_own():
         fault_exclusion_ranges=(),
         dependency_edges=((0, 1), (2, 1)),
         closed_temporal_boundary_windows=(1,),
-        window_protocol=message.WindowProtocol.TAN_ZERO_SEAM_GRAPHLIKE,
+        window_protocol=window_records.WindowProtocol.TAN_ZERO_SEAM_GRAPHLIKE,
     )
     seam_faults = models[1].require_faults(GRAPHLIKE)
     before_owns = owned_faults(models[0])

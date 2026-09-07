@@ -8,11 +8,14 @@ import pytest
 
 import decsim.decoders.strong_requests as strong_requests_module
 import decsim.message as message
+import decsim.records.windows as window_records
 from decsim.decoders.strong_requests import HeldStrongCompletion
 
 
 def _request_key(sequence):
-    return message.DecoderRequestKey(1, 0, message.DecoderTier.STRONG, sequence)
+    return window_records.DecoderRequestKey(
+        1, 0, window_records.DecoderTier.STRONG, sequence
+    )
 
 
 def _strong_job(request_key, window_key=(1, 0)):
@@ -104,7 +107,9 @@ def test_a_second_weak_decode_of_an_unresolved_window_is_refused():
 def test_a_merged_batch_splits_into_one_empty_completion_per_member():
     requests = strong_requests_module.StrongRequests()
     first_key = _request_key(1)
-    second_key = message.DecoderRequestKey(1, 1, message.DecoderTier.STRONG, 2)
+    second_key = window_records.DecoderRequestKey(
+        1, 1, window_records.DecoderTier.STRONG, 2
+    )
     first = _strong_job(first_key, window_key=(1, 0))
     second = message.DecodeJob(
         op_id=1,

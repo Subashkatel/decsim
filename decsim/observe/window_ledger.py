@@ -13,6 +13,7 @@ from typing import Optional
 
 import decsim.message as message
 import decsim.records.identity as identity_records
+import decsim.records.windows as window_records
 
 
 @dataclasses.dataclass(frozen=True)
@@ -28,7 +29,7 @@ class FinalWindowRow:
     final_commit_hi: Optional[int]
     window_disposition: str
     absorbed_into: Optional[tuple[object, int]]
-    selected_request_key: Optional[message.DecoderRequestKey]
+    selected_request_key: Optional[window_records.DecoderRequestKey]
 
 
 class WindowLedger:
@@ -43,12 +44,14 @@ class WindowLedger:
         """The windows the plan laid out before anyone could listen."""
         self.windows.update(planned_windows)
 
-    def window_planned(self, window: message.Window) -> None:
+    def window_planned(self, window: window_records.Window) -> None:
         """A stream laid one more window."""
         self.windows[window.key] = window
 
     def window_committed(
-        self, window: message.Window, contribution: message.LogicalContribution
+        self,
+        window: window_records.Window,
+        contribution: message.LogicalContribution,
     ) -> None:
         """A window committed under the contribution that owns its rounds."""
         self.windows[window.key] = window
@@ -67,7 +70,9 @@ class WindowLedger:
             rows.append(row)
         return tuple(rows)
 
-    def _final_row(self, key: tuple, window: message.Window) -> FinalWindowRow:
+    def _final_row(
+        self, key: tuple, window: window_records.Window
+    ) -> FinalWindowRow:
         if key in self.absorbed_into:
             return FinalWindowRow(
                 key,

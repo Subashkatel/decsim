@@ -96,6 +96,55 @@ def test_sliding_window_k_commits_ncom_rounds_and_reads_nbuf_past_them():
     assert last.buffer_hi == 30
 
 
+def qldpc_sliding_windows(round_count, width, stride):
+    """The tail loop of qLDPC's own SlidingWindowDecoder (sinter.py).
+
+    `while start < end - (W + s - 1)` opens a regular window of width W
+    every stride s and stops as soon as fewer than W + s rounds remain;
+    the last window then commits everything left.
+    """
+    start = 0
+    windows = []
+    last_regular_start = round_count - (width + stride - 1)
+    while start < last_regular_start:
+        regular = (start + 1, start + stride, start + width)
+        windows.append(regular)
+        start += stride
+    tail = (start + 1, round_count, round_count)
+    windows.append(tail)
+    return windows
+
+
+def test_the_sliding_tail_is_qldpcs_tail_on_every_shape_it_ships():
+    """The Tan flush terminal policy against qLDPC's loop, shape for shape."""
+    scheme = windowing_schemes.SlidingWindowScheme()
+    for round_count in (5, 13, 20, 30, 31, 32, 33):
+        for commit_rounds, buffer_rounds in ((3, 6), (3, 3), (2, 4), (5, 5)):
+            plan = scheme.plan_operation(
+                1,
+                round_count,
+                commit_round_count=commit_rounds,
+                buffer_round_count=buffer_rounds,
+            )
+            ours = [
+                (window.commit_lo, window.commit_hi, window.buffer_hi)
+                for window in plan.windows
+            ]
+            width = commit_rounds + buffer_rounds
+            theirs = qldpc_sliding_windows(round_count, width, commit_rounds)
+            assert ours == theirs
+
+
+def test_the_sliding_tail_absorbs_a_short_remainder():
+    """A tail shorter than a window is decoded by the window before it."""
+    scheme = windowing_schemes.SlidingWindowScheme()
+    plan = scheme.plan_operation(
+        1, 31, commit_round_count=3, buffer_round_count=6
+    )
+    last = plan.windows[-1]
+    assert (last.commit_lo, last.commit_hi) == (22, 31)
+
+
 def test_first_block_a_commits_2d_and_a_block_b_has_no_buffers():
     scheme = windowing_schemes.ParallelWindowScheme()
     plan = scheme.plan_operation(

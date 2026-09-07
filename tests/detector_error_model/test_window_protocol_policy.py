@@ -10,15 +10,15 @@ validated for the graphlike matching representation only.
 import pytest
 import stim
 
-import decsim.message as message
+import decsim.records.windows as window_records
 from decsim.detector_error_model import (
     fault_model_contracts,
     window_model_builders,
     window_protocol_policy,
 )
 
-TAN = message.WindowProtocol.TAN_ZERO_SEAM_GRAPHLIKE
-GENERIC = message.WindowProtocol.GENERIC
+TAN = window_records.WindowProtocol.TAN_ZERO_SEAM_GRAPHLIKE
+GENERIC = window_records.WindowProtocol.GENERIC
 GRAPHLIKE_REQUIRED = fault_model_contracts.GRAPHLIKE_FAULT_MODEL_REQUIRED
 PHYSICAL_REQUIRED = fault_model_contracts.PHYSICAL_FAULT_MODEL_REQUIRED
 SANDWICH = ((1, 1, 2, 3), (3, 3, 3, 3), (3, 4, 5, 5))

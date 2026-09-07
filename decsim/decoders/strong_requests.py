@@ -21,6 +21,7 @@ from typing import Optional
 
 import decsim.message as message
 import decsim.records.identity as identity_records
+import decsim.records.windows as window_records
 
 ACCURACY_FIELDS = (
     "correction",
@@ -69,10 +70,10 @@ class StrongRequests:
     def __init__(self) -> None:
         self.running_by_window: dict[tuple, LiveStrongRequest] = {}
         self.waiting_selection_by_window: dict[
-            tuple, message.DecoderRequestKey
+            tuple, window_records.DecoderRequestKey
         ] = {}
         self.waiting_result_by_window: dict[
-            tuple, message.DecoderRequestKey
+            tuple, window_records.DecoderRequestKey
         ] = {}
         self.held_by_window: dict[tuple, HeldStrongCompletion] = {}
         self.unresolved_weak_windows: set = set()
@@ -208,7 +209,7 @@ class StrongRequests:
     # --------------------------------------- selection and completion
 
     def begin_selection(
-        self, key: tuple, request_key: message.DecoderRequestKey
+        self, key: tuple, request_key: window_records.DecoderRequestKey
     ) -> None:
         """The destination asked for this request's result.
 
@@ -218,7 +219,7 @@ class StrongRequests:
         self.waiting_selection_by_window[key] = request_key
 
     def select(
-        self, key: tuple, request_key: message.DecoderRequestKey
+        self, key: tuple, request_key: window_records.DecoderRequestKey
     ) -> Optional[HeldStrongCompletion]:
         """The selection arrived: the destination now waits for the result.
 

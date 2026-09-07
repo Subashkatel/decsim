@@ -15,6 +15,7 @@ import types
 
 import decsim.message as message
 import decsim.records.rounds as round_records
+import decsim.records.windows as window_records
 import decsim.syndrome_buffer.round_store as round_store_module
 import decsim.syndrome_buffer.settings as round_store_settings
 import decsim.windows.round_retention as round_retention
@@ -42,7 +43,7 @@ def _retention(store, round_counts: dict, successors: dict):
         planner,
         tracker,
         is_strong_context_retained=False,
-        primary_tier=message.DecoderTier.WEAK,
+        primary_tier=window_records.DecoderTier.WEAK,
     )
 
 
@@ -63,7 +64,7 @@ def _packet(operation_id, round_index) -> round_records.SyndromeRoundPacket:
 def test_a_window_holds_its_read_range_plus_the_successor_overflow():
     store = _store()
     retention = _retention(store, {1: 4, 2: 9}, {1: [2]})
-    window = message.Window(
+    window = window_records.Window(
         op_id=1, k=0, commit_lo=1, commit_hi=3, buffer_hi=6, n_rounds=6
     )
     retention.register_window((1, 0), window)
@@ -74,14 +75,16 @@ def test_a_window_holds_its_read_range_plus_the_successor_overflow():
 def test_the_hold_moves_to_the_request_and_releases_when_the_input_lands():
     store = _store()
     retention = _retention(store, {1: 6}, {1: []})
-    window = message.Window(
+    window = window_records.Window(
         op_id=1, k=0, commit_lo=1, commit_hi=3, buffer_hi=5, n_rounds=5
     )
     retention.register_window((1, 0), window)
     for round_index in (1, 2, 3, 4, 5):
         packet = _packet(1, round_index)
         store.accept_packed_round(packet, publication_tick=round_index)
-    request_key = message.DecoderRequestKey(1, 0, message.DecoderTier.WEAK, 0)
+    request_key = window_records.DecoderRequestKey(
+        1, 0, window_records.DecoderTier.WEAK, 0
+    )
     job = message.DecodeJob(
         op_id=1, window_id=0, n_rounds=5, request_key=request_key
     )
@@ -107,7 +110,7 @@ def test_an_unheld_round_is_freed_on_arrival():
 def test_a_clipped_tail_keeps_only_its_commit_range():
     store = _store()
     retention = _retention(store, {"stream": 9}, {"stream": []})
-    window = message.Window(
+    window = window_records.Window(
         op_id="stream", k=1, commit_lo=4, commit_hi=6, buffer_hi=8, n_rounds=5
     )
     retention.register_window(("stream", 1), window)
@@ -119,7 +122,7 @@ def test_a_clipped_tail_keeps_only_its_commit_range():
 
 
 def test_strong_context_is_one_buffer_on_each_side_of_the_commit():
-    window = message.Window(
+    window = window_records.Window(
         op_id=1, k=2, commit_lo=7, commit_hi=9, buffer_hi=11, n_rounds=5
     )
     bounds = round_retention.strong_context_bounds(window)
@@ -129,7 +132,7 @@ def test_strong_context_is_one_buffer_on_each_side_of_the_commit():
 def test_a_potential_restart_read_outlives_the_landing_and_follows_a_reslice():
     store = _store()
     retention = _retention(store, {1: 12}, {1: []})
-    window = message.Window(
+    window = window_records.Window(
         op_id=1, k=1, commit_lo=4, commit_hi=6, buffer_hi=9, n_rounds=6
     )
     retention.register_window((1, 1), window)
@@ -139,7 +142,9 @@ def test_a_potential_restart_read_outlives_the_landing_and_follows_a_reslice():
     for round_index in range(1, 10):
         packet = _packet(1, round_index)
         store.accept_packed_round(packet, publication_tick=round_index)
-    request_key = message.DecoderRequestKey(1, 1, message.DecoderTier.WEAK, 0)
+    request_key = window_records.DecoderRequestKey(
+        1, 1, window_records.DecoderTier.WEAK, 0
+    )
     job = message.DecodeJob(
         op_id=1, window_id=1, n_rounds=6, request_key=request_key
     )

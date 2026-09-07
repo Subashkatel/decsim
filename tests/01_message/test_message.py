@@ -6,6 +6,7 @@ import pytest
 import decsim.records.identity as identity_records
 import decsim.records.rounds as round_records
 import decsim.records.seeds as seed_records
+import decsim.records.windows as window_records
 from decsim import message
 
 
@@ -23,7 +24,7 @@ def make_fragment(**overrides):
 
 
 def make_window_geometry(start_round):
-    return message.WindowGeometry(
+    return window_records.WindowGeometry(
         buffer_lo=start_round,
         commit_lo=start_round,
         commit_hi=start_round,
@@ -46,7 +47,7 @@ def make_operation_window_plan(**overrides):
         "batch_preceding_idle_rounds": False,
     }
     values.update(overrides)
-    return message.OperationWindowPlan(**values)
+    return window_records.OperationWindowPlan(**values)
 
 
 def make_soft_output_source(**overrides):
@@ -291,7 +292,7 @@ def test_round_packet_preserves_supplied_fragment_order_and_is_frozen():
 
 def test_window_start_round_and_key_reflect_runtime_geometry():
     """Runtime windows expose their leading start round and operation-window key."""
-    window = message.Window(4, 2, 3, 5, 6, 4, buffer_lo=1)
+    window = window_records.Window(4, 2, 3, 5, 6, 4, buffer_lo=1)
     assert window.start_round == 1
     assert window.key == (4, 2)
 
@@ -301,12 +302,12 @@ def test_window_start_round_and_key_reflect_runtime_geometry():
 
 def test_window_info_snapshots_topology_and_detector_positions():
     """Window information copies mutable topology and detector-position inputs."""
-    window = message.Window(4, 2, 3, 5, 6, 4, buffer_lo=1)
+    window = window_records.Window(4, 2, 3, 5, 6, 4, buffer_lo=1)
     window.deps.append((4, 1))
     window.dependents.append((4, 3))
     detector_positions = {7: (1, 2)}
 
-    info = message.WindowInfo.from_window(
+    info = window_records.WindowInfo.from_window(
         window,
         detector_positions=detector_positions,
     )
@@ -363,7 +364,7 @@ def test_operation_window_plan_accepts_declared_nonchecks():
 
 def test_compiled_window_plan_carries_mutable_manager_mappings():
     """Compiled window plans carry manager mappings that remain mutable."""
-    plan = message.WindowPlan(
+    plan = window_records.WindowPlan(
         windows={},
         window_count={},
         op_windows={},
@@ -382,7 +383,7 @@ def test_compiled_window_plan_carries_mutable_manager_mappings():
 def test_dependency_residual_skips_container_order_and_defects_validation():
     """Dependency residuals accept unsorted list identifiers and unchecked defects views."""
     defects = object()
-    residual = message.DependencyResidual([2, 0, 1], defects)
+    residual = window_records.DependencyResidual([2, 0, 1], defects)
     assert residual.detector_ids == [2, 0, 1]
     assert residual.defects is defects
     assert_frozen(residual)
@@ -401,13 +402,13 @@ def test_boundary_delivery_is_current_only_at_both_latest_revisions():
         "dependency_released": False,
         "payload": object(),
     }
-    current = message.BoundaryDelivery(**values)
+    current = window_records.BoundaryDelivery(**values)
     stale_delivery_values = dict(values)
     stale_delivery_values["latest_delivery_revision"] = 4
-    stale_delivery = message.BoundaryDelivery(**stale_delivery_values)
+    stale_delivery = window_records.BoundaryDelivery(**stale_delivery_values)
     stale_source_values = dict(values)
     stale_source_values["latest_source_revision"] = 3
-    stale_source = message.BoundaryDelivery(**stale_source_values)
+    stale_source = window_records.BoundaryDelivery(**stale_source_values)
     assert current.is_current
     assert not stale_delivery.is_current
     assert not stale_source.is_current
@@ -417,7 +418,7 @@ def test_boundary_delivery_is_current_only_at_both_latest_revisions():
 def test_boundary_update_carries_policy_decisions_and_is_frozen():
     """Boundary updates carry policy state and acceptance and release decisions."""
     state = object()
-    update = message.BoundaryUpdate(
+    update = window_records.BoundaryUpdate(
         state, accepted=True, release_dependency=False
     )
     assert update.state is state
@@ -428,7 +429,7 @@ def test_boundary_update_carries_policy_decisions_and_is_frozen():
 
 def test_strong_region_plan_skips_runtime_type_checks():
     """Strong region plans accept comparable noninteger bounds without type checks."""
-    plan = message.StrongRegionPlan(2.0, 4.0, 1.0, 5.0, 1.0, None)
+    plan = window_records.StrongRegionPlan(2.0, 4.0, 1.0, 5.0, 1.0, None)
     assert plan.context_lo == 1.0
     assert plan.restart_buffer_lo == 1.0
 
@@ -436,8 +437,8 @@ def test_strong_region_plan_skips_runtime_type_checks():
 def test_window_protocol_exposes_distinct_scientific_tags():
     """Window protocols distinguish generic and graphlike scientific contracts."""
     assert (
-        message.WindowProtocol.GENERIC
-        is not message.WindowProtocol.TAN_ZERO_SEAM_GRAPHLIKE
+        window_records.WindowProtocol.GENERIC
+        is not window_records.WindowProtocol.TAN_ZERO_SEAM_GRAPHLIKE
     )
 
 
@@ -478,13 +479,13 @@ def test_soft_output_normalizes_numbers_without_source_instance_validation():
 
 def test_decoder_keys_preserve_request_and_service_identity():
     """Decoder keys carry operation, window, tier, and run-sequence identity."""
-    request_key = message.DecoderRequestKey(
-        (4, "op"), 2, message.DecoderTier.STRONG, 7
+    request_key = window_records.DecoderRequestKey(
+        (4, "op"), 2, window_records.DecoderTier.STRONG, 7
     )
     service_key = message.DecoderServiceKey(8)
     assert request_key.operation_id == (4, "op")
     assert request_key.window_id == 2
-    assert request_key.tier is message.DecoderTier.STRONG
+    assert request_key.tier is window_records.DecoderTier.STRONG
     assert request_key.run_sequence == 7
     assert service_key.run_sequence == 8
     assert_frozen(request_key)
@@ -555,8 +556,10 @@ def test_protected_region_skips_identity_and_endpoint_validation():
 
 def test_readiness_messages_carry_local_successor_and_tail_state():
     """Readiness messages carry successor progress, memory progress, and tail state."""
-    successor = message.SuccessorReadiness(5, rounds_arrived=2, round_count=3)
-    readiness = message.WindowReadiness(
+    successor = window_records.SuccessorReadiness(
+        5, rounds_arrived=2, round_count=3
+    )
+    readiness = window_records.WindowReadiness(
         1, 3, (successor,), 2, tail_closed=False
     )
     assert readiness.successors == (successor,)

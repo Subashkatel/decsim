@@ -14,6 +14,7 @@ import decsim.links.fabric as fabric_module
 import decsim.links.settings as link_settings
 import decsim.message as message
 import decsim.ports as ports
+import decsim.records.windows as window_records
 
 PATH = message.LinkPath
 AGGREGATE = link_settings.QuantityBasis.AGGREGATE
@@ -94,10 +95,10 @@ def operation_attribution(relation=None):
 
 
 def request_relation_for(window_id):
-    request_key = message.DecoderRequestKey(
+    request_key = window_records.DecoderRequestKey(
         operation_id=1,
         window_id=window_id,
-        tier=message.DecoderTier.WEAK,
+        tier=window_records.DecoderTier.WEAK,
         run_sequence=window_id,
     )
     return message.RequestTransferRelation(request_key)

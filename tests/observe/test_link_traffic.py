@@ -14,6 +14,7 @@ import decsim.links.settings as link_settings
 import decsim.message as message
 import decsim.observe.link_traffic as link_traffic
 import decsim.records.identity as identity_records
+import decsim.records.windows as window_records
 
 PATH = message.LinkPath
 AGGREGATE = link_settings.QuantityBasis.AGGREGATE
@@ -148,10 +149,10 @@ def round_attribution(round_index):
 
 
 def request_key_for(window_id):
-    return message.DecoderRequestKey(
+    return window_records.DecoderRequestKey(
         operation_id=OPERATION_ID,
         window_id=window_id,
-        tier=message.DecoderTier.STRONG,
+        tier=window_records.DecoderTier.STRONG,
         run_sequence=0,
     )
 

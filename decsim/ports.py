@@ -25,6 +25,7 @@ from typing import Any, Callable, Optional, Protocol, runtime_checkable
 
 import decsim.message as message
 import decsim.records.rounds as round_records
+import decsim.records.windows as window_records
 
 # ------------------------------------------------ the QPU emits a readout
 
@@ -167,7 +168,7 @@ class DecodeQueue(Protocol):
         """The window's last boundary arrived: start its parked decode."""
 
     def await_strong_result(
-        self, window_key: tuple, request_key: message.DecoderRequestKey
+        self, window_key: tuple, request_key: window_records.DecoderRequestKey
     ) -> None:
         """The window asked for this request's strong result.
 
@@ -176,7 +177,7 @@ class DecodeQueue(Protocol):
         """
 
     def accept_selection(
-        self, window_key: tuple, request_key: message.DecoderRequestKey
+        self, window_key: tuple, request_key: window_records.DecoderRequestKey
     ) -> None:
         """The selection landed: the request's result may reach the window."""
 
@@ -247,7 +248,7 @@ class Frame(Protocol):
         *,
         window_key: tuple,
         logical_observables,
-        request_key: message.DecoderRequestKey,
+        request_key: window_records.DecoderRequestKey,
         on_committed: Callable[[], None],
     ) -> None:
         """Accept a window's correction once, charge the write, call back."""
@@ -389,7 +390,7 @@ class EscalationPolicy(Protocol):
     # The tier that decodes the plan's windows; every tier-dependent site
     # (arrival authority, input store and link, request-key tier, output
     # link) follows from this one declaration.
-    primary_tier: message.DecoderTier
+    primary_tier: window_records.DecoderTier
     # Whether the policy may escalate a window, so the run keeps the
     # room-side store, one buffer of context on each side of every
     # window, and the strong tier's window side.
@@ -399,8 +400,8 @@ class EscalationPolicy(Protocol):
         """Refuse, with a sentence, a run shape the policy cannot serve."""
 
     def tiers_for_ready_window(
-        self, window: message.Window
-    ) -> tuple[message.DecoderTier, ...]:
+        self, window: window_records.Window
+    ) -> tuple[window_records.DecoderTier, ...]:
         """The tiers that decode the complete window now, primary first."""
 
     def verdict_for_weak_result(
@@ -492,9 +493,9 @@ class WindowingScheme(Protocol):
 
     def data_complete(
         self,
-        window: message.Window,
+        window: window_records.Window,
         *,
-        readiness: message.WindowReadiness,
+        readiness: window_records.WindowReadiness,
     ) -> bool:
         """Whether the window has every round it reads."""
 

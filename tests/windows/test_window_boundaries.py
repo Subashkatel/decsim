@@ -14,6 +14,7 @@ import decsim.engine as engine_module
 import decsim.links.fabric as fabric
 import decsim.links.link_profiles as link_profiles
 import decsim.message as message
+import decsim.records.windows as window_records
 import decsim.windows.window_boundaries as window_boundaries
 import decsim.windows.window_interactions as window_interactions
 import decsim.windows.window_transfers as window_transfers
@@ -33,7 +34,7 @@ def test_a_stale_delivery_is_ignored_and_the_edge_releases_once():
     operation = message.Operation(
         id=1, name="memory", qubits=(0,), patches=(0,)
     )
-    source = message.Window(
+    source = window_records.Window(
         op_id=1,
         k=0,
         commit_lo=1,
@@ -42,7 +43,7 @@ def test_a_stale_delivery_is_ignored_and_the_edge_releases_once():
         n_rounds=5,
         dependents=[(1, 1)],
     )
-    dependent = message.Window(
+    dependent = window_records.Window(
         op_id=1,
         k=1,
         commit_lo=4,
@@ -70,7 +71,9 @@ def test_a_stale_delivery_is_ignored_and_the_edge_releases_once():
     courier = window_boundaries.BoundaryCourier(
         planner, transfers, interaction, _EAGER, on_boundary_received
     )
-    key = message.DecoderRequestKey(1, 0, message.DecoderTier.WEAK, 0)
+    key = window_records.DecoderRequestKey(
+        1, 0, window_records.DecoderTier.WEAK, 0
+    )
     boundary_v1 = {4: [1, 0, 0]}
     boundary_v2 = {4: [0, 1, 0]}
 

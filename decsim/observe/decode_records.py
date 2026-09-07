@@ -10,13 +10,14 @@ import dataclasses
 from typing import Optional
 
 import decsim.message as message
+import decsim.records.windows as window_records
 
 
 @dataclasses.dataclass(frozen=True)
 class TerminalRequestRecord:
     """One decode request at its end: identity, input, ticks, outcome."""
 
-    request_key: message.DecoderRequestKey
+    request_key: window_records.DecoderRequestKey
     input_round_lo: int
     input_round_hi: int
     input_round_count: int
@@ -38,9 +39,9 @@ class TerminalServiceRecord:
 
     service_key: message.DecoderServiceKey
     pool: str
-    original_request_keys: tuple[message.DecoderRequestKey, ...]
-    completed_request_keys: tuple[message.DecoderRequestKey, ...]
-    cancelled_request_keys: tuple[message.DecoderRequestKey, ...]
+    original_request_keys: tuple[window_records.DecoderRequestKey, ...]
+    completed_request_keys: tuple[window_records.DecoderRequestKey, ...]
+    cancelled_request_keys: tuple[window_records.DecoderRequestKey, ...]
     input_round_count: int
     dispatch_ticks: int
     terminal_ticks: int

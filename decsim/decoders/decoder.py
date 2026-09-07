@@ -27,6 +27,7 @@ import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.message as message
 import decsim.observe.trace_source as trace_source
 import decsim.records.seeds as seed_records
+import decsim.records.windows as window_records
 
 OnResult = Callable[[Optional[message.DecodeResult]], None]
 
@@ -295,7 +296,7 @@ def result_from_selected_faults(
     defects = _defects_from_detector_ids(model, residual_detector_ids)
     correction = committed.astype(numpy.uint8)
     logical_observables = bit_tuple(observable_flips)
-    boundary_data = message.DependencyResidual(
+    boundary_data = window_records.DependencyResidual(
         detector_ids=residual_detector_ids, defects=defects
     )
     return message.DecodeResult(

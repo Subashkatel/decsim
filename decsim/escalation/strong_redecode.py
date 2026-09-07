@@ -18,6 +18,7 @@ import functools
 from typing import Callable, Optional
 
 import decsim.message as message
+import decsim.records.windows as window_records
 
 LOG_SOURCE = "DecoderCluster"
 
@@ -193,7 +194,7 @@ class StrongRedecode:
     def _send_selection(
         self,
         weak_job: message.DecodeJob,
-        strong_request_key: message.DecoderRequestKey,
+        strong_request_key: window_records.DecoderRequestKey,
     ) -> int:
         """Send the window's selection; returns the tick it is expected.
 
@@ -216,7 +217,7 @@ class StrongRedecode:
 
     def _selection_delivered(
         self,
-        request_key: message.DecoderRequestKey,
+        request_key: window_records.DecoderRequestKey,
         on_selection_delivered: Callable[[], None],
     ) -> None:
         self.selections.note_delivered(request_key)
@@ -237,13 +238,13 @@ class _StrongSelections:
         self.landing_by_request_key: dict = {}
 
     def remember_sibling(
-        self, window_key: tuple, request_key: message.DecoderRequestKey
+        self, window_key: tuple, request_key: window_records.DecoderRequestKey
     ) -> None:
         self.sibling_key_by_window[window_key] = request_key
 
     def sibling_for(
         self, window_key: tuple
-    ) -> Optional[message.DecoderRequestKey]:
+    ) -> Optional[window_records.DecoderRequestKey]:
         return self.sibling_key_by_window.get(window_key)
 
     def forget_sibling(self, window_key: tuple) -> None:
@@ -251,7 +252,7 @@ class _StrongSelections:
 
     def land_after_selection(
         self,
-        request_key: message.DecoderRequestKey,
+        request_key: window_records.DecoderRequestKey,
         on_landed: Callable[[], None],
     ) -> None:
         """A selected strong input lands only once its selection arrived."""
@@ -260,7 +261,9 @@ class _StrongSelections:
             return
         self.landing_by_request_key[request_key] = on_landed
 
-    def note_delivered(self, request_key: message.DecoderRequestKey) -> None:
+    def note_delivered(
+        self, request_key: window_records.DecoderRequestKey
+    ) -> None:
         """The selection arrived: a landed input waiting for it may start."""
         self.delivered_request_keys.add(request_key)
         waiting = self.landing_by_request_key.pop(request_key, None)

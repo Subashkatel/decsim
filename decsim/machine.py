@@ -84,6 +84,7 @@ import decsim.qpu.settings as qpu_settings
 import decsim.qpu.stim_device as stim_device
 import decsim.qpu.syndrome_devices as syndrome_devices
 import decsim.records.seeds as seed_records
+import decsim.records.windows as window_records
 import decsim.seeding as seeding
 import decsim.syndrome_buffer.round_store as round_store_module
 import decsim.syndrome_buffer.settings as round_store_settings
@@ -1187,7 +1188,7 @@ def _strong_round_store(
     row = _row(ROUND_STORES, "strong_round_store.kind", settings.kind)
     uses_strong_store = (
         escalation_policy.requires_strong_context
-        or escalation_policy.primary_tier is message.DecoderTier.STRONG
+        or escalation_policy.primary_tier is window_records.DecoderTier.STRONG
     )
     if not uses_strong_store:
         return None

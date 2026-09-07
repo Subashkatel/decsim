@@ -17,6 +17,7 @@ from typing import Optional
 
 import decsim.message as message
 import decsim.records.identity as identity_records
+import decsim.records.windows as window_records
 import decsim.windows.windowing_schemes as windowing_schemes
 
 
@@ -156,7 +157,7 @@ class RoundTracker:
     # ---- round counts and readiness
 
     def round_count_for_window(
-        self, operation_id, window: Optional[message.Window] = None
+        self, operation_id, window: Optional[window_records.Window] = None
     ) -> int:
         """The round count to check or read one window against.
 
@@ -176,7 +177,7 @@ class RoundTracker:
         return self.rounds_arrived(operation_id)
 
     def effective_round_count_for_window(
-        self, operation_id, window: Optional[message.Window]
+        self, operation_id, window: Optional[window_records.Window]
     ) -> int:
         """The round count a window reads against, clipped at a closed tail."""
         round_count = self.round_count_for_window(operation_id, window)
@@ -188,7 +189,7 @@ class RoundTracker:
         return min(round_count, closed)
 
     def closed_boundary_round_for_window(
-        self, window: message.Window
+        self, window: window_records.Window
     ) -> Optional[int]:
         """The closed boundary in the window's trailing buffer, if any.
 
@@ -211,7 +212,9 @@ class RoundTracker:
             return round_count
         return None
 
-    def readiness(self, window: message.Window) -> message.WindowReadiness:
+    def readiness(
+        self, window: window_records.Window
+    ) -> window_records.WindowReadiness:
         """What the scheme sees when deciding whether a window has its data."""
         successor_ids = sorted(
             self.planner.successors_by_operation[window.op_id],
@@ -221,7 +224,7 @@ class RoundTracker:
         for successor_id in successor_ids:
             arrived = self.rounds_arrived(successor_id)
             round_count = self.round_count_for_window(successor_id)
-            successor = message.SuccessorReadiness(
+            successor = window_records.SuccessorReadiness(
                 successor_id, arrived, round_count
             )
             successors.append(successor)
@@ -232,7 +235,7 @@ class RoundTracker:
         is_tail_closed = closed_boundary is not None
         local_rounds_arrived = self.rounds_arrived(window.op_id)
         memory_rounds_arrived = self.memory_rounds(window.op_id)
-        return message.WindowReadiness(
+        return window_records.WindowReadiness(
             local_rounds_arrived=local_rounds_arrived,
             local_round_count=local_round_count,
             successors=tuple(successors),
@@ -240,17 +243,17 @@ class RoundTracker:
             tail_closed=is_tail_closed,
         )
 
-    def is_data_complete(self, window: message.Window) -> bool:
+    def is_data_complete(self, window: window_records.Window) -> bool:
         """Whether the window has every round it reads, by the scheme's rule."""
         readiness = self.readiness(window)
         return self.scheme.data_complete(window, readiness=readiness)
 
-    def is_buffer_filled_by_memory(self, window: message.Window) -> bool:
+    def is_buffer_filled_by_memory(self, window: window_records.Window) -> bool:
         """Whether memory rounds alone satisfy the buffer past the operation."""
         readiness = self.readiness(window)
         return windowing_schemes.buffer_filled_by_memory_only(window, readiness)
 
-    def has_first_round(self, window: message.Window) -> bool:
+    def has_first_round(self, window: window_records.Window) -> bool:
         """Whether the window's first read round has arrived."""
         arrived = self.rounds_arrived(window.op_id)
         return arrived >= window.start_round
@@ -292,7 +295,7 @@ class _StreamLength:
         )
 
     def closed_boundary_for_window(
-        self, window: message.Window
+        self, window: window_records.Window
     ) -> Optional[int]:
         """The earliest closed boundary in the window's trailing buffer."""
         covered = []

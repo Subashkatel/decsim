@@ -12,7 +12,7 @@ operation). The paper contract is docs/PAPER_MODEL_MAP.md.
 import enum
 import math
 
-import decsim.message as message
+import decsim.records.windows as window_records
 
 
 class SlidingTerminalPolicy(enum.Enum):
@@ -23,7 +23,7 @@ class SlidingTerminalPolicy(enum.Enum):
 
 
 def sliding_data_complete(
-    window: message.Window, readiness: message.WindowReadiness
+    window: window_records.Window, readiness: window_records.WindowReadiness
 ) -> bool:
     """Whether a window's commit and buffer rounds are present.
 
@@ -47,7 +47,7 @@ def sliding_data_complete(
 
 
 def buffer_filled_by_memory_only(
-    window: message.Window, readiness: message.WindowReadiness
+    window: window_records.Window, readiness: window_records.WindowReadiness
 ) -> bool:
     """Whether memory rounds alone satisfy the buffer past the operation.
 
@@ -89,7 +89,7 @@ class SlidingWindowScheme:
         *,
         commit_round_count: int,
         buffer_round_count: int,
-    ) -> message.OperationWindowPlan:
+    ) -> window_records.OperationWindowPlan:
         """The finite forward (W, F) construction.
 
         F is commit_round_count and W is commit_round_count plus
@@ -114,7 +114,7 @@ class SlidingWindowScheme:
         for window_index in range(last_index):
             next_index = window_index + 1
             internal_dependencies.append((window_index, next_index))
-        return message.OperationWindowPlan(
+        return window_records.OperationWindowPlan(
             operation_id=operation_id,
             windows=windows,
             internal_dependencies=tuple(internal_dependencies),
@@ -134,9 +134,9 @@ class SlidingWindowScheme:
 
     def data_complete(
         self,
-        window: message.Window,
+        window: window_records.Window,
         *,
-        readiness: message.WindowReadiness,
+        readiness: window_records.WindowReadiness,
     ) -> bool:
         """Whether the window has every round it reads."""
         return sliding_data_complete(window, readiness)
@@ -154,11 +154,11 @@ class NaiveOnlineScheme:
         *,
         commit_round_count: int,
         buffer_round_count: int,
-    ) -> message.OperationWindowPlan:
+    ) -> window_records.OperationWindowPlan:
         """One window over the whole operation."""
         del commit_round_count, buffer_round_count
-        whole = message.WindowGeometry(1, 1, round_count, round_count)
-        return message.OperationWindowPlan(
+        whole = window_records.WindowGeometry(1, 1, round_count, round_count)
+        return window_records.OperationWindowPlan(
             operation_id=operation_id,
             windows=(whole,),
             internal_dependencies=(),
@@ -170,9 +170,9 @@ class NaiveOnlineScheme:
 
     def data_complete(
         self,
-        window: message.Window,
+        window: window_records.Window,
         *,
-        readiness: message.WindowReadiness,
+        readiness: window_records.WindowReadiness,
     ) -> bool:
         """Whether the window has every round it reads."""
         return sliding_data_complete(window, readiness)
@@ -193,7 +193,7 @@ class ParallelWindowScheme:
         *,
         commit_round_count: int,
         buffer_round_count: int,
-    ) -> message.OperationWindowPlan:
+    ) -> window_records.OperationWindowPlan:
         """Skoric's depth-two block A/B schedule with endpoint rules.
 
         The published construction fixes ncom = nbuf = d. The first A
@@ -215,9 +215,9 @@ class ParallelWindowScheme:
 
     def data_complete(
         self,
-        window: message.Window,
+        window: window_records.Window,
         *,
-        readiness: message.WindowReadiness,
+        readiness: window_records.WindowReadiness,
     ) -> bool:
         """Whether the window has every round it reads."""
         return sliding_data_complete(window, readiness)
@@ -252,7 +252,7 @@ class TanSandwichScheme:
         *,
         commit_round_count: int,
         buffer_round_count: int,
-    ) -> message.OperationWindowPlan:
+    ) -> window_records.OperationWindowPlan:
         """Type-1 cores every s rounds with a type-2 seam between each pair."""
         step = commit_round_count
         buffer = buffer_round_count
@@ -275,7 +275,7 @@ class TanSandwichScheme:
         for left_type_1 in range(seam_count):
             seam_round = buffer + step + left_type_1 * step
             seam_index = len(windows)
-            seam = message.WindowGeometry(
+            seam = window_records.WindowGeometry(
                 seam_round,
                 seam_round,
                 seam_round,
@@ -294,7 +294,7 @@ class TanSandwichScheme:
         exit_window_indices = tuple(range(1, window_count, 2))
         if not exit_window_indices:
             exit_window_indices = (0,)
-        return message.OperationWindowPlan(
+        return window_records.OperationWindowPlan(
             operation_id=operation_id,
             windows=tuple(windows),
             internal_dependencies=tuple(edges),
@@ -302,14 +302,14 @@ class TanSandwichScheme:
             exit_window_indices=exit_window_indices,
             windowed=True,
             batch_preceding_idle_rounds=False,
-            protocol=message.WindowProtocol.TAN_ZERO_SEAM_GRAPHLIKE,
+            protocol=window_records.WindowProtocol.TAN_ZERO_SEAM_GRAPHLIKE,
         )
 
     def data_complete(
         self,
-        window: message.Window,
+        window: window_records.Window,
         *,
-        readiness: message.WindowReadiness,
+        readiness: window_records.WindowReadiness,
     ) -> bool:
         """Whether the window has every round it reads."""
         return sliding_data_complete(window, readiness)
@@ -332,7 +332,7 @@ class _TanCores:
         self.width = width
         self.type_1_count = type_1_count
 
-    def type_1_window(self, index: int) -> message.WindowGeometry:
+    def type_1_window(self, index: int) -> window_records.WindowGeometry:
         """Core index reads w rounds from 1 + index*s, commits the middle s."""
         read_lo = 1 + index * self.step
         commit_lo = read_lo + self.buffer
@@ -343,7 +343,7 @@ class _TanCores:
             commit_hi = self.round_count
         read_end = read_lo + self.width - 1
         buffer_hi = min(self.round_count, read_end)
-        return message.WindowGeometry(
+        return window_records.WindowGeometry(
             buffer_lo=read_lo,
             commit_lo=commit_lo,
             commit_hi=commit_hi,
@@ -361,7 +361,7 @@ class _BlockLayout:
         three_widths = 3 * width
         first_commit_hi = min(two_widths, round_count)
         first_buffer_hi = min(three_widths, round_count)
-        first_a = message.WindowGeometry(
+        first_a = window_records.WindowGeometry(
             buffer_lo=1,
             commit_lo=1,
             commit_hi=first_commit_hi,
@@ -388,7 +388,7 @@ class _BlockLayout:
     def _absorb_tail_into_current_a(self) -> None:
         """A short tail of at most d rounds joins the preceding A commit."""
         current = self.windows[self.current_a]
-        self.windows[self.current_a] = message.WindowGeometry(
+        self.windows[self.current_a] = window_records.WindowGeometry(
             buffer_lo=current.buffer_lo,
             commit_lo=current.commit_lo,
             commit_hi=self.round_count,
@@ -399,7 +399,7 @@ class _BlockLayout:
         """A terminal B at the physical boundary has only its left A."""
         b_lo = self.windows[self.current_a].commit_hi + 1
         b_index = len(self.windows)
-        terminal_b = message.WindowGeometry(
+        terminal_b = window_records.WindowGeometry(
             b_lo,
             b_lo,
             self.round_count,
@@ -415,7 +415,7 @@ class _BlockLayout:
         next_a_lo = b_lo + 3 * self.width
         b_index = len(self.windows)
         b_hi = next_a_lo - 1
-        interior_b = message.WindowGeometry(
+        interior_b = window_records.WindowGeometry(
             b_lo, b_lo, b_hi, b_hi, closed_temporal_boundaries=True
         )
         self.windows.append(interior_b)
@@ -425,7 +425,7 @@ class _BlockLayout:
         leading_start = next_a_lo - self.width
         next_a_read_end = next_a_hi + self.width
         next_a_buffer_hi = min(next_a_read_end, self.round_count)
-        next_a = message.WindowGeometry(
+        next_a = window_records.WindowGeometry(
             buffer_lo=max(1, leading_start),
             commit_lo=next_a_lo,
             commit_hi=next_a_hi,
@@ -436,7 +436,7 @@ class _BlockLayout:
         self.edges.append((next_a_index, b_index))
         self.current_a = next_a_index
 
-    def plan(self, operation_id: int) -> message.OperationWindowPlan:
+    def plan(self, operation_id: int) -> window_records.OperationWindowPlan:
         """The plan: entries have no incoming edge, exits no outgoing one."""
         edge_tuple = tuple(self.edges)
         destinations = set()
@@ -452,7 +452,7 @@ class _BlockLayout:
                 entry_window_indices.append(index)
             if index not in sources:
                 exit_window_indices.append(index)
-        return message.OperationWindowPlan(
+        return window_records.OperationWindowPlan(
             operation_id=operation_id,
             windows=tuple(self.windows),
             internal_dependencies=edge_tuple,
@@ -483,7 +483,7 @@ def _finite_forward_window_geometries(
     while True:
         remaining_rounds = round_count - commit_lo + 1
         if remaining_rounds < window_width + commit_round_count:
-            tail = message.WindowGeometry(
+            tail = window_records.WindowGeometry(
                 buffer_lo=commit_lo,
                 commit_lo=commit_lo,
                 commit_hi=round_count,
@@ -493,7 +493,7 @@ def _finite_forward_window_geometries(
             return tuple(windows)
         regular_commit_hi = commit_lo + commit_round_count - 1
         regular_buffer_hi = regular_commit_hi + buffer_round_count
-        regular = message.WindowGeometry(
+        regular = window_records.WindowGeometry(
             buffer_lo=commit_lo,
             commit_lo=commit_lo,
             commit_hi=regular_commit_hi,
@@ -518,7 +518,7 @@ def _lookahead_window_geometries(
         stride_end = (index + 1) * commit_round_count
         commit_hi = min(stride_end, round_count)
         buffer_hi = commit_hi + buffer_round_count
-        geometry = message.WindowGeometry(
+        geometry = window_records.WindowGeometry(
             buffer_lo=commit_lo,
             commit_lo=commit_lo,
             commit_hi=commit_hi,
@@ -553,7 +553,7 @@ def _require_buffer_floor(geometry, floor: int, floor_label: str) -> None:
 
 
 def _successor_has_rounds(
-    readiness: message.WindowReadiness, overflow_rounds: int
+    readiness: window_records.WindowReadiness, overflow_rounds: int
 ) -> bool:
     for successor in readiness.successors:
         if successor.rounds_arrived >= overflow_rounds:
@@ -561,7 +561,9 @@ def _successor_has_rounds(
     return False
 
 
-def _every_successor_exhausted(readiness: message.WindowReadiness) -> bool:
+def _every_successor_exhausted(
+    readiness: window_records.WindowReadiness,
+) -> bool:
     for successor in readiness.successors:
         if successor.rounds_arrived < successor.round_count:
             return False

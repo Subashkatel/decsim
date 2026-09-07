@@ -13,6 +13,7 @@ threshold comes from is its ThresholdSource (threshold_sources.py).
 
 import decsim.controller.policies as boundary_policies
 import decsim.message as message
+import decsim.records.windows as window_records
 import decsim.windows.windowing_schemes as windowing_schemes
 
 
@@ -29,7 +30,7 @@ class EscalationPolicyBase:
         """Every run shape is served."""
         del plan
 
-    def tiers_for_ready_window(self, window: message.Window) -> tuple:
+    def tiers_for_ready_window(self, window: window_records.Window) -> tuple:
         """The primary tier alone."""
         del window
         return (self.primary_tier,)
@@ -44,7 +45,7 @@ class Baseline(EscalationPolicyBase):
     """Plain windowed decoding: every window once on the weak tier, kept."""
 
     requires_strong_context = False
-    primary_tier = message.DecoderTier.WEAK
+    primary_tier = window_records.DecoderTier.WEAK
 
     def verdict_for_weak_result(self, job, result) -> message.Verdict:
         """Every result is final."""
@@ -67,7 +68,7 @@ class StrongOnly(EscalationPolicyBase):
     """
 
     requires_strong_context = False
-    primary_tier = message.DecoderTier.STRONG
+    primary_tier = window_records.DecoderTier.STRONG
 
     def check_plan(self, plan: message.RunShape) -> None:
         """A static plan; dynamic streams re-point live window reads."""
@@ -103,7 +104,7 @@ class Switching(EscalationPolicyBase):
     """
 
     requires_strong_context = True
-    primary_tier = message.DecoderTier.WEAK
+    primary_tier = window_records.DecoderTier.WEAK
 
     def __init__(
         self,
@@ -137,12 +138,15 @@ class Switching(EscalationPolicyBase):
         _refuse_crossing_strong_region(plan)
         _refuse_double_window_run(plan)
 
-    def tiers_for_ready_window(self, window: message.Window) -> tuple:
+    def tiers_for_ready_window(self, window: window_records.Window) -> tuple:
         """The weak tier, and the strong tier too when both run at once."""
         del window
         if self.run_both_at_once:
-            return (message.DecoderTier.WEAK, message.DecoderTier.STRONG)
-        return (message.DecoderTier.WEAK,)
+            return (
+                window_records.DecoderTier.WEAK,
+                window_records.DecoderTier.STRONG,
+            )
+        return (window_records.DecoderTier.WEAK,)
 
     def verdict_for_weak_result(self, job, result) -> message.Verdict:
         """Keep a confident weak result; otherwise escalate its window.

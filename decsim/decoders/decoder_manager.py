@@ -28,6 +28,7 @@ import decsim.decoders.decoder_pool as decoder_pool_module
 import decsim.decoders.gap_joins as gap_joins_module
 import decsim.decoders.strong_requests as strong_requests_module
 import decsim.message as message
+import decsim.records.windows as window_records
 
 
 class DecoderManager:
@@ -213,7 +214,7 @@ class DecoderManager:
     # ------------------------------------------------- the strong requests
 
     def await_strong_result(
-        self, window_key: tuple, request_key: message.DecoderRequestKey
+        self, window_key: tuple, request_key: window_records.DecoderRequestKey
     ) -> None:
         """The window asked for this request's strong result.
 
@@ -223,7 +224,7 @@ class DecoderManager:
         self.strong_requests.begin_selection(window_key, request_key)
 
     def accept_selection(
-        self, window_key: tuple, request_key: message.DecoderRequestKey
+        self, window_key: tuple, request_key: window_records.DecoderRequestKey
     ) -> None:
         """The selection landed: the request's result may reach the window."""
         self.outcomes.select_strong_result(window_key, request_key)

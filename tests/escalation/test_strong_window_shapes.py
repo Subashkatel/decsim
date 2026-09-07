@@ -27,6 +27,7 @@ import pytest
 import decsim.machine as machine_module
 import decsim.message as message
 import decsim.observe.run_views as run_views
+import decsim.records.windows as window_records
 import tests.escalation.declared_fabric as fabric
 
 # The gate's switching card (validation/responsibility_audit_2026_08_30/
@@ -110,7 +111,7 @@ def _strong_request_record(machine, window_id: int):
     )
     for record in view.requests:
         is_window = record.request_key.window_id == window_id
-        is_strong = record.request_key.tier is message.DecoderTier.STRONG
+        is_strong = record.request_key.tier is window_records.DecoderTier.STRONG
         if is_window and is_strong:
             return record
     raise AssertionError(f"no strong request for window {window_id}")

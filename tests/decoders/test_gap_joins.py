@@ -9,6 +9,7 @@ import decsim.decoders.gap_joins as gap_joins_module
 import decsim.engine as engine_module
 import decsim.message as message
 import decsim.records.rounds as round_records
+import decsim.records.windows as window_records
 
 
 class _Enqueued:
@@ -34,7 +35,7 @@ def _primary():
     )
     landed_round = decoder_memory.MaterializedSyndromeRound(1, 1, (fragment,))
     decoder_input = decoder_memory.DecoderInput(1, 0, None, (landed_round,))
-    window = message.Window(
+    window = window_records.Window(
         op_id=1, k=0, commit_lo=1, commit_hi=1, buffer_hi=1, n_rounds=1
     )
     model = object()

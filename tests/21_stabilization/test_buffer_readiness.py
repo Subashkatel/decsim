@@ -8,11 +8,11 @@ adds its declared cost, so each assertion is exact arithmetic.
 import pytest
 
 import decsim.records.rounds as round_records
+import decsim.records.windows as window_records
 from decsim.config import microseconds_to_ticks
 from decsim.engine import Engine
 from decsim.links.fabric import LinkFabric
 from decsim.links.link_profiles import logical_reference_profile
-from decsim.message import DecoderTier
 
 
 def test_weak_only_pipeline_arithmetic(fabric):
@@ -124,7 +124,7 @@ def test_strong_primary_rounds_never_enter_the_weak_path(fabric):
     (record,) = completed.pauli_frame.snapshot().records
     assert record.tier == "strong"
     (request,) = completed.observation.decode_records.requests
-    assert request.request_key.tier is DecoderTier.STRONG
+    assert request.request_key.tier is window_records.DecoderTier.STRONG
     assert (
         request.terminal_processing_outcome.value
         == "primary_forwarded_for_delivery"

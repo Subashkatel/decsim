@@ -16,13 +16,14 @@ import functools
 from typing import Callable, Optional
 
 import decsim.message as message
+import decsim.records.windows as window_records
 
 
 @dataclasses.dataclass(frozen=True)
 class HeldBoundary:
     """A boundary kept back until the window's result is final (Held)."""
 
-    source_request_key: message.DecoderRequestKey
+    source_request_key: window_records.DecoderRequestKey
     operation: message.Operation
     boundary: object
 
@@ -51,10 +52,10 @@ class BoundaryCourier:
 
     def hand_on(
         self,
-        window: message.Window,
+        window: window_records.Window,
         operation: message.Operation,
         result: message.DecodeResult,
-        request_key: message.DecoderRequestKey,
+        request_key: window_records.DecoderRequestKey,
         is_final: bool,
     ) -> None:
         """Ship the decoder's boundary to dependent windows, or hold it."""
@@ -69,9 +70,9 @@ class BoundaryCourier:
 
     def ship_held(
         self,
-        window: message.Window,
+        window: window_records.Window,
         result: message.DecodeResult,
-        request_key: message.DecoderRequestKey,
+        request_key: window_records.DecoderRequestKey,
     ) -> None:
         """The window's result is final: a boundary held for it ships now."""
         record = self._record(window.key)
@@ -98,7 +99,7 @@ class BoundaryCourier:
             return None
         return record.committed
 
-    def invalidate(self, window: message.Window) -> None:
+    def invalidate(self, window: window_records.Window) -> None:
         """A window is about to be decoded again.
 
         A boundary already in transit belongs to the invalidated decode,
@@ -124,11 +125,11 @@ class BoundaryCourier:
 
     def send(
         self,
-        window: message.Window,
+        window: window_records.Window,
         operation: message.Operation,
         boundary,
         *,
-        source_request_key: message.DecoderRequestKey,
+        source_request_key: window_records.DecoderRequestKey,
     ) -> None:
         """Ship a committed boundary to the dependents the interaction selects.
 
@@ -159,7 +160,7 @@ class BoundaryCourier:
             )
 
     def merge_available(
-        self, source_key: tuple, destination: message.Window, boundary
+        self, source_key: tuple, destination: window_records.Window, boundary
     ) -> None:
         """Merge an already-delivered predecessor into a newly built window."""
         record = self._record(source_key)
@@ -167,7 +168,7 @@ class BoundaryCourier:
             destination.key, 0
         )
         source_round_count = self.planner.round_count_of(source_key[0])
-        delivery = message.BoundaryDelivery(
+        delivery = window_records.BoundaryDelivery(
             source_key=source_key,
             destination_key=destination.key,
             source_revision=record.version,
@@ -196,9 +197,9 @@ class BoundaryCourier:
             self.record_by_window[key] = record
         return record
 
-    def _targets(self, window: message.Window) -> tuple:
+    def _targets(self, window: window_records.Window) -> tuple:
         """The dependents the interaction selects, absorbed ones left out."""
-        window_info = message.WindowInfo.from_window(window)
+        window_info = window_records.WindowInfo.from_window(window)
         window_infos = self._window_infos()
         selected = self.interaction.boundary_targets(window_info, window_infos)
         targets = []
@@ -212,15 +213,15 @@ class BoundaryCourier:
     def _window_infos(self) -> dict:
         infos = {}
         for key, window in self.planner.windows_by_key.items():
-            infos[key] = message.WindowInfo.from_window(window)
+            infos[key] = window_records.WindowInfo.from_window(window)
         return infos
 
     def _send_one(
         self,
-        window: message.Window,
+        window: window_records.Window,
         operation: message.Operation,
         boundary,
-        source_request_key: message.DecoderRequestKey,
+        source_request_key: window_records.DecoderRequestKey,
         dependent_key: tuple,
         version: int,
         delivery_version: int,
@@ -266,7 +267,7 @@ class BoundaryCourier:
             key, 0
         )
         source_round_count = self.planner.round_count_of(source_operation_id)
-        delivery = message.BoundaryDelivery(
+        delivery = window_records.BoundaryDelivery(
             source_key=source_key,
             destination_key=key,
             source_revision=version,
@@ -289,7 +290,7 @@ class BoundaryCourier:
         self.on_boundary_received(key, is_unblocked)
 
     @staticmethod
-    def _is_unblocked_now(window: message.Window) -> bool:
+    def _is_unblocked_now(window: window_records.Window) -> bool:
         """The last boundary arrived for a shipped window still waiting."""
         if not window.queued or window.committed:
             return False
@@ -297,8 +298,8 @@ class BoundaryCourier:
 
     def _check_update(
         self,
-        update: message.BoundaryUpdate,
-        window: message.Window,
+        update: window_records.BoundaryUpdate,
+        window: window_records.Window,
         delivery_key: tuple,
         dependency_released: bool,
     ) -> None:
@@ -323,8 +324,10 @@ class BoundaryCourier:
             )
 
     def _propose_boundary_update(
-        self, delivery: message.BoundaryDelivery, destination: message.Window
-    ) -> message.BoundaryUpdate:
+        self,
+        delivery: window_records.BoundaryDelivery,
+        destination: window_records.Window,
+    ) -> window_records.BoundaryUpdate:
         """Let the interaction modify an isolated candidate boundary state."""
         try:
             candidate_state = copy.deepcopy(destination.boundary_in)
@@ -337,7 +340,7 @@ class BoundaryCourier:
         detector_positions = None
         if model is not None:
             detector_positions = model.defect_positions
-        destination_info = message.WindowInfo.from_window(
+        destination_info = window_records.WindowInfo.from_window(
             destination, detector_positions=detector_positions
         )
         update = self.interaction.merge_boundary(

@@ -14,6 +14,7 @@ static plan).
 import types
 
 import decsim.message as message
+import decsim.records.windows as window_records
 import decsim.windows.built_window_models as built_window_models
 import decsim.windows.window_planner as window_planner
 import decsim.windows.windowing_schemes as windowing_schemes
@@ -22,8 +23,8 @@ COMMIT_ROUNDS = 3
 BUFFER_ROUNDS = 2
 
 
-def _empty_plan() -> message.WindowPlan:
-    return message.WindowPlan(
+def _empty_plan() -> window_records.WindowPlan:
+    return window_records.WindowPlan(
         windows={},
         window_count={},
         op_windows={},
@@ -171,7 +172,7 @@ def test_the_seal_clips_the_window_holding_the_last_round():
 
 def test_idle_rounds_fold_only_into_a_batch_style_operation():
     plan = _empty_plan()
-    window = message.Window(
+    window = window_records.Window(
         op_id=7, k=0, commit_lo=1, commit_hi=6, buffer_hi=6, n_rounds=6
     )
     plan.windows[(7, 0)] = window

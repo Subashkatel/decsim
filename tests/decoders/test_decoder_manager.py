@@ -18,6 +18,7 @@ import decsim.escalation.policies as escalation_policies
 import decsim.message as message
 import decsim.observe.log_writers as log_writers
 import decsim.records.rounds as round_records
+import decsim.records.windows as window_records
 from decsim.decoders.decoder_manager import DecoderManager
 
 
@@ -56,7 +57,9 @@ def _window_job():
         size_bits=2,
         fragment_index=0,
     )
-    request_key = message.DecoderRequestKey(1, 0, message.DecoderTier.WEAK, 0)
+    request_key = window_records.DecoderRequestKey(
+        1, 0, window_records.DecoderTier.WEAK, 0
+    )
     return message.DecodeJob(
         op_id=1,
         window_id=0,
@@ -109,8 +112,8 @@ def test_a_withdrawn_window_leaves_the_queue_and_the_ledger():
     waiting = _window_job()
     waiting.window_id = 1
     waiting.label = "waiting"
-    waiting.request_key = message.DecoderRequestKey(
-        1, 1, message.DecoderTier.WEAK, 1
+    waiting.request_key = window_records.DecoderRequestKey(
+        1, 1, window_records.DecoderTier.WEAK, 1
     )
     manager.enqueue(waiting, None, lambda _job, _result: None)
     assert manager.queue.total() == 0  # both took a slot of the one unit

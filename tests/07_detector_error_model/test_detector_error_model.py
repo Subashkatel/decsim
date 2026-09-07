@@ -38,8 +38,7 @@ import decsim.detector_error_model.window_ownership_dag as window_ownership_dag
 import decsim.detector_error_model.window_placement as window_placement
 import decsim.detector_error_model.window_protocol_policy as window_protocol_policy
 import decsim.detector_error_model.window_slicer as window_slicer
-from decsim.message import WindowProtocol
-
+import decsim.records.windows as window_records
 
 # --------------------------------------------------------------------------
 # Local fakes for the Stim surface this module consumes.
@@ -122,7 +121,9 @@ class FakeCircuit:
         object.__setattr__(
             self,
             "_undecomposed_model",
-            decomposed_model if undecomposed_model is None else undecomposed_model,
+            decomposed_model
+            if undecomposed_model is None
+            else undecomposed_model,
         )
         object.__setattr__(self, "accessed_names", [])
 
@@ -212,7 +213,9 @@ PHYSICAL = fault_model_contracts.FaultRepresentation.PHYSICAL
 
 def chain_models(plan, **keyword_arguments):
     """Slice the chain circuit with the shared chronology and defaults."""
-    keyword_arguments.setdefault("fault_model_requirement", GRAPHLIKE_REQUIREMENT)
+    keyword_arguments.setdefault(
+        "fault_model_requirement", GRAPHLIKE_REQUIREMENT
+    )
     keyword_arguments.setdefault("fault_exclusion_ranges", ())
     return window_model_builders.build_window_error_models(
         chain_circuit(),
@@ -301,11 +304,15 @@ def test_package_init_is_a_docstring_and_exports_nothing():
     assert isinstance(only_statement.value.value, str)
     assert not hasattr(detector_error_model_package, "__all__")
     public_names = {
-        name for name in vars(detector_error_model_package) if not name.startswith("__")
+        name
+        for name in vars(detector_error_model_package)
+        if not name.startswith("__")
     }
     assert public_names <= set(PACKAGE_LAYERS)
     for name in public_names:
-        assert isinstance(vars(detector_error_model_package)[name], types.ModuleType)
+        assert isinstance(
+            vars(detector_error_model_package)[name], types.ModuleType
+        )
 
 
 def test_package_modules_form_a_one_way_acyclic_layer_graph():
@@ -320,20 +327,24 @@ def test_package_modules_form_a_one_way_acyclic_layer_graph():
             if isinstance(node, ast.Import):
                 imported = [alias.name for alias in node.names]
             elif isinstance(node, ast.ImportFrom) and node.module:
-                imported = [f"{node.module}.{alias.name}" for alias in node.names]
+                imported = [
+                    f"{node.module}.{alias.name}" for alias in node.names
+                ]
             else:
                 continue
             for name in imported:
                 if name.startswith(package_prefix):
-                    edges.add((module_name, name[len(package_prefix):]))
+                    edges.add((module_name, name[len(package_prefix) :]))
                 elif name.startswith("decsim."):
                     outward_imports.add((module_name, name))
     assert edges
     assert not any(importer == "__init__" for importer, _ in edges)
     for importer, imported in edges:
         assert PACKAGE_LAYERS[imported] < PACKAGE_LAYERS[importer]
-    reachable = {module: {target for source, target in edges if source == module}
-                 for module in PACKAGE_LAYERS}
+    reachable = {
+        module: {target for source, target in edges if source == module}
+        for module in PACKAGE_LAYERS
+    }
     for _ in range(len(PACKAGE_LAYERS)):
         for module in reachable:
             for target in list(reachable[module]):
@@ -341,8 +352,8 @@ def test_package_modules_form_a_one_way_acyclic_layer_graph():
     for module, targets in reachable.items():
         assert module not in targets
     assert outward_imports == {
-        ("window_protocol_policy", "decsim.message"),
-        ("window_model_builders", "decsim.message"),
+        ("window_protocol_policy", "decsim.records.windows"),
+        ("window_model_builders", "decsim.records.windows"),
     }
 
 
@@ -369,7 +380,9 @@ def test_importing_a_leaf_module_loads_no_higher_layer_and_no_numpy():
     assert "decsim.detector_error_model.fault_model_contracts" in loaded
     assert not any(name.split(".")[0] == "numpy" for name in loaded)
     package_modules_loaded = {
-        name for name in loaded if name.startswith("decsim.detector_error_model")
+        name
+        for name in loaded
+        if name.startswith("decsim.detector_error_model")
     }
     assert package_modules_loaded == {
         "decsim.detector_error_model",
@@ -388,7 +401,9 @@ def test_importing_a_leaf_module_loads_no_higher_layer_and_no_numpy():
 
 def test_fault_representation_has_exactly_two_stable_values():
     """The fault representation enum has exactly the two stable string values graphlike and physical."""
-    assert [member.value for member in fault_model_contracts.FaultRepresentation] == [
+    assert [
+        member.value for member in fault_model_contracts.FaultRepresentation
+    ] == [
         "graphlike",
         "physical",
     ]
@@ -396,7 +411,9 @@ def test_fault_representation_has_exactly_two_stable_values():
 
 def test_requirement_fields_and_defaults():
     """A decoder fault-model requirement has exactly two fields and defaults to no representations and no link."""
-    fields = dataclasses.fields(fault_model_contracts.DecoderFaultModelRequirement)
+    fields = dataclasses.fields(
+        fault_model_contracts.DecoderFaultModelRequirement
+    )
     assert [field.name for field in fields] == [
         "representations",
         "require_physical_to_graphlike_link",
@@ -442,7 +459,8 @@ def test_link_requires_both_representations(representations):
 def test_link_with_both_representations_is_accepted():
     """Asking for the link together with both representations is accepted."""
     requirement = fault_model_contracts.DecoderFaultModelRequirement(
-        frozenset({GRAPHLIKE, PHYSICAL}), require_physical_to_graphlike_link=True
+        frozenset({GRAPHLIKE, PHYSICAL}),
+        require_physical_to_graphlike_link=True,
     )
     assert requirement.require_physical_to_graphlike_link is True
 
@@ -460,17 +478,23 @@ def test_joined_is_union_and_logical_or():
     joined = GRAPHLIKE_REQUIREMENT.joined(PHYSICAL_REQUIREMENT)
     assert joined.representations == frozenset({GRAPHLIKE, PHYSICAL})
     assert joined.require_physical_to_graphlike_link is False
-    assert LINKED_REQUIREMENT.joined(NO_REQUIREMENT).require_physical_to_graphlike_link
+    assert LINKED_REQUIREMENT.joined(
+        NO_REQUIREMENT
+    ).require_physical_to_graphlike_link
 
 
 def test_four_requirement_singletons_have_exact_values():
     """The four shared requirement singletons carry exactly the declared representations and link flags."""
-    assert NO_REQUIREMENT == fault_model_contracts.DecoderFaultModelRequirement()
+    assert (
+        NO_REQUIREMENT == fault_model_contracts.DecoderFaultModelRequirement()
+    )
     assert GRAPHLIKE_REQUIREMENT.representations == frozenset({GRAPHLIKE})
     assert GRAPHLIKE_REQUIREMENT.require_physical_to_graphlike_link is False
     assert PHYSICAL_REQUIREMENT.representations == frozenset({PHYSICAL})
     assert PHYSICAL_REQUIREMENT.require_physical_to_graphlike_link is False
-    assert LINKED_REQUIREMENT.representations == frozenset({GRAPHLIKE, PHYSICAL})
+    assert LINKED_REQUIREMENT.representations == frozenset(
+        {GRAPHLIKE, PHYSICAL}
+    )
     assert LINKED_REQUIREMENT.require_physical_to_graphlike_link is True
 
 
@@ -482,7 +506,10 @@ def test_four_requirement_singletons_have_exact_values():
 def test_canonical_records_are_frozen_with_both_identities():
     """The canonical error records are frozen and carry both the instruction-wide identity and its components."""
     component_fields = [
-        field.name for field in dataclasses.fields(stim_fault_catalog.CanonicalErrorComponent)
+        field.name
+        for field in dataclasses.fields(
+            stim_fault_catalog.CanonicalErrorComponent
+        )
     ]
     assert component_fields == [
         "component_ordinal",
@@ -491,7 +518,9 @@ def test_canonical_records_are_frozen_with_both_identities():
     ]
     instruction_fields = [
         field.name
-        for field in dataclasses.fields(stim_fault_catalog.CanonicalErrorInstruction)
+        for field in dataclasses.fields(
+            stim_fault_catalog.CanonicalErrorInstruction
+        )
     ]
     assert instruction_fields == [
         "error_ordinal",
@@ -518,12 +547,17 @@ def test_merged_probabilities_are_not_domain_checked():
     assert stim_fault_catalog._merge_probability(2.0, 3.0) == pytest.approx(
         2.0 * (1 - 3.0) + 3.0 * (1 - 2.0)
     )
-    assert stim_fault_catalog._merge_probability(-1.0, 0.5) == pytest.approx(-1.0 * 0.5 + 0.5 * 2.0)
+    assert stim_fault_catalog._merge_probability(-1.0, 0.5) == pytest.approx(
+        -1.0 * 0.5 + 0.5 * 2.0
+    )
 
 
 def test_xor_reduction_drops_even_multiplicities_and_sorts():
     """Identity canonicalisation drops ids occurring an even number of times and returns the rest sorted."""
-    assert fault_identity_validation.xor_target_ids([5, 1, 5, 3, 3, 3]) == (1, 3)
+    assert fault_identity_validation.xor_target_ids([5, 1, 5, 3, 3, 3]) == (
+        1,
+        3,
+    )
     assert fault_identity_validation.xor_target_ids([]) == ()
     assert fault_identity_validation.xor_target_ids([2, 2]) == ()
 
@@ -537,9 +571,17 @@ def test_one_instruction_is_parsed_before_components_are_exposed():
     assert record.aggregate_detectors == (2, 3)
     # The two L0 targets cancel across the separator.
     assert record.aggregate_logical_observables == ()
-    assert [component.detectors for component in record.components] == [(2,), (3,)]
-    assert [component.component_ordinal for component in record.components] == [0, 1]
-    assert [component.logical_observables for component in record.components] == [
+    assert [component.detectors for component in record.components] == [
+        (2,),
+        (3,),
+    ]
+    assert [component.component_ordinal for component in record.components] == [
+        0,
+        1,
+    ]
+    assert [
+        component.logical_observables for component in record.components
+    ] == [
         (0,),
         (0,),
     ]
@@ -547,7 +589,9 @@ def test_one_instruction_is_parsed_before_components_are_exposed():
 
 def test_probability_is_taken_from_the_first_instruction_argument():
     """An error's probability is the first instruction argument, as a float."""
-    instruction = FakeDemInstruction("error", (0.5, 9.0), targets_from_text("D0 D1"))
+    instruction = FakeDemInstruction(
+        "error", (0.5, 9.0), targets_from_text("D0 D1")
+    )
     model = FakeDetectorErrorModel([instruction])
     (record,) = stim_fault_catalog.canonical_error_instructions(model)
     assert record.probability == 0.5
@@ -566,7 +610,9 @@ def test_detectorless_aggregate_returns_none_or_raises():
     inert = make_model([(0.1, "D0 D0")])
     assert stim_fault_catalog.canonical_error_instructions(inert) == ()
     with pytest.raises(ValueError) as failure:
-        stim_fault_catalog.canonical_error_instructions(make_model([(0.1, "D0 D0 L1")]))
+        stim_fault_catalog.canonical_error_instructions(
+            make_model([(0.1, "D0 D0 L1")])
+        )
     message = str(failure.value)
     assert "detectorless logical" in message
     assert "error 0" in message
@@ -596,7 +642,10 @@ def test_error_ordinal_counts_every_error_instruction():
     )
     records = stim_fault_catalog.canonical_error_instructions(model)
     assert [record.error_ordinal for record in records] == [1, 2]
-    assert [record.aggregate_detectors for record in records] == [(1, 2), (2, 3)]
+    assert [record.aggregate_detectors for record in records] == [
+        (1, 2),
+        (2, 3),
+    ]
 
 
 def test_unknown_target_kinds_are_ignored():
@@ -619,14 +668,19 @@ def test_unknown_target_kinds_are_ignored():
 
 def test_fault_catalog_is_a_frozen_parallel_record():
     """A fault catalog is a frozen record whose detector, observable and prior tuples stay index aligned."""
-    fields = [field.name for field in dataclasses.fields(fault_model_contracts.FaultCatalog)]
+    fields = [
+        field.name
+        for field in dataclasses.fields(fault_model_contracts.FaultCatalog)
+    ]
     assert fields == [
         "representation",
         "detector_sets",
         "observable_sets",
         "priors",
     ]
-    catalog = stim_fault_catalog._catalog_from_detector_error_model(make_model(CHAIN_ERROR_ROWS), GRAPHLIKE)
+    catalog = stim_fault_catalog._catalog_from_detector_error_model(
+        make_model(CHAIN_ERROR_ROWS), GRAPHLIKE
+    )
     assert len(catalog.detector_sets) == len(catalog.observable_sets)
     assert len(catalog.detector_sets) == len(catalog.priors)
     with pytest.raises(dataclasses.FrozenInstanceError):
@@ -652,21 +706,23 @@ def test_odd_component_keys_uses_the_injected_validator():
         record, fault_identity_validation.validate_fault_identity
     ) == (((0, 1, 2), ()),)
     with pytest.raises(ValueError) as failure:
-        stim_fault_catalog._odd_component_keys(record, fault_identity_validation.validate_graphlike_fault)
+        stim_fault_catalog._odd_component_keys(
+            record, fault_identity_validation.validate_graphlike_fault
+        )
     assert "detector hyperedge" in str(failure.value)
 
 
 def test_detector_error_model_to_faults_merges_component_identities():
     """Component identities repeated across instructions are merged into one column in first-seen order."""
-    model = make_model(
-        [(0.1, "D0 D1"), (0.2, "D0 D1"), (0.3, "D1 D2 ^ D2 D3")]
-    )
-    detector_sets, observable_sets, priors = stim_fault_catalog.detector_error_model_to_faults(
-        model
+    model = make_model([(0.1, "D0 D1"), (0.2, "D0 D1"), (0.3, "D1 D2 ^ D2 D3")])
+    detector_sets, observable_sets, priors = (
+        stim_fault_catalog.detector_error_model_to_faults(model)
     )
     assert detector_sets == [(0, 1), (1, 2), (2, 3)]
     assert observable_sets == [(), (), ()]
-    assert priors[0] == pytest.approx(stim_fault_catalog._merge_probability(0.1, 0.2))
+    assert priors[0] == pytest.approx(
+        stim_fault_catalog._merge_probability(0.1, 0.2)
+    )
     assert priors[1] == pytest.approx(0.3)
     assert priors[2] == pytest.approx(0.3)
 
@@ -682,8 +738,12 @@ def test_detector_error_model_to_faults_applies_no_degree_bound():
 def test_graphlike_and_physical_catalogs_key_columns_differently():
     """The graphlike catalog keys columns by component identity while the physical catalog keys them by instruction-wide identity."""
     model = make_model([(0.2, "D1 D2 ^ D2 D3")])
-    graphlike = stim_fault_catalog._catalog_from_detector_error_model(model, GRAPHLIKE)
-    physical = stim_fault_catalog._catalog_from_detector_error_model(model, PHYSICAL)
+    graphlike = stim_fault_catalog._catalog_from_detector_error_model(
+        model, GRAPHLIKE
+    )
+    physical = stim_fault_catalog._catalog_from_detector_error_model(
+        model, PHYSICAL
+    )
     assert graphlike.detector_sets == ((1, 2), (2, 3))
     assert physical.detector_sets == ((1, 3),)
     assert graphlike.representation is GRAPHLIKE
@@ -711,9 +771,16 @@ def test_validate_fault_identity_canonicalises_and_guards_logical_loss():
     assert fault_identity_validation.validate_fault_identity(
         [3, 1, 3], [2, 2, 5], location="site"
     ) == ((1,), (5,))
-    assert fault_identity_validation.validate_fault_identity([4, 4], [], location="site") is None
+    assert (
+        fault_identity_validation.validate_fault_identity(
+            [4, 4], [], location="site"
+        )
+        is None
+    )
     with pytest.raises(ValueError) as failure:
-        fault_identity_validation.validate_fault_identity([4, 4], [7], location="site")
+        fault_identity_validation.validate_fault_identity(
+            [4, 4], [7], location="site"
+        )
     assert "site is a detectorless logical fault" in str(failure.value)
 
 
@@ -722,9 +789,16 @@ def test_validate_graphlike_fault_bounds_the_detector_degree():
     assert fault_identity_validation.validate_graphlike_fault(
         [1, 0], [], location="site"
     ) == ((0, 1), ())
-    assert fault_identity_validation.validate_graphlike_fault([2, 2], [], location="site") is None
+    assert (
+        fault_identity_validation.validate_graphlike_fault(
+            [2, 2], [], location="site"
+        )
+        is None
+    )
     with pytest.raises(ValueError) as failure:
-        fault_identity_validation.validate_graphlike_fault([0, 1, 2], [], location="site")
+        fault_identity_validation.validate_graphlike_fault(
+            [0, 1, 2], [], location="site"
+        )
     message = str(failure.value)
     assert "site is a detector hyperedge" in message
     assert "one or two detectors per fault" in message
@@ -732,14 +806,22 @@ def test_validate_graphlike_fault_bounds_the_detector_degree():
 
 def test_binary_matrix_normalisation():
     """A matrix argument must be rank two and binary, and is normalised to unsigned bytes, with the location in the message."""
-    matrix = fault_identity_validation._binary_matrix([[0, 1], [1, 0]], location="site", name="check")
+    matrix = fault_identity_validation._binary_matrix(
+        [[0, 1], [1, 0]], location="site", name="check"
+    )
     assert matrix.dtype == numpy.uint8
     with pytest.raises(ValueError) as rank_failure:
-        fault_identity_validation._binary_matrix([0, 1], location="site", name="check")
+        fault_identity_validation._binary_matrix(
+            [0, 1], location="site", name="check"
+        )
     assert "site check must be a rank-2 matrix" in str(rank_failure.value)
     with pytest.raises(ValueError) as value_failure:
-        fault_identity_validation._binary_matrix([[0, 2]], location="site", name="check")
-    assert "site check must contain only binary values" in str(value_failure.value)
+        fault_identity_validation._binary_matrix(
+            [[0, 2]], location="site", name="check"
+        )
+    assert "site check must contain only binary values" in str(
+        value_failure.value
+    )
 
 
 def test_placed_matrix_faults_returns_plain_int_ids():
@@ -759,7 +841,10 @@ def test_placed_matrix_faults_requires_equal_column_counts():
             [[1, 0]], [[1, 0, 1]], location="site"
         )
     message = str(failure.value)
-    assert "site check and observable matrices have different fault counts" in message
+    assert (
+        "site check and observable matrices have different fault counts"
+        in message
+    )
     assert "2 and 3" in message
 
 
@@ -772,7 +857,9 @@ def test_validate_placed_fault_matrices_allows_any_degree_but_not_logical_loss()
         fault_identity_validation.validate_placed_fault_matrices(
             [[0], [0]], [[1], [0]], location="physical"
         )
-    assert "physical column 0 is a detectorless logical fault" in str(failure.value)
+    assert "physical column 0 is a detectorless logical fault" in str(
+        failure.value
+    )
 
 
 # --------------------------------------------------------------------------
@@ -801,8 +888,11 @@ def linked_circuit(
 
 def test_linked_catalogs_build_a_verified_link():
     """The linked build returns a graphlike catalog, a physical catalog and the verified incidence matrix between them."""
-    graphlike, physical, link = stim_fault_catalog._prepare_linked_fault_catalogs(
-        make_model(LINKED_DECOMPOSED_ROWS), make_model(LINKED_UNDECOMPOSED_ROWS)
+    graphlike, physical, link = (
+        stim_fault_catalog._prepare_linked_fault_catalogs(
+            make_model(LINKED_DECOMPOSED_ROWS),
+            make_model(LINKED_UNDECOMPOSED_ROWS),
+        )
     )
     assert graphlike.detector_sets == ((0, 1), (1, 2), (2, 3))
     assert physical.detector_sets == ((0, 1), (1, 3))
@@ -813,9 +903,11 @@ def test_linked_catalogs_build_a_verified_link():
 
 def test_linked_catalogs_retain_a_maximum_detector_canceled_from_the_aggregate():
     """Linked catalogs retain a maximum component detector even when it cancels out of the physical aggregate."""
-    graphlike, physical, link = stim_fault_catalog._prepare_linked_fault_catalogs(
-        make_model([(0.25, "D1 D4 ^ D3 D4")]),
-        make_model([(0.25, "D1 D3")]),
+    graphlike, physical, link = (
+        stim_fault_catalog._prepare_linked_fault_catalogs(
+            make_model([(0.25, "D1 D4 ^ D3 D4")]),
+            make_model([(0.25, "D1 D3")]),
+        )
     )
     assert graphlike == fault_model_contracts.FaultCatalog(
         representation=GRAPHLIKE,
@@ -831,7 +923,14 @@ def test_linked_catalogs_retain_a_maximum_detector_canceled_from_the_aggregate()
     )
     assert link.dtype == numpy.uint8
     assert link.toarray().tolist() == [[1], [1]]
-    assert max(detector for detectors in graphlike.detector_sets for detector in detectors) == 4
+    assert (
+        max(
+            detector
+            for detectors in graphlike.detector_sets
+            for detector in detectors
+        )
+        == 4
+    )
     assert all(4 not in detectors for detectors in physical.detector_sets)
 
 
@@ -855,7 +954,9 @@ def test_linked_catalogs_reject_disagreeing_physical_probabilities():
             make_model(LINKED_DECOMPOSED_ROWS),
             make_model(((0.1, "D0 D1"), (0.2 + 1e-9, "D1 D3"))),
         )
-    assert "decomposed and undecomposed Stim models disagree" in str(failure.value)
+    assert "decomposed and undecomposed Stim models disagree" in str(
+        failure.value
+    )
 
 
 def test_linked_catalogs_reject_a_missing_physical_key():
@@ -903,10 +1004,14 @@ def test_prepare_fault_catalogs_builds_only_requested_domains():
     )
     assert set(physical_only) == {PHYSICAL}
     assert still_no_link is None
-    both, link = stim_fault_catalog.prepare_fault_catalogs(circuit, LINKED_REQUIREMENT)
+    both, link = stim_fault_catalog.prepare_fault_catalogs(
+        circuit, LINKED_REQUIREMENT
+    )
     assert set(both) == {GRAPHLIKE, PHYSICAL}
     assert link is not None
-    empty, empty_link = stim_fault_catalog.prepare_fault_catalogs(circuit, NO_REQUIREMENT)
+    empty, empty_link = stim_fault_catalog.prepare_fault_catalogs(
+        circuit, NO_REQUIREMENT
+    )
     assert empty == {}
     assert empty_link is None
 
@@ -931,8 +1036,10 @@ def test_local_projection_is_the_verified_detector_row_slice():
         graphlike.check.shape[1],
         physical.check.shape[1],
     )
-    derived = (graphlike.check.toarray().astype(numpy.uint64)
-               @ projection.toarray().astype(numpy.uint64)) % 2
+    derived = (
+        graphlike.check.toarray().astype(numpy.uint64)
+        @ projection.toarray().astype(numpy.uint64)
+    ) % 2
     assert numpy.array_equal(derived, physical.check.toarray())
 
 
@@ -943,7 +1050,9 @@ def test_local_projection_is_the_verified_detector_row_slice():
 
 def coordinate_circuit(coordinates, detector_count=None):
     return FakeCircuit(
-        detector_count=len(coordinates) if detector_count is None else detector_count,
+        detector_count=len(coordinates)
+        if detector_count is None
+        else detector_count,
         observable_count=1,
         detector_coordinates=coordinates,
         decomposed_model=make_model([(0.1, "D0 D1")]),
@@ -953,7 +1062,9 @@ def coordinate_circuit(coordinates, detector_count=None):
 def test_round_count_must_be_positive():
     """Resolving chronology requires a positive round count."""
     with pytest.raises(ValueError) as failure:
-        detector_chronology.resolve_detector_rounds(chain_circuit(), CHAIN_DETECTOR_ROUNDS, 0)
+        detector_chronology.resolve_detector_rounds(
+            chain_circuit(), CHAIN_DETECTOR_ROUNDS, 0
+        )
     assert "round_count must be positive" in str(failure.value)
 
 
@@ -962,7 +1073,9 @@ def test_a_detector_free_source_is_still_refused():
     circuit = coordinate_circuit({}, detector_count=0)
     for detector_rounds in ({}, None):
         with pytest.raises(ValueError) as failure:
-            detector_chronology.resolve_detector_rounds(circuit, detector_rounds, 1)
+            detector_chronology.resolve_detector_rounds(
+                circuit, detector_rounds, 1
+            )
         assert "requires at least one detector" in str(failure.value)
 
 
@@ -985,9 +1098,12 @@ def test_explicit_map_must_cover_detectors_and_stay_inside_the_rounds():
     assert "must cover every detector exactly" in str(coverage_failure.value)
 
     map_with_middle_gap = {0: 1, 1: 1, 2: 3, 3: 4}
-    assert detector_chronology.resolve_detector_rounds(
-        chain_circuit(), map_with_middle_gap, CHAIN_ROUND_COUNT
-    ) == map_with_middle_gap
+    assert (
+        detector_chronology.resolve_detector_rounds(
+            chain_circuit(), map_with_middle_gap, CHAIN_ROUND_COUNT
+        )
+        == map_with_middle_gap
+    )
 
     for out_of_bounds_round in (0, CHAIN_ROUND_COUNT + 1):
         invalid_map = dict(CHAIN_DETECTOR_ROUNDS)
@@ -1002,7 +1118,13 @@ def test_explicit_map_must_cover_detectors_and_stay_inside_the_rounds():
 def test_coordinate_layers_are_folded_into_one_based_rounds():
     """Without a map, the last coordinate component is folded into one-based emitted rounds."""
     circuit = coordinate_circuit(
-        {0: [0.0, 0.0], 1: [0.0, 1.0], 2: [0.0, 2.0], 3: [0.0, 3.0], 4: [1.0, 3.0]}
+        {
+            0: [0.0, 0.0],
+            1: [0.0, 1.0],
+            2: [0.0, 2.0],
+            3: [0.0, 3.0],
+            4: [1.0, 3.0],
+        }
     )
     assert detector_chronology.resolve_detector_rounds(circuit, None, 3) == {
         0: 1,
@@ -1018,7 +1140,11 @@ def test_surface_style_three_dimensional_coordinates_are_accepted():
     circuit = coordinate_circuit(
         {0: [1.0, 1.0, 0.0], 1: [1.0, 1.0, 1.0], 2: [2.0, 1.0, 1.0]}
     )
-    assert detector_chronology.resolve_detector_rounds(circuit, None, 1) == {0: 1, 1: 1, 2: 1}
+    assert detector_chronology.resolve_detector_rounds(circuit, None, 1) == {
+        0: 1,
+        1: 1,
+        2: 1,
+    }
 
 
 def test_mixed_or_short_coordinate_arities_are_refused():
@@ -1047,9 +1173,7 @@ def test_raw_layers_must_be_finite_integers(layer):
 
 def test_raw_layers_may_skip_a_round_but_must_stay_inside_the_duration():
     """Coordinate layers may leave a middle round empty but must remain bounded."""
-    circuit_with_middle_gap = coordinate_circuit(
-        {0: [0.0, 0.0], 1: [0.0, 2.0]}
-    )
+    circuit_with_middle_gap = coordinate_circuit({0: [0.0, 0.0], 1: [0.0, 2.0]})
     assert detector_chronology.resolve_detector_rounds(
         circuit_with_middle_gap, None, 3
     ) == {0: 1, 1: 3}
@@ -1059,13 +1183,19 @@ def test_raw_layers_may_skip_a_round_but_must_stay_inside_the_duration():
             {0: [0.0, 0.0], 1: [0.0, out_of_bounds_layer]}
         )
         with pytest.raises(ValueError) as failure:
-            detector_chronology.resolve_detector_rounds(invalid_circuit, None, 3)
-        assert "must lie inside the declared source duration" in str(failure.value)
+            detector_chronology.resolve_detector_rounds(
+                invalid_circuit, None, 3
+            )
+        assert "must lie inside the declared source duration" in str(
+            failure.value
+        )
 
 
 def test_detector_position_in_round_uses_ascending_detector_id():
     """A detector's position inside its round follows ascending detector id."""
-    positions = detector_chronology.detector_position_in_round({2: 1, 0: 1, 1: 2, 3: 2})
+    positions = detector_chronology.detector_position_in_round(
+        {2: 1, 0: 1, 1: 2, 3: 2}
+    )
     assert positions == {0: 0, 2: 1, 1: 0, 3: 1}
 
 
@@ -1092,7 +1222,10 @@ def test_a_detector_free_round_keeps_addresses_and_committed_coverage():
     }
     assert slicer.chronology.round_by_detector == detector_rounds
     assert {
-        detector_id: (slicer.chronology.round_by_detector[detector_id], slicer.chronology.position_by_detector[detector_id])
+        detector_id: (
+            slicer.chronology.round_by_detector[detector_id],
+            slicer.chronology.position_by_detector[detector_id],
+        )
         for detector_id in detector_rounds
     } == expected_addresses
     assert windows[1].detector_ids == ()
@@ -1104,19 +1237,20 @@ def test_a_detector_free_round_keeps_addresses_and_committed_coverage():
     assert empty_faults.owned.shape == (0,)
 
     committed_detector_ids = tuple(
-        detector_id
-        for window in windows
-        for detector_id in window.detector_ids
+        detector_id for window in windows for detector_id in window.detector_ids
     )
     assert committed_detector_ids == (0, 1, 2, 3)
     assert len(committed_detector_ids) == len(set(committed_detector_ids))
     for window in windows:
         for detector_id in window.detector_ids:
-            assert window.defect_positions[detector_id] == expected_addresses[detector_id]
+            assert (
+                window.defect_positions[detector_id]
+                == expected_addresses[detector_id]
+            )
 
 
 def test_coordinates_for_rows_are_all_or_nothing():
-    """Window coordinates are returned only when every row has coordinates, otherwise nothing."""
+    """window_records.Window coordinates are returned only when every row has coordinates, otherwise nothing."""
     complete = {0: [0.0, 0.0], 1: [1.0, 2.0]}
     assert detector_chronology.coordinates_for_rows(complete, [0, 1]) == (
         (0.0, 0.0),
@@ -1124,14 +1258,18 @@ def test_coordinates_for_rows_are_all_or_nothing():
     )
     partial = {0: [0.0, 0.0], 1: []}
     assert detector_chronology.coordinates_for_rows(partial, [0, 1]) is None
-    assert detector_chronology.coordinates_for_rows(partial, [0]) == ((0.0, 0.0),)
+    assert detector_chronology.coordinates_for_rows(partial, [0]) == (
+        (0.0, 0.0),
+    )
     assert detector_chronology.coordinates_for_rows(partial, [0, 7]) is None
 
 
 def test_coordinates_for_rows_are_normalized_to_float_tuples():
     """Row coordinates are copied out of the mapping as nested tuples of built-in floats."""
     integer_valued = {0: [1, 2, 3], 1: (4, 5, 6)}
-    normalized = detector_chronology.coordinates_for_rows(integer_valued, [1, 0])
+    normalized = detector_chronology.coordinates_for_rows(
+        integer_valued, [1, 0]
+    )
     assert normalized == ((4.0, 5.0, 6.0), (1.0, 2.0, 3.0))
     assert type(normalized) is tuple
     assert all(type(row) is tuple for row in normalized)
@@ -1157,7 +1295,10 @@ def make_placed_model():
 
 def test_placed_fault_model_fields_and_docstring():
     """A placed fault model carries the representation, matrices, ownership mask, handoff map and source column ids."""
-    fields = [field.name for field in dataclasses.fields(fault_model_contracts.PlacedFaultModel)]
+    fields = [
+        field.name
+        for field in dataclasses.fields(fault_model_contracts.PlacedFaultModel)
+    ]
     assert fields == [
         "representation",
         "check",
@@ -1194,7 +1335,10 @@ def test_placed_fault_model_freezes_every_field():
 
 def test_window_error_model_fields_and_deliberate_non_freezing():
     """A window model exposes its fields and deliberately leaves defect positions a plain mutable dict."""
-    fields = [field.name for field in dataclasses.fields(fault_model_contracts.WindowErrorModel)]
+    fields = [
+        field.name
+        for field in dataclasses.fields(fault_model_contracts.WindowErrorModel)
+    ]
     assert fields == [
         "detector_ids",
         "detector_coordinates",
@@ -1253,7 +1397,9 @@ def test_require_faults_returns_or_fails_at_the_consuming_boundary():
     assert "window model does not contain physical faults" in str(missing.value)
     with pytest.raises(RuntimeError) as wrong_type:
         window.require_faults("graphlike")
-    assert "representation must be a FaultRepresentation value" in str(wrong_type.value)
+    assert "representation must be a FaultRepresentation value" in str(
+        wrong_type.value
+    )
 
 
 @pytest.mark.parametrize(
@@ -1264,7 +1410,9 @@ def test_require_faults_returns_or_fails_at_the_consuming_boundary():
         ((1, 1, 1, 1), (1, 1, 1, 1)),
     ],
 )
-def test_parse_window_entry_normalises_three_and_four_value_forms(entry, expected):
+def test_parse_window_entry_normalises_three_and_four_value_forms(
+    entry, expected
+):
     """Three-value and four-value plan entries normalise to the same four-bound form."""
     assert window_placement.parse_window_entry(entry) == expected
 
@@ -1294,7 +1442,10 @@ def test_parse_window_entry_lets_a_malformed_length_fail_naturally(entry):
 def test_detectors_in_window_selects_rows_by_round():
     """A window takes the detectors of its buffer rounds."""
     detectors_by_round = {1: [0], 2: [1], 3: [2], 4: [3]}
-    assert window_placement.detectors_in_window(detectors_by_round, 2, 3) == [1, 2]
+    assert window_placement.detectors_in_window(detectors_by_round, 2, 3) == [
+        1,
+        2,
+    ]
     assert window_placement.detectors_in_window(detectors_by_round, 5, 6) == []
 
 
@@ -1305,7 +1456,11 @@ def test_detectors_in_window_selects_rows_by_round():
 
 def test_fault_columns_are_touching_columns_not_committed_elsewhere():
     """The window's columns are the candidate faults the slicer found touching its rows, minus the columns a prior window committed."""
-    assert window_placement._fault_columns_for_window([0, 1, 2], set()) == [0, 1, 2]
+    assert window_placement._fault_columns_for_window([0, 1, 2], set()) == [
+        0,
+        1,
+        2,
+    ]
     assert window_placement._fault_columns_for_window([0, 1, 2], {1, 2}) == [0]
     assert window_placement._fault_columns_for_window([1, 3], set()) == [1, 3]
 
@@ -1316,9 +1471,9 @@ def test_committed_columns_stay_excluded_on_both_ownership_paths():
     incremental = chain_models(plan)[1].require_faults(GRAPHLIKE)
     assert incremental.source_fault_ids == (3, 4)
     assert incremental.owned.tolist() == [True, True]
-    dependency = chain_models(plan, dependency_edges=((0, 1),))[1].require_faults(
-        GRAPHLIKE
-    )
+    dependency = chain_models(plan, dependency_edges=((0, 1),))[
+        1
+    ].require_faults(GRAPHLIKE)
     assert dependency.source_fault_ids == (3, 4)
     assert dependency.owned.tolist() == [True, True]
 
@@ -1347,7 +1502,9 @@ def test_fault_owned_by_window_precedence(
             committed,
             unowned,
             explicit,
-            placement_context(first_commit_round=1, last_commit_round=3, is_last=is_last),
+            placement_context(
+                first_commit_round=1, last_commit_round=3, is_last=is_last
+            ),
         )
         is expected
     )
@@ -1356,7 +1513,9 @@ def test_fault_owned_by_window_precedence(
 def test_detector_bits_are_local_but_observable_bits_are_unconditional():
     """A column sets detector bits only for rows in this window but sets every observable bit."""
     check, observables, _, _ = window_placement._build_window_arrays(
-        context=placement_context(rows=[9, 0], row_by_detector={0: 1}, observable_count=3),
+        context=placement_context(
+            rows=[9, 0], row_by_detector={0: 1}, observable_count=3
+        ),
         columns=[0],
         detector_sets=((0, 5),),
         observable_sets=((2,),),
@@ -1429,7 +1588,9 @@ def test_owned_columns_are_not_recorded_on_the_explicit_path():
         (((4, 3),), ValueError, "is inverted"),
     ],
 )
-def test_fault_exclusion_ranges_are_validated(ranges, expected_error, expected_message):
+def test_fault_exclusion_ranges_are_validated(
+    ranges, expected_error, expected_message
+):
     """Exclusion ranges must not be inverted."""
     with pytest.raises(expected_error) as failure:
         window_placement.checked_fault_exclusion_ranges(ranges)
@@ -1445,9 +1606,18 @@ def test_valid_exclusion_ranges_pass():
 def test_unowned_faults_are_those_touching_an_exclusion_range():
     """A fault is excluded from commitment when any of its detectors falls in an exclusion range."""
     fault_rounds = ((1,), (2, 3), (4,))
-    assert window_placement.faults_touching_excluded_rounds(fault_rounds, ((3, 3),), [0, 1, 2]) == {1}
-    assert window_placement.faults_touching_excluded_rounds(fault_rounds, ((1, 1), (4, 9)), [0, 1, 2]) == {0, 2}
-    assert window_placement.faults_touching_excluded_rounds(fault_rounds, (), [0, 1, 2]) == set()
+    assert window_placement.faults_touching_excluded_rounds(
+        fault_rounds, ((3, 3),), [0, 1, 2]
+    ) == {1}
+    assert window_placement.faults_touching_excluded_rounds(
+        fault_rounds, ((1, 1), (4, 9)), [0, 1, 2]
+    ) == {0, 2}
+    assert (
+        window_placement.faults_touching_excluded_rounds(
+            fault_rounds, (), [0, 1, 2]
+        )
+        == set()
+    )
 
 
 def test_exclusion_keeps_a_fault_available_but_uncommittable():
@@ -1475,13 +1645,15 @@ def test_multi_range_and_single_pair_builders_agree():
         fault_model_requirement=GRAPHLIKE_REQUIREMENT,
         exclude_faults_touching=(2, 2),
     )
-    multiple = window_model_builders.build_single_window_error_model_with_exclusions(
-        chain_circuit(),
-        (1, 2, 2),
-        round_count=CHAIN_ROUND_COUNT,
-        detector_rounds=dict(CHAIN_DETECTOR_ROUNDS),
-        fault_model_requirement=GRAPHLIKE_REQUIREMENT,
-        fault_exclusion_ranges=((2, 2),),
+    multiple = (
+        window_model_builders.build_single_window_error_model_with_exclusions(
+            chain_circuit(),
+            (1, 2, 2),
+            round_count=CHAIN_ROUND_COUNT,
+            detector_rounds=dict(CHAIN_DETECTOR_ROUNDS),
+            fault_model_requirement=GRAPHLIKE_REQUIREMENT,
+            fault_exclusion_ranges=((2, 2),),
+        )
     )
     single_faults = single.require_faults(GRAPHLIKE)
     multiple_faults = multiple.require_faults(GRAPHLIKE)
@@ -1676,7 +1848,9 @@ def test_placement_context_is_a_frozen_six_field_bundle_without_copies():
     ]
     assert own_methods == []
     with pytest.raises(TypeError):
-        window_placement.WindowPlacementContext(rows=rows, row_by_detector=row_by_detector)
+        window_placement.WindowPlacementContext(
+            rows=rows, row_by_detector=row_by_detector
+        )
 
 
 def test_slice_window_builds_one_shared_placement_context(monkeypatch):
@@ -1694,8 +1868,12 @@ def test_slice_window_builds_one_shared_placement_context(monkeypatch):
         events.append(("placed", context))
         return real_placement(context=context, **rest)
 
-    monkeypatch.setattr(window_placement, "WindowPlacementContext", recording_context)
-    monkeypatch.setattr(window_placement, "placed_faults_for_window", recording_placement)
+    monkeypatch.setattr(
+        window_placement, "WindowPlacementContext", recording_context
+    )
+    monkeypatch.setattr(
+        window_placement, "placed_faults_for_window", recording_placement
+    )
     both_domains = fault_model_contracts.DecoderFaultModelRequirement(
         frozenset({GRAPHLIKE, PHYSICAL})
     )
@@ -1717,8 +1895,11 @@ def test_slice_window_builds_one_shared_placement_context(monkeypatch):
         detector_id: row for row, detector_id in enumerate(model.detector_ids)
     }
     assert shared.observable_count == slicer.observable_count
-    assert (shared.first_commit_round, shared.last_commit_round, shared.is_last) == (1, 2, False)
-
+    assert (
+        shared.first_commit_round,
+        shared.last_commit_round,
+        shared.is_last,
+    ) == (1, 2, False)
 
 
 def test_slice_window_products_are_complete():
@@ -1746,10 +1927,18 @@ def test_slice_window_products_are_complete():
 
 
 def test_dependency_depths_and_cycle_rejection():
-    """Window depths follow the dependency edges, and negative indices or cycles are rejected."""
-    assert window_ownership_dag.dependency_depths(3, ((0, 1), (1, 2))) == (0, 1, 2)
+    """window_records.Window depths follow the dependency edges, and negative indices or cycles are rejected."""
+    assert window_ownership_dag.dependency_depths(3, ((0, 1), (1, 2))) == (
+        0,
+        1,
+        2,
+    )
     assert window_ownership_dag.dependency_depths(2, ()) == (0, 0)
-    assert window_ownership_dag.dependency_depths(3, ((0, 2), (1, 2))) == (0, 0, 1)
+    assert window_ownership_dag.dependency_depths(3, ((0, 2), (1, 2))) == (
+        0,
+        0,
+        1,
+    )
     with pytest.raises(ValueError) as negative:
         window_ownership_dag.dependency_depths(2, ((-1, 1),))
     assert "must be nonnegative" in str(negative.value)
@@ -1760,7 +1949,9 @@ def test_dependency_depths_and_cycle_rejection():
 
 def test_dependency_ancestors_are_transitive():
     """Each window's ancestor set includes indirect predecessors."""
-    ancestors = window_ownership_dag.dependency_ancestors(3, ((0, 1), (1, 2)), (0, 1, 2))
+    ancestors = window_ownership_dag.dependency_ancestors(
+        3, ((0, 1), (1, 2)), (0, 1, 2)
+    )
     assert ancestors == (frozenset(), frozenset({0}), frozenset({0, 1}))
 
 
@@ -1774,7 +1965,9 @@ def test_explicit_prior_faults_union_ancestor_ownership():
     ancestors = (frozenset(), frozenset({0}), frozenset({0, 1}))
     priors = window_ownership_dag.explicit_prior_faults(ownership, ancestors)
     # answered by membership: a fault is prior when its owner is an ancestor
-    assert [[fault in prior[GRAPHLIKE] for fault in (0, 1, 2)] for prior in priors] == [
+    assert [
+        [fault in prior[GRAPHLIKE] for fault in (0, 1, 2)] for prior in priors
+    ] == [
         [False, False, False],
         [True, False, False],
         [True, True, False],
@@ -1816,7 +2009,9 @@ def test_equal_depth_candidates_have_no_causal_owner():
     with pytest.raises(ValueError) as failure:
         chain_models([(1, 1, 2, 2), (2, 3, 4, 4)], dependency_edges=())
     message = str(failure.value)
-    assert "straddles independent commit regions without a causal owner" in message
+    assert (
+        "straddles independent commit regions without a causal owner" in message
+    )
     assert "graphlike fault 2" in message
 
 
@@ -1833,7 +2028,9 @@ def test_partial_suffix_plan_leaves_outside_faults_unowned():
 
 def test_dag_ownership_is_compiled_before_any_window_is_sliced():
     """With dependency edges, ownership follows the shallowest window rather than plan order."""
-    models = chain_models([(1, 1, 2, 2), (2, 3, 4, 4)], dependency_edges=((1, 0),))
+    models = chain_models(
+        [(1, 1, 2, 2), (2, 3, 4, 4)], dependency_edges=((1, 0),)
+    )
     first = models[0].require_faults(GRAPHLIKE)
     last = models[1].require_faults(GRAPHLIKE)
     assert first.source_fault_ids == (0, 1)
@@ -1860,8 +2057,9 @@ def test_closed_boundary_window_must_be_a_dependency_destination():
             dependency_edges=((0, 1),),
             closed_temporal_boundary_windows=(2,),
         )
-    assert "closed temporal boundary window must be a dependency destination" in str(
-        failure.value
+    assert (
+        "closed temporal boundary window must be a dependency destination"
+        in str(failure.value)
     )
 
 
@@ -1874,8 +2072,14 @@ def test_closed_boundary_window_may_not_truncate_a_global_fault():
             closed_temporal_boundary_windows=(1,),
         )
     message = str(failure.value)
-    assert "graphlike closed temporal boundary window 1 truncates global fault 2" in message
-    assert "smooth B boundary cannot contain an artificial boundary generator" in message
+    assert (
+        "graphlike closed temporal boundary window 1 truncates global fault 2"
+        in message
+    )
+    assert (
+        "smooth B boundary cannot contain an artificial boundary generator"
+        in message
+    )
 
 
 def test_empty_closed_window_tuple_is_inert():
@@ -1886,7 +2090,7 @@ def test_empty_closed_window_tuple_is_inert():
 
 def test_generic_protocol_imposes_nothing_and_unknown_protocols_fail_closed():
     """The generic protocol imposes nothing while any unknown protocol value is refused."""
-    protocol = WindowProtocol
+    protocol = window_records.WindowProtocol
     assert protocol.GENERIC.name == "GENERIC"
     assert protocol.TAN_ZERO_SEAM_GRAPHLIKE.name == "TAN_ZERO_SEAM_GRAPHLIKE"
     window_protocol_policy.validate_window_protocol(
@@ -1905,7 +2109,7 @@ def test_valid_tan_zero_seam_plan_is_accepted():
         SEAM_PLAN,
         dependency_edges=((0, 1), (2, 1)),
         closed_temporal_boundary_windows=(1,),
-        window_protocol=WindowProtocol.TAN_ZERO_SEAM_GRAPHLIKE,
+        window_protocol=window_records.WindowProtocol.TAN_ZERO_SEAM_GRAPHLIKE,
     )
     assert len(models) == 3
     assert models[1].detector_ids == (1,)
@@ -1945,14 +2149,16 @@ def test_valid_tan_zero_seam_plan_is_accepted():
         ),
     ],
 )
-def test_tan_zero_seam_contract_fails_closed(plan, edges, closed, requirement, expected):
+def test_tan_zero_seam_contract_fails_closed(
+    plan, edges, closed, requirement, expected
+):
     """A zero-seam plan missing its closed seams, its seam parents, its single-layer seam or its graphlike domain is refused."""
     with pytest.raises(ValueError) as failure:
         chain_models(
             plan,
             dependency_edges=edges,
             closed_temporal_boundary_windows=closed,
-            window_protocol=WindowProtocol.TAN_ZERO_SEAM_GRAPHLIKE,
+            window_protocol=window_records.WindowProtocol.TAN_ZERO_SEAM_GRAPHLIKE,
             fault_model_requirement=requirement,
         )
     assert expected in str(failure.value)
@@ -1967,7 +2173,10 @@ def test_build_window_error_models_returns_one_model_per_entry_in_plan_order():
     """Slicing returns one window model per plan entry, in plan order."""
     models = chain_models([(1, 1, 1), (2, 2, 2), (3, 4, 4)])
     assert [model.detector_ids for model in models] == [(0,), (1,), (2, 3)]
-    assert all(isinstance(model, fault_model_contracts.WindowErrorModel) for model in models)
+    assert all(
+        isinstance(model, fault_model_contracts.WindowErrorModel)
+        for model in models
+    )
 
 
 @pytest.mark.parametrize(
@@ -2014,10 +2223,19 @@ def test_optional_capabilities_are_inert_when_unused():
     """Every optional capability stays inert when it is not requested."""
     models = chain_models([(1, 2, 2), (3, 4, 4)])
     assert models[0].physical_to_graphlike_detector_projection is None
-    assert window_placement.faults_touching_excluded_rounds(((1,), (2,)), (), [0, 1]) == set()
+    assert (
+        window_placement.faults_touching_excluded_rounds(
+            ((1,), (2,)), (), [0, 1]
+        )
+        == set()
+    )
     assert (
         window_protocol_policy.validate_window_protocol(
-            ((1, 1, 2, 2),), WindowProtocol.GENERIC, None, (), NO_REQUIREMENT
+            ((1, 1, 2, 2),),
+            window_records.WindowProtocol.GENERIC,
+            None,
+            (),
+            NO_REQUIREMENT,
         )
         is None
     )
@@ -2086,20 +2304,28 @@ def surface_circuit(stim_module):
 
 def global_graphlike_catalog(circuit):
     """Return the whole-circuit graphlike fault catalog of a real circuit."""
-    detector_sets, observable_sets, priors = stim_fault_catalog.detector_error_model_to_faults(
-        circuit.detector_error_model(decompose_errors=True)
+    detector_sets, observable_sets, priors = (
+        stim_fault_catalog.detector_error_model_to_faults(
+            circuit.detector_error_model(decompose_errors=True)
+        )
     )
     return detector_sets, observable_sets, priors
 
 
-def test_real_repetition_round_map_matches_the_circuit_structure(repetition_circuit):
+def test_real_repetition_round_map_matches_the_circuit_structure(
+    repetition_circuit,
+):
     """Rounds recovered from a real repetition circuit match its coordinates and its per-round detector counts."""
     round_by_detector = detector_chronology.resolve_detector_rounds(
         repetition_circuit, None, REPETITION_ROUNDS
     )
     coordinates = repetition_circuit.get_detector_coordinates()
-    assert set(round_by_detector) == set(range(repetition_circuit.num_detectors))
-    assert set(round_by_detector.values()) == set(range(1, REPETITION_ROUNDS + 1))
+    assert set(round_by_detector) == set(
+        range(repetition_circuit.num_detectors)
+    )
+    assert set(round_by_detector.values()) == set(
+        range(1, REPETITION_ROUNDS + 1)
+    )
     for detector_id, emitted_round in round_by_detector.items():
         raw_layer = int(coordinates[detector_id][-1])
         expected = (
@@ -2118,22 +2344,34 @@ def test_real_repetition_round_map_matches_the_circuit_structure(repetition_circ
 
 def test_real_surface_round_map_matches_the_circuit_structure(surface_circuit):
     """Rounds recovered from a real rotated surface-code circuit match its three-dimensional coordinates."""
-    round_by_detector = detector_chronology.resolve_detector_rounds(surface_circuit, None, SURFACE_ROUNDS)
+    round_by_detector = detector_chronology.resolve_detector_rounds(
+        surface_circuit, None, SURFACE_ROUNDS
+    )
     coordinates = surface_circuit.get_detector_coordinates()
-    assert {len(coordinates[detector_id]) for detector_id in round_by_detector} == {3}
+    assert {
+        len(coordinates[detector_id]) for detector_id in round_by_detector
+    } == {3}
     assert set(round_by_detector.values()) == set(range(1, SURFACE_ROUNDS + 1))
     for detector_id, emitted_round in round_by_detector.items():
         raw_layer = int(coordinates[detector_id][-1])
-        expected = SURFACE_ROUNDS if raw_layer == SURFACE_ROUNDS else raw_layer + 1
+        expected = (
+            SURFACE_ROUNDS if raw_layer == SURFACE_ROUNDS else raw_layer + 1
+        )
         assert emitted_round == expected
 
 
-def test_real_decomposed_model_is_graphlike_and_parity_reduced(repetition_circuit):
+def test_real_decomposed_model_is_graphlike_and_parity_reduced(
+    repetition_circuit,
+):
     """The catalog built from a real decomposed detector error model is parity reduced and graphlike."""
-    detector_sets, observable_sets, priors = global_graphlike_catalog(repetition_circuit)
+    detector_sets, observable_sets, priors = global_graphlike_catalog(
+        repetition_circuit
+    )
     assert detector_sets
     assert len(detector_sets) == len(observable_sets) == len(priors)
-    for detectors, observables, prior in zip(detector_sets, observable_sets, priors):
+    for detectors, observables, prior in zip(
+        detector_sets, observable_sets, priors
+    ):
         assert 1 <= len(detectors) <= 2
         assert list(detectors) == sorted(set(detectors))
         assert list(observables) == sorted(set(observables))
@@ -2164,11 +2402,15 @@ def test_real_repetition_commit_regions_cover_every_detector_once(
         fault_exclusion_ranges=(),
     )
     committed_detectors = []
-    for model, (_, first_commit_round, last_commit_round, _) in zip(models, entries):
+    for model, (_, first_commit_round, last_commit_round, _) in zip(
+        models, entries
+    ):
         committed_detectors.extend(
             detector_id
             for detector_id in model.detector_ids
-            if first_commit_round <= round_by_detector[detector_id] <= last_commit_round
+            if first_commit_round
+            <= round_by_detector[detector_id]
+            <= last_commit_round
         )
     assert sorted(committed_detectors) == list(
         range(repetition_circuit.num_detectors)
@@ -2180,7 +2422,9 @@ def test_real_repetition_windows_partition_and_preserve_the_global_faults(
     repetition_circuit,
 ):
     """Sliced windows of a real circuit own every global fault once and keep each column's logical identity."""
-    detector_sets, observable_sets, priors = global_graphlike_catalog(repetition_circuit)
+    detector_sets, observable_sets, priors = global_graphlike_catalog(
+        repetition_circuit
+    )
     plan = [(1, 2, 3), (3, 5, 5)]
     models = window_model_builders.build_window_error_models(
         repetition_circuit,
@@ -2198,25 +2442,31 @@ def test_real_repetition_windows_partition_and_preserve_the_global_faults(
         for local_column, global_column in enumerate(faults.source_fault_ids):
             global_detectors = set(detector_sets[global_column])
             local_detectors = {
-                rows[row]
-                for row in faults.check[:, local_column].nonzero()[0]
+                rows[row] for row in faults.check[:, local_column].nonzero()[0]
             }
             assert local_detectors == global_detectors & set(rows)
             local_observables = set(
                 int(observable)
-                for observable in faults.observables[:, local_column].nonzero()[0]
+                for observable in faults.observables[:, local_column].nonzero()[
+                    0
+                ]
             )
             assert local_observables == set(observable_sets[global_column])
-            assert faults.priors[local_column] == pytest.approx(priors[global_column])
+            assert faults.priors[local_column] == pytest.approx(
+                priors[global_column]
+            )
             if faults.owned[local_column]:
                 owned_columns.append(global_column)
-                assert set(
-                    faults.boundary_flips.get(local_column, ())
-                ) == global_detectors
+                assert (
+                    set(faults.boundary_flips.get(local_column, ()))
+                    == global_detectors
+                )
     assert sorted(owned_columns) == list(range(len(detector_sets)))
 
 
-def test_real_repetition_boundary_flips_carry_the_full_detector_effect(repetition_circuit):
+def test_real_repetition_boundary_flips_carry_the_full_detector_effect(
+    repetition_circuit,
+):
     """Owned columns of a real circuit carry their complete global detector effect, so the next window can take the post-commit part."""
     round_by_detector = detector_chronology.resolve_detector_rounds(
         repetition_circuit, None, REPETITION_ROUNDS
@@ -2234,7 +2484,9 @@ def test_real_repetition_boundary_flips_carry_the_full_detector_effect(repetitio
     for local_column, global_column in enumerate(first_faults.source_fault_ids):
         if not first_faults.owned[local_column]:
             continue
-        assert first_faults.boundary_flips[local_column] == tuple(detector_sets[global_column])
+        assert first_faults.boundary_flips[local_column] == tuple(
+            detector_sets[global_column]
+        )
         beyond_commit = [
             detector_id
             for detector_id in detector_sets[global_column]
@@ -2252,7 +2504,9 @@ def test_real_repetition_boundary_flips_carry_the_full_detector_effect(repetitio
 
 def test_real_surface_slicing_preserves_the_global_faults(surface_circuit):
     """A real surface-code circuit slices into windows whose columns keep the global logical identity."""
-    detector_sets, observable_sets, _ = global_graphlike_catalog(surface_circuit)
+    detector_sets, observable_sets, _ = global_graphlike_catalog(
+        surface_circuit
+    )
     models = window_model_builders.build_window_error_models(
         surface_circuit,
         [(1, 1, 2), (2, 3, 3)],
@@ -2268,13 +2522,16 @@ def test_real_surface_slicing_preserves_the_global_faults(surface_circuit):
         assert len(model.detector_coordinates) == len(rows)
         for local_column, global_column in enumerate(faults.source_fault_ids):
             local_detectors = {
-                rows[row]
-                for row in faults.check[:, local_column].nonzero()[0]
+                rows[row] for row in faults.check[:, local_column].nonzero()[0]
             }
-            assert local_detectors == set(detector_sets[global_column]) & set(rows)
+            assert local_detectors == set(detector_sets[global_column]) & set(
+                rows
+            )
             local_observables = set(
                 int(observable)
-                for observable in faults.observables[:, local_column].nonzero()[0]
+                for observable in faults.observables[:, local_column].nonzero()[
+                    0
+                ]
             )
             assert local_observables == set(observable_sets[global_column])
             if faults.owned[local_column]:
@@ -2282,7 +2539,9 @@ def test_real_surface_slicing_preserves_the_global_faults(surface_circuit):
     assert sorted(owned_columns) == list(range(len(detector_sets)))
 
 
-def test_real_repetition_linked_views_agree_with_both_stim_models(repetition_circuit):
+def test_real_repetition_linked_views_agree_with_both_stim_models(
+    repetition_circuit,
+):
     """Both Stim views of a real circuit build a linked pair whose local projection reproduces the physical rows."""
     slicer = window_slicer.WindowSlicer(
         repetition_circuit,
@@ -2298,8 +2557,10 @@ def test_real_repetition_linked_views_agree_with_both_stim_models(repetition_cir
         len(graphlike.source_fault_ids),
         len(physical.source_fault_ids),
     )
-    derived = (graphlike.check.toarray().astype(numpy.uint64)
-               @ projection.toarray().astype(numpy.uint64)) % 2
+    derived = (
+        graphlike.check.toarray().astype(numpy.uint64)
+        @ projection.toarray().astype(numpy.uint64)
+    ) % 2
     assert numpy.array_equal(derived, physical.check.toarray())
 
 
@@ -2319,7 +2580,9 @@ def test_real_dependency_plan_partitions_the_real_catalog(repetition_circuit):
         faults = model.require_faults(GRAPHLIKE)
         owned_columns.extend(
             global_column
-            for local_column, global_column in enumerate(faults.source_fault_ids)
+            for local_column, global_column in enumerate(
+                faults.source_fault_ids
+            )
             if faults.owned[local_column]
         )
     assert sorted(owned_columns) == list(range(len(detector_sets)))

@@ -15,6 +15,7 @@ from typing import Callable
 
 import decsim.message as message
 import decsim.observe.trace_source as trace_source
+import decsim.records.windows as window_records
 import decsim.windows.window_transfers as window_transfers
 
 
@@ -27,10 +28,10 @@ class CorrectionPublisher:
 
     def publish(
         self,
-        window: message.Window,
+        window: window_records.Window,
         operation: message.Operation,
         result: message.DecodeResult,
-        request_key: message.DecoderRequestKey,
+        request_key: window_records.DecoderRequestKey,
         on_committed: Callable[[], None],
     ) -> None:
         """Send the result on its tier's output link; commit it at delivery.
@@ -40,7 +41,7 @@ class CorrectionPublisher:
         has a frame, gates on_committed.
         """
         output_path = message.LinkPath.WEAK_DECODER_TO_FRAME
-        if request_key.tier is not message.DecoderTier.WEAK:
+        if request_key.tier is not window_records.DecoderTier.WEAK:
             output_path = message.LinkPath.STRONG_DECODER_TO_FRAME
         payload_bits = window_transfers.result_payload_bits(result, operation)
         commit = functools.partial(
@@ -54,7 +55,7 @@ class CorrectionPublisher:
         self,
         window_key: tuple,
         result: message.DecodeResult,
-        request_key: message.DecoderRequestKey,
+        request_key: window_records.DecoderRequestKey,
         on_committed: Callable[[], None],
     ) -> None:
         """Charge and install one final correction, then call back."""
@@ -144,10 +145,10 @@ class WindowCommitter:
 
     def commit(
         self,
-        window: message.Window,
+        window: window_records.Window,
         operation: message.Operation,
         result: message.DecodeResult,
-        request_key: message.DecoderRequestKey,
+        request_key: window_records.DecoderRequestKey,
         is_final: bool,
     ) -> None:
         """Commit the window: its contribution, its status, what it wakes."""
@@ -181,10 +182,10 @@ class WindowCommitter:
 
     def finish_strong(
         self,
-        window: message.Window,
+        window: window_records.Window,
         operation: message.Operation,
         result: message.DecodeResult,
-        request_key: message.DecoderRequestKey,
+        request_key: window_records.DecoderRequestKey,
     ) -> None:
         """The strong result is the window's final one.
 

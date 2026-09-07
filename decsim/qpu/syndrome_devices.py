@@ -19,6 +19,7 @@ import decsim.observe.trace_source as trace_source
 import decsim.qpu.code_geometry as code_geometry
 import decsim.records.rounds as round_records
 import decsim.records.seeds as seed_records
+import decsim.records.windows as window_records
 import decsim.seeding as seeding
 
 # Stream ids and patches are opaque identities chosen by the workload; Any
@@ -85,12 +86,12 @@ class TimingOnlyDevice:
     def window_models_for_operation(
         self,
         operation: message.Operation,
-        windows: list[message.Window],
+        windows: list[window_records.Window],
         round_count: int,
         *,
         fault_model_requirement: fault_models.DecoderFaultModelRequirement,
         fault_exclusion_ranges: tuple,
-        window_protocol: message.WindowProtocol,
+        window_protocol: window_records.WindowProtocol,
     ) -> list[fault_models.WindowErrorModel]:
         """No circuit, so no window has an error model."""
         del operation, windows, round_count
@@ -98,14 +99,14 @@ class TimingOnlyDevice:
         return []
 
     def window_model_for_stream(
-        self, stream_id: Any, window: message.Window
+        self, stream_id: Any, window: window_records.Window
     ) -> None:
         """No circuit, so no stream window has an error model."""
 
     def strong_window_model_for_operation(
         self,
         operation: message.Operation,
-        window: message.Window,
+        window: window_records.Window,
         round_count: int,
         *,
         fault_model_requirement: fault_models.DecoderFaultModelRequirement,
@@ -116,7 +117,7 @@ class TimingOnlyDevice:
     def strong_window_model_for_operation_with_exclusions(
         self,
         operation: message.Operation,
-        window: message.Window,
+        window: window_records.Window,
         round_count: int,
         *,
         fault_model_requirement: fault_models.DecoderFaultModelRequirement,
@@ -209,12 +210,12 @@ class SyndromeBitDevice(seeding._RandomSeedConsumer):
     def window_models_for_operation(
         self,
         operation: message.Operation,
-        windows: list[message.Window],
+        windows: list[window_records.Window],
         round_count: int,
         *,
         fault_model_requirement: fault_models.DecoderFaultModelRequirement,
         fault_exclusion_ranges: tuple,
-        window_protocol: message.WindowProtocol,
+        window_protocol: window_records.WindowProtocol,
     ) -> list[fault_models.WindowErrorModel]:
         """No circuit, so no window has an error model."""
         del operation, windows, round_count
@@ -222,14 +223,14 @@ class SyndromeBitDevice(seeding._RandomSeedConsumer):
         return []
 
     def window_model_for_stream(
-        self, stream_id: Any, window: message.Window
+        self, stream_id: Any, window: window_records.Window
     ) -> None:
         """No circuit, so no stream window has an error model."""
 
     def strong_window_model_for_operation(
         self,
         operation: message.Operation,
-        window: message.Window,
+        window: window_records.Window,
         round_count: int,
         *,
         fault_model_requirement: fault_models.DecoderFaultModelRequirement,
@@ -240,7 +241,7 @@ class SyndromeBitDevice(seeding._RandomSeedConsumer):
     def strong_window_model_for_operation_with_exclusions(
         self,
         operation: message.Operation,
-        window: message.Window,
+        window: window_records.Window,
         round_count: int,
         *,
         fault_model_requirement: fault_models.DecoderFaultModelRequirement,

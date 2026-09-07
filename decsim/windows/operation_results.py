@@ -13,6 +13,7 @@ from typing import Callable, Optional
 
 import decsim.message as message
 import decsim.observe.trace_source as trace_source
+import decsim.records.windows as window_records
 
 
 class OperationResults:
@@ -43,7 +44,7 @@ class OperationResults:
     # ---- what the committer tells
 
     def install_window_contribution(
-        self, window: message.Window, logical_observables
+        self, window: window_records.Window, logical_observables
     ) -> message.LogicalContribution:
         """The window owns its commit range, unless a strong window does.
 
@@ -67,7 +68,7 @@ class OperationResults:
         self.ledger.replace_prediction(key, logical_observables)
 
     def note_window_committed(
-        self, window: message.Window, is_final: bool
+        self, window: window_records.Window, is_final: bool
     ) -> None:
         """A window committed: advance the stream's prefix; free its context.
 
@@ -305,7 +306,7 @@ class OperationResults:
             strong_store.close_operation(operation_id)
 
 
-def is_awaiting_strong(window: message.Window) -> bool:
+def is_awaiting_strong(window: window_records.Window) -> bool:
     """Committed provisionally: the strong redo has not published yet."""
     if not window.committed:
         return False

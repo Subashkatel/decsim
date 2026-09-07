@@ -10,6 +10,7 @@ import decsim.engine as engine_module
 import decsim.escalation.policies as escalation_policies
 import decsim.message as message
 import decsim.records.rounds as round_records
+import decsim.records.windows as window_records
 from decsim.decoders.decoder_manager import DecoderManager
 
 
@@ -29,7 +30,7 @@ class _OpenGate:
 
 
 def _window(index, deps_remaining):
-    return message.Window(
+    return window_records.Window(
         op_id=1,
         k=index,
         commit_lo=1,
@@ -49,8 +50,8 @@ def _job(index, label, deps_remaining, gate=None):
         size_bits=2,
         fragment_index=0,
     )
-    request_key = message.DecoderRequestKey(
-        1, index, message.DecoderTier.WEAK, index
+    request_key = window_records.DecoderRequestKey(
+        1, index, window_records.DecoderTier.WEAK, index
     )
     window = _window(index, deps_remaining)
     return message.DecodeJob(

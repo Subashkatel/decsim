@@ -6,28 +6,24 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+import decsim.records.windows as window_records
 from decsim.config import TICKS_PER_MICROSECOND
-from decsim.message import PotentialStrong
-from decsim.message import (
-    Operation,
-    OperationPlanningView,
-    OperationWindowPlan,
-    OpKind,
-    ResolvedCodeGeometry,
-    ResolvedOperationPlanning,
-    Window,
-    WindowGeometry,
-    WindowPlan,
-    WindowProtocol,
-)
 from decsim.frontends.planner import (
     RunPlan,
     SyndromeBufferingPlan,
     _materialize_execution_plan,
-    plan_execution,
     _plan_syndrome_buffering,
     check_operation_graph,
     check_workload_identity,
+    plan_execution,
+)
+from decsim.message import (
+    Operation,
+    OperationPlanningView,
+    OpKind,
+    PotentialStrong,
+    ResolvedCodeGeometry,
+    ResolvedOperationPlanning,
 )
 from decsim.qpu.round_policies import (
     CodeRounds,
@@ -100,15 +96,19 @@ def operation_plan(
     exits=None,
     windowed=True,
     batch_idle=False,
-    protocol=WindowProtocol.GENERIC,
+    protocol=window_records.WindowProtocol.GENERIC,
 ):
     if entries is None:
         incoming = {destination for _, destination in dependencies}
-        entries = tuple(index for index in range(len(windows)) if index not in incoming)
+        entries = tuple(
+            index for index in range(len(windows)) if index not in incoming
+        )
     if exits is None:
         outgoing = {source for source, _ in dependencies}
-        exits = tuple(index for index in range(len(windows)) if index not in outgoing)
-    return OperationWindowPlan(
+        exits = tuple(
+            index for index in range(len(windows)) if index not in outgoing
+        )
+    return window_records.OperationWindowPlan(
         operation_id=operation_id,
         windows=tuple(windows),
         internal_dependencies=tuple(dependencies),
@@ -168,7 +168,9 @@ class RecordingLayout:
         self.operation_calls.append((value.id, base_spatial_node_count))
         return base_spatial_node_count + 1
 
-    def patch_spatial_nodes_for(self, patch_identity, *, base_spatial_node_count):
+    def patch_spatial_nodes_for(
+        self, patch_identity, *, base_spatial_node_count
+    ):
         self.patch_calls.append((patch_identity, base_spatial_node_count))
         return base_spatial_node_count + 2
 
@@ -194,7 +196,7 @@ class RecordingScheme:
         )
         return operation_plan(
             operation_id,
-            (WindowGeometry(1, 1, round_count, round_count),),
+            (window_records.WindowGeometry(1, 1, round_count, round_count),),
             windowed=False,
         )
 
@@ -233,7 +235,9 @@ def compile_plan(
 
 def test_plan_records_are_frozen_without_recursively_freezing_execution():
     """Top-level plan records are immutable while their runtime window graph stays mutable."""
-    execution = WindowPlan({}, {}, {}, {}, {}, {}, {}, 0, {}, {}, {})
+    execution = window_records.WindowPlan(
+        {}, {}, {}, {}, {}, {}, {}, 0, {}, {}, {}
+    )
     buffering = SyndromeBufferingPlan((), (), (), (), (), None)
     run_plan = RunPlan(geometry(), (), (), 1, execution, buffering)
 
@@ -244,15 +248,18 @@ def test_plan_records_are_frozen_without_recursively_freezing_execution():
 
     execution.total_windows = 3
     assert run_plan.execution.total_windows == 3
-    assert SyndromeBufferingPlan("unchecked", (), (), None, (), None).weak_holds == "unchecked"
+    assert (
+        SyndromeBufferingPlan("unchecked", (), (), None, (), None).weak_holds
+        == "unchecked"
+    )
 
 
 def test_buffering_plan_accounts_for_overlap_successors_and_open_streams():
     """Retention ledgers include direct overflow once and suppress finite capacity for open streams."""
-    first = Window(1, 0, 2, 4, 6, 5, buffer_lo=1)
-    second = Window(2, 0, 1, 2, 3, 3)
-    third = Window(3, 0, 1, 2, 3, 3)
-    execution = WindowPlan(
+    first = window_records.Window(1, 0, 2, 4, 6, 5, buffer_lo=1)
+    second = window_records.Window(2, 0, 1, 2, 3, 3)
+    third = window_records.Window(3, 0, 1, 2, 3, 3)
+    execution = window_records.WindowPlan(
         windows={(1, 0): first, (2, 0): second, (3, 0): third},
         window_count={1: 1, 2: 1, 3: 1},
         op_windows={1: [0]},
@@ -275,7 +282,9 @@ def test_buffering_plan_accounts_for_overlap_successors_and_open_streams():
     )
     assert weak_only.potential_holds == ()
     assert weak_only.minimum_live_rounds == weak_only.weak_holds[0][1]
-    assert set(weak_only.sufficient_live_rounds) == set(weak_only.weak_holds[0][1])
+    assert set(weak_only.sufficient_live_rounds) == set(
+        weak_only.weak_holds[0][1]
+    )
     assert (3, 2) not in weak_only.sufficient_live_rounds
 
     open_ended = _plan_syndrome_buffering(
@@ -289,8 +298,8 @@ def test_buffering_plan_accounts_for_overlap_successors_and_open_streams():
 
 def test_strong_buffering_extends_context_and_unions_shared_rounds():
     """Strong context extends around commits without double-counting shared physical rounds."""
-    window = Window(1, 0, 3, 4, 6, 7, buffer_lo=2)
-    execution = WindowPlan(
+    window = window_records.Window(1, 0, 3, 4, 6, 7, buffer_lo=2)
+    execution = window_records.WindowPlan(
         windows={(1, 0): window},
         window_count={1: 1},
         op_windows={1: [0]},
@@ -330,7 +339,8 @@ def test_strong_buffering_extends_context_and_unions_shared_rounds():
     )
     assert set(doubled.sufficient_live_rounds) == set(doubled.weak_holds[0][1])
     assert set(doubled.sb1_sufficient_live_rounds) == set(
-        doubled.potential_holds[0][1])
+        doubled.potential_holds[0][1]
+    )
     assert doubled.minimum_live_rounds == doubled.weak_holds[0][1]
     assert doubled.sb1_minimum_live_rounds == (
         (1, 1),
@@ -351,7 +361,10 @@ def test_strong_buffering_extends_context_and_unions_shared_rounds():
         ([operation(1, predecessors=(1,))], "depends on itself"),
         ([operation(1, predecessors=(9,))], "unknown predecessor"),
         ([operation(1), operation(2, predecessors=(1, 1))], "more than once"),
-        ([operation(1, predecessors=(2,)), operation(2, predecessors=(1,))], "cycle"),
+        (
+            [operation(1, predecessors=(2,)), operation(2, predecessors=(1,))],
+            "cycle",
+        ),
     ],
 )
 def test_operation_graph_rejects_ambiguous_or_stranded_dependency_graphs(
@@ -507,10 +520,23 @@ def test_execution_planning_resolves_geometry_patches_seams_and_graph():
         one_patch_spatial_node_count=10,
         window_floor_justification=None,
     )
-    assert [value.operation_id for value in plan.resolved_operations] == [10, 20]
-    assert [value.spatial_node_count for value in plan.resolved_operations] == [31, 21]
-    assert [value.patch_identity for value in plan.resolved_patches] == [1, "1", "q1", "q2"]
-    assert [value.spatial_node_count for value in plan.resolved_patches] == [12] * 4
+    assert [value.operation_id for value in plan.resolved_operations] == [
+        10,
+        20,
+    ]
+    assert [value.spatial_node_count for value in plan.resolved_operations] == [
+        31,
+        21,
+    ]
+    assert [value.patch_identity for value in plan.resolved_patches] == [
+        1,
+        "1",
+        "q1",
+        "q2",
+    ]
+    assert [value.spatial_node_count for value in plan.resolved_patches] == [
+        12
+    ] * 4
     assert set(code.spatial_node_calls) == {1, 2, 3}
     assert scheme.validated_geometry == plan.code_geometry
     assert scheme.plan_calls == [(10, 4, 2, 1), (20, 4, 2, 1)]
@@ -527,7 +553,9 @@ def test_execution_planning_accepts_real_numpy_scalars():
         (np.int64(2), 2_000_000),
     ]
     for cadence, expected_ticks in witnesses:
-        plan, _, _, _ = compile_plan((operation(1),), (1,), code=RecordingCode(cadence))
+        plan, _, _, _ = compile_plan(
+            (operation(1),), (1,), code=RecordingCode(cadence)
+        )
         assert plan.round_ticks == expected_ticks
         assert type(plan.round_ticks) is int
 
@@ -549,7 +577,12 @@ def test_execution_planning_rejects_invalid_cadence_and_code_selection():
     patch_layout = RecordingLayout(code)
     patch_layout.patch_code_override = RecordingCode()
     with pytest.raises(ValueError, match="patch"):
-        compile_plan((operation(1, patches=("patch",)),), (1,), code=code, layout=patch_layout)
+        compile_plan(
+            (operation(1, patches=("patch",)),),
+            (1,),
+            code=code,
+            layout=patch_layout,
+        )
 
 
 def test_execution_planning_rejects_zero_round_and_invalid_boundary_owners():
@@ -586,12 +619,18 @@ def test_materialization_copies_ledgers_and_builds_cartesian_boundary_edges():
     destination = planning_view(operation(2, decoder_predecessors=(1,)))
     source_plan = operation_plan(
         1,
-        (WindowGeometry(1, 1, 1, 1), WindowGeometry(2, 2, 2, 2)),
-        protocol=WindowProtocol.TAN_ZERO_SEAM_GRAPHLIKE,
+        (
+            window_records.WindowGeometry(1, 1, 1, 1),
+            window_records.WindowGeometry(2, 2, 2, 2),
+        ),
+        protocol=window_records.WindowProtocol.TAN_ZERO_SEAM_GRAPHLIKE,
     )
     destination_plan = operation_plan(
         2,
-        (WindowGeometry(1, 1, 1, 1), WindowGeometry(2, 2, 2, 2)),
+        (
+            window_records.WindowGeometry(1, 1, 1, 1),
+            window_records.WindowGeometry(2, 2, 2, 2),
+        ),
         batch_idle=True,
     )
 
@@ -612,8 +651,14 @@ def test_materialization_copies_ledgers_and_builds_cartesian_boundary_edges():
     assert result.spatial_nodes == {1: 11, 2: 12}
     assert result.rounds_by_operation == {1: 4, 2: 4}
     assert result.windowed_by_operation == {1: True, 2: True}
-    assert result.batch_preceding_idle_rounds_by_operation == {1: False, 2: True}
-    assert result.protocol_by_operation[1] is WindowProtocol.TAN_ZERO_SEAM_GRAPHLIKE
+    assert result.batch_preceding_idle_rounds_by_operation == {
+        1: False,
+        2: True,
+    }
+    assert (
+        result.protocol_by_operation[1]
+        is window_records.WindowProtocol.TAN_ZERO_SEAM_GRAPHLIKE
+    )
     assert result.total_windows == 4
 
 
@@ -622,7 +667,10 @@ def test_materialization_preserves_internal_edges():
     view = planning_view(operation(1))
     plan = operation_plan(
         1,
-        (WindowGeometry(1, 1, 1, 1), WindowGeometry(2, 2, 2, 2)),
+        (
+            window_records.WindowGeometry(1, 1, 1, 1),
+            window_records.WindowGeometry(2, 2, 2, 2),
+        ),
         dependencies=((0, 1),),
     )
     result = _materialize_execution_plan((view,), (resolved(1),), (plan,))
@@ -633,8 +681,10 @@ def test_materialization_preserves_internal_edges():
 def test_materialization_truncates_excess_positional_inputs():
     """Materialization deliberately relies on zip and ignores excess cards and ledgers."""
     first = planning_view(operation(1))
-    first_plan = operation_plan(1, (WindowGeometry(1, 1, 1, 1),))
-    excess_plan = operation_plan(2, (WindowGeometry(1, 1, 1, 1),))
+    first_plan = operation_plan(1, (window_records.WindowGeometry(1, 1, 1, 1),))
+    excess_plan = operation_plan(
+        2, (window_records.WindowGeometry(1, 1, 1, 1),)
+    )
     result = _materialize_execution_plan(
         (first,),
         (resolved(1), resolved(2)),

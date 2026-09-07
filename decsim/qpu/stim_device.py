@@ -25,6 +25,7 @@ import decsim.detector_error_model.window_slicer as window_slicer
 import decsim.message as message
 import decsim.observe.trace_source as trace_source
 import decsim.records.rounds as round_records
+import decsim.records.windows as window_records
 import decsim.seeding as seeding
 
 # Stream ids, operation ids and patches are opaque identities chosen by
@@ -274,12 +275,12 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
     def window_models_for_operation(
         self,
         operation: message.Operation,
-        windows: list[message.Window],
+        windows: list[window_records.Window],
         round_count: int,
         *,
         fault_model_requirement: fault_models.DecoderFaultModelRequirement,
         fault_exclusion_ranges: tuple,
-        window_protocol: message.WindowProtocol,
+        window_protocol: window_records.WindowProtocol,
     ) -> list[fault_models.WindowErrorModel]:
         """The detector error models of one finite Stim operation's windows."""
         if operation.circuit is None or not windows:
@@ -305,7 +306,7 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         )
 
     def window_model_for_stream(
-        self, stream_id: Any, window: message.Window
+        self, stream_id: Any, window: window_records.Window
     ) -> Optional[fault_models.WindowErrorModel]:
         """The detector error model of one dynamic stream window.
 
@@ -327,7 +328,7 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
     def strong_window_model_for_operation(
         self,
         operation: message.Operation,
-        window: message.Window,
+        window: window_records.Window,
         round_count: int,
         *,
         fault_model_requirement: fault_models.DecoderFaultModelRequirement,
@@ -354,7 +355,7 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
     def strong_window_model_for_operation_with_exclusions(
         self,
         operation: message.Operation,
-        window: message.Window,
+        window: window_records.Window,
         round_count: int,
         *,
         fault_model_requirement: fault_models.DecoderFaultModelRequirement,
@@ -652,7 +653,7 @@ def _first_patch_or_zero(operation: message.Operation):
     return 0
 
 
-def _window_span(window: message.Window) -> tuple:
+def _window_span(window: window_records.Window) -> tuple:
     return (
         window.start_round,
         window.commit_lo,

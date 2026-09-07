@@ -15,13 +15,14 @@ from collections.abc import Mapping
 from typing import Any, Optional, Protocol, runtime_checkable
 
 import decsim.message as message
+import decsim.records.windows as window_records
 
 
 @runtime_checkable
 class WindowInteraction(Protocol):
     """Decisions relating adjacent or replaced windows."""
 
-    def initial_boundary_state(self, window: message.WindowInfo) -> Any:
+    def initial_boundary_state(self, window: window_records.WindowInfo) -> Any:
         """The boundary a window starts with."""
 
     def boundary_from_result(
@@ -31,30 +32,34 @@ class WindowInteraction(Protocol):
 
     def boundary_targets(
         self,
-        source: message.WindowInfo,
-        windows: Mapping[tuple, message.WindowInfo],
+        source: window_records.WindowInfo,
+        windows: Mapping[tuple, window_records.WindowInfo],
     ) -> list:
         """The unstarted destinations among the source's declared edges."""
 
     def merge_boundary(
         self,
-        delivery: message.BoundaryDelivery,
-        destination: message.WindowInfo,
+        delivery: window_records.BoundaryDelivery,
+        destination: window_records.WindowInfo,
         current_state: Any,
-    ) -> message.BoundaryUpdate:
+    ) -> window_records.BoundaryUpdate:
         """The destination's boundary after this delivery."""
 
     def apply_boundary(
-        self, state: Any, window: message.WindowInfo, payload, round_key: int
+        self,
+        state: Any,
+        window: window_records.WindowInfo,
+        payload,
+        round_key: int,
     ):
         """Fold one delivered boundary into a landed round of the window."""
 
     def plan_strong_region(
         self,
-        weak_window: message.WindowInfo,
+        weak_window: window_records.WindowInfo,
         later_windows: list,
         operation_round_count: int,
-    ) -> Optional[message.StrongRegionPlan]:
+    ) -> Optional[window_records.StrongRegionPlan]:
         """The strong window that replaces a weak window, or None."""
 
 
@@ -74,7 +79,7 @@ class DefaultWindowInteraction:
         """The result's residual, its boundary defects, or the fallback."""
         if result is None:
             return fallback
-        if isinstance(result.boundary_data, message.DependencyResidual):
+        if isinstance(result.boundary_data, window_records.DependencyResidual):
             return result.boundary_data
         if result.boundary_defects is not None:
             return result.boundary_defects
@@ -89,7 +94,7 @@ class DefaultWindowInteraction:
     def merge_boundary(self, delivery, destination, current_state):
         """A current delivery replaces its source's contribution to the mask."""
         if not delivery.is_current:
-            return message.BoundaryUpdate(
+            return window_records.BoundaryUpdate(
                 state=current_state,
                 accepted=False,
                 release_dependency=False,
@@ -104,7 +109,7 @@ class DefaultWindowInteraction:
                 combined[key] = _xor_mask(previous, mask)
         state = _DefectBoundaryState(combined, contributions)
         release_dependency = not delivery.dependency_released
-        return message.BoundaryUpdate(
+        return window_records.BoundaryUpdate(
             state=state,
             accepted=True,
             release_dependency=release_dependency,
@@ -158,8 +163,10 @@ class DefaultWindowInteraction:
         if has_restart:
             restart_start = commit_hi - buffer_round_count + 1
             restart_buffer_lo = max(commit_lo, restart_start)
-            restart_seam_fault_owner = message.SeamFaultOwner.STRONG_REGION
-        return message.StrongRegionPlan(
+            restart_seam_fault_owner = (
+                window_records.SeamFaultOwner.STRONG_REGION
+            )
+        return window_records.StrongRegionPlan(
             commit_lo=commit_lo,
             commit_hi=commit_hi,
             context_lo=context_lo,
@@ -181,13 +188,15 @@ class _DefectBoundaryState(dict):
         self.contributions = dict(contributions)
 
 
-def _map_defects(delivery: message.BoundaryDelivery, destination) -> dict:
+def _map_defects(
+    delivery: window_records.BoundaryDelivery, destination
+) -> dict:
     """The delivery's defects in the destination's round coordinates."""
     payload = delivery.payload
     if _is_same_operation_residual(delivery, destination):
         return _map_detector_identities(payload.detector_ids, destination)
     defects = payload
-    if isinstance(payload, message.DependencyResidual):
+    if isinstance(payload, window_records.DependencyResidual):
         defects = payload.defects
     if not defects:
         return {}
@@ -200,7 +209,7 @@ def _map_defects(delivery: message.BoundaryDelivery, destination) -> dict:
 def _is_same_operation_residual(delivery, destination) -> bool:
     """A same-operation A/B delivery with stable global detector identity."""
     payload = delivery.payload
-    if not isinstance(payload, message.DependencyResidual):
+    if not isinstance(payload, window_records.DependencyResidual):
         return False
     if not payload.detector_ids:
         return False

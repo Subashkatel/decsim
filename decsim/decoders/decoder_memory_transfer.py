@@ -11,6 +11,7 @@ from typing import Callable, Optional, Protocol, runtime_checkable
 
 import decsim.message as message
 import decsim.observe.trace_source as trace_source
+import decsim.records.windows as window_records
 
 SendInput = Callable[[Callable[[], None]], int]
 
@@ -170,7 +171,7 @@ class CancellableDecoderMemoryTransfer:
 def _store_name_of(job: message.DecodeJob) -> str:
     """The store a job's rounds came from: its tier's (data_path.md 3)."""
     key = job.request_key
-    if key is not None and key.tier is message.DecoderTier.STRONG:
+    if key is not None and key.tier is window_records.DecoderTier.STRONG:
         return "Buffer 1"
     return "Buffer 0"
 

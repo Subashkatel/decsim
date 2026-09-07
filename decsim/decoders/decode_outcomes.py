@@ -17,6 +17,7 @@ from typing import Callable, Optional
 import decsim.decoders.strong_requests as strong_requests_module
 import decsim.message as message
 import decsim.observe.trace_source as trace_source
+import decsim.records.windows as window_records
 
 
 class DecodeOutcomes:
@@ -109,7 +110,7 @@ class DecodeOutcomes:
         )
 
     def select_strong_result(
-        self, key: tuple, request_key: message.DecoderRequestKey
+        self, key: tuple, request_key: window_records.DecoderRequestKey
     ) -> None:
         """The selection landed: a held strong completion reaches its window."""
         held = self.strong_requests.select(key, request_key)

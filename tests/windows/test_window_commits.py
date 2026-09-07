@@ -10,6 +10,7 @@ import types
 
 import decsim.engine as engine_module
 import decsim.message as message
+import decsim.records.windows as window_records
 import decsim.windows.window_commits as window_commits
 
 
@@ -81,7 +82,7 @@ class _Transfers:
 class _Fixture:
     def __init__(self, frame_ticks: int = 3) -> None:
         self.engine = engine_module.Engine()
-        self.window = message.Window(
+        self.window = window_records.Window(
             op_id=4, k=1, commit_lo=4, commit_hi=6, buffer_hi=8, n_rounds=5
         )
         operation = message.Operation(4, "logical", (0,), patches=(0,))
@@ -113,7 +114,7 @@ class _Fixture:
         )
 
     def job(self, tier, sequence, awaiting=False) -> message.DecodeJob:
-        request_key = message.DecoderRequestKey(4, 1, tier, sequence)
+        request_key = window_records.DecoderRequestKey(4, 1, tier, sequence)
         job = message.DecodeJob(
             op_id=4, window_id=1, n_rounds=5, request_key=request_key
         )
@@ -123,7 +124,7 @@ class _Fixture:
 
 def test_the_boundary_leaves_at_decode_done_before_the_frame_commit():
     fixture = _Fixture()
-    job = fixture.job(message.DecoderTier.WEAK, 0)
+    job = fixture.job(window_records.DecoderTier.WEAK, 0)
     result = message.DecodeResult(4, 1, logical_observables=(1, 0))
     fixture.engine.schedule(
         10, lambda: fixture.committer.accept_result(job, result)
@@ -133,7 +134,11 @@ def test_the_boundary_leaves_at_decode_done_before_the_frame_commit():
     assert fixture.courier.handed == [((4, 1), True)]
     (path, key, tier, payload_bits) = fixture.transfers.sent[0]
     assert path is message.LinkPath.WEAK_DECODER_TO_FRAME
-    assert (key, tier, payload_bits) == ((4, 1), message.DecoderTier.WEAK, 2)
+    assert (key, tier, payload_bits) == (
+        (4, 1),
+        window_records.DecoderTier.WEAK,
+        2,
+    )
     assert fixture.frame.commits == [(14, (4, 1), (1, 0))]
     assert fixture.window.committed
     assert fixture.window.published_request_key is job.request_key
@@ -145,7 +150,7 @@ def test_the_boundary_leaves_at_decode_done_before_the_frame_commit():
 
 def test_a_window_awaiting_strong_commits_provisionally_and_is_not_final():
     fixture = _Fixture()
-    job = fixture.job(message.DecoderTier.WEAK, 0, awaiting=True)
+    job = fixture.job(window_records.DecoderTier.WEAK, 0, awaiting=True)
     result = message.DecodeResult(4, 1, logical_observables=(1, 0))
     fixture.committer.accept_result(job, result)
     assert fixture.transfers.sent == []
@@ -158,10 +163,10 @@ def test_a_window_awaiting_strong_commits_provisionally_and_is_not_final():
 
 def test_a_strong_result_replaces_the_weak_prediction_and_ships_the_held():
     fixture = _Fixture()
-    weak = fixture.job(message.DecoderTier.WEAK, 0, awaiting=True)
+    weak = fixture.job(window_records.DecoderTier.WEAK, 0, awaiting=True)
     weak_result = message.DecodeResult(4, 1, logical_observables=(1, 0))
     fixture.committer.accept_result(weak, weak_result)
-    strong = fixture.job(message.DecoderTier.STRONG, 1)
+    strong = fixture.job(window_records.DecoderTier.STRONG, 1)
     result = message.DecodeResult(4, 1, logical_observables=(0, 1))
     fixture.engine.schedule(
         20, lambda: fixture.committer.accept_strong_result(strong, result)
@@ -169,7 +174,7 @@ def test_a_strong_result_replaces_the_weak_prediction_and_ships_the_held():
     fixture.engine.run()
     (path, _key, tier, _bits) = fixture.transfers.sent[0]
     assert path is message.LinkPath.STRONG_DECODER_TO_FRAME
-    assert tier is message.DecoderTier.STRONG
+    assert tier is window_records.DecoderTier.STRONG
     assert fixture.frame.commits == [(24, (4, 1), (0, 1))]
     assert fixture.results.replaced == [((4, 1), (0, 1))]
     assert fixture.window.published_request_key is strong.request_key
@@ -185,7 +190,9 @@ def test_a_frameless_run_commits_at_the_delivery():
     committed = []
     window = fixture.window
     operation = message.Operation(4, "logical", (0,), patches=(0,))
-    request_key = message.DecoderRequestKey(4, 1, message.DecoderTier.WEAK, 0)
+    request_key = window_records.DecoderRequestKey(
+        4, 1, window_records.DecoderTier.WEAK, 0
+    )
     result = message.DecodeResult(4, 1, logical_observables=(1,))
     publisher.publish(
         window,

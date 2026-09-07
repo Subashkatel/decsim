@@ -13,7 +13,7 @@ static plan).
 
 import types
 
-import decsim.message as message
+import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.windows.built_window_models as built_window_models
 import decsim.windows.window_planner as window_planner
@@ -53,7 +53,7 @@ def _resolved(operation_id, round_count: int):
 
 
 def _stream(operation_id="stream"):
-    return message.Operation(operation_id, "stream", (0,))
+    return program_records.Operation(operation_id, "stream", (0,))
 
 
 class _FiniteSource:

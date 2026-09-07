@@ -24,8 +24,8 @@ gives a new window its first boundary and the workload's feedback mode.
 import dataclasses
 from typing import Optional, Protocol, runtime_checkable
 
-import decsim.message as message
 import decsim.records.identity as identity_records
+import decsim.records.program as program_records
 import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
 
@@ -130,13 +130,15 @@ class WindowManager:
 
     # ---- the plan: operations, streams, windows and their holds
 
-    def register_operation(self, operation: message.Operation) -> None:
+    def register_operation(self, operation: program_records.Operation) -> None:
         """Track an operation's rounds, payload RAM, and feedback role."""
         is_new = self.tracker.register_operation(operation)
         if is_new:
             self.retention.weak_store.open_operation(operation.id)
 
-    def register_stream(self, stream_operation: message.Operation) -> None:
+    def register_stream(
+        self, stream_operation: program_records.Operation
+    ) -> None:
         """Register a stream whose windows are created at runtime."""
         resolved_feedback_mode = stream_operation.feedback_boundary_mode
         if resolved_feedback_mode is None:
@@ -271,7 +273,7 @@ class WindowManager:
     def _refuse_unplanned_round(
         self,
         packet: round_records.SyndromeRoundPacket,
-        operation: message.Operation,
+        operation: program_records.Operation,
     ) -> None:
         """A round past the plan is the device's mistake (it is a plug-in)."""
         if not self.retention.weak_store.has_operation(operation.id):
@@ -316,7 +318,7 @@ class WindowManager:
         self._wake_windows(operation)
 
     def _count_arrival(
-        self, operation: message.Operation, round_index: int
+        self, operation: program_records.Operation, round_index: int
     ) -> None:
         """Advance the readiness arrival counter; the authority calls this."""
         arrived_now = self.tracker.note_arrival(operation.id, round_index)
@@ -331,7 +333,7 @@ class WindowManager:
         if self.strong_redecode is not None:
             self.strong_redecode.submit_if_terminal_data_complete(operation_id)
 
-    def _wake_windows(self, operation: message.Operation) -> None:
+    def _wake_windows(self, operation: program_records.Operation) -> None:
         self.check_windows_for_operation(operation.id)
         for predecessor_id in operation.decoder_boundary_predecessors:
             self.check_windows_for_operation(predecessor_id)
@@ -396,7 +398,7 @@ class WindowManager:
         self.results.bind_required_stream_end(operation_id, required_stream_end)
 
 
-def _representative_patch(operation: message.Operation):
+def _representative_patch(operation: program_records.Operation):
     """The patch a backlog row names: the first patch, qubit, or the id."""
     if operation.patches:
         return operation.patches[0]

@@ -9,7 +9,7 @@ the examples the guides and slides run.
 import math
 from typing import Optional
 
-import decsim.message as message
+import decsim.records.program as program_records
 
 CLIFFORD_GATES = {
     "cnot",
@@ -29,45 +29,47 @@ ROTATION_GATES = {"rz", "rx", "ry", "p", "u1"}
 GENERAL_UNITARY_GATES = {"u2", "u3", "u"}
 
 
-def three_cnot_circuit() -> list[message.Operation]:
+def three_cnot_circuit() -> list[program_records.Operation]:
     """Three CNOTs where the first two can run before the third."""
     operations = [
-        message.Operation(0, "Op0:CNOT(q0,q1)", (0, 1), clifford=True),
-        message.Operation(1, "Op1:CNOT(q2,q3)", (2, 3), clifford=True),
-        message.Operation(2, "Op2:CNOT(q1,q3)", (1, 3), clifford=True),
+        program_records.Operation(0, "Op0:CNOT(q0,q1)", (0, 1), clifford=True),
+        program_records.Operation(1, "Op1:CNOT(q2,q3)", (2, 3), clifford=True),
+        program_records.Operation(2, "Op2:CNOT(q1,q3)", (1, 3), clifford=True),
     ]
     return _wire_circuit(operations)
 
 
-def cnot_plus_two_t_circuit() -> list[message.Operation]:
+def cnot_plus_two_t_circuit() -> list[program_records.Operation]:
     """A CNOT followed by two dependent T operations."""
     operations = [
-        message.Operation(0, "Op0:CNOT(q0,q1)", (0, 1), clifford=True),
-        message.Operation(
+        program_records.Operation(0, "Op0:CNOT(q0,q1)", (0, 1), clifford=True),
+        program_records.Operation(
             1, "Op1:T(q1)", (1,), clifford=False, blocked_by=None
         ),
-        message.Operation(2, "Op2:T(q1)", (1,), clifford=False, blocked_by=1),
+        program_records.Operation(
+            2, "Op2:T(q1)", (1,), clifford=False, blocked_by=1
+        ),
     ]
     return _wire_circuit(operations)
 
 
-def independent_t_circuit(count: int = 6) -> list[message.Operation]:
+def independent_t_circuit(count: int = 6) -> list[program_records.Operation]:
     """Independent T operations that only wait for magic-state supply."""
     operations = []
     for index in range(count):
-        operation = message.Operation(
+        operation = program_records.Operation(
             index, f"T(q{index})", (index,), clifford=False, blocked_by=None
         )
         operations.append(operation)
     return _wire_circuit(operations)
 
 
-def three_cnot_six_qubits_circuit() -> list[message.Operation]:
+def three_cnot_six_qubits_circuit() -> list[program_records.Operation]:
     """Three independent CNOTs on six qubits."""
     operations = [
-        message.Operation(0, "Op0:CNOT(q0,q1)", (0, 1), clifford=True),
-        message.Operation(1, "Op1:CNOT(q3,q4)", (3, 4), clifford=True),
-        message.Operation(2, "Op2:CNOT(q2,q5)", (2, 5), clifford=True),
+        program_records.Operation(0, "Op0:CNOT(q0,q1)", (0, 1), clifford=True),
+        program_records.Operation(1, "Op1:CNOT(q3,q4)", (3, 4), clifford=True),
+        program_records.Operation(2, "Op2:CNOT(q2,q5)", (2, 5), clifford=True),
     ]
     return _wire_circuit(operations)
 
@@ -77,13 +79,13 @@ class CircuitFrontend:
 
     def __init__(
         self,
-        operations: list[message.Operation],
+        operations: list[program_records.Operation],
         qubit_to_patch: Optional[dict] = None,
     ):
         self.operations = operations
         self.qubit_to_patch = qubit_to_patch
 
-    def build(self) -> list[message.Operation]:
+    def build(self) -> list[program_records.Operation]:
         """The operations with patch-order dependencies filled in."""
         return _wire_circuit(self.operations, self.qubit_to_patch)
 
@@ -100,7 +102,7 @@ class SurgeryIRFrontend:
         self.text = text
         self.qubit_to_patch = qubit_to_patch
 
-    def build(self) -> list[message.Operation]:
+    def build(self) -> list[program_records.Operation]:
         """Parse the text and lower it into wired operations."""
         gates = []
         for raw_line in self.text.splitlines():
@@ -112,9 +114,9 @@ class SurgeryIRFrontend:
 
 
 def _wire_circuit(
-    operations: list[message.Operation],
+    operations: list[program_records.Operation],
     qubit_to_patch: Optional[dict] = None,
-) -> list[message.Operation]:
+) -> list[program_records.Operation]:
     """Fill operation patches and predecessors in schedule order."""
     _check_unique_qubits(operations)
     _check_patch_mapping(operations, qubit_to_patch)
@@ -126,7 +128,7 @@ def _wire_circuit(
     return operations
 
 
-def _check_unique_qubits(operations: list[message.Operation]) -> None:
+def _check_unique_qubits(operations: list[program_records.Operation]) -> None:
     """Refuse an operation that lists the same qubit twice."""
     for operation in operations:
         distinct = set(operation.qubits)
@@ -138,7 +140,7 @@ def _check_unique_qubits(operations: list[message.Operation]) -> None:
 
 
 def _check_patch_mapping(
-    operations: list[message.Operation], qubit_to_patch: Optional[dict]
+    operations: list[program_records.Operation], qubit_to_patch: Optional[dict]
 ) -> None:
     """Refuse a patch map that leaves a used qubit without a patch."""
     if qubit_to_patch is None:
@@ -152,7 +154,9 @@ def _check_patch_mapping(
         raise ValueError(f"qubit_to_patch has no patch for qubit(s) {ordered}")
 
 
-def _unmapped_qubits(operation: message.Operation, qubit_to_patch: dict) -> set:
+def _unmapped_qubits(
+    operation: program_records.Operation, qubit_to_patch: dict
+) -> set:
     unmapped = set()
     for qubit in operation.qubits:
         if qubit not in qubit_to_patch:
@@ -161,7 +165,7 @@ def _unmapped_qubits(operation: message.Operation, qubit_to_patch: dict) -> set:
 
 
 def _operation_patches(
-    operation: message.Operation, qubit_to_patch: Optional[dict]
+    operation: program_records.Operation, qubit_to_patch: Optional[dict]
 ) -> tuple:
     """The patches an operation touches, in first-use order."""
     if qubit_to_patch is not None:
@@ -176,7 +180,7 @@ def _operation_patches(
 
 
 def _patch_order_predecessors(
-    operations: list[message.Operation], qubit_to_patch: Optional[dict]
+    operations: list[program_records.Operation], qubit_to_patch: Optional[dict]
 ) -> dict:
     """Each operation's predecessors: the last earlier user of each patch."""
     last_operation_on_patch = {}
@@ -191,7 +195,7 @@ def _patch_order_predecessors(
 
 
 def _claim_patches(
-    operation: message.Operation, last_operation_on_patch: dict
+    operation: program_records.Operation, last_operation_on_patch: dict
 ) -> set:
     """Mark the operation as each patch's last user; the users it displaces."""
     earlier_users = set()
@@ -250,7 +254,7 @@ def _is_qubit_token(token: str) -> bool:
 
 def _operations_from_gates(
     gates: list, qubit_to_patch: Optional[dict] = None
-) -> list[message.Operation]:
+) -> list[program_records.Operation]:
     """Lower parsed gates into wired operations."""
     operations = []
     for operation_index, gate in enumerate(gates):
@@ -260,7 +264,7 @@ def _operations_from_gates(
             qubit_words.append(f"q{qubit}")
         qubit_text = ",".join(qubit_words)
         upper_mnemonic = mnemonic.upper()
-        operation = message.Operation(
+        operation = program_records.Operation(
             operation_index,
             f"Op{operation_index}:{upper_mnemonic}({qubit_text})",
             tuple(qubits),

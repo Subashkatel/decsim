@@ -9,8 +9,9 @@ prediction; a window awaiting strong is not final.
 import types
 
 import decsim.engine as engine_module
-import decsim.message as message
 import decsim.records.decoding as decoding_records
+import decsim.records.program as program_records
+import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 import decsim.windows.window_commits as window_commits
 
@@ -86,7 +87,7 @@ class _Fixture:
         self.window = window_records.Window(
             op_id=4, k=1, commit_lo=4, commit_hi=6, buffer_hi=8, n_rounds=5
         )
-        operation = message.Operation(4, "logical", (0,), patches=(0,))
+        operation = program_records.Operation(4, "logical", (0,), patches=(0,))
         planner = types.SimpleNamespace(windows_by_key={(4, 1): self.window})
         tracker = types.SimpleNamespace(operation_by_id={4: operation})
         self.courier = _RecordingCourier()
@@ -134,7 +135,7 @@ def test_the_boundary_leaves_at_decode_done_before_the_frame_commit():
     assert fixture.window.t_done == 10
     assert fixture.courier.handed == [((4, 1), True)]
     (path, key, tier, payload_bits) = fixture.transfers.sent[0]
-    assert path is message.LinkPath.WEAK_DECODER_TO_FRAME
+    assert path is transfer_records.LinkPath.WEAK_DECODER_TO_FRAME
     assert (key, tier, payload_bits) == (
         (4, 1),
         window_records.DecoderTier.WEAK,
@@ -176,7 +177,7 @@ def test_a_strong_result_replaces_the_weak_prediction_and_ships_the_held():
     )
     fixture.engine.run()
     (path, _key, tier, _bits) = fixture.transfers.sent[0]
-    assert path is message.LinkPath.STRONG_DECODER_TO_FRAME
+    assert path is transfer_records.LinkPath.STRONG_DECODER_TO_FRAME
     assert tier is window_records.DecoderTier.STRONG
     assert fixture.frame.commits == [(24, (4, 1), (0, 1))]
     assert fixture.results.replaced == [((4, 1), (0, 1))]
@@ -192,7 +193,7 @@ def test_a_frameless_run_commits_at_the_delivery():
     publisher = window_commits.CorrectionPublisher(fixture.transfers, None)
     committed = []
     window = fixture.window
-    operation = message.Operation(4, "logical", (0,), patches=(0,))
+    operation = program_records.Operation(4, "logical", (0,), patches=(0,))
     request_key = window_records.DecoderRequestKey(
         4, 1, window_records.DecoderTier.WEAK, 0
     )

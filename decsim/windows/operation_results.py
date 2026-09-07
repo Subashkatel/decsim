@@ -11,9 +11,9 @@ window is final.
 
 from typing import Callable, Optional
 
-import decsim.message as message
 import decsim.observe.trace_source as trace_source
 import decsim.records.decoding as decoding_records
+import decsim.records.program as program_records
 import decsim.records.windows as window_records
 
 
@@ -87,7 +87,7 @@ class OperationResults:
 
     # ---- delivery
 
-    def deliver_if_final(self, operation: message.Operation) -> None:
+    def deliver_if_final(self, operation: program_records.Operation) -> None:
         """Deliver the result once every window is final and the stream sealed.
 
         Every window committed, no strong redo pending, no store still
@@ -196,7 +196,7 @@ class OperationResults:
         by_stream[stream_id] = committed
         self.release_stream_segments_at_commit(stream_id, committed)
 
-    def _deliver_result(self, operation: message.Operation) -> None:
+    def _deliver_result(self, operation: program_records.Operation) -> None:
         windows = self.planner.windows_of(operation.id)
         commit_los = [window.commit_lo for window in windows]
         commit_his = [window.commit_hi for window in windows]
@@ -213,7 +213,7 @@ class OperationResults:
 
     def _release_segment_if_committed(
         self,
-        operation: message.Operation,
+        operation: program_records.Operation,
         stream_id,
         committed_round_count: int,
     ) -> None:
@@ -248,7 +248,7 @@ class OperationResults:
         self.conditional_release.release_waiters(operation)
 
     def _stream_segment_end(
-        self, operation: message.Operation, segment, stream_offset
+        self, operation: program_records.Operation, segment, stream_offset
     ) -> Optional[int]:
         if segment is not None and segment.required_stream_end is not None:
             return segment.required_stream_end

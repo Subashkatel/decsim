@@ -19,8 +19,8 @@ from typing import Optional
 import decsim.engine
 import decsim.links.channel as channel_module
 import decsim.links.settings as link_settings
-import decsim.message as message
 import decsim.observe.trace_source as trace_source
+import decsim.records.transfers as transfer_records
 
 
 class LinkFabric:
@@ -38,14 +38,16 @@ class LinkFabric:
     ):
         self.transfer_delivered = trace_source.TraceSource()
         self._channel_by_name: dict[str, channel_module.Channel] = {}
-        self._binding_by_path: dict[message.LinkPath, _PathBinding] = {}
+        self._binding_by_path: dict[
+            transfer_records.LinkPath, _PathBinding
+        ] = {}
         self._send_count = 0
         for path in fabric_settings.wired_paths():
             path_settings = fabric_settings.path_settings(path)
             channel = self._channel_for(path_settings.channel, engine)
             self._binding_by_path[path] = _PathBinding(path_settings, channel)
 
-    def is_wired(self, path: message.LinkPath) -> bool:
+    def is_wired(self, path: transfer_records.LinkPath) -> bool:
         """Whether the card prices this path.
 
         The fabric sends on wired paths only; a sender treats an unwired
@@ -55,7 +57,7 @@ class LinkFabric:
 
     def expected_delay_ticks(
         self,
-        path: message.LinkPath,
+        path: transfer_records.LinkPath,
         payload_bits: Optional[int],
         now_ticks: int,
     ) -> int:
@@ -70,10 +72,10 @@ class LinkFabric:
 
     def send(
         self,
-        path: message.LinkPath,
+        path: transfer_records.LinkPath,
         payload_bits: Optional[int],
         now_ticks: int,
-        attribution: message.TransferAttribution,
+        attribution: transfer_records.TransferAttribution,
         on_delivered: channel_module.OnDelivered,
     ) -> None:
         """Send one transfer on a path; on_delivered(transfer) runs at delivery.
@@ -113,11 +115,11 @@ class LinkFabric:
         return channel
 
     def _finish(
-        self, outgoing: "_Outgoing", transfer: message.Transfer
+        self, outgoing: "_Outgoing", transfer: transfer_records.Transfer
     ) -> None:
         """At delivery: the listeners hear the transfer, then the caller."""
         if self.transfer_delivered.has_listeners:
-            record = message.TransferRecord(
+            record = transfer_records.TransferRecord(
                 request_sequence=outgoing.request_sequence,
                 path=outgoing.path,
                 channel=outgoing.channel,
@@ -143,16 +145,16 @@ class _Outgoing:
     """What the ledger's record needs beyond the channel's timing."""
 
     request_sequence: int
-    path: message.LinkPath
+    path: transfer_records.LinkPath
     channel: str
-    attribution: message.TransferAttribution
-    payload_selection: message.PayloadSelection
+    attribution: transfer_records.TransferAttribution
+    payload_selection: transfer_records.PayloadSelection
     payload_source: Optional[str]
     on_delivered: channel_module.OnDelivered
 
 
 def _select_payload(
-    path: message.LinkPath,
+    path: transfer_records.LinkPath,
     path_settings: link_settings.PathSettings,
     payload_bits: Optional[int],
 ) -> tuple:
@@ -170,14 +172,14 @@ def _select_payload(
             )
         return (
             payload_bits,
-            message.PayloadSelection.ACTUAL,
+            transfer_records.PayloadSelection.ACTUAL,
             path_settings.actual_payload_source,
         )
     default_payload = path_settings.default_payload
     if default_payload is not None:
         return (
             default_payload.aggregate_bits,
-            message.PayloadSelection.CONFIGURED_DEFAULT,
+            transfer_records.PayloadSelection.CONFIGURED_DEFAULT,
             default_payload.source,
         )
     if path_settings.channel.capacity is not None:
@@ -187,6 +189,6 @@ def _select_payload(
         )
     return (
         None,
-        message.PayloadSelection.UNRESOLVED,
+        transfer_records.PayloadSelection.UNRESOLVED,
         path_settings.actual_payload_source,
     )

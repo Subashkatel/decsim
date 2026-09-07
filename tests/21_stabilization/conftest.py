@@ -6,6 +6,7 @@ from dataclasses import replace
 
 import pytest
 
+import decsim.records.program as program_records
 from decsim.config import microseconds_to_ticks
 from decsim.controller.policies import Held
 from decsim.controller.settings import ControllerSettings
@@ -31,7 +32,6 @@ from decsim.links.link_profiles import (
 )
 from decsim.links.settings import ChannelSettings, PathSettings
 from decsim.machine import Machine, MachineSettings
-from decsim.message import Operation
 from decsim.observe.settings import ObservationSettings
 from decsim.pauli_frame.pauli_frame import PauliFrameConfig
 from decsim.qpu.round_policies import FixedRounds
@@ -179,7 +179,7 @@ def memory_op(
     predecessors=(),
     requires_result_return=False,
 ):
-    return Operation(
+    return program_records.Operation(
         id=op_id,
         name=name or f"mem{op_id}",
         qubits=(op_id,),

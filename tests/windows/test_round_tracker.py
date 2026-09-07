@@ -9,7 +9,7 @@ into the next window, lines 275-278).
 
 import types
 
-import decsim.message as message
+import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.windows.round_tracker as round_tracker
 import decsim.windows.windowing_schemes as windowing_schemes
@@ -29,8 +29,10 @@ class _Planner:
         return self.round_counts[operation_id]
 
 
-def _operation(operation_id, **fields) -> message.Operation:
-    return message.Operation(operation_id, f"op{operation_id}", (0,), **fields)
+def _operation(operation_id, **fields) -> program_records.Operation:
+    return program_records.Operation(
+        operation_id, f"op{operation_id}", (0,), **fields
+    )
 
 
 def _window(

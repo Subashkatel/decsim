@@ -8,6 +8,7 @@ import pytest
 
 import decsim.decoders.decoder_memory as decoder_memory
 import decsim.records.decoding as decoding_records
+import decsim.records.program as program_records
 import decsim.records.rounds as round_records
 from decsim.decoders.decoder_memory import (
     DecoderInput,
@@ -32,7 +33,6 @@ from decsim.detector_error_model.window_model_builders import (
 )
 from decsim.frontends.settings import WorkloadSettings
 from decsim.machine import Machine, MachineSettings
-from decsim.message import Operation
 from decsim.qpu.round_policies import FixedRounds
 from decsim.qpu.settings import QpuSettings
 from decsim.qpu.stim_device import StimDevice
@@ -211,7 +211,7 @@ def test_real_stim_run_reaches_model_backed_materialization_and_completes(
         after_reset_flip_probability=0.01,
         before_round_data_depolarization=0.01,
     )
-    operation = Operation(
+    operation = program_records.Operation(
         id=1,
         name="repetition memory",
         qubits=(0,),
@@ -504,12 +504,14 @@ def test_window_larger_than_the_unit_memory_stops_the_run() -> None:
 def test_run_gives_every_unit_its_own_memory_and_frees_it_at_completion() -> (
     None
 ):
+    import decsim.records.program as program_records
     from decsim.decoders.decoders import PerRoundDecoder
-    from decsim.message import Operation
     from decsim.qpu.round_policies import FixedRounds
 
     operations = [
-        Operation(id=i, name=f"op {i}", qubits=(i,), patches=(i,))
+        program_records.Operation(
+            id=i, name=f"op {i}", qubits=(i,), patches=(i,)
+        )
         for i in (1, 2)
     ]
     settings = MachineSettings(
@@ -534,13 +536,17 @@ def test_run_gives_every_unit_its_own_memory_and_frees_it_at_completion() -> (
 
 
 def test_a_unit_too_small_for_its_window_fails_the_run_loudly() -> None:
+    import decsim.records.program as program_records
     from decsim.decoders.decoders import PerRoundDecoder
-    from decsim.message import Operation
     from decsim.qpu.round_policies import FixedRounds
 
     settings = MachineSettings(
         workload=WorkloadSettings(
-            operations=[Operation(id=1, name="op", qubits=(1,), patches=(1,))],
+            operations=[
+                program_records.Operation(
+                    id=1, name="op", qubits=(1,), patches=(1,)
+                )
+            ],
             rounds_policy=FixedRounds(3),
         ),
         qpu=QpuSettings(distance=3),

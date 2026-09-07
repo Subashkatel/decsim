@@ -13,9 +13,9 @@ import decsim.controller.settings as controller_settings
 import decsim.engine as engine_module
 import decsim.links.fabric as fabric_module
 import decsim.links.link_profiles as link_profiles
-import decsim.message as message
 import decsim.observe.round_events as round_events
 import decsim.records.rounds as round_records
+import decsim.records.transfers as transfer_records
 
 SETTINGS = controller_settings.ControllerSettings(
     readout_to_bits_microseconds=3.0
@@ -53,7 +53,7 @@ def test_a_readout_reaches_the_assembler_after_the_crossing_and_the_delay():
         7, "patch-a", 4, bits=[True, False, 1, 0], size_bits=4
     )
     crossing_ticks = links.expected_delay_ticks(
-        message.LinkPath.QPU_TO_CONTROLLER, 4, 0
+        transfer_records.LinkPath.QPU_TO_CONTROLLER, 4, 0
     )
 
     controller.accept_qpu_readout(readout, round_records.WINDOW_INPUT_ROUTE)
@@ -81,7 +81,7 @@ def test_a_readout_with_no_delay_reaches_the_assembler_at_the_crossing():
     )
     readout = round_records.QPUReadout(7, "patch-a", 4, bits=[1], size_bits=1)
     crossing_ticks = links.expected_delay_ticks(
-        message.LinkPath.QPU_TO_CONTROLLER, 1, 0
+        transfer_records.LinkPath.QPU_TO_CONTROLLER, 1, 0
     )
 
     controller.accept_qpu_readout(readout, round_records.WINDOW_INPUT_ROUTE)

@@ -11,15 +11,17 @@ one time step of d code cycles).
 
 from typing import Optional, Protocol, runtime_checkable
 
-import decsim.message as message
 import decsim.qpu.code_geometry as code_geometry
+import decsim.records.program as program_records
 
 
 @runtime_checkable
 class RoundsPolicy(Protocol):
     """How many syndrome rounds an operation runs for; always at least 1."""
 
-    def rounds_for(self, operation: message.OperationPlanningView, code) -> int:
+    def rounds_for(
+        self, operation: program_records.OperationPlanningView, code
+    ) -> int:
         """The operation's round count on this code."""
 
 
@@ -32,7 +34,7 @@ class FixedRounds:
 
     def rounds_for(
         self,
-        operation: message.OperationPlanningView,
+        operation: program_records.OperationPlanningView,
         code: code_geometry.CodeModel,
     ) -> int:
         """The fixed count."""
@@ -66,7 +68,7 @@ class PerOperationRounds:
 
     def rounds_for(
         self,
-        operation: message.OperationPlanningView,
+        operation: program_records.OperationPlanningView,
         code: code_geometry.CodeModel,
     ) -> int:
         """The operation's own count, or the fallback policy's."""
@@ -83,7 +85,7 @@ class CodeRounds:
 
     def rounds_for(
         self,
-        operation: message.OperationPlanningView,
+        operation: program_records.OperationPlanningView,
         code: code_geometry.CodeModel,
     ) -> int:
         """The scaled logical cycle, rounded, never below one."""
@@ -113,17 +115,20 @@ class GateRounds:
 
     def rounds_for(
         self,
-        operation: message.OperationPlanningView,
+        operation: program_records.OperationPlanningView,
         code: code_geometry.CodeModel,
     ) -> int:
         """The kind's cost in rounds of the code's distance."""
         distance = code.distance
         kind = operation.kind
-        if kind is message.OpKind.MEASURE or kind is message.OpKind.INJECT:
+        if (
+            kind is program_records.OpKind.MEASURE
+            or kind is program_records.OpKind.INJECT
+        ):
             return 1
-        if kind is message.OpKind.MERGE:
+        if kind is program_records.OpKind.MERGE:
             return self.merge_step_count * distance
-        if kind in (message.OpKind.IDLE, message.OpKind.MEMORY):
+        if kind in (program_records.OpKind.IDLE, program_records.OpKind.MEMORY):
             return distance
         if len(operation.qubits) >= 2:
             return self.merge_step_count * distance
@@ -153,13 +158,13 @@ class TemporalRounds:
 
     def rounds_for(
         self,
-        operation: message.OperationPlanningView,
+        operation: program_records.OperationPlanningView,
         code: code_geometry.CodeModel,
     ) -> int:
         """The temporal distance for surgery, else the base policy's count."""
         kind = operation.kind
-        is_merge = kind is message.OpKind.MERGE
-        is_generic = kind is message.OpKind.GENERIC
+        is_merge = kind is program_records.OpKind.MERGE
+        is_generic = kind is program_records.OpKind.GENERIC
         is_multi_qubit = len(operation.qubits) >= 2
         is_generic_surgery = is_generic and is_multi_qubit
         if is_merge or is_generic_surgery:

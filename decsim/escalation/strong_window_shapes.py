@@ -44,10 +44,10 @@ import dataclasses
 import enum
 from typing import Any, Optional, Protocol, runtime_checkable
 
-import decsim.message as message
 import decsim.observe.trace_source as trace_source
 import decsim.records.decoding as decoding_records
 import decsim.records.identity as identity_records
+import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.windows.round_retention as round_retention
 
@@ -514,7 +514,7 @@ class ForwardWindow:
 
     def _build_strong_window_model(
         self,
-        operation: message.Operation,
+        operation: program_records.Operation,
         window: window_records.Window,
         round_count: int,
         fault_exclusions: tuple,

@@ -24,13 +24,13 @@ import decsim.engine as engine_module
 import decsim.front.experiment as experiment
 import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
-import decsim.message as message
 import decsim.qpu.cycle_clock as cycle_clock
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
 import decsim.qpu.stim_device as stim_device
 import decsim.qpu.syndrome_devices as syndrome_devices
 import decsim.records.decoding as decoding_records
+import decsim.records.program as program_records
 import decsim.syndrome_buffer.round_store as round_store_module
 import decsim.syndrome_buffer.settings as round_store_settings
 
@@ -73,7 +73,7 @@ def test_readouts_reach_the_receiver_in_cycle_order_cycle_ticks_apart():
     receiver = RecordingReceiver(engine)
     device = syndrome_devices.TimingOnlyDevice()
 
-    def finish_the_program(operation: message.Operation) -> None:
+    def finish_the_program(operation: program_records.Operation) -> None:
         del operation
         qpu.finish()
 
@@ -84,10 +84,10 @@ def test_readouts_reach_the_receiver_in_cycle_order_cycle_ticks_apart():
         readout_receiver=receiver,
         completion_receiver=finish_the_program,
     )
-    operation = message.Operation(
+    operation = program_records.Operation(
         id=1, name="memory", qubits=(0,), patches=(0,)
     )
-    body = message.RunOperationBody(
+    body = program_records.RunOperationBody(
         operation,
         round_ticks=CYCLE_TICKS,
         round_count=3,
@@ -218,10 +218,10 @@ def _two_patch_memory(weak_decoder) -> machine_module.MachineSettings:
     (separate_decode_jobs) charges that idle region as one load-only
     decode job, a job without a window model.
     """
-    first = message.Operation(
+    first = program_records.Operation(
         id=1, name="mem0", qubits=(0,), patches=(0,), circuit=MEMORY_CIRCUIT
     )
-    late = message.Operation(
+    late = program_records.Operation(
         id=2,
         name="mem1",
         qubits=(1,),
@@ -275,7 +275,7 @@ def test_the_cluster_gap_decoder_runs_as_a_python_built_tier():
     base = union_find_decoder.UnionFindDecoder(latency_model)
     decoder = cluster.UnionFindClusterGapDecoder(base)
     weak_decoder = decoder_settings.DecoderSettings(decoder=decoder)
-    operation = message.Operation(
+    operation = program_records.Operation(
         id=1, name="memory", qubits=(0,), patches=(0,), circuit=MEMORY_CIRCUIT
     )
     settings = _memory_on_stim_device(weak_decoder, (operation,))

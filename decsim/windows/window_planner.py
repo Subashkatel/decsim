@@ -16,8 +16,8 @@ the RoundTracker's.
 import types
 from typing import Optional
 
-import decsim.message as message
 import decsim.observe.trace_source as trace_source
+import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.windows.built_window_models as built_window_models
 
@@ -266,7 +266,7 @@ class WindowPlanner:
 
     # ---- a dynamic stream: registered, grown, clipped
 
-    def register_stream(self, stream_operation: message.Operation):
+    def register_stream(self, stream_operation: program_records.Operation):
         """Open a stream's tables; returns the source's round limit or None."""
         stream_id = stream_operation.id
         self.plan.window_count[stream_id] = 0
@@ -354,7 +354,9 @@ class WindowPlanner:
 
     # ---- private
 
-    def _build_operation_models(self, operation: message.Operation) -> None:
+    def _build_operation_models(
+        self, operation: program_records.Operation
+    ) -> None:
         windows = self.windows_of(operation.id)
         if not windows:
             return

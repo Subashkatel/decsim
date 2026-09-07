@@ -22,8 +22,8 @@ import decsim.detector_error_model.detector_formation as detector_formation
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.detector_error_model.window_model_builders as window_models
 import decsim.detector_error_model.window_slicer as window_slicer
-import decsim.message as message
 import decsim.observe.trace_source as trace_source
+import decsim.records.program as program_records
 import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
 import decsim.seeding as seeding
@@ -116,7 +116,7 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
 
     def begin_operation(
         self,
-        operation: message.Operation,
+        operation: program_records.Operation,
         segment_round_count: int,
         source_round_count: int,
     ) -> None:
@@ -157,7 +157,7 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         return tuple(value for _, value in events)
 
     def round_payloads(
-        self, operation: message.Operation, round_index: int
+        self, operation: program_records.Operation, round_index: int
     ) -> list[round_records.QPUReadout]:
         """This operation round as one raw measurement packet."""
         key = _sample_key_of(operation)
@@ -174,7 +174,7 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         ]
 
     def finalize_stream_round(
-        self, operation: message.Operation, source_round_count: int
+        self, operation: program_records.Operation, source_round_count: int
     ) -> list[round_records.QPUReadout]:
         """The stream's final data readout as its own raw fragment.
 
@@ -211,7 +211,7 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
 
     def idle_round_payloads(
         self,
-        operation: message.Operation,
+        operation: program_records.Operation,
         stream_id: Any,
         global_round: int,
         patch: Any,
@@ -230,7 +230,7 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
 
     def register_dynamic_stream(
         self,
-        stream_operation: message.Operation,
+        stream_operation: program_records.Operation,
         round_count: int,
         *,
         fault_model_requirement: fault_models.DecoderFaultModelRequirement,
@@ -255,7 +255,9 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         return round_count
 
     def validate_stream_length(
-        self, stream_operation: message.Operation, stream_round_count: int
+        self,
+        stream_operation: program_records.Operation,
+        stream_round_count: int,
     ) -> None:
         """Refuse a stream whose runtime length differs from its circuit."""
         stream_model = self._stream_model_by_id.get(stream_operation.id)
@@ -274,7 +276,7 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
 
     def window_models_for_operation(
         self,
-        operation: message.Operation,
+        operation: program_records.Operation,
         windows: list[window_records.Window],
         round_count: int,
         *,
@@ -327,7 +329,7 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
 
     def strong_window_model_for_operation(
         self,
-        operation: message.Operation,
+        operation: program_records.Operation,
         window: window_records.Window,
         round_count: int,
         *,
@@ -354,7 +356,7 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
 
     def strong_window_model_for_operation_with_exclusions(
         self,
-        operation: message.Operation,
+        operation: program_records.Operation,
         window: window_records.Window,
         round_count: int,
         *,
@@ -415,7 +417,7 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
     def _sample_shot(
         self,
         key,
-        operation: message.Operation,
+        operation: program_records.Operation,
         source_round_count: int,
         detector_rounds: dict,
     ) -> None:
@@ -584,7 +586,7 @@ class _StreamModel:
     slicer: window_slicer.WindowSlicer
 
 
-def _sample_key_of(operation: message.Operation):
+def _sample_key_of(operation: program_records.Operation):
     if operation.stream_id is not None:
         return operation.stream_id
     return operation.id
@@ -619,7 +621,7 @@ def _check_sample_key(key) -> None:
 
 
 def _check_segment(
-    operation: message.Operation,
+    operation: program_records.Operation,
     segment_round_count: int,
     source_round_count: int,
 ) -> None:
@@ -639,13 +641,13 @@ def _as_int_bits(bits) -> tuple[int, ...]:
     return tuple(int(bit) for bit in bits)
 
 
-def _first_patch_of(operation: message.Operation):
+def _first_patch_of(operation: program_records.Operation):
     if operation.patches:
         return operation.patches[0]
     return operation.qubits[0]
 
 
-def _first_patch_or_zero(operation: message.Operation):
+def _first_patch_or_zero(operation: program_records.Operation):
     if operation.patches:
         return operation.patches[0]
     if operation.qubits:

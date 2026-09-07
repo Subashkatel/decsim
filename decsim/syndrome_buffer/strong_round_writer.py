@@ -11,9 +11,9 @@ landing; the store's holds and lifetime are RoundStore's.
 
 from typing import Callable, Optional
 
-import decsim.message as message
 import decsim.observe.trace_source as trace_source
 import decsim.records.rounds as round_records
+import decsim.records.transfers as transfer_records
 import decsim.syndrome_buffer.round_store as round_store_module
 
 
@@ -53,12 +53,12 @@ class StrongRoundWriter:
         packet: round_records.SyndromeRoundPacket,
         *,
         packet_bits: Optional[int],
-        attribution: message.TransferAttribution,
+        attribution: transfer_records.TransferAttribution,
     ) -> None:
         """Carry the round over the crossing and store it at landing."""
         assert self.has_room(), "a round was written into a full strong store"
         is_priced = self.link.is_wired(
-            message.LinkPath.CONTROLLER_TO_STRONG_BUFFER
+            transfer_records.LinkPath.CONTROLLER_TO_STRONG_BUFFER
         )
         if not is_priced:
             self._land(packet, packet_bits)
@@ -70,7 +70,7 @@ class StrongRoundWriter:
             self._land(packet, packet_bits)
 
         self.link.send(
-            message.LinkPath.CONTROLLER_TO_STRONG_BUFFER,
+            transfer_records.LinkPath.CONTROLLER_TO_STRONG_BUFFER,
             packet_bits,
             self.engine.now,
             attribution,

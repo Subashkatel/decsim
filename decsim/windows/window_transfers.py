@@ -9,8 +9,9 @@ An input that rides no link lands now or after a fixed delay.
 import functools
 from typing import Callable, Optional
 
-import decsim.message as message
 import decsim.records.decoding as decoding_records
+import decsim.records.program as program_records
+import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 
 
@@ -28,15 +29,15 @@ class WindowTransfers:
 
     def send_for_window(
         self,
-        path: message.LinkPath,
+        path: transfer_records.LinkPath,
         window: window_records.Window,
-        operation: message.Operation,
+        operation: program_records.Operation,
         request_key: window_records.DecoderRequestKey,
         payload_bits: Optional[int],
         on_delivered: Callable[[], None],
     ) -> None:
         """Send in a window's name; on_delivered runs at the delivery."""
-        attribution = message.TransferAttribution.for_window(
+        attribution = transfer_records.TransferAttribution.for_window(
             window, operation, request_key
         )
         delivered = functools.partial(_run_at_delivery, on_delivered)
@@ -46,7 +47,7 @@ class WindowTransfers:
 
     def send_for_job(
         self,
-        path: message.LinkPath,
+        path: transfer_records.LinkPath,
         job: decoding_records.DecodeJob,
         *,
         payload_bits: Optional[int],
@@ -60,7 +61,9 @@ class WindowTransfers:
         relation_key = request_key
         if relation_key is None:
             relation_key = job.request_key
-        attribution = message.TransferAttribution.for_job(job, relation_key)
+        attribution = transfer_records.TransferAttribution.for_job(
+            job, relation_key
+        )
         now_ticks = self.engine.now
         expected_delay_ticks = self.link.expected_delay_ticks(
             path, payload_bits, now_ticks
@@ -81,7 +84,7 @@ class WindowTransfers:
         selects; returns the delay the link expects.
         """
         return self.send_for_job(
-            message.LinkPath.WEAK_DECODER_TO_STRONG_DECODER,
+            transfer_records.LinkPath.WEAK_DECODER_TO_STRONG_DECODER,
             weak_job,
             payload_bits=None,
             request_key=strong_request_key,
@@ -90,12 +93,12 @@ class WindowTransfers:
 
     def send_boundary(
         self,
-        attribution: message.TransferAttribution,
-        on_delivered: Callable[[message.Transfer], None],
+        attribution: transfer_records.TransferAttribution,
+        on_delivered: Callable[[transfer_records.Transfer], None],
     ) -> None:
         """Send a boundary over decoder_to_decoder; on_delivered gets it."""
         self.link.send(
-            message.LinkPath.DECODER_TO_DECODER,
+            transfer_records.LinkPath.DECODER_TO_DECODER,
             None,
             self.engine.now,
             attribution,
@@ -114,7 +117,7 @@ class WindowTransfers:
 
 
 def result_payload_bits(
-    result: decoding_records.DecodeResult, operation: message.Operation
+    result: decoding_records.DecodeResult, operation: program_records.Operation
 ) -> int:
     """A result reaches the frame as one bit per logical observable.
 

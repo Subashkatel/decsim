@@ -25,10 +25,10 @@ import decsim.engine as engine_module
 import decsim.links.fabric as fabric_module
 import decsim.links.link_profiles as link_profiles
 import decsim.links.settings as link_settings
-import decsim.message as message
 import decsim.observe.link_traffic as link_traffic
 import decsim.observe.round_events as round_events
 import decsim.records.rounds as round_records
+import decsim.records.transfers as transfer_records
 import decsim.syndrome_buffer.round_store as round_store_module
 import decsim.syndrome_buffer.settings as round_store_settings
 
@@ -36,7 +36,7 @@ CWB_TICKS = config.microseconds_to_ticks(0.25)
 WBD_TICKS = config.microseconds_to_ticks(5.0)
 CYCLE_TICKS = config.microseconds_to_ticks(1.0)
 MEMORY_ROUTE = round_records.SyndromePacketRoute.feedback_memory_round(7)
-WBD_PATH = message.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER
+WBD_PATH = transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER
 # 64 bits at 1000 bits per microsecond, one serialization on the wire
 ROUND_BITS = 64
 SERIALIZATION_TICKS = config.microseconds_to_ticks(0.064)
@@ -70,7 +70,7 @@ class DispatchingWindows:
 
     def accept_window_input(self, packet):
         self.published.append((self.engine.now, packet.round_index))
-        attribution = message.TransferAttribution.for_round(1, (0,), 9)
+        attribution = transfer_records.TransferAttribution.for_round(1, (0,), 9)
         self.link.send(
             WBD_PATH,
             ROUND_BITS,

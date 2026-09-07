@@ -17,8 +17,8 @@ import numpy
 import pytest
 
 import decsim.detector_error_model.fault_model_contracts as fault_models
-import decsim.message as message
 import decsim.qpu.stim_device as stim_device
+import decsim.records.program as program_records
 import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
 
@@ -66,7 +66,7 @@ def memory_circuit(distance, rounds, noise=0.001):
 
 
 def memory_operation(circuit, operation_id=1, **changes):
-    return message.Operation(
+    return program_records.Operation(
         id=operation_id,
         name="memory",
         qubits=(0,),
@@ -370,7 +370,7 @@ def test_a_stream_keeps_the_circuit_it_was_bound_to():
 
 def test_an_operation_without_a_circuit_is_refused():
     device = stim_device.StimDevice(seed=5)
-    operation = message.Operation(id=1, name="memory", qubits=(0,))
+    operation = program_records.Operation(id=1, name="memory", qubits=(0,))
     with pytest.raises(ValueError, match="require a circuit"):
         device.begin_operation(operation, 3, 3)
 

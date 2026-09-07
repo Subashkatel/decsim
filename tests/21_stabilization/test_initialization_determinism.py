@@ -6,9 +6,9 @@ The initialization contract these tests pin is
 
 import pytest
 
+import decsim.records.program as program_records
 import decsim.records.rounds as round_records
 from decsim.config import microseconds_to_ticks
-from decsim.message import Operation
 
 
 def test_execution_and_decoding_views_agree(fabric):
@@ -67,7 +67,7 @@ def test_duplicate_operation_ids_are_rejected(fabric):
 
 def test_scheduled_start_round_delays_the_root(fabric):
     """A scheduled start releases the operation on its exact boundary."""
-    op = Operation(
+    op = program_records.Operation(
         id=1, name="late", qubits=(1,), patches=(1,), scheduled_start_round=4
     )
     completed = fabric["weak_only_run"](rounds=6, ops=[op])
@@ -90,7 +90,7 @@ def test_every_program_operation_is_registered(fabric):
     """The execution-view registration covers non-emitting operations,
     which the decode-plan view never sees; dropping it would leave them
     without readiness accounts."""
-    quiet = Operation(
+    quiet = program_records.Operation(
         id=1, name="quiet", qubits=(1,), patches=(1,), emits_detector_data=False
     )
     completed = fabric["weak_only_run"](

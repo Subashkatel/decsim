@@ -14,8 +14,8 @@ import decsim.config as config
 import decsim.engine as engine_module
 import decsim.links.fabric as fabric_module
 import decsim.links.link_profiles as link_profiles
-import decsim.message as message
 import decsim.records.rounds as round_records
+import decsim.records.transfers as transfer_records
 import decsim.syndrome_buffer.round_store as round_store_module
 import decsim.syndrome_buffer.settings as round_store_settings
 import decsim.syndrome_buffer.strong_round_writer as strong_round_writer
@@ -35,8 +35,8 @@ def packet(round_index: int) -> round_records.SyndromeRoundPacket:
     return round_records.SyndromeRoundPacket(1, round_index, (fragment,))
 
 
-def attribution(round_index: int) -> message.TransferAttribution:
-    return message.TransferAttribution(
+def attribution(round_index: int) -> transfer_records.TransferAttribution:
+    return transfer_records.TransferAttribution(
         operation_id=1,
         patch_ids=(0,),
         window_id=None,

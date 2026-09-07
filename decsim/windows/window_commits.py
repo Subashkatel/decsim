@@ -13,9 +13,10 @@ committer is every window job's on_decoded.
 import functools
 from typing import Callable
 
-import decsim.message as message
 import decsim.observe.trace_source as trace_source
 import decsim.records.decoding as decoding_records
+import decsim.records.program as program_records
+import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 import decsim.windows.window_transfers as window_transfers
 
@@ -30,7 +31,7 @@ class CorrectionPublisher:
     def publish(
         self,
         window: window_records.Window,
-        operation: message.Operation,
+        operation: program_records.Operation,
         result: decoding_records.DecodeResult,
         request_key: window_records.DecoderRequestKey,
         on_committed: Callable[[], None],
@@ -41,9 +42,9 @@ class CorrectionPublisher:
         strong_decoder_to_frame; the frame's priced write, when the run
         has a frame, gates on_committed.
         """
-        output_path = message.LinkPath.WEAK_DECODER_TO_FRAME
+        output_path = transfer_records.LinkPath.WEAK_DECODER_TO_FRAME
         if request_key.tier is not window_records.DecoderTier.WEAK:
-            output_path = message.LinkPath.STRONG_DECODER_TO_FRAME
+            output_path = transfer_records.LinkPath.STRONG_DECODER_TO_FRAME
         payload_bits = window_transfers.result_payload_bits(result, operation)
         commit = functools.partial(
             self._commit, window.key, result, request_key, on_committed
@@ -151,7 +152,7 @@ class WindowCommitter:
     def commit(
         self,
         window: window_records.Window,
-        operation: message.Operation,
+        operation: program_records.Operation,
         result: decoding_records.DecodeResult,
         request_key: window_records.DecoderRequestKey,
         is_final: bool,
@@ -188,7 +189,7 @@ class WindowCommitter:
     def finish_strong(
         self,
         window: window_records.Window,
-        operation: message.Operation,
+        operation: program_records.Operation,
         result: decoding_records.DecodeResult,
         request_key: window_records.DecoderRequestKey,
     ) -> None:

@@ -7,9 +7,9 @@ from typing import Optional
 import stim
 
 import decsim.frontends.circuit_frontend as circuit_frontend
-import decsim.message as message
 import decsim.ports as ports
 import decsim.qpu.round_policies as round_policies
+import decsim.records.program as program_records
 import decsim.windows.built_window_models as built_window_models
 
 FEEDBACK_BOUNDARY_MODES = ("trailing_buffer", "measurement_closed")
@@ -141,7 +141,7 @@ def memory_circuit_operations(settings: WorkloadSettings, code) -> tuple:
         code.distance,
         settings.physical_error_probability,
     )
-    operation = message.Operation(
+    operation = program_records.Operation(
         id=1, name="memory", qubits=(0,), patches=(0,), circuit=circuit
     )
     return (operation,), round_policies.FixedRounds(rounds)

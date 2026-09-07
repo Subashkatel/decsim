@@ -1,7 +1,7 @@
 """The ports: the map of a readout's path through the machine.
 
 One Protocol per handoff between neighbours, one method per handoff, and
-the record that crosses it in message.py. A component depends on ports,
+the record that crosses it in decsim/records. A component depends on ports,
 never on another component's class, so a new implementation plugs in as
 one class that fills the port and one row in the root's table
 (decsim/machine.py). Read top to bottom, this file is the pipeline: the
@@ -23,9 +23,10 @@ fires, never through a port, so every component runs with no observer.
 
 from typing import Any, Callable, Optional, Protocol, runtime_checkable
 
-import decsim.message as message
 import decsim.records.decoding as decoding_records
+import decsim.records.program as program_records
 import decsim.records.rounds as round_records
+import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 
 # ------------------------------------------------ the QPU emits a readout
@@ -86,7 +87,7 @@ class StrongRoundStore(Protocol):
         packet: round_records.SyndromeRoundPacket,
         *,
         packet_bits: Optional[int],
-        attribution: message.TransferAttribution,
+        attribution: transfer_records.TransferAttribution,
     ) -> None:
         """Carry the round over the store's link and keep it on arrival."""
 
@@ -267,7 +268,7 @@ class Frame(Protocol):
 class ReleaseReceiver(Protocol):
     """The conditional release, as the window manager sees it."""
 
-    def release_waiters(self, operation: message.Operation) -> None:
+    def release_waiters(self, operation: program_records.Operation) -> None:
         """A final result is in: send every decision it releases."""
 
 
@@ -277,8 +278,8 @@ class InstructionReceiver(Protocol):
 
     def relay_instruction(
         self,
-        decision: message.Decision,
-        deliver: Callable[[message.Decision], None],
+        decision: program_records.Decision,
+        deliver: Callable[[program_records.Decision], None],
     ) -> None:
         """Carry one decision to the controller; deliver runs on arrival."""
 
@@ -290,7 +291,7 @@ class InstructionReceiver(Protocol):
 class Qpu(Protocol):
     """The QPU, as the controller sees it."""
 
-    def issue(self, command: message.RunOperationBody) -> None:
+    def issue(self, command: program_records.RunOperationBody) -> None:
         """Queue one operation body; it starts on the next cycle boundary."""
 
 
@@ -314,25 +315,25 @@ class SyndromeSource(Protocol):
 
     def begin_operation(
         self,
-        operation: message.Operation,
+        operation: program_records.Operation,
         segment_round_count: int,
         source_round_count: int,
     ) -> None:
         """Prepare the operation's rounds (a Stim source samples its shot)."""
 
     def round_payloads(
-        self, operation: message.Operation, round_index: int
+        self, operation: program_records.Operation, round_index: int
     ) -> list[round_records.QPUReadout]:
         """The readouts of one round, one per patch or fragment."""
 
     def finalize_stream_round(
-        self, operation: message.Operation, source_round_count: int
+        self, operation: program_records.Operation, source_round_count: int
     ) -> list[round_records.QPUReadout]:
         """The stream's final data readout, as its own fragment."""
 
     def idle_round_payloads(
         self,
-        operation: message.Operation,
+        operation: program_records.Operation,
         stream_id: Any,
         global_round: int,
         patch: Any,
@@ -352,12 +353,12 @@ class Link(Protocol):
     delivers by callback with every tick of the transfer on the record.
     """
 
-    def is_wired(self, path: message.LinkPath) -> bool:
+    def is_wired(self, path: transfer_records.LinkPath) -> bool:
         """Whether the card prices this path; an unwired path is a free hop."""
 
     def expected_delay_ticks(
         self,
-        path: message.LinkPath,
+        path: transfer_records.LinkPath,
         payload_bits: Optional[int],
         now_ticks: int,
     ) -> int:
@@ -365,11 +366,11 @@ class Link(Protocol):
 
     def send(
         self,
-        path: message.LinkPath,
+        path: transfer_records.LinkPath,
         payload_bits: Optional[int],
         now_ticks: int,
-        attribution: message.TransferAttribution,
-        on_delivered: Callable[[message.Transfer], None],
+        attribution: transfer_records.TransferAttribution,
+        on_delivered: Callable[[transfer_records.Transfer], None],
     ) -> None:
         """Send one transfer on the path; on_delivered runs at delivery."""
 
@@ -509,7 +510,9 @@ class WindowingScheme(Protocol):
     ) -> bool:
         """Whether the window has every round it reads."""
 
-    def validate_buffer(self, geometry: message.ResolvedCodeGeometry) -> None:
+    def validate_buffer(
+        self, geometry: program_records.ResolvedCodeGeometry
+    ) -> None:
         """Refuse a buffer below the scheme's floor."""
 
 
@@ -538,5 +541,5 @@ class Workload(Protocol):
     Table rows: memory_circuit, circuit_list, surgery_ir, qlx.
     """
 
-    def build(self) -> list[message.Operation]:
+    def build(self) -> list[program_records.Operation]:
         """The operations, each with its patches and its predecessors."""

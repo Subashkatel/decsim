@@ -6,15 +6,13 @@ import math
 import pytest
 
 import decsim.qpu.layouts as layouts_module
-from decsim.qpu.code_geometry import SurfaceCodeModel
+import decsim.records.program as program_records
 from decsim.decoders.decoders import PresetLatencyDecoder
-from decsim.qpu.layouts import UniformLayout
-from decsim.message import Operation, OperationPlanningView, ResourceClaim
-from decsim.qpu.code_geometry import CodeModel
-from decsim.qpu.layouts import LayoutModel
 from decsim.decoders.settings import DecoderSettings
 from decsim.frontends.settings import WorkloadSettings
 from decsim.machine import Machine, MachineSettings
+from decsim.qpu.code_geometry import CodeModel, SurfaceCodeModel
+from decsim.qpu.layouts import LayoutModel, UniformLayout
 from decsim.qpu.settings import QpuSettings
 
 
@@ -41,17 +39,21 @@ class RecordingLayout:
         self.calls.append(("spatial_nodes_for", operation))
         return base_spatial_node_count
 
-    def patch_spatial_nodes_for(self, patch_identity, *, base_spatial_node_count):
+    def patch_spatial_nodes_for(
+        self, patch_identity, *, base_spatial_node_count
+    ):
         self.calls.append(("patch_spatial_nodes_for", patch_identity))
         return base_spatial_node_count
 
     def resources_for(self, operation):
         self.calls.append(("resources_for", operation))
-        return [ResourceClaim("qubits", frozenset(operation.qubits))]
+        return [
+            program_records.ResourceClaim("qubits", frozenset(operation.qubits))
+        ]
 
 
 def make_operation(*, operation_id=4, qubits=(3, 5), patches=(11,)):
-    return Operation(
+    return program_records.Operation(
         id=operation_id,
         name="timing-only",
         qubits=qubits,
@@ -60,7 +62,9 @@ def make_operation(*, operation_id=4, qubits=(3, 5), patches=(11,)):
 
 
 def make_planning_view(*, qubits=(3, 5, 3)):
-    return OperationPlanningView.from_operation(make_operation(qubits=qubits))
+    return program_records.OperationPlanningView.from_operation(
+        make_operation(qubits=qubits)
+    )
 
 
 def test_layout_stores_and_exposes_the_exact_mutable_code_object():
@@ -118,14 +122,20 @@ def test_spatial_hooks_return_even_invalid_base_counts_unchanged():
     operation = make_planning_view()
 
     for invalid_count in (None, -1, 0, "invalid", math.nan, object()):
-        assert layout.spatial_nodes_for(
-            operation,
-            base_spatial_node_count=invalid_count,
-        ) is invalid_count
-        assert layout.patch_spatial_nodes_for(
-            None,
-            base_spatial_node_count=invalid_count,
-        ) is invalid_count
+        assert (
+            layout.spatial_nodes_for(
+                operation,
+                base_spatial_node_count=invalid_count,
+            )
+            is invalid_count
+        )
+        assert (
+            layout.patch_spatial_nodes_for(
+                None,
+                base_spatial_node_count=invalid_count,
+            )
+            is invalid_count
+        )
 
 
 def test_spatial_base_counts_remain_keyword_only():
@@ -146,9 +156,11 @@ def test_resources_group_all_planning_qubits_in_one_immutable_claim():
 
     claims = layout.resources_for(operation)
 
-    assert claims == [ResourceClaim("qubits", frozenset({2, 5, 8}))]
+    assert claims == [
+        program_records.ResourceClaim("qubits", frozenset({2, 5, 8}))
+    ]
     assert len(claims) == 1
-    assert type(claims[0]) is ResourceClaim
+    assert type(claims[0]) is program_records.ResourceClaim
     assert claims[0].kind == "qubits"
     assert type(claims[0].ids) is frozenset
     assert operation.qubits == original_qubits
@@ -162,7 +174,9 @@ def test_resources_return_fresh_lists_and_allow_an_empty_declaration():
     first_claims = layout.resources_for(operation)
     second_claims = layout.resources_for(operation)
 
-    assert first_claims == [ResourceClaim("qubits", frozenset())]
+    assert first_claims == [
+        program_records.ResourceClaim("qubits", frozenset())
+    ]
     assert second_claims == first_claims
     assert second_claims is not first_claims
 
@@ -196,24 +210,27 @@ def test_codes_returns_a_fresh_list_without_mutating_the_layout():
 
 def test_the_hooks_take_the_planning_view_and_the_removed_aliases_stay_absent():
     """The operation hooks are annotated with the planning view the planner
-    passes; layouts imports no Operation; deleted aliases do not return."""
+    passes; layouts imports no program_records.Operation; deleted aliases do not return."""
     layout = UniformLayout(SurfaceCodeModel(distance=3))
 
     assert not hasattr(UniformLayout, "name")
     assert not hasattr(UniformLayout, "distance")
     assert not hasattr(layout, "name")
     assert not hasattr(layout, "distance")
-    assert not hasattr(layouts_module, "Operation")
+    assert not hasattr(layouts_module, "program_records.Operation")
     for method_name, parameter_name in (
         ("code_for_op", "operation"),
         ("spatial_nodes_for", "operation"),
         ("resources_for", "operation"),
     ):
-        parameter = inspect.signature(getattr(UniformLayout, method_name)).parameters[
-            parameter_name
-        ]
-        assert parameter.annotation is OperationPlanningView
-    assert UniformLayout.resources_for.__doc__ == "Return one qubit exclusivity claim."
+        parameter = inspect.signature(
+            getattr(UniformLayout, method_name)
+        ).parameters[parameter_name]
+        assert parameter.annotation is program_records.OperationPlanningView
+    assert (
+        UniformLayout.resources_for.__doc__
+        == "Return one qubit exclusivity claim."
+    )
 
 
 def test_timing_build_dispatches_real_planning_views_through_layout_hooks():
@@ -225,7 +242,9 @@ def test_timing_build_dispatches_real_planning_views_through_layout_hooks():
     settings = MachineSettings(
         workload=WorkloadSettings(operations=[operation]),
         qpu=QpuSettings(layout=layout),
-        weak_decoder=DecoderSettings(decoder=PresetLatencyDecoder(latency_us=1.0)),
+        weak_decoder=DecoderSettings(
+            decoder=PresetLatencyDecoder(latency_us=1.0)
+        ),
     )
     machine = Machine.build(settings)
     machine.run()
@@ -237,7 +256,7 @@ def test_timing_build_dispatches_real_planning_views_through_layout_hooks():
     assert calls_by_name["codes"] == [None]
     for hook_name in ("code_for_op", "spatial_nodes_for", "resources_for"):
         assert calls_by_name[hook_name] == [
-            OperationPlanningView.from_operation(operation)
+            program_records.OperationPlanningView.from_operation(operation)
         ]
     assert calls_by_name["code_for_patch"] == [13]
     assert calls_by_name["patch_spatial_nodes_for"] == [13]
@@ -249,17 +268,23 @@ def test_run_spec_owns_code_source_and_declared_code_count_checks():
     operation = make_operation()
 
     with pytest.raises(ValueError, match="multiple code sources"):
-        Machine.build(MachineSettings(
-            workload=WorkloadSettings(operations=[operation]),
-            qpu=QpuSettings(code=code, layout=UniformLayout(code))))
+        Machine.build(
+            MachineSettings(
+                workload=WorkloadSettings(operations=[operation]),
+                qpu=QpuSettings(code=code, layout=UniformLayout(code)),
+            )
+        )
 
     for declared_codes in ([], [code, SurfaceCodeModel(distance=5)]):
         layout = RecordingLayout(code)
         layout.codes = lambda values=declared_codes: values
         with pytest.raises(ValueError, match="exactly one code"):
-            Machine.build(MachineSettings(
-                workload=WorkloadSettings(operations=[operation]),
-                qpu=QpuSettings(layout=layout)))
+            Machine.build(
+                MachineSettings(
+                    workload=WorkloadSettings(operations=[operation]),
+                    qpu=QpuSettings(layout=layout),
+                )
+            )
 
 
 def test_planner_rejects_operation_selector_identity_changes():
@@ -269,9 +294,12 @@ def test_planner_rejects_operation_selector_identity_changes():
     layout.code_for_op = lambda operation: SurfaceCodeModel(distance=3)
 
     with pytest.raises(ValueError, match="selected a code different"):
-        Machine.build(MachineSettings(
-            workload=WorkloadSettings(operations=[make_operation()]),
-            qpu=QpuSettings(layout=layout)))
+        Machine.build(
+            MachineSettings(
+                workload=WorkloadSettings(operations=[make_operation()]),
+                qpu=QpuSettings(layout=layout),
+            )
+        )
 
 
 def test_planner_rejects_patch_selector_identity_changes():
@@ -281,6 +309,9 @@ def test_planner_rejects_patch_selector_identity_changes():
     layout.code_for_patch = lambda patch_identity: SurfaceCodeModel(distance=3)
 
     with pytest.raises(ValueError, match="selected a code different"):
-        Machine.build(MachineSettings(
-            workload=WorkloadSettings(operations=[make_operation()]),
-            qpu=QpuSettings(layout=layout)))
+        Machine.build(
+            MachineSettings(
+                workload=WorkloadSettings(operations=[make_operation()]),
+                qpu=QpuSettings(layout=layout),
+            )
+        )

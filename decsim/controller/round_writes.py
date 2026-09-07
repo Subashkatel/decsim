@@ -16,9 +16,9 @@ leaves on its route at the write (RoundTransmitter).
 from typing import Callable
 
 import decsim.controller.settings as controller_settings
-import decsim.message as message
 import decsim.observe.trace_source as trace_source
 import decsim.records.rounds as round_records
+import decsim.records.transfers as transfer_records
 
 
 class HeldRounds:
@@ -186,7 +186,9 @@ class RoundWriter:
         return self.strong_writer.has_room()
 
     def _write_strong(self, packed: round_records.PackedRound) -> None:
-        attribution = message.TransferAttribution.for_packet(packed.packet)
+        attribution = transfer_records.TransferAttribution.for_packet(
+            packed.packet
+        )
         self.strong_writer.write(
             packed.packet, packet_bits=packed.wire_bits, attribution=attribution
         )

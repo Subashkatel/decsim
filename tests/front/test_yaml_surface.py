@@ -8,6 +8,7 @@ and a run writes its manifest and its per-shot records.
 
 import pytest
 
+import decsim.controller.settings as controller_settings
 import decsim.front.collect_command as collect_command
 import decsim.front.experiment as experiment
 import decsim.front.report as report
@@ -81,6 +82,36 @@ def test_controller_cycle_card_reaches_both_runtime_paths(tmp_path):
     assert completed.instruction_output.pulse_ticks == microseconds_to_ticks(
         0.016
     )
+
+
+def test_the_packing_overflow_word_reaches_the_controller(tmp_path):
+    controller = dict(MINIMAL_CONFIG["controller"])
+    controller["packing_overflow"] = "drop_round"
+    config_path = write_config(tmp_path, {"controller": controller})
+    config = experiment.load_experiment(config_path)
+    assert config.settings.controller.packing_overflow is (
+        controller_settings.PackingOverflowPolicy.DROP_ROUND
+    )
+
+
+def test_the_default_packing_overflow_is_backpressure(tmp_path):
+    config_path = write_config(tmp_path, {})
+    config = experiment.load_experiment(config_path)
+    assert config.settings.controller.packing_overflow is (
+        controller_settings.PackingOverflowPolicy.STALL
+    )
+
+
+def test_an_unknown_packing_overflow_word_is_refused(tmp_path):
+    controller = dict(MINIMAL_CONFIG["controller"])
+    controller["packing_overflow"] = "overwrite"
+    config_path = write_config(tmp_path, {"controller": controller})
+    sentence = (
+        "controller.packing_overflow must be one of "
+        r"\('stall', 'drop_round'\), got 'overwrite'"
+    )
+    with pytest.raises(ValueError, match=sentence):
+        experiment.load_experiment(config_path)
 
 
 def test_a_mode_without_its_tier_is_refused(tmp_path):

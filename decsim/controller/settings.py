@@ -24,10 +24,9 @@ class PackingOverflowPolicy(enum.Enum):
     WAIT_MEAS, and credit-based flow control never loses a flit. LILLIPUT's
     readout buffer and QubiC's measurement register instead overwrite the
     latest value, a storage choice this policy does not model. DROP_ROUND
-    is a study knob with no yaml key (ns-3's drop tail,
-    point-to-point-net-device.cc Send: Enqueue false, packet dropped);
-    it applies to the packing stage's bound too, which under STALL stops
-    the run when full.
+    drops it, ns-3's drop tail (point-to-point-net-device.cc Send:
+    Enqueue false, the packet is dropped); it applies to the packing
+    stage's bound too, which under STALL stops the run when full.
     """
 
     STALL = "stall"
@@ -49,7 +48,8 @@ class ControllerSettings:
     packing_rounds_in_flight bounds the rounds in flight through the
     packing stage at once, each from its first fragment until the windows
     hear of it (round_assembly.RoundsInFlight); None is unbounded.
-    packing_overflow is a Python-only knob.
+    packing_overflow is what happens to a finished round the store cannot
+    take: the yaml's stall or drop_round.
     """
 
     readout_to_bits_microseconds: float = 0.0
@@ -84,11 +84,13 @@ class ControllerSettings:
         packing_microseconds = clocks.microseconds(packing_cycles, clock)
         decision_microseconds = clocks.microseconds(decision_cycles, clock)
         packing_rounds_in_flight = section.get("packing_rounds_in_flight")
+        packing_overflow = _packing_overflow(section)
         return cls(
             readout_to_bits_microseconds=readout_microseconds,
             packing_microseconds_per_round=packing_microseconds,
             decision_to_pulse_microseconds=decision_microseconds,
             packing_rounds_in_flight=packing_rounds_in_flight,
+            packing_overflow=packing_overflow,
         )
 
     def readout_to_bits_ticks(self) -> int:
@@ -118,3 +120,19 @@ class IdlePolicySettings:
 
     kind: str = "separate_decode_jobs"
     policy: Optional[ports.IdlePolicy] = None
+
+
+def _packing_overflow(section: Mapping) -> PackingOverflowPolicy:
+    """The `packing_overflow` word, or the default backpressure."""
+    default = PackingOverflowPolicy.STALL.value
+    named = section.get("packing_overflow", default)
+    for policy in PackingOverflowPolicy:
+        if policy.value == named:
+            return policy
+    words = []
+    for policy in PackingOverflowPolicy:
+        words.append(policy.value)
+    raise ValueError(
+        f"controller.packing_overflow must be one of {tuple(words)}, got "
+        f"{named!r}"
+    )

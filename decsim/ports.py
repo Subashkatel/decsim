@@ -220,7 +220,12 @@ class Decoder(Protocol):
     def decode(
         self, job: decoding_records.DecodeJob
     ) -> decoding_records.DecodeResult:
-        """The window's correction and its logical observables."""
+        """The window's correction and its logical observables.
+
+        A timing-only decoder leaves both unset: the result's two
+        fields are optional (decsim/records/decoding.py DecodeResult),
+        and every reader of them handles None.
+        """
 
     def latency(self, job: decoding_records.DecodeJob) -> int:
         """The whole job's service time in ticks, known at dispatch."""

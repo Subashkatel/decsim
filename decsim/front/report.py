@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Optional
 
 import decsim.front.measure as measure
+import decsim.front.refusal as refusal
 
 BULKY_FIELDS = ("samples", "means", "maxes", "link_totals")
 # The files combine folds, and how each one is put back in the order a
@@ -418,7 +419,7 @@ def _refuse_the_folders(row: dict, run_dirs: list) -> None:
         f"algorithm {row['algorithm']}, "
         f"round period {row['round_period_us']} us"
     )
-    raise ValueError(
+    raise refusal.RefusalError(
         f"the point {point} is in more than one of {listed}; combine folds "
         "shards of one sweep, and two shards never run the same point"
     )

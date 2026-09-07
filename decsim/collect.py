@@ -134,17 +134,14 @@ def collect(
 
 
 def shard_of(tasks: list, shard: Optional[tuple]) -> list:
-    """The tasks of one shard: position modulo count equals index."""
+    """The tasks of one shard: position modulo count equals index.
+
+    The command checks i and n where it reads them
+    (decsim/front/command.py _shard_of), before a run folder exists.
+    """
     if shard is None:
         return tasks
     index, count = shard
-    is_countable = count >= 1
-    is_in_range = 0 <= index < count
-    if not is_countable or not is_in_range:
-        raise ValueError(
-            f"shard {index}/{count} is not a shard; write i/n with n at "
-            "least 1 and i between 0 and n - 1"
-        )
     selected = []
     for position, task in enumerate(tasks):
         if position % count == index:

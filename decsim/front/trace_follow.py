@@ -20,10 +20,13 @@ import html
 from typing import Optional
 
 import decsim.config as config
+import decsim.front.refusal as refusal
 import decsim.front.trace_file as trace_file
 
 ROUND = "round"
 WINDOW = "window"
+# how many keys a refusal lists before it names the ends and the count
+LISTED_KEYS = 12
 # a hop is something that happened to the bits; a counter sample and a
 # flow arrow describe the file, not the path
 HOP_PHASES = ("X", "i")
@@ -140,6 +143,19 @@ def page(path: FollowedPath) -> str:
     return _PAGE.format(title=named, style=_STYLE, body=body)
 
 
+def carried_keys(document, kind: str) -> tuple:
+    """Every round or window key the trace's hops name, in key order."""
+    keys = set()
+    for event in document.events:
+        if event["ph"] not in HOP_PHASES:
+            continue
+        key = event["args"].get(kind)
+        if key is None:
+            continue
+        keys.add(key)
+    return tuple(sorted(keys, key=_key_parts))
+
+
 def main(argv: list) -> None:
     """`decsim trace follow <file> --round k:n | --window k:n`."""
     parser = argparse.ArgumentParser(prog="decsim trace")
@@ -152,6 +168,7 @@ def main(argv: list) -> None:
     _refuse_an_unknown_action(parsed.action)
     kind, key = _followed(parsed.round, parsed.window)
     document = trace_file.load(parsed.file)
+    _refuse_a_key_the_trace_does_not_carry(document, kind, key)
     path = follow(document, kind, key)
     lines = report_lines(path)
     text = "\n".join(lines)
@@ -167,7 +184,7 @@ def main(argv: list) -> None:
 def _followed(round_key: Optional[str], window_key: Optional[str]) -> tuple:
     """Which thing the command line named, refusing anything but one."""
     if round_key is not None and window_key is not None:
-        raise ValueError(
+        raise refusal.RefusalError(
             "decsim trace follow takes one of --round and --window, not both"
         )
     if round_key is not None:
@@ -176,7 +193,7 @@ def _followed(round_key: Optional[str], window_key: Optional[str]) -> tuple:
     if window_key is not None:
         _refuse_a_key_that_is_not_two_parts(WINDOW, window_key)
         return WINDOW, window_key
-    raise ValueError(
+    raise refusal.RefusalError(
         "decsim trace follow needs --round k:n or --window k:n, the keys "
         "the trace's args carry"
     )
@@ -186,7 +203,7 @@ def _refuse_an_unknown_action(action: str) -> None:
     """The one thing `decsim trace` does today."""
     if action == "follow":
         return
-    raise ValueError(
+    raise refusal.RefusalError(
         f"decsim trace has no action {action}; it follows one round or "
         "window: decsim trace follow <file> --round 1:1"
     )
@@ -197,10 +214,33 @@ def _refuse_a_key_that_is_not_two_parts(kind: str, key: str) -> None:
     words = key.split(":")
     if len(words) == 2 and words[1].isdigit():
         return
-    raise ValueError(
+    raise refusal.RefusalError(
         f"--{kind} {key} is not a {kind} key; write the operation and the "
         f"index the trace carries, so --{kind} 1:0"
     )
+
+
+def _refuse_a_key_the_trace_does_not_carry(
+    document, kind: str, key: str
+) -> None:
+    """A key no hop names, with what this file does carry instead."""
+    carried = carried_keys(document, kind)
+    if key in carried:
+        return
+    listed = _carried_text(carried)
+    raise refusal.RefusalError(
+        f"no hop of {document.process_name} carries {kind} {key}; its "
+        f"{kind} keys are {listed}"
+    )
+
+
+def _carried_text(carried: tuple) -> str:
+    """The carried keys, listed while they are few, else ends and count."""
+    if not carried:
+        return "none"
+    if len(carried) <= LISTED_KEYS:
+        return ", ".join(carried)
+    return f"{carried[0]} to {carried[-1]}, {len(carried)} in all"
 
 
 def _events_of(document, kind: str, key: str) -> list:

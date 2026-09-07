@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Optional
 
 import decsim.config as config_module
+import decsim.front.refusal as refusal
 import decsim.front.trace_file as trace_file
 
 WINDOW_COLORS = (
@@ -405,7 +406,9 @@ def figure(name: str, run_dirs: list, out_path=None, probability=None):
     matplotlib.use("Agg")
     if name not in FIGURES:
         listed = ", ".join(FIGURES)
-        raise ValueError(f"no figure named {name}; the figures are {listed}")
+        raise refusal.RefusalError(
+            f"no figure named {name}; the figures are {listed}"
+        )
     first_dir = Path(run_dirs[0])
     if out_path is None:
         out_path = first_dir / FIGURES[name]
@@ -431,7 +434,7 @@ def _draw_named_figure(
         combined_latency_plot(sample_files, out_path)
         return
     if probability is None:
-        raise ValueError(
+        raise refusal.RefusalError(
             "the ler_vs_d figure is drawn at one physical error rate; "
             "name it with --probability"
         )
@@ -444,7 +447,7 @@ def _timeline_source(run_dir: Path) -> Path:
         return run_dir
     trace_path = first_trace_file(run_dir)
     if trace_path is None:
-        raise ValueError(
+        raise refusal.RefusalError(
             f"{run_dir} has no trace/ folder, so no shot of it was traced; "
             "run it again with --trace, or `trace: chrome` in the yaml"
         )
@@ -1096,7 +1099,9 @@ def _ler_rows_at_probability(run_dir, probability: float) -> list:
         if math.isclose(row_probability, probability):
             selected_rows.append(row)
     if not selected_rows:
-        raise ValueError(f"{run_dir} swept no p={probability:g} point")
+        raise refusal.RefusalError(
+            f"{run_dir} swept no p={probability:g} point"
+        )
     selected_rows.sort(key=_by_distance_text)
     return selected_rows
 
@@ -1146,7 +1151,7 @@ def _shot_rows(run_dir) -> list:
     """Every row of the run's shots.csv; a run without one is refused."""
     shots_path = Path(run_dir) / "shots.csv"
     if not shots_path.exists():
-        raise FileNotFoundError(
+        raise refusal.RefusalError(
             f"{run_dir} has no shots.csv; the stage breakdown reads the "
             f"per-shot stage means a closed-loop run records"
         )
@@ -1352,9 +1357,15 @@ def _samples_by_distance(rows: list) -> dict:
 
 
 def _sample_files(run_dirs) -> list:
-    """Each run folder's latency_samples.csv."""
+    """Each folder's latency_samples.csv; one without it is refused."""
     paths = []
     for run_dir in run_dirs:
         samples_path = Path(run_dir) / "latency_samples.csv"
+        if not samples_path.is_file():
+            raise refusal.RefusalError(
+                f"{run_dir} has no latency_samples.csv; the latency figure "
+                "reads the decode wall clock per window, which a run whose "
+                "decoder is named and not a latency card records"
+            )
         paths.append(samples_path)
     return paths

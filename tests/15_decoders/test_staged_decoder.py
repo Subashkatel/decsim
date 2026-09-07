@@ -17,13 +17,13 @@ from decsim.decoders.staged_decoder import (
     UnitTiming,
 )
 from decsim.engine import Engine
-from decsim.observe.stage_records import StageLedger
 from decsim.message import (
     DecodeJob,
     DecodeResult,
     DecoderRequestKey,
     DecoderTier,
 )
+from decsim.observe.stage_records import StageLedger
 
 MHZ = 250.0
 CYCLE = microseconds_to_ticks(1 / MHZ)

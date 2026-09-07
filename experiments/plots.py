@@ -25,7 +25,6 @@ from pathlib import Path
 
 from decsim.config import TICKS_PER_MICROSECOND
 from decsim.machine import Machine
-
 from experiments.experiment_config import ExperimentConfig
 from experiments.measure_shot import INPUT_LINK, OUTPUT_LINK
 
@@ -323,9 +322,12 @@ def ler_groups(rows: list) -> list:
 
 
 def decoder_title(config: ExperimentConfig) -> str:
-    """ "pymatching decoder (weak)" / "belief matching decoder (strong)".
+    """The figure's decoder title, tier included.
+
+    "pymatching decoder (weak)" or "belief matching decoder (strong)".
     A numeric card reads as pymatching: the card prices latency but its
-    corrections come from the same MWPM path."""
+    corrections come from the same MWPM path.
+    """
     algorithm = config.active_decoder.kind
     name = algorithm if isinstance(algorithm, str) else "pymatching"
     tier = config.settings.escalation.decodes_on
@@ -398,9 +400,11 @@ def ler_plot(rows: list, path: Path, title: str = "Logical error rate") -> None:
 
 
 def _csv_tier_label(algorithm_field: str) -> str:
-    """ "pymatching (weak)" / "belief matching (strong)" from ler.csv's
-    algorithm column. A numeric card reads as pymatching, the same
-    ruling as decoder_title."""
+    """The csv's tier label, read back from its algorithm column.
+
+    "pymatching (weak)" or "belief matching (strong)". A numeric card
+    reads as pymatching, the same ruling as decoder_title.
+    """
     try:
         float(algorithm_field)
         algorithm_name = "pymatching"
@@ -728,6 +732,7 @@ def combined_latency_plot(sample_files: list, path: Path) -> None:
         python -m experiments.plots latency <run_dir> <run_dir> <out.png>
     """
     import csv
+
     import matplotlib
 
     matplotlib.use("Agg")

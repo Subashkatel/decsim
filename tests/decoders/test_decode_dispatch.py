@@ -6,8 +6,8 @@ displaces ready work (src/cpu/o3/inst_queue.hh, scheduleReadyInsts).
 
 import decsim.decoders.decoders as decoders
 import decsim.decoders.schedulers as schedulers
-import decsim.escalation.policies as escalation_policies
 import decsim.engine as engine_module
+import decsim.escalation.policies as escalation_policies
 import decsim.message as message
 from decsim.decoders.decoder_manager import DecoderManager
 

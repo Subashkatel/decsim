@@ -1,15 +1,15 @@
+import inspect
 from dataclasses import FrozenInstanceError
 from types import SimpleNamespace
-import inspect
 
 import pytest
 
-from decsim.pauli_frame.pauli_frame import PauliFrame as RuntimePauliFrame
-from decsim.pauli_frame.pauli_frame import PauliFrameConfig
-from decsim.ports import Frame as PauliFramePort
 import decsim.machine as machine_module
 from decsim.machine import MachineSettings
 from decsim.message import RunSeedPathSegment
+from decsim.pauli_frame.pauli_frame import PauliFrame as RuntimePauliFrame
+from decsim.pauli_frame.pauli_frame import PauliFrameConfig
+from decsim.ports import Frame as PauliFramePort
 
 
 class ManualEngine:
@@ -42,7 +42,9 @@ def request(run_sequence=0, *, tier="weak", operation_id=0, window_id=0):
     )
 
 
-def accept(frame, window_key, observables, *, run_sequence=0, callback=lambda: None):
+def accept(
+    frame, window_key, observables, *, run_sequence=0, callback=lambda: None
+):
     frame.commit_correction(
         window_key=window_key,
         logical_observables=observables,
@@ -59,7 +61,9 @@ def test_wide_elementwise_xor_cancels_without_a_word_size_limit():
 
     accept(frame, (41, 0), left)
     accept(frame, (41, 1), right)
-    assert frame.frame_for_stream(41) == tuple(a ^ b for a, b in zip(left, right))
+    assert frame.frame_for_stream(41) == tuple(
+        a ^ b for a, b in zip(left, right)
+    )
 
     accept(frame, (41, 2), left)
     accept(frame, (41, 3), right)
@@ -97,17 +101,36 @@ def test_a_second_correction_for_a_window_is_refused_loudly():
     frame = RuntimePauliFrame(engine, commit_ticks=11)
     continuations = []
 
-    accept(frame, (3, 7), [1, 0], run_sequence=2,
-           callback=lambda: continuations.append(("accepted", engine.now)))
+    accept(
+        frame,
+        (3, 7),
+        [1, 0],
+        run_sequence=2,
+        callback=lambda: continuations.append(("accepted", engine.now)),
+    )
     with pytest.raises(RuntimeError, match="already has a"):
-        accept(frame, (3, 7), [0, 1], run_sequence=3,
-               callback=lambda: continuations.append(("pending duplicate", engine.now)))
+        accept(
+            frame,
+            (3, 7),
+            [0, 1],
+            run_sequence=3,
+            callback=lambda: continuations.append(
+                ("pending duplicate", engine.now)
+            ),
+        )
 
     engine.run_all()
     assert continuations == [("accepted", 28)]
     with pytest.raises(RuntimeError, match="already has a"):
-        accept(frame, (3, 7), [1, 1], run_sequence=4,
-               callback=lambda: continuations.append(("installed duplicate", engine.now)))
+        accept(
+            frame,
+            (3, 7),
+            [1, 1],
+            run_sequence=4,
+            callback=lambda: continuations.append(
+                ("installed duplicate", engine.now)
+            ),
+        )
     settled = frame.snapshot()
     assert settled.commit_count == 1
     assert settled.pending_write_count == 0
@@ -176,12 +199,20 @@ def test_configuration_rejects_implicit_or_disappearing_costs():
             PauliFrameConfig(commit_microseconds=invalid)
     with pytest.raises(ValueError, match="rounds to zero ticks"):
         PauliFrameConfig(commit_microseconds=1e-12)
-    with pytest.raises(ValueError, match="needs zero_commit_cost_justification"):
+    with pytest.raises(
+        ValueError, match="needs zero_commit_cost_justification"
+    ):
         PauliFrameConfig(commit_microseconds=0.0)
-    with pytest.raises(ValueError, match="needs zero_commit_cost_justification"):
-        PauliFrameConfig(commit_microseconds=0.0, zero_commit_cost_justification="")
+    with pytest.raises(
+        ValueError, match="needs zero_commit_cost_justification"
+    ):
+        PauliFrameConfig(
+            commit_microseconds=0.0, zero_commit_cost_justification=""
+        )
     with pytest.raises(ValueError, match="needs a free write"):
-        PauliFrameConfig(commit_microseconds=1.0, zero_commit_cost_justification="free")
+        PauliFrameConfig(
+            commit_microseconds=1.0, zero_commit_cost_justification="free"
+        )
 
     zero = PauliFrameConfig(
         commit_microseconds=0.0,
@@ -192,13 +223,16 @@ def test_configuration_rejects_implicit_or_disappearing_costs():
     assert PauliFrameConfig(commit_microseconds=1.0).commit_ticks() > 0
 
 
-
 def test_runtime_satisfies_the_declared_keyword_only_correction_seam():
     frame = RuntimePauliFrame(ManualEngine(), commit_ticks=0)
     assert isinstance(frame, PauliFramePort)
     parameters = inspect.signature(PauliFramePort.commit_correction).parameters
     assert tuple(parameters) == (
-        "self", "window_key", "logical_observables", "request_key", "on_committed"
+        "self",
+        "window_key",
+        "logical_observables",
+        "request_key",
+        "on_committed",
     )
     assert all(
         parameter.kind is inspect.Parameter.KEYWORD_ONLY

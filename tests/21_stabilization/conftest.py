@@ -7,87 +7,154 @@ from dataclasses import replace
 import pytest
 
 from decsim.config import microseconds_to_ticks
-from decsim.controller.settings import ControllerSettings
-from decsim.decoders.settings import (DecoderManagerSettings, DecoderSettings,
-                                      EscalationSettings)
-from decsim.frontends.settings import WorkloadSettings
-from decsim.machine import Machine, MachineSettings
-from decsim.observe.settings import ObservationSettings
-from decsim.qpu.settings import QpuSettings
-from decsim.windows.settings import WindowSettings
-from decsim.decoders.decoders import (SAMPLED_CONFIDENCE_SOURCE,
-                                      PresetLatencyDecoder,
-                                      SampledConfidenceDecoder,
-                                      SwitchingRouter)
-from decsim.escalation.policies import Switching, StrongOnly
-from decsim.escalation.threshold_sources import FixedThreshold
 from decsim.controller.policies import Held
-from decsim.links.link_profiles import (logical_reference_profile,
-                                        with_controller_to_weak_buffer_path,
-                                        with_controller_to_strong_buffer_path)
-from decsim.links.settings import ChannelSettings, PathSettings
-from decsim.message import Operation
+from decsim.controller.settings import ControllerSettings
 from decsim.decoders.decoder_memory import DecoderMemoryConfig
+from decsim.decoders.decoders import (
+    SAMPLED_CONFIDENCE_SOURCE,
+    PresetLatencyDecoder,
+    SampledConfidenceDecoder,
+    SwitchingRouter,
+)
+from decsim.decoders.settings import (
+    DecoderManagerSettings,
+    DecoderSettings,
+    EscalationSettings,
+)
+from decsim.escalation.policies import StrongOnly, Switching
+from decsim.escalation.threshold_sources import FixedThreshold
+from decsim.frontends.settings import WorkloadSettings
+from decsim.links.link_profiles import (
+    logical_reference_profile,
+    with_controller_to_strong_buffer_path,
+    with_controller_to_weak_buffer_path,
+)
+from decsim.links.settings import ChannelSettings, PathSettings
+from decsim.machine import Machine, MachineSettings
+from decsim.message import Operation
+from decsim.observe.settings import ObservationSettings
 from decsim.pauli_frame.pauli_frame import PauliFrameConfig
 from decsim.qpu.round_policies import FixedRounds
-from decsim.windows.windowing_schemes import (SlidingTerminalPolicy,
-                                              SlidingWindowScheme)
+from decsim.qpu.settings import QpuSettings
+from decsim.windows.settings import WindowSettings
+from decsim.windows.windowing_schemes import (
+    SlidingTerminalPolicy,
+    SlidingWindowScheme,
+)
 
 
 def sliding_scheme():
     return SlidingWindowScheme(
-        terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD)
+        terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD
+    )
+
 
 # The declared stage ticks of this suite, in microseconds. QEC cycle is
 # 1.0 us. The packet assembly time is declared zero here; its per-round
 # charge has its own test in test_controller_io_paths.py.
 DECLARED_US = {
-    "qpu_to_controller": 2.0, "binary": 3.0, "pack": 0.0, "controller_to_weak_buffer": 4.0, "controller_to_strong_buffer": 7.0,
-    "weak_buffer_to_weak_decoder": 5.0, "weak_decoder_to_strong_decoder": 3.0, "strong_buffer_to_strong_decoder": 6.0, "weak": 10.0, "strong": 30.0,
-    "weak_decoder_to_frame": 2.0, "decoder_to_decoder": 0.5, "strong_decoder_to_frame": 4.0, "frame": 1.0, "frame_to_controller": 2.0, "controller_to_qpu": 2.0,
+    "qpu_to_controller": 2.0,
+    "binary": 3.0,
+    "pack": 0.0,
+    "controller_to_weak_buffer": 4.0,
+    "controller_to_strong_buffer": 7.0,
+    "weak_buffer_to_weak_decoder": 5.0,
+    "weak_decoder_to_strong_decoder": 3.0,
+    "strong_buffer_to_strong_decoder": 6.0,
+    "weak": 10.0,
+    "strong": 30.0,
+    "weak_decoder_to_frame": 2.0,
+    "decoder_to_decoder": 0.5,
+    "strong_decoder_to_frame": 4.0,
+    "frame": 1.0,
+    "frame_to_controller": 2.0,
+    "controller_to_qpu": 2.0,
 }
 ROUND_US = 1.0
 
 
 def _declared_edge(base_edge, latency_us):
-    channel = ChannelSettings(base_edge.channel.name, microseconds_to_ticks(latency_us),
-                              None, "stabilization declared tick")
-    return PathSettings(channel, base_edge.default_payload,
-                        base_edge.actual_payload_source)
+    channel = ChannelSettings(
+        base_edge.channel.name,
+        microseconds_to_ticks(latency_us),
+        None,
+        "stabilization declared tick",
+    )
+    return PathSettings(
+        channel, base_edge.default_payload, base_edge.actual_payload_source
+    )
 
 
-def declared_profile(*, controller_to_weak_buffer=True, controller_to_strong_buffer=True, strong_buffer_us=None):
+def declared_profile(
+    *,
+    controller_to_weak_buffer=True,
+    controller_to_strong_buffer=True,
+    strong_buffer_us=None,
+):
     """The reference card with every latency replaced by a declared tick."""
     base = logical_reference_profile()
     profile = replace(
         base,
-        qpu_to_controller=_declared_edge(base.qpu_to_controller, DECLARED_US["qpu_to_controller"]),
-        weak_buffer_to_weak_decoder=_declared_edge(base.weak_buffer_to_weak_decoder, DECLARED_US["weak_buffer_to_weak_decoder"]),
-        weak_decoder_to_strong_decoder=_declared_edge(base.weak_decoder_to_strong_decoder, DECLARED_US["weak_decoder_to_strong_decoder"]),
-        strong_buffer_to_strong_decoder=_declared_edge(base.strong_buffer_to_strong_decoder, DECLARED_US["strong_buffer_to_strong_decoder"]),
-        weak_decoder_to_frame=_declared_edge(base.weak_decoder_to_frame, DECLARED_US["weak_decoder_to_frame"]),
-        decoder_to_decoder=_declared_edge(base.decoder_to_decoder, DECLARED_US["decoder_to_decoder"]),
-        strong_decoder_to_frame=_declared_edge(base.strong_decoder_to_frame, DECLARED_US["strong_decoder_to_frame"]),
-        frame_to_controller=_declared_edge(base.frame_to_controller, DECLARED_US["frame_to_controller"]),
-        controller_to_qpu=_declared_edge(base.controller_to_qpu, DECLARED_US["controller_to_qpu"]),
+        qpu_to_controller=_declared_edge(
+            base.qpu_to_controller, DECLARED_US["qpu_to_controller"]
+        ),
+        weak_buffer_to_weak_decoder=_declared_edge(
+            base.weak_buffer_to_weak_decoder,
+            DECLARED_US["weak_buffer_to_weak_decoder"],
+        ),
+        weak_decoder_to_strong_decoder=_declared_edge(
+            base.weak_decoder_to_strong_decoder,
+            DECLARED_US["weak_decoder_to_strong_decoder"],
+        ),
+        strong_buffer_to_strong_decoder=_declared_edge(
+            base.strong_buffer_to_strong_decoder,
+            DECLARED_US["strong_buffer_to_strong_decoder"],
+        ),
+        weak_decoder_to_frame=_declared_edge(
+            base.weak_decoder_to_frame, DECLARED_US["weak_decoder_to_frame"]
+        ),
+        decoder_to_decoder=_declared_edge(
+            base.decoder_to_decoder, DECLARED_US["decoder_to_decoder"]
+        ),
+        strong_decoder_to_frame=_declared_edge(
+            base.strong_decoder_to_frame, DECLARED_US["strong_decoder_to_frame"]
+        ),
+        frame_to_controller=_declared_edge(
+            base.frame_to_controller, DECLARED_US["frame_to_controller"]
+        ),
+        controller_to_qpu=_declared_edge(
+            base.controller_to_qpu, DECLARED_US["controller_to_qpu"]
+        ),
         # the declared qc tick is wire time only; readout classification
         # prices the controller processing separately
         is_controller_processing_outside_qpu_to_controller=True,
     )
     if controller_to_weak_buffer:
         profile = with_controller_to_weak_buffer_path(
-            profile, latency_microseconds=DECLARED_US["controller_to_weak_buffer"],
-            aggregate_bits_per_microsecond=None, source="stabilization declared tick")
+            profile,
+            latency_microseconds=DECLARED_US["controller_to_weak_buffer"],
+            aggregate_bits_per_microsecond=None,
+            source="stabilization declared tick",
+        )
     if controller_to_strong_buffer:
         profile = with_controller_to_strong_buffer_path(
-            profile, latency_microseconds=(DECLARED_US["controller_to_strong_buffer"] if strong_buffer_us is None else strong_buffer_us),
-            aggregate_bits_per_microsecond=None, source="stabilization declared tick")
+            profile,
+            latency_microseconds=(
+                DECLARED_US["controller_to_strong_buffer"]
+                if strong_buffer_us is None
+                else strong_buffer_us
+            ),
+            aggregate_bits_per_microsecond=None,
+            source="stabilization declared tick",
+        )
     return profile
 
 
 def declared_timing():
-    return ControllerSettings(readout_to_bits_microseconds=DECLARED_US["binary"],
-                              packing_microseconds_per_round=DECLARED_US["pack"])
+    return ControllerSettings(
+        readout_to_bits_microseconds=DECLARED_US["binary"],
+        packing_microseconds_per_round=DECLARED_US["pack"],
+    )
 
 
 def declared_qpu(round_us=ROUND_US):
@@ -104,55 +171,103 @@ def run_machine(settings, seed=0, make_metrics=None):
     return machine
 
 
-def memory_op(op_id=1, *, name=None, blocked_by=None, predecessors=(),
-              requires_result_return=False):
+def memory_op(
+    op_id=1,
+    *,
+    name=None,
+    blocked_by=None,
+    predecessors=(),
+    requires_result_return=False,
+):
     return Operation(
-        id=op_id, name=name or f"mem{op_id}", qubits=(op_id,),
-        patches=(op_id,), blocked_by=blocked_by, predecessors=predecessors,
-        requires_result_return_to_qpu=requires_result_return)
+        id=op_id,
+        name=name or f"mem{op_id}",
+        qubits=(op_id,),
+        patches=(op_id,),
+        blocked_by=blocked_by,
+        predecessors=predecessors,
+        requires_result_return_to_qpu=requires_result_return,
+    )
 
 
-def weak_only_run(*, rounds=6, ops=None, controller_to_weak_buffer=True, seed=0, io_trace=False,
-                  frame=True, make_metrics=None):
+def weak_only_run(
+    *,
+    rounds=6,
+    ops=None,
+    controller_to_weak_buffer=True,
+    seed=0,
+    io_trace=False,
+    frame=True,
+    make_metrics=None,
+):
     """Weak-only baseline on the declared fabric; d=3 sliding windows."""
     settings = MachineSettings(
         workload=WorkloadSettings(
             operations=(ops if ops is not None else [memory_op(1)]),
-            rounds_policy=FixedRounds(rounds)),
+            rounds_policy=FixedRounds(rounds),
+        ),
         qpu=declared_qpu(),
-        weak_decoder=DecoderSettings(decoder=PresetLatencyDecoder(DECLARED_US["weak"])),
-        links=declared_profile(controller_to_weak_buffer=controller_to_weak_buffer, controller_to_strong_buffer=False),
+        weak_decoder=DecoderSettings(
+            decoder=PresetLatencyDecoder(DECLARED_US["weak"])
+        ),
+        links=declared_profile(
+            controller_to_weak_buffer=controller_to_weak_buffer,
+            controller_to_strong_buffer=False,
+        ),
         controller=declared_timing(),
-        pauli_frame=(PauliFrameConfig(commit_microseconds=DECLARED_US["frame"])
-                     if frame else None),
-        observation=ObservationSettings(log_component_io=io_trace))
+        pauli_frame=(
+            PauliFrameConfig(commit_microseconds=DECLARED_US["frame"])
+            if frame
+            else None
+        ),
+        observation=ObservationSettings(log_component_io=io_trace),
+    )
     return run_machine(settings, seed, make_metrics)
 
 
-def strong_only_run(*, rounds=6, ops=None, seed=0, io_trace=False,
-                    record=False):
+def strong_only_run(
+    *, rounds=6, ops=None, seed=0, io_trace=False, record=False
+):
     """Strong-primary baseline: readiness listens to syndrome buffer 1."""
     settings = MachineSettings(
         workload=WorkloadSettings(
             operations=(ops if ops is not None else [memory_op(1)]),
-            rounds_policy=FixedRounds(rounds)),
+            rounds_policy=FixedRounds(rounds),
+        ),
         qpu=declared_qpu(),
-        weak_decoder=DecoderSettings(decoder=PresetLatencyDecoder(DECLARED_US["strong"])),
+        weak_decoder=DecoderSettings(
+            decoder=PresetLatencyDecoder(DECLARED_US["strong"])
+        ),
         escalation=EscalationSettings(policy=StrongOnly()),
-        links=declared_profile(controller_to_weak_buffer=True, controller_to_strong_buffer=True),
+        links=declared_profile(
+            controller_to_weak_buffer=True, controller_to_strong_buffer=True
+        ),
         controller=declared_timing(),
         pauli_frame=PauliFrameConfig(commit_microseconds=DECLARED_US["frame"]),
-        observation=ObservationSettings(log_component_io=io_trace,
-                                        record_switching_windows=record))
+        observation=ObservationSettings(
+            log_component_io=io_trace, record_switching_windows=record
+        ),
+    )
     return run_machine(settings, seed)
 
 
-def switching_run(*, rounds=6, escalation_probability, ops=None,
-                  run_both_at_once=False, double_window=False,
-                  unit_pools=None, seed=0, io_trace=False,
-                  probability_for=None, record=False, strong_buffer_us=None,
-                  weak_memory_rounds=None, round_us=ROUND_US,
-                  make_metrics=None):
+def switching_run(
+    *,
+    rounds=6,
+    escalation_probability,
+    ops=None,
+    run_both_at_once=False,
+    double_window=False,
+    unit_pools=None,
+    seed=0,
+    io_trace=False,
+    probability_for=None,
+    record=False,
+    strong_buffer_us=None,
+    weak_memory_rounds=None,
+    round_us=ROUND_US,
+    make_metrics=None,
+):
     """Weak-primary switching on the declared fabric.
 
     escalation_probability 0.0 or 1.0 (or a per-job probability_for
@@ -161,33 +276,56 @@ def switching_run(*, rounds=6, escalation_probability, ops=None,
     """
     weak = SampledConfidenceDecoder(
         PresetLatencyDecoder(DECLARED_US["weak"]),
-        escalation_probability, probability_for=probability_for)
-    router = SwitchingRouter(weak=weak,
-                             strong=PresetLatencyDecoder(DECLARED_US["strong"]))
-    policy = Switching(FixedThreshold(0.5), SAMPLED_CONFIDENCE_SOURCE,
-                       run_both_at_once=run_both_at_once)
+        escalation_probability,
+        probability_for=probability_for,
+    )
+    router = SwitchingRouter(
+        weak=weak, strong=PresetLatencyDecoder(DECLARED_US["strong"])
+    )
+    policy = Switching(
+        FixedThreshold(0.5),
+        SAMPLED_CONFIDENCE_SOURCE,
+        run_both_at_once=run_both_at_once,
+    )
     settings = MachineSettings(
         workload=WorkloadSettings(
             operations=(ops if ops is not None else [memory_op(1)]),
-            rounds_policy=FixedRounds(rounds)),
+            rounds_policy=FixedRounds(rounds),
+        ),
         qpu=declared_qpu(round_us),
         windows=WindowSettings(
             scheme=sliding_scheme(),
             # serial switching requires Held boundaries; double_window rejects
             # them (escalation.policies.Switching.check_plan)
-            boundary_policy=(None if double_window else Held())),
+            boundary_policy=(None if double_window else Held()),
+        ),
         decoder_manager=DecoderManagerSettings(
             router=router,
-            unit_pools=(unit_pools if unit_pools is not None
-                        else {"default": 1, "strong": 1}),
-            decoder_memory=(None if weak_memory_rounds is None else
-                            DecoderMemoryConfig({"default": weak_memory_rounds}))),
-        escalation=EscalationSettings(policy=policy, double_window=double_window),
-        links=declared_profile(controller_to_weak_buffer=True, controller_to_strong_buffer=True, strong_buffer_us=strong_buffer_us),
+            unit_pools=(
+                unit_pools
+                if unit_pools is not None
+                else {"default": 1, "strong": 1}
+            ),
+            decoder_memory=(
+                None
+                if weak_memory_rounds is None
+                else DecoderMemoryConfig({"default": weak_memory_rounds})
+            ),
+        ),
+        escalation=EscalationSettings(
+            policy=policy, double_window=double_window
+        ),
+        links=declared_profile(
+            controller_to_weak_buffer=True,
+            controller_to_strong_buffer=True,
+            strong_buffer_us=strong_buffer_us,
+        ),
         controller=declared_timing(),
         pauli_frame=PauliFrameConfig(commit_microseconds=DECLARED_US["frame"]),
-        observation=ObservationSettings(log_component_io=io_trace,
-                                        record_switching_windows=record))
+        observation=ObservationSettings(
+            log_component_io=io_trace, record_switching_windows=record
+        ),
+    )
     return run_machine(settings, seed, make_metrics)
 
 
@@ -204,7 +342,10 @@ class OccupancyProbe:
 
     def observe(self, tick):
         live_upstream = self.window_manager.retention.weak_store.occupancy
-        if not self.buffer0_timeline or self.buffer0_timeline[-1][1] != live_upstream:
+        if (
+            not self.buffer0_timeline
+            or self.buffer0_timeline[-1][1] != live_upstream
+        ):
             self.buffer0_timeline.append((tick, live_upstream))
         room_store = self.window_manager.retention.strong_store
         if room_store is not None:
@@ -213,8 +354,10 @@ class OccupancyProbe:
                 self.sb1_timeline.append((tick, live_room))
 
     def result(self):
-        return {"buffer0": list(self.buffer0_timeline),
-                "sb1": list(self.sb1_timeline)}
+        return {
+            "buffer0": list(self.buffer0_timeline),
+            "sb1": list(self.sb1_timeline),
+        }
 
 
 def occupancy_metrics():
@@ -252,7 +395,8 @@ def log_index(log_lines, needle):
 def fabric():
     """The suite's helper namespace, one import point for every test."""
     return {
-        "DECLARED_US": DECLARED_US, "ROUND_US": ROUND_US,
+        "DECLARED_US": DECLARED_US,
+        "ROUND_US": ROUND_US,
         "declared_profile": declared_profile,
         "declared_timing": declared_timing,
         "declared_qpu": declared_qpu,

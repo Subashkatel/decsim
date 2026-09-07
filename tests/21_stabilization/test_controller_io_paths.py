@@ -6,20 +6,20 @@ online stage in causal order.
 """
 
 from decsim.config import microseconds_to_ticks
-from decsim.controller.settings import ControllerSettings
-from decsim.decoders.settings import DecoderSettings
-from decsim.frontends.settings import WorkloadSettings
-from decsim.machine import MachineSettings
-from decsim.qpu.settings import QpuSettings
-from decsim.observe.link_traffic import TrafficLedger
 from decsim.controller.instruction_output import InstructionOutput
+from decsim.controller.settings import ControllerSettings
 from decsim.decoders.decoders import PresetLatencyDecoder
+from decsim.decoders.settings import DecoderSettings
 from decsim.engine import Engine
+from decsim.frontends.settings import WorkloadSettings
 from decsim.links.fabric import LinkFabric
+from decsim.machine import MachineSettings
 from decsim.message import Decision, RunOperationBody
+from decsim.observe.link_traffic import TrafficLedger
 from decsim.observe.round_events import RoundEventRecorder
 from decsim.pauli_frame.pauli_frame import PauliFrameConfig
 from decsim.qpu.round_policies import FixedRounds
+from decsim.qpu.settings import QpuSettings
 
 
 def _feedback_run(fabric, *, controller_output_us):

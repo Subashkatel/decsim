@@ -186,8 +186,8 @@ def _standalone_pool(units, transfer_us, compute_us, decoder=None):
     from decsim.decoders.decoder_manager import DecoderManager
     from decsim.decoders.decoders import CodeRouter
     from decsim.decoders.schedulers import FifoScheduler
-    from decsim.escalation.policies import Baseline
     from decsim.engine import Engine
+    from decsim.escalation.policies import Baseline
     from decsim.message import (
         DecodeJob,
         DecoderRequestKey,

@@ -144,11 +144,11 @@ def test_a_full_buffer_0_stalls_the_controller_instead_of_failing(fabric):
     take data, and QubiC's cores block in WAIT_MEAS until readout data is
     consumed."""
     from decsim.decoders.decoders import PresetLatencyDecoder
-    from decsim.pauli_frame.pauli_frame import PauliFrameConfig
-    from decsim.qpu.round_policies import FixedRounds
     from decsim.decoders.settings import DecoderSettings
     from decsim.frontends.settings import WorkloadSettings
     from decsim.machine import MachineSettings
+    from decsim.pauli_frame.pauli_frame import PauliFrameConfig
+    from decsim.qpu.round_policies import FixedRounds
     from decsim.syndrome_buffer.settings import RoundStoreSettings
 
     declared = fabric["DECLARED_US"]

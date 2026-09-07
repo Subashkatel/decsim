@@ -7,7 +7,11 @@ The initialization contract these tests pin is
 import pytest
 
 from decsim.config import microseconds_to_ticks
-from decsim.message import Operation, RetainedSyndromeFragment, SyndromeRoundPacket
+from decsim.message import (
+    Operation,
+    RetainedSyndromeFragment,
+    SyndromeRoundPacket,
+)
 
 
 def test_execution_and_decoding_views_agree(fabric):
@@ -38,18 +42,22 @@ def test_registration_is_idempotent(fabric):
     assert window_manager.tracker.operation_by_id[1] is operation
 
 
-
-
 def test_round_after_operation_close_fails(fabric):
     """A round arriving after the operation's syndrome RAM was freed refuses."""
     completed = fabric["weak_only_run"](rounds=6)
     fragment = RetainedSyndromeFragment(
-        operation_id=1, patch_id=1, round_index=2, bits=None,
-        size_bits=None, fragment_index=0)
+        operation_id=1,
+        patch_id=1,
+        round_index=2,
+        bits=None,
+        size_bits=None,
+        fragment_index=0,
+    )
     packet = SyndromeRoundPacket(1, 2, (fragment,))
 
-    with pytest.raises(RuntimeError,
-                       match="arrived after the op's last window committed"):
+    with pytest.raises(
+        RuntimeError, match="arrived after the op's last window committed"
+    ):
         completed.window_manager.accept_window_input(packet)
 
 
@@ -62,10 +70,13 @@ def test_duplicate_operation_ids_are_rejected(fabric):
 
 def test_scheduled_start_round_delays_the_root(fabric):
     """A scheduled start releases the operation on its exact boundary."""
-    op = Operation(id=1, name="late", qubits=(1,), patches=(1,),
-                   scheduled_start_round=4)
+    op = Operation(
+        id=1, name="late", qubits=(1,), patches=(1,), scheduled_start_round=4
+    )
     completed = fabric["weak_only_run"](rounds=6, ops=[op])
-    assert completed.observation.runtime_stamps.op_start[1] == microseconds_to_ticks(4 * fabric["ROUND_US"])
+    assert completed.observation.runtime_stamps.op_start[
+        1
+    ] == microseconds_to_ticks(4 * fabric["ROUND_US"])
 
 
 def test_component_boundaries_are_structural(fabric):
@@ -82,10 +93,12 @@ def test_every_program_operation_is_registered(fabric):
     """The execution-view registration covers non-emitting operations,
     which the decode-plan view never sees; dropping it would leave them
     without readiness accounts."""
-    quiet = Operation(id=1, name="quiet", qubits=(1,), patches=(1,),
-                      emits_detector_data=False)
-    completed = fabric["weak_only_run"](rounds=6,
-                                        ops=[quiet, fabric["memory_op"](2)])
+    quiet = Operation(
+        id=1, name="quiet", qubits=(1,), patches=(1,), emits_detector_data=False
+    )
+    completed = fabric["weak_only_run"](
+        rounds=6, ops=[quiet, fabric["memory_op"](2)]
+    )
     window_manager = completed.window_manager
 
     assert {1, 2} <= set(window_manager.tracker.operation_by_id)

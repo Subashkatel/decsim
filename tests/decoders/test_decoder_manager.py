@@ -13,8 +13,8 @@ import decsim.config as config
 import decsim.decoders.decoder as decoder_module
 import decsim.decoders.decoders as decoders
 import decsim.decoders.schedulers as schedulers
-import decsim.escalation.policies as escalation_policies
 import decsim.engine as engine_module
+import decsim.escalation.policies as escalation_policies
 import decsim.message as message
 import decsim.observe.log_writers as log_writers
 from decsim.decoders.decoder_manager import DecoderManager

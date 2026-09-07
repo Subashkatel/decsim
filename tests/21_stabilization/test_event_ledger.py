@@ -1,6 +1,6 @@
 """The run flight recorder (cycle/event ledger).
 
-`FlightRecorder.events` assembles one causal record per
+`FlightRecorder.ledger` assembles one causal record per
 hardware-significant transition from the owners' own records: the
 packing stage's round events, syndrome buffer 1's stored log, the
 window stamps, the frame records, and the release times. Every event
@@ -31,7 +31,7 @@ def test_weak_round_chain_is_exact(fabric):
     # CWB-sent 8, published in Buffer 0 at 12, terminal.
     ledger = fabric["weak_only_run"](
         rounds=6
-    ).observation.flight_recorder.events
+    ).observation.flight_recorder.ledger
     chain = ledger.chain(op=1, round=3)
 
     assert _kinds_and_ticks(chain) == [
@@ -52,7 +52,7 @@ def test_weak_window_chain_is_exact(fabric):
     # publication event.
     ledger = fabric["weak_only_run"](
         rounds=6
-    ).observation.flight_recorder.events
+    ).observation.flight_recorder.ledger
     chain = ledger.chain(op=1, window=0)
 
     assert _kinds_and_ticks(chain) == [
@@ -77,7 +77,7 @@ def test_every_emitted_round_reaches_exactly_one_terminal(fabric):
     # publications, and the check passes.
     ledger = fabric["weak_only_run"](
         rounds=6
-    ).observation.flight_recorder.events
+    ).observation.flight_recorder.ledger
     ledger.check()
 
     emitted = [event for event in ledger.events if event.kind == "EMITTED"]
@@ -92,7 +92,7 @@ def test_strong_run_records_the_room_store_landing(fabric):
     # cwb, and the window chain runs 18 / 54 / 58 / 59 on the strong tier.
     ledger = fabric["strong_only_run"](
         rounds=6
-    ).observation.flight_recorder.events
+    ).observation.flight_recorder.ledger
     ledger.check()
 
     assert _kinds_and_ticks(ledger.chain(op=1, round=3)) == [
@@ -116,7 +116,7 @@ def test_strong_run_records_the_room_store_landing(fabric):
 def test_switching_run_ledger_checks(fabric):
     """A full escalation run assembles and passes the accounting check."""
     completed = fabric["switching_run"](rounds=6, escalation_probability=1.0)
-    ledger = completed.observation.flight_recorder.events
+    ledger = completed.observation.flight_recorder.ledger
     ledger.check()
 
 
@@ -128,7 +128,7 @@ def test_release_links_to_the_blocking_operations_commit(fabric):
         rounds=6,
         ops=[fabric["memory_op"](1), fabric["memory_op"](2, blocked_by=1)],
     )
-    ledger = completed.observation.flight_recorder.events
+    ledger = completed.observation.flight_recorder.ledger
     ledger.check()
 
     (decision,) = [
@@ -216,15 +216,16 @@ def _ledger_of(recorder):
     """A recorder alone, with every other listener empty."""
     from types import SimpleNamespace
 
+    corrections = FrameCorrections()
     recorder_only = FlightRecorder(
         recorder,
         SimpleNamespace(windows={}),
         SimpleNamespace(decode_release={}, result_return={}),
         SimpleNamespace(events=()),
-        FrameCorrections(),
+        corrections,
         (),
     )
-    return recorder_only.events
+    return recorder_only.ledger
 
 
 def test_dropped_round_is_an_accounted_terminal_state():
@@ -381,7 +382,7 @@ def test_ledger_holds_over_randomized_configurations(fabric, seed):
             rounds=rounds, escalation_probability=1.0, double_window=True
         )
 
-    ledger = completed.observation.flight_recorder.events
+    ledger = completed.observation.flight_recorder.ledger
     ledger.check()
 
     accounted_rounds = {
@@ -431,7 +432,7 @@ def test_idle_rounds_reach_one_terminal_state_on_a_fabric_without_cwb(fabric):
         controller_to_weak_buffer=False,
         ops=[fabric["memory_op"](1), fabric["memory_op"](2, blocked_by=1)],
     )
-    ledger = completed.observation.flight_recorder.events
+    ledger = completed.observation.flight_recorder.ledger
     ledger.check()
     idle_terminals = [
         event.kind

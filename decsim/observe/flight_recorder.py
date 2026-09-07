@@ -37,7 +37,7 @@ class FlightRecorder:
         self.operations = operations
 
     @property
-    def events(self) -> "RunLedgerView":
+    def ledger(self) -> "RunLedgerView":
         """Assemble the causal record of the run so far.
 
         The chains are added in pipeline order: every round's controller

@@ -42,13 +42,15 @@ class RecordingController:
 
     def observe_lifecycle(self, boundary, operation_id):
         if self.runtime is not None:
-            self.lifecycle_observations.append((
-                boundary,
-                operation_id,
-                frozenset(self.runtime.started_operation_ids),
-                frozenset(self.runtime.finished_operation_ids),
-                frozenset(self.runtime.released_operation_ids),
-            ))
+            self.lifecycle_observations.append(
+                (
+                    boundary,
+                    operation_id,
+                    frozenset(self.runtime.started_operation_ids),
+                    frozenset(self.runtime.finished_operation_ids),
+                    frozenset(self.runtime.released_operation_ids),
+                )
+            )
 
     def round_ticks_for(self, operation):
         return self.round_ticks
@@ -62,11 +64,13 @@ class RecordingController:
         self.observe_lifecycle("issue_operation", operation.id)
         self.issued.append((operation, on_started))
         if self.runtime is not None:
-            self.observed_at_issue.append((
-                operation.id,
-                operation.id in self.runtime.started_operation_ids,
-                self.stamps.op_start.get(operation.id),
-            ))
+            self.observed_at_issue.append(
+                (
+                    operation.id,
+                    operation.id in self.runtime.started_operation_ids,
+                    self.stamps.op_start.get(operation.id),
+                )
+            )
         self.engine.events.append(("issue", operation.id))
         return self.engine.now
 
@@ -74,7 +78,9 @@ class RecordingController:
         self.observe_lifecycle("before_successor_release", operation.id)
         self.engine.events.append(("before", operation.id))
 
-    def after_successor_release(self, operation, waits_for_blocked, is_workload_complete):
+    def after_successor_release(
+        self, operation, waits_for_blocked, is_workload_complete
+    ):
         self.observe_lifecycle("after_successor_release", operation.id)
         self.engine.events.append(("after", operation.id))
 
@@ -93,7 +99,9 @@ class RecordingFactory:
 
 
 def make_operation(operation_id, *, name=None, qubits=(), **changes):
-    return Operation(operation_id, name or f"operation-{operation_id}", qubits, **changes)
+    return Operation(
+        operation_id, name or f"operation-{operation_id}", qubits, **changes
+    )
 
 
 def claims_for(*operations):
@@ -108,7 +116,9 @@ def make_runtime(*operations, round_ticks=1, claims=None):
         engine,
         issuer=controller,
         factory=factory,
-        resource_claims_by_operation_id=claims if claims is not None else claims_for(*operations),
+        resource_claims_by_operation_id=claims
+        if claims is not None
+        else claims_for(*operations),
     )
     controller.runtime = runtime
     stamps = runtime_stamps_module.RuntimeStamps()
@@ -123,19 +133,29 @@ def make_runtime(*operations, round_ticks=1, claims=None):
 
 def mutable_runtime_state(runtime, engine, controller, factory):
     names = (
-        "operations", "dependencies_remaining", "successors", "schedule_released",
-        "requested", "state_ready", "started_operation_ids",
-        "finished_operation_ids", "released_operation_ids",
+        "operations",
+        "dependencies_remaining",
+        "successors",
+        "schedule_released",
+        "requested",
+        "state_ready",
+        "started_operation_ids",
+        "finished_operation_ids",
+        "released_operation_ids",
     )
     copied = {}
     for name in names:
         value = getattr(runtime, name)
         copied[name] = value.copy()
     stamp_names = (
-        "op_start", "body_done", "decode_release", "result_return",
+        "op_start",
+        "body_done",
+        "decode_release",
+        "result_return",
     )
     for name in stamp_names:
-        copied[name] = getattr(controller.stamps, name).copy()
+        stamp = getattr(controller.stamps, name)
+        copied[name] = stamp.copy()
     copied["program"] = runtime.program
     copied["last_finish"] = controller.stamps.last_finish
     copied["engine_events"] = list(engine.events)
@@ -152,7 +172,9 @@ def test_construction_preserves_collaborators_and_shallow_copies_claim_mapping()
     operation = make_operation(1)
     claim_list = []
     supplied_claims = {operation.id: claim_list}
-    runtime, engine, controller, factory, _ = make_runtime(operation, claims=supplied_claims)
+    runtime, engine, controller, factory, _ = make_runtime(
+        operation, claims=supplied_claims
+    )
 
     assert runtime.engine is engine
     assert runtime.issuer is controller
@@ -175,7 +197,9 @@ def test_construction_preserves_collaborators_and_shallow_copies_claim_mapping()
         resource_claims_by_operation_id={},
     )
     assert (bare_runtime.engine, bare_runtime.issuer, bare_runtime.factory) == (
-        bare_engine, bare_controller, bare_factory
+        bare_engine,
+        bare_controller,
+        bare_factory,
     )
 
 
@@ -188,8 +212,11 @@ def test_construction_starts_with_the_documented_empty_lifecycle():
     for name in ("operations", "dependencies_remaining", "successors"):
         assert getattr(runtime, name) == {}
     for name in (
-        "schedule_released", "requested", "state_ready",
-        "started_operation_ids", "finished_operation_ids",
+        "schedule_released",
+        "requested",
+        "state_ready",
+        "started_operation_ids",
+        "finished_operation_ids",
         "released_operation_ids",
     ):
         assert getattr(runtime, name) == set()
@@ -220,10 +247,12 @@ def test_deleted_lifecycle_latches_are_not_part_of_the_runtime_surface():
 
 
 def test_the_lifecycle_id_sets_are_the_only_membership_record():
-    """The id sets match lifecycle membership at every controller observation boundary."""
+    """The id sets match lifecycle membership at every boundary."""
     root = make_operation(1)
     blocked_successor = make_operation(2, predecessors=(1,), blocked_by=1)
-    runtime, engine, controller, _, stamps = make_runtime(root, blocked_successor, )
+    runtime, engine, controller, _, stamps = make_runtime(
+        root, blocked_successor
+    )
     controller.allowed[2] = False
 
     runtime.load_program(ExecutionProgram((root, blocked_successor)))
@@ -239,13 +268,43 @@ def test_the_lifecycle_id_sets_are_the_only_membership_record():
     assert controller.lifecycle_observations == [
         ("can_start", 1, frozenset(), frozenset(), frozenset()),
         ("issue_operation", 1, frozenset({1}), frozenset(), frozenset()),
-        ("before_successor_release", 1, frozenset({1}), frozenset({1}), frozenset()),
-        ("after_successor_release", 1, frozenset({1}), frozenset({1}), frozenset()),
+        (
+            "before_successor_release",
+            1,
+            frozenset({1}),
+            frozenset({1}),
+            frozenset(),
+        ),
+        (
+            "after_successor_release",
+            1,
+            frozenset({1}),
+            frozenset({1}),
+            frozenset(),
+        ),
         ("can_start", 2, frozenset({1}), frozenset({1}), frozenset({2})),
         ("can_start", 2, frozenset({1}), frozenset({1}), frozenset({2})),
-        ("issue_operation", 2, frozenset({1, 2}), frozenset({1}), frozenset({2})),
-        ("before_successor_release", 2, frozenset({1, 2}), frozenset({1, 2}), frozenset({2})),
-        ("after_successor_release", 2, frozenset({1, 2}), frozenset({1, 2}), frozenset({2})),
+        (
+            "issue_operation",
+            2,
+            frozenset({1, 2}),
+            frozenset({1}),
+            frozenset({2}),
+        ),
+        (
+            "before_successor_release",
+            2,
+            frozenset({1, 2}),
+            frozenset({1, 2}),
+            frozenset({2}),
+        ),
+        (
+            "after_successor_release",
+            2,
+            frozenset({1, 2}),
+            frozenset({1, 2}),
+            frozenset({2}),
+        ),
     ]
     assert runtime.started_operation_ids == {1, 2}
     assert runtime.finished_operation_ids == {1, 2}
@@ -318,7 +377,9 @@ def test_schedule_release_uses_raw_cadence_product_without_local_validation():
     immediate = make_operation(1, scheduled_start_round=0)
     negative = make_operation(2, scheduled_start_round=1)
     fractional = make_operation(3, scheduled_start_round=1.5)
-    runtime, _, controller, _, _ = make_runtime(immediate, negative, fractional, round_ticks=-4)
+    runtime, _, controller, _, _ = make_runtime(
+        immediate, negative, fractional, round_ticks=-4
+    )
     runtime.load_program(ExecutionProgram((immediate, negative, fractional)))
 
     assert runtime.schedule_released == {1}
@@ -415,9 +476,13 @@ def test_claim_publication_is_ordered_and_all_or_nothing():
     }
     runtime, _, _, _, _ = make_runtime(operation, claims=claims)
     runtime.operations[1] = operation
-    runtime.resources.claim(operation, lambda holder_id: runtime.operations[holder_id].name)
+    runtime.resources.claim(
+        operation, lambda holder_id: runtime.operations[holder_id].name
+    )
     assert list(runtime.resources.holder_by_resource) == [
-        ("qubit", "a"), ("qubit", "b"), ("ancilla", 2)
+        ("qubit", "a"),
+        ("qubit", "b"),
+        ("ancilla", 2),
     ]
 
     contender = make_operation(2)
@@ -428,12 +493,17 @@ def test_claim_publication_is_ordered_and_all_or_nothing():
             ResourceClaim("qubit", frozenset({"busy"})),
         ]
     }
-    conflict_runtime, _, _, _, _ = make_runtime(contender, claims=conflict_claims)
+    conflict_runtime, _, _, _, _ = make_runtime(
+        contender, claims=conflict_claims
+    )
     conflict_runtime.operations.update({2: contender, 3: holder})
     conflict_runtime.resources.holder_by_resource[("qubit", "busy")] = 3
     before = dict(conflict_runtime.resources.holder_by_resource)
     with pytest.raises(RuntimeError, match="share qubit resource"):
-        conflict_runtime.resources.claim(contender, lambda holder_id: conflict_runtime.operations[holder_id].name)
+        conflict_runtime.resources.claim(
+            contender,
+            lambda holder_id: conflict_runtime.operations[holder_id].name,
+        )
     assert conflict_runtime.resources.holder_by_resource == before
 
 
@@ -443,7 +513,10 @@ def test_claim_rejects_duplicate_operands_and_duplicate_typed_keys_before_public
     runtime, _, _, _, _ = make_runtime(duplicate_qubits)
     runtime.operations[1] = duplicate_qubits
     with pytest.raises(RuntimeError, match="more than once"):
-        runtime.resources.claim(duplicate_qubits, lambda holder_id: runtime.operations[holder_id].name)
+        runtime.resources.claim(
+            duplicate_qubits,
+            lambda holder_id: runtime.operations[holder_id].name,
+        )
     assert runtime.resources.holder_by_resource == {}
 
     duplicate_key = make_operation(2)
@@ -453,10 +526,15 @@ def test_claim_rejects_duplicate_operands_and_duplicate_typed_keys_before_public
             ResourceClaim("qubit", frozenset({"q"})),
         ]
     }
-    duplicate_runtime, _, _, _, _ = make_runtime(duplicate_key, claims=duplicate_claims)
+    duplicate_runtime, _, _, _, _ = make_runtime(
+        duplicate_key, claims=duplicate_claims
+    )
     duplicate_runtime.operations[2] = duplicate_key
     with pytest.raises(RuntimeError, match="share qubit resource"):
-        duplicate_runtime.resources.claim(duplicate_key, lambda holder_id: duplicate_runtime.operations[holder_id].name)
+        duplicate_runtime.resources.claim(
+            duplicate_key,
+            lambda holder_id: duplicate_runtime.operations[holder_id].name,
+        )
     assert duplicate_runtime.resources.holder_by_resource == {}
 
 
@@ -466,22 +544,31 @@ def test_claim_shape_and_mapping_completeness_use_natural_failures():
     runtime, _, _, _, _ = make_runtime(missing, claims={99: []})
     runtime.operations[1] = missing
     with pytest.raises(KeyError):
-        runtime.resources.claim(missing, lambda holder_id: runtime.operations[holder_id].name)
+        runtime.resources.claim(
+            missing, lambda holder_id: runtime.operations[holder_id].name
+        )
     with pytest.raises(KeyError):
         runtime.resources.release(missing)
     assert runtime.resources.holder_by_resource == {}
 
     valid = make_operation(3)
-    extra_runtime, _, _, _, _ = make_runtime(valid, claims={3: [], 99: object()})
+    extra_runtime, _, _, _, _ = make_runtime(
+        valid, claims={3: [], 99: object()}
+    )
     extra_runtime.operations[3] = valid
-    extra_runtime.resources.claim(valid, lambda holder_id: extra_runtime.operations[holder_id].name)
+    extra_runtime.resources.claim(
+        valid, lambda holder_id: extra_runtime.operations[holder_id].name
+    )
     assert extra_runtime.resources.holder_by_resource == {}
 
     unhashable = make_operation(2, qubits=([],))
     unhashable_runtime, _, _, _, _ = make_runtime(unhashable)
     unhashable_runtime.operations[2] = unhashable
     with pytest.raises(TypeError):
-        unhashable_runtime.resources.claim(unhashable, lambda holder_id: unhashable_runtime.operations[holder_id].name)
+        unhashable_runtime.resources.claim(
+            unhashable,
+            lambda holder_id: unhashable_runtime.operations[holder_id].name,
+        )
     assert unhashable_runtime.resources.holder_by_resource == {}
 
 
@@ -493,7 +580,9 @@ def test_body_done_preserves_valid_release_hook_issue_and_completion_order():
         1: [ResourceClaim("qubit", frozenset({"shared"}))],
         2: [ResourceClaim("qubit", frozenset({"shared"}))],
     }
-    runtime, engine, controller, _, stamps = make_runtime(root, successor, claims=claims)
+    runtime, engine, controller, _, stamps = make_runtime(
+        root, successor, claims=claims
+    )
     runtime.load_program(ExecutionProgram((root, successor)))
     engine.events.clear()
 
@@ -518,7 +607,11 @@ def test_body_done_preserves_valid_release_hook_issue_and_completion_order():
     assert engine.events == [
         ("log", "ExecutionRuntime", "operation-2 body done"),
         ("before", 2),
-        ("log", "ExecutionRuntime", "QPU finished. All 2 operations are physically complete; decoder may still be draining."),
+        (
+            "log",
+            "ExecutionRuntime",
+            "QPU finished. All 2 operations are physically complete; decoder may still be draining.",
+        ),
         ("after", 2),
     ]
 
@@ -526,9 +619,13 @@ def test_body_done_preserves_valid_release_hook_issue_and_completion_order():
 def test_waiting_blocked_successor_checks_only_direct_feedback_and_boundary_state():
     """The waiting query ignores nonfeedback readiness dimensions for direct successors."""
     predecessor = make_operation(1)
-    blocked = make_operation(2, predecessors=(1,), blocked_by=1, scheduled_start_round=8)
+    blocked = make_operation(
+        2, predecessors=(1,), blocked_by=1, scheduled_start_round=8
+    )
     unblocked = make_operation(3, predecessors=(1,))
-    runtime, _, controller, _, stamps = make_runtime(predecessor, blocked, unblocked, )
+    runtime, _, controller, _, stamps = make_runtime(
+        predecessor, blocked, unblocked
+    )
     controller.allowed[2] = False
     runtime.load_program(ExecutionProgram((predecessor, blocked, unblocked)))
 
@@ -642,6 +739,7 @@ def test_zero_finish_time_needs_physical_completion_state_for_interpretation():
     completed.body_done(operation)
     assert completed_stamps.last_finish == 0
     assert completed.workload_complete is True
+
 
 def test_timing_endpoints_remain_distinct_from_physical_and_terminal_completion():
     """Timing-only start, body, release, and return endpoints retain distinct event meanings."""

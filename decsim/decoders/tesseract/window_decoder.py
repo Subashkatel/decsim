@@ -22,7 +22,6 @@ import stim
 
 import decsim.decoders.backend_outcome as backend_outcome
 import decsim.decoders.decoder as decoder_module
-import decsim.detector_error_model.fault_identity_validation as fault_identity
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.seeding as seeding
 
@@ -359,11 +358,6 @@ def _validated_prior(fault_index: int, value) -> float:
 
 def detector_error_model_of(model, physical_faults) -> tuple:
     """(Stim detector error model, coordinates) of one physical view."""
-    fault_identity.validate_placed_fault_matrices(
-        physical_faults.check,
-        physical_faults.observables,
-        location="Tesseract physical window model",
-    )
     check = physical_faults.check
     # observables are few rows; dense per-fault columns are cheap to read
     observables = physical_faults.observables.toarray()

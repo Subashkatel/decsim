@@ -13,7 +13,6 @@ import ldpc
 import scipy.sparse
 
 import decsim.decoders.decoder as decoder_module
-import decsim.detector_error_model.fault_identity_validation as fault_identity
 import decsim.detector_error_model.fault_model_contracts as fault_models
 
 
@@ -42,9 +41,6 @@ class BeliefPropagationOsdDecoder(decoder_module.WindowDecoderBase):
     def compile(self, faults, model=None):
         """Ldpc's BP-OSD decoder over the window's physical check."""
         del model
-        fault_identity.validate_placed_fault_matrices(
-            faults.check, faults.observables, location="BP-OSD window model"
-        )
         row_count, column_count = faults.check.shape
         window_rank = column_count - row_count
         window_osd_order = max(0, min(self.osd_order, window_rank))

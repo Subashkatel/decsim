@@ -224,12 +224,15 @@ def read_rows(path: Path) -> list:
 def combine(run_dirs: list, out_dir: Path) -> list:
     """Fold several run folders' rows into one report, and return its rows.
 
-    A shard runs whole tasks (decsim/collect.py shard_of), so two shards
-    of one sweep never hold the same point and folding them is a
-    concatenation, not a re-aggregation: sinter's combine adds rows with
-    the same strong id, and here no two rows share one. A point that
-    does appear twice is refused, because summing two summaries of the
-    same point is not the summary of their shots.
+    Folding is a concatenation, not a re-aggregation: sinter's combine
+    adds rows with the same strong id, and here no two rows share one.
+    A point in two folders is refused, because a point's summary is not
+    additive: its `<point>_median_us` and `<point>_p99_us` columns are
+    percentiles over every decoded window of every shot of that point
+    pooled, and no run folder records those windows, so two summaries
+    of one point cannot be made into the summary of their shots. Give
+    each shard whole points (`--shard` without `--shots-per-unit`) and
+    the fold is exact.
 
     The rows come back in the order one unsharded run would have
     written them, read off the rows themselves and the sweep every
@@ -434,8 +437,10 @@ def _refuse_the_folders(row: dict, run_dirs: list) -> None:
         f"round period {row['round_period_us']} us"
     )
     raise refusal.RefusalError(
-        f"the point {point} is in more than one of {listed}; combine folds "
-        "shards of one sweep, and two shards never run the same point"
+        f"the point {point} is in more than one of {listed}; a point's "
+        "summary is not additive, since its median and p99 columns are "
+        "over its pooled decoded windows and no run folder records them, "
+        "so give each shard whole points: --shard without --shots-per-unit"
     )
 
 

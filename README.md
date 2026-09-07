@@ -51,6 +51,7 @@ One command, one subcommand per word, as sinter's is:
 decsim run configs/reference.yaml --seed 0 --trace   # one seeded shot
 decsim collect configs/weak_ler.yaml --processes 8   # the whole sweep
 decsim collect configs/weak_ler.yaml --shard 0/4     # one Slurm array task
+decsim collect configs/weak_ler.yaml --shots-per-unit 1000   # finer work units
 decsim combine results/<a> results/<b>               # the shards' rows
 decsim show configs/reference.yaml                   # what the yaml resolves to
 decsim plot results/<run> --figure timeline          # a figure from its files

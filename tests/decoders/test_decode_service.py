@@ -62,7 +62,7 @@ def _job(index, gate=None, deps_remaining=0):
     )
     window = window_records.Window(
         operation_id=1,
-        k=index,
+        window_index=index,
         commit_lo=1,
         commit_hi=1,
         buffer_hi=1,

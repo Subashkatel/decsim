@@ -980,7 +980,7 @@ def _context_window_of(
     round_count = context_hi - context_lo + 1
     strong_window = window_records.Window(
         operation_id=weak_window.operation_id,
-        k=weak_window.k,
+        window_index=weak_window.window_index,
         commit_lo=commit_lo,
         commit_hi=commit_hi,
         buffer_hi=context_hi,
@@ -1015,7 +1015,7 @@ def _strong_window_of(
     round_count = plan.context_hi - plan.context_lo + 1
     return window_records.Window(
         operation_id=key[0],
-        k=key[1],
+        window_index=key[1],
         commit_lo=plan.commit_lo,
         commit_hi=plan.commit_hi,
         buffer_hi=plan.context_hi,

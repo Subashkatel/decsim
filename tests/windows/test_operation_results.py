@@ -41,7 +41,7 @@ def _window(operation_id, index, commit_lo, commit_hi) -> window_records.Window:
     round_count = commit_hi - commit_lo + 1
     return window_records.Window(
         operation_id=operation_id,
-        k=index,
+        window_index=index,
         commit_lo=commit_lo,
         commit_hi=commit_hi,
         buffer_hi=commit_hi,

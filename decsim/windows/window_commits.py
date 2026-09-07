@@ -169,7 +169,7 @@ class WindowCommitter:
             status_note = f" best effort: {status.value}"
         self.engine.log(
             "DecoderCluster",
-            f"DECODE DONE {operation.name} W{window.k} "
+            f"DECODE DONE {operation.name} W{window.window_index} "
             f"[commit {window.commit_lo}-{window.commit_hi}]{status_note}",
         )
         contribution = self.results.install_window_contribution(

@@ -297,7 +297,7 @@ class TraceWriter:
             "window": window_text(window.key),
             "commit": f"{window.commit_lo}..{window.commit_hi}",
         }
-        name = f"W{window.k} planned"
+        name = f"W{window.window_index} planned"
         self._instant("Window planner", name, "window", args)
 
     def window_ready(self, window: window_records.Window) -> None:
@@ -307,7 +307,7 @@ class TraceWriter:
             "rounds": f"{window.start_round}..{window.buffer_hi}",
             "commit": f"{window.commit_lo}..{window.commit_hi}",
         }
-        name = f"W{window.k} ready"
+        name = f"W{window.window_index} ready"
         self._instant("Window planner", name, "window", args)
 
     def job_enqueued(self, job: decoding_records.DecodeJob) -> None:
@@ -349,7 +349,7 @@ class TraceWriter:
             "commit": f"{commit_lo}..{commit_hi}",
             "ownership": contribution.ownership_kind,
         }
-        name = f"W{window.k} committed"
+        name = f"W{window.window_index} committed"
         self._instant("Window planner", name, "window", args)
 
     def window_absorbed(self, key, owner_key) -> None:

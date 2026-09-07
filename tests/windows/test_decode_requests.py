@@ -78,7 +78,7 @@ class _Fixture:
         )
         self.window = window_records.Window(
             operation_id=1,
-            k=0,
+            window_index=0,
             commit_lo=1,
             commit_hi=3,
             buffer_hi=5,

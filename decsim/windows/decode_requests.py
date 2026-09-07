@@ -87,8 +87,8 @@ class DecodeRequestBuilder:
             return
         self.engine.log(
             "DecoderCluster",
-            f"{operation.name} W{window.k} buffer filled by memory rounds "
-            f"(time-only, no syndrome content)",
+            f"{operation.name} W{window.window_index} buffer filled by "
+            f"memory rounds (time-only, no syndrome content)",
         )
 
     def build(
@@ -99,7 +99,9 @@ class DecodeRequestBuilder:
         store,
     ) -> decoding_records.DecodeJob:
         """The tier's decode job for one complete window, read from store."""
-        request_key = self.new_request_key(window.operation_id, window.k, tier)
+        request_key = self.new_request_key(
+            window.operation_id, window.window_index, tier
+        )
         payloads = self.assemble_payloads(window, store)
         payload_round_count = decoding_records.distinct_round_count(payloads)
         round_count = (
@@ -111,7 +113,7 @@ class DecodeRequestBuilder:
         label = self._job_label(window, operation)
         return decoding_records.DecodeJob(
             operation_id=window.operation_id,
-            window_id=window.k,
+            window_id=window.window_index,
             round_count=round_count,
             ready_time=self.engine.now,
             spatial_nodes=spatial_nodes,
@@ -120,7 +122,7 @@ class DecodeRequestBuilder:
             code=geometry.code_name,
             window=window,
             label=label,
-            strong_label=f"strong({operation.name} W{window.k})",
+            strong_label=f"strong({operation.name} W{window.window_index})",
             request_key=request_key,
             request_created_ticks=self.engine.now,
             gate=self,
@@ -191,7 +193,7 @@ class DecodeRequestBuilder:
         window = job.window
         if window is None or window.deps_remaining <= 0:
             return True
-        visiting = {(window.operation_id, window.k)}
+        visiting = {(window.operation_id, window.window_index)}
         for dependency in window.deps:
             if not self._resolving_without_new_slots(dependency, visiting):
                 return False
@@ -242,7 +244,7 @@ class DecodeRequestBuilder:
     ) -> str:
         if self.planner.is_windowed(window.operation_id):
             return (
-                f"{operation.name} W{window.k} "
+                f"{operation.name} W{window.window_index} "
                 f"[commit {window.commit_lo}-{window.commit_hi}]"
             )
         body_rounds = self.tracker.round_count_for_window(operation.id, window)

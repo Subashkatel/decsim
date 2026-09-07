@@ -86,7 +86,7 @@ class _Fixture:
         self.engine = engine_module.Engine()
         self.window = window_records.Window(
             operation_id=4,
-            k=1,
+            window_index=1,
             commit_lo=4,
             commit_hi=6,
             buffer_hi=8,

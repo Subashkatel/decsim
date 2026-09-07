@@ -391,7 +391,7 @@ def _hold_window(
 
     The weak decode reads the window from its start to its buffer.
     """
-    key = (operation_id, window.k)
+    key = (operation_id, window.window_index)
     round_keys = _read_keys(
         execution, operation_id, window.start_round, window.buffer_hi
     )
@@ -434,7 +434,9 @@ def _hold_restart_reads(
     lower_start = window.commit_lo - reread_rounds
     lower = max(1, lower_start)
     round_keys = _read_keys(execution, operation_id, lower, window.buffer_hi)
-    owner = decoding_records.PotentialRestart((operation_id, window.k))
+    owner = decoding_records.PotentialRestart(
+        (operation_id, window.window_index)
+    )
     weak.add(owner, round_keys, round_keys)
 
 
@@ -468,7 +470,9 @@ def _hold_strong_context(
     lower = max(1, context_start)
     upper = commit_hi + buffer_rounds
     potential = _read_keys(execution, operation_id, lower, upper)
-    owner = decoding_records.PotentialStrong((operation_id, window.k))
+    owner = decoding_records.PotentialStrong(
+        (operation_id, window.window_index)
+    )
     arrived = _arrived_by_buffer(potential, operation_id, window.buffer_hi)
     strong.add(owner, potential, arrived)
 
@@ -557,7 +561,7 @@ def _add_operation_windows(windows: dict, operation_id, operation_plan) -> None:
     for window_index, geometry in enumerate(operation_plan.windows):
         windows[(operation_id, window_index)] = window_records.Window(
             operation_id=operation_id,
-            k=window_index,
+            window_index=window_index,
             commit_lo=geometry.commit_lo,
             commit_hi=geometry.commit_hi,
             buffer_hi=geometry.buffer_hi,

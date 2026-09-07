@@ -1,10 +1,11 @@
 """The Pauli frame behaves like a real frame and charges what it says.
 
 Sources: PECOS pauli_frame.rs (a stream's frame is the XOR of its
-corrections; folding is non-destructive); Riesebos, Pauli frames for
-quantum computer architectures, DAC 2017 (a correction is applied exactly
-once); Yang et al. 2605.04892 Fig. 1 (one frame update costs one cycle,
-4 ns at 250 MHz, and the loop waits for it).
+corrections; folding is non-destructive); Riesebos, "Pauli Frames for
+Quantum Computer Architectures", TU Delft MSc thesis CE-MS-2016,
+Sec. 3.2 Table 3.1 (a flush applies a Pauli record's gates once and
+resets the record to I); Yang et al. 2605.04892 Fig. 1 (one frame update
+costs one cycle, 4 ns at 250 MHz, and the loop waits for it).
 """
 
 import dataclasses

@@ -111,11 +111,13 @@ class IdlePolicySettings:
     """The yaml's `idle_policy` value: how an idle patch's rounds are charged.
 
     Table rows (decsim/machine.py): separate_decode_jobs, ignore,
-    extend_stream. Idle rounds are decoder workload in every reference
-    system (SWIPER ISCA 2025, XQsim, Terhal backlog), so
-    separate_decode_jobs is the default; ignore is the optimistic card
-    for active-path latency studies; extend_stream folds them into a
-    live stream. A Python-built policy is used as it is.
+    extend_stream. Idle rounds are decoder workload, because the backlog
+    bound counts every generated syndrome bit against the decoder's
+    processing rate (Terhal 1302.3428 lines 3151-3159; Battistel et al.
+    2303.00054 line 144), so separate_decode_jobs is the default; ignore
+    is the optimistic card for active-path latency studies;
+    extend_stream folds them into a live stream. A Python-built policy is
+    used as it is.
     """
 
     kind: str = "separate_decode_jobs"

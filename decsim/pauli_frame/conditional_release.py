@@ -7,9 +7,17 @@ When nothing waits but the QPU itself needs the outcome, the decision is a
 frame-to-controller path, and a release then sends the real operation
 command through the controller and on to the QPU.
 
-The value of the outcome never matters here. Timing does not branch on it
-(SWIPER's rule: a conditional instruction starts once its dependency is
-fully decoded), so nothing in this file reads the result's bits.
+The value of the outcome never matters here: a conditional operation
+starts once its dependency is fully decoded, whatever it decoded to.
+Caune et al. 2410.05202 stalls the program on the decoder's status
+register until decoding completes and then executes the second program
+"conditionally on the received result" (lines 364-367, 1255-1262), and
+the conditional gate costs the same either way, the qubit idling "for a
+time equal to the gate's duration" when the result is 0. Sivak et al.
+2211.09116 broadcasts the two decision bits to every control card,
+which "run independent but synchronized control flows that include
+conditional branching on these bits" (lines 1051-1056). So nothing in
+this file reads the result's bits.
 """
 
 from typing import Callable, Optional

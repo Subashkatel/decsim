@@ -4,9 +4,10 @@ The QPU runs syndrome extraction on every live patch every cycle, whether
 or not an operation is using the patch: every measure qubit is read out
 each cycle (Google, Suppressing quantum errors by scaling a surface code
 logical qubit, 2207.06431; Google, Quantum error correction below the
-surface code threshold, 2408.13687), and SWIPER's device manager emits one
-round per active patch per cycle, an idle round where no instruction runs
-(device_manager.py, _generate_syndrome_round). Operations start on a cycle
+surface code threshold, 2408.13687), and the extraction does not pause
+for a patch no instruction is using, so that patch emits an idle round;
+what those rounds cost the decoder is the idle policy's question, with
+its sources in controller/policies.py. Operations start on a cycle
 boundary and occupy whole cycles; a command that arrives on a boundary
 starts on that boundary (QubiC, 2404.15260 Sec. IV: a pulse timestamp is
 the time after which the pulse plays). This module owns that cadence

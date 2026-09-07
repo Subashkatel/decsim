@@ -292,12 +292,15 @@ pauli_frame:
 
 idle_policy: separate_decode_jobs  # separate_decode_jobs | ignore | extend_stream.
                                    # How an idle patch's rounds are charged; idle
-                                   # rounds are decoder workload in every reference
-                                   # system (SWIPER, XQsim, Terhal backlog), so the
-                                   # default costs one load-only decode job per idle
-                                   # commit region. ignore is the optimistic card for
-                                   # active-path latency studies. Inert while the
-                                   # workload is a single always-busy operation.
+                                   # rounds are decoder workload, since the backlog
+                                   # bound counts every generated syndrome bit
+                                   # against the decoder's processing rate (Terhal
+                                   # 1302.3428 lines 3151-3159; Battistel et al.
+                                   # 2303.00054 line 144), so the default costs one
+                                   # load-only decode job per idle commit region.
+                                   # ignore is the optimistic card for active-path
+                                   # latency studies. Inert while the workload is a
+                                   # single always-busy operation.
 
 observation:                       # what a run records beyond its results
   check_windows_with: none         # none | tesseract. tesseract re-decodes every

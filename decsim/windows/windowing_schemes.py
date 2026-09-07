@@ -54,9 +54,9 @@ def buffer_filled_by_memory_only(
     That is a trailing buffer with no successor content standing behind it.
 
     Such a release is time-only: the reference systems decode the buffer
-    region's content (Skoric and Tan windows, LATTE d^3+buffer blocks,
-    SWIPER idle windows), so a window released this way carries an
-    approximate result. The terminal no-successor release is the Tan
+    region's content (Skoric and Tan windows, LATTE d^3+buffer blocks),
+    so a window released this way carries an approximate result. The
+    terminal no-successor release is the Tan
     flush and is not flagged.
     """
     overflow_rounds = window.buffer_hi - readiness.local_round_count

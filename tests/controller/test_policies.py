@@ -6,15 +6,13 @@ committed boundary ships now (Eager) or only when its result is final
 of a patch that waits travel and what they cost.
 
 The three idle rows are three defensible cards, not one right answer.
-Idle rounds are decoder workload in every reference system, so the
-charged row is the default: SWIPER emits one UNWANTED_IDLE round per
-unused patch per cycle and windows it like any other (ISCA 2025,
-2412.05115, device_manager), XQsim decodes every patch under each
-RUN_ESM (ISCA 2022), and Terhal's backlog bound charges the decoder for
-every generated round (via Battistel 2303.00054). Ignore is the
-optimistic card, valid for latency studies of the active path, since
-only data feeding the next non-Clifford decision is latency critical
-(Skoric 2209.08552). ExtendStream is XQsim's continuous stream.
+Idle rounds are decoder workload, so the charged row is the default:
+the backlog bound counts every generated syndrome bit against the
+decoder's processing rate (Terhal 1302.3428 lines 3151-3159; Battistel
+et al. 2303.00054 line 144). Ignore is the optimistic card, valid for
+latency studies of the active path, since only data feeding the next
+non-Clifford decision is latency critical (Skoric 2209.08552).
+ExtendStream folds an idle patch's rounds into the live stream beside it.
 
 The charged row's own arithmetic (one job per commit region, one shorter
 job for the remainder) is pinned in test_idle_rounds.py, where the

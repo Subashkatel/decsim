@@ -98,6 +98,15 @@ class DecoderManager:
         """The copy_made sources of the manager's own hops, in hop order."""
         return [self.service.staging.copy_made]
 
+    def input_transport(self):
+        """The transport that moves an input into a unit's memory.
+
+        The manager owns the hop, so it names it; a caller that needs to
+        seed or observe the transport asks the manager rather than
+        reaching through its service and its staging.
+        """
+        return self.service.staging.transport
+
     # ---------------------------------------------------------- admission
 
     def enqueue(

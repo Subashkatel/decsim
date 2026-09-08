@@ -73,6 +73,7 @@ import decsim.frontends.settings as workload_settings
 import decsim.links.fabric as fabric
 import decsim.links.link_profiles as link_profiles
 import decsim.links.settings as link_settings
+import decsim.links.window_transfers as window_transfers_module
 import decsim.observe.link_traffic as link_traffic
 import decsim.observe.observation as observation_module
 import decsim.observe.settings as observe_settings
@@ -108,7 +109,6 @@ import decsim.windows.window_commits as window_commits
 import decsim.windows.window_interactions as window_interactions
 import decsim.windows.window_manager as window_manager_module
 import decsim.windows.window_planner as window_planner_module
-import decsim.windows.window_transfers as window_transfers_module
 import decsim.windows.windowing_schemes as windowing_schemes
 from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
@@ -528,6 +528,7 @@ class Machine:
         qpu.connect_readout_receiver(controller)
         qpu.connect_completion_receiver(execution_runtime.body_done)
         qpu.connect_idle_receiver(idle_rounds.emit_idle_round)
+        input_transport = decoder_manager.input_transport()
         seed_roots = _seed_roots(
             code=plan.code,
             scheme=plan.scheme,
@@ -537,7 +538,7 @@ class Machine:
             factory=factory,
             escalation_policy=escalation_policy,
             scheduler=pool.scheduler,
-            decoder_memory_transfer=decoder_manager.service.staging.transport,
+            decoder_memory_transfer=input_transport,
             boundary_policy=plan.boundary_policy,
             window_interaction=plan.window_interaction,
             idle_policy=plan.idle_policy,

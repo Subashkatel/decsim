@@ -17,7 +17,6 @@ from typing import Any, Callable, Optional, Protocol, runtime_checkable
 
 import decsim.observe.trace_source as trace_source
 import decsim.records.decoding as decoding_records
-import decsim.records.windows as window_records
 
 SendInput = Callable[[Callable[[], None]], int]
 
@@ -101,8 +100,8 @@ class DecoderInputStaging:
             job.payloads = []
             job.memory = memory
             if job.decoder_input.rounds:
-                store_name = _store_name_of(job)
-                self.copy_made.fire(job, bits, store_name, memory.name)
+                source_name = job.input_source_name
+                self.copy_made.fire(job, bits, source_name, memory.name)
             hold = job.input_hold
             if hold is not None:  # Buffer 0 may drop the rounds now
                 hold()
@@ -250,14 +249,6 @@ class CancellableDecoderMemoryTransfer:
         """Suppress the landing of a request that has not landed yet."""
         key = _transfer_key(job)
         self._in_flight_keys.discard(key)
-
-
-def _store_name_of(job: decoding_records.DecodeJob) -> str:
-    """The store a job's rounds came from: its tier's (data_path.md 3)."""
-    key = job.request_key
-    if key is not None and key.tier is window_records.DecoderTier.STRONG:
-        return "Buffer 1"
-    return "Buffer 0"
 
 
 def _transfer_key(job: decoding_records.DecodeJob):

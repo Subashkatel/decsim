@@ -13,12 +13,12 @@ import types
 import decsim.engine as engine_module
 import decsim.links.fabric as fabric
 import decsim.links.link_profiles as link_profiles
+import decsim.links.window_transfers as window_transfers
 import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.windows.boundary_payloads as boundary_payloads
 import decsim.windows.window_boundaries as window_boundaries
 import decsim.windows.window_interactions as window_interactions
-import decsim.windows.window_transfers as window_transfers
 
 
 class _EagerPolicy:

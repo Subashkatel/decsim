@@ -1,6 +1,8 @@
 """The window transfers: sends in a window's name over the links.
 
-Every send rides the Link port with a TransferAttribution naming the
+The fabric adapter the two decoder output ports hold: it turns a window
+or a job into one Link send, so a caller names what it moves and never
+the fabric. Every send rides the Link port with a TransferAttribution naming the
 operation, its patches, the window and the round range, and the request
 the transfer serves; the delivery callback runs at the link's delivery.
 An input that rides no link lands now or after a fixed delay.

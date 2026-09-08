@@ -333,7 +333,7 @@ class WindowManager:
     def _wake_strong_tier(self, operation_id) -> None:
         """A round is stored: a terminal strong window may have its tail."""
         if self.strong_redecode is not None:
-            self.strong_redecode.submit_if_terminal_data_complete(operation_id)
+            self.strong_redecode.submit_if_stored_data_releases(operation_id)
 
     def _wake_windows(self, operation: program_records.Operation) -> None:
         self.check_windows_for_operation(operation.id)

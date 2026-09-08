@@ -1525,8 +1525,8 @@ class _LateWiring:
     def escalate(self, job: decoding_records.DecodeJob) -> None:
         self.strong_redecode.escalate(job)
 
-    def submit_if_far_boundary_committed(self, key: tuple) -> None:
-        self.strong_redecode.submit_if_far_boundary_committed(key)
+    def submit_if_commit_releases(self, key: tuple) -> None:
+        self.strong_redecode.submit_if_commit_releases(key)
 
 
 def _decoder_manager(

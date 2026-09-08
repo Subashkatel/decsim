@@ -463,33 +463,22 @@ class RecordingContextWindow:
             engine, regions, retention, builder
         )
         self.planned_windows = []
+        self.assignments = []
 
     def plan(self, weak_job):
         """Note the window, then plan it as the context window does."""
         self.planned_windows.append(weak_job.window_id)
-        return self.inner.plan(weak_job)
+        assignment = self.inner.plan(weak_job)
+        self.assignments.append(assignment)
+        return assignment
 
-    def note_selection_sent(self, window_key, selection_arrival_ticks):
-        """The held window's selection left."""
-        return self.inner.note_selection_sent(
-            window_key, selection_arrival_ticks
-        )
+    def release_conditions(self, assignment):
+        """What releases a held job, as the context window declares it."""
+        return self.inner.release_conditions(assignment)
 
-    def take_if_far_boundary_committed(self, window_key):
-        """The held job this weak commit releases, if any."""
-        return self.inner.take_if_far_boundary_committed(window_key)
-
-    def take_if_terminal_data_stored(self, operation_id):
-        """The held terminal job whose last round is stored, if any."""
-        return self.inner.take_if_terminal_data_stored(operation_id)
-
-    def has_pending(self) -> bool:
-        """Whether a strong window is still held."""
-        return self.inner.has_pending()
-
-    def pending_work(self) -> tuple:
-        """The held strong windows, for the views."""
-        return self.inner.pending_work()
+    def held_job(self, assignment):
+        """The held job, once its rounds are there."""
+        return self.inner.held_job(assignment)
 
 
 def test_a_shape_row_added_from_outside_runs_by_its_yaml_name():
@@ -513,6 +502,9 @@ def test_a_shape_row_added_from_outside_runs_by_its_yaml_name():
     shape = machine.window_manager.strong_redecode.shape
     assert type(shape) is RecordingContextWindow
     assert shape.planned_windows == [2]
+    # the row reads raw rounds on both faces: it folds no neighbour
+    # boundary into the strong job's input
+    assert shape.assignments[0].folded_boundaries == ()
     assert fabric.frame_tiers(machine) == [
         ((1, 0), "weak"),
         ((1, 1), "weak"),
@@ -528,3 +520,35 @@ def test_a_shape_name_off_the_table_is_refused_naming_the_rows():
     assert "escalation.strong_window 'seam_pinned' is not a row" in str(
         refusal.value
     )
+
+
+class _StoredRounds:
+    """A retention that answers with the rounds the window reads."""
+
+    def strong_window_input(self, builder, window) -> tuple:
+        """The stored rounds, whatever the builder and the window are."""
+        del builder
+        del window
+        return ("the stored rounds",)
+
+
+def test_a_row_that_folds_a_neighbour_boundary_is_told_what_it_needs():
+    """The port's input declaration, and the one piece it still needs.
+
+    A row that pins a face carries its neighbour's committed correction
+    into the strong job's input, which is Bombin et al. 2303.04846's
+    input adaptation (lines 775-788). Both shipped rows fold none, and a
+    row that declares one is told where the missing machinery goes
+    rather than losing the declaration.
+    """
+    retention = _StoredRounds()
+    window = object()
+    payloads = strong_window_shapes.strong_job_payloads(
+        retention, None, window, strong_window_shapes.FOLDS_NO_BOUNDARY
+    )
+    assert payloads == ("the stored rounds",)
+    with pytest.raises(NotImplementedError) as refusal:
+        strong_window_shapes.strong_job_payloads(
+            retention, None, window, ((1, 1),)
+        )
+    assert "windows/decode_requests.py" in str(refusal.value)

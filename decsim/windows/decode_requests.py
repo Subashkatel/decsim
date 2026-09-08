@@ -4,10 +4,11 @@ A window's raw rounds ship as soon as its data is complete; a window
 that still owes a boundary is masked at the decoder when its decode
 starts (qLDPC folds the net error into the syndrome of the next window,
 qldpc/decoders/sinter.py decode_shots_to_error; cudaq-x keeps raw
-rounds and applies syndrome_mods at assembly). The builder is the job's
-WindowInputGate: may_stage says whether a blocked job may take an input
-slot yet, may_start whether the landed job may decode, mask_input folds
-the boundary into the landed input once. The requester builds the
+rounds and applies syndrome_mods at assembly). WindowInputGate is what
+the decoder side calls back into through job.gate: may_stage says
+whether a blocked job may take an input slot yet, may_start whether the
+landed job may decode, mask_input folds the boundary into the landed
+input once. The requester builds the
 primary tier's job, asks the escalation policy which tiers decode the
 window now, and enqueues one submission per tier on the DecodeQueue
 port with each job's input send; a strong sibling's submission is the
@@ -26,26 +27,125 @@ import decsim.records.program as program_records
 import decsim.records.windows as window_records
 
 
-class DecodeRequestBuilder:
-    """Builds one request from a complete window; the job's input gate.
+class WindowInputGate:
+    """Whether a job may take a slot, may start, and what its input reads.
 
-    Trace sources: copy_made(job, bits, memory_name, "masked view") when
-    the boundary mask is folded into a second copy of the landed input
-    (data_path.md, correction 2 moves that copy behind the port);
-    window_data_complete(window) when the last round the window reads is
-    readable in its store, which is the moment the window may be
-    requested.
+    The decoder side calls back into this through job.gate: may_stage
+    says whether a boundary-blocked job may occupy an input slot yet,
+    may_start whether the landed job may decode, mask_input folds the
+    window's boundary into the landed input once. It is decoder-side
+    policy about one window, so it is its own class rather than a second
+    face of the builder. Trace source: copy_made(job, bits, memory_name,
+    "masked view") when the mask is folded into a second copy of the
+    landed input (data_path.md, correction 2 moves that copy behind the
+    port).
     """
 
-    def __init__(
-        self, engine, planner, tracker, interaction, store_output
-    ) -> None:
+    def __init__(self, planner, interaction) -> None:
+        self.planner = planner
+        self.interaction = interaction
+        self.trace = _GateTraceSources()
+
+    def may_stage(self, job: decoding_records.DecodeJob) -> bool:
+        """May this boundary-blocked job occupy an input slot yet?
+
+        Only when every unmet dependency is already resolving without
+        needing a slot of its own: decoded, decoding, or itself dispatched
+        with resolving dependencies all the way down. Admitted earlier, a
+        job like the Tan seam (which reads both neighbors) squats a slot
+        against the very decode that must release it.
+        """
+        window = job.window
+        if window is None or window.deps_remaining <= 0:
+            return True
+        visiting = {(window.operation_id, window.window_index)}
+        for dependency in window.deps:
+            if not self._resolving_without_new_slots(dependency, visiting):
+                return False
+        return True
+
+    def may_start(self, job: decoding_records.DecodeJob) -> bool:
+        """May this landed job start its decode?
+
+        False parks the job in its slot until its window's last boundary
+        arrives. Pure check: the mask itself is applied by mask_input at
+        the actual start, so a re-check can never fold the boundary twice.
+        """
+        window = job.window
+        if window is None:
+            return True
+        return window.deps_remaining <= 0
+
+    def mask_input(self, job: decoding_records.DecodeJob) -> None:
+        """XOR the window's boundary mask into the landed decoder input.
+
+        The unit's stored copy stays raw (cudaq-x keeps raw rounds and
+        applies syndrome_mods at window assembly); the job's input view is
+        replaced with the masked rounds the decode will read.
+        """
+        window = job.window
+        if window is None:
+            return
+        state = window.boundary_in
+        if not state or job.decoder_input is None:
+            return
+        window_info = window_records.WindowInfo.from_window(window)
+        masked_rounds = []
+        for round_input in job.decoder_input.rounds:
+            masked = self._masked_round(state, window_info, round_input)
+            masked_rounds.append(masked)
+        job.decoder_input = dataclasses.replace(
+            job.decoder_input, rounds=tuple(masked_rounds)
+        )
+        bits = _input_bit_count(job.decoder_input)
+        self.trace.copy_made.fire(job, bits, job.memory.name, "masked view")
+
+    # ---- private
+
+    def _resolving_without_new_slots(self, key: tuple, visiting: set) -> bool:
+        if key in visiting:
+            return False
+        window = self.planner.windows_by_key.get(key)
+        if window is None:
+            return True
+        if window.is_absorbed:
+            return True
+        if window.t_done is not None or window.service_began:
+            return True
+        if window.t_dispatch is None:
+            return False
+        visited = visiting | {key}
+        for dependency in window.deps:
+            if not self._resolving_without_new_slots(dependency, visited):
+                return False
+        return True
+
+    def _masked_round(self, state, window_info, round_input):
+        fragments = []
+        for fragment in round_input.fragments:
+            masked = self.interaction.apply_boundary(
+                state, window_info, fragment, round_input.round_index
+            )
+            fragments.append(masked)
+        return dataclasses.replace(round_input, fragments=tuple(fragments))
+
+
+class DecodeRequestBuilder:
+    """Builds one decode job from a complete window.
+
+    It stamps the gate on every job it builds, so the decoder side has
+    the window's input policy without knowing the window package. Trace
+    source: window_data_complete(window) when the last round the window
+    reads is readable in its store, which is the moment the window may
+    be requested.
+    """
+
+    def __init__(self, engine, planner, tracker, interaction, gate) -> None:
         self.engine = engine
         self.planner = planner
         self.tracker = tracker
         self.interaction = interaction
-        # the primary store's outgoing port; it executes the input send
-        self.store_output = store_output
+        self.gate = gate
         self.next_request_sequence = 0
         self.trace = _TraceSources()
 
@@ -131,7 +231,7 @@ class DecodeRequestBuilder:
             request_key=request_key,
             input_key=request_key,
             request_created_ticks=self.engine.now,
-            gate=self,
+            gate=self.gate,
             forced_logical_class=forced_logical_class,
         )
 
@@ -165,7 +265,7 @@ class DecodeRequestBuilder:
             request_key=request_key,
             input_key=job.input_key,
             request_created_ticks=self.engine.now,
-            gate=self,
+            gate=self.gate,
             forced_logical_class=forced_logical_class,
         )
 
@@ -204,62 +304,6 @@ class DecodeRequestBuilder:
                 window_info,
             )
         return payloads
-
-    # ---- the WindowInputGate port
-
-    def may_stage(self, job: decoding_records.DecodeJob) -> bool:
-        """May this boundary-blocked job occupy an input slot yet?
-
-        Only when every unmet dependency is already resolving without
-        needing a slot of its own: decoded, decoding, or itself dispatched
-        with resolving dependencies all the way down. Admitted earlier, a
-        job like the Tan seam (which reads both neighbors) squats a slot
-        against the very decode that must release it.
-        """
-        window = job.window
-        if window is None or window.deps_remaining <= 0:
-            return True
-        visiting = {(window.operation_id, window.window_index)}
-        for dependency in window.deps:
-            if not self._resolving_without_new_slots(dependency, visiting):
-                return False
-        return True
-
-    def may_start(self, job: decoding_records.DecodeJob) -> bool:
-        """May this landed job start its decode?
-
-        False parks the job in its slot until its window's last boundary
-        arrives. Pure check: the mask itself is applied by mask_input at
-        the actual start, so a re-check can never fold the boundary twice.
-        """
-        window = job.window
-        if window is None:
-            return True
-        return window.deps_remaining <= 0
-
-    def mask_input(self, job: decoding_records.DecodeJob) -> None:
-        """XOR the window's boundary mask into the landed decoder input.
-
-        The unit's stored copy stays raw (cudaq-x keeps raw rounds and
-        applies syndrome_mods at window assembly); the job's input view is
-        replaced with the masked rounds the decode will read.
-        """
-        window = job.window
-        if window is None:
-            return
-        state = window.boundary_in
-        if not state or job.decoder_input is None:
-            return
-        window_info = window_records.WindowInfo.from_window(window)
-        masked_rounds = []
-        for round_input in job.decoder_input.rounds:
-            masked = self._masked_round(state, window_info, round_input)
-            masked_rounds.append(masked)
-        job.decoder_input = dataclasses.replace(
-            job.decoder_input, rounds=tuple(masked_rounds)
-        )
-        bits = _input_bit_count(job.decoder_input)
-        self.trace.copy_made.fire(job, bits, job.memory.name, "masked view")
 
     # ---- private
 
@@ -314,33 +358,6 @@ class DecodeRequestBuilder:
             )
             payloads.append(payload)
 
-    def _resolving_without_new_slots(self, key: tuple, visiting: set) -> bool:
-        if key in visiting:
-            return False
-        window = self.planner.windows_by_key.get(key)
-        if window is None:
-            return True
-        if window.is_absorbed:
-            return True
-        if window.t_done is not None or window.service_began:
-            return True
-        if window.t_dispatch is None:
-            return False
-        visited = visiting | {key}
-        for dependency in window.deps:
-            if not self._resolving_without_new_slots(dependency, visited):
-                return False
-        return True
-
-    def _masked_round(self, state, window_info, round_input):
-        fragments = []
-        for fragment in round_input.fragments:
-            masked = self.interaction.apply_boundary(
-                state, window_info, fragment, round_input.round_index
-            )
-            fragments.append(masked)
-        return dataclasses.replace(round_input, fragments=tuple(fragments))
-
 
 class DecodeRequester:
     """Requests a decode for every complete, unblocked window, once.
@@ -358,6 +375,7 @@ class DecodeRequester:
         decode_queue,
         escalation_policy,
         verdict,
+        store_output,
         gap_join=None,
     ) -> None:
         self.tracker = tracker
@@ -366,6 +384,8 @@ class DecodeRequester:
         self.decode_queue = decode_queue
         self.escalation_policy = escalation_policy
         self.verdict = verdict
+        # the primary store's outgoing port; it executes the input send
+        self.store_output = store_output
         self.gap_join = gap_join
 
     def request_ready_windows(self, windows, strong_redecode) -> None:
@@ -479,8 +499,7 @@ class DecodeRequester:
         this side asks for it and the decoder manager calls it at
         dispatch, and neither of them executes it.
         """
-        store_output = self.builder.store_output
-        send_input = store_output.input_send_for(job, is_input_held)
+        send_input = self.store_output.input_send_for(job, is_input_held)
         return decoding_records.Submission(job, send_input)
 
     def _bind_input_hold(self, primary_jobs: list, key: tuple) -> bool:
@@ -600,6 +619,13 @@ def _fragment_patch_order(fragment):
 
 
 @dataclasses.dataclass(frozen=True)
+class _GateTraceSources:
+    """Every event the window input gate reports, as one member."""
+
+    copy_made: trace_source.TraceSource = trace_source.new_source()
+
+
+@dataclasses.dataclass(frozen=True)
 class _TraceSources:
     """Every event the decode request builder reports, as one member.
 
@@ -609,5 +635,4 @@ class _TraceSources:
     listener reaches all of them through one name.
     """
 
-    copy_made: trace_source.TraceSource = trace_source.new_source()
     window_data_complete: trace_source.TraceSource = trace_source.new_source()

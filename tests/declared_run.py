@@ -254,7 +254,7 @@ def switching_run(
     escalation_probability=0.0,
     operations=None,
     run_both_at_once=False,
-    double_window=False,
+    strong_window="two_sided_context",
     unit_pools=None,
     seed=0,
     io_trace=False,
@@ -280,10 +280,10 @@ def switching_run(
         run_both_at_once=run_both_at_once,
     )
     workload = declared_workload(operations, rounds)
-    # serial switching needs Held boundaries; the double window refuses
+    # serial switching needs Held boundaries; the forward window refuses
     # them (escalation.policies.Switching.check_plan)
     boundary_policy = boundary_policies.Held()
-    if double_window:
+    if strong_window == "forward":
         boundary_policy = None
     scheme = sliding_scheme()
     windows = window_settings.WindowSettings(
@@ -304,7 +304,7 @@ def switching_run(
         bulk_strong=bulk_strong,
     )
     escalation = decoder_settings.EscalationSettings(
-        policy=policy, double_window=double_window
+        policy=policy, strong_window=strong_window
     )
     links = declared_profile(
         strong_buffer_microseconds=strong_buffer_microseconds

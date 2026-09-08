@@ -155,14 +155,14 @@ def test_table_source_key_guards(tmp_path):
 
 
 def test_online_card_guards(tmp_path):
-    double_window_card = {
+    forward_window_card = {
         "threshold_source": "online",
         "gap_threshold_db": 20.0,
-        "double_window": True,
+        "strong_window": "forward",
     }
-    double_window_path = source_config(tmp_path, double_window_card)
+    forward_window_path = source_config(tmp_path, forward_window_card)
     with pytest.raises(ValueError, match="serial-only"):
-        load_experiment(double_window_path)
+        load_experiment(forward_window_path)
     fixed_with_online_card = {
         "gap_threshold_db": 20.0,
         "online": {"audit_rate": 0.1},

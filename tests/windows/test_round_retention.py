@@ -4,7 +4,7 @@ A window holds [start_round, buffer_hi] plus the successor overflow
 (Skoric et al. 2209.08552: the buffer region is re-read by the next
 window); the hold moves to the request at admission and is released
 once the input lands; an unheld round is freed on arrival. Under the
-double window a window's potential restart read (PotentialRestart,
+forward window a window's potential restart read (PotentialRestart,
 placed by the planner) keeps the rounds its restart decode would read
 past the landing, follows a re-slice, and ends when the retention is
 told no earlier escalation can re-slice the window (Toshio 2510.25222

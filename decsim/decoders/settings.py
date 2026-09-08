@@ -17,15 +17,17 @@ from typing import Any, Optional, Union
 
 import decsim.config as config
 import decsim.decoders.decoder_memory as decoder_memory_module
+import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.escalation.threshold_sources as threshold_sources
 import decsim.ports as ports
 
 THRESHOLD_SOURCES = ("fixed", "table", "online")
 # How many of the strong region's buffer regions the restarted weak
-# window re-reads under the double window (Toshio 2510.25222 Sec. III C,
-# Fig. 12). 0, the default, is the paper: the weak decoder resumes on
-# the commit plus buffer rounds stored after the strong region and reads
-# nothing inside it. 1 reads one buffer region of the strong region as
+# window re-reads under the forward strong window (Toshio 2510.25222
+# Sec. III C, Fig. 12). 0, the default, is the paper: the weak decoder
+# resumes on the commit plus buffer rounds stored after the strong
+# region and reads nothing inside it. 1 reads one buffer region of the
+# strong region as
 # the restart window's far-boundary context, which is what decsim's
 # forward window did until 2026-09-07.
 RESTART_REREAD_BUFFER_REGIONS = (0, 1)
@@ -34,7 +36,7 @@ ESCALATION_KEYS = (
     "confidence",
     "gap_threshold_db",
     "run_both_at_once",
-    "double_window",
+    "strong_window",
     "restart_reread_buffer_regions",
     "threshold_source",
     "threshold_table",
@@ -297,9 +299,13 @@ class EscalationSettings:
     switching only; run_both_at_once is Sec. III A's Step 1, the strong
     decoder started with the weak one and cancelled on confidence
     (false, the default, is the same section's on-demand variant, lines
-    631-640); double_window is the paper's Sec. III C scheme, and
+    631-640); strong_window names the shape of the window the strong
+    tier re-decodes (STRONG_WINDOW_SHAPES in
+    decsim/escalation/strong_window_shapes.py: two_sided_context, the
+    default, or forward, the paper's Sec. III C scheme), and
     restart_reread_buffer_regions is how many of the strong region's
-    buffer regions the restarted weak window re-reads under it.
+    buffer regions the restarted weak window re-reads under the forward
+    shape.
     confidence names the signal the weak tier reports and the threshold
     decides on (machine.py CONFIDENCE_SIGNALS), and the yaml refuses a
     weak decoder whose decode cannot produce that signal's evidence.
@@ -319,7 +325,7 @@ class EscalationSettings:
     threshold_column: Optional[str] = None
     online: Optional[OnlineThresholdSettings] = None
     run_both_at_once: bool = False
-    double_window: bool = False
+    strong_window: str = "two_sided_context"
     restart_reread_buffer_regions: int = 0
     policy: Optional[ports.EscalationPolicy] = None
     gap_threshold_nats: Optional[float] = None
@@ -458,8 +464,8 @@ def _switching_settings(
     named_confidence = section.get("confidence", "complementary_gap")
     confidence = str(named_confidence)
     run_both_at_once = _switching_boolean(section, "run_both_at_once")
-    double_window = _switching_boolean(section, "double_window")
-    _check_serial_only(threshold_source, double_window)
+    strong_window = _strong_window(section)
+    _check_serial_only(threshold_source, strong_window)
     reread_regions = _restart_reread_buffer_regions(section)
     threshold_table = section.get("threshold_table")
     return EscalationSettings(
@@ -472,7 +478,7 @@ def _switching_settings(
         threshold_column=threshold_column,
         online=online,
         run_both_at_once=run_both_at_once,
-        double_window=double_window,
+        strong_window=strong_window,
         restart_reread_buffer_regions=reread_regions,
         base_directory=base_directory,
     )
@@ -548,16 +554,30 @@ def _online_settings(
     return OnlineThresholdSettings.from_yaml(raw_online)
 
 
-def _check_serial_only(threshold_source: str, double_window: bool) -> None:
+def _strong_window(section: Mapping) -> str:
+    """The strong window shape the section names, refused if not a row."""
+    named = section.get("strong_window", "two_sided_context")
+    rows = sorted(strong_window_shapes.STRONG_WINDOW_SHAPES)
+    if named not in rows:
+        raise ValueError(
+            f"escalation.strong_window {named!r} is not a row of its "
+            f"table; the rows are {rows}"
+        )
+    return str(named)
+
+
+def _check_serial_only(threshold_source: str, strong_window: str) -> None:
     """Online calibration is validated for serial switching."""
-    if not double_window:
+    row = strong_window_shapes.STRONG_WINDOW_SHAPES[strong_window]
+    if not row.absorbs_weak_windows:
         return
     if threshold_source == "online":
         raise ValueError(
             "threshold_source online is serial-only: an audit label "
             "compares one window's weak and strong committed "
-            "observables, and a double-window strong result owns a "
-            "larger extent than the audited window"
+            "observables, and a strong window that absorbs the weak "
+            "windows it covers owns a larger extent than the audited "
+            "window"
         )
 
 

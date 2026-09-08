@@ -1,10 +1,10 @@
 """The strong window's shape: which rounds the strong tier re-decodes, and when.
 
-Two rows, selected by escalation.double_window (Toshio et al.
-2510.25222). ContextWindow reads the escalated window's commit region
-with one buffer of raw context on each side, built the moment it is
-asked for; that geometry is decsim's own, not the paper's (see
-ContextWindow). ForwardWindow is Sec. III C and Fig. 12: a strong window
+Two rows of STRONG_WINDOW_SHAPES, named by escalation.strong_window
+(Toshio et al. 2510.25222). ContextWindow reads the escalated window's
+commit region with one buffer of raw context on each side, built the
+moment it is asked for; that geometry is decsim's own, not the paper's
+(see ContextWindow). ForwardWindow is Sec. III C and Fig. 12: a strong window
 that starts at the escalated commit and extends forward, absorbs the
 weak windows it covers, re-slices the window past it (the restart
 window) and is held until that window's weak commit or, at the
@@ -80,13 +80,19 @@ class DeferredStrongJob:
 class StrongWindowShape(Protocol):
     """How the strong tier's window is laid out, as the redecode sees it.
 
-    window_absorbed(key, owner_key) is the shape's one trace source: the
-    forward window fires it for every weak window a strong one covers,
-    and a shape that absorbs nothing exposes the silent source, so the
-    machine connects the ledger and the trace without asking which shape
-    it built.
+    Table rows: two_sided_context and forward (STRONG_WINDOW_SHAPES,
+    below). absorbs_weak_windows is the row's own declaration that its
+    strong region replaces the weak windows it covers, so the planner
+    claims the rounds a restart would read and the weak chain keeps
+    committing; a reader of the run's shape asks the row rather than a
+    yaml flag. window_absorbed(key, owner_key) is the shape's one trace
+    source: the forward window fires it for every weak window a strong
+    one covers, and a shape that absorbs nothing exposes the silent
+    source, so the machine connects the ledger and the trace without
+    asking which shape it built.
     """
 
+    absorbs_weak_windows: bool
     window_absorbed: Any
 
     def plan(self, weak_job: decoding_records.DecodeJob) -> StrongAssignment:
@@ -133,6 +139,7 @@ class ContextWindow:
     window, so its window_absorbed source is the silent one.
     """
 
+    absorbs_weak_windows = False
     window_absorbed = trace_source.SILENT
 
     def __init__(self, engine, planner, tracker, retention, builder) -> None:
@@ -257,6 +264,8 @@ class ForwardWindow:
     Trace source: window_absorbed(key, owner_key) for every window the
     strong window at owner_key covers.
     """
+
+    absorbs_weak_windows = True
 
     def __init__(
         self,
@@ -817,6 +826,15 @@ class ForwardWindow:
         )
         self.retention.hold_strong_input(job)
         return job
+
+
+# escalation.strong_window names one of these rows: the shape of the
+# window the strong tier re-decodes. The root resolves the name once and
+# builds the row with the window components it needs.
+STRONG_WINDOW_SHAPES = {
+    "two_sided_context": ContextWindow,
+    "forward": ForwardWindow,
+}
 
 
 @dataclasses.dataclass(frozen=True)

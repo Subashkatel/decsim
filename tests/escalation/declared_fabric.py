@@ -75,7 +75,7 @@ def switching_machine(
     *,
     rounds: int,
     escalated_windows,
-    double_window: bool = False,
+    strong_window: str = "two_sided_context",
     run_both_at_once: bool = False,
     round_microseconds: float = 1.0,
     strong_buffer_microseconds: float = 7.0,
@@ -101,7 +101,7 @@ def switching_machine(
         run_both_at_once=run_both_at_once,
     )
     boundary_policy = boundary_policies.Held()
-    if double_window:
+    if strong_window == "forward":
         boundary_policy = None
     operation = program_records.Operation(
         id=1, name="mem1", qubits=(1,), patches=(1,)
@@ -123,7 +123,7 @@ def switching_machine(
     )
     if escalation is None:
         escalation = decoder_settings.EscalationSettings(
-            policy=policy, double_window=double_window
+            policy=policy, strong_window=strong_window
         )
     links = declared_profile(strong_buffer_microseconds)
     controller = controller_settings.ControllerSettings(

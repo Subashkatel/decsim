@@ -56,7 +56,7 @@ def plan_execution(
     rounds_policy,
     fallback_round_microseconds: float,
     retain_strong_context: bool,
-    double_window: bool,
+    absorbs_weak_windows: bool,
     restart_reread_buffer_regions: int,
     has_open_ended_dynamic_streams: bool = False,
 ) -> RunPlan:
@@ -92,7 +92,7 @@ def plan_execution(
     buffering = _plan_syndrome_buffering(
         execution,
         retain_strong_context=retain_strong_context,
-        double_window=double_window,
+        absorbs_weak_windows=absorbs_weak_windows,
         restart_reread_buffer_regions=restart_reread_buffer_regions,
         has_open_ended_dynamic_streams=has_open_ended_dynamic_streams,
     )
@@ -332,7 +332,7 @@ def _plan_syndrome_buffering(
     execution,
     *,
     retain_strong_context: bool,
-    double_window: bool,
+    absorbs_weak_windows: bool,
     restart_reread_buffer_regions: int,
     has_open_ended_dynamic_streams: bool = False,
 ) -> SyndromeBufferingPlan:
@@ -352,7 +352,7 @@ def _plan_syndrome_buffering(
                 operation_id,
                 window,
                 weak,
-                double_window,
+                absorbs_weak_windows,
                 restart_reread_buffer_regions,
             )
             _hold_strong_context(
@@ -361,7 +361,7 @@ def _plan_syndrome_buffering(
                 window,
                 strong,
                 retain_strong_context,
-                double_window,
+                absorbs_weak_windows,
             )
     weak_sufficient = weak.sufficient_live_rounds(
         has_open_ended_dynamic_streams
@@ -384,7 +384,7 @@ def _hold_window(
     operation_id,
     window,
     weak: "_HoldSet",
-    double_window: bool,
+    absorbs_weak_windows: bool,
     restart_reread_buffer_regions: int,
 ) -> None:
     """The window's Buffer 0 holds: its weak read, its potential restart read.
@@ -401,7 +401,7 @@ def _hold_window(
         operation_id,
         window,
         weak,
-        double_window,
+        absorbs_weak_windows,
         restart_reread_buffer_regions,
     )
 
@@ -411,10 +411,10 @@ def _hold_restart_reads(
     operation_id,
     window,
     weak: "_HoldSet",
-    double_window: bool,
+    absorbs_weak_windows: bool,
     restart_reread_buffer_regions: int,
 ) -> None:
-    """Under the double window, a bounded window keeps its restart reads.
+    """Under an absorbing strong window, a bounded window keeps its reads.
 
     An escalation of an earlier window may re-slice this window as its
     restart window, whose weak decode re-reads
@@ -424,7 +424,7 @@ def _hold_restart_reads(
     request and landing, until the window before it commits
     (round_retention.release_restart_reads).
     """
-    if not double_window:
+    if not absorbs_weak_windows:
         return
     if not _has_same_operation_dependency(window, operation_id):
         return
@@ -454,7 +454,7 @@ def _hold_strong_context(
     window,
     strong: "_HoldSet",
     retain_strong_context: bool,
-    double_window: bool,
+    absorbs_weak_windows: bool,
 ) -> None:
     """A possible strong redo reads one buffer of context on each side."""
     if not retain_strong_context:
@@ -463,7 +463,7 @@ def _hold_strong_context(
     look_ahead = window.buffer_hi - window.commit_hi
     buffer_rounds = max(0, look_ahead)
     commit_hi = window.commit_hi
-    if double_window:
+    if absorbs_weak_windows:
         extended = window.commit_hi + 2 * buffer_rounds
         commit_hi = min(round_count, extended)
     context_start = window.commit_lo - buffer_rounds

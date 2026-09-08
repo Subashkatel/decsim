@@ -256,15 +256,15 @@ def test_a_plan_that_contradicts_itself_is_refused_at_build_with_a_sentence():
         fabric.switching_machine(
             rounds=9,
             escalated_windows=set(),
-            double_window=True,
+            strong_window="forward",
             run_both_at_once=True,
         )
 
 
-def _double_window_settings(
+def _forward_window_settings(
     commit_rounds: int, buffer_rounds: int
 ) -> machine_module.MachineSettings:
-    """The gate's switching card with double_window on and the sizes given.
+    """The gate's switching card with the forward window and the sizes.
 
     Every part is a table row, the way the yaml builds it.
     """
@@ -278,7 +278,7 @@ def _double_window_settings(
         kind="belief_matching", engine_megahertz=100.0
     )
     escalation = decoder_settings.EscalationSettings(
-        kind="switching", gap_threshold_nats=1.0, double_window=True
+        kind="switching", gap_threshold_nats=1.0, strong_window="forward"
     )
     return machine_module.MachineSettings(
         windows=windows,
@@ -289,7 +289,7 @@ def _double_window_settings(
 
 
 @pytest.mark.parametrize("commit_rounds, buffer_rounds", [(3, 4), (4, 3)])
-def test_a_double_window_crossing_a_later_commit_region_is_refused_at_build(
+def test_a_forward_window_crossing_a_later_commit_region_is_refused(
     commit_rounds, buffer_rounds
 ):
     """The slice note's ruling 5: the crossing shape is decided at build.
@@ -298,35 +298,35 @@ def test_a_double_window_crossing_a_later_commit_region_is_refused_at_build(
     is not a multiple of the commit, it ends inside a later window's
     commit region, and the run used to die at its first escalation.
     """
-    settings = _double_window_settings(commit_rounds, buffer_rounds)
+    settings = _forward_window_settings(commit_rounds, buffer_rounds)
     with pytest.raises(
         ValueError,
-        match="the double window's strong region, commit plus two buffers, "
+        match="the forward window's strong region, commit plus two buffers, "
         "must end inside its own commit region",
     ):
         machine_module.Machine.build(settings, 0)
 
 
 @pytest.mark.parametrize("commit_rounds, buffer_rounds", [(3, 3), (4, 4)])
-def test_a_double_window_ending_on_a_commit_edge_builds(
+def test_a_forward_window_ending_on_a_commit_edge_builds(
     commit_rounds, buffer_rounds
 ):
-    settings = _double_window_settings(commit_rounds, buffer_rounds)
+    settings = _forward_window_settings(commit_rounds, buffer_rounds)
     machine = machine_module.Machine.build(settings, 0)
     assert machine.window_manager.strong_redecode is not None
 
 
-def test_an_online_source_under_a_double_window_is_refused_as_serial_only():
+def test_an_online_source_under_a_forward_window_is_refused_as_serial():
     """check_plan's serial-only law.
 
     An audit label compares one window's weak and strong committed
-    observables, and a double-window strong result owns a larger extent
+    observables, and a forward-window strong result owns a larger extent
     than the audited window.
     """
     online = _always_auditing_online_threshold(threshold=2.0)
     policy = policies.Switching(online, decoders.SAMPLED_CONFIDENCE_SOURCE)
     escalation = decoder_settings.EscalationSettings(
-        policy=policy, double_window=True
+        policy=policy, strong_window="forward"
     )
     with pytest.raises(
         ValueError, match="online threshold calibration is serial-only"
@@ -334,7 +334,7 @@ def test_an_online_source_under_a_double_window_is_refused_as_serial_only():
         fabric.switching_machine(
             rounds=9,
             escalated_windows=set(),
-            double_window=True,
+            strong_window="forward",
             escalation=escalation,
         )
 
@@ -388,7 +388,7 @@ class _Draws:
 def _serial_switching_settings(
     boundary_policy,
 ) -> machine_module.MachineSettings:
-    """Serial switching (no double window) with the boundary policy given."""
+    """Serial switching (no forward window) with the boundary policy given."""
     lookahead = windowing_schemes.SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD
     scheme = windowing_schemes.SlidingWindowScheme(terminal_policy=lookahead)
     windows = window_settings.WindowSettings(
@@ -422,15 +422,15 @@ def test_serial_switching_refuses_eager_boundaries_at_build():
         machine_module.Machine.build(settings, 0)
 
 
-def test_the_double_window_refuses_held_boundaries_at_build():
+def test_the_forward_window_refuses_held_boundaries_at_build():
     """The far boundary IS the restart window's weak commit.
 
-    Toshio 2510.25222 Sec. III C: under the double window the weak chain
+    Toshio 2510.25222 Sec. III C: under the forward window the weak chain
     keeps committing while the strong region decodes, so holding the
     weak boundaries until the strong result arrives would deadlock the
     strong window on itself.
     """
-    settings = _double_window_settings(3, 3)
+    settings = _forward_window_settings(3, 3)
     held = boundary_policies.Held()
     windows = window_settings.WindowSettings(
         commit_rounds=3, buffer_rounds=3, boundary_policy=held

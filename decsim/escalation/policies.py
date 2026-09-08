@@ -96,9 +96,10 @@ class Switching(EscalationPolicyBase):
     Step 1, Toshio et al. 2510.25222 Sec. III A); otherwise the strong
     re-decode starts at the verdict, after the weak_decoder_to_strong_
     decoder hop (the serial modification of the same section). How the
-    strong window is laid out is the run's shape (escalation.double_
-    window: decsim's own two-sided context, or the forward window of
-    Sec. III C, strong_window_shapes.py), and whether queued re-decodes are batched
+    strong window is laid out is the run's shape
+    (escalation.strong_window: decsim's own two_sided_context, or the
+    forward window of Sec. III C, strong_window_shapes.py), and whether
+    queued re-decodes are batched
     is the decoder manager's (bulk_strong); check_plan holds the policy's
     knobs and its threshold source against both once, at build.
     """
@@ -130,13 +131,13 @@ class Switching(EscalationPolicyBase):
                 "bulk_strong is only meaningful in serial mode "
                 "(run_both_at_once=False)"
             )
-        if not plan.is_double_window:
+        if not plan.is_absorbing_strong_window:
             _refuse_eager_serial_boundaries(plan.boundary_policy)
             return
-        self._refuse_double_window_contradictions(plan)
-        _refuse_double_window_scheme(plan.scheme, plan.boundary_policy)
+        self._refuse_absorbing_window_contradictions(plan)
+        _refuse_absorbing_window_scheme(plan.scheme, plan.boundary_policy)
         _refuse_crossing_strong_region(plan)
-        _refuse_double_window_run(plan)
+        _refuse_absorbing_window_run(plan)
 
     def tiers_for_ready_window(self, window: window_records.Window) -> tuple:
         """The weak tier, and the strong tier too when both run at once."""
@@ -171,27 +172,29 @@ class Switching(EscalationPolicyBase):
         """The threshold source hears the strong tier's answer."""
         self.threshold.learn_from_strong_result(window_key, result)
 
-    def _refuse_double_window_contradictions(
+    def _refuse_absorbing_window_contradictions(
         self, plan: decoding_records.RunShape
     ) -> None:
         """A forward strong window starts late and alone; these knobs do not."""
         if self.run_both_at_once:
             raise ValueError(
-                "double_window defers the strong start until the far weak "
-                "boundary exists; run_both_at_once starts it immediately "
-                "(the two policies contradict; pick one)"
+                "escalation.strong_window forward defers the strong "
+                "start until the far weak boundary exists; "
+                "run_both_at_once starts it immediately (the two "
+                "policies contradict; pick one)"
             )
         if plan.is_bulk_strong:
             raise ValueError(
-                "double_window + bulk_strong is not supported: deferred "
-                "strong windows are submitted one per escalation"
+                "escalation.strong_window forward with bulk_strong is "
+                "not supported: deferred strong windows are submitted "
+                "one per escalation"
             )
         if self.threshold.audits_by_escalating:
             raise ValueError(
                 "online threshold calibration is serial-only: an "
                 "audit label compares one window's weak and strong "
-                "committed observables, and a double-window strong "
-                "result owns a larger extent than the audited window"
+                "committed observables, and an absorbing strong window "
+                "owns a larger extent than the audited window"
             )
 
 
@@ -217,15 +220,17 @@ def _refuse_eager_serial_boundaries(boundary_policy) -> None:
         )
 
 
-def _refuse_double_window_scheme(scheme, boundary_policy) -> None:
+def _refuse_absorbing_window_scheme(scheme, boundary_policy) -> None:
     if type(scheme) is not windowing_schemes.SlidingWindowScheme:
         raise ValueError(
-            "double_window requires the exact shipped serial "
+            "escalation.strong_window forward requires the exact shipped "
+            "serial "
             "SlidingWindowScheme"
         )
     if isinstance(boundary_policy, boundary_policies.Held):
         raise ValueError(
-            "double_window requires the weak chain to keep committing "
+            "escalation.strong_window forward requires the weak chain to "
+            "keep committing "
             "(the far boundary IS the restart window's weak commit); "
             "the Held boundary policy would make later windows wait for "
             "the strong result and deadlock the strong window"
@@ -250,33 +255,36 @@ def _refuse_crossing_strong_region(plan: decoding_records.RunShape) -> None:
         return
     raise ValueError(
         f"windows.commit_rounds {commit_round_count} with "
-        f"windows.buffer_rounds {buffer_round_count} gives the double "
+        f"windows.buffer_rounds {buffer_round_count} gives the forward "
         f"window a strong region of {strong_round_count} rounds that ends "
-        "inside a later window's commit region; the double window's "
+        "inside a later window's commit region; the forward window's "
         "strong region, commit plus two buffers, must end inside its own "
         "commit region, so twice buffer_rounds must be a multiple of "
         "commit_rounds"
     )
 
 
-def _refuse_double_window_run(plan: decoding_records.RunShape) -> None:
-    """A double window needs static, explicit, single-patch operations."""
+def _refuse_absorbing_window_run(plan: decoding_records.RunShape) -> None:
+    """An absorbing window needs static, explicit, single-patch operations."""
     if plan.has_dynamic_streams or plan.has_static_decode_plan:
         raise ValueError(
-            "double_window skips statically planned windows when a "
+            "escalation.strong_window forward skips statically planned "
+            "windows when a "
             "strong window is assigned; stream windows created or "
             "folded at runtime (dynamic_streams/decode_ops) are not "
             "supported yet"
         )
     if plan.has_frontend:
         raise ValueError(
-            "double_window is validated for explicit ops= workloads; "
+            "escalation.strong_window forward is validated for explicit "
+            "ops= workloads; "
             "frontend-built operation chains are not supported yet"
         )
     for operation in plan.operations:
         if operation.decoder_boundary_predecessors:
             raise ValueError(
-                "double_window supports one single-patch stream per "
+                "escalation.strong_window forward supports one single-patch "
+                "stream per "
                 "operation; decoder-boundary chains would let a strong "
                 "window cross an operation seam before its far "
                 "boundary exists"

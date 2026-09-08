@@ -48,6 +48,7 @@ DECLARED_MICROSECONDS = {
 }
 DECLARED_EDGE_NAMES = (
     "qpu_to_controller",
+    "controller_to_weak_buffer",
     "weak_buffer_to_weak_decoder",
     "weak_decoder_to_strong_decoder",
     "strong_buffer_to_strong_decoder",
@@ -155,25 +156,18 @@ def declared_profile(strong_buffer_microseconds: float):
     declared_edges = {}
     for name in DECLARED_EDGE_NAMES:
         base_edge = getattr(base, name)
-        declared_edges[name] = _declared_edge(base_edge, name)
-    profile = dataclasses.replace(
+        latency = DECLARED_MICROSECONDS[name]
+        declared_edges[name] = _declared_edge(base_edge, latency)
+    strong_store = _declared_edge(
+        base.controller_to_strong_buffer, strong_buffer_microseconds
+    )
+    declared_edges["controller_to_strong_buffer"] = strong_store
+    return dataclasses.replace(
         base,
         # the declared qpu tick is wire time only; readout classification
         # prices the controller processing separately
         is_controller_processing_outside_qpu_to_controller=True,
         **declared_edges,
-    )
-    profile = link_profiles.with_controller_to_weak_buffer_path(
-        profile,
-        latency_microseconds=DECLARED_MICROSECONDS["controller_to_weak_buffer"],
-        aggregate_bits_per_microsecond=None,
-        source="escalation test declared tick",
-    )
-    return link_profiles.with_controller_to_strong_buffer_path(
-        profile,
-        latency_microseconds=strong_buffer_microseconds,
-        aggregate_bits_per_microsecond=None,
-        source="escalation test declared tick",
     )
 
 
@@ -195,8 +189,10 @@ def log_lines_containing(machine, needle: str) -> list:
     return lines
 
 
-def _declared_edge(base_edge, name: str) -> link_settings.PathSettings:
-    latency_ticks = config.microseconds_to_ticks(DECLARED_MICROSECONDS[name])
+def _declared_edge(
+    base_edge, latency_microseconds: float
+) -> link_settings.PathSettings:
+    latency_ticks = config.microseconds_to_ticks(latency_microseconds)
     channel = link_settings.ChannelSettings(
         base_edge.channel.name,
         latency_ticks,

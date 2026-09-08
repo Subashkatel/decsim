@@ -285,18 +285,8 @@ def _section_lines(settings: machine.MachineSettings) -> list:
 
 
 def _links_line(links) -> str:
-    """The fabric card, and the hops it leaves unwired.
-
-    An unwired hop is free: nothing at all is charged for it, so it is
-    named here rather than left to be read as a priced path.
-    """
-    unwired = []
-    for path in links.unwired_paths():
-        unwired.append(path.value)
-    if not unwired:
-        return f"links: card {links.profile_name}, every hop wired"
-    listed = ", ".join(unwired)
-    return f"links: card {links.profile_name}, unwired and so free: {listed}"
+    """The fabric card the run resolved to."""
+    return f"links: card {links.profile_name}"
 
 
 def _sweep_block_line(index: int, block: SweepBlock) -> str:

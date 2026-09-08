@@ -51,10 +51,11 @@ DECLARED_MICROSECONDS = {
     "controller_to_qpu": 2.0,
 }
 ROUND_MICROSECONDS = 1.0
-# the paths whose latency the card carries before either buffer path is
-# added, in the order the reference card declares them
+# every path whose latency the card carries, in the order the reference
+# card declares them; controller_to_strong_buffer is set per run
 DECLARED_EDGE_NAMES = (
     "qpu_to_controller",
+    "controller_to_weak_buffer",
     "weak_buffer_to_weak_decoder",
     "weak_decoder_to_strong_decoder",
     "strong_buffer_to_strong_decoder",
@@ -87,12 +88,7 @@ def declared_edge(base_edge, latency_microseconds):
     )
 
 
-def declared_profile(
-    *,
-    controller_to_weak_buffer=True,
-    controller_to_strong_buffer=True,
-    strong_buffer_microseconds=None,
-):
+def declared_profile(*, strong_buffer_microseconds=None):
     """The reference card with every latency replaced by a declared tick."""
     base = link_profiles.logical_reference_profile()
     declared_edges = {}
@@ -100,31 +96,19 @@ def declared_profile(
         base_edge = getattr(base, name)
         latency = DECLARED_MICROSECONDS[name]
         declared_edges[name] = declared_edge(base_edge, latency)
-    profile = dataclasses.replace(
+    strong_latency = strong_buffer_microseconds
+    if strong_latency is None:
+        strong_latency = DECLARED_MICROSECONDS["controller_to_strong_buffer"]
+    strong_store = declared_edge(
+        base.controller_to_strong_buffer, strong_latency
+    )
+    declared_edges["controller_to_strong_buffer"] = strong_store
+    return dataclasses.replace(
         base,
         # the declared qpu tick is wire time only; readout classification
         # prices the controller processing separately
         is_controller_processing_outside_qpu_to_controller=True,
         **declared_edges,
-    )
-    if controller_to_weak_buffer:
-        weak_latency = DECLARED_MICROSECONDS["controller_to_weak_buffer"]
-        profile = link_profiles.with_controller_to_weak_buffer_path(
-            profile,
-            latency_microseconds=weak_latency,
-            aggregate_bits_per_microsecond=None,
-            source="declared tick",
-        )
-    if not controller_to_strong_buffer:
-        return profile
-    strong_latency = strong_buffer_microseconds
-    if strong_latency is None:
-        strong_latency = DECLARED_MICROSECONDS["controller_to_strong_buffer"]
-    return link_profiles.with_controller_to_strong_buffer_path(
-        profile,
-        latency_microseconds=strong_latency,
-        aggregate_bits_per_microsecond=None,
-        source="declared tick",
     )
 
 
@@ -191,7 +175,6 @@ def weak_only_run(
     *,
     rounds=6,
     operations=None,
-    controller_to_weak_buffer=True,
     seed=0,
     io_trace=False,
     round_store=None,
@@ -203,10 +186,7 @@ def weak_only_run(
     workload = declared_workload(operations, rounds)
     decoder = decoders.PresetLatencyDecoder(DECLARED_MICROSECONDS["weak"])
     weak_decoder = decoder_settings.DecoderSettings(decoder=decoder)
-    links = declared_profile(
-        controller_to_weak_buffer=controller_to_weak_buffer,
-        controller_to_strong_buffer=False,
-    )
+    links = declared_profile()
     if controller is None:
         controller = declared_controller()
     if observation is None:

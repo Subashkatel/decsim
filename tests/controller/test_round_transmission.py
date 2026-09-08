@@ -40,6 +40,8 @@ WBD_PATH = transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER
 # 64 bits at 1000 bits per microsecond, one serialization on the wire
 ROUND_BITS = 64
 SERIALIZATION_TICKS = config.microseconds_to_ticks(0.064)
+# the reference card's controller_to_weak_buffer, Caune's 40 ns stage
+REFERENCE_CWB_TICKS = config.microseconds_to_ticks(0.04)
 
 
 class RecordingWindows:
@@ -95,12 +97,19 @@ def packed(round_index, route=round_records.WINDOW_INPUT_ROUTE, wire_bits=2):
 
 def priced_cwb_profile():
     reference = link_profiles.logical_reference_profile()
-    return link_profiles.with_controller_to_weak_buffer_path(
-        reference,
-        latency_microseconds=0.25,
-        aggregate_bits_per_microsecond=None,
-        source="test",
+    base = reference.controller_to_weak_buffer
+    channel = link_settings.ChannelSettings(
+        base.channel.name, CWB_TICKS, None, "test"
     )
+    path = link_settings.PathSettings(
+        channel, base.default_payload, base.actual_payload_source
+    )
+    return dataclasses.replace(reference, controller_to_weak_buffer=path)
+
+
+def free_cwb_profile():
+    reference = link_profiles.logical_reference_profile()
+    return dataclasses.replace(reference, controller_to_weak_buffer=None)
 
 
 def five_microsecond_wbd_profile(bits_per_microsecond=None):
@@ -169,7 +178,7 @@ def test_a_priced_hop_publishes_at_delivery_and_stamps_the_store():
 
 def test_a_free_hop_publishes_as_the_round_is_stored():
     engine = engine_module.Engine()
-    profile = link_profiles.logical_reference_profile()
+    profile = free_cwb_profile()
     transmitter, store, windows, recorder, _ledger = transmitter_with(
         engine, profile
     )
@@ -229,26 +238,28 @@ def test_memory_rounds_pipeline_onto_the_link_without_a_landing_wait():
 
 
 @pytest.mark.parametrize(
-    "first_route, memory_delivery, input_delivery, wire_order",
+    "memory_send_ticks, memory_delivery, input_delivery, wire_order",
     [
-        (MEMORY_ROUTE, 1, 2, [1, 9]),
-        (round_records.WINDOW_INPUT_ROUTE, 2, 1, [9, 1]),
+        (0, 5_064_000, 5_128_000, [1, 9]),
+        (REFERENCE_CWB_TICKS, 5_168_000, 5_104_000, [9, 1]),
     ],
 )
-def test_rounds_sent_at_one_tick_leave_in_completion_order(
-    first_route, memory_delivery, input_delivery, wire_order
+def test_two_routes_take_one_wire_in_the_order_they_reach_it(
+    memory_send_ticks, memory_delivery, input_delivery, wire_order
 ):
-    """The first of two rounds completing at one tick is on the wire first.
+    """The round that reaches the shared wire first serializes first.
 
-    A memory round and a window round complete at one tick on a
-    bandwidth-bounded weak_buffer_to_weak_decoder (5 us, 1000 bits per
-    microsecond, 64-bit rounds). The decode input the windows send at
-    the window round's publication serializes behind the memory round
-    when the memory round completed first, ahead of it otherwise. gem5's
-    DmaPort queues at the request (src/dev/dma_device.cc transmitList)
-    and ns-3's device starts the next packet at TransmitComplete
-    (point-to-point-net-device.cc): no arbitration event between the
-    routes.
+    A memory round and a decode input share a bandwidth-bounded
+    weak_buffer_to_weak_decoder (5 us, 1000 bits per microsecond,
+    64-bit rounds, so 0.064 us on the wire). The window round crosses
+    controller_to_weak_buffer into Buffer 0 first, so the decode input
+    the windows send at its publication reaches the shared wire one
+    store hop after the round was sent: a memory round sent with the
+    window round is ahead of it, and one sent at the publication tick
+    is behind it. gem5's DmaPort queues at the request
+    (src/dev/dma_device.cc transmitList) and ns-3's device starts the
+    next packet at TransmitComplete (point-to-point-net-device.cc): no
+    arbitration event between the routes.
     """
     engine = engine_module.Engine()
     profile = five_microsecond_wbd_profile(bits_per_microsecond=1000.0)
@@ -257,25 +268,23 @@ def test_rounds_sent_at_one_tick_leave_in_completion_order(
     )
     memory_round = packed(1, route=MEMORY_ROUTE, wire_bits=ROUND_BITS)
     window_round = packed(2, wire_bits=ROUND_BITS)
-    completion_order = [window_round, memory_round]
-    if first_route is MEMORY_ROUTE:
-        completion_order = [memory_round, window_round]
 
-    def complete_both():
-        for finished in completion_order:
-            store.accept_packed_round(finished.packet, publication_tick=None)
-            transmitter.send(finished)
+    def send(finished):
+        store.accept_packed_round(finished.packet, publication_tick=None)
+        transmitter.send(finished)
 
-    engine.schedule(0, complete_both)
+    engine.schedule(0, lambda: send(window_round))
+    engine.schedule(memory_send_ticks, lambda: send(memory_round))
     engine.run()
 
-    memory_tick = WBD_TICKS + memory_delivery * SERIALIZATION_TICKS
-    input_tick = WBD_TICKS + input_delivery * SERIALIZATION_TICKS
-    assert windows.memory_rounds == [(memory_tick, 7)]
+    assert windows.memory_rounds == [(memory_delivery, 7)]
     (decode_input,) = windows.decode_inputs_delivered
-    assert decode_input.delivery_ticks == input_tick
+    assert decode_input.delivery_ticks == input_delivery
     traffic = ledger.traffic_json_value()
-    rounds_on_the_wire = [
-        transfer["attribution"]["round_lo"] for transfer in traffic["transfers"]
-    ]
+    rounds_on_the_wire = []
+    for transfer in traffic["transfers"]:
+        if transfer["path"] != "weak_buffer_to_weak_decoder":
+            continue
+        round_lo = transfer["attribution"]["round_lo"]
+        rounds_on_the_wire.append(round_lo)
     assert rounds_on_the_wire == wire_order

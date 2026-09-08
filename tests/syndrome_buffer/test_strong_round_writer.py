@@ -12,12 +12,15 @@ pipeline: under a strong-primary policy the landing is what makes a
 window ready, on the declared card of tests/declared_run.py.
 """
 
+import dataclasses
+
 import pytest
 
 import decsim.config as config
 import decsim.engine as engine_module
 import decsim.links.fabric as fabric_module
 import decsim.links.link_profiles as link_profiles
+import decsim.links.settings as link_settings
 import decsim.records.rounds as round_records
 import decsim.records.transfers as transfer_records
 import decsim.syndrome_buffer.round_store as round_store_module
@@ -64,11 +67,9 @@ class RecordingListener:
 
 def priced_writer(engine, rounds=None, listener=None, on_round_stored=None):
     reference = link_profiles.logical_reference_profile()
-    settings = link_profiles.with_controller_to_strong_buffer_path(
-        reference,
-        latency_microseconds=0.5,
-        aggregate_bits_per_microsecond=None,
-        source="test",
+    crossing = half_microsecond_crossing(reference)
+    settings = dataclasses.replace(
+        reference, controller_to_strong_buffer=crossing
     )
     link = fabric_module.LinkFabric(settings, engine)
     store_settings = round_store_settings.RoundStoreSettings(rounds=rounds)
@@ -81,9 +82,22 @@ def priced_writer(engine, rounds=None, listener=None, on_round_stored=None):
     )
 
 
+def half_microsecond_crossing(reference):
+    """The room-side write at half a microsecond, no rate bound."""
+    base = reference.controller_to_strong_buffer
+    latency_ticks = config.microseconds_to_ticks(0.5)
+    channel = link_settings.ChannelSettings(
+        base.channel.name, latency_ticks, None, "test"
+    )
+    return link_settings.PathSettings(
+        channel, base.default_payload, base.actual_payload_source
+    )
+
+
 def free_writer(engine, on_round_stored=None):
     reference = link_profiles.logical_reference_profile()
-    link = fabric_module.LinkFabric(reference, engine)
+    unwired = dataclasses.replace(reference, controller_to_strong_buffer=None)
+    link = fabric_module.LinkFabric(unwired, engine)
     store_settings = round_store_settings.RoundStoreSettings()
     store = round_store_module.RoundStore(store_settings)
     return strong_round_writer.StrongRoundWriter(

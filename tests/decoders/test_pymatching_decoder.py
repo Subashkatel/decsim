@@ -109,7 +109,8 @@ def test_the_row_predicts_what_sinters_pymatching_row_predicts():
     whole = pymatching.Matching.from_detector_error_model(detector_error_model)
     row = adapter.PyMatchingDecoder()
     faults = model.require_faults(GRAPHLIKE)
-    matching = row.compiled_for(faults, model)
+    graphs = row.compiled_for(faults, model)
+    matching = graphs.plain
     ties = 0
     for shot, predicted in zip(detection_events, predictions):
         job = windows.job_for(model, shot)
@@ -177,7 +178,8 @@ def test_the_warm_up_survives_a_boundaryless_component():
     check = [[1, 0], [0, 1], [1, 0], [0, 1]]
     faults = placed_faults(check, [0.1, 0.1], [[0, 0]])
     row = adapter.PyMatchingDecoder()
-    matching = row.compile(faults)
+    graphs = row.compile(faults)
+    matching = graphs.plain
     syndrome = numpy.asarray([1, 0, 1, 0], dtype=numpy.uint8)
     selected = matching.decode(syndrome)
     assert selected.tolist() == [1, 0]
@@ -198,7 +200,8 @@ def test_two_placed_columns_with_the_same_endpoints_become_one_edge():
     priors = [0.05, 0.05, 0.2, 0.2]
     faults = placed_faults(check, priors, [[1, 1, 0, 0]])
     row = adapter.PyMatchingDecoder()
-    matching = row.compile(faults)
+    graphs = row.compile(faults)
+    matching = graphs.plain
     syndrome = numpy.asarray([1, 1, 0], dtype=numpy.uint8)
     selected, weight = matching.decode(syndrome, return_weight=True)
     selected_columns = selected.tolist()
@@ -207,3 +210,45 @@ def test_two_placed_columns_with_the_same_endpoints_become_one_edge():
     assert selected_columns[2] == 0
     assert selected_columns[3] == 0
     assert weight == pytest.approx(2.2540580520993854, abs=1e-6)
+
+
+def test_the_lighter_forced_class_is_the_row_s_own_unforced_answer():
+    """A forced solve pins the observable; the lighter class is the decode.
+
+    The complementary gap's two solves (Gidney et al. arXiv:2312.04522
+    Sec. "Complementary gap") are the same matching on the graph with
+    the observable row appended as one more check. The minimum over the
+    two classes is the unconstrained minimum, so the lighter forced
+    solve reproduces the row's own correction, and the two weights are
+    what a gap subtracts.
+    """
+    _circuit, model, detection_events, _observables = _window_and_shots()
+    row = adapter.PyMatchingDecoder()
+    for shot in detection_events:
+        plain_job = windows.job_for(model, shot)
+        plain = row.decode(plain_job)
+        forced_results = []
+        for forced_class in (0, 1):
+            job = windows.job_for(model, shot)
+            job.forced_logical_class = forced_class
+            forced = row.decode(job)
+            forced_results.append(forced)
+        weight_zero = forced_results[0].forced_class_weight
+        weight_one = forced_results[1].forced_class_weight
+        lighter = forced_results[0]
+        if weight_one < weight_zero:
+            lighter = forced_results[1]
+        assert lighter.correction.tolist() == plain.correction.tolist()
+
+
+def test_a_row_that_declares_no_forced_solve_refuses_a_forced_job():
+    """The declaration is data on the row; the call is a caller's bug."""
+    row = adapter.PyMatchingDecoder()
+    assert row.answers_forced_logical_class is True
+    faults = placed_faults([[1, 0], [0, 1]], [0.1, 0.1], [[1, 0]])
+    model = window_of(faults, 2)
+    syndrome = numpy.zeros(2, dtype=numpy.uint8)
+    with pytest.raises(RuntimeError, match="forced-class solve"):
+        decoder_module.WindowDecoderBase.decode_forced_window(
+            row, None, model, faults, syndrome, 0
+        )

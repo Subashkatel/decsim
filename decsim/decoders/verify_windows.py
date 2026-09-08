@@ -36,6 +36,7 @@ class TesseractCheckedDecoder(decoder_module.DecoderBase):
         self.referee = tesseract_window_decoder.TesseractWindowDecoder()
         # The referee reads the physical view, the tier the graphlike one.
         self.fault_model_requirement = fault_models.LINKED_FAULT_MODELS_REQUIRED
+        self.answers_forced_logical_class = inner.answers_forced_logical_class
         self.window_checked = trace_source.TraceSource()
 
     def run_seed_children(self) -> tuple:

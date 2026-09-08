@@ -6,17 +6,37 @@ with log-odds weights, parallel faults merged as independent errors
 loader), one matching per live window model, warmed on three columns
 before the first timed call. Higgott and Gidney, Sparse Blossom
 (2303.15933) is the algorithm behind
-the call.
+the call. The same graph with the observable row appended as one more
+check answers a forced-class job: the appended detector's bit pins the
+observable's parity, so the solve is the minimum weight inside that
+logical class (Gidney et al. 2312.04522 Sec. "Complementary gap").
 """
+
+import dataclasses
+from typing import Optional
 
 import numpy
 import pymatching
+import scipy.sparse
 
 import decsim.decoders.decoder as decoder_module
 import decsim.decoders.minimum_weight_perfect_matching.weights as weights
 import decsim.detector_error_model.fault_model_contracts as fault_models
 
 WARM_UP_COLUMNS = 3
+
+
+@dataclasses.dataclass(frozen=True)
+class MatchingGraphs:
+    """One window's matching graph, and the one that pins its observable.
+
+    forced is None for a window whose model carries no single nonzero
+    observable row: there is no parity to pin, so no class can be
+    forced and the plain graph answers a forced job with no weight.
+    """
+
+    plain: pymatching.Matching
+    forced: Optional[pymatching.Matching]
 
 
 class PyMatchingDecoder(decoder_module.WindowDecoderBase):
@@ -29,9 +49,10 @@ class PyMatchingDecoder(decoder_module.WindowDecoderBase):
 
     fault_model_requirement = fault_models.GRAPHLIKE_FAULT_MODEL_REQUIRED
     fault_representation = fault_models.FaultRepresentation.GRAPHLIKE
+    answers_forced_logical_class = True
 
-    def compile(self, faults, model=None):
-        """The matching graph of one placed model, warm."""
+    def compile(self, faults, model=None) -> MatchingGraphs:
+        """The matching graphs of one placed model, both warm."""
         del model
         # PyMatching normalises the matrix it is given in place; the placed
         # matrix is frozen, so it gets a copy (one per model, cached).
@@ -50,7 +71,8 @@ class PyMatchingDecoder(decoder_module.WindowDecoderBase):
             merge_strategy="independent",
         )
         _warm_up(matching, faults)
-        return matching
+        forced = self._forced_matching(faults, edge_weights)
+        return MatchingGraphs(plain=matching, forced=forced)
 
     def decode_window(self, backend, model, faults, syndrome) -> tuple:
         """The matching's correction, or an empty one marked invalid.
@@ -62,7 +84,7 @@ class PyMatchingDecoder(decoder_module.WindowDecoderBase):
         """
         del model
         try:
-            return backend.decode(syndrome), None
+            return backend.plain.decode(syndrome), None
         except ValueError as error:
             if "perfect matching" not in str(error):
                 raise
@@ -71,8 +93,55 @@ class PyMatchingDecoder(decoder_module.WindowDecoderBase):
             invalid = decoder_module.BackendDecodeStatus.INVALID_CORRECTION
             return empty, invalid
 
+    def decode_forced_window(
+        self, backend, model, faults, syndrome, forced_logical_class: int
+    ) -> tuple:
+        """The lightest correction whose observable parity is the class.
+
+        The appended detector carries the class bit, so the matching
+        must flip the observable an even or an odd number of times
+        (Gidney et al. 2312.04522 Sec. "Complementary gap"). A window
+        that pins no observable has no forced solve, and the plain
+        decode answers it with no weight, which leaves the confidence
+        without a gap and escalates the window.
+        """
+        if backend.forced is None:
+            selected, decode_status = self.decode_window(
+                backend, model, faults, syndrome
+            )
+            return selected, decode_status, None
+        pinned = _with_pinned_observable(syndrome, forced_logical_class)
+        selected, weight = backend.forced.decode(pinned, return_weight=True)
+        return selected, None, float(weight)
+
     def _weights_for(self, faults):
         return weights.matching_weights(faults.priors)
+
+    def _forced_matching(
+        self, faults, edge_weights
+    ) -> Optional[pymatching.Matching]:
+        """The graph with the observable row as one more check, warm."""
+        observables = faults.observables
+        if observables.shape[0] != 1:
+            return None
+        dense_observables = observables.toarray()
+        dense_row = dense_observables[0]
+        if not dense_row.any():
+            return None
+        if not _stays_graphlike_with_observable(faults.check, dense_row):
+            return None
+        observable_check = scipy.sparse.csc_matrix(observables[0:1, :])
+        stacked = scipy.sparse.vstack([faults.check, observable_check])
+        pinned_check = stacked.tocsc()
+        error_probabilities = weights.finite_priors(faults.priors)
+        matching = pymatching.Matching.from_check_matrix(
+            pinned_check,
+            weights=edge_weights,
+            error_probabilities=error_probabilities,
+            merge_strategy="independent",
+        )
+        _warm_up_forced(matching, faults, dense_row)
+        return matching
 
 
 class UnweightedPyMatchingDecoder(PyMatchingDecoder):
@@ -113,6 +182,58 @@ def _warm_up(matching, faults) -> None:
         warmed += 1
         if warmed == WARM_UP_COLUMNS:
             return
+
+
+def _stays_graphlike_with_observable(check, observable_row) -> bool:
+    """Whether the pinned graph is still a matching graph.
+
+    A matching edge touches at most two detectors, so a fault that
+    already flips two detectors and the observable has no edge on the
+    pinned graph (PyMatching refuses such a column). Such a window has
+    no forced solve, which leaves its confidence without a gap.
+    """
+    dense_check = _dense_check(check)
+    column_weights = dense_check.sum(axis=0)
+    pinned_weights = column_weights + observable_row
+    highest = pinned_weights.max(initial=0)
+    is_graphlike = highest <= 2
+    return bool(is_graphlike)
+
+
+def _dense_check(check):
+    if scipy.sparse.issparse(check):
+        return check.toarray()
+    return numpy.asarray(check)
+
+
+def _warm_up_forced(matching, faults, observable_row) -> None:
+    """Warm the pinned graph on the same one-column syndromes.
+
+    Each column alone explains its detector set, and the appended
+    detector carries that column's own observable bit, so the pinned
+    syndrome is satisfiable.
+    """
+    check = faults.check
+    detector_count = check.shape[0]
+    warmed = 0
+    for column in range(check.shape[1]):
+        rows = _column_rows(check, column)
+        if rows.size == 0:
+            continue
+        syndrome = numpy.zeros(detector_count, dtype=numpy.uint8)
+        syndrome[rows] = 1
+        observable_bit = int(observable_row[column])
+        pinned = _with_pinned_observable(syndrome, observable_bit)
+        matching.decode(pinned)
+        warmed += 1
+        if warmed == WARM_UP_COLUMNS:
+            return
+
+
+def _with_pinned_observable(syndrome, observable_bit: int):
+    """The syndrome with the pinned graph's observable detector appended."""
+    extended = numpy.concatenate([syndrome, [observable_bit]])
+    return extended.astype(numpy.uint8)
 
 
 def _column_rows(check, column: int):

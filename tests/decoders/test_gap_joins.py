@@ -86,7 +86,7 @@ def test_a_window_has_a_join_from_the_spawn_until_both_halves_report():
     assert joins.has_join(primary) is False
     joins.spawn(primary)
     assert joins.has_join(primary) is True
-    result = decoding_records.DecodeResult(1, 0, gap_half_weight=3.0)
+    result = decoding_records.DecodeResult(1, 0, forced_class_weight=3.0)
     joins.take_weak_result(primary, result)
     joins.sibling_done((1, 0), 5.0)
     assert joins.has_join(primary) is False
@@ -97,7 +97,7 @@ def test_the_gap_is_the_two_class_weights_difference_once_both_report():
     joins = _joins(enqueued)
     primary = _primary()
     joins.spawn(primary)
-    result = decoding_records.DecodeResult(1, 0, gap_half_weight=3.0)
+    result = decoding_records.DecodeResult(1, 0, forced_class_weight=3.0)
     assert joins.take_weak_result(primary, result) is None
     joined_job, joined_result = joins.sibling_done((1, 0), 5.0)
     assert joined_job is primary
@@ -113,7 +113,7 @@ def test_a_sibling_that_reports_first_joins_at_the_primary_result():
     primary = _primary()
     joins.spawn(primary)
     assert joins.sibling_done((1, 0), 4.0) is None
-    result = decoding_records.DecodeResult(1, 0, gap_half_weight=6.0)
+    result = decoding_records.DecodeResult(1, 0, forced_class_weight=6.0)
     joined = joins.take_weak_result(primary, result)
     assert joined is result
     assert joined.soft_output.gap == 2.0
@@ -124,7 +124,7 @@ def test_a_missing_half_leaves_no_soft_output():
     joins = _joins(enqueued)
     primary = _primary()
     joins.spawn(primary)
-    result = decoding_records.DecodeResult(1, 0, gap_half_weight=3.0)
+    result = decoding_records.DecodeResult(1, 0, forced_class_weight=3.0)
     joins.take_weak_result(primary, result)
     _joined_job, joined_result = joins.sibling_done((1, 0), None)
     assert joined_result.soft_output is None

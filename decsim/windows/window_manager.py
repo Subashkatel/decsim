@@ -362,6 +362,10 @@ class WindowManager:
             self.requester.release_parked(key)
         self.check_window(key)
 
+    def check_settled(self) -> None:
+        """At the end of a run every window's solves have been joined."""
+        self.requester.check_settled()
+
     # ---- observation
 
     def rounds_backlog(self) -> tuple:

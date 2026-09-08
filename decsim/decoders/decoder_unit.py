@@ -12,6 +12,14 @@ every in-flight decode resident and retires them in issue order
 (Hennessy and Patterson, Computer Architecture, App. C; Helios
 2301.08419). The unit records who holds what, gem5's functional unit
 (fu_pool.hh:64-75); the service starts and ends the decodes.
+
+A finished result nobody has asked for yet waits in the unit's output
+slot, not in the manager: AFS keeps the finished error log in the unit
+(2001.06598 lines 833-840), ChipCheck's output sits in programmable
+registers until it is read (2309.05558 lines 484-485), and gem5's sender
+keeps the packet and sends it again when the far side accepts it
+(port.hh:244-255). Holding it costs nothing and blocks nothing: the
+compute and the input slots are freed at the decode's end as before.
 """
 
 import dataclasses
@@ -54,6 +62,20 @@ class PipelineFlights:
     stalled_depth: int = 0
 
 
+@dataclasses.dataclass
+class UnitSlots:
+    """What the unit's slots hold, in and out.
+
+    residents are the jobs whose input occupies or reserves an input
+    slot (in transfer or landed), in dispatch order; at most the
+    resident capacity. finished are the results this unit has produced
+    that nobody has taken yet, by destination window.
+    """
+
+    residents: list = dataclasses.field(default_factory=list)
+    finished: dict = dataclasses.field(default_factory=dict)
+
+
 class DecoderUnit:
     """One numbered engine of a pool with its own input memory."""
 
@@ -66,11 +88,14 @@ class DecoderUnit:
         self.pool = pool
         self.index = index
         self.memory = memory
-        # jobs whose input occupies or reserves a slot (in transfer or
-        # landed), in dispatch order; at most the resident capacity
-        self.residents: list[decoding_records.DecodeJob] = []
+        self.slots = UnitSlots()
         self.compute = ComputeClaim()
         self.pipeline = PipelineFlights()
+
+    @property
+    def residents(self) -> list:
+        """The jobs holding this unit's input slots, in dispatch order."""
+        return self.slots.residents
 
     @property
     def name(self) -> str:
@@ -127,13 +152,13 @@ class DecoderUnit:
 
     def admit(self, job: decoding_records.DecodeJob) -> None:
         """The job takes a slot; its input moves into this unit's memory."""
-        self.residents.append(job)
+        self.slots.residents.append(job)
         job.unit = self
 
     def evict(self, job: decoding_records.DecodeJob) -> None:
         """The job leaves its slot."""
-        if job in self.residents:
-            self.residents.remove(job)
+        if job in self.slots.residents:
+            self.slots.residents.remove(job)
         job.unit = None
 
     def oldest_landed_resident_ready_to_start(
@@ -183,6 +208,30 @@ class DecoderUnit:
                 f"{resident.label} {phase}, {resident.round_count} rounds"
             )
         return "; ".join(parts)
+
+    # -------------------------------------------------- the output slot
+
+    def hold_output(self, window_key: tuple, completion) -> None:
+        """Keep one finished result until its destination asks for it.
+
+        A destination window has at most one unconsumed strong result,
+        so a second one for the same window is a defect, not a queue.
+        """
+        finished = self.slots.finished
+        if window_key in finished:
+            raise RuntimeError(
+                f"unit {self.name!r} already holds a finished result for "
+                f"window {window_key}"
+            )
+        finished[window_key] = completion
+
+    def take_output(self, window_key: tuple):
+        """Take the result waiting for that destination, or None."""
+        return self.slots.finished.pop(window_key, None)
+
+    def output_windows(self) -> list:
+        """The destinations whose results are still waiting here."""
+        return list(self.slots.finished)
 
     # ----------------------------------------------------- the compute
 

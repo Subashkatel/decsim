@@ -8,9 +8,10 @@ the confidence threshold, commits the result as final or provisionally,
 asks the strong tier itself, and tells this ledger the request is
 resolved. A strong result teaches the policy and becomes one completion
 per member request, delivered to each destination that waits for it now
-and held for one whose selection is still crossing the weak-to-strong
-link (StrongRequests). Every terminal outcome goes out on request_ended
-and service_ended; the record ledger listens.
+and left in the output slot of the unit that produced it when the
+destination's selection is still crossing the weak-to-strong link
+(decoders/decoder_unit.py). Every terminal outcome goes out on
+request_ended and service_ended; the record ledger listens.
 """
 
 import dataclasses
@@ -19,7 +20,6 @@ from typing import Callable, Optional
 import decsim.decoders.strong_requests as strong_requests_module
 import decsim.observe.trace_source as trace_source
 import decsim.records.decoding as decoding_records
-import decsim.records.windows as window_records
 
 
 class DecodeOutcomes:
@@ -80,7 +80,7 @@ class DecodeOutcomes:
         self.strong_requests.resolve_weak(key)
         is_escalated = verdict is decoding_records.Verdict.ESCALATE
         if not is_escalated:
-            self.cancel_strong(key)  # no-op unless one is live/held
+            self.cancel_strong(key)  # no-op unless one is live or done
         outcomes = decoding_records.RequestProcessingOutcome
         processing = outcomes.PRIMARY_FORWARDED_FOR_DELIVERY
         if is_escalated:
@@ -110,7 +110,8 @@ class DecodeOutcomes:
         """The strong decode ended: teach the policy, deliver each completion.
 
         deliveries are the per-request completions taken before the
-        unit was freed; each reaches its destination now or is held.
+        job left its slot; each reaches its destination now or waits
+        in the output slot of the unit that produced it.
         """
         self.strong_requests.finish_service(job)
         self.escalation_policy.learn_from_strong_result(
@@ -121,30 +122,40 @@ class DecodeOutcomes:
         self.trace.service_ended.fire(job, self.engine.now)
 
     def complete_strong(
-        self, held: strong_requests_module.HeldStrongCompletion
+        self, completion: strong_requests_module.StrongCompletion
     ) -> None:
         """Deliver a strong result to the destination that waits for it.
 
-        The ledger holds it when the demand is still on its way.
+        A destination whose selection is still on its way leaves the
+        result in the output slot of the unit that produced it, the way
+        a sender keeps the packet until the far side accepts it (gem5
+        port.hh:244-255).
         """
-        if not self.strong_requests.complete(held):
+        if not self.strong_requests.complete(completion):
+            self._hold_at_the_unit(completion)
             return
-        request_job = held.request_job
-        request_job.on_decoded(request_job, held.result)
+        request_job = completion.request_job
+        request_job.on_decoded(request_job, completion.result)
         self.trace.request_ended.fire(
-            held.request_job,
-            held.result,
+            completion.request_job,
+            completion.result,
             decoding_records.RequestProcessingOutcome.STRONG_FORWARDED_FOR_DELIVERY,
-            held.decode_output_ticks,
+            completion.decode_output_ticks,
         )
 
-    def select_strong_result(
-        self, key: tuple, request_key: window_records.DecoderRequestKey
+    def _hold_at_the_unit(
+        self, completion: strong_requests_module.StrongCompletion
     ) -> None:
-        """The selection landed: a held strong completion reaches its window."""
-        held = self.strong_requests.select(key, request_key)
-        if held is not None:
-            self.complete_strong(held)
+        """Leave the result in its producing unit's output slot."""
+        unit = completion.unit
+        request_key = completion.request_job.request_key
+        window_key = (request_key.operation_id, request_key.window_id)
+        if unit is None:
+            raise RuntimeError(
+                f"strong result for window {window_key} has no unit to wait "
+                "in: a finished result waits in the unit that produced it"
+            )
+        unit.hold_output(window_key, completion)
 
     def report_request(
         self,

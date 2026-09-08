@@ -303,6 +303,27 @@ class DecodeService:
             residents.extend(unit.residents)
         return residents
 
+    def take_strong_output(self, window_key: tuple):
+        """Take the finished result waiting for that destination, if any.
+
+        The result waits in the output slot of the unit that produced
+        it, and a destination has at most one, so the first unit holding
+        one for this window is the one.
+        """
+        for unit in self.pool.units():
+            completion = unit.take_output(window_key)
+            if completion is not None:
+                return completion
+        return None
+
+    def windows_holding_output(self) -> list:
+        """The destinations whose results are still waiting in a unit."""
+        waiting = []
+        for unit in self.pool.units():
+            windows = unit.output_windows()
+            waiting.extend(windows)
+        return sorted(waiting)
+
     def units_holding_rounds(self) -> list:
         """The names of the units whose memory still holds rounds."""
         held = []

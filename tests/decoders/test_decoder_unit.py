@@ -102,3 +102,25 @@ def test_a_memory_config_with_a_zero_capacity_is_refused_at_construction():
         ValueError, match="pool 'default' needs a positive round capacity"
     ):
         decoder_memory.DecoderMemoryConfig({"default": 0})
+
+
+def test_the_output_slot_holds_one_finished_result_until_it_is_taken():
+    """AFS keeps the finished log in the unit until it is read (833-840)."""
+    unit = _unit()
+    completion = object()
+    assert unit.output_windows() == []
+    unit.hold_output((1, 0), completion)
+    assert unit.output_windows() == [(1, 0)]
+    assert unit.take_output((1, 0)) is completion
+    assert unit.output_windows() == []
+    assert unit.take_output((1, 0)) is None
+
+
+def test_a_second_result_for_one_destination_is_refused():
+    """A destination window has at most one unconsumed strong result."""
+    unit = _unit()
+    first = object()
+    second = object()
+    unit.hold_output((1, 0), first)
+    with pytest.raises(RuntimeError, match="already holds a finished result"):
+        unit.hold_output((1, 0), second)

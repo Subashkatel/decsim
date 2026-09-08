@@ -6,6 +6,8 @@ is the shape of on_decoded.
 """
 
 import decsim.decoders.decode_outcomes as decode_outcomes
+import decsim.decoders.decoder_memory as decoder_memory
+import decsim.decoders.decoder_unit as decoder_unit
 import decsim.decoders.strong_requests as strong_requests_module
 import decsim.engine as engine_module
 import decsim.observe.decode_records as decode_records
@@ -120,7 +122,12 @@ def test_a_strong_result_teaches_the_policy_and_reaches_its_destination_once():
     assert requests.unsettled() == {}
 
 
-def test_a_selection_that_lands_after_the_strong_result_releases_it():
+def test_a_result_whose_selection_has_not_landed_waits_in_its_unit():
+    """D1: the ledger holds no result; the unit that produced it does.
+
+    gem5's sender keeps the packet until the far side accepts it
+    (tmp/resources/gem5/src/mem/port.hh:244-255).
+    """
     cancelled = []
     outcomes, requests, _policy = _outcomes(
         decoding_records.Verdict.KEEP, cancelled
@@ -138,14 +145,21 @@ def test_a_selection_that_lands_after_the_strong_result_releases_it():
         request_key=strong_key,
         on_decoded=on_decoded,
     )
+    memory = decoder_memory.DecoderMemory("strong", 0, None)
+    unit = decoder_unit.DecoderUnit("strong", 0, memory)
+    strong_job.unit = unit
     requests.admit_strong(strong_job, now=0)
     requests.begin_selection((1, 0), strong_key)
     result = decoding_records.DecodeResult(1, 0, logical_observables=(1,))
     deliveries = requests.deliveries_for(strong_job, result, now=30)
     outcomes.conclude_strong(strong_job, result, deliveries)
     assert delivered == []
-    outcomes.select_strong_result((1, 0), strong_key)
+    assert unit.output_windows() == [(1, 0)]
+    assert requests.select((1, 0), strong_key) is True
+    completion = unit.take_output((1, 0))
+    outcomes.complete_strong(completion)
     assert delivered == [(strong_job, result)]
+    assert unit.output_windows() == []
     assert requests.unsettled() == {}
 
 

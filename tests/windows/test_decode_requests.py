@@ -134,7 +134,7 @@ class _Fixture:
         )
         self.queue = _RecordingQueue()
         policy = escalation_policies.Baseline()
-        committer = types.SimpleNamespace(
+        verdict = types.SimpleNamespace(
             accept_result=_ignore_result, accept_strong_result=_ignore_result
         )
         self.requester = decode_requests.DecodeRequester(
@@ -143,7 +143,7 @@ class _Fixture:
             self.builder,
             self.queue,
             policy,
-            committer,
+            verdict,
         )
         self.retention.register_window((1, 0), self.window)
 

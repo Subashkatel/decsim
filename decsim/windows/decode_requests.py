@@ -357,7 +357,7 @@ class DecodeRequester:
         builder: DecodeRequestBuilder,
         decode_queue,
         escalation_policy,
-        committer,
+        verdict,
         gap_join=None,
     ) -> None:
         self.tracker = tracker
@@ -365,7 +365,7 @@ class DecodeRequester:
         self.builder = builder
         self.decode_queue = decode_queue
         self.escalation_policy = escalation_policy
-        self.committer = committer
+        self.verdict = verdict
         self.gap_join = gap_join
 
     def request_ready_windows(self, windows, strong_redecode) -> None:
@@ -512,9 +512,9 @@ class DecodeRequester:
         answer takes both forced-class solves.
         """
         job = submission.job
-        on_decoded = self.committer.accept_result
+        on_decoded = self.verdict.accept_result
         if job.strong_decode_for is not None:
-            on_decoded = self.committer.accept_strong_result
+            on_decoded = self.verdict.accept_strong_result
         elif self.gap_join is not None:
             on_decoded = self.gap_join.accept_result
         self.decode_queue.enqueue(job, submission.send_input, on_decoded)

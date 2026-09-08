@@ -37,6 +37,7 @@ import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
 import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
+import decsim.settings as machine_settings
 
 
 def fragment(operation_id, round_index, fragment_index, bits=(0, 1)):
@@ -188,7 +189,7 @@ def _two_patch_memory_run(rounds_per_unit, unit_count):
     manager = decoder_settings.DecoderManagerSettings(
         decoder_memory=memory_config
     )
-    return machine_module.MachineSettings(
+    return machine_settings.MachineSettings(
         workload=workload,
         qpu=qpu,
         weak_decoder=weak_decoder,

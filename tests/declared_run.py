@@ -28,6 +28,7 @@ import decsim.pauli_frame.pauli_frame as pauli_frame_module
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
 import decsim.records.program as program_records
+import decsim.settings as machine_settings
 import decsim.windows.settings as window_settings
 import decsim.windows.windowing_schemes as windowing_schemes
 from decsim.config import microseconds_to_ticks
@@ -196,7 +197,7 @@ def weak_only_run(
         )
     qpu = declared_qpu()
     frame = declared_frame()
-    settings = machine_module.MachineSettings(
+    settings = machine_settings.MachineSettings(
         workload=workload,
         qpu=qpu,
         weak_decoder=weak_decoder,
@@ -226,7 +227,7 @@ def strong_only_run(
     links = declared_profile()
     controller = declared_controller()
     frame = declared_frame()
-    settings = machine_module.MachineSettings(
+    settings = machine_settings.MachineSettings(
         workload=workload,
         qpu=qpu,
         strong_decoder=strong_decoder,
@@ -316,7 +317,7 @@ def switching_run(
     qpu = declared_qpu(round_microseconds)
     controller = declared_controller()
     frame = declared_frame()
-    settings = machine_module.MachineSettings(
+    settings = machine_settings.MachineSettings(
         workload=workload,
         qpu=qpu,
         windows=windows,

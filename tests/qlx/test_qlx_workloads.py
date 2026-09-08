@@ -19,10 +19,11 @@ from decsim.detector_error_model.detector_chronology import (
 )
 from decsim.frontends.qlx_frontend import qlx_frontend
 from decsim.frontends.settings import WorkloadSettings
-from decsim.machine import Machine, MachineSettings
+from decsim.machine import Machine
 from decsim.qpu.round_policies import GateRounds
 from decsim.qpu.settings import QpuSettings
 from decsim.qpu.stim_device import StimDevice
+from decsim.settings import MachineSettings
 
 _THIS_FILE = Path(__file__)
 _TEST_FILE = _THIS_FILE.resolve()

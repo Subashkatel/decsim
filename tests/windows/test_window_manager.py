@@ -22,6 +22,7 @@ import decsim.qpu.stim_device as stim_device
 import decsim.records.program as program_records
 import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
+import decsim.settings as machine_settings
 import decsim.windows.boundary_payloads as boundary_payloads
 import decsim.windows.built_window_models as built_window_models
 import decsim.windows.settings as window_settings
@@ -42,7 +43,7 @@ def _weak_run():
     qpu = qpu_settings.QpuSettings(code=code, round_period_microseconds=1.0)
     decoder = decoders.PresetLatencyDecoder(2.0)
     weak_decoder = decoder_settings.DecoderSettings(decoder=decoder, units=1)
-    settings = machine_module.MachineSettings(
+    settings = machine_settings.MachineSettings(
         workload=workload, qpu=qpu, weak_decoder=weak_decoder
     )
     machine = machine_module.Machine.build(settings, 0)
@@ -196,7 +197,7 @@ def _tan_sandwich_run(unit_count):
     )
     scheme = windowing_schemes.TanSandwichScheme()
     windows = window_settings.WindowSettings(scheme=scheme)
-    settings = machine_module.MachineSettings(
+    settings = machine_settings.MachineSettings(
         workload=workload,
         qpu=qpu,
         weak_decoder=weak_decoder,

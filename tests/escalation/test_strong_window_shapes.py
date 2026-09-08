@@ -36,6 +36,7 @@ import decsim.observe.run_views as run_views
 import decsim.observe.trace_source as trace_source
 import decsim.records.decoding as decoding_records
 import decsim.records.windows as window_records
+import decsim.settings as machine_settings
 import tests.escalation.declared_fabric as fabric
 
 # The gate's switching card, section by section as the yaml reads.
@@ -260,7 +261,7 @@ def _gate_forward_window_machine(
         reread_buffer_regions
     )
     base_directory = pathlib.Path(".")
-    settings = machine_module.MachineSettings.from_mapping(
+    settings = machine_settings.MachineSettings.from_mapping(
         sections, name="switching_validation", base_directory=base_directory
     )
     qpu = dataclasses.replace(

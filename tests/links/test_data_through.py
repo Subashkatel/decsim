@@ -39,6 +39,7 @@ import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
 import decsim.qpu.stim_device as stim_device
 import decsim.records.program as program_records
+import decsim.settings as machine_settings_module
 
 ROUNDS = 15
 PROBABILITY = 0.008
@@ -201,7 +202,7 @@ def machine_settings(shape: str, distance: int):
         escalation = escalation_settings.EscalationSettings(
             kind="weak_baseline"
         )
-        return machine_module.MachineSettings(
+        return machine_settings_module.MachineSettings(
             workload=workload,
             qpu=qpu,
             weak_decoder=weak,
@@ -210,7 +211,7 @@ def machine_settings(shape: str, distance: int):
         )
     if shape == "strong":
         escalation = escalation_settings.EscalationSettings(kind="strong_only")
-        return machine_module.MachineSettings(
+        return machine_settings_module.MachineSettings(
             workload=workload,
             qpu=qpu,
             strong_decoder=strong,
@@ -224,7 +225,7 @@ def machine_settings(shape: str, distance: int):
         gap_threshold_decibels=UNREACHABLE_GAP_DECIBELS,
         gap_threshold_nats=nats,
     )
-    return machine_module.MachineSettings(
+    return machine_settings_module.MachineSettings(
         workload=workload,
         qpu=qpu,
         weak_decoder=weak,
@@ -420,7 +421,7 @@ def test_the_feedback_hops_fire_when_an_operation_waits_on_a_result():
         kind="pymatching", engine_megahertz=ENGINE_MEGAHERTZ
     )
     links = link_profiles.logical_reference_profile()
-    settings = machine_module.MachineSettings(
+    settings = machine_settings_module.MachineSettings(
         workload=workload, qpu=qpu, weak_decoder=weak, links=links
     )
     machine = machine_module.Machine.build(settings, SEED)

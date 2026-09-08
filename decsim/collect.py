@@ -33,6 +33,7 @@ from collections.abc import Callable, Iterable, Mapping
 from typing import Any, Optional
 
 import decsim.machine as machine_module
+import decsim.settings as machine_settings
 import decsim.windows.built_window_models as built_window_models
 
 
@@ -46,7 +47,7 @@ class Task:
     installed on every shot's settings.
     """
 
-    settings: machine_module.MachineSettings
+    settings: machine_settings.MachineSettings
     shots: int
     metadata: Mapping[str, Any]
     online_threshold: Optional[Any] = None
@@ -54,7 +55,7 @@ class Task:
     @classmethod
     def at_point(
         cls,
-        settings: machine_module.MachineSettings,
+        settings: machine_settings.MachineSettings,
         shots: int,
         metadata: Mapping[str, Any],
     ) -> "Task":
@@ -81,7 +82,7 @@ class Task:
 
     def shot_settings(
         self, built_models=None
-    ) -> machine_module.MachineSettings:
+    ) -> machine_settings.MachineSettings:
         """The settings one shot runs: the point's threshold and models."""
         settings = self.settings
         if self.online_threshold is not None:

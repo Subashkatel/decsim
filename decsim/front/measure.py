@@ -23,6 +23,7 @@ import decsim.collect as collect
 import decsim.config as config_module
 import decsim.machine as machine_module
 import decsim.observe.observation as observation_module
+import decsim.settings as machine_settings
 
 # Latency points, in path order, in microseconds per window unless noted.
 POINTS = (
@@ -309,7 +310,7 @@ def direct_prediction(
 
 def chain_load(
     samples: dict,
-    settings: machine_module.MachineSettings,
+    settings: machine_settings.MachineSettings,
     distance: int,
     round_period_us: float,
 ) -> float:
@@ -329,7 +330,7 @@ def chain_load(
     return chain_us / inter_arrival_us
 
 
-def active_decoder_kind(settings: machine_module.MachineSettings):
+def active_decoder_kind(settings: machine_settings.MachineSettings):
     """The kind of the tier that decodes the plan's windows."""
     tier = machine_module.primary_tier(settings.escalation)
     tier_settings = getattr(settings, f"{tier}_decoder")
@@ -359,7 +360,7 @@ def trace_path_for_shot(path: str, seed: int, trace_shots) -> str:
     return str(seeded)
 
 
-def shot_label(settings: machine_module.MachineSettings, seed: int) -> str:
+def shot_label(settings: machine_settings.MachineSettings, seed: int) -> str:
     """The name a shot's log and trace files carry: its point and seed."""
     physical_error_probability = settings.workload.physical_error_probability
     distance = settings.qpu.distance
@@ -372,7 +373,7 @@ def shot_label(settings: machine_module.MachineSettings, seed: int) -> str:
 
 
 def _measurement(
-    settings: machine_module.MachineSettings,
+    settings: machine_settings.MachineSettings,
     observation: observation_module.Observation,
     result: machine_module.RunResult,
     *,
@@ -468,7 +469,7 @@ def _logical_verdicts(
 
 def _throughput_per_microsecond(
     observation: observation_module.Observation,
-    settings: machine_module.MachineSettings,
+    settings: machine_settings.MachineSettings,
     samples: dict,
     distance: int,
 ) -> _Throughput:

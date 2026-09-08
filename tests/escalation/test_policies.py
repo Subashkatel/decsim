@@ -31,6 +31,7 @@ import decsim.qpu.stim_device as stim_device
 import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
 import decsim.records.windows as window_records
+import decsim.settings as machine_settings
 import decsim.windows.settings as window_settings
 import decsim.windows.windowing_schemes as windowing_schemes
 import tests.escalation.declared_fabric as fabric
@@ -151,7 +152,7 @@ def test_escalations_equal_gaps_below_the_threshold_equal_strong_frame_writes():
     observation = observe_settings.ObservationSettings(
         record_switching_windows=True
     )
-    settings = machine_module.MachineSettings(
+    settings = machine_settings.MachineSettings(
         workload=workload,
         qpu=qpu,
         windows=windows,
@@ -264,7 +265,7 @@ def test_a_plan_that_contradicts_itself_is_refused_at_build_with_a_sentence():
 
 def _forward_window_settings(
     commit_rounds: int, buffer_rounds: int
-) -> machine_module.MachineSettings:
+) -> machine_settings.MachineSettings:
     """The gate's switching card with the forward window and the sizes.
 
     Every part is a table row, the way the yaml builds it.
@@ -281,7 +282,7 @@ def _forward_window_settings(
     escalation = escalation_settings.EscalationSettings(
         kind="switching", gap_threshold_nats=1.0, strong_window="forward"
     )
-    return machine_module.MachineSettings(
+    return machine_settings.MachineSettings(
         windows=windows,
         weak_decoder=weak_decoder,
         strong_decoder=strong_decoder,
@@ -388,7 +389,7 @@ class _Draws:
 
 def _serial_switching_settings(
     boundary_policy,
-) -> machine_module.MachineSettings:
+) -> machine_settings.MachineSettings:
     """Serial switching (no forward window) with the boundary policy given."""
     lookahead = windowing_schemes.SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD
     scheme = windowing_schemes.SlidingWindowScheme(terminal_policy=lookahead)
@@ -400,7 +401,7 @@ def _serial_switching_settings(
     escalation = escalation_settings.EscalationSettings(
         kind="switching", gap_threshold_nats=1.0
     )
-    return machine_module.MachineSettings(
+    return machine_settings.MachineSettings(
         windows=windows,
         weak_decoder=weak_decoder,
         strong_decoder=strong_decoder,

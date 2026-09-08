@@ -156,7 +156,7 @@ class ExperimentConfig:
     def active_decoder(self) -> decoder_settings.DecoderSettings:
         """The decoder card of the tier that decodes the plan's windows."""
         tier = self.active_tier
-        return getattr(self.settings, f"{tier}_decoder")
+        return self.settings.decoder_settings_for(tier)
 
 
 def resolved_description(config: ExperimentConfig) -> list:

@@ -13,6 +13,11 @@ class NaiveOnlineScheme:
     """Decode each operation as one full batch after all rounds arrive."""
 
     scheme_label = "naive online batch decode (no windowing)"
+    # One window covers the operation, so there is nothing past its
+    # commit and nothing after it to chain to.
+    has_trailing_tail_context = False
+    commits_in_one_serial_chain = False
+    supports_dynamic_streams = False
 
     def plan_operation(
         self,

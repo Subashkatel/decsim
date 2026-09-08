@@ -577,6 +577,8 @@ def test_a_new_escalation_kind_is_one_class_and_one_table_row():
 class RecordingBoundaryPolicy:
     """A boundary policy written outside decsim: one method, plain names."""
 
+    ships_provisional_boundaries = False
+
     def on_commit(self, window, final: bool) -> bool:
         del window
         return final
@@ -632,6 +634,8 @@ def test_a_policy_written_outside_decsim_is_used_on_its_own_axis():
 
 class SeedRecordingPolicy:
     """A boundary policy that records the seed the root derived for it."""
+
+    ships_provisional_boundaries = False
 
     def __init__(self):
         self.reserved_seeds = []

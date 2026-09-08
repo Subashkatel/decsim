@@ -22,6 +22,8 @@ different claim.
 class Eager:
     """Ships every committed boundary, final or provisional."""
 
+    ships_provisional_boundaries = True
+
     def on_commit(self, window, final: bool) -> bool:
         """Ship."""
         del window
@@ -31,6 +33,8 @@ class Eager:
 
 class Held:
     """Opt-in: ship only when the committing result is final."""
+
+    ships_provisional_boundaries = False
 
     def on_commit(self, window, final: bool) -> bool:
         """Ship when final."""

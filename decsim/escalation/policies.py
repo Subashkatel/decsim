@@ -11,10 +11,8 @@ owns the units, hold-or-deliver and cancellation. Where Switching's
 threshold comes from is its ThresholdSource (threshold_sources.py).
 """
 
-import decsim.controller.policies as boundary_policies
 import decsim.records.decoding as decoding_records
 import decsim.records.windows as window_records
-import decsim.windows.schemes.sliding as sliding_scheme
 
 
 class EscalationPolicyBase:
@@ -199,40 +197,39 @@ class Switching(EscalationPolicyBase):
 
 
 def _refuse_flush_terminal(scheme) -> None:
-    """Switching needs the lookahead terminal policy on sliding windows."""
-    if type(scheme) is not sliding_scheme.SlidingWindowScheme:
+    """Switching needs a last window that still reads past its commit."""
+    if scheme.has_trailing_tail_context:
         return
-    lookahead = sliding_scheme.SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD
-    if scheme.terminal_policy is not lookahead:
-        raise ValueError(
-            "switching and strong-window recovery require the explicit "
-            "REGULAR_STRIDE_LOOKAHEAD terminal policy; the literature-exact "
-            "QUITS/Tan all-core flush has no trailing tail context"
-        )
+    raise ValueError(
+        "switching and strong-window recovery require a windowing scheme "
+        "whose last window carries buffer context past its commit; this "
+        "scheme has no trailing tail context"
+    )
 
 
 def _refuse_eager_serial_boundaries(boundary_policy) -> None:
-    if isinstance(boundary_policy, boundary_policies.Eager):
+    if boundary_policy.ships_provisional_boundaries:
         raise ValueError(
-            "serial switching requires Held boundaries: an eagerly "
+            "serial switching requires held boundaries: an eagerly "
             "shipped provisional boundary is never corrected when "
             "the strong result later revises the window"
         )
 
 
 def _refuse_absorbing_window_scheme(scheme, boundary_policy) -> None:
-    if type(scheme) is not sliding_scheme.SlidingWindowScheme:
+    if not scheme.commits_in_one_serial_chain:
         raise ValueError(
-            "escalation.strong_window forward requires the exact shipped "
-            "serial "
-            "SlidingWindowScheme"
+            "escalation.strong_window forward requires a windowing scheme "
+            "whose windows commit in one serial chain, since the forward "
+            "window absorbs the weak windows its region covers"
         )
-    if isinstance(boundary_policy, boundary_policies.Held):
+    if not boundary_policy.ships_provisional_boundaries:
         raise ValueError(
             "escalation.strong_window forward requires the weak chain to "
             "keep committing "
             "(the far boundary IS the restart window's weak commit); "
-            "the Held boundary policy would make later windows wait for "
+            "a boundary policy that holds provisional boundaries would "
+            "make later windows wait for "
             "the strong result and deadlock the strong window"
         )
 

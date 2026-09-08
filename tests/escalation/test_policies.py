@@ -419,7 +419,7 @@ def test_serial_switching_refuses_eager_boundaries_at_build():
     eager = boundary_policies.Eager()
     settings = _serial_switching_settings(eager)
     with pytest.raises(
-        ValueError, match="serial switching requires Held boundaries"
+        ValueError, match="serial switching requires held boundaries"
     ):
         machine_module.Machine.build(settings, 0)
 
@@ -439,6 +439,94 @@ def test_the_forward_window_refuses_held_boundaries_at_build():
     )
     settings = dataclasses.replace(settings, windows=windows)
     with pytest.raises(
-        ValueError, match="the Held boundary policy would make later windows"
+        ValueError,
+        match="a boundary policy that holds provisional boundaries would",
     ):
         machine_module.Machine.build(settings, 0)
+
+
+class DelegatingWindowScheme:
+    """A windowing scheme row a study adds: sliding windows, wrapped.
+
+    It fills the WindowingScheme port by holding a sliding scheme and
+    passing every call to it, and it declares the three facts the port
+    asks a row to declare. That is what a new row is: one class, the
+    declarations, and nothing else changes (gem5's port API, arXiv
+    2007.03152 lines 489-491).
+    """
+
+    has_trailing_tail_context = True
+    commits_in_one_serial_chain = True
+    supports_dynamic_streams = True
+
+    def __init__(self) -> None:
+        terminal = sliding_scheme.SlidingTerminalPolicy
+        lookahead = terminal.REGULAR_STRIDE_LOOKAHEAD
+        self.inner = sliding_scheme.SlidingWindowScheme(
+            terminal_policy=lookahead
+        )
+
+    def plan_operation(
+        self,
+        operation_id: int,
+        round_count: int,
+        *,
+        commit_round_count: int,
+        buffer_round_count: int,
+    ):
+        """The windows the sliding scheme lays out."""
+        return self.inner.plan_operation(
+            operation_id,
+            round_count,
+            commit_round_count=commit_round_count,
+            buffer_round_count=buffer_round_count,
+        )
+
+    def data_complete(self, window, *, readiness) -> bool:
+        """Whether the window has every round it reads."""
+        return self.inner.data_complete(window, readiness=readiness)
+
+    def validate_buffer(self, geometry) -> None:
+        """The sliding scheme's trailing floor."""
+        self.inner.validate_buffer(geometry)
+
+
+class UndeclaredWindowScheme:
+    """The same kind of row with the port's declarations left off.
+
+    It carries no port method either: the build refuses the row before
+    it plans a window.
+    """
+
+
+def test_a_windowing_scheme_added_from_outside_runs_under_switching():
+    """The forward window reads the row's declaration, not its class.
+
+    A row that commits in one serial chain and keeps trailing tail
+    context serves the forward strong window, whatever class it is.
+    """
+    scheme = DelegatingWindowScheme()
+    machine = fabric.switching_machine(
+        rounds=15,
+        escalated_windows={1},
+        strong_window="forward",
+        round_microseconds=4.0,
+        scheme=scheme,
+    )
+    machine.run()
+    assert fabric.frame_tiers(machine) == [
+        ((1, 0), "weak"),
+        ((1, 4), "weak"),
+        ((1, 1), "strong"),
+    ]
+
+
+def test_a_windowing_scheme_without_the_declarations_is_refused_by_name():
+    """A row that declares nothing is refused at build, by the fact it lacks."""
+    scheme = UndeclaredWindowScheme()
+    with pytest.raises(
+        ValueError,
+        match="UndeclaredWindowScheme does not declare "
+        "has_trailing_tail_context",
+    ):
+        fabric.switching_machine(rounds=9, escalated_windows={1}, scheme=scheme)

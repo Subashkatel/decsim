@@ -38,8 +38,12 @@ class BoundaryPolicy(Protocol):
 
     Eager ships at every weak commit (the default); Held ships only once
     the result is final. A provisional boundary that ships is never
-    revised, so serial switching (which can revise a result) needs Held.
+    revised, so serial switching (which can revise a result) needs a row
+    that holds. ships_provisional_boundaries is that fact, declared by
+    the row so a caller reads it rather than the row's class.
     """
+
+    ships_provisional_boundaries: bool
 
     def on_commit(self, window: window_records.Window, *, final: bool) -> bool:
         """Whether to ship the boundary now."""

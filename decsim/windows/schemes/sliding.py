@@ -27,6 +27,8 @@ class SlidingWindowScheme:
     """Serial commit and look-ahead buffer windows."""
 
     scheme_label = "sliding-window (serial commit/buffer chain)"
+    commits_in_one_serial_chain = True
+    supports_dynamic_streams = True
 
     def __init__(
         self,
@@ -34,7 +36,9 @@ class SlidingWindowScheme:
             SlidingTerminalPolicy.QUITS_TAN_FLUSH
         ),
     ) -> None:
+        lookahead = SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD
         self.terminal_policy = terminal_policy
+        self.has_trailing_tail_context = terminal_policy is lookahead
 
     def plan_operation(
         self,

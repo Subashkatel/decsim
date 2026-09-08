@@ -28,6 +28,15 @@ import decsim.windows.schemes.sliding as sliding_scheme
 import decsim.windows.settings as window_settings
 import decsim.windows.window_interactions as window_interactions
 
+# What every windowing scheme row declares, so the escalation policy and
+# the plan read a fact rather than the row's class (ports.py,
+# WindowingScheme).
+_SCHEME_DECLARATIONS = (
+    "has_trailing_tail_context",
+    "commits_in_one_serial_chain",
+    "supports_dynamic_streams",
+)
+
 
 @dataclasses.dataclass(frozen=True)
 class Plan:
@@ -100,9 +109,10 @@ def build_plan(
         window_interaction = window_interactions.DefaultWindowInteraction(
             reread_regions, boundary_payload
         )
-    is_sliding = type(scheme) is sliding_scheme.SlidingWindowScheme
-    if dynamic_streams and not is_sliding:
-        raise ValueError("dynamic streams require SlidingWindowScheme")
+    if dynamic_streams and not scheme.supports_dynamic_streams:
+        raise ValueError(
+            "dynamic streams require a windowing scheme that supports them"
+        )
     has_static_decode_plan = settings.workload.decode_operations is not None
     has_frontend = settings.workload.kind in ("surgery_ir", "qlx")
     commit_round_count = code.commit_rounds()
@@ -256,6 +266,16 @@ def _scheme(
     Switching needs the lookahead terminal policy on sliding windows:
     the literature-exact flush has no trailing tail context.
     """
+    scheme = _chosen_scheme(windows, escalation)
+    _refuse_undeclared_scheme(scheme)
+    return scheme
+
+
+def _chosen_scheme(
+    windows: window_settings.WindowSettings,
+    escalation: escalation_settings.EscalationSettings,
+):
+    """The Python-built scheme, the kind's row, or switching's lookahead."""
     if windows.scheme is not None:
         return windows.scheme
     row = tables.row(
@@ -269,6 +289,34 @@ def _scheme(
     return sliding_scheme.SlidingWindowScheme(terminal_policy=lookahead)
 
 
+def _refuse_undeclared_scheme(scheme) -> None:
+    """A windowing scheme row declares the facts its callers read."""
+    row = type(scheme)
+    row_name = row.__name__
+    declarations = ", ".join(_SCHEME_DECLARATIONS)
+    for declaration in _SCHEME_DECLARATIONS:
+        if hasattr(scheme, declaration):
+            continue
+        raise ValueError(
+            f"windowing scheme {row_name} does not declare "
+            f"{declaration}; every row of windows.kind declares "
+            f"{declarations}"
+        )
+
+
+def _refuse_undeclared_boundary_policy(boundary_policy) -> None:
+    """A boundary policy row declares whether it ships provisionally."""
+    if hasattr(boundary_policy, "ships_provisional_boundaries"):
+        return
+    row = type(boundary_policy)
+    row_name = row.__name__
+    raise ValueError(
+        f"boundary policy {row_name} does not declare "
+        "ships_provisional_boundaries; every boundary policy row declares "
+        "whether it ships a boundary before the result is final"
+    )
+
+
 def _boundary_policy(
     windows: window_settings.WindowSettings,
     escalation: escalation_settings.EscalationSettings,
@@ -280,6 +328,7 @@ def _boundary_policy(
     the weak windows it covers keeps the weak chain committing eagerly.
     """
     if windows.boundary_policy is not None:
+        _refuse_undeclared_boundary_policy(windows.boundary_policy)
         return windows.boundary_policy
     absorbs_weak_windows = escalation_build.absorbs_weak_windows(escalation)
     is_serial_switching = (

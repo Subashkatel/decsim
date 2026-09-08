@@ -84,11 +84,13 @@ def switching_machine(
     record: bool = False,
     escalation=None,
     trace_path=None,
+    scheme=None,
 ) -> machine_module.Machine:
     """One d=3 memory operation, weak-primary switching on declared ticks.
 
     escalation replaces the Python-built Switching settings when given
-    (a table row under its own kind).
+    (a table row under its own kind); scheme replaces the lookahead
+    sliding windows with a caller's own windowing scheme.
     """
     probability = escalate_only(escalated_windows)
     weak_latency = decoders.PresetLatencyDecoder(DECLARED_MICROSECONDS["weak"])
@@ -118,8 +120,10 @@ def switching_machine(
     qpu = qpu_settings.QpuSettings(
         distance=3, round_period_microseconds=round_microseconds
     )
-    lookahead = sliding_scheme.SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD
-    scheme = sliding_scheme.SlidingWindowScheme(terminal_policy=lookahead)
+    if scheme is None:
+        terminal = sliding_scheme.SlidingTerminalPolicy
+        lookahead = terminal.REGULAR_STRIDE_LOOKAHEAD
+        scheme = sliding_scheme.SlidingWindowScheme(terminal_policy=lookahead)
     windows = window_settings.WindowSettings(
         scheme=scheme, boundary_policy=boundary_policy
     )

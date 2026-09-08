@@ -96,7 +96,7 @@ class DecoderManager:
 
     def copy_sources(self) -> list:
         """The copy_made sources of the manager's own hops, in hop order."""
-        return [self.service.staging.copy_made]
+        return [self.service.staging.trace.copy_made]
 
     def input_transport(self):
         """The transport that moves an input into a unit's memory.

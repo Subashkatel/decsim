@@ -13,6 +13,7 @@ link (StrongRequests). Every terminal outcome goes out on request_ended
 and service_ended; the record ledger listens.
 """
 
+import dataclasses
 from typing import Callable, Optional
 
 import decsim.decoders.strong_requests as strong_requests_module
@@ -46,9 +47,7 @@ class DecodeOutcomes:
         self.strong_requests = strong_requests
         # the manager's cancel, for a weak result the policy keeps
         self.cancel_strong = cancel_strong
-        self.verdict_given = trace_source.TraceSource()
-        self.request_ended = trace_source.TraceSource()
-        self.service_ended = trace_source.TraceSource()
+        self.trace = _TraceSources()
 
     def deliver_weak(
         self,
@@ -63,7 +62,7 @@ class DecodeOutcomes:
         the window comes back later, through resolve_weak_request.
         """
         job.on_decoded(job, result)
-        self.service_ended.fire(job, self.engine.now)
+        self.trace.service_ended.fire(job, self.engine.now)
 
     def resolve_weak_request(
         self,
@@ -77,7 +76,7 @@ class DecodeOutcomes:
         has already asked the strong tier through the window side.
         """
         key = (job.operation_id, job.window_id)
-        self.verdict_given.fire(key, job.request_key, verdict)
+        self.trace.verdict_given.fire(key, job.request_key, verdict)
         self.strong_requests.resolve_weak(key)
         is_escalated = verdict is decoding_records.Verdict.ESCALATE
         if not is_escalated:
@@ -86,7 +85,7 @@ class DecodeOutcomes:
         processing = outcomes.PRIMARY_FORWARDED_FOR_DELIVERY
         if is_escalated:
             processing = outcomes.WEAK_AWAITED_STRONG
-        self.request_ended.fire(job, result, processing, self.engine.now)
+        self.trace.request_ended.fire(job, result, processing, self.engine.now)
 
     def close_companion_request(
         self,
@@ -95,7 +94,7 @@ class DecodeOutcomes:
     ) -> None:
         """The forced-class solve whose window is answered by the other one."""
         outcomes = decoding_records.RequestProcessingOutcome
-        self.request_ended.fire(
+        self.trace.request_ended.fire(
             job,
             result,
             outcomes.WEAK_FORCED_CLASS_COMPANION,
@@ -119,7 +118,7 @@ class DecodeOutcomes:
         )
         for held in deliveries:
             self.complete_strong(held)
-        self.service_ended.fire(job, self.engine.now)
+        self.trace.service_ended.fire(job, self.engine.now)
 
     def complete_strong(
         self, held: strong_requests_module.HeldStrongCompletion
@@ -132,7 +131,7 @@ class DecodeOutcomes:
             return
         request_job = held.request_job
         request_job.on_decoded(request_job, held.result)
-        self.request_ended.fire(
+        self.trace.request_ended.fire(
             held.request_job,
             held.result,
             decoding_records.RequestProcessingOutcome.STRONG_FORWARDED_FOR_DELIVERY,
@@ -155,8 +154,23 @@ class DecodeOutcomes:
         decode_output_ticks: Optional[int],
     ) -> None:
         """A request ended outside a conclusion: cancelled or withdrawn."""
-        self.request_ended.fire(job, result, outcome, decode_output_ticks)
+        self.trace.request_ended.fire(job, result, outcome, decode_output_ticks)
 
     def report_service(self, job: decoding_records.DecodeJob) -> None:
         """A physical decode ended outside its conclusion: aborted."""
-        self.service_ended.fire(job, self.engine.now)
+        self.trace.service_ended.fire(job, self.engine.now)
+
+
+@dataclasses.dataclass(frozen=True)
+class _TraceSources:
+    """Every event the decode outcomes reports, as one member.
+
+    gem5 groups a component's statistics into one nested Group member
+    (tmp/resources/gem5/src/base/stats/group.hh:60-92) rather than one
+    member per counter; a component's events are the same shape, so a
+    listener reaches all of them through one name.
+    """
+
+    verdict_given: trace_source.TraceSource = trace_source.new_source()
+    request_ended: trace_source.TraceSource = trace_source.new_source()
+    service_ended: trace_source.TraceSource = trace_source.new_source()

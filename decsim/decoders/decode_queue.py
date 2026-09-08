@@ -12,6 +12,7 @@ merged. The queue depth is sampled on every change for the switching
 study.
 """
 
+import dataclasses
 from typing import Optional
 
 import decsim.decoders.strong_requests as strong_requests_module
@@ -59,8 +60,7 @@ class WaitingJobs:
             _check_pools_bulk_strong_means(self.waiting_by_pool)
         self.strong_requests = strong_requests
         self.is_bulk_strong = is_bulk_strong
-        self.job_enqueued = trace_source.TraceSource()
-        self.depth_changed = trace_source.TraceSource()
+        self.trace = _TraceSources()
 
     def pool_of(self, job: decoding_records.DecodeJob) -> str:
         """The pool a job queues in: its kind's, when the run has it."""
@@ -82,7 +82,7 @@ class WaitingJobs:
             f"{job.label} READY -> enqueue "
             f"({pool_tag}ready-queue length = {queue_length})",
         )
-        self.job_enqueued.fire(job)
+        self.trace.job_enqueued.fire(job)
         self.sample_depth()
 
     def add_quietly(self, job: decoding_records.DecodeJob) -> None:
@@ -90,7 +90,7 @@ class WaitingJobs:
         pool = self.pool_of(job)
         queue = self.waiting_by_pool[pool]
         queue.append(job)
-        self.job_enqueued.fire(job)
+        self.trace.job_enqueued.fire(job)
         self.sample_depth()
 
     def remove(self, job: decoding_records.DecodeJob) -> bool:
@@ -123,7 +123,7 @@ class WaitingJobs:
     def sample_depth(self) -> None:
         """Report the total depth now."""
         depth = self.total()
-        self.depth_changed.fire(self.engine.now, depth)
+        self.trace.depth_changed.fire(self.engine.now, depth)
 
     def drain_in_scheduler_order(self, pool: str) -> list:
         """Empty the pool's queue into a list, next job first."""
@@ -249,3 +249,17 @@ def _batch_job(jobs: list, window_keys: list) -> decoding_records.DecodeJob:
         spatial_nodes=jobs[0].spatial_nodes,
         strong_decode_for=first_window_key,
     )
+
+
+@dataclasses.dataclass(frozen=True)
+class _TraceSources:
+    """Every event the waiting jobs reports, as one member.
+
+    gem5 groups a component's statistics into one nested Group member
+    (tmp/resources/gem5/src/base/stats/group.hh:60-92) rather than one
+    member per counter; a component's events are the same shape, so a
+    listener reaches all of them through one name.
+    """
+
+    job_enqueued: trace_source.TraceSource = trace_source.new_source()
+    depth_changed: trace_source.TraceSource = trace_source.new_source()

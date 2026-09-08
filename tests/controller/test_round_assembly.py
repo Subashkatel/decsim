@@ -57,7 +57,7 @@ def assembler_with(engine, packed, recorder, **settings_fields):
         rounds_in_flight=bound,
     )
     if recorder is not None:
-        assembler.round_event.connect(recorder.record)
+        assembler.trace.round_event.connect(recorder.record)
     return assembler
 
 

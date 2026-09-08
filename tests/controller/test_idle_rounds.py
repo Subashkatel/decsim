@@ -87,7 +87,7 @@ def accounting_with(policy, streams=None):
 def counters_on(accounting):
     """A counters listener on the accounting's one source."""
     counters = controller_counters.ControllerCounters()
-    accounting.idle_round_emitted.connect(counters.idle_round_emitted)
+    accounting.trace.idle_round_emitted.connect(counters.idle_round_emitted)
     return counters
 
 

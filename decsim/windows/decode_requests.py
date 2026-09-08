@@ -47,8 +47,7 @@ class DecodeRequestBuilder:
         # the primary store's outgoing port; it executes the input send
         self.store_output = store_output
         self.next_request_sequence = 0
-        self.copy_made = trace_source.TraceSource()
-        self.window_data_complete = trace_source.TraceSource()
+        self.trace = _TraceSources()
 
     # ---- building a request
 
@@ -83,7 +82,7 @@ class DecodeRequestBuilder:
         if window.t_data_complete is not None:
             return
         window.t_data_complete = self.engine.now
-        self.window_data_complete.fire(window)
+        self.trace.window_data_complete.fire(window)
         if not self.tracker.is_buffer_filled_by_memory(window):
             return
         self.engine.log(
@@ -260,7 +259,7 @@ class DecodeRequestBuilder:
             job.decoder_input, rounds=tuple(masked_rounds)
         )
         bits = _input_bit_count(job.decoder_input)
-        self.copy_made.fire(job, bits, job.memory.name, "masked view")
+        self.trace.copy_made.fire(job, bits, job.memory.name, "masked view")
 
     # ---- private
 
@@ -598,3 +597,17 @@ def _input_bit_count(decoder_input) -> Optional[int]:
 
 def _fragment_patch_order(fragment):
     return identity_records.stable_identity_order_key(fragment.patch_id)
+
+
+@dataclasses.dataclass(frozen=True)
+class _TraceSources:
+    """Every event the decode request builder reports, as one member.
+
+    gem5 groups a component's statistics into one nested Group member
+    (tmp/resources/gem5/src/base/stats/group.hh:60-92) rather than one
+    member per counter; a component's events are the same shape, so a
+    listener reaches all of them through one name.
+    """
+
+    copy_made: trace_source.TraceSource = trace_source.new_source()
+    window_data_complete: trace_source.TraceSource = trace_source.new_source()

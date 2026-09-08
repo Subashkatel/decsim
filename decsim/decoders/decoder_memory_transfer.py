@@ -64,7 +64,7 @@ class DecoderInputStaging:
     def __init__(self, transport, engine):
         self.transport = transport
         self.engine = engine
-        self.copy_made = trace_source.TraceSource()
+        self.trace = _TraceSources()
         # landing key -> the transfer in flight and the jobs joining it
         self.awaited_by_input: dict = {}
 
@@ -101,7 +101,7 @@ class DecoderInputStaging:
             job.memory = memory
             if job.decoder_input.rounds:
                 source_name = job.input_source_name
-                self.copy_made.fire(job, bits, source_name, memory.name)
+                self.trace.copy_made.fire(job, bits, source_name, memory.name)
             hold = job.input_hold
             if hold is not None:  # Buffer 0 may drop the rounds now
                 hold()
@@ -263,3 +263,16 @@ def _is_among(member: decoding_records.DecodeJob, released: list) -> bool:
         if done is member:
             return True
     return False
+
+
+@dataclasses.dataclass(frozen=True)
+class _TraceSources:
+    """Every event the decoder input staging reports, as one member.
+
+    gem5 groups a component's statistics into one nested Group member
+    (tmp/resources/gem5/src/base/stats/group.hh:60-92) rather than one
+    member per counter; a component's events are the same shape, so a
+    listener reaches all of them through one name.
+    """
+
+    copy_made: trace_source.TraceSource = trace_source.new_source()

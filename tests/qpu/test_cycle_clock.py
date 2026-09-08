@@ -145,7 +145,7 @@ def test_a_round_is_logged_as_fired_with_its_place_in_the_body():
 def test_a_command_arriving_mid_cycle_starts_on_the_next_boundary():
     engine, qpu, log = clocked_qpu(921_000)
     commands = command_events_module.CommandEvents()
-    qpu.command_event.connect(commands.command_event)
+    qpu.trace.command_event.connect(commands.command_event)
     body = memory_body(1, 1, 921_000)
 
     def issue_body():
@@ -164,7 +164,7 @@ def test_a_command_arriving_mid_cycle_starts_on_the_next_boundary():
 def test_a_command_arriving_on_a_boundary_starts_on_that_boundary():
     engine, qpu, log = clocked_qpu(1_250_000)
     commands = command_events_module.CommandEvents()
-    qpu.command_event.connect(commands.command_event)
+    qpu.trace.command_event.connect(commands.command_event)
     body = memory_body(1, 1, 1_250_000)
 
     def issue_body():

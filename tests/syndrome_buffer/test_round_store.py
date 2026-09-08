@@ -69,8 +69,8 @@ def store(rounds=None, on_slot_freed=None, listener=None):
         settings, on_slot_freed=on_slot_freed
     )
     if listener is not None:
-        the_store.round_stored.connect(listener.round_stored)
-        the_store.round_released.connect(listener.round_released)
+        the_store.trace.round_stored.connect(listener.round_stored)
+        the_store.trace.round_released.connect(listener.round_released)
     return the_store
 
 
@@ -308,9 +308,9 @@ def test_the_hold_sources_carry_the_token_and_its_rounds():
     def released(holder):
         heard.append(("released", holder))
 
-    the_store.hold_registered.connect(registered)
-    the_store.hold_transferred.connect(transferred)
-    the_store.hold_released.connect(released)
+    the_store.trace.hold_registered.connect(registered)
+    the_store.trace.hold_transferred.connect(transferred)
+    the_store.trace.hold_released.connect(released)
     the_store.register_hold("window", [(1, 1), (1, 2)])
     the_store.transfer_hold("window", "job")
     the_store.release_hold("job")

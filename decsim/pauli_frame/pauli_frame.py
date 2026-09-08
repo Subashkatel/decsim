@@ -128,8 +128,7 @@ class PauliFrame:
         # A stream id is whatever the front end chose; the frame never
         # looks inside it.
         self._windows_by_stream: dict[Any, list[tuple]] = {}
-        self.correction_accepted = trace_source.TraceSource()
-        self.correction_committed = trace_source.TraceSource()
+        self.trace = _TraceSources()
 
     def commit_correction(
         self, *, window_key, logical_observables, request_key, on_committed
@@ -158,7 +157,7 @@ class PauliFrame:
         self._records.append(record)
         pending = _PendingWrite(record, on_committed)
         self._pending_by_window[window_key] = pending
-        self.correction_accepted.fire(record)
+        self.trace.correction_accepted.fire(record)
         self._charge_write(window_key)
 
     def frame_for_stream(self, stream_id) -> Optional[ObservableBits]:
@@ -258,7 +257,7 @@ class PauliFrame:
                 f"{record.logical_observables}; holds {held} window corrections"
             ),
         )
-        self.correction_committed.fire(record)
+        self.trace.correction_committed.fire(record)
         pending.on_committed()
 
 
@@ -291,3 +290,17 @@ def _fold_by_xor(
         for index, bit in enumerate(observables):
             folded[index] ^= bit
     return tuple(folded)
+
+
+@dataclasses.dataclass(frozen=True)
+class _TraceSources:
+    """Every event the pauli frame reports, as one member.
+
+    gem5 groups a component's statistics into one nested Group member
+    (tmp/resources/gem5/src/base/stats/group.hh:60-92) rather than one
+    member per counter; a component's events are the same shape, so a
+    listener reaches all of them through one name.
+    """
+
+    correction_accepted: trace_source.TraceSource = trace_source.new_source()
+    correction_committed: trace_source.TraceSource = trace_source.new_source()

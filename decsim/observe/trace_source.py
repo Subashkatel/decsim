@@ -13,6 +13,7 @@ has, so every row of that table carries every source the port declares
 and a listener connects to all of them by name.
 """
 
+import dataclasses
 from typing import Callable
 
 
@@ -65,6 +66,17 @@ class SilentSource:
     def has_listeners(self) -> bool:
         """No one hears an event that never happens."""
         return False
+
+
+def new_source():
+    """A dataclass field default that gives each record its own source.
+
+    A component's events are one member, the way gem5 groups a
+    component's statistics into one nested Group rather than one member
+    per counter (tmp/resources/gem5/src/base/stats/group.hh:60-92); the
+    group is a frozen record whose fields are declared with this.
+    """
+    return dataclasses.field(default_factory=TraceSource)
 
 
 # the one silent source every row that reports nothing exposes

@@ -71,7 +71,7 @@ def issuer_with(engine, qpu, idle_rounds, windows, recorder, link=None):
         engine, link, qpu, PULSE_TICKS
     )
     if recorder is not None:
-        output.output_event.connect(recorder.output)
+        output.trace.output_event.connect(recorder.output)
     streams = feedback_streams.NoFeedbackStreams()
     resolved_operations = (resolved(1), resolved(2))
     return operation_issue.OperationIssuer(

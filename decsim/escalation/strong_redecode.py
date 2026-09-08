@@ -17,6 +17,7 @@ uses the per-job law, decode_queue.enqueue(job, send_input, on_decoded)
 with the committer's accept_strong_result as the return path.
 """
 
+import dataclasses
 import functools
 from typing import Callable, Optional
 
@@ -55,8 +56,7 @@ class StrongRedecode:
         self.pending = pending_strong_windows.PendingStrongWindows()
         # trace sources: the wait a held strong window sits in, from the
         # hold to the condition that ends it
-        self.strong_window_held = trace_source.TraceSource()
-        self.strong_window_left = trace_source.TraceSource()
+        self.trace = _TraceSources()
 
     # ---- the two entries
 
@@ -141,7 +141,7 @@ class StrongRedecode:
             return
         self.pending.take(held)
         self.selections.forget_sibling(window_key)
-        self.strong_window_left.fire(
+        self.trace.strong_window_left.fire(
             held.assignment.request_key,
             window_key,
             "cancelled: the weak result is confident",
@@ -181,7 +181,7 @@ class StrongRedecode:
         )
         self.pending.register(held)
         waits_for = pending_strong_windows.waiting_text(conditions)
-        self.strong_window_held.fire(
+        self.trace.strong_window_held.fire(
             assignment.request_key, key, waits_for, assignment.round_count
         )
 
@@ -192,7 +192,7 @@ class StrongRedecode:
             if job is None:
                 continue
             self.pending.take(held)
-            self.strong_window_left.fire(
+            self.trace.strong_window_left.fire(
                 job.request_key,
                 held.key,
                 held.conditions.released_description,
@@ -336,3 +336,17 @@ class _StrongSelections:
         waiting = self.landing_by_request_key.pop(request_key, None)
         if waiting is not None:
             waiting()
+
+
+@dataclasses.dataclass(frozen=True)
+class _TraceSources:
+    """Every event the strong redecode reports, as one member.
+
+    gem5 groups a component's statistics into one nested Group member
+    (tmp/resources/gem5/src/base/stats/group.hh:60-92) rather than one
+    member per counter; a component's events are the same shape, so a
+    listener reaches all of them through one name.
+    """
+
+    strong_window_held: trace_source.TraceSource = trace_source.new_source()
+    strong_window_left: trace_source.TraceSource = trace_source.new_source()

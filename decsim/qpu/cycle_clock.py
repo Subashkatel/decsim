@@ -64,8 +64,7 @@ class QPUDevice:
         self.readout_receiver = readout_receiver
         self.completion_receiver = completion_receiver
         self.idle_receiver = idle_receiver
-        self.command_event = trace_source.TraceSource()
-        self.round_emitted = trace_source.TraceSource()
+        self.trace = _TraceSources()
         self._running_by_operation_id: dict = {}
         self._idle_by_patch: dict = {}
         self._commands_waiting: list[program_records.RunOperationBody] = []
@@ -102,7 +101,7 @@ class QPUDevice:
                 "zero-duration detector emitters must finalize a stream round"
             )
         event = QPUCommandEvent("ARRIVED", self.engine.now, command)
-        self.command_event.fire(event)
+        self.trace.command_event.fire(event)
         self._commands_waiting.append(command)
         boundary = self.next_boundary()
         self._schedule_boundary(boundary)
@@ -216,7 +215,7 @@ class QPUDevice:
     def _start_command(self, command: program_records.RunOperationBody) -> None:
         operation = command.operation
         event = QPUCommandEvent("STARTED", self.engine.now, command)
-        self.command_event.fire(event)
+        self.trace.command_event.fire(event)
         for patch in patches_of(operation):
             self._idle_by_patch.pop(patch, None)
         if command.round_count == 0:
@@ -280,7 +279,7 @@ class QPUDevice:
             readout = dataclasses.replace(
                 payload, fragment_count=fragment_count, fragment_index=index
             )
-            self.round_emitted.fire(readout)
+            self.trace.round_emitted.fire(readout)
             self.readout_receiver.accept_qpu_readout(
                 readout, round_records.WINDOW_INPUT_ROUTE
             )
@@ -309,3 +308,17 @@ class _IdlePatch:
 
     operation_id: object
     emitted_round_count: int
+
+
+@dataclasses.dataclass(frozen=True)
+class _TraceSources:
+    """Every event the q p u device reports, as one member.
+
+    gem5 groups a component's statistics into one nested Group member
+    (tmp/resources/gem5/src/base/stats/group.hh:60-92) rather than one
+    member per counter; a component's events are the same shape, so a
+    listener reaches all of them through one name.
+    """
+
+    command_event: trace_source.TraceSource = trace_source.new_source()
+    round_emitted: trace_source.TraceSource = trace_source.new_source()

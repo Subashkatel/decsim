@@ -15,6 +15,7 @@ and keeps at most its depth in flight (Hennessy and Patterson App. C;
 rowD4).
 """
 
+import dataclasses
 import functools
 from typing import Callable
 
@@ -73,10 +74,7 @@ class DecodeService:
         # the manager's own work per dispatch, charged before the input
         # is asked for (decoder_manager.dispatch_cycles)
         self.dispatch_ticks = dispatch_ticks
-        self.job_dispatched = trace_source.TraceSource()
-        self.input_landed = trace_source.TraceSource()
-        self.job_started = trace_source.TraceSource()
-        self.job_finished = trace_source.TraceSource()
+        self.trace = _TraceSources()
 
     # ------------------------------------------ what the dispatcher asks
 
@@ -139,7 +137,7 @@ class DecodeService:
         if job.window is not None:
             job.window.t_dispatch = self.engine.now
         self._log_assignment(pool, job, claim_compute)
-        self.job_dispatched.fire(job, unit)
+        self.trace.job_dispatched.fire(job, unit)
         self._charge_dispatch(job, unit, claim_compute)
 
     def _charge_dispatch(
@@ -193,7 +191,7 @@ class DecodeService:
             job.window.service_began = True
         decoder = self.pool.decoder_for(job)
         self.engine.log(decode_queue.LOG_SOURCE, f"START DECODE {job.label}")
-        self.job_started.fire(job, job.unit)
+        self.trace.job_started.fire(job, job.unit)
         self._predict_compute_free(job)
         pipeline = self._pipeline_of(decoder, job)
         if job.decoder_input is not None:
@@ -246,7 +244,7 @@ class DecodeService:
             f"unit {unit.name} SRAM",
             lambda: _emitted_description(job, unit),
         )
-        self.job_finished.fire(job, unit)
+        self.trace.job_finished.fire(job, unit)
         self._offer_compute(unit)
 
     def evict(self, job: decoding_records.DecodeJob) -> None:
@@ -436,7 +434,7 @@ class DecodeService:
             f"unit {unit.name} SRAM",
             lambda: _landed_description(job, unit),
         )
-        self.input_landed.fire(job, unit)
+        self.trace.input_landed.fire(job, unit)
         holder = unit.holder
         if holder is job:
             # this job holds or was reserved the unit's compute
@@ -680,3 +678,19 @@ def job_defects_text(job: decoding_records.DecodeJob) -> str:
         defect_texts.append(str(defect))
     listed = ", ".join(defect_texts)
     return f"defects {{{listed}}}"
+
+
+@dataclasses.dataclass(frozen=True)
+class _TraceSources:
+    """Every event the decode service reports, as one member.
+
+    gem5 groups a component's statistics into one nested Group member
+    (tmp/resources/gem5/src/base/stats/group.hh:60-92) rather than one
+    member per counter; a component's events are the same shape, so a
+    listener reaches all of them through one name.
+    """
+
+    job_dispatched: trace_source.TraceSource = trace_source.new_source()
+    input_landed: trace_source.TraceSource = trace_source.new_source()
+    job_started: trace_source.TraceSource = trace_source.new_source()
+    job_finished: trace_source.TraceSource = trace_source.new_source()

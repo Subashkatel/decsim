@@ -66,7 +66,7 @@ def writer_with(
 ):
     recorder = round_events.RoundEventRecorder(engine)
     held = round_writes.HeldRounds(engine, on_full)
-    held.round_event.connect(recorder.record)
+    held.trace.round_event.connect(recorder.record)
     settings = round_store_settings.RoundStoreSettings(rounds=weak_rounds)
     weak_store = round_store_module.RoundStore(
         settings, on_slot_freed=held.retry

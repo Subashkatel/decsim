@@ -115,11 +115,11 @@ def runtime_over(operations, claims=None, round_ticks=1):
         resource_claims_by_operation_id=claims,
     )
     stamps = runtime_stamps_module.RuntimeStamps()
-    runtime.operation_issued.connect(stamps.operation_issued)
-    runtime.operation_started.connect(stamps.operation_started)
-    runtime.body_finished.connect(stamps.body_finished)
-    runtime.decode_released.connect(stamps.decode_released)
-    runtime.result_returned.connect(stamps.result_returned)
+    runtime.trace.operation_issued.connect(stamps.operation_issued)
+    runtime.trace.operation_started.connect(stamps.operation_started)
+    runtime.trace.body_finished.connect(stamps.body_finished)
+    runtime.trace.decode_released.connect(stamps.decode_released)
+    runtime.trace.result_returned.connect(stamps.result_returned)
     return runtime, engine, issuer, factory, stamps
 
 

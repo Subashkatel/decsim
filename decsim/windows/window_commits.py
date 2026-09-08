@@ -5,72 +5,18 @@ so it leaves for the dependent windows at decode done, the way Skoric's
 blocks pass their artificial defects on (2209.08552 lines 275-278),
 LILLIPUT's state register and qLDPC's net_error do
 (qldpc/decoders/sinter.py decode_shots_to_error); the frame commit
-downstream never gates the next window. The publisher rides the result
-over its tier's output link and charges the frame's write; the
-committer is every window job's on_decoded.
+downstream never gates the next window. The committer is every window
+job's on_decoded: it decides, and the decoder side executes the send
+that carries the correction to the frame (decoders/decoder_output.py).
 """
 
 import functools
-from typing import Callable
 
 import decsim.decoders.decode_queue as decode_queue_module
 import decsim.observe.trace_source as trace_source
 import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
-import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
-import decsim.windows.window_transfers as window_transfers
-
-
-class CorrectionPublisher:
-    """Rides a result over its output link to the frame, then calls back."""
-
-    def __init__(self, transfers, frame) -> None:
-        self.transfers = transfers
-        self.frame = frame
-
-    def publish(
-        self,
-        window: window_records.Window,
-        operation: program_records.Operation,
-        result: decoding_records.DecodeResult,
-        request_key: window_records.DecoderRequestKey,
-        on_committed: Callable[[], None],
-    ) -> None:
-        """Send the result on its tier's output link; commit it at delivery.
-
-        A weak result rides weak_decoder_to_frame, a strong one
-        strong_decoder_to_frame; the frame's priced write, when the run
-        has a frame, gates on_committed.
-        """
-        output_path = transfer_records.LinkPath.WEAK_DECODER_TO_FRAME
-        if request_key.tier is not window_records.DecoderTier.WEAK:
-            output_path = transfer_records.LinkPath.STRONG_DECODER_TO_FRAME
-        payload_bits = window_transfers.result_payload_bits(result, operation)
-        commit = functools.partial(
-            self._commit, window.key, result, request_key, on_committed
-        )
-        self.transfers.send_for_window(
-            output_path, window, operation, request_key, payload_bits, commit
-        )
-
-    def _commit(
-        self,
-        window_key: tuple,
-        result: decoding_records.DecodeResult,
-        request_key: window_records.DecoderRequestKey,
-        on_committed: Callable[[], None],
-    ) -> None:
-        """Charge and install one final correction, then call back."""
-        if self.frame is None:
-            on_committed()
-            return
-        self.frame.commit_correction(
-            window_key=window_key,
-            logical_observables=result.logical_observables,
-            request_key=request_key,
-            on_committed=on_committed,
-        )
 
 
 class WindowCommitter:
@@ -79,8 +25,8 @@ class WindowCommitter:
     The engine stamps and logs, the planner and the tracker name the
     window and its operation, the escalation policy answers the
     window's confidence, the decode queue hears that answer, and the
-    courier, the publisher, the strong redecode and the results are the
-    four the commit hands to; the strong redecode (None when the run
+    courier, the decoder output, the strong redecode and the results are
+    the four the commit hands to; the strong redecode (None when the run
     never escalates) hears an escalated result before its provisional
     commit and every weak commit after it. Trace source:
     window_committed(window, contribution), the window's record and the
@@ -93,7 +39,7 @@ class WindowCommitter:
         planner,
         tracker,
         courier,
-        publisher: CorrectionPublisher,
+        decoder_output,
         strong_redecode,
         results,
         escalation_policy,
@@ -103,7 +49,7 @@ class WindowCommitter:
         self.planner = planner
         self.tracker = tracker
         self.courier = courier
-        self.publisher = publisher
+        self.decoder_output = decoder_output
         self.strong_redecode = strong_redecode
         self.results = results
         self.escalation_policy = escalation_policy
@@ -141,7 +87,7 @@ class WindowCommitter:
         commit = functools.partial(
             self.commit, window, operation, result, job.request_key, True
         )
-        self.publisher.publish(
+        self.decoder_output.publish(
             window, operation, result, job.request_key, commit
         )
 
@@ -157,7 +103,7 @@ class WindowCommitter:
         finish = functools.partial(
             self.finish_strong, window, operation, result, job.request_key
         )
-        self.publisher.publish(
+        self.decoder_output.publish(
             window, operation, result, job.request_key, finish
         )
 

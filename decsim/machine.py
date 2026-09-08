@@ -53,6 +53,7 @@ import decsim.decoders.belief_matching.decoder as belief_matching
 import decsim.decoders.belief_propagation_osd.decoder as belief_propagation_osd
 import decsim.decoders.decoder_manager as decoder_manager_module
 import decsim.decoders.decoder_memory as decoder_memory_module
+import decsim.decoders.decoder_output as decoder_output_module
 import decsim.decoders.decoders as decoders
 import decsim.decoders.schedulers as schedulers
 import decsim.decoders.settings as decoder_settings
@@ -86,8 +87,10 @@ import decsim.qpu.syndrome_devices as syndrome_devices
 import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
 import decsim.records.seeds as seed_records
+import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 import decsim.seeding as seeding
+import decsim.syndrome_buffer.round_output as round_output
 import decsim.syndrome_buffer.round_store as round_store_module
 import decsim.syndrome_buffer.settings as round_store_settings
 import decsim.syndrome_buffer.strong_round_writer as strong_round_writer_module
@@ -1311,8 +1314,22 @@ def _window_manager(
         primary_tier=escalation_policy.primary_tier,
     )
     transfers = window_transfers_module.WindowTransfers(engine, links)
+    decoder_output = decoder_output_module.DecoderOutput(transfers, pauli_frame)
+    weak_output = round_output.RoundStoreOutput(
+        transfers,
+        transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER,
+        "Buffer 0",
+    )
+    strong_output = round_output.RoundStoreOutput(
+        transfers,
+        transfer_records.LinkPath.STRONG_BUFFER_TO_STRONG_DECODER,
+        "Buffer 1",
+    )
+    primary_output = weak_output
+    if escalation_policy.primary_tier is window_records.DecoderTier.STRONG:
+        primary_output = strong_output
     builder = decode_requests.DecodeRequestBuilder(
-        engine, planner, tracker, plan.window_interaction, transfers
+        engine, planner, tracker, plan.window_interaction, primary_output
     )
     ledger = committed_rounds.LogicalLedger()
     results = operation_results.OperationResults(
@@ -1323,7 +1340,6 @@ def _window_manager(
         conditional_release,
         on_workload_complete,
     )
-    publisher = window_commits.CorrectionPublisher(transfers, pauli_frame)
     # the courier's landing callback reaches the facade and the
     # committer's two hooks reach the strong redecode, both built after
     # them; this stands in at wiring time, and a run that never
@@ -1334,7 +1350,7 @@ def _window_manager(
         committer_redecode = late
     courier = window_boundaries.BoundaryCourier(
         planner,
-        transfers,
+        decoder_output,
         plan.window_interaction,
         plan.boundary_policy,
         late.accept_boundary,
@@ -1344,7 +1360,7 @@ def _window_manager(
         planner,
         tracker,
         courier,
-        publisher,
+        decoder_output,
         committer_redecode,
         results,
         escalation_policy,
@@ -1368,7 +1384,8 @@ def _window_manager(
         tracker,
         retention,
         builder,
-        transfers,
+        decoder_output,
+        strong_output,
         requester,
         ledger,
         plan.window_interaction,
@@ -1419,7 +1436,8 @@ def _strong_redecode(
     tracker,
     retention,
     builder,
-    transfers,
+    decoder_output,
+    strong_output,
     requester,
     ledger,
     interaction,
@@ -1449,7 +1467,12 @@ def _strong_redecode(
             engine, planner, tracker, retention, builder
         )
     return strong_redecode_module.StrongRedecode(
-        engine, shape, transfers, decode_queue, on_strong_decoded
+        engine,
+        shape,
+        decoder_output,
+        strong_output,
+        decode_queue,
+        on_strong_decoded,
     )
 
 

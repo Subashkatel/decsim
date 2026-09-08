@@ -16,7 +16,9 @@ import decsim.escalation.policies as escalation_policies
 import decsim.observe.run_views as run_views
 import decsim.records.program as program_records
 import decsim.records.rounds as round_records
+import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
+import decsim.syndrome_buffer.round_output as round_output
 import decsim.syndrome_buffer.round_store as round_store_module
 import decsim.syndrome_buffer.settings as round_store_settings
 import decsim.windows.decode_requests as decode_requests
@@ -116,9 +118,14 @@ class _Fixture:
         )
         link = _Link()
         transfers = window_transfers.WindowTransfers(self.engine, link)
+        store_output = round_output.RoundStoreOutput(
+            transfers,
+            transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER,
+            "Buffer 0",
+        )
         interaction = window_interactions.DefaultWindowInteraction(0)
         self.builder = decode_requests.DecodeRequestBuilder(
-            self.engine, self.planner, self.tracker, interaction, transfers
+            self.engine, self.planner, self.tracker, interaction, store_output
         )
         self.queue = _RecordingQueue()
         policy = escalation_policies.Baseline()

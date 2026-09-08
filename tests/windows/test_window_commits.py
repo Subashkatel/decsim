@@ -8,6 +8,7 @@ prediction; a window awaiting strong is not final.
 
 import types
 
+import decsim.decoders.decoder_output as decoder_output_module
 import decsim.engine as engine_module
 import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
@@ -115,7 +116,7 @@ class _Fixture:
         )
         self.transfers = _Transfers(self.engine, 4)
         self.frame = _Frame(self.engine, frame_ticks)
-        publisher = window_commits.CorrectionPublisher(
+        decoder_output = decoder_output_module.DecoderOutput(
             self.transfers, self.frame
         )
         self.committer = window_commits.WindowCommitter(
@@ -123,7 +124,7 @@ class _Fixture:
             planner,
             tracker,
             self.courier,
-            publisher,
+            decoder_output,
             self.escalation,
             self.results,
             self.policy,
@@ -213,7 +214,9 @@ def test_a_strong_result_replaces_the_weak_prediction_and_ships_the_held():
 
 def test_a_frameless_run_commits_at_the_delivery():
     fixture = _Fixture()
-    publisher = window_commits.CorrectionPublisher(fixture.transfers, None)
+    decoder_output = decoder_output_module.DecoderOutput(
+        fixture.transfers, None
+    )
     committed = []
     window = fixture.window
     operation = program_records.Operation(4, "logical", (0,), patches=(0,))
@@ -221,7 +224,7 @@ def test_a_frameless_run_commits_at_the_delivery():
         4, 1, window_records.DecoderTier.WEAK, 0
     )
     result = decoding_records.DecodeResult(4, 1, logical_observables=(1,))
-    publisher.publish(
+    decoder_output.publish(
         window,
         operation,
         result,

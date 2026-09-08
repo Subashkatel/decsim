@@ -72,25 +72,6 @@ class WindowTransfers:
         self.link.send(path, payload_bits, now_ticks, attribution, delivered)
         return expected_delay_ticks
 
-    def send_selection(
-        self,
-        weak_job: decoding_records.DecodeJob,
-        strong_request_key: window_records.DecoderRequestKey,
-        on_delivered: Callable[[], None],
-    ) -> int:
-        """Send a window's strong selection over weak_decoder_to_strong_decoder.
-
-        The send is in the weak job's name for the strong request it
-        selects; returns the delay the link expects.
-        """
-        return self.send_for_job(
-            transfer_records.LinkPath.WEAK_DECODER_TO_STRONG_DECODER,
-            weak_job,
-            payload_bits=None,
-            request_key=strong_request_key,
-            on_delivered=on_delivered,
-        )
-
     def send_boundary(
         self,
         attribution: transfer_records.TransferAttribution,
@@ -114,19 +95,6 @@ class WindowTransfers:
             return 0
         self.engine.schedule(delay_ticks, on_landed, label="held input lands")
         return delay_ticks
-
-
-def result_payload_bits(
-    result: decoding_records.DecodeResult, operation: program_records.Operation
-) -> int:
-    """A result reaches the frame as one bit per logical observable.
-
-    A timing-only result stands for one observable per patch.
-    """
-    if result.logical_observables is not None:
-        return len(result.logical_observables)
-    patch_count = len(operation.patches)
-    return max(1, patch_count)
 
 
 def _run_at_delivery(on_delivered: Callable[[], None], _transfer) -> None:

@@ -15,7 +15,6 @@ strong tier's window side's.
 """
 
 import dataclasses
-import functools
 from typing import Callable, Optional
 
 import decsim.decoders.decode_queue as decode_queue_module
@@ -23,7 +22,6 @@ import decsim.observe.trace_source as trace_source
 import decsim.records.decoding as decoding_records
 import decsim.records.identity as identity_records
 import decsim.records.program as program_records
-import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 
 
@@ -39,13 +37,14 @@ class DecodeRequestBuilder:
     """
 
     def __init__(
-        self, engine, planner, tracker, interaction, transfers
+        self, engine, planner, tracker, interaction, store_output
     ) -> None:
         self.engine = engine
         self.planner = planner
         self.tracker = tracker
         self.interaction = interaction
-        self.transfers = transfers
+        # the primary store's outgoing port; it executes the input send
+        self.store_output = store_output
         self.next_request_sequence = 0
         self.copy_made = trace_source.TraceSource()
         self.window_data_complete = trace_source.TraceSource()
@@ -200,21 +199,6 @@ class DecodeRequestBuilder:
             )
         return payloads
 
-    def input_send(
-        self, job: decoding_records.DecodeJob, path: transfer_records.LinkPath
-    ) -> Callable[[Callable[[], None]], int]:
-        """The job's input send: at dispatch it rides the path into the unit.
-
-        The payload bits are fixed now: the staging clears the job's
-        payloads when the input lands.
-        """
-        payload_bits = job.payload_bits()
-        return functools.partial(self._send_input, job, path, payload_bits)
-
-    def resend_held_input(self) -> Callable[[Callable[[], None]], int]:
-        """A job resubmitted after a withdrawal: its input lands at once."""
-        return self._land_held_input
-
     # ---- the WindowInputGate port
 
     def may_stage(self, job: decoding_records.DecodeJob) -> bool:
@@ -323,20 +307,6 @@ class DecodeRequestBuilder:
                 None, window_info, fragment, round_index
             )
             payloads.append(payload)
-
-    def _send_input(
-        self,
-        job: decoding_records.DecodeJob,
-        path: transfer_records.LinkPath,
-        payload_bits: Optional[int],
-        on_landed: Callable[[], None],
-    ) -> int:
-        return self.transfers.send_for_job(
-            path, job, payload_bits=payload_bits, on_delivered=on_landed
-        )
-
-    def _land_held_input(self, on_landed: Callable[[], None]) -> int:
-        return self.transfers.land_after(0, on_landed)
 
     def _resolving_without_new_slots(self, key: tuple, visiting: set) -> bool:
         if key in visiting:
@@ -489,13 +459,14 @@ class DecodeRequester:
     def _primary_submission(
         self, job: decoding_records.DecodeJob, is_input_held: bool
     ) -> decoding_records.Submission:
-        """One primary job with its input send; a held input lands at once."""
-        if is_input_held:
-            resend = self.builder.resend_held_input()
-            return decoding_records.Submission(job, resend)
-        send_input = self.builder.input_send(
-            job, self.retention.primary_input_path
-        )
+        """One primary job with its input send; a held input lands at once.
+
+        The send is the store's own (syndrome_buffer/round_output.py):
+        this side asks for it and the decoder manager calls it at
+        dispatch, and neither of them executes it.
+        """
+        store_output = self.builder.store_output
+        send_input = store_output.input_send_for(job, is_input_held)
         return decoding_records.Submission(job, send_input)
 
     def _bind_input_hold(self, primary_jobs: list, key: tuple) -> bool:

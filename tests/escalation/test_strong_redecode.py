@@ -70,19 +70,26 @@ class _Shape:
         return None
 
 
-class _Transfers:
-    """Records every send; a delivery is released by the test."""
+class _DecoderOutput:
+    """The weak decoder's end of the selection hop; the test delivers it."""
 
     def __init__(self) -> None:
         self.selections = []
-        self.inputs = []
 
     def send_selection(self, weak_job, strong_request_key, on_delivered):
         self.selections.append((weak_job, strong_request_key, on_delivered))
         return 30
 
-    def send_for_job(self, path, job, *, payload_bits, on_delivered):
-        self.inputs.append((path, job, payload_bits, on_delivered))
+
+class _StrongOutput:
+    """Syndrome buffer 1's end of the strong input hop."""
+
+    def __init__(self) -> None:
+        self.inputs = []
+
+    def send_input(self, job, on_landed):
+        payload_bits = job.payload_bits()
+        self.inputs.append((job, payload_bits, on_landed))
         return 60
 
 
@@ -104,13 +111,19 @@ class _DecodeQueue:
 
 def _redecode(shape):
     engine = engine_module.Engine()
-    transfers = _Transfers()
+    decoder_output = _DecoderOutput()
+    strong_output = _StrongOutput()
     queue = _DecodeQueue()
     on_strong_decoded = object()  # opaque: the committer's return path
     redecode = strong_redecode_module.StrongRedecode(
-        engine, shape, transfers, queue, on_strong_decoded
+        engine,
+        shape,
+        decoder_output,
+        strong_output,
+        queue,
+        on_strong_decoded,
     )
-    return redecode, transfers, queue, on_strong_decoded
+    return redecode, decoder_output, strong_output, queue, on_strong_decoded
 
 
 def _call_names(queue) -> list:
@@ -123,11 +136,11 @@ def _call_names(queue) -> list:
 def test_a_job_built_now_is_queued_behind_its_selection():
     strong_job = _strong_job(5)
     shape = _Shape(strong_job, is_held=False)
-    redecode, transfers, queue, on_strong_decoded = _redecode(shape)
+    redecode, output, _strong, queue, on_strong_decoded = _redecode(shape)
     weak_job = _weak_job()
     redecode.escalate(weak_job)
-    assert len(transfers.selections) == 1
-    assert transfers.selections[0][1] == strong_job.request_key
+    assert len(output.selections) == 1
+    assert output.selections[0][1] == strong_job.request_key
     assert _call_names(queue) == ["enqueue", "await"]
     _kind, queued, _send_input, return_path = queue.calls[0]
     assert queued is strong_job
@@ -138,7 +151,7 @@ def test_a_job_built_now_is_queued_behind_its_selection():
 def test_a_held_job_leaves_at_its_far_boundary_commit():
     strong_job = _strong_job(5)
     shape = _Shape(strong_job, is_held=True)
-    redecode, transfers, queue, _on_strong_decoded = _redecode(shape)
+    redecode, output, strong_output, queue, _done = _redecode(shape)
     weak_job = _weak_job()
     redecode.escalate(weak_job)
     assert shape.selection_ticks == [(WINDOW_KEY, 30)]
@@ -152,21 +165,21 @@ def test_a_held_job_leaves_at_its_far_boundary_commit():
 def test_a_sibling_started_with_the_weak_job_is_selected_as_it_is():
     strong_job = _strong_job(5)
     shape = _Shape(strong_job, is_held=False)
-    redecode, transfers, queue, _on_strong_decoded = _redecode(shape)
+    redecode, output, strong_output, queue, _done = _redecode(shape)
     weak_job = _weak_job()
     submission = redecode.parallel_strong_submission(weak_job)
     assert submission.job is strong_job
     redecode.escalate(weak_job)
     # one plan, one selection, no second job: the sibling is selected
     assert len(shape.planned) == 1
-    assert len(transfers.selections) == 1
+    assert len(output.selections) == 1
     assert queue.calls == [("await", WINDOW_KEY, strong_job.request_key)]
 
 
 def test_a_strong_input_landed_before_its_selection_waits_for_it():
     strong_job = _strong_job(5)
     shape = _Shape(strong_job, is_held=False)
-    redecode, transfers, queue, _on_strong_decoded = _redecode(shape)
+    redecode, output, strong_output, queue, _done = _redecode(shape)
     weak_job = _weak_job()
     redecode.escalate(weak_job)
     _kind, _job, send_input, _return_path = queue.calls[0]
@@ -175,10 +188,10 @@ def test_a_strong_input_landed_before_its_selection_waits_for_it():
     # the pool's estimate is the later of the input (60) and the
     # selection (30 ticks from now)
     assert expected_delay == 60
-    _path, _job, _bits, input_delivered = transfers.inputs[0]
+    _job, _bits, input_delivered = strong_output.inputs[0]
     input_delivered()
     assert landings == []
-    _weak, _key, selection_delivered = transfers.selections[0]
+    _weak, _key, selection_delivered = output.selections[0]
     selection_delivered()
     assert landings == ["landed"]
     assert queue.calls[-1] == ("accept", WINDOW_KEY, strong_job.request_key)

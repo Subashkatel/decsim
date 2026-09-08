@@ -36,13 +36,14 @@ class BoundaryCourier:
     def __init__(
         self,
         planner,
-        transfers,
+        decoder_output,
         interaction,
         boundary_policy,
         on_boundary_received: Callable[[tuple, bool], None],
     ) -> None:
         self.planner = planner
-        self.transfers = transfers
+        # the boundary leaves a decoder, so the decoder side sends it
+        self.decoder_output = decoder_output
         self.interaction = interaction
         self.boundary_policy = boundary_policy
         # (source window key, is_unblocked): a delivery landed in a window;
@@ -249,7 +250,7 @@ class BoundaryCourier:
             version,
             delivery_version,
         )
-        self.transfers.send_boundary(attribution, receive)
+        self.decoder_output.send_boundary(attribution, receive)
 
     def _receive_boundary(
         self,

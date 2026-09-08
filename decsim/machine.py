@@ -226,7 +226,7 @@ class Machine:
                 execution_runtime.retry_ready_operations()
             ),
         )
-        patch_by_identity = controller_side._patch_by_identity(plan)
+        patch_by_identity = controller_side.resolved_patches_by_identity(plan)
         idle_rounds = idle_rounds_module.IdleRoundAccounting(
             plan.idle_policy, decoder_manager, patch_by_identity, streams, qpu
         )

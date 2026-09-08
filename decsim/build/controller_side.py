@@ -150,7 +150,7 @@ def build_feedback_streams(
     )
 
 
-def _patch_by_identity(plan: plan_build.Plan) -> dict:
+def resolved_patches_by_identity(plan: plan_build.Plan) -> dict:
     """The resolved patches by identity, for the idle accounting."""
     patch_by_identity = {}
     for patch in plan.run_plan.resolved_patches:

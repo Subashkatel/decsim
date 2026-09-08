@@ -253,3 +253,30 @@ def test_a_row_that_declares_no_forced_solve_refuses_a_forced_job():
         decoder_module.WindowDecoderBase.decode_forced_window(
             row, None, model, faults, syndrome, 0
         )
+
+
+def test_a_model_whose_observable_rides_a_two_detector_fault_says_so_once():
+    """No class can be pinned; the model is named once, with the reason.
+
+    The observable flips a fault that already flips two detectors, so
+    the appended observable detector would give that column three and
+    PyMatching has no edge for it. Compiling is where the model is
+    known, so the reason is reported there rather than once per window
+    that then escalates without one.
+    """
+    check = [[1, 0], [1, 1], [0, 1]]
+    faults = placed_faults(check, [0.01, 0.01], [[1, 0]])
+    model = window_of(faults, 3)
+    row = adapter.PyMatchingDecoder()
+    reported = []
+
+    def hear(reported_model, reason: str) -> None:
+        reported.append((reported_model, reason))
+
+    row.forced_solve_unavailable.connect(hear)
+    graphs = row.compiled_for(faults, model)
+    row.compiled_for(faults, model)
+    assert graphs.forced is None
+    assert len(reported) == 1
+    assert reported[0][0] is model
+    assert "2312.04522" in reported[0][1]

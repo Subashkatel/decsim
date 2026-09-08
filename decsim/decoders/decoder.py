@@ -62,6 +62,10 @@ class DecoderBase(abc.ABC):
     fault_model_requirement = fault_models.NO_FAULT_MODEL_REQUIRED
     stage_recorded = trace_source.SILENT
     window_checked = trace_source.SILENT
+    # forced_solve_unavailable(model, reason) once per window model this
+    # row cannot pin to a logical class, so a run whose confidence reads
+    # forced solves hears the reason once instead of once per window
+    forced_solve_unavailable = trace_source.SILENT
     # what this row's decode can show a confidence signal beyond the
     # correction; the yaml refuses a signal whose requirement is not here
     decoder_evidence = decoding_records.NO_DECODER_EVIDENCE

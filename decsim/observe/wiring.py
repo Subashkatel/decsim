@@ -18,6 +18,7 @@ afterwards would miss them.
 import functools
 from typing import Optional
 
+import decsim.decoders.decode_queue as decode_queue_module
 import decsim.decoders.decoder as decoder_module
 import decsim.decoders.decoder_manager as decoder_manager_module
 import decsim.engine as engine_module
@@ -95,6 +96,7 @@ def observe(
     stages = _connect_stage_records(pool)
     referee_audit = _connect_referee_audit(pool)
     sampled_shots = _connect_sampled_shots(syndrome_source)
+    _connect_unpinnable_observables(engine, pool)
     decode_records = _decode_records(observation)
     _connect_decode_records(decoder_manager, decode_records)
     trace_writer = _trace_writer(observation, engine, process_name)
@@ -368,6 +370,28 @@ def _connect_decoder_trace(
         memory.taken.connect(taken)
     for decoder in _routed_decoders(pool):
         decoder.stage_recorded.connect(trace_writer.stage_recorded)
+
+
+def _connect_unpinnable_observables(engine, pool) -> None:
+    """Say once per model that its windows can pin no logical class.
+
+    Compiling the model is where that is known. A confidence built from
+    forced-class solves reads no gap on such a model, so without this
+    line the run shows one unexplained escalation per window of it.
+    """
+    report = functools.partial(_log_unpinnable_observable, engine)
+    for decoder in _routed_decoders(pool):
+        decoder.forced_solve_unavailable.connect(report)
+
+
+def _log_unpinnable_observable(engine, model, reason: str) -> None:
+    """One line naming the model and why no class can be forced."""
+    detector_count = len(model.detector_ids)
+    engine.log(
+        decode_queue_module.LOG_SOURCE,
+        f"NO FORCED SOLVE on a {detector_count}-detector window model: "
+        f"{reason}",
+    )
 
 
 def _routed_decoders(pool) -> list:

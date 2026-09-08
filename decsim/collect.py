@@ -33,6 +33,7 @@ from collections.abc import Callable, Iterable, Mapping
 from typing import Any, Optional
 
 import decsim.machine as machine_module
+import decsim.records.results as result_records
 import decsim.settings as machine_settings
 import decsim.windows.built_window_models as built_window_models
 
@@ -119,7 +120,7 @@ class Shot:
     task: Task
     seed: int
     machine: machine_module.Machine
-    result: machine_module.RunResult
+    result: result_records.RunResult
     wall_seconds: float
 
 

@@ -4,8 +4,9 @@ decsim is one root and a row of components, in the order a readout
 travels. Each component depends on the port of the next, never on its
 class, so a component can be replaced without any other one knowing.
 `decsim/ports.py` is that list of ports, top to bottom in pipeline order,
-with the record that crosses each; `decsim/machine.py` builds them in the
-same order and wires them the way gem5's config script assigns ports.
+with the record that crosses each; `decsim/machine.py` wires them in the
+same order, calling the builders of `decsim/build/` the way gem5's config
+script assigns ports.
 
 ## The readout's path
 
@@ -56,8 +57,8 @@ reports one row per path.
 The syndrome source, the round store, the decoder, the escalation
 policy, the confidence signal, the windowing scheme, the idle policy
 and the workload are the pluggable parts a table picks: each has its
-abstract class in `decsim/ports.py` and one table of rows at the top
-of `decsim/machine.py`. Two parts are pluggable through their own
+abstract class in `decsim/ports.py` and one table of rows in the
+settings module of the package that owns it. Two parts are pluggable through their own
 settings section instead. The link fabric is built from the `links`
 section, a number card read by `link_profiles.from_yaml` and wired by
 `fabric.LinkFabric`, so a card of your own is numbers in that section,
@@ -106,5 +107,6 @@ boundary of its clock.
 ## Read next
 
 - `decsim/ports.py`: the ports in pipeline order, one method per handoff.
-- `decsim/machine.py`: the build, in that same order, and the tables.
+- `decsim/machine.py`: the wiring order.
+- `decsim/build/`: one module per pipeline stage, called in that order.
 - `docs/plug_in_a_component.md`: how to fill one of those ports yourself.

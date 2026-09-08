@@ -13,9 +13,10 @@ from pathlib import Path
 
 import yaml
 
+import decsim.build.escalation as escalation_build
 import decsim.collect as collect
+import decsim.decoders.settings as decoder_settings
 import decsim.front.refusal as refusal
-import decsim.machine as machine
 import decsim.settings as machine_settings
 
 _THIS_FILE = Path(__file__)
@@ -149,10 +150,10 @@ class ExperimentConfig:
     @property
     def active_tier(self) -> str:
         """The tier that decodes the plan's windows: weak or strong."""
-        return machine.primary_tier(self.settings.escalation)
+        return escalation_build.primary_tier(self.settings.escalation)
 
     @property
-    def active_decoder(self) -> machine.decoder_settings.DecoderSettings:
+    def active_decoder(self) -> decoder_settings.DecoderSettings:
         """The decoder card of the tier that decodes the plan's windows."""
         tier = self.active_tier
         return getattr(self.settings, f"{tier}_decoder")

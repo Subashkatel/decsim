@@ -6,7 +6,7 @@
 # sweep makes this file cheap to run, so the test suite runs it as a smoke check.
 #
 # One section per component; a pluggable component's section carries a
-# `kind` key naming a row of the tables at the top of decsim/machine.py,
+# `kind` key naming a row of a table in that package's settings module,
 # and each section is read by the package it configures (its
 # settings.py). Kept honest by tests/front/test_yaml_surface.py:
 # the test fails if this file and the readers drift apart. Knobs the yaml

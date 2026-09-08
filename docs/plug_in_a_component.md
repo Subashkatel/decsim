@@ -15,8 +15,9 @@ a class you wrote in your own file runs with no registration at all:
 while you are still changing the class.
 
 **Add a table row.** A `kind` string in a settings record is a row of a
-table at the top of `decsim/machine.py`, which is what lets a yaml name
-your class and what makes it appear in a sweep. One row, nothing more.
+table in that package's own settings module, which is what lets a yaml
+name your class and what makes it appear in a sweep. One row, nothing
+more.
 
 ## The three steps
 
@@ -97,5 +98,5 @@ Your class runs inside the machine, so it keeps the machine's contract:
 ## Read next
 
 - `decsim/ports.py`: the port you are filling.
-- `decsim/machine.py`: the tables, at the top of the file.
+- the settings module of the package you are plugging into: its table.
 - `configs/reference.yaml`: the section your `kind` goes in.

@@ -17,12 +17,12 @@ from typing import Optional
 
 import decsim.decoders.strong_requests as strong_requests_module
 import decsim.records.decoding as decoding_records
+import decsim.records.log_sources as log_sources
 import decsim.trace_source as trace_source
 
 # The decoder manager component's name in the narrator (docs/
 # architecture.md's component table). It lives here because every part of
 # the manager imports this module, and the manager's facade imports them.
-LOG_SOURCE = "Decoder manager"
 DEFAULT_POOL = "default"
 STRONG_POOL = "strong"
 # the pool each job kind asks for; a run without that pool queues it in
@@ -78,7 +78,7 @@ class WaitingJobs:
         pool_tag = pool_tag_of(pool)
         queue_length = len(queue)
         self.engine.log(
-            LOG_SOURCE,
+            log_sources.DECODER_MANAGER,
             f"{job.label} READY -> enqueue "
             f"({pool_tag}ready-queue length = {queue_length})",
         )

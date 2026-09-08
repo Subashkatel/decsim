@@ -18,7 +18,6 @@ afterwards would miss them.
 import functools
 from typing import Optional
 
-import decsim.decoders.decode_queue as decode_queue_module
 import decsim.decoders.decoder as decoder_module
 import decsim.decoders.decoder_manager as decoder_manager_module
 import decsim.engine as engine_module
@@ -42,6 +41,7 @@ import decsim.observe.settings as observe_settings
 import decsim.observe.stage_records as stage_records_module
 import decsim.observe.trace_writer as trace_writer_module
 import decsim.observe.window_ledger as window_ledger_module
+import decsim.records.log_sources as log_sources
 import decsim.seeding as seeding
 
 
@@ -390,7 +390,7 @@ def _log_unpinnable_observable(engine, model, reason: str) -> None:
     """One line naming the model and why no class can be forced."""
     detector_count = len(model.detector_ids)
     engine.log(
-        decode_queue_module.LOG_SOURCE,
+        log_sources.DECODER_MANAGER,
         f"NO FORCED SOLVE on a {detector_count}-detector window model: "
         f"{reason}",
     )

@@ -22,6 +22,7 @@ this file reads the result's bits.
 
 from typing import Callable, Optional
 
+import decsim.records.log_sources as log_sources
 import decsim.records.program as program_records
 
 
@@ -54,7 +55,7 @@ class ConditionalRelease:
             else:
                 instruction = "result return"
             self.engine.log(
-                "PauliFrame",
+                log_sources.PAULI_FRAME,
                 f"DISPATCH {instruction} for op#{decision.target_operation_id} "
                 f"-> controller -> controller sequencer",
             )

@@ -12,6 +12,7 @@ RoundStore's.
 import dataclasses
 from typing import Callable, Optional
 
+import decsim.records.log_sources as log_sources
 import decsim.records.rounds as round_records
 import decsim.records.transfers as transfer_records
 import decsim.syndrome_buffer.round_store as round_store_module
@@ -86,7 +87,7 @@ class StrongRoundWriter:
             round_key, packet_bits, "controller assembler", "Buffer 1"
         )
         self.engine.log_io(
-            "SyndromeBuffer1", lambda: self._received_text(packet)
+            log_sources.STRONG_BUFFER, lambda: self._received_text(packet)
         )
         if self.on_round_stored is not None:
             self.on_round_stored(packet.operation_id, packet.round_index)

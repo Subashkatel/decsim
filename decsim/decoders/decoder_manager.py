@@ -29,6 +29,7 @@ import decsim.decoders.decoder_memory_transfer as staging_module
 import decsim.decoders.decoder_pool as decoder_pool_module
 import decsim.decoders.strong_requests as strong_requests_module
 import decsim.records.decoding as decoding_records
+import decsim.records.log_sources as log_sources
 import decsim.records.windows as window_records
 
 
@@ -238,7 +239,7 @@ class DecoderManager:
             None,
         )
         self.engine.log(
-            decode_queue.LOG_SOURCE,
+            log_sources.DECODER_MANAGER,
             f"WITHDRAW {job.label} (invalidated before start)",
         )
 
@@ -283,7 +284,7 @@ class DecoderManager:
         job.soft_output_ticks = ticks
         unit_name = job.decoding_unit_name
         self.engine.log(
-            decode_queue.LOG_SOURCE,
+            log_sources.DECODER_MANAGER,
             f"CONFIDENCE {job.label} on unit {unit_name}: {ticks} ticks",
         )
 
@@ -422,7 +423,7 @@ class DecoderManager:
         pool_tag = decode_queue.pool_tag_of(job.pool)
         free_now = self.service.free_unit_count(job.pool)
         self.engine.log(
-            decode_queue.LOG_SOURCE,
+            log_sources.DECODER_MANAGER,
             f"DECODE DONE {job.label} ({pool_tag}units free now {free_now})",
         )
         job.on_done()

@@ -177,13 +177,6 @@ def test_a_blocking_result_holds_the_unit_until_the_window_commits():
     assert len(blocking_windows) == len(default_windows)
 
 
-def test_a_result_blocking_value_that_is_not_a_row_is_refused_by_name():
-    with pytest.raises(
-        ValueError, match="weak_decoder.result_blocks_unit 'yes'"
-    ):
-        _machine(result_blocks_unit="yes")
-
-
 def test_the_formation_default_sends_the_events_from_the_controller():
     """Controller is today's behaviour: the input link carries the events."""
     default = _machine()

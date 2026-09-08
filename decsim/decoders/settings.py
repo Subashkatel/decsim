@@ -71,15 +71,6 @@ DECODER_INPUTS = {"copy": True, "in_place": False}
 # single writer, so in_place is refused there by name.
 DECODER_BOUNDARY_FOLDS = {"copy": True, "in_place": False}
 
-# <tier>.result_blocks_unit says when a unit's compute goes back to its
-# pool: false at the decode's end, which is Chen's frame manager taking
-# the correction without blocking the decoder (2605.30765 lines
-# 1618-1620), or true at the window's commit, which is Riverlane's
-# polled status register: the decoder holds its output until the reader
-# takes it (2410.05202 lines 1256-1259). The row is read on the tier
-# that decodes the plan's windows.
-DECODER_RESULT_BLOCKING = {False: False, True: True}
-
 
 @dataclasses.dataclass(frozen=True)
 class DecoderSettings:
@@ -98,9 +89,13 @@ class DecoderSettings:
     store keeps them. boundary_fold names a row of
     DECODER_BOUNDARY_FOLDS: whether the window's boundary mask is XORed
     into a duplicate of the landed input or into the unit's own memory.
-    result_blocks_unit names a row of DECODER_RESULT_BLOCKING: whether
-    the unit's compute goes back to its pool at the decode's end or at
-    the commit, where the window side has the result in hand.
+    result_blocks_unit says when a unit's compute goes back to its pool:
+    false at the decode's end, which is Chen's frame manager taking the
+    correction without blocking the decoder (2605.30765 lines
+    1618-1620), or true at the window's commit, which is Riverlane's
+    polled status register, the decoder holding its output until the
+    reader takes it (2410.05202 lines 1256-1259). It is read on the tier
+    that decodes the plan's windows.
     kind None is no decoder at all, right for a run that plans no
     windows. A Python-built decoder is routed as it is, with no engine
     stages around it.
@@ -119,7 +114,10 @@ class DecoderSettings:
 
     @classmethod
     def from_yaml(
-        cls, section: Mapping, clocks: config.ClockSettings
+        cls,
+        section: Mapping,
+        clocks: config.ClockSettings,
+        section_name: str,
     ) -> "DecoderSettings":
         """A tier section: kind, units, unit memory and the engine card."""
         engine = section["engine"]
@@ -133,6 +131,7 @@ class DecoderSettings:
         input_kind = section.get("input", "copy")
         boundary_fold = section.get("boundary_fold", "copy")
         result_blocks_unit = section.get("result_blocks_unit", False)
+        _check_boolean(section_name, "result_blocks_unit", result_blocks_unit)
         return cls(
             kind=section["kind"],
             units=section["units"],
@@ -218,3 +217,12 @@ def _dispatch_microseconds(
         )
     clock = section["clock"]
     return clocks.microseconds(cycles, clock)
+
+
+def _check_boolean(section_name: str, key: str, value) -> None:
+    """A yaml key that is written true or false, checked where it enters."""
+    if value is True or value is False:
+        return
+    raise ValueError(
+        f"{section_name}.{key} {value!r} is not a boolean; write true or false"
+    )

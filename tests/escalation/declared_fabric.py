@@ -16,7 +16,7 @@ import decsim.controller.settings as controller_settings
 import decsim.decoders.decoders as decoders
 import decsim.decoders.settings as decoder_settings
 import decsim.escalation.policies as escalation_policies
-import decsim.escalation.strong_window_shapes as strong_window_shapes
+import decsim.escalation.settings as escalation_settings
 import decsim.escalation.threshold_sources as threshold_sources
 import decsim.frontends.settings as workload_settings
 import decsim.links.link_profiles as link_profiles
@@ -104,7 +104,7 @@ def switching_machine(
     )
     boundary_policy = boundary_policies.Held()
     # a name off the table stays, so the settings refuse it by name
-    row = strong_window_shapes.STRONG_WINDOW_SHAPES.get(strong_window)
+    row = escalation_settings.STRONG_WINDOW_SHAPES.get(strong_window)
     if row is not None and row.absorbs_weak_windows:
         boundary_policy = None
     operation = program_records.Operation(
@@ -126,7 +126,7 @@ def switching_machine(
         router=router, unit_pools={"default": 1, "strong": 1}
     )
     if escalation is None:
-        escalation = decoder_settings.EscalationSettings(
+        escalation = escalation_settings.EscalationSettings(
             policy=policy, strong_window=strong_window
         )
     links = declared_profile(strong_buffer_microseconds)

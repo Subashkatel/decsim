@@ -1,6 +1,7 @@
 """The strong window's shape: which rounds the strong tier re-decodes, and when.
 
-Two rows of STRONG_WINDOW_SHAPES, named by escalation.strong_window
+Two rows of STRONG_WINDOW_SHAPES (escalation/settings.py), named by
+escalation.strong_window
 (Toshio et al. 2510.25222). ContextWindow reads the escalated window's
 commit region with one buffer of raw context on each side, built the
 moment it is asked for; that geometry is decsim's own, not the paper's
@@ -100,8 +101,9 @@ class StrongWindowCollaborators:
 class StrongWindowShape(Protocol):
     """How the strong tier's window is laid out, as the redecode sees it.
 
-    Table rows: two_sided_context and forward (STRONG_WINDOW_SHAPES,
-    below). A row that cannot build its job at the escalation returns an
+    Table rows: two_sided_context and forward
+    (STRONG_WINDOW_SHAPES, escalation/settings.py). A row that cannot
+    build its job at the escalation returns an
     assignment with no job and declares what releases it
     (release_conditions), and the redecode asks held_job for the job when
     those conditions fire; the row never learns which hook rang.
@@ -569,14 +571,6 @@ class ForwardWindow:
         self.collaborators.retention.hold_strong_input(job)
         return job
 
-
-# escalation.strong_window names one of these rows: the shape of the
-# window the strong tier re-decodes. The root resolves the name once and
-# builds the row with the window components it needs.
-STRONG_WINDOW_SHAPES = {
-    "two_sided_context": ContextWindow,
-    "forward": ForwardWindow,
-}
 
 # both shipped rows read raw rounds on both faces and fold no committed
 # neighbour boundary into the strong job's input

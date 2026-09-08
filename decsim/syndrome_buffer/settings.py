@@ -9,9 +9,9 @@ from typing import Optional
 class RoundStoreSettings:
     """The yaml's `round_store` and `strong_round_store` sections.
 
-    Table row (decsim/machine.py): round_store. rounds bounds the store;
-    None is unbounded. A full store makes the controller hold the
-    finished round and write it in order once a slot frees, the
+    Table row (ROUND_STORES, round_store.py): round_store. rounds bounds
+    the store; None is unbounded. A full store makes the controller hold
+    the finished round and write it in order once a slot frees, the
     backpressure real systems apply to their source (Caune et al.
     2410.05202: the sequencer stalls on the decoder's status register).
     """

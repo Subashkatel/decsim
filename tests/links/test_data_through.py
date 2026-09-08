@@ -31,6 +31,7 @@ import dataclasses
 import pytest
 
 import decsim.decoders.settings as decoder_settings
+import decsim.escalation.settings as escalation_settings
 import decsim.frontends.settings as workload_settings
 import decsim.links.link_profiles as link_profiles
 import decsim.machine as machine_module
@@ -197,7 +198,9 @@ def machine_settings(shape: str, distance: int):
         kind="pymatching", engine_megahertz=ENGINE_MEGAHERTZ
     )
     if shape == "weak":
-        escalation = decoder_settings.EscalationSettings(kind="weak_baseline")
+        escalation = escalation_settings.EscalationSettings(
+            kind="weak_baseline"
+        )
         return machine_module.MachineSettings(
             workload=workload,
             qpu=qpu,
@@ -206,7 +209,7 @@ def machine_settings(shape: str, distance: int):
             links=links,
         )
     if shape == "strong":
-        escalation = decoder_settings.EscalationSettings(kind="strong_only")
+        escalation = escalation_settings.EscalationSettings(kind="strong_only")
         return machine_module.MachineSettings(
             workload=workload,
             qpu=qpu,
@@ -214,8 +217,8 @@ def machine_settings(shape: str, distance: int):
             escalation=escalation,
             links=links,
         )
-    nats = decoder_settings.decibels_to_nats(UNREACHABLE_GAP_DECIBELS)
-    escalation = decoder_settings.EscalationSettings(
+    nats = escalation_settings.decibels_to_nats(UNREACHABLE_GAP_DECIBELS)
+    escalation = escalation_settings.EscalationSettings(
         kind="switching",
         confidence="complementary_gap",
         gap_threshold_decibels=UNREACHABLE_GAP_DECIBELS,

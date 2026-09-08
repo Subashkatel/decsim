@@ -256,8 +256,9 @@ def window_completion_ticks(
     completion_ticks = {}
 
     def record_completion(job, result) -> None:
-        del result
         completion_ticks[job.label] = engine.now
+        keep = decoding_records.Verdict.KEEP
+        manager.resolve_weak_request(job, result, keep)
 
     for window_id in range(3):
         label = f"w{window_id}"

@@ -58,7 +58,7 @@ def _weak_job(delivered):
     )
 
 
-def test_a_kept_weak_result_cancels_the_live_strong_request():
+def test_a_kept_weak_request_cancels_the_live_strong_request():
     cancelled = []
     outcomes, requests, _policy = _outcomes(
         decoding_records.Verdict.KEEP, cancelled
@@ -67,13 +67,13 @@ def test_a_kept_weak_result_cancels_the_live_strong_request():
     job = _weak_job(delivered)
     requests.admit(job, now=0)
     result = decoding_records.DecodeResult(1, 0)
-    outcomes.conclude_weak(job, result)
-    assert cancelled == [(1, 0)]
-    assert job.awaiting_strong_result is False
+    outcomes.deliver_weak(job, result)
     assert delivered == [(job, result)]
+    outcomes.resolve_weak_request(job, result, decoding_records.Verdict.KEEP)
+    assert cancelled == [(1, 0)]
 
 
-def test_an_escalated_weak_result_reaches_on_decoded_awaiting_the_strong():
+def test_an_escalated_weak_request_closes_the_attempt_and_cancels_nothing():
     cancelled = []
     outcomes, requests, _policy = _outcomes(
         decoding_records.Verdict.ESCALATE, cancelled
@@ -82,11 +82,13 @@ def test_an_escalated_weak_result_reaches_on_decoded_awaiting_the_strong():
     job = _weak_job(delivered)
     requests.admit(job, now=0)
     result = decoding_records.DecodeResult(1, 0)
-    outcomes.conclude_weak(job, result)
-    assert cancelled == []
-    assert job.awaiting_strong_result is True
+    outcomes.deliver_weak(job, result)
     assert delivered == [(job, result)]
-    assert (1, 0) not in requests.unresolved_weak_windows
+    outcomes.resolve_weak_request(
+        job, result, decoding_records.Verdict.ESCALATE
+    )
+    assert cancelled == []
+    assert (1, 0) not in requests.open_weak_requests_by_window
 
 
 def test_a_strong_result_teaches_the_policy_and_reaches_its_destination_once():
@@ -174,7 +176,8 @@ def test_the_terminal_sources_carry_every_ended_request_and_service():
     )
     requests.admit(job, now=0)
     result = decoding_records.DecodeResult(1, 0)
-    outcomes.conclude_weak(job, result)
+    outcomes.deliver_weak(job, result)
+    outcomes.resolve_weak_request(job, result, decoding_records.Verdict.KEEP)
     (request,) = ledger.requests
     (service,) = ledger.services
     assert request.request_key == job.request_key
@@ -191,6 +194,7 @@ def test_a_run_with_no_listener_concludes_the_same_way():
     job = _weak_job(delivered)
     requests.admit(job, now=0)
     result = decoding_records.DecodeResult(1, 0)
-    outcomes.conclude_weak(job, result)
+    outcomes.deliver_weak(job, result)
+    outcomes.resolve_weak_request(job, result, decoding_records.Verdict.KEEP)
     assert delivered == [(job, result)]
     assert policy.learned == []

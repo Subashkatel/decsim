@@ -102,15 +102,23 @@ def _manager(engine, decoder):
     )
 
 
-def _ignore(_job, _result):
-    pass
+def _resolving(manager):
+    """An on_decoded that closes the request, as the window side does."""
+    keep = decoding_records.Verdict.KEEP
+
+    def on_decoded(job, result):
+        manager.resolve_weak_request(job, result, keep)
+
+    return on_decoded
 
 
-def _ending_in(ends, engine):
+def _ending_in(ends, engine, manager):
     """An on_decoded that keeps the tick each job's result arrived."""
+    keep = decoding_records.Verdict.KEEP
 
-    def on_decoded(job, _result):
+    def on_decoded(job, result):
         ends[job.label] = engine.now
+        manager.resolve_weak_request(job, result, keep)
 
     return on_decoded
 
@@ -172,7 +180,7 @@ def test_a_job_starts_when_its_input_landed_and_the_gate_allows():
     transfer_ticks = config.microseconds_to_ticks(2.0)
     job = _job(0, gate)
     send_input = _send_after(engine, transfer_ticks)
-    on_decoded = _ending_in(done, engine)
+    on_decoded = _ending_in(done, engine, manager)
     manager.enqueue(job, send_input, on_decoded)
     engine.run()
     assert starts["w0"] == transfer_ticks
@@ -188,7 +196,8 @@ def test_a_parked_job_keeps_its_slot_and_releases_the_compute():
     gate = _Gate()
     gate.is_open = False
     job = _job(0, gate)
-    manager.enqueue(job, None, _ignore)
+    on_decoded = _resolving(manager)
+    manager.enqueue(job, None, on_decoded)
     (unit,) = manager.pool.units_by_pool["default"]
     assert job.is_parked is True
     assert unit.residents == [job]
@@ -215,7 +224,8 @@ def test_the_second_slots_transfer_overlaps_the_compute():
     for index in range(3):
         job = _job(index)
         send_input = _send_after(engine, transfer_ticks)
-        manager.enqueue(job, send_input, _ignore)
+        on_decoded = _resolving(manager)
+        manager.enqueue(job, send_input, on_decoded)
     engine.run()
     assert starts == {
         "w0": config.microseconds_to_ticks(1.0),
@@ -234,7 +244,7 @@ def test_a_pipelined_unit_issues_at_its_initiation_interval():
     manager = _manager(engine, decoder)
     starts = _recording(manager, engine)
     ends = {}
-    on_decoded = _ending_in(ends, engine)
+    on_decoded = _ending_in(ends, engine, manager)
     for index in range(3):
         job = _job(index)
         manager.enqueue(job, None, on_decoded)
@@ -268,7 +278,7 @@ def test_an_initiation_interval_stays_a_lower_bound_below_the_response():
     manager = _manager(engine, decoder)
     starts = _recording(manager, engine)
     ends = {}
-    on_decoded = _ending_in(ends, engine)
+    on_decoded = _ending_in(ends, engine, manager)
     first = _job(0)
     second = _job(1)
     manager.enqueue(first, None, on_decoded)
@@ -313,7 +323,7 @@ def test_a_declared_pipeline_depth_bounds_the_decodes_in_flight():
         dispatches[job.label] = engine.now
 
     manager.service.job_dispatched.connect(note_dispatch)
-    on_decoded = _ending_in(ends, engine)
+    on_decoded = _ending_in(ends, engine, manager)
     transfer_ticks = config.microseconds_to_ticks(5.0)
     for index in range(4):
         job = _job(index)
@@ -353,8 +363,9 @@ def test_a_pipelined_unit_refuses_two_in_flight_response_times():
     manager = _manager(engine, decoder)
     first = _job(0)
     second = _job(1)
-    manager.enqueue(first, None, _ignore)
-    manager.enqueue(second, None, _ignore)
+    on_decoded = _resolving(manager)
+    manager.enqueue(first, None, on_decoded)
+    manager.enqueue(second, None, on_decoded)
     with pytest.raises(RuntimeError, match="completes in order"):
         engine.run()
 

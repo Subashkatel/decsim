@@ -76,22 +76,18 @@ class StrongRequests:
             tuple, window_records.DecoderRequestKey
         ] = {}
         self.held_by_window: dict[tuple, HeldStrongCompletion] = {}
-        self.unresolved_weak_windows: set = set()
+        # window key -> the request keys of its open weak attempt
+        self.open_weak_requests_by_window: dict[tuple, set] = {}
         self.counts = StrongCounts()
 
     # ------------------------------------------------------ admission
 
     def admit(self, job: decoding_records.DecodeJob, now: int) -> None:
-        """Open the request's place: a strong destination, or a weak attempt.
-
-        A gap half is neither tier: it feeds the join, not the ledger.
-        """
+        """Open the request's place: a strong destination, or a weak attempt."""
         if job.strong_decode_for is not None:
             self.admit_strong(job, now)
             return
         if job.on_done is not None:
-            return
-        if job.gap_sibling_for is not None:
             return
         self.admit_weak(job, now)
 
@@ -107,15 +103,20 @@ class StrongRequests:
         job.request_admitted_ticks = now
 
     def admit_weak(self, job: decoding_records.DecodeJob, now: int) -> None:
-        """Open one destination window's decode attempt."""
+        """Open one request of a destination window's decode attempt.
+
+        A window's attempt is the forced-class requests its window side
+        submits together, so an attempt holds one or two request keys;
+        each of them is admitted once.
+        """
         key = (job.operation_id, job.window_id)
-        if key in self.unresolved_weak_windows:
+        requests = self.open_weak_requests_by_window.setdefault(key, set())
+        if job.request_key in requests:
             raise RuntimeError(
-                f"second weak decode for window {key} while the first is "
-                "unresolved: a destination window decodes once at a time, "
-                "so that its strong result reaches the attempt that asked"
+                f"weak request {job.request_key} for window {key} is already "
+                "open: a DecodeJob is admitted once"
             )
-        self.unresolved_weak_windows.add(key)
+        requests.add(job.request_key)
         job.request_admitted_ticks = now
 
     def resolve_weak(self, key: tuple) -> None:
@@ -124,7 +125,7 @@ class StrongRequests:
         The destination may be decoded again and stops keeping a strong
         result.
         """
-        self.unresolved_weak_windows.remove(key)
+        del self.open_weak_requests_by_window[key]
 
     def is_live_request(self, job: decoding_records.DecodeJob) -> bool:
         """Whether the strong job still carries its destination's request.
@@ -170,7 +171,7 @@ class StrongRequests:
             return True
         if key in self.waiting_selection_by_window:
             return True
-        return key in self.unresolved_weak_windows
+        return key in self.open_weak_requests_by_window
 
     # --------------------------------------------- batching and service
 
@@ -312,7 +313,7 @@ class StrongRequests:
             ("waiting for strong selection", self.waiting_selection_by_window),
             ("holding an unclaimed strong result", self.held_by_window),
             ("still holding a strong request", self.running_by_window),
-            ("decoding with no outcome", self.unresolved_weak_windows),
+            ("decoding with no outcome", self.open_weak_requests_by_window),
         )
         unsettled = {}
         for state, keys in states:

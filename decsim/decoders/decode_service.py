@@ -24,7 +24,6 @@ import decsim.decoders.decode_queue as decode_queue
 import decsim.decoders.decoder_memory_transfer as staging_module
 import decsim.decoders.decoder_pool as decoder_pool_module
 import decsim.decoders.decoder_unit as decoder_unit_module
-import decsim.decoders.gap_joins as gap_joins_module
 import decsim.decoders.strong_requests as strong_requests_module
 import decsim.observe.trace_source as trace_source
 import decsim.records.decoding as decoding_records
@@ -33,13 +32,13 @@ import decsim.records.decoding as decoding_records
 class DecodeService:
     """Stages, starts, prices and frees every decode on its unit.
 
-    Seven attributes: the engine, the pool that routes and holds the
+    Six attributes: the engine, the pool that routes and holds the
     units, the staging, the strong requests (a merged batch's members
-    are the ledger's knowledge), the gap joins spawned at service start,
-    and the two calls back to the manager: on_completed(job, result) at
-    every decode's end, and dispatch() wherever compute frees inside an
-    engine event, so the non-reentrant dispatch loop runs from the same
-    points it always did. Four trace sources, each carrying (job, unit):
+    are the ledger's knowledge), and the two calls back to the manager:
+    on_completed(job, result) at every decode's end, and dispatch()
+    wherever compute frees inside an engine event, so the non-reentrant
+    dispatch loop runs from the same points it always did. Four trace
+    sources, each carrying (job, unit):
     job_dispatched when the job takes its slot, input_landed when every
     transfer of its input has landed, job_started when its decode
     begins, job_finished when its compute ends.
@@ -51,7 +50,6 @@ class DecodeService:
         pool: decoder_pool_module.DecoderPool,
         staging: staging_module.DecoderInputStaging,
         strong_requests: strong_requests_module.StrongRequests,
-        gap_joins: gap_joins_module.GapJoins,
         on_completed: Callable[[decoding_records.DecodeJob, object], None],
         dispatch: Callable[[], None],
     ) -> None:
@@ -59,7 +57,6 @@ class DecodeService:
         self.pool = pool
         self.staging = staging
         self.strong_requests = strong_requests
-        self.gap_joins = gap_joins
         self.on_completed = on_completed
         self.dispatch = dispatch
         self.job_dispatched = trace_source.TraceSource()
@@ -149,7 +146,6 @@ class DecodeService:
         job.service_started = True
         if job.window is not None:
             job.window.service_began = True
-        self.gap_joins.spawn(job)
         decoder = self.pool.decoder_for(job)
         self.engine.log(decode_queue.LOG_SOURCE, f"START DECODE {job.label}")
         self.job_started.fire(job, job.unit)
@@ -584,8 +580,6 @@ class DecodeService:
 
 def _is_outside_pipelined_model(job: decoding_records.DecodeJob) -> bool:
     if job.strong_decode_for is not None:
-        return True
-    if job.gap_sibling_for is not None:
         return True
     return len(job.service_original_request_keys) > 1
 

@@ -3,17 +3,19 @@
 A job waits in the WaitingJobs of its pool, the DecodeDispatcher places
 it on the DecoderUnit the DecoderPool offers, the DecodeService stages
 its input into that unit's memory and starts the routed decoder once the
-input landed and the window owes no boundary, the GapJoins spawn the
-split-gap sibling at service start, the StrongRequests say which
-destination waits for which strong result, and the DecodeOutcomes
-decide what a finished decode means and deliver it through the job's
-on_decoded. The facade implements the DecodeQueue port (admits, cancels,
-withdraws, releases, awaits and accepts a strong selection, settles) and
-wires the six, the shape of gem5's
-cache (BaseCache owns its MSHR queue, write buffer and tags, each one
-job, and implements the ports: src/mem/cache/base.hh). One job reads as
-enqueue, dispatcher.run, service.dispatch_to, service.begin,
-decode_completed, outcomes.conclude_weak, job.on_decoded.
+input landed and the window owes no boundary, the StrongRequests say
+which destination waits for which strong result, and the DecodeOutcomes
+deliver a finished decode through the job's on_decoded and close the
+request when the window side answers. The manager schedules, says when
+a job's input moves, and returns results; it executes no send, holds no
+join and holds no result for a third party. The facade implements the
+DecodeQueue port (admits, cancels, withdraws, releases, awaits and
+accepts a strong selection, resolves a weak request, settles) and wires
+the five, the shape of gem5's cache (BaseCache owns its MSHR queue,
+write buffer and tags, each one job, and implements the ports:
+src/mem/cache/base.hh). One job reads as enqueue, dispatcher.run,
+service.dispatch_to, service.begin, decode_completed,
+outcomes.deliver_weak, job.on_decoded.
 """
 
 from typing import Callable, Optional
@@ -25,7 +27,6 @@ import decsim.decoders.decode_service as decode_service
 import decsim.decoders.decoder_memory as decoder_memory_module
 import decsim.decoders.decoder_memory_transfer as staging_module
 import decsim.decoders.decoder_pool as decoder_pool_module
-import decsim.decoders.gap_joins as gap_joins_module
 import decsim.decoders.strong_requests as strong_requests_module
 import decsim.records.decoding as decoding_records
 import decsim.records.windows as window_records
@@ -34,7 +35,7 @@ import decsim.records.windows as window_records
 class DecoderManager:
     """Admits, cancels, withdraws, releases and settles every decode.
 
-    Seven attributes: the six one-job components the module docstring
+    Six attributes: the five one-job components the module docstring
     names, and the engine it logs and reads the clock on.
     """
 
@@ -51,7 +52,6 @@ class DecoderManager:
             decoder_memory_module.DecoderMemoryConfig
         ] = None,
         escalation_policy,
-        link=None,
     ):
         if unit_pools is None:
             unit_pools = {"default": num_units}
@@ -67,12 +67,6 @@ class DecoderManager:
             self.strong_requests,
             is_bulk_strong=bulk_strong,
         )
-        # a router with a gap route turns the split-pair joins on; the
-        # sibling's input rides the link, None sends nothing
-        is_gap_split = router.gap is not None
-        self.gap_joins = gap_joins_module.GapJoins(
-            engine, link, self.enqueue, is_gap_split
-        )
         transport = staging_module.CancellableDecoderMemoryTransfer(engine)
         staging = staging_module.DecoderInputStaging(transport, engine)
         self.service = decode_service.DecodeService(
@@ -80,7 +74,6 @@ class DecoderManager:
             pool,
             staging,
             self.strong_requests,
-            self.gap_joins,
             on_completed=self.decode_completed,
             dispatch=self.dispatch,
         )
@@ -101,7 +94,7 @@ class DecoderManager:
 
     def copy_sources(self) -> list:
         """The copy_made sources of the manager's own hops, in hop order."""
-        return [self.service.staging.copy_made, self.gap_joins.copy_made]
+        return [self.service.staging.copy_made]
 
     # ---------------------------------------------------------- admission
 
@@ -187,11 +180,18 @@ class DecoderManager:
         raw input is superseded. The attempt closes in the ledger and the
         caller resubmits a fresh job if the window is rebuilt.
         """
-        job = self._find_window_job(window_key)
-        if job is None:
+        jobs = self._find_window_jobs(window_key)
+        if not jobs:
             raise RuntimeError(
                 f"no withdrawable decode for window {window_key}"
             )
+        for job in jobs:
+            self._withdraw_job(job)
+        self.strong_requests.resolve_weak(window_key)
+        self.dispatcher.run()
+
+    def _withdraw_job(self, job: decoding_records.DecodeJob) -> None:
+        """Take one unstarted job out of its queue or its slot."""
         if job.service_started or job.completed:
             raise RuntimeError(
                 f"{job.label} cannot be withdrawn: its decode already started"
@@ -199,7 +199,9 @@ class DecoderManager:
         job.cancelled = True
         was_queued = self.queue.remove(job)
         if was_queued:
-            self.service.release_input(job)
+            # the withdrawn request stops holding its rounds; the window
+            # keeps its own claim on them for the job that replaces it
+            self.service.cancel_input(job)
         elif job.unit is not None:
             self.service.evict(job)
         else:
@@ -207,7 +209,6 @@ class DecoderManager:
                 f"{job.label} is neither queued nor resident; nothing to "
                 "withdraw"
             )
-        self.strong_requests.resolve_weak(window_key)
         self.outcomes.report_request(
             job,
             None,
@@ -218,7 +219,6 @@ class DecoderManager:
             decode_queue.LOG_SOURCE,
             f"WITHDRAW {job.label} (invalidated before start)",
         )
-        self.dispatcher.run()
 
     # ------------------------------------------------- the strong requests
 
@@ -237,6 +237,23 @@ class DecoderManager:
     ) -> None:
         """The selection landed: the request's result may reach the window."""
         self.outcomes.select_strong_result(window_key, request_key)
+
+    def resolve_weak_request(
+        self,
+        job: decoding_records.DecodeJob,
+        result: decoding_records.DecodeResult,
+        verdict: decoding_records.Verdict,
+    ) -> None:
+        """The window side decided this weak request; close its attempt."""
+        self.outcomes.resolve_weak_request(job, result, verdict)
+
+    def close_companion_request(
+        self,
+        job: decoding_records.DecodeJob,
+        result: decoding_records.DecodeResult,
+    ) -> None:
+        """A forced-class solve whose window is answered by the other one."""
+        self.outcomes.close_companion_request(job, result)
 
     def cancel_strong(self, key: tuple) -> None:
         """Cancel an unneeded strong re-decode wherever it is.
@@ -283,11 +300,6 @@ class DecoderManager:
         than a tolerated one.
         """
         self.service.check_settled()
-        unresolved_joins = self.gap_joins.unresolved_windows()
-        if unresolved_joins:
-            raise RuntimeError(
-                f"run ended with split-gap joins unresolved: {unresolved_joins}"
-            )
         unsettled = self.strong_requests.unsettled()
         held = self.service.units_holding_rounds()
         if held:
@@ -307,9 +319,6 @@ class DecoderManager:
             self.service.discard_cancelled(job)
             self.dispatcher.run()
             return
-        if job.gap_sibling_for is not None:
-            self._gap_half_done(job, result)
-            return
         if job.strong_decode_for is not None:
             self._strong_decode_done(job, result)
             return
@@ -317,23 +326,6 @@ class DecoderManager:
             self._external_decode_done(job)
             return
         self._weak_decode_done(job, result)
-
-    def _gap_half_done(self, job: decoding_records.DecodeJob, result) -> None:
-        job.completed = True
-        self.service.free(job)
-        self.service.release_input(job)
-        self.engine.log(
-            decode_queue.LOG_SOURCE, f"DECODE DONE {job.label} (gap half)"
-        )
-        sibling_weight = None
-        if result is not None:
-            sibling_weight = result.forced_class_weight
-        key = job.gap_sibling_for
-        joined = self.gap_joins.sibling_done(key, sibling_weight)
-        if joined is not None:
-            held_job, held_result = joined
-            self._finish_weak(held_job, held_result)
-        self.dispatcher.run()
 
     def _strong_decode_done(
         self, job: decoding_records.DecodeJob, result
@@ -369,20 +361,10 @@ class DecoderManager:
     def _weak_decode_done(
         self, job: decoding_records.DecodeJob, result
     ) -> None:
+        """The decode ended; its result goes to the destination that asked."""
         job.completed = True
         self.service.free(job)
-        if self.gap_joins.has_join(job):
-            # the unit is free either way; the OUTCOME waits at the join
-            self.service.release_input(job)
-        joined_result = self.gap_joins.take_weak_result(job, result)
-        if joined_result is None:
-            self.dispatcher.run()
-            return
-        self._finish_weak(job, joined_result)
-
-    def _finish_weak(self, job: decoding_records.DecodeJob, result) -> None:
-        """The weak outcome concluded; the memory and the queue move on."""
-        self.outcomes.conclude_weak(job, result)
+        self.outcomes.deliver_weak(job, result)
         self.service.release_input(job)
         self.dispatcher.run()
 
@@ -445,14 +427,16 @@ class DecoderManager:
             None,
         )
 
-    def _find_window_job(self, window_key: tuple):
+    def _find_window_jobs(self, window_key: tuple) -> list:
+        """Every live weak job of the window: one attempt, one or two jobs."""
         candidates = self.queue.jobs()
         residents = self.service.resident_jobs()
         candidates.extend(residents)
+        found = []
         for job in candidates:
             if _is_live_weak_window_job(job, window_key):
-                return job
-        return None
+                found.append(job)
+        return found
 
 
 def _refuse_spent_job(job: decoding_records.DecodeJob) -> None:

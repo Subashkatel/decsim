@@ -105,6 +105,14 @@ class _Fixture:
         )
         self.escalated = []
         self.after_weak = []
+        self.resolved = []
+        self.verdicts = {}
+        self.policy = types.SimpleNamespace(
+            verdict_for_weak_result=self._verdict_for
+        )
+        self.decode_queue = types.SimpleNamespace(
+            resolve_weak_request=self._resolve
+        )
         self.transfers = _Transfers(self.engine, 4)
         self.frame = _Frame(self.engine, frame_ticks)
         publisher = window_commits.CorrectionPublisher(
@@ -118,6 +126,8 @@ class _Fixture:
             publisher,
             self.escalation,
             self.results,
+            self.policy,
+            self.decode_queue,
         )
 
     def job(self, tier, sequence, awaiting=False) -> decoding_records.DecodeJob:
@@ -125,8 +135,16 @@ class _Fixture:
         job = decoding_records.DecodeJob(
             operation_id=4, window_id=1, round_count=5, request_key=request_key
         )
-        job.awaiting_strong_result = awaiting
+        self.verdicts[request_key] = awaiting
         return job
+
+    def _verdict_for(self, job, _result) -> decoding_records.Verdict:
+        if self.verdicts[job.request_key]:
+            return decoding_records.Verdict.ESCALATE
+        return decoding_records.Verdict.KEEP
+
+    def _resolve(self, job, _result, verdict) -> None:
+        self.resolved.append((job.request_key, verdict))
 
 
 def test_the_boundary_leaves_at_decode_done_before_the_frame_commit():

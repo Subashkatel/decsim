@@ -125,8 +125,43 @@ class DecodeRequestBuilder:
             label=label,
             strong_label=f"strong({operation.name} W{window.window_index})",
             request_key=request_key,
+            input_key=request_key,
             request_created_ticks=self.engine.now,
             gate=self,
+        )
+
+    def build_forced_companion(
+        self, job: decoding_records.DecodeJob, forced_logical_class: int
+    ) -> decoding_records.DecodeJob:
+        """The window's other forced-class job over the same rounds.
+
+        Its own request, so both transfers are priced and recorded
+        separately, and the first request's key as its input identity,
+        so a unit that already holds the rounds reads them instead of
+        receiving them again (design audit note 12 section 4.5).
+        """
+        request_key = self.new_request_key(
+            job.operation_id, job.window_id, job.request_key.tier
+        )
+        label = f"{job.label} class {forced_logical_class}"
+        payloads = list(job.payloads)
+        return decoding_records.DecodeJob(
+            operation_id=job.operation_id,
+            window_id=job.window_id,
+            round_count=job.round_count,
+            ready_time=self.engine.now,
+            spatial_nodes=job.spatial_nodes,
+            payloads=payloads,
+            detector_error_model=job.detector_error_model,
+            code=job.code,
+            window=job.window,
+            label=label,
+            strong_label=job.strong_label,
+            request_key=request_key,
+            input_key=job.input_key,
+            request_created_ticks=self.engine.now,
+            gate=self,
+            forced_logical_class=forced_logical_class,
         )
 
     def assemble_payloads(self, window: window_records.Window, store) -> list:
@@ -332,7 +367,12 @@ class DecodeRequestBuilder:
 
 
 class DecodeRequester:
-    """Requests a decode for every complete, unblocked window, once."""
+    """Requests a decode for every complete, unblocked window, once.
+
+    gap_join is the confidence join of a run whose gap is two
+    forced-class solves; it is both jobs' on_decoded and None when the
+    run's weak decoder reports its own soft output from one decode.
+    """
 
     def __init__(
         self,
@@ -342,6 +382,7 @@ class DecodeRequester:
         decode_queue,
         escalation_policy,
         committer,
+        gap_join=None,
     ) -> None:
         self.tracker = tracker
         self.retention = retention
@@ -349,6 +390,7 @@ class DecodeRequester:
         self.decode_queue = decode_queue
         self.escalation_policy = escalation_policy
         self.committer = committer
+        self.gap_join = gap_join
 
     def request_ready_windows(self, windows, strong_redecode) -> None:
         """Request each window that has its data, in the given order.
@@ -400,27 +442,94 @@ class DecodeRequester:
         job = self.builder.build(window, operation, primary_tier, store)
         window.queued = True
         tiers = self.escalation_policy.tiers_for_ready_window(window)
+        primary_jobs = self._primary_jobs(job)
+        is_input_held = self._bind_input_hold(primary_jobs, window.key)
         submissions = []
         for tier in tiers:
             if tier is primary_tier:
-                primary = decoding_records.Submission(job)
-                submissions.append(primary)
+                primary = self._primary_submissions(primary_jobs, is_input_held)
+                submissions.extend(primary)
             else:
                 sibling = strong_redecode.parallel_strong_submission(job)
                 submissions.append(sibling)
         for submission in submissions:
-            self._submit(submission, window.key)
+            self.enqueue(submission)
+
+    def _primary_submissions(
+        self, primary_jobs: list, is_input_held: bool
+    ) -> list:
+        """One submission per primary job, each with its own input send."""
+        submissions = []
+        for job in primary_jobs:
+            submission = self._primary_submission(job, is_input_held)
+            submissions.append(submission)
+        return submissions
+
+    def _primary_jobs(self, job: decoding_records.DecodeJob) -> list:
+        """The primary tier's jobs: one decode, or one solve per class.
+
+        A confidence built from forced-class solves needs the window
+        decoded once per class, and both are asked for at one instant
+        (CUDA launches a whole grid in one call, cuda_guide.txt:
+        1888-1892; OpenMP's primary thread creates the whole team,
+        openmp_spec_5_2.txt:1400-1407).
+        """
+        if self.gap_join is None:
+            return [job]
+        classes = self.gap_join.signal.forced_logical_classes
+        job.forced_logical_class = classes[0]
+        jobs = [job]
+        for forced_class in classes[1:]:
+            companion = self.builder.build_forced_companion(job, forced_class)
+            jobs.append(companion)
+        return jobs
+
+    def _primary_submission(
+        self, job: decoding_records.DecodeJob, is_input_held: bool
+    ) -> decoding_records.Submission:
+        """One primary job with its input send; a held input lands at once."""
+        if is_input_held:
+            resend = self.builder.resend_held_input()
+            return decoding_records.Submission(job, resend)
+        send_input = self.builder.input_send(
+            job, self.retention.primary_input_path
+        )
+        return decoding_records.Submission(job, send_input)
+
+    def _bind_input_hold(self, primary_jobs: list, key: tuple) -> bool:
+        """Move the window's hold to the attempt; whether it was held already.
+
+        The jobs of one attempt read the same rounds, so they share one
+        hold and Buffer 0 may drop the rounds when the last of them has
+        its input; a job whose rounds this side already holds keeps
+        them and moves nothing.
+        """
+        first = primary_jobs[0]
+        if first.submitted or self.retention.holds_input(first):
+            return True
+        store = self.retention.primary_store
+        self.retention.bind_input_hold(first, key, store)
+        reader_count = len(primary_jobs)
+        if reader_count == 1:
+            return False
+        shared = _SharedInputHold(first.input_hold, reader_count)
+        for job in primary_jobs:
+            job.input_hold = shared.release
+        return False
 
     def enqueue(self, submission: decoding_records.Submission) -> None:
         """Admit one submission with its input send and its return path.
 
         A strong job's result finalizes its window; a primary job's
-        result commits it.
+        result commits it, through the confidence join when the window's
+        answer takes both forced-class solves.
         """
         job = submission.job
         on_decoded = self.committer.accept_result
         if job.strong_decode_for is not None:
             on_decoded = self.committer.accept_strong_result
+        elif self.gap_join is not None:
+            on_decoded = self.gap_join.accept_result
         self.decode_queue.enqueue(job, submission.send_input, on_decoded)
 
     def withdraw(self, window: window_records.Window) -> None:
@@ -441,26 +550,26 @@ class DecodeRequester:
         """The window's last boundary arrived: its parked decode may start."""
         self.decode_queue.release_parked(window_key)
 
-    def _submit(
-        self, submission: decoding_records.Submission, key: tuple
-    ) -> None:
-        """A strong submission carries its send; a weak one gets its input."""
-        job = submission.job
-        if job.strong_decode_for is not None:
-            self.enqueue(submission)
+
+class _SharedInputHold:
+    """One store hold released when the last job that reads it has landed.
+
+    The forced-class solves of one window read the same rounds, so
+    Buffer 0 keeps them until every one of them has its input, the
+    lifetime a zero-copy send owes its source (the kernel's dmaengine
+    client rule that a mapping lives until the transfer completes).
+    """
+
+    def __init__(self, release: Callable[[], None], reader_count: int) -> None:
+        self.hold_release = release
+        self.readers_left = reader_count
+
+    def release(self) -> None:
+        """One reader has its input; the rounds go when the last one does."""
+        self.readers_left -= 1
+        if self.readers_left > 0:
             return
-        if job.submitted or self.retention.holds_input(job):
-            resend = self.builder.resend_held_input()
-            submission = decoding_records.Submission(job, resend)
-            self.enqueue(submission)
-            return
-        store = self.retention.primary_store
-        self.retention.bind_input_hold(job, key, store)
-        send_input = self.builder.input_send(
-            job, self.retention.primary_input_path
-        )
-        submission = decoding_records.Submission(job, send_input)
-        self.enqueue(submission)
+        self.hold_release()
 
 
 def _input_bit_count(decoder_input) -> Optional[int]:

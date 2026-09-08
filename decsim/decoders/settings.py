@@ -21,7 +21,6 @@ import decsim.escalation.threshold_sources as threshold_sources
 import decsim.ports as ports
 
 THRESHOLD_SOURCES = ("fixed", "table", "online")
-GAP_COMPUTATIONS = ("serial", "parallel_pair", "split_pair")
 # How many of the strong region's buffer regions the restarted weak
 # window re-reads under the double window (Toshio 2510.25222 Sec. III C,
 # Fig. 12). 0, the default, is the paper: the weak decoder resumes on
@@ -36,8 +35,6 @@ ESCALATION_KEYS = (
     "run_both_at_once",
     "double_window",
     "restart_reread_buffer_regions",
-    "gap_computation",
-    "gap_units",
     "threshold_source",
     "threshold_table",
     "threshold_column",
@@ -269,10 +266,10 @@ class EscalationSettings:
     (false, the default, is the same section's on-demand variant, lines
     631-640); double_window is the paper's Sec. III C scheme, and
     restart_reread_buffer_regions is how many of the strong region's
-    buffer regions the restarted weak window re-reads under it;
-    gap_computation is where the two forced solves run (serial on one
-    core, parallel_pair on two cores in the unit, split_pair on its own
-    pool of gap_units). A Python-built policy is used as it is. The
+    buffer regions the restarted weak window re-reads under it. The
+    complementary gap's two forced-class solves are two ordinary jobs
+    of the weak pool, so weak_decoder.units alone decides whether they
+    overlap. A Python-built policy is used as it is. The
     threshold in nats and the online threshold source are set per sweep
     point by the front; base_directory resolves a relative
     threshold_table.
@@ -287,8 +284,6 @@ class EscalationSettings:
     run_both_at_once: bool = False
     double_window: bool = False
     restart_reread_buffer_regions: int = 0
-    gap_computation: str = "serial"
-    gap_units: int = 1
     policy: Optional[ports.EscalationPolicy] = None
     gap_threshold_nats: Optional[float] = None
     online_threshold: Optional[threshold_sources.OnlineThreshold] = None
@@ -423,10 +418,9 @@ def _switching_settings(
         raw_column = section.get("threshold_column", "gth_eq4_wilson")
         threshold_column = str(raw_column)
     online = _online_settings(section, threshold_source)
-    gap_computation, gap_units = _gap_computation(section)
     run_both_at_once = _switching_boolean(section, "run_both_at_once")
     double_window = _switching_boolean(section, "double_window")
-    _check_serial_only(gap_computation, threshold_source, double_window)
+    _check_serial_only(threshold_source, double_window)
     reread_regions = _restart_reread_buffer_regions(section)
     threshold_table = section.get("threshold_table")
     return EscalationSettings(
@@ -440,8 +434,6 @@ def _switching_settings(
         run_both_at_once=run_both_at_once,
         double_window=double_window,
         restart_reread_buffer_regions=reread_regions,
-        gap_computation=gap_computation,
-        gap_units=gap_units,
         base_directory=base_directory,
     )
 
@@ -516,40 +508,10 @@ def _online_settings(
     return OnlineThresholdSettings.from_yaml(raw_online)
 
 
-def _gap_computation(section: Mapping) -> tuple:
-    """(gap_computation, gap_units); gap_units belongs to split_pair."""
-    gap_computation = section.get("gap_computation", "serial")
-    if gap_computation not in GAP_COMPUTATIONS:
-        raise ValueError(
-            "escalation.gap_computation must be one of "
-            f"{GAP_COMPUTATIONS}, got {gap_computation!r}"
-        )
-    raw_units = section.get("gap_units", 1)
-    gap_units = int(raw_units)
-    if gap_units < 1:
-        raise ValueError(
-            f"escalation.gap_units needs at least 1 unit (got {gap_units})"
-        )
-    if "gap_units" in section and gap_computation != "split_pair":
-        raise ValueError(
-            "escalation.gap_units sizes the split_pair sibling pool; "
-            f"gap_computation is {gap_computation!r}, so drop the key"
-        )
-    return gap_computation, gap_units
-
-
-def _check_serial_only(
-    gap_computation: str, threshold_source: str, double_window: bool
-) -> None:
-    """split_pair and online calibration are validated for serial switching."""
+def _check_serial_only(threshold_source: str, double_window: bool) -> None:
+    """Online calibration is validated for serial switching."""
     if not double_window:
         return
-    if gap_computation == "split_pair":
-        raise ValueError(
-            "split_pair is validated for serial switching only: a strong "
-            "window absorbing windows whose gap join is still open is not "
-            "supported yet"
-        )
     if threshold_source == "online":
         raise ValueError(
             "threshold_source online is serial-only: an audit label "

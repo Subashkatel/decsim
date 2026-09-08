@@ -101,6 +101,7 @@ class RequestProcessingOutcome(Enum):
 
     PRIMARY_FORWARDED_FOR_DELIVERY = "primary_forwarded_for_delivery"
     WEAK_AWAITED_STRONG = "weak_awaited_strong"
+    WEAK_FORCED_CLASS_COMPANION = "weak_forced_class_companion"
     STRONG_FORWARDED_FOR_DELIVERY = "strong_forwarded_for_delivery"
     STRONG_COMPLETED_DISCARDED = "strong_completed_discarded"
     STRONG_CANCELLED_BEFORE_DISPATCH = "strong_cancelled_before_dispatch"
@@ -188,12 +189,6 @@ class DecodeJob:
     window: Optional[window_records.Window] = None
     strong_decode_for: Optional[tuple] = (
         None  # (operation_id, window_id) this strong job re-decodes
-    )
-    gap_sibling_for: Optional[tuple] = (
-        None  # (operation_id, window_id) whose split-gap half this job solves
-    )
-    awaiting_strong_result: bool = (
-        False  # weak result held non-final until the strong sibling lands
     )
     cancelled: bool = False  # cancelled siblings discard completion
     completed: bool = (

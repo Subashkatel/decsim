@@ -462,35 +462,30 @@ class ThresholdSource(Protocol):
 
 
 @runtime_checkable
-class ConfidenceMetric(Protocol):
-    """One window model's confidence, as the wrappers evaluate it."""
-
-    def evaluate(self, syndrome) -> decoding_records.SoftOutput:
-        """The soft output of one syndrome (Toshio 2510.25222 Sec. III A)."""
-
-
-@runtime_checkable
 class ConfidenceSignal(Protocol):
     """The soft output a weak decode reports, as its wrapper sees it.
 
     Table row: complementary_gap (decsim/confidence/complementary.py).
     source names the signal so the switching policy can refuse another
     one's, fault_model_requirement is what a window model must offer,
-    and metric_for builds the metric of one window model, or None when
-    the model has nothing the signal can measure. The three wrappers
-    (decsim/confidence/decoder.py, by escalation.gap_computation: serial
-    on one core, parallel_pair on two, split_pair across two units)
-    attach a signal to a weak decoder. The Union-Find cluster gap reads
-    the hard decode's own intervals, not the syndrome, so it is a
-    Python-built Decoder (decsim/confidence/cluster.py) beside this port
-    rather than a row on it.
+    and forced_logical_classes are the classes the window must be
+    decoded in, one job each, for the row to have anything to subtract.
+    The row computes the soft output from the decoder's own output, so
+    a decoder that cannot produce that evidence is refused by name at
+    the yaml boundary. The Union-Find cluster gap reads the hard
+    decode's own intervals, not the syndrome, so it is a Python-built
+    Decoder (decsim/confidence/cluster.py) beside this port rather than
+    a row on it.
     """
 
     source: decoding_records.SoftOutputSource
     fault_model_requirement: Any
+    forced_logical_classes: tuple
 
-    def metric_for(self, window_model) -> Optional[ConfidenceMetric]:
-        """The metric of one placed window model; None when it has none."""
+    def soft_output_for(
+        self, forced_class_weights
+    ) -> Optional[decoding_records.SoftOutput]:
+        """The window's confidence; None when the evidence is missing."""
 
 
 @runtime_checkable

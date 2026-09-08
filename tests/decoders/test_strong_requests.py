@@ -95,17 +95,34 @@ def test_a_destination_keeps_at_most_one_unconsumed_strong_result():
         requests.admit_strong(second, now=1)
 
 
-def test_a_second_weak_decode_of_an_unresolved_window_is_refused():
+def test_a_windows_attempt_holds_its_forced_class_requests_and_no_repeat():
+    """One attempt, one or two requests; a request is admitted once.
+
+    The complementary gap decodes a window once per logical class, so
+    the window's open attempt names both request keys and resolves as
+    one when the join hands the window's answer on.
+    """
     requests = strong_requests_module.StrongRequests()
+    first_key = window_records.DecoderRequestKey(
+        1, 0, window_records.DecoderTier.WEAK, 0
+    )
+    second_key = window_records.DecoderRequestKey(
+        1, 0, window_records.DecoderTier.WEAK, 1
+    )
     first = decoding_records.DecodeJob(
-        operation_id=1, window_id=0, round_count=3
+        operation_id=1, window_id=0, round_count=3, request_key=first_key
     )
     second = decoding_records.DecodeJob(
-        operation_id=1, window_id=0, round_count=3
+        operation_id=1, window_id=0, round_count=3, request_key=second_key
     )
     requests.admit(first, now=0)
-    with pytest.raises(RuntimeError, match="decodes once at a time"):
+    requests.admit(second, now=0)
+    open_requests = requests.open_weak_requests_by_window[(1, 0)]
+    assert open_requests == {first_key, second_key}
+    with pytest.raises(RuntimeError, match="is already open"):
         requests.admit(second, now=1)
+    requests.resolve_weak((1, 0))
+    assert (1, 0) not in requests.open_weak_requests_by_window
 
 
 def test_a_merged_batch_splits_into_one_empty_completion_per_member():

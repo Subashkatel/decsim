@@ -10,7 +10,7 @@ import decsim.confidence.signals as confidence_signals
 import decsim.escalation.policies as escalation_policies
 import decsim.escalation.settings as escalation_settings
 import decsim.escalation.threshold_sources as threshold_sources
-import decsim.settings as machine_settings
+import decsim.tables as tables
 
 
 def primary_tier(settings: escalation_settings.EscalationSettings) -> str:
@@ -27,7 +27,7 @@ def primary_tier(settings: escalation_settings.EscalationSettings) -> str:
     """
     if settings.policy is not None:
         return settings.policy.primary_tier.value
-    row = machine_settings.row(
+    row = tables.row(
         escalation_settings.ESCALATIONS, "escalation.kind", settings.kind
     )
     return row.primary_tier.value
@@ -35,7 +35,7 @@ def primary_tier(settings: escalation_settings.EscalationSettings) -> str:
 
 def strong_window_row(settings: escalation_settings.EscalationSettings):
     """The strong window shape class the escalation section names."""
-    return machine_settings.row(
+    return tables.row(
         escalation_settings.STRONG_WINDOW_SHAPES,
         "escalation.strong_window",
         settings.strong_window,
@@ -54,7 +54,7 @@ def build_escalation_policy(settings: escalation_settings.EscalationSettings):
     """The policy of the escalation kind, or the Python-built one."""
     if settings.policy is not None:
         return settings.policy
-    row = machine_settings.row(
+    row = tables.row(
         escalation_settings.ESCALATIONS, "escalation.kind", settings.kind
     )
     if row is escalation_policies.Switching:
@@ -68,7 +68,7 @@ def build_escalation_policy(settings: escalation_settings.EscalationSettings):
 
 def confidence_signal(escalation: escalation_settings.EscalationSettings):
     """The signal row a switching run's weak decoder reports and decides on."""
-    row = machine_settings.row(
+    row = tables.row(
         confidence_signals.CONFIDENCE_SIGNALS,
         "escalation.confidence",
         escalation.confidence,

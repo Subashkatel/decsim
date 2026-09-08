@@ -23,6 +23,7 @@ import decsim.qpu.settings as qpu_settings
 import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
 import decsim.settings as machine_settings
+import decsim.tables as tables
 import decsim.windows.schemes.sliding as sliding_scheme
 import decsim.windows.settings as window_settings
 import decsim.windows.window_interactions as window_interactions
@@ -90,7 +91,7 @@ def build_plan(
     reread_regions = settings.escalation.restart_reread_buffer_regions
     window_interaction = settings.windows.window_interaction
     if window_interaction is None:
-        payload_row = machine_settings.row(
+        payload_row = tables.row(
             window_settings.BOUNDARY_PAYLOADS,
             "windows.boundary_payload",
             settings.windows.boundary_payload,
@@ -181,7 +182,7 @@ def _operations(settings: workload_settings.WorkloadSettings, code) -> tuple:
     The run never mutates the caller's operations; an operation without
     its own feedback boundary mode takes the workload's.
     """
-    row = machine_settings.row(
+    row = tables.row(
         workload_settings.WORKLOADS, "workload.kind", settings.kind
     )
     source_operations, fixed_rounds_policy = row(settings, code)
@@ -257,7 +258,7 @@ def _scheme(
     """
     if windows.scheme is not None:
         return windows.scheme
-    row = machine_settings.row(
+    row = tables.row(
         window_settings.WINDOWING_SCHEMES, "windows.kind", windows.kind
     )
     if escalation.kind != "switching":
@@ -292,7 +293,7 @@ def _boundary_policy(
 def _idle_policy(settings: controller_settings.IdlePolicySettings):
     if settings.policy is not None:
         return settings.policy
-    row = machine_settings.row(
+    row = tables.row(
         controller_settings.IDLE_POLICIES, "idle_policy", settings.kind
     )
     return row()
@@ -302,9 +303,7 @@ def _syndrome_source(settings: qpu_settings.QpuSettings):
     """The device of the qpu kind, or the Python-built one."""
     if settings.device is not None:
         return settings.device
-    row = machine_settings.row(
-        qpu_settings.SYNDROME_SOURCES, "qpu.kind", settings.kind
-    )
+    row = tables.row(qpu_settings.SYNDROME_SOURCES, "qpu.kind", settings.kind)
     return row(**settings.arguments)
 
 

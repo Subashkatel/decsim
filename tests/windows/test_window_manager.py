@@ -25,12 +25,13 @@ import decsim.records.windows as window_records
 import decsim.settings as machine_settings
 import decsim.windows.boundary_payloads as boundary_payloads
 import decsim.windows.built_window_models as built_window_models
+import decsim.windows.schemes.sandwich as sandwich_scheme
+import decsim.windows.schemes.sliding as sliding_scheme
 import decsim.windows.settings as window_settings
 import decsim.windows.window_boundaries as window_boundaries
 import decsim.windows.window_interactions as window_interactions
 import decsim.windows.window_manager as window_manager_module
 import decsim.windows.window_planner as window_planner
-import decsim.windows.windowing_schemes as windowing_schemes
 
 
 def _weak_run():
@@ -148,7 +149,7 @@ def _stream_planner() -> window_planner.WindowPlanner:
     )
     built = built_window_models.BuiltWindowModels()
     models = window_planner.WindowModels(None, lambda _code_name: None, built)
-    scheme = windowing_schemes.SlidingWindowScheme()
+    scheme = sliding_scheme.SlidingWindowScheme()
     return window_planner.WindowPlanner(
         scheme, [resolved], plan, models, planned_operations=()
     )
@@ -195,7 +196,7 @@ def _tan_sandwich_run(unit_count):
     weak_decoder = decoder_settings.DecoderSettings(
         decoder=decoder, units=unit_count
     )
-    scheme = windowing_schemes.TanSandwichScheme()
+    scheme = sandwich_scheme.TanSandwichScheme()
     windows = window_settings.WindowSettings(scheme=scheme)
     settings = machine_settings.MachineSettings(
         workload=workload,

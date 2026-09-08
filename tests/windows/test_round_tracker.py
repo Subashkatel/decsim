@@ -12,7 +12,7 @@ import types
 import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.windows.round_tracker as round_tracker
-import decsim.windows.windowing_schemes as windowing_schemes
+import decsim.windows.schemes.sliding as sliding_scheme
 
 
 class _Planner:
@@ -53,7 +53,7 @@ def _tracker(
     round_counts: dict, successors: dict
 ) -> round_tracker.RoundTracker:
     planner = _Planner(round_counts, successors)
-    scheme = windowing_schemes.SlidingWindowScheme()
+    scheme = sliding_scheme.SlidingWindowScheme()
     return round_tracker.RoundTracker(scheme, planner)
 
 

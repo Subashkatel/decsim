@@ -18,8 +18,11 @@ import pytest
 import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.windows.built_window_models as built_window_models
+import decsim.windows.schemes.naive_online as naive_online_scheme
+import decsim.windows.schemes.parallel as parallel_scheme
+import decsim.windows.schemes.sandwich as sandwich_scheme
+import decsim.windows.schemes.sliding as sliding_scheme
 import decsim.windows.window_planner as window_planner
-import decsim.windows.windowing_schemes as windowing_schemes
 
 COMMIT_ROUNDS = 3
 BUFFER_ROUNDS = 2
@@ -76,7 +79,7 @@ class _FiniteSource:
 def _planner(source=None) -> window_planner.WindowPlanner:
     built = built_window_models.BuiltWindowModels()
     models = window_planner.WindowModels(source, lambda _code_name: None, built)
-    scheme = windowing_schemes.SlidingWindowScheme()
+    scheme = sliding_scheme.SlidingWindowScheme()
     resolved = [_resolved("stream", 9)]
     plan = _empty_plan()
     return window_planner.WindowPlanner(
@@ -85,7 +88,7 @@ def _planner(source=None) -> window_planner.WindowPlanner:
 
 
 def test_sliding_window_k_commits_ncom_rounds_and_reads_nbuf_past_them():
-    scheme = windowing_schemes.SlidingWindowScheme()
+    scheme = sliding_scheme.SlidingWindowScheme()
     plan = scheme.plan_operation(
         1, 30, commit_round_count=5, buffer_round_count=5
     )
@@ -119,7 +122,7 @@ def qldpc_sliding_windows(round_count, width, stride):
 
 def test_the_sliding_tail_is_qldpcs_tail_on_every_shape_it_ships():
     """The Tan flush terminal policy against qLDPC's loop, shape for shape."""
-    scheme = windowing_schemes.SlidingWindowScheme()
+    scheme = sliding_scheme.SlidingWindowScheme()
     for round_count in (5, 13, 20, 30, 31, 32, 33):
         for commit_rounds, buffer_rounds in ((3, 6), (3, 3), (2, 4), (5, 5)):
             plan = scheme.plan_operation(
@@ -139,7 +142,7 @@ def test_the_sliding_tail_is_qldpcs_tail_on_every_shape_it_ships():
 
 def test_the_sliding_tail_absorbs_a_short_remainder():
     """A tail shorter than a window is decoded by the window before it."""
-    scheme = windowing_schemes.SlidingWindowScheme()
+    scheme = sliding_scheme.SlidingWindowScheme()
     plan = scheme.plan_operation(
         1, 31, commit_round_count=3, buffer_round_count=6
     )
@@ -148,7 +151,7 @@ def test_the_sliding_tail_absorbs_a_short_remainder():
 
 
 def test_first_block_a_commits_2d_and_a_block_b_has_no_buffers():
-    scheme = windowing_schemes.ParallelWindowScheme()
+    scheme = parallel_scheme.ParallelWindowScheme()
     plan = scheme.plan_operation(
         1, 40, commit_round_count=3, buffer_round_count=3
     )
@@ -164,7 +167,7 @@ def test_first_block_a_commits_2d_and_a_block_b_has_no_buffers():
 
 
 def test_tan_type_1_width_is_s_plus_2b_and_the_seam_is_closed_both_sides():
-    scheme = windowing_schemes.TanSandwichScheme()
+    scheme = sandwich_scheme.TanSandwichScheme()
     plan = scheme.plan_operation(
         1, 30, commit_round_count=4, buffer_round_count=2
     )
@@ -235,7 +238,7 @@ def test_idle_rounds_fold_only_into_a_batch_style_operation():
     plan.batch_preceding_idle_rounds_by_operation[7] = True
     built = built_window_models.BuiltWindowModels()
     models = window_planner.WindowModels(None, lambda _code_name: None, built)
-    scheme = windowing_schemes.NaiveOnlineScheme()
+    scheme = naive_online_scheme.NaiveOnlineScheme()
     resolved = [_resolved(7, 6)]
     planner = window_planner.WindowPlanner(
         scheme, resolved, plan, models, planned_operations=()
@@ -266,7 +269,7 @@ def test_a_buffer_below_the_papers_floor_is_refused_unless_the_card_says_why():
     why (Skoric 2209.08552, Tan PRX Quantum 4, 040344, Bombin
     2303.04846); the scheme refuses a silent one.
     """
-    scheme = windowing_schemes.SlidingWindowScheme()
+    scheme = sliding_scheme.SlidingWindowScheme()
     bare = _geometry(buffer_round_count=0, justification=None)
     with pytest.raises(
         ValueError, match="is below the trailing buffering floor 3"
@@ -279,7 +282,7 @@ def test_a_buffer_below_the_papers_floor_is_refused_unless_the_card_says_why():
 
 
 def test_a_justification_on_a_card_at_the_floor_is_refused_as_stale():
-    scheme = windowing_schemes.SlidingWindowScheme()
+    scheme = sliding_scheme.SlidingWindowScheme()
     geometry = _geometry(buffer_round_count=3, justification="stale")
     with pytest.raises(
         ValueError, match="is not below the trailing buffering floor 3"
@@ -289,7 +292,7 @@ def test_a_justification_on_a_card_at_the_floor_is_refused_as_stale():
 
 def test_the_parallel_scheme_refuses_unequal_commit_and_buffer_widths():
     """Skoric's block A/B construction fixes ncom = nbuf = d."""
-    scheme = windowing_schemes.ParallelWindowScheme()
+    scheme = parallel_scheme.ParallelWindowScheme()
     with pytest.raises(
         ValueError, match="requires commit_round_count == buffer_round_count"
     ):

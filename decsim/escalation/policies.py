@@ -14,7 +14,7 @@ threshold comes from is its ThresholdSource (threshold_sources.py).
 import decsim.controller.policies as boundary_policies
 import decsim.records.decoding as decoding_records
 import decsim.records.windows as window_records
-import decsim.windows.windowing_schemes as windowing_schemes
+import decsim.windows.schemes.sliding as sliding_scheme
 
 
 class EscalationPolicyBase:
@@ -200,9 +200,9 @@ class Switching(EscalationPolicyBase):
 
 def _refuse_flush_terminal(scheme) -> None:
     """Switching needs the lookahead terminal policy on sliding windows."""
-    if type(scheme) is not windowing_schemes.SlidingWindowScheme:
+    if type(scheme) is not sliding_scheme.SlidingWindowScheme:
         return
-    lookahead = windowing_schemes.SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD
+    lookahead = sliding_scheme.SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD
     if scheme.terminal_policy is not lookahead:
         raise ValueError(
             "switching and strong-window recovery require the explicit "
@@ -221,7 +221,7 @@ def _refuse_eager_serial_boundaries(boundary_policy) -> None:
 
 
 def _refuse_absorbing_window_scheme(scheme, boundary_policy) -> None:
-    if type(scheme) is not windowing_schemes.SlidingWindowScheme:
+    if type(scheme) is not sliding_scheme.SlidingWindowScheme:
         raise ValueError(
             "escalation.strong_window forward requires the exact shipped "
             "serial "

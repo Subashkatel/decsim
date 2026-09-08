@@ -35,6 +35,7 @@ from typing import Any, Optional
 
 import stim
 
+import decsim.confidence.cluster as cluster
 import decsim.confidence.complementary as complementary
 import decsim.confidence.gap_join as gap_join_module
 import decsim.config as config
@@ -139,14 +140,15 @@ DECODERS = {
     "relay_bp": relay_belief_propagation.RelayBeliefPropagationDecoder,
     "bposd": belief_propagation_osd.BeliefPropagationOsdDecoder,
 }
-# The soft output a switching run's weak decoder reports. No yaml key
-# names the signal yet; the root takes the one row, the switching policy
-# expects its source, and the window side asks the weak decoder for the
-# solves the row needs.
+# The soft output a switching run's weak decoder reports, named by
+# escalation.confidence. A row says what evidence it needs from the
+# decode and what classes the window must be decoded in; the switching
+# policy expects its source, and the window side asks the weak decoder
+# for exactly those solves.
 CONFIDENCE_SIGNALS = {
     "complementary_gap": complementary.ComplementaryGap,
+    "cluster_gap": cluster.ClusterGap,
 }
-CONFIDENCE_SIGNAL_KIND = "complementary_gap"
 ROUND_STORES = {
     "round_store": round_store_module.RoundStore,
 }
@@ -637,9 +639,9 @@ def build_decoder_unit(settings: MachineSettings, tier: str):
     release stages are cycles of the tier's clock; a number is a fixed
     core latency on the MWPM path. The tier that decodes the plan's
     windows carries the Tesseract referee when the observation asks for
-    it, and under a switching escalation must answer the forced-class
-    solves the confidence signal needs. A Python-built decoder is
-    returned as it is. None when the tier names no decoder.
+    it, and under a switching escalation must produce the evidence the
+    run's confidence signal reads. A Python-built decoder is returned as
+    it is. None when the tier names no decoder.
     """
     tier_settings = getattr(settings, f"{tier}_decoder")
     if tier_settings.decoder is not None:
@@ -651,7 +653,9 @@ def build_decoder_unit(settings: MachineSettings, tier: str):
     is_active = tier == active_tier
     is_switching = settings.escalation.kind == "switching"
     if is_active and is_switching:
-        _check_answers_the_confidence(algorithm, tier_settings.kind, tier)
+        _check_serves_the_confidence(
+            algorithm, tier_settings.kind, tier, settings.escalation
+        )
     check = _row(
         WINDOW_CHECKS,
         "observation.check_windows_with",
@@ -750,7 +754,7 @@ def _escalation_policy(settings: decoder_settings.EscalationSettings):
     row = _row(ESCALATIONS, "escalation.kind", settings.kind)
     if row is escalation_policies.Switching:
         threshold = _threshold_source(settings)
-        signal = _confidence_signal()
+        signal = _confidence_signal(settings)
         return escalation_policies.Switching(
             threshold, signal.source, run_both_at_once=settings.run_both_at_once
         )
@@ -1125,7 +1129,9 @@ def _algorithm(kind, tier: str):
     return minimum_weight_perfect_matching.PyMatchingDecoder(latency_model)
 
 
-def _check_answers_the_confidence(algorithm, kind, tier: str) -> None:
+def _check_serves_the_confidence(
+    algorithm, kind, tier: str, escalation: decoder_settings.EscalationSettings
+) -> None:
     """Refuse a weak tier that cannot serve the run's confidence signal.
 
     A confidence is the decoder's own, so the signal's evidence
@@ -1133,7 +1139,7 @@ def _check_answers_the_confidence(algorithm, kind, tier: str) -> None:
     is not refused: it prices one decode of one window, and a forced pair
     is two decodes, so the card is charged once per forced solve.
     """
-    signal = _confidence_signal()
+    signal = _confidence_signal(escalation)
     required = signal.decoder_evidence_requirement
     missing = required - algorithm.decoder_evidence
     if not missing:
@@ -1158,10 +1164,10 @@ def _evidence_order(member) -> str:
     return member.value
 
 
-def _confidence_signal():
+def _confidence_signal(escalation: decoder_settings.EscalationSettings):
     """The signal row a switching run's weak decoder reports and decides on."""
     row = _row(
-        CONFIDENCE_SIGNALS, "escalation.confidence", CONFIDENCE_SIGNAL_KIND
+        CONFIDENCE_SIGNALS, "escalation.confidence", escalation.confidence
     )
     return row()
 
@@ -1337,7 +1343,7 @@ def _window_manager(
         escalation_policy,
         decode_queue,
     )
-    gap_join = _forced_class_gap_join(settings, engine, committer, decode_queue)
+    gap_join = _window_gap_join(settings, engine, committer, decode_queue)
     requester = decode_requests.DecodeRequester(
         tracker,
         retention,
@@ -1379,10 +1385,10 @@ def _window_manager(
     return window_manager
 
 
-def _forced_class_gap_join(
+def _window_gap_join(
     settings: MachineSettings, engine, committer, decode_queue
 ):
-    """The confidence join of a run whose gap is two forced-class solves.
+    """The confidence join of a switching run: every solve's on_decoded.
 
     None when the escalation is not the root's switching policy: a
     Python-built policy brings its own decoder, which reports its own
@@ -1392,8 +1398,8 @@ def _forced_class_gap_join(
         return None
     if settings.escalation.policy is not None:
         return None
-    signal = _confidence_signal()
-    return gap_join_module.ForcedClassGapJoin(
+    signal = _confidence_signal(settings.escalation)
+    return gap_join_module.WindowGapJoin(
         engine, signal, committer, decode_queue
     )
 

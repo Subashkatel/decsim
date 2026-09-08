@@ -31,6 +31,7 @@ THRESHOLD_SOURCES = ("fixed", "table", "online")
 RESTART_REREAD_BUFFER_REGIONS = (0, 1)
 ESCALATION_KEYS = (
     "kind",
+    "confidence",
     "gap_threshold_db",
     "run_both_at_once",
     "double_window",
@@ -266,16 +267,20 @@ class EscalationSettings:
     (false, the default, is the same section's on-demand variant, lines
     631-640); double_window is the paper's Sec. III C scheme, and
     restart_reread_buffer_regions is how many of the strong region's
-    buffer regions the restarted weak window re-reads under it. The
-    complementary gap's two forced-class solves are two ordinary jobs
-    of the weak pool, so weak_decoder.units alone decides whether they
-    overlap. A Python-built policy is used as it is. The
+    buffer regions the restarted weak window re-reads under it.
+    confidence names the signal the weak tier reports and the threshold
+    decides on (machine.py CONFIDENCE_SIGNALS), and the yaml refuses a
+    weak decoder whose decode cannot produce that signal's evidence.
+    The complementary gap's two forced-class solves are two ordinary
+    jobs of the weak pool, so weak_decoder.units alone decides whether
+    they overlap. A Python-built policy is used as it is. The
     threshold in nats and the online threshold source are set per sweep
     point by the front; base_directory resolves a relative
     threshold_table.
     """
 
     kind: str = "weak_baseline"
+    confidence: str = "complementary_gap"
     gap_threshold_decibels: Optional[float] = None
     threshold_source: str = "fixed"
     threshold_table: Optional[str] = None
@@ -418,6 +423,8 @@ def _switching_settings(
         raw_column = section.get("threshold_column", "gth_eq4_wilson")
         threshold_column = str(raw_column)
     online = _online_settings(section, threshold_source)
+    named_confidence = section.get("confidence", "complementary_gap")
+    confidence = str(named_confidence)
     run_both_at_once = _switching_boolean(section, "run_both_at_once")
     double_window = _switching_boolean(section, "double_window")
     _check_serial_only(threshold_source, double_window)
@@ -425,6 +432,7 @@ def _switching_settings(
     threshold_table = section.get("threshold_table")
     return EscalationSettings(
         kind="switching",
+        confidence=confidence,
         gap_threshold_decibels=gap_threshold_decibels,
         gap_threshold_nats=gap_threshold_nats,
         threshold_source=threshold_source,

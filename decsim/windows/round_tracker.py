@@ -78,6 +78,10 @@ class RoundTracker:
         arrivals = self.arrivals_by_operation[operation_id]
         arrivals.strong_rounds = max(arrivals.strong_rounds, round_index)
 
+    def operation(self, operation_id) -> program_records.Operation:
+        """The operation record of that id."""
+        return self.operation_by_id[operation_id]
+
     def rounds_arrived(self, operation_id) -> int:
         """The highest round the arrival authority has published."""
         arrivals = self.arrivals_by_operation.get(operation_id)

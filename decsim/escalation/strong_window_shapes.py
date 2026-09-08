@@ -41,18 +41,16 @@ windows; it is one job, the forward window's layout, and the width is
 the number of components a re-slice reaches.
 """
 
-import copy
 import dataclasses
 import enum
 from typing import Any, Optional, Protocol, runtime_checkable
 
 import decsim.decoders.decode_queue as decode_queue_module
+import decsim.escalation.strong_regions as strong_regions
 import decsim.observe.trace_source as trace_source
 import decsim.records.decoding as decoding_records
 import decsim.records.identity as identity_records
-import decsim.records.program as program_records
 import decsim.records.windows as window_records
-import decsim.windows.round_retention as round_retention
 
 
 @dataclasses.dataclass(frozen=True)
@@ -142,9 +140,9 @@ class ContextWindow:
     absorbs_weak_windows = False
     window_absorbed = trace_source.SILENT
 
-    def __init__(self, engine, planner, tracker, retention, builder) -> None:
+    def __init__(self, engine, regions, tracker, retention, builder) -> None:
         self.engine = engine
-        self.planner = planner
+        self.regions = regions
         self.tracker = tracker
         self.retention = retention
         self.builder = builder
@@ -152,23 +150,15 @@ class ContextWindow:
     def plan(self, weak_job: decoding_records.DecodeJob) -> StrongAssignment:
         """The two-sided context job, built now, its context held."""
         key = (weak_job.operation_id, weak_job.window_id)
-        weak_window = self.planner.windows_by_key[key]
-        operation = self.tracker.operation_by_id[weak_job.operation_id]
-        strong_window = _context_window_of(weak_window)
-        round_count = self.tracker.round_count_for_window(
-            operation.id, strong_window
-        )
-        left_exclusions = _left_fault_exclusions(strong_window.commit_lo)
-        resolved = self.planner.resolved_operation_by_id[operation.id]
-        model = self.planner.models.strong_model_for_operation(
-            operation, resolved, strong_window, round_count, left_exclusions
-        )
+        region = self.regions.context_region(key)
+        strong_window = region.window
+        model = self.regions.context_model(key, strong_window)
         request_key = self.builder.new_request_key(
             weak_job.operation_id,
             weak_job.window_id,
             window_records.DecoderTier.STRONG,
         )
-        self._require_context_stored(key, weak_job.operation_id, strong_window)
+        self._require_context_stored(key, region)
         strong_store = self.retention.strong_store
         self.builder.stamp_first_round(strong_window, strong_store)
         payloads = self.builder.assemble_payloads(strong_window, strong_store)
@@ -224,18 +214,12 @@ class ContextWindow:
         return ()
 
     def _require_context_stored(
-        self, key: tuple, operation_id, strong_window: window_records.Window
+        self, key: tuple, region: strong_regions.ContextRegion
     ) -> None:
         """Every context round that already arrived must sit in buffer 1."""
-        context_reads = self.retention.read_keys_for_bounds(
-            operation_id,
-            strong_window.buffer_lo,
-            strong_window.buffer_hi,
-            strong_window,
-        )
         strong_store = self.retention.strong_store
         missing = []
-        for round_key in context_reads:
+        for round_key in region.context_read_keys:
             arrived = self.tracker.rounds_arrived(round_key[0])
             if round_key[1] > arrived:
                 continue
@@ -270,22 +254,20 @@ class ForwardWindow:
     def __init__(
         self,
         engine,
+        regions,
         planner,
-        tracker,
         retention,
         builder,
         requester,
         ledger,
-        interaction,
     ) -> None:
         self.engine = engine
+        self.regions = regions
         self.planner = planner
-        self.tracker = tracker
         self.retention = retention
         self.builder = builder
         self.requester = requester
         self.ledger = ledger
-        self.interaction = interaction
         self.pending = _PendingWindows()
         self.window_absorbed = trace_source.TraceSource()
 
@@ -307,42 +289,20 @@ class ForwardWindow:
             window_records.DecoderTier.STRONG,
         )
         strong_request_created_ticks = self.engine.now
-        operation_id, escalated_index = key
-        weak_window = self.planner.windows_by_key[key]
-        round_count = self.tracker.round_count_for_window(
-            operation_id, weak_window
-        )
-        later_windows = self._later_windows(operation_id, escalated_index)
-        plan = self._plan_strong_region(weak_window, later_windows, round_count)
-        resolved_region = self._resolve_strong_region_plan(
-            key, weak_window, later_windows, round_count, plan
-        )
+        operation_id = key[0]
+        resolved_region = self.regions.forward_region(key)
+        plan = resolved_region.plan
         restart_key = resolved_region.restart_window_key
-        operation = self.tracker.operation_by_id[operation_id]
-        proposed_restart = None
-        restart_model = None
-        if restart_key is not None:
-            proposed_restart = self._proposed_restart_window(restart_key, plan)
-            restart_model = self._build_strong_window_model(
-                operation,
-                proposed_restart,
-                round_count,
-                resolved_region.restart_fault_exclusion_ranges,
-            )
-        strong_window = _strong_window_of(key, plan)
-        strong_model = self._build_strong_window_model(
-            operation,
-            strong_window,
-            round_count,
-            resolved_region.strong_fault_exclusion_ranges,
-        )
+        strong_window = resolved_region.strong_window
+        strong_model = resolved_region.strong_model
+        restart_model = resolved_region.restart_model
         logical_candidate = self._strong_window_ownership_candidate(
             key, resolved_region
         )
         guard = self._guard_restart_reads(
             key,
             restart_key,
-            proposed_restart,
+            resolved_region.proposed_restart_window,
             strong_request_key,
             resolved_region,
         )
@@ -364,7 +324,11 @@ class ForwardWindow:
         try:
             self.ledger.contributions = logical_candidate
             self.pending.register(held, operation_id, restart_key)
-            self._hold_strong_context(key, strong_request_key, plan)
+            self._hold_strong_context(
+                key,
+                strong_request_key,
+                resolved_region.context_round_keys,
+            )
             self._withdraw_stale_requests(resolved_region)
             pending_hold = decoding_records.PendingStrong(strong_request_key)
             for absorbed_key in resolved_region.absorbed_window_keys:
@@ -405,7 +369,9 @@ class ForwardWindow:
         held = self.pending.peek_terminal(operation_id)
         if held is None:
             return None
-        stored_through = self.tracker.strong_rounds_arrived(operation_id)
+        stored_through = self.regions.strong_rounds_stored(
+            operation_id
+        )
         if stored_through < held.resolved_region.plan.context_hi:
             return None
         job = self._build_pending_strong_job(held)
@@ -437,118 +403,8 @@ class ForwardWindow:
                 f"switching event creates exactly one strong job"
             )
 
-    def _later_windows(self, operation_id, escalated_index: int) -> list:
-        """The operation's windows past the escalated one, in index order."""
-        later_windows = []
-        for window_index in self.planner.window_indices_of(operation_id):
-            if window_index > escalated_index:
-                window = self.planner.windows_by_key[
-                    (operation_id, window_index)
-                ]
-                later_windows.append(window)
-        return later_windows
-
-    def _plan_strong_region(
-        self,
-        weak_window: window_records.Window,
-        later_windows: list,
-        round_count,
-    ) -> window_records.StrongRegionPlan:
-        weak_info = window_records.WindowInfo.from_window(weak_window)
-        later_infos = []
-        for window in later_windows:
-            window_info = window_records.WindowInfo.from_window(window)
-            later_infos.append(window_info)
-        return self.interaction.plan_strong_region(
-            weak_info, later_infos, round_count
-        )
-
-    def _resolve_strong_region_plan(
-        self,
-        key: tuple,
-        weak_window: window_records.Window,
-        later_windows: list,
-        round_count: int,
-        plan: window_records.StrongRegionPlan,
-    ) -> "_ResolvedStrongRegion":
-        """Check the plan against the live window graph; resolve its reads.
-
-        The interaction that planned the region is a plug-in, so its
-        plan is checked like an input.
-        """
-        _check_region_bounds(key, weak_window, round_count, plan)
-        absorbed = _absorbed_window_keys(later_windows, plan)
-        _refuse_crossing_window(later_windows, plan)
-        self._check_absorbable(absorbed)
-        restart_key = _restart_window_key(later_windows, plan)
-        restart_reads = self._restart_reads(key, restart_key, plan)
-        strong_exclusions, restart_exclusions = _fault_exclusions(
-            plan, round_count, restart_key
-        )
-        context_reads = _context_round_keys(weak_window.operation_id, plan)
-        purpose = f"strong-region plan for {key}"
-        # the strong window's context lives in syndrome buffer 1; the
-        # restart window's weak reads, the re-read range among them, sit
-        # in Buffer 0 under its potential restart hold (planned with the
-        # window, live until _restart_weak_chain ends it)
-        self.retention.require_retained(
-            context_reads, purpose, self.retention.strong_store
-        )
-        self.retention.require_retained(restart_reads, purpose)
-        return _ResolvedStrongRegion(
-            plan=plan,
-            absorbed_window_keys=absorbed,
-            restart_window_key=restart_key,
-            restart_read_keys=tuple(restart_reads),
-            strong_fault_exclusion_ranges=strong_exclusions,
-            restart_fault_exclusion_ranges=restart_exclusions,
-        )
-
-    def _check_absorbable(self, absorbed: tuple) -> None:
-        for absorbed_key in absorbed:
-            window = self.planner.windows_by_key[absorbed_key]
-            assert not window.committed, f"absorbing committed {absorbed_key}"
-            assert window.t_done is None, f"absorbing decoded {absorbed_key}"
-
-    def _restart_reads(
-        self, key: tuple, restart_key: Optional[tuple], plan
-    ) -> list:
-        """The restart window's reads from its re-sliced buffer start."""
-        if restart_key is None:
-            _refuse_terminal_restart_data(key, plan)
-            return []
-        restart = self.planner.windows_by_key[restart_key]
-        _check_restart_tiling(key, restart_key, restart, plan)
-        return self.retention.read_keys_for_bounds(
-            restart.operation_id,
-            plan.restart_buffer_lo,
-            restart.buffer_hi,
-            restart,
-        )
-
-    def _proposed_restart_window(
-        self, restart_key: tuple, plan: window_records.StrongRegionPlan
-    ) -> window_records.Window:
-        """The restart window as it will read after the re-slice."""
-        restart = self.planner.windows_by_key[restart_key]
-        proposed = copy.deepcopy(restart)
-        proposed.buffer_lo = plan.restart_buffer_lo
-        return proposed
-
-    def _build_strong_window_model(
-        self,
-        operation: program_records.Operation,
-        window: window_records.Window,
-        round_count: int,
-        fault_exclusions: tuple,
-    ):
-        resolved = self.planner.resolved_operation_by_id[operation.id]
-        return self.planner.models.strong_model_for_operation(
-            operation, resolved, window, round_count, fault_exclusions
-        )
-
     def _strong_window_ownership_candidate(
-        self, key: tuple, resolved_region: "_ResolvedStrongRegion"
+        self, key: tuple, resolved_region: strong_regions.ForwardRegion
     ) -> dict:
         """The logical-owner map with the strong window; nothing live moves."""
         plan = resolved_region.plan
@@ -574,7 +430,7 @@ class ForwardWindow:
         restart_key: Optional[tuple],
         proposed_restart: Optional[window_records.Window],
         strong_request_key: window_records.DecoderRequestKey,
-        resolved_region: "_ResolvedStrongRegion",
+        resolved_region: strong_regions.ForwardRegion,
     ) -> Optional[decoding_records.RephaseGuard]:
         """Hold the restart window's strong context while the plan lands.
 
@@ -613,7 +469,7 @@ class ForwardWindow:
         key: tuple,
         restart_key: tuple,
         proposed_restart: window_records.Window,
-        resolved_region: "_ResolvedStrongRegion",
+        resolved_region: strong_regions.ForwardRegion,
     ) -> list:
         strong_store = self.retention.strong_store
         escalated_potential = decoding_records.PotentialStrong(key)
@@ -626,7 +482,7 @@ class ForwardWindow:
         )
         guarded = list(escalated_identities)
         guarded += list(restart_identities)
-        guarded += _context_round_keys(key[0], resolved_region.plan)
+        guarded += list(resolved_region.context_round_keys)
         restart_reads = list(resolved_region.restart_read_keys)
         guarded += self.retention.strong_context_read_keys(
             proposed_restart, restart_reads
@@ -636,7 +492,7 @@ class ForwardWindow:
     # ---- private: landing the plan
 
     def _withdraw_stale_requests(
-        self, resolved_region: "_ResolvedStrongRegion"
+        self, resolved_region: strong_regions.ForwardRegion
     ) -> None:
         """Take back the weak decodes the strong window supersedes.
 
@@ -659,13 +515,14 @@ class ForwardWindow:
         self,
         key: tuple,
         strong_request_key: window_records.DecoderRequestKey,
-        plan: window_records.StrongRegionPlan,
+        context_keys: tuple,
     ) -> None:
         """The window's potential strong read becomes the request's hold."""
         self.retention.transfer_potential_to_pending(key, strong_request_key)
         pending_hold = decoding_records.PendingStrong(strong_request_key)
-        context_keys = _context_round_keys(key[0], plan)
-        self.retention.strong_store.replace_hold(pending_hold, context_keys)
+        self.retention.strong_store.replace_hold(
+            pending_hold, list(context_keys)
+        )
 
     def _absorb_window(
         self, key: tuple, restart_key: Optional[tuple], replacement
@@ -726,7 +583,7 @@ class ForwardWindow:
     def _log_assignment(
         self,
         held: "_PendingWindow",
-        resolved_region: "_ResolvedStrongRegion",
+        resolved_region: strong_regions.ForwardRegion,
     ) -> None:
         plan = resolved_region.plan
         readiness_description = "the far-side weak boundary"
@@ -837,18 +694,6 @@ STRONG_WINDOW_SHAPES = {
 }
 
 
-@dataclasses.dataclass(frozen=True)
-class _ResolvedStrongRegion:
-    """One planned strong region resolved against the live window graph."""
-
-    plan: window_records.StrongRegionPlan
-    absorbed_window_keys: tuple
-    restart_window_key: Optional[tuple]
-    restart_read_keys: tuple
-    strong_fault_exclusion_ranges: tuple
-    restart_fault_exclusion_ranges: Optional[tuple]
-
-
 class _Phase(enum.Enum):
     """The one readiness condition that releases a held strong job."""
 
@@ -863,7 +708,7 @@ class _PendingWindow:
     key: tuple
     weak_job: decoding_records.DecodeJob
     label: str
-    resolved_region: _ResolvedStrongRegion
+    resolved_region: strong_regions.ForwardRegion
     strong_window: window_records.Window
     strong_model: object
     selection_arrival_ticks: Optional[int]
@@ -995,205 +840,6 @@ def _released(
     """The held window's job with its selection's tick."""
     assert held.selection_arrival_ticks is not None, held.key
     return DeferredStrongJob(job, held.selection_arrival_ticks)
-
-
-def _context_window_of(
-    weak_window: window_records.Window,
-) -> window_records.Window:
-    """The weak window with one buffer of raw context on each side."""
-    context_lo, commit_lo, commit_hi, context_hi = (
-        round_retention.strong_context_bounds(weak_window)
-    )
-    round_count = context_hi - context_lo + 1
-    strong_window = window_records.Window(
-        operation_id=weak_window.operation_id,
-        window_index=weak_window.window_index,
-        commit_lo=commit_lo,
-        commit_hi=commit_hi,
-        buffer_hi=context_hi,
-        buffer_lo=context_lo,
-        round_count=round_count,
-    )
-    strong_window.boundary_in = weak_window.boundary_in
-    return strong_window
-
-
-def _left_fault_exclusions(commit_lo: int) -> tuple:
-    """The rounds before the strong window, whose faults it never owns."""
-    if commit_lo > 1:
-        return ((1, commit_lo - 1),)
-    return ()
-
-
-def _context_round_keys(
-    operation_id, plan: window_records.StrongRegionPlan
-) -> list:
-    """The (operation, round) keys of the strong window's whole context."""
-    stop_round = plan.context_hi + 1
-    round_keys = []
-    for round_index in range(plan.context_lo, stop_round):
-        round_keys.append((operation_id, round_index))
-    return round_keys
-
-
-def _strong_window_of(
-    key: tuple, plan: window_records.StrongRegionPlan
-) -> window_records.Window:
-    round_count = plan.context_hi - plan.context_lo + 1
-    return window_records.Window(
-        operation_id=key[0],
-        window_index=key[1],
-        commit_lo=plan.commit_lo,
-        commit_hi=plan.commit_hi,
-        buffer_hi=plan.context_hi,
-        buffer_lo=plan.context_lo,
-        round_count=round_count,
-    )
-
-
-def _check_region_bounds(
-    key: tuple,
-    weak_window: window_records.Window,
-    round_count: int,
-    plan: window_records.StrongRegionPlan,
-) -> None:
-    """Context holds commit holds the weak window, inside the operation."""
-    nested_bounds = (
-        1,
-        plan.context_lo,
-        plan.commit_lo,
-        weak_window.commit_lo,
-        weak_window.commit_hi,
-        plan.commit_hi,
-        plan.context_hi,
-        round_count,
-    )
-    if not _is_nondecreasing(nested_bounds):
-        raise RuntimeError(
-            f"invalid strong-region bounds for {key}: context "
-            f"{plan.context_lo}-{plan.context_hi}, commit "
-            f"{plan.commit_lo}-{plan.commit_hi}, operation 1-{round_count}"
-        )
-    if plan.commit_lo != weak_window.commit_lo:
-        raise RuntimeError(
-            f"strong-region commit for {key} must start at the "
-            f"escalated window's commit start {weak_window.commit_lo}"
-        )
-
-
-def _is_nondecreasing(values: tuple) -> bool:
-    for left, right in zip(values, values[1:]):
-        if right < left:
-            return False
-    return True
-
-
-def _absorbed_window_keys(
-    later_windows: list, plan: window_records.StrongRegionPlan
-) -> tuple:
-    """The later windows whose whole commit region the strong window covers."""
-    absorbed = []
-    for window in later_windows:
-        if window.commit_hi <= plan.commit_hi:
-            absorbed.append(window.key)
-    return tuple(absorbed)
-
-
-def _refuse_crossing_window(
-    later_windows: list, plan: window_records.StrongRegionPlan
-) -> None:
-    """A window committing across the strong window's edge has no owner.
-
-    The settings refuse the shape at build for the shipped interaction
-    (policies.py, _refuse_crossing_strong_region); this is the contract
-    behind it, since the interaction that planned the region is a
-    plug-in and its plan is checked like an input.
-    """
-    for window in later_windows:
-        is_begun = window.commit_lo <= plan.commit_hi
-        is_unfinished = plan.commit_hi < window.commit_hi
-        if is_begun and is_unfinished:
-            raise RuntimeError(
-                f"window {window.key} commits {window.commit_lo}-"
-                f"{window.commit_hi} across the strong-region edge "
-                f"{plan.commit_hi}"
-            )
-
-
-def _restart_window_key(
-    later_windows: list, plan: window_records.StrongRegionPlan
-) -> Optional[tuple]:
-    """The first later window past the strong window, or None at the end."""
-    for window in later_windows:
-        if window.commit_lo > plan.commit_hi:
-            return window.key
-    return None
-
-
-def _refuse_terminal_restart_data(
-    key: tuple, plan: window_records.StrongRegionPlan
-) -> None:
-    has_restart_data = plan.restart_buffer_lo is not None
-    has_seam_owner = plan.restart_seam_fault_owner is not None
-    if has_restart_data or has_seam_owner:
-        raise RuntimeError(
-            f"terminal strong-region plan for {key} cannot define "
-            f"restart seam data"
-        )
-
-
-def _check_restart_tiling(
-    key: tuple,
-    restart_key: tuple,
-    restart: window_records.Window,
-    plan: window_records.StrongRegionPlan,
-) -> None:
-    """The restart window commits right after the strong window."""
-    expected_start = plan.commit_hi + 1
-    if restart.commit_lo != expected_start:
-        raise RuntimeError(
-            f"strong-region plan for {key} ends at "
-            f"{plan.commit_hi}, but restart {restart_key} "
-            f"starts at {restart.commit_lo}; committed regions must "
-            "tile without a gap"
-        )
-    if plan.restart_buffer_lo is None:
-        raise RuntimeError(
-            f"strong-region restart {restart_key} needs a "
-            f"buffer start in 1-{restart.commit_lo}"
-        )
-    is_inside = 1 <= plan.restart_buffer_lo <= restart.commit_lo
-    if not is_inside:
-        raise RuntimeError(
-            f"strong-region restart {restart_key} needs a "
-            f"buffer start in 1-{restart.commit_lo}"
-        )
-
-
-def _fault_exclusions(
-    plan: window_records.StrongRegionPlan,
-    round_count: int,
-    restart_key: Optional[tuple],
-) -> tuple:
-    """(strong window's, restart window's) fault exclusion ranges.
-
-    The seam's owner keeps the crossing faults: when the strong region
-    owns them the restart window excludes everything up to the strong
-    window's edge; otherwise the strong window excludes the rounds past
-    its edge and the restart window excludes only the rounds before it.
-    """
-    left_exclusions = _left_fault_exclusions(plan.commit_lo)
-    if restart_key is None:
-        return left_exclusions, None
-    if (
-        plan.restart_seam_fault_owner
-        is window_records.SeamFaultOwner.STRONG_REGION
-    ):
-        restart_exclusions = ((1, plan.commit_hi),)
-        return left_exclusions, restart_exclusions
-    right_exclusion = (plan.commit_hi + 1, round_count)
-    strong_exclusions = left_exclusions + (right_exclusion,)
-    return strong_exclusions, left_exclusions
 
 
 def _refuse_overlapping_contribution(

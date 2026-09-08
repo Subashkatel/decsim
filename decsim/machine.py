@@ -64,6 +64,7 @@ import decsim.decoders.verify_windows as verify_windows
 import decsim.engine as engine_module
 import decsim.escalation.policies as escalation_policies
 import decsim.escalation.strong_redecode as strong_redecode_module
+import decsim.escalation.strong_regions as strong_regions
 import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.escalation.threshold_sources as threshold_sources
 import decsim.frontends.execution_runtime as execution_runtime_module
@@ -1487,19 +1488,15 @@ def _strong_redecode(
     if not escalation_policy.requires_strong_context:
         return None
     row = _strong_window_row(escalation)
+    regions = strong_regions.StrongRegions(
+        planner, tracker, retention, interaction
+    )
     if row.absorbs_weak_windows:
         shape = row(
-            engine,
-            planner,
-            tracker,
-            retention,
-            builder,
-            requester,
-            ledger,
-            interaction,
+            engine, regions, planner, retention, builder, requester, ledger
         )
     else:
-        shape = row(engine, planner, tracker, retention, builder)
+        shape = row(engine, regions, tracker, retention, builder)
     return strong_redecode_module.StrongRedecode(
         engine,
         shape,

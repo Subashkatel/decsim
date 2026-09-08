@@ -184,9 +184,7 @@ def _window_gap_join(
     if settings.escalation.policy is not None:
         return None
     signal = escalation_build.confidence_signal(settings.escalation)
-    return gap_join_module.WindowGapJoin(
-        engine, signal, verdict, decode_queue
-    )
+    return gap_join_module.WindowGapJoin(engine, signal, verdict, decode_queue)
 
 
 def _strong_redecode(

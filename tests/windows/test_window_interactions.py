@@ -12,6 +12,7 @@ far boundary.
 """
 
 import decsim.records.windows as window_records
+import decsim.windows.boundary_payloads as boundary_payloads
 import decsim.windows.window_interactions as window_interactions
 
 
@@ -31,7 +32,10 @@ def _weak_window_info(commit_lo: int) -> window_records.WindowInfo:
 
 
 def test_the_strong_region_is_commit_plus_two_buffers_from_the_commit_start():
-    interaction = window_interactions.DefaultWindowInteraction(1)
+    boundary_payload = boundary_payloads.DenseSeamMask()
+    interaction = window_interactions.DefaultWindowInteraction(
+        1, boundary_payload
+    )
     weak_window = _weak_window_info(1)
 
     plan = interaction.plan_strong_region(weak_window, [], 30)
@@ -48,7 +52,10 @@ def test_the_paper_restart_reads_no_round_of_the_strong_region():
     It shares no round with the strong region, so it owns the faults of
     the rounds it reads (Fig. 12).
     """
-    interaction = window_interactions.DefaultWindowInteraction(0)
+    boundary_payload = boundary_payloads.DenseSeamMask()
+    interaction = window_interactions.DefaultWindowInteraction(
+        0, boundary_payload
+    )
     weak_window = _weak_window_info(1)
 
     plan = interaction.plan_strong_region(weak_window, [], 30)
@@ -67,7 +74,10 @@ def test_one_buffer_region_of_re_read_reaches_back_into_the_strong_region():
     The re-read rounds are read twice, and the strong region, which
     decoded them with both boundaries determined, keeps their faults.
     """
-    interaction = window_interactions.DefaultWindowInteraction(1)
+    boundary_payload = boundary_payloads.DenseSeamMask()
+    interaction = window_interactions.DefaultWindowInteraction(
+        1, boundary_payload
+    )
     weak_window = _weak_window_info(1)
 
     plan = interaction.plan_strong_region(weak_window, [], 30)
@@ -82,7 +92,10 @@ def test_one_buffer_region_of_re_read_reaches_back_into_the_strong_region():
 
 def test_a_re_read_never_reaches_before_the_strong_regions_commit_start():
     """A strong region clipped by the operation's end keeps its own start."""
-    interaction = window_interactions.DefaultWindowInteraction(1)
+    boundary_payload = boundary_payloads.DenseSeamMask()
+    interaction = window_interactions.DefaultWindowInteraction(
+        1, boundary_payload
+    )
     weak_window = _weak_window_info(10)
 
     plan = interaction.plan_strong_region(weak_window, [], 30)
@@ -93,7 +106,10 @@ def test_a_re_read_never_reaches_before_the_strong_regions_commit_start():
 
 
 def test_a_strong_region_at_the_operations_end_has_no_restart_window():
-    interaction = window_interactions.DefaultWindowInteraction(0)
+    boundary_payload = boundary_payloads.DenseSeamMask()
+    interaction = window_interactions.DefaultWindowInteraction(
+        0, boundary_payload
+    )
     weak_window = _weak_window_info(4)
 
     plan = interaction.plan_strong_region(weak_window, [], 12)

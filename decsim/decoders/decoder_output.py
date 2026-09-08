@@ -83,10 +83,15 @@ class DecoderOutput:
     def send_boundary(
         self,
         attribution: transfer_records.TransferAttribution,
+        payload_bits: Optional[int],
         on_delivered: Callable[[transfer_records.Transfer], None],
     ) -> None:
-        """Send one window's boundary to a dependent window's decoder."""
-        self.transfers.send_boundary(attribution, on_delivered)
+        """Send one window's boundary to a dependent window's decoder.
+
+        The bits are the ones the window side counted on the seam the
+        message updates; None leaves the transfer to the card.
+        """
+        self.transfers.send_boundary(attribution, payload_bits, on_delivered)
 
     def _commit(
         self,

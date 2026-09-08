@@ -2,7 +2,7 @@ distance,physical_error_probability,algorithm,round_period_us,link,transfers_per
 3,0.001,pymatching,1.0,controller_to_qpu,0.0,0.0,0.0,0.0,0.0,0.0,0.0
 3,0.001,pymatching,1.0,controller_to_strong_buffer,0.0,0.0,0.0,0.0,0.0,0.0,0.0
 3,0.001,pymatching,1.0,controller_to_weak_buffer,15.0,129.0,8.6,0.0,0.0,0.0645,0.06
-3,0.001,pymatching,1.0,decoder_to_decoder,3.0,300.0,100.0,0.0,0.0,0.0,0.012
+3,0.001,pymatching,1.0,decoder_to_decoder,3.0,24.0,8.0,0.0,0.0,0.0,0.012
 3,0.001,pymatching,1.0,frame_to_controller,0.0,0.0,0.0,0.0,0.0,0.0,0.0
 3,0.001,pymatching,1.0,qpu_to_controller,15.0,129.0,8.6,0.0,0.0,0.0,0.06
 3,0.001,pymatching,1.0,strong_buffer_to_strong_decoder,0.0,0.0,0.0,0.0,0.0,0.0,0.0

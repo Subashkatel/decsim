@@ -60,6 +60,15 @@ ROUND_PAYLOAD_SOURCE = "PackedRound.wire_bits"
 # (syndrome_buffer/round_output.py).
 DECODER_INPUT_PAYLOAD_SOURCE = "DecodeJob.payload_bits()"
 
+# A window's hand-off updates the detectors of its neighbour's oldest
+# round layer and nothing else (Tan et al. 2209.09219 lines 936-946;
+# quits sliding_window.py:164-174; cuda-q QEC sliding_window.cpp:325-344;
+# Bombin et al. 2303.04846 lines 784-786). The window side counts that
+# seam in the representation windows.boundary_payload names, dense or
+# sparse (decsim/windows/boundary_payloads.py), and passes the count with
+# the send.
+BOUNDARY_PAYLOAD_SOURCE = "DependencyResidual seam-layer detectors"
+
 # The controller's write into a syndrome buffer is a hop of the control
 # system, and Caune et al., arXiv:2410.05202, Fig. 1a is the referent that
 # measures such hops one by one, with worst-case values where measured.
@@ -137,11 +146,11 @@ def logical_reference_profile() -> settings.FabricSettings:
         "Khalid do latency mapped to the weak output",
         RESULT_PAYLOAD_SOURCE,
     )
-    decoder_to_decoder = _default_path(
+    decoder_to_decoder = _actual_path(
         "decoder_to_decoder",
         0.5,
-        100,
-        "Khalid dd representative aggregate transaction",
+        "repository boundary-hop model choice",
+        BOUNDARY_PAYLOAD_SOURCE,
     )
     strong_decoder_to_frame = _actual_path(
         "strong_decoder_to_frame",
@@ -211,7 +220,12 @@ def bandwidth_limited_profile(
     strong_window_bits_per_microsecond = (
         strong_window_bits / commit_region_microseconds
     )
-    boundary_bits_per_microsecond = 100 / commit_region_microseconds
+    # one dense seam layer per commit region: the layer's detectors are
+    # the round's syndrome bits (section 2.2 of the layer arithmetic:
+    # d*d-1 ancilla measurements is one bulk layer's detector count)
+    boundary_bits_per_microsecond = (
+        syndrome_bits_per_round / commit_region_microseconds
+    )
     bus_word_bits_per_microsecond = BUS_WORD_BITS / commit_region_microseconds
     instruction_word_bits_per_microsecond = (
         INSTRUCTION_WORD_BITS / commit_region_microseconds
@@ -284,10 +298,10 @@ def bandwidth_limited_profile(
     decoder_to_decoder = provisioning.path(
         "decoder_to_decoder",
         0.5,
-        100,
+        syndrome_bits_per_round,
         boundary_bits_per_microsecond,
-        "one boundary transaction per commit region",
-        None,
+        "one dense seam layer per commit region",
+        BOUNDARY_PAYLOAD_SOURCE,
     )
     strong_decoder_to_frame = provisioning.path(
         "strong_decoder_to_frame",

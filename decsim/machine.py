@@ -94,6 +94,7 @@ import decsim.syndrome_buffer.round_output as round_output
 import decsim.syndrome_buffer.round_store as round_store_module
 import decsim.syndrome_buffer.settings as round_store_settings
 import decsim.syndrome_buffer.strong_round_writer as strong_round_writer_module
+import decsim.windows.boundary_payloads as boundary_payloads
 import decsim.windows.built_window_models as built_window_models
 import decsim.windows.committed_rounds as committed_rounds
 import decsim.windows.decode_requests as decode_requests
@@ -815,8 +816,14 @@ def _plan(settings: MachineSettings, escalation_policy) -> _Plan:
     reread_regions = settings.escalation.restart_reread_buffer_regions
     window_interaction = settings.windows.window_interaction
     if window_interaction is None:
+        payload_row = _row(
+            boundary_payloads.BOUNDARY_PAYLOADS,
+            "windows.boundary_payload",
+            settings.windows.boundary_payload,
+        )
+        boundary_payload = payload_row()
         window_interaction = window_interactions.DefaultWindowInteraction(
-            reread_regions
+            reread_regions, boundary_payload
         )
     is_sliding = type(scheme) is windowing_schemes.SlidingWindowScheme
     if dynamic_streams and not is_sliding:

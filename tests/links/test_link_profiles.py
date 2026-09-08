@@ -94,9 +94,16 @@ def test_the_reference_card_is_unbounded_on_every_path():
 
 def test_the_reference_card_prices_a_bus_word_and_an_instruction_word():
     profile = link_profiles.logical_reference_profile()
-    assert profile.decoder_to_decoder.default_payload.aggregate_bits == 100
     assert profile.frame_to_controller.default_payload.aggregate_bits == 32
     assert profile.controller_to_qpu.default_payload.aggregate_bits == 128
+
+
+def test_the_reference_card_prices_a_boundary_on_the_seam_it_updates():
+    profile = link_profiles.logical_reference_profile()
+    assert profile.decoder_to_decoder.default_payload is None
+    assert profile.decoder_to_decoder.actual_payload_source == (
+        "DependencyResidual seam-layer detectors"
+    )
 
 
 def test_the_reference_card_names_the_runtime_quantity_of_each_actual_path():
@@ -151,7 +158,7 @@ def test_the_bandwidth_card_provisions_each_path_for_one_commit_region():
         "weak_decoder_to_strong_decoder": 0.2,
         "strong_buffer_to_strong_decoder": 72.0,
         "weak_decoder_to_frame": 0.2,
-        "decoder_to_decoder": 20.0,
+        "decoder_to_decoder": 4.8,
         "strong_decoder_to_frame": 0.2,
         "frame_to_controller": 6.4,
         "controller_to_qpu": 25.6,
@@ -180,6 +187,7 @@ def test_the_bandwidth_cards_default_payloads_are_one_regions_traffic():
         profile.weak_decoder_to_strong_decoder.default_payload.aggregate_bits
         == 1
     )
+    assert profile.decoder_to_decoder.default_payload.aggregate_bits == 24
 
 
 def test_the_capacity_scale_multiplies_every_rate():

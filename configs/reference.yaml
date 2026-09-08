@@ -139,6 +139,25 @@ windows:
   kind: sliding                    # sliding | parallel | sandwich | naive_online
   commit_rounds: null              # rounds committed per window; null = d
   buffer_rounds: null              # look-ahead rounds per window; null = d
+  boundary_payload: dense_seam_mask # dense_seam_mask | sparse_seam_list: how a
+                                   # window's hand-off to its neighbour is
+                                   # written on decoder_to_decoder. The message
+                                   # updates the detectors of the neighbour's
+                                   # oldest round layer and nothing else (Tan
+                                   # 2209.09219 lines 936-946; quits
+                                   # sliding_window.py:164-174; cuda-q QEC
+                                   # sliding_window.cpp:325-344). dense_seam_mask
+                                   # charges one bit per detector of that layer
+                                   # (d*d-1 on a bulk layer), the mask both
+                                   # compiled implementations carry, so the cost
+                                   # does not move with the noise.
+                                   # sparse_seam_list charges one index per
+                                   # flipped detector, ceil(log2(seam
+                                   # detectors)) bits each: Skoric's artificial
+                                   # defect list (2209.08552 lines 265-269,
+                                   # 1038-1040) and Bombin's "small number of
+                                   # check generators" (2303.04846 lines
+                                   # 784-786)
 
 # The sweep: a list of blocks; each block is the cross product of its three
 # axes, `shots` seeds per point (0..shots-1); a point named twice runs

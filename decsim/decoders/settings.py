@@ -58,6 +58,19 @@ DECODER_MANAGER_KEYS = ("bulk_strong", "clock", "dispatch_cycles")
 # which is what every hop of this tree does today.
 DECODER_INPUTS = {"copy": True, "in_place": False}
 
+# weak_decoder.boundary_fold names one of these rows: how the window's
+# boundary mask is folded into the input the decode reads. copy
+# duplicates the landed input and XORs the mask into the duplicate, so
+# the unit's stored rounds stay raw, which is what a software decoder
+# does (cuda-q QEC keeps the raw rounds and rebuilds the window syndrome
+# each time, sliding_window.cpp:283-292). in_place XORs the mask into
+# the unit's own memory, which is what a hardware decoder does: AFS's
+# processing elements write on-chip memory directly (2001.06598 lines
+# 528-531) and Helios keeps its shared memory in registers with a single
+# writer (2301.08419 lines 632-640). One input read by two jobs has no
+# single writer, so in_place is refused there by name.
+DECODER_BOUNDARY_FOLDS = {"copy": True, "in_place": False}
+
 
 @dataclasses.dataclass(frozen=True)
 class DecoderSettings:
@@ -72,8 +85,10 @@ class DecoderSettings:
     unit_memory_rounds is the input SRAM per unit (None is unbounded); a
     unit overlaps input transfer with compute only when two windows fit.
     input names a row of DECODER_INPUTS (above): whether this tier's
-    unit is given a copy of the rounds or reads them where the store
-    keeps them.
+    unit is given a copy of the rounds it reads or reads them where the
+    store keeps them. boundary_fold names a row of
+    DECODER_BOUNDARY_FOLDS: whether the window's boundary mask is XORed
+    into a duplicate of the landed input or into the unit's own memory.
     kind None is no decoder at all, right for a run that plans no
     windows. A Python-built decoder is routed as it is, with no engine
     stages around it.
@@ -82,6 +97,7 @@ class DecoderSettings:
     kind: Union[str, float, None] = None
     units: int = 1
     input: str = "copy"
+    boundary_fold: str = "copy"
     unit_memory_rounds: Optional[int] = None
     fetch_cycles_per_round: int = 1
     release_cycles_per_job: int = 1
@@ -102,10 +118,12 @@ class DecoderSettings:
                 f"for an unbounded unit memory (got {unit_memory_rounds})"
             )
         input_kind = section.get("input", "copy")
+        boundary_fold = section.get("boundary_fold", "copy")
         return cls(
             kind=section["kind"],
             units=section["units"],
             input=input_kind,
+            boundary_fold=boundary_fold,
             unit_memory_rounds=unit_memory_rounds,
             fetch_cycles_per_round=engine["fetch_cycles_per_round"],
             release_cycles_per_job=engine["release_cycles_per_job"],

@@ -330,6 +330,22 @@ weak_decoder:                      # the lightweight tier: fast, higher LER
                                    # directly access the data stored on-chip",
                                    # 2001.06598 lines 528-531). copy is what
                                    # every hop of this tree does today
+  boundary_fold: copy              # copy | in_place: how the window's boundary
+                                   # mask reaches the decode. copy duplicates
+                                   # the landed input and XORs the mask into the
+                                   # duplicate, leaving the unit's rounds raw,
+                                   # which is what a software decoder does
+                                   # (cuda-q QEC rebuilds the window syndrome
+                                   # each time, sliding_window.cpp:283-292).
+                                   # in_place XORs it into the unit's own
+                                   # memory, which is what a hardware decoder
+                                   # does (AFS 2001.06598 lines 528-531; Helios
+                                   # keeps its shared memory single-writer,
+                                   # 2301.08419 lines 632-640), and is refused
+                                   # by name when two jobs read that input or
+                                   # when the tier reads its input in place.
+                                   # Only the tier that decodes the plan's
+                                   # windows folds a boundary
   unit_memory_rounds: null         # input SRAM rounds PER UNIT; null = unbounded.
                                    # Each unit holds two windows when they fit
                                    # (transfer overlaps compute); a unit sized

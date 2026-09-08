@@ -10,11 +10,14 @@ on its lookahead tail (Skoric et al. 2209.08552, Tan et al. 2209.09219).
 
 import types
 
+import pytest
+
 import decsim.decoders.decoder_memory as decoder_memory
 import decsim.engine as engine_module
 import decsim.escalation.policies as escalation_policies
 import decsim.links.window_transfers as window_transfers
 import decsim.observe.run_views as run_views
+import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
 import decsim.records.rounds as round_records
 import decsim.records.transfers as transfer_records
@@ -249,3 +252,58 @@ def test_a_decode_job_is_priced_for_the_rounds_it_reads():
     assert tail.request_key.tier is window_records.DecoderTier.WEAK
     assert (tail.input_round_lo, tail.input_round_hi) == (7, 12)
     assert tail.input_round_count == 3
+
+
+def _landed_job(fixture, folds_in_place: bool):
+    """One blocked window's job, landed in a real unit memory."""
+    fixture.window.deps = [(1, 9)]
+    fixture.window.deps_remaining = 1
+    fixture.window.boundary_in = {2: [1, 0, 1]}
+    for round_index in (1, 2, 3, 4, 5):
+        fixture.arrive(round_index)
+    (job, _send_input) = fixture.queue.enqueued[0]
+    memory = decoder_memory.DecoderMemory("default", 0, None)
+    job.decoder_input = memory.deposit(job)
+    job.memory = memory
+    if folds_in_place:
+        fixture.gate.copies_the_fold = False
+    return job, memory
+
+
+def test_the_copy_fold_leaves_the_units_rounds_raw():
+    """Today's row: the job reads a masked duplicate (cuda-q QEC's shape)."""
+    fixture = _Fixture()
+    job, memory = _landed_job(fixture, folds_in_place=False)
+    fixture.gate.mask_input(job)
+    resident = memory.input_of(job)
+    (masked,) = job.decoder_input.rounds[1].fragments
+    assert masked.bits == (1, 0, 1)
+    (raw,) = resident.rounds[1].fragments
+    assert raw.bits is None
+    assert job.decoder_input is not resident
+
+
+def test_the_in_place_fold_writes_the_units_own_memory():
+    """AFS 2001.06598 lines 528-531: the unit's memory is written directly."""
+    fixture = _Fixture()
+    job, memory = _landed_job(fixture, folds_in_place=True)
+    fixture.gate.mask_input(job)
+    resident = memory.input_of(job)
+    assert job.decoder_input is resident
+    (masked,) = resident.rounds[1].fragments
+    assert masked.bits == (1, 0, 1)
+
+
+def test_an_in_place_fold_of_an_input_two_jobs_read_is_refused():
+    """One input has one writer (Helios 2301.08419 lines 632-640)."""
+    fixture = _Fixture()
+    job, memory = _landed_job(fixture, folds_in_place=True)
+    sibling = decoding_records.DecodeJob(
+        operation_id=1,
+        window_id=0,
+        round_count=5,
+        request_key=job.request_key,
+    )
+    memory.add_reader(sibling)
+    with pytest.raises(RuntimeError, match="2 jobs read"):
+        fixture.gate.mask_input(job)

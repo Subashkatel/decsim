@@ -4,8 +4,15 @@ import dataclasses
 from collections.abc import Mapping
 from typing import Optional
 
+import decsim.decoders.verify_windows as verify_windows
+
 LOG_MODES = ("off", "print", "file", "both")
-WINDOW_CHECKS = ("none", "tesseract")
+# observation.check_windows_with names one of these rows: the referee
+# that re-decodes every window, or none.
+WINDOW_CHECKS = {
+    "none": None,
+    "tesseract": verify_windows.TesseractCheckedDecoder,
+}
 # the trace's own word for "name the file yourself", so a study asks for
 # a Chrome trace without choosing a path
 CHROME_TRACE = "chrome"
@@ -148,10 +155,11 @@ def _log_mode(section: Mapping) -> str:
 def _window_check(section: Mapping) -> str:
     """The referee that re-decodes every window, or none."""
     check_windows_with = section.get("check_windows_with", "none")
+    rows = sorted(WINDOW_CHECKS)
     if check_windows_with not in WINDOW_CHECKS:
         raise ValueError(
             "observation.check_windows_with must be one of "
-            f"{WINDOW_CHECKS}, got {check_windows_with!r}"
+            f"{rows}, got {check_windows_with!r}"
         )
     return check_windows_with
 

@@ -26,7 +26,6 @@ import decsim.front.collect_command as run
 import decsim.front.experiment as experiment
 import decsim.front.measure as measure_shot
 import decsim.front.report as sweep_report
-import decsim.machine as machine_module
 import decsim.windows.built_window_models as built_window_models
 
 THIS_FILE = pathlib.Path(__file__)
@@ -139,7 +138,7 @@ def test_a_decoder_kind_off_the_table_is_refused_naming_the_rows():
     weak_decoder = decoder_settings.DecoderSettings(kind="lookup_table")
     settings = dataclasses.replace(task.settings, weak_decoder=weak_decoder)
     unknown = dataclasses.replace(task, settings=settings)
-    rows = sorted(machine_module.DECODERS)
+    rows = sorted(decoder_settings.DECODERS)
     sentence = (
         "weak_decoder.kind 'lookup_table' is not a row of its table; "
         "the rows are " + re.escape(repr(rows))

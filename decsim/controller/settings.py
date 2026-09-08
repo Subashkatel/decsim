@@ -10,7 +10,16 @@ from collections.abc import Mapping
 from typing import Optional
 
 import decsim.config as config
+import decsim.controller.policies as policies
 import decsim.ports as ports
+
+# idle_policy.kind names one of these rows: what the controller does
+# with the rounds of a patch that is idle.
+IDLE_POLICIES = {
+    "separate_decode_jobs": policies.SeparateDecodeJobs,
+    "ignore": policies.Ignore,
+    "extend_stream": policies.ExtendStream,
+}
 
 
 class PackingOverflowPolicy(enum.Enum):

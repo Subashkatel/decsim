@@ -33,10 +33,19 @@ your class and what makes it appear in a sweep. One row, nothing more.
    `start`, `cancel`, `occupancy` and `pipeline_depth` besides, so a
    decoder can be `decode` and `latency` alone.
 2. **Add the row**, if a yaml needs to name it: one entry in the table
-   your part belongs to in `decsim/machine.py` (`DECODERS`,
-   `SYNDROME_SOURCES`, `ROUND_STORES`, `ESCALATIONS`,
-   `WINDOWING_SCHEMES`, `IDLE_POLICIES`, `WORKLOADS`,
-   `MAGIC_STATE_FACTORIES`, `CONFIDENCE_SIGNALS`, `WINDOW_CHECKS`).
+   your part belongs to, which lives beside the classes it lists.
+
+   | Table | Where it lives |
+   | --- | --- |
+   | `DECODERS` | `decsim/decoders/settings.py` |
+   | `SYNDROME_SOURCES`, `MAGIC_STATE_FACTORIES` | `decsim/qpu/settings.py` |
+   | `ROUND_STORES` | `decsim/syndrome_buffer/round_store.py` |
+   | `ESCALATIONS`, `STRONG_WINDOW_SHAPES` | `decsim/escalation/settings.py` |
+   | `WINDOWING_SCHEMES`, `BOUNDARY_PAYLOADS` | `decsim/windows/settings.py` |
+   | `IDLE_POLICIES` | `decsim/controller/settings.py` |
+   | `WORKLOADS` | `decsim/frontends/settings.py` |
+   | `CONFIDENCE_SIGNALS` | `decsim/confidence/signals.py` |
+   | `WINDOW_CHECKS` | `decsim/observe/settings.py` |
 3. **Name it in the yaml** by the row's key, in the section that owns
    your part: `weak_decoder: {kind: my_decoder}`. A kind that is not a
    row is refused at load with the rows listed, so a typo never runs.

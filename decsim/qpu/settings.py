@@ -12,7 +12,25 @@ import decsim.config as config
 import decsim.ports as ports
 import decsim.qpu.code_geometry as code_geometry
 import decsim.qpu.layouts as layouts
+import decsim.qpu.magic_state_factories as magic_state_factories
+import decsim.qpu.stim_device as stim_device
+import decsim.qpu.syndrome_devices as syndrome_devices
 import decsim.windows.settings as window_settings
+
+# qpu.kind names one of these rows: the device that emits the readout.
+SYNDROME_SOURCES = {
+    "stim_device": stim_device.StimDevice,
+    "timing_only": syndrome_devices.TimingOnlyDevice,
+    "syndrome_bits": syndrome_devices.SyndromeBitDevice,
+    "recorded_stim": stim_device.RecordedStimDevice,
+}
+# qpu.magic_state_factory names one of these rows: what supplies the
+# T states an operation consumes.
+MAGIC_STATE_FACTORIES = {
+    "infinite": magic_state_factories.InfiniteFactory,
+    "distillation": magic_state_factories.DistillationFactory,
+    "multi_level": magic_state_factories.MultiLevelDistillationFactory,
+}
 
 
 @dataclasses.dataclass(frozen=True)

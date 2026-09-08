@@ -24,7 +24,6 @@ import functools
 from typing import Optional
 
 import decsim.records.decoding as decoding_records
-import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 
 
@@ -60,13 +59,6 @@ class RoundRetention:
         if self.primary_tier is window_records.DecoderTier.STRONG:
             return self.strong_store
         return self.weak_store
-
-    @property
-    def primary_input_path(self) -> transfer_records.LinkPath:
-        """The link the primary tier's input rides into its unit."""
-        if self.primary_tier is window_records.DecoderTier.WEAK:
-            return transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER
-        return transfer_records.LinkPath.STRONG_BUFFER_TO_STRONG_DECODER
 
     def store_for(self, store):
         """The given store, or Buffer 0 when none is named."""

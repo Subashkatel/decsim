@@ -36,6 +36,7 @@ import decsim.qpu.settings as qpu_settings
 import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
 import decsim.records.rounds as round_records
+import decsim.records.windows as window_records
 
 
 def fragment(operation_id, round_index, fragment_index, bits=(0, 1)):
@@ -89,6 +90,37 @@ def test_materialization_orders_the_rounds_and_keeps_each_rounds_order():
         first_in_round,
         second_in_round,
     )
+
+
+def test_a_second_reader_of_one_input_is_one_copy_held_until_both_are_done():
+    """One copy per unit that reads the window, never one per job.
+
+    gem5 keeps every target of a single fill on one MSHR
+    (src/mem/cache/mshr.hh); OpenMP's shared clause says every task
+    reads the storage of the original item (openmp_spec_5_2.txt:
+    4315-4317). The two forced-class solves of one window are two jobs
+    and one resident input.
+    """
+    memory = decoder_memory.DecoderMemory("default", 0, capacity_rounds=4)
+    first = timing_only_job("class 0", 3)
+    second = timing_only_job("class 1", 3)
+    input_key = window_records.DecoderRequestKey(
+        41, 7, window_records.DecoderTier.WEAK, 0
+    )
+    first.request_key = input_key
+    first.input_key = input_key
+    second.input_key = input_key
+
+    memory.deposit(first)
+    assert memory.holds(second) is True
+    memory.add_reader(second)
+    assert memory.occupied_rounds == 3
+    assert memory.admissions == 1
+
+    memory.take(first)
+    assert memory.occupied_rounds == 3
+    memory.take(second)
+    assert memory.occupied_rounds == 0
 
 
 def test_a_pool_the_yaml_leaves_out_holds_as_many_rounds_as_it_is_given():

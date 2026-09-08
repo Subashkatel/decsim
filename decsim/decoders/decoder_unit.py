@@ -96,10 +96,14 @@ class DecoderUnit:
         inputs; a unit sized for one window keeps serial residency (the
         doubled-SRAM price of overlap is paid explicitly, never assumed).
         A first resident is always admitted, so a genuinely oversized
-        window still stops loudly at its deposit.
+        window still stops loudly at its deposit. A job whose rounds
+        this unit already holds needs no memory of its own: it is one
+        more reader of the copy that is here.
         """
         if len(self.residents) >= resident_capacity:
             return False
+        if self.memory.holds(job):
+            return True
         live = self.live_residents()
         if not live:
             return True

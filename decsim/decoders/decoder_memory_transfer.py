@@ -62,8 +62,13 @@ class DecoderInputStaging:
 
         At the landing the rounds are deposited, the Buffer 0 hold is
         dropped and the landing is reported. Until the landing,
-        input_landing_ticks is the tick the link expects.
+        input_landing_ticks is the tick the link expects. A job whose
+        rounds this unit already holds becomes one more reader of them
+        and moves nothing.
         """
+        if memory.holds(job):
+            self._read_resident(job, memory, on_landed)
+            return
         send_input = job.send_input
         job.send_input = None
 
@@ -84,6 +89,24 @@ class DecoderInputStaging:
 
         expected_delay_ticks = self.transport.deliver(job, send_input, land)
         job.input_landing_ticks = self.engine.now + expected_delay_ticks
+
+    def _read_resident(
+        self,
+        job: decoding_records.DecodeJob,
+        memory,
+        on_landed: Callable[[decoding_records.DecodeJob], None],
+    ) -> None:
+        """The rounds are here already: read them, move nothing, land now."""
+        job.send_input = None
+        job.input_landing_ticks = self.engine.now
+        job.decoder_input = memory.add_reader(job)
+        job.payloads = []
+        job.memory = memory
+        hold = job.input_hold
+        if hold is not None:
+            hold()
+            job.input_hold = None
+        on_landed(job)
 
     def cancel(self, job: decoding_records.DecodeJob) -> None:
         """Drop one job from transport and storage, then free its hold.

@@ -8,6 +8,15 @@ larger than the unit's memory cannot be decoded by that unit and stops
 the run. There is no shared store, no credits and no waiting: a job
 waits in Buffer 0 for a unit, never for memory. Precedent: XQsim's error
 decode unit holds one syndrome input at a time in its own registers.
+
+An input is held per input, not per job, with its readers recorded, so
+two jobs that read the same rounds on one unit are one copy and one
+transfer: gem5's MSHR keeps every target of a single fill
+(src/mem/cache/mshr.hh), and OpenMP's shared clause says every task
+reads the storage of the original item (openmp_spec_5_2.txt:4315-4317).
+The rule the data-movement study rests on is one copy per unit that
+reads the window, never one copy per job and never a copy taken from
+another unit.
 """
 
 import dataclasses
@@ -99,6 +108,14 @@ class DecoderInput:
         return fragments
 
 
+@dataclasses.dataclass
+class ResidentInput:
+    """One landed input of a unit and the jobs still reading it."""
+
+    decoder_input: DecoderInput
+    readers: list
+
+
 @dataclasses.dataclass(frozen=True)
 class DecoderMemorySnapshot:
     """Immutable observation of one unit's memory."""
@@ -154,7 +171,7 @@ class DecoderMemory:
         self.pool = pool
         self.unit = unit
         self.capacity_rounds = capacity_rounds
-        self._inputs: dict = {}  # request key -> DecoderInput
+        self._inputs: dict = {}  # input key -> ResidentInput
         self.peak_occupied_rounds = 0
         self.admissions = 0
         self.deposited = trace_source.TraceSource()
@@ -169,9 +186,14 @@ class DecoderMemory:
     def occupied_rounds(self) -> int:
         """Rounds held right now, over every input."""
         occupied = 0
-        for decoder_input in self._inputs.values():
-            occupied += len(decoder_input.rounds)
+        for resident in self._inputs.values():
+            occupied += len(resident.decoder_input.rounds)
         return occupied
+
+    def holds(self, job: decoding_records.DecodeJob) -> bool:
+        """Whether the rounds this job reads are already in this memory."""
+        key = _memory_key(job)
+        return key in self._inputs
 
     def deposit(self, job: decoding_records.DecodeJob) -> DecoderInput:
         """Materialize one job's rounds into this unit's memory."""
@@ -189,18 +211,30 @@ class DecoderMemory:
                 requested_rounds=needed,
                 capacity_rounds=self.capacity_rounds,
             )
-        self._inputs[key] = decoder_input
+        self._inputs[key] = ResidentInput(decoder_input, [job])
         self.peak_occupied_rounds = max(self.peak_occupied_rounds, needed)
         self.admissions += 1
         self.deposited.fire(job, decoder_input)
         return decoder_input
 
-    def take(self, job: decoding_records.DecodeJob) -> None:
-        """Free the job's rounds; a job this unit never held is ignored."""
+    def add_reader(self, job: decoding_records.DecodeJob) -> DecoderInput:
+        """One more job reads the rounds already here; no second copy."""
         key = _memory_key(job)
-        taken = self._inputs.pop(key, None)
-        if taken is not None:
-            self.taken.fire(job, taken)
+        resident = self._inputs[key]
+        resident.readers.append(job)
+        return resident.decoder_input
+
+    def take(self, job: decoding_records.DecodeJob) -> None:
+        """Drop the job's read; the rounds go when the last reader does."""
+        key = _memory_key(job)
+        resident = self._inputs.get(key)
+        if resident is None:
+            return
+        _drop_reader(resident, job)
+        if resident.readers:
+            return
+        del self._inputs[key]
+        self.taken.fire(job, resident.decoder_input)
 
     def snapshot(self) -> DecoderMemorySnapshot:
         """The memory's counters as one immutable record."""
@@ -215,10 +249,27 @@ class DecoderMemory:
 
 
 def _memory_key(job: decoding_records.DecodeJob):
-    """A window job is held under its request key, any other under itself."""
+    """The identity of the rounds a job reads.
+
+    The request whose transfer brought them when the job shares another
+    request's landed input, its own request key otherwise, and the job
+    itself when it carries no request.
+    """
+    if job.input_key is not None:
+        return job.input_key
     if job.request_key is not None:
         return job.request_key
     return id(job)
+
+
+def _drop_reader(
+    resident: ResidentInput, job: decoding_records.DecodeJob
+) -> None:
+    """Take one job out of an input's readers; an unknown job is ignored."""
+    for reader in resident.readers:
+        if reader is job:
+            resident.readers.remove(reader)
+            return
 
 
 def _round_order_key(item: tuple) -> tuple:

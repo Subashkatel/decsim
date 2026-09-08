@@ -57,15 +57,24 @@ class StrongRedecode:
 
     def parallel_strong_submission(
         self, weak_job: decoding_records.DecodeJob
-    ) -> decoding_records.Submission:
+    ) -> Optional[decoding_records.Submission]:
         """The strong sibling started with the weak job (the paper's Step 1).
 
         Its context is held and its send built now; the verdict selects
-        it or cancels it.
+        it or cancels it. A sibling whose input has not landed yet is
+        held instead and enqueued when its condition fires, so there is
+        no submission for the requester to make: Step 1 feeds both
+        decoders the same data (2510.25222 lines 599-603), and in a
+        model that prices transport the strong decoder starts when its
+        copy has arrived.
         """
         key = (weak_job.operation_id, weak_job.window_id)
         assignment = self.shape.plan(weak_job)
         self.selections.remember_sibling(key, assignment.request_key)
+        if assignment.job is None:
+            self._hold(key, assignment, None)
+            self.submit_if_stored_data_releases(weak_job.operation_id)
+            return None
         send_input = self._strong_input_send(assignment.job, None)
         return decoding_records.Submission(assignment.job, send_input)
 
@@ -113,6 +122,26 @@ class StrongRedecode:
         released = self.pending.released_by_stored_data(operation_id)
         self._submit_released(released)
 
+    def cancel_held_sibling(self, window_key: tuple) -> None:
+        """A kept weak result: its held sibling never decodes.
+
+        The parallel sibling is speculative (Toshio et al. 2510.25222
+        Sec. III A, Step 1), so a confident weak result ends it. One
+        already enqueued is cancelled on the decoder side; one still
+        held for its input is dropped here, before the window's final
+        commit frees the rounds it would have read.
+        """
+        held = self.pending.held_for(window_key)
+        if held is None:
+            return
+        self.pending.take(held)
+        self.selections.forget_sibling(window_key)
+        self.engine.log(
+            decode_queue_module.LOG_SOURCE,
+            f"strong sibling for {window_key} cancelled while held for "
+            f"its input (the weak result is confident)",
+        )
+
     # ---- observation
 
     def has_pending(self) -> bool:
@@ -129,7 +158,7 @@ class StrongRedecode:
         self,
         key: tuple,
         assignment,
-        selection_arrival_ticks: int,
+        selection_arrival_ticks: Optional[int],
     ) -> None:
         """Register the assignment under the conditions its row declared."""
         conditions = self.shape.release_conditions(assignment)

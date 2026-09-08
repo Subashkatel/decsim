@@ -115,6 +115,15 @@ class RoundStore:
             return None
         return stored.packet.fragments
 
+    def is_round_held(self, round_key) -> bool:
+        """Whether a consumer keeps this round, stored or still expected.
+
+        A hold names the rounds its holder reads from the moment it is
+        placed, so a round with a hold and no fragments is one the store
+        expects and has not received.
+        """
+        return self.holds.is_held(round_key)
+
     def publication_tick(self, round_key) -> Optional[int]:
         """The tick the round was published to the windows, or None."""
         stored = self.round_by_key.get(round_key)

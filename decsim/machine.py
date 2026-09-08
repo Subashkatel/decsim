@@ -1528,6 +1528,9 @@ class _LateWiring:
     def submit_if_commit_releases(self, key: tuple) -> None:
         self.strong_redecode.submit_if_commit_releases(key)
 
+    def cancel_held_sibling(self, key: tuple) -> None:
+        self.strong_redecode.cancel_held_sibling(key)
+
 
 def _decoder_manager(
     engine: engine_module.Engine,

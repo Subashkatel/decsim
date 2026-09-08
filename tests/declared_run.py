@@ -215,7 +215,7 @@ def strong_only_run(
     """The strong-primary baseline: readiness listens to Buffer 1."""
     workload = declared_workload(operations, rounds)
     decoder = decoders.PresetLatencyDecoder(DECLARED_MICROSECONDS["strong"])
-    weak_decoder = decoder_settings.DecoderSettings(decoder=decoder)
+    strong_decoder = decoder_settings.DecoderSettings(decoder=decoder)
     policy = escalation_policies.StrongOnly()
     escalation = decoder_settings.EscalationSettings(policy=policy)
     observation = observe_settings.ObservationSettings(
@@ -228,7 +228,7 @@ def strong_only_run(
     settings = machine_module.MachineSettings(
         workload=workload,
         qpu=qpu,
-        weak_decoder=weak_decoder,
+        strong_decoder=strong_decoder,
         escalation=escalation,
         links=links,
         controller=controller,

@@ -236,6 +236,25 @@ class BoundaryDelivery:
 
 
 @dataclass(frozen=True)
+class BoundarySeam:
+    """What one boundary message updates: the destination's oldest layer.
+
+    A window hands its neighbour the detectors its committed correction
+    flips on the one round layer the neighbour starts with: Tan et al.
+    2209.09219 lines 936-946 ("the detectors on the oldest layer of the
+    next window are updated"), quits `syn_update` sized by one check
+    layer (sliding_window.py:164-174) and cuda-q QEC's `syndrome_mods`
+    written only between the next window's round bounds
+    (sliding_window.cpp:325-344). detector_count is that layer's
+    detectors, d*d-1 on a bulk layer of a rotated surface code;
+    flip_count is how many of them the message flips.
+    """
+
+    detector_count: int
+    flip_count: int
+
+
+@dataclass(frozen=True)
 class BoundaryUpdate:
     """A policy's decision for one boundary arrival."""
 

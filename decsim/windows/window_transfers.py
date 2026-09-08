@@ -75,12 +75,13 @@ class WindowTransfers:
     def send_boundary(
         self,
         attribution: transfer_records.TransferAttribution,
+        payload_bits: Optional[int],
         on_delivered: Callable[[transfer_records.Transfer], None],
     ) -> None:
         """Send a boundary over decoder_to_decoder; on_delivered gets it."""
         self.link.send(
             transfer_records.LinkPath.DECODER_TO_DECODER,
-            None,
+            payload_bits,
             self.engine.now,
             attribution,
             on_delivered,

@@ -15,6 +15,7 @@ import decsim.links.fabric as fabric
 import decsim.links.link_profiles as link_profiles
 import decsim.records.program as program_records
 import decsim.records.windows as window_records
+import decsim.windows.boundary_payloads as boundary_payloads
 import decsim.windows.window_boundaries as window_boundaries
 import decsim.windows.window_interactions as window_interactions
 import decsim.windows.window_transfers as window_transfers
@@ -66,7 +67,10 @@ def test_a_stale_delivery_is_ignored_and_the_edge_releases_once():
     )
     profile = link_profiles.logical_reference_profile()
     links = fabric.LinkFabric(profile, engine)
-    interaction = window_interactions.DefaultWindowInteraction(0)
+    boundary_payload = boundary_payloads.DenseSeamMask()
+    interaction = window_interactions.DefaultWindowInteraction(
+        0, boundary_payload
+    )
     transfers = window_transfers.WindowTransfers(engine, links)
     courier = window_boundaries.BoundaryCourier(
         planner, transfers, interaction, _EAGER, on_boundary_received

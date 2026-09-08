@@ -21,6 +21,7 @@ import decsim.records.windows as window_records
 import decsim.syndrome_buffer.round_output as round_output
 import decsim.syndrome_buffer.round_store as round_store_module
 import decsim.syndrome_buffer.settings as round_store_settings
+import decsim.windows.boundary_payloads as boundary_payloads
 import decsim.windows.decode_requests as decode_requests
 import decsim.windows.round_retention as round_retention
 import decsim.windows.window_interactions as window_interactions
@@ -123,7 +124,10 @@ class _Fixture:
             transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER,
             "Buffer 0",
         )
-        interaction = window_interactions.DefaultWindowInteraction(0)
+        boundary_payload = boundary_payloads.DenseSeamMask()
+        interaction = window_interactions.DefaultWindowInteraction(
+            0, boundary_payload
+        )
         self.builder = decode_requests.DecodeRequestBuilder(
             self.engine, self.planner, self.tracker, interaction, store_output
         )

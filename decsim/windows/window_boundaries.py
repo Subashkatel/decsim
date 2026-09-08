@@ -250,7 +250,32 @@ class BoundaryCourier:
             version,
             delivery_version,
         )
-        self.decoder_output.send_boundary(attribution, receive)
+        payload_bits = self._boundary_bits(boundary, dependent_key)
+        self.decoder_output.send_boundary(attribution, payload_bits, receive)
+
+    def _boundary_bits(self, boundary, dependent_key: tuple):
+        """The bits this hand-off takes on the wire, or None for the card.
+
+        The interaction owns what a boundary is, so it is the one that
+        counts what crosses.
+        """
+        destination = self.planner.windows_by_key[dependent_key]
+        destination_info = self._destination_info(destination)
+        return self.interaction.boundary_payload_bits(
+            boundary, destination_info
+        )
+
+    def _destination_info(
+        self, destination: window_records.Window
+    ) -> window_records.WindowInfo:
+        """The destination as a policy reads it, with its detector layers."""
+        model = self.planner.model_by_window.get(destination.key)
+        detector_positions = None
+        if model is not None:
+            detector_positions = model.defect_positions
+        return window_records.WindowInfo.from_window(
+            destination, detector_positions=detector_positions
+        )
 
     def _receive_boundary(
         self,
@@ -339,13 +364,7 @@ class BoundaryCourier:
                 f"boundary state for {delivery.destination_key} must support "
                 "deep copying before merge_boundary"
             ) from error
-        model = self.planner.model_by_window.get(destination.key)
-        detector_positions = None
-        if model is not None:
-            detector_positions = model.defect_positions
-        destination_info = window_records.WindowInfo.from_window(
-            destination, detector_positions=detector_positions
-        )
+        destination_info = self._destination_info(destination)
         update = self.interaction.merge_boundary(
             delivery, destination_info, candidate_state
         )

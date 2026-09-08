@@ -22,6 +22,7 @@ import decsim.qpu.stim_device as stim_device
 import decsim.records.program as program_records
 import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
+import decsim.windows.boundary_payloads as boundary_payloads
 import decsim.windows.built_window_models as built_window_models
 import decsim.windows.settings as window_settings
 import decsim.windows.window_boundaries as window_boundaries
@@ -93,7 +94,10 @@ def test_a_window_is_final_once_its_request_is_published():
 def test_a_streams_later_window_waits_on_the_previous_ones_boundary():
     """Each later overlapping stream window depends on its predecessor."""
     manager = object.__new__(window_manager_module.WindowManager)
-    manager.window_interaction = window_interactions.DefaultWindowInteraction(0)
+    boundary_payload = boundary_payloads.DenseSeamMask()
+    manager.window_interaction = window_interactions.DefaultWindowInteraction(
+        0, boundary_payload
+    )
     manager.planner = _stream_planner()
     manager.tracker = types.SimpleNamespace(is_sealed=lambda _stream_id: False)
     manager.courier = window_boundaries.BoundaryCourier(

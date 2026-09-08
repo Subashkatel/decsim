@@ -496,6 +496,20 @@ class ConfidenceSignal(Protocol):
 
 
 @runtime_checkable
+class BoundaryPayload(Protocol):
+    """How a boundary message is written on decoder_to_decoder.
+
+    Table rows: dense_seam_mask and sparse_seam_list
+    (decsim/windows/boundary_payloads.py), named by
+    windows.boundary_payload. The seam is the destination's oldest round
+    layer and the row turns it into the bits the wire carries.
+    """
+
+    def bits(self, seam: window_records.BoundarySeam) -> int:
+        """The bits one hand-off takes in this representation."""
+
+
+@runtime_checkable
 class WindowingScheme(Protocol):
     """How an operation's rounds are cut into windows.
 

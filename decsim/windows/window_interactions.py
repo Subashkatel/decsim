@@ -14,6 +14,7 @@ import dataclasses
 from collections.abc import Mapping
 from typing import Any, Optional, Protocol, runtime_checkable
 
+import decsim.ports as ports
 import decsim.records.decoding as decoding_records
 import decsim.records.windows as window_records
 
@@ -54,6 +55,11 @@ class WindowInteraction(Protocol):
     ):
         """Fold one delivered boundary into a landed round of the window."""
 
+    def boundary_payload_bits(
+        self, payload: Any, destination: window_records.WindowInfo
+    ) -> Optional[int]:
+        """The bits one hand-off takes on the wire, None when unknown."""
+
     def plan_strong_region(
         self,
         weak_window: window_records.WindowInfo,
@@ -71,11 +77,18 @@ class DefaultWindowInteraction:
     delivery is mapped by stable detector identity.
     `restart_reread_buffer_regions` is how many of the strong region's
     buffer regions the restart window re-reads
-    (escalation.restart_reread_buffer_regions).
+    (escalation.restart_reread_buffer_regions); `boundary_payload` is the
+    representation its hand-off takes on the wire
+    (windows.boundary_payload, decsim/windows/boundary_payloads.py).
     """
 
-    def __init__(self, restart_reread_buffer_regions: int) -> None:
+    def __init__(
+        self,
+        restart_reread_buffer_regions: int,
+        boundary_payload: ports.BoundaryPayload,
+    ) -> None:
         self.restart_reread_buffer_regions = restart_reread_buffer_regions
+        self.boundary_payload = boundary_payload
 
     def initial_boundary_state(self, _window):
         """An empty mask."""
@@ -140,6 +153,20 @@ class DefaultWindowInteraction:
             bits = tuple(masked)
         return dataclasses.replace(payload, bits=bits)
 
+    def boundary_payload_bits(self, payload, destination):
+        """The bits this hand-off takes in the configured representation.
+
+        The message updates the destination's oldest round layer (Tan
+        2209.09219 lines 936-946), so the seam is that layer's detectors
+        and the flips landing on it, and the representation turns the
+        seam into bits. A destination with no window model has no layer
+        to count, and the wire prices the transfer by its card instead.
+        """
+        seam = _seam_of(payload, destination)
+        if seam is None:
+            return None
+        return self.boundary_payload.bits(seam)
+
     def plan_strong_region(
         self, weak_window, _later_windows, operation_round_count
     ):
@@ -194,6 +221,34 @@ class DefaultWindowInteraction:
         if self.restart_reread_buffer_regions == 0:
             return window_records.SeamFaultOwner.RESTART_WINDOW
         return window_records.SeamFaultOwner.STRONG_REGION
+
+
+def _seam_of(payload, destination):
+    """The destination's oldest layer, and the flips landing on it."""
+    positions = destination.detector_positions
+    if positions is None:
+        return None
+    seam_round = destination.start_round
+    detector_count = 0
+    for round_index, _position in positions.values():
+        if round_index == seam_round:
+            detector_count += 1
+    flip_count = _seam_flip_count(payload, positions, seam_round)
+    return window_records.BoundarySeam(detector_count, flip_count)
+
+
+def _seam_flip_count(payload, positions, seam_round: int) -> int:
+    """The residual's detectors that land on the destination's seam layer."""
+    if not isinstance(payload, window_records.DependencyResidual):
+        return 0
+    flip_count = 0
+    for detector_id in payload.detector_ids:
+        position = positions.get(detector_id)
+        if position is None:
+            continue
+        if position[0] == seam_round:
+            flip_count += 1
+    return flip_count
 
 
 class _DefectBoundaryState(dict):

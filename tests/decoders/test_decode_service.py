@@ -198,7 +198,7 @@ def strong_primary_run(decoder):
     """
     operation = declared_run.memory_operation(1)
     workload = declared_run.declared_workload([operation], 3)
-    weak_decoder = decoder_settings.DecoderSettings(decoder=decoder)
+    strong_decoder = decoder_settings.DecoderSettings(decoder=decoder)
     policy = escalation_policies.StrongOnly()
     escalation = decoder_settings.EscalationSettings(policy=policy)
     qpu = declared_run.declared_qpu()
@@ -208,7 +208,7 @@ def strong_primary_run(decoder):
     settings = machine_module.MachineSettings(
         workload=workload,
         qpu=qpu,
-        weak_decoder=weak_decoder,
+        strong_decoder=strong_decoder,
         escalation=escalation,
         links=links,
         controller=controller,

@@ -419,7 +419,7 @@ class Machine:
         engine = engine_module.Engine()
         escalation_policy = _escalation_policy(settings.escalation)
         plan = _plan(settings, escalation_policy)
-        pool = _decoder_pool(settings, plan)
+        pool = _decoder_pool(settings, plan, escalation_policy)
         _check_readout_cost_is_priced(settings)
         conditional_release = conditional_release_module.ConditionalRelease(
             engine
@@ -637,7 +637,7 @@ class Machine:
         return _capture_result(self)
 
 
-def build_decoder_unit(settings: MachineSettings, tier: str):
+def build_decoder_unit(settings: MachineSettings, tier: str, policy):
     """The decoder unit of one tier, weak or strong, as the root builds it.
 
     A named row decodes for real inside a StagedDecoder whose fetch and
@@ -654,8 +654,7 @@ def build_decoder_unit(settings: MachineSettings, tier: str):
     if tier_settings.kind is None:
         return None
     algorithm = _algorithm(tier_settings.kind, tier)
-    active_tier = escalation_tier(settings.escalation)
-    is_active = tier == active_tier
+    is_active = tier == policy.primary_tier.value
     is_switching = settings.escalation.kind == "switching"
     if is_active and is_switching:
         _check_serves_the_confidence(
@@ -741,13 +740,20 @@ def _root_seed(value) -> Optional[int]:
 # ------------------------------------------------- the escalation policy
 
 
-def escalation_tier(settings: decoder_settings.EscalationSettings) -> str:
-    """The tier the escalation kind decodes the plan's windows on.
+def primary_tier(settings: decoder_settings.EscalationSettings) -> str:
+    """The tier that decodes the plan's windows, for a caller with no policy.
 
-    The kind's row declares it (EscalationPolicy.primary_tier), so the
-    tier is written once, in the class, and read here by every caller
-    that holds settings and not yet a policy.
+    A policy the caller built is the one fact and answers for itself; the
+    kind is only how the yaml names a policy, so the table is the lookup
+    of last resort. sinter resolves the caller's own decoders before its
+    built-in table (sinter/_collection/_mux_sampler.py:33-40) and gem5
+    reads a built object's own params rather than its class table
+    (src/python/m5/SimObject.py:204-205). The front asks this rather than
+    building the policy, because a switching policy's threshold is
+    resolved per sweep point and a config may reach here without one.
     """
+    if settings.policy is not None:
+        return settings.policy.primary_tier.value
     row = _row(ESCALATIONS, "escalation.kind", settings.kind)
     return row.primary_tier.value
 
@@ -1046,7 +1052,9 @@ def _install_device_circuits(device, operations) -> None:
 # ------------------------------------------------------ the decoder pool
 
 
-def _decoder_pool(settings: MachineSettings, plan: _Plan) -> _DecoderPool:
+def _decoder_pool(
+    settings: MachineSettings, plan: _Plan, policy
+) -> _DecoderPool:
     """The router over the tiers and the manager's pools.
 
     Switching puts two units behind one router: the strong pool serves
@@ -1057,9 +1065,9 @@ def _decoder_pool(settings: MachineSettings, plan: _Plan) -> _DecoderPool:
     scheduler = manager.scheduler
     if scheduler is None:
         scheduler = schedulers.FifoScheduler()
-    weak = build_decoder_unit(settings, "weak")
-    strong = build_decoder_unit(settings, "strong")
-    active_tier = escalation_tier(settings.escalation)
+    weak = build_decoder_unit(settings, "weak", policy)
+    strong = build_decoder_unit(settings, "strong", policy)
+    active_tier = policy.primary_tier.value
     active = weak
     if active_tier == "strong":
         active = strong
@@ -1076,9 +1084,9 @@ def _decoder_pool(settings: MachineSettings, plan: _Plan) -> _DecoderPool:
     if router is None:
         router = decoders.CodeRouter(default=active)
     if unit_pools is None:
-        active_settings = _active_tier_settings(settings)
+        active_settings = _active_tier_settings(settings, policy)
         unit_pools = {"default": active_settings.units}
-    decoder_memory = _decoder_memory(settings)
+    decoder_memory = _decoder_memory(settings, policy)
     return _DecoderPool(
         router=router,
         active=active,
@@ -1109,20 +1117,20 @@ def _switching_pools(settings: MachineSettings, weak, strong) -> tuple:
 
 
 def _active_tier_settings(
-    settings: MachineSettings,
+    settings: MachineSettings, policy
 ) -> decoder_settings.DecoderSettings:
-    tier = escalation_tier(settings.escalation)
+    tier = policy.primary_tier.value
     return getattr(settings, f"{tier}_decoder")
 
 
 def _decoder_memory(
-    settings: MachineSettings,
+    settings: MachineSettings, policy
 ) -> Optional[decoder_memory_module.DecoderMemoryConfig]:
     """The pools' input memory: the given one, or the active tier's SRAM."""
     given = settings.decoder_manager.decoder_memory
     if given is not None:
         return given
-    active_settings = _active_tier_settings(settings)
+    active_settings = _active_tier_settings(settings, policy)
     unit_memory_rounds = active_settings.unit_memory_rounds
     if unit_memory_rounds is None:
         return None

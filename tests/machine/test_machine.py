@@ -513,7 +513,7 @@ def test_a_new_escalation_kind_is_one_class_and_one_table_row():
     settings = dataclasses.replace(settings, escalation=escalation)
     machine_module.ESCALATIONS["always_strong"] = AlwaysStrongEscalation
     try:
-        assert machine_module.escalation_tier(escalation) == "strong"
+        assert machine_module.primary_tier(escalation) == "strong"
         machine = machine_module.Machine.build(settings, 0)
         result = machine.run()
     finally:
@@ -1188,3 +1188,67 @@ def test_a_strong_only_run_writes_every_round_into_buffer_1_over_a_priced_hop():
     assert link_totals(machine, room_hop) == (15, 129)
     assert link_totals(machine, readout_hop) == (15, 129)
     assert link_totals(machine, store_hop) == (0, 0)
+
+
+def strong_primary_settings(escalation):
+    """The declared strong-primary run, escalated by that section."""
+    operation = declared_run.memory_operation(1)
+    workload = declared_run.declared_workload([operation], 6)
+    latency = declared_run.DECLARED_MICROSECONDS["strong"]
+    decoder = decoders.PresetLatencyDecoder(latency)
+    strong_decoder = decoder_settings.DecoderSettings(decoder=decoder)
+    qpu = declared_run.declared_qpu()
+    links = declared_run.declared_profile()
+    controller = declared_run.declared_controller()
+    frame = declared_run.declared_frame()
+    return machine_module.MachineSettings(
+        workload=workload,
+        qpu=qpu,
+        strong_decoder=strong_decoder,
+        escalation=escalation,
+        links=links,
+        controller=controller,
+        pauli_frame=frame,
+    )
+
+
+def test_a_policy_object_decodes_where_its_name_decodes():
+    """The built policy is the authority, so both forms are one run.
+
+    sinter resolves the caller's own decoders before its built-in table
+    (sinter/_collection/_mux_sampler.py:33-40), and a run named
+    strong_only and a run given StrongOnly() are the same machine: the
+    same decoder, the same bits, the same ticks.
+    """
+    named = decoder_settings.EscalationSettings(kind="strong_only")
+    policy = escalation_policies.StrongOnly()
+    by_object = decoder_settings.EscalationSettings(policy=policy)
+    named_settings = strong_primary_settings(named)
+    named_machine = machine_module.Machine.build(named_settings, 0)
+    named_result = named_machine.run()
+    object_settings = strong_primary_settings(by_object)
+    object_machine = machine_module.Machine.build(object_settings, 0)
+    object_result = object_machine.run()
+    assert object_machine.active_decoder is not None
+    assert type(object_machine.active_decoder) is type(
+        named_machine.active_decoder
+    )
+    assert object_result.fully_done_ticks == named_result.fully_done_ticks
+    named_observables = named_result.operation_results[0].logical_observables
+    object_observables = object_result.operation_results[0].logical_observables
+    assert object_observables == named_observables
+    assert declared_run.frame_tiers(object_machine) == declared_run.frame_tiers(
+        named_machine
+    )
+
+
+def test_a_policy_object_whose_tier_names_no_decoder_is_refused():
+    """The refusal reads the policy's tier, not the section's name."""
+    policy = escalation_policies.StrongOnly()
+    escalation = decoder_settings.EscalationSettings(policy=policy)
+    settings = strong_primary_settings(escalation)
+    no_decoder = decoder_settings.DecoderSettings()
+    settings = dataclasses.replace(settings, strong_decoder=no_decoder)
+    with pytest.raises(ValueError) as refusal:
+        machine_module.Machine.build(settings, 0)
+    assert "decodes windows on the strong tier" in str(refusal.value)

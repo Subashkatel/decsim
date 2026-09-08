@@ -2,12 +2,17 @@
 
 The decoder side of the strong tier: the strong request live for each
 destination window and the physical job serving it (itself, or a merged
-batch), the destinations waiting for a strong result or for its
-selection to arrive over the weak-to-strong link, the strong results
-held because nobody asked for them yet, and the weak decodes still
-open. A run without strong escalation keeps this ledger too: only its
-weak side (one open decode per destination) is ever touched, and every
-strong query answers "nothing".
+batch), how far each destination's demand for a strong result has
+travelled, and the weak decodes still open. A run without strong
+escalation keeps this ledger too: only its weak side (one open decode
+per destination) is ever touched, and every strong query answers
+"nothing".
+
+The ledger holds no result. A finished result nobody has asked for yet
+waits in the output slot of the unit that produced it
+(decoders/decoder_unit.py), the way a sender keeps the packet until the
+far side accepts it (gem5 port.hh:244-255); this ledger only says
+whether a destination takes one now.
 
 Invariants: a destination window has at most one unconsumed strong
 result; a destination decodes weakly once at a time, so a strong result
@@ -46,15 +51,18 @@ class LiveStrongRequest:
 
 
 @dataclasses.dataclass(frozen=True)
-class HeldStrongCompletion:
+class StrongCompletion:
     """A finished strong result, per request, with the tick its decode ended.
 
-    The request job carries the request key the result answers.
+    The request job carries the request key the result answers, and the
+    unit is the one that produced it: its output slot keeps the result
+    until the destination asks for it.
     """
 
     request_job: decoding_records.DecodeJob
     result: decoding_records.DecodeResult
     decode_output_ticks: int
+    unit: Optional[object] = None
 
 
 @dataclasses.dataclass
@@ -84,20 +92,18 @@ class WindowRequests:
 
     live is the strong request admitted for it and the job serving that
     request; phase and selected_request_key are how far its demand for
-    a strong result has travelled; held is a finished strong result
-    nobody has asked for yet; open_weak_requests are the request keys of
-    its weak attempt, one or two, still without a directive.
+    a strong result has travelled; open_weak_requests are the request
+    keys of its weak attempt, one or two, still without a directive.
     """
 
     live: Optional[LiveStrongRequest] = None
     phase: StrongPhase = StrongPhase.NONE
     selected_request_key: Optional[window_records.DecoderRequestKey] = None
-    held: Optional[HeldStrongCompletion] = None
     open_weak_requests: set = dataclasses.field(default_factory=set)
 
     def is_empty(self) -> bool:
-        """Whether the window is waiting on nothing and holds nothing."""
-        if self.live is not None or self.held is not None:
+        """Whether the window is waiting on nothing and asks for nothing."""
+        if self.live is not None:
             return False
         if self.phase is not StrongPhase.NONE:
             return False
@@ -134,7 +140,7 @@ class StrongRequests:
         """Give one destination's next strong result to this request."""
         key = job.strong_decode_for
         record = self._record(key)
-        if record.live is not None or record.held is not None:
+        if record.live is not None:
             raise RuntimeError(
                 f"duplicate strong decode for window {key}: a destination "
                 "window has at most one unconsumed strong result"
@@ -199,18 +205,6 @@ class StrongRequests:
                 members.append(live.request_job)
         return members
 
-    def carriers_for(self, key: tuple) -> tuple:
-        """The live request or held completion that carries the result."""
-        record = self.by_window.get(key)
-        if record is None:
-            return ()
-        carriers = []
-        if record.live is not None:
-            carriers.append(record.live)
-        if record.held is not None:
-            carriers.append(record.held)
-        return tuple(carriers)
-
     def destination_may_consume(self, key: tuple) -> bool:
         """Whether the destination waits for a strong result now or may yet.
 
@@ -257,16 +251,6 @@ class StrongRequests:
         self._drop_if_empty(key)
         return live
 
-    def take_held(self, key: tuple) -> Optional[HeldStrongCompletion]:
-        """Drop and return the destination's held completion, if any."""
-        record = self.by_window.get(key)
-        if record is None:
-            return None
-        held = record.held
-        record.held = None
-        self._drop_if_empty(key)
-        return held
-
     def has_survivors(self, service_job: decoding_records.DecodeJob) -> bool:
         """Whether any request the decode serves is still live."""
         for live in self._live_requests():
@@ -290,34 +274,29 @@ class StrongRequests:
 
     def select(
         self, key: tuple, request_key: window_records.DecoderRequestKey
-    ) -> Optional[HeldStrongCompletion]:
+    ) -> bool:
         """The selection arrived: the destination now waits for the result.
 
-        Returns a completion held from before, or None.
+        True when this selection is the one the destination sent, so its
+        result may leave the unit that produced it.
         """
         record = self.by_window.get(key)
         if record is None:
-            return None
+            return False
         if record.phase is not StrongPhase.WAITING_SELECTION:
-            return None
+            return False
         if record.selected_request_key != request_key:
-            return None
+            return False
         record.phase = StrongPhase.WAITING_RESULT
-        held = record.held
-        if held is None:
-            return None
-        if held.request_job.request_key != request_key:
-            return None
-        record.held = None
-        self._drop_if_empty(key)
-        return held
+        return True
 
-    def complete(self, held: HeldStrongCompletion) -> bool:
+    def complete(self, completion: StrongCompletion) -> bool:
         """A strong result is ready: True when a destination consumes it now.
 
-        Otherwise it is held for the demand that is still coming.
+        False leaves it in the output slot of the unit that produced it,
+        for the demand that is still coming.
         """
-        request_key = held.request_job.request_key
+        request_key = completion.request_job.request_key
         key = (request_key.operation_id, request_key.window_id)
         if self._takes_the_awaited_result(key, request_key):
             return True
@@ -333,8 +312,6 @@ class StrongRequests:
                 "waiting for it: the destination registered no strong "
                 "demand and its decode attempt has resolved"
             )
-        record = self._record(key)
-        record.held = held
         return False
 
     def deliveries_for(
@@ -346,7 +323,11 @@ class StrongRequests:
         """Per-request completions of one finished strong decode.
 
         A merged batch may only carry timing: no accuracy-bearing field.
+        The unit is read here, before the decode's end frees the job's
+        slot, because it is the unit whose output slot holds a result
+        nobody has asked for yet.
         """
+        unit = service_job.unit
         requests = self.members_of(service_job)
         keys = []
         for request in requests:
@@ -358,7 +339,7 @@ class StrongRequests:
                 is_merged = True
         if not is_merged:
             request = requests[0]
-            return (HeldStrongCompletion(request, result, now),)
+            return (StrongCompletion(request, result, now, unit),)
         populated = _populated_accuracy_fields(result)
         if populated:
             listed = ", ".join(populated)
@@ -372,8 +353,8 @@ class StrongRequests:
             empty = decoding_records.DecodeResult(
                 operation_id=key[0], window_id=key[1]
             )
-            held = HeldStrongCompletion(request, empty, now)
-            deliveries.append(held)
+            completion = StrongCompletion(request, empty, now, unit)
+            deliveries.append(completion)
         return tuple(deliveries)
 
     # ------------------------------------------------------- private
@@ -465,8 +446,6 @@ def _states_of(record: WindowRequests) -> list:
     states = []
     if record.phase is not StrongPhase.NONE:
         states.append(record.phase.value)
-    if record.held is not None:
-        states.append("holding an unclaimed strong result")
     if record.live is not None:
         states.append("still holding a strong request")
     if record.open_weak_requests:

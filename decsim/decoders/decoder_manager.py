@@ -237,8 +237,9 @@ class DecoderManager:
     ) -> None:
         """The window asked for this request's strong result.
 
-        Its selection is on the weak-to-strong link; the ledger holds
-        the result for the window until the selection lands.
+        Its selection is on the weak-to-strong link; a result that
+        finishes first waits in the unit that produced it until the
+        selection lands.
         """
         self.strong_requests.begin_selection(window_key, request_key)
 
@@ -246,7 +247,12 @@ class DecoderManager:
         self, window_key: tuple, request_key: window_records.DecoderRequestKey
     ) -> None:
         """The selection landed: the request's result may reach the window."""
-        self.outcomes.select_strong_result(window_key, request_key)
+        if not self.strong_requests.select(window_key, request_key):
+            return
+        completion = self.service.take_strong_output(window_key)
+        if completion is None:
+            return
+        self.outcomes.complete_strong(completion)
 
     def resolve_weak_request(
         self,
@@ -268,24 +274,25 @@ class DecoderManager:
     def cancel_strong(self, key: tuple) -> None:
         """Cancel an unneeded strong re-decode wherever it is.
 
-        Queued, crossing the link, running, or held. A cancel ends one
+        Queued, crossing the link, running, or finished and waiting in
+        its unit's output slot. A cancel ends one
         request; it passes no verdict on the destination. A destination
         that keeps its weak result stops being a consumer because its weak
         decode has resolved, and a destination still waiting keeps its
         demand, so the cancelled request can be replaced in either
         position.
         """
-        held = self.strong_requests.take_held(key)
-        if held is not None:
+        completion = self.service.take_strong_output(key)
+        if completion is not None:
             self.outcomes.report_request(
-                held.request_job,
-                held.result,
+                completion.request_job,
+                completion.result,
                 decoding_records.RequestProcessingOutcome.STRONG_COMPLETED_DISCARDED,
-                held.decode_output_ticks,
+                completion.decode_output_ticks,
             )
         live = self.strong_requests.take_live(key)
         if live is None:
-            if held is not None:
+            if completion is not None:
                 self.strong_requests.counts.cancelled += 1
             return
         job = live.service_job
@@ -311,6 +318,9 @@ class DecoderManager:
         """
         self.service.check_settled()
         unsettled = self.strong_requests.unsettled()
+        unclaimed = self.service.windows_holding_output()
+        if unclaimed:
+            unsettled["holding an unclaimed strong result"] = unclaimed
         held = self.service.units_holding_rounds()
         if held:
             unsettled["decoder memory still holding rounds"] = held

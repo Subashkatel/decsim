@@ -10,11 +10,22 @@ A unit reads one copy of one input: a job whose rounds this unit holds
 reads them, and a job staged while their transfer is still in flight
 joins that landing instead of sending them again, which is gem5's MSHR
 with several targets on one fill (src/mem/cache/mshr.hh).
+
+That is the copy rule, and it is a tier's setting: with
+<tier>.input in_place the unit reads the rounds where the store keeps
+them, so nothing is deposited in the unit's memory, nothing crosses the
+input link, and the store's hold is kept for the whole decode. AFS's
+processing elements "can directly access the data stored on-chip"
+(2001.06598 lines 528-531); Collision Clustering's Init unit loads the
+syndrome into the storage elements instead (2309.05558 lines 268-271),
+which is the copy row, and the strong hop is a transfer of the assigned
+data (Toshio 2510.25222 lines 1248-1250).
 """
 
 import dataclasses
 from typing import Any, Callable, Optional, Protocol, runtime_checkable
 
+import decsim.decoders.decoder_memory as decoder_memory_module
 import decsim.observe.trace_source as trace_source
 import decsim.records.decoding as decoding_records
 
@@ -56,17 +67,21 @@ class _AwaitedLanding:
 class DecoderInputStaging:
     """Stages a job's input into a unit's memory and frees it again.
 
-    Trace source: copy_made(job, bits, store_name, memory_name) at every
+    Trace sources: copy_made(job, bits, store_name, memory_name) at every
     landing that deposits rounds, the copy out of the store into the
-    unit's own memory (data_path.md hops 5 and 9).
+    unit's own memory (data_path.md hops 5 and 9); hold_registered(job,
+    round_keys) instead, for a tier whose input is read in place.
     """
 
-    def __init__(self, transport, engine):
+    def __init__(self, transport, engine, copies_input_by_pool=None):
         self.transport = transport
         self.engine = engine
         self.trace = _TraceSources()
         # landing key -> the transfer in flight and the jobs joining it
         self.awaited_by_input: dict = {}
+        # pool name -> whether that tier copies its input into the unit;
+        # a pool this map does not name copies, which is the default
+        self.copies_input_by_pool = copies_input_by_pool or {}
 
     def stage(
         self,
@@ -80,8 +95,12 @@ class DecoderInputStaging:
         dropped and the landing is reported. Until the landing,
         input_landing_ticks is the tick the link expects. A job whose
         rounds this unit already holds becomes one more reader of them
-        and moves nothing.
+        and moves nothing. A tier that reads its input in place deposits
+        nothing and sends nothing.
         """
+        if not self.copies_input(job):
+            self._read_in_place(job, on_landed)
+            return
         if memory.holds(job):
             self._read_resident(job, memory, on_landed)
             return
@@ -115,6 +134,30 @@ class DecoderInputStaging:
         landing_ticks = self.engine.now + expected_delay_ticks
         job.input_landing_ticks = landing_ticks
         awaited.expected_landing_ticks = landing_ticks
+
+    def copies_input(self, job: decoding_records.DecodeJob) -> bool:
+        """Whether this job's tier is given a copy of the rounds it reads."""
+        return self.copies_input_by_pool.get(job.pool, True)
+
+    def _read_in_place(
+        self,
+        job: decoding_records.DecodeJob,
+        on_landed: Callable[[decoding_records.DecodeJob], None],
+    ) -> None:
+        """The unit reads the rounds where the store keeps them.
+
+        No link move, no deposit, and the store's hold is kept until the
+        decode releases the job, because the rounds it reads are the
+        store's own (<tier>.input in_place).
+        """
+        job.send_input = None
+        job.input_landing_ticks = self.engine.now
+        decoder_input = decoder_memory_module.materialize_decoder_input(job)
+        job.decoder_input = decoder_input
+        job.payloads = []
+        round_keys = _round_keys(decoder_input)
+        self.trace.hold_registered.fire(job, round_keys)
+        on_landed(job)
 
     def _join_landing(
         self,
@@ -183,12 +226,20 @@ class DecoderInputStaging:
         del self.awaited_by_input[landing_key]
 
     def release(self, job: decoding_records.DecodeJob) -> None:
-        """Free the job's rounds from its unit's memory; none held is fine."""
+        """Free the job's rounds from its unit's memory; none held is fine.
+
+        A job that read its input in place kept the store's hold for the
+        whole decode, so this is where that hold ends.
+        """
         memory = job.memory
         if memory is not None:
             memory.take(job)
             job.memory = None
         job.decoder_input = None
+        hold = job.input_hold
+        if hold is not None:
+            hold()
+            job.input_hold = None
 
     def release_service_members(self, members) -> None:
         """Return the credits of every request one decode still serves.
@@ -258,6 +309,14 @@ def _transfer_key(job: decoding_records.DecodeJob):
     return id(job)
 
 
+def _round_keys(decoder_input) -> tuple:
+    """The (operation, round) identities one input reads."""
+    keys = []
+    for round_input in decoder_input.rounds:
+        keys.append((round_input.operation_id, round_input.round_index))
+    return tuple(keys)
+
+
 def _is_among(member: decoding_records.DecodeJob, released: list) -> bool:
     for done in released:
         if done is member:
@@ -276,3 +335,4 @@ class _TraceSources:
     """
 
     copy_made: trace_source.TraceSource = trace_source.new_source()
+    hold_registered: trace_source.TraceSource = trace_source.new_source()

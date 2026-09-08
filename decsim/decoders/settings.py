@@ -45,6 +45,19 @@ DECODERS = {
 
 DECODER_MANAGER_KEYS = ("bulk_strong", "clock", "dispatch_cycles")
 
+# weak_decoder.input and strong_decoder.input name one of these rows:
+# how a tier's unit gets the rounds it decodes. copy moves them over the
+# tier's input link into the unit's own memory, which is what a hardware
+# decoder does when its input is off-chip (Collision Clustering's Init
+# unit loads the syndrome into the storage elements, 2309.05558 lines
+# 268-271, and the strong hop is a transfer of the assigned data,
+# Toshio 2510.25222 lines 1248-1250). in_place leaves the rounds in the
+# store and reads them where they are, which is what a decoder with its
+# input on-chip does: AFS's processing elements "can directly access the
+# data stored on-chip" (2001.06598 lines 528-531). The default is copy,
+# which is what every hop of this tree does today.
+DECODER_INPUTS = {"copy": True, "in_place": False}
+
 
 @dataclasses.dataclass(frozen=True)
 class DecoderSettings:
@@ -58,6 +71,9 @@ class DecoderSettings:
     engine's clock, resolved to a frequency once at load.
     unit_memory_rounds is the input SRAM per unit (None is unbounded); a
     unit overlaps input transfer with compute only when two windows fit.
+    input names a row of DECODER_INPUTS (above): whether this tier's
+    unit is given a copy of the rounds or reads them where the store
+    keeps them.
     kind None is no decoder at all, right for a run that plans no
     windows. A Python-built decoder is routed as it is, with no engine
     stages around it.
@@ -65,6 +81,7 @@ class DecoderSettings:
 
     kind: Union[str, float, None] = None
     units: int = 1
+    input: str = "copy"
     unit_memory_rounds: Optional[int] = None
     fetch_cycles_per_round: int = 1
     release_cycles_per_job: int = 1
@@ -84,9 +101,11 @@ class DecoderSettings:
                 "unit_memory_rounds must be at least one round, or null "
                 f"for an unbounded unit memory (got {unit_memory_rounds})"
             )
+        input_kind = section.get("input", "copy")
         return cls(
             kind=section["kind"],
             units=section["units"],
+            input=input_kind,
             unit_memory_rounds=unit_memory_rounds,
             fetch_cycles_per_round=engine["fetch_cycles_per_round"],
             release_cycles_per_job=engine["release_cycles_per_job"],

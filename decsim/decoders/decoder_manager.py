@@ -53,6 +53,7 @@ class DecoderManager:
         ] = None,
         escalation_policy,
         dispatch_ticks: int = 0,
+        copies_input_by_pool: Optional[dict] = None,
     ):
         if unit_pools is None:
             unit_pools = {"default": num_units}
@@ -69,7 +70,9 @@ class DecoderManager:
             is_bulk_strong=bulk_strong,
         )
         transport = staging_module.CancellableDecoderMemoryTransfer(engine)
-        staging = staging_module.DecoderInputStaging(transport, engine)
+        staging = staging_module.DecoderInputStaging(
+            transport, engine, copies_input_by_pool
+        )
         self.service = decode_service.DecodeService(
             engine,
             pool,
@@ -97,6 +100,14 @@ class DecoderManager:
     def copy_sources(self) -> list:
         """The copy_made sources of the manager's own hops, in hop order."""
         return [self.service.staging.trace.copy_made]
+
+    def reference_sources(self) -> list:
+        """The sources of the inputs this run reads instead of copying.
+
+        A tier whose input is read in place reports a reference where a
+        copying tier reports a copy (<tier>.input, decoders/settings.py).
+        """
+        return [self.service.staging.trace.hold_registered]
 
     def input_transport(self):
         """The transport that moves an input into a unit's memory.

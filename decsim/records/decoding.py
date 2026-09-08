@@ -185,6 +185,8 @@ class DecodeJob:
     # called at dispatch: send the input link, call back at the landing,
     # return the expected delay in ticks
     send_input: Optional[Callable[[Callable[[], None]], int]] = None
+    # the store the input leaves from, stamped by that store's own port
+    input_source_name: Optional[str] = None
     unit: Optional[Any] = None  # the DecoderUnit assigned at dispatch
     memory: Optional[Any] = (
         None  # that unit's DecoderMemory while it holds this job's input

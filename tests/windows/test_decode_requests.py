@@ -13,6 +13,7 @@ import types
 import decsim.decoders.decoder_memory as decoder_memory
 import decsim.engine as engine_module
 import decsim.escalation.policies as escalation_policies
+import decsim.links.window_transfers as window_transfers
 import decsim.observe.run_views as run_views
 import decsim.records.program as program_records
 import decsim.records.rounds as round_records
@@ -25,7 +26,6 @@ import decsim.windows.boundary_payloads as boundary_payloads
 import decsim.windows.decode_requests as decode_requests
 import decsim.windows.round_retention as round_retention
 import decsim.windows.window_interactions as window_interactions
-import decsim.windows.window_transfers as window_transfers
 import tests.declared_run as declared_run
 
 

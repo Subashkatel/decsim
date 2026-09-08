@@ -39,15 +39,26 @@ class RoundStoreOutput:
 
         The bits are the job's payloads, which the staging clears when
         the input lands, so they are read here while they are still the
-        job's.
+        job's, and the job is stamped with this store's name: whoever
+        records the landing reads where the rounds came from rather than
+        deriving it from the job's tier.
         """
+        job.input_source_name = self.name
         payload_bits = job.payload_bits()
         return self.transfers.send_for_job(
             self.path, job, payload_bits=payload_bits, on_delivered=on_landed
         )
 
-    def land_held_input(self, on_landed: Callable[[], None]) -> int:
-        """A job resubmitted after a withdrawal: its rounds never left."""
+    def land_held_input(
+        self,
+        job: decoding_records.DecodeJob,
+        on_landed: Callable[[], None],
+    ) -> int:
+        """A job resubmitted after a withdrawal: its rounds never left.
+
+        The rounds are already this store's, so it names itself here too.
+        """
+        job.input_source_name = self.name
         return self.transfers.land_after(0, on_landed)
 
     def input_send_for(
@@ -55,5 +66,5 @@ class RoundStoreOutput:
     ) -> Callable[[Callable[[], None]], int]:
         """The send the manager calls at dispatch, bound to this job."""
         if is_input_held:
-            return self.land_held_input
+            return functools.partial(self.land_held_input, job)
         return functools.partial(self.send_input, job)

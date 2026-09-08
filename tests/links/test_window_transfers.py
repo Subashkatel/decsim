@@ -7,11 +7,11 @@ result reaches the frame as one bit per logical observable.
 import decsim.engine as engine_module
 import decsim.links.fabric as fabric
 import decsim.links.link_profiles as link_profiles
+import decsim.links.window_transfers as window_transfers
 import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
-import decsim.windows.window_transfers as window_transfers
 
 
 class _RecordingLink:

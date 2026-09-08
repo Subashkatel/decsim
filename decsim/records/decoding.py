@@ -211,6 +211,10 @@ class DecodeJob:
     # never the unit's compute, until release_parked
     is_parked: bool = False
     request_key: Optional[window_records.DecoderRequestKey] = None
+    # the request whose transfer brought the rounds this job reads; the
+    # jobs that share one landed input share this key and a unit holds
+    # one copy per input, never one per job
+    input_key: Optional[window_records.DecoderRequestKey] = None
     request_created_ticks: Optional[int] = None
     request_admitted_ticks: Optional[int] = None
     service_key: Optional[DecoderServiceKey] = None

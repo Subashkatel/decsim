@@ -149,7 +149,7 @@ def _connect_window_ledger(window_manager) -> window_ledger_module.WindowLedger:
     planner = window_manager.planner
     ledger.load_planned(planner.windows_by_key)
     planner.trace.window_planned.connect(ledger.window_planned)
-    committer = window_manager.requester.committer
+    committer = window_manager.requester.verdict.committer
     committer.trace.window_committed.connect(ledger.window_committed)
     strong_redecode = window_manager.strong_redecode
     if strong_redecode is not None:
@@ -435,9 +435,8 @@ def _connect_window_trace(
     )
     builder = window_manager.requester.builder
     builder.trace.window_data_complete.connect(trace_writer.window_ready)
-    window_manager.requester.committer.trace.window_committed.connect(
-        trace_writer.window_committed
-    )
+    committer = window_manager.requester.verdict.committer
+    committer.trace.window_committed.connect(trace_writer.window_committed)
     decoder_manager.outcomes.trace.verdict_given.connect(
         trace_writer.verdict_given
     )

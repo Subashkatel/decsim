@@ -7,7 +7,7 @@ one of those jobs' on_decoded. It holds each solve until the window's
 last one arrives, the way a reservation station holds a value until its
 tag matches (Tomasulo 1967, IBM Journal of R&D, the tag here being the
 window key), asks the signal for the window's confidence, and hands the
-answering solve to the window committer, which applies the threshold.
+answering solve to the window verdict, which applies the threshold.
 The join is outside the decoder manager on purpose: every fine-grained
 referent puts a two-result comparison in the producer or the consumer
 and none puts it in the scheduler (gem5's SplitDataRequest counting its
@@ -37,10 +37,10 @@ class WindowGapJoin:
     window's others, so the trace shows the held solve and the join.
     """
 
-    def __init__(self, engine, signal, committer, decode_queue) -> None:
+    def __init__(self, engine, signal, verdict, decode_queue) -> None:
         self.engine = engine
         self.signal = signal
-        self.committer = committer
+        self.verdict = verdict
         self.decode_queue = decode_queue
         # window key -> the solves of that window that have finished
         self.held_by_window: dict[tuple, list] = {}
@@ -103,7 +103,7 @@ class WindowGapJoin:
                 self.decode_queue.close_companion_request(
                     solve.job, solve.result
                 )
-        self.committer.accept_result(answer.job, answer.result)
+        self.verdict.accept_result(answer.job, answer.result)
 
 
 def _answering_solve(held: list) -> HeldSolve:

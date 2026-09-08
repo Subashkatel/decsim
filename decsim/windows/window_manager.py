@@ -15,7 +15,7 @@ tags, each one job, and implements the ports: src/mem/cache/base.hh).
 The strong tier is the StrongRedecode's (decsim/escalation), on the
 same components; a run that never escalates has none. One round reads
 as accept_window_input, requester.request_if_ready, job.on_decoded
-(committer.accept_result), results.deliver_if_final.
+(verdict.accept_result), results.deliver_if_final.
 
 Wide state recorded: ten attributes, the seven components a round
 crosses, the strong redecode the arrivals wake, the interaction that

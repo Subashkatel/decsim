@@ -5,9 +5,14 @@ so it leaves for the dependent windows at decode done, the way Skoric's
 blocks pass their artificial defects on (2209.08552 lines 275-278),
 LILLIPUT's state register and qLDPC's net_error do
 (qldpc/decoders/sinter.py decode_shots_to_error); the frame commit
-downstream never gates the next window. The committer is every window
-job's on_decoded: it decides, and the decoder side executes the send
-that carries the correction to the frame (decoders/decoder_output.py).
+downstream never gates the next window.
+
+Two classes, because a window's result meets two decisions. WindowVerdict
+is every window job's on_decoded: it applies the threshold, escalates or
+cancels, and tells the decode queue what it decided. WindowCommitter
+then commits the window and hands the correction on; the decoder side
+executes the send that carries it to the frame
+(decoders/decoder_output.py).
 """
 
 import dataclasses
@@ -20,42 +25,32 @@ import decsim.records.program as program_records
 import decsim.records.windows as window_records
 
 
-class WindowCommitter:
-    """Commits one window's result once; the job's on_decoded.
+class WindowVerdict:
+    """Applies the threshold to one window's result; the job's on_decoded.
 
-    The engine stamps and logs, the planner and the tracker name the
-    window and its operation, the escalation policy answers the
-    window's confidence, the decode queue hears that answer, and the
-    courier, the decoder output, the strong redecode and the results are
-    the four the commit hands to; the strong redecode (None when the run
-    never escalates) hears an escalated result before its provisional
-    commit and every weak commit after it. Trace source:
-    window_committed(window, contribution), the window's record and the
-    contribution that owns its rounds, at every commit.
+    The planner and the tracker name the window and its operation, the
+    escalation policy answers the window's confidence, the decode queue
+    hears that answer, the strong redecode (None when the run never
+    escalates) hears an escalated result before its provisional commit
+    and every weak commit after it, and the committer performs whichever
+    commit the verdict asks for.
     """
 
     def __init__(
         self,
-        engine,
         planner,
         tracker,
-        courier,
-        decoder_output,
-        strong_redecode,
-        results,
         escalation_policy,
+        strong_redecode,
         decode_queue,
+        committer: "WindowCommitter",
     ) -> None:
-        self.engine = engine
         self.planner = planner
         self.tracker = tracker
-        self.courier = courier
-        self.decoder_output = decoder_output
-        self.strong_redecode = strong_redecode
-        self.results = results
         self.escalation_policy = escalation_policy
+        self.strong_redecode = strong_redecode
         self.decode_queue = decode_queue
-        self.trace = _TraceSources()
+        self.committer = committer
 
     def accept_result(
         self,
@@ -74,7 +69,7 @@ class WindowCommitter:
         """
         key = (job.operation_id, job.window_id)
         window = self.planner.windows_by_key[key]
-        window.t_done = self.engine.now
+        window.t_done = self.committer.engine.now
         operation = self.tracker.operation_by_id[job.operation_id]
         verdict = self.escalation_policy.verdict_for_weak_result(job, result)
         is_final = verdict is decoding_records.Verdict.KEEP
@@ -83,15 +78,8 @@ class WindowCommitter:
         elif self.strong_redecode is not None:
             self.strong_redecode.cancel_held_sibling(key)
         self.decode_queue.resolve_weak_request(job, result, verdict)
-        if not is_final:
-            self.commit(window, operation, result, job.request_key, False)
-            return
-        self.courier.hand_on(window, operation, result, job.request_key, True)
-        commit = functools.partial(
-            self.commit, window, operation, result, job.request_key, True
-        )
-        self.decoder_output.publish(
-            window, operation, result, job.request_key, commit
+        self.committer.commit_or_publish(
+            window, operation, result, job.request_key, is_final
         )
 
     def accept_strong_result(
@@ -103,11 +91,65 @@ class WindowCommitter:
         key = (job.request_key.operation_id, job.request_key.window_id)
         window = self.planner.windows_by_key[key]
         operation = self.tracker.operation_by_id[window.operation_id]
-        finish = functools.partial(
-            self.finish_strong, window, operation, result, job.request_key
+        self.committer.publish_strong(
+            window, operation, result, job.request_key
+        )
+
+
+class WindowCommitter:
+    """Commits one window once and hands its correction on.
+
+    The engine stamps and logs; the courier, the decoder output and the
+    results are the three the commit hands to; the strong redecode
+    (None when the run never escalates) hears every weak commit, because
+    a commit can release a held strong window. Trace source:
+    window_committed(window, contribution), the window's record and the
+    contribution that owns its rounds, at every commit.
+    """
+
+    def __init__(
+        self, engine, courier, decoder_output, results, strong_redecode
+    ) -> None:
+        self.engine = engine
+        self.courier = courier
+        self.decoder_output = decoder_output
+        self.results = results
+        self.strong_redecode = strong_redecode
+        self.trace = _TraceSources()
+
+    def commit_or_publish(
+        self,
+        window: window_records.Window,
+        operation: program_records.Operation,
+        result: decoding_records.DecodeResult,
+        request_key: window_records.DecoderRequestKey,
+        is_final: bool,
+    ) -> None:
+        """A provisional result commits now; a final one commits on its send."""
+        if not is_final:
+            self.commit(window, operation, result, request_key, False)
+            return
+        self.courier.hand_on(window, operation, result, request_key, True)
+        commit = functools.partial(
+            self.commit, window, operation, result, request_key, True
         )
         self.decoder_output.publish(
-            window, operation, result, job.request_key, finish
+            window, operation, result, request_key, commit
+        )
+
+    def publish_strong(
+        self,
+        window: window_records.Window,
+        operation: program_records.Operation,
+        result: decoding_records.DecodeResult,
+        request_key: window_records.DecoderRequestKey,
+    ) -> None:
+        """Send the strong result home; it finalizes the window on landing."""
+        finish = functools.partial(
+            self.finish_strong, window, operation, result, request_key
+        )
+        self.decoder_output.publish(
+            window, operation, result, request_key, finish
         )
 
     def commit(

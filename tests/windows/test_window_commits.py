@@ -119,16 +119,21 @@ class _Fixture:
         decoder_output = decoder_output_module.DecoderOutput(
             self.transfers, self.frame
         )
-        self.committer = window_commits.WindowCommitter(
+        committer = window_commits.WindowCommitter(
             self.engine,
-            planner,
-            tracker,
             self.courier,
             decoder_output,
-            self.escalation,
             self.results,
+            self.escalation,
+        )
+        self.committer = committer
+        self.verdict = window_commits.WindowVerdict(
+            planner,
+            tracker,
             self.policy,
+            self.escalation,
             self.decode_queue,
+            committer,
         )
 
     def job(self, tier, sequence, awaiting=False) -> decoding_records.DecodeJob:
@@ -153,7 +158,7 @@ def test_the_boundary_leaves_at_decode_done_before_the_frame_commit():
     job = fixture.job(window_records.DecoderTier.WEAK, 0)
     result = decoding_records.DecodeResult(4, 1, logical_observables=(1, 0))
     fixture.engine.schedule(
-        10, lambda: fixture.committer.accept_result(job, result)
+        10, lambda: fixture.verdict.accept_result(job, result)
     )
     fixture.engine.run()
     assert fixture.window.t_done == 10
@@ -178,7 +183,7 @@ def test_a_window_awaiting_strong_commits_provisionally_and_is_not_final():
     fixture = _Fixture()
     job = fixture.job(window_records.DecoderTier.WEAK, 0, awaiting=True)
     result = decoding_records.DecodeResult(4, 1, logical_observables=(1, 0))
-    fixture.committer.accept_result(job, result)
+    fixture.verdict.accept_result(job, result)
     assert fixture.transfers.sent == []
     assert fixture.frame.commits == []
     assert fixture.window.committed
@@ -193,11 +198,11 @@ def test_a_strong_result_replaces_the_weak_prediction_and_ships_the_held():
     weak_result = decoding_records.DecodeResult(
         4, 1, logical_observables=(1, 0)
     )
-    fixture.committer.accept_result(weak, weak_result)
+    fixture.verdict.accept_result(weak, weak_result)
     strong = fixture.job(window_records.DecoderTier.STRONG, 1)
     result = decoding_records.DecodeResult(4, 1, logical_observables=(0, 1))
     fixture.engine.schedule(
-        20, lambda: fixture.committer.accept_strong_result(strong, result)
+        20, lambda: fixture.verdict.accept_strong_result(strong, result)
     )
     fixture.engine.run()
     (path, _key, tier, _bits) = fixture.transfers.sent[0]

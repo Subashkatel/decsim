@@ -11,8 +11,9 @@ __pycache__/
 .env
 .env.*
 
-# Build artifacts
-build/
+# Build artifacts. The pattern is anchored to the root: decsim/build/ is
+# the machine's build script, not an artifact.
+/build/
 *.egg-info/
 
 # Editor/OS noise

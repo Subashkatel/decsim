@@ -1,10 +1,10 @@
 """The strong window's shape: which rounds the strong tier re-decodes, and when.
 
 Two rows, selected by escalation.double_window (Toshio et al.
-2510.25222). ContextWindow is Sec. III A: the escalated window's commit
-region with one buffer of raw context on each side (r_strong = r_com +
-2 r_buf, Sec. III A), built the moment it
-is asked for. ForwardWindow is Sec. III C and Fig. 12: a strong window
+2510.25222). ContextWindow reads the escalated window's commit region
+with one buffer of raw context on each side, built the moment it is
+asked for; that geometry is decsim's own, not the paper's (see
+ContextWindow). ForwardWindow is Sec. III C and Fig. 12: a strong window
 that starts at the escalated commit and extends forward, absorbs the
 weak windows it covers, re-slices the window past it (the restart
 window) and is held until that window's weak commit or, at the
@@ -115,7 +115,17 @@ class StrongWindowShape(Protocol):
 
 
 class ContextWindow:
-    """Sec. III A: the commit region and one buffer of context each side.
+    """The commit region and one buffer of raw context on each side.
+
+    The geometry is decsim's own. Toshio et al. 2510.25222 Sec. III A
+    feeds the strong decoder the same window as the weak one, "a
+    sequence of syndrome data sigma is simultaneously fed to both the
+    weak and strong decoders" (lines 599-601), and the formula
+    r_strong = r_com + 2 r_buf is Sec. III C, stated with Fig. 12 (lines
+    1250-1251) for the forward window. decsim reads context on both
+    sides because escalation discards the weak result, which unpins the
+    past face, and a buffer of raw context is the standard answer to an
+    open face (Skoric 2209.08552 line 388; Tan 2209.09219 line 1021).
 
     The job is built the moment it is asked for and priced for the
     context rounds that exist: a window at the operation's edge has a
@@ -972,7 +982,7 @@ def _released(
 def _context_window_of(
     weak_window: window_records.Window,
 ) -> window_records.Window:
-    """The two-sided context window of a weak window (Sec. III A)."""
+    """The weak window with one buffer of raw context on each side."""
     context_lo, commit_lo, commit_hi, context_hi = (
         round_retention.strong_context_bounds(weak_window)
     )

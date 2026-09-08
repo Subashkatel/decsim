@@ -97,8 +97,8 @@ class Switching(EscalationPolicyBase):
     re-decode starts at the verdict, after the weak_decoder_to_strong_
     decoder hop (the serial modification of the same section). How the
     strong window is laid out is the run's shape (escalation.double_
-    window: the two-sided context, or the forward window of Sec. III C,
-    strong_window_shapes.py), and whether queued re-decodes are batched
+    window: decsim's own two-sided context, or the forward window of
+    Sec. III C, strong_window_shapes.py), and whether queued re-decodes are batched
     is the decoder manager's (bulk_strong); check_plan holds the policy's
     knobs and its threshold source against both once, at build.
     """

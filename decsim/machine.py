@@ -1463,7 +1463,7 @@ def _strong_redecode(
     """The window side of the strong tier, or None when never escalating.
 
     The strong window's shape is the forward window of Toshio Sec. III C
-    under double_window, the two-sided context of Sec. III A otherwise.
+    under double_window, and decsim's own two-sided context otherwise.
     """
     if not escalation_policy.requires_strong_context:
         return None

@@ -216,6 +216,38 @@ class WindowPlanner:
         """Every window planned so far, streams included."""
         return self.plan.total_windows
 
+    def window_at(self, key: tuple) -> window_records.Window:
+        """The window at (operation id, index)."""
+        return self.plan.windows[key]
+
+    def later_windows(self, operation_id, window_index: int) -> list:
+        """The operation's windows past that index, in index order."""
+        later = []
+        for index in self.window_indices_of(operation_id):
+            if index > window_index:
+                later.append(self.plan.windows[(operation_id, index)])
+        return later
+
+    def check_absorbable(self, window_keys) -> None:
+        """Every listed window is still undecoded and uncommitted."""
+        for key in window_keys:
+            window = self.plan.windows[key]
+            assert not window.committed, f"absorbing committed {key}"
+            assert window.t_done is None, f"absorbing decoded {key}"
+
+    def strong_window_model(
+        self,
+        operation: program_records.Operation,
+        window: window_records.Window,
+        round_count: int,
+        fault_exclusion_ranges: tuple,
+    ):
+        """The error model of one strong window of that operation."""
+        resolved = self.resolved_operation_by_id[operation.id]
+        return self.models.strong_model_for_operation(
+            operation, resolved, window, round_count, fault_exclusion_ranges
+        )
+
     def window_indices_of(self, operation_id) -> list:
         """The operation's window indices in order; none when unplanned."""
         return self.plan.op_windows.get(operation_id, [])

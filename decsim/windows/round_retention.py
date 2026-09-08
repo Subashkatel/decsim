@@ -242,6 +242,10 @@ class RoundRetention:
             strong_store.register_hold(in_flight, round_identities)
         self.bind_input_hold(job, in_flight, strong_store)
 
+    def require_strong_retained(self, round_keys, purpose: str) -> None:
+        """Every listed round must still sit in the room-side store."""
+        self.require_retained(round_keys, purpose, self.strong_store)
+
     def require_retained(
         self, round_keys: list, purpose: str, store=None
     ) -> None:

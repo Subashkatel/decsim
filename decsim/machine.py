@@ -1128,20 +1128,34 @@ def _algorithm(kind, tier: str):
 def _check_answers_the_confidence(algorithm, kind, tier: str) -> None:
     """Refuse a weak tier that cannot serve the run's confidence signal.
 
-    The complementary gap is two solves of the same window, each pinned
-    to one logical class, run by the weak decoder itself: a confidence
-    is the decoder's own. A row that cannot be pinned has no gap to
-    report. A priced card is not refused: it prices one decode of one
-    window, and the pair is two decodes, so the card is charged once
-    per forced solve.
+    A confidence is the decoder's own, so the signal's evidence
+    requirement is held against the row's own declaration. A priced card
+    is not refused: it prices one decode of one window, and a forced pair
+    is two decodes, so the card is charged once per forced solve.
     """
-    if algorithm.answers_forced_logical_class:
+    signal = _confidence_signal()
+    required = signal.decoder_evidence_requirement
+    missing = required - algorithm.decoder_evidence
+    if not missing:
         return
+    missing_text = _evidence_text(missing)
+    signal_name = signal.source.method
     raise ValueError(
-        f"{tier}_decoder.kind {kind!r} cannot pin a solve to one logical "
-        "class, so it cannot report the complementary gap escalation "
-        "switching decides on"
+        f"{tier}_decoder.kind {kind!r} cannot serve the {signal_name}: "
+        f"its decode reports no {missing_text}"
     )
+
+
+def _evidence_text(evidence) -> str:
+    """The named evidence a row is missing, in a stable order."""
+    names = []
+    for member in sorted(evidence, key=_evidence_order):
+        names.append(member.value)
+    return ", ".join(names)
+
+
+def _evidence_order(member) -> str:
+    return member.value
 
 
 def _confidence_signal():

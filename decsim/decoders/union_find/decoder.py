@@ -27,6 +27,7 @@ class UnionFindDecoder(decoder_module.WindowDecoderBase):
 
     fault_model_requirement = fault_models.GRAPHLIKE_FAULT_MODEL_REQUIRED
     fault_representation = fault_models.FaultRepresentation.GRAPHLIKE
+    decoder_evidence = decoding_records.CLUSTER_GROWTH_EVIDENCE
 
     def __init__(
         self,

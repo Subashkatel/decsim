@@ -20,6 +20,7 @@ import decsim.decoders.decoder as decoder_module
 import decsim.decoders.minimum_weight_perfect_matching.decoder as adapter
 import decsim.decoders.minimum_weight_perfect_matching.weights as weights
 import decsim.detector_error_model.fault_model_contracts as fault_models
+import decsim.records.decoding as decoding_records
 from tests.decoders import windows
 
 ROUNDS = 3
@@ -244,7 +245,7 @@ def test_the_lighter_forced_class_is_the_row_s_own_unforced_answer():
 def test_a_row_that_declares_no_forced_solve_refuses_a_forced_job():
     """The declaration is data on the row; the call is a caller's bug."""
     row = adapter.PyMatchingDecoder()
-    assert row.answers_forced_logical_class is True
+    assert row.decoder_evidence == decoding_records.FORCED_CLASS_SOLVES
     faults = placed_faults([[1, 0], [0, 1]], [0.1, 0.1], [[1, 0]])
     model = window_of(faults, 2)
     syndrome = numpy.zeros(2, dtype=numpy.uint8)

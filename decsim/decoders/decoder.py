@@ -62,10 +62,9 @@ class DecoderBase(abc.ABC):
     fault_model_requirement = fault_models.NO_FAULT_MODEL_REQUIRED
     stage_recorded = trace_source.SILENT
     window_checked = trace_source.SILENT
-    # a row that can pin its solve to one logical class and report that
-    # class's minimum weight says so here; the yaml refuses a confidence
-    # built from forced solves over a row that cannot
-    answers_forced_logical_class = False
+    # what this row's decode can show a confidence signal beyond the
+    # correction; the yaml refuses a signal whose requirement is not here
+    decoder_evidence = decoding_records.NO_DECODER_EVIDENCE
 
     @abc.abstractmethod
     def decode(

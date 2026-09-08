@@ -213,16 +213,19 @@ class Decoder(Protocol):
     the machine connects the stage listeners to every row without asking
     what the row is.
 
-    answers_forced_logical_class declares, as data on the row, whether
-    the row can decode a job pinned to one logical class and report that
-    class's minimum weight (decsim/records/decoding.py,
-    DecodeJob.forced_logical_class). A confidence built from forced
-    solves needs it, and the yaml refuses a row that does not have it.
+    decoder_evidence declares, as data on the row, what its decode can
+    show about itself beyond the correction: a solve pinned to one
+    logical class with that class's minimum weight, the growth a
+    cluster-based decode did, or neither (decsim/records/decoding.py
+    DecoderEvidence). A confidence signal declares the same set as its
+    requirement, and the yaml refuses a pairing the row cannot serve.
+    The unit's insides stay closed: the port learns what the decoder can
+    answer, never how.
     """
 
     fault_model_requirement: Any
     stage_recorded: Any
-    answers_forced_logical_class: bool
+    decoder_evidence: frozenset
 
     def decode(
         self, job: decoding_records.DecodeJob
@@ -463,27 +466,27 @@ class ThresholdSource(Protocol):
 
 @runtime_checkable
 class ConfidenceSignal(Protocol):
-    """The soft output a weak decode reports, as its wrapper sees it.
+    """The soft output one window's decodes report, as the join sees it.
 
-    Table row: complementary_gap (decsim/confidence/complementary.py).
+    Table rows: complementary_gap and cluster_gap (decsim/confidence/).
     source names the signal so the switching policy can refuse another
     one's, fault_model_requirement is what a window model must offer,
-    and forced_logical_classes are the classes the window must be
-    decoded in, one job each, for the row to have anything to subtract.
-    The row computes the soft output from the decoder's own output, so
-    a decoder that cannot produce that evidence is refused by name at
-    the yaml boundary. The Union-Find cluster gap reads the hard
-    decode's own intervals, not the syndrome, so it is a Python-built
-    Decoder (decsim/confidence/cluster.py) beside this port rather than
-    a row on it.
+    decoder_evidence_requirement is what the decode itself must show
+    (decsim/records/decoding.py DecoderEvidence) and is held against the
+    weak row's own declaration at the yaml boundary, and
+    forced_logical_classes are the classes the window must be decoded
+    in, one job each, empty for a signal that reads one ordinary decode.
+    The row computes the soft output from the decoder's own output: the
+    solves it is given are that window's DecodeResults.
     """
 
     source: decoding_records.SoftOutputSource
     fault_model_requirement: Any
+    decoder_evidence_requirement: frozenset
     forced_logical_classes: tuple
 
     def soft_output_for(
-        self, forced_class_weights
+        self, solves: tuple
     ) -> Optional[decoding_records.SoftOutput]:
         """The window's confidence; None when the evidence is missing."""
 

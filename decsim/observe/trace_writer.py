@@ -40,6 +40,7 @@ THREAD_ORDER = (
     "controller_to_strong_buffer",
     "Buffer 1",
     "Window planner",
+    "Strong tier",
     "weak_buffer_to_weak_decoder",
     "strong_buffer_to_strong_decoder",
     "weak_decoder_to_strong_decoder",
@@ -50,6 +51,10 @@ THREAD_ORDER = (
     "frame_to_controller",
     "controller_to_qpu",
 )
+
+# the strong tier's own lane: what its window side waits on before a
+# unit is even asked for
+STRONG_TIER_THREAD = "Strong tier"
 
 PROCESS_ID = 1
 # the controller's packing workspace draws on the controller's own lane
@@ -351,6 +356,36 @@ class TraceWriter:
         }
         name = f"W{window.window_index} committed"
         self._instant("Window planner", name, "window", args)
+
+    def strong_window_held(
+        self, request_key, window_key, waits_for: str, rounds: int
+    ) -> None:
+        """A strong window's job waits for the condition its row declared."""
+        args = {
+            "window": window_text(window_key),
+            "request": request_text(request_key),
+            "waits_for": waits_for,
+            "rounds": rounds,
+        }
+        name = f"W{window_key[1]} strong window held"
+        self._begin_residence(
+            STRONG_TIER_THREAD, request_key, name, "window,strong", args
+        )
+
+    def strong_window_left(
+        self, request_key, window_key, outcome: str, is_submitted: bool
+    ) -> None:
+        """The wait ended: the job was submitted, or it never runs.
+
+        A submitted job carries the window's chain on to its dispatch,
+        one more hop of the flow the window's first enqueue began.
+        """
+        closing = {"outcome": outcome}
+        if is_submitted:
+            self._step_window_flow(
+                STRONG_TIER_THREAD, window_key, self.engine.now
+            )
+        self._end_residence(STRONG_TIER_THREAD, request_key, closing)
 
     def window_absorbed(self, key, owner_key) -> None:
         """A strong window covers the window; the weak chain skips it."""

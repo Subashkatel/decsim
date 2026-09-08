@@ -81,6 +81,7 @@ def switching_machine(
     strong_buffer_microseconds: float = 7.0,
     record: bool = False,
     escalation=None,
+    trace_path=None,
 ) -> machine_module.Machine:
     """One d=3 memory operation, weak-primary switching on declared ticks.
 
@@ -133,8 +134,13 @@ def switching_machine(
     pauli_frame = pauli_frame_module.PauliFrameConfig(
         commit_microseconds=DECLARED_MICROSECONDS["frame"]
     )
+    trace = "off"
+    if trace_path is not None:
+        trace = str(trace_path)
     observation = observe_settings.ObservationSettings(
-        log_component_io=True, record_switching_windows=record
+        log_component_io=True,
+        record_switching_windows=record,
+        trace=trace,
     )
     settings = machine_module.MachineSettings(
         workload=workload,

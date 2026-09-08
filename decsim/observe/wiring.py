@@ -442,6 +442,8 @@ def _connect_window_trace(
         return
     shape = strong_redecode.shape
     shape.window_absorbed.connect(trace_writer.window_absorbed)
+    strong_redecode.strong_window_held.connect(trace_writer.strong_window_held)
+    strong_redecode.strong_window_left.connect(trace_writer.strong_window_left)
 
 
 def _decode_records(

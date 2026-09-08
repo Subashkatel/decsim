@@ -17,6 +17,7 @@ one strong re-decode per escalated window).
 """
 
 import dataclasses
+import enum
 from typing import Optional
 
 import decsim.records.decoding as decoding_records
@@ -64,20 +65,50 @@ class StrongCounts:
     cancelled: int = 0
 
 
+class StrongPhase(enum.Enum):
+    """Where one destination window stands in its strong request.
+
+    NONE while it has asked for nothing; WAITING_SELECTION while its
+    selection crosses the weak-to-strong link; WAITING_RESULT once the
+    selection has landed and the result is owed.
+    """
+
+    NONE = "none"
+    WAITING_SELECTION = "waiting for strong selection"
+    WAITING_RESULT = "waiting for a strong result"
+
+
+@dataclasses.dataclass
+class WindowRequests:
+    """One destination window's requests, in one record.
+
+    live is the strong request admitted for it and the job serving that
+    request; phase and selected_request_key are how far its demand for
+    a strong result has travelled; held is a finished strong result
+    nobody has asked for yet; open_weak_requests are the request keys of
+    its weak attempt, one or two, still without a directive.
+    """
+
+    live: Optional[LiveStrongRequest] = None
+    phase: StrongPhase = StrongPhase.NONE
+    selected_request_key: Optional[window_records.DecoderRequestKey] = None
+    held: Optional[HeldStrongCompletion] = None
+    open_weak_requests: set = dataclasses.field(default_factory=set)
+
+    def is_empty(self) -> bool:
+        """Whether the window is waiting on nothing and holds nothing."""
+        if self.live is not None or self.held is not None:
+            return False
+        if self.phase is not StrongPhase.NONE:
+            return False
+        return not self.open_weak_requests
+
+
 class StrongRequests:
     """The strong requests by destination window and their states."""
 
     def __init__(self) -> None:
-        self.running_by_window: dict[tuple, LiveStrongRequest] = {}
-        self.waiting_selection_by_window: dict[
-            tuple, window_records.DecoderRequestKey
-        ] = {}
-        self.waiting_result_by_window: dict[
-            tuple, window_records.DecoderRequestKey
-        ] = {}
-        self.held_by_window: dict[tuple, HeldStrongCompletion] = {}
-        # window key -> the request keys of its open weak attempt
-        self.open_weak_requests_by_window: dict[tuple, set] = {}
+        self.by_window: dict[tuple, WindowRequests] = {}
         self.counts = StrongCounts()
         kinds = decoding_records.DecodeJobKind
         self.admit_by_job_kind = {
@@ -102,12 +133,13 @@ class StrongRequests:
     def admit_strong(self, job: decoding_records.DecodeJob, now: int) -> None:
         """Give one destination's next strong result to this request."""
         key = job.strong_decode_for
-        if key in self.running_by_window or key in self.held_by_window:
+        record = self._record(key)
+        if record.live is not None or record.held is not None:
             raise RuntimeError(
                 f"duplicate strong decode for window {key}: a destination "
                 "window has at most one unconsumed strong result"
             )
-        self.running_by_window[key] = LiveStrongRequest(job, job)
+        record.live = LiveStrongRequest(job, job)
         job.request_admitted_ticks = now
 
     def admit_weak(self, job: decoding_records.DecodeJob, now: int) -> None:
@@ -118,13 +150,13 @@ class StrongRequests:
         each of them is admitted once.
         """
         key = (job.operation_id, job.window_id)
-        requests = self.open_weak_requests_by_window.setdefault(key, set())
-        if job.request_key in requests:
+        record = self._record(key)
+        if job.request_key in record.open_weak_requests:
             raise RuntimeError(
                 f"weak request {job.request_key} for window {key} is already "
                 "open: a DecodeJob is admitted once"
             )
-        requests.add(job.request_key)
+        record.open_weak_requests.add(job.request_key)
         job.request_admitted_ticks = now
 
     def resolve_weak(self, key: tuple) -> None:
@@ -133,14 +165,19 @@ class StrongRequests:
         The destination may be decoded again and stops keeping a strong
         result.
         """
-        del self.open_weak_requests_by_window[key]
+        record = self.by_window[key]
+        assert record.open_weak_requests, (
+            f"window {key} has no open weak request to resolve"
+        )
+        record.open_weak_requests = set()
+        self._drop_if_empty(key)
 
     def is_live_request(self, job: decoding_records.DecodeJob) -> bool:
         """Whether the strong job still carries its destination's request.
 
         A request cancelled while its input crossed the link is not.
         """
-        live = self.running_by_window.get(job.strong_decode_for)
+        live = self.live(job.strong_decode_for)
         if live is None:
             return False
         return live.request_job is job
@@ -149,25 +186,29 @@ class StrongRequests:
 
     def live(self, key: tuple) -> Optional[LiveStrongRequest]:
         """The request live for the destination, or None."""
-        return self.running_by_window.get(key)
+        record = self.by_window.get(key)
+        if record is None:
+            return None
+        return record.live
 
     def members_of(self, service_job: decoding_records.DecodeJob) -> list:
         """The request jobs one physical decode serves, in admission order."""
         members = []
-        for live in self.running_by_window.values():
+        for live in self._live_requests():
             if live.service_job is service_job:
                 members.append(live.request_job)
         return members
 
     def carriers_for(self, key: tuple) -> tuple:
         """The live request or held completion that carries the result."""
+        record = self.by_window.get(key)
+        if record is None:
+            return ()
         carriers = []
-        live = self.running_by_window.get(key)
-        if live is not None:
-            carriers.append(live)
-        held = self.held_by_window.get(key)
-        if held is not None:
-            carriers.append(held)
+        if record.live is not None:
+            carriers.append(record.live)
+        if record.held is not None:
+            carriers.append(record.held)
         return tuple(carriers)
 
     def destination_may_consume(self, key: tuple) -> bool:
@@ -175,11 +216,12 @@ class StrongRequests:
 
         Its weak decode is open and its directive may still ask for one.
         """
-        if key in self.waiting_result_by_window:
+        record = self.by_window.get(key)
+        if record is None:
+            return False
+        if record.phase is not StrongPhase.NONE:
             return True
-        if key in self.waiting_selection_by_window:
-            return True
-        return key in self.open_weak_requests_by_window
+        return bool(record.open_weak_requests)
 
     # --------------------------------------------- batching and service
 
@@ -191,29 +233,43 @@ class StrongRequests:
     ) -> None:
         """One merged batch now serves every member request."""
         for window_key, request_job in zip(window_keys, request_jobs):
-            self.running_by_window[window_key] = LiveStrongRequest(
-                request_job, batch
-            )
+            record = self._record(window_key)
+            record.live = LiveStrongRequest(request_job, batch)
 
     def finish_service(self, service_job: decoding_records.DecodeJob) -> None:
         """The physical decode ended; its requests are no longer running."""
-        entries = self.running_by_window.items()
-        entries = tuple(entries)
-        for key, live in entries:
-            if live.service_job is service_job:
-                self.running_by_window.pop(key)
+        keys = tuple(self.by_window)
+        for key in keys:
+            record = self.by_window[key]
+            if record.live is None:
+                continue
+            if record.live.service_job is service_job:
+                record.live = None
+                self._drop_if_empty(key)
 
     def take_live(self, key: tuple) -> Optional[LiveStrongRequest]:
         """Drop and return the destination's live request, if any."""
-        return self.running_by_window.pop(key, None)
+        record = self.by_window.get(key)
+        if record is None:
+            return None
+        live = record.live
+        record.live = None
+        self._drop_if_empty(key)
+        return live
 
     def take_held(self, key: tuple) -> Optional[HeldStrongCompletion]:
         """Drop and return the destination's held completion, if any."""
-        return self.held_by_window.pop(key, None)
+        record = self.by_window.get(key)
+        if record is None:
+            return None
+        held = record.held
+        record.held = None
+        self._drop_if_empty(key)
+        return held
 
     def has_survivors(self, service_job: decoding_records.DecodeJob) -> bool:
         """Whether any request the decode serves is still live."""
-        for live in self.running_by_window.values():
+        for live in self._live_requests():
             if live.service_job is service_job:
                 return True
         return False
@@ -228,7 +284,9 @@ class StrongRequests:
         The selection is on its way over the weak-to-strong link.
         """
         self.counts.needed += 1
-        self.waiting_selection_by_window[key] = request_key
+        record = self._record(key)
+        record.phase = StrongPhase.WAITING_SELECTION
+        record.selected_request_key = request_key
 
     def select(
         self, key: tuple, request_key: window_records.DecoderRequestKey
@@ -237,16 +295,22 @@ class StrongRequests:
 
         Returns a completion held from before, or None.
         """
-        if self.waiting_selection_by_window.get(key) != request_key:
+        record = self.by_window.get(key)
+        if record is None:
             return None
-        del self.waiting_selection_by_window[key]
-        self.waiting_result_by_window[key] = request_key
-        held = self.held_by_window.get(key)
+        if record.phase is not StrongPhase.WAITING_SELECTION:
+            return None
+        if record.selected_request_key != request_key:
+            return None
+        record.phase = StrongPhase.WAITING_RESULT
+        held = record.held
         if held is None:
             return None
         if held.request_job.request_key != request_key:
             return None
-        return self.held_by_window.pop(key)
+        record.held = None
+        self._drop_if_empty(key)
+        return held
 
     def complete(self, held: HeldStrongCompletion) -> bool:
         """A strong result is ready: True when a destination consumes it now.
@@ -255,10 +319,9 @@ class StrongRequests:
         """
         request_key = held.request_job.request_key
         key = (request_key.operation_id, request_key.window_id)
-        if self.waiting_result_by_window.get(key) == request_key:
-            del self.waiting_result_by_window[key]
+        if self._takes_the_awaited_result(key, request_key):
             return True
-        if key in self.running_by_window:
+        if self.live(key) is not None:
             raise RuntimeError(
                 f"strong result for window {key} arrived after a newer "
                 "strong request took the destination's next result: "
@@ -270,7 +333,8 @@ class StrongRequests:
                 "waiting for it: the destination registered no strong "
                 "demand and its decode attempt has resolved"
             )
-        self.held_by_window[key] = held
+        record = self._record(key)
+        record.held = held
         return False
 
     def deliveries_for(
@@ -312,21 +376,59 @@ class StrongRequests:
             deliveries.append(held)
         return tuple(deliveries)
 
+    # ------------------------------------------------------- private
+
+    def _takes_the_awaited_result(
+        self, key: tuple, request_key: window_records.DecoderRequestKey
+    ) -> bool:
+        """Whether the destination was waiting for exactly this result."""
+        record = self.by_window.get(key)
+        if record is None:
+            return False
+        if record.phase is not StrongPhase.WAITING_RESULT:
+            return False
+        if record.selected_request_key != request_key:
+            return False
+        record.phase = StrongPhase.NONE
+        record.selected_request_key = None
+        self._drop_if_empty(key)
+        return True
+
+    def _record(self, key: tuple) -> WindowRequests:
+        """The window's record, made on the first request that needs it."""
+        record = self.by_window.get(key)
+        if record is None:
+            record = WindowRequests()
+            self.by_window[key] = record
+        return record
+
+    def _drop_if_empty(self, key: tuple) -> None:
+        """A window waiting on nothing leaves the ledger."""
+        record = self.by_window.get(key)
+        if record is None:
+            return
+        if record.is_empty():
+            del self.by_window[key]
+
+    def _live_requests(self) -> list:
+        """Every live strong request, in the order its window was admitted."""
+        live_requests = []
+        for record in self.by_window.values():
+            if record.live is not None:
+                live_requests.append(record.live)
+        return live_requests
+
     # ---------------------------------------------------- observation
 
     def unsettled(self) -> dict:
         """Every state still holding a destination, by its name."""
-        states = (
-            ("waiting for a strong result", self.waiting_result_by_window),
-            ("waiting for strong selection", self.waiting_selection_by_window),
-            ("holding an unclaimed strong result", self.held_by_window),
-            ("still holding a strong request", self.running_by_window),
-            ("decoding with no outcome", self.open_weak_requests_by_window),
-        )
         unsettled = {}
-        for state, keys in states:
-            if keys:
-                unsettled[state] = sorted(keys)
+        for key, record in self.by_window.items():
+            for state in _states_of(record):
+                keys = unsettled.setdefault(state, [])
+                keys.append(key)
+        for state in unsettled:
+            unsettled[state] = sorted(unsettled[state])
         return unsettled
 
     def snapshot(self, queue_memberships: dict) -> tuple:
@@ -338,8 +440,10 @@ class StrongRequests:
         """
         jobs_by_identity = {}
         keys_by_identity = {}
-        for destination_key, live in self.running_by_window.items():
-            job = live.service_job
+        for destination_key, record in self.by_window.items():
+            if record.live is None:
+                continue
+            job = record.live.service_job
             identity = id(job)
             jobs_by_identity[identity] = job
             keys = keys_by_identity.setdefault(identity, [])
@@ -354,6 +458,20 @@ class StrongRequests:
             )
             records.append((tuple(destination_keys), phase, job.round_count))
         return tuple(sorted(records, key=_snapshot_order))
+
+
+def _states_of(record: WindowRequests) -> list:
+    """The names unsettled() reports one window's record under."""
+    states = []
+    if record.phase is not StrongPhase.NONE:
+        states.append(record.phase.value)
+    if record.held is not None:
+        states.append("holding an unclaimed strong result")
+    if record.live is not None:
+        states.append("still holding a strong request")
+    if record.open_weak_requests:
+        states.append("decoding with no outcome")
+    return states
 
 
 def is_merged_batch(job: decoding_records.DecodeJob) -> bool:

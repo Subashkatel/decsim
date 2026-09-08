@@ -117,12 +117,12 @@ def test_a_windows_attempt_holds_its_forced_class_requests_and_no_repeat():
     )
     requests.admit(first, now=0)
     requests.admit(second, now=0)
-    open_requests = requests.open_weak_requests_by_window[(1, 0)]
-    assert open_requests == {first_key, second_key}
+    record = requests.by_window[(1, 0)]
+    assert record.open_weak_requests == {first_key, second_key}
     with pytest.raises(RuntimeError, match="is already open"):
         requests.admit(second, now=1)
     requests.resolve_weak((1, 0))
-    assert (1, 0) not in requests.open_weak_requests_by_window
+    assert (1, 0) not in requests.by_window
 
 
 def test_a_merged_batch_splits_into_one_empty_completion_per_member():

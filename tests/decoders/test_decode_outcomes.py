@@ -88,7 +88,7 @@ def test_an_escalated_weak_request_closes_the_attempt_and_cancels_nothing():
         job, result, decoding_records.Verdict.ESCALATE
     )
     assert cancelled == []
-    assert (1, 0) not in requests.open_weak_requests_by_window
+    assert (1, 0) not in requests.by_window
 
 
 def test_a_strong_result_teaches_the_policy_and_reaches_its_destination_once():

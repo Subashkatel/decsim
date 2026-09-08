@@ -67,14 +67,22 @@ def _wilson_interval(failures: int, count: int) -> tuple:
     return center - half_width, center + half_width
 
 
-def _forced_class_weights(row, model, shot) -> list:
-    """The two class weights of one shot, from the row's own solves."""
-    weights = []
+def _forced_class_solves(row, model, shot) -> list:
+    """The two forced-class solves of one shot, the row's own."""
+    solves = []
     for forced_class in complementary.FORCED_LOGICAL_CLASSES:
         job = windows.job_for(model, shot)
         job.forced_logical_class = forced_class
-        result = row.decode(job)
-        weights.append(result.forced_class_weight)
+        solve = row.decode(job)
+        solves.append(solve)
+    return solves
+
+
+def _class_weights(solves) -> list:
+    """The weight each solve reported, in class order."""
+    weights = []
+    for solve in solves:
+        weights.append(solve.forced_class_weight)
     return weights
 
 
@@ -89,10 +97,11 @@ def _gaps_and_failures() -> tuple:
     gap_decibels = []
     failures = []
     for shot, observable in zip(events, observables):
-        weights = _forced_class_weights(row, model, shot)
-        soft_output = signal.soft_output_for(weights)
+        solves = _forced_class_solves(row, model, shot)
+        soft_output = signal.soft_output_for(solves)
         decibels = soft_output.gap * DECIBELS_PER_NAT
         gap_decibels.append(decibels)
+        weights = _class_weights(solves)
         is_odd_class_lighter = weights[1] < weights[0]
         lighter_class = int(is_odd_class_lighter)
         truth = int(observable[0])
@@ -134,10 +143,10 @@ def test_a_window_without_an_observable_reports_no_weight_and_no_gap():
     model = windows.whole_circuit_window(stripped, 6, requirement)
     row = adapter.PyMatchingDecoder()
     events, _observables = windows.sampled_shots(stripped, 1, 3)
-    weights = _forced_class_weights(row, model, events[0])
-    assert weights == [None, None]
+    solves = _forced_class_solves(row, model, events[0])
+    assert _class_weights(solves) == [None, None]
     signal = complementary.ComplementaryGap()
-    assert signal.soft_output_for(weights) is None
+    assert signal.soft_output_for(solves) is None
     assert signal.source is complementary.COMPLEMENTARY_GAP_SOURCE
     assert signal.fault_model_requirement is requirement
 
@@ -149,9 +158,9 @@ def test_the_gap_is_the_weight_difference_of_the_two_classes():
     model = windows.whole_circuit_window(circuit, ROUNDS, requirement)
     row = adapter.PyMatchingDecoder()
     events, _observables = windows.sampled_shots(circuit, 1, 3)
-    weights = _forced_class_weights(row, model, events[0])
+    solves = _forced_class_solves(row, model, events[0])
     signal = complementary.ComplementaryGap()
-    soft_output = signal.soft_output_for(weights)
+    soft_output = signal.soft_output_for(solves)
     difference = (
         soft_output.complementary_class_weight
         - soft_output.decoded_class_weight
@@ -185,17 +194,18 @@ def test_the_two_class_weights_are_the_pinned_graphs_own_edges():
     row = adapter.PyMatchingDecoder()
     graphs = row.compile(faults)
     syndrome = numpy.asarray([1, 0], dtype=numpy.uint8)
-    weights = []
+    solves = []
     for forced_class in complementary.FORCED_LOGICAL_CLASSES:
         answer = row.decode_forced_window(
             graphs, None, faults, syndrome, forced_class
         )
-        weights.append(answer.forced_class_weight)
+        solves.append(answer)
+    weights = _class_weights(solves)
     # 2 ln(0.8 / 0.2) for the even class, ln((1 - 0.095) / 0.095) for the odd
     assert weights[0] == pytest.approx(2.772588722239781, abs=1e-6)
     assert weights[1] == pytest.approx(2.2540580520993854, abs=1e-6)
     signal = complementary.ComplementaryGap()
-    soft_output = signal.soft_output_for(weights)
+    soft_output = signal.soft_output_for(solves)
     assert soft_output.decoded_class_weight == pytest.approx(
         2.2540580520993854, abs=1e-6
     )

@@ -36,22 +36,25 @@ class ComplementaryGap:
 
     source = COMPLEMENTARY_GAP_SOURCE
     fault_model_requirement = fault_models.GRAPHLIKE_FAULT_MODEL_REQUIRED
+    decoder_evidence_requirement = decoding_records.FORCED_CLASS_SOLVES
     forced_logical_classes = FORCED_LOGICAL_CLASSES
 
     def soft_output_for(
-        self, forced_class_weights
+        self, solves: tuple
     ) -> Optional[decoding_records.SoftOutput]:
-        """The gap of one window's forced-class weights.
+        """The gap between the weights of one window's forced solves.
 
         None when a weight is missing: a window whose model pins no
         observable has no forced solve, and the escalation policy then
         escalates it (escalation/policies.py).
         """
-        for weight in forced_class_weights:
-            if weight is None:
+        weights = []
+        for solve in solves:
+            if solve.forced_class_weight is None:
                 return None
-        decoded_class_weight = min(forced_class_weights)
-        complementary_class_weight = max(forced_class_weights)
+            weights.append(solve.forced_class_weight)
+        decoded_class_weight = min(weights)
+        complementary_class_weight = max(weights)
         gap = complementary_class_weight - decoded_class_weight
         return decoding_records.SoftOutput(
             gap=gap,

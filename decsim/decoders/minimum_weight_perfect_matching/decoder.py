@@ -50,7 +50,7 @@ class PyMatchingDecoder(decoder_module.WindowDecoderBase):
 
     fault_model_requirement = fault_models.GRAPHLIKE_FAULT_MODEL_REQUIRED
     fault_representation = fault_models.FaultRepresentation.GRAPHLIKE
-    answers_forced_logical_class = True
+    decoder_evidence = decoding_records.FORCED_CLASS_SOLVES
 
     def compile(self, faults, model=None) -> MatchingGraphs:
         """The matching graphs of one placed model, both warm."""

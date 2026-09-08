@@ -248,6 +248,29 @@ class LogicalContribution:
     logical_observables: Optional[tuple[int, ...]]
 
 
+class DecoderEvidence(Enum):
+    """What a decode can show about itself, beyond its correction.
+
+    A confidence signal reads one of these off the decode that produced
+    the correction, so each signal declares what it needs and each
+    decoder row declares what it produces, the way a decoder declares
+    its fault representation. FORCED_CLASS_WEIGHT is the minimum weight
+    inside a logical class the solve was pinned to, which only a decoder
+    that minimises weight inside the class reports honestly (Lee et al.
+    2510.05795 Sec. 2.1.1); CLUSTER_GROWTH is the graph and the radii a
+    cluster-based decode grew (Meister et al. 2405.07433 Algorithm 2).
+    """
+
+    FORCED_CLASS_WEIGHT = "forced_class_weight"
+    CLUSTER_GROWTH = "cluster_growth"
+
+
+# The named capabilities follow the sets they are built from.
+NO_DECODER_EVIDENCE = frozenset()
+FORCED_CLASS_SOLVES = frozenset({DecoderEvidence.FORCED_CLASS_WEIGHT})
+CLUSTER_GROWTH_EVIDENCE = frozenset({DecoderEvidence.CLUSTER_GROWTH})
+
+
 @dataclass(frozen=True)
 class WindowDecode:
     """What one backend call on one window answers.

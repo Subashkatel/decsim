@@ -81,9 +81,8 @@ class ForcedClassGapJoin:
 
     def _join(self, first: HeldForcedSolve, second: HeldForcedSolve) -> None:
         """Subtract the two weights and commit the lighter class's answer."""
-        weights = [first.result.forced_class_weight]
-        weights.append(second.result.forced_class_weight)
-        soft_output = self.signal.soft_output_for(weights)
+        solves = (first.result, second.result)
+        soft_output = self.signal.soft_output_for(solves)
         lighter = _lighter_of(first, second)
         companion = second
         if lighter is second:

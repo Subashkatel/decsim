@@ -79,17 +79,25 @@ class StrongRequests:
         # window key -> the request keys of its open weak attempt
         self.open_weak_requests_by_window: dict[tuple, set] = {}
         self.counts = StrongCounts()
+        kinds = decoding_records.DecodeJobKind
+        self.admit_by_job_kind = {
+            kinds.WINDOW: self.admit_weak,
+            kinds.STRONG_REDECODE: self.admit_strong,
+        }
 
     # ------------------------------------------------------ admission
 
     def admit(self, job: decoding_records.DecodeJob, now: int) -> None:
-        """Open the request's place: a strong destination, or a weak attempt."""
-        if job.strong_decode_for is not None:
-            self.admit_strong(job, now)
+        """Open the request's place: a strong destination, or a weak attempt.
+
+        A job's kind says which; a self-contained decode has no window
+        to be a request for, and a batch is registered by the queue that
+        merged it.
+        """
+        admit = self.admit_by_job_kind.get(job.kind)
+        if admit is None:
             return
-        if job.on_done is not None:
-            return
-        self.admit_weak(job, now)
+        admit(job, now)
 
     def admit_strong(self, job: decoding_records.DecodeJob, now: int) -> None:
         """Give one destination's next strong result to this request."""
@@ -350,9 +358,7 @@ class StrongRequests:
 
 def is_merged_batch(job: decoding_records.DecodeJob) -> bool:
     """A batch serves several strong requests and has no request itself."""
-    if job.request_key is not None:
-        return False
-    return job.strong_decode_for is not None
+    return job.kind is decoding_records.DecodeJobKind.STRONG_BATCH
 
 
 def _populated_accuracy_fields(result: decoding_records.DecodeResult) -> list:

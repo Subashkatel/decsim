@@ -158,7 +158,6 @@ class DecodeQueue(Protocol):
         label: str = "external",
         code: Optional[str] = None,
         spatial_nodes: Optional[int] = None,
-        hint: Optional[str] = None,
     ) -> None:
         """Queue a self-contained decode of the rounds; on_done at its end.
 

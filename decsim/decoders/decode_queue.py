@@ -3,11 +3,13 @@
 gem5's instruction queue holds ready work in priority order and hands
 it out through one scheduling rule (src/cpu/o3/inst_queue.hh:160-178,
 scheduleReadyInsts); here the Scheduler port (schedulers.py) is that
-rule, per pool. A job queues in the pool its hint names, else the
-default pool. Under bulk_strong the strong pool's queue is served as one
-merged batch: every queued strong job, timing-only, becomes one decode
-serving every member request. The queue depth is sampled on every
-change for the switching study.
+rule, per pool. A job queues in the pool its kind names, when the run
+has that pool, else the default pool. Under bulk_strong the STRONG POOL
+alone is served as one merged batch: every queued strong job,
+timing-only, becomes one decode serving every member request, so a run
+that names a pool bulk_strong does not mean is refused rather than
+merged. The queue depth is sampled on every change for the switching
+study.
 """
 
 from typing import Optional
@@ -21,6 +23,15 @@ import decsim.records.decoding as decoding_records
 # the manager imports this module, and the manager's facade imports them.
 LOG_SOURCE = "Decoder manager"
 DEFAULT_POOL = "default"
+STRONG_POOL = "strong"
+# the pool each job kind asks for; a run without that pool queues it in
+# the default pool
+POOL_BY_JOB_KIND = {
+    decoding_records.DecodeJobKind.WINDOW: DEFAULT_POOL,
+    decoding_records.DecodeJobKind.STRONG_REDECODE: STRONG_POOL,
+    decoding_records.DecodeJobKind.STRONG_BATCH: STRONG_POOL,
+    decoding_records.DecodeJobKind.SELF_CONTAINED: DEFAULT_POOL,
+}
 
 
 class WaitingJobs:
@@ -44,15 +55,18 @@ class WaitingJobs:
         self.waiting_by_pool: dict[str, list] = {}
         for pool in pools:
             self.waiting_by_pool[pool] = []
+        if is_bulk_strong:
+            _check_pools_bulk_strong_means(self.waiting_by_pool)
         self.strong_requests = strong_requests
         self.is_bulk_strong = is_bulk_strong
         self.job_enqueued = trace_source.TraceSource()
         self.depth_changed = trace_source.TraceSource()
 
     def pool_of(self, job: decoding_records.DecodeJob) -> str:
-        """The pool a job queues in: its hint when a pool has that name."""
-        if job.hint in self.waiting_by_pool:
-            return job.hint
+        """The pool a job queues in: its kind's, when the run has it."""
+        pool = POOL_BY_JOB_KIND[job.kind]
+        if pool in self.waiting_by_pool:
+            return pool
         return DEFAULT_POOL
 
     def add(self, job: decoding_records.DecodeJob) -> None:
@@ -128,7 +142,7 @@ class WaitingJobs:
     def next(self, pool: str) -> decoding_records.DecodeJob:
         """Remove and return the pool's next job by the scheduler's rule."""
         queue = self.waiting_by_pool[pool]
-        if self.is_bulk_strong and pool != DEFAULT_POOL:
+        if self.is_bulk_strong and pool == STRONG_POOL:
             return self._merge_strong_batch(queue)
         return self.scheduler.pop(queue)
 
@@ -168,6 +182,25 @@ class WaitingJobs:
             else:
                 jobs.append(queued)
         return jobs
+
+
+def _check_pools_bulk_strong_means(waiting_by_pool: dict) -> None:
+    """bulk_strong merges the strong pool; another pool is not its business.
+
+    A pool is a capability, so the rule that merges one names it. A run
+    that defines a pool beyond the default and the strong one is refused
+    here rather than having its jobs merged as though they were strong
+    re-decodes (design audit note 12 section 6.6).
+    """
+    named = set(waiting_by_pool) - {DEFAULT_POOL, STRONG_POOL}
+    if not named:
+        return
+    listed = sorted(named)
+    raise ValueError(
+        f"decoder_manager.bulk_strong merges the {STRONG_POOL!r} pool "
+        f"only, and this run also has {listed}; give those pools their "
+        "own rule or turn bulk_strong off"
+    )
 
 
 def pool_tag_of(pool: str) -> str:
@@ -212,7 +245,7 @@ def _batch_job(jobs: list, window_keys: list) -> decoding_records.DecodeJob:
         round_count=total_rounds,
         ready_time=earliest_ready_time,
         label=f"strong-batch x{batch_size} ({total_rounds}r)",
-        hint="strong",
+        kind=decoding_records.DecodeJobKind.STRONG_BATCH,
         spatial_nodes=jobs[0].spatial_nodes,
         strong_decode_for=first_window_key,
     )

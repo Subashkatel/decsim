@@ -1503,8 +1503,8 @@ def _process_name(settings: MachineSettings, seed: Optional[int]) -> str:
 def _check_strong_route(settings: MachineSettings, router) -> None:
     """A switching run routes a strong job away from the weak decoder.
 
-    Run once on probe jobs: one decoder for both hints is the user's
-    mistake.
+    Run once on probe jobs: one decoder for both job kinds is the
+    user's mistake.
     """
     if settings.escalation.kind != "switching":
         return
@@ -1512,15 +1512,18 @@ def _check_strong_route(settings: MachineSettings, router) -> None:
         operation_id=-1, window_id=0, round_count=0
     )
     strong_probe = decoding_records.DecodeJob(
-        operation_id=-1, window_id=0, round_count=0, hint="strong"
+        operation_id=-1,
+        window_id=0,
+        round_count=0,
+        kind=decoding_records.DecodeJobKind.STRONG_REDECODE,
     )
     strong_decoder = router.route(strong_probe)
     weak_decoder = router.route(weak_probe)
     if strong_decoder is weak_decoder:
         raise ValueError(
             "the strong tier routes to the same decoder as the weak tier; "
-            "give strong_decoder its own kind, or a router that sends "
-            "hint 'strong' to a distinct decoder"
+            "give strong_decoder its own kind, or a router that sends a "
+            "strong re-decode to a distinct decoder"
         )
 
 

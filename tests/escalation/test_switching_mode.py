@@ -111,11 +111,11 @@ def test_switching_config_requires_both_tiers_and_the_card(tmp_path):
 
 
 def _restart_width_card(regions: int) -> dict:
-    """The switching card with the double window and the re-read width."""
+    """The switching card with the forward window and the re-read width."""
     escalation = {
         "kind": "switching",
         "gap_threshold_db": 20.0,
-        "double_window": True,
+        "strong_window": "forward",
         "restart_reread_buffer_regions": regions,
     }
     strong_decoder = strong_unit("belief_matching")

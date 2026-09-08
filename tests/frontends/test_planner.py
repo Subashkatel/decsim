@@ -266,7 +266,7 @@ def compiled_plan(operations, planned_ids, **overrides):
         rounds_policy = round_policies.FixedRounds(4)
     cadence = overrides.pop("fallback_round_microseconds", 2.0)
     retain_strong_context = overrides.pop("retain_strong_context", False)
-    double_window = overrides.pop("double_window", False)
+    absorbs_weak_windows = overrides.pop("absorbs_weak_windows", False)
     reread_regions = overrides.pop("restart_reread_buffer_regions", 0)
     open_ended = overrides.pop("open_ended", False)
     views = []
@@ -282,7 +282,7 @@ def compiled_plan(operations, planned_ids, **overrides):
         rounds_policy=rounds_policy,
         fallback_round_microseconds=cadence,
         retain_strong_context=retain_strong_context,
-        double_window=double_window,
+        absorbs_weak_windows=absorbs_weak_windows,
         restart_reread_buffer_regions=reread_regions,
         has_open_ended_dynamic_streams=open_ended,
     )
@@ -525,7 +525,7 @@ def test_a_windows_hold_reaches_into_the_successors_it_overflows_into():
     buffering = planner._plan_syndrome_buffering(
         execution,
         retain_strong_context=False,
-        double_window=False,
+        absorbs_weak_windows=False,
         restart_reread_buffer_regions=0,
     )
 
@@ -551,7 +551,7 @@ def test_an_open_ended_stream_leaves_the_stores_capacity_unbounded():
     buffering = planner._plan_syndrome_buffering(
         execution,
         retain_strong_context=False,
-        double_window=False,
+        absorbs_weak_windows=False,
         restart_reread_buffer_regions=0,
         has_open_ended_dynamic_streams=True,
     )
@@ -604,13 +604,13 @@ def test_the_potential_restart_hold_covers_what_the_restart_re_reads():
     paper = planner._plan_syndrome_buffering(
         execution,
         retain_strong_context=True,
-        double_window=True,
+        absorbs_weak_windows=True,
         restart_reread_buffer_regions=0,
     )
     one_region = planner._plan_syndrome_buffering(
         execution,
         retain_strong_context=True,
-        double_window=True,
+        absorbs_weak_windows=True,
         restart_reread_buffer_regions=1,
     )
 
@@ -652,7 +652,7 @@ def test_a_strong_context_hold_is_one_buffer_region_on_each_side():
     buffering = planner._plan_syndrome_buffering(
         execution,
         retain_strong_context=True,
-        double_window=False,
+        absorbs_weak_windows=False,
         restart_reread_buffer_regions=0,
     )
 
@@ -661,14 +661,14 @@ def test_a_strong_context_hold_is_one_buffer_region_on_each_side():
     assert held_rounds == tuple((1, index) for index in range(1, 7))
 
 
-def test_a_double_windows_strong_hold_reaches_into_the_successor():
+def test_a_forward_windows_strong_hold_reaches_into_the_successor():
     """The wider region runs past the operation's end onto its successor."""
     execution = one_window_with_a_successor()
 
     buffering = planner._plan_syndrome_buffering(
         execution,
         retain_strong_context=True,
-        double_window=True,
+        absorbs_weak_windows=True,
         restart_reread_buffer_regions=0,
     )
 
@@ -698,7 +698,7 @@ def test_the_strong_union_counts_a_shared_round_once():
     buffering = planner._plan_syndrome_buffering(
         execution,
         retain_strong_context=True,
-        double_window=False,
+        absorbs_weak_windows=False,
         restart_reread_buffer_regions=0,
     )
 

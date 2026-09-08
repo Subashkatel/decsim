@@ -7,7 +7,7 @@ which strong region replaces an escalated window. It returns data and
 immutable decisions; the window side owns event ordering, retention,
 logical accounting and finality. The default interaction is decsim's
 defect-mask boundary (qLDPC net_error, cudaq-x syndrome_mods) and its
-double-window strong region.
+forward strong region.
 """
 
 import dataclasses
@@ -70,7 +70,7 @@ class WindowInteraction(Protocol):
 
 
 class DefaultWindowInteraction:
-    """decsim's defect-mask boundary and double-window strong region.
+    """decsim's defect-mask boundary and forward strong region.
 
     The boundary is a mask per (round, patch) or per round, XORed into
     the landed rounds when the decode starts; a same-operation A/B

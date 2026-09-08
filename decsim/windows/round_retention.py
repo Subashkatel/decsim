@@ -6,8 +6,8 @@ same rounds plus one buffer of context on each side are held in the
 room-side store as a potential strong read (Skoric et al. 2209.08552:
 the buffer region is re-read by the next window). At admission the
 window's hold becomes the request's and is released once the input
-lands in the unit's memory. Under the double window a window that an
-earlier window bounds also keeps the rounds its restart decode would
+lands in the unit's memory. Under the forward strong window a window
+that an earlier window bounds also keeps the rounds its restart would
 read as a potential restart read (PotentialRestart, planned in
 frontends/planner.py), past its own request and landing: an earlier
 escalation may re-slice it as the restart window, which re-reads

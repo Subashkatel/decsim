@@ -1,12 +1,15 @@
 """The two strong-window shapes plan the region the paper gives.
 
-Toshio et al. 2510.25222: the context window is the commit region with
-one buffer of context on each side, r_strong = r_com + 2 r_buf, clipped
-at the operation's edge (Sec. III A); the forward window starts at the
-escalated commit, absorbs the windows it covers, and is decoded once both of its
-boundaries are weak-determined: the restart window's commit, or the
+The context window is the commit region with one buffer of context on
+each side, clipped at the operation's edge; that geometry is decsim's
+own, since escalation unpins the past face (Skoric 2209.08552 line 388,
+Tan 2209.09219 line 1021). Toshio et al. 2510.25222: the forward window
+starts at the
+escalated commit, absorbs the windows it covers, and is decoded once
+both of its boundaries are weak-determined: the restart window's commit, or the
 terminal data (Sec. III C, Fig. 12). A d=3 sliding window commits 3
-rounds and buffers 3, so r_strong is 9 rounds.
+rounds and buffers 3, so r_strong = r_com + 2 r_buf is 9 rounds
+(Sec. III C, lines 1250-1251).
 
 The restart window's weak decode re-reads
 escalation.restart_reread_buffer_regions buffer regions of the strong
@@ -26,8 +29,10 @@ import pathlib
 
 import pytest
 
+import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.machine as machine_module
 import decsim.observe.run_views as run_views
+import decsim.observe.trace_source as trace_source
 import decsim.records.decoding as decoding_records
 import decsim.records.windows as window_records
 import tests.escalation.declared_fabric as fabric
@@ -149,7 +154,7 @@ def test_the_forward_window_absorbs_the_windows_it_covers():
     machine = fabric.switching_machine(
         rounds=15,
         escalated_windows={1},
-        double_window=True,
+        strong_window="forward",
         round_microseconds=4.0,
     )
     machine.run()
@@ -172,7 +177,7 @@ def test_the_forward_window_is_submitted_once_at_the_far_boundary_commit():
     machine = fabric.switching_machine(
         rounds=15,
         escalated_windows={1},
-        double_window=True,
+        strong_window="forward",
         round_microseconds=4.0,
     )
     machine.run()
@@ -194,7 +199,7 @@ def test_the_forward_window_is_submitted_once_at_the_far_boundary_commit():
 
 def test_the_forward_window_at_the_operations_end_waits_for_terminal_data():
     machine = fabric.switching_machine(
-        rounds=9, escalated_windows={2}, double_window=True
+        rounds=9, escalated_windows={2}, strong_window="forward"
     )
     machine.run()
     submitted = fabric.log_lines_containing(
@@ -211,7 +216,7 @@ def test_the_forward_window_at_the_operations_end_waits_for_terminal_data():
 
 def test_a_second_escalation_of_one_window_is_refused():
     machine = fabric.switching_machine(
-        rounds=9, escalated_windows={2}, double_window=True
+        rounds=9, escalated_windows={2}, strong_window="forward"
     )
     machine.run()
     shape = machine.window_manager.strong_redecode.shape
@@ -228,7 +233,7 @@ def test_a_second_escalation_of_one_window_is_refused():
 # ---- the restart window's Buffer 0 claim under a backlog
 
 
-def _gate_double_window_machine(
+def _gate_forward_window_machine(
     commit_rounds: int,
     buffer_rounds: int,
     weak_microseconds: float,
@@ -236,7 +241,7 @@ def _gate_double_window_machine(
     weak_units: int,
     reread_buffer_regions: int,
 ) -> machine_module.Machine:
-    """The gate's switching card with double_window on, both tiers priced.
+    """The gate's switching card with the forward window, both tiers priced.
 
     The gate's point: p 0.008, d 3, 1 us rounds, 30 rounds, seed 0. The
     weak tier at 40 us per window against 3 us of rounds is the backlog
@@ -249,7 +254,7 @@ def _gate_double_window_machine(
     sections["weak_decoder"]["kind"] = weak_microseconds
     sections["weak_decoder"]["units"] = weak_units
     sections["strong_decoder"]["kind"] = strong_microseconds
-    sections["escalation"]["double_window"] = True
+    sections["escalation"]["strong_window"] = "forward"
     sections["escalation"]["restart_reread_buffer_regions"] = (
         reread_buffer_regions
     )
@@ -288,21 +293,21 @@ def _claim(machine, window_index: int):
     return store.hold_round_identities(claim)
 
 
-def test_a_double_window_plan_claims_the_rounds_a_restart_would_read():
+def test_a_forward_window_plan_claims_the_rounds_a_restart_would_read():
     """The plan's claims at the default re-read width, which is 0.
 
     A bounded window claims exactly its own reads, since a restart of
     it would begin on its first committed round. The first window, and
     every window of an ordinary run, claims nothing.
     """
-    doubled = fabric.switching_machine(
-        rounds=15, escalated_windows=set(), double_window=True
+    forward = fabric.switching_machine(
+        rounds=15, escalated_windows=set(), strong_window="forward"
     )
     # W1 commits 4-6 and reads to 9
-    assert _claim(doubled, 1) == tuple((1, index) for index in range(4, 10))
+    assert _claim(forward, 1) == tuple((1, index) for index in range(4, 10))
     # W4 commits 13-15 and reads to 18, clipped at the operation's end
-    assert _claim(doubled, 4) == tuple((1, index) for index in range(13, 16))
-    assert _claim(doubled, 0) is None
+    assert _claim(forward, 4) == tuple((1, index) for index in range(13, 16))
+    assert _claim(forward, 0) is None
     ordinary = fabric.switching_machine(rounds=15, escalated_windows=set())
     for window_index in range(5):
         assert _claim(ordinary, window_index) is None
@@ -318,7 +323,7 @@ def test_the_restart_window_keeps_its_re_read_rounds_across_the_withdrawals():
     sentence; now W6's own claim carries the rounds across W5's
     withdrawal and W6's stale request is withdrawn and rebuilt.
     """
-    machine = _gate_double_window_machine(3, 3, 40.0, 5.0, 1, 1)
+    machine = _gate_forward_window_machine(3, 3, 40.0, 5.0, 1, 1)
     result = machine.run()
     assert _run_statuses(result) == [(1, "logical_observables")]
     assert fabric.frame_tiers(machine) == [
@@ -341,7 +346,7 @@ def test_the_restart_window_keeps_its_re_read_rounds_across_the_withdrawals():
 
 def test_the_re_read_rounds_survive_with_commit_four_and_buffer_four():
     """The reviewer's second shape: W2 escalates, W5 re-reads 17-20."""
-    machine = _gate_double_window_machine(4, 4, 40.0, 5.0, 1, 1)
+    machine = _gate_forward_window_machine(4, 4, 40.0, 5.0, 1, 1)
     result = machine.run()
     assert _run_statuses(result) == [(1, "logical_observables")]
     assert fabric.frame_tiers(machine) == [
@@ -367,7 +372,7 @@ def test_the_re_read_rounds_survive_the_absorbed_inputs_landing_first():
     Four units hold two windows at once, since a window's confidence
     is two forced-class solves and each takes a unit.
     """
-    machine = _gate_double_window_machine(3, 3, 40.0, 5.0, 4, 1)
+    machine = _gate_forward_window_machine(3, 3, 40.0, 5.0, 4, 1)
     result = machine.run()
     landed_absorbed = _log_index(
         machine, "memory W5 [commit 16-18] input landed"
@@ -398,7 +403,7 @@ def test_the_paper_width_restarts_on_the_round_after_the_strong_region():
     2510.25222 Sec. III C, Fig. 12); the run completes as it does with
     one buffer region of re-read, and W9 keeps its weak result.
     """
-    machine = _gate_double_window_machine(3, 3, 40.0, 5.0, 2, 0)
+    machine = _gate_forward_window_machine(3, 3, 40.0, 5.0, 2, 0)
     result = machine.run()
     assert _run_statuses(result) == [(1, "logical_observables")]
     resliced = fabric.log_lines_containing(machine, "re-sliced")
@@ -423,7 +428,7 @@ def test_the_forward_window_lands_in_the_declared_backlog_regime():
     the refusal was the bug.
     """
     machine = fabric.switching_machine(
-        rounds=15, escalated_windows={1}, double_window=True
+        rounds=15, escalated_windows={1}, strong_window="forward"
     )
     machine.run()
     assert fabric.frame_tiers(machine) == [
@@ -437,3 +442,89 @@ def test_the_forward_window_lands_in_the_declared_backlog_regime():
         in (resliced[0])
     )
     assert not machine.window_manager.strong_redecode.has_pending()
+
+
+# ---- a shape row added from outside decsim
+
+
+class RecordingContextWindow:
+    """A shape row a study adds: the context window, with its plans noted.
+
+    It fills the StrongWindowShape port by holding a ContextWindow and
+    passing every call to it, which is what a new row does: one class,
+    one table entry, one yaml name, and nothing else changes.
+    """
+
+    absorbs_weak_windows = False
+    window_absorbed = trace_source.SILENT
+
+    def __init__(self, engine, planner, tracker, retention, builder) -> None:
+        self.inner = strong_window_shapes.ContextWindow(
+            engine, planner, tracker, retention, builder
+        )
+        self.planned_windows = []
+
+    def plan(self, weak_job):
+        """Note the window, then plan it as the context window does."""
+        self.planned_windows.append(weak_job.window_id)
+        return self.inner.plan(weak_job)
+
+    def note_selection_sent(self, window_key, selection_arrival_ticks):
+        """The held window's selection left."""
+        return self.inner.note_selection_sent(
+            window_key, selection_arrival_ticks
+        )
+
+    def take_if_far_boundary_committed(self, window_key):
+        """The held job this weak commit releases, if any."""
+        return self.inner.take_if_far_boundary_committed(window_key)
+
+    def take_if_terminal_data_stored(self, operation_id):
+        """The held terminal job whose last round is stored, if any."""
+        return self.inner.take_if_terminal_data_stored(operation_id)
+
+    def has_pending(self) -> bool:
+        """Whether a strong window is still held."""
+        return self.inner.has_pending()
+
+    def pending_work(self) -> tuple:
+        """The held strong windows, for the views."""
+        return self.inner.pending_work()
+
+
+def test_a_shape_row_added_from_outside_runs_by_its_yaml_name():
+    """A new strong window shape is one class and one table row.
+
+    sinter's BUILT_IN_DECODERS is the shape: a name in the config
+    resolves to a class in the table, and the machine builds it with the
+    components the port needs (_decoding_all_built_in_decoders.py).
+    """
+    table = strong_window_shapes.STRONG_WINDOW_SHAPES
+    table["recording_context"] = RecordingContextWindow
+    try:
+        machine = fabric.switching_machine(
+            rounds=9,
+            escalated_windows={2},
+            strong_window="recording_context",
+        )
+        machine.run()
+    finally:
+        del table["recording_context"]
+    shape = machine.window_manager.strong_redecode.shape
+    assert type(shape) is RecordingContextWindow
+    assert shape.planned_windows == [2]
+    assert fabric.frame_tiers(machine) == [
+        ((1, 0), "weak"),
+        ((1, 1), "weak"),
+        ((1, 2), "strong"),
+    ]
+
+
+def test_a_shape_name_off_the_table_is_refused_naming_the_rows():
+    with pytest.raises(ValueError) as refusal:
+        fabric.switching_machine(
+            rounds=9, escalated_windows=set(), strong_window="seam_pinned"
+        )
+    assert "escalation.strong_window 'seam_pinned' is not a row" in str(
+        refusal.value
+    )

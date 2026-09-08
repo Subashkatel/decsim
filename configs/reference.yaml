@@ -96,11 +96,23 @@ escalation:
 #                                  # weak_decoder_to_strong_decoder hop, which the
 #                                  # paper expects to cost little because the
 #                                  # switching rate decays with the code distance
-#   double_window: false           # the paper's Sec. III C scheme: the weak
-#                                  # chain keeps committing past an escalated
-#                                  # strong window; false = serial escalation
-#                                  # with Held boundaries
-#   restart_reread_buffer_regions: 0  # double window only: how many of the
+#   strong_window: two_sided_context  # two_sided_context | forward: the shape
+#                                  # of the window the strong tier re-decodes
+#                                  # (STRONG_WINDOW_SHAPES in
+#                                  # escalation/strong_window_shapes.py).
+#                                  # two_sided_context, the default, re-decodes
+#                                  # the escalated window's commit region with
+#                                  # one buffer of raw context on each side and
+#                                  # escalates serially, with Held boundaries;
+#                                  # that geometry is decsim's own, since
+#                                  # discarding the weak result unpins the past
+#                                  # face (Skoric 2209.08552 line 388, Tan
+#                                  # 2209.09219 line 1021). forward is the
+#                                  # paper's Sec. III C scheme: the weak chain
+#                                  # keeps committing past an escalated strong
+#                                  # window, which absorbs the windows it
+#                                  # covers and re-slices the one past it
+#   restart_reread_buffer_regions: 0  # forward window only: how many of the
 #                                  # strong region's buffer regions the
 #                                  # restarted weak window re-reads. 0 is the
 #                                  # paper (Toshio 2510.25222 Sec. III C lines

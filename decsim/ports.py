@@ -448,7 +448,7 @@ class ThresholdSource(Protocol):
     front. A source that audits by escalating (the online row labels a
     kept window by re-decoding it on the strong tier) needs one serial
     strong re-decode per window, so Switching refuses it beside
-    run_both_at_once and the double window.
+    run_both_at_once and the forward strong window.
     """
 
     audits_by_escalating: bool

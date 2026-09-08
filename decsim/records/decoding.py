@@ -51,11 +51,11 @@ class PotentialStrong:
 class PotentialRestart:
     """A hold: a window's reads and one buffer before them, in Buffer 0.
 
-    Under the double window an earlier escalation may re-slice the
-    window as its restart window, whose weak decode re-reads one buffer
-    into the strong region (Toshio 2510.25222 Sec. III C); the rounds
-    stay past the window's own request and landing, until the window
-    before it commits.
+    Under the forward strong window an earlier escalation may re-slice
+    this window as its restart window, whose weak decode re-reads one
+    buffer into the strong region (Toshio 2510.25222 Sec. III C); the
+    rounds stay past the window's own request and landing, until the
+    window before it commits.
     """
 
     window_key: tuple
@@ -366,10 +366,11 @@ class RunShape:
     """What a run is made of, as the root checks it before planning.
 
     The escalation policy refuses a run it cannot serve from this
-    record, once, in Machine.build. is_double_window is the strong
-    window's shape (the forward window of Toshio et al. 2510.25222
-    Sec. III C when true, decsim's own two-sided context otherwise);
-    is_bulk_strong is the
+    record, once, in Machine.build. is_absorbing_strong_window is the
+    strong window shape's own declaration that its region replaces the
+    weak windows it covers (the forward window of Toshio et al.
+    2510.25222 Sec. III C; decsim's own two-sided context absorbs
+    nothing); is_bulk_strong is the
     decoder manager's merging of queued strong re-decodes; operations
     are the workload's planning views; commit_round_count and
     buffer_round_count size every window (windows.commit_rounds and
@@ -382,7 +383,7 @@ class RunShape:
     operations: tuple
     commit_round_count: int
     buffer_round_count: int
-    is_double_window: bool
+    is_absorbing_strong_window: bool
     is_bulk_strong: bool
     has_dynamic_streams: bool
     has_static_decode_plan: bool

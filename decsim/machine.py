@@ -758,6 +758,23 @@ def primary_tier(settings: decoder_settings.EscalationSettings) -> str:
     return row.primary_tier.value
 
 
+def _strong_window_row(settings: decoder_settings.EscalationSettings):
+    """The strong window shape class the escalation section names."""
+    return _row(
+        strong_window_shapes.STRONG_WINDOW_SHAPES,
+        "escalation.strong_window",
+        settings.strong_window,
+    )
+
+
+def _absorbs_weak_windows(
+    settings: decoder_settings.EscalationSettings,
+) -> bool:
+    """Whether the strong window replaces the weak windows it covers."""
+    row = _strong_window_row(settings)
+    return row.absorbs_weak_windows
+
+
 def _escalation_policy(settings: decoder_settings.EscalationSettings):
     """The policy of the escalation kind, or the Python-built one."""
     if settings.policy is not None:
@@ -819,6 +836,7 @@ def _plan(settings: MachineSettings, escalation_policy) -> _Plan:
     )
     scheme = _scheme(settings.windows, settings.escalation)
     boundary_policy = _boundary_policy(settings.windows, settings.escalation)
+    absorbs_weak_windows = _absorbs_weak_windows(settings.escalation)
     reread_regions = settings.escalation.restart_reread_buffer_regions
     window_interaction = settings.windows.window_interaction
     if window_interaction is None:
@@ -844,7 +862,7 @@ def _plan(settings: MachineSettings, escalation_policy) -> _Plan:
         operations=views,
         commit_round_count=commit_round_count,
         buffer_round_count=buffer_round_count,
-        is_double_window=settings.escalation.double_window,
+        is_absorbing_strong_window=absorbs_weak_windows,
         is_bulk_strong=settings.decoder_manager.bulk_strong,
         has_dynamic_streams=bool(dynamic_streams),
         has_static_decode_plan=has_static_decode_plan,
@@ -869,7 +887,7 @@ def _plan(settings: MachineSettings, escalation_policy) -> _Plan:
         rounds_policy=rounds_policy,
         fallback_round_microseconds=settings.qpu.round_period_microseconds,
         retain_strong_context=escalation_policy.requires_strong_context,
-        double_window=settings.escalation.double_window,
+        absorbs_weak_windows=absorbs_weak_windows,
         restart_reread_buffer_regions=reread_regions,
         has_open_ended_dynamic_streams=bool(dynamic_streams),
     )
@@ -1003,13 +1021,14 @@ def _boundary_policy(
     """Eager shipping, or Held while a serial escalation is pending.
 
     Serial switching holds boundaries until results are final
-    (descendants wait out an escalation); double_window keeps the weak
-    chain committing eagerly and absorbs escalations in strong windows.
+    (descendants wait out an escalation); a strong window that absorbs
+    the weak windows it covers keeps the weak chain committing eagerly.
     """
     if windows.boundary_policy is not None:
         return windows.boundary_policy
+    absorbs_weak_windows = _absorbs_weak_windows(escalation)
     is_serial_switching = (
-        escalation.kind == "switching" and not escalation.double_window
+        escalation.kind == "switching" and not absorbs_weak_windows
     )
     if is_serial_switching:
         return policies.Held()
@@ -1462,13 +1481,14 @@ def _strong_redecode(
 ):
     """The window side of the strong tier, or None when never escalating.
 
-    The strong window's shape is the forward window of Toshio Sec. III C
-    under double_window, and decsim's own two-sided context otherwise.
+    escalation.strong_window names the row: the forward window of Toshio
+    Sec. III C, or decsim's own two-sided context.
     """
     if not escalation_policy.requires_strong_context:
         return None
-    if escalation.double_window:
-        shape = strong_window_shapes.ForwardWindow(
+    row = _strong_window_row(escalation)
+    if row.absorbs_weak_windows:
+        shape = row(
             engine,
             planner,
             tracker,
@@ -1479,9 +1499,7 @@ def _strong_redecode(
             interaction,
         )
     else:
-        shape = strong_window_shapes.ContextWindow(
-            engine, planner, tracker, retention, builder
-        )
+        shape = row(engine, planner, tracker, retention, builder)
     return strong_redecode_module.StrongRedecode(
         engine,
         shape,

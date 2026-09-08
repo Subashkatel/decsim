@@ -95,6 +95,39 @@ ours. A block nested deeper than two levels is hoisted into a named
 method (LLVM's early exits and predicate functions); that one is a
 failure.
 
+### Classes exempt from the six-attribute report
+
+Some classes are one responsibility with genuinely many collaborators:
+splitting them would put one job in two places. `tools/check_one_action.py`
+reads this list and reports every other wide class, so the exemptions are
+visible here, beside the rule, rather than buried in the checker. The list
+stays short; past eight names the rule is wrong, not the list.
+
+- `WindowManager` (`decsim/windows/window_manager.py`): the windows
+  package's facade, whose collaborators are that package's components,
+  named once here so no caller reaches past it.
+- `FeedbackStreams` (`decsim/controller/feedback_streams.py`): one
+  protected cycle, which needs the qpu it releases, the windows it hears
+  from, and the three tables the program declares it with.
+- `StrongRedecode` (`decsim/escalation/strong_redecode.py`): one strong
+  re-decode of a window, which crosses both send ends, the decode queue
+  and the committer's return path in a single flow.
+- `DecodeRequester` (`decsim/windows/decode_requests.py`): one request per
+  complete window, which needs the window state, the builder, the queue,
+  the escalation verdict and the store's outgoing port to place it.
+- `IdleRoundAccounting` (`decsim/controller/idle_rounds.py`): one idle
+  round routed by the policy, which needs the geometry, the streams and
+  the qpu the round belongs to as well as the queue it charges.
+- `RoundWriter` (`decsim/controller/round_writes.py`): one finished round
+  written to its stores or held, with both stores, the hold and the
+  transmitter that publishes the landing.
+- `OperationResults` (`decsim/windows/operation_results.py`): one final
+  result per operation, which reads the plan, the window state, the
+  retention and the ledger before it releases a conditional operation.
+- `DecodeRequestBuilder` (`decsim/windows/decode_requests.py`): one decode
+  job built from a window, stamped with the input gate and the run-wide
+  request ordinal.
+
 ## Rule 2. Names are full words that say what the thing is
 
 No abbreviations. No acronyms except these, which are words in this field

@@ -18,6 +18,7 @@ tests/escalation/declared_fabric.py, so every tick asserted there is
 arithmetic over declared latencies.
 """
 
+import json
 import math
 
 import pytest
@@ -447,6 +448,80 @@ def test_the_parallel_sibling_waits_for_the_context_it_reads():
     assert submitted == last_context_round
     assert started > submitted
     assert not machine.window_manager.strong_redecode.has_pending()
+
+
+def test_a_deferred_strong_job_is_traced_from_its_hold_to_its_release(
+    tmp_path,
+):
+    """The wait is a visible state on the strong tier's own lane.
+
+    Note 14 section 3.4: a slice that opens when the row holds the job
+    and closes when the condition fires, labelled with the strong
+    request key, carrying the name of what it waits on, and stepping the
+    window's flow into the job's dispatch. gem5 exposes a blocked port
+    the same way, as state rather than as an exception
+    (src/mem/port.hh:244-255).
+    """
+    trace_path = tmp_path / "parallel.trace.json"
+    machine = fabric.switching_machine(
+        rounds=9,
+        escalated_windows=set(),
+        run_both_at_once=True,
+        strong_buffer_microseconds=7.0,
+        trace_path=trace_path,
+    )
+    machine.run()
+    machine.observation.trace_writer.write(str(trace_path))
+    text = trace_path.read_text()
+    document = json.loads(text)
+    lanes = _lane_names(document)
+    held = _events_named(document, "X", "W0 strong window held")
+    (slice_row,) = held
+    args = slice_row["args"]
+    expected_held = decsim_config.microseconds_to_ticks(15.0)
+    expected_released = decsim_config.microseconds_to_ticks(18.0)
+
+    assert lanes[slice_row["tid"]] == "Strong tier"
+    assert args["request"] == "1:0:strong:1"
+    assert args["waits_for"] == "stored rounds of operation 1"
+    assert args["outcome"] == "strong context stored in syndrome buffer 1"
+    assert args["rounds"] == 6
+    assert args["tick"] == expected_held
+    assert slice_row["dur"] == pytest.approx(3.0)
+
+    arrows = _flows_of(document, lanes, "Strong tier", "window 1:0")
+    (arrow,) = arrows
+    assert arrow["args"]["tick"] == expected_released
+
+
+def _lane_names(document) -> dict:
+    """The name of every lane of the trace, by its thread id."""
+    names = {}
+    for row in document:
+        if row.get("name") == "thread_name":
+            names[row["tid"]] = row["args"]["name"]
+    return names
+
+
+def _events_named(document, phase: str, name: str) -> list:
+    """Every event of one phase with one name."""
+    rows = []
+    for row in document:
+        if row["ph"] == phase and row["name"] == name:
+            rows.append(row)
+    return rows
+
+
+def _flows_of(document, lanes: dict, lane: str, flow_id: str) -> list:
+    """Every flow event of one chain on one lane."""
+    rows = []
+    for row in document:
+        if row["ph"] not in ("s", "t", "f"):
+            continue
+        if lanes[row["tid"]] != lane or row["id"] != flow_id:
+            continue
+        rows.append(row)
+    return rows
 
 
 def test_a_sibling_held_for_its_input_is_cancelled_by_a_confident_result():

@@ -22,6 +22,7 @@ from typing import Callable, Optional
 
 import decsim.decoders.decode_queue as decode_queue_module
 import decsim.escalation.pending_strong_windows as pending_strong_windows
+import decsim.observe.trace_source as trace_source
 import decsim.records.decoding as decoding_records
 import decsim.records.windows as window_records
 
@@ -52,6 +53,10 @@ class StrongRedecode:
         self.on_strong_decoded = on_strong_decoded
         self.selections = _StrongSelections()
         self.pending = pending_strong_windows.PendingStrongWindows()
+        # trace sources: the wait a held strong window sits in, from the
+        # hold to the condition that ends it
+        self.strong_window_held = trace_source.TraceSource()
+        self.strong_window_left = trace_source.TraceSource()
 
     # ---- the two entries
 
@@ -136,6 +141,12 @@ class StrongRedecode:
             return
         self.pending.take(held)
         self.selections.forget_sibling(window_key)
+        self.strong_window_left.fire(
+            held.assignment.request_key,
+            window_key,
+            "cancelled: the weak result is confident",
+            False,
+        )
         self.engine.log(
             decode_queue_module.LOG_SOURCE,
             f"strong sibling for {window_key} cancelled while held for "
@@ -169,6 +180,10 @@ class StrongRedecode:
             selection_arrival_ticks=selection_arrival_ticks,
         )
         self.pending.register(held)
+        waits_for = pending_strong_windows.waiting_text(conditions)
+        self.strong_window_held.fire(
+            assignment.request_key, key, waits_for, assignment.round_count
+        )
 
     def _submit_released(self, released: tuple) -> None:
         """Ask each released row for its job; submit the ones it builds."""
@@ -177,6 +192,12 @@ class StrongRedecode:
             if job is None:
                 continue
             self.pending.take(held)
+            self.strong_window_left.fire(
+                job.request_key,
+                held.key,
+                held.conditions.released_description,
+                True,
+            )
             self._enqueue(job, held.selection_arrival_ticks)
             self.engine.log(
                 decode_queue_module.LOG_SOURCE,

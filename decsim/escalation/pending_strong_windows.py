@@ -144,6 +144,17 @@ class PendingStrongWindows:
         return tuple(ordered)
 
 
+def waiting_text(conditions: ReleaseConditions) -> str:
+    """What a held window waits on, named for the run's views."""
+    parts = []
+    for window_key in conditions.committed_windows:
+        parts.append(f"commit of window {window_key}")
+    operation_id = conditions.stored_data_of_operation
+    if operation_id is not None:
+        parts.append(f"stored rounds of operation {operation_id}")
+    return ", ".join(parts)
+
+
 def _index(index: dict, condition_key, held_key: tuple) -> None:
     """Record that the held window waits on this condition."""
     waiting = index.setdefault(condition_key, [])

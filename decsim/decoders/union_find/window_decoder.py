@@ -10,91 +10,26 @@ round(w / weight_step), never below one tick, so a likelier fault is
 crossed sooner; that quantization is _quantize_weight_ticks. Growth
 here is event driven: each round jumps to the next tick at which some
 front closes an edge, and a front advances one half-tick per tick.
+
+What a decode leaves behind is a record a confidence signal reads, so
+the graph, its edges, the open and closed intervals and the weight step
+live in decsim/records/decoder_evidence.py; the growth and the peeling
+are here.
 """
 
-import dataclasses
 import math
-from numbers import Real
-from typing import Optional, Union
+from typing import Optional
 
 import numpy
 
+import decsim.records.decoder_evidence as evidence_records
+
 BOUNDARY = -1
-# one tick of an edge length is this many natural-log units of weight
-DEFAULT_WEIGHT_STEP = 0.1
-
-
-@dataclasses.dataclass(frozen=True)
-class Open:
-    """The uncovered interval between two growing edge fronts."""
-
-    lower_tick: int
-    upper_tick: int
-
-
-@dataclasses.dataclass(frozen=True)
-class Closed:
-    """A fully covered edge."""
-
-
-@dataclasses.dataclass(frozen=True)
-class UnionFindEdge:
-    """One graphlike residual fault column in the weighted graph."""
-
-    fault_index: int
-    detector_a: int
-    detector_b: int
-    logical_observables: tuple[int, ...]
-    length_half_ticks: int
-
-
-@dataclasses.dataclass(frozen=True)
-class UnionFindGraph:
-    """Immutable graph state shared by decodes of one placed fault model."""
-
-    detector_count: int
-    fault_count: int
-    edges: tuple[UnionFindEdge, ...]
-    baseline_faults: tuple[int, ...]
-    baseline_syndrome: tuple[int, ...]
-    logical_observables_by_fault: tuple[tuple[int, ...], ...] = ()
-    logical_observable_count: int = 0
-    # the absolute natural-log weight one tick of an edge length is, so
-    # a reader of the growth knows what its distances mean
-    weight_step: float = DEFAULT_WEIGHT_STEP
-
-
-@dataclasses.dataclass(frozen=True)
-class UnionFindHardEvidence:
-    """Immutable weighted growth and peeling evidence from one hard decode."""
-
-    graph: UnionFindGraph
-    syndrome: tuple[int, ...]
-    residual_syndrome: tuple[int, ...]
-    selected_faults: tuple[int, ...]
-    contact_faults: tuple[int, ...]
-    edge_intervals: tuple[Union[Open, Closed], ...]
-    erasure_forest_faults: tuple[int, ...]
-    logical_observables: tuple[int, ...]
-    # detectors the best-effort correction leaves unexplained: an odd
-    # cluster that ran out of edges before reaching another defect or the
-    # boundary
-    unmatched_detectors: tuple[int, ...] = ()
-
-
-def normalized_weight_step(weight_step) -> float:
-    """The weight step as a positive finite float; anything else is refused."""
-    if isinstance(weight_step, bool) or not isinstance(weight_step, Real):
-        raise TypeError("Union-Find weight_step must be a real number")
-    normalized = float(weight_step)
-    if not math.isfinite(normalized) or normalized <= 0.0:
-        raise ValueError("Union-Find weight_step must be finite and positive")
-    return normalized
 
 
 def graph_from_model(
     faults, *, location: str, weight_step: float
-) -> UnionFindGraph:
+) -> evidence_records.UnionFindGraph:
     """The weighted graph of one placed graphlike model.
 
     Faults likelier than one half are the baseline correction; every
@@ -122,7 +57,7 @@ def graph_from_model(
     logical_columns = _logical_columns(observables, fault_count)
     baseline_faults = _int_tuple(baseline)
     baseline_syndrome = _int_tuple(baseline_syndrome)
-    return UnionFindGraph(
+    return evidence_records.UnionFindGraph(
         detector_count=check.shape[0],
         fault_count=fault_count,
         edges=tuple(edges),
@@ -134,7 +69,9 @@ def graph_from_model(
     )
 
 
-def decode_graph(graph: UnionFindGraph, syndrome) -> UnionFindHardEvidence:
+def decode_graph(
+    graph: evidence_records.UnionFindGraph, syndrome
+) -> evidence_records.UnionFindHardEvidence:
     """Decode one syndrome on the graph: grow, take the forest, peel, report."""
     syndrome_array = _checked_syndrome(graph, syndrome)
     baseline_syndrome = numpy.asarray(
@@ -158,7 +95,7 @@ def decode_graph(graph: UnionFindGraph, syndrome) -> UnionFindHardEvidence:
     logical_observables = _logical_observables(graph, selected_faults)
     contact_faults = _fault_indices(graph, contacts)
     erasure_forest_faults = _fault_indices(graph, forest)
-    return UnionFindHardEvidence(
+    return evidence_records.UnionFindHardEvidence(
         graph=graph,
         syndrome=syndrome_bits,
         residual_syndrome=residual_bits,
@@ -280,7 +217,7 @@ def _parity_product(matrix, vector):
 
 def _edge_of(
     check, priors, baseline, observables, fault_index: int, weight_step: float
-) -> Optional[UnionFindEdge]:
+) -> Optional[evidence_records.UnionFindEdge]:
     """The edge of one fault column; None when its residual is certain."""
     probability = float(priors[fault_index])
     residual_probability = probability
@@ -294,7 +231,7 @@ def _edge_of(
     column = observables[:, fault_index]
     logical_observables = _int_tuple(column)
     length_half_ticks = 2 * weight_ticks
-    return UnionFindEdge(
+    return evidence_records.UnionFindEdge(
         fault_index=fault_index,
         detector_a=detector_a,
         detector_b=detector_b,
@@ -333,14 +270,18 @@ def _int_tuple(values) -> tuple:
     return tuple(integers)
 
 
-def _fault_indices(graph: UnionFindGraph, edge_indices) -> tuple:
+def _fault_indices(
+    graph: evidence_records.UnionFindGraph, edge_indices
+) -> tuple:
     fault_indices = []
     for edge_index in edge_indices:
         fault_indices.append(graph.edges[edge_index].fault_index)
     return tuple(fault_indices)
 
 
-def _in_fault_order(graph: UnionFindGraph, edge_indices) -> tuple:
+def _in_fault_order(
+    graph: evidence_records.UnionFindGraph, edge_indices
+) -> tuple:
     keyed = []
     for edge_index in edge_indices:
         keyed.append((graph.edges[edge_index].fault_index, edge_index))
@@ -351,7 +292,9 @@ def _in_fault_order(graph: UnionFindGraph, edge_indices) -> tuple:
     return tuple(ordered)
 
 
-def _frozen_roots(graph: UnionFindGraph, disjoint_set: _DisjointSet) -> tuple:
+def _frozen_roots(
+    graph: evidence_records.UnionFindGraph, disjoint_set: _DisjointSet
+) -> tuple:
     """(root of a, root of b) per edge, as the clusters stand now."""
     detector_count = graph.detector_count
     roots = []
@@ -364,7 +307,9 @@ def _frozen_roots(graph: UnionFindGraph, disjoint_set: _DisjointSet) -> tuple:
     return tuple(roots)
 
 
-def _active_roots(graph: UnionFindGraph, disjoint_set: _DisjointSet) -> dict:
+def _active_roots(
+    graph: evidence_records.UnionFindGraph, disjoint_set: _DisjointSet
+) -> dict:
     """Whether each cluster still grows, by its root."""
     all_roots = set()
     node_count = graph.detector_count + 1
@@ -378,13 +323,15 @@ def _active_roots(graph: UnionFindGraph, disjoint_set: _DisjointSet) -> dict:
 
 
 def _closed_contact_batch(
-    graph: UnionFindGraph, disjoint_set: _DisjointSet, edge_intervals: list
+    graph: evidence_records.UnionFindGraph,
+    disjoint_set: _DisjointSet,
+    edge_intervals: list,
 ) -> tuple:
     """Closed edges whose ends are still in different clusters."""
     frozen_roots = _frozen_roots(graph, disjoint_set)
     contacts = []
     for edge_index, interval in enumerate(edge_intervals):
-        if not isinstance(interval, Closed):
+        if not isinstance(interval, evidence_records.Closed):
             continue
         left_root, right_root = frozen_roots[edge_index]
         if left_root == right_root:
@@ -394,7 +341,9 @@ def _closed_contact_batch(
 
 
 def _union_contact_batch(
-    graph: UnionFindGraph, disjoint_set: _DisjointSet, contact_edge_indices
+    graph: evidence_records.UnionFindGraph,
+    disjoint_set: _DisjointSet,
+    contact_edge_indices,
 ) -> None:
     detector_count = graph.detector_count
     for edge_index in contact_edge_indices:
@@ -405,12 +354,12 @@ def _union_contact_batch(
 
 
 def _advance_open_interval(
-    interval: Open,
+    interval: evidence_records.Open,
     length_half_ticks: int,
     elapsed_ticks: int,
     left_active: bool,
     right_active: bool,
-) -> Open:
+) -> evidence_records.Open:
     lower_tick = interval.lower_tick
     if left_active:
         lower_tick += elapsed_ticks
@@ -421,15 +370,15 @@ def _advance_open_interval(
         raise RuntimeError(
             "weighted Union-Find edge update lost represented interval order"
         )
-    return Open(lower_tick, upper_tick)
+    return evidence_records.Open(lower_tick, upper_tick)
 
 
-def _initial_intervals(graph: UnionFindGraph) -> list:
+def _initial_intervals(graph: evidence_records.UnionFindGraph) -> list:
     intervals = []
     for edge in graph.edges:
-        interval = Open(0, edge.length_half_ticks)
+        interval = evidence_records.Open(0, edge.length_half_ticks)
         if edge.length_half_ticks == 0:
-            interval = Closed()
+            interval = evidence_records.Closed()
         intervals.append(interval)
     return intervals
 
@@ -440,7 +389,7 @@ def _closing_candidates(
     """(ticks until the edge closes, edge index) for every growing edge."""
     candidates = []
     for edge_index, interval in enumerate(edge_intervals):
-        if not isinstance(interval, Open):
+        if not isinstance(interval, evidence_records.Open):
             continue
         left_root, right_root = frozen_roots[edge_index]
         if left_root == right_root:
@@ -476,7 +425,7 @@ def _edges_closing_at(candidates: list, elapsed: int) -> set:
 
 
 def _advanced_interval(
-    edge: UnionFindEdge,
+    edge: evidence_records.UnionFindEdge,
     edge_index: int,
     interval,
     frozen_roots: tuple,
@@ -485,14 +434,14 @@ def _advanced_interval(
     selected: set,
 ):
     """The edge's interval after every active front grew by elapsed ticks."""
-    if not isinstance(interval, Open):
+    if not isinstance(interval, evidence_records.Open):
         return interval
     left_root, right_root = frozen_roots[edge_index]
     left_active = frozen_active[left_root]
     right_active = frozen_active[right_root]
     if left_root != right_root:
         if edge_index in selected:
-            return Closed()
+            return evidence_records.Closed()
         return _advance_open_interval(
             interval, edge.length_half_ticks, elapsed, left_active, right_active
         )
@@ -501,14 +450,14 @@ def _advanced_interval(
         return interval
     remaining_ticks = interval.upper_tick - interval.lower_tick
     if 2 * elapsed >= remaining_ticks:
-        return Closed()
+        return evidence_records.Closed()
     return _advance_open_interval(
         interval, edge.length_half_ticks, elapsed, True, True
     )
 
 
 def _advanced_intervals(
-    graph: UnionFindGraph,
+    graph: evidence_records.UnionFindGraph,
     edge_intervals: list,
     frozen_roots: tuple,
     frozen_active: dict,
@@ -531,7 +480,9 @@ def _advanced_intervals(
     return proposals
 
 
-def _weighted_growth_outcome(graph: UnionFindGraph, syndrome) -> tuple:
+def _weighted_growth_outcome(
+    graph: evidence_records.UnionFindGraph, syndrome
+) -> tuple:
     """Grow every odd cluster until none is left or none can grow.
 
     Returns the clusters, the edge intervals and the contact edges in
@@ -579,7 +530,9 @@ def _weighted_growth_outcome(graph: UnionFindGraph, syndrome) -> tuple:
     return disjoint_set, tuple(edge_intervals), tuple(contact_edges)
 
 
-def _by_length_then_fault(graph: UnionFindGraph, edge_indices) -> list:
+def _by_length_then_fault(
+    graph: evidence_records.UnionFindGraph, edge_indices
+) -> list:
     keyed = []
     for edge_index in edge_indices:
         edge = graph.edges[edge_index]
@@ -592,7 +545,7 @@ def _by_length_then_fault(graph: UnionFindGraph, edge_indices) -> list:
 
 
 def _minimum_weight_contact_forest(
-    graph: UnionFindGraph, contact_edge_indices: tuple
+    graph: evidence_records.UnionFindGraph, contact_edge_indices: tuple
 ) -> tuple:
     """A spanning forest of the contacts, lightest edges first (Kruskal)."""
     no_defects = [0] * graph.detector_count
@@ -611,7 +564,9 @@ def _minimum_weight_contact_forest(
     return tuple(forest_edges)
 
 
-def _sort_neighbors(graph: UnionFindGraph, neighbors: list) -> None:
+def _sort_neighbors(
+    graph: evidence_records.UnionFindGraph, neighbors: list
+) -> None:
     """Neighbors by their edge's fault index, then by node, in place."""
     keyed = []
     for neighbor, edge_index in neighbors:
@@ -623,7 +578,9 @@ def _sort_neighbors(graph: UnionFindGraph, neighbors: list) -> None:
         neighbors.append((neighbor, edge_index))
 
 
-def _forest_adjacency(graph: UnionFindGraph, forest_edges: tuple) -> dict:
+def _forest_adjacency(
+    graph: evidence_records.UnionFindGraph, forest_edges: tuple
+) -> dict:
     detector_count = graph.detector_count
     node_count = detector_count + 1
     adjacency = {}
@@ -718,7 +675,9 @@ def _peel_component(
     return selected
 
 
-def _peel_forest(graph: UnionFindGraph, syndrome, forest_edges: tuple) -> tuple:
+def _peel_forest(
+    graph: evidence_records.UnionFindGraph, syndrome, forest_edges: tuple
+) -> tuple:
     """The forest edges that pair the defects (peeling, Algorithm 2)."""
     adjacency = _forest_adjacency(graph, forest_edges)
     boundary_node = graph.detector_count
@@ -741,7 +700,7 @@ def _peel_forest(graph: UnionFindGraph, syndrome, forest_edges: tuple) -> tuple:
     return tuple(sorted(selected_edges))
 
 
-def _checked_syndrome(graph: UnionFindGraph, syndrome):
+def _checked_syndrome(graph: evidence_records.UnionFindGraph, syndrome):
     raw_syndrome = numpy.asarray(syndrome)
     if raw_syndrome.ndim != 1 or raw_syndrome.size != graph.detector_count:
         raise ValueError(
@@ -756,7 +715,9 @@ def _checked_syndrome(graph: UnionFindGraph, syndrome):
     return raw_syndrome.astype(numpy.uint8, copy=False)
 
 
-def _selected_faults(graph: UnionFindGraph, edge_indices: tuple) -> list:
+def _selected_faults(
+    graph: evidence_records.UnionFindGraph, edge_indices: tuple
+) -> list:
     selected = list(graph.baseline_faults)
     for edge_index in edge_indices:
         fault_index = graph.edges[edge_index].fault_index
@@ -765,7 +726,7 @@ def _selected_faults(graph: UnionFindGraph, edge_indices: tuple) -> list:
 
 
 def _reproduced_syndrome(
-    graph: UnionFindGraph, baseline_syndrome, edge_indices
+    graph: evidence_records.UnionFindGraph, baseline_syndrome, edge_indices
 ):
     reproduced = baseline_syndrome.copy()
     for edge_index in edge_indices:
@@ -777,7 +738,9 @@ def _reproduced_syndrome(
     return reproduced
 
 
-def _logical_observables(graph: UnionFindGraph, selected_faults: list) -> tuple:
+def _logical_observables(
+    graph: evidence_records.UnionFindGraph, selected_faults: list
+) -> tuple:
     parities = [0] * graph.logical_observable_count
     for fault_index in range(graph.fault_count):
         if not selected_faults[fault_index]:

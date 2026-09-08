@@ -16,9 +16,9 @@ import decsim.confidence.cluster as cluster
 import decsim.confidence.complementary as complementary
 import decsim.decoders.minimum_weight_perfect_matching.decoder as mwpm
 import decsim.decoders.union_find.decoder as union_find
-import decsim.decoders.union_find.window_decoder as window_decoder
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.ports as ports
+import decsim.records.decoder_evidence as evidence_records
 import decsim.records.decoding as decoding_records
 from tests.decoders import windows
 
@@ -68,7 +68,7 @@ def test_the_gap_is_read_off_the_decode_that_produced_the_correction():
     selected = list(evidence.selected_faults)
     assert selected == list(result.correction)
     graph = evidence.graph
-    assert graph.weight_step == window_decoder.DEFAULT_WEIGHT_STEP
+    assert graph.weight_step == evidence_records.DEFAULT_WEIGHT_STEP
     signal = cluster.ClusterGap()
     computation = signal.compute((result,))
     soft_output = computation.soft_output
@@ -107,6 +107,6 @@ def test_the_cluster_gap_and_the_complementary_gap_agree_on_one_window():
         matching_output = matching_computation.soft_output
         difference = cluster_output.gap - matching_output.gap
         differences.append(abs(difference))
-    weight_step = window_decoder.DEFAULT_WEIGHT_STEP
+    weight_step = evidence_records.DEFAULT_WEIGHT_STEP
     assert statistics.median(differences) <= weight_step
     assert max(differences) <= 5 * weight_step

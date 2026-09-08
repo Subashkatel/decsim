@@ -140,10 +140,9 @@ class ContextWindow:
     absorbs_weak_windows = False
     window_absorbed = trace_source.SILENT
 
-    def __init__(self, engine, regions, tracker, retention, builder) -> None:
+    def __init__(self, engine, regions, retention, builder) -> None:
         self.engine = engine
         self.regions = regions
-        self.tracker = tracker
         self.retention = retention
         self.builder = builder
 
@@ -158,10 +157,10 @@ class ContextWindow:
             weak_job.window_id,
             window_records.DecoderTier.STRONG,
         )
-        self._require_context_stored(key, region)
-        strong_store = self.retention.strong_store
-        self.builder.stamp_first_round(strong_window, strong_store)
-        payloads = self.builder.assemble_payloads(strong_window, strong_store)
+        self.retention.require_context_stored(key, region.context_read_keys)
+        payloads = self.retention.strong_window_input(
+            self.builder, strong_window
+        )
         payload_round_count = decoding_records.distinct_round_count(payloads)
         job = decoding_records.DecodeJob(
             operation_id=weak_job.operation_id,
@@ -212,27 +211,6 @@ class ContextWindow:
     def pending_work(self) -> tuple:
         """Nothing is ever held."""
         return ()
-
-    def _require_context_stored(
-        self, key: tuple, region: strong_regions.ContextRegion
-    ) -> None:
-        """Every context round that already arrived must sit in buffer 1."""
-        strong_store = self.retention.strong_store
-        missing = []
-        for round_key in region.context_read_keys:
-            arrived = self.tracker.rounds_arrived(round_key[0])
-            if round_key[1] > arrived:
-                continue
-            fragments = strong_store.retained_fragments(round_key)
-            if fragments is None:
-                missing.append(round_key)
-        if missing:
-            raise RuntimeError(
-                f"strong context for {key} arrived at Buffer 0 but is not "
-                f"stored in syndrome buffer 1: {missing} "
-                f"(controller_to_strong_buffer lag beyond the escalation "
-                f"margin, or an early release)"
-            )
 
 
 class ForwardWindow:
@@ -299,12 +277,13 @@ class ForwardWindow:
         logical_candidate = self._strong_window_ownership_candidate(
             key, resolved_region
         )
-        guard = self._guard_restart_reads(
+        guard = self.retention.guard_restart_reads(
             key,
             restart_key,
             resolved_region.proposed_restart_window,
             strong_request_key,
-            resolved_region,
+            resolved_region.context_round_keys,
+            resolved_region.restart_read_keys,
         )
         phase = _Phase.WAITING_FAR_BOUNDARY
         if restart_key is None:
@@ -324,7 +303,7 @@ class ForwardWindow:
         try:
             self.ledger.contributions = logical_candidate
             self.pending.register(held, operation_id, restart_key)
-            self._hold_strong_context(
+            self.retention.hold_strong_context(
                 key,
                 strong_request_key,
                 resolved_region.context_round_keys,
@@ -340,9 +319,7 @@ class ForwardWindow:
             return StrongAssignment(strong_request_key, None)
         finally:
             if guard is not None:
-                self.retention.release_hold_if_live(
-                    guard, self.retention.strong_store
-                )
+                self.retention.release_strong_hold_if_live(guard)
 
     def note_selection_sent(
         self, window_key: tuple, selection_arrival_ticks: int
@@ -424,71 +401,6 @@ class ForwardWindow:
         )
         return candidate
 
-    def _guard_restart_reads(
-        self,
-        key: tuple,
-        restart_key: Optional[tuple],
-        proposed_restart: Optional[window_records.Window],
-        strong_request_key: window_records.DecoderRequestKey,
-        resolved_region: strong_regions.ForwardRegion,
-    ) -> Optional[decoding_records.RephaseGuard]:
-        """Hold the restart window's strong context while the plan lands.
-
-        Syndrome buffer 1 loses the absorbed windows' potential strong
-        holds as the plan lands; the guard keeps the restart window's
-        context until its re-sliced potential strong hold names it. Its
-        Buffer 0 reads need no guard: its potential restart hold is
-        live until the plan ends (_restart_weak_chain).
-        """
-        if restart_key is None:
-            return None
-        self._require_restart_claim(key, restart_key)
-        guard = decoding_records.RephaseGuard(strong_request_key)
-        guarded_strong = self._guarded_strong_reads(
-            key, restart_key, proposed_restart, resolved_region
-        )
-        self.retention.strong_store.register_hold(guard, guarded_strong)
-        return guard
-
-    def _require_restart_claim(self, key: tuple, restart_key: tuple) -> None:
-        """The restart window still claims its reads and the re-read range.
-
-        The claim ends only when the window before the restart window
-        commits, at absorption, or at the end of this plan, and the
-        absorbed windows are checked uncommitted first, so no runtime
-        path reaches a released claim here: an invariant, not a check.
-        """
-        claim = decoding_records.PotentialRestart(restart_key)
-        assert self.retention.weak_store.has_hold(claim), (
-            f"strong-region plan for {key}: restart window {restart_key}'s "
-            f"potential restart hold is no longer live"
-        )
-
-    def _guarded_strong_reads(
-        self,
-        key: tuple,
-        restart_key: tuple,
-        proposed_restart: window_records.Window,
-        resolved_region: strong_regions.ForwardRegion,
-    ) -> list:
-        strong_store = self.retention.strong_store
-        escalated_potential = decoding_records.PotentialStrong(key)
-        restart_potential = decoding_records.PotentialStrong(restart_key)
-        escalated_identities = strong_store.hold_round_identities(
-            escalated_potential
-        )
-        restart_identities = strong_store.hold_round_identities(
-            restart_potential
-        )
-        guarded = list(escalated_identities)
-        guarded += list(restart_identities)
-        guarded += list(resolved_region.context_round_keys)
-        restart_reads = list(resolved_region.restart_read_keys)
-        guarded += self.retention.strong_context_read_keys(
-            proposed_restart, restart_reads
-        )
-        return guarded
-
     # ---- private: landing the plan
 
     def _withdraw_stale_requests(
@@ -511,19 +423,6 @@ class ForwardWindow:
             if window.queued:
                 self.requester.withdraw(window)
 
-    def _hold_strong_context(
-        self,
-        key: tuple,
-        strong_request_key: window_records.DecoderRequestKey,
-        context_keys: tuple,
-    ) -> None:
-        """The window's potential strong read becomes the request's hold."""
-        self.retention.transfer_potential_to_pending(key, strong_request_key)
-        pending_hold = decoding_records.PendingStrong(strong_request_key)
-        self.retention.strong_store.replace_hold(
-            pending_hold, list(context_keys)
-        )
-
     def _absorb_window(
         self, key: tuple, restart_key: Optional[tuple], replacement
     ) -> None:
@@ -543,7 +442,9 @@ class ForwardWindow:
             self._unhook_restart(key, restart_key, window)
         self.retention.release_hold_if_live(key)
         self.retention.release_restart_reads(key)
-        self._release_absorbed_strong_hold(key, restart_key, replacement)
+        self.retention.release_absorbed_strong_hold(
+            key, restart_key, replacement
+        )
         self.engine.log(
             decode_queue_module.LOG_SOURCE,
             f"window {key} absorbed into the strong window "
@@ -559,26 +460,6 @@ class ForwardWindow:
             restart.deps_remaining -= 1
         if restart_key in window.dependents:
             window.dependents.remove(restart_key)
-
-    def _release_absorbed_strong_hold(
-        self, key: tuple, restart_key: Optional[tuple], replacement
-    ) -> None:
-        """Drop the absorbed window's potential read; the request holds it."""
-        strong_store = self.retention.strong_store
-        absorbed = decoding_records.PotentialStrong(key)
-        needed_identities = strong_store.hold_round_identities(absorbed)
-        needed = set(needed_identities)
-        replacement_identities = strong_store.hold_round_identities(replacement)
-        replacements = set(replacement_identities)
-        if restart_key is not None:
-            restart_potential = decoding_records.PotentialStrong(restart_key)
-            restart_identities = strong_store.hold_round_identities(
-                restart_potential
-            )
-            replacements.update(restart_identities)
-        if not needed <= replacements:
-            raise RuntimeError("absorption replacement does not cover packets")
-        strong_store.release_hold(absorbed)
 
     def _log_assignment(
         self,
@@ -658,10 +539,13 @@ class ForwardWindow:
         key = held.key
         weak_job = held.weak_job
         strong_window = held.strong_window
-        strong_store = self.retention.strong_store
-        payloads = self.builder.assemble_payloads(strong_window, strong_store)
-        _check_every_round_retained(held, payloads)
-        self.builder.stamp_first_round(strong_window, strong_store)
+        payloads = self.retention.strong_window_input(
+            self.builder, strong_window
+        )
+        plan = held.resolved_region.plan
+        self.retention.require_rounds_retained(
+            held.label, payloads, plan.context_lo, plan.context_hi
+        )
         payload_round_count = decoding_records.distinct_round_count(payloads)
         job = decoding_records.DecodeJob(
             operation_id=key[0],
@@ -858,24 +742,6 @@ def _refuse_overlapping_contribution(
             f"{plan.commit_hi} overlaps unabsorbed logical "
             f"contribution {other_key} extent "
             f"{contribution.commit_lo}-{contribution.commit_hi}"
-        )
-
-
-def _check_every_round_retained(held: _PendingWindow, payloads: list) -> None:
-    """A strong window starts only once every context round is retained."""
-    covered = set()
-    for payload in payloads:
-        covered.add(payload.round_index)
-    plan = held.resolved_region.plan
-    stop_round = plan.context_hi + 1
-    needed = set(range(plan.context_lo, stop_round))
-    if covered != needed:
-        listed = sorted(covered)
-        raise RuntimeError(
-            f"{held.label}: strong window submitted with rounds "
-            f"{listed} but it needs "
-            f"{plan.context_lo}-{plan.context_hi}; a strong window may "
-            "only start once every required round is retained"
         )
 
 

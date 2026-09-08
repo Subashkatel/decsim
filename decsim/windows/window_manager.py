@@ -136,7 +136,7 @@ class WindowManager:
         """Track an operation's rounds, payload RAM, and feedback role."""
         is_new = self.tracker.register_operation(operation)
         if is_new:
-            self.retention.weak_store.open_operation(operation.id)
+            self.retention.open_operation_store(operation.id)
 
     def register_stream(
         self, stream_operation: program_records.Operation
@@ -148,7 +148,7 @@ class WindowManager:
         stream_operation = dataclasses.replace(
             stream_operation, feedback_boundary_mode=resolved_feedback_mode
         )
-        self.retention.weak_store.open_operation(stream_operation.id)
+        self.retention.open_operation_store(stream_operation.id)
         source_round_limit = self.planner.register_stream(stream_operation)
         self.tracker.register_stream(stream_operation, source_round_limit)
 
@@ -278,7 +278,7 @@ class WindowManager:
         operation: program_records.Operation,
     ) -> None:
         """A round past the plan is the device's mistake (it is a plug-in)."""
-        if not self.retention.weak_store.has_operation(operation.id):
+        if not self.retention.has_operation_store(operation.id):
             raise RuntimeError(
                 f"round {packet.round_index} of {operation.name} arrived "
                 f"after the op's last window committed and its syndrome RAM "

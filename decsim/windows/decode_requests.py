@@ -387,7 +387,8 @@ class DecodeRequester:
         if window.t_first_round is None and self.tracker.has_first_round(
             window
         ):
-            self.builder.stamp_first_round(window, self.retention.weak_store)
+            store = self.retention.store_for(None)
+            self.builder.stamp_first_round(window, store)
         if not self.tracker.is_data_complete(window):
             return
         operation = self.tracker.operation_by_id[window.operation_id]

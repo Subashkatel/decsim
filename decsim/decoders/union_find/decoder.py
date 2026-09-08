@@ -10,6 +10,7 @@ from typing import Optional
 import decsim.decoders.decoder as decoder_module
 import decsim.decoders.union_find.window_decoder as window_decoder
 import decsim.detector_error_model.fault_model_contracts as fault_models
+import decsim.records.decoder_evidence as evidence_records
 import decsim.records.decoding as decoding_records
 
 
@@ -32,13 +33,13 @@ class UnionFindDecoder(decoder_module.WindowDecoderBase):
     def __init__(
         self,
         latency_model: Optional[decoder_module.DecoderBase] = None,
-        weight_step=window_decoder.DEFAULT_WEIGHT_STEP,
+        weight_step=evidence_records.DEFAULT_WEIGHT_STEP,
     ) -> None:
         decoder_module.WindowDecoderBase.__init__(self, latency_model)
         # absolute natural-log units represented by one weight tick
-        self.weight_step = window_decoder.normalized_weight_step(weight_step)
+        self.weight_step = evidence_records.normalized_weight_step(weight_step)
 
-    def compile(self, faults, model=None) -> window_decoder.UnionFindGraph:
+    def compile(self, faults, model=None) -> evidence_records.UnionFindGraph:
         """The immutable weighted graph of one placed model."""
         del model
         return window_decoder.graph_from_model(
@@ -65,7 +66,7 @@ class UnionFindDecoder(decoder_module.WindowDecoderBase):
         )
 
 
-def _status_of(evidence: window_decoder.UnionFindHardEvidence):
+def _status_of(evidence: evidence_records.UnionFindHardEvidence):
     if evidence.unmatched_detectors:
         return decoder_module.BackendDecodeStatus.INVALID_CORRECTION
     return None

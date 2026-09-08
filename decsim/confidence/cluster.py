@@ -35,16 +35,16 @@ from fractions import Fraction
 from typing import Optional, Union
 
 import decsim.config as config
-import decsim.decoders.union_find.window_decoder as window_decoder
 import decsim.detector_error_model.fault_model_contracts as fault_models
+import decsim.records.decoder_evidence as evidence_records
 import decsim.records.decoding as decoding_records
 
 
 def union_find_cluster_gap_source(
-    weight_step: float = window_decoder.DEFAULT_WEIGHT_STEP,
+    weight_step: float = evidence_records.DEFAULT_WEIGHT_STEP,
 ) -> decoding_records.SoftOutputSource:
     """The source of a cluster gap at one absolute natural-log weight step."""
-    normalized_step = window_decoder.normalized_weight_step(weight_step)
+    normalized_step = evidence_records.normalized_weight_step(weight_step)
     return decoding_records.SoftOutputSource(
         method="cluster_gap",
         cluster_origin="union_find_decoder",
@@ -74,10 +74,10 @@ class ClusterGap:
 
     def __init__(
         self,
-        weight_step: float = window_decoder.DEFAULT_WEIGHT_STEP,
+        weight_step: float = evidence_records.DEFAULT_WEIGHT_STEP,
         walk_microseconds: Optional[float] = None,
     ) -> None:
-        self.weight_step = window_decoder.normalized_weight_step(weight_step)
+        self.weight_step = evidence_records.normalized_weight_step(weight_step)
         self.source = union_find_cluster_gap_source(self.weight_step)
         # what the walk costs on the weak tier's clock: a card's declared
         # number, or None to measure the call as a measured decoder is
@@ -146,7 +146,7 @@ def _require_weight_step(graph, weight_step: float) -> None:
 
 
 def _cluster_gap(
-    hard_evidence: window_decoder.UnionFindHardEvidence, weight_step: float
+    hard_evidence: evidence_records.UnionFindHardEvidence, weight_step: float
 ) -> float:
     gap_half_ticks = _quotient_cluster_gap(
         hard_evidence.graph, hard_evidence.edge_intervals
@@ -155,7 +155,7 @@ def _cluster_gap(
 
 
 def _quotient_cluster_gap(
-    graph: window_decoder.UnionFindGraph, edge_intervals: tuple
+    graph: evidence_records.UnionFindGraph, edge_intervals: tuple
 ) -> Union[int, float]:
     """The shortest odd-logical quotient walk, in integer half ticks.
 
@@ -201,7 +201,7 @@ def _add_edge_segments(
 
 def _split_coordinates(edge, interval) -> tuple:
     """The edge's tick coordinates where its segments meet, ascending."""
-    if isinstance(interval, window_decoder.Closed):
+    if isinstance(interval, evidence_records.Closed):
         return (0, edge.length_half_ticks)
     ticks = {
         0,
@@ -215,7 +215,7 @@ def _split_coordinates(edge, interval) -> tuple:
 
 def _segment_weight(interval, lower: int, upper: int) -> int:
     """The segment's cost: zero where the growth covered it."""
-    if isinstance(interval, window_decoder.Closed):
+    if isinstance(interval, evidence_records.Closed):
         return 0
     if upper <= interval.lower_tick:
         return 0

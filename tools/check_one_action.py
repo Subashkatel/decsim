@@ -27,7 +27,7 @@ What is reported, by kind:
     long function       a function longer than MAX_FUNCTION_LINES
     deep nesting        blocks nested deeper than MAX_BLOCK_DEPTH
     wide state          a class whose __init__ sets more attributes than
-                        MAX_ATTRIBUTES
+                        MAX_ATTRIBUTES, unless STYLE.md rule 1 names it
 
 Two kinds are reports, not failures: long function and wide state. The
 40 lines is Google's prompt to think, not a limit, and the six
@@ -38,6 +38,7 @@ printed under their own heading and do not set the exit code.
 
 import ast
 import pathlib
+import re
 import sys
 
 ALLOWED_INNER_CALLS = frozenset(
@@ -84,11 +85,44 @@ EXCLUDED_PATHS = ("tests/data",)
 MAX_FUNCTION_LINES = 40
 MAX_BLOCK_DEPTH = 2
 MAX_ATTRIBUTES = 6
+# STYLE.md rule 1 names the classes whose width is one responsibility with
+# genuinely many collaborators. The list lives there, not here, so a
+# reader of the rule sees every exemption and its one sentence.
+CHECKER_FILE = pathlib.Path(__file__)
+CHECKER_PATH = CHECKER_FILE.resolve()
+PACKAGE_ROOT = CHECKER_PATH.parent.parent
+STYLE_GUIDE = PACKAGE_ROOT / "STYLE.md"
+EXEMPTION_HEADING = "### Classes exempt from the six-attribute report"
+EXEMPTION_LINE = re.compile(r"^- `(\w+)` \(`([^`]+)`\):")
 
 BLOCK_STATEMENTS = (ast.For, ast.While, ast.If, ast.With, ast.Try)
 ARITHMETIC = (ast.BinOp, ast.Compare, ast.BoolOp)
 FUNCTIONS = (ast.FunctionDef, ast.AsyncFunctionDef)
 COMPREHENSIONS = (ast.ListComp, ast.SetComp, ast.GeneratorExp, ast.DictComp)
+
+
+def wide_state_exemptions():
+    """The (class, path) pairs STYLE.md rule 1 exempts from the report."""
+    exemptions = set()
+    if not STYLE_GUIDE.exists():
+        return exemptions
+    is_listing = False
+    guide = STYLE_GUIDE.read_text()
+    for line in guide.splitlines():
+        if line.startswith("### "):
+            is_listing = line.startswith(EXEMPTION_HEADING)
+            continue
+        if not is_listing:
+            continue
+        match = EXEMPTION_LINE.match(line)
+        if match is not None:
+            class_name = match.group(1)
+            class_path = match.group(2)
+            exemptions.add((class_name, class_path))
+    return exemptions
+
+
+EXEMPT_CLASSES = wide_state_exemptions()
 
 
 class Finding:
@@ -318,12 +352,29 @@ class Checker(ast.NodeVisitor):
 
     def visit_ClassDef(self, node):
         """Report a class whose __init__ sets too many attributes."""
-        init = init_method(node)
-        if init is not None:
-            names = self_attributes_assigned(init)
-            if len(names) > MAX_ATTRIBUTES:
-                self.report(node, "wide state")
+        if self.is_wide_state(node):
+            self.report(node, "wide state")
         self.generic_visit(node)
+
+    def is_wide_state(self, node):
+        """Whether the class sets too many attributes and is not exempt."""
+        init = init_method(node)
+        if init is None:
+            return False
+        names = self_attributes_assigned(init)
+        if len(names) <= MAX_ATTRIBUTES:
+            return False
+        return not self.is_exempt(node.name)
+
+    def is_exempt(self, class_name):
+        """Whether STYLE.md rule 1 names this class at this path."""
+        text = self.path.as_posix()
+        for exempt_name, exempt_path in EXEMPT_CLASSES:
+            if exempt_name != class_name:
+                continue
+            if text.endswith(exempt_path):
+                return True
+        return False
 
     def visit_Call(self, node):
         """Check a call's arguments and what it is called on."""

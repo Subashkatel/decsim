@@ -79,6 +79,8 @@ class WindowCommitter:
         is_final = verdict is decoding_records.Verdict.KEEP
         if not is_final:
             self.strong_redecode.escalate(job)
+        elif self.strong_redecode is not None:
+            self.strong_redecode.cancel_held_sibling(key)
         self.decode_queue.resolve_weak_request(job, result, verdict)
         if not is_final:
             self.commit(window, operation, result, job.request_key, False)

@@ -11,7 +11,8 @@ the boundary into the landed input once. The requester builds the
 primary tier's job, asks the escalation policy which tiers decode the
 window now, and enqueues one submission per tier on the DecodeQueue
 port with each job's input send; a strong sibling's submission is the
-strong tier's window side's.
+strong tier's window side's, and a sibling that side holds for its
+input has no submission to make here.
 """
 
 import dataclasses
@@ -432,7 +433,8 @@ class DecodeRequester:
                 submissions.extend(primary)
             else:
                 sibling = strong_redecode.parallel_strong_submission(job)
-                submissions.append(sibling)
+                started = _sibling_submissions(sibling)
+                submissions.extend(started)
         for submission in submissions:
             self.enqueue(submission)
 
@@ -568,6 +570,13 @@ class _SharedInputHold:
         if self.readers_left > 0:
             return
         self.hold_release()
+
+
+def _sibling_submissions(sibling) -> list:
+    """The strong sibling's submission, or none while its side holds it."""
+    if sibling is None:
+        return []
+    return [sibling]
 
 
 def _first_forced_class(forced_classes: tuple) -> Optional[int]:

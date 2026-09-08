@@ -406,16 +406,19 @@ def test_the_serial_escalation_timeline_is_exact():
     assert parked_start == expected_parked_start
 
 
-def test_the_parallel_mode_refuses_a_room_side_lag_beyond_the_margin():
-    """The parallel strong sibling starts at once or the run stops.
+def test_the_parallel_sibling_waits_for_the_context_it_reads():
+    """The parallel strong sibling starts when its copy has landed.
 
-    Toshio arXiv:2510.25222 Sec. III A, Step 1: in the parallel variant
-    the strong decoder is handed the window's context the moment the
-    weak decode starts. On the declared card the room-side hop is 7 us
-    against Buffer 0's 4 us, so the context is not yet in syndrome
-    buffer 1 when the window becomes ready, and the shape refuses
-    loudly rather than decode a window whose context it cannot read
-    (decsim/escalation/strong_window_shapes.py).
+    Toshio arXiv:2510.25222 Sec. III A, Step 1: "a sequence of syndrome
+    data sigma is simultaneously fed to both the weak and strong
+    decoders" (lines 599-603). The paper prices no transport in Sec.
+    III A and prices T_comm^strong at ten times T_comm^weak in Table I
+    (lines 1943-1950), so in a model that prices transport Step 1 means
+    the strong decoder starts when its copy has arrived. On the
+    declared card the room-side hop is 7 us against Buffer 0's 4 us, so
+    the first window's context is still crossing when the window
+    becomes ready: the sibling is held, and it is submitted at the tick
+    its last context round is stored in syndrome buffer 1.
     """
     machine = fabric.switching_machine(
         rounds=9,
@@ -423,11 +426,55 @@ def test_the_parallel_mode_refuses_a_room_side_lag_beyond_the_margin():
         run_both_at_once=True,
         strong_buffer_microseconds=7.0,
     )
-    with pytest.raises(
-        RuntimeError,
-        match="controller_to_strong_buffer lag beyond the escalation margin",
-    ):
-        machine.run()
+    machine.run()
+    log_lines = machine.observation.log.lines
+    held = declared_run.log_tick(
+        log_lines, "strong(mem1 W0): strong start deferred"
+    )
+    last_context_round = declared_run.log_tick(
+        log_lines, "SyndromeBuffer1: received round 6 of op 1"
+    )
+    submitted = declared_run.log_tick(
+        log_lines,
+        "strong(mem1 W0): strong context stored in syndrome buffer 1",
+    )
+    started = declared_run.log_tick(log_lines, "START DECODE strong(mem1 W0)")
+    deferred_lines = fabric.log_lines_containing(
+        machine, "strong start deferred until the context rounds"
+    )
+    assert "[(1, 4), (1, 5), (1, 6)]" in deferred_lines[0]
+    assert held < submitted
+    assert submitted == last_context_round
+    assert started > submitted
+    assert not machine.window_manager.strong_redecode.has_pending()
+
+
+def test_a_sibling_held_for_its_input_is_cancelled_by_a_confident_result():
+    """Step 3 halts the strong computation a confident weak result spares.
+
+    Toshio arXiv:2510.25222 Sec. III A, step 3 (lines 610-615). A
+    sibling still waiting for its context has not started, so the
+    confident weak result ends it where it waits; the room-side rounds
+    it would have read are freed with the window's final commit, and
+    the run settles with nothing held.
+    """
+    machine = fabric.switching_machine(
+        rounds=9,
+        escalated_windows=set(),
+        run_both_at_once=True,
+        strong_buffer_microseconds=40.0,
+    )
+    machine.run()
+    cancelled = fabric.log_lines_containing(
+        machine, "cancelled while held for its input"
+    )
+    assert len(cancelled) == 3
+    assert not machine.window_manager.strong_redecode.has_pending()
+    assert fabric.frame_tiers(machine) == [
+        ((1, 0), "weak"),
+        ((1, 1), "weak"),
+        ((1, 2), "weak"),
+    ]
 
 
 def test_every_strong_request_is_cancelled_when_the_weak_tier_is_confident():

@@ -126,10 +126,15 @@ class ContextWindow:
     past face, and a buffer of raw context is the standard answer to an
     open face (Skoric 2209.08552 line 388; Tan 2209.09219 line 1021).
 
-    The job is built the moment it is asked for and priced for the
-    context rounds that exist: a window at the operation's edge has a
-    shorter context than commit + 2 buffer. This shape absorbs no weak
-    window, so its window_absorbed source is the silent one.
+    The job is built as soon as its context is stored in syndrome
+    buffer 1, and priced for the context rounds that exist: a window at
+    the operation's edge has a shorter context than commit + 2 buffer.
+    A context round still crossing controller_to_strong_buffer holds the
+    job instead, because Step 1 feeds both decoders the same data and a
+    model that prices transport starts the strong decoder when its copy
+    lands (Table I prices T_comm^strong at ten times T_comm^weak, lines
+    1943-1950). This shape absorbs no weak window, so its
+    window_absorbed source is the silent one.
     """
 
     absorbs_weak_windows = False
@@ -142,7 +147,7 @@ class ContextWindow:
         self.builder = builder
 
     def plan(self, weak_job: decoding_records.DecodeJob) -> StrongAssignment:
-        """The two-sided context job, built now, its context held."""
+        """The two-sided context job, built now or held for its context."""
         key = (weak_job.operation_id, weak_job.window_id)
         region = self.regions.context_region(key)
         strong_window = region.window
@@ -152,50 +157,99 @@ class ContextWindow:
             weak_job.window_id,
             window_records.DecoderTier.STRONG,
         )
-        self.retention.require_context_stored(key, region.context_read_keys)
-        payloads = strong_job_payloads(
-            self.retention, self.builder, strong_window, FOLDS_NO_BOUNDARY
-        )
-        payload_round_count = decoding_records.distinct_round_count(payloads)
-        job = decoding_records.DecodeJob(
-            operation_id=weak_job.operation_id,
-            window_id=weak_job.window_id,
-            round_count=payload_round_count,
-            ready_time=self.engine.now,
+        held = _HeldContextWindow(
+            key=key,
+            weak_job=weak_job,
             label=weak_job.strong_label,
-            kind=decoding_records.DecodeJobKind.STRONG_REDECODE,
-            spatial_nodes=weak_job.spatial_nodes,
-            code=weak_job.code,
-            detector_error_model=model,
-            payloads=payloads,
-            attempt=1,
-            window=strong_window,
-            strong_decode_for=key,
+            region=region,
+            strong_window=strong_window,
+            model=model,
             request_key=request_key,
             request_created_ticks=self.engine.now,
-            gate=self.builder,
         )
-        self.retention.hold_strong_input(job)
+        crossing = self.retention.context_rounds_in_flight(
+            key, region.context_read_keys
+        )
+        if crossing:
+            self._log_hold(held, crossing)
+            return StrongAssignment(
+                request_key,
+                None,
+                held_plan=held,
+                round_count=strong_window.round_count,
+                folded_boundaries=FOLDS_NO_BOUNDARY,
+            )
+        job = self._build_strong_job(held)
         return StrongAssignment(
             request_key,
             job,
-            round_count=payload_round_count,
+            round_count=job.round_count,
             folded_boundaries=FOLDS_NO_BOUNDARY,
         )
 
     def release_conditions(
         self, assignment: StrongAssignment
     ) -> pending_strong_windows.ReleaseConditions:
-        """Nothing is held: the job left with its selection."""
-        del assignment
-        return pending_strong_windows.RELEASED_AT_ONCE
+        """The rounds of its own context, stored in syndrome buffer 1."""
+        held = assignment.held_plan
+        return pending_strong_windows.ReleaseConditions(
+            stored_data_of_operation=held.key[0],
+            name="context_stored",
+            released_description="strong context stored in syndrome buffer 1",
+        )
 
     def held_job(
         self, assignment: StrongAssignment
     ) -> Optional[decoding_records.DecodeJob]:
-        """Nothing is ever held."""
-        del assignment
-        return None
+        """The job, once every context round that arrived is stored."""
+        held = assignment.held_plan
+        crossing = self.retention.context_rounds_in_flight(
+            held.key, held.region.context_read_keys
+        )
+        if crossing:
+            return None
+        return self._build_strong_job(held)
+
+    def _log_hold(self, held: "_HeldContextWindow", crossing: tuple) -> None:
+        """The context is still on controller_to_strong_buffer."""
+        self.engine.log(
+            decode_queue_module.LOG_SOURCE,
+            f"{held.label}: strong start deferred until the context "
+            f"rounds {list(crossing)} are stored in syndrome buffer 1",
+        )
+
+    def _build_strong_job(
+        self, held: "_HeldContextWindow"
+    ) -> decoding_records.DecodeJob:
+        """The context window's job, on the rounds its store now holds."""
+        weak_job = held.weak_job
+        payloads = strong_job_payloads(
+            self.retention,
+            self.builder,
+            held.strong_window,
+            FOLDS_NO_BOUNDARY,
+        )
+        payload_round_count = decoding_records.distinct_round_count(payloads)
+        job = decoding_records.DecodeJob(
+            operation_id=held.key[0],
+            window_id=held.key[1],
+            round_count=payload_round_count,
+            ready_time=self.engine.now,
+            label=held.label,
+            kind=decoding_records.DecodeJobKind.STRONG_REDECODE,
+            spatial_nodes=weak_job.spatial_nodes,
+            code=weak_job.code,
+            detector_error_model=held.model,
+            payloads=payloads,
+            attempt=1,
+            window=held.strong_window,
+            strong_decode_for=held.key,
+            request_key=held.request_key,
+            request_created_ticks=held.request_created_ticks,
+            gate=self.builder,
+        )
+        self.retention.hold_strong_input(job)
+        return job
 
 
 class ForwardWindow:
@@ -521,6 +575,20 @@ STRONG_WINDOW_SHAPES = {
 # both shipped rows read raw rounds on both faces and fold no committed
 # neighbour boundary into the strong job's input
 FOLDS_NO_BOUNDARY: tuple = ()
+
+
+@dataclasses.dataclass(frozen=True)
+class _HeldContextWindow:
+    """All the context row keeps from its plan until it builds the job."""
+
+    key: tuple
+    weak_job: decoding_records.DecodeJob
+    label: str
+    region: strong_regions.ContextRegion
+    strong_window: window_records.Window
+    model: object
+    request_key: window_records.DecoderRequestKey
+    request_created_ticks: int
 
 
 @dataclasses.dataclass(frozen=True)

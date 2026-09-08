@@ -125,6 +125,10 @@ class PendingStrongWindows:
         if operation_id is not None:
             _unindex(self.keys_by_stored_operation, operation_id, held.key)
 
+    def held_for(self, window_key: tuple):
+        """The entry held for one escalated window, or None."""
+        return self.by_key.get(window_key)
+
     def any_held(self) -> bool:
         """Whether a strong window is still waiting for its conditions."""
         return bool(self.by_key)

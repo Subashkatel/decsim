@@ -261,30 +261,37 @@ class RoundRetention:
         builder.stamp_first_round(window, self.strong_store)
         return builder.assemble_payloads(window, self.strong_store)
 
-    def require_context_stored(self, key: tuple, read_keys) -> None:
-        """Every context round that already arrived sits in buffer 1.
+    def context_rounds_in_flight(self, key: tuple, read_keys) -> tuple:
+        """The context rounds that arrived at Buffer 0 and are still crossing.
 
-        A round the QPU has not produced yet is not late; a round that
-        reached Buffer 0 and is not in the room-side store was either
-        released early or is still crossing, and both are the run's
-        mistake to report loudly.
+        A round the QPU has not produced yet is not late. A round that
+        reached Buffer 0 and is not in the room-side store is either
+        still crossing controller_to_strong_buffer, which its own live
+        hold says, or was released while a reader still needs it, which
+        is the run's mistake to report loudly. A caller waits for the
+        first and never for the second.
         """
-        missing = []
+        crossing = []
+        released = []
         for round_key in read_keys:
             arrived = self.tracker.rounds_arrived(round_key[0])
             if round_key[1] > arrived:
                 continue
             fragments = self.strong_store.retained_fragments(round_key)
-            if fragments is None:
-                missing.append(round_key)
-        if not missing:
-            return
-        raise RuntimeError(
-            f"strong context for {key} arrived at Buffer 0 but is not "
-            f"stored in syndrome buffer 1: {missing} "
-            f"(controller_to_strong_buffer lag beyond the escalation "
-            f"margin, or an early release)"
-        )
+            if fragments is not None:
+                continue
+            if self.strong_store.is_round_held(round_key):
+                crossing.append(round_key)
+                continue
+            released.append(round_key)
+        if released:
+            raise RuntimeError(
+                f"strong context for {key} arrived at Buffer 0 and is "
+                f"neither stored in syndrome buffer 1 nor expected there: "
+                f"{released} (the rounds were released while a strong "
+                f"window still reads them)"
+            )
+        return tuple(crossing)
 
     def hold_strong_context(
         self, key: tuple, strong_request_key, context_keys

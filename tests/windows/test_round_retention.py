@@ -13,6 +13,8 @@ Sec. III C).
 
 import types
 
+import pytest
+
 import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
@@ -59,6 +61,55 @@ def _packet(operation_id, round_index) -> round_records.SyndromeRoundPacket:
     return round_records.SyndromeRoundPacket(
         operation_id, round_index, (fragment,)
     )
+
+
+def _strong_retention(strong_store, rounds_arrived: int):
+    """A retention whose room-side store is the one under test."""
+    planner = types.SimpleNamespace(successors_by_operation={1: []})
+    tracker = types.SimpleNamespace(
+        effective_round_count_for_window=lambda _operation_id, _window: 9,
+        rounds_arrived=lambda _operation_id: rounds_arrived,
+        strong_rounds_arrived=lambda _operation_id: 0,
+    )
+    weak_store = _store()
+    return round_retention.RoundRetention(
+        weak_store,
+        strong_store,
+        planner,
+        tracker,
+        is_strong_context_retained=True,
+        primary_tier=window_records.DecoderTier.WEAK,
+    )
+
+
+def test_a_context_round_still_crossing_is_told_apart_from_one_released():
+    """The two states the strong context's readiness check conflated.
+
+    A round with a live hold and no fragments is on
+    controller_to_strong_buffer and the strong window waits for it, the
+    way a gem5 port waits for its retry rather than failing
+    (src/mem/port.hh:244-255). A round that arrived at Buffer 0 with
+    neither fragments nor a hold was released while a reader still
+    needs it, which is the mistake the check was written to catch.
+    """
+    store = _store()
+    retention = _strong_retention(store, rounds_arrived=3)
+    potential = decoding_records.PotentialStrong((1, 0))
+    store.register_hold(potential, [(1, 1), (1, 2)])
+    packet = _packet(1, 1)
+    store.accept_packed_round(packet, publication_tick=1)
+    crossing = retention.context_rounds_in_flight((1, 0), ((1, 1), (1, 2)))
+    assert crossing == ((1, 2),)
+    with pytest.raises(RuntimeError, match="released while a strong window"):
+        retention.context_rounds_in_flight((1, 0), ((1, 3),))
+
+
+def test_a_context_round_the_qpu_has_not_produced_is_not_awaited():
+    """A round that has not arrived at Buffer 0 is not late anywhere."""
+    store = _store()
+    retention = _strong_retention(store, rounds_arrived=2)
+    crossing = retention.context_rounds_in_flight((1, 0), ((1, 5),))
+    assert crossing == ()
 
 
 def test_a_window_holds_its_read_range_plus_the_successor_overflow():

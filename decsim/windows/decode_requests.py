@@ -97,8 +97,13 @@ class DecodeRequestBuilder:
         operation: program_records.Operation,
         tier: window_records.DecoderTier,
         store,
+        forced_logical_class: Optional[int] = None,
     ) -> decoding_records.DecodeJob:
-        """The tier's decode job for one complete window, read from store."""
+        """The tier's decode job for one complete window, read from store.
+
+        forced_logical_class is the class the job's solve is pinned to,
+        None for the window's own unconstrained decode.
+        """
         request_key = self.new_request_key(
             window.operation_id, window.window_index, tier
         )
@@ -127,6 +132,7 @@ class DecodeRequestBuilder:
             input_key=request_key,
             request_created_ticks=self.engine.now,
             gate=self,
+            forced_logical_class=forced_logical_class,
         )
 
     def build_forced_companion(
@@ -409,10 +415,14 @@ class DecodeRequester:
         self.builder.stamp_first_round(window, store)
         window.t_queued = self.builder.engine.now
         primary_tier = self.retention.primary_tier
-        job = self.builder.build(window, operation, primary_tier, store)
+        forced_classes = self._forced_logical_classes()
+        first_class = _first_forced_class(forced_classes)
+        job = self.builder.build(
+            window, operation, primary_tier, store, first_class
+        )
         window.queued = True
         tiers = self.escalation_policy.tiers_for_ready_window(window)
-        primary_jobs = self._primary_jobs(job)
+        primary_jobs = self._primary_jobs(job, forced_classes)
         is_input_held = self._bind_input_hold(primary_jobs, window.key)
         submissions = []
         for tier in tiers:
@@ -435,8 +445,16 @@ class DecodeRequester:
             submissions.append(submission)
         return submissions
 
-    def _primary_jobs(self, job: decoding_records.DecodeJob) -> list:
-        """The primary tier's jobs: one decode, or one solve per class.
+    def _forced_logical_classes(self) -> tuple:
+        """The classes this run's confidence has each window pinned to."""
+        if self.gap_join is None:
+            return ()
+        return self.gap_join.signal.forced_logical_classes
+
+    def _primary_jobs(
+        self, job: decoding_records.DecodeJob, forced_classes: tuple
+    ) -> list:
+        """The primary tier's jobs: the built one, and one per other class.
 
         A confidence built from forced-class solves needs the window
         decoded once per class, and all of them are asked for at one instant
@@ -444,14 +462,8 @@ class DecodeRequester:
         1888-1892; OpenMP's primary thread creates the whole team,
         openmp_spec_5_2.txt:1400-1407).
         """
-        if self.gap_join is None:
-            return [job]
-        classes = self.gap_join.signal.forced_logical_classes
-        if not classes:
-            return [job]
-        job.forced_logical_class = classes[0]
         jobs = [job]
-        for forced_class in classes[1:]:
+        for forced_class in forced_classes[1:]:
             companion = self.builder.build_forced_companion(job, forced_class)
             jobs.append(companion)
         return jobs
@@ -555,6 +567,13 @@ class _SharedInputHold:
         if self.readers_left > 0:
             return
         self.hold_release()
+
+
+def _first_forced_class(forced_classes: tuple) -> Optional[int]:
+    """The class the window's own job is built with; None when free."""
+    if not forced_classes:
+        return None
+    return forced_classes[0]
 
 
 def _input_bit_count(decoder_input) -> Optional[int]:

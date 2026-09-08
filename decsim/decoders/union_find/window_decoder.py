@@ -20,6 +20,8 @@ from typing import Optional, Union
 import numpy
 
 BOUNDARY = -1
+# one tick of an edge length is this many natural-log units of weight
+DEFAULT_WEIGHT_STEP = 0.1
 
 
 @dataclasses.dataclass(frozen=True)
@@ -57,6 +59,9 @@ class UnionFindGraph:
     baseline_syndrome: tuple[int, ...]
     logical_observables_by_fault: tuple[tuple[int, ...], ...] = ()
     logical_observable_count: int = 0
+    # the absolute natural-log weight one tick of an edge length is, so
+    # a reader of the growth knows what its distances mean
+    weight_step: float = DEFAULT_WEIGHT_STEP
 
 
 @dataclasses.dataclass(frozen=True)
@@ -125,6 +130,7 @@ def graph_from_model(
         baseline_syndrome=baseline_syndrome,
         logical_observables_by_fault=logical_columns,
         logical_observable_count=observables.shape[0],
+        weight_step=weight_step,
     )
 
 

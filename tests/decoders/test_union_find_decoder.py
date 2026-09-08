@@ -155,10 +155,10 @@ def test_both_decoders_reproduce_every_syndrome_an_error_produces():
         ldpc_correction = numpy.asarray(ldpc_correction, dtype=numpy.uint8)
         assert _reproduces(ldpc_correction, syndrome)
         job = _job(model, syndrome)
-        decoded = row.decode_with_growth_evidence(job)
-        assert decoded.hard_evidence.unmatched_detectors == ()
+        result = row.decode(job)
+        assert result.cluster_evidence.unmatched_detectors == ()
         decsim_correction = numpy.asarray(
-            decoded.hard_evidence.selected_faults, dtype=numpy.uint8
+            result.cluster_evidence.selected_faults, dtype=numpy.uint8
         )
         assert _reproduces(decsim_correction, syndrome)
 
@@ -172,9 +172,9 @@ def test_a_single_fault_is_named_by_both_decoders():
         ldpc_correction = referee.decode(syndrome)
         ldpc_correction = numpy.asarray(ldpc_correction, dtype=numpy.uint8)
         job = _job(model, syndrome)
-        decoded = row.decode_with_growth_evidence(job)
+        result = row.decode(job)
         decsim_correction = numpy.asarray(
-            decoded.hard_evidence.selected_faults, dtype=numpy.uint8
+            result.cluster_evidence.selected_faults, dtype=numpy.uint8
         )
         assert decsim_correction.tolist() == ldpc_correction.tolist()
         selected_count = decsim_correction.sum()

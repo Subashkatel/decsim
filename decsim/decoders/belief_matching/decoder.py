@@ -20,6 +20,7 @@ import scipy.special
 
 import decsim.decoders.decoder as decoder_module
 import decsim.detector_error_model.fault_model_contracts as fault_models
+import decsim.records.decoding as decoding_records
 
 POSTERIOR_FLOOR = 1e-15
 POSTERIOR_CEILING = 1.0 - POSTERIOR_FLOOR
@@ -77,7 +78,7 @@ class BeliefMatchingDecoder(decoder_module.WindowDecoderBase):
         self.decode_window(backend, model, faults, empty_syndrome)
         return backend
 
-    def decode_window(self, backend, model, faults, syndrome) -> tuple:
+    def decode_window(self, backend, model, faults, syndrome):
         """BP on the hyperedges, then a matching with posterior weights.
 
         PyMatching raises on odd parity in a boundaryless component (see
@@ -102,8 +103,9 @@ class BeliefMatchingDecoder(decoder_module.WindowDecoderBase):
             fault_count = faults.check.shape[1]
             empty = numpy.zeros(fault_count, dtype=numpy.uint8)
             invalid = decoder_module.BackendDecodeStatus.INVALID_CORRECTION
-            return empty, invalid
-        return numpy.asarray(selected, dtype=numpy.uint8), None
+            return decoding_records.WindowDecode(empty, invalid)
+        correction = numpy.asarray(selected, dtype=numpy.uint8)
+        return decoding_records.WindowDecode(correction)
 
 
 def _edge_posteriors(belief_propagation, edge_from_hyperedge, syndrome):

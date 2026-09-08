@@ -1,7 +1,7 @@
 """The backend outcome record Tesseract and Relay-BP return.
 
 One backend call's correction, its disposition and its diagnostics,
-normalized once at construction; selected_faults_of turns it into the
+normalized once at construction; window_decode_of turns it into the
 correction the row commits and the status the result carries. A backend
 that produced a correction has it committed as it stands, best effort
 or not; only a backend that produced no correction at all is a
@@ -17,6 +17,7 @@ from typing import Optional
 import numpy
 
 import decsim.decoders.decoder as decoder_module
+import decsim.records.decoding as decoding_records
 
 BackendDecodeStatus = decoder_module.BackendDecodeStatus
 
@@ -127,8 +128,10 @@ def empty_fault_model_outcome(syndrome) -> BackendDecodeOutcome:
     )
 
 
-def selected_faults_of(outcome: BackendDecodeOutcome) -> tuple:
-    """(correction, status) of a backend outcome: one policy for every backend.
+def window_decode_of(
+    outcome: BackendDecodeOutcome,
+) -> decoding_records.WindowDecode:
+    """The window's answer from a backend outcome: one policy for every row.
 
     A decode that produced a correction is committed as it stands, best
     effort or not, with its status on the result (nonconverged, low
@@ -144,7 +147,9 @@ def selected_faults_of(outcome: BackendDecodeOutcome) -> tuple:
     decode_status = None
     if not outcome.succeeded:
         decode_status = outcome.status
-    return outcome.physical_correction, decode_status
+    return decoding_records.WindowDecode(
+        outcome.physical_correction, decode_status
+    )
 
 
 def _check_status_reason(

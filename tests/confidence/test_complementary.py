@@ -187,10 +187,10 @@ def test_the_two_class_weights_are_the_pinned_graphs_own_edges():
     syndrome = numpy.asarray([1, 0], dtype=numpy.uint8)
     weights = []
     for forced_class in complementary.FORCED_LOGICAL_CLASSES:
-        _selected, _status, weight = row.decode_forced_window(
+        answer = row.decode_forced_window(
             graphs, None, faults, syndrome, forced_class
         )
-        weights.append(weight)
+        weights.append(answer.forced_class_weight)
     # 2 ln(0.8 / 0.2) for the even class, ln((1 - 0.095) / 0.095) for the odd
     assert weights[0] == pytest.approx(2.772588722239781, abs=1e-6)
     assert weights[1] == pytest.approx(2.2540580520993854, abs=1e-6)

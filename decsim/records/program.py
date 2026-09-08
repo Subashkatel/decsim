@@ -231,3 +231,12 @@ class OperationPlanningView:
             ),
             kind=operation.kind,
         )
+
+
+def patches_of(operation: Operation) -> tuple:
+    """The patches an operation occupies; its first qubit stands in for none."""
+    if operation.patches:
+        return tuple(operation.patches)
+    if operation.qubits:
+        return (operation.qubits[0],)
+    return (0,)

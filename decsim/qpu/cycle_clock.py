@@ -212,7 +212,7 @@ class QPUDevice:
         operation = command.operation
         event = QPUCommandEvent("STARTED", self.engine.now, command)
         self.trace.command_event.fire(event)
-        for patch in patches_of(operation):
+        for patch in program_records.patches_of(operation):
             self._live.idle_by_patch.pop(patch, None)
         if command.round_count == 0:
             self._run_instant_command(command)
@@ -240,7 +240,7 @@ class QPUDevice:
         self, command: program_records.RunOperationBody
     ) -> None:
         operation = command.operation
-        for patch in patches_of(operation):
+        for patch in program_records.patches_of(operation):
             idle = _IdlePatch(operation.id, 0)
             self._live.idle_by_patch.setdefault(patch, idle)
         self.receivers.completion(operation)
@@ -279,15 +279,6 @@ class QPUDevice:
             self.receivers.readout.accept_qpu_readout(
                 readout, round_records.WINDOW_INPUT_ROUTE
             )
-
-
-def patches_of(operation: program_records.Operation) -> tuple:
-    """The patches an operation occupies; its first qubit stands in for none."""
-    if operation.patches:
-        return tuple(operation.patches)
-    if operation.qubits:
-        return (operation.qubits[0],)
-    return (0,)
 
 
 @dataclasses.dataclass

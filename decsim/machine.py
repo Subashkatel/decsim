@@ -175,7 +175,9 @@ class Machine:
             held_rounds=held_rounds,
             transmitter=transmitter,
         )
-        form_round = getattr(plan.device, "form_round", None)
+        detection_events = controller_side.build_detection_events(
+            settings, plan.device
+        )
         rounds_in_flight = round_assembly.RoundsInFlight(
             settings.controller.packing_rounds_in_flight,
             held_rounds,
@@ -184,7 +186,7 @@ class Machine:
         assembler = round_assembly.RoundAssembler(
             engine,
             settings.controller,
-            form_round=form_round,
+            detection_events=detection_events,
             on_packed=round_writer.admit,
             rounds_in_flight=rounds_in_flight,
         )

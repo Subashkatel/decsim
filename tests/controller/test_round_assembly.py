@@ -46,13 +46,19 @@ def rounds_in_flight(capacity, held=0, on_route=0):
     return round_assembly.RoundsInFlight(capacity, held_rounds, transmitter)
 
 
+def formation(form_round, at_the_controller=True):
+    """The device's table and where this assembler forms its events."""
+    return round_assembly.DetectionEventFormation(form_round, at_the_controller)
+
+
 def assembler_with(engine, packed, recorder, **settings_fields):
     settings = controller_settings.ControllerSettings(**settings_fields)
     bound = rounds_in_flight(settings.packing_rounds_in_flight)
+    events = formation(None)
     assembler = round_assembly.RoundAssembler(
         engine,
         settings,
-        form_round=None,
+        detection_events=events,
         on_packed=packed.append,
         rounds_in_flight=bound,
     )
@@ -124,10 +130,11 @@ def test_the_bound_counts_rounds_held_and_on_their_route():
     settings = controller_settings.ControllerSettings()
     full = rounds_in_flight(2, held=1, on_route=1)
     packed = []
+    events = formation(None)
     assembler = round_assembly.RoundAssembler(
         engine,
         settings,
-        form_round=None,
+        detection_events=events,
         on_packed=packed.append,
         rounds_in_flight=full,
     )
@@ -182,10 +189,11 @@ def test_detection_events_are_formed_once_from_the_merged_bits():
 
     settings = controller_settings.ControllerSettings()
     unbounded = rounds_in_flight(None)
+    events = formation(form_round)
     assembler = round_assembly.RoundAssembler(
         engine,
         settings,
-        form_round=form_round,
+        detection_events=events,
         on_packed=packed.append,
         rounds_in_flight=unbounded,
     )
@@ -200,6 +208,37 @@ def test_detection_events_are_formed_once_from_the_merged_bits():
     (formed,) = round.packet.fragments
     assert formed.bits == (0, 1, 1)
     assert formed.size_bits == 3
+    assert round.wire_bits == 4
+
+
+def test_events_formed_at_the_decoder_keep_the_raw_measurement_width():
+    """The store and the input link carry the outcomes, not the events."""
+    engine = engine_module.Engine()
+    packed = []
+
+    def form_round(_operation_id, _round_index, _bits):
+        return (0, 1, 1)
+
+    settings = controller_settings.ControllerSettings()
+    events = formation(form_round, at_the_controller=False)
+    unbounded = rounds_in_flight(None)
+    assembler = round_assembly.RoundAssembler(
+        engine,
+        settings,
+        detection_events=events,
+        on_packed=packed.append,
+        rounds_in_flight=unbounded,
+    )
+    first = fragment(1, fragment_index=0, bits=(1, 0))
+    second = fragment(1, fragment_index=1, bits=(0, 1))
+
+    assembler.add(first, 2, round_records.WINDOW_INPUT_ROUTE)
+    assembler.add(second, 2, round_records.WINDOW_INPUT_ROUTE)
+
+    (round,) = packed
+    (formed,) = round.packet.fragments
+    assert formed.bits == (0, 1, 1)
+    assert formed.size_bits == 4
     assert round.wire_bits == 4
 
 

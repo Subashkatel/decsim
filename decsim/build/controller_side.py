@@ -5,6 +5,8 @@ from typing import Optional
 import decsim.build.decoders as decoder_build
 import decsim.build.plan as plan_build
 import decsim.controller.feedback_streams as feedback_streams
+import decsim.controller.round_assembly as round_assembly
+import decsim.controller.settings as controller_settings
 import decsim.decoders.decoder_manager as decoder_manager_module
 import decsim.engine as engine_module
 import decsim.qpu.magic_state_factories as magic_state_factories
@@ -34,6 +36,24 @@ def build_decoder_manager(
         copies_input_by_pool=pool.copies_input_by_pool,
         blocks_unit_by_pool=pool.blocks_unit_by_pool,
     )
+
+
+def build_detection_events(
+    settings: machine_settings.MachineSettings, device
+) -> round_assembly.DetectionEventFormation:
+    """The device's formation table and where this machine forms events.
+
+    controller.detection_events_formed_at names the row; a value that is
+    not one is refused here, before the first round is packed. A source
+    with no formation table forms nothing either way.
+    """
+    form_round = getattr(device, "form_round", None)
+    at_the_controller = tables.row(
+        controller_settings.DETECTION_EVENT_FORMATION,
+        "controller.detection_events_formed_at",
+        settings.controller.detection_events_formed_at,
+    )
+    return round_assembly.DetectionEventFormation(form_round, at_the_controller)
 
 
 def process_name(

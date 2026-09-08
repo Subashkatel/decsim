@@ -3,10 +3,13 @@
 The controller's packing stage merges the fragments of a round in
 fragment order, charges the packing time once per complete round, forms
 the detection events with the device's formation table when it has one,
-and hands the finished round on (on_packed). Caune et al. 2410.05202
-measure 250 to 370 FPGA cycles for packetization, bus transfer, result
-return and the conditional together, an upper bound for the packing
-time. The stage admits a bounded number of rounds at once
+and hands the finished round on (on_packed). Where the events are
+formed is a setting (controller.detection_events_formed_at, and
+DetectionEventFormation below), and it decides the width Buffer 0 and
+the tier's input link carry. Caune et al. 2410.05202 measure 250 to 370
+FPGA cycles for packetization, bus transfer, result return and the
+conditional together, an upper bound for the packing time. The stage
+admits a bounded number of rounds at once
 (controller.packing_rounds_in_flight, RoundsInFlight): a round counts
 from its first fragment until the windows hear of it, whether it is
 still in assembly, held for store room or on its route. A full stage
@@ -24,6 +27,28 @@ import decsim.records.identity as identity_records
 import decsim.records.rounds as round_records
 
 
+@dataclasses.dataclass(frozen=True)
+class DetectionEventFormation:
+    """The device's formation table, and where the machine forms events.
+
+    form_round is called once per complete round, in round order, and is
+    None for a timing-only or synthetic source. at_the_controller is the
+    row controller.detection_events_formed_at names, and it is the width
+    the round carries onward: at the controller the round leaves sized
+    by its detection events, because "inside the workstation,
+    measurements are converted into detections and then streamed to the
+    real-time decoding software via a shared memory buffer" (Google
+    2408.13687 lines 474-476); at the decoder the round keeps its raw
+    measurement width, because the controller writes the outcomes
+    "sequentially to the decoder" and "the decoder computes the syndrome
+    from measurement outcomes" (Caune et al. 2410.05202 lines
+    1252-1256).
+    """
+
+    form_round: Optional[Callable]
+    at_the_controller: bool = True
+
+
 class RoundAssembler:
     """Fragments in, one packed round out, after the packing time.
 
@@ -37,15 +62,13 @@ class RoundAssembler:
         engine,
         settings: controller_settings.ControllerSettings,
         *,
-        form_round: Optional[Callable],
+        detection_events: DetectionEventFormation,
         on_packed: Callable[[round_records.PackedRound], None],
         rounds_in_flight: "RoundsInFlight",
     ) -> None:
         self.engine = engine
         self.settings = settings
-        # the device's formation table, called once per complete round;
-        # None for a timing-only or synthetic source
-        self.form_round = form_round
+        self.detection_events = detection_events
         self.workspace = _Workspace(rounds_in_flight, settings.packing_overflow)
         self.on_packed = on_packed
         self.trace = _TraceSources()
@@ -132,8 +155,8 @@ class RoundAssembler:
         """The round is complete: merge, form detection events, hand on."""
         operation_id, round_index = context.round_key
         raw_fragments = _merge_fragments_by_patch(context.fragments)
-        # the links carry the raw measurement bits; detection events exist
-        # only from the decoder input (Buffer 0) onward
+        # the link out of the controller carries the raw measurement
+        # bits wherever the events are formed
         wire_bits = _fragment_bits(raw_fragments)
         # the merge is what packs the round, so it is reported before the
         # round is packed, and the workspace's residence knows its bits
@@ -158,8 +181,16 @@ class RoundAssembler:
         self.on_packed(packed)
 
     def _form_detection_events(self, raw_fragments) -> tuple:
-        """The round's detection events; raw when no table forms them."""
-        if self.form_round is None:
+        """The round's detection events; raw when no table forms them.
+
+        The values are the device's wherever the machine forms them: the
+        formation table is stateful and reads every round once, in round
+        order, so this stage calls it for the controller and for the
+        decoder alike. Where they are formed is the width the round
+        carries onward (controller.detection_events_formed_at).
+        """
+        form_round = self.detection_events.form_round
+        if form_round is None:
             return raw_fragments
         has_bits = all(fragment.bits is not None for fragment in raw_fragments)
         if not has_bits:
@@ -168,10 +199,15 @@ class RoundAssembler:
             "detector formation expects one merged raw fragment per round"
         )
         (raw,) = raw_fragments
-        events = self.form_round(raw.operation_id, raw.round_index, raw.bits)
-        formed = tuple(events)
-        fragment = dataclasses.replace(raw, bits=formed, size_bits=len(formed))
-        return (fragment,)
+        events = form_round(raw.operation_id, raw.round_index, raw.bits)
+        return (self._formed_fragment(raw, tuple(events)),)
+
+    def _formed_fragment(self, raw, formed: tuple):
+        """The round's fragment: its events, at the width its hops carry."""
+        size_bits = raw.size_bits
+        if self.detection_events.at_the_controller:
+            size_bits = len(formed)
+        return dataclasses.replace(raw, bits=formed, size_bits=size_bits)
 
 
 @dataclasses.dataclass

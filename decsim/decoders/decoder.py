@@ -65,6 +65,9 @@ class DecoderBase(abc.ABC):
     # what this row's decode can show a confidence signal beyond the
     # correction; the yaml refuses a signal whose requirement is not here
     decoder_evidence = decoding_records.NO_DECODER_EVIDENCE
+    # per evidence this row does not produce but a reader would expect
+    # of it, the sentence the yaml refusal quotes
+    missing_evidence_reasons: dict = {}
 
     @abc.abstractmethod
     def decode(

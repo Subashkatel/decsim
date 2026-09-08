@@ -35,6 +35,16 @@ class BeliefMatchingDecoder(decoder_module.WindowDecoderBase):
 
     fault_model_requirement = fault_models.LINKED_FAULT_MODELS_REQUIRED
     fault_representation = fault_models.FaultRepresentation.GRAPHLIKE
+    missing_evidence_reasons = {
+        decoding_records.DecoderEvidence.FORCED_CLASS_WEIGHT: (
+            "belief matching matches on the posterior graph belief "
+            "propagation reweights, so its forced pair must be built on "
+            "that graph and not on the window's raw priors (Gidney et "
+            "al. arXiv:2312.04522 lines 843-846); that pair is not "
+            "built yet, and a gap from another graph is not this "
+            "decoder's confidence"
+        )
+    }
 
     def __init__(
         self,

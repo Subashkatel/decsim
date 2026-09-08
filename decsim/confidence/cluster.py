@@ -52,6 +52,14 @@ class ClusterGap:
     decoder_evidence_requirement = decoding_records.CLUSTER_GROWTH_EVIDENCE
     # the window is decoded once; the gap is read off that decode
     forced_logical_classes = ()
+    evidence_refusal = (
+        "the cluster gap walks the radii a growth left behind, and "
+        "PyMatching's API reports no regions, blossoms or radii "
+        "(pymatching 2.4.0 Matching), while belief propagation and "
+        "search decoders grow no clusters at all; use "
+        "weak_decoder.kind union_find, or escalation.confidence "
+        "complementary_gap"
+    )
 
     def __init__(
         self, weight_step: float = window_decoder.DEFAULT_WEIGHT_STEP

@@ -47,7 +47,18 @@ INSTRUCTION_WORD_SOURCE = (
     "(QubiC distributed processor, Fruitwala et al. 2404.15260)"
 )
 
-ROUND_PAYLOAD_SOURCE = "SyndromeRoundPacket.fragment_size_sum"
+# The two controller-to-store hops carry the packed round as the
+# controller assembled it: the raw measurement bits, counted before the
+# detection events are formed (controller/round_assembly.py, wire_bits
+# of the merged raw fragments). The store then holds the formed events,
+# so a store's contents and the bits this card charges are two different
+# counts on the same round.
+ROUND_PAYLOAD_SOURCE = "PackedRound.wire_bits"
+
+# Both decoder-input hops carry the job's own payload count, read by the
+# store's output port while the rounds are still the job's
+# (syndrome_buffer/round_output.py).
+DECODER_INPUT_PAYLOAD_SOURCE = "DecodeJob.payload_bits()"
 
 # The controller's write into a syndrome buffer is a hop of the control
 # system, and Caune et al., arXiv:2410.05202, Fig. 1a is the referent that
@@ -106,7 +117,7 @@ def logical_reference_profile() -> settings.FabricSettings:
         "weak_buffer_to_weak_decoder",
         2.0,
         "Khalid cd latency; logical_reference integrated weak-input transfer",
-        ROUND_PAYLOAD_SOURCE,
+        DECODER_INPUT_PAYLOAD_SOURCE,
     )
     weak_decoder_to_strong_decoder = _actual_path(
         "weak_decoder_to_strong_decoder",
@@ -118,7 +129,7 @@ def logical_reference_profile() -> settings.FabricSettings:
         "strong_buffer_to_strong_decoder",
         2.0,
         "Khalid cd mapped to the strong input",
-        "DecodeJob.retained_payload_size_bits",
+        DECODER_INPUT_PAYLOAD_SOURCE,
     )
     weak_decoder_to_frame = _actual_path(
         "weak_decoder_to_frame",
@@ -242,7 +253,7 @@ def bandwidth_limited_profile(
         "one weak window of rcom+rbuf rounds per commit region "
         "(Toshio 2510.25222 Sec. III C, "
         '"rcom = rbuf = d")',
-        ROUND_PAYLOAD_SOURCE,
+        DECODER_INPUT_PAYLOAD_SOURCE,
     )
     weak_decoder_to_strong_decoder = provisioning.path(
         "weak_decoder_to_strong_decoder",
@@ -260,7 +271,7 @@ def bandwidth_limited_profile(
         "one strong window of rcom+2rbuf rounds per commit region "
         "(Toshio 2510.25222 Sec. III C, "
         '"In this paper, we assume that rstrong = rcom + 2rbuf.")',
-        "DecodeJob.retained_payload_size_bits",
+        DECODER_INPUT_PAYLOAD_SOURCE,
     )
     weak_decoder_to_frame = provisioning.path(
         "weak_decoder_to_frame",

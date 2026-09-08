@@ -106,20 +106,20 @@ def test_the_reference_card_names_the_runtime_quantity_of_each_actual_path():
         == "SyndromePayload.size_bits"
     )
     assert profile.controller_to_weak_buffer.actual_payload_source == (
-        "SyndromeRoundPacket.fragment_size_sum"
+        "PackedRound.wire_bits"
     )
     assert profile.controller_to_strong_buffer.actual_payload_source == (
-        "SyndromeRoundPacket.fragment_size_sum"
+        "PackedRound.wire_bits"
     )
     assert profile.weak_buffer_to_weak_decoder.actual_payload_source == (
-        "SyndromeRoundPacket.fragment_size_sum"
+        "DecodeJob.payload_bits()"
     )
     assert (
         profile.weak_decoder_to_strong_decoder.actual_payload_source
         == "switching decision payload_bits"
     )
     assert profile.strong_buffer_to_strong_decoder.actual_payload_source == (
-        "DecodeJob.retained_payload_size_bits"
+        "DecodeJob.payload_bits()"
     )
     assert profile.weak_decoder_to_frame.actual_payload_source == (
         "DecodeResult.logical_observables bits"

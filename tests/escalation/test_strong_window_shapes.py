@@ -29,6 +29,7 @@ import pathlib
 
 import pytest
 
+import decsim.escalation.settings as escalation_settings
 import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.machine as machine_module
 import decsim.observe.run_views as run_views
@@ -486,7 +487,7 @@ def test_a_shape_row_added_from_outside_runs_by_its_yaml_name():
     resolves to a class in the table, and the machine builds it with the
     components the port needs (_decoding_all_built_in_decoders.py).
     """
-    table = strong_window_shapes.STRONG_WINDOW_SHAPES
+    table = escalation_settings.STRONG_WINDOW_SHAPES
     table["recording_context"] = RecordingContextWindow
     try:
         machine = fabric.switching_machine(
@@ -548,7 +549,7 @@ def test_an_absorbing_row_added_from_outside_builds_through_the_same_call():
     rewrites the ledger. Both take one StrongWindowCollaborators record,
     so the root builds a row without branching on its geometry.
     """
-    table = strong_window_shapes.STRONG_WINDOW_SHAPES
+    table = escalation_settings.STRONG_WINDOW_SHAPES
     table["recording_forward"] = RecordingForwardWindow
     try:
         machine = fabric.switching_machine(

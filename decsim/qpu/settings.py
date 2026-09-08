@@ -37,7 +37,7 @@ MAGIC_STATE_FACTORIES = {
 class QpuSettings:
     """The QPU: its round period, its code card and its syndrome source.
 
-    Table rows for the source (decsim/machine.py): stim_device (Stim
+    Table rows for the source (SYNDROME_SOURCES, above): stim_device (Stim
     samples the operation's circuit), timing_only (bitless payloads,
     timing alone), syndrome_bits (seeded random bits shaped like the
     code's syndrome), recorded_stim (a released experiment's
@@ -110,8 +110,9 @@ class QpuSettings:
 class FactorySettings:
     """The magic state factory: where non-Clifford operations get states.
 
-    Table rows (decsim/machine.py): infinite (a state is always in
-    stock), distillation (Litinski's 15-to-1 stage, 1905.06903),
+    Table rows (MAGIC_STATE_FACTORIES, above): infinite (a state is
+    always in stock), distillation (Litinski's 15-to-1 stage,
+    1905.06903),
     multi_level (Silva's chain of levels, 2411.04270). The arguments are
     the row's keyword arguments, everything but the engine, the decode
     service and the round ticks the root supplies

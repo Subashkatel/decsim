@@ -55,7 +55,7 @@ class RoundsPerShot:
 class WorkloadSettings:
     """The yaml's `workload` section.
 
-    Table rows (decsim/machine.py): memory_circuit (Stim's generated
+    Table rows (WORKLOADS, below): memory_circuit (Stim's generated
     memory circuit for the code task, one physical error probability on
     all four of Stim's noise channels, rounds_per_shot rounds),
     circuit_list (a Python-built operation list), surgery_ir (the

@@ -57,6 +57,7 @@ import decsim.decoders.settings as decoder_settings
 import decsim.decoders.staged_decoder as staged_decoder
 import decsim.engine as engine_module
 import decsim.escalation.policies as escalation_policies
+import decsim.escalation.settings as escalation_settings
 import decsim.escalation.strong_redecode as strong_redecode_module
 import decsim.escalation.strong_regions as strong_regions
 import decsim.escalation.strong_window_shapes as strong_window_shapes
@@ -105,22 +106,10 @@ from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
 )
 
-# ------------------------------------------------------------ the tables
-#
-# One dict per pluggable part: the `kind` a yaml section names, to the
-# class or builder that fills the part's port. The machine looks a kind
-# up once and refuses one that is not a row, naming the rows.
-
-# One row per escalation kind, and the row is the only place the kind's
-# facts are written: which tier decodes the plan's windows
-# (primary_tier) and whether the strong context is retained
-# (requires_strong_context) are read off the class, so a new kind is one
-# class and one row here (sinter's BUILT_IN_DECODERS shape).
-ESCALATIONS = {
-    "weak_baseline": escalation_policies.Baseline,
-    "strong_only": escalation_policies.StrongOnly,
-    "switching": escalation_policies.Switching,
-}
+# The yaml sections, in the order MachineSettings reads them. Each
+# section's own package owns its settings record and its plug-in table;
+# the root looks a kind up in that table once and refuses one that is
+# not a row, naming the rows (_row).
 SECTIONS = (
     "clocks",
     "qpu",
@@ -177,8 +166,8 @@ class MachineSettings:
     decoder_manager: decoder_settings.DecoderManagerSettings = (
         decoder_settings.DecoderManagerSettings()
     )
-    escalation: decoder_settings.EscalationSettings = (
-        decoder_settings.EscalationSettings()
+    escalation: escalation_settings.EscalationSettings = (
+        escalation_settings.EscalationSettings()
     )
     pauli_frame: Optional[pauli_frame_module.PauliFrameConfig] = None
     workload: workload_settings.WorkloadSettings = (
@@ -233,7 +222,7 @@ class MachineSettings:
         decoder_manager = decoder_settings.DecoderManagerSettings.from_yaml(
             decoder_manager_section, clocks
         )
-        escalation = decoder_settings.EscalationSettings.from_yaml(
+        escalation = escalation_settings.EscalationSettings.from_yaml(
             escalation_section, base_directory
         )
         pauli_frame = pauli_frame_module.PauliFrameConfig.from_yaml(
@@ -668,7 +657,7 @@ def _root_seed(value) -> Optional[int]:
 # ------------------------------------------------- the escalation policy
 
 
-def primary_tier(settings: decoder_settings.EscalationSettings) -> str:
+def primary_tier(settings: escalation_settings.EscalationSettings) -> str:
     """The tier that decodes the plan's windows, for a caller with no policy.
 
     A policy the caller built is the one fact and answers for itself; the
@@ -682,32 +671,36 @@ def primary_tier(settings: decoder_settings.EscalationSettings) -> str:
     """
     if settings.policy is not None:
         return settings.policy.primary_tier.value
-    row = _row(ESCALATIONS, "escalation.kind", settings.kind)
+    row = _row(
+        escalation_settings.ESCALATIONS, "escalation.kind", settings.kind
+    )
     return row.primary_tier.value
 
 
-def _strong_window_row(settings: decoder_settings.EscalationSettings):
+def _strong_window_row(settings: escalation_settings.EscalationSettings):
     """The strong window shape class the escalation section names."""
     return _row(
-        strong_window_shapes.STRONG_WINDOW_SHAPES,
+        escalation_settings.STRONG_WINDOW_SHAPES,
         "escalation.strong_window",
         settings.strong_window,
     )
 
 
 def _absorbs_weak_windows(
-    settings: decoder_settings.EscalationSettings,
+    settings: escalation_settings.EscalationSettings,
 ) -> bool:
     """Whether the strong window replaces the weak windows it covers."""
     row = _strong_window_row(settings)
     return row.absorbs_weak_windows
 
 
-def _escalation_policy(settings: decoder_settings.EscalationSettings):
+def _escalation_policy(settings: escalation_settings.EscalationSettings):
     """The policy of the escalation kind, or the Python-built one."""
     if settings.policy is not None:
         return settings.policy
-    row = _row(ESCALATIONS, "escalation.kind", settings.kind)
+    row = _row(
+        escalation_settings.ESCALATIONS, "escalation.kind", settings.kind
+    )
     if row is escalation_policies.Switching:
         threshold = _threshold_source(settings)
         signal = _confidence_signal(settings)
@@ -717,7 +710,7 @@ def _escalation_policy(settings: decoder_settings.EscalationSettings):
     return row()
 
 
-def _threshold_source(settings: decoder_settings.EscalationSettings):
+def _threshold_source(settings: escalation_settings.EscalationSettings):
     """The sweep point's online source, or the fixed threshold.
 
     The table source is resolved to a fixed threshold per sweep point by
@@ -924,7 +917,7 @@ def _decode_plan_operations(
 
 def _scheme(
     windows: window_settings.WindowSettings,
-    escalation: decoder_settings.EscalationSettings,
+    escalation: escalation_settings.EscalationSettings,
 ):
     """The windowing scheme of the kind, or the Python-built one.
 
@@ -944,7 +937,7 @@ def _scheme(
 
 def _boundary_policy(
     windows: window_settings.WindowSettings,
-    escalation: decoder_settings.EscalationSettings,
+    escalation: escalation_settings.EscalationSettings,
 ):
     """Eager shipping, or Held while a serial escalation is pending.
 
@@ -1096,7 +1089,10 @@ def _algorithm(kind, tier: str):
 
 
 def _check_serves_the_confidence(
-    algorithm, kind, tier: str, escalation: decoder_settings.EscalationSettings
+    algorithm,
+    kind,
+    tier: str,
+    escalation: escalation_settings.EscalationSettings,
 ) -> None:
     """Refuse a weak tier that cannot serve the run's confidence signal.
 
@@ -1137,7 +1133,7 @@ def _evidence_order(member) -> str:
     return member.value
 
 
-def _confidence_signal(escalation: decoder_settings.EscalationSettings):
+def _confidence_signal(escalation: escalation_settings.EscalationSettings):
     """The signal row a switching run's weak decoder reports and decides on."""
     row = _row(
         confidence_signals.CONFIDENCE_SIGNALS,
@@ -1401,7 +1397,7 @@ def _window_gap_join(
 
 def _strong_redecode(
     escalation_policy,
-    escalation: decoder_settings.EscalationSettings,
+    escalation: escalation_settings.EscalationSettings,
     engine,
     planner,
     tracker,

@@ -17,6 +17,7 @@ import decsim.decoders.decoder_memory as decoder_memory
 import decsim.decoders.decoders as decoders
 import decsim.decoders.settings as decoder_settings
 import decsim.escalation.policies as escalation_policies
+import decsim.escalation.settings as escalation_settings
 import decsim.escalation.threshold_sources as threshold_sources
 import decsim.frontends.settings as workload_settings
 import decsim.links.link_profiles as link_profiles
@@ -217,7 +218,7 @@ def strong_only_run(
     decoder = decoders.PresetLatencyDecoder(DECLARED_MICROSECONDS["strong"])
     strong_decoder = decoder_settings.DecoderSettings(decoder=decoder)
     policy = escalation_policies.StrongOnly()
-    escalation = decoder_settings.EscalationSettings(policy=policy)
+    escalation = escalation_settings.EscalationSettings(policy=policy)
     observation = observe_settings.ObservationSettings(
         log_component_io=io_trace, record_switching_windows=record
     )
@@ -303,7 +304,7 @@ def switching_run(
         decoder_memory=memory,
         bulk_strong=bulk_strong,
     )
-    escalation = decoder_settings.EscalationSettings(
+    escalation = escalation_settings.EscalationSettings(
         policy=policy, strong_window=strong_window
     )
     links = declared_profile(

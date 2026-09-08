@@ -19,6 +19,7 @@ import decsim.controller.policies as boundary_policies
 import decsim.decoders.decoders as decoders
 import decsim.decoders.settings as decoder_settings
 import decsim.escalation.policies as policies
+import decsim.escalation.settings as escalation_settings
 import decsim.escalation.threshold_sources as threshold_sources
 import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
@@ -141,7 +142,7 @@ def test_escalations_equal_gaps_below_the_threshold_equal_strong_frame_writes():
     strong_decoder = decoder_settings.DecoderSettings(
         kind="pymatching", engine_megahertz=100.0
     )
-    escalation = decoder_settings.EscalationSettings(
+    escalation = escalation_settings.EscalationSettings(
         kind="switching",
         gap_threshold_decibels=15.0,
         gap_threshold_nats=threshold_nats,
@@ -277,7 +278,7 @@ def _forward_window_settings(
     strong_decoder = decoder_settings.DecoderSettings(
         kind="belief_matching", engine_megahertz=100.0
     )
-    escalation = decoder_settings.EscalationSettings(
+    escalation = escalation_settings.EscalationSettings(
         kind="switching", gap_threshold_nats=1.0, strong_window="forward"
     )
     return machine_module.MachineSettings(
@@ -325,7 +326,7 @@ def test_an_online_source_under_a_forward_window_is_refused_as_serial():
     """
     online = _always_auditing_online_threshold(threshold=2.0)
     policy = policies.Switching(online, decoders.SAMPLED_CONFIDENCE_SOURCE)
-    escalation = decoder_settings.EscalationSettings(
+    escalation = escalation_settings.EscalationSettings(
         policy=policy, strong_window="forward"
     )
     with pytest.raises(
@@ -363,9 +364,9 @@ class _AlwaysEscalate(policies.EscalationPolicyBase):
 def test_a_policy_row_added_to_the_table_runs_a_switching_point(monkeypatch):
     """One class and one ESCALATIONS row; the row declares its tier."""
     monkeypatch.setitem(
-        machine_module.ESCALATIONS, "always_escalate", _AlwaysEscalate
+        escalation_settings.ESCALATIONS, "always_escalate", _AlwaysEscalate
     )
-    escalation = decoder_settings.EscalationSettings(kind="always_escalate")
+    escalation = escalation_settings.EscalationSettings(kind="always_escalate")
     machine = fabric.switching_machine(
         rounds=9, escalated_windows=set(), escalation=escalation
     )
@@ -396,7 +397,7 @@ def _serial_switching_settings(
     )
     weak_decoder = decoder_settings.DecoderSettings(kind="pymatching")
     strong_decoder = decoder_settings.DecoderSettings(kind="belief_matching")
-    escalation = decoder_settings.EscalationSettings(
+    escalation = escalation_settings.EscalationSettings(
         kind="switching", gap_threshold_nats=1.0
     )
     return machine_module.MachineSettings(

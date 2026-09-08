@@ -21,6 +21,7 @@ import decsim.decoders.settings as decoder_settings
 import decsim.decoders.staged_decoder as staged_decoder
 import decsim.engine as engine_module
 import decsim.escalation.policies as escalation_policies
+import decsim.escalation.settings as escalation_settings
 import decsim.machine as machine_module
 import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
@@ -200,7 +201,7 @@ def strong_primary_run(decoder):
     workload = declared_run.declared_workload([operation], 3)
     strong_decoder = decoder_settings.DecoderSettings(decoder=decoder)
     policy = escalation_policies.StrongOnly()
-    escalation = decoder_settings.EscalationSettings(policy=policy)
+    escalation = escalation_settings.EscalationSettings(policy=policy)
     qpu = declared_run.declared_qpu()
     links = declared_run.declared_profile()
     controller = declared_run.declared_controller()

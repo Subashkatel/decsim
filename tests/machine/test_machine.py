@@ -32,6 +32,7 @@ import decsim.decoders.union_find.decoder as union_find_decoder
 import decsim.detector_error_model.detector_chronology as detector_chronology
 import decsim.engine as engine_module
 import decsim.escalation.policies as escalation_policies
+import decsim.escalation.settings as escalation_settings
 import decsim.front.experiment as experiment
 import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
@@ -294,8 +295,8 @@ def test_a_load_only_job_on_a_measured_unit_holds_it_for_zero_algorithm_ticks():
 def _switching_memory(weak_kind: str, confidence: str):
     """A d=3 memory whose weak tier reports the named confidence signal."""
     decibels = 20.0
-    nats = decoder_settings.decibels_to_nats(decibels)
-    escalation = decoder_settings.EscalationSettings(
+    nats = escalation_settings.decibels_to_nats(decibels)
+    escalation = escalation_settings.EscalationSettings(
         kind="switching",
         confidence=confidence,
         gap_threshold_decibels=decibels,
@@ -431,9 +432,9 @@ def test_the_cluster_gap_is_not_a_tier_kind_under_any_escalation(
     tiers[tier] = decoder_settings.DecoderSettings(
         kind="union_find_cluster_gap", engine_megahertz=100.0
     )
-    escalation = decoder_settings.EscalationSettings(kind=escalation_kind)
+    escalation = escalation_settings.EscalationSettings(kind=escalation_kind)
     if escalation_kind == "switching":
-        escalation = decoder_settings.EscalationSettings(
+        escalation = escalation_settings.EscalationSettings(
             kind="switching", gap_threshold_nats=1.0
         )
     settings = machine_module.MachineSettings(
@@ -511,13 +512,13 @@ def test_a_new_escalation_kind_is_one_class_and_one_table_row():
     )
     escalation = dataclasses.replace(settings.escalation, kind="always_strong")
     settings = dataclasses.replace(settings, escalation=escalation)
-    machine_module.ESCALATIONS["always_strong"] = AlwaysStrongEscalation
+    escalation_settings.ESCALATIONS["always_strong"] = AlwaysStrongEscalation
     try:
         assert machine_module.primary_tier(escalation) == "strong"
         machine = machine_module.Machine.build(settings, 0)
         result = machine.run()
     finally:
-        del machine_module.ESCALATIONS["always_strong"]
+        del escalation_settings.ESCALATIONS["always_strong"]
     assert result.terminal_status == "complete"
     snapshot = machine.pauli_frame.snapshot()
     tiers = []
@@ -1220,9 +1221,9 @@ def test_a_policy_object_decodes_where_its_name_decodes():
     strong_only and a run given StrongOnly() are the same machine: the
     same decoder, the same bits, the same ticks.
     """
-    named = decoder_settings.EscalationSettings(kind="strong_only")
+    named = escalation_settings.EscalationSettings(kind="strong_only")
     policy = escalation_policies.StrongOnly()
-    by_object = decoder_settings.EscalationSettings(policy=policy)
+    by_object = escalation_settings.EscalationSettings(policy=policy)
     named_settings = strong_primary_settings(named)
     named_machine = machine_module.Machine.build(named_settings, 0)
     named_result = named_machine.run()
@@ -1245,7 +1246,7 @@ def test_a_policy_object_decodes_where_its_name_decodes():
 def test_a_policy_object_whose_tier_names_no_decoder_is_refused():
     """The refusal reads the policy's tier, not the section's name."""
     policy = escalation_policies.StrongOnly()
-    escalation = decoder_settings.EscalationSettings(policy=policy)
+    escalation = escalation_settings.EscalationSettings(policy=policy)
     settings = strong_primary_settings(escalation)
     no_decoder = decoder_settings.DecoderSettings()
     settings = dataclasses.replace(settings, strong_decoder=no_decoder)

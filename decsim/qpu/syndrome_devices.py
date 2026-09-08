@@ -33,6 +33,13 @@ class TimingOnlyDevice:
     # nothing is sampled here, so the port's shot source never fires
     shot_sampled = trace_source.SILENT
 
+    def logical_observable_truth(
+        self, operation_id: Any
+    ) -> Optional[tuple[int, ...]]:
+        """This source draws no shot, so it knows no truth."""
+        del operation_id
+        return None
+
     def begin_operation(
         self,
         operation: program_records.Operation,
@@ -134,6 +141,13 @@ class SyndromeBitDevice(seeding._RandomSeedConsumer):
     operation_circuit_scope = "none"
     # the bits are drawn per round, not per shot, so nothing fires here
     shot_sampled = trace_source.SILENT
+
+    def logical_observable_truth(
+        self, operation_id: Any
+    ) -> Optional[tuple[int, ...]]:
+        """This source draws no shot, so it knows no truth."""
+        del operation_id
+        return None
 
     def __init__(
         self,

@@ -378,9 +378,7 @@ def _capture_result(machine: Machine) -> result_records.RunResult:
     execution_runtime = machine.execution_runtime
     if not engine.idle or not execution_runtime.workload_complete:
         raise RuntimeError("primary run ended before workload completed")
-    truth_for = getattr(
-        machine.syndrome_source, "logical_observable_truth", None
-    )
+    truth_for = machine.syndrome_source.logical_observable_truth
     operation_by_id = {}
     for operation in machine.operations:
         operation_by_id[operation.id] = operation
@@ -425,9 +423,7 @@ def _operation_result(
     if logical is not None:
         bits = tuple(logical)
         status = "logical_observables"
-    actual = None
-    if truth_for is not None:
-        actual = truth_for(operation_id)
+    actual = truth_for(operation_id)
     if actual is not None:
         actual = tuple(actual)
     failure = None

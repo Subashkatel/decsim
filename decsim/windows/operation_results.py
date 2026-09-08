@@ -12,10 +12,10 @@ window is final.
 import dataclasses
 from typing import Callable, Optional
 
-import decsim.observe.trace_source as trace_source
 import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
 import decsim.records.windows as window_records
+import decsim.trace_source as trace_source
 
 
 class OperationResults:

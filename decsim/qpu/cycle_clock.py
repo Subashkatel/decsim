@@ -18,10 +18,10 @@ import dataclasses
 from typing import Any, Callable, Optional
 
 import decsim.engine
-import decsim.observe.trace_source as trace_source
 import decsim.ports as ports
 import decsim.records.program as program_records
 import decsim.records.rounds as round_records
+import decsim.trace_source as trace_source
 
 # Patches and operation ids are opaque identities chosen by the workload;
 # Any stands for them in every signature below.

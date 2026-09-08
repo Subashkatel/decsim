@@ -22,11 +22,11 @@ import decsim.detector_error_model.detector_formation as detector_formation
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.detector_error_model.window_model_builders as window_models
 import decsim.detector_error_model.window_slicer as window_slicer
-import decsim.observe.trace_source as trace_source
 import decsim.records.program as program_records
 import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
 import decsim.seeding as seeding
+import decsim.trace_source as trace_source
 
 # Stream ids, operation ids and patches are opaque identities chosen by
 # the workload; Any stands for them in every signature below.

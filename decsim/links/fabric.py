@@ -19,8 +19,8 @@ from typing import Optional
 import decsim.engine
 import decsim.links.channel as channel_module
 import decsim.links.settings as link_settings
-import decsim.observe.trace_source as trace_source
 import decsim.records.transfers as transfer_records
+import decsim.trace_source as trace_source
 
 
 class LinkFabric:

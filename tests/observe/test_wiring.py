@@ -8,7 +8,7 @@ double a count without failing anything.
 """
 
 import decsim.machine as machine_module
-import decsim.observe.trace_source as trace_source
+import decsim.trace_source as trace_source
 import tests.observe.gate_point as gate_point
 
 EVERY_KNOB = {

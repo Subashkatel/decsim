@@ -334,6 +334,21 @@ interpreter and dependency folder to the script:
 For anything you run by hand from a worktree, set `PYTHONPATH=.` and
 confirm `decsim.__file__` is the worktree before trusting any result.
 
+## Rule 10. The package order, the rows, and the ports
+
+The packages import each other in one direction only: the `uses`
+relation is a partial order, so the top levels can be cut off and the
+rest still runs (Parnas 1972 lines 505-529; Dijkstra's THE levels,
+dijkstra_the.txt 52-57). `tools/check_uses_graph.py`, run by
+`tools/check.sh`, fails on any cycle and prints the levels, which
+machine.py's docstring names. No component recognises another
+component's row by its class: a fact a caller needs about a row is
+declared on the port and answered by every row, never read off the
+row's type, because a class is what the port promises not to reveal
+(gem5's port API, arXiv 2007.03152 lines 489-491). And `decsim/ports.py`
+is the slowest layer of all: a port method added, renamed or removed
+needs a design note saying why, the way a golden move does.
+
 ## Tests
 
 The best test of a component is its output beside a referent's output on

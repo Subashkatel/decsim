@@ -26,8 +26,8 @@ import dataclasses
 from typing import Any, Callable, Optional, Protocol, runtime_checkable
 
 import decsim.decoders.decoder_memory as decoder_memory_module
-import decsim.observe.trace_source as trace_source
 import decsim.records.decoding as decoding_records
+import decsim.trace_source as trace_source
 
 SendInput = Callable[[Callable[[], None]], int]
 

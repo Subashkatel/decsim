@@ -26,9 +26,9 @@ from typing import Callable, Optional
 
 import decsim.config as config
 import decsim.decoders.decoder as decoder_module
-import decsim.observe.trace_source as trace_source
 import decsim.records.decoding as decoding_records
 import decsim.records.seeds as seed_records
+import decsim.trace_source as trace_source
 
 # The decoder unit component's name in the narrator (docs/
 # architecture.md's component table).

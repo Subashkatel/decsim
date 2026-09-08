@@ -18,9 +18,9 @@ of them; the packing stage's bound reads it (RoundsInFlight).
 import dataclasses
 import functools
 
-import decsim.observe.trace_source as trace_source
 import decsim.records.rounds as round_records
 import decsim.records.transfers as transfer_records
+import decsim.trace_source as trace_source
 
 
 class RoundTransmitter:

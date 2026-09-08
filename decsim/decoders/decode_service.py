@@ -27,8 +27,8 @@ import decsim.decoders.decoder_memory_transfer as staging_module
 import decsim.decoders.decoder_pool as decoder_pool_module
 import decsim.decoders.decoder_unit as decoder_unit_module
 import decsim.decoders.strong_requests as strong_requests_module
-import decsim.observe.trace_source as trace_source
 import decsim.records.decoding as decoding_records
+import decsim.trace_source as trace_source
 
 # the job kinds a pipelined unit serves; every other kind holds its unit
 # for the whole decode until it gets its own design pass

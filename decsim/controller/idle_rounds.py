@@ -15,7 +15,7 @@ Battistel et al. 2303.00054 line 144).
 
 import dataclasses
 
-import decsim.observe.trace_source as trace_source
+import decsim.trace_source as trace_source
 
 
 @dataclasses.dataclass

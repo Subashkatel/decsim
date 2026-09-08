@@ -23,8 +23,8 @@ from collections.abc import Mapping
 from typing import Callable, Optional
 
 import decsim.config as config
-import decsim.observe.trace_source as trace_source
 import decsim.records.identity as identity_records
+import decsim.trace_source as trace_source
 
 ObservableBits = tuple[int, ...]
 

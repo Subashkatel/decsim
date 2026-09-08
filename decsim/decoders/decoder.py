@@ -24,10 +24,10 @@ import numpy
 
 import decsim.config as config
 import decsim.detector_error_model.fault_model_contracts as fault_models
-import decsim.observe.trace_source as trace_source
 import decsim.records.decoding as decoding_records
 import decsim.records.seeds as seed_records
 import decsim.records.windows as window_records
+import decsim.trace_source as trace_source
 
 OnResult = Callable[[Optional[decoding_records.DecodeResult]], None]
 

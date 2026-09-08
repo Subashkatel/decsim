@@ -7,7 +7,7 @@ runs first; when they share a priority, the one scheduled first runs
 first. That is SimPy's ordering (simpy.core.Environment): time, then
 priority, then arrival.
 
-The engine reports through three trace sources (observe/trace_source.py)
+The engine reports through three trace sources (trace_source.py)
 and holds no observer: line carries each narrated line's text, io_line
 carries a component's I/O line and fires only when someone listens, so
 a store never walks its contents for a line nobody records, and
@@ -23,7 +23,7 @@ import itertools
 from typing import Callable
 
 import decsim.config as config
-import decsim.observe.trace_source as trace_source
+import decsim.trace_source as trace_source
 
 Action = Callable[[], None]
 

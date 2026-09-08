@@ -18,8 +18,8 @@ from typing import Callable, Optional
 
 import decsim.decoders.decoder_memory as decoder_memory_module
 import decsim.decoders.decoder_unit as decoder_unit_module
-import decsim.observe.trace_source as trace_source
 import decsim.records.decoding as decoding_records
+import decsim.trace_source as trace_source
 
 DEFAULT_POOL = "default"
 

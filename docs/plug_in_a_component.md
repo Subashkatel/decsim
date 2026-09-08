@@ -28,7 +28,7 @@ more.
    A port with members that are not methods says where their values
    come from: the `Decoder`'s `fault_model_requirement` is one of the
    four in `decsim/detector_error_model/fault_model_contracts.py`, and
-   its `stage_recorded` is a `decsim/observe/trace_source.py` source,
+   its `stage_recorded` is a `decsim/trace_source.py` source,
    `SILENT` for a decoder with no internal stages. Inheriting
    `decsim/decoders/decoder.py`'s `DecoderBase` gives you both, and
    `start`, `cancel`, `occupancy` and `pipeline_depth` besides, so a

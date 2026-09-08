@@ -18,8 +18,8 @@ import dataclasses
 from typing import Callable, Optional
 
 import decsim.decoders.strong_requests as strong_requests_module
-import decsim.observe.trace_source as trace_source
 import decsim.records.decoding as decoding_records
+import decsim.trace_source as trace_source
 
 
 class DecodeOutcomes:

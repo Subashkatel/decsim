@@ -20,8 +20,8 @@ import types
 from typing import Any, Callable, Protocol, runtime_checkable
 
 import decsim.engine
-import decsim.observe.trace_source as trace_source
 import decsim.records.program as program_records
+import decsim.trace_source as trace_source
 
 
 @runtime_checkable

@@ -11,6 +11,7 @@ from typing import Any, Optional
 
 import decsim.build.escalation as escalation_build
 import decsim.build.plan as plan_build
+import decsim.decoders.decode_queue as decode_queue
 import decsim.decoders.decoder_memory as decoder_memory_module
 import decsim.decoders.decoders as decoders
 import decsim.decoders.schedulers as schedulers
@@ -34,6 +35,9 @@ class DecoderPool:
     unit_pools: dict
     decoder_memory: Optional[decoder_memory_module.DecoderMemoryConfig]
     scheduler: Any
+    # pool name -> whether that tier's unit is given a copy of the
+    # rounds it decodes (weak_decoder.input, strong_decoder.input)
+    copies_input_by_pool: dict
 
 
 def build_decoder_unit(
@@ -106,12 +110,45 @@ def build_decoder_pool(
         active_settings = _active_tier_settings(settings, policy)
         unit_pools = {"default": active_settings.units}
     decoder_memory = _decoder_memory(settings, policy)
+    copies_input_by_pool = _copies_input_by_pool(settings, policy, unit_pools)
     return DecoderPool(
         router=router,
         active=active,
         unit_pools=dict(unit_pools),
         decoder_memory=decoder_memory,
         scheduler=scheduler,
+        copies_input_by_pool=copies_input_by_pool,
+    )
+
+
+def _copies_input_by_pool(
+    settings: machine_settings.MachineSettings, policy, unit_pools: dict
+) -> dict:
+    """Each pool's input rule, from the tier whose units that pool holds.
+
+    The strong pool is the strong tier's; every other pool decodes the
+    plan's windows on the active tier. A value that is not a row of
+    DECODER_INPUTS is refused here, where the tier is named.
+    """
+    active_settings = _active_tier_settings(settings, policy)
+    active_copies = _copies_input(active_settings, policy.primary_tier.value)
+    strong_copies = _copies_input(settings.strong_decoder, "strong")
+    copies_by_pool = {}
+    for pool in unit_pools:
+        copies_by_pool[pool] = active_copies
+    if decode_queue.STRONG_POOL in copies_by_pool:
+        copies_by_pool[decode_queue.STRONG_POOL] = strong_copies
+    return copies_by_pool
+
+
+def _copies_input(
+    tier_settings: decoder_settings.DecoderSettings, tier: str
+) -> bool:
+    """Whether this tier's unit is given a copy of the rounds it reads."""
+    return tables.row(
+        decoder_settings.DECODER_INPUTS,
+        f"{tier}_decoder.input",
+        tier_settings.input,
     )
 
 

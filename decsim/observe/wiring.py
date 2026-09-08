@@ -254,6 +254,8 @@ def _connect_data_path(
         _connect_store_counts(data_movement, round_store)
         if strong_round_store is not None:
             _connect_store_counts(data_movement, strong_round_store)
+        for source in decoder_manager.reference_sources():
+            source.connect(data_movement.hold_registered)
         for source in _copy_sources(
             controller,
             assembler,

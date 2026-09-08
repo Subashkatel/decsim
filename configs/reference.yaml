@@ -315,6 +315,21 @@ weak_decoder:                      # the lightweight tier: fast, higher LER
                                    # A card prices the algorithm stage ONLY;
                                    # fetch and release cycles are separate
   units: 1                         # decoder units in this tier's pool
+  input: copy                      # copy | in_place: how this tier's unit gets
+                                   # the rounds it decodes. copy moves them over
+                                   # the tier's input link into the unit's own
+                                   # memory, which is what a decoder with
+                                   # off-chip input does (Collision Clustering's
+                                   # Init unit loads the syndrome into the
+                                   # storage elements, 2309.05558 lines
+                                   # 268-271). in_place reads them where the
+                                   # store keeps them: no link move, no deposit,
+                                   # the store's hold kept for the whole decode,
+                                   # and the run counts a reference instead of a
+                                   # copy (AFS's processing elements "can
+                                   # directly access the data stored on-chip",
+                                   # 2001.06598 lines 528-531). copy is what
+                                   # every hop of this tree does today
   unit_memory_rounds: null         # input SRAM rounds PER UNIT; null = unbounded.
                                    # Each unit holds two windows when they fit
                                    # (transfer overlaps compute); a unit sized
@@ -329,6 +344,10 @@ weak_decoder:                      # the lightweight tier: fast, higher LER
 strong_decoder:                    # the accurate tier: slow, lower LER
   kind: belief_matching
   units: 1
+  input: copy                      # copy | in_place, as above; the strong hop
+                                   # transfers the assigned data in the paper
+                                   # (Toshio 2510.25222 lines 1248-1250), which
+                                   # is the copy row
   unit_memory_rounds: null
   engine:
     clock: room                    # the strong unit lives room-side

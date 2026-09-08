@@ -4,12 +4,13 @@ A Machine is gem5's shape (src/python/m5/SimObject.py: a SimObject's
 Python class is its params, `allClasses` maps a name to a class; the
 learning_gem5 simple.py script names each component once and assigns
 its ports), with the wiring done by constructor because Python needs
-no second bind step. MachineSettings holds one settings record per yaml
-section, each built by its own package's `from_yaml`; the tables below
-map each section's `kind` to the class that fills the port, sinter's
-`BUILT_IN_DECODERS` (sinter/_decoding/_decoding_all_built_in_decoders.py)
-made one dict per pluggable part. A new component is one class that
-fills its port in decsim/ports.py and one row here.
+no second bind step. A MachineSettings (decsim/settings.py) holds one
+settings record per yaml section, each built by its own package's
+`from_yaml`, and each package's own settings module maps that section's
+`kind` to the class that fills the port, sinter's `BUILT_IN_DECODERS`
+(sinter/_decoding/_decoding_all_built_in_decoders.py) made one dict per
+pluggable part. A new component is one class that fills its port in
+decsim/ports.py and one row in its package's table.
 
 Every component is wired by constructor; nothing is bound to a
 component after it is built. Where two components refer to each other
@@ -30,14 +31,12 @@ facade and the strong redecode built after them.
 
 import copy
 import dataclasses
-from collections.abc import Mapping
 from typing import Any, Optional
 
 import stim
 
 import decsim.confidence.gap_join as gap_join_module
 import decsim.confidence.signals as confidence_signals
-import decsim.config as config
 import decsim.controller.controller as controller_module
 import decsim.controller.feedback_streams as feedback_streams
 import decsim.controller.idle_rounds as idle_rounds_module
@@ -66,8 +65,6 @@ import decsim.frontends.execution_runtime as execution_runtime_module
 import decsim.frontends.planner as planner
 import decsim.frontends.settings as workload_settings
 import decsim.links.fabric as fabric
-import decsim.links.link_profiles as link_profiles
-import decsim.links.settings as link_settings
 import decsim.links.window_transfers as window_transfers_module
 import decsim.observe.link_traffic as link_traffic
 import decsim.observe.observation as observation_module
@@ -85,6 +82,7 @@ import decsim.records.seeds as seed_records
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 import decsim.seeding as seeding
+import decsim.settings as machine_settings
 import decsim.syndrome_buffer.round_output as round_output
 import decsim.syndrome_buffer.round_store as round_store_module
 import decsim.syndrome_buffer.settings as round_store_settings
@@ -105,152 +103,6 @@ import decsim.windows.windowing_schemes as windowing_schemes
 from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
 )
-
-# The yaml sections, in the order MachineSettings reads them. Each
-# section's own package owns its settings record and its plug-in table;
-# the root looks a kind up in that table once and refuses one that is
-# not a row, naming the rows (_row).
-SECTIONS = (
-    "clocks",
-    "qpu",
-    "controller",
-    "idle_policy",
-    "links",
-    "round_store",
-    "strong_round_store",
-    "windows",
-    "weak_decoder",
-    "strong_decoder",
-    "decoder_manager",
-    "escalation",
-    "pauli_frame",
-    "workload",
-    "observation",
-)
-
-
-@dataclasses.dataclass(frozen=True)
-class MachineSettings:
-    """One settings record per yaml section, plus the Python-only knobs.
-
-    Every field has a default, so a Python caller names only what
-    differs from a timing-only run of three-qubit surface code patches
-    with no decoder at all. links is the fabric card; the reference card
-    prices propagation only. magic_state_factory has no yaml key today.
-    """
-
-    clocks: config.ClockSettings = config.ClockSettings()
-    qpu: qpu_settings.QpuSettings = qpu_settings.QpuSettings()
-    controller: controller_settings.ControllerSettings = (
-        controller_settings.ControllerSettings()
-    )
-    idle_policy: controller_settings.IdlePolicySettings = (
-        controller_settings.IdlePolicySettings()
-    )
-    links: link_settings.FabricSettings = (
-        link_profiles.logical_reference_profile()
-    )
-    round_store: round_store_settings.RoundStoreSettings = (
-        round_store_settings.RoundStoreSettings()
-    )
-    strong_round_store: round_store_settings.RoundStoreSettings = (
-        round_store_settings.RoundStoreSettings()
-    )
-    windows: window_settings.WindowSettings = window_settings.WindowSettings()
-    weak_decoder: decoder_settings.DecoderSettings = (
-        decoder_settings.DecoderSettings()
-    )
-    strong_decoder: decoder_settings.DecoderSettings = (
-        decoder_settings.DecoderSettings()
-    )
-    decoder_manager: decoder_settings.DecoderManagerSettings = (
-        decoder_settings.DecoderManagerSettings()
-    )
-    escalation: escalation_settings.EscalationSettings = (
-        escalation_settings.EscalationSettings()
-    )
-    pauli_frame: Optional[pauli_frame_module.PauliFrameConfig] = None
-    workload: workload_settings.WorkloadSettings = (
-        workload_settings.WorkloadSettings()
-    )
-    magic_state_factory: qpu_settings.FactorySettings = (
-        qpu_settings.FactorySettings()
-    )
-    observation: observe_settings.ObservationSettings = (
-        observe_settings.ObservationSettings()
-    )
-
-    @classmethod
-    def from_mapping(
-        cls, sections: Mapping, *, name: str, base_directory
-    ) -> "MachineSettings":
-        """One yaml's sections, each handed to the package that owns it.
-
-        name labels the links card in the traffic ledger; base_directory
-        resolves the escalation section's relative table path.
-        """
-        unknown = set(sections) - set(SECTIONS)
-        if unknown:
-            listed = sorted(unknown)
-            raise ValueError(
-                f"the yaml has no section {listed}; the sections are "
-                f"{list(SECTIONS)}"
-            )
-        clocks = config.ClockSettings.from_yaml(sections["clocks"])
-        idle_policy = controller_settings.IdlePolicySettings()
-        if "idle_policy" in sections:
-            idle_policy = controller_settings.IdlePolicySettings(
-                kind=sections["idle_policy"]
-            )
-        escalation_section = sections.get("escalation", {})
-        decoder_manager_section = sections.get("decoder_manager", {})
-        observation_section = sections.get("observation", {})
-        qpu = qpu_settings.QpuSettings.from_yaml(sections["qpu"])
-        controller = controller_settings.ControllerSettings.from_yaml(
-            sections["controller"], clocks
-        )
-        links = link_profiles.from_yaml(sections["links"], clocks, name)
-        round_store = round_store_settings.RoundStoreSettings.from_yaml(
-            sections["round_store"]
-        )
-        strong_round_store = round_store_settings.RoundStoreSettings.from_yaml(
-            sections["strong_round_store"]
-        )
-        windows = window_settings.WindowSettings.from_yaml(sections["windows"])
-        weak_decoder = _tier_settings(sections, "weak_decoder", clocks)
-        strong_decoder = _tier_settings(sections, "strong_decoder", clocks)
-        decoder_manager = decoder_settings.DecoderManagerSettings.from_yaml(
-            decoder_manager_section, clocks
-        )
-        escalation = escalation_settings.EscalationSettings.from_yaml(
-            escalation_section, base_directory
-        )
-        pauli_frame = pauli_frame_module.PauliFrameConfig.from_yaml(
-            sections["pauli_frame"], clocks
-        )
-        workload = workload_settings.WorkloadSettings.from_yaml(
-            sections["workload"]
-        )
-        observation = observe_settings.ObservationSettings.from_yaml(
-            observation_section
-        )
-        return cls(
-            clocks=clocks,
-            qpu=qpu,
-            controller=controller,
-            idle_policy=idle_policy,
-            links=links,
-            round_store=round_store,
-            strong_round_store=strong_round_store,
-            windows=windows,
-            weak_decoder=weak_decoder,
-            strong_decoder=strong_decoder,
-            decoder_manager=decoder_manager,
-            escalation=escalation,
-            pauli_frame=pauli_frame,
-            workload=workload,
-            observation=observation,
-        )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -295,7 +147,7 @@ class Machine:
     decodes the plan's windows, None when no decoder was named.
     """
 
-    settings: MachineSettings
+    settings: machine_settings.MachineSettings
     engine: engine_module.Engine
     observation: observation_module.Observation
     links: fabric.LinkFabric
@@ -322,7 +174,7 @@ class Machine:
 
     @classmethod
     def build(
-        cls, settings: MachineSettings, seed: Optional[int] = 0
+        cls, settings: machine_settings.MachineSettings, seed: Optional[int] = 0
     ) -> "Machine":
         """Build every component in pipeline order and wire it.
 
@@ -554,7 +406,9 @@ class Machine:
         return _capture_result(self)
 
 
-def build_decoder_unit(settings: MachineSettings, tier: str, policy):
+def build_decoder_unit(
+    settings: machine_settings.MachineSettings, tier: str, policy
+):
     """The decoder unit of one tier, weak or strong, as the root builds it.
 
     A named row decodes for real inside a StagedDecoder whose fetch and
@@ -577,7 +431,7 @@ def build_decoder_unit(settings: MachineSettings, tier: str, policy):
         _check_serves_the_confidence(
             algorithm, tier_settings.kind, tier, settings.escalation
         )
-    check = _row(
+    check = machine_settings.row(
         observe_settings.WINDOW_CHECKS,
         "observation.check_windows_with",
         settings.observation.check_windows_with,
@@ -625,25 +479,6 @@ class _DecoderPool:
     scheduler: Any
 
 
-def _row(table: dict, section: str, kind):
-    """The table row a section's kind names; a kind off the table is refused."""
-    if kind not in table:
-        rows = sorted(table)
-        raise ValueError(
-            f"{section} {kind!r} is not a row of its table; the rows are {rows}"
-        )
-    return table[kind]
-
-
-def _tier_settings(
-    sections: Mapping, tier: str, clocks: config.ClockSettings
-) -> decoder_settings.DecoderSettings:
-    """A tier's section, or no decoder when the yaml leaves it out."""
-    if tier not in sections:
-        return decoder_settings.DecoderSettings()
-    return decoder_settings.DecoderSettings.from_yaml(sections[tier], clocks)
-
-
 def _root_seed(value) -> Optional[int]:
     """The run's root seed: None for entropy, else an unsigned 64-bit int."""
     if value is None:
@@ -671,7 +506,7 @@ def primary_tier(settings: escalation_settings.EscalationSettings) -> str:
     """
     if settings.policy is not None:
         return settings.policy.primary_tier.value
-    row = _row(
+    row = machine_settings.row(
         escalation_settings.ESCALATIONS, "escalation.kind", settings.kind
     )
     return row.primary_tier.value
@@ -679,7 +514,7 @@ def primary_tier(settings: escalation_settings.EscalationSettings) -> str:
 
 def _strong_window_row(settings: escalation_settings.EscalationSettings):
     """The strong window shape class the escalation section names."""
-    return _row(
+    return machine_settings.row(
         escalation_settings.STRONG_WINDOW_SHAPES,
         "escalation.strong_window",
         settings.strong_window,
@@ -698,7 +533,7 @@ def _escalation_policy(settings: escalation_settings.EscalationSettings):
     """The policy of the escalation kind, or the Python-built one."""
     if settings.policy is not None:
         return settings.policy
-    row = _row(
+    row = machine_settings.row(
         escalation_settings.ESCALATIONS, "escalation.kind", settings.kind
     )
     if row is escalation_policies.Switching:
@@ -731,7 +566,9 @@ def _threshold_source(settings: escalation_settings.EscalationSettings):
 # ------------------------------------------------ the workload and plan
 
 
-def _plan(settings: MachineSettings, escalation_policy) -> _Plan:
+def _plan(
+    settings: machine_settings.MachineSettings, escalation_policy
+) -> _Plan:
     """The code, the workload's operations and the window plan."""
     code, layout = settings.qpu.build_code(settings.windows)
     operations, decode_operations, dynamic_streams, rounds_policy = _operations(
@@ -761,7 +598,7 @@ def _plan(settings: MachineSettings, escalation_policy) -> _Plan:
     reread_regions = settings.escalation.restart_reread_buffer_regions
     window_interaction = settings.windows.window_interaction
     if window_interaction is None:
-        payload_row = _row(
+        payload_row = machine_settings.row(
             window_settings.BOUNDARY_PAYLOADS,
             "windows.boundary_payload",
             settings.windows.boundary_payload,
@@ -852,7 +689,9 @@ def _operations(settings: workload_settings.WorkloadSettings, code) -> tuple:
     The run never mutates the caller's operations; an operation without
     its own feedback boundary mode takes the workload's.
     """
-    row = _row(workload_settings.WORKLOADS, "workload.kind", settings.kind)
+    row = machine_settings.row(
+        workload_settings.WORKLOADS, "workload.kind", settings.kind
+    )
     source_operations, fixed_rounds_policy = row(settings, code)
     rounds_policy = settings.rounds_policy
     if rounds_policy is None:
@@ -926,7 +765,9 @@ def _scheme(
     """
     if windows.scheme is not None:
         return windows.scheme
-    row = _row(window_settings.WINDOWING_SCHEMES, "windows.kind", windows.kind)
+    row = machine_settings.row(
+        window_settings.WINDOWING_SCHEMES, "windows.kind", windows.kind
+    )
     if escalation.kind != "switching":
         return row()
     if windows.kind != "sliding":
@@ -959,7 +800,9 @@ def _boundary_policy(
 def _idle_policy(settings: controller_settings.IdlePolicySettings):
     if settings.policy is not None:
         return settings.policy
-    row = _row(controller_settings.IDLE_POLICIES, "idle_policy", settings.kind)
+    row = machine_settings.row(
+        controller_settings.IDLE_POLICIES, "idle_policy", settings.kind
+    )
     return row()
 
 
@@ -967,7 +810,9 @@ def _syndrome_source(settings: qpu_settings.QpuSettings):
     """The device of the qpu kind, or the Python-built one."""
     if settings.device is not None:
         return settings.device
-    row = _row(qpu_settings.SYNDROME_SOURCES, "qpu.kind", settings.kind)
+    row = machine_settings.row(
+        qpu_settings.SYNDROME_SOURCES, "qpu.kind", settings.kind
+    )
     return row(**settings.arguments)
 
 
@@ -993,7 +838,7 @@ def _install_device_circuits(device, operations) -> None:
 
 
 def _decoder_pool(
-    settings: MachineSettings, plan: _Plan, policy
+    settings: machine_settings.MachineSettings, plan: _Plan, policy
 ) -> _DecoderPool:
     """The router over the tiers and the manager's pools.
 
@@ -1036,7 +881,9 @@ def _decoder_pool(
     )
 
 
-def _switching_pools(settings: MachineSettings, weak, strong) -> tuple:
+def _switching_pools(
+    settings: machine_settings.MachineSettings, weak, strong
+) -> tuple:
     """The switching router and its pools: default and strong.
 
     A window's two forced-class solves are two ordinary jobs of the
@@ -1057,14 +904,14 @@ def _switching_pools(settings: MachineSettings, weak, strong) -> tuple:
 
 
 def _active_tier_settings(
-    settings: MachineSettings, policy
+    settings: machine_settings.MachineSettings, policy
 ) -> decoder_settings.DecoderSettings:
     tier = policy.primary_tier.value
     return getattr(settings, f"{tier}_decoder")
 
 
 def _decoder_memory(
-    settings: MachineSettings, policy
+    settings: machine_settings.MachineSettings, policy
 ) -> Optional[decoder_memory_module.DecoderMemoryConfig]:
     """The pools' input memory: the given one, or the active tier's SRAM."""
     given = settings.decoder_manager.decoder_memory
@@ -1082,7 +929,9 @@ def _decoder_memory(
 def _algorithm(kind, tier: str):
     """A tier's algorithm: a table row, or a fixed latency on MWPM."""
     if isinstance(kind, str):
-        row = _row(decoder_settings.DECODERS, f"{tier}_decoder.kind", kind)
+        row = machine_settings.row(
+            decoder_settings.DECODERS, f"{tier}_decoder.kind", kind
+        )
         return row(latency_model=None)
     latency_model = decoders.PresetLatencyDecoder(kind)
     return minimum_weight_perfect_matching.PyMatchingDecoder(latency_model)
@@ -1135,7 +984,7 @@ def _evidence_order(member) -> str:
 
 def _confidence_signal(escalation: escalation_settings.EscalationSettings):
     """The signal row a switching run's weak decoder reports and decides on."""
-    row = _row(
+    row = machine_settings.row(
         confidence_signals.CONFIDENCE_SIGNALS,
         "escalation.confidence",
         escalation.confidence,
@@ -1173,7 +1022,7 @@ def _round_store(
     held_rounds: round_writes.HeldRounds,
 ):
     """Buffer 0; a freed slot retries the rounds held for room."""
-    row = _row(
+    row = machine_settings.row(
         round_store_module.ROUND_STORES, "round_store.kind", settings.kind
     )
     return row(settings, on_slot_freed=held_rounds.retry)
@@ -1185,7 +1034,7 @@ def _strong_round_store(
     held_rounds: round_writes.HeldRounds,
 ):
     """The room-side store, only when a tier reads from the room side."""
-    row = _row(
+    row = machine_settings.row(
         round_store_module.ROUND_STORES,
         "strong_round_store.kind",
         settings.kind,
@@ -1225,7 +1074,9 @@ def _pauli_frame(
     return settings.resolve(engine)
 
 
-def _check_readout_cost_is_priced(settings: MachineSettings) -> None:
+def _check_readout_cost_is_priced(
+    settings: machine_settings.MachineSettings,
+) -> None:
     """A readout cost on the controller needs a card that leaves it out."""
     readout_ticks = settings.controller.readout_to_bits_ticks()
     links = settings.links
@@ -1243,7 +1094,7 @@ def _check_readout_cost_is_priced(settings: MachineSettings) -> None:
 
 def _window_manager(
     engine: engine_module.Engine,
-    settings: MachineSettings,
+    settings: machine_settings.MachineSettings,
     escalation_policy,
     plan: _Plan,
     *,
@@ -1377,7 +1228,7 @@ def _window_manager(
 
 
 def _window_gap_join(
-    settings: MachineSettings, engine, committer, decode_queue
+    settings: machine_settings.MachineSettings, engine, committer, decode_queue
 ):
     """The confidence join of a switching run: every solve's on_decoded.
 
@@ -1469,7 +1320,7 @@ class _LateWiring:
 
 def _decoder_manager(
     engine: engine_module.Engine,
-    settings: MachineSettings,
+    settings: machine_settings.MachineSettings,
     escalation_policy,
     pool: _DecoderPool,
 ) -> decoder_manager_module.DecoderManager:
@@ -1486,7 +1337,9 @@ def _decoder_manager(
     )
 
 
-def _process_name(settings: MachineSettings, seed: Optional[int]) -> str:
+def _process_name(
+    settings: machine_settings.MachineSettings, seed: Optional[int]
+) -> str:
     """The point the trace is of, so two files are told apart at a glance."""
     kind = settings.escalation.kind
     distance = settings.qpu.distance
@@ -1494,7 +1347,9 @@ def _process_name(settings: MachineSettings, seed: Optional[int]) -> str:
     return f"decsim {kind} d{distance} p{probability} seed{seed}"
 
 
-def _check_strong_route(settings: MachineSettings, router) -> None:
+def _check_strong_route(
+    settings: machine_settings.MachineSettings, router
+) -> None:
     """A switching run routes a strong job away from the weak decoder.
 
     Run once on probe jobs: one decoder for both job kinds is the
@@ -1532,7 +1387,7 @@ def _factory(
     A distillation row decodes its corrections on the run's decoder
     manager; the multi-level row paces its levels on the run's round.
     """
-    row = _row(
+    row = machine_settings.row(
         qpu_settings.MAGIC_STATE_FACTORIES,
         "magic_state_factory.kind",
         settings.kind,

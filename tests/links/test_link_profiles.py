@@ -14,6 +14,7 @@ import decsim.config as config
 import decsim.links.link_profiles as link_profiles
 import decsim.machine as machine
 import decsim.records.transfers as transfer_records
+import decsim.settings as machine_settings
 
 # One distance-5 patch: 24 syndrome bits per 1.0 us round, commit and
 # buffer regions of 5 rounds.
@@ -247,11 +248,11 @@ def test_the_reference_card_prices_the_two_controller_to_buffer_hops():
 
 
 def test_a_run_without_a_card_uses_the_reference_card():
-    default_settings = machine.MachineSettings()
+    default_settings = machine_settings.MachineSettings()
     default_machine = machine.Machine.build(default_settings)
     default_result = default_machine.run()
     reference = link_profiles.logical_reference_profile()
-    explicit_settings = machine.MachineSettings(links=reference)
+    explicit_settings = machine_settings.MachineSettings(links=reference)
     explicit_machine = machine.Machine.build(explicit_settings)
     explicit_result = explicit_machine.run()
     assert default_result == explicit_result

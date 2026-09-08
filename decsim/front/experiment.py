@@ -1,7 +1,7 @@
 """One yaml file is one experiment; this module is the only yaml reader.
 
 The file's sections are handed to the packages that own them, one
-settings record each (decsim.machine.MachineSettings.from_mapping); the
+settings record each (decsim.machine_settings.MachineSettings.from_mapping); the
 sweep blocks stay here, since the machine knows nothing of sweeps.
 `extends: other.yaml` starts from that file (same folder) and overrides
 the top-level keys this file names.
@@ -16,6 +16,7 @@ import yaml
 import decsim.collect as collect
 import decsim.front.refusal as refusal
 import decsim.machine as machine
+import decsim.settings as machine_settings
 
 _THIS_FILE = Path(__file__)
 _FRONT_DIR = _THIS_FILE.resolve()
@@ -66,7 +67,7 @@ class ExperimentConfig:
     """Everything one yaml file says: the machine, and the sweep over it."""
 
     name: str  # the yaml stem; suffixes the run folder
-    settings: machine.MachineSettings
+    settings: machine_settings.MachineSettings
     sweep: tuple  # of SweepBlock
     # the yaml files this config was read from, nearest first (an extends
     # chain)
@@ -118,7 +119,7 @@ class ExperimentConfig:
         physical_error_probability: float,
         distance: int,
         round_period_us: float,
-    ) -> machine.MachineSettings:
+    ) -> machine_settings.MachineSettings:
         """The machine at one sweep point.
 
         The point sets the QPU's distance and round period, the memory
@@ -226,7 +227,9 @@ def _refuse_a_path_that_is_not_a_file(path: Path) -> None:
     )
 
 
-def _settings_of(sections: dict, path: Path) -> machine.MachineSettings:
+def _settings_of(
+    sections: dict, path: Path
+) -> machine_settings.MachineSettings:
     """The machine's settings records, one per section of the file.
 
     A settings record checks its own section and raises ValueError
@@ -234,7 +237,7 @@ def _settings_of(sections: dict, path: Path) -> machine.MachineSettings:
     reaches the user as one sentence naming the file it is in.
     """
     try:
-        return machine.MachineSettings.from_mapping(
+        return machine_settings.MachineSettings.from_mapping(
             sections, name=path.stem, base_directory=path.parent
         )
     except ValueError as refused:
@@ -272,7 +275,7 @@ def _files_line(config: ExperimentConfig) -> str:
     return f"config: {joined}"
 
 
-def _section_lines(settings: machine.MachineSettings) -> list:
+def _section_lines(settings: machine_settings.MachineSettings) -> list:
     """One line per section, its kind named where the section has one."""
     lines = []
     for field in dataclasses.fields(settings):

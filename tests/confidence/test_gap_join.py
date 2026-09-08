@@ -20,6 +20,7 @@ import decsim.machine as machine_module
 import decsim.records.decoding as decoding_records
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
+import decsim.settings as machine_settings
 import tests.escalation.declared_fabric as fabric
 from tests.escalation.test_strong_window_shapes import GATE_SWITCHING_CARD
 
@@ -35,7 +36,7 @@ def _switching_machine(weak_units: int, weak_microseconds: float = 4.0):
     sections["weak_decoder"]["units"] = weak_units
     sections["strong_decoder"]["kind"] = 20.0
     base_directory = pathlib.Path(".")
-    settings = machine_module.MachineSettings.from_mapping(
+    settings = machine_settings.MachineSettings.from_mapping(
         sections, name="switching_validation", base_directory=base_directory
     )
     qpu = dataclasses.replace(

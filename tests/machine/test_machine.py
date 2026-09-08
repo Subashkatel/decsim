@@ -48,6 +48,7 @@ import decsim.records.seeds as seed_records
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 import decsim.seeding as seeding
+import decsim.settings as machine_settings
 import decsim.syndrome_buffer.round_store as round_store_module
 import decsim.syndrome_buffer.settings as round_store_settings
 import decsim.windows.settings as window_settings
@@ -173,7 +174,7 @@ def test_a_second_table_row_runs_gate_point_one():
 
 def test_a_decoder_kind_off_the_table_is_refused_naming_the_rows():
     weak_decoder = decoder_settings.DecoderSettings(kind="lookup_table")
-    settings = machine_module.MachineSettings(weak_decoder=weak_decoder)
+    settings = machine_settings.MachineSettings(weak_decoder=weak_decoder)
     sentence = (
         "weak_decoder.kind 'lookup_table' is not a row of its table; "
         "the rows are " + tier_rows()
@@ -188,7 +189,7 @@ def test_a_strong_store_kind_off_the_table_is_refused_even_when_unused():
     strong_round_store = round_store_settings.RoundStoreSettings(
         kind="off_table"
     )
-    settings = machine_module.MachineSettings(
+    settings = machine_settings.MachineSettings(
         strong_round_store=strong_round_store
     )
     with pytest.raises(
@@ -203,14 +204,14 @@ def test_a_yaml_section_nobody_owns_is_refused_naming_the_sections():
     with pytest.raises(
         ValueError, match=r"the yaml has no section \['buffers'\]; the sections"
     ):
-        machine_module.MachineSettings.from_mapping(
+        machine_settings.MachineSettings.from_mapping(
             {"buffers": {}}, name="x", base_directory=None
         )
 
 
 def test_the_constructor_wiring_reaches_its_components():
     """Every cross-reference is made by constructor, none left None."""
-    settings = machine_module.MachineSettings()
+    settings = machine_settings.MachineSettings()
     machine = machine_module.Machine.build(settings)
     assert machine.qpu.readout_receiver is machine.controller
     assert machine.execution_runtime.issuer is machine.issuer
@@ -226,7 +227,7 @@ MEMORY_CIRCUIT = workload_settings.memory_circuit(
 
 def _memory_on_stim_device(
     weak_decoder, operations
-) -> machine_module.MachineSettings:
+) -> machine_settings.MachineSettings:
     """The operations as a six-round d=3 memory on the Stim device."""
     rounds = round_policies.FixedRounds(MEMORY_ROUNDS)
     workload = workload_settings.WorkloadSettings(
@@ -234,12 +235,12 @@ def _memory_on_stim_device(
     )
     device = stim_device.StimDevice()
     qpu = qpu_settings.QpuSettings(distance=3, device=device)
-    return machine_module.MachineSettings(
+    return machine_settings.MachineSettings(
         workload=workload, qpu=qpu, weak_decoder=weak_decoder
     )
 
 
-def _two_patch_memory(weak_decoder) -> machine_module.MachineSettings:
+def _two_patch_memory(weak_decoder) -> machine_settings.MachineSettings:
     """Two memory operations on two patches; the second starts at round 4.
 
     Patch 1 idles for four rounds first, and the default idle policy
@@ -437,7 +438,7 @@ def test_the_cluster_gap_is_not_a_tier_kind_under_any_escalation(
         escalation = escalation_settings.EscalationSettings(
             kind="switching", gap_threshold_nats=1.0
         )
-    settings = machine_module.MachineSettings(
+    settings = machine_settings.MachineSettings(
         weak_decoder=tiers["weak"],
         strong_decoder=tiers["strong"],
         escalation=escalation,
@@ -548,7 +549,7 @@ class RecordingIdlePolicy:
 
 def test_the_default_policies_are_eager_boundaries_and_charged_idle_rounds():
     """Two builds of the same settings each get their own policy objects."""
-    settings = machine_module.MachineSettings()
+    settings = machine_settings.MachineSettings()
     first = machine_module.Machine.build(settings)
     second = machine_module.Machine.build(settings)
     first_boundary = first.window_manager.courier.boundary_policy
@@ -566,11 +567,11 @@ def test_a_policy_written_outside_decsim_is_used_on_its_own_axis():
     """The two policy axes are independent: one given, the other default."""
     boundary_policy = RecordingBoundaryPolicy()
     windows = window_settings.WindowSettings(boundary_policy=boundary_policy)
-    boundary_settings = machine_module.MachineSettings(windows=windows)
+    boundary_settings = machine_settings.MachineSettings(windows=windows)
     with_boundary = machine_module.Machine.build(boundary_settings)
     idle_policy = RecordingIdlePolicy()
     idle_row = controller_settings.IdlePolicySettings(policy=idle_policy)
-    idle_settings = machine_module.MachineSettings(idle_policy=idle_row)
+    idle_settings = machine_settings.MachineSettings(idle_policy=idle_row)
     with_idle = machine_module.Machine.build(idle_settings)
     assert with_boundary.window_manager.courier.boundary_policy is (
         boundary_policy
@@ -610,7 +611,7 @@ class SeedRecordingPolicy:
 
 def _machine_with_seed(policy, seed):
     windows = window_settings.WindowSettings(boundary_policy=policy)
-    settings = machine_module.MachineSettings(windows=windows)
+    settings = machine_settings.MachineSettings(windows=windows)
     return machine_module.Machine.build(settings, seed)
 
 
@@ -643,20 +644,20 @@ def test_an_integral_seed_of_another_type_is_taken_as_its_value():
 
 
 def test_a_seed_outside_the_unsigned_64_bit_range_is_refused():
-    settings = machine_module.MachineSettings()
+    settings = machine_settings.MachineSettings()
     one_past_the_widest_seed = 1 << 64
     with pytest.raises(ValueError, match=r"seed must be in \[0, 2\*\*64\)"):
         machine_module.Machine.build(settings, one_past_the_widest_seed)
 
 
 def test_a_negative_seed_is_refused():
-    settings = machine_module.MachineSettings()
+    settings = machine_settings.MachineSettings()
     with pytest.raises(ValueError, match=r"seed must be in \[0, 2\*\*64\)"):
         machine_module.Machine.build(settings, -1)
 
 
 def test_a_seed_that_is_not_a_number_is_refused():
-    settings = machine_module.MachineSettings()
+    settings = machine_settings.MachineSettings()
     with pytest.raises(ValueError):
         machine_module.Machine.build(settings, "x")
 
@@ -698,14 +699,14 @@ def _resolved_geometry(machine):
     return first.code_geometry
 
 
-def _one_memory_operation_on(card) -> machine_module.MachineSettings:
+def _one_memory_operation_on(card) -> machine_settings.MachineSettings:
     """One timing-only memory operation on the code card given."""
     operation = program_records.Operation(id=1, name="memory", qubits=(0,))
     workload = workload_settings.WorkloadSettings(operations=[operation])
     qpu = qpu_settings.QpuSettings(code=card)
     decoder = decoders.PresetLatencyDecoder(0.0)
     weak_decoder = decoder_settings.DecoderSettings(decoder=decoder)
-    return machine_module.MachineSettings(
+    return machine_settings.MachineSettings(
         workload=workload, qpu=qpu, weak_decoder=weak_decoder
     )
 
@@ -788,7 +789,7 @@ def replayed_run(circuit, measurements, shot):
     inner = decoders.PresetLatencyDecoder(0.028)
     decoder = mwpm.PyMatchingDecoder(inner)
     weak_decoder = decoder_settings.DecoderSettings(decoder=decoder)
-    settings = machine_module.MachineSettings(
+    settings = machine_settings.MachineSettings(
         workload=workload, qpu=qpu, weak_decoder=weak_decoder
     )
     machine = machine_module.Machine.build(settings, shot)
@@ -1073,7 +1074,7 @@ def twelve_rounds_with_packing_bound(bound):
     links = declared_run.declared_profile()
     qpu = declared_run.declared_qpu()
     frame = declared_run.declared_frame()
-    return machine_module.MachineSettings(
+    return machine_settings.MachineSettings(
         workload=workload,
         qpu=qpu,
         weak_decoder=weak_decoder,
@@ -1202,7 +1203,7 @@ def strong_primary_settings(escalation):
     links = declared_run.declared_profile()
     controller = declared_run.declared_controller()
     frame = declared_run.declared_frame()
-    return machine_module.MachineSettings(
+    return machine_settings.MachineSettings(
         workload=workload,
         qpu=qpu,
         strong_decoder=strong_decoder,

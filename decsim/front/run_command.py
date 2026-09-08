@@ -18,6 +18,7 @@ import decsim.front.experiment as experiment
 import decsim.front.measure as measure
 import decsim.front.run_folder as run_folder
 import decsim.machine as machine_module
+import decsim.settings as machine_settings
 
 
 def run_one_shot(
@@ -105,7 +106,7 @@ def _parsed(argv: list) -> _Arguments:
     )
 
 
-def _first_point_settings(config) -> machine_module.MachineSettings:
+def _first_point_settings(config) -> machine_settings.MachineSettings:
     """The machine at the first point of the first sweep block."""
     block = config.sweep[0]
     return config.point_settings(
@@ -116,10 +117,10 @@ def _first_point_settings(config) -> machine_module.MachineSettings:
 
 
 def _with_observation(
-    settings: machine_module.MachineSettings,
+    settings: machine_settings.MachineSettings,
     log: Optional[str],
     trace: bool,
-) -> machine_module.MachineSettings:
+) -> machine_settings.MachineSettings:
     """The flags this run gave, over the yaml's observation section."""
     changes = {}
     if log is not None:
@@ -134,7 +135,7 @@ def _with_observation(
 
 def _write_files(
     machine: machine_module.Machine,
-    settings: machine_module.MachineSettings,
+    settings: machine_settings.MachineSettings,
     run_dir: Optional[Path],
     seed: int,
 ) -> None:
@@ -168,7 +169,7 @@ def _trace_path(observation, run_dir: Path, label: str) -> Path:
 
 def _result_lines(
     config,
-    settings: machine_module.MachineSettings,
+    settings: machine_settings.MachineSettings,
     seed: int,
     result: machine_module.RunResult,
     run_dir: Optional[Path],

@@ -30,6 +30,7 @@ import decsim.qpu.stim_device as stim_device
 import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
 import decsim.records.windows as window_records
+import decsim.settings as machine_settings
 
 MEGAHERTZ = 250.0
 CYCLE_MICROSECONDS = 1 / MEGAHERTZ
@@ -155,7 +156,7 @@ def memory_machine(decoder, circuit):
     device = stim_device.StimDevice()
     qpu = qpu_settings.QpuSettings(distance=MEMORY_DISTANCE, device=device)
     weak_decoder = decoder_settings.DecoderSettings(decoder=decoder)
-    settings = machine_module.MachineSettings(
+    settings = machine_settings.MachineSettings(
         workload=workload, qpu=qpu, weak_decoder=weak_decoder
     )
     return machine_module.Machine.build(settings, 3)

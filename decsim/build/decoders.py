@@ -38,6 +38,9 @@ class DecoderPool:
     # pool name -> whether that tier's unit is given a copy of the
     # rounds it decodes (weak_decoder.input, strong_decoder.input)
     copies_input_by_pool: dict
+    # pool name -> whether a finished decode holds its unit until the
+    # window side reads the result (<tier>.result_blocks_unit)
+    blocks_unit_by_pool: dict
 
 
 def build_decoder_unit(
@@ -111,6 +114,7 @@ def build_decoder_pool(
         unit_pools = {"default": active_settings.units}
     decoder_memory = _decoder_memory(settings, policy)
     copies_input_by_pool = _copies_input_by_pool(settings, policy, unit_pools)
+    blocks_unit_by_pool = _blocks_unit_by_pool(settings, policy, unit_pools)
     return DecoderPool(
         router=router,
         active=active,
@@ -118,7 +122,31 @@ def build_decoder_pool(
         decoder_memory=decoder_memory,
         scheduler=scheduler,
         copies_input_by_pool=copies_input_by_pool,
+        blocks_unit_by_pool=blocks_unit_by_pool,
     )
+
+
+def _blocks_unit_by_pool(
+    settings: machine_settings.MachineSettings, policy, unit_pools: dict
+) -> dict:
+    """Every pool's blocking rule, from the tier that decodes the windows.
+
+    A strong re-decode holds its result in the unit that produced it
+    until the window side takes it in any case (decoder_unit.py
+    hold_output), so the row is read on the primary tier, and
+    <tier>.result_blocks_unit names it there.
+    """
+    tier = policy.primary_tier.value
+    tier_settings = getattr(settings, f"{tier}_decoder")
+    blocks_unit = tables.row(
+        decoder_settings.DECODER_RESULT_BLOCKING,
+        f"{tier}_decoder.result_blocks_unit",
+        tier_settings.result_blocks_unit,
+    )
+    blocks_by_pool = {}
+    for pool in unit_pools:
+        blocks_by_pool[pool] = blocks_unit
+    return blocks_by_pool
 
 
 def _copies_input_by_pool(

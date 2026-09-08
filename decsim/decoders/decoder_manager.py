@@ -54,12 +54,13 @@ class DecoderManager:
         escalation_policy,
         dispatch_ticks: int = 0,
         copies_input_by_pool: Optional[dict] = None,
+        blocks_unit_by_pool: Optional[dict] = None,
     ):
         if unit_pools is None:
             unit_pools = {"default": num_units}
         self.engine = engine
         pool = decoder_pool_module.DecoderPool(
-            router, unit_pools, decoder_memory
+            router, unit_pools, decoder_memory, blocks_unit_by_pool
         )
         self.strong_requests = strong_requests_module.StrongRequests()
         self.queue = decode_queue.WaitingJobs(
@@ -302,6 +303,21 @@ class DecoderManager:
     ) -> None:
         """A forced-class solve whose window is answered by the other one."""
         self.outcomes.close_companion_request(job, result)
+        self.read_result(job)
+
+    def read_result(self, job: decoding_records.DecodeJob) -> None:
+        """The window side has the result in hand: a held unit is free now.
+
+        <tier>.result_blocks_unit true is Riverlane's polled status
+        register, where the decoder holds its output until the reader
+        takes it (2410.05202 lines 1256-1259); a tier that does not
+        block gave the unit back at the decode's end and has nothing to
+        give back here.
+        """
+        if not self.pool.blocks_unit(job):
+            return
+        self.service.free(job)
+        self.dispatcher.run()
 
     def cancel_strong(self, key: tuple) -> None:
         """Cancel an unneeded strong re-decode wherever it is.
@@ -415,9 +431,15 @@ class DecoderManager:
     def _window_decode_done(
         self, job: decoding_records.DecodeJob, result
     ) -> None:
-        """The decode ended; its result goes to the destination that asked."""
+        """The decode ended; its result goes to the destination that asked.
+
+        The unit's compute goes back at this end unless the tier blocks
+        on the result, in which case it goes back when the window side
+        has read it (<tier>.result_blocks_unit).
+        """
         job.completed = True
-        self.service.free(job)
+        if not self.pool.blocks_unit(job):
+            self.service.free(job)
         self.outcomes.deliver_weak(job, result)
         self.service.release_input(job)
         self.dispatcher.run()

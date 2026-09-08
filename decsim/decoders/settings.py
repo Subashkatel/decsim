@@ -71,6 +71,15 @@ DECODER_INPUTS = {"copy": True, "in_place": False}
 # single writer, so in_place is refused there by name.
 DECODER_BOUNDARY_FOLDS = {"copy": True, "in_place": False}
 
+# <tier>.result_blocks_unit says when a unit's compute goes back to its
+# pool: false at the decode's end, which is Chen's frame manager taking
+# the correction without blocking the decoder (2605.30765 lines
+# 1618-1620), or true at the window's commit, which is Riverlane's
+# polled status register: the decoder holds its output until the reader
+# takes it (2410.05202 lines 1256-1259). The row is read on the tier
+# that decodes the plan's windows.
+DECODER_RESULT_BLOCKING = {False: False, True: True}
+
 
 @dataclasses.dataclass(frozen=True)
 class DecoderSettings:
@@ -89,6 +98,9 @@ class DecoderSettings:
     store keeps them. boundary_fold names a row of
     DECODER_BOUNDARY_FOLDS: whether the window's boundary mask is XORed
     into a duplicate of the landed input or into the unit's own memory.
+    result_blocks_unit names a row of DECODER_RESULT_BLOCKING: whether
+    the unit's compute goes back to its pool at the decode's end or at
+    the commit, where the window side has the result in hand.
     kind None is no decoder at all, right for a run that plans no
     windows. A Python-built decoder is routed as it is, with no engine
     stages around it.
@@ -98,6 +110,7 @@ class DecoderSettings:
     units: int = 1
     input: str = "copy"
     boundary_fold: str = "copy"
+    result_blocks_unit: bool = False
     unit_memory_rounds: Optional[int] = None
     fetch_cycles_per_round: int = 1
     release_cycles_per_job: int = 1
@@ -119,11 +132,13 @@ class DecoderSettings:
             )
         input_kind = section.get("input", "copy")
         boundary_fold = section.get("boundary_fold", "copy")
+        result_blocks_unit = section.get("result_blocks_unit", False)
         return cls(
             kind=section["kind"],
             units=section["units"],
             input=input_kind,
             boundary_fold=boundary_fold,
+            result_blocks_unit=result_blocks_unit,
             unit_memory_rounds=unit_memory_rounds,
             fetch_cycles_per_round=engine["fetch_cycles_per_round"],
             release_cycles_per_job=engine["release_cycles_per_job"],

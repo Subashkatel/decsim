@@ -346,6 +346,24 @@ weak_decoder:                      # the lightweight tier: fast, higher LER
                                    # when the tier reads its input in place.
                                    # Only the tier that decodes the plan's
                                    # windows folds a boundary
+  result_blocks_unit: false        # false | true: when a finished decode gives
+                                   # its unit's compute back. false gives it
+                                   # back at the decode's end, because the frame
+                                   # manager takes the correction without
+                                   # blocking the decoder (Chen 2605.30765 lines
+                                   # 1618-1620). true holds the unit until the
+                                   # window commits, which is a decoder whose
+                                   # output sits in a status register until the
+                                   # reader polls it (Riverlane 2410.05202 lines
+                                   # 1256-1259); the unit is then busy for the
+                                   # output hop and the frame write too. Read on
+                                   # the tier that decodes the plan's windows: a
+                                   # strong re-decode's result waits in its unit
+                                   # until the window side takes it in any case.
+                                   # A confidence that forces two class solves
+                                   # per window needs a unit per forced class
+                                   # under true, because the join reads neither
+                                   # solve until both have finished
   unit_memory_rounds: null         # input SRAM rounds PER UNIT; null = unbounded.
                                    # Each unit holds two windows when they fit
                                    # (transfer overlaps compute); a unit sized

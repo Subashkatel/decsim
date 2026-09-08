@@ -180,3 +180,14 @@ def _is_per_distance_text(value) -> bool:
         return False
     digits = value[:-1]
     return digits.isdigit()
+
+
+# workload.kind names one of these rows: a row turns its settings and
+# the run's code into the operations and, when the row fixes them, the
+# rounds policy.
+WORKLOADS = {
+    "memory_circuit": memory_circuit_operations,
+    "circuit_list": circuit_list_operations,
+    "surgery_ir": surgery_ir_operations,
+    "qlx": qlx_operations,
+}

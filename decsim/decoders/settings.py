@@ -16,10 +16,38 @@ from collections.abc import Mapping
 from typing import Any, Optional, Union
 
 import decsim.config as config
+import decsim.decoders.belief_matching.decoder as belief_matching
+import decsim.decoders.belief_propagation_osd.decoder as belief_propagation_osd
 import decsim.decoders.decoder_memory as decoder_memory_module
+import decsim.decoders.tesseract.decoder as tesseract
+import decsim.decoders.union_find.decoder as union_find
 import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.escalation.threshold_sources as threshold_sources
 import decsim.ports as ports
+from decsim.decoders.minimum_weight_perfect_matching import (
+    decoder as minimum_weight_perfect_matching,
+)
+from decsim.decoders.relay_belief_propagation import (
+    decoder as relay_belief_propagation,
+)
+
+# weak_decoder.kind and strong_decoder.kind name one of these rows. A
+# named row decodes every window for real and is charged its measured
+# wall clock; a number instead of a name is a fixed core latency in
+# microseconds on the MWPM path (decsim/build/decoders.py). Every row is
+# one class on the Decoder port (decsim/decoders/decoder.py); sinter's
+# BUILT_IN_DECODERS is the shape.
+DECODERS = {
+    "pymatching": minimum_weight_perfect_matching.PyMatchingDecoder,
+    "unweighted_pymatching": (
+        minimum_weight_perfect_matching.UnweightedPyMatchingDecoder
+    ),
+    "belief_matching": belief_matching.BeliefMatchingDecoder,
+    "union_find": union_find.UnionFindDecoder,
+    "tesseract": tesseract.TesseractDecoder,
+    "relay_bp": relay_belief_propagation.RelayBeliefPropagationDecoder,
+    "bposd": belief_propagation_osd.BeliefPropagationOsdDecoder,
+}
 
 THRESHOLD_SOURCES = ("fixed", "table", "online")
 # How many of the strong region's buffer regions the restarted weak

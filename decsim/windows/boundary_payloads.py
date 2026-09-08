@@ -50,13 +50,6 @@ class SparseSeamList:
         return seam.flip_count * index_width
 
 
-# windows.boundary_payload names one of these rows.
-BOUNDARY_PAYLOADS = {
-    "dense_seam_mask": DenseSeamMask,
-    "sparse_seam_list": SparseSeamList,
-}
-
-
 def _index_width(detector_count: int) -> int:
     """The bits an index into the seam layer takes."""
     if detector_count <= 1:

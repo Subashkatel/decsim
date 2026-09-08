@@ -35,9 +35,8 @@ from typing import Any, Optional
 
 import stim
 
-import decsim.confidence.cluster as cluster
-import decsim.confidence.complementary as complementary
 import decsim.confidence.gap_join as gap_join_module
+import decsim.confidence.signals as confidence_signals
 import decsim.config as config
 import decsim.controller.controller as controller_module
 import decsim.controller.feedback_streams as feedback_streams
@@ -49,8 +48,6 @@ import decsim.controller.round_assembly as round_assembly
 import decsim.controller.round_transmission as round_transmission
 import decsim.controller.round_writes as round_writes
 import decsim.controller.settings as controller_settings
-import decsim.decoders.belief_matching.decoder as belief_matching
-import decsim.decoders.belief_propagation_osd.decoder as belief_propagation_osd
 import decsim.decoders.decoder_manager as decoder_manager_module
 import decsim.decoders.decoder_memory as decoder_memory_module
 import decsim.decoders.decoder_output as decoder_output_module
@@ -58,9 +55,6 @@ import decsim.decoders.decoders as decoders
 import decsim.decoders.schedulers as schedulers
 import decsim.decoders.settings as decoder_settings
 import decsim.decoders.staged_decoder as staged_decoder
-import decsim.decoders.tesseract.decoder as tesseract
-import decsim.decoders.union_find.decoder as union_find
-import decsim.decoders.verify_windows as verify_windows
 import decsim.engine as engine_module
 import decsim.escalation.policies as escalation_policies
 import decsim.escalation.strong_redecode as strong_redecode_module
@@ -84,8 +78,6 @@ import decsim.qpu.cycle_clock as cycle_clock
 import decsim.qpu.magic_state_factories as magic_state_factories
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
-import decsim.qpu.stim_device as stim_device
-import decsim.qpu.syndrome_devices as syndrome_devices
 import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
 import decsim.records.seeds as seed_records
@@ -96,7 +88,6 @@ import decsim.syndrome_buffer.round_output as round_output
 import decsim.syndrome_buffer.round_store as round_store_module
 import decsim.syndrome_buffer.settings as round_store_settings
 import decsim.syndrome_buffer.strong_round_writer as strong_round_writer_module
-import decsim.windows.boundary_payloads as boundary_payloads
 import decsim.windows.built_window_models as built_window_models
 import decsim.windows.committed_rounds as committed_rounds
 import decsim.windows.decode_requests as decode_requests
@@ -113,9 +104,6 @@ import decsim.windows.windowing_schemes as windowing_schemes
 from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
 )
-from decsim.decoders.relay_belief_propagation import (
-    decoder as relay_belief_propagation,
-)
 
 # ------------------------------------------------------------ the tables
 #
@@ -123,40 +111,6 @@ from decsim.decoders.relay_belief_propagation import (
 # class or builder that fills the part's port. The machine looks a kind
 # up once and refuses one that is not a row, naming the rows.
 
-SYNDROME_SOURCES = {
-    "stim_device": stim_device.StimDevice,
-    "timing_only": syndrome_devices.TimingOnlyDevice,
-    "syndrome_bits": syndrome_devices.SyndromeBitDevice,
-    "recorded_stim": stim_device.RecordedStimDevice,
-}
-# A named row decodes every window for real and is charged its measured
-# wall clock; a number instead of a name is a fixed core latency in
-# microseconds on the MWPM path (_algorithm). Every row is one class on
-# the Decoder port (decsim/decoders/decoder.py); sinter's
-# BUILT_IN_DECODERS is the shape.
-DECODERS = {
-    "pymatching": minimum_weight_perfect_matching.PyMatchingDecoder,
-    "unweighted_pymatching": (
-        minimum_weight_perfect_matching.UnweightedPyMatchingDecoder
-    ),
-    "belief_matching": belief_matching.BeliefMatchingDecoder,
-    "union_find": union_find.UnionFindDecoder,
-    "tesseract": tesseract.TesseractDecoder,
-    "relay_bp": relay_belief_propagation.RelayBeliefPropagationDecoder,
-    "bposd": belief_propagation_osd.BeliefPropagationOsdDecoder,
-}
-# The soft output a switching run's weak decoder reports, named by
-# escalation.confidence. A row says what evidence it needs from the
-# decode and what classes the window must be decoded in; the switching
-# policy expects its source, and the window side asks the weak decoder
-# for exactly those solves.
-CONFIDENCE_SIGNALS = {
-    "complementary_gap": complementary.ComplementaryGap,
-    "cluster_gap": cluster.ClusterGap,
-}
-ROUND_STORES = {
-    "round_store": round_store_module.RoundStore,
-}
 # One row per escalation kind, and the row is the only place the kind's
 # facts are written: which tier decodes the plan's windows
 # (primary_tier) and whether the strong context is retained
@@ -166,34 +120,6 @@ ESCALATIONS = {
     "weak_baseline": escalation_policies.Baseline,
     "strong_only": escalation_policies.StrongOnly,
     "switching": escalation_policies.Switching,
-}
-WINDOWING_SCHEMES = {
-    "sliding": windowing_schemes.SlidingWindowScheme,
-    "parallel": windowing_schemes.ParallelWindowScheme,
-    "sandwich": windowing_schemes.TanSandwichScheme,
-    "naive_online": windowing_schemes.NaiveOnlineScheme,
-}
-IDLE_POLICIES = {
-    "separate_decode_jobs": policies.SeparateDecodeJobs,
-    "ignore": policies.Ignore,
-    "extend_stream": policies.ExtendStream,
-}
-# A workload row turns its settings and the run's code into the
-# operations and, when the row fixes them, the rounds policy.
-WORKLOADS = {
-    "memory_circuit": workload_settings.memory_circuit_operations,
-    "circuit_list": workload_settings.circuit_list_operations,
-    "surgery_ir": workload_settings.surgery_ir_operations,
-    "qlx": workload_settings.qlx_operations,
-}
-MAGIC_STATE_FACTORIES = {
-    "infinite": magic_state_factories.InfiniteFactory,
-    "distillation": magic_state_factories.DistillationFactory,
-    "multi_level": magic_state_factories.MultiLevelDistillationFactory,
-}
-WINDOW_CHECKS = {
-    "none": None,
-    "tesseract": verify_windows.TesseractCheckedDecoder,
 }
 SECTIONS = (
     "clocks",
@@ -663,7 +589,7 @@ def build_decoder_unit(settings: MachineSettings, tier: str, policy):
             algorithm, tier_settings.kind, tier, settings.escalation
         )
     check = _row(
-        WINDOW_CHECKS,
+        observe_settings.WINDOW_CHECKS,
         "observation.check_windows_with",
         settings.observation.check_windows_with,
     )
@@ -843,7 +769,7 @@ def _plan(settings: MachineSettings, escalation_policy) -> _Plan:
     window_interaction = settings.windows.window_interaction
     if window_interaction is None:
         payload_row = _row(
-            boundary_payloads.BOUNDARY_PAYLOADS,
+            window_settings.BOUNDARY_PAYLOADS,
             "windows.boundary_payload",
             settings.windows.boundary_payload,
         )
@@ -933,7 +859,7 @@ def _operations(settings: workload_settings.WorkloadSettings, code) -> tuple:
     The run never mutates the caller's operations; an operation without
     its own feedback boundary mode takes the workload's.
     """
-    row = _row(WORKLOADS, "workload.kind", settings.kind)
+    row = _row(workload_settings.WORKLOADS, "workload.kind", settings.kind)
     source_operations, fixed_rounds_policy = row(settings, code)
     rounds_policy = settings.rounds_policy
     if rounds_policy is None:
@@ -1007,7 +933,7 @@ def _scheme(
     """
     if windows.scheme is not None:
         return windows.scheme
-    row = _row(WINDOWING_SCHEMES, "windows.kind", windows.kind)
+    row = _row(window_settings.WINDOWING_SCHEMES, "windows.kind", windows.kind)
     if escalation.kind != "switching":
         return row()
     if windows.kind != "sliding":
@@ -1040,7 +966,7 @@ def _boundary_policy(
 def _idle_policy(settings: controller_settings.IdlePolicySettings):
     if settings.policy is not None:
         return settings.policy
-    row = _row(IDLE_POLICIES, "idle_policy", settings.kind)
+    row = _row(controller_settings.IDLE_POLICIES, "idle_policy", settings.kind)
     return row()
 
 
@@ -1048,7 +974,7 @@ def _syndrome_source(settings: qpu_settings.QpuSettings):
     """The device of the qpu kind, or the Python-built one."""
     if settings.device is not None:
         return settings.device
-    row = _row(SYNDROME_SOURCES, "qpu.kind", settings.kind)
+    row = _row(qpu_settings.SYNDROME_SOURCES, "qpu.kind", settings.kind)
     return row(**settings.arguments)
 
 
@@ -1163,7 +1089,7 @@ def _decoder_memory(
 def _algorithm(kind, tier: str):
     """A tier's algorithm: a table row, or a fixed latency on MWPM."""
     if isinstance(kind, str):
-        row = _row(DECODERS, f"{tier}_decoder.kind", kind)
+        row = _row(decoder_settings.DECODERS, f"{tier}_decoder.kind", kind)
         return row(latency_model=None)
     latency_model = decoders.PresetLatencyDecoder(kind)
     return minimum_weight_perfect_matching.PyMatchingDecoder(latency_model)
@@ -1214,7 +1140,9 @@ def _evidence_order(member) -> str:
 def _confidence_signal(escalation: decoder_settings.EscalationSettings):
     """The signal row a switching run's weak decoder reports and decides on."""
     row = _row(
-        CONFIDENCE_SIGNALS, "escalation.confidence", escalation.confidence
+        confidence_signals.CONFIDENCE_SIGNALS,
+        "escalation.confidence",
+        escalation.confidence,
     )
     return row()
 
@@ -1249,7 +1177,9 @@ def _round_store(
     held_rounds: round_writes.HeldRounds,
 ):
     """Buffer 0; a freed slot retries the rounds held for room."""
-    row = _row(ROUND_STORES, "round_store.kind", settings.kind)
+    row = _row(
+        round_store_module.ROUND_STORES, "round_store.kind", settings.kind
+    )
     return row(settings, on_slot_freed=held_rounds.retry)
 
 
@@ -1259,7 +1189,11 @@ def _strong_round_store(
     held_rounds: round_writes.HeldRounds,
 ):
     """The room-side store, only when a tier reads from the room side."""
-    row = _row(ROUND_STORES, "strong_round_store.kind", settings.kind)
+    row = _row(
+        round_store_module.ROUND_STORES,
+        "strong_round_store.kind",
+        settings.kind,
+    )
     uses_strong_store = (
         escalation_policy.requires_strong_context
         or escalation_policy.primary_tier is window_records.DecoderTier.STRONG
@@ -1602,7 +1536,11 @@ def _factory(
     A distillation row decodes its corrections on the run's decoder
     manager; the multi-level row paces its levels on the run's round.
     """
-    row = _row(MAGIC_STATE_FACTORIES, "magic_state_factory.kind", settings.kind)
+    row = _row(
+        qpu_settings.MAGIC_STATE_FACTORIES,
+        "magic_state_factory.kind",
+        settings.kind,
+    )
     if row is magic_state_factories.InfiniteFactory:
         return row(engine)
     if row is magic_state_factories.MultiLevelDistillationFactory:

@@ -64,7 +64,7 @@ def tier_rows() -> str:
     Read from the table, so a row added to it breaks no test here:
     that is what the plug-in page promises a new decoder costs.
     """
-    rows = sorted(machine_module.DECODERS)
+    rows = sorted(decoder_settings.DECODERS)
     return re.escape(repr(rows))
 
 
@@ -139,12 +139,12 @@ def test_a_new_decoder_is_one_class_and_one_table_row():
     )
     weak_decoder = dataclasses.replace(settings.weak_decoder, kind="fake")
     settings = dataclasses.replace(settings, weak_decoder=weak_decoder)
-    machine_module.DECODERS["fake"] = FakeWeakDecoder
+    decoder_settings.DECODERS["fake"] = FakeWeakDecoder
     try:
         machine = machine_module.Machine.build(settings, 0)
         result = machine.run()
     finally:
-        del machine_module.DECODERS["fake"]
+        del decoder_settings.DECODERS["fake"]
     assert result.terminal_status == "complete"
     assert type(machine.active_decoder.decoder) is FakeWeakDecoder
     decode_lines = [
@@ -416,7 +416,7 @@ def test_the_cluster_gap_is_not_a_tier_kind_under_any_escalation(
 ):
     """The cluster gap is a confidence row, not a decoder row.
 
-    escalation.confidence names it (machine.py CONFIDENCE_SIGNALS) and
+    escalation.confidence names it (confidence/signals.py) and
     it reads the growth of whatever weak decoder the tier table names,
     so it is not a kind of that table under any escalation kind.
     """
@@ -474,12 +474,12 @@ def test_a_new_round_store_is_one_class_and_one_table_row():
     )
     round_store = dataclasses.replace(settings.round_store, kind="counting")
     settings = dataclasses.replace(settings, round_store=round_store)
-    machine_module.ROUND_STORES["counting"] = CountingRoundStore
+    round_store_module.ROUND_STORES["counting"] = CountingRoundStore
     try:
         machine = machine_module.Machine.build(settings, 0)
         result = machine.run()
     finally:
-        del machine_module.ROUND_STORES["counting"]
+        del round_store_module.ROUND_STORES["counting"]
     assert result.terminal_status == "complete"
     assert type(machine.round_store) is CountingRoundStore
     fired = [

@@ -310,3 +310,11 @@ def _range_text(low: int, high: int) -> str:
     if low == high:
         return f"{low}"
     return f"{low}..{high}"
+
+
+# round_store.kind and strong_round_store.kind name one of these rows.
+# The table sits beside the class rather than in the package's
+# settings.py, which this module imports for RoundStoreSettings.
+ROUND_STORES = {
+    "round_store": RoundStore,
+}

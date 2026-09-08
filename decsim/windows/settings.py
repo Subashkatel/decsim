@@ -5,18 +5,36 @@ from collections.abc import Mapping
 from typing import Optional
 
 import decsim.ports as ports
+import decsim.windows.boundary_payloads as boundary_payloads
 import decsim.windows.window_interactions as window_interactions
 import decsim.windows.window_manager as window_manager
+import decsim.windows.windowing_schemes as windowing_schemes
+
+# windows.kind names one of these rows: how the stream is cut into
+# windows.
+WINDOWING_SCHEMES = {
+    "sliding": windowing_schemes.SlidingWindowScheme,
+    "parallel": windowing_schemes.ParallelWindowScheme,
+    "sandwich": windowing_schemes.TanSandwichScheme,
+    "naive_online": windowing_schemes.NaiveOnlineScheme,
+}
+# windows.boundary_payload names one of these rows: how the hand-off
+# between two windows is written on decoder_to_decoder.
+BOUNDARY_PAYLOADS = {
+    "dense_seam_mask": boundary_payloads.DenseSeamMask,
+    "sparse_seam_list": boundary_payloads.SparseSeamList,
+}
 
 
 @dataclasses.dataclass(frozen=True)
 class WindowSettings:
     """The yaml's `windows` section.
 
-    Table rows (decsim/machine.py): sliding, parallel, sandwich,
+    Table rows (WINDOWING_SCHEMES, above): sliding, parallel,
+    sandwich,
     naive_online. commit_rounds and buffer_rounds size every window; None
     is the code distance. boundary_payload names a row of
-    BOUNDARY_PAYLOADS (decsim/windows/boundary_payloads.py): how the
+    BOUNDARY_PAYLOADS (above): how the
     hand-off between windows is written on decoder_to_decoder. A
     Python-built scheme, boundary policy or window interaction is used as
     it is; the root's defaults are the sliding scheme, Eager shipping and

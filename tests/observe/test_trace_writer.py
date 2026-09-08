@@ -14,6 +14,7 @@ import json
 import pytest
 
 import decsim.decoders.decoders as decoders
+import decsim.decoders.settings as decoder_settings
 import decsim.machine as machine_module
 import tests.observe.gate_point as gate_point
 
@@ -483,12 +484,12 @@ def test_a_write_with_no_prediction_is_traced_without_observables(tmp_path):
     point = _settings(trace_path)
     weak_decoder = dataclasses.replace(point.weak_decoder, kind="timing_only")
     point = dataclasses.replace(point, weak_decoder=weak_decoder)
-    machine_module.DECODERS["timing_only"] = _timing_only_row
+    decoder_settings.DECODERS["timing_only"] = _timing_only_row
     try:
         machine = machine_module.Machine.build(point, SEED)
         result = machine.run()
     finally:
-        del machine_module.DECODERS["timing_only"]
+        del decoder_settings.DECODERS["timing_only"]
     machine.observation.trace_writer.write(str(trace_path))
     text = trace_path.read_text()
     document = json.loads(text)

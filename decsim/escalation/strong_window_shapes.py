@@ -11,7 +11,9 @@ window) and is held until that window's weak commit or, at the
 operation's end, until its last round is stored. A shape builds the
 strong job on the window components (planner, tracker, retention,
 builder) and hands it to the StrongRedecode, which submits it
-(strong_redecode.py).
+(strong_redecode.py); a row that cannot build its job at the escalation
+declares what releases it instead (pending_strong_windows.py), and the
+redecode holds the assignment until those conditions fire.
 
 Seam modelling of the forward window: both faces are decoded as
 two-sided windows, one buffer of raw context per face, exact
@@ -42,14 +44,13 @@ the number of components a re-slice reaches.
 """
 
 import dataclasses
-import enum
 from typing import Any, Optional, Protocol, runtime_checkable
 
 import decsim.decoders.decode_queue as decode_queue_module
+import decsim.escalation.pending_strong_windows as pending_strong_windows
 import decsim.escalation.strong_regions as strong_regions
 import decsim.observe.trace_source as trace_source
 import decsim.records.decoding as decoding_records
-import decsim.records.identity as identity_records
 import decsim.records.windows as window_records
 
 
@@ -57,21 +58,22 @@ import decsim.records.windows as window_records
 class StrongAssignment:
     """A strong window assigned to an escalated weak window.
 
-    job is the strong job when the shape builds it now (the context
-    window); None when the shape holds it for its far boundary or its
-    terminal data (the forward window).
+    job is the strong job when the row builds it now (the context
+    window); None when the row holds it until the conditions it declares
+    fire (the forward window). held_plan is then the row's own record of
+    what it planned, handed back to the row when the redecode asks for
+    the job, and round_count is the strong window's rounds, which the
+    views name while the job is held. folded_boundaries names the
+    neighbour windows whose committed boundary conditions the row folds
+    into the job's input, Bombin et al. 2303.04846's input adaptation
+    (lines 775-788); both shipped rows fold none and read raw rounds.
     """
 
     request_key: window_records.DecoderRequestKey
     job: Optional[decoding_records.DecodeJob]
-
-
-@dataclasses.dataclass(frozen=True)
-class DeferredStrongJob:
-    """A held strong job its condition released, with its selection's tick."""
-
-    job: decoding_records.DecodeJob
-    selection_arrival_ticks: int
+    held_plan: Any = None
+    round_count: int = 0
+    folded_boundaries: tuple = ()
 
 
 @runtime_checkable
@@ -79,7 +81,11 @@ class StrongWindowShape(Protocol):
     """How the strong tier's window is laid out, as the redecode sees it.
 
     Table rows: two_sided_context and forward (STRONG_WINDOW_SHAPES,
-    below). absorbs_weak_windows is the row's own declaration that its
+    below). A row that cannot build its job at the escalation returns an
+    assignment with no job and declares what releases it
+    (release_conditions), and the redecode asks held_job for the job when
+    those conditions fire; the row never learns which hook rang.
+    absorbs_weak_windows is the row's own declaration that its
     strong region replaces the weak windows it covers, so the planner
     claims the rounds a restart would read and the weak chain keeps
     committing; a reader of the run's shape asks the row rather than a
@@ -96,26 +102,15 @@ class StrongWindowShape(Protocol):
     def plan(self, weak_job: decoding_records.DecodeJob) -> StrongAssignment:
         """Assign the strong window; build its job now or hold it."""
 
-    def note_selection_sent(
-        self, window_key: tuple, selection_arrival_ticks: int
-    ) -> None:
-        """The held window's selection left; its arrival tick is known."""
+    def release_conditions(
+        self, assignment: StrongAssignment
+    ) -> pending_strong_windows.ReleaseConditions:
+        """What must happen before a held job may be built."""
 
-    def take_if_far_boundary_committed(
-        self, window_key: tuple
-    ) -> Optional[DeferredStrongJob]:
-        """The held job whose far boundary this weak commit is, if any."""
-
-    def take_if_terminal_data_stored(
-        self, operation_id
-    ) -> Optional[DeferredStrongJob]:
-        """The held terminal job whose last round is stored, if any."""
-
-    def has_pending(self) -> bool:
-        """Whether a strong window is still held."""
-
-    def pending_work(self) -> tuple:
-        """The held strong windows as (key, phase, rounds), for the views."""
+    def held_job(
+        self, assignment: StrongAssignment
+    ) -> Optional[decoding_records.DecodeJob]:
+        """The held job, once its rounds are there; None while they are not."""
 
 
 class ContextWindow:
@@ -158,8 +153,8 @@ class ContextWindow:
             window_records.DecoderTier.STRONG,
         )
         self.retention.require_context_stored(key, region.context_read_keys)
-        payloads = self.retention.strong_window_input(
-            self.builder, strong_window
+        payloads = strong_job_payloads(
+            self.retention, self.builder, strong_window, FOLDS_NO_BOUNDARY
         )
         payload_round_count = decoding_records.distinct_round_count(payloads)
         job = decoding_records.DecodeJob(
@@ -181,36 +176,26 @@ class ContextWindow:
             gate=self.builder,
         )
         self.retention.hold_strong_input(job)
-        return StrongAssignment(request_key, job)
+        return StrongAssignment(
+            request_key,
+            job,
+            round_count=payload_round_count,
+            folded_boundaries=FOLDS_NO_BOUNDARY,
+        )
 
-    def note_selection_sent(
-        self, window_key: tuple, selection_arrival_ticks: int
-    ) -> None:
-        """Nothing is held; the job left with its selection."""
-        del window_key
-        del selection_arrival_ticks
+    def release_conditions(
+        self, assignment: StrongAssignment
+    ) -> pending_strong_windows.ReleaseConditions:
+        """Nothing is held: the job left with its selection."""
+        del assignment
+        return pending_strong_windows.RELEASED_AT_ONCE
 
-    def take_if_far_boundary_committed(
-        self, window_key: tuple
-    ) -> Optional[DeferredStrongJob]:
-        """Nothing waits for a far boundary."""
-        del window_key
-        return None
-
-    def take_if_terminal_data_stored(
-        self, operation_id
-    ) -> Optional[DeferredStrongJob]:
-        """Nothing waits for terminal data."""
-        del operation_id
-        return None
-
-    def has_pending(self) -> bool:
+    def held_job(
+        self, assignment: StrongAssignment
+    ) -> Optional[decoding_records.DecodeJob]:
         """Nothing is ever held."""
-        return False
-
-    def pending_work(self) -> tuple:
-        """Nothing is ever held."""
-        return ()
+        del assignment
+        return None
 
 
 class ForwardWindow:
@@ -246,7 +231,6 @@ class ForwardWindow:
         self.builder = builder
         self.requester = requester
         self.ledger = ledger
-        self.pending = _PendingWindows()
         self.window_absorbed = trace_source.TraceSource()
 
     # ---- the shape
@@ -257,7 +241,8 @@ class ForwardWindow:
         The strong window absorbs the windows it covers. Its job waits for
         the restart window's weak commit (waiting_far_boundary) or, at the
         operation's end, until every clamped strong window round is
-        stored (waiting_terminal_data).
+        stored (waiting_terminal_data); release_conditions declares which
+        of the two, and the redecode holds the assignment until it fires.
         """
         key = (weak_job.operation_id, weak_job.window_id)
         self._refuse_second_escalation(key)
@@ -267,7 +252,6 @@ class ForwardWindow:
             window_records.DecoderTier.STRONG,
         )
         strong_request_created_ticks = self.engine.now
-        operation_id = key[0]
         resolved_region = self.regions.forward_region(key)
         plan = resolved_region.plan
         restart_key = resolved_region.restart_window_key
@@ -282,18 +266,13 @@ class ForwardWindow:
             resolved_region.context_round_keys,
             resolved_region.restart_read_keys,
         )
-        phase = _Phase.WAITING_FAR_BOUNDARY
-        if restart_key is None:
-            phase = _Phase.WAITING_TERMINAL_DATA
-        held = _PendingWindow(
+        held = _HeldForwardWindow(
             key=key,
             weak_job=weak_job,
             label=weak_job.strong_label,
             resolved_region=resolved_region,
             strong_window=strong_window,
             strong_model=strong_model,
-            selection_arrival_ticks=None,
-            phase=phase,
             strong_request_key=strong_request_key,
             strong_request_created_ticks=strong_request_created_ticks,
         )
@@ -304,7 +283,6 @@ class ForwardWindow:
                 plan.commit_hi,
                 resolved_region.absorbed_window_keys,
             )
-            self.pending.register(held, operation_id, restart_key)
             self.retention.hold_strong_context(
                 key,
                 strong_request_key,
@@ -318,61 +296,64 @@ class ForwardWindow:
             self._log_assignment(held, resolved_region)
             if restart_key is not None:
                 self._restart_weak_chain(restart_key, plan, restart_model)
-            return StrongAssignment(strong_request_key, None)
+            return StrongAssignment(
+                strong_request_key,
+                None,
+                held_plan=held,
+                round_count=strong_window.round_count,
+                folded_boundaries=FOLDS_NO_BOUNDARY,
+            )
         finally:
             if guard is not None:
                 self.retention.release_strong_hold_if_live(guard)
 
-    def note_selection_sent(
-        self, window_key: tuple, selection_arrival_ticks: int
-    ) -> None:
-        """The held window's selection left; its arrival tick is recorded."""
-        held = self.pending.peek_key(window_key)
-        self.pending.update_selection_arrival(held, selection_arrival_ticks)
+    def release_conditions(
+        self, assignment: StrongAssignment
+    ) -> pending_strong_windows.ReleaseConditions:
+        """The restart window's commit, or the operation's stored tail.
 
-    def take_if_far_boundary_committed(
-        self, window_key: tuple
-    ) -> Optional[DeferredStrongJob]:
-        """The job held for this far boundary, built now, if there is one."""
-        held = self.pending.peek_far(window_key)
-        if held is None:
-            return None
-        job = self._build_pending_strong_job(held)
-        self.pending.take_far(window_key, held)
-        return _released(held, job)
-
-    def take_if_terminal_data_stored(
-        self, operation_id
-    ) -> Optional[DeferredStrongJob]:
-        """The operation's terminal job, built now once its tail is stored."""
-        held = self.pending.peek_terminal(operation_id)
-        if held is None:
-            return None
-        stored_through = self.regions.strong_rounds_stored(
-            operation_id
+        A strong window bounded by a later weak window waits for that
+        window to commit; one at the end of the stream has no later
+        window, so it waits for the rounds it reads to be stored
+        (Toshio et al. 2510.25222 lines 1248-1250).
+        """
+        held = assignment.held_plan
+        restart_key = held.resolved_region.restart_window_key
+        if restart_key is None:
+            return pending_strong_windows.ReleaseConditions(
+                stored_data_of_operation=held.key[0],
+                name="terminal_data",
+                released_description="terminal data complete",
+            )
+        return pending_strong_windows.ReleaseConditions(
+            committed_windows=(restart_key,),
+            name="far_boundary",
+            released_description="far-side weak boundary determined",
         )
-        if stored_through < held.resolved_region.plan.context_hi:
-            return None
-        job = self._build_pending_strong_job(held)
-        self.pending.take_terminal(operation_id, held)
-        return _released(held, job)
 
-    def has_pending(self) -> bool:
-        """Whether a strong window is still held for its condition."""
-        return bool(self.pending.by_key)
+    def held_job(
+        self, assignment: StrongAssignment
+    ) -> Optional[decoding_records.DecodeJob]:
+        """The held job, once the rounds it reads are stored.
 
-    def pending_work(self) -> tuple:
-        """The held strong windows without the live windows."""
-        return self.pending.work()
+        A window waiting on a later weak commit reads rounds that were
+        stored long before that commit; a terminal one is released by
+        the stored round itself, so it is the one that can be asked
+        before its tail is there.
+        """
+        held = assignment.held_plan
+        if held.resolved_region.restart_window_key is None:
+            stored_through = self.regions.strong_rounds_stored(held.key[0])
+            if stored_through < held.resolved_region.plan.context_hi:
+                return None
+        return self._build_strong_job(held)
 
     # ---- private: the plan
 
     def _refuse_second_escalation(self, key: tuple) -> None:
-        if self.pending.peek_key(key) is not None:
-            raise RuntimeError(
-                f"duplicate strong escalation for window {key}: one "
-                f"switching event creates exactly one strong job"
-            )
+        # the plan claims the extent in the ledger before it holds
+        # anything, so an escalation of a window already claimed is the
+        # second one, held or committed
         if self.ledger.owns_strong_window(key):
             raise RuntimeError(
                 f"duplicate strong escalation for window {key}: one "
@@ -424,7 +405,7 @@ class ForwardWindow:
 
     def _log_assignment(
         self,
-        held: "_PendingWindow",
+        held: "_HeldForwardWindow",
         resolved_region: strong_regions.ForwardRegion,
     ) -> None:
         plan = resolved_region.plan
@@ -484,8 +465,8 @@ class ForwardWindow:
 
     # ---- private: the held job
 
-    def _build_pending_strong_job(
-        self, held: "_PendingWindow"
+    def _build_strong_job(
+        self, held: "_HeldForwardWindow"
     ) -> decoding_records.DecodeJob:
         """The strong window's job, once both of its boundaries exist.
 
@@ -496,8 +477,11 @@ class ForwardWindow:
         key = held.key
         weak_job = held.weak_job
         strong_window = held.strong_window
-        payloads = self.retention.strong_window_input(
-            self.builder, strong_window
+        payloads = strong_job_payloads(
+            self.retention,
+            self.builder,
+            strong_window,
+            FOLDS_NO_BOUNDARY,
         )
         plan = held.resolved_region.plan
         self.retention.require_rounds_retained(
@@ -534,17 +518,14 @@ STRONG_WINDOW_SHAPES = {
     "forward": ForwardWindow,
 }
 
-
-class _Phase(enum.Enum):
-    """The one readiness condition that releases a held strong job."""
-
-    WAITING_FAR_BOUNDARY = enum.auto()
-    WAITING_TERMINAL_DATA = enum.auto()
+# both shipped rows read raw rounds on both faces and fold no committed
+# neighbour boundary into the strong job's input
+FOLDS_NO_BOUNDARY: tuple = ()
 
 
 @dataclasses.dataclass(frozen=True)
-class _PendingWindow:
-    """Everything kept from the plan until the one strong-job submission."""
+class _HeldForwardWindow:
+    """All the forward row keeps from its plan until it builds the job."""
 
     key: tuple
     weak_job: decoding_records.DecodeJob
@@ -552,136 +533,27 @@ class _PendingWindow:
     resolved_region: strong_regions.ForwardRegion
     strong_window: window_records.Window
     strong_model: object
-    selection_arrival_ticks: Optional[int]
-    phase: _Phase
     strong_request_key: window_records.DecoderRequestKey
     strong_request_created_ticks: int
 
 
-class _PendingWindows:
-    """The held strong windows by window, each in one readiness index.
+def strong_job_payloads(
+    retention, builder, strong_window: window_records.Window, folded_boundaries
+) -> tuple:
+    """The rounds a strong job reads, and the boundaries it folds into them.
 
-    Its invariants (one phase per index, one entry per window, a take
-    that matches its register) are the shape's own and are asserted.
+    Both shipped rows fold no boundary: their faces are raw context, so
+    the input is the stored rounds of the window. A row that pins a face
+    carries its neighbour's committed correction into the input instead
+    (Bombin et al. 2303.04846 lines 775-788), which is the one piece of
+    machinery such a row still needs; the weak side's boundary masking
+    (windows/decode_requests.py) is where it would come from.
     """
-
-    def __init__(self) -> None:
-        self.by_key: dict = {}
-        self.key_by_far_boundary: dict = {}
-        self.key_by_terminal_operation: dict = {}
-
-    def register(
-        self, held: _PendingWindow, operation_id, restart_key: Optional[tuple]
-    ) -> None:
-        """Index the held window by its far boundary, or by its operation."""
-        if restart_key is None:
-            self._register(
-                held,
-                _Phase.WAITING_TERMINAL_DATA,
-                self.key_by_terminal_operation,
-                operation_id,
-            )
-            return
-        self._register(
-            held,
-            _Phase.WAITING_FAR_BOUNDARY,
-            self.key_by_far_boundary,
-            restart_key,
+    if folded_boundaries:
+        raise NotImplementedError(
+            f"the strong job folds the boundaries of {folded_boundaries} "
+            f"into its input: a shape row that pins a face needs the "
+            f"boundary conditions of windows/decode_requests.py on the "
+            f"strong side, which decsim does not build yet"
         )
-
-    def update_selection_arrival(
-        self, expected: _PendingWindow, selection_arrival_ticks: int
-    ) -> _PendingWindow:
-        """Record the selection's expected arrival without moving ownership."""
-        assert self.by_key.get(expected.key) is expected, expected.key
-        assert expected.selection_arrival_ticks is None, expected.key
-        updated = dataclasses.replace(
-            expected, selection_arrival_ticks=selection_arrival_ticks
-        )
-        self.by_key[expected.key] = updated
-        return updated
-
-    def peek_key(self, key: tuple) -> Optional[_PendingWindow]:
-        return self.by_key.get(key)
-
-    def peek_far(self, far_boundary_key: tuple) -> Optional[_PendingWindow]:
-        key = self.key_by_far_boundary.get(far_boundary_key)
-        if key is None:
-            return None
-        return self.by_key[key]
-
-    def peek_terminal(self, operation_id) -> Optional[_PendingWindow]:
-        key = self.key_by_terminal_operation.get(operation_id)
-        if key is None:
-            return None
-        return self.by_key[key]
-
-    def take_far(
-        self, far_boundary_key: tuple, expected: _PendingWindow
-    ) -> None:
-        self._take(
-            expected,
-            _Phase.WAITING_FAR_BOUNDARY,
-            self.key_by_far_boundary,
-            far_boundary_key,
-        )
-
-    def take_terminal(self, operation_id, expected: _PendingWindow) -> None:
-        self._take(
-            expected,
-            _Phase.WAITING_TERMINAL_DATA,
-            self.key_by_terminal_operation,
-            operation_id,
-        )
-
-    def work(self) -> tuple:
-        """The held windows as (key, phase name, rounds), in stable order."""
-        phase_names = {
-            _Phase.WAITING_FAR_BOUNDARY: "waiting_far_boundary",
-            _Phase.WAITING_TERMINAL_DATA: "waiting_terminal_data",
-        }
-        records = []
-        for key, held in self.by_key.items():
-            phase_name = phase_names[held.phase]
-            record = (key, phase_name, held.strong_window.round_count)
-            records.append(record)
-        ordered = sorted(records, key=_work_record_order)
-        return tuple(ordered)
-
-    def _register(
-        self,
-        held: _PendingWindow,
-        expected_phase: _Phase,
-        readiness_index: dict,
-        readiness_key,
-    ) -> None:
-        assert held.phase is expected_phase, held.key
-        assert held.key not in self.by_key, held.key
-        assert readiness_key not in readiness_index, readiness_key
-        self.by_key[held.key] = held
-        readiness_index[readiness_key] = held.key
-
-    def _take(
-        self,
-        expected: _PendingWindow,
-        expected_phase: _Phase,
-        readiness_index: dict,
-        readiness_key,
-    ) -> None:
-        assert expected.phase is expected_phase, expected.key
-        assert self.by_key.get(expected.key) is expected, expected.key
-        assert readiness_index.get(readiness_key) == expected.key, readiness_key
-        del readiness_index[readiness_key]
-        del self.by_key[expected.key]
-
-
-def _released(
-    held: _PendingWindow, job: decoding_records.DecodeJob
-) -> DeferredStrongJob:
-    """The held window's job with its selection's tick."""
-    assert held.selection_arrival_ticks is not None, held.key
-    return DeferredStrongJob(job, held.selection_arrival_ticks)
-
-
-def _work_record_order(record: tuple) -> bytes:
-    return identity_records.stable_identity_order_key(record[0])
+    return retention.strong_window_input(builder, strong_window)

@@ -8,13 +8,17 @@ for it. The submission is the DecodeQueue port's enqueue with the
 committer's return path (SimPy's callback on the event).
 """
 
+import pytest
+
 import decsim.engine as engine_module
+import decsim.escalation.pending_strong_windows as pending_module
 import decsim.escalation.strong_redecode as strong_redecode_module
 import decsim.escalation.strong_window_shapes as shapes
 import decsim.records.decoding as decoding_records
 import decsim.records.windows as window_records
 
 WINDOW_KEY = (1, 2)
+FAR_BOUNDARY_KEY = (1, 4)
 
 
 def _weak_job() -> decoding_records.DecodeJob:
@@ -41,13 +45,15 @@ def _strong_job(sequence: int) -> decoding_records.DecodeJob:
 
 
 class _Shape:
-    """Assigns one strong job, built now or held for its far boundary."""
+    """Assigns one strong job, built now or held for the commits it names."""
 
-    def __init__(self, job, is_held: bool) -> None:
+    def __init__(
+        self, job, is_held: bool, waits_on=(FAR_BOUNDARY_KEY,)
+    ) -> None:
         self.job = job
         self.is_held = is_held
+        self.waits_on = waits_on
         self.planned = []
-        self.selection_ticks = []
 
     def plan(self, weak_job) -> shapes.StrongAssignment:
         self.planned.append(weak_job)
@@ -55,19 +61,18 @@ class _Shape:
             return shapes.StrongAssignment(self.job.request_key, None)
         return shapes.StrongAssignment(self.job.request_key, self.job)
 
-    def note_selection_sent(self, window_key, selection_arrival_ticks):
-        self.selection_ticks.append((window_key, selection_arrival_ticks))
+    def release_conditions(self, assignment):
+        del assignment
+        return pending_module.ReleaseConditions(
+            committed_windows=self.waits_on,
+            name="far_boundary",
+            released_description="far-side weak boundary determined",
+        )
 
-    def take_if_far_boundary_committed(self, window_key):
-        del window_key
-        if not self.is_held:
-            return None
+    def held_job(self, assignment):
+        del assignment
         self.is_held = False
-        return shapes.DeferredStrongJob(self.job, self.selection_ticks[0][1])
-
-    def take_if_terminal_data_stored(self, operation_id):
-        del operation_id
-        return None
+        return self.job
 
 
 class _DecoderOutput:
@@ -148,18 +153,21 @@ def test_a_job_built_now_is_queued_behind_its_selection():
     assert queue.calls[1] == ("await", WINDOW_KEY, strong_job.request_key)
 
 
-def test_a_held_job_leaves_at_its_far_boundary_commit():
+def test_a_held_job_leaves_when_the_window_it_named_commits():
     strong_job = _strong_job(5)
     shape = _Shape(strong_job, is_held=True)
     redecode, output, strong_output, queue, _done = _redecode(shape)
     weak_job = _weak_job()
     redecode.escalate(weak_job)
-    assert shape.selection_ticks == [(WINDOW_KEY, 30)]
+    assert redecode.pending_work() == ((WINDOW_KEY, "waiting_far_boundary", 0),)
     assert _call_names(queue) == ["await"]
-    redecode.submit_if_far_boundary_committed((1, 4))
+    redecode.submit_if_commit_releases((1, 3))
+    assert _call_names(queue) == ["await"]
+    redecode.submit_if_commit_releases(FAR_BOUNDARY_KEY)
     assert _call_names(queue) == ["await", "enqueue"]
     assert queue.calls[1][1] is strong_job
     assert not shape.is_held
+    assert not redecode.has_pending()
 
 
 def test_a_sibling_started_with_the_weak_job_is_selected_as_it_is():
@@ -195,3 +203,34 @@ def test_a_strong_input_landed_before_its_selection_waits_for_it():
     selection_delivered()
     assert landings == ["landed"]
     assert queue.calls[-1] == ("accept", WINDOW_KEY, strong_job.request_key)
+
+
+def test_a_row_that_names_two_windows_waits_for_both():
+    """The general condition: a row waits on every window it named.
+
+    A seam-pinned window is bounded on both faces (note 14 section 1.4),
+    and a Skoric layer-B window on its two adjacent layer-A commits
+    (2209.08552 lines 419-421); the redecode counts the commits down.
+    """
+    strong_job = _strong_job(5)
+    faces = ((1, 1), FAR_BOUNDARY_KEY)
+    shape = _Shape(strong_job, is_held=True, waits_on=faces)
+    redecode, _output, _strong, queue, _done = _redecode(shape)
+    weak_job = _weak_job()
+    redecode.escalate(weak_job)
+    redecode.submit_if_commit_releases((1, 1))
+    assert _call_names(queue) == ["await"]
+    assert redecode.has_pending()
+    redecode.submit_if_commit_releases(FAR_BOUNDARY_KEY)
+    assert _call_names(queue) == ["await", "enqueue"]
+    assert queue.calls[1][1] is strong_job
+
+
+def test_a_row_that_holds_its_job_and_names_nothing_is_refused():
+    """A held job with no condition would never leave."""
+    strong_job = _strong_job(5)
+    shape = _Shape(strong_job, is_held=True, waits_on=())
+    redecode, _output, _strong, _queue, _done = _redecode(shape)
+    weak_job = _weak_job()
+    with pytest.raises(RuntimeError, match="no release condition"):
+        redecode.escalate(weak_job)

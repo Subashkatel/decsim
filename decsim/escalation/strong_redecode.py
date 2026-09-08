@@ -4,8 +4,11 @@ When the escalation policy escalates a weak result, StrongRedecode asks
 the shape for the strong window's job (strong_window_shapes.py), sends
 the window's selection over weak_decoder_to_strong_decoder, tells the
 decoder side to await the request's result (the DecodeQueue port), and
-submits the job now or when the shape's condition fires: the far weak
-boundary's commit or the operation's terminal data. When the policy
+submits the job now or when the conditions the shape declared fire: the
+commits of the weak windows it named, or the stored rounds of an
+operation (pending_strong_windows.py). The redecode holds that index,
+so a new shape row names its own condition rather than adding a hook.
+When the policy
 decodes both tiers at once (Toshio et al. 2510.25222 Sec. III A, Step
 1), it builds the strong sibling the requester enqueues beside the weak
 job and selects it at the verdict. A strong input landed in its unit
@@ -18,6 +21,7 @@ import functools
 from typing import Callable, Optional
 
 import decsim.decoders.decode_queue as decode_queue_module
+import decsim.escalation.pending_strong_windows as pending_strong_windows
 import decsim.records.decoding as decoding_records
 import decsim.records.windows as window_records
 
@@ -47,6 +51,7 @@ class StrongRedecode:
         # the strong job's return path, the committer's accept_strong_result
         self.on_strong_decoded = on_strong_decoded
         self.selections = _StrongSelections()
+        self.pending = pending_strong_windows.PendingStrongWindows()
 
     # ---- the two entries
 
@@ -71,8 +76,9 @@ class StrongRedecode:
         decoder side awaits the request's result. A strong sibling
         started with the weak job is selected as it is; otherwise the
         shape assigns the strong window: a job built now is queued
-        behind its selection, a held one leaves when its condition fires
-        (a terminal window whose tail is already stored leaves now).
+        behind its selection, a held one is registered under the
+        conditions it declared and leaves when they fire (a window
+        waiting on data already stored leaves now).
         """
         key = (weak_job.operation_id, weak_job.window_id)
         sibling_request_key = self.selections.sibling_for(key)
@@ -86,50 +92,68 @@ class StrongRedecode:
         if assignment.job is not None:
             self._enqueue(assignment.job, selection_arrival_ticks)
         else:
-            self.shape.note_selection_sent(key, selection_arrival_ticks)
-            self.submit_if_terminal_data_complete(weak_job.operation_id)
+            self._hold(key, assignment, selection_arrival_ticks)
+            self.submit_if_stored_data_releases(weak_job.operation_id)
         self.decode_queue.await_strong_result(key, request_key)
 
-    # ---- the hooks that release a held job
+    # ---- the two events that meet a declared condition
 
-    def submit_if_far_boundary_committed(self, window_key: tuple) -> None:
-        """A weak window committed: the strong window it bounds leaves now.
+    def submit_if_commit_releases(self, window_key: tuple) -> None:
+        """A weak window committed: a strong window waiting on it leaves.
 
         The committed window's own strong sibling, selected or cancelled
         by its verdict, is forgotten.
         """
         self.selections.forget_sibling(window_key)
-        deferred = self.shape.take_if_far_boundary_committed(window_key)
-        if deferred is None:
-            return
-        self._enqueue(deferred.job, deferred.selection_arrival_ticks)
-        self.engine.log(
-            decode_queue_module.LOG_SOURCE,
-            f"{deferred.job.label}: far-side weak boundary determined -> "
-            "strong window submitted",
-        )
+        released = self.pending.released_by_commit(window_key)
+        self._submit_released(released)
 
-    def submit_if_terminal_data_complete(self, operation_id) -> None:
-        """A round is stored: a terminal strong window with its tail leaves."""
-        deferred = self.shape.take_if_terminal_data_stored(operation_id)
-        if deferred is None:
-            return
-        self._enqueue(deferred.job, deferred.selection_arrival_ticks)
-        self.engine.log(
-            decode_queue_module.LOG_SOURCE,
-            f"{deferred.job.label}: terminal data complete -> "
-            "strong window submitted",
-        )
+    def submit_if_stored_data_releases(self, operation_id) -> None:
+        """A round is stored: a strong window waiting on that data leaves."""
+        released = self.pending.released_by_stored_data(operation_id)
+        self._submit_released(released)
 
     # ---- observation
 
     def has_pending(self) -> bool:
-        """Whether a strong window is still held for its condition."""
-        return self.shape.has_pending()
+        """Whether a strong window is still held for its conditions."""
+        return self.pending.any_held()
 
     def pending_work(self) -> tuple:
-        """The held strong windows as (key, phase, rounds)."""
-        return self.shape.pending_work()
+        """The held strong windows as (key, wait name, rounds)."""
+        return self.pending.work()
+
+    # ---- private: holding and releasing an assignment
+
+    def _hold(
+        self,
+        key: tuple,
+        assignment,
+        selection_arrival_ticks: int,
+    ) -> None:
+        """Register the assignment under the conditions its row declared."""
+        conditions = self.shape.release_conditions(assignment)
+        held = pending_strong_windows.PendingStrongWindow(
+            key=key,
+            assignment=assignment,
+            conditions=conditions,
+            selection_arrival_ticks=selection_arrival_ticks,
+        )
+        self.pending.register(held)
+
+    def _submit_released(self, released: tuple) -> None:
+        """Ask each released row for its job; submit the ones it builds."""
+        for held in released:
+            job = self.shape.held_job(held.assignment)
+            if job is None:
+                continue
+            self.pending.take(held)
+            self._enqueue(job, held.selection_arrival_ticks)
+            self.engine.log(
+                decode_queue_module.LOG_SOURCE,
+                f"{job.label}: {held.conditions.released_description} -> "
+                "strong window submitted",
+            )
 
     # ---- private: submitting a strong job with its input send
 

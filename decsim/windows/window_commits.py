@@ -141,7 +141,7 @@ class WindowCommitter:
             # provisional: the boundary leaves with the commit
             self.courier.hand_on(window, operation, result, request_key, False)
         if self.strong_redecode is not None:
-            self.strong_redecode.submit_if_far_boundary_committed(window.key)
+            self.strong_redecode.submit_if_commit_releases(window.key)
         self.results.deliver_if_final(operation)
 
     def finish_strong(

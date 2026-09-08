@@ -34,8 +34,8 @@ class WindowVerdict:
     hears that answer and, at the commit, that the result was read, the
     strong redecode (None when the run never escalates) hears an
     escalated result before its provisional commit and every weak commit
-    after it, and the committer performs whichever commit the verdict
-    asks for.
+    after it, and the committer stamps the window with the tick the
+    decode answered and performs whichever commit the verdict asks for.
     """
 
     def __init__(
@@ -71,7 +71,7 @@ class WindowVerdict:
         """
         key = (job.operation_id, job.window_id)
         window = self.planner.windows_by_key[key]
-        window.t_done = self.committer.engine.now
+        self.committer.note_decode_finished(window)
         operation = self.tracker.operation_by_id[job.operation_id]
         verdict = self.escalation_policy.verdict_for_weak_result(job, result)
         is_final = verdict is decoding_records.Verdict.KEEP
@@ -181,6 +181,10 @@ class WindowCommitter:
             window, operation, result, request_key, finish
         )
 
+    def note_decode_finished(self, window: window_records.Window) -> None:
+        """Stamp the window with the tick its decode answered."""
+        window.t_done = self.engine.now
+
     def commit(
         self,
         window: window_records.Window,
@@ -192,7 +196,7 @@ class WindowCommitter:
         """Commit the window: its contribution, its status, what it wakes."""
         window.committed = True
         if window.t_done is None:
-            window.t_done = self.engine.now
+            self.note_decode_finished(window)
         status = result.decode_status
         window.decode_status = None
         status_note = ""

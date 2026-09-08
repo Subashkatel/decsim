@@ -39,9 +39,13 @@ class DecoderPool:
         decoder_memory: Optional[
             decoder_memory_module.DecoderMemoryConfig
         ] = None,
+        blocks_unit_by_pool: Optional[dict] = None,
     ) -> None:
         _check_unit_pools(unit_pools)
         self.router = router
+        # pool name -> whether a finished decode holds its unit until
+        # the window side reads the result (<tier>.result_blocks_unit)
+        self.blocks_unit_by_pool = blocks_unit_by_pool or {}
         self.units_by_pool: dict[str, list] = {}
         # the units whose compute is back in the pool, in return order
         self.free_by_pool: dict[str, list] = {}
@@ -59,6 +63,10 @@ class DecoderPool:
                 units.append(unit)
             self.units_by_pool[pool] = units
             self.free_by_pool[pool] = list(units)
+
+    def blocks_unit(self, job: decoding_records.DecodeJob) -> bool:
+        """Whether this job's tier holds its unit until the result is read."""
+        return self.blocks_unit_by_pool.get(job.pool, False)
 
     def decoder_for(self, job: decoding_records.DecodeJob):
         """The decoder the job runs on, by the router's rule."""

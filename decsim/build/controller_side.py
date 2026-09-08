@@ -32,6 +32,7 @@ def build_decoder_manager(
         escalation_policy=escalation_policy,
         dispatch_ticks=dispatch_ticks,
         copies_input_by_pool=pool.copies_input_by_pool,
+        blocks_unit_by_pool=pool.blocks_unit_by_pool,
     )
 
 

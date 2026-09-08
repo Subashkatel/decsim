@@ -34,7 +34,9 @@ def _machine(**weak_changes):
         physical_error_probability=0.001, distance=3, round_period_us=1.0
     )
     weak = dataclasses.replace(settings.weak_decoder, **weak_changes)
-    observation = dataclasses.replace(settings.observation, data_movement=True)
+    observation = dataclasses.replace(
+        settings.observation, data_movement=True, decoder_utilization=True
+    )
     settings = dataclasses.replace(
         settings, weak_decoder=weak, observation=observation
     )
@@ -59,6 +61,12 @@ def _weak_input_transfers(machine) -> int:
         if path_snapshot.path is WEAK_INPUT_PATH:
             return path_snapshot.counters.transfer_count
     return 0
+
+
+def _busy_unit_ticks(machine) -> int:
+    """The time-integrated ticks the pool's units held their compute."""
+    utilization = machine.observation.decoder_utilization.result()
+    return utilization["busy_unit_ticks"]
 
 
 def _observables(result) -> list:
@@ -122,3 +130,32 @@ def test_a_boundary_fold_that_is_not_a_row_is_refused_by_name():
         ValueError, match="weak_decoder.boundary_fold 'in place'"
     ):
         _machine(boundary_fold="in place")
+
+
+def test_the_result_default_frees_the_unit_at_the_decodes_end():
+    """False is today's behaviour: the compute is back when the decode ends."""
+    default = _machine()
+    default.run()
+    non_blocking = _machine(result_blocks_unit=False)
+    non_blocking.run()
+    assert _busy_unit_ticks(non_blocking) == _busy_unit_ticks(default)
+
+
+def test_a_blocking_result_holds_the_unit_until_the_window_commits():
+    """True keeps the unit busy over the output hop and the frame write."""
+    default = _machine()
+    default_result = default.run()
+    blocking = _machine(result_blocks_unit=True)
+    blocking_result = blocking.run()
+    assert _busy_unit_ticks(blocking) > _busy_unit_ticks(default)
+    assert _observables(blocking_result) == _observables(default_result)
+    default_windows = default.observation.windows.windows
+    blocking_windows = blocking.observation.windows.windows
+    assert len(blocking_windows) == len(default_windows)
+
+
+def test_a_result_blocking_value_that_is_not_a_row_is_refused_by_name():
+    with pytest.raises(
+        ValueError, match="weak_decoder.result_blocks_unit 'yes'"
+    ):
+        _machine(result_blocks_unit="yes")

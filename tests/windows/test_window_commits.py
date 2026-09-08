@@ -111,8 +111,9 @@ class _Fixture:
         self.policy = types.SimpleNamespace(
             verdict_for_weak_result=self._verdict_for
         )
+        self.reads = []
         self.decode_queue = types.SimpleNamespace(
-            resolve_weak_request=self._resolve
+            resolve_weak_request=self._resolve, read_result=self._read
         )
         self.transfers = _Transfers(self.engine, 4)
         self.frame = _Frame(self.engine, frame_ticks)
@@ -152,6 +153,9 @@ class _Fixture:
     def _resolve(self, job, _result, verdict) -> None:
         self.resolved.append((job.request_key, verdict))
 
+    def _read(self, job) -> None:
+        self.reads.append((self.engine.now, job.request_key))
+
 
 def test_the_boundary_leaves_at_decode_done_before_the_frame_commit():
     fixture = _Fixture()
@@ -177,6 +181,9 @@ def test_the_boundary_leaves_at_decode_done_before_the_frame_commit():
     assert fixture.results.committed == [((4, 1), True)]
     assert fixture.after_weak == [(4, 1)]
     assert fixture.results.delivered == [4]
+    # the result is read at the commit, after the hop and the frame's
+    # write, not at the decode's end at 10
+    assert fixture.reads == [(17, job.request_key)]
 
 
 def test_a_window_awaiting_strong_commits_provisionally_and_is_not_final():
@@ -190,6 +197,8 @@ def test_a_window_awaiting_strong_commits_provisionally_and_is_not_final():
     assert fixture.window.published_request_key is None
     assert fixture.courier.handed == [((4, 1), False)]
     assert fixture.results.committed == [((4, 1), False)]
+    # a provisional commit sends nothing, so its read is the same instant
+    assert fixture.reads == [(0, job.request_key)]
 
 
 def test_a_strong_result_replaces_the_weak_prediction_and_ships_the_held():

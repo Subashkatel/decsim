@@ -17,6 +17,7 @@ executes the send that carries it to the frame
 
 import dataclasses
 import functools
+from typing import Callable
 
 import decsim.decoders.decode_queue as decode_queue_module
 import decsim.observe.trace_source as trace_source
@@ -30,10 +31,11 @@ class WindowVerdict:
 
     The planner and the tracker name the window and its operation, the
     escalation policy answers the window's confidence, the decode queue
-    hears that answer, the strong redecode (None when the run never
-    escalates) hears an escalated result before its provisional commit
-    and every weak commit after it, and the committer performs whichever
-    commit the verdict asks for.
+    hears that answer and, at the commit, that the result was read, the
+    strong redecode (None when the run never escalates) hears an
+    escalated result before its provisional commit and every weak commit
+    after it, and the committer performs whichever commit the verdict
+    asks for.
     """
 
     def __init__(
@@ -78,8 +80,9 @@ class WindowVerdict:
         elif self.strong_redecode is not None:
             self.strong_redecode.cancel_held_sibling(key)
         self.decode_queue.resolve_weak_request(job, result, verdict)
+        read_result = functools.partial(self.decode_queue.read_result, job)
         self.committer.commit_or_publish(
-            window, operation, result, job.request_key, is_final
+            window, operation, result, job.request_key, is_final, read_result
         )
 
     def accept_strong_result(
@@ -102,9 +105,11 @@ class WindowCommitter:
     The engine stamps and logs; the courier, the decoder output and the
     results are the three the commit hands to; the strong redecode
     (None when the run never escalates) hears every weak commit, because
-    a commit can release a held strong window. Trace source:
-    window_committed(window, contribution), the window's record and the
-    contribution that owns its rounds, at every commit.
+    a commit can release a held strong window. The commit is also where
+    the result is in the window side's hands, so the caller's
+    on_result_read runs there. Trace source: window_committed(window,
+    contribution), the window's record and the contribution that owns
+    its rounds, at every commit.
     """
 
     def __init__(
@@ -124,18 +129,42 @@ class WindowCommitter:
         result: decoding_records.DecodeResult,
         request_key: window_records.DecoderRequestKey,
         is_final: bool,
+        on_result_read: Callable[[], None],
     ) -> None:
-        """A provisional result commits now; a final one commits on its send."""
+        """A provisional result commits now; a final one commits on its send.
+
+        The commit is the moment the window side has the result in hand,
+        so it is where the decoder side hears that its output was read
+        (<tier>.result_blocks_unit, decoders/settings.py).
+        """
         if not is_final:
             self.commit(window, operation, result, request_key, False)
+            on_result_read()
             return
         self.courier.hand_on(window, operation, result, request_key, True)
         commit = functools.partial(
-            self.commit, window, operation, result, request_key, True
+            self._commit_the_final_result,
+            window,
+            operation,
+            result,
+            request_key,
+            on_result_read,
         )
         self.decoder_output.publish(
             window, operation, result, request_key, commit
         )
+
+    def _commit_the_final_result(
+        self,
+        window: window_records.Window,
+        operation: program_records.Operation,
+        result: decoding_records.DecodeResult,
+        request_key: window_records.DecoderRequestKey,
+        on_result_read: Callable[[], None],
+    ) -> None:
+        """Commit the landed result, then report that it was read."""
+        self.commit(window, operation, result, request_key, True)
+        on_result_read()
 
     def publish_strong(
         self,

@@ -80,6 +80,21 @@ def test_the_input_default_copies_the_rounds_into_the_unit():
     assert transfers == windows
 
 
+def test_the_boundary_fold_default_leaves_the_run_as_it_is():
+    """Copy is today's behaviour; the fold itself is tested on the gate.
+
+    tests/windows/test_decode_requests.py exercises both rows against a
+    real unit memory, because no shipped config blocks a window long
+    enough to fold a boundary at its start.
+    """
+    copied = _machine()
+    copied_result = copied.run()
+    folded = _machine(boundary_fold="copy")
+    folded_result = folded.run()
+    assert _observables(folded_result) == _observables(copied_result)
+    assert _unit_input_copies(folded) == _unit_input_copies(copied)
+
+
 def test_an_in_place_input_references_the_rounds_and_moves_nothing():
     """In place: no deposit, no link move, the store's hold kept instead."""
     copied = _machine()
@@ -100,3 +115,10 @@ def test_an_in_place_input_references_the_rounds_and_moves_nothing():
 def test_an_input_kind_that_is_not_a_row_is_refused_by_name():
     with pytest.raises(ValueError, match="weak_decoder.input 'in-place'"):
         _machine(input="in-place")
+
+
+def test_a_boundary_fold_that_is_not_a_row_is_refused_by_name():
+    with pytest.raises(
+        ValueError, match="weak_decoder.boundary_fold 'in place'"
+    ):
+        _machine(boundary_fold="in place")

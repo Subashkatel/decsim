@@ -10,6 +10,7 @@ import decsim.build.escalation as escalation_build
 import decsim.build.plan as plan_build
 import decsim.confidence.gap_join as gap_join_module
 import decsim.decoders.decoder_output as decoder_output_module
+import decsim.decoders.settings as decoder_settings
 import decsim.engine as engine_module
 import decsim.escalation.settings as escalation_settings
 import decsim.escalation.strong_redecode as strong_redecode_module
@@ -21,6 +22,7 @@ import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 import decsim.settings as machine_settings
 import decsim.syndrome_buffer.round_output as round_output
+import decsim.tables as tables
 import decsim.windows.built_window_models as built_window_models
 import decsim.windows.committed_rounds as committed_rounds
 import decsim.windows.decode_requests as decode_requests
@@ -87,7 +89,10 @@ def build_window_manager(
     primary_output = weak_output
     if escalation_policy.primary_tier is window_records.DecoderTier.STRONG:
         primary_output = strong_output
-    gate = decode_requests.WindowInputGate(planner, plan.window_interaction)
+    copies_the_fold = _copies_the_boundary_fold(settings, escalation_policy)
+    gate = decode_requests.WindowInputGate(
+        planner, plan.window_interaction, copies_the_fold
+    )
     builder = decode_requests.DecodeRequestBuilder(
         engine, planner, tracker, plan.window_interaction, gate
     )
@@ -168,6 +173,23 @@ def build_window_manager(
     )
     late.window_manager = window_manager
     return window_manager
+
+
+def _copies_the_boundary_fold(
+    settings: machine_settings.MachineSettings, escalation_policy
+) -> bool:
+    """Whether the tier that decodes the plan's windows folds into a copy.
+
+    <tier>.boundary_fold names the row; a value that is not one is
+    refused here, where the tier is named.
+    """
+    tier = escalation_policy.primary_tier.value
+    tier_settings = getattr(settings, f"{tier}_decoder")
+    return tables.row(
+        decoder_settings.DECODER_BOUNDARY_FOLDS,
+        f"{tier}_decoder.boundary_fold",
+        tier_settings.boundary_fold,
+    )
 
 
 def _window_gap_join(

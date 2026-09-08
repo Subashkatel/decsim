@@ -229,6 +229,35 @@ class DecoderMemory:
         resident.readers.append(job)
         return resident.decoder_input
 
+    def input_of(self, job: decoding_records.DecodeJob):
+        """The input this job reads here, or None when nothing is held."""
+        key = _memory_key(job)
+        resident = self._inputs.get(key)
+        if resident is None:
+            return None
+        return resident.decoder_input
+
+    def reader_count(self, job: decoding_records.DecodeJob) -> int:
+        """How many jobs read the input this job reads, here."""
+        key = _memory_key(job)
+        resident = self._inputs.get(key)
+        if resident is None:
+            return 0
+        return len(resident.readers)
+
+    def rewrite(
+        self, job: decoding_records.DecodeJob, decoder_input: DecoderInput
+    ) -> DecoderInput:
+        """Replace the input this job reads, in the unit's own memory.
+
+        Every reader of that input now reads the new one, which is why
+        the caller decides whether a second reader is allowed.
+        """
+        key = _memory_key(job)
+        resident = self._inputs[key]
+        resident.decoder_input = decoder_input
+        return decoder_input
+
     def take(self, job: decoding_records.DecodeJob) -> None:
         """Drop the job's read; the rounds go when the last reader does."""
         key = _memory_key(job)

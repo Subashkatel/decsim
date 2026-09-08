@@ -38,12 +38,16 @@ class WindowInputGate:
     face of the builder. Trace source: copy_made(job, bits, memory_name,
     "masked view") when the mask is folded into a second copy of the
     landed input (data_path.md, correction 2 moves that copy behind the
-    port).
+    port); a tier that folds in place edits the unit's own memory and
+    copies nothing (<tier>.boundary_fold, decoders/settings.py).
     """
 
-    def __init__(self, planner, interaction) -> None:
+    def __init__(self, planner, interaction, copies_the_fold: bool = True):
         self.planner = planner
         self.interaction = interaction
+        # weak_decoder.boundary_fold: copy duplicates the landed input,
+        # in_place XORs the mask into the unit's own memory
+        self.copies_the_fold = copies_the_fold
         self.trace = _GateTraceSources()
 
     def may_stage(self, job: decoding_records.DecodeJob) -> bool:
@@ -77,11 +81,13 @@ class WindowInputGate:
         return window.deps_remaining <= 0
 
     def mask_input(self, job: decoding_records.DecodeJob) -> None:
-        """XOR the window's boundary mask into the landed decoder input.
+        """XOR the window's boundary mask into the input the decode reads.
 
-        The unit's stored copy stays raw (cudaq-x keeps raw rounds and
-        applies syndrome_mods at window assembly); the job's input view is
-        replaced with the masked rounds the decode will read.
+        With the copy fold the unit's stored rounds stay raw (cudaq-x
+        keeps raw rounds and applies syndrome_mods at window assembly)
+        and the job reads a masked duplicate; with the in-place fold the
+        mask is written into the unit's own memory and nothing is
+        duplicated.
         """
         window = job.window
         if window is None:
@@ -94,11 +100,50 @@ class WindowInputGate:
         for round_input in job.decoder_input.rounds:
             masked = self._masked_round(state, window_info, round_input)
             masked_rounds.append(masked)
-        job.decoder_input = dataclasses.replace(
+        masked_input = dataclasses.replace(
             job.decoder_input, rounds=tuple(masked_rounds)
         )
-        bits = _input_bit_count(job.decoder_input)
-        self.trace.copy_made.fire(job, bits, job.memory.name, "masked view")
+        if self.copies_the_fold:
+            self._fold_into_a_copy(job, masked_input)
+            return
+        self._fold_in_place(job, masked_input)
+
+    def _fold_into_a_copy(
+        self, job: decoding_records.DecodeJob, masked_input
+    ) -> None:
+        """The job reads a masked duplicate; the unit's rounds stay raw."""
+        job.decoder_input = masked_input
+        bits = _input_bit_count(masked_input)
+        source_name = _input_source_name(job)
+        self.trace.copy_made.fire(job, bits, source_name, "masked view")
+
+    def _fold_in_place(
+        self, job: decoding_records.DecodeJob, masked_input
+    ) -> None:
+        """The mask is written into the unit's own memory, for one reader.
+
+        An input two jobs read has no single writer, so folding into it
+        would change what the other job decodes; Helios keeps its shared
+        memory single-writer (2301.08419 lines 632-640) and this refuses
+        rather than rewriting the sibling's window.
+        """
+        memory = job.memory
+        if memory is None:
+            raise RuntimeError(
+                f"{job.label}: boundary_fold in_place needs the unit's own "
+                "copy of the rounds, and this tier reads its input in "
+                "place (input: in_place); fold into a copy, or copy the "
+                "input"
+            )
+        readers = memory.reader_count(job)
+        if readers > 1:
+            raise RuntimeError(
+                f"{job.label}: boundary_fold in_place would rewrite an "
+                f"input {readers} jobs read; one input has one writer "
+                "(Helios 2301.08419 lines 632-640), so give this tier "
+                "boundary_fold copy or one job per input"
+            )
+        job.decoder_input = memory.rewrite(job, masked_input)
 
     # ---- private
 
@@ -602,6 +647,14 @@ def _first_forced_class(forced_classes: tuple) -> Optional[int]:
     if not forced_classes:
         return None
     return forced_classes[0]
+
+
+def _input_source_name(job: decoding_records.DecodeJob) -> str:
+    """Where the rounds the mask is folded out of sit."""
+    memory = job.memory
+    if memory is None:
+        return job.input_source_name
+    return memory.name
 
 
 def _input_bit_count(decoder_input) -> Optional[int]:

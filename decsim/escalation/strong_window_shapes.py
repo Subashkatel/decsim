@@ -265,7 +265,7 @@ class ContextWindow:
             strong_decode_for=held.key,
             request_key=held.request_key,
             request_created_ticks=held.request_created_ticks,
-            gate=self.collaborators.builder,
+            gate=self.collaborators.builder.gate,
         )
         self.collaborators.retention.hold_strong_input(job)
         return job
@@ -566,7 +566,7 @@ class ForwardWindow:
             strong_decode_for=key,
             request_key=held.strong_request_key,
             request_created_ticks=held.strong_request_created_ticks,
-            gate=self.collaborators.builder,
+            gate=self.collaborators.builder.gate,
         )
         self.collaborators.retention.hold_strong_input(job)
         return job

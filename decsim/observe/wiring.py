@@ -323,7 +323,7 @@ def _copy_sources(
         sources.append(strong_round_writer.trace.copy_made)
     for source in decoder_manager.copy_sources():
         sources.append(source)
-    sources.append(window_manager.requester.builder.trace.copy_made)
+    sources.append(window_manager.requester.builder.gate.trace.copy_made)
     return sources
 
 

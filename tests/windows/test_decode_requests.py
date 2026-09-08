@@ -129,8 +129,10 @@ class _Fixture:
         interaction = window_interactions.DefaultWindowInteraction(
             0, boundary_payload
         )
+        gate = decode_requests.WindowInputGate(self.planner, interaction)
+        self.gate = gate
         self.builder = decode_requests.DecodeRequestBuilder(
-            self.engine, self.planner, self.tracker, interaction, store_output
+            self.engine, self.planner, self.tracker, interaction, gate
         )
         self.queue = _RecordingQueue()
         policy = escalation_policies.Baseline()
@@ -144,6 +146,7 @@ class _Fixture:
             self.queue,
             policy,
             verdict,
+            store_output,
         )
         self.retention.register_window((1, 0), self.window)
 
@@ -171,7 +174,7 @@ def test_a_complete_window_is_requested_once():
     assert len(fixture.queue.enqueued) == 1
     (job, send_input) = fixture.queue.enqueued[0]
     assert job.window is fixture.window
-    assert job.gate is fixture.builder
+    assert job.gate is fixture.gate
     assert job.on_decoded is _ignore_result
     assert [payload.round_index for payload in job.payloads] == [1, 2, 3, 4, 5]
     assert fixture.window.queued
@@ -187,7 +190,7 @@ def test_a_blocked_window_ships_raw_rounds_and_is_masked_at_start():
     for round_index in (1, 2, 3, 4, 5):
         fixture.arrive(round_index)
     (job, _send_input) = fixture.queue.enqueued[0]
-    assert fixture.builder.may_start(job) is False
+    assert fixture.gate.may_start(job) is False
     raw = job.payloads[1]
     assert raw.bits is None
     landed = decoder_memory.MaterializedSyndromeRound(1, 2, (raw,))
@@ -195,11 +198,11 @@ def test_a_blocked_window_ships_raw_rounds_and_is_masked_at_start():
         1, 0, job.request_key, (landed,)
     )
     job.memory = decoder_memory.DecoderMemory("default", 0, None)
-    fixture.builder.mask_input(job)
+    fixture.gate.mask_input(job)
     (masked,) = job.decoder_input.rounds[0].fragments
     assert masked.bits == (1, 0, 1)
     fixture.window.deps_remaining = 0
-    assert fixture.builder.may_start(job) is True
+    assert fixture.gate.may_start(job) is True
 
 
 def test_a_withdrawn_window_is_requested_again_fresh():

@@ -1492,12 +1492,16 @@ def _strong_redecode(
     regions = strong_regions.StrongRegions(
         planner, tracker, retention, interaction
     )
-    if row.absorbs_weak_windows:
-        shape = row(
-            engine, regions, planner, retention, builder, requester, ledger
-        )
-    else:
-        shape = row(engine, regions, retention, builder)
+    collaborators = strong_window_shapes.StrongWindowCollaborators(
+        engine=engine,
+        regions=regions,
+        planner=planner,
+        retention=retention,
+        builder=builder,
+        requester=requester,
+        ledger=ledger,
+    )
+    shape = row(collaborators)
     return strong_redecode_module.StrongRedecode(
         engine,
         shape,

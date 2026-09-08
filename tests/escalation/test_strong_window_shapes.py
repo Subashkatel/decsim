@@ -458,10 +458,8 @@ class RecordingContextWindow:
     absorbs_weak_windows = False
     window_absorbed = trace_source.SILENT
 
-    def __init__(self, engine, regions, retention, builder) -> None:
-        self.inner = strong_window_shapes.ContextWindow(
-            engine, regions, retention, builder
-        )
+    def __init__(self, collaborators) -> None:
+        self.inner = strong_window_shapes.ContextWindow(collaborators)
         self.planned_windows = []
         self.assignments = []
 
@@ -510,6 +508,61 @@ def test_a_shape_row_added_from_outside_runs_by_its_yaml_name():
         ((1, 1), "weak"),
         ((1, 2), "strong"),
     ]
+
+
+class RecordingForwardWindow:
+    """A shape row a study adds that absorbs the windows it covers.
+
+    It takes the same one collaborator record the shipped rows take,
+    although its layout reads the planner, the requester and the ledger
+    that the context window never touches.
+    """
+
+    absorbs_weak_windows = True
+
+    def __init__(self, collaborators) -> None:
+        self.inner = strong_window_shapes.ForwardWindow(collaborators)
+        self.window_absorbed = self.inner.window_absorbed
+        self.planned_windows = []
+
+    def plan(self, weak_job):
+        """Note the window, then plan it as the forward window does."""
+        self.planned_windows.append(weak_job.window_id)
+        return self.inner.plan(weak_job)
+
+    def release_conditions(self, assignment):
+        """What releases a held job, as the forward window declares it."""
+        return self.inner.release_conditions(assignment)
+
+    def held_job(self, assignment):
+        """The held job, once its rounds are there."""
+        return self.inner.held_job(assignment)
+
+
+def test_an_absorbing_row_added_from_outside_builds_through_the_same_call():
+    """One constructor signature, whatever the row's geometry.
+
+    The two shipped rows read different components: the context window
+    reads the regions, the retention and the builder; the forward window
+    also re-slices on the planner, withdraws on the requester and
+    rewrites the ledger. Both take one StrongWindowCollaborators record,
+    so the root builds a row without branching on its geometry.
+    """
+    table = strong_window_shapes.STRONG_WINDOW_SHAPES
+    table["recording_forward"] = RecordingForwardWindow
+    try:
+        machine = fabric.switching_machine(
+            rounds=9,
+            escalated_windows={0},
+            strong_window="recording_forward",
+        )
+        machine.run()
+    finally:
+        del table["recording_forward"]
+    shape = machine.window_manager.strong_redecode.shape
+    assert type(shape) is RecordingForwardWindow
+    assert shape.planned_windows == [0]
+    assert fabric.frame_tiers(machine) == [((1, 0), "strong")]
 
 
 def test_a_shape_name_off_the_table_is_refused_naming_the_rows():

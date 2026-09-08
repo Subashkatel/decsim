@@ -22,6 +22,7 @@ import scipy.sparse
 import decsim.decoders.decoder as decoder_module
 import decsim.decoders.minimum_weight_perfect_matching.weights as weights
 import decsim.detector_error_model.fault_model_contracts as fault_models
+import decsim.records.decoding as decoding_records
 
 WARM_UP_COLUMNS = 3
 
@@ -74,7 +75,7 @@ class PyMatchingDecoder(decoder_module.WindowDecoderBase):
         forced = self._forced_matching(faults, edge_weights)
         return MatchingGraphs(plain=matching, forced=forced)
 
-    def decode_window(self, backend, model, faults, syndrome) -> tuple:
+    def decode_window(self, backend, model, faults, syndrome):
         """The matching's correction, or an empty one marked invalid.
 
         PyMatching raises when a syndrome has odd parity in a boundaryless
@@ -84,18 +85,19 @@ class PyMatchingDecoder(decoder_module.WindowDecoderBase):
         """
         del model
         try:
-            return backend.plain.decode(syndrome), None
+            selected = backend.plain.decode(syndrome)
         except ValueError as error:
             if "perfect matching" not in str(error):
                 raise
             fault_count = faults.check.shape[1]
             empty = numpy.zeros(fault_count, dtype=numpy.uint8)
             invalid = decoder_module.BackendDecodeStatus.INVALID_CORRECTION
-            return empty, invalid
+            return decoding_records.WindowDecode(empty, invalid)
+        return decoding_records.WindowDecode(selected)
 
     def decode_forced_window(
         self, backend, model, faults, syndrome, forced_logical_class: int
-    ) -> tuple:
+    ):
         """The lightest correction whose observable parity is the class.
 
         The appended detector carries the class bit, so the matching
@@ -106,13 +108,12 @@ class PyMatchingDecoder(decoder_module.WindowDecoderBase):
         without a gap and escalates the window.
         """
         if backend.forced is None:
-            selected, decode_status = self.decode_window(
-                backend, model, faults, syndrome
-            )
-            return selected, decode_status, None
+            return self.decode_window(backend, model, faults, syndrome)
         pinned = _with_pinned_observable(syndrome, forced_logical_class)
         selected, weight = backend.forced.decode(pinned, return_weight=True)
-        return selected, None, float(weight)
+        return decoding_records.WindowDecode(
+            selected, forced_class_weight=float(weight)
+        )
 
     def _weights_for(self, faults):
         return weights.matching_weights(faults.priors)

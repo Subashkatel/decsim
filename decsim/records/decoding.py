@@ -248,6 +248,25 @@ class LogicalContribution:
     logical_observables: Optional[tuple[int, ...]]
 
 
+@dataclass(frozen=True)
+class WindowDecode:
+    """What one backend call on one window answers.
+
+    ``selected_faults`` is the correction and ``decode_status`` a
+    best-effort disposition (None when the decode succeeded). The two
+    evidence fields are what a confidence signal reads off the decode
+    that produced the correction: the minimum weight inside the class a
+    forced solve was pinned to, and the growth a cluster-based decode
+    did (Meister et al. 2405.07433 Algorithm 2 lines 518-525 reads the
+    graph and the radii). A row leaves what it does not produce None.
+    """
+
+    selected_faults: Any
+    decode_status: Optional[Any] = None
+    forced_class_weight: Optional[float] = None
+    cluster_evidence: Optional[Any] = None
+
+
 @dataclass
 class DecodeResult:
     """One window result; timing-only decoders leave optional fields unset."""
@@ -260,6 +279,9 @@ class DecodeResult:
     # the minimum weight inside the class the job was forced to; None
     # when the decode was not forced or the window pins no observable
     forced_class_weight: Optional[float] = None
+    # the growth a cluster-based decode did, what a cluster gap reads;
+    # None from a row that grows no clusters
+    cluster_evidence: Optional[Any] = None
     # round-keyed seam defects (synthetic decoders, recovery lock
     # scenarios)
     boundary_defects: Optional[dict] = None

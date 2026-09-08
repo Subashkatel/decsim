@@ -169,26 +169,28 @@ class WindowDecoderBase(DecoderBase):
         """The backend for one window model, built once while it lives."""
 
     @abc.abstractmethod
-    def decode_window(self, backend, model, faults, syndrome) -> tuple:
-        """(selected faults, decode status or None) of one backend call."""
+    def decode_window(
+        self, backend, model, faults, syndrome
+    ) -> decoding_records.WindowDecode:
+        """One backend call's answer on one window."""
 
     def decode_forced_window(
         self, backend, model, faults, syndrome, forced_logical_class: int
-    ) -> tuple:
-        """(selected faults, decode status, the class's weight) of one solve.
+    ) -> decoding_records.WindowDecode:
+        """One solve pinned to one logical class, with that class's weight.
 
         The minimum-weight correction inside one logical class, the
         weight a complementary gap subtracts (Gidney et al. 2312.04522
         Sec. "Complementary gap"). The weight is None when the window
-        pins no observable and the class cannot be forced. A row whose
-        answers_forced_logical_class is False never reaches this.
+        pins no observable and the class cannot be forced. A row that
+        does not declare the forced-class solve never reaches this.
         """
         del backend, model, faults, syndrome, forced_logical_class
         row = type(self)
         row_name = row.__name__
         raise RuntimeError(
             f"{row_name} was asked for a forced-class solve and does not "
-            "answer one; its row declares answers_forced_logical_class False"
+            "answer one; its row declares no forced-class solve"
         )
 
     def latency(self, job: decoding_records.DecodeJob) -> int:
@@ -224,39 +226,30 @@ class WindowDecoderBase(DecoderBase):
         syndrome = payload_syndrome(job)
         check_syndrome_size(job, syndrome, faults)
         backend = self.compiled_for(faults, model)
+        started_ns = time.perf_counter_ns()
+        answer = self.window_answer(job, backend, model, faults, syndrome)
+        finished_ns = time.perf_counter_ns()
+        result = result_from_selected_faults(
+            job,
+            model,
+            faults,
+            answer.selected_faults,
+            decode_status=answer.decode_status,
+        )
+        result.forced_class_weight = answer.forced_class_weight
+        result.cluster_evidence = answer.cluster_evidence
+        return result, finished_ns - started_ns
+
+    def window_answer(
+        self, job, backend, model, faults, syndrome
+    ) -> decoding_records.WindowDecode:
+        """The backend call this job asks for: the window's, or one class's."""
         forced_class = job.forced_logical_class
         if forced_class is None:
-            return self._plain_decode(job, backend, model, faults, syndrome)
-        return self._forced_decode(
-            job, backend, model, faults, syndrome, forced_class
-        )
-
-    def _plain_decode(self, job, backend, model, faults, syndrome) -> tuple:
-        """(the window's own result, nanoseconds of the backend call)."""
-        started_ns = time.perf_counter_ns()
-        selected, decode_status = self.decode_window(
-            backend, model, faults, syndrome
-        )
-        finished_ns = time.perf_counter_ns()
-        result = result_from_selected_faults(
-            job, model, faults, selected, decode_status=decode_status
-        )
-        return result, finished_ns - started_ns
-
-    def _forced_decode(
-        self, job, backend, model, faults, syndrome, forced_class: int
-    ) -> tuple:
-        """(the class's result and weight, nanoseconds of the backend call)."""
-        started_ns = time.perf_counter_ns()
-        selected, decode_status, weight = self.decode_forced_window(
+            return self.decode_window(backend, model, faults, syndrome)
+        return self.decode_forced_window(
             backend, model, faults, syndrome, forced_class
         )
-        finished_ns = time.perf_counter_ns()
-        result = result_from_selected_faults(
-            job, model, faults, selected, decode_status=decode_status
-        )
-        result.forced_class_weight = weight
-        return result, finished_ns - started_ns
 
     def compiled_for(self, faults, model):
         """The placed model's backend, compiled once and kept while it lives.

@@ -39,7 +39,7 @@ _BINARY64_LN_TEN = float.fromhex("0x1.26bb1bbb55516p+1")
 
 
 def union_find_cluster_gap_source(
-    weight_step: float = 0.1,
+    weight_step: float = window_decoder.DEFAULT_WEIGHT_STEP,
 ) -> decoding_records.SoftOutputSource:
     """The source of a cluster gap at one absolute natural-log weight step."""
     normalized_step = window_decoder.normalized_weight_step(weight_step)
@@ -106,19 +106,15 @@ class UnionFindClusterGapDecoder(decoder_module.DecoderBase):
         if model is None:
             return self.base.decode_timed(job)
         _require_one_logical_row(model)
-        decoded_window = self.base.decode_with_growth_evidence(job)
+        result, backend_ns = self.base.decode_timed(job)
         started = time.perf_counter_ns()
-        gap = _cluster_gap(decoded_window.hard_evidence, self.base.weight_step)
+        gap = _cluster_gap(result.cluster_evidence, self.base.weight_step)
         finished = time.perf_counter_ns()
         source = union_find_cluster_gap_source(self.base.weight_step)
-        decoded_window.hard_result.soft_output = decoding_records.SoftOutput(
-            gap=gap, source=source
-        )
+        confidence = decoding_records.SoftOutput(gap=gap, source=source)
+        result.soft_output = confidence
         gap_nanoseconds = finished - started
-        return (
-            decoded_window.hard_result,
-            decoded_window.backend_ns + gap_nanoseconds,
-        )
+        return result, backend_ns + gap_nanoseconds
 
 
 def _require_one_logical_row(model) -> None:

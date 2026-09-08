@@ -63,8 +63,8 @@ class RelayBeliefPropagationDecoder(decoder_module.WindowDecoderBase):
         del model
         return self.window_decoder
 
-    def decode_window(self, backend, model, faults, syndrome) -> tuple:
+    def decode_window(self, backend, model, faults, syndrome):
         """One backend call; a produced correction is committed as it stands."""
         del faults
         outcome = backend.decode(model, syndrome)
-        return backend_outcome.selected_faults_of(outcome)
+        return backend_outcome.window_decode_of(outcome)

@@ -14,6 +14,7 @@ import scipy.sparse
 
 import decsim.decoders.decoder as decoder_module
 import decsim.detector_error_model.fault_model_contracts as fault_models
+import decsim.records.decoding as decoding_records
 
 
 class BeliefPropagationOsdDecoder(decoder_module.WindowDecoderBase):
@@ -56,8 +57,9 @@ class BeliefPropagationOsdDecoder(decoder_module.WindowDecoderBase):
             osd_order=window_osd_order,
         )
 
-    def decode_window(self, backend, model, faults, syndrome) -> tuple:
+    def decode_window(self, backend, model, faults, syndrome):
         """One BP-OSD call; ldpc always returns a correction."""
         del model
         del faults
-        return backend.decode(syndrome), None
+        selected = backend.decode(syndrome)
+        return decoding_records.WindowDecode(selected)

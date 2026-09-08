@@ -81,7 +81,9 @@ def test_an_outcome_that_carries_a_correction_is_committed_with_its_status():
     reasons = backend_outcome.BackendFailureReason
     reason = reasons.NO_CONVERGED_RELAY_SOLUTION
     outcome = outcome_of(nonconverged, reason, (1, 0))
-    selected, status = backend_outcome.selected_faults_of(outcome)
+    answer = backend_outcome.window_decode_of(outcome)
+    selected = answer.selected_faults
+    status = answer.decode_status
     assert selected == (1, 0)
     assert status is nonconverged
     # two boundaryless edges, (0, 2) and (1, 3), so two fault columns
@@ -110,4 +112,4 @@ def test_an_outcome_with_no_correction_is_a_contract_violation():
     reason = reasons.UPSTREAM_EXCEPTION
     outcome = outcome_of(backend_error, reason, None)
     with pytest.raises(RuntimeError, match="produced no correction"):
-        backend_outcome.selected_faults_of(outcome)
+        backend_outcome.window_decode_of(outcome)

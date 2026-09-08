@@ -100,24 +100,31 @@ def unbounded_path(name, latency_ticks):
     return link_settings.PathSettings(channel, None, "test payload")
 
 
+def every_path_free():
+    """One free path per hop, keyed by the hop's name.
+
+    A card names every hop, so a test that cares about one path wires
+    that one and leaves the rest on the shared free channel.
+    """
+    names = []
+    for path in transfer_records.LinkPath:
+        names.append(path.value)
+    return dict.fromkeys(names, FREE_PATH)
+
+
+def edge_of(report, path_name):
+    """The semantic edge row of one path, found by name not by position."""
+    for edge in report["semantic_edges"]:
+        if edge["path"] == path_name:
+            return edge
+    raise AssertionError(f"{path_name} is not in the report")
+
+
 class Run:
     """An engine, a ledger and a fabric wired to it, from one card."""
 
     def __init__(self, **paths):
-        wiring = dict.fromkeys(
-            (
-                "qpu_to_controller",
-                "weak_buffer_to_weak_decoder",
-                "weak_decoder_to_strong_decoder",
-                "strong_buffer_to_strong_decoder",
-                "weak_decoder_to_frame",
-                "decoder_to_decoder",
-                "strong_decoder_to_frame",
-                "frame_to_controller",
-                "controller_to_qpu",
-            ),
-            FREE_PATH,
-        )
+        wiring = every_path_free()
         wiring.update(paths)
         settings = link_settings.FabricSettings(profile_name="test", **wiring)
         self.engine = decsim.engine.Engine()
@@ -243,15 +250,16 @@ def test_channels_are_aliased_in_the_order_the_paths_first_meet_them():
         weak_decoder_to_strong_decoder=shared,
     )
     report = run.ledger.traffic_json_value()
-    edges = report["semantic_edges"]
-    assert edges[0]["path"] == "qpu_to_controller"
-    assert edges[0]["physical_alias"] == "channel-0"
-    assert edges[1]["path"] == "weak_buffer_to_weak_decoder"
-    assert edges[1]["physical_alias"] == "channel-1"
-    assert edges[2]["path"] == "weak_decoder_to_strong_decoder"
-    assert edges[2]["physical_alias"] == "channel-0"
-    assert edges[3]["path"] == "strong_buffer_to_strong_decoder"
-    assert edges[3]["physical_alias"] == "channel-2"
+    readout = edge_of(report, "qpu_to_controller")
+    weak_store = edge_of(report, "controller_to_weak_buffer")
+    weak_input = edge_of(report, "weak_buffer_to_weak_decoder")
+    escalation = edge_of(report, "weak_decoder_to_strong_decoder")
+    strong_input = edge_of(report, "strong_buffer_to_strong_decoder")
+    assert readout["physical_alias"] == "channel-0"
+    assert weak_store["physical_alias"] == "channel-1"
+    assert weak_input["physical_alias"] == "channel-2"
+    assert escalation["physical_alias"] == "channel-0"
+    assert strong_input["physical_alias"] == "channel-1"
     assert report["physical_channels"][0]["member_paths"] == [
         "qpu_to_controller",
         "weak_decoder_to_strong_decoder",
@@ -331,7 +339,7 @@ def test_the_traffic_json_itemizes_the_setup_per_path():
     run.send(PATH.STRONG_BUFFER_TO_STRONG_DECODER, 4, 100, attribution)
     run.engine.run()
     report = run.ledger.traffic_json_value()
-    semantic_edge = report["semantic_edges"][3]
+    semantic_edge = edge_of(report, "strong_buffer_to_strong_decoder")
     assert semantic_edge == {
         "path": "strong_buffer_to_strong_decoder",
         "physical_alias": "channel-1",
@@ -356,7 +364,7 @@ def test_the_traffic_json_sums_the_setup_over_a_paths_transfers():
     run.send(PATH.STRONG_BUFFER_TO_STRONG_DECODER, 4, 100, second_window)
     run.engine.run()
     report = run.ledger.traffic_json_value()
-    semantic_edge = report["semantic_edges"][3]
+    semantic_edge = edge_of(report, "strong_buffer_to_strong_decoder")
     assert report["transfers"][0]["setup_ticks"] == 50
     assert report["transfers"][1]["setup_ticks"] == 100
     assert semantic_edge["setup_ticks"] == 150
@@ -420,6 +428,7 @@ def test_the_reconciliation_row_states_the_sum_and_the_channel():
     assert row["physical_counters"]["known_payload_bits"] == 8
     assert report["path_order"] == [
         "qpu_to_controller",
+        "controller_to_weak_buffer",
         "weak_buffer_to_weak_decoder",
         "weak_decoder_to_strong_decoder",
         "strong_buffer_to_strong_decoder",
@@ -428,6 +437,7 @@ def test_the_reconciliation_row_states_the_sum_and_the_channel():
         "strong_decoder_to_frame",
         "frame_to_controller",
         "controller_to_qpu",
+        "controller_to_strong_buffer",
     ]
 
 
@@ -438,7 +448,7 @@ def test_an_empty_ledger_reports_every_path_with_zero_counters():
     counts = [
         edge["counters"]["transfer_count"] for edge in report["semantic_edges"]
     ]
-    assert counts == [0] * 10
+    assert counts == [0] * 11
     assert report["transfers"] == []
     assert report["path_order"][-1] == "controller_to_strong_buffer"
 

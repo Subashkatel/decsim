@@ -94,10 +94,10 @@ class HeldRounds:
 class RoundWriter:
     """Writes a finished round into Buffer 0 and the strong store, or holds.
 
-    Trace sources: round_event(RoundEvent) with kind PUBLISHED when the
-    round is published as it is stored; copy_made(round_key, bits,
-    "controller assembler", "Buffer 0") for the write (data_path.md hop
-    3). It narrates Buffer 0's intake on the engine's io_line.
+    Trace source: copy_made(round_key, bits, "controller assembler",
+    "Buffer 0") for the write (data_path.md hop 3). It narrates Buffer
+    0's intake on the engine's io_line; the publication is the
+    transmitter's, at the round's landing in Buffer 0.
     """
 
     def __init__(
@@ -119,7 +119,6 @@ class RoundWriter:
         self.publishes_from_strong_store = publishes_from_strong_store
         self.held_rounds = held_rounds
         self.transmitter = transmitter
-        self.round_event = trace_source.TraceSource()
         self.copy_made = trace_source.TraceSource()
 
     def admit(self, packed: round_records.PackedRound) -> bool:
@@ -133,28 +132,17 @@ class RoundWriter:
             return self.held_rounds.refuse(packed, self.admit)
         if not self._strong_has_room():
             return self.held_rounds.refuse(packed, self.admit)
-        publication_tick = self.transmitter.publication_tick_at_storage(
-            packed.route
-        )
+        # the round is published when its controller_to_weak_buffer
+        # transfer lands, which is where the transmitter stamps it
         self.weak_store.accept_packed_round(
-            packed.packet, publication_tick=publication_tick
+            packed.packet, publication_tick=None
         )
-        operation_id, round_index = packed.round_key
         self.copy_made.fire(
             packed.round_key,
             packed.wire_bits,
             "controller assembler",
             "Buffer 0",
         )
-        if publication_tick is not None:
-            published = round_records.RoundEvent.of(
-                "PUBLISHED",
-                publication_tick,
-                operation_id,
-                round_index,
-                packed.route,
-            )
-            self.round_event.fire(published)
         self.engine.log_io(
             "Buffer 0", lambda: _received_text(packed.packet, self.weak_store)
         )

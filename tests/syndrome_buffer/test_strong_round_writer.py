@@ -94,17 +94,6 @@ def half_microsecond_crossing(reference):
     )
 
 
-def free_writer(engine, on_round_stored=None):
-    reference = link_profiles.logical_reference_profile()
-    unwired = dataclasses.replace(reference, controller_to_strong_buffer=None)
-    link = fabric_module.LinkFabric(unwired, engine)
-    store_settings = round_store_settings.RoundStoreSettings()
-    store = round_store_module.RoundStore(store_settings)
-    return strong_round_writer.StrongRoundWriter(
-        engine, link, store, on_round_stored=on_round_stored
-    )
-
-
 def test_a_write_lands_after_the_crossing_and_the_listener_hears_it_once():
     engine = engine_module.Engine()
     listener = RecordingListener()
@@ -143,22 +132,6 @@ def test_the_writer_counts_a_write_in_flight_as_room_taken():
     assert writer.writes_in_flight == 0
     assert writer.has_room() is False
     assert writer.store.occupancy == 1
-
-
-def test_an_unpriced_crossing_stores_at_the_write():
-    engine = engine_module.Engine()
-    stored = []
-    writer = free_writer(
-        engine, on_round_stored=lambda *key: stored.append(key)
-    )
-    writer.store.register_hold("reader", [(1, 1)])
-
-    first = packet(1)
-    first_attribution = attribution(1)
-    writer.write(first, packet_bits=3, attribution=first_attribution)
-
-    assert writer.store.publication_tick((1, 1)) == 0
-    assert stored == [(1, 1)]
 
 
 def test_a_round_whose_readers_resolved_while_crossing_is_dropped_at_landing():

@@ -78,7 +78,6 @@ def observe(
         controller=controller,
         assembler=assembler,
         held_rounds=held_rounds,
-        round_writer=round_writer,
         transmitter=transmitter,
         instruction_output=instruction_output,
         strong_round_store=strong_round_store,
@@ -459,20 +458,13 @@ def _connect_round_events(
     controller,
     assembler,
     held_rounds,
-    round_writer,
     transmitter,
     instruction_output,
     strong_round_store,
 ) -> round_events_module.RoundEventRecorder:
     """The recorder hears every round event, output and strong landing."""
     round_events = round_events_module.RoundEventRecorder(engine)
-    for component in (
-        controller,
-        assembler,
-        held_rounds,
-        round_writer,
-        transmitter,
-    ):
+    for component in (controller, assembler, held_rounds, transmitter):
         component.round_event.connect(round_events.record)
     instruction_output.output_event.connect(round_events.output)
     if strong_round_store is not None:

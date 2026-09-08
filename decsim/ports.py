@@ -354,12 +354,10 @@ class Link(Protocol):
     """The link fabric as every sender sees it.
 
     Table rows: logical_reference, bandwidth_limited (link_profiles.py),
-    and the yaml's cards. A path is wired or free; a send on a wired path
-    delivers by callback with every tick of the transfer on the record.
+    and the yaml's cards. Every hop of the reaction path is priced, and a
+    send delivers by callback with every tick of the transfer on the
+    record.
     """
-
-    def is_wired(self, path: transfer_records.LinkPath) -> bool:
-        """Whether the card prices this path; an unwired path is a free hop."""
 
     def expected_delay_ticks(
         self,

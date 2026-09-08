@@ -184,7 +184,7 @@ def _copies_the_boundary_fold(
     refused here, where the tier is named.
     """
     tier = escalation_policy.primary_tier.value
-    tier_settings = getattr(settings, f"{tier}_decoder")
+    tier_settings = settings.decoder_settings_for(tier)
     return tables.row(
         decoder_settings.DECODER_BOUNDARY_FOLDS,
         f"{tier}_decoder.boundary_fold",

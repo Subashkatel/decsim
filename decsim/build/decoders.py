@@ -56,7 +56,7 @@ def build_decoder_unit(
     run's confidence signal reads. A Python-built decoder is returned as
     it is. None when the tier names no decoder.
     """
-    tier_settings = getattr(settings, f"{tier}_decoder")
+    tier_settings = settings.decoder_settings_for(tier)
     if tier_settings.decoder is not None:
         return tier_settings.decoder
     if tier_settings.kind is None:
@@ -137,7 +137,7 @@ def _blocks_unit_by_pool(
     <tier>.result_blocks_unit names it there.
     """
     tier = policy.primary_tier.value
-    tier_settings = getattr(settings, f"{tier}_decoder")
+    tier_settings = settings.decoder_settings_for(tier)
     blocks_unit = tier_settings.result_blocks_unit
     blocks_by_pool = {}
     for pool in unit_pools:
@@ -202,7 +202,7 @@ def _active_tier_settings(
     settings: machine_settings.MachineSettings, policy
 ) -> decoder_settings.DecoderSettings:
     tier = policy.primary_tier.value
-    return getattr(settings, f"{tier}_decoder")
+    return settings.decoder_settings_for(tier)
 
 
 def _decoder_memory(

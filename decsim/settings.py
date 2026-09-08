@@ -100,6 +100,15 @@ class MachineSettings:
         observe_settings.ObservationSettings()
     )
 
+    def decoder_settings_for(
+        self, tier: str
+    ) -> decoder_settings.DecoderSettings:
+        """The card of one decoder tier, named the way the yaml names it."""
+        if tier == "weak":
+            return self.weak_decoder
+        assert tier == "strong", f"no decoder tier named {tier!r}"
+        return self.strong_decoder
+
     @classmethod
     def from_mapping(
         cls, sections: Mapping, *, name: str, base_directory

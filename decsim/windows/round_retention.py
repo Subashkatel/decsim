@@ -242,6 +242,169 @@ class RoundRetention:
             strong_store.register_hold(in_flight, round_identities)
         self.bind_input_hold(job, in_flight, strong_store)
 
+    # ---- what a strong window holds
+
+    def open_operation_store(self, operation_id) -> None:
+        """Open the operation's rounds in the store its windows read."""
+        self.weak_store.open_operation(operation_id)
+
+    def has_operation_store(self, operation_id) -> bool:
+        """Whether the operation's syndrome RAM is still open."""
+        return self.weak_store.has_operation(operation_id)
+
+    def strong_window_input(self, builder, window) -> list:
+        """The room-side payloads of a strong window, its first round stamped.
+
+        Which store a strong window reads is the retention's to say, so
+        the shape asks for the input rather than for the store.
+        """
+        builder.stamp_first_round(window, self.strong_store)
+        return builder.assemble_payloads(window, self.strong_store)
+
+    def require_context_stored(self, key: tuple, read_keys) -> None:
+        """Every context round that already arrived sits in buffer 1.
+
+        A round the QPU has not produced yet is not late; a round that
+        reached Buffer 0 and is not in the room-side store was either
+        released early or is still crossing, and both are the run's
+        mistake to report loudly.
+        """
+        missing = []
+        for round_key in read_keys:
+            arrived = self.tracker.rounds_arrived(round_key[0])
+            if round_key[1] > arrived:
+                continue
+            fragments = self.strong_store.retained_fragments(round_key)
+            if fragments is None:
+                missing.append(round_key)
+        if not missing:
+            return
+        raise RuntimeError(
+            f"strong context for {key} arrived at Buffer 0 but is not "
+            f"stored in syndrome buffer 1: {missing} "
+            f"(controller_to_strong_buffer lag beyond the escalation "
+            f"margin, or an early release)"
+        )
+
+    def hold_strong_context(
+        self, key: tuple, strong_request_key, context_keys
+    ) -> None:
+        """The window's potential strong read becomes the request's hold."""
+        self.transfer_potential_to_pending(key, strong_request_key)
+        pending_hold = decoding_records.PendingStrong(strong_request_key)
+        self.strong_store.replace_hold(pending_hold, list(context_keys))
+
+    def guard_restart_reads(
+        self,
+        key: tuple,
+        restart_key: Optional[tuple],
+        proposed_restart,
+        strong_request_key,
+        context_keys,
+        restart_read_keys,
+    ) -> Optional[decoding_records.RephaseGuard]:
+        """Hold the restart window's strong context while a plan lands.
+
+        Syndrome buffer 1 loses the absorbed windows' potential strong
+        holds as the plan lands; the guard keeps the restart window's
+        context until its re-sliced potential strong hold names it. Its
+        Buffer 0 reads need no guard: its potential restart hold is live
+        until the weak chain restarts.
+        """
+        if restart_key is None:
+            return None
+        self._require_restart_claim(key, restart_key)
+        guard = decoding_records.RephaseGuard(strong_request_key)
+        guarded = self._guarded_strong_reads(
+            key, restart_key, proposed_restart, context_keys, restart_read_keys
+        )
+        self.strong_store.register_hold(guard, guarded)
+        return guard
+
+    def release_strong_hold_if_live(self, owner) -> None:
+        """Drop a room-side hold when it is still registered."""
+        self.release_hold_if_live(owner, self.strong_store)
+
+    def release_absorbed_strong_hold(
+        self, key: tuple, restart_key: Optional[tuple], replacement
+    ) -> None:
+        """Drop the absorbed window's potential read; the request holds it."""
+        absorbed = decoding_records.PotentialStrong(key)
+        needed_identities = self.strong_store.hold_round_identities(absorbed)
+        needed = set(needed_identities)
+        replacement_identities = self.strong_store.hold_round_identities(
+            replacement
+        )
+        replacements = set(replacement_identities)
+        if restart_key is not None:
+            restart_potential = decoding_records.PotentialStrong(restart_key)
+            restart_identities = self.strong_store.hold_round_identities(
+                restart_potential
+            )
+            replacements.update(restart_identities)
+        if not needed <= replacements:
+            raise RuntimeError("absorption replacement does not cover packets")
+        self.strong_store.release_hold(absorbed)
+
+    def require_rounds_retained(
+        self, label: str, payloads: list, first_round: int, last_round: int
+    ) -> None:
+        """A strong window starts only once every round it reads is held."""
+        covered = set()
+        for payload in payloads:
+            covered.add(payload.round_index)
+        stop_round = last_round + 1
+        needed = set(range(first_round, stop_round))
+        if covered == needed:
+            return
+        listed = sorted(covered)
+        raise RuntimeError(
+            f"{label}: strong window submitted with rounds "
+            f"{listed} but it needs "
+            f"{first_round}-{last_round}; a strong window may "
+            "only start once every required round is retained"
+        )
+
+    def _require_restart_claim(self, key: tuple, restart_key: tuple) -> None:
+        """The restart window still claims its reads and the re-read range.
+
+        The claim ends only when the window before the restart window
+        commits, at absorption, or at the end of the plan, and the
+        absorbed windows are checked uncommitted first, so no runtime
+        path reaches a released claim here: an invariant, not a check.
+        """
+        claim = decoding_records.PotentialRestart(restart_key)
+        assert self.weak_store.has_hold(claim), (
+            f"strong-region plan for {key}: restart window {restart_key}'s "
+            f"potential restart hold is no longer live"
+        )
+
+    def _guarded_strong_reads(
+        self,
+        key: tuple,
+        restart_key: tuple,
+        proposed_restart,
+        context_keys,
+        restart_read_keys,
+    ) -> list:
+        """Every room-side round the plan must keep while it lands."""
+        escalated_potential = decoding_records.PotentialStrong(key)
+        restart_potential = decoding_records.PotentialStrong(restart_key)
+        escalated_identities = self.strong_store.hold_round_identities(
+            escalated_potential
+        )
+        restart_identities = self.strong_store.hold_round_identities(
+            restart_potential
+        )
+        guarded = list(escalated_identities)
+        guarded += list(restart_identities)
+        guarded += list(context_keys)
+        restart_reads = list(restart_read_keys)
+        guarded += self.strong_context_read_keys(
+            proposed_restart, restart_reads
+        )
+        return guarded
+
     def require_strong_retained(self, round_keys, purpose: str) -> None:
         """Every listed round must still sit in the room-side store."""
         self.require_retained(round_keys, purpose, self.strong_store)

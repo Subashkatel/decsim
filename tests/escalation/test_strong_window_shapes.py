@@ -458,9 +458,9 @@ class RecordingContextWindow:
     absorbs_weak_windows = False
     window_absorbed = trace_source.SILENT
 
-    def __init__(self, engine, planner, tracker, retention, builder) -> None:
+    def __init__(self, engine, regions, retention, builder) -> None:
         self.inner = strong_window_shapes.ContextWindow(
-            engine, planner, tracker, retention, builder
+            engine, regions, retention, builder
         )
         self.planned_windows = []
 

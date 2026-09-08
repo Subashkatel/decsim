@@ -1496,7 +1496,7 @@ def _strong_redecode(
             engine, regions, planner, retention, builder, requester, ledger
         )
     else:
-        shape = row(engine, regions, tracker, retention, builder)
+        shape = row(engine, regions, retention, builder)
     return strong_redecode_module.StrongRedecode(
         engine,
         shape,

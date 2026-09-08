@@ -31,9 +31,6 @@ SAMPLED_CONFIDENCE_SOURCE = decoding_records.SoftOutputSource(
 class CodeRouter:
     """Route each job by code name, with a default decoder fallback."""
 
-    # no gap route: split-pair joins are the switching router's
-    gap = None
-
     def __init__(self, default, by_code: Optional[dict] = None):
         self.default = default
         self.by_code = {}
@@ -65,17 +62,11 @@ class CodeRouter:
 
 
 class SwitchingRouter:
-    """Route strong side jobs to the strong decoder and every other to weak.
+    """Route strong side jobs to the strong decoder and every other to weak."""
 
-    An optional ``gap`` engine serves split-pair sibling jobs (hint
-    "gap"): the second forced-class solve on its own decoder unit. Its
-    presence is also the manager's signal that split-pair joins are on.
-    """
-
-    def __init__(self, weak, strong, gap=None):
+    def __init__(self, weak, strong):
         self.weak = weak
         self.strong = strong
-        self.gap = gap
 
     def run_seed_children(self) -> tuple:
         """Every routed decoder tier under its own path."""
@@ -85,16 +76,10 @@ class SwitchingRouter:
             seed_records.RunSeedChild(weak_path, self.weak),
             seed_records.RunSeedChild(strong_path, self.strong),
         ]
-        if self.gap is not None:
-            gap_path = (seed_records.RunSeedPathSegment("field", "gap"),)
-            gap_child = seed_records.RunSeedChild(gap_path, self.gap)
-            children.append(gap_child)
         return tuple(children)
 
     def route(self, job: decoding_records.DecodeJob):
         """Strong decoder for escalated jobs, weak for everything else."""
-        if job.hint == "gap" and self.gap is not None:
-            return self.gap
         if job.hint == "strong":
             return self.strong
         return self.weak

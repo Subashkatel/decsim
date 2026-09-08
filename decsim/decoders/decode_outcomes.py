@@ -1,15 +1,16 @@
 """What a finished decode means and where its result goes.
 
 gem5's commit stage retires what executed (src/cpu/o3/commit.hh:286);
-here a weak result is put to the escalation policy for its verdict,
-keep or escalate, and then reaches its destination through the job's
-own on_decoded (SimPy's callback on the event) with the verdict on the
-job, so the window side commits it as final or provisionally and asks
-the strong tier itself; a strong result teaches the policy and becomes
-one completion per member request, delivered to each destination that
-waits for it now and held for one whose selection is still crossing the
-weak-to-strong link (StrongRequests). Every terminal outcome goes out on
-request_ended and service_ended; the record ledger listens.
+here a weak result reaches its destination through the job's own
+on_decoded (SimPy's callback on the event), and the window side answers
+with the verdict once it holds the window's whole answer: it applies
+the confidence threshold, commits the result as final or provisionally,
+asks the strong tier itself, and tells this ledger the request is
+resolved. A strong result teaches the policy and becomes one completion
+per member request, delivered to each destination that waits for it now
+and held for one whose selection is still crossing the weak-to-strong
+link (StrongRequests). Every terminal outcome goes out on request_ended
+and service_ended; the record ledger listens.
 """
 
 from typing import Callable, Optional
@@ -21,12 +22,16 @@ import decsim.records.windows as window_records
 
 
 class DecodeOutcomes:
-    """Concludes weak and strong results and reports every terminal one.
+    """Delivers weak results, concludes strong ones, reports every end.
 
-    Trace sources: verdict_given(window_key, request_key, verdict) as the
-    policy answers each weak result; request_ended(job, result, outcome,
-    decode_output_ticks) and service_ended(job, tick) at every terminal
-    outcome.
+    A weak result goes to the destination the job carries and the
+    window side answers with the verdict; a strong result teaches the
+    policy and becomes one completion per member request.
+
+    Trace sources: verdict_given(window_key, request_key, verdict) as
+    the window side answers each weak request; request_ended(job,
+    result, outcome, decode_output_ticks) and service_ended(job, tick)
+    at every terminal outcome.
     """
 
     def __init__(
@@ -45,33 +50,57 @@ class DecodeOutcomes:
         self.request_ended = trace_source.TraceSource()
         self.service_ended = trace_source.TraceSource()
 
-    def conclude_weak(
+    def deliver_weak(
         self,
         job: decoding_records.DecodeJob,
         result: decoding_records.DecodeResult,
     ) -> None:
-        """Put the weak result to the policy and deliver it with the verdict.
+        """Hand one finished weak decode to the destination that asked.
+
+        The destination is the job's own on_decoded: the window
+        committer, or the confidence join in front of it when the
+        window's answer takes two forced-class solves. The verdict on
+        the window comes back later, through resolve_weak_request.
+        """
+        job.on_decoded(job, result)
+        self.service_ended.fire(job, self.engine.now)
+
+    def resolve_weak_request(
+        self,
+        job: decoding_records.DecodeJob,
+        result: decoding_records.DecodeResult,
+        verdict: decoding_records.Verdict,
+    ) -> None:
+        """The window side decided this weak request: close the attempt.
 
         A kept result cancels a live strong request; an escalated one
-        rides to its destination with awaiting_strong_result set, so the
-        window side asks the strong tier for the window and commits the
-        result provisionally.
+        has already asked the strong tier through the window side.
         """
         key = (job.operation_id, job.window_id)
-        verdict = self.escalation_policy.verdict_for_weak_result(job, result)
         self.verdict_given.fire(key, job.request_key, verdict)
         self.strong_requests.resolve_weak(key)
         is_escalated = verdict is decoding_records.Verdict.ESCALATE
         if not is_escalated:
             self.cancel_strong(key)  # no-op unless one is live/held
-        job.awaiting_strong_result = is_escalated  # BEFORE the commit callback
-        job.on_decoded(job, result)
         outcomes = decoding_records.RequestProcessingOutcome
         processing = outcomes.PRIMARY_FORWARDED_FOR_DELIVERY
         if is_escalated:
             processing = outcomes.WEAK_AWAITED_STRONG
         self.request_ended.fire(job, result, processing, self.engine.now)
-        self.service_ended.fire(job, self.engine.now)
+
+    def close_companion_request(
+        self,
+        job: decoding_records.DecodeJob,
+        result: decoding_records.DecodeResult,
+    ) -> None:
+        """The forced-class solve whose window is answered by the other one."""
+        outcomes = decoding_records.RequestProcessingOutcome
+        self.request_ended.fire(
+            job,
+            result,
+            outcomes.WEAK_FORCED_CLASS_COMPANION,
+            self.engine.now,
+        )
 
     def conclude_strong(
         self,

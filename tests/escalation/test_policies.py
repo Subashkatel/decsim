@@ -4,7 +4,8 @@ Toshio et al. 2510.25222 Sec. IV C: the switching rate is the mass of the
 window-gap distribution below the threshold, so on one run the windows
 escalated equal the recorded weak gaps below g_th equal the strong
 corrections in the frame (one identity, checked here on its threshold and
-its complementary-gap signal). The port is gem5's conditional predictor
+its complementary-gap signal, which the weak decoder computes from its
+own two forced-class solves). The port is gem5's conditional predictor
 (src/cpu/pred/conditional.hh): a row answers and is told; the root acts.
 """
 
@@ -14,11 +15,8 @@ import math
 import pytest
 import stim
 
-import decsim.confidence.complementary as complementary
-import decsim.confidence.decoder as confidence_decoder
 import decsim.controller.policies as boundary_policies
 import decsim.decoders.decoders as decoders
-import decsim.decoders.minimum_weight_perfect_matching.decoder as mwpm
 import decsim.decoders.settings as decoder_settings
 import decsim.escalation.policies as policies
 import decsim.escalation.threshold_sources as threshold_sources
@@ -121,15 +119,6 @@ def test_escalations_equal_gaps_below_the_threshold_equal_strong_frame_writes():
         before_measure_flip_probability=0.005,
         after_reset_flip_probability=0.005,
     )
-    weak_latency = decoders.PresetLatencyDecoder(1.0)
-    weak_matching = mwpm.PyMatchingDecoder(weak_latency)
-    signal = complementary.ComplementaryGap()
-    weak = confidence_decoder.SoftOutputDecoder(weak_matching, signal)
-    strong_latency = decoders.PresetLatencyDecoder(5.0)
-    strong = mwpm.PyMatchingDecoder(strong_latency)
-    router = decoders.SwitchingRouter(weak=weak, strong=strong)
-    fixed = threshold_sources.FixedThreshold(threshold_nats)
-    policy = policies.Switching(fixed, complementary.COMPLEMENTARY_GAP_SOURCE)
     operation = program_records.Operation(
         id=1, name="memory", qubits=(0,), patches=(0,), circuit=circuit
     )
@@ -145,10 +134,18 @@ def test_escalations_equal_gaps_below_the_threshold_equal_strong_frame_writes():
     windows = window_settings.WindowSettings(
         scheme=scheme, boundary_policy=held
     )
-    decoder_manager = decoder_settings.DecoderManagerSettings(
-        router=router, unit_pools={"default": 1, "strong": 1}
+    decoder_manager = decoder_settings.DecoderManagerSettings()
+    weak_decoder = decoder_settings.DecoderSettings(
+        kind="pymatching", engine_megahertz=100.0
     )
-    escalation = decoder_settings.EscalationSettings(policy=policy)
+    strong_decoder = decoder_settings.DecoderSettings(
+        kind="pymatching", engine_megahertz=100.0
+    )
+    escalation = decoder_settings.EscalationSettings(
+        kind="switching",
+        gap_threshold_decibels=15.0,
+        gap_threshold_nats=threshold_nats,
+    )
     pauli_frame = pauli_frame_module.PauliFrameConfig(commit_microseconds=0.004)
     observation = observe_settings.ObservationSettings(
         record_switching_windows=True
@@ -158,6 +155,8 @@ def test_escalations_equal_gaps_below_the_threshold_equal_strong_frame_writes():
         qpu=qpu,
         windows=windows,
         decoder_manager=decoder_manager,
+        weak_decoder=weak_decoder,
+        strong_decoder=strong_decoder,
         escalation=escalation,
         pauli_frame=pauli_frame,
         observation=observation,
@@ -169,6 +168,7 @@ def test_escalations_equal_gaps_below_the_threshold_equal_strong_frame_writes():
         is_weak = record.request_key.tier is window_records.DecoderTier.WEAK
         if is_weak and record.soft_output is not None:
             weak_gaps.append(record.soft_output.gap)
+    # one gap per window: the companion forced-class request carries none
     below = 0
     for gap in weak_gaps:
         if gap < threshold_nats:

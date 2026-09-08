@@ -76,14 +76,15 @@ class CorrectionPublisher:
 class WindowCommitter:
     """Commits one window's result once; the job's on_decoded.
 
-    Seven attributes: the engine stamps and logs, the planner and the
-    tracker name the window and its operation, and the courier, the
-    publisher, the strong redecode and the results are the four the
-    commit hands to; the strong redecode (None when the run never
-    escalates) hears an escalated result before its provisional commit
-    and every weak commit after it. Trace source: window_committed(
-    window, contribution), the window's record and the contribution
-    that owns its rounds, at every commit.
+    The engine stamps and logs, the planner and the tracker name the
+    window and its operation, the escalation policy answers the
+    window's confidence, the decode queue hears that answer, and the
+    courier, the publisher, the strong redecode and the results are the
+    four the commit hands to; the strong redecode (None when the run
+    never escalates) hears an escalated result before its provisional
+    commit and every weak commit after it. Trace source:
+    window_committed(window, contribution), the window's record and the
+    contribution that owns its rounds, at every commit.
     """
 
     def __init__(
@@ -95,6 +96,8 @@ class WindowCommitter:
         publisher: CorrectionPublisher,
         strong_redecode,
         results,
+        escalation_policy,
+        decode_queue,
     ) -> None:
         self.engine = engine
         self.planner = planner
@@ -103,6 +106,8 @@ class WindowCommitter:
         self.publisher = publisher
         self.strong_redecode = strong_redecode
         self.results = results
+        self.escalation_policy = escalation_policy
+        self.decode_queue = decode_queue
         self.window_committed = trace_source.TraceSource()
 
     def accept_result(
@@ -110,10 +115,13 @@ class WindowCommitter:
         job: decoding_records.DecodeJob,
         result: decoding_records.DecodeResult,
     ) -> None:
-        """A primary decode finished: hand the boundary on, publish, commit.
+        """The window's answer: apply the threshold, publish or escalate.
 
-        A result the policy escalated asks the strong tier for the
-        window first (its selection, and a serial strong job, leave
+        The result carries the window's confidence, so the threshold is
+        applied here (Toshio et al. 2510.25222 Sec. III A, step 3): a
+        kept result rides its output link to the frame and commits as
+        final; a result below the threshold asks the strong tier for
+        the window first (its selection, and a serial strong job, leave
         now), then commits provisionally, its boundary leaving with the
         commit.
         """
@@ -121,9 +129,12 @@ class WindowCommitter:
         window = self.planner.windows_by_key[key]
         window.t_done = self.engine.now
         operation = self.tracker.operation_by_id[job.operation_id]
-        is_final = not job.awaiting_strong_result
+        verdict = self.escalation_policy.verdict_for_weak_result(job, result)
+        is_final = verdict is decoding_records.Verdict.KEEP
         if not is_final:
             self.strong_redecode.escalate(job)
+        self.decode_queue.resolve_weak_request(job, result, verdict)
+        if not is_final:
             self.commit(window, operation, result, job.request_key, False)
             return
         self.courier.hand_on(window, operation, result, job.request_key, True)

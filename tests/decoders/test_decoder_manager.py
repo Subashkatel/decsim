@@ -79,8 +79,9 @@ def test_a_fake_row_through_the_pool_decodes_the_window_once():
     manager = _manager(engine, row)
     delivered = []
 
-    def on_decoded(_job, result):
+    def on_decoded(job, result):
         delivered.append((engine.now, result))
+        manager.resolve_weak_request(job, result, decoding_records.Verdict.KEEP)
 
     job = _window_job()
     manager.enqueue(job, None, on_decoded)
@@ -91,6 +92,16 @@ def test_a_fake_row_through_the_pool_decodes_the_window_once():
     assert result.logical_observables == (1,)
     assert "Decoder manager: START DECODE mem W0" in log.lines[-1]
     manager.check_decode_work_settled()
+
+
+def _resolving(manager):
+    """An on_decoded that closes the request, as the window side does."""
+    keep = decoding_records.Verdict.KEEP
+
+    def on_decoded(job, result):
+        manager.resolve_weak_request(job, result, keep)
+
+    return on_decoded
 
 
 def test_a_spent_job_is_refused():
@@ -109,14 +120,15 @@ def test_a_withdrawn_window_leaves_the_queue_and_the_ledger():
     manager = _manager(engine, row)
     busy = _window_job()
     busy.label = "busy"
-    manager.enqueue(busy, None, lambda _job, _result: None)
+    on_decoded = _resolving(manager)
+    manager.enqueue(busy, None, on_decoded)
     waiting = _window_job()
     waiting.window_id = 1
     waiting.label = "waiting"
     waiting.request_key = window_records.DecoderRequestKey(
         1, 1, window_records.DecoderTier.WEAK, 1
     )
-    manager.enqueue(waiting, None, lambda _job, _result: None)
+    manager.enqueue(waiting, None, on_decoded)
     assert manager.queue.total() == 0  # both took a slot of the one unit
     manager.withdraw_window((1, 1))
     assert waiting.cancelled is True

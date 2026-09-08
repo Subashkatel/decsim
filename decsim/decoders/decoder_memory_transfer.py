@@ -5,9 +5,15 @@ DecoderMemory, the release, the cancel. DecoderInputStaging is the sole
 writer of job.decoder_input, job.memory and job.input_hold; the
 transport owns the in-flight delivery and its cancellation only, so a
 supplied transport cannot bypass decoder memory.
+
+A unit reads one copy of one input: a job whose rounds this unit holds
+reads them, and a job staged while their transfer is still in flight
+joins that landing instead of sending them again, which is gem5's MSHR
+with several targets on one fill (src/mem/cache/mshr.hh).
 """
 
-from typing import Callable, Optional, Protocol, runtime_checkable
+import dataclasses
+from typing import Any, Callable, Optional, Protocol, runtime_checkable
 
 import decsim.observe.trace_source as trace_source
 import decsim.records.decoding as decoding_records
@@ -39,6 +45,15 @@ class DecoderMemoryTransfer(Protocol):
         """Suppress the landing of a request that has not landed yet."""
 
 
+@dataclasses.dataclass
+class _AwaitedLanding:
+    """One transfer in flight into a unit, and the jobs joining its landing."""
+
+    memory: Any
+    expected_landing_ticks: int
+    joined: list
+
+
 class DecoderInputStaging:
     """Stages a job's input into a unit's memory and frees it again.
 
@@ -51,6 +66,8 @@ class DecoderInputStaging:
         self.transport = transport
         self.engine = engine
         self.copy_made = trace_source.TraceSource()
+        # landing key -> the transfer in flight and the jobs joining it
+        self.awaited_by_input: dict = {}
 
     def stage(
         self,
@@ -69,6 +86,11 @@ class DecoderInputStaging:
         if memory.holds(job):
             self._read_resident(job, memory, on_landed)
             return
+        landing_key = memory.landing_key(job)
+        awaited = self.awaited_by_input.get(landing_key)
+        if awaited is not None:
+            self._join_landing(awaited, job, on_landed)
+            return
         send_input = job.send_input
         job.send_input = None
 
@@ -85,10 +107,32 @@ class DecoderInputStaging:
             if hold is not None:  # Buffer 0 may drop the rounds now
                 hold()
                 job.input_hold = None
+            self._land_joined(landing_key, memory)
             on_landed(job)
 
+        awaited = _AwaitedLanding(memory, self.engine.now, [])
+        self.awaited_by_input[landing_key] = awaited
         expected_delay_ticks = self.transport.deliver(job, send_input, land)
-        job.input_landing_ticks = self.engine.now + expected_delay_ticks
+        landing_ticks = self.engine.now + expected_delay_ticks
+        job.input_landing_ticks = landing_ticks
+        awaited.expected_landing_ticks = landing_ticks
+
+    def _join_landing(
+        self,
+        awaited: _AwaitedLanding,
+        job: decoding_records.DecodeJob,
+        on_landed: Callable[[decoding_records.DecodeJob], None],
+    ) -> None:
+        """These rounds are already on their way here: wait for that landing."""
+        job.send_input = None
+        job.input_landing_ticks = awaited.expected_landing_ticks
+        awaited.joined.append((job, on_landed))
+
+    def _land_joined(self, landing_key, memory) -> None:
+        """Read the landed rounds into every job that joined the transfer."""
+        awaited = self.awaited_by_input.pop(landing_key)
+        for job, on_landed in awaited.joined:
+            self._read_resident(job, memory, on_landed)
 
     def _read_resident(
         self,
@@ -116,11 +160,28 @@ class DecoderInputStaging:
         cancel.
         """
         self.transport.cancel(job)
+        self._drop_awaited(job)
         self.release(job)
         hold = job.input_hold
         if hold is not None:
             hold()
             job.input_hold = None
+
+    def _drop_awaited(self, job: decoding_records.DecodeJob) -> None:
+        """Forget a landing this job was sending or waiting for.
+
+        The jobs of one attempt are withdrawn together, so a cancelled
+        sender takes its joined readers' landing with it and they are
+        cancelled in the same pass.
+        """
+        unit = job.unit
+        if unit is None:
+            return
+        landing_key = unit.memory.landing_key(job)
+        awaited = self.awaited_by_input.get(landing_key)
+        if awaited is None:
+            return
+        del self.awaited_by_input[landing_key]
 
     def release(self, job: decoding_records.DecodeJob) -> None:
         """Free the job's rounds from its unit's memory; none held is fine."""

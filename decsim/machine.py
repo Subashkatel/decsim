@@ -36,7 +36,7 @@ from typing import Any, Optional
 import stim
 
 import decsim.confidence.complementary as complementary
-import decsim.confidence.decoder as confidence_decoder
+import decsim.confidence.gap_join as gap_join_module
 import decsim.config as config
 import decsim.controller.controller as controller_module
 import decsim.controller.feedback_streams as feedback_streams
@@ -139,19 +139,14 @@ DECODERS = {
     "relay_bp": relay_belief_propagation.RelayBeliefPropagationDecoder,
     "bposd": belief_propagation_osd.BeliefPropagationOsdDecoder,
 }
-# The soft output a switching run's weak decoder reports, and the wrapper
-# that attaches it (escalation.gap_computation). No yaml key names the
-# signal yet; the root takes the one row, and the switching policy
-# expects its source.
+# The soft output a switching run's weak decoder reports. No yaml key
+# names the signal yet; the root takes the one row, the switching policy
+# expects its source, and the window side asks the weak decoder for the
+# solves the row needs.
 CONFIDENCE_SIGNALS = {
     "complementary_gap": complementary.ComplementaryGap,
 }
 CONFIDENCE_SIGNAL_KIND = "complementary_gap"
-CONFIDENCE_WRAPPERS = {
-    "serial": confidence_decoder.SoftOutputDecoder,
-    "parallel_pair": confidence_decoder.ParallelGapDecoder,
-    "split_pair": confidence_decoder.SplitGapDecoder,
-}
 ROUND_STORES = {
     "round_store": round_store_module.RoundStore,
 }
@@ -438,7 +433,7 @@ class Machine:
         # job carries its return path.
         _check_strong_route(settings, pool.router)
         decoder_manager = _decoder_manager(
-            engine, settings, escalation_policy, pool, links
+            engine, settings, escalation_policy, pool
         )
         window_manager = _window_manager(
             engine,
@@ -641,11 +636,10 @@ def build_decoder_unit(settings: MachineSettings, tier: str):
     A named row decodes for real inside a StagedDecoder whose fetch and
     release stages are cycles of the tier's clock; a number is a fixed
     core latency on the MWPM path. The tier that decodes the plan's
-    windows carries the confidence signal's wrapper when the escalation
-    switches (CONFIDENCE_WRAPPERS by gap_computation) and the Tesseract
-    referee when the observation asks for it; the strong tier of a
-    switching run is unwrapped (its result is final). A Python-built
-    decoder is returned as it is. None when the tier names no decoder.
+    windows carries the Tesseract referee when the observation asks for
+    it, and under a switching escalation must answer the forced-class
+    solves the confidence signal needs. A Python-built decoder is
+    returned as it is. None when the tier names no decoder.
     """
     tier_settings = getattr(settings, f"{tier}_decoder")
     if tier_settings.decoder is not None:
@@ -657,9 +651,7 @@ def build_decoder_unit(settings: MachineSettings, tier: str):
     is_active = tier == active_tier
     is_switching = settings.escalation.kind == "switching"
     if is_active and is_switching:
-        # a named row is measured on the host clock; a number is priced
-        is_measured = isinstance(tier_settings.kind, str)
-        algorithm = _gap_wrapped(algorithm, settings.escalation, is_measured)
+        _check_answers_the_confidence(algorithm, tier_settings.kind, tier)
     check = _row(
         WINDOW_CHECKS,
         "observation.check_windows_with",
@@ -1043,9 +1035,8 @@ def _decoder_pool(settings: MachineSettings, plan: _Plan) -> _DecoderPool:
     """The router over the tiers and the manager's pools.
 
     Switching puts two units behind one router: the strong pool serves
-    escalated jobs, and split_pair adds a gap pool for the sibling
-    solves. Any other escalation routes every job to the tier that
-    decodes the plan's windows.
+    escalated jobs. Any other escalation routes every job to the tier
+    that decodes the plan's windows.
     """
     manager = settings.decoder_manager
     scheduler = manager.scheduler
@@ -1083,7 +1074,12 @@ def _decoder_pool(settings: MachineSettings, plan: _Plan) -> _DecoderPool:
 
 
 def _switching_pools(settings: MachineSettings, weak, strong) -> tuple:
-    """The switching router and its pools: default, strong, maybe gap."""
+    """The switching router and its pools: default and strong.
+
+    A window's two forced-class solves are two ordinary jobs of the
+    default pool, so weak_decoder.units alone decides whether they
+    overlap (design audit note 12 section 4).
+    """
     if strong is None:
         raise ValueError(
             "escalation switching escalates to the strong_decoder, which "
@@ -1093,11 +1089,7 @@ def _switching_pools(settings: MachineSettings, weak, strong) -> tuple:
         "default": settings.weak_decoder.units,
         "strong": settings.strong_decoder.units,
     }
-    gap = None
-    if settings.escalation.gap_computation == "split_pair":
-        gap = _gap_unit(settings)
-        unit_pools["gap"] = settings.escalation.gap_units
-    router = decoders.SwitchingRouter(weak, strong, gap=gap)
+    router = decoders.SwitchingRouter(weak, strong)
     return router, unit_pools
 
 
@@ -1133,25 +1125,23 @@ def _algorithm(kind, tier: str):
     return minimum_weight_perfect_matching.PyMatchingDecoder(latency_model)
 
 
-def _gap_wrapped(
-    algorithm, escalation: decoder_settings.EscalationSettings, is_measured
-):
-    """The weak algorithm carrying the signal, in the computation's wrapper."""
-    signal = _confidence_signal()
-    wrapper = _row(
-        CONFIDENCE_WRAPPERS,
-        "escalation.gap_computation",
-        escalation.gap_computation,
+def _check_answers_the_confidence(algorithm, kind, tier: str) -> None:
+    """Refuse a weak tier that cannot serve the run's confidence signal.
+
+    The complementary gap is two solves of the same window, each pinned
+    to one logical class, run by the weak decoder itself: a confidence
+    is the decoder's own. A row that cannot be pinned has no gap to
+    report. A priced card is not refused: it prices one decode of one
+    window, and the pair is two decodes, so the card is charged once
+    per forced solve.
+    """
+    if algorithm.answers_forced_logical_class:
+        return
+    raise ValueError(
+        f"{tier}_decoder.kind {kind!r} cannot pin a solve to one logical "
+        "class, so it cannot report the complementary gap escalation "
+        "switching decides on"
     )
-    is_split = wrapper is confidence_decoder.SplitGapDecoder
-    if is_split and not is_measured:
-        raise ValueError(
-            "split_pair times two real forced-class solves on separate "
-            "units, so the weak tier needs a named wall-clock "
-            "algorithm; a priced card already models the whole unit "
-            "(use parallel_pair to change its cost sheet instead)"
-        )
-    return wrapper(algorithm, signal)
 
 
 def _confidence_signal():
@@ -1160,17 +1150,6 @@ def _confidence_signal():
         CONFIDENCE_SIGNALS, "escalation.confidence", CONFIDENCE_SIGNAL_KIND
     )
     return row()
-
-
-def _gap_unit(settings: MachineSettings) -> staged_decoder.StagedDecoder:
-    """split_pair's sibling pool: one forced solve per window, timed for real.
-
-    Staged over the weak tier's engine timing, since it reads the same
-    rounds.
-    """
-    signal = _confidence_signal()
-    half = confidence_decoder.GapHalfDecoder(signal)
-    return _staged_unit(settings.weak_decoder, half)
 
 
 def _staged_unit(
@@ -1341,9 +1320,18 @@ def _window_manager(
         publisher,
         committer_redecode,
         results,
+        escalation_policy,
+        decode_queue,
     )
+    gap_join = _forced_class_gap_join(settings, engine, committer, decode_queue)
     requester = decode_requests.DecodeRequester(
-        tracker, retention, builder, decode_queue, escalation_policy, committer
+        tracker,
+        retention,
+        builder,
+        decode_queue,
+        escalation_policy,
+        committer,
+        gap_join,
     )
     strong_redecode = _strong_redecode(
         escalation_policy,
@@ -1375,6 +1363,25 @@ def _window_manager(
     )
     late.window_manager = window_manager
     return window_manager
+
+
+def _forced_class_gap_join(
+    settings: MachineSettings, engine, committer, decode_queue
+):
+    """The confidence join of a run whose gap is two forced-class solves.
+
+    None when the escalation is not the root's switching policy: a
+    Python-built policy brings its own decoder, which reports its own
+    soft output from one decode.
+    """
+    if settings.escalation.kind != "switching":
+        return None
+    if settings.escalation.policy is not None:
+        return None
+    signal = _confidence_signal()
+    return gap_join_module.ForcedClassGapJoin(
+        engine, signal, committer, decode_queue
+    )
 
 
 def _strong_redecode(
@@ -1446,11 +1453,9 @@ def _decoder_manager(
     settings: MachineSettings,
     escalation_policy,
     pool: _DecoderPool,
-    links,
 ) -> decoder_manager_module.DecoderManager:
     return decoder_manager_module.DecoderManager(
         engine,
-        link=links,
         router=pool.router,
         scheduler=pool.scheduler,
         unit_pools=pool.unit_pools,

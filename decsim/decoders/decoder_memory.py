@@ -190,6 +190,11 @@ class DecoderMemory:
             occupied += len(resident.decoder_input.rounds)
         return occupied
 
+    def landing_key(self, job: decoding_records.DecodeJob) -> tuple:
+        """The identity of the rounds this job reads, in this unit."""
+        key = _memory_key(job)
+        return (self.pool, self.unit, key)
+
     def holds(self, job: decoding_records.DecodeJob) -> bool:
         """Whether the rounds this job reads are already in this memory."""
         key = _memory_key(job)

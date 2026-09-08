@@ -358,14 +358,16 @@ def test_the_re_read_rounds_survive_with_commit_four_and_buffer_four():
 
 
 def test_the_re_read_rounds_survive_the_absorbed_inputs_landing_first():
-    """Two weak units: the absorbed W5 and the restart W6 land first.
+    """Four weak units: the absorbed W5 and the restart W6 land first.
 
     Both inputs are in unit memory before W3's verdict. A landed
     input's Buffer 0 request hold ends at the landing, so with one
     holder the re-read rounds 16-18 and W6's own 19-21 would be gone
     before the plan runs; W6's claim keeps them past both landings.
+    Four units hold two windows at once, since a window's confidence
+    is two forced-class solves and each takes a unit.
     """
-    machine = _gate_double_window_machine(3, 3, 40.0, 5.0, 2, 1)
+    machine = _gate_double_window_machine(3, 3, 40.0, 5.0, 4, 1)
     result = machine.run()
     landed_absorbed = _log_index(
         machine, "memory W5 [commit 16-18] input landed"

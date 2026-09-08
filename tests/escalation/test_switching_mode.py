@@ -295,12 +295,18 @@ def test_unreachable_threshold_escalates_every_window(tmp_path):
 
 
 def gaps_by_window(view, weak_tier) -> dict:
-    """Every weak request's gap, keyed by the window it decoded."""
+    """Every window's gap, keyed by the window it decoded.
+
+    A window's two forced-class requests are one attempt: the request
+    that carries the window's answer carries the gap, its companion
+    carries none.
+    """
     gaps = {}
     for record in view.requests:
         if record.request_key.tier is not weak_tier:
             continue
-        assert record.soft_output is not None
+        if record.soft_output is None:
+            continue
         window_key = (
             record.request_key.operation_id,
             record.request_key.window_id,

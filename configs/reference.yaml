@@ -98,9 +98,14 @@ escalation:
 #                                  # boundary, and the strong region keeps the
 #                                  # crossing faults; it costs Buffer 0 one
 #                                  # more buffer region per bounded window
-#   gap_computation: serial        # serial | parallel_pair | split_pair: where
-#                                  # the two forced-class gap solves run
-#   gap_units: 1                   # split_pair only: sibling pool size
+#                                  # The complementary gap is two solves of
+#                                  # one window, each pinned to one logical
+#                                  # class, submitted at one instant as two
+#                                  # ordinary jobs of the weak pool; so
+#                                  # weak_decoder.units alone decides whether
+#                                  # they overlap. A priced weak card prices
+#                                  # one decode of one window, so it is
+#                                  # charged once per forced solve.
 
 workload:
   kind: memory_circuit             # memory_circuit is the one yaml row; the

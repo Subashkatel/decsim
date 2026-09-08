@@ -21,9 +21,9 @@ import dataclasses
 import functools
 from typing import Callable, Optional
 
-import decsim.decoders.decode_queue as decode_queue_module
 import decsim.escalation.pending_strong_windows as pending_strong_windows
 import decsim.records.decoding as decoding_records
+import decsim.records.log_sources as log_sources
 import decsim.records.windows as window_records
 import decsim.trace_source as trace_source
 
@@ -148,7 +148,7 @@ class StrongRedecode:
             False,
         )
         self.engine.log(
-            decode_queue_module.LOG_SOURCE,
+            log_sources.DECODER_MANAGER,
             f"strong sibling for {window_key} cancelled while held for "
             f"its input (the weak result is confident)",
         )
@@ -200,7 +200,7 @@ class StrongRedecode:
             )
             self._enqueue(job, held.selection_arrival_ticks)
             self.engine.log(
-                decode_queue_module.LOG_SOURCE,
+                log_sources.DECODER_MANAGER,
                 f"{job.label}: {held.conditions.released_description} -> "
                 "strong window submitted",
             )

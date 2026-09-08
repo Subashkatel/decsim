@@ -28,6 +28,7 @@ import decsim.decoders.decoder_pool as decoder_pool_module
 import decsim.decoders.decoder_unit as decoder_unit_module
 import decsim.decoders.strong_requests as strong_requests_module
 import decsim.records.decoding as decoding_records
+import decsim.records.log_sources as log_sources
 import decsim.trace_source as trace_source
 
 # the job kinds a pipelined unit serves; every other kind holds its unit
@@ -189,7 +190,9 @@ class DecodeService:
         if job.window is not None:
             job.window.service_began = True
         decoder = self.pool.decoder_for(job)
-        self.engine.log(decode_queue.LOG_SOURCE, f"START DECODE {job.label}")
+        self.engine.log(
+            log_sources.DECODER_MANAGER, f"START DECODE {job.label}"
+        )
         self.trace.job_started.fire(job, job.unit)
         self._predict_compute_free(job)
         pipeline = self._pipeline_of(decoder, job)
@@ -399,7 +402,7 @@ class DecodeService:
         pool_tag = decode_queue.pool_tag_of(pool)
         free_now = self.pool.free_count(pool)
         self.engine.log(
-            decode_queue.LOG_SOURCE,
+            log_sources.DECODER_MANAGER,
             f"ASSIGN UNIT {job.label} "
             f"({slot_note}waited {waited} in queue, "
             f"{pool_tag}units free now {free_now})",
@@ -478,7 +481,7 @@ class DecodeService:
     def _park(self, job: decoding_records.DecodeJob) -> None:
         job.is_parked = True
         self.engine.log(
-            decode_queue.LOG_SOURCE,
+            log_sources.DECODER_MANAGER,
             f"PARK DECODE {job.label} (boundary pending)",
         )
         self._release_compute_claim(job)

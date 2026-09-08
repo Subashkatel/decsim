@@ -46,10 +46,10 @@ only the components its own layout needs.
 import dataclasses
 from typing import Any, Optional, Protocol, runtime_checkable
 
-import decsim.decoders.decode_queue as decode_queue_module
 import decsim.escalation.pending_strong_windows as pending_strong_windows
 import decsim.escalation.strong_regions as strong_regions
 import decsim.records.decoding as decoding_records
+import decsim.records.log_sources as log_sources
 import decsim.records.windows as window_records
 import decsim.trace_source as trace_source
 
@@ -232,7 +232,7 @@ class ContextWindow:
     def _log_hold(self, held: "_HeldContextWindow", crossing: tuple) -> None:
         """The context is still on controller_to_strong_buffer."""
         self.collaborators.engine.log(
-            decode_queue_module.LOG_SOURCE,
+            log_sources.DECODER_MANAGER,
             f"{held.label}: strong start deferred until the context "
             f"rounds {list(crossing)} are stored in syndrome buffer 1",
         )
@@ -458,7 +458,7 @@ class ForwardWindow:
             key, restart_key, replacement
         )
         self.collaborators.engine.log(
-            decode_queue_module.LOG_SOURCE,
+            log_sources.DECODER_MANAGER,
             f"window {key} absorbed into the strong window "
             f"(weak chain skips it)",
         )
@@ -474,7 +474,7 @@ class ForwardWindow:
             readiness_description = "terminal data"
         absorbed_count = len(resolved_region.absorbed_window_keys)
         self.collaborators.engine.log(
-            decode_queue_module.LOG_SOURCE,
+            log_sources.DECODER_MANAGER,
             f"{held.label}: strong window rounds {plan.commit_lo}-"
             f"{plan.commit_hi} assigned; weak chain skips "
             f"{absorbed_count} window(s); "
@@ -518,7 +518,7 @@ class ForwardWindow:
         self.collaborators.retention.replace_window_reads(restart_key, restart)
         seam_owner_name = seam_owner.name.lower()
         self.collaborators.engine.log(
-            decode_queue_module.LOG_SOURCE,
+            log_sources.DECODER_MANAGER,
             f"restart window {restart_key} re-sliced across strong window "
             f"edge {strong_window_hi} (reads rounds {restart.buffer_lo}-"
             f"{restart.buffer_hi}; crossing faults owned by "

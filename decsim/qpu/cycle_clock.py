@@ -19,6 +19,7 @@ from typing import Any, Callable, Optional
 
 import decsim.engine
 import decsim.ports as ports
+import decsim.records.log_sources as log_sources
 import decsim.records.program as program_records
 import decsim.records.rounds as round_records
 import decsim.trace_source as trace_source
@@ -189,7 +190,7 @@ class QPUDevice:
             operation = command.operation
             if command.emits_detector_data:
                 self.engine.log(
-                    "QPU",
+                    log_sources.QPU,
                     f"{operation.name} fires round "
                     f"{running.emitted_round_count}/{command.round_count}",
                 )

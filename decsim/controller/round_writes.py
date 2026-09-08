@@ -17,6 +17,7 @@ import dataclasses
 from typing import Callable
 
 import decsim.controller.settings as controller_settings
+import decsim.records.log_sources as log_sources
 import decsim.records.rounds as round_records
 import decsim.records.transfers as transfer_records
 import decsim.trace_source as trace_source
@@ -142,10 +143,11 @@ class RoundWriter:
             packed.round_key,
             packed.wire_bits,
             "controller assembler",
-            "Buffer 0",
+            log_sources.WEAK_BUFFER,
         )
         self.engine.log_io(
-            "Buffer 0", lambda: _received_text(packed.packet, self.weak_store)
+            log_sources.WEAK_BUFFER,
+            lambda: _received_text(packed.packet, self.weak_store),
         )
         if self.strong_writer is not None:
             # the dual write: the same round leaves for the room side in

@@ -15,6 +15,7 @@ import types
 from typing import Callable, Optional
 
 import decsim.qpu.cycle_clock as cycle_clock
+import decsim.records.log_sources as log_sources
 import decsim.records.program as program_records
 
 
@@ -132,7 +133,7 @@ class OperationIssuer:
         if operation.blocked_by is not None:
             release_note = f" [unblocked by op#{operation.blocked_by}]"
         self.engine.log(
-            "Controller",
+            log_sources.CONTROLLER,
             f"START {operation.name}  ({kind}, qubits "
             f"{operation.qubits}){release_note}",
         )

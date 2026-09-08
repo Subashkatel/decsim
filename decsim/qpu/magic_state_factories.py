@@ -35,6 +35,7 @@ from typing import Callable, Optional, Protocol
 import decsim.config as config
 import decsim.engine
 import decsim.ports as ports
+import decsim.records.log_sources as log_sources
 import decsim.seeding as seeding
 
 
@@ -141,7 +142,7 @@ class DistillationFactory(seeding._RandomSeedConsumer):
         self._stall_start_by_operation_id[operation_id] = self.engine.now
         waiting_count = len(self.waiting)
         self.engine.log(
-            "Factory",
+            log_sources.MAGIC_STATE_FACTORY,
             f"op#{operation_id} requests a magic state "
             f"(store {self.stored_state_count}, waiting {waiting_count})",
         )
@@ -241,7 +242,8 @@ class DistillationFactory(seeding._RandomSeedConsumer):
             self._submit_corrections()
         else:
             self.engine.log(
-                "Factory", "a unit's distillation DISCARDED, retrying"
+                log_sources.MAGIC_STATE_FACTORY,
+                "a unit's distillation DISCARDED, retrying",
             )
         self._start_attempts()
 
@@ -270,7 +272,7 @@ class DistillationFactory(seeding._RandomSeedConsumer):
             )
             return
         self.engine.log(
-            "Factory",
+            log_sources.MAGIC_STATE_FACTORY,
             f"a unit distilled a state; submitting "
             f"{self.card.correction_decode_count} correction-qubit decode jobs "
             f"to the cluster (parallel)",
@@ -304,7 +306,7 @@ class DistillationFactory(seeding._RandomSeedConsumer):
         trace.released_tick = self.engine.now
         self._ready_traces.append(trace)
         self.engine.log(
-            "Factory",
+            log_sources.MAGIC_STATE_FACTORY,
             f"magic state ready (store now {self.stored_state_count})",
         )
         self._deliver_to_waiting()
@@ -319,7 +321,7 @@ class DistillationFactory(seeding._RandomSeedConsumer):
             self.total_stall_ticks += waited_ticks
             tag = _stall_tag(waited_ticks)
             self.engine.log(
-                "Factory",
+                log_sources.MAGIC_STATE_FACTORY,
                 f"  -> delivered to op#{operation_id} "
                 f"(store now {self.stored_state_count}){tag}",
             )
@@ -434,7 +436,7 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
         top_store = top_counters.stored_state_count
         waiting_count = len(self.waiting)
         self.engine.log(
-            "Factory",
+            log_sources.MAGIC_STATE_FACTORY,
             f"op#{operation_id} requests a magic state "
             f"(top-level store {top_store}, waiting {waiting_count})",
         )
@@ -508,7 +510,7 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
             self.total_stall_ticks += waited_ticks
             tag = _stall_tag(waited_ticks)
             self.engine.log(
-                "Factory",
+                log_sources.MAGIC_STATE_FACTORY,
                 f"  -> delivered final state to op#{operation_id}{tag}",
             )
             callback()
@@ -670,7 +672,7 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
         else:
             counters.failure_count += 1
             self.engine.log(
-                "Factory",
+                log_sources.MAGIC_STATE_FACTORY,
                 f"level {level} distillation failed (inputs discarded), "
                 "retrying",
             )
@@ -686,7 +688,7 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
         input_level = level - 1
         consumed = self.card.inputs_per_round
         self.engine.log(
-            "Factory",
+            log_sources.MAGIC_STATE_FACTORY,
             f"level {level} distilled a state ({destination}; "
             f"consumed {consumed} level-{input_level} states)",
         )

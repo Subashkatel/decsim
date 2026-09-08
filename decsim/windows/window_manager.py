@@ -25,8 +25,8 @@ gives a new window its first boundary and the workload's feedback mode.
 import dataclasses
 from typing import Optional, Protocol, runtime_checkable
 
-import decsim.decoders.decode_queue as decode_queue_module
 import decsim.records.identity as identity_records
+import decsim.records.log_sources as log_sources
 import decsim.records.program as program_records
 import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
@@ -301,7 +301,7 @@ class WindowManager:
         memory_rounds = self.tracker.note_memory_round(source_operation_id)
         operation = self.tracker.operation_by_id[source_operation_id]
         self.engine.log(
-            decode_queue_module.LOG_SOURCE,
+            log_sources.DECODER_MANAGER,
             f"memory round for {operation.name} "
             f"(idle buffer rounds: {memory_rounds})",
         )
@@ -329,7 +329,7 @@ class WindowManager:
         """Advance the readiness arrival counter; the authority calls this."""
         arrived_now = self.tracker.note_arrival(operation.id, round_index)
         self.engine.log(
-            decode_queue_module.LOG_SOURCE,
+            log_sources.DECODER_MANAGER,
             f"round {round_index} of {operation.name} arrived "
             f"(op now has rounds 1..{arrived_now})",
         )

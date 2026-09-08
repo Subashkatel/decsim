@@ -20,6 +20,7 @@ import types
 from typing import Any, Callable, Protocol, runtime_checkable
 
 import decsim.engine
+import decsim.records.log_sources as log_sources
 import decsim.records.program as program_records
 import decsim.trace_source as trace_source
 
@@ -212,7 +213,9 @@ class ExecutionRuntime:
         )
         self.lifecycle.finished_operation_ids.add(operation.id)
         self.trace.body_finished.fire(operation.id, self.engine.now)
-        self.engine.log("ExecutionRuntime", f"{operation.name} body done")
+        self.engine.log(
+            log_sources.EXECUTION_RUNTIME, f"{operation.name} body done"
+        )
         self.lifecycle.resources.release(operation)
         self.issuer.before_successor_release(operation)
         for successor_id in self.schedule.successors[operation.id]:
@@ -223,7 +226,7 @@ class ExecutionRuntime:
         if self.workload_complete:
             operation_count = len(self.schedule.operations)
             self.engine.log(
-                "ExecutionRuntime",
+                log_sources.EXECUTION_RUNTIME,
                 f"QPU finished. All {operation_count} operations are "
                 "physically complete; decoder may still be draining.",
             )
@@ -261,7 +264,7 @@ class ExecutionRuntime:
         if not decision.releases_operation:
             self.trace.result_returned.fire(operation_id, self.engine.now)
             self.engine.log(
-                "ExecutionRuntime",
+                log_sources.EXECUTION_RUNTIME,
                 f"received result return for {operation.name}",
             )
             return
@@ -274,7 +277,7 @@ class ExecutionRuntime:
         self.lifecycle.released_operation_ids.add(operation_id)
         self.trace.decode_released.fire(operation_id, self.engine.now)
         self.engine.log(
-            "ExecutionRuntime",
+            log_sources.EXECUTION_RUNTIME,
             f"CONSUMED release for {operation.name}; now trying to start",
         )
         self._maybe_begin(operation)
@@ -306,7 +309,7 @@ class ExecutionRuntime:
             self._state_became_ready(operation)
             return
         self.engine.log(
-            "ExecutionRuntime",
+            log_sources.EXECUTION_RUNTIME,
             f"{operation.name} needs a magic state; asking the factory",
         )
         on_ready = functools.partial(self._state_became_ready, operation)

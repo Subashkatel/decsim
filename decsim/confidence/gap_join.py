@@ -23,8 +23,8 @@ window's reaction time carry the signal's work (decision D8).
 
 import dataclasses
 
-import decsim.decoders.decode_queue as decode_queue_module
 import decsim.records.decoding as decoding_records
+import decsim.records.log_sources as log_sources
 import decsim.trace_source as trace_source
 
 
@@ -85,7 +85,7 @@ class WindowGapJoin:
         """Keep the solve until the window's others report."""
         forced_class = job.forced_logical_class
         self.engine.log(
-            decode_queue_module.LOG_SOURCE,
+            log_sources.DECODER_MANAGER,
             f"GAP HOLD {job.label}: class {forced_class} waits for the "
             "other class",
         )
@@ -107,7 +107,7 @@ class WindowGapJoin:
         answer.result.soft_output = computation.soft_output
         gap_text = _gap_text(computation.soft_output)
         self.engine.log(
-            decode_queue_module.LOG_SOURCE,
+            log_sources.DECODER_MANAGER,
             f"GAP JOIN {answer.job.label}: {gap_text}",
         )
         self.decode_queue.charge_soft_output(answer.job, computation.ticks)

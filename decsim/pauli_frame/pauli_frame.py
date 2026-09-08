@@ -24,6 +24,7 @@ from typing import Callable, Optional
 
 import decsim.config as config
 import decsim.records.identity as identity_records
+import decsim.records.log_sources as log_sources
 import decsim.trace_source as trace_source
 
 ObservableBits = tuple[int, ...]
@@ -209,7 +210,7 @@ class PauliFrame:
 
     def _log_received(self, tier, window_key, observables) -> None:
         self.engine.log_io(
-            "PauliFrame",
+            log_sources.PAULI_FRAME,
             lambda: (
                 f"received {tier} correction for window {window_key}; "
                 f"logical observables {observables}"
@@ -250,7 +251,7 @@ class PauliFrame:
         windows_on_stream.append(window_key)
         held = len(self._state.committed_by_window)
         self.engine.log_io(
-            "PauliFrame",
+            log_sources.PAULI_FRAME,
             lambda: (
                 f"committed window {window_key}; logical observables "
                 f"{record.logical_observables}; holds {held} window corrections"

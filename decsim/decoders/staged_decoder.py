@@ -27,12 +27,12 @@ from typing import Callable, Optional
 import decsim.config as config
 import decsim.decoders.decoder as decoder_module
 import decsim.records.decoding as decoding_records
+import decsim.records.log_sources as log_sources
 import decsim.records.seeds as seed_records
 import decsim.trace_source as trace_source
 
 # The decoder unit component's name in the narrator (docs/
 # architecture.md's component table).
-LOG_SOURCE = "Decoder unit"
 ALGORITHM_STAGE = "algorithm"
 
 
@@ -245,7 +245,7 @@ class StagedDecoder(decoder_module.DecoderBase):
             return
         name, cycles, ticks = steps[index]
         text = _stage_text(name, job, cycles)
-        engine.log(LOG_SOURCE, text)
+        engine.log(log_sources.DECODER_UNIT, text)
         if name == ALGORITHM_STAGE:
             self._enter_algorithm(running, engine, steps, index)
             return

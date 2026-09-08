@@ -303,7 +303,7 @@ class MachineSettings:
         weak_decoder = _tier_settings(sections, "weak_decoder", clocks)
         strong_decoder = _tier_settings(sections, "strong_decoder", clocks)
         decoder_manager = decoder_settings.DecoderManagerSettings.from_yaml(
-            decoder_manager_section
+            decoder_manager_section, clocks
         )
         escalation = decoder_settings.EscalationSettings.from_yaml(
             escalation_section, base_directory
@@ -1504,6 +1504,7 @@ def _decoder_manager(
     escalation_policy,
     pool: _DecoderPool,
 ) -> decoder_manager_module.DecoderManager:
+    dispatch_ticks = settings.decoder_manager.dispatch_ticks()
     return decoder_manager_module.DecoderManager(
         engine,
         router=pool.router,
@@ -1512,6 +1513,7 @@ def _decoder_manager(
         bulk_strong=settings.decoder_manager.bulk_strong,
         decoder_memory=pool.decoder_memory,
         escalation_policy=escalation_policy,
+        dispatch_ticks=dispatch_ticks,
     )
 
 

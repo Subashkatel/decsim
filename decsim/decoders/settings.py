@@ -41,7 +41,7 @@ ESCALATION_KEYS = (
     "threshold_column",
     "online",
 )
-DECODER_MANAGER_KEYS = ("bulk_strong",)
+DECODER_MANAGER_KEYS = ("bulk_strong", "clock", "dispatch_cycles")
 ONLINE_KEYS = (
     "target_escalation_rate",
     "step_db",
@@ -108,11 +108,16 @@ class DecoderSettings:
 class DecoderManagerSettings:
     """The yaml's `decoder_manager` section, and the manager's Python knobs.
 
-    bulk_strong is the section's one key: it serves the strong pool's
-    queued re-decodes as one merged batch (Toshio 2510.25222 Sec. III C,
-    the strong decoder processes its assigned data in bulk); timing-only,
-    since a batch carries no accuracy-bearing result, and serial only.
-    The rest are Python objects. A router picks the decoder for each job
+    bulk_strong serves the strong pool's queued re-decodes as one merged
+    batch (Toshio 2510.25222 Sec. III C, the strong decoder processes its
+    assigned data in bulk); timing-only, since a batch carries no
+    accuracy-bearing result, and serial only. dispatch_cycles prices the
+    manager's own work per dispatch on the clock the section names,
+    charged before the job's input is asked for; Caune et al. 2410.05202
+    lines 519-526 and 636-641 measure 250 to 370 control cycles per
+    decode on the control system's own clock. It is zero by default, so a
+    run that does not model that work is unchanged. The rest are Python
+    objects. A router picks the decoder for each job
     (CodeRouter by code name, SwitchingRouter by tier); given, it
     replaces the one the root builds from the two tier sections. The
     scheduler orders the ready queue (FifoScheduler by default),
@@ -126,10 +131,13 @@ class DecoderManagerSettings:
     unit_pools: Optional[Mapping[str, int]] = None
     decoder_memory: Optional[decoder_memory_module.DecoderMemoryConfig] = None
     bulk_strong: bool = False
+    dispatch_microseconds: float = 0.0
 
     @classmethod
-    def from_yaml(cls, section: Mapping) -> "DecoderManagerSettings":
-        """The `decoder_manager` section: the one knob the yaml reaches."""
+    def from_yaml(
+        cls, section: Mapping, clocks: config.ClockSettings
+    ) -> "DecoderManagerSettings":
+        """The `decoder_manager` section: its knobs, cycles resolved once."""
         unknown = set(section) - set(DECODER_MANAGER_KEYS)
         if unknown:
             listed = sorted(unknown)
@@ -143,7 +151,31 @@ class DecoderManagerSettings:
                 "decoder_manager.bulk_strong must be true or false, got "
                 f"{bulk_strong!r}"
             )
-        return cls(bulk_strong=bulk_strong)
+        dispatch_microseconds = _dispatch_microseconds(section, clocks)
+        return cls(
+            bulk_strong=bulk_strong,
+            dispatch_microseconds=dispatch_microseconds,
+        )
+
+    def dispatch_ticks(self) -> int:
+        """The manager's per-dispatch cost in ticks."""
+        return config.microseconds_to_ticks(self.dispatch_microseconds)
+
+
+def _dispatch_microseconds(
+    section: Mapping, clocks: config.ClockSettings
+) -> float:
+    """dispatch_cycles on the section's clock; zero when it names none."""
+    cycles = section.get("dispatch_cycles", 0)
+    if cycles == 0:
+        return 0.0
+    if "clock" not in section:
+        raise ValueError(
+            "decoder_manager.dispatch_cycles needs a clock: name the "
+            "domain its cycles are counted in"
+        )
+    clock = section["clock"]
+    return clocks.microseconds(cycles, clock)
 
 
 @dataclasses.dataclass(frozen=True)

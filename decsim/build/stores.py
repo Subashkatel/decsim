@@ -11,6 +11,7 @@ import decsim.settings as machine_settings
 import decsim.syndrome_buffer.round_store as round_store_module
 import decsim.syndrome_buffer.settings as round_store_settings
 import decsim.syndrome_buffer.strong_round_writer as strong_round_writer_module
+import decsim.tables as tables
 
 
 def build_round_store(
@@ -18,7 +19,7 @@ def build_round_store(
     held_rounds: round_writes.HeldRounds,
 ):
     """Buffer 0; a freed slot retries the rounds held for room."""
-    row = machine_settings.row(
+    row = tables.row(
         round_store_module.ROUND_STORES, "round_store.kind", settings.kind
     )
     return row(settings, on_slot_freed=held_rounds.retry)
@@ -30,7 +31,7 @@ def build_strong_round_store(
     held_rounds: round_writes.HeldRounds,
 ):
     """The room-side store, only when a tier reads from the room side."""
-    row = machine_settings.row(
+    row = tables.row(
         round_store_module.ROUND_STORES,
         "strong_round_store.kind",
         settings.kind,

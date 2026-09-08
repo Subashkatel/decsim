@@ -26,21 +26,10 @@ import decsim.qpu.settings as qpu_settings
 import decsim.syndrome_buffer.settings as round_store_settings
 import decsim.windows.settings as window_settings
 
-
-def row(table: dict, section: str, kind):
-    """The table row a section's kind names; a kind off the table is refused."""
-    if kind not in table:
-        rows = sorted(table)
-        raise ValueError(
-            f"{section} {kind!r} is not a row of its table; the rows are {rows}"
-        )
-    return table[kind]
-
-
 # The yaml sections, in the order MachineSettings reads them. Each
 # section's own package owns its settings record and its plug-in table;
 # the root looks a kind up in that table once and refuses one that is
-# not a row, naming the rows (_row).
+# not a row, naming the rows (decsim/tables.py).
 SECTIONS = (
     "clocks",
     "qpu",

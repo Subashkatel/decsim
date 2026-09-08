@@ -19,6 +19,7 @@ import decsim.decoders.staged_decoder as staged_decoder
 import decsim.escalation.settings as escalation_settings
 import decsim.observe.settings as observe_settings
 import decsim.settings as machine_settings
+import decsim.tables as tables
 from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
 )
@@ -60,7 +61,7 @@ def build_decoder_unit(
         _check_serves_the_confidence(
             algorithm, tier_settings.kind, tier, settings.escalation
         )
-    check = machine_settings.row(
+    check = tables.row(
         observe_settings.WINDOW_CHECKS,
         "observation.check_windows_with",
         settings.observation.check_windows_with,
@@ -162,7 +163,7 @@ def _decoder_memory(
 def _algorithm(kind, tier: str):
     """A tier's algorithm: a table row, or a fixed latency on MWPM."""
     if isinstance(kind, str):
-        row = machine_settings.row(
+        row = tables.row(
             decoder_settings.DECODERS, f"{tier}_decoder.kind", kind
         )
         return row(latency_model=None)

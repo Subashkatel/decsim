@@ -11,6 +11,7 @@ import decsim.qpu.magic_state_factories as magic_state_factories
 import decsim.qpu.settings as qpu_settings
 import decsim.records.decoding as decoding_records
 import decsim.settings as machine_settings
+import decsim.tables as tables
 
 
 def build_decoder_manager(
@@ -83,7 +84,7 @@ def build_factory(
     A distillation row decodes its corrections on the run's decoder
     manager; the multi-level row paces its levels on the run's round.
     """
-    row = machine_settings.row(
+    row = tables.row(
         qpu_settings.MAGIC_STATE_FACTORIES,
         "magic_state_factory.kind",
         settings.kind,

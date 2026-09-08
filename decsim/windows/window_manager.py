@@ -3,10 +3,11 @@
 Which windows exist is the WindowPlanner's, which rounds arrived and
 whether a window has its data is the RoundTracker's, which rounds each
 window holds is the RoundRetention's, a decode is asked for by the
-DecodeRequester from a job the DecodeRequestBuilder builds, every send
-rides the WindowTransfers, a result commits its window through the
-WindowCommitter and reaches the frame through the CorrectionPublisher,
-boundaries between windows are the BoundaryCourier's, ownership of
+DecodeRequester from a job the DecodeRequestBuilder builds, its input
+is sent by the store's own RoundStoreOutput, a result commits its
+window through the WindowCommitter and leaves for the frame through the
+decoder side's DecoderOutput, boundaries between windows are the
+BoundaryCourier's, ownership of
 committed rounds is the LogicalLedger's, and each operation's result is
 the OperationResults'; the facade receives rounds and wires them, the
 shape of gem5's cache (BaseCache owns its MSHR queue, write buffer and

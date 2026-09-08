@@ -19,7 +19,6 @@ from typing import Callable, Optional
 
 import decsim.decoders.decode_queue as decode_queue_module
 import decsim.records.decoding as decoding_records
-import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 
 
@@ -30,7 +29,8 @@ class StrongRedecode:
         self,
         engine,
         shape,
-        transfers,
+        decoder_output,
+        strong_output,
         decode_queue,
         on_strong_decoded: Callable[
             [decoding_records.DecodeJob, decoding_records.DecodeResult], None
@@ -38,7 +38,11 @@ class StrongRedecode:
     ) -> None:
         self.engine = engine
         self.shape = shape
-        self.transfers = transfers
+        # the two ends that execute this tier's sends: the weak
+        # decoder's selection leaves by the decoder output, and syndrome
+        # buffer 1 sends the strong input
+        self.decoder_output = decoder_output
+        self.strong_output = strong_output
         self.decode_queue = decode_queue
         # the strong job's return path, the committer's accept_strong_result
         self.on_strong_decoded = on_strong_decoded
@@ -147,29 +151,21 @@ class StrongRedecode:
         strong_job: decoding_records.DecodeJob,
         selection_arrival_ticks: Optional[int],
     ) -> Callable[[Callable[[], None]], int]:
-        """The job's input send, its payload bits fixed now.
-
-        The staging clears the job's payloads when the input lands.
-        """
-        payload_bits = strong_job.payload_bits()
+        """The send the manager calls at dispatch, bound to this job."""
         return functools.partial(
-            self._send_strong_input,
-            strong_job,
-            payload_bits,
-            selection_arrival_ticks,
+            self._send_strong_input, strong_job, selection_arrival_ticks
         )
 
     def _send_strong_input(
         self,
         strong_job: decoding_records.DecodeJob,
-        payload_bits: Optional[int],
         selection_arrival_ticks: Optional[int],
         on_landed: Callable[[], None],
     ) -> int:
         """Send the input at dispatch; returns the delay the pool expects.
 
-        The unit is assigned first, then the input moves into that unit's
-        memory over strong_buffer_to_strong_decoder; a job selected at
+        The unit is assigned first, then syndrome buffer 1 moves the
+        input into that unit's memory; a job selected at
         the verdict also waits for its selection to arrive, and the
         pool's estimate is the later of the two.
         """
@@ -180,12 +176,7 @@ class StrongRedecode:
                 strong_job.request_key,
                 on_landed,
             )
-        expected_delay_ticks = self.transfers.send_for_job(
-            transfer_records.LinkPath.STRONG_BUFFER_TO_STRONG_DECODER,
-            strong_job,
-            payload_bits=payload_bits,
-            on_delivered=landed,
-        )
+        expected_delay_ticks = self.strong_output.send_input(strong_job, landed)
         if selection_arrival_ticks is None:
             return expected_delay_ticks
         selection_delay_ticks = selection_arrival_ticks - self.engine.now
@@ -212,7 +203,7 @@ class StrongRedecode:
             strong_request_key,
             on_selection_delivered,
         )
-        expected_delay_ticks = self.transfers.send_selection(
+        expected_delay_ticks = self.decoder_output.send_selection(
             weak_job, strong_request_key, delivered
         )
         return self.engine.now + expected_delay_ticks

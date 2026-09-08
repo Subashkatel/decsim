@@ -176,8 +176,9 @@ class DecodeQueue(Protocol):
     ) -> None:
         """The window asked for this request's strong result.
 
-        Its selection is on the weak-to-strong link; the result is held
-        for the window until accept_selection.
+        Its selection is on the weak-to-strong link; a result that
+        finishes first waits in the unit that produced it until
+        accept_selection.
         """
 
     def accept_selection(

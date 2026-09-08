@@ -28,8 +28,8 @@ import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
 import decsim.records.program as program_records
 import decsim.settings as machine_settings
+import decsim.windows.schemes.sliding as sliding_scheme
 import decsim.windows.settings as window_settings
-import decsim.windows.windowing_schemes as windowing_schemes
 
 DECLARED_MICROSECONDS = {
     "qpu_to_controller": 2.0,
@@ -118,8 +118,8 @@ def switching_machine(
     qpu = qpu_settings.QpuSettings(
         distance=3, round_period_microseconds=round_microseconds
     )
-    lookahead = windowing_schemes.SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD
-    scheme = windowing_schemes.SlidingWindowScheme(terminal_policy=lookahead)
+    lookahead = sliding_scheme.SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD
+    scheme = sliding_scheme.SlidingWindowScheme(terminal_policy=lookahead)
     windows = window_settings.WindowSettings(
         scheme=scheme, boundary_policy=boundary_policy
     )

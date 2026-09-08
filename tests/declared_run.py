@@ -29,8 +29,8 @@ import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
 import decsim.records.program as program_records
 import decsim.settings as machine_settings
+import decsim.windows.schemes.sliding as sliding_scheme
 import decsim.windows.settings as window_settings
-import decsim.windows.windowing_schemes as windowing_schemes
 from decsim.config import microseconds_to_ticks
 
 # every declared stage of the fabric, in microseconds
@@ -70,10 +70,10 @@ DECLARED_EDGE_NAMES = (
 ESCALATION_THRESHOLD = 0.5
 
 
-def sliding_scheme():
+def lookahead_sliding_scheme():
     """The sliding windows with the lookahead tail every run here uses."""
-    lookahead = windowing_schemes.SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD
-    return windowing_schemes.SlidingWindowScheme(terminal_policy=lookahead)
+    lookahead = sliding_scheme.SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD
+    return sliding_scheme.SlidingWindowScheme(terminal_policy=lookahead)
 
 
 def declared_edge(base_edge, latency_microseconds):
@@ -287,7 +287,7 @@ def switching_run(
     boundary_policy = boundary_policies.Held()
     if strong_window == "forward":
         boundary_policy = None
-    scheme = sliding_scheme()
+    scheme = lookahead_sliding_scheme()
     windows = window_settings.WindowSettings(
         scheme=scheme, boundary_policy=boundary_policy
     )

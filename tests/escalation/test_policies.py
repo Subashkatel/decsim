@@ -32,8 +32,8 @@ import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.settings as machine_settings
+import decsim.windows.schemes.sliding as sliding_scheme
 import decsim.windows.settings as window_settings
-import decsim.windows.windowing_schemes as windowing_schemes
 import tests.escalation.declared_fabric as fabric
 
 SOURCE = decoding_records.SoftOutputSource(
@@ -130,8 +130,8 @@ def test_escalations_equal_gaps_below_the_threshold_equal_strong_frame_writes():
     )
     device = stim_device.StimDevice()
     qpu = qpu_settings.QpuSettings(distance=3, device=device)
-    lookahead = windowing_schemes.SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD
-    scheme = windowing_schemes.SlidingWindowScheme(terminal_policy=lookahead)
+    lookahead = sliding_scheme.SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD
+    scheme = sliding_scheme.SlidingWindowScheme(terminal_policy=lookahead)
     held = boundary_policies.Held()
     windows = window_settings.WindowSettings(
         scheme=scheme, boundary_policy=held
@@ -391,8 +391,8 @@ def _serial_switching_settings(
     boundary_policy,
 ) -> machine_settings.MachineSettings:
     """Serial switching (no forward window) with the boundary policy given."""
-    lookahead = windowing_schemes.SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD
-    scheme = windowing_schemes.SlidingWindowScheme(terminal_policy=lookahead)
+    lookahead = sliding_scheme.SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD
+    scheme = sliding_scheme.SlidingWindowScheme(terminal_policy=lookahead)
     windows = window_settings.WindowSettings(
         scheme=scheme, boundary_policy=boundary_policy
     )

@@ -6,17 +6,20 @@ from typing import Optional
 
 import decsim.ports as ports
 import decsim.windows.boundary_payloads as boundary_payloads
+import decsim.windows.schemes.naive_online as naive_online_scheme
+import decsim.windows.schemes.parallel as parallel_scheme
+import decsim.windows.schemes.sandwich as sandwich_scheme
+import decsim.windows.schemes.sliding as sliding_scheme
 import decsim.windows.window_interactions as window_interactions
 import decsim.windows.window_manager as window_manager
-import decsim.windows.windowing_schemes as windowing_schemes
 
 # windows.kind names one of these rows: how the stream is cut into
 # windows.
 WINDOWING_SCHEMES = {
-    "sliding": windowing_schemes.SlidingWindowScheme,
-    "parallel": windowing_schemes.ParallelWindowScheme,
-    "sandwich": windowing_schemes.TanSandwichScheme,
-    "naive_online": windowing_schemes.NaiveOnlineScheme,
+    "sliding": sliding_scheme.SlidingWindowScheme,
+    "parallel": parallel_scheme.ParallelWindowScheme,
+    "sandwich": sandwich_scheme.TanSandwichScheme,
+    "naive_online": naive_online_scheme.NaiveOnlineScheme,
 }
 # windows.boundary_payload names one of these rows: how the hand-off
 # between two windows is written on decoder_to_decoder.

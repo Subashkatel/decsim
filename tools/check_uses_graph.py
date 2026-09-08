@@ -57,7 +57,8 @@ def read_edges(root: pathlib.Path) -> dict:
     for path in source_paths(root):
         source = package_of(path, root)
         targets = imports_of(path, source)
-        edges[source] |= targets
+        if targets:
+            edges[source] |= targets
     return edges
 
 

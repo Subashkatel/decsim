@@ -44,7 +44,7 @@ class WindowGapJoin:
         self.decode_queue = decode_queue
         # window key -> the solves of that window that have finished
         self.held_by_window: dict[tuple, list] = {}
-        self.solve_held = trace_source.TraceSource()
+        self.trace = _TraceSources()
 
     @property
     def solves_per_window(self) -> int:
@@ -83,7 +83,7 @@ class WindowGapJoin:
             f"GAP HOLD {job.label}: class {forced_class} waits for the "
             "other class",
         )
-        self.solve_held.fire(job, result)
+        self.trace.solve_held.fire(job, result)
 
     def _join(self, held: list) -> None:
         """Ask the signal for the window's gap and commit its answer."""
@@ -134,3 +134,16 @@ def _gap_text(soft_output) -> str:
     if soft_output is None:
         return "no gap (a solve reported no evidence)"
     return f"gap {soft_output.gap:.3f}"
+
+
+@dataclasses.dataclass(frozen=True)
+class _TraceSources:
+    """Every event the window gap join reports, as one member.
+
+    gem5 groups a component's statistics into one nested Group member
+    (tmp/resources/gem5/src/base/stats/group.hh:60-92) rather than one
+    member per counter; a component's events are the same shape, so a
+    listener reaches all of them through one name.
+    """
+
+    solve_held: trace_source.TraceSource = trace_source.new_source()

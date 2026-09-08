@@ -166,7 +166,7 @@ def test_the_depth_is_reported_at_every_change():
     engine = engine_module.Engine()
     manager = _manager(engine, 1)
     depth_log = queue_depth.QueueDepthLog()
-    manager.queue.depth_changed.connect(depth_log.depth_changed)
+    manager.queue.trace.depth_changed.connect(depth_log.depth_changed)
     _submit(manager, "a")
     _submit(manager, "b")
     engine.run()

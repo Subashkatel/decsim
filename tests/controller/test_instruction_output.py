@@ -37,7 +37,7 @@ def test_a_release_is_delivered_when_it_reaches_the_controller():
     output = instruction_output.InstructionOutput(
         engine, link, None, PULSE_TICKS
     )
-    output.output_event.connect(recorder.output)
+    output.trace.output_event.connect(recorder.output)
     crossing_ticks = link.expected_delay_ticks(
         transfer_records.LinkPath.FRAME_TO_CONTROLLER, None, 0
     )
@@ -65,7 +65,7 @@ def test_a_result_return_pays_the_pulse_cost_and_the_crossing_to_the_qpu():
     output = instruction_output.InstructionOutput(
         engine, link, None, PULSE_TICKS
     )
-    output.output_event.connect(recorder.output)
+    output.trace.output_event.connect(recorder.output)
     to_controller = link.expected_delay_ticks(
         transfer_records.LinkPath.FRAME_TO_CONTROLLER, None, 0
     )
@@ -106,7 +106,7 @@ def test_a_result_return_with_no_link_still_pays_the_pulse_cost():
     output = instruction_output.InstructionOutput(
         engine, None, None, PULSE_TICKS
     )
-    output.output_event.connect(recorder.output)
+    output.trace.output_event.connect(recorder.output)
     result = program_records.Decision(9, releases_operation=False)
     delivered = []
 

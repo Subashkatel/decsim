@@ -36,7 +36,7 @@ class LinkFabric:
         fabric_settings: link_settings.FabricSettings,
         engine: decsim.engine.Engine,
     ):
-        self.transfer_delivered = trace_source.TraceSource()
+        self.trace = _TraceSources()
         self._channel_by_name: dict[str, channel_module.Channel] = {}
         self._binding_by_path: dict[
             transfer_records.LinkPath, _PathBinding
@@ -110,7 +110,7 @@ class LinkFabric:
         self, outgoing: "_Outgoing", transfer: transfer_records.Transfer
     ) -> None:
         """At delivery: the listeners hear the transfer, then the caller."""
-        if self.transfer_delivered.has_listeners:
+        if self.trace.transfer_delivered.has_listeners:
             record = transfer_records.TransferRecord(
                 request_sequence=outgoing.request_sequence,
                 path=outgoing.path,
@@ -120,7 +120,7 @@ class LinkFabric:
                 payload_source=outgoing.payload_source,
                 transfer=transfer,
             )
-            self.transfer_delivered.fire(record)
+            self.trace.transfer_delivered.fire(record)
         outgoing.on_delivered(transfer)
 
 
@@ -184,3 +184,16 @@ def _select_payload(
         transfer_records.PayloadSelection.UNRESOLVED,
         path_settings.actual_payload_source,
     )
+
+
+@dataclasses.dataclass(frozen=True)
+class _TraceSources:
+    """Every event the link fabric reports, as one member.
+
+    gem5 groups a component's statistics into one nested Group member
+    (tmp/resources/gem5/src/base/stats/group.hh:60-92) rather than one
+    member per counter; a component's events are the same shape, so a
+    listener reaches all of them through one name.
+    """
+
+    transfer_delivered: trace_source.TraceSource = trace_source.new_source()

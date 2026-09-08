@@ -42,7 +42,7 @@ class IdleRoundAccounting:
         self.qpu = qpu
         self.operation_by_id: dict = {}
         self.idle_by_patch: dict = {}
-        self.idle_round_emitted = trace_source.TraceSource()
+        self.trace = _TraceSources()
 
     def load(self, program) -> None:
         """Know the operations an idle patch names."""
@@ -62,7 +62,7 @@ class IdleRoundAccounting:
         self.policy.relay(self, operation, patch, round_index)
         idle = self._idle(patch)
         idle.unclaimed += 1
-        self.idle_round_emitted.fire(operation_id, patch, round_index)
+        self.trace.idle_round_emitted.fire(operation_id, patch, round_index)
 
     def claim(self, operation) -> int:
         """The idle rounds on the operation's patches since the last claim."""
@@ -152,3 +152,16 @@ class IdleRoundAccounting:
 
 def _ignore_completion() -> None:
     """An idle decode's completion has no listener."""
+
+
+@dataclasses.dataclass(frozen=True)
+class _TraceSources:
+    """Every event the idle round accounting reports, as one member.
+
+    gem5 groups a component's statistics into one nested Group member
+    (tmp/resources/gem5/src/base/stats/group.hh:60-92) rather than one
+    member per counter; a component's events are the same shape, so a
+    listener reaches all of them through one name.
+    """
+
+    idle_round_emitted: trace_source.TraceSource = trace_source.new_source()

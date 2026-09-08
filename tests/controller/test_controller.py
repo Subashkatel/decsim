@@ -38,7 +38,7 @@ def controller_with(engine, links, assembler, recorder, settings=SETTINGS):
         engine, links, settings, assembler
     )
     if recorder is not None:
-        controller.round_event.connect(recorder.record)
+        controller.trace.round_event.connect(recorder.record)
     return controller
 
 

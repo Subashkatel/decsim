@@ -67,8 +67,8 @@ def test_the_memory_occupancy_is_the_memorys_own_count_at_every_change():
     occupancy = machine.observation.decoder_memory_occupancy
     (unit,) = machine.decoder_manager.pool.units()
     watcher = _MemoryWatcher(occupancy, unit)
-    unit.memory.deposited.connect(watcher.changed)
-    unit.memory.taken.connect(watcher.changed)
+    unit.memory.trace.deposited.connect(watcher.changed)
+    unit.memory.trace.taken.connect(watcher.changed)
 
     machine.run()
 

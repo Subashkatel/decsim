@@ -11,6 +11,8 @@ idle accounting (idle_rounds.py) routes and charges idle rounds, and the
 feedback streams (feedback_streams.py) keep the protected regions.
 """
 
+import dataclasses
+
 import decsim.controller.settings as controller_settings
 import decsim.observe.trace_source as trace_source
 import decsim.records.rounds as round_records
@@ -36,8 +38,7 @@ class Controller:
         self.link = link
         self.settings = settings
         self.assembler = assembler
-        self.round_event = trace_source.TraceSource()
-        self.copy_made = trace_source.TraceSource()
+        self.trace = _TraceSources()
 
     def accept_qpu_readout(
         self,
@@ -51,7 +52,7 @@ class Controller:
         fragment = round_records.RetainedSyndromeFragment.from_readout(readout)
         fragment_count = readout.fragment_count
         round_key = (fragment.operation_id, fragment.round_index)
-        self.copy_made.fire(
+        self.trace.copy_made.fire(
             round_key, readout.size_bits, "readout", "controller intake"
         )
         emitted = round_records.RoundEvent.of(
@@ -62,7 +63,7 @@ class Controller:
             route,
             fragment.patch_id,
         )
-        self.round_event.fire(emitted)
+        self.trace.round_event.fire(emitted)
         attribution = transfer_records.TransferAttribution.for_round(
             fragment.operation_id, (fragment.patch_id,), fragment.round_index
         )
@@ -86,3 +87,17 @@ class Controller:
             attribution,
             at_controller,
         )
+
+
+@dataclasses.dataclass(frozen=True)
+class _TraceSources:
+    """Every event the controller reports, as one member.
+
+    gem5 groups a component's statistics into one nested Group member
+    (tmp/resources/gem5/src/base/stats/group.hh:60-92) rather than one
+    member per counter; a component's events are the same shape, so a
+    listener reaches all of them through one name.
+    """
+
+    round_event: trace_source.TraceSource = trace_source.new_source()
+    copy_made: trace_source.TraceSource = trace_source.new_source()

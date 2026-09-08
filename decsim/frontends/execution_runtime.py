@@ -14,6 +14,7 @@ The issuer hears each start through on_started (SimPy's callback on the
 event): the runtime never receives a call back from the controller.
 """
 
+import dataclasses
 import functools
 import types
 from typing import Any, Callable, Protocol, runtime_checkable
@@ -123,11 +124,7 @@ class ExecutionRuntime:
         self.started_operation_ids = set()
         self.finished_operation_ids = set()
         self.released_operation_ids = set()
-        self.operation_issued = trace_source.TraceSource()
-        self.operation_started = trace_source.TraceSource()
-        self.body_finished = trace_source.TraceSource()
-        self.decode_released = trace_source.TraceSource()
-        self.result_returned = trace_source.TraceSource()
+        self.trace = _TraceSources()
 
     @property
     def workload_complete(self) -> bool:
@@ -158,7 +155,7 @@ class ExecutionRuntime:
         self, operation: program_records.Operation, boundary_tick: int
     ) -> None:
         """The QPU has the operation's command: it starts at this boundary."""
-        self.operation_started.fire(operation.id, boundary_tick)
+        self.trace.operation_started.fire(operation.id, boundary_tick)
 
     def body_done(self, operation: program_records.Operation) -> None:
         """A body finished: record it, free resources, release successors."""
@@ -172,7 +169,7 @@ class ExecutionRuntime:
             f"{operation.name} finished twice"
         )
         self.finished_operation_ids.add(operation.id)
-        self.body_finished.fire(operation.id, self.engine.now)
+        self.trace.body_finished.fire(operation.id, self.engine.now)
         self.engine.log("ExecutionRuntime", f"{operation.name} body done")
         self.resources.release(operation)
         self.issuer.before_successor_release(operation)
@@ -220,7 +217,7 @@ class ExecutionRuntime:
         operation_id = decision.target_operation_id
         operation = self.operations[operation_id]
         if not decision.releases_operation:
-            self.result_returned.fire(operation_id, self.engine.now)
+            self.trace.result_returned.fire(operation_id, self.engine.now)
             self.engine.log(
                 "ExecutionRuntime",
                 f"received result return for {operation.name}",
@@ -233,7 +230,7 @@ class ExecutionRuntime:
             f"{operation.name} was released twice"
         )
         self.released_operation_ids.add(operation_id)
-        self.decode_released.fire(operation_id, self.engine.now)
+        self.trace.decode_released.fire(operation_id, self.engine.now)
         self.engine.log(
             "ExecutionRuntime",
             f"CONSUMED release for {operation.name}; now trying to start",
@@ -304,7 +301,7 @@ class ExecutionRuntime:
         # must not issue this one twice. The stamps listener hears the
         # issue now and the QPU's actual start boundary when it comes.
         self.started_operation_ids.add(operation.id)
-        self.operation_issued.fire(operation.id, self.engine.now)
+        self.trace.operation_issued.fire(operation.id, self.engine.now)
         on_started = functools.partial(self.note_start_boundary, operation)
         self.issuer.issue_operation(operation, on_started)
 
@@ -324,3 +321,20 @@ def _claim_keys(claim) -> list[tuple]:
     for resource_id in ordered_ids:
         keys.append((claim.kind, resource_id))
     return keys
+
+
+@dataclasses.dataclass(frozen=True)
+class _TraceSources:
+    """Every event the execution runtime reports, as one member.
+
+    gem5 groups a component's statistics into one nested Group member
+    (tmp/resources/gem5/src/base/stats/group.hh:60-92) rather than one
+    member per counter; a component's events are the same shape, so a
+    listener reaches all of them through one name.
+    """
+
+    operation_issued: trace_source.TraceSource = trace_source.new_source()
+    operation_started: trace_source.TraceSource = trace_source.new_source()
+    body_finished: trace_source.TraceSource = trace_source.new_source()
+    decode_released: trace_source.TraceSource = trace_source.new_source()
+    result_returned: trace_source.TraceSource = trace_source.new_source()

@@ -91,7 +91,7 @@ class _Fixture:
             lambda: self.completions.append("done"),
         )
         self.delivered = result_ledger.ResultLedger()
-        self.results.operation_result_delivered.connect(
+        self.results.trace.operation_result_delivered.connect(
             self.delivered.operation_result_delivered
         )
 

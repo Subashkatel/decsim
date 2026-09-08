@@ -13,6 +13,7 @@ reordered; under the stall policy nothing is dropped. The written round
 leaves on its route at the write (RoundTransmitter).
 """
 
+import dataclasses
 from typing import Callable
 
 import decsim.controller.settings as controller_settings
@@ -37,7 +38,7 @@ class HeldRounds:
         # (held round, the admission it retries), in completion order
         self.waiting: list = []
         self.on_full = on_full
-        self.round_event = trace_source.TraceSource()
+        self.trace = _HeldRoundsTraceSources()
 
     def refuse(
         self,
@@ -59,7 +60,7 @@ class HeldRounds:
                 round_index,
                 packed.route,
             )
-            self.round_event.fire(dropped)
+            self.trace.round_event.fire(dropped)
             return False
         if self._is_holding(packed):
             return False
@@ -67,7 +68,7 @@ class HeldRounds:
         stalled = round_records.RoundEvent.of(
             "STALLED", self.engine.now, operation_id, round_index, packed.route
         )
-        self.round_event.fire(stalled)
+        self.trace.round_event.fire(stalled)
         return False
 
     def retry(self) -> None:
@@ -119,7 +120,7 @@ class RoundWriter:
         self.publishes_from_strong_store = publishes_from_strong_store
         self.held_rounds = held_rounds
         self.transmitter = transmitter
-        self.copy_made = trace_source.TraceSource()
+        self.trace = _RoundWriterTraceSources()
 
     def admit(self, packed: round_records.PackedRound) -> bool:
         """Write the round where it belongs; False when it had to wait."""
@@ -137,7 +138,7 @@ class RoundWriter:
         self.weak_store.accept_packed_round(
             packed.packet, publication_tick=None
         )
-        self.copy_made.fire(
+        self.trace.copy_made.fire(
             packed.round_key,
             packed.wire_bits,
             "controller assembler",
@@ -191,3 +192,29 @@ def _received_text(
         f"received round {packet.round_index} of "
         f"op {packet.operation_id} from packing; {defects}; holds {holds}"
     )
+
+
+@dataclasses.dataclass(frozen=True)
+class _HeldRoundsTraceSources:
+    """Every event the held rounds reports, as one member.
+
+    gem5 groups a component's statistics into one nested Group member
+    (tmp/resources/gem5/src/base/stats/group.hh:60-92) rather than one
+    member per counter; a component's events are the same shape, so a
+    listener reaches all of them through one name.
+    """
+
+    round_event: trace_source.TraceSource = trace_source.new_source()
+
+
+@dataclasses.dataclass(frozen=True)
+class _RoundWriterTraceSources:
+    """Every event the round writer reports, as one member.
+
+    gem5 groups a component's statistics into one nested Group member
+    (tmp/resources/gem5/src/base/stats/group.hh:60-92) rather than one
+    member per counter; a component's events are the same shape, so a
+    listener reaches all of them through one name.
+    """
+
+    copy_made: trace_source.TraceSource = trace_source.new_source()

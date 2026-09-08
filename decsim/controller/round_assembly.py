@@ -48,8 +48,7 @@ class RoundAssembler:
         self.form_round = form_round
         self.workspace = _Workspace(rounds_in_flight, settings.packing_overflow)
         self.on_packed = on_packed
-        self.round_event = trace_source.TraceSource()
-        self.copy_made = trace_source.TraceSource()
+        self.trace = _TraceSources()
 
     def add(
         self,
@@ -66,7 +65,7 @@ class RoundAssembler:
             route,
             fragment.patch_id,
         )
-        self.round_event.fire(available)
+        self.trace.round_event.fire(available)
         round_key = (fragment.operation_id, fragment.round_index)
         if self.workspace.is_dropped(round_key):
             return
@@ -121,7 +120,7 @@ class RoundAssembler:
                 route,
                 fragment.patch_id,
             )
-            self.round_event.fire(drop)
+            self.trace.round_event.fire(drop)
         return None
 
     def _open_context(self, identity, round_key, route, fragment_count):
@@ -138,7 +137,7 @@ class RoundAssembler:
         wire_bits = _fragment_bits(raw_fragments)
         # the merge is what packs the round, so it is reported before the
         # round is packed, and the workspace's residence knows its bits
-        self.copy_made.fire(
+        self.trace.copy_made.fire(
             context.round_key,
             wire_bits,
             "controller intake",
@@ -147,7 +146,7 @@ class RoundAssembler:
         packed_event = round_records.RoundEvent.of(
             "PACKED", self.engine.now, operation_id, round_index, context.route
         )
-        self.round_event.fire(packed_event)
+        self.trace.round_event.fire(packed_event)
         formed_fragments = self._form_detection_events(raw_fragments)
         packet = round_records.SyndromeRoundPacket(
             operation_id=operation_id,
@@ -318,3 +317,17 @@ def _concatenated(
     if prior.size_bits is not None and fragment.size_bits is not None:
         size_bits = prior.size_bits + fragment.size_bits
     return dataclasses.replace(prior, bits=bits, size_bits=size_bits)
+
+
+@dataclasses.dataclass(frozen=True)
+class _TraceSources:
+    """Every event the round assembler reports, as one member.
+
+    gem5 groups a component's statistics into one nested Group member
+    (tmp/resources/gem5/src/base/stats/group.hh:60-92) rather than one
+    member per counter; a component's events are the same shape, so a
+    listener reaches all of them through one name.
+    """
+
+    round_event: trace_source.TraceSource = trace_source.new_source()
+    copy_made: trace_source.TraceSource = trace_source.new_source()

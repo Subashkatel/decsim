@@ -174,8 +174,7 @@ class DecoderMemory:
         self._inputs: dict = {}  # input key -> ResidentInput
         self.peak_occupied_rounds = 0
         self.admissions = 0
-        self.deposited = trace_source.TraceSource()
-        self.taken = trace_source.TraceSource()
+        self.trace = _TraceSources()
 
     @property
     def name(self) -> str:
@@ -219,7 +218,7 @@ class DecoderMemory:
         self._inputs[key] = ResidentInput(decoder_input, [job])
         self.peak_occupied_rounds = max(self.peak_occupied_rounds, needed)
         self.admissions += 1
-        self.deposited.fire(job, decoder_input)
+        self.trace.deposited.fire(job, decoder_input)
         return decoder_input
 
     def add_reader(self, job: decoding_records.DecodeJob) -> DecoderInput:
@@ -239,7 +238,7 @@ class DecoderMemory:
         if resident.readers:
             return
         del self._inputs[key]
-        self.taken.fire(job, resident.decoder_input)
+        self.trace.taken.fire(job, resident.decoder_input)
 
     def snapshot(self) -> DecoderMemorySnapshot:
         """The memory's counters as one immutable record."""
@@ -354,3 +353,17 @@ def _model_row_identities(
         round_index, position_in_round = defect_positions[detector_id]
         identities.append((operation_id, round_index, position_in_round))
     return tuple(identities)
+
+
+@dataclasses.dataclass(frozen=True)
+class _TraceSources:
+    """Every event the decoder memory reports, as one member.
+
+    gem5 groups a component's statistics into one nested Group member
+    (tmp/resources/gem5/src/base/stats/group.hh:60-92) rather than one
+    member per counter; a component's events are the same shape, so a
+    listener reaches all of them through one name.
+    """
+
+    deposited: trace_source.TraceSource = trace_source.new_source()
+    taken: trace_source.TraceSource = trace_source.new_source()

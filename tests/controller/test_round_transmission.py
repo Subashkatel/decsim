@@ -135,7 +135,7 @@ def five_microsecond_wbd_profile(bits_per_microsecond=None):
 def transmitter_with(engine, profile, windows=None):
     ledger = link_traffic.TrafficLedger(profile)
     links = fabric_module.LinkFabric(profile, engine)
-    links.transfer_delivered.connect(ledger.on_transfer)
+    links.trace.transfer_delivered.connect(ledger.on_transfer)
     settings = round_store_settings.RoundStoreSettings()
     store = round_store_module.RoundStore(settings)
     if windows is None:
@@ -146,7 +146,7 @@ def transmitter_with(engine, profile, windows=None):
     transmitter = round_transmission.RoundTransmitter(
         engine, links, store, windows
     )
-    transmitter.round_event.connect(recorder.record)
+    transmitter.trace.round_event.connect(recorder.record)
     return transmitter, store, windows, recorder, ledger
 
 

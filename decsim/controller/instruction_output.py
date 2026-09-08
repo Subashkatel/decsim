@@ -10,6 +10,7 @@ QPU starts a command on its next cycle boundary. A preloaded command
 controller preparation happened before the simulated interval.
 """
 
+import dataclasses
 import functools
 from typing import Callable
 
@@ -32,7 +33,7 @@ class InstructionOutput:
         self.link = link
         self.qpu = qpu
         self.pulse_ticks = pulse_ticks
-        self.output_event = trace_source.TraceSource()
+        self.trace = _TraceSources()
 
     def start_preloaded(
         self,
@@ -154,4 +155,17 @@ class InstructionOutput:
         event = round_records.ControllerOutputEvent(
             kind, self.engine.now, operation_id, payload
         )
-        self.output_event.fire(event)
+        self.trace.output_event.fire(event)
+
+
+@dataclasses.dataclass(frozen=True)
+class _TraceSources:
+    """Every event the instruction output reports, as one member.
+
+    gem5 groups a component's statistics into one nested Group member
+    (tmp/resources/gem5/src/base/stats/group.hh:60-92) rather than one
+    member per counter; a component's events are the same shape, so a
+    listener reaches all of them through one name.
+    """
+
+    output_event: trace_source.TraceSource = trace_source.new_source()

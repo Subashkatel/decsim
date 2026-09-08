@@ -156,8 +156,8 @@ def test_the_terminal_sources_carry_every_ended_request_and_service():
         decoding_records.Verdict.KEEP, cancelled
     )
     ledger = decode_records.DecodeRecordLedger()
-    outcomes.request_ended.connect(ledger.request_ended)
-    outcomes.service_ended.connect(ledger.service_ended)
+    outcomes.trace.request_ended.connect(ledger.request_ended)
+    outcomes.trace.service_ended.connect(ledger.service_ended)
     delivered = []
     job = _weak_job(delivered)
     job.request_key = window_records.DecoderRequestKey(

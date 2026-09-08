@@ -15,6 +15,7 @@ in_flight counts the rounds from their send until the windows have heard
 of them; the packing stage's bound reads it (RoundsInFlight).
 """
 
+import dataclasses
 import functools
 
 import decsim.observe.trace_source as trace_source
@@ -35,7 +36,7 @@ class RoundTransmitter:
         self.weak_store = weak_store
         self.windows = windows
         self.in_flight = 0
-        self.round_event = trace_source.TraceSource()
+        self.trace = _TraceSources()
 
     def send(self, packed: round_records.PackedRound) -> None:
         """Send the round on its route at this tick.
@@ -114,7 +115,7 @@ class RoundTransmitter:
         event = round_records.RoundEvent.of(
             kind, self.engine.now, operation_id, round_index, packed.route
         )
-        self.round_event.fire(event)
+        self.trace.round_event.fire(event)
 
     def _send(
         self, path: transfer_records.LinkPath, packed, on_delivered
@@ -129,3 +130,16 @@ class RoundTransmitter:
         self.link.send(
             path, packed.wire_bits, self.engine.now, attribution, delivered
         )
+
+
+@dataclasses.dataclass(frozen=True)
+class _TraceSources:
+    """Every event the round transmitter reports, as one member.
+
+    gem5 groups a component's statistics into one nested Group member
+    (tmp/resources/gem5/src/base/stats/group.hh:60-92) rather than one
+    member per counter; a component's events are the same shape, so a
+    listener reaches all of them through one name.
+    """
+
+    round_event: trace_source.TraceSource = trace_source.new_source()

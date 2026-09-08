@@ -370,7 +370,7 @@ def test_a_declared_pipeline_depth_bounds_the_decodes_in_flight():
     def note_dispatch(job, _unit):
         dispatches[job.label] = engine.now
 
-    manager.service.job_dispatched.connect(note_dispatch)
+    manager.service.trace.job_dispatched.connect(note_dispatch)
     on_decoded = _ending_in(ends, engine, manager)
     transfer_ticks = config.microseconds_to_ticks(5.0)
     for index in range(4):

@@ -9,6 +9,7 @@ sum over its committed windows). The workload is complete once every
 window is final.
 """
 
+import dataclasses
 from typing import Callable, Optional
 
 import decsim.observe.trace_source as trace_source
@@ -40,7 +41,7 @@ class OperationResults:
         self.ledger = ledger
         self.conditional_release = conditional_release
         self.deliveries = _Deliveries(on_workload_complete)
-        self.operation_result_delivered = trace_source.TraceSource()
+        self.trace = _TraceSources()
 
     # ---- what the committer tells
 
@@ -209,7 +210,9 @@ class OperationResults:
         self.conditional_release.release_waiters(operation)
 
     def _record_result(self, operation_id, logical_observables) -> None:
-        self.operation_result_delivered.fire(operation_id, logical_observables)
+        self.trace.operation_result_delivered.fire(
+            operation_id, logical_observables
+        )
 
     def _release_segment_if_committed(
         self,
@@ -348,3 +351,18 @@ class _Segment:
         self.stream_id = None
         self.stream_offset = None
         self.required_stream_end = None
+
+
+@dataclasses.dataclass(frozen=True)
+class _TraceSources:
+    """Every event the operation results reports, as one member.
+
+    gem5 groups a component's statistics into one nested Group member
+    (tmp/resources/gem5/src/base/stats/group.hh:60-92) rather than one
+    member per counter; a component's events are the same shape, so a
+    listener reaches all of them through one name.
+    """
+
+    operation_result_delivered: trace_source.TraceSource = (
+        trace_source.new_source()
+    )

@@ -73,7 +73,7 @@ def fabric_with(engine, listener=None, **paths):
     settings = link_settings.FabricSettings(profile_name="test", **wiring)
     fabric = fabric_module.LinkFabric(settings, engine)
     if listener is not None:
-        fabric.transfer_delivered.connect(listener.on_transfer)
+        fabric.trace.transfer_delivered.connect(listener.on_transfer)
     return fabric
 
 

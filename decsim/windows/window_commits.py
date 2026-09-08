@@ -10,6 +10,7 @@ job's on_decoded: it decides, and the decoder side executes the send
 that carries the correction to the frame (decoders/decoder_output.py).
 """
 
+import dataclasses
 import functools
 
 import decsim.decoders.decode_queue as decode_queue_module
@@ -54,7 +55,7 @@ class WindowCommitter:
         self.results = results
         self.escalation_policy = escalation_policy
         self.decode_queue = decode_queue
-        self.window_committed = trace_source.TraceSource()
+        self.trace = _TraceSources()
 
     def accept_result(
         self,
@@ -137,7 +138,7 @@ class WindowCommitter:
         )
         if is_final:
             window.published_request_key = request_key
-        self.window_committed.fire(window, contribution)
+        self.trace.window_committed.fire(window, contribution)
         self.results.note_window_committed(window, is_final)
         if not is_final:
             # provisional: the boundary leaves with the commit
@@ -167,3 +168,16 @@ class WindowCommitter:
         self.courier.ship_held(window, result, request_key)
         self.results.release_committed_segments(operation.id)
         self.results.deliver_if_final(operation)
+
+
+@dataclasses.dataclass(frozen=True)
+class _TraceSources:
+    """Every event the window committer reports, as one member.
+
+    gem5 groups a component's statistics into one nested Group member
+    (tmp/resources/gem5/src/base/stats/group.hh:60-92) rather than one
+    member per counter; a component's events are the same shape, so a
+    listener reaches all of them through one name.
+    """
+
+    window_committed: trace_source.TraceSource = trace_source.new_source()

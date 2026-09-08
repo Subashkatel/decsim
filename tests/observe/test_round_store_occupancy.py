@@ -37,8 +37,8 @@ def run_random_trace(seed: int):
     listener = round_store_occupancy.RoundStoreOccupancy(engine)
     settings = round_store_settings.RoundStoreSettings()
     store = round_store_module.RoundStore(settings)
-    store.round_stored.connect(listener.round_stored)
-    store.round_released.connect(listener.round_released)
+    store.trace.round_stored.connect(listener.round_stored)
+    store.trace.round_released.connect(listener.round_released)
     residences = []
     tick = 0
     for round_index in range(1, 41):
@@ -70,8 +70,8 @@ def test_the_peak_is_the_most_rounds_stored_at_once():
     listener = round_store_occupancy.RoundStoreOccupancy(engine)
     settings = round_store_settings.RoundStoreSettings()
     store = round_store_module.RoundStore(settings)
-    store.round_stored.connect(listener.round_stored)
-    store.round_released.connect(listener.round_released)
+    store.trace.round_stored.connect(listener.round_stored)
+    store.trace.round_released.connect(listener.round_released)
     first = packet(1)
     second = packet(2)
     third = packet(3)
@@ -90,8 +90,8 @@ def test_the_time_average_is_the_integral_over_the_span():
     listener = round_store_occupancy.RoundStoreOccupancy(engine)
     settings = round_store_settings.RoundStoreSettings()
     store = round_store_module.RoundStore(settings)
-    store.round_stored.connect(listener.round_stored)
-    store.round_released.connect(listener.round_released)
+    store.trace.round_stored.connect(listener.round_stored)
+    store.trace.round_released.connect(listener.round_released)
     first = packet(1)
     accept = functools.partial(
         store.accept_packed_round, first, publication_tick=None

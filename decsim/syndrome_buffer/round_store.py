@@ -18,6 +18,7 @@ hold_registered(holder, round_keys), hold_transferred(old_holder,
 new_holder) and hold_released(holder) for the consumers' tokens.
 """
 
+import dataclasses
 from typing import Callable, Optional
 
 import decsim.observe.trace_source as trace_source
@@ -26,6 +27,24 @@ import decsim.records.identity as identity_records
 import decsim.records.rounds as round_records
 import decsim.syndrome_buffer.round_holds as round_holds
 import decsim.syndrome_buffer.settings as round_store_settings
+
+
+@dataclasses.dataclass(frozen=True)
+class _TraceSources:
+    """Every event the store reports, as one member.
+
+    gem5 groups a component's statistics into one nested Group member
+    (tmp/resources/gem5/src/base/stats/group.hh:60-92) rather than one
+    member per counter; a component's events are the same shape, so a
+    listener reaches all of them through store.trace.
+    """
+
+    round_stored: trace_source.TraceSource = trace_source.new_source()
+    round_published: trace_source.TraceSource = trace_source.new_source()
+    round_released: trace_source.TraceSource = trace_source.new_source()
+    hold_registered: trace_source.TraceSource = trace_source.new_source()
+    hold_transferred: trace_source.TraceSource = trace_source.new_source()
+    hold_released: trace_source.TraceSource = trace_source.new_source()
 
 
 class _StoredRound:
@@ -39,9 +58,8 @@ class _StoredRound:
 class RoundStore:
     """The store: rounds by key, their holds, and the operations it serves.
 
-    Eleven attributes, six of them trace sources (the module docstring
-    names them); the state is the settings, the rounds, the holds, the
-    operations and the slot-freed callback.
+    Its state is the settings, the rounds, the holds, the operations,
+    the slot-freed callback and its events (trace).
     """
 
     def __init__(
@@ -57,12 +75,7 @@ class RoundStore:
         # closed; a closed identity never reopens
         self.operations: dict = {}
         self.on_slot_freed = on_slot_freed
-        self.round_stored = trace_source.TraceSource()
-        self.round_published = trace_source.TraceSource()
-        self.round_released = trace_source.TraceSource()
-        self.hold_registered = trace_source.TraceSource()
-        self.hold_transferred = trace_source.TraceSource()
-        self.hold_released = trace_source.TraceSource()
+        self.trace = _TraceSources()
 
     # ---- the port
 
@@ -89,9 +102,9 @@ class RoundStore:
         stored = _StoredRound(packet)
         stored.publication_tick = publication_tick
         self.round_by_key[round_key] = stored
-        self.round_stored.fire(round_key, packet)
+        self.trace.round_stored.fire(round_key, packet)
         if publication_tick is not None:
-            self.round_published.fire(round_key, publication_tick)
+            self.trace.round_published.fire(round_key, publication_tick)
 
     def release_round(self, round_key) -> None:
         """Free one unheld round; its consumers are done with it."""
@@ -139,7 +152,7 @@ class RoundStore:
         if stored.publication_tick is not None:
             raise RuntimeError(f"round {round_key!r} was already published")
         stored.publication_tick = publication_tick
-        self.round_published.fire(round_key, publication_tick)
+        self.trace.round_published.fire(round_key, publication_tick)
 
     # ---- operation scope
 
@@ -187,7 +200,7 @@ class RoundStore:
         """Keep the listed rounds alive for one consumer token."""
         record = self._hold_record(holder, round_keys)
         self.holds.register(holder, record)
-        self.hold_registered.fire(holder, record.round_keys)
+        self.trace.hold_registered.fire(holder, record.round_keys)
 
     def replace_hold(self, holder, round_keys) -> None:
         """Re-point a live hold at a new set of rounds."""
@@ -198,12 +211,12 @@ class RoundStore:
     def transfer_hold(self, old_holder, new_holder) -> None:
         """Move a live hold to a new token without freeing its rounds."""
         self.holds.transfer(old_holder, new_holder)
-        self.hold_transferred.fire(old_holder, new_holder)
+        self.trace.hold_transferred.fire(old_holder, new_holder)
 
     def release_hold(self, holder) -> None:
         """Drop a hold; rounds with no remaining holder are freed."""
         orphaned = self.holds.release(holder)
-        self.hold_released.fire(holder)
+        self.trace.hold_released.fire(holder)
         self._free_stored(orphaned)
 
     def has_hold(self, holder) -> bool:
@@ -286,7 +299,7 @@ class RoundStore:
 
     def _free_round(self, round_key) -> None:
         del self.round_by_key[round_key]
-        self.round_released.fire(round_key)
+        self.trace.round_released.fire(round_key)
         if self.on_slot_freed is not None:
             self.on_slot_freed()
 

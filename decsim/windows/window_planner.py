@@ -13,6 +13,7 @@ CompiledSequentialWindowDecoder.decode_shots_to_error); readiness is
 the RoundTracker's.
 """
 
+import dataclasses
 import types
 from typing import Optional
 
@@ -195,7 +196,7 @@ class WindowPlanner:
         self.models = models
         self.model_by_window: dict = {}
         self.growth_by_stream: dict = {}
-        self.window_planned = trace_source.TraceSource()
+        self.trace = _TraceSources()
         for operation in planned_operations:
             self._build_operation_models(operation)
 
@@ -465,7 +466,7 @@ class WindowPlanner:
         self.plan.window_count[stream_id] += 1
         self.plan.total_windows += 1
         growth.next_window_index += 1
-        self.window_planned.fire(window)
+        self.trace.window_planned.fire(window)
         return window
 
 
@@ -515,3 +516,16 @@ class _StreamGrowth:
             )
             begun.append(geometry)
             index += 1
+
+
+@dataclasses.dataclass(frozen=True)
+class _TraceSources:
+    """Every event the window planner reports, as one member.
+
+    gem5 groups a component's statistics into one nested Group member
+    (tmp/resources/gem5/src/base/stats/group.hh:60-92) rather than one
+    member per counter; a component's events are the same shape, so a
+    listener reaches all of them through one name.
+    """
+
+    window_planned: trace_source.TraceSource = trace_source.new_source()

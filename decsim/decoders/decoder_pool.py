@@ -13,6 +13,7 @@ job when a central FIFO queue over the pool would; rowD2). A job with no
 input has nothing to prefetch and waits in the queue for free compute.
 """
 
+import dataclasses
 from typing import Callable, Optional
 
 import decsim.decoders.decoder_memory as decoder_memory_module
@@ -44,8 +45,7 @@ class DecoderPool:
         self.units_by_pool: dict[str, list] = {}
         # the units whose compute is back in the pool, in return order
         self.free_by_pool: dict[str, list] = {}
-        self.unit_busy = trace_source.TraceSource()
-        self.unit_freed = trace_source.TraceSource()
+        self.trace = _TraceSources()
         for pool, unit_count in unit_pools.items():
             capacity = None
             if decoder_memory is not None:
@@ -120,13 +120,13 @@ class DecoderPool:
         free = self.free_by_pool[unit.pool]
         free.remove(unit)
         unit.claim_compute(job)
-        self.unit_busy.fire(unit)
+        self.trace.unit_busy.fire(unit)
 
     def release(self, unit: decoder_unit_module.DecoderUnit) -> None:
         """The unit's compute goes back to its pool."""
         free = self.free_by_pool[unit.pool]
         free.append(unit)
-        self.unit_freed.fire(unit)
+        self.trace.unit_freed.fire(unit)
 
 
 def _earliest_freeing(units: list) -> decoder_unit_module.DecoderUnit:
@@ -153,3 +153,17 @@ def _check_unit_pools(unit_pools: dict) -> None:
             raise ValueError(
                 f"pool {pool_name!r} needs at least 1 unit (got {units})"
             )
+
+
+@dataclasses.dataclass(frozen=True)
+class _TraceSources:
+    """Every event the decoder pool reports, as one member.
+
+    gem5 groups a component's statistics into one nested Group member
+    (tmp/resources/gem5/src/base/stats/group.hh:60-92) rather than one
+    member per counter; a component's events are the same shape, so a
+    listener reaches all of them through one name.
+    """
+
+    unit_busy: trace_source.TraceSource = trace_source.new_source()
+    unit_freed: trace_source.TraceSource = trace_source.new_source()

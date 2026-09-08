@@ -9,6 +9,7 @@ stores each round at its landing; the store's holds and lifetime are
 RoundStore's.
 """
 
+import dataclasses
 from typing import Callable, Optional
 
 import decsim.observe.trace_source as trace_source
@@ -39,7 +40,7 @@ class StrongRoundWriter:
         self.writes_in_flight = 0
         # hears (operation_id, round_index) once a round is stored
         self.on_round_stored = on_round_stored
-        self.copy_made = trace_source.TraceSource()
+        self.trace = _TraceSources()
 
     def has_room(self) -> bool:
         """A write can land: capacity counts the rounds stored and in flight."""
@@ -81,7 +82,7 @@ class StrongRoundWriter:
         # a round whose every reader resolved while it crossed the link
         # is dropped at the door: nobody can ever read it
         self.store.release_round_if_unheld(round_key)
-        self.copy_made.fire(
+        self.trace.copy_made.fire(
             round_key, packet_bits, "controller assembler", "Buffer 1"
         )
         self.engine.log_io(
@@ -106,3 +107,16 @@ class StrongRoundWriter:
                 f"controller_to_strong_buffer writes in flight"
             )
         self.store.check_settled()
+
+
+@dataclasses.dataclass(frozen=True)
+class _TraceSources:
+    """Every event the strong round writer reports, as one member.
+
+    gem5 groups a component's statistics into one nested Group member
+    (tmp/resources/gem5/src/base/stats/group.hh:60-92) rather than one
+    member per counter; a component's events are the same shape, so a
+    listener reaches all of them through one name.
+    """
+
+    copy_made: trace_source.TraceSource = trace_source.new_source()

@@ -73,7 +73,7 @@ def observe(
 ) -> observation_module.Observation:
     """Every listener of the run, built and connected to what it hears."""
     log = _connect_log(observation, engine)
-    links.transfer_delivered.connect(traffic_ledger.on_transfer)
+    links.trace.transfer_delivered.connect(traffic_ledger.on_transfer)
     round_events = _connect_round_events(
         engine,
         controller=controller,
@@ -148,9 +148,9 @@ def _connect_window_ledger(window_manager) -> window_ledger_module.WindowLedger:
     ledger = window_ledger_module.WindowLedger()
     planner = window_manager.planner
     ledger.load_planned(planner.windows_by_key)
-    planner.window_planned.connect(ledger.window_planned)
+    planner.trace.window_planned.connect(ledger.window_planned)
     committer = window_manager.requester.committer
-    committer.window_committed.connect(ledger.window_committed)
+    committer.trace.window_committed.connect(ledger.window_committed)
     strong_redecode = window_manager.strong_redecode
     if strong_redecode is not None:
         shape = strong_redecode.shape
@@ -162,7 +162,7 @@ def _connect_result_ledger(window_manager) -> result_ledger_module.ResultLedger:
     """The logical results, heard once per operation as they are delivered."""
     ledger = result_ledger_module.ResultLedger()
     results = window_manager.results
-    results.operation_result_delivered.connect(
+    results.trace.operation_result_delivered.connect(
         ledger.operation_result_delivered
     )
     return ledger
@@ -171,7 +171,7 @@ def _connect_result_ledger(window_manager) -> result_ledger_module.ResultLedger:
 def _connect_queue_depth(decoder_manager) -> queue_depth_module.QueueDepthLog:
     """The waiting jobs, sampled at every change of the queue's depth."""
     depth_log = queue_depth_module.QueueDepthLog()
-    decoder_manager.queue.depth_changed.connect(depth_log.depth_changed)
+    decoder_manager.queue.trace.depth_changed.connect(depth_log.depth_changed)
     return depth_log
 
 
@@ -180,14 +180,14 @@ def _connect_controller_counters(
 ) -> controller_counters_module.ControllerCounters:
     """The controller's idle rounds, counted as they are emitted."""
     counters = controller_counters_module.ControllerCounters()
-    idle_rounds.idle_round_emitted.connect(counters.idle_round_emitted)
+    idle_rounds.trace.idle_round_emitted.connect(counters.idle_round_emitted)
     return counters
 
 
 def _connect_command_events(qpu) -> command_events_module.CommandEvents:
     """Every command the QPU received and started."""
     events = command_events_module.CommandEvents()
-    qpu.command_event.connect(events.command_event)
+    qpu.trace.command_event.connect(events.command_event)
     return events
 
 
@@ -200,8 +200,8 @@ def _round_store_occupancy(
     if not observation.round_store_occupancy:
         return None
     occupancy = round_store_occupancy_module.RoundStoreOccupancy(engine)
-    round_store.round_stored.connect(occupancy.round_stored)
-    round_store.round_released.connect(occupancy.round_released)
+    round_store.trace.round_stored.connect(occupancy.round_stored)
+    round_store.trace.round_released.connect(occupancy.round_released)
     return occupancy
 
 
@@ -249,8 +249,8 @@ def _connect_data_path(
     nothing and fires into empty lists.
     """
     if data_movement is not None:
-        qpu.round_emitted.connect(data_movement.round_emitted)
-        links.transfer_delivered.connect(data_movement.transfer_delivered)
+        qpu.trace.round_emitted.connect(data_movement.round_emitted)
+        links.trace.transfer_delivered.connect(data_movement.transfer_delivered)
         _connect_store_counts(data_movement, round_store)
         if strong_round_store is not None:
             _connect_store_counts(data_movement, strong_round_store)
@@ -265,9 +265,9 @@ def _connect_data_path(
             source.connect(data_movement.copy_made)
     if trace_writer is None:
         return
-    qpu.round_emitted.connect(trace_writer.round_emitted)
-    qpu.command_event.connect(trace_writer.command_event)
-    links.transfer_delivered.connect(trace_writer.transfer_delivered)
+    qpu.trace.round_emitted.connect(trace_writer.round_emitted)
+    qpu.trace.command_event.connect(trace_writer.command_event)
+    links.trace.transfer_delivered.connect(trace_writer.transfer_delivered)
     for source in _copy_sources(
         controller,
         assembler,
@@ -281,17 +281,17 @@ def _connect_data_path(
         trace_writer.round_in_assembly,
         assembler.settings.packing_rounds_in_flight,
     )
-    assembler.round_event.connect(in_assembly)
+    assembler.trace.round_event.connect(in_assembly)
     _connect_store_trace(trace_writer, round_store, "Buffer 0")
     if strong_round_store is not None:
         _connect_store_trace(trace_writer, strong_round_store, "Buffer 1")
     _connect_decoder_trace(trace_writer, decoder_manager, pool)
     _connect_window_trace(trace_writer, window_manager, decoder_manager)
     if pauli_frame is not None:
-        pauli_frame.correction_accepted.connect(
+        pauli_frame.trace.correction_accepted.connect(
             trace_writer.correction_accepted
         )
-        pauli_frame.correction_committed.connect(
+        pauli_frame.trace.correction_committed.connect(
             trace_writer.correction_committed
         )
 
@@ -300,9 +300,9 @@ def _connect_store_counts(
     data_movement: data_movement_module.DataMovement, store
 ) -> None:
     """One store's references: registered, transferred and released."""
-    store.hold_registered.connect(data_movement.hold_registered)
-    store.hold_transferred.connect(data_movement.hold_transferred)
-    store.hold_released.connect(data_movement.hold_released)
+    store.trace.hold_registered.connect(data_movement.hold_registered)
+    store.trace.hold_transferred.connect(data_movement.hold_transferred)
+    store.trace.hold_released.connect(data_movement.hold_released)
 
 
 def _copy_sources(
@@ -315,15 +315,15 @@ def _copy_sources(
 ) -> list:
     """Every copy_made source of the data path, in hop order."""
     sources = [
-        controller.copy_made,
-        assembler.copy_made,
-        round_writer.copy_made,
+        controller.trace.copy_made,
+        assembler.trace.copy_made,
+        round_writer.trace.copy_made,
     ]
     if strong_round_writer is not None:
-        sources.append(strong_round_writer.copy_made)
+        sources.append(strong_round_writer.trace.copy_made)
     for source in decoder_manager.copy_sources():
         sources.append(source)
-    sources.append(window_manager.requester.builder.copy_made)
+    sources.append(window_manager.requester.builder.trace.copy_made)
     return sources
 
 
@@ -333,17 +333,17 @@ def _connect_store_trace(
     """One store's residences, its occupancy and its holds."""
     capacity = store.settings.rounds
     stored = functools.partial(trace_writer.round_stored, store_name, capacity)
-    store.round_stored.connect(stored)
+    store.trace.round_stored.connect(stored)
     published = functools.partial(trace_writer.round_published, store_name)
-    store.round_published.connect(published)
+    store.trace.round_published.connect(published)
     released = functools.partial(trace_writer.round_released, store_name)
-    store.round_released.connect(released)
+    store.trace.round_released.connect(released)
     registered = functools.partial(trace_writer.hold_registered, store_name)
-    store.hold_registered.connect(registered)
+    store.trace.hold_registered.connect(registered)
     transferred = functools.partial(trace_writer.hold_transferred, store_name)
-    store.hold_transferred.connect(transferred)
+    store.trace.hold_transferred.connect(transferred)
     hold_released = functools.partial(trace_writer.hold_released, store_name)
-    store.hold_released.connect(hold_released)
+    store.trace.hold_released.connect(hold_released)
 
 
 def _connect_decoder_trace(
@@ -353,21 +353,21 @@ def _connect_decoder_trace(
 ) -> None:
     """The ready queue, the units' services, their memories and stages."""
     queue = decoder_manager.queue
-    queue.job_enqueued.connect(trace_writer.job_enqueued)
-    queue.depth_changed.connect(trace_writer.depth_changed)
+    queue.trace.job_enqueued.connect(trace_writer.job_enqueued)
+    queue.trace.depth_changed.connect(trace_writer.depth_changed)
     service = decoder_manager.service
-    service.job_dispatched.connect(trace_writer.job_dispatched)
-    service.input_landed.connect(trace_writer.input_landed)
-    service.job_started.connect(trace_writer.job_started)
-    service.job_finished.connect(trace_writer.job_finished)
+    service.trace.job_dispatched.connect(trace_writer.job_dispatched)
+    service.trace.input_landed.connect(trace_writer.input_landed)
+    service.trace.job_started.connect(trace_writer.job_started)
+    service.trace.job_finished.connect(trace_writer.job_finished)
     for unit in decoder_manager.pool.units():
         memory = unit.memory
         deposited = functools.partial(
             trace_writer.memory_deposited, memory.name
         )
-        memory.deposited.connect(deposited)
+        memory.trace.deposited.connect(deposited)
         taken = functools.partial(trace_writer.memory_taken, memory.name)
-        memory.taken.connect(taken)
+        memory.trace.taken.connect(taken)
     for decoder in _routed_decoders(pool):
         decoder.stage_recorded.connect(trace_writer.stage_recorded)
 
@@ -430,20 +430,28 @@ def _connect_window_trace(
     decoder_manager,
 ) -> None:
     """The windows a stream lays, their verdicts, commits and absorptions."""
-    window_manager.planner.window_planned.connect(trace_writer.window_planned)
+    window_manager.planner.trace.window_planned.connect(
+        trace_writer.window_planned
+    )
     builder = window_manager.requester.builder
-    builder.window_data_complete.connect(trace_writer.window_ready)
-    window_manager.requester.committer.window_committed.connect(
+    builder.trace.window_data_complete.connect(trace_writer.window_ready)
+    window_manager.requester.committer.trace.window_committed.connect(
         trace_writer.window_committed
     )
-    decoder_manager.outcomes.verdict_given.connect(trace_writer.verdict_given)
+    decoder_manager.outcomes.trace.verdict_given.connect(
+        trace_writer.verdict_given
+    )
     strong_redecode = window_manager.strong_redecode
     if strong_redecode is None:
         return
     shape = strong_redecode.shape
     shape.window_absorbed.connect(trace_writer.window_absorbed)
-    strong_redecode.strong_window_held.connect(trace_writer.strong_window_held)
-    strong_redecode.strong_window_left.connect(trace_writer.strong_window_left)
+    strong_redecode.trace.strong_window_held.connect(
+        trace_writer.strong_window_held
+    )
+    strong_redecode.trace.strong_window_left.connect(
+        trace_writer.strong_window_left
+    )
 
 
 def _decode_records(
@@ -463,19 +471,19 @@ def _connect_decode_records(
     if decode_records is None:
         return
     outcomes = decoder_manager.outcomes
-    outcomes.request_ended.connect(decode_records.request_ended)
-    outcomes.service_ended.connect(decode_records.service_ended)
+    outcomes.trace.request_ended.connect(decode_records.request_ended)
+    outcomes.trace.service_ended.connect(decode_records.service_ended)
 
 
 def _connect_runtime_stamps(
     execution_runtime, stamps: runtime_stamps_module.RuntimeStamps
 ) -> None:
     """The stamps hear every tick of an operation's life."""
-    execution_runtime.operation_issued.connect(stamps.operation_issued)
-    execution_runtime.operation_started.connect(stamps.operation_started)
-    execution_runtime.body_finished.connect(stamps.body_finished)
-    execution_runtime.decode_released.connect(stamps.decode_released)
-    execution_runtime.result_returned.connect(stamps.result_returned)
+    execution_runtime.trace.operation_issued.connect(stamps.operation_issued)
+    execution_runtime.trace.operation_started.connect(stamps.operation_started)
+    execution_runtime.trace.body_finished.connect(stamps.body_finished)
+    execution_runtime.trace.decode_released.connect(stamps.decode_released)
+    execution_runtime.trace.result_returned.connect(stamps.result_returned)
 
 
 def _connect_round_events(
@@ -491,10 +499,10 @@ def _connect_round_events(
     """The recorder hears every round event, output and strong landing."""
     round_events = round_events_module.RoundEventRecorder(engine)
     for component in (controller, assembler, held_rounds, transmitter):
-        component.round_event.connect(round_events.record)
-    instruction_output.output_event.connect(round_events.output)
+        component.trace.round_event.connect(round_events.record)
+    instruction_output.trace.output_event.connect(round_events.output)
     if strong_round_store is not None:
-        strong_round_store.round_stored.connect(round_events.round_stored)
+        strong_round_store.trace.round_stored.connect(round_events.round_stored)
     return round_events
 
 
@@ -532,8 +540,12 @@ def _frame_corrections(
     corrections = flight_recorder_module.FrameCorrections()
     if pauli_frame is None:
         return corrections
-    pauli_frame.correction_accepted.connect(corrections.correction_accepted)
-    pauli_frame.correction_committed.connect(corrections.correction_committed)
+    pauli_frame.trace.correction_accepted.connect(
+        corrections.correction_accepted
+    )
+    pauli_frame.trace.correction_committed.connect(
+        corrections.correction_committed
+    )
     return corrections
 
 
@@ -546,8 +558,8 @@ def _decoder_utilization(
     for name, units in pool.units_by_pool.items():
         units_by_pool[name] = len(units)
     utilization = metrics.DecoderUtilization(engine, units_by_pool)
-    pool.unit_busy.connect(utilization.unit_busy)
-    pool.unit_freed.connect(utilization.unit_freed)
+    pool.trace.unit_busy.connect(utilization.unit_busy)
+    pool.trace.unit_freed.connect(utilization.unit_freed)
     return utilization
 
 
@@ -562,9 +574,9 @@ def _decoder_memory_occupancy(
     occupancy = metrics.DecoderMemoryOccupancy(engine, capacity_by_unit)
     for unit in units:
         deposited = functools.partial(occupancy.deposited, unit.name)
-        unit.memory.deposited.connect(deposited)
+        unit.memory.trace.deposited.connect(deposited)
         taken = functools.partial(occupancy.taken, unit.name)
-        unit.memory.taken.connect(taken)
+        unit.memory.trace.taken.connect(taken)
     return occupancy
 
 

@@ -22,9 +22,9 @@ import functools
 from typing import Callable, Optional
 
 import decsim.controller.settings as controller_settings
-import decsim.observe.trace_source as trace_source
 import decsim.records.identity as identity_records
 import decsim.records.rounds as round_records
+import decsim.trace_source as trace_source
 
 
 @dataclasses.dataclass(frozen=True)

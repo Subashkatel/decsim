@@ -12,10 +12,10 @@ RoundStore's.
 import dataclasses
 from typing import Callable, Optional
 
-import decsim.observe.trace_source as trace_source
 import decsim.records.rounds as round_records
 import decsim.records.transfers as transfer_records
 import decsim.syndrome_buffer.round_store as round_store_module
+import decsim.trace_source as trace_source
 
 
 class StrongRoundWriter:

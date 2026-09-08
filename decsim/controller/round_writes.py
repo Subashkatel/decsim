@@ -17,9 +17,9 @@ import dataclasses
 from typing import Callable
 
 import decsim.controller.settings as controller_settings
-import decsim.observe.trace_source as trace_source
 import decsim.records.rounds as round_records
 import decsim.records.transfers as transfer_records
+import decsim.trace_source as trace_source
 
 
 class HeldRounds:

@@ -5,7 +5,7 @@ The shape is ns-3's TracedCallback (point-to-point-net-device.h:309,
 fires into an empty list.
 """
 
-import decsim.observe.trace_source as trace_source
+import decsim.trace_source as trace_source
 
 
 def test_a_source_with_no_listener_fires_and_nothing_happens():

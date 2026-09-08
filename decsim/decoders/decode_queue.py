@@ -16,8 +16,8 @@ import dataclasses
 from typing import Optional
 
 import decsim.decoders.strong_requests as strong_requests_module
-import decsim.observe.trace_source as trace_source
 import decsim.records.decoding as decoding_records
+import decsim.trace_source as trace_source
 
 # The decoder manager component's name in the narrator (docs/
 # architecture.md's component table). It lives here because every part of

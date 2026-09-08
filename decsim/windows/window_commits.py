@@ -20,10 +20,10 @@ import functools
 from typing import Callable
 
 import decsim.decoders.decode_queue as decode_queue_module
-import decsim.observe.trace_source as trace_source
 import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
 import decsim.records.windows as window_records
+import decsim.trace_source as trace_source
 
 
 class WindowVerdict:

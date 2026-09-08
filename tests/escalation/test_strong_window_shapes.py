@@ -33,10 +33,10 @@ import decsim.escalation.settings as escalation_settings
 import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.machine as machine_module
 import decsim.observe.run_views as run_views
-import decsim.observe.trace_source as trace_source
 import decsim.records.decoding as decoding_records
 import decsim.records.windows as window_records
 import decsim.settings as machine_settings
+import decsim.trace_source as trace_source
 import tests.escalation.declared_fabric as fabric
 
 # The gate's switching card, section by section as the yaml reads.

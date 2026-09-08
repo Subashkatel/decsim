@@ -24,8 +24,8 @@ window's reaction time carry the signal's work (decision D8).
 import dataclasses
 
 import decsim.decoders.decode_queue as decode_queue_module
-import decsim.observe.trace_source as trace_source
 import decsim.records.decoding as decoding_records
+import decsim.trace_source as trace_source
 
 
 @dataclasses.dataclass(frozen=True)

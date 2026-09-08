@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# The three style checks of STYLE.md rule 9 (and rule 1, which the
-# one-action check enforces), on the paths given or on the whole tree.
+# The style checks of STYLE.md rule 9 (and rule 1, which the one-action
+# check enforces), on the paths given or on the whole tree, then rule
+# 10's partial order over the whole package.
 #
 # The interpreter and the dependency folder default to the checkout's
 # own .venv and .pydeps. A git worktree has neither, so point the two
@@ -24,4 +25,5 @@ status=0
 PYTHONPATH=$pydeps "$python" -m ruff format --check "${targets[@]}" || status=1
 PYTHONPATH=$pydeps "$python" -m ruff check "${targets[@]}" || status=1
 "$python" tools/check_one_action.py "${targets[@]}" || status=1
+"$python" tools/check_uses_graph.py decsim || status=1
 exit $status

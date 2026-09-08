@@ -27,6 +27,27 @@ retries them when a slot frees, and the strong writer tells the window
 manager what landed. The one stand-in is _LateWiring inside
 _window_manager, for the courier's and the committer's callbacks to the
 facade and the strong redecode built after them.
+
+The packages import each other in one direction only, so the top can be
+cut off and what is left still runs (Parnas 1972 lines 505-529;
+Dijkstra's THE, dijkstra_the.txt 52-57). The levels, leaves first, are
+what tools/check_uses_graph.py prints and check.sh enforces:
+
+    0  config, records, tables, trace_source
+    1  detector_error_model, engine, pauli_frame, ports, seeding,
+       syndrome_buffer
+    2  decoders, links
+    3  confidence, observe, windows
+    4  escalation, qpu
+    5  controller, frontends
+    6  settings
+    7  build
+    8  machine (this file)
+    9  collect
+    10 front
+
+Level 3 and below decode a window on a store with no window manager,
+which is what the decoders' own tests run.
 """
 
 import dataclasses

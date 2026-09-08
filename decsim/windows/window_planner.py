@@ -17,9 +17,9 @@ import dataclasses
 import types
 from typing import Optional
 
-import decsim.observe.trace_source as trace_source
 import decsim.records.program as program_records
 import decsim.records.windows as window_records
+import decsim.trace_source as trace_source
 import decsim.windows.built_window_models as built_window_models
 
 

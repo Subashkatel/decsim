@@ -10,7 +10,7 @@ so a round held for room enters in order. That is gem5's cache queue
 never refuses a write, it answers room first. A round's status (its
 packet, its publication tick) lives on its record, gem5's CacheBlk.
 
-The store reports through trace sources (observe/trace_source.py) and
+The store reports through trace sources (trace_source.py) and
 runs with no listener: round_stored(round_key, packet) when a slot is
 taken, round_published(round_key, tick) when the round's data is ready
 for the windows, round_released(round_key) when the slot frees;
@@ -21,12 +21,12 @@ new_holder) and hold_released(holder) for the consumers' tokens.
 import dataclasses
 from typing import Callable, Optional
 
-import decsim.observe.trace_source as trace_source
 import decsim.records.decoding as decoding_records
 import decsim.records.identity as identity_records
 import decsim.records.rounds as round_records
 import decsim.syndrome_buffer.round_holds as round_holds
 import decsim.syndrome_buffer.settings as round_store_settings
+import decsim.trace_source as trace_source
 
 
 @dataclasses.dataclass(frozen=True)

@@ -14,13 +14,13 @@ the payload path end to end without Stim.
 from typing import Any, Optional
 
 import decsim.detector_error_model.fault_model_contracts as fault_models
-import decsim.observe.trace_source as trace_source
 import decsim.qpu.code_geometry as code_geometry
 import decsim.records.program as program_records
 import decsim.records.rounds as round_records
 import decsim.records.seeds as seed_records
 import decsim.records.windows as window_records
 import decsim.seeding as seeding
+import decsim.trace_source as trace_source
 
 # Stream ids and patches are opaque identities chosen by the workload; Any
 # stands for them in every signature below.

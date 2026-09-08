@@ -16,9 +16,9 @@ import numpy
 import decsim.decoders.decoder as decoder_module
 import decsim.decoders.tesseract.window_decoder as tesseract_window_decoder
 import decsim.detector_error_model.fault_model_contracts as fault_models
-import decsim.observe.trace_source as trace_source
 import decsim.records.decoding as decoding_records
 import decsim.records.seeds as seed_records
+import decsim.trace_source as trace_source
 
 
 class TesseractCheckedDecoder(decoder_module.DecoderBase):

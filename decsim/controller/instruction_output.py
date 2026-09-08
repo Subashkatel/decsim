@@ -14,10 +14,10 @@ import dataclasses
 import functools
 from typing import Callable
 
-import decsim.observe.trace_source as trace_source
 import decsim.records.program as program_records
 import decsim.records.rounds as round_records
 import decsim.records.transfers as transfer_records
+import decsim.trace_source as trace_source
 
 
 class InstructionOutput:

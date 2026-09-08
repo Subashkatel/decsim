@@ -369,6 +369,11 @@ class SyndromeSource(Protocol):
     ) -> list[round_records.QPUReadout]:
         """The readouts of one idle round on a patch of a live stream."""
 
+    def logical_observable_truth(
+        self, operation_id: Any
+    ) -> Optional[tuple[int, ...]]:
+        """The observable flips the source drew, or None when it draws none."""
+
 
 # -------------------------------------------------- every hop rides a link
 

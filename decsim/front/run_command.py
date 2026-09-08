@@ -18,6 +18,7 @@ import decsim.front.experiment as experiment
 import decsim.front.measure as measure
 import decsim.front.run_folder as run_folder
 import decsim.machine as machine_module
+import decsim.records.results as result_records
 import decsim.settings as machine_settings
 
 
@@ -171,7 +172,7 @@ def _result_lines(
     config,
     settings: machine_settings.MachineSettings,
     seed: int,
-    result: machine_module.RunResult,
+    result: result_records.RunResult,
     run_dir: Optional[Path],
 ) -> list:
     """The point, the terminal status, the ticks and every result."""

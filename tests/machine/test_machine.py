@@ -20,6 +20,7 @@ import re
 import numpy
 import pytest
 
+import decsim.build.escalation as escalation_build
 import decsim.config as config
 import decsim.controller.policies as boundary_policies
 import decsim.controller.settings as controller_settings
@@ -515,7 +516,7 @@ def test_a_new_escalation_kind_is_one_class_and_one_table_row():
     settings = dataclasses.replace(settings, escalation=escalation)
     escalation_settings.ESCALATIONS["always_strong"] = AlwaysStrongEscalation
     try:
-        assert machine_module.primary_tier(escalation) == "strong"
+        assert escalation_build.primary_tier(escalation) == "strong"
         machine = machine_module.Machine.build(settings, 0)
         result = machine.run()
     finally:

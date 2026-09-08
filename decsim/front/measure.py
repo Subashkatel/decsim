@@ -19,10 +19,11 @@ import numpy
 import pymatching
 import stim
 
+import decsim.build.escalation as escalation_build
 import decsim.collect as collect
 import decsim.config as config_module
-import decsim.machine as machine_module
 import decsim.observe.observation as observation_module
+import decsim.records.results as result_records
 import decsim.settings as machine_settings
 
 # Latency points, in path order, in microseconds per window unless noted.
@@ -250,7 +251,7 @@ def frame_records_by_window(
 
 def collect_samples(
     observation: observation_module.Observation,
-    result: machine_module.RunResult,
+    result: result_records.RunResult,
     escalation_kind: str,
 ) -> dict:
     """Every point's microsecond samples over the shot's decoded windows."""
@@ -332,7 +333,7 @@ def chain_load(
 
 def active_decoder_kind(settings: machine_settings.MachineSettings):
     """The kind of the tier that decodes the plan's windows."""
-    tier = machine_module.primary_tier(settings.escalation)
+    tier = escalation_build.primary_tier(settings.escalation)
     tier_settings = getattr(settings, f"{tier}_decoder")
     return tier_settings.kind
 
@@ -375,7 +376,7 @@ def shot_label(settings: machine_settings.MachineSettings, seed: int) -> str:
 def _measurement(
     settings: machine_settings.MachineSettings,
     observation: observation_module.Observation,
-    result: machine_module.RunResult,
+    result: result_records.RunResult,
     *,
     physical_error_probability: float,
     distance: int,
@@ -449,7 +450,7 @@ class _RefereeCounts:
 
 def _logical_verdicts(
     observation: observation_module.Observation,
-    result: machine_module.RunResult,
+    result: result_records.RunResult,
 ) -> _LogicalVerdicts:
     """The loop's observables beside the truth and beside the reference."""
     operation_result = result.operation_results[0]

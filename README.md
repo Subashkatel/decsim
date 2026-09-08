@@ -63,8 +63,9 @@ by section, and `decsim show configs/reference.yaml` prints what a yaml
 resolves to without running anything.
 
 To build a machine with no yaml at all, set only the fields you study;
-every settings record has a default. `decsim/machine.py` holds one table
-per pluggable part, and the `kind` in a settings record is a row of it.
+every settings record has a default. Each package's settings module
+holds one table per pluggable part it owns, and the `kind` in a settings
+record is a row of it.
 
 ## Run one sweep
 

@@ -269,7 +269,7 @@ class BoundaryCourier:
         self, destination: window_records.Window
     ) -> window_records.WindowInfo:
         """The destination as a policy reads it, with its detector layers."""
-        model = self.planner.model_by_window.get(destination.key)
+        model = self.planner.models.model_by_window.get(destination.key)
         detector_positions = None
         if model is not None:
             detector_positions = model.defect_positions

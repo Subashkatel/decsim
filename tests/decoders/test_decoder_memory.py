@@ -116,7 +116,7 @@ def test_a_second_reader_of_one_input_is_one_copy_held_until_both_are_done():
     assert memory.holds(second) is True
     memory.add_reader(second)
     assert memory.occupied_rounds == 3
-    assert memory.admissions == 1
+    assert memory.statistics.admissions == 1
 
     memory.take(first)
     assert memory.occupied_rounds == 3
@@ -136,7 +136,7 @@ def test_a_deposited_job_occupies_its_rounds_until_it_is_taken():
 
     memory.deposit(job)
     assert memory.occupied_rounds == 3
-    assert memory.peak_occupied_rounds == 3
+    assert memory.statistics.peak_occupied_rounds == 3
 
     memory.take(job)
     assert memory.occupied_rounds == 0
@@ -204,7 +204,7 @@ def test_every_unit_has_its_own_memory_and_ends_the_run_empty():
     units = machine.decoder_manager.pool.units()
     names = [unit.name for unit in units]
     occupied = [unit.memory.occupied_rounds for unit in units]
-    admissions = [unit.memory.admissions for unit in units]
+    admissions = [unit.memory.statistics.admissions for unit in units]
     assert names == ["default#0", "default#1"]
     assert occupied == [0, 0]
     assert sum(admissions) >= 2

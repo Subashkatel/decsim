@@ -59,39 +59,26 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
     ):
         self._seed = _validated_seed(seed)
         self._initialize_run_seed_binding(self._seed)
-        detector_rounds = detector_rounds or {}
-        self._detector_rounds_override = {
-            key: dict(rounds_map) for key, rounds_map in detector_rounds.items()
-        }
-        terminal_detector_ids = terminal_detector_ids or {}
-        self._terminal_detector_ids = {
-            key: tuple(detector_ids)
-            for key, detector_ids in terminal_detector_ids.items()
-        }
-        measurement_rounds = measurement_rounds or {}
-        self._measurement_rounds_override = {
-            key: dict(rounds_map)
-            for key, rounds_map in measurement_rounds.items()
-        }
-        # A shot sits under its sample key: the stream id, or the operation
-        # id of a standalone operation. An operation that replays a stream's
-        # shot is known by its own id, which maps to the sample key.
-        self._shot_by_key: dict = {}
-        self._sample_key_by_operation_id: dict = {}
-        self._stream_model_by_id: dict = {}
-        self._source_binding_by_key: dict = {}
+        detector_rounds_override = _rounds_by_key(detector_rounds)
+        terminal_ids = _detector_ids_by_key(terminal_detector_ids)
+        measurement_rounds_override = _rounds_by_key(measurement_rounds)
+        self._shots = _ShotTable(
+            detector_rounds_override=detector_rounds_override,
+            terminal_detector_ids=terminal_ids,
+            measurement_rounds_override=measurement_rounds_override,
+        )
         self.shot_sampled = trace_source.TraceSource()
 
     def sampled_truth(self) -> dict:
         """Every sampled observable-flip vector, by operation or stream."""
         truth_by_key = {}
-        for key, shot in self._shot_by_key.items():
+        for key, shot in self._shots.shot_by_key.items():
             truth_by_key[key] = _as_int_bits(shot.truth)
-        operation_ids = self._sample_key_by_operation_id.items()
+        operation_ids = self._shots.sample_key_by_operation_id.items()
         for operation_id, key in operation_ids:
             if operation_id in truth_by_key:
                 continue
-            shot = self._shot_by_key[key]
+            shot = self._shots.shot_by_key[key]
             truth_by_key[operation_id] = _as_int_bits(shot.truth)
         return truth_by_key
 
@@ -134,10 +121,12 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         is_later_segment = is_stream and operation.stream_offset > 0
         if is_later_segment:
             # A later segment reads its stream's shot under its own id.
-            assert key in self._shot_by_key, "a segment begins after its head"
-            self._sample_key_by_operation_id[operation.id] = key
+            assert key in self._shots.shot_by_key, (
+                "a segment begins after its head"
+            )
+            self._shots.sample_key_by_operation_id[operation.id] = key
             return
-        assert key not in self._shot_by_key, f"{key!r} has already begun"
+        assert key not in self._shots.shot_by_key, f"{key!r} has already begun"
         self._sample_shot(key, operation, source_round_count, detector_rounds)
 
     def form_round(
@@ -183,8 +172,8 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         the final readout.
         """
         key = _sample_key_of(operation)
-        shot = self._shot_by_key[key]
-        binding = self._source_binding_by_key[key]
+        shot = self._shots.shot_by_key[key]
+        binding = self._shots.source_binding_by_key[key]
         circuit_text = str(operation.circuit)
         if circuit_text != binding.circuit_text:
             raise RuntimeError(
@@ -193,7 +182,7 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         final_round = operation.stream_offset + 1
         if final_round != source_round_count:
             raise RuntimeError("finalizer is not at the final source round")
-        if not self._terminal_detector_ids.get(key):
+        if not self._shots.terminal_detector_ids.get(key):
             raise RuntimeError(
                 "terminal finalizer has no declared detector ids"
             )
@@ -218,7 +207,7 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
     ) -> list[round_records.QPUReadout]:
         """This idle stream round as one raw measurement packet."""
         del operation
-        binding = self._source_binding_by_key[stream_id]
+        binding = self._shots.source_binding_by_key[stream_id]
         if not 1 <= global_round <= binding.round_count:
             raise ValueError("idle round is outside the finite source")
         bits = self._round_packet_bits(stream_id, global_round)
@@ -251,7 +240,7 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
             fault_model_requirement=fault_model_requirement,
         )
         stream_model = _StreamModel(round_count, slicer)
-        self._stream_model_by_id[stream_operation.id] = stream_model
+        self._shots.stream_model_by_id[stream_operation.id] = stream_model
         return round_count
 
     def validate_stream_length(
@@ -260,7 +249,7 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         stream_round_count: int,
     ) -> None:
         """Refuse a stream whose runtime length differs from its circuit."""
-        stream_model = self._stream_model_by_id.get(stream_operation.id)
+        stream_model = self._shots.stream_model_by_id.get(stream_operation.id)
         if stream_model is None:
             return
         finite_round_count = stream_model.round_count
@@ -315,7 +304,7 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         The window whose commit region reaches the stream's last round is
         the terminal one.
         """
-        stream_model = self._stream_model_by_id.get(stream_id)
+        stream_model = self._shots.stream_model_by_id.get(stream_id)
         if stream_model is None:
             return None
         is_last = window.commit_hi == stream_model.round_count
@@ -379,16 +368,18 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         )
 
     def _prepare_run_seed_state(self, effective_seed):
-        return (effective_seed, {}, {}, {}, {})
+        return effective_seed
 
     def _install_run_seed_state(self, prepared_state) -> None:
-        (
-            self._seed,
-            self._shot_by_key,
-            self._sample_key_by_operation_id,
-            self._stream_model_by_id,
-            self._source_binding_by_key,
-        ) = prepared_state
+        """A fresh run keeps the declarations and drops what it sampled."""
+        self._seed = prepared_state
+        self._shots = dataclasses.replace(
+            self._shots,
+            shot_by_key={},
+            sample_key_by_operation_id={},
+            stream_model_by_id={},
+            source_binding_by_key={},
+        )
 
     def _sample_seed_for(self, key) -> int:
         """A substream seed that is stable across processes for one identity."""
@@ -424,7 +415,7 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         sampler = self._sampler_for(key, operation.circuit)
         self._mark_stochastic_use()
         measurement_row = self._measurement_row(sampler)
-        measurement_rounds = self._measurement_rounds_override.get(key)
+        measurement_rounds = self._shots.measurement_rounds_override.get(key)
         table = detector_formation.build_formation_table(
             operation.circuit,
             source_round_count,
@@ -442,8 +433,8 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         )
         former = detector_formation.StreamingDetectorFormer(table)
         shot = _SampledShot(packets, table, former, formed_events, formed_truth)
-        self._shot_by_key[key] = shot
-        self._sample_key_by_operation_id[operation.id] = key
+        self._shots.shot_by_key[key] = shot
+        self._shots.sample_key_by_operation_id[operation.id] = key
         self.shot_sampled.fire(operation, formed_events)
 
     def _measurement_row(
@@ -456,8 +447,8 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
 
     def _shot_for(self, identity):
         """The shot behind a replaying operation id, or behind a sample key."""
-        key = self._sample_key_by_operation_id.get(identity, identity)
-        return self._shot_by_key.get(key)
+        key = self._shots.sample_key_by_operation_id.get(identity, identity)
+        return self._shots.shot_by_key.get(key)
 
     def _round_packet_bits(self, key, global_round: int) -> tuple[int, ...]:
         """The raw bits the QPU emits for one round.
@@ -465,10 +456,10 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         When the stream declares a terminal fragment, the folded readout
         bits of the final round stay behind for finalize_stream_round.
         """
-        shot = self._shot_by_key[key]
+        shot = self._shots.shot_by_key[key]
         packet = shot.packets[global_round]
         table = shot.table
-        terminal_ids = self._terminal_detector_ids.get(key)
+        terminal_ids = self._shots.terminal_detector_ids.get(key)
         is_final_round = global_round == table.round_count
         has_terminal_fragment = bool(terminal_ids)
         has_folded_readout = table.readout_slot_start is not None
@@ -481,15 +472,15 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         self, key, circuit: stim.Circuit, source_round_count: int
     ) -> dict:
         """Bind one finite circuit, duration and detector chronology per key."""
-        detector_rounds_override = self._detector_rounds_override.get(key)
+        detector_rounds_override = self._shots.detector_rounds_override.get(key)
         resolved = detector_chronology.resolve_detector_rounds(
             circuit, detector_rounds_override, source_round_count
         )
         circuit_text = str(circuit)
-        binding = self._source_binding_by_key.get(key)
+        binding = self._shots.source_binding_by_key.get(key)
         if binding is None:
             detector_rounds = dict(resolved)
-            self._source_binding_by_key[key] = _SourceBinding(
+            self._shots.source_binding_by_key[key] = _SourceBinding(
                 circuit_text, source_round_count, detector_rounds
             )
             return detector_rounds
@@ -687,3 +678,43 @@ def _closed_temporal_boundary_windows(windows: list) -> tuple:
         if window.closed_temporal_boundaries:
             closed.append(index)
     return tuple(closed)
+
+
+@dataclasses.dataclass(frozen=True)
+class _ShotTable:
+    """Every per-shot and per-stream map of one device, as one member.
+
+    A shot sits under its sample key: the stream id, or the operation id
+    of a standalone operation. An operation that replays a stream's shot
+    is known by its own id, which maps to the sample key. The three
+    override maps are the caller's declarations about the circuit; the
+    four registries are what sampling fills in. Grouping them is gem5's
+    move for a component's many members
+    (tmp/resources/gem5/src/base/stats/group.hh:60-92).
+    """
+
+    detector_rounds_override: dict
+    terminal_detector_ids: dict
+    measurement_rounds_override: dict
+    shot_by_key: dict = dataclasses.field(default_factory=dict)
+    sample_key_by_operation_id: dict = dataclasses.field(default_factory=dict)
+    stream_model_by_id: dict = dataclasses.field(default_factory=dict)
+    source_binding_by_key: dict = dataclasses.field(default_factory=dict)
+
+
+def _rounds_by_key(declared: Optional[dict]) -> dict:
+    """One rounds map per stream key, copied out of the caller's mapping."""
+    declared = declared or {}
+    copied = {}
+    for key, rounds_map in declared.items():
+        copied[key] = dict(rounds_map)
+    return copied
+
+
+def _detector_ids_by_key(declared: Optional[dict]) -> dict:
+    """One terminal detector tuple per stream key."""
+    declared = declared or {}
+    copied = {}
+    for key, detector_ids in declared.items():
+        copied[key] = tuple(detector_ids)
+    return copied

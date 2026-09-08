@@ -214,7 +214,7 @@ def test_the_constructor_wiring_reaches_its_components():
     """Every cross-reference is made by constructor, none left None."""
     settings = machine_settings.MachineSettings()
     machine = machine_module.Machine.build(settings)
-    assert machine.qpu.readout_receiver is machine.controller
+    assert machine.qpu.receivers.readout is machine.controller
     assert machine.execution_runtime.issuer is machine.issuer
     manager = machine.decoder_manager
     assert machine.window_manager.requester.decode_queue is manager

@@ -18,6 +18,7 @@ without it; with no writer connected each source fires into an empty
 list.
 """
 
+import dataclasses
 import json
 from typing import Optional
 
@@ -91,20 +92,7 @@ class TraceWriter:
         self.engine = engine
         self.process_name = process_name
         self.events: list[dict] = []
-        self._tid_by_thread: dict[str, int] = {}
-        # a residence or service that has begun and not yet ended, by
-        # (thread, key); each writes one X at its end
-        self._open_residence: dict[tuple, dict] = {}
-        self._open_service: dict[tuple, dict] = {}
-        # the rounds and windows whose flow has started, so a step never
-        # precedes its start
-        self._flowing_rounds: set = set()
-        self._flowing_windows: set = set()
-        # which unit is decoding each window, so a stage lands on its
-        # lane: the stage record names the window, not the unit
-        self._unit_thread_by_window: dict[tuple, str] = {}
-        self._counter_value: dict[str, int] = {}
-        self._unnamed_threads = 0
+        self._open = _OpenSlices()
 
     # ---- the file
 
@@ -125,7 +113,7 @@ class TraceWriter:
         """
         process = self._process_name_event()
         rows = [process]
-        threads = self._tid_by_thread.items()
+        threads = self._open.tid_by_thread.items()
         for thread, tid in sorted(threads, key=_by_tid):
             named = _thread_name_event(tid, thread)
             rows.append(named)
@@ -139,7 +127,7 @@ class TraceWriter:
     def _still_open(self) -> list:
         """One X per residence the run never ended, closed at now."""
         rows = []
-        for (thread, _key), open_row in self._open_residence.items():
+        for (thread, _key), open_row in self._open.open_residence.items():
             args = dict(open_row["args"])
             args["freed_reason"] = "end of run"
             tid = self._tid(thread)
@@ -427,13 +415,13 @@ class TraceWriter:
         """The unit began this job's physical decode."""
         thread = _unit_thread(unit.name)
         window_key = (job.operation_id, job.window_id)
-        self._unit_thread_by_window[window_key] = thread
+        self._open.unit_thread_by_window[window_key] = thread
         args = {
             "request": request_text(job.request_key),
             "service": _service_text(job.service_key),
         }
         key = ("service", job.request_key)
-        self._open_service[(thread, key)] = {
+        self._open.open_service[(thread, key)] = {
             "start": self.engine.now,
             "args": args,
         }
@@ -442,7 +430,7 @@ class TraceWriter:
         """The unit's physical decode ended."""
         thread = _unit_thread(unit.name)
         key = ("service", job.request_key)
-        open_row = self._open_service.pop((thread, key), None)
+        open_row = self._open.open_service.pop((thread, key), None)
         if open_row is None:
             return
         start = open_row["start"]
@@ -454,7 +442,7 @@ class TraceWriter:
     def stage_recorded(self, record) -> None:
         """One stage of one job on the lane of the unit that started it."""
         window_key = (record.operation_id, record.window_id)
-        thread = self._unit_thread_by_window.get(window_key)
+        thread = self._open.unit_thread_by_window.get(window_key)
         if thread is None:
             return
         args = {
@@ -532,15 +520,15 @@ class TraceWriter:
 
     def _tid(self, thread: str) -> int:
         """The thread's lane: its rank in THREAD_ORDER, or after them all."""
-        known = self._tid_by_thread.get(thread)
+        known = self._open.tid_by_thread.get(thread)
         if known is not None:
             return known
         if thread in THREAD_ORDER:
             allocated = THREAD_ORDER.index(thread) + 1
         else:
-            allocated = len(THREAD_ORDER) + 1 + self._unnamed_threads
-            self._unnamed_threads += 1
-        self._tid_by_thread[thread] = allocated
+            allocated = len(THREAD_ORDER) + 1 + self._open.unnamed_threads
+            self._open.unnamed_threads += 1
+        self._open.tid_by_thread[thread] = allocated
         return allocated
 
     def _instant(
@@ -586,13 +574,13 @@ class TraceWriter:
         self.events.append(row)
 
     def _count(self, thread: str, name: str, step: int) -> None:
-        value = self._counter_value.get(name, 0) + step
-        self._counter_value[name] = value
+        value = self._open.counter_value.get(name, 0) + step
+        self._open.counter_value[name] = value
         self._counter(thread, name, {"rounds": value}, self.engine.now)
 
     def _begin_assembly(self, capacity, round_key, event) -> None:
         """The round's first fragment opens its place in the workspace."""
-        if (ASSEMBLER_THREAD, round_key) in self._open_residence:
+        if (ASSEMBLER_THREAD, round_key) in self._open.open_residence:
             return
         args = {
             "round": round_text(round_key),
@@ -610,7 +598,7 @@ class TraceWriter:
 
     def _end_assembly(self, round_key, reason: str) -> None:
         """The round left the workspace, packed or dropped."""
-        if (ASSEMBLER_THREAD, round_key) not in self._open_residence:
+        if (ASSEMBLER_THREAD, round_key) not in self._open.open_residence:
             return
         closing = {"freed": self.engine.now, "freed_reason": reason}
         self._end_residence(ASSEMBLER_THREAD, round_key, closing)
@@ -619,7 +607,7 @@ class TraceWriter:
     def _begin_residence(
         self, thread: str, key, name: str, category: str, args: dict
     ) -> None:
-        self._open_residence[(thread, key)] = {
+        self._open.open_residence[(thread, key)] = {
             "start": self.engine.now,
             "name": name,
             "cat": category,
@@ -637,7 +625,7 @@ class TraceWriter:
         """
         if not isinstance(key, tuple):
             return
-        open_row = self._open_residence.get((thread, key))
+        open_row = self._open.open_residence.get((thread, key))
         if open_row is None:
             return
         held = open_row["args"].get("bits")
@@ -647,13 +635,13 @@ class TraceWriter:
 
     def _learn_on_residence(self, thread: str, key, learned: dict) -> None:
         """Facts a residence hears after it opens and before it ends."""
-        open_row = self._open_residence.get((thread, key))
+        open_row = self._open.open_residence.get((thread, key))
         if open_row is None:
             return
         open_row["args"].update(learned)
 
     def _end_residence(self, thread: str, key, closing: dict) -> None:
-        open_row = self._open_residence.pop((thread, key), None)
+        open_row = self._open.open_residence.pop((thread, key), None)
         if open_row is None:
             return
         args = dict(open_row["args"])
@@ -673,27 +661,27 @@ class TraceWriter:
         """
         carries_window = attribution.window_id is not None
         for round_key in _rounds_of(attribution):
-            is_flowing = round_key in self._flowing_rounds
+            is_flowing = round_key in self._open.flowing_rounds
             if not is_flowing and carries_window:
                 continue
             phase = "s"
             if is_flowing:
                 phase = "t"
             else:
-                self._flowing_rounds.add(round_key)
+                self._open.flowing_rounds.add(round_key)
             self._round_flow(phase, thread, round_key, transfer.send_ticks)
 
     def _step_flow(self, thread: str, round_key) -> None:
-        if round_key not in self._flowing_rounds:
+        if round_key not in self._open.flowing_rounds:
             return
         self._round_flow("t", thread, round_key, self.engine.now)
 
     def _end_flow(self, thread: str, job: decoding_records.DecodeJob) -> None:
         for round_key in _job_round_keys(job):
-            if round_key not in self._flowing_rounds:
+            if round_key not in self._open.flowing_rounds:
                 continue
             self._round_flow("f", thread, round_key, self.engine.now)
-            self._flowing_rounds.discard(round_key)
+            self._open.flowing_rounds.discard(round_key)
 
     def _flow(
         self,
@@ -741,24 +729,24 @@ class TraceWriter:
         That is one more hop of the same chain: a Chrome flow has one
         start and then steps, so the second enqueue writes a `t`.
         """
-        if window_key in self._flowing_windows:
+        if window_key in self._open.flowing_windows:
             self._step_window_flow(thread, window_key, self.engine.now)
             return
-        self._flowing_windows.add(window_key)
+        self._open.flowing_windows.add(window_key)
         self._window_flow("s", thread, window_key, self.engine.now)
 
     def _step_window_flow(self, thread: str, window_key, tick: int) -> None:
         """One more hop of a chain that has begun; an unstarted one waits."""
-        if window_key not in self._flowing_windows:
+        if window_key not in self._open.flowing_windows:
             return
         self._window_flow("t", thread, window_key, tick)
 
     def _end_window_flow(self, thread: str, window_key, tick: int) -> None:
         """The chain ends where the frame holds the window's correction."""
-        if window_key not in self._flowing_windows:
+        if window_key not in self._open.flowing_windows:
             return
         self._window_flow("f", thread, window_key, tick)
-        self._flowing_windows.discard(window_key)
+        self._open.flowing_windows.discard(window_key)
 
 
 def _complete_event(
@@ -980,3 +968,26 @@ def _job_round_keys(job: decoding_records.DecodeJob) -> tuple:
     for round_input in decoder_input.rounds:
         keys.append((round_input.operation_id, round_input.round_index))
     return tuple(keys)
+
+
+@dataclasses.dataclass
+class _OpenSlices:
+    """Every slice the writer has begun and not yet closed, as one member.
+
+    A residence or a service that has begun and not ended sits under
+    (thread, key) and writes one X event at its end; flowing_rounds and
+    flowing_windows are the flows whose start has been written, so a
+    step never precedes its start; unit_thread_by_window says which
+    unit's lane a stage lands on, because a stage record names the
+    window and not the unit. gem5 groups a component's many members the
+    same way (tmp/resources/gem5/src/base/stats/group.hh:60-92).
+    """
+
+    tid_by_thread: dict = dataclasses.field(default_factory=dict)
+    open_residence: dict = dataclasses.field(default_factory=dict)
+    open_service: dict = dataclasses.field(default_factory=dict)
+    flowing_rounds: set = dataclasses.field(default_factory=set)
+    flowing_windows: set = dataclasses.field(default_factory=set)
+    unit_thread_by_window: dict = dataclasses.field(default_factory=dict)
+    counter_value: dict = dataclasses.field(default_factory=dict)
+    unnamed_threads: int = 0

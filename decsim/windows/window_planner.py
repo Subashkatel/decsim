@@ -39,6 +39,9 @@ class WindowModels:
         self.provider = error_model_provider
         self.fault_model_requirement_for = fault_model_requirement_for
         self.built_models = built_models
+        # the model each planned or grown window was laid with; the
+        # models object builds them, so it is where they live
+        self.model_by_window: dict = {}
 
     def has_provider(self) -> bool:
         """Whether the source builds models at all."""
@@ -194,7 +197,6 @@ class WindowPlanner:
         self.resolved_operation_by_id = types.MappingProxyType(resolved_by_id)
         self.plan = plan
         self.models = models
-        self.model_by_window: dict = {}
         self.growth_by_stream: dict = {}
         self.trace = _TraceSources()
         for operation in planned_operations:
@@ -256,7 +258,7 @@ class WindowPlanner:
         window.buffer_lo = buffer_lo
         window.round_count = window.buffer_hi - window.buffer_lo + 1
         if model is not None:
-            self.model_by_window[key] = model
+            self.models.model_by_window[key] = model
         return window
 
     def check_absorbable(self, window_keys) -> None:
@@ -407,7 +409,7 @@ class WindowPlanner:
         """Give a new stream window its model, when the source has one."""
         model = self.models.model_for_stream(window.operation_id, window)
         if model is not None:
-            self.model_by_window[window.key] = model
+            self.models.model_by_window[window.key] = model
 
     def trim_stream_tail(
         self, stream_id, stream_round_count: int
@@ -444,7 +446,7 @@ class WindowPlanner:
         if not models:
             return
         for window, model in zip(windows, models):
-            self.model_by_window[window.key] = model
+            self.models.model_by_window[window.key] = model
 
     def _create_stream_window(
         self, stream_id, growth: "_StreamGrowth", geometry

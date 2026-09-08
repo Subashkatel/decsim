@@ -20,7 +20,7 @@ et al. 2605.04892).
 import dataclasses
 import math
 from collections.abc import Mapping
-from typing import Any, Callable, Optional
+from typing import Callable, Optional
 
 import decsim.config as config
 import decsim.observe.trace_source as trace_source
@@ -122,12 +122,7 @@ class PauliFrame:
     def __init__(self, engine, *, commit_ticks: int) -> None:
         self.engine = engine
         self.commit_ticks = commit_ticks
-        self._records: list[PauliFrameCommitRecord] = []
-        self._pending_by_window: dict[tuple, _PendingWrite] = {}
-        self._committed_by_window: dict[tuple, PauliFrameCommitRecord] = {}
-        # A stream id is whatever the front end chose; the frame never
-        # looks inside it.
-        self._windows_by_stream: dict[Any, list[tuple]] = {}
+        self._state = _FrameState()
         self.trace = _TraceSources()
 
     def commit_correction(
@@ -154,9 +149,9 @@ class PauliFrame:
             committed_ticks=committed_ticks,
             logical_observables=observables,
         )
-        self._records.append(record)
+        self._state.records.append(record)
         pending = _PendingWrite(record, on_committed)
-        self._pending_by_window[window_key] = pending
+        self._state.pending_by_window[window_key] = pending
         self.trace.correction_accepted.fire(record)
         self._charge_write(window_key)
 
@@ -167,8 +162,8 @@ class PauliFrame:
         corrections carries no observables, since a fold over an unknown
         value is unknown.
         """
-        window_keys = self._windows_by_stream.get(stream_id, ())
-        records = [self._committed_by_window[key] for key in window_keys]
+        window_keys = self._state.windows_by_stream.get(stream_id, ())
+        records = [self._state.committed_by_window[key] for key in window_keys]
         if not records:
             return ()
         observables_per_record = [
@@ -184,15 +179,17 @@ class PauliFrame:
     def snapshot(self) -> PauliFrameSnapshot:
         """A frozen copy of what the frame holds now."""
         stream_ids = sorted(
-            self._windows_by_stream,
+            self._state.windows_by_stream,
             key=identity_records.stable_identity_order_key,
         )
         frames = []
         for stream_id in stream_ids:
             frame = self.frame_for_stream(stream_id)
             frames.append((stream_id, frame))
-        commit_ticks = [record.committed_ticks for record in self._records]
-        commit_count = len(self._records)
+        commit_ticks = [
+            record.committed_ticks for record in self._state.records
+        ]
+        commit_count = len(self._state.records)
         first_commit_ticks = None
         last_commit_ticks = None
         if commit_ticks:
@@ -202,12 +199,12 @@ class PauliFrame:
         return PauliFrameSnapshot(
             configured_commit_ticks=self.commit_ticks,
             commit_count=commit_count,
-            pending_write_count=len(self._pending_by_window),
+            pending_write_count=len(self._state.pending_by_window),
             charged_ticks=charged_ticks,
             first_commit_ticks=first_commit_ticks,
             last_commit_ticks=last_commit_ticks,
             frames=tuple(frames),
-            records=tuple(self._records),
+            records=tuple(self._state.records),
         )
 
     def _log_received(self, tier, window_key, observables) -> None:
@@ -230,26 +227,28 @@ class PauliFrame:
         )
 
     def _has_accepted(self, window_key) -> bool:
-        is_pending = window_key in self._pending_by_window
-        is_committed = window_key in self._committed_by_window
+        is_pending = window_key in self._state.pending_by_window
+        is_committed = window_key in self._state.committed_by_window
         return is_pending or is_committed
 
     def _tier_of(self, window_key) -> str:
-        pending = self._pending_by_window.get(window_key)
+        pending = self._state.pending_by_window.get(window_key)
         if pending is not None:
             return pending.record.tier
-        record = self._committed_by_window[window_key]
+        record = self._state.committed_by_window[window_key]
         return record.tier
 
     def _finish_write(self, window_key) -> None:
-        pending = self._pending_by_window.pop(window_key)
+        pending = self._state.pending_by_window.pop(window_key)
         record = pending.record
-        self._committed_by_window[window_key] = record
+        self._state.committed_by_window[window_key] = record
         # A window key starts with the stream it belongs to.
         stream_id = window_key[0]
-        windows_on_stream = self._windows_by_stream.setdefault(stream_id, [])
+        windows_on_stream = self._state.windows_by_stream.setdefault(
+            stream_id, []
+        )
         windows_on_stream.append(window_key)
-        held = len(self._committed_by_window)
+        held = len(self._state.committed_by_window)
         self.engine.log_io(
             "PauliFrame",
             lambda: (
@@ -304,3 +303,20 @@ class _TraceSources:
 
     correction_accepted: trace_source.TraceSource = trace_source.new_source()
     correction_committed: trace_source.TraceSource = trace_source.new_source()
+
+
+@dataclasses.dataclass
+class _FrameState:
+    """What the frame holds: its records and its two registries.
+
+    records is every committed correction in commit order;
+    pending_by_window is the writes charged and not yet landed;
+    committed_by_window is the window that already has a correction, so
+    a second one is refused. A stream id is whatever the front end
+    chose, and the frame never looks inside it.
+    """
+
+    records: list = dataclasses.field(default_factory=list)
+    pending_by_window: dict = dataclasses.field(default_factory=dict)
+    committed_by_window: dict = dataclasses.field(default_factory=dict)
+    windows_by_stream: dict = dataclasses.field(default_factory=dict)

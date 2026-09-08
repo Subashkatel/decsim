@@ -133,11 +133,23 @@ class StagedDecoder(decoder_module.DecoderBase):
     def __init__(self, decoder, timing: UnitTiming):
         self.decoder = decoder
         self.timing = timing
-        self.fault_model_requirement = decoder.fault_model_requirement
-        self.decoder_evidence = decoder.decoder_evidence
-        self.missing_evidence_reasons = decoder.missing_evidence_reasons
         self._running: dict = {}
         self.stage_recorded = trace_source.TraceSource()
+
+    @property
+    def fault_model_requirement(self):
+        """What the wrapped decoder needs of the model; the stages add none."""
+        return self.decoder.fault_model_requirement
+
+    @property
+    def decoder_evidence(self):
+        """The evidence the wrapped decoder reports; the stages add none."""
+        return self.decoder.decoder_evidence
+
+    @property
+    def missing_evidence_reasons(self) -> dict:
+        """Why the wrapped decoder cannot report a piece of evidence."""
+        return self.decoder.missing_evidence_reasons
 
     def run_seed_children(self) -> tuple:
         """The wrapped decoder under the segment decoder."""

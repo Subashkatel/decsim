@@ -60,9 +60,10 @@ def test_a_stale_delivery_is_ignored_and_the_edge_releases_once():
     def on_boundary_received(key, _is_unblocked) -> None:
         checks.append((engine.now, key))
 
+    no_models = types.SimpleNamespace(model_by_window={})
     planner = types.SimpleNamespace(
         windows_by_key=windows,
-        model_by_window={},
+        models=no_models,
         round_count_of=lambda _operation_id: 20,
     )
     profile = link_profiles.logical_reference_profile()

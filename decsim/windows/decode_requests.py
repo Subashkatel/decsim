@@ -114,7 +114,7 @@ class DecodeRequestBuilder:
         )
         spatial_nodes = self.planner.spatial_node_count_of(operation.id)
         geometry = self.planner.code_geometry_of(operation.id)
-        model = self.planner.model_by_window.get(window.key)
+        model = self.planner.models.model_by_window.get(window.key)
         label = self._job_label(window, operation)
         return decoding_records.DecodeJob(
             operation_id=window.operation_id,

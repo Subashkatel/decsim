@@ -179,6 +179,10 @@ class DecodeJob:
     code: Optional[str] = None  # code name, drives CodeRouter routing
     attempt: int = 0  # 0 = first (weak) decode, 1 = strong redo
     hint: Optional[str] = None  # routing override, e.g. "strong"
+    # the logical class this decode is pinned to, or None to decode
+    # normally; a forced solve reports that class's minimum weight
+    # (Gidney et al. 2312.04522, the augmented virtual detector)
+    forced_logical_class: Optional[int] = None
     pool: Optional[str] = None  # unit pool assigned at dispatch
     # back-reference to the source window
     window: Optional[window_records.Window] = None
@@ -254,9 +258,9 @@ class DecodeResult:
     correction: Optional[Any] = None  # correction operator (None = timing-only)
     logical_observables: Optional[tuple[int, ...]] = None  # full prediction
     soft_output: Optional[SoftOutput] = None  # source-compatible confidence
-    # one forced-class solve's weight, carried to the split-gap join
-    # (the gap exists only once both halves have reported)
-    gap_half_weight: Optional[float] = None
+    # the minimum weight inside the class the job was forced to; None
+    # when the decode was not forced or the window pins no observable
+    forced_class_weight: Optional[float] = None
     # round-keyed seam defects (synthetic decoders, recovery lock
     # scenarios)
     boundary_defects: Optional[dict] = None

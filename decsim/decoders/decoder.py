@@ -62,6 +62,10 @@ class DecoderBase(abc.ABC):
     fault_model_requirement = fault_models.NO_FAULT_MODEL_REQUIRED
     stage_recorded = trace_source.SILENT
     window_checked = trace_source.SILENT
+    # a row that can pin its solve to one logical class and report that
+    # class's minimum weight says so here; the yaml refuses a confidence
+    # built from forced solves over a row that cannot
+    answers_forced_logical_class = False
 
     @abc.abstractmethod
     def decode(
@@ -168,6 +172,25 @@ class WindowDecoderBase(DecoderBase):
     def decode_window(self, backend, model, faults, syndrome) -> tuple:
         """(selected faults, decode status or None) of one backend call."""
 
+    def decode_forced_window(
+        self, backend, model, faults, syndrome, forced_logical_class: int
+    ) -> tuple:
+        """(selected faults, decode status, the class's weight) of one solve.
+
+        The minimum-weight correction inside one logical class, the
+        weight a complementary gap subtracts (Gidney et al. 2312.04522
+        Sec. "Complementary gap"). The weight is None when the window
+        pins no observable and the class cannot be forced. A row whose
+        answers_forced_logical_class is False never reaches this.
+        """
+        del backend, model, faults, syndrome, forced_logical_class
+        row = type(self)
+        row_name = row.__name__
+        raise RuntimeError(
+            f"{row_name} was asked for a forced-class solve and does not "
+            "answer one; its row declares answers_forced_logical_class False"
+        )
+
     def latency(self, job: decoding_records.DecodeJob) -> int:
         """The latency model's time; a measured decoder has none in advance."""
         if self.latency_model is None:
@@ -201,6 +224,15 @@ class WindowDecoderBase(DecoderBase):
         syndrome = payload_syndrome(job)
         check_syndrome_size(job, syndrome, faults)
         backend = self.compiled_for(faults, model)
+        forced_class = job.forced_logical_class
+        if forced_class is None:
+            return self._plain_decode(job, backend, model, faults, syndrome)
+        return self._forced_decode(
+            job, backend, model, faults, syndrome, forced_class
+        )
+
+    def _plain_decode(self, job, backend, model, faults, syndrome) -> tuple:
+        """(the window's own result, nanoseconds of the backend call)."""
         started_ns = time.perf_counter_ns()
         selected, decode_status = self.decode_window(
             backend, model, faults, syndrome
@@ -209,6 +241,21 @@ class WindowDecoderBase(DecoderBase):
         result = result_from_selected_faults(
             job, model, faults, selected, decode_status=decode_status
         )
+        return result, finished_ns - started_ns
+
+    def _forced_decode(
+        self, job, backend, model, faults, syndrome, forced_class: int
+    ) -> tuple:
+        """(the class's result and weight, nanoseconds of the backend call)."""
+        started_ns = time.perf_counter_ns()
+        selected, decode_status, weight = self.decode_forced_window(
+            backend, model, faults, syndrome, forced_class
+        )
+        finished_ns = time.perf_counter_ns()
+        result = result_from_selected_faults(
+            job, model, faults, selected, decode_status=decode_status
+        )
+        result.forced_class_weight = weight
         return result, finished_ns - started_ns
 
     def compiled_for(self, faults, model):

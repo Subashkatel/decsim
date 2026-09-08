@@ -327,7 +327,7 @@ class DecoderManager:
         )
         sibling_weight = None
         if result is not None:
-            sibling_weight = result.gap_half_weight
+            sibling_weight = result.forced_class_weight
         key = job.gap_sibling_for
         joined = self.gap_joins.sibling_done(key, sibling_weight)
         if joined is not None:

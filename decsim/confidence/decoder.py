@@ -72,6 +72,7 @@ class SoftOutputDecoder(decoder_module.DecoderBase):
         self.fault_model_requirement = base.fault_model_requirement.joined(
             signal.fault_model_requirement
         )
+        self.answers_forced_logical_class = base.answers_forced_logical_class
         self._metrics_by_model_identity: dict = {}
 
     def run_seed_children(self) -> tuple:
@@ -180,7 +181,7 @@ class SplitGapDecoder(SoftOutputDecoder):
     while a sibling job on a separate decoder unit solves the other
     class. The gap does not exist until both halves report, so this
     decoder attaches no soft output; it stamps its forced weight on the
-    result (gap_half_weight) and the decoder manager's join builds the
+    result (forced_class_weight) and the decoder manager's join builds the
     SoftOutput when the sibling lands. The unit's charged time is the
     forced solve (the base decode re-derives the same winning-class
     answer for the simulator's accuracy artifacts and is not charged,
@@ -199,7 +200,7 @@ class SplitGapDecoder(SoftOutputDecoder):
         weight, elapsed_nanoseconds = metric.forced_class_solve(
             syndrome, self.FORCED_CLASS
         )
-        result.gap_half_weight = weight
+        result.forced_class_weight = weight
         return result, elapsed_nanoseconds
 
 
@@ -256,5 +257,5 @@ class GapHalfDecoder(decoder_module.DecoderBase):
         weight, elapsed_nanoseconds = metric.forced_class_solve(
             syndrome, self.FORCED_CLASS
         )
-        result.gap_half_weight = weight
+        result.forced_class_weight = weight
         return result, elapsed_nanoseconds

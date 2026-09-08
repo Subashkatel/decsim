@@ -212,10 +212,17 @@ class Decoder(Protocol):
     exposes the silent source DecoderBase gives it and fires nothing;
     the machine connects the stage listeners to every row without asking
     what the row is.
+
+    answers_forced_logical_class declares, as data on the row, whether
+    the row can decode a job pinned to one logical class and report that
+    class's minimum weight (decsim/records/decoding.py,
+    DecodeJob.forced_logical_class). A confidence built from forced
+    solves needs it, and the yaml refuses a row that does not have it.
     """
 
     fault_model_requirement: Any
     stage_recorded: Any
+    answers_forced_logical_class: bool
 
     def decode(
         self, job: decoding_records.DecodeJob

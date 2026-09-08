@@ -134,6 +134,8 @@ class StagedDecoder(decoder_module.DecoderBase):
         self.decoder = decoder
         self.timing = timing
         self.fault_model_requirement = decoder.fault_model_requirement
+        forced = decoder.answers_forced_logical_class
+        self.answers_forced_logical_class = forced
         self._running: dict = {}
         self.stage_recorded = trace_source.TraceSource()
 

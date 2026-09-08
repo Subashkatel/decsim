@@ -220,7 +220,7 @@ def _attach_gap(
     Either half missing leaves soft_output None, and the policy then
     escalates (the same behavior a metric-less serial decode has).
     """
-    primary_weight = result.gap_half_weight
+    primary_weight = result.forced_class_weight
     if primary_weight is None or sibling_weight is None:
         return
     decoded_class_weight = min(primary_weight, sibling_weight)

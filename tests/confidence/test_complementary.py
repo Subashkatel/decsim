@@ -186,7 +186,8 @@ def test_the_minimum_weight_is_the_window_decoders_own_matching_weight():
     )
     faults = placed_faults(check, priors, observables)
     row = adapter.PyMatchingDecoder()
-    row_matching = row.compile(faults)
+    row_graphs = row.compile(faults)
+    row_matching = row_graphs.plain
     syndrome = numpy.asarray([1, 0], dtype=numpy.uint8)
     _correction, row_weight = row_matching.decode(syndrome, return_weight=True)
     soft_output = metric.evaluate(syndrome)

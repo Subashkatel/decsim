@@ -367,8 +367,9 @@ class RunShape:
 
     The escalation policy refuses a run it cannot serve from this
     record, once, in Machine.build. is_double_window is the strong
-    window's shape (Toshio et al. 2510.25222 Sec. III C when true, the
-    two-sided context of Sec. III A otherwise); is_bulk_strong is the
+    window's shape (the forward window of Toshio et al. 2510.25222
+    Sec. III C when true, decsim's own two-sided context otherwise);
+    is_bulk_strong is the
     decoder manager's merging of queued strong re-decodes; operations
     are the workload's planning views; commit_round_count and
     buffer_round_count size every window (windows.commit_rounds and

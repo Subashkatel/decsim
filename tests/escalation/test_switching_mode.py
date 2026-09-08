@@ -161,14 +161,30 @@ def test_a_wider_restart_re_read_and_another_kind_are_refused(tmp_path):
 
 
 def _parallel_variant_card(run_both_at_once) -> dict:
-    """The switching card with Sec. III A's Step 1 asked for, or not."""
+    """The switching card with Sec. III A's Step 1 asked for, or not.
+
+    Step 1 builds the strong job at weak readiness, so the room-side
+    write must not lag the Buffer 0 publication path; the card wires the
+    two store hops at one cycle each. On the reference numbers Buffer 1
+    is 0.26 us behind Buffer 0 at 0.04 us and the build refuses.
+    """
     escalation = {
         "kind": "switching",
         "gap_threshold_db": 20.0,
         "run_both_at_once": run_both_at_once,
     }
+    one_fridge_cycle = {
+        "latency_cycles": 1,
+        "clock": "fridge",
+        "bits_per_cycle": None,
+    }
+    links = {
+        "qpu_to_controller": one_fridge_cycle,
+        "controller_to_weak_buffer": one_fridge_cycle,
+        "controller_to_strong_buffer": one_fridge_cycle,
+    }
     strong_decoder = strong_unit("belief_matching")
-    card = {"escalation": escalation}
+    card = {"escalation": escalation, "links": links}
     card.update(strong_decoder)
     return card
 

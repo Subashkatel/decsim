@@ -1,11 +1,13 @@
-"""The link number cards: the two reference fabrics and the optional hops.
+"""The link number cards: the two reference fabrics and the yaml's own.
 
 logical_reference_profile is the default when no links card is given:
 every channel unbounded, so it prices propagation only and no transfer
-ever queues; latencies from Khalid et al. Table II. bandwidth_limited_
-profile is the same fabric with finite calibrated rates so contention
-becomes measurable; capacity_scale sweeps the whole fabric. The with_
-functions add the optional store hops and a setup cost to either.
+ever queues; latencies from Khalid et al. Table II, and the two
+controller-to-buffer hops from Caune et al. Fig. 1a.
+bandwidth_limited_profile is the same fabric with finite calibrated rates
+so contention becomes measurable; capacity_scale sweeps the whole fabric.
+from_yaml puts the yaml's own card on any path; with_transfer_overhead
+adds a setup cost to either fabric.
 
 Every number carries a source string that travels into the traffic
 report; paper locators are arXiv numbers and sections. To
@@ -15,7 +17,7 @@ it as the machine's links setting.
 
 import dataclasses
 from collections.abc import Mapping
-from typing import Callable, Optional
+from typing import Optional
 
 import decsim.config as config
 import decsim.links.settings as settings
@@ -47,6 +49,33 @@ INSTRUCTION_WORD_SOURCE = (
 
 ROUND_PAYLOAD_SOURCE = "SyndromeRoundPacket.fragment_size_sum"
 
+# The controller's write into a syndrome buffer is a hop of the control
+# system, and Caune et al., arXiv:2410.05202, Fig. 1a is the referent that
+# measures such hops one by one, with worst-case values where measured.
+# Syndrome buffer 0 sits with the controller, so its write is stage D,
+# "time required to handle result message and prepare for broadcast"
+# (40 ns). Syndrome buffer 1 sits at room temperature, so its write leaves
+# the chassis: stage F, "inter-node delay time for broadcasting between
+# control system chassis" (240 to 260 ns), taken at the stated worst case.
+# Google, arXiv:2408.13687, gives the same topology without a per-hop
+# number: bits go to a workstation over low-latency Ethernet and are then
+# streamed to the decoder through a shared memory buffer. Toshio et al.,
+# arXiv:2510.25222, Table I price the whole controller-to-decoder path as
+# T_comm^weak = tau_gen and T_comm^strong = 10 tau_gen, which decsim
+# splits into this hop, the buffer-to-decoder hop and the
+# decoder-to-frame hop, so those symbols bound the sum of three cards
+# rather than either card here.
+WEAK_STORE_LATENCY_MICROSECONDS = 0.04
+WEAK_STORE_SOURCE = (
+    "Caune 2410.05202 Fig. 1a D, result message handled and prepared for "
+    "broadcast, 40 ns"
+)
+STRONG_STORE_LATENCY_MICROSECONDS = 0.26
+STRONG_STORE_SOURCE = (
+    "Caune 2410.05202 Fig. 1a F, inter-node broadcast between control "
+    "system chassis, 240 to 260 ns at the stated worst case"
+)
+
 
 def logical_reference_profile() -> settings.FabricSettings:
     """The default card: Khalid's latencies, unbounded bandwidth.
@@ -60,6 +89,18 @@ def logical_reference_profile() -> settings.FabricSettings:
         0.15,
         "Khalid qc effective time",
         "SyndromePayload.size_bits",
+    )
+    controller_to_weak_buffer = _actual_path(
+        "controller_to_weak_buffer",
+        WEAK_STORE_LATENCY_MICROSECONDS,
+        WEAK_STORE_SOURCE,
+        ROUND_PAYLOAD_SOURCE,
+    )
+    controller_to_strong_buffer = _actual_path(
+        "controller_to_strong_buffer",
+        STRONG_STORE_LATENCY_MICROSECONDS,
+        STRONG_STORE_SOURCE,
+        ROUND_PAYLOAD_SOURCE,
     )
     weak_buffer_to_weak_decoder = _actual_path(
         "weak_buffer_to_weak_decoder",
@@ -108,6 +149,7 @@ def logical_reference_profile() -> settings.FabricSettings:
     )
     return settings.FabricSettings(
         qpu_to_controller=qpu_to_controller,
+        controller_to_weak_buffer=controller_to_weak_buffer,
         weak_buffer_to_weak_decoder=weak_buffer_to_weak_decoder,
         weak_decoder_to_strong_decoder=weak_decoder_to_strong_decoder,
         strong_buffer_to_strong_decoder=strong_buffer_to_strong_decoder,
@@ -116,6 +158,7 @@ def logical_reference_profile() -> settings.FabricSettings:
         strong_decoder_to_frame=strong_decoder_to_frame,
         frame_to_controller=frame_to_controller,
         controller_to_qpu=controller_to_qpu,
+        controller_to_strong_buffer=controller_to_strong_buffer,
         profile_name="logical_reference",
     )
 
@@ -174,6 +217,22 @@ def bandwidth_limited_profile(
         round_bits_per_microsecond,
         "one syndrome round per round period",
         "SyndromePayload.size_bits",
+    )
+    controller_to_weak_buffer = provisioning.path(
+        "controller_to_weak_buffer",
+        WEAK_STORE_LATENCY_MICROSECONDS,
+        syndrome_bits_per_round,
+        round_bits_per_microsecond,
+        "one packed round per round period",
+        ROUND_PAYLOAD_SOURCE,
+    )
+    controller_to_strong_buffer = provisioning.path(
+        "controller_to_strong_buffer",
+        STRONG_STORE_LATENCY_MICROSECONDS,
+        syndrome_bits_per_round,
+        round_bits_per_microsecond,
+        "one packed round per round period",
+        ROUND_PAYLOAD_SOURCE,
     )
     weak_buffer_to_weak_decoder = provisioning.path(
         "weak_buffer_to_weak_decoder",
@@ -245,6 +304,7 @@ def bandwidth_limited_profile(
     )
     return settings.FabricSettings(
         qpu_to_controller=qpu_to_controller,
+        controller_to_weak_buffer=controller_to_weak_buffer,
         weak_buffer_to_weak_decoder=weak_buffer_to_weak_decoder,
         weak_decoder_to_strong_decoder=weak_decoder_to_strong_decoder,
         strong_buffer_to_strong_decoder=strong_buffer_to_strong_decoder,
@@ -253,6 +313,7 @@ def bandwidth_limited_profile(
         strong_decoder_to_frame=strong_decoder_to_frame,
         frame_to_controller=frame_to_controller,
         controller_to_qpu=controller_to_qpu,
+        controller_to_strong_buffer=controller_to_strong_buffer,
         profile_name="bandwidth_limited",
     )
 
@@ -265,8 +326,7 @@ def from_yaml(
     A card prices its path in cycles of a named clock domain: latency,
     bits per cycle per lane (null is unbounded), the lane count, and an
     optional per-transfer setup cost. A null card keeps the reference
-    card's numbers for that path. The two controller-to-buffer hops are
-    free until a card wires them. The config prices readout
+    card's numbers for that path. The config prices readout
     classification on its own line, so its qpu_to_controller card is
     link propagation only, and the fabric says so.
     """
@@ -281,27 +341,8 @@ def from_yaml(
                 f"paths are {path_names}"
             )
     profile = logical_reference_profile()
-    cards = dict(section)
-    weak_store_card = cards.pop("controller_to_weak_buffer", None)
-    if weak_store_card is not None:
-        profile = _priced_store_hop(
-            profile,
-            with_controller_to_weak_buffer_path,
-            weak_store_card,
-            clocks,
-            source,
-        )
-    strong_store_card = cards.pop("controller_to_strong_buffer", None)
-    if strong_store_card is not None:
-        profile = _priced_store_hop(
-            profile,
-            with_controller_to_strong_buffer_path,
-            strong_store_card,
-            clocks,
-            source,
-        )
     replacements = {}
-    for path_name, card in cards.items():
+    for path_name, card in section.items():
         if card is None:
             continue
         path_settings = getattr(profile, path_name)
@@ -347,60 +388,6 @@ def with_transfer_overhead(
     )
 
 
-def with_controller_to_strong_buffer_path(
-    profile: settings.FabricSettings,
-    *,
-    latency_microseconds: float,
-    aggregate_bits_per_microsecond: Optional[float],
-    source: str,
-) -> settings.FabricSettings:
-    """The profile with the optional priced controller_to_strong_buffer hop.
-
-    The caller supplies both experiment-card numbers and their provenance;
-    aggregate_bits_per_microsecond of None means unbounded bandwidth (the hop
-    charges propagation latency only); a profile without this hop stores
-    rounds in syndrome buffer 1 for free.
-    """
-    store_path = _store_path(
-        "controller_to_strong_buffer",
-        latency_microseconds,
-        aggregate_bits_per_microsecond,
-        source,
-    )
-    return dataclasses.replace(
-        profile,
-        controller_to_strong_buffer=store_path,
-        profile_name=f"{profile.profile_name}+priced_controller_to_strong_buffer",
-    )
-
-
-def with_controller_to_weak_buffer_path(
-    profile: settings.FabricSettings,
-    *,
-    latency_microseconds: float,
-    aggregate_bits_per_microsecond: Optional[float],
-    source: str,
-) -> settings.FabricSettings:
-    """The profile with the optional priced controller_to_weak_buffer hop.
-
-    The caller supplies both experiment-card numbers and their provenance;
-    aggregate_bits_per_microsecond of None means unbounded bandwidth (the hop
-    charges propagation latency only); a profile without this hop
-    publishes rounds to buffer 0 for free.
-    """
-    store_path = _store_path(
-        "controller_to_weak_buffer",
-        latency_microseconds,
-        aggregate_bits_per_microsecond,
-        source,
-    )
-    return dataclasses.replace(
-        profile,
-        controller_to_weak_buffer=store_path,
-        profile_name=f"{profile.profile_name}+priced_controller_to_weak_buffer",
-    )
-
-
 def _card_microseconds(card: Mapping, clocks: config.ClockSettings) -> tuple:
     """(latency, aggregate rate, setup) of one card in microseconds."""
     megahertz = clocks.megahertz(card["clock"])
@@ -415,24 +402,6 @@ def _card_microseconds(card: Mapping, clocks: config.ClockSettings) -> tuple:
     if setup_cycles is not None:
         setup_microseconds = setup_cycles / megahertz
     return latency_microseconds, bits_per_microsecond, setup_microseconds
-
-
-def _priced_store_hop(
-    profile: settings.FabricSettings,
-    with_store_path: Callable,
-    card: Mapping,
-    clocks: config.ClockSettings,
-    source: str,
-) -> settings.FabricSettings:
-    latency_microseconds, bits_per_microsecond, _setup = _card_microseconds(
-        card, clocks
-    )
-    return with_store_path(
-        profile,
-        latency_microseconds=latency_microseconds,
-        aggregate_bits_per_microsecond=bits_per_microsecond,
-        source=source,
-    )
 
 
 def _carded_path(
@@ -522,22 +491,3 @@ def _default_path(
     channel = _unbounded_channel(name, latency_microseconds, source)
     payload = _aggregate_payload(bits, source)
     return settings.PathSettings(channel, payload, None)
-
-
-def _store_path(
-    name: str,
-    latency_microseconds: float,
-    aggregate_bits_per_microsecond: Optional[float],
-    source: str,
-) -> settings.PathSettings:
-    capacity = None
-    if aggregate_bits_per_microsecond is not None:
-        capacity = settings.CapacitySettings(
-            aggregate_bits_per_microsecond,
-            settings.QuantityBasis.AGGREGATE,
-            None,
-            source,
-        )
-    latency_ticks = config.microseconds_to_ticks(latency_microseconds)
-    channel = settings.ChannelSettings(name, latency_ticks, capacity, source)
-    return settings.PathSettings(channel, None, ROUND_PAYLOAD_SOURCE)

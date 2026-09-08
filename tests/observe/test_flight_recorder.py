@@ -567,18 +567,15 @@ def test_the_ledger_holds_over_random_runs_of_every_mode(seed):
 def test_an_idle_feedback_memory_round_reaches_one_terminal_state():
     """An idle patch's rounds end in the feedback store, and only there.
 
-    With no controller-to-weak-buffer path the fabric publishes for
-    free, and an idle stream's rounds are routed as feedback memory
-    rather than as window input; each must therefore carry its
-    FEEDBACK_MEMORY_DELIVERED terminal and no publication beside it
-    (flight_recorder.py's _ROUND_TERMINALS).
+    An idle stream's rounds are routed as feedback memory rather than as
+    window input, so each must carry its FEEDBACK_MEMORY_DELIVERED
+    terminal and no publication beside it (flight_recorder.py's
+    _ROUND_TERMINALS).
     """
     first = declared_run.memory_operation(1)
     second = declared_run.memory_operation(2, blocked_by=1)
     operations = [first, second]
-    machine = declared_run.weak_only_run(
-        rounds=6, operations=operations, controller_to_weak_buffer=False
-    )
+    machine = declared_run.weak_only_run(rounds=6, operations=operations)
     ledger = machine.observation.flight_recorder.ledger
 
     ledger.check()

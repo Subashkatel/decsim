@@ -982,7 +982,7 @@ def twelve_rounds_with_packing_bound(bound):
     weak_microseconds = declared_run.DECLARED_MICROSECONDS["weak"]
     decoder = decoders.PresetLatencyDecoder(weak_microseconds)
     weak_decoder = decoder_settings.DecoderSettings(decoder=decoder)
-    links = declared_run.declared_profile(controller_to_strong_buffer=False)
+    links = declared_run.declared_profile()
     qpu = declared_run.declared_qpu()
     frame = declared_run.declared_frame()
     return machine_module.MachineSettings(
@@ -1035,3 +1035,69 @@ def test_a_packing_bound_of_six_clears_a_twelve_round_run():
     assert result.terminal_status == "complete"
     assert machine.observation.round_events.packing_drops == 0
     assert machine.engine.now == TWELVE_ROUND_RUN_END_TICK
+
+
+def link_totals(machine, path):
+    """(transfers, payload bits) one link path carried in a whole run."""
+    traffic = machine.observation.traffic.snapshot()
+    transfers = 0
+    payload_bits = 0
+    for record in traffic.transfers:
+        if record.path is not path:
+            continue
+        transfers += 1
+        payload_bits += record.transfer.payload_bits
+    return transfers, payload_bits
+
+
+def reference_run(escalation_kind):
+    """One shot of reference.yaml at d=3, p=0.001, on one escalation kind."""
+    config_path = CONFIGS / "reference.yaml"
+    config = experiment.load_experiment(config_path)
+    settings = config.point_settings(
+        physical_error_probability=0.001, distance=3, round_period_us=1.0
+    )
+    escalation = dataclasses.replace(settings.escalation, kind=escalation_kind)
+    settings = dataclasses.replace(settings, escalation=escalation)
+    machine = machine_module.Machine.build(settings, 0)
+    machine.run()
+    return machine
+
+
+def test_the_controller_writes_every_round_into_buffer_0_over_a_priced_hop():
+    """Fifteen rounds are fifteen transfers carrying the round's own bits.
+
+    Toshio et al. 2510.25222 price the syndrome data of each round
+    between the system controller and the weak decoder as T_comm^weak
+    (Table I), so the write into syndrome buffer 0 is a transfer like
+    every other hop rather than a free store: reference.yaml at d = 3
+    puts its fifteen rounds and their 129 measured bits on
+    controller_to_weak_buffer, the same bits they put on
+    qpu_to_controller.
+    """
+    machine = reference_run("weak_baseline")
+    store_hop = transfer_records.LinkPath.CONTROLLER_TO_WEAK_BUFFER
+    readout_hop = transfer_records.LinkPath.QPU_TO_CONTROLLER
+    room_hop = transfer_records.LinkPath.CONTROLLER_TO_STRONG_BUFFER
+
+    assert link_totals(machine, store_hop) == (15, 129)
+    assert link_totals(machine, readout_hop) == (15, 129)
+    assert link_totals(machine, room_hop) == (0, 0)
+
+
+def test_a_strong_only_run_writes_every_round_into_buffer_1_over_a_priced_hop():
+    """The same law on the room-side store, the only one it fills.
+
+    T_comm^strong is Toshio's symbol for the same transport to the
+    strong decoder, and a strong-primary plan reads its windows from
+    syndrome buffer 1, so every round takes controller_to_strong_buffer
+    once and syndrome buffer 0 sees none of them.
+    """
+    machine = reference_run("strong_only")
+    store_hop = transfer_records.LinkPath.CONTROLLER_TO_WEAK_BUFFER
+    readout_hop = transfer_records.LinkPath.QPU_TO_CONTROLLER
+    room_hop = transfer_records.LinkPath.CONTROLLER_TO_STRONG_BUFFER
+
+    assert link_totals(machine, room_hop) == (15, 129)
+    assert link_totals(machine, readout_hop) == (15, 129)
+    assert link_totals(machine, store_hop) == (0, 0)

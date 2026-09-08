@@ -176,13 +176,11 @@ clocks:                            # clock domain name -> MHz; a link prices its
   fridge: 250.0
   room: 250.0
 
-links:                             # one card per path. For the nine paths of the
-                                   # logical_reference profile, null = that
-                                   # profile's numbers for the path. The two store
-                                   # hops are not in it (link_profiles.py
-                                   # logical_reference_profile), so null there
-                                   # leaves the hop unwired and it costs nothing at
-                                   # all; `decsim show` names every unwired hop.
+links:                             # one card per path; null = the
+                                   # logical_reference profile's numbers for that
+                                   # path (link_profiles.py
+                                   # logical_reference_profile), which prices every
+                                   # one of the eleven hops, so no hop is free.
                                    # Each card, in cycles of its named clock domain:
                                    #   latency_cycles: propagation latency
                                    #   clock: the domain (a clocks: key)
@@ -197,14 +195,10 @@ links:                             # one card per path. For the nine paths of th
                                    # QPU -> controller, one readout
   controller_to_weak_buffer: {latency_cycles: 1, clock: fridge, bits_per_cycle: 1.0, channels: 8}
                                    # controller -> syndrome buffer 0 (the weak
-                                   # buffer), one round. Not in the
-                                   # logical_reference profile: null here is an
-                                   # unwired, free hop, not reference numbers
+                                   # buffer), one round
   controller_to_strong_buffer: null
                                    # controller -> syndrome buffer 1 (the strong
-                                   # buffer), one round. Not in the
-                                   # logical_reference profile either, so this null
-                                   # writes Buffer 1 for free. Parallel switching
+                                   # buffer), one round. Parallel switching
                                    # (escalation.run_both_at_once) builds the strong
                                    # job at weak readiness, so this hop must not lag
                                    # the buffer 0 publication path

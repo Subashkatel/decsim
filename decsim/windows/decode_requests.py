@@ -505,6 +505,18 @@ class DecodeRequester:
             on_decoded = self.gap_join.accept_result
         self.decode_queue.enqueue(job, submission.send_input, on_decoded)
 
+    def check_settled(self) -> None:
+        """At the end of a run no window may still hold an unjoined solve."""
+        if self.gap_join is None:
+            return
+        unresolved = self.gap_join.unresolved_windows()
+        if not unresolved:
+            return
+        raise RuntimeError(
+            f"the run ended with windows holding an unjoined solve: "
+            f"{unresolved}"
+        )
+
     def withdraw(self, window: window_records.Window) -> None:
         """Withdraw one window's early-shipped, unstarted decode.
 

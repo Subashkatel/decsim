@@ -627,6 +627,7 @@ class Machine:
                 f"the run ended with pending strong escalations: {pending}"
             )
         self.decoder_manager.check_decode_work_settled()
+        self.window_manager.check_settled()
         self.assembler.check_settled()
         self.round_writer.check_settled()
         self.transmitter.check_settled()

@@ -19,6 +19,7 @@ def build_decoder_manager(
     escalation_policy,
     pool: decoder_build.DecoderPool,
 ) -> decoder_manager_module.DecoderManager:
+    """The decoder side's manager: the pool's router, scheduler and units."""
     dispatch_ticks = settings.decoder_manager.dispatch_ticks()
     return decoder_manager_module.DecoderManager(
         engine,

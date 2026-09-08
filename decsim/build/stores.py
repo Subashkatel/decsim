@@ -65,6 +65,7 @@ def build_pauli_frame(
     settings: Optional[pauli_frame_module.PauliFrameConfig],
     engine: engine_module.Engine,
 ) -> Optional[pauli_frame_module.PauliFrame]:
+    """The Pauli frame the run commits into; None when it has no frame."""
     if settings is None:
         return None
     return settings.resolve(engine)

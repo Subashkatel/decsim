@@ -7,8 +7,8 @@ system before it wires a single port.
 """
 
 import copy
-from typing import Any
 import dataclasses
+from typing import Any
 
 import stim
 
@@ -23,9 +23,9 @@ import decsim.qpu.settings as qpu_settings
 import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
 import decsim.settings as machine_settings
+import decsim.windows.schemes.sliding as sliding_scheme
 import decsim.windows.settings as window_settings
 import decsim.windows.window_interactions as window_interactions
-import decsim.windows.schemes.sliding as sliding_scheme
 
 
 @dataclasses.dataclass(frozen=True)
@@ -52,6 +52,7 @@ class Plan:
 
     @property
     def round_ticks(self) -> int:
+        """The ticks one syndrome round takes, as the run plan sized it."""
         return self.run_plan.round_ticks
 
 
@@ -83,7 +84,9 @@ def build_plan(
     )
     scheme = _scheme(settings.windows, settings.escalation)
     boundary_policy = _boundary_policy(settings.windows, settings.escalation)
-    absorbs_weak_windows = escalation_build.absorbs_weak_windows(settings.escalation)
+    absorbs_weak_windows = escalation_build.absorbs_weak_windows(
+        settings.escalation
+    )
     reread_regions = settings.escalation.restart_reread_buffer_regions
     window_interaction = settings.windows.window_interaction
     if window_interaction is None:

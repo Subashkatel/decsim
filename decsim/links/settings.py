@@ -171,14 +171,16 @@ class PathSettings:
 class FabricSettings:
     """A fabric card: one path setting per hop plus a profile name.
 
-    The nine original paths are required and the two controller-to-buffer
-    hops are optional. A card whose QPU-to-controller latency leaves out
-    the controller's readout processing says so, because the timing card
+    Every hop of the reaction path is priced, so a card names all eleven
+    and a caller that leaves one out is refused where it constructs the
+    card. A card whose QPU-to-controller latency leaves out the
+    controller's readout processing says so, because the timing card
     prices that processing on its own line. The root builds the run's
     fabric from the card: LinkFabric(settings, engine, listener).
     """
 
     qpu_to_controller: PathSettings
+    controller_to_weak_buffer: PathSettings
     weak_buffer_to_weak_decoder: PathSettings
     weak_decoder_to_strong_decoder: PathSettings
     strong_buffer_to_strong_decoder: PathSettings
@@ -187,14 +189,13 @@ class FabricSettings:
     strong_decoder_to_frame: PathSettings
     frame_to_controller: PathSettings
     controller_to_qpu: PathSettings
+    controller_to_strong_buffer: PathSettings
     profile_name: str
     is_controller_processing_outside_qpu_to_controller: bool = False
-    controller_to_weak_buffer: Optional[PathSettings] = None
-    controller_to_strong_buffer: Optional[PathSettings] = None
 
     def __post_init__(self) -> None:
         channel_by_name = {}
-        for path in self.wired_paths():
+        for path in transfer_records.LinkPath:
             path_settings = self.path_settings(path)
             channel = path_settings.channel
             known = channel_by_name.setdefault(channel.name, channel)
@@ -204,52 +205,9 @@ class FabricSettings:
                     f"settings by two paths"
                 )
 
-    def wired_paths(self) -> tuple:
-        """The paths this card wires, in vocabulary order.
-
-        A card that leaves out a required path is refused.
-        """
-        wired_paths = []
-        for path in transfer_records.LinkPath:
-            path_settings = getattr(self, path.value)
-            if path_settings is not None:
-                wired_paths.append(path)
-                continue
-            if path.value in _REQUIRED_PATH_VALUES:
-                raise ValueError(f"{path.value} is a required link path")
-        return tuple(wired_paths)
-
-    def unwired_paths(self) -> tuple:
-        """The optional paths this card leaves out, in vocabulary order.
-
-        An unwired hop is not priced at all: nothing is charged for it,
-        which is a different card from a hop priced at zero latency.
-        """
-        unwired_paths = []
-        for path in transfer_records.LinkPath:
-            path_settings = getattr(self, path.value)
-            if path_settings is None:
-                unwired_paths.append(path)
-        return tuple(unwired_paths)
-
     def path_settings(self, path: transfer_records.LinkPath) -> PathSettings:
-        """The setting of one wired path."""
+        """The setting of one path."""
         return getattr(self, path.value)
-
-
-_REQUIRED_PATH_VALUES = frozenset(
-    (
-        "qpu_to_controller",
-        "weak_buffer_to_weak_decoder",
-        "weak_decoder_to_strong_decoder",
-        "strong_buffer_to_strong_decoder",
-        "weak_decoder_to_frame",
-        "decoder_to_decoder",
-        "strong_decoder_to_frame",
-        "frame_to_controller",
-        "controller_to_qpu",
-    )
-)
 
 
 def _as_whole_number(value, name: str) -> int:

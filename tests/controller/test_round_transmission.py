@@ -1,9 +1,9 @@
 """The transmitter: a stored round leaves at the write and lands on its route.
 
-A window-input round on a priced controller_to_weak_buffer hop is
-published at delivery, where the store is stamped; on a free hop the
-publication is the storage. A feedback-memory round tells the windows at
-delivery and frees its slot. The sender never waits for a landing:
+A window-input round rides controller_to_weak_buffer and is published at
+delivery, where the store is stamped. A feedback-memory round tells the
+windows at delivery and frees its slot. The sender never waits for a
+landing:
 two memory rounds one QEC cycle apart on a 5 us weak_buffer_to_weak_decoder
 land one cycle apart (Yang et al. 2605.04892 and Google 2408.13687 stream
 every round; gem5 src/dev/dma_device.cc transmitList; ns-3
@@ -11,7 +11,7 @@ point-to-point-net-device.cc TransmitComplete). Rounds sent at one tick
 leave in completion order, each at its own write, with no arbitration
 between the routes: the memory round of the reviewed bounded
 weak_buffer_to_weak_decoder shape serializes ahead of the decode input
-the windows send at its publication. The link law itself is the
+the windows send one store hop later. The link law itself is the
 channel's (tests/links/test_channel.py).
 """
 
@@ -107,11 +107,6 @@ def priced_cwb_profile():
     return dataclasses.replace(reference, controller_to_weak_buffer=path)
 
 
-def free_cwb_profile():
-    reference = link_profiles.logical_reference_profile()
-    return dataclasses.replace(reference, controller_to_weak_buffer=None)
-
-
 def five_microsecond_wbd_profile(bits_per_microsecond=None):
     """The reference card with a 5 us weak_buffer_to_weak_decoder.
 
@@ -162,36 +157,16 @@ def test_a_priced_hop_publishes_at_delivery_and_stamps_the_store():
         engine, profile
     )
     first = packed(1)
-    stored_tick = transmitter.publication_tick_at_storage(first.route)
-    store.accept_packed_round(first.packet, publication_tick=stored_tick)
+    store.accept_packed_round(first.packet, publication_tick=None)
 
     transmitter.send(first)
     engine.run()
 
-    assert stored_tick is None
     assert store.publication_tick((1, 1)) == CWB_TICKS
     assert windows.published == [(CWB_TICKS, 1)]
     kinds_and_ticks = [(event.kind, event.tick) for event in recorder.events]
     assert kinds_and_ticks == [("CWB_SENT", 0), ("PUBLISHED", CWB_TICKS)]
     assert transmitter.in_flight == 0
-
-
-def test_a_free_hop_publishes_as_the_round_is_stored():
-    engine = engine_module.Engine()
-    profile = free_cwb_profile()
-    transmitter, store, windows, recorder, _ledger = transmitter_with(
-        engine, profile
-    )
-    first = packed(1)
-    stored_tick = transmitter.publication_tick_at_storage(first.route)
-    store.accept_packed_round(first.packet, publication_tick=stored_tick)
-
-    transmitter.send(first)
-    engine.run()
-
-    assert stored_tick == 0
-    assert windows.published == [(0, 1)]
-    assert recorder.events == []
 
 
 def test_a_memory_round_tells_the_windows_at_delivery_and_frees_its_slot():
@@ -201,13 +176,11 @@ def test_a_memory_round_tells_the_windows_at_delivery_and_frees_its_slot():
         engine, profile
     )
     memory_round = packed(1, route=MEMORY_ROUTE)
-    stored_tick = transmitter.publication_tick_at_storage(memory_round.route)
-    store.accept_packed_round(memory_round.packet, publication_tick=stored_tick)
+    store.accept_packed_round(memory_round.packet, publication_tick=None)
 
     transmitter.send(memory_round)
     engine.run()
 
-    assert stored_tick is None
     assert windows.memory_rounds == [(WBD_TICKS, 7)]
     assert store.occupancy == 0
     kinds_and_ticks = [(event.kind, event.tick) for event in recorder.events]

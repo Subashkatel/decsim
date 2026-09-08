@@ -54,22 +54,21 @@ def default_path(name, bits):
     return link_settings.PathSettings(channel, payload, None)
 
 
+def every_path_free():
+    """One free path per hop, keyed by the hop's name.
+
+    A card names every hop, so a test that cares about one path wires
+    that one and leaves the rest on the shared free channel.
+    """
+    names = []
+    for path in transfer_records.LinkPath:
+        names.append(path.value)
+    return dict.fromkeys(names, FREE_PATH)
+
+
 def fabric_with(engine, listener=None, **paths):
     """A fabric whose paths are free unless the test wires them itself."""
-    wiring = dict.fromkeys(
-        (
-            "qpu_to_controller",
-            "weak_buffer_to_weak_decoder",
-            "weak_decoder_to_strong_decoder",
-            "strong_buffer_to_strong_decoder",
-            "weak_decoder_to_frame",
-            "decoder_to_decoder",
-            "strong_decoder_to_frame",
-            "frame_to_controller",
-            "controller_to_qpu",
-        ),
-        FREE_PATH,
-    )
+    wiring = every_path_free()
     wiring.update(paths)
     settings = link_settings.FabricSettings(profile_name="test", **wiring)
     fabric = fabric_module.LinkFabric(settings, engine)
@@ -414,16 +413,6 @@ def test_a_fabric_with_no_listener_runs():
     )
     engine.run()
     assert len(delivered) == 1
-
-
-def test_an_optional_path_is_wired_only_when_the_card_names_it():
-    engine = decsim.engine.Engine()
-    store = unbounded_path("store", 3)
-    with_store = fabric_with(engine, controller_to_strong_buffer=store)
-    without_store = fabric_with(engine)
-    assert with_store.is_wired(PATH.CONTROLLER_TO_STRONG_BUFFER)
-    assert not without_store.is_wired(PATH.CONTROLLER_TO_STRONG_BUFFER)
-    assert without_store.is_wired(PATH.QPU_TO_CONTROLLER)
 
 
 def test_the_expected_delay_prices_the_paths_payload_rule():

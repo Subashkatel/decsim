@@ -118,8 +118,8 @@ class FabricSnapshot:
 class TrafficLedger:
     """The fabric's observer: every transfer counted per path and per channel.
 
-    A channel's alias is "channel-<n>", numbered in the order the wired
-    paths first meet it; the reports name channels by alias.
+    A channel's alias is "channel-<n>", numbered in the order the paths
+    first meet it; the reports name channels by alias.
     """
 
     def __init__(self, fabric_settings: link_settings.FabricSettings):
@@ -130,7 +130,7 @@ class TrafficLedger:
         ] = {}
         self._counters_by_channel: dict[str, TrafficCounters] = {}
         self._records: list[transfer_records.TransferRecord] = []
-        for path in fabric_settings.wired_paths():
+        for path in transfer_records.LinkPath:
             path_settings = fabric_settings.path_settings(path)
             channel_name = path_settings.channel.name
             self._counters_by_path[path] = TrafficCounters()

@@ -40,11 +40,6 @@ class RecordingTransmitter:
         self.engine = engine
         self.sent = []
 
-    def publication_tick_at_storage(self, route):
-        if route.kind is round_records.SyndromePacketRouteKind.WINDOW_INPUT:
-            return self.engine.now
-        return None
-
     def send(self, round):
         self.sent.append(round.packet.round_index)
 
@@ -85,7 +80,6 @@ def writer_with(
         held_rounds=held,
         transmitter=transmitter,
     )
-    writer.round_event.connect(recorder.record)
     return writer, weak_store, transmitter, recorder
 
 
@@ -113,20 +107,6 @@ def test_a_round_with_no_room_is_held_and_written_in_order_when_a_slot_frees():
         if event.kind == "STALLED"
     ]
     assert stalled == [2]
-
-
-def test_a_published_round_is_recorded_at_its_storage_when_the_hop_is_free():
-    engine = engine_module.Engine()
-    writer, weak_store, _transmitter, recorder = writer_with(engine)
-    first = packed(1)
-
-    writer.admit(first)
-
-    assert weak_store.publication_tick((1, 1)) == 0
-    published = [
-        event for event in recorder.events if event.kind == "PUBLISHED"
-    ]
-    assert [(event.round_index, event.tick) for event in published] == [(1, 0)]
 
 
 def test_a_strong_primary_window_round_takes_one_hop_into_the_strong_store():

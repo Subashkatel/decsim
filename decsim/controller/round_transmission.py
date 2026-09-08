@@ -2,8 +2,7 @@
 
 A window-input round rides controller_to_weak_buffer and is published to
 the windows at delivery, where its publication tick is stamped on the
-store; on a card that leaves the path unpriced the publication is the
-storage itself. A feedback-memory round rides weak_buffer_to_weak_decoder
+store. A feedback-memory round rides weak_buffer_to_weak_decoder
 and, at delivery, tells the windows and frees its Buffer 0 slot. The
 sender never waits for a round to land before sending the next: the DAQs
 of Yang et al. (2605.04892) and Google's control electronics
@@ -17,7 +16,6 @@ of them; the packing stage's bound reads it (RoundsInFlight).
 """
 
 import functools
-from typing import Optional
 
 import decsim.observe.trace_source as trace_source
 import decsim.records.rounds as round_records
@@ -38,23 +36,6 @@ class RoundTransmitter:
         self.windows = windows
         self.in_flight = 0
         self.round_event = trace_source.TraceSource()
-
-    def publication_tick_at_storage(
-        self, route: round_records.SyndromePacketRoute
-    ) -> Optional[int]:
-        """The tick a round stored now is published, if known at storage.
-
-        A window-input round on a card without controller_to_weak_buffer
-        is published as it is stored; with the path priced it is
-        published at delivery; a feedback-memory round is never
-        published, its terminal is FEEDBACK_MEMORY_DELIVERED.
-        """
-        window_input = round_records.SyndromePacketRouteKind.WINDOW_INPUT
-        if route.kind is not window_input:
-            return None
-        if self._publishes_at_delivery():
-            return None
-        return self.engine.now
 
     def send(self, packed: round_records.PackedRound) -> None:
         """Send the round on its route at this tick.
@@ -85,16 +66,7 @@ class RoundTransmitter:
                 f"route"
             )
 
-    def _publishes_at_delivery(self) -> bool:
-        return self.link.is_wired(
-            transfer_records.LinkPath.CONTROLLER_TO_WEAK_BUFFER
-        )
-
     def _send_window_input(self, packed: round_records.PackedRound) -> None:
-        if not self._publishes_at_delivery():
-            self.windows.accept_window_input(packed.packet)
-            self._leave_after_publication()
-            return
         self._fire("CWB_SENT", packed)
         publish = functools.partial(self._publish, packed)
         self._send(

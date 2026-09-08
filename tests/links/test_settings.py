@@ -12,6 +12,7 @@ import math
 import pytest
 
 import decsim.links.settings as link_settings
+import decsim.records.transfers as transfer_records
 
 AGGREGATE = link_settings.QuantityBasis.AGGREGATE
 PER_LANE = link_settings.QuantityBasis.PER_LANE
@@ -39,21 +40,20 @@ def actual_path(channel_settings, setup_ticks=0):
     )
 
 
+def every_path_free():
+    """One free path per hop, keyed by the hop's name.
+
+    A card names every hop, so a test that cares about one path wires
+    that one and leaves the rest on the shared free channel.
+    """
+    names = []
+    for path in transfer_records.LinkPath:
+        names.append(path.value)
+    return dict.fromkeys(names, FREE_PATH)
+
+
 def card(**paths):
-    wiring = dict.fromkeys(
-        (
-            "qpu_to_controller",
-            "weak_buffer_to_weak_decoder",
-            "weak_decoder_to_strong_decoder",
-            "strong_buffer_to_strong_decoder",
-            "weak_decoder_to_frame",
-            "decoder_to_decoder",
-            "strong_decoder_to_frame",
-            "frame_to_controller",
-            "controller_to_qpu",
-        ),
-        FREE_PATH,
-    )
+    wiring = every_path_free()
     wiring.update(paths)
     return link_settings.FabricSettings(profile_name="test", **wiring)
 
@@ -173,30 +173,17 @@ def test_a_default_payload_with_another_lane_count_is_refused():
         link_settings.PathSettings(bounded, three_lane_payload, None)
 
 
-def test_a_card_without_a_required_path_is_refused():
-    with pytest.raises(
-        ValueError, match="frame_to_controller is a required link path"
-    ):
-        card(frame_to_controller=None)
+def test_a_card_that_leaves_out_a_path_is_refused_naming_it():
+    """Every hop is priced, so a card names all eleven.
 
-
-def test_a_card_lists_its_wired_paths_in_vocabulary_order():
-    store_channel = channel("store")
-    store_path = actual_path(store_channel)
-    settings = card(controller_to_strong_buffer=store_path)
-    wired = settings.wired_paths()
-    assert [path.value for path in wired] == [
-        "qpu_to_controller",
-        "weak_buffer_to_weak_decoder",
-        "weak_decoder_to_strong_decoder",
-        "strong_buffer_to_strong_decoder",
-        "weak_decoder_to_frame",
-        "decoder_to_decoder",
-        "strong_decoder_to_frame",
-        "frame_to_controller",
-        "controller_to_qpu",
-        "controller_to_strong_buffer",
-    ]
+    The refusal is the constructor's own: a path has no default, so a
+    caller that omits one is stopped where it builds the card and the
+    message names the path (STYLE.md rule 4, one check at the boundary).
+    """
+    wiring = every_path_free()
+    del wiring["frame_to_controller"]
+    with pytest.raises(TypeError, match="frame_to_controller"):
+        link_settings.FabricSettings(profile_name="test", **wiring)
 
 
 def test_one_channel_name_with_two_settings_is_refused():

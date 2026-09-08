@@ -42,18 +42,10 @@ class LinkFabric:
             transfer_records.LinkPath, _PathBinding
         ] = {}
         self._send_count = 0
-        for path in fabric_settings.wired_paths():
+        for path in transfer_records.LinkPath:
             path_settings = fabric_settings.path_settings(path)
             channel = self._channel_for(path_settings.channel, engine)
             self._binding_by_path[path] = _PathBinding(path_settings, channel)
-
-    def is_wired(self, path: transfer_records.LinkPath) -> bool:
-        """Whether the card prices this path.
-
-        The fabric sends on wired paths only; a sender treats an unwired
-        path as a free hop and continues at once.
-        """
-        return path in self._binding_by_path
 
     def expected_delay_ticks(
         self,

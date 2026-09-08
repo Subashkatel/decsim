@@ -1,12 +1,12 @@
 """The priced controller_to_strong_buffer crossing into a round store.
 
 Every packed round is written out of the fridge exactly once over the
-crossing (priced when the card wires it, free otherwise) and stored on
-the room side in parallel with its Buffer 0 publication, so the strong
-tier's context lives at room temperature. The writer answers has_room
-counting the writes still in flight, gem5's queue counting its reserved
-entries (src/mem/cache/queue.hh isFull), and stores each round at its
-landing; the store's holds and lifetime are RoundStore's.
+crossing and stored on the room side in parallel with its Buffer 0
+publication, so the strong tier's context lives at room temperature. The
+writer answers has_room counting the writes still in flight, gem5's
+queue counting its reserved entries (src/mem/cache/queue.hh isFull), and
+stores each round at its landing; the store's holds and lifetime are
+RoundStore's.
 """
 
 from typing import Callable, Optional
@@ -57,12 +57,6 @@ class StrongRoundWriter:
     ) -> None:
         """Carry the round over the crossing and store it at landing."""
         assert self.has_room(), "a round was written into a full strong store"
-        is_priced = self.link.is_wired(
-            transfer_records.LinkPath.CONTROLLER_TO_STRONG_BUFFER
-        )
-        if not is_priced:
-            self._land(packet, packet_bits)
-            return
         self.writes_in_flight += 1
 
         def landed(_transfer) -> None:

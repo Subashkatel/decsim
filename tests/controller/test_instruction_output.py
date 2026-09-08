@@ -187,4 +187,4 @@ def test_the_feedback_chain_is_the_frame_commit_plus_each_stage_once():
     assert stamps.decode_release[2] == expected_release
     assert stamps.op_start[2] == expected_start
     assert arrival.tick == expected_start
-    assert arrival.command.operation is sequencer.operations[2]
+    assert arrival.command.operation is sequencer.schedule.operations[2]

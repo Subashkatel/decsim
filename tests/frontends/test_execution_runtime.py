@@ -127,7 +127,7 @@ def name_of_holder(runtime):
     """The name the ledger prints for a holding operation."""
 
     def name_of(holder_id):
-        holder = runtime.operations[holder_id]
+        holder = runtime.schedule.operations[holder_id]
         return holder.name
 
     return name_of
@@ -149,12 +149,12 @@ def test_a_successor_waits_for_every_dependency_edge_it_declares():
     program = program_records.ExecutionProgram(operations)
 
     runtime.load_program(program)
-    assert runtime.dependencies_remaining == {1: 0, 2: 2}
+    assert runtime.schedule.dependencies_remaining == {1: 0, 2: 2}
     assert issuer.issued == [1]
 
     engine.now = 4
     runtime.body_done(root)
-    assert runtime.dependencies_remaining[2] == 0
+    assert runtime.schedule.dependencies_remaining[2] == 0
     assert issuer.issued == [1, 2]
     assert stamps.body_done[1] == 4
 
@@ -208,7 +208,9 @@ def test_a_magic_state_operation_claims_its_qubits_then_waits_for_one():
     program = program_records.ExecutionProgram(operations)
 
     runtime.load_program(program)
-    assert runtime.resources.holder_by_resource == {("qubit", "data"): 1}
+    assert runtime.lifecycle.resources.holder_by_resource == {
+        ("qubit", "data"): 1
+    }
     assert issuer.issued == []
     assert engine.calls[-1] == ("factory_request", 1)
 
@@ -252,27 +254,29 @@ def test_a_claim_publishes_every_resource_of_the_operation_or_none():
     runtime, _engine, _issuer, _factory, _stamps = runtime_over(
         operations, claims=claims
     )
-    runtime.operations.update({2: contender, 3: holder})
-    runtime.resources.holder_by_resource[("qubit", "busy")] = 3
+    runtime.schedule.operations.update({2: contender, 3: holder})
+    runtime.lifecycle.resources.holder_by_resource[("qubit", "busy")] = 3
 
     name_of = name_of_holder(runtime)
     with pytest.raises(RuntimeError, match="share qubit resource"):
-        runtime.resources.claim(contender, name_of)
+        runtime.lifecycle.resources.claim(contender, name_of)
 
-    assert runtime.resources.holder_by_resource == {("qubit", "busy"): 3}
+    assert runtime.lifecycle.resources.holder_by_resource == {
+        ("qubit", "busy"): 3
+    }
 
 
 def test_an_operation_that_lists_one_qubit_twice_is_refused():
     operation = program_records.Operation(1, "twice", ("q", "q"))
     operations = (operation,)
     runtime, _engine, _issuer, _factory, _stamps = runtime_over(operations)
-    runtime.operations[1] = operation
+    runtime.schedule.operations[1] = operation
 
     name_of = name_of_holder(runtime)
     with pytest.raises(RuntimeError, match="lists a qubit more than once"):
-        runtime.resources.claim(operation, name_of)
+        runtime.lifecycle.resources.claim(operation, name_of)
 
-    assert runtime.resources.holder_by_resource == {}
+    assert runtime.lifecycle.resources.holder_by_resource == {}
 
 
 def test_a_body_frees_its_resources_before_its_successor_is_issued():
@@ -297,7 +301,9 @@ def test_a_body_frees_its_resources_before_its_successor_is_issued():
     engine.now = 11
     runtime.body_done(root)
 
-    assert runtime.resources.holder_by_resource == {("qubit", "shared"): 2}
+    assert runtime.lifecycle.resources.holder_by_resource == {
+        ("qubit", "shared"): 2
+    }
     assert engine.calls == [
         ("log", "ExecutionRuntime", "root body done"),
         ("before", 1),
@@ -317,7 +323,7 @@ def test_the_ready_retry_offers_the_waiting_operations_in_identity_order():
     runtime, engine, issuer, _factory, _stamps = runtime_over(operations)
     program = program_records.ExecutionProgram(operations)
     runtime.load_program(program)
-    runtime.released_operation_ids.update({9, 24})
+    runtime.lifecycle.released_operation_ids.update({9, 24})
     engine.calls.clear()
 
     runtime.retry_ready_operations()

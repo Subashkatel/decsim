@@ -94,12 +94,71 @@ class ResourceLedger:
         return None
 
 
-class ExecutionRuntime:
-    """Own the program DAG, readiness, and the operations' lifecycle.
+class OperationSchedule:
+    """The program's dependency graph and every operation's readiness.
 
-    The ledger owns resources. The three id sets (started, finished,
-    released) are the operations' lifecycle state; the ticks are fired,
-    not kept.
+    operations indexes the program; dependencies_remaining counts each
+    operation's unfinished predecessors and successors is the reverse
+    edge; schedule_released, requested and state_ready are the three
+    gates an operation passes before it may be issued. gem5 keeps the
+    same split between the workload's graph and the object that runs it
+    (configs/deprecated/example/se.py builds the process list, the
+    system runs it).
+    """
+
+    def __init__(self) -> None:
+        self.program = None
+        self.operations: dict = {}
+        self.dependencies_remaining: dict = {}
+        self.successors: dict = {}
+        self.gates = _StartGates()
+
+    def index(self, program: program_records.ExecutionProgram) -> None:
+        """Record the program's operations and both edges of its graph."""
+        self.program = program
+        for operation in program.operations:
+            self.operations[operation.id] = operation
+            predecessor_count = len(operation.predecessors)
+            self.dependencies_remaining[operation.id] = predecessor_count
+            self.successors[operation.id] = []
+        for operation in program.operations:
+            for predecessor_id in operation.predecessors:
+                self.successors[predecessor_id].append(operation.id)
+
+    def is_admissible(self, operation: program_records.Operation) -> bool:
+        """Predecessors done, schedule released, and not yet requested."""
+        if self.dependencies_remaining[operation.id] != 0:
+            return False
+        if operation.id not in self.gates.schedule_released:
+            return False
+        return operation.id not in self.gates.requested
+
+    def name_of(self, operation_id) -> str:
+        """The operation's name, for a log line or a refusal."""
+        return self.operations[operation_id].name
+
+
+@dataclasses.dataclass
+class _StartGates:
+    """The three gates an operation passes before it may be issued.
+
+    schedule_released is its scheduled start round having arrived,
+    requested is its resources claimed and its magic state asked for,
+    state_ready is that state in hand.
+    """
+
+    schedule_released: set = dataclasses.field(default_factory=set)
+    requested: set = dataclasses.field(default_factory=set)
+    state_ready: set = dataclasses.field(default_factory=set)
+
+
+class ExecutionRuntime:
+    """Drive the operations' lifecycle: start each one, finish it, release.
+
+    OperationSchedule owns the program's dependency graph and readiness;
+    this class owns what happens to an operation over its life, so the
+    two responsibilities note 14 section 7.4 found in one class are two
+    classes. The ticks are fired, not kept.
     """
 
     def __init__(
@@ -113,39 +172,22 @@ class ExecutionRuntime:
         self.engine = engine
         self.issuer = issuer
         self.factory = factory
-        self.resources = ResourceLedger(resource_claims_by_operation_id)
-        self.program = None
-        self.operations = {}
-        self.dependencies_remaining = {}
-        self.successors = {}
-        self.schedule_released = set()
-        self.requested = set()
-        self.state_ready = set()
-        self.started_operation_ids = set()
-        self.finished_operation_ids = set()
-        self.released_operation_ids = set()
+        self.schedule = OperationSchedule()
+        resources = ResourceLedger(resource_claims_by_operation_id)
+        self.lifecycle = _OperationLifecycle(resources)
         self.trace = _TraceSources()
 
     @property
     def workload_complete(self) -> bool:
         """Every operation of the loaded program has finished its body."""
-        if self.program is None:
+        if self.schedule.program is None:
             return False
-        indexed = self.operations.keys()
-        return indexed == self.finished_operation_ids
+        indexed = self.schedule.operations.keys()
+        return indexed == self.lifecycle.finished_operation_ids
 
     def load_program(self, program: program_records.ExecutionProgram) -> None:
         """Index the operations, build the dependency graph, start the roots."""
-        self.program = program
-        for operation in program.operations:
-            self.operations[operation.id] = operation
-            self.dependencies_remaining[operation.id] = len(
-                operation.predecessors
-            )
-            self.successors[operation.id] = []
-        for operation in program.operations:
-            for predecessor_id in operation.predecessors:
-                self.successors[predecessor_id].append(operation.id)
+        self.schedule.index(program)
         for operation in program.operations:
             self._release_at_scheduled_start(operation)
         for operation in program.operations:
@@ -159,27 +201,27 @@ class ExecutionRuntime:
 
     def body_done(self, operation: program_records.Operation) -> None:
         """A body finished: record it, free resources, release successors."""
-        assert operation.id in self.operations, (
+        assert operation.id in self.schedule.operations, (
             f"operation {operation.id!r} is not in the program"
         )
-        assert operation.id in self.started_operation_ids, (
+        assert operation.id in self.lifecycle.started_operation_ids, (
             f"{operation.name} finished before it started"
         )
-        assert operation.id not in self.finished_operation_ids, (
+        assert operation.id not in self.lifecycle.finished_operation_ids, (
             f"{operation.name} finished twice"
         )
-        self.finished_operation_ids.add(operation.id)
+        self.lifecycle.finished_operation_ids.add(operation.id)
         self.trace.body_finished.fire(operation.id, self.engine.now)
         self.engine.log("ExecutionRuntime", f"{operation.name} body done")
-        self.resources.release(operation)
+        self.lifecycle.resources.release(operation)
         self.issuer.before_successor_release(operation)
-        for successor_id in self.successors[operation.id]:
-            self.dependencies_remaining[successor_id] -= 1
-            if self.dependencies_remaining[successor_id] == 0:
-                successor = self.operations[successor_id]
+        for successor_id in self.schedule.successors[operation.id]:
+            self.schedule.dependencies_remaining[successor_id] -= 1
+            if self.schedule.dependencies_remaining[successor_id] == 0:
+                successor = self.schedule.operations[successor_id]
                 self._attempt_start(successor)
         if self.workload_complete:
-            operation_count = len(self.operations)
+            operation_count = len(self.schedule.operations)
             self.engine.log(
                 "ExecutionRuntime",
                 f"QPU finished. All {operation_count} operations are "
@@ -192,20 +234,20 @@ class ExecutionRuntime:
 
     def waiting_blocked_successor(self, operation_id) -> bool:
         """True while a feedback-blocked successor awaits its decode release."""
-        for successor_id in self.successors[operation_id]:
-            successor = self.operations[successor_id]
+        for successor_id in self.schedule.successors[operation_id]:
+            successor = self.schedule.operations[successor_id]
             if successor.blocked_by is None:
                 continue
-            if successor.id in self.started_operation_ids:
+            if successor.id in self.lifecycle.started_operation_ids:
                 continue
-            if successor.id not in self.released_operation_ids:
+            if successor.id not in self.lifecycle.released_operation_ids:
                 return True
         return False
 
     def retry_ready_operations(self) -> None:
         """Retry every state-ready operation after a cadence change."""
-        for operation_id in sorted(self.state_ready):
-            operation = self.operations[operation_id]
+        for operation_id in sorted(self.schedule.gates.state_ready):
+            operation = self.schedule.operations[operation_id]
             self._maybe_begin(operation)
 
     def on_decision(self, decision: program_records.Decision) -> None:
@@ -215,7 +257,7 @@ class ExecutionRuntime:
         blocked operation tries to start.
         """
         operation_id = decision.target_operation_id
-        operation = self.operations[operation_id]
+        operation = self.schedule.operations[operation_id]
         if not decision.releases_operation:
             self.trace.result_returned.fire(operation_id, self.engine.now)
             self.engine.log(
@@ -226,10 +268,10 @@ class ExecutionRuntime:
         assert operation.blocked_by is not None, (
             f"a release targets {operation.name}, which is not feedback-blocked"
         )
-        assert operation_id not in self.released_operation_ids, (
+        assert operation_id not in self.lifecycle.released_operation_ids, (
             f"{operation.name} was released twice"
         )
-        self.released_operation_ids.add(operation_id)
+        self.lifecycle.released_operation_ids.add(operation_id)
         self.trace.decode_released.fire(operation_id, self.engine.now)
         self.engine.log(
             "ExecutionRuntime",
@@ -243,7 +285,7 @@ class ExecutionRuntime:
         round_ticks = self.issuer.round_ticks_for(operation)
         release_tick = operation.scheduled_start_round * round_ticks
         if release_tick == 0:
-            self.schedule_released.add(operation.id)
+            self.schedule.gates.schedule_released.add(operation.id)
             return
         release = functools.partial(self._release_scheduled, operation)
         self.engine.schedule(
@@ -251,15 +293,15 @@ class ExecutionRuntime:
         )
 
     def _release_scheduled(self, operation: program_records.Operation) -> None:
-        self.schedule_released.add(operation.id)
+        self.schedule.gates.schedule_released.add(operation.id)
         self._attempt_start(operation)
 
     def _attempt_start(self, operation: program_records.Operation) -> None:
         """Claim resources and ask for the magic state once the DAG allows."""
-        if not self._is_admissible(operation):
+        if not self.schedule.is_admissible(operation):
             return
-        self.resources.claim(operation, self._operation_name)
-        self.requested.add(operation.id)
+        self.lifecycle.resources.claim(operation, self.schedule.name_of)
+        self.schedule.gates.requested.add(operation.id)
         if not operation.needs_magic_state:
             self._state_became_ready(operation)
             return
@@ -270,29 +312,21 @@ class ExecutionRuntime:
         on_ready = functools.partial(self._state_became_ready, operation)
         self.factory.request(operation.id, on_ready)
 
-    def _is_admissible(self, operation: program_records.Operation) -> bool:
-        """Predecessors done, schedule released, and not yet requested."""
-        if self.dependencies_remaining[operation.id] != 0:
-            return False
-        if operation.id not in self.schedule_released:
-            return False
-        return operation.id not in self.requested
-
-    def _operation_name(self, operation_id) -> str:
-        return self.operations[operation_id].name
-
     def _state_became_ready(self, operation: program_records.Operation) -> None:
-        self.state_ready.add(operation.id)
+        self.schedule.gates.state_ready.add(operation.id)
         self._maybe_begin(operation)
 
     def _maybe_begin(self, operation: program_records.Operation) -> None:
         """Issue the operation when every start gate is open."""
-        if operation.id in self.started_operation_ids:
+        if operation.id in self.lifecycle.started_operation_ids:
             return
-        if operation.id not in self.state_ready:
+        if operation.id not in self.schedule.gates.state_ready:
             return
         is_blocked = operation.blocked_by is not None
-        if is_blocked and operation.id not in self.released_operation_ids:
+        if (
+            is_blocked
+            and operation.id not in self.lifecycle.released_operation_ids
+        ):
             return
         if not self.issuer.can_start(operation):
             return
@@ -300,10 +334,25 @@ class ExecutionRuntime:
         # issuing can retry ready operations, and a reentrant _maybe_begin
         # must not issue this one twice. The stamps listener hears the
         # issue now and the QPU's actual start boundary when it comes.
-        self.started_operation_ids.add(operation.id)
+        self.lifecycle.started_operation_ids.add(operation.id)
         self.trace.operation_issued.fire(operation.id, self.engine.now)
         on_started = functools.partial(self.note_start_boundary, operation)
         self.issuer.issue_operation(operation, on_started)
+
+
+@dataclasses.dataclass
+class _OperationLifecycle:
+    """Where each operation is in its life, and what it holds.
+
+    An operation is started when it is issued, finished when its body
+    ends, and released when a feedback decision unblocks it; the ledger
+    holds the resources it claimed between the first and the second.
+    """
+
+    resources: ResourceLedger
+    started_operation_ids: set = dataclasses.field(default_factory=set)
+    finished_operation_ids: set = dataclasses.field(default_factory=set)
+    released_operation_ids: set = dataclasses.field(default_factory=set)
 
 
 def _resource_keys(claims) -> list[tuple]:

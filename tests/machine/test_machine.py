@@ -1030,7 +1030,7 @@ def test_the_execution_and_the_decoding_views_agree_on_the_workload():
     planned_round_count = planner.round_count_of(1)
     arrived_round_count = tracker.rounds_arrived(1)
 
-    assert set(sequencer.operations) == {1}
+    assert set(sequencer.schedule.operations) == {1}
     assert set(tracker.operation_by_id) == {1}
     assert planned_round_count == 6
     assert arrived_round_count == 6

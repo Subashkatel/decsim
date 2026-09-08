@@ -533,7 +533,24 @@ class WindowingScheme(Protocol):
     Table rows: sliding, parallel, sandwich, naive_online. The static
     window graph of an operation, when a window has its data, and the
     buffer floor the scheme needs.
+
+    Three facts about the layout are declared rather than read off the
+    row's class, so a scheme written outside decsim answers the same
+    questions the shipped rows answer (gem5's port API, arXiv 2007.03152
+    lines 489-491).
+
+    has_trailing_tail_context: the last window this scheme lays out
+        reads rounds past its own commit, which is what the switching
+        recovery re-reads when a strong result revises a window.
+    commits_in_one_serial_chain: the windows commit one after another in
+        stride order, which the forward strong window absorbs.
+    supports_dynamic_streams: an operation whose round count is not known
+        at build can be windowed by this scheme.
     """
+
+    has_trailing_tail_context: bool
+    commits_in_one_serial_chain: bool
+    supports_dynamic_streams: bool
 
     def plan_operation(
         self,

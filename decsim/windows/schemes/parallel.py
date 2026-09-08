@@ -15,6 +15,13 @@ class ParallelWindowScheme:
     """Skoric block A/B windows with dependency-aware seam residuals."""
 
     scheme_label = "parallel block A/B window (Skoric 2209.08552 sec. I.C)"
+    # The last block, an absorbed tail or a terminal B, commits to the
+    # operation's last round and reads nothing past it.
+    has_trailing_tail_context = False
+    # The A blocks are decoded at the same time and the B blocks
+    # reconcile them, so the commits are a depth-two graph, not a chain.
+    commits_in_one_serial_chain = False
+    supports_dynamic_streams = False
 
     def plan_operation(
         self,

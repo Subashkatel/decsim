@@ -20,6 +20,13 @@ class TanSandwichScheme:
     scheme_label = (
         "Tan zero-seam sandwich (type-1 cores / type-2 seam reconciliation)"
     )
+    # The last core commits to the operation's last round, so its read
+    # window ends where its commit ends.
+    has_trailing_tail_context = False
+    # The cores are independent and a seam waits on the core on each
+    # side of it, so the commits are a depth-two graph, not a chain.
+    commits_in_one_serial_chain = False
+    supports_dynamic_streams = False
 
     def plan_operation(
         self,

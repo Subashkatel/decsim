@@ -355,7 +355,7 @@ def test_the_unit_memory_counter_peaks_at_the_memorys_high_water_mark(traced):
             values.append(row["args"]["rounds"])
 
     assert values
-    assert max(values) == unit.memory.peak_occupied_rounds
+    assert max(values) == unit.memory.statistics.peak_occupied_rounds
     assert values[-1] == unit.memory.occupied_rounds
 
 

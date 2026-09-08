@@ -172,8 +172,7 @@ class DecoderMemory:
         self.unit = unit
         self.capacity_rounds = capacity_rounds
         self._inputs: dict = {}  # input key -> ResidentInput
-        self.peak_occupied_rounds = 0
-        self.admissions = 0
+        self.statistics = _MemoryStatistics()
         self.trace = _TraceSources()
 
     @property
@@ -216,8 +215,10 @@ class DecoderMemory:
                 capacity_rounds=self.capacity_rounds,
             )
         self._inputs[key] = ResidentInput(decoder_input, [job])
-        self.peak_occupied_rounds = max(self.peak_occupied_rounds, needed)
-        self.admissions += 1
+        self.statistics.peak_occupied_rounds = max(
+            self.statistics.peak_occupied_rounds, needed
+        )
+        self.statistics.admissions += 1
         self.trace.deposited.fire(job, decoder_input)
         return decoder_input
 
@@ -247,8 +248,8 @@ class DecoderMemory:
             self.unit,
             self.capacity_rounds,
             self.occupied_rounds,
-            self.peak_occupied_rounds,
-            self.admissions,
+            self.statistics.peak_occupied_rounds,
+            self.statistics.admissions,
         )
 
 
@@ -367,3 +368,17 @@ class _TraceSources:
 
     deposited: trace_source.TraceSource = trace_source.new_source()
     taken: trace_source.TraceSource = trace_source.new_source()
+
+
+@dataclasses.dataclass
+class _MemoryStatistics:
+    """What one unit's memory has held, over the run.
+
+    peak_occupied_rounds is the high-water mark a study sizes the SRAM
+    by; admissions counts the inputs that landed. gem5 keeps a
+    component's counters in one Group member
+    (tmp/resources/gem5/src/base/stats/group.hh:60-92).
+    """
+
+    peak_occupied_rounds: int = 0
+    admissions: int = 0

@@ -69,11 +69,7 @@ class DecodeService:
         self.pool = pool
         self.staging = staging
         self.strong_requests = strong_requests
-        self.on_completed = on_completed
-        self.dispatch = dispatch
-        # the manager's own work per dispatch, charged before the input
-        # is asked for (decoder_manager.dispatch_cycles)
-        self.dispatch_ticks = dispatch_ticks
+        self.manager = _ManagerSide(on_completed, dispatch, dispatch_ticks)
         self.trace = _TraceSources()
 
     # ------------------------------------------ what the dispatcher asks
@@ -153,12 +149,12 @@ class DecodeService:
         decode's arrival and its dispatch;
         decoder_manager.dispatch_cycles prices that, zero by default.
         """
-        if self.dispatch_ticks == 0:
+        if self.manager.dispatch_ticks == 0:
             self._ask_for_input(job, unit, claim_compute)
             return
         ask = functools.partial(self._ask_for_input, job, unit, claim_compute)
         label = f"dispatch_cost({job.label})"
-        self.engine.schedule(self.dispatch_ticks, ask, label=label)
+        self.engine.schedule(self.manager.dispatch_ticks, ask, label=label)
 
     def _ask_for_input(
         self,
@@ -198,7 +194,9 @@ class DecodeService:
             # the decoder reads this unit's memory now
             job.payloads = job.decoder_input.fragments()
         decoder.start(
-            job, self.engine, lambda result: self.on_completed(job, result)
+            job,
+            self.engine,
+            lambda result: self.manager.on_completed(job, result),
         )
         if pipeline is None:
             return
@@ -472,7 +470,7 @@ class DecodeService:
         if unit.holder is job:
             unit.release_compute()
             self._offer_compute(unit)
-            self.dispatch()
+            self.manager.dispatch()
 
     def _offer_compute(self, unit: decoder_unit_module.DecoderUnit) -> None:
         """Free compute goes to the oldest startable resident.
@@ -585,14 +583,14 @@ class DecodeService:
         if job.cancelled or job.completed:
             unit.release_compute()
             self._offer_compute(unit)
-            self.dispatch()
+            self.manager.dispatch()
             return
         if unit.flight_count() >= depth:
             unit.stall(job, depth)
             return
         unit.release_compute()
         self._offer_compute(unit)
-        self.dispatch()
+        self.manager.dispatch()
 
     def _end_flight(
         self, job: decoding_records.DecodeJob, offer_now: bool
@@ -618,7 +616,7 @@ class DecodeService:
         unit.release_compute()
         if offer_now:
             self._offer_compute(unit)
-            self.dispatch()
+            self.manager.dispatch()
 
 
 def _is_outside_pipelined_model(job: decoding_records.DecodeJob) -> bool:
@@ -694,3 +692,19 @@ class _TraceSources:
     input_landed: trace_source.TraceSource = trace_source.new_source()
     job_started: trace_source.TraceSource = trace_source.new_source()
     job_finished: trace_source.TraceSource = trace_source.new_source()
+
+
+@dataclasses.dataclass(frozen=True)
+class _ManagerSide:
+    """The service's two calls back to the manager, and the manager's cost.
+
+    on_completed(job, result) at every decode's end; dispatch() wherever
+    compute frees inside an engine event, so the non-reentrant dispatch
+    loop runs from the same points it always did; dispatch_ticks is the
+    manager's own work per dispatch, charged before the input is asked
+    for (decoder_manager.dispatch_cycles).
+    """
+
+    on_completed: Callable
+    dispatch: Callable
+    dispatch_ticks: int

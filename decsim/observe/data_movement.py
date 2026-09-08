@@ -34,47 +34,41 @@ class DataMovement:
     """Copies, references and moves, in total and per named path."""
 
     def __init__(self) -> None:
-        self.copies = _Counts()
-        self.moves = _Counts()
+        self.copies = _PathCounts()
+        self.moves = _PathCounts()
         self.references = _Counts()
-        self.holds_registered = 0
-        self.holds_transferred = 0
-        self.holds_released = 0
-        self.copies_by_path: dict[str, _Counts] = {}
-        self.moves_by_path: dict[str, _Counts] = {}
+        self.holds = _HoldTallies()
         self.rounds_seen: set = set()
 
     def copy_made(self, key, bits, source_name: str, target_name: str) -> None:
         """One structure duplicated the bits into another."""
         path = f"{source_name} -> {target_name}"
         rounds = _rounds(key)
-        self._add(self.copies, self.copies_by_path, path, bits, rounds)
+        self._add(self.copies, path, bits, rounds)
 
     def transfer_delivered(self, record) -> None:
         """One move landed on its link."""
         bits = record.transfer.payload_bits
         rounds = _attributed_rounds(record.attribution)
-        self._add(
-            self.moves, self.moves_by_path, record.path.value, bits, rounds
-        )
+        self._add(self.moves, record.path.value, bits, rounds)
 
     def hold_registered(self, holder, round_keys) -> None:
         """One token referenced the rounds where they already sit."""
         del holder
         self.references.events += 1
         self.references.rounds += len(round_keys)
-        self.holds_registered += 1
+        self.holds.registered += 1
 
     def hold_transferred(self, old_holder, new_holder) -> None:
         """A live reference moved to a new token, copying nothing."""
         del old_holder
         del new_holder
-        self.holds_transferred += 1
+        self.holds.transferred += 1
 
     def hold_released(self, holder) -> None:
         """One reference ended."""
         del holder
-        self.holds_released += 1
+        self.holds.released += 1
 
     def round_emitted(self, readout) -> None:
         """One more round exists, so a per-round rate has a denominator."""
@@ -90,36 +84,32 @@ class DataMovement:
         """Copies over rounds; zero when the run emitted none."""
         if not self.rounds_seen:
             return 0.0
-        return self.copies.events / len(self.rounds_seen)
+        return self.copies.total.events / len(self.rounds_seen)
 
     def json_value(self) -> dict:
         """The counters as the RunResult carries them."""
-        holds = (
-            self.holds_registered + self.holds_transferred + self.holds_released
-        )
+        holds = self.holds.total()
         return {
             "rounds": self.rounds,
-            "copies": self.copies.events,
-            "copied_rounds": self.copies.rounds,
-            "copy_bits": self.copies.bits,
+            "copies": self.copies.total.events,
+            "copied_rounds": self.copies.total.rounds,
+            "copy_bits": self.copies.total.bits,
             "references": self.references.events,
             "referenced_rounds": self.references.rounds,
             "hold_events": holds,
-            "moves": self.moves.events,
-            "moved_rounds": self.moves.rounds,
-            "move_bits": self.moves.bits,
-            "copies_by_path": _as_rows(self.copies_by_path),
-            "moves_by_path": _as_rows(self.moves_by_path),
+            "moves": self.moves.total.events,
+            "moved_rounds": self.moves.total.rounds,
+            "move_bits": self.moves.total.bits,
+            "copies_by_path": _as_rows(self.copies.by_path),
+            "moves_by_path": _as_rows(self.moves.by_path),
         }
 
-    def _add(
-        self, total: _Counts, by_path: dict, path: str, bits, rounds: int
-    ) -> None:
-        row = by_path.get(path)
+    def _add(self, kind: "_PathCounts", path: str, bits, rounds: int) -> None:
+        row = kind.by_path.get(path)
         if row is None:
             row = _Counts()
-            by_path[path] = row
-        for counts in (total, row):
+            kind.by_path[path] = row
+        for counts in (kind.total, row):
             counts.events += 1
             counts.rounds += rounds
             if bits is not None:
@@ -152,3 +142,24 @@ def _as_rows(by_path: dict) -> dict:
             "bits": counts.bits,
         }
     return rows
+
+
+@dataclasses.dataclass
+class _PathCounts:
+    """One kind's tally: the run's total, and one row per named path."""
+
+    total: _Counts = dataclasses.field(default_factory=_Counts)
+    by_path: dict = dataclasses.field(default_factory=dict)
+
+
+@dataclasses.dataclass
+class _HoldTallies:
+    """How often a reference was registered, handed on and ended."""
+
+    registered: int = 0
+    transferred: int = 0
+    released: int = 0
+
+    def total(self) -> int:
+        """Every hold event of the run."""
+        return self.registered + self.transferred + self.released

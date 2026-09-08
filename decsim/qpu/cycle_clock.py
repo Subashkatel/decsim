@@ -61,32 +61,27 @@ class QPUDevice:
         self.engine = engine
         self.syndrome_source = syndrome_source
         self.cycle_ticks = cycle_ticks
-        self.readout_receiver = readout_receiver
-        self.completion_receiver = completion_receiver
-        self.idle_receiver = idle_receiver
+        self.receivers = _Receivers(
+            readout_receiver, completion_receiver, idle_receiver
+        )
         self.trace = _TraceSources()
-        self._running_by_operation_id: dict = {}
-        self._idle_by_patch: dict = {}
-        self._commands_waiting: list[program_records.RunOperationBody] = []
-        self._scheduled_boundaries: set = set()
-        self._last_emitted_boundary = 0
-        self._is_finished = False
+        self._live = _LiveOperations()
 
     def connect_readout_receiver(self, receiver: ports.ReadoutReceiver) -> None:
         """Wire the component that accepts every readout."""
-        self.readout_receiver = receiver
+        self.receivers.readout = receiver
 
     def connect_completion_receiver(
         self, receiver: Callable[[program_records.Operation], None]
     ) -> None:
         """Wire the callback for a completed operation body."""
-        self.completion_receiver = receiver
+        self.receivers.completion = receiver
 
     def connect_idle_receiver(
         self, receiver: Callable[[Any, Any, int], None]
     ) -> None:
         """Wire the callback for an idle patch's round."""
-        self.idle_receiver = receiver
+        self.receivers.idle = receiver
 
     def issue(self, command: program_records.RunOperationBody) -> None:
         """Queue one operation body; it starts on the next cycle boundary."""
@@ -102,13 +97,13 @@ class QPUDevice:
             )
         event = QPUCommandEvent("ARRIVED", self.engine.now, command)
         self.trace.command_event.fire(event)
-        self._commands_waiting.append(command)
+        self._live.commands_waiting.append(command)
         boundary = self.next_boundary()
         self._schedule_boundary(boundary)
 
     def finish(self) -> None:
         """The program is complete: idle patches stop after this cycle."""
-        self._is_finished = True
+        self._live.is_finished = True
 
     def next_boundary(self) -> int:
         """The cycle boundary at or after now, where issued operations start."""
@@ -147,12 +142,12 @@ class QPUDevice:
         route = round_records.SyndromePacketRoute.feedback_memory_round(
             operation_id
         )
-        self.readout_receiver.accept_qpu_readout(payload, route)
+        self.receivers.readout.accept_qpu_readout(payload, route)
 
     def _schedule_boundary(self, boundary: int) -> None:
-        if boundary in self._scheduled_boundaries:
+        if boundary in self._live.scheduled_boundaries:
             return
-        self._scheduled_boundaries.add(boundary)
+        self._live.scheduled_boundaries.add(boundary)
         delay = boundary - self.engine.now
         cycle_number = boundary // self.cycle_ticks
         self.engine.schedule(
@@ -162,32 +157,32 @@ class QPUDevice:
     def _cross_boundary(self) -> None:
         """One cycle boundary: the ended cycle's rounds, then the starts."""
         now = self.engine.now
-        self._scheduled_boundaries.discard(now)
-        if now > self._last_emitted_boundary:
-            self._last_emitted_boundary = now
+        self._live.scheduled_boundaries.discard(now)
+        if now > self._live.last_emitted_boundary:
+            self._live.last_emitted_boundary = now
             self._emit_idle_rounds()
             self._emit_operation_rounds()
         self._start_waiting_commands()
-        if self._is_finished:
-            self._idle_by_patch.clear()
-        has_running = bool(self._running_by_operation_id)
-        has_idle = bool(self._idle_by_patch)
-        has_waiting = bool(self._commands_waiting)
+        if self._live.is_finished:
+            self._live.idle_by_patch.clear()
+        has_running = bool(self._live.running_by_operation_id)
+        has_idle = bool(self._live.idle_by_patch)
+        has_waiting = bool(self._live.commands_waiting)
         is_live = has_running or has_idle
         if is_live or has_waiting:
             next_boundary = now + self.cycle_ticks
             self._schedule_boundary(next_boundary)
 
     def _emit_idle_rounds(self) -> None:
-        idle_patches = self._idle_by_patch.items()
+        idle_patches = self._live.idle_by_patch.items()
         for patch, idle in list(idle_patches):
             idle.emitted_round_count += 1
-            self.idle_receiver(
+            self.receivers.idle(
                 idle.operation_id, patch, idle.emitted_round_count
             )
 
     def _emit_operation_rounds(self) -> None:
-        running_operations = self._running_by_operation_id.items()
+        running_operations = self._live.running_by_operation_id.items()
         for operation_id, running in list(running_operations):
             running.emitted_round_count += 1
             command = running.command
@@ -203,12 +198,12 @@ class QPUDevice:
                 )
                 self._deliver(payloads, operation)
             if running.emitted_round_count == command.round_count:
-                del self._running_by_operation_id[operation_id]
+                del self._live.running_by_operation_id[operation_id]
                 self._finish_command(command)
 
     def _start_waiting_commands(self) -> None:
-        waiting = self._commands_waiting
-        self._commands_waiting = []
+        waiting = self._live.commands_waiting
+        self._live.commands_waiting = []
         for command in waiting:
             self._start_command(command)
 
@@ -217,7 +212,7 @@ class QPUDevice:
         event = QPUCommandEvent("STARTED", self.engine.now, command)
         self.trace.command_event.fire(event)
         for patch in patches_of(operation):
-            self._idle_by_patch.pop(patch, None)
+            self._live.idle_by_patch.pop(patch, None)
         if command.round_count == 0:
             self._run_instant_command(command)
             return
@@ -226,7 +221,7 @@ class QPUDevice:
                 operation, command.round_count, command.source_round_count
             )
         running = _RunningOperation(command, 0)
-        self._running_by_operation_id[operation.id] = running
+        self._live.running_by_operation_id[operation.id] = running
 
     def _run_instant_command(
         self, command: program_records.RunOperationBody
@@ -246,8 +241,8 @@ class QPUDevice:
         operation = command.operation
         for patch in patches_of(operation):
             idle = _IdlePatch(operation.id, 0)
-            self._idle_by_patch.setdefault(patch, idle)
-        self.completion_receiver(operation)
+            self._live.idle_by_patch.setdefault(patch, idle)
+        self.receivers.completion(operation)
 
     def _deliver(
         self,
@@ -280,7 +275,7 @@ class QPUDevice:
                 payload, fragment_count=fragment_count, fragment_index=index
             )
             self.trace.round_emitted.fire(readout)
-            self.readout_receiver.accept_qpu_readout(
+            self.receivers.readout.accept_qpu_readout(
                 readout, round_records.WINDOW_INPUT_ROUTE
             )
 
@@ -322,3 +317,39 @@ class _TraceSources:
 
     command_event: trace_source.TraceSource = trace_source.new_source()
     round_emitted: trace_source.TraceSource = trace_source.new_source()
+
+
+@dataclasses.dataclass
+class _LiveOperations:
+    """What the clock is running this cycle, and what it has emitted.
+
+    running_by_operation_id and idle_by_patch are what a cycle emits a
+    round for; commands_waiting are the bodies whose start the clock has
+    not reached; scheduled_boundaries and last_emitted_boundary keep a
+    cycle boundary from being scheduled or emitted twice; is_finished
+    closes the clock once the workload is done. gem5 groups a
+    component's many members the same way
+    (tmp/resources/gem5/src/base/stats/group.hh:60-92).
+    """
+
+    running_by_operation_id: dict = dataclasses.field(default_factory=dict)
+    idle_by_patch: dict = dataclasses.field(default_factory=dict)
+    commands_waiting: list = dataclasses.field(default_factory=list)
+    scheduled_boundaries: set = dataclasses.field(default_factory=set)
+    last_emitted_boundary: int = 0
+    is_finished: bool = False
+
+
+@dataclasses.dataclass
+class _Receivers:
+    """The three components a cycle hands its output to.
+
+    readout takes every syndrome round, completion hears an operation's
+    body end, idle hears a round of a patch that is running nothing.
+    Each may arrive after the clock is built, through connect_*, because
+    the controller and the runtime are built after the QPU.
+    """
+
+    readout: Optional[ports.ReadoutReceiver] = None
+    completion: Optional[Callable] = None
+    idle: Optional[Callable] = None

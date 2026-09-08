@@ -179,4 +179,6 @@ def _tier_settings(
     """A tier's section, or no decoder when the yaml leaves it out."""
     if tier not in sections:
         return decoder_settings.DecoderSettings()
-    return decoder_settings.DecoderSettings.from_yaml(sections[tier], clocks)
+    return decoder_settings.DecoderSettings.from_yaml(
+        sections[tier], clocks, tier
+    )

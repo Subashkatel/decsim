@@ -138,11 +138,7 @@ def _blocks_unit_by_pool(
     """
     tier = policy.primary_tier.value
     tier_settings = getattr(settings, f"{tier}_decoder")
-    blocks_unit = tables.row(
-        decoder_settings.DECODER_RESULT_BLOCKING,
-        f"{tier}_decoder.result_blocks_unit",
-        tier_settings.result_blocks_unit,
-    )
+    blocks_unit = tier_settings.result_blocks_unit
     blocks_by_pool = {}
     for pool in unit_pools:
         blocks_by_pool[pool] = blocks_unit

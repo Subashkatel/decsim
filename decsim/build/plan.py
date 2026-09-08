@@ -70,7 +70,10 @@ def build_plan(
     settings: machine_settings.MachineSettings, escalation_policy
 ) -> Plan:
     """The code, the workload's operations and the window plan."""
-    code, layout = settings.qpu.build_code(settings.windows)
+    code, layout = settings.qpu.build_code(
+        commit_rounds_override=settings.windows.commit_rounds,
+        buffer_rounds_override=settings.windows.buffer_rounds,
+    )
     operations, decode_operations, dynamic_streams, rounds_policy = _operations(
         settings.workload, code
     )

@@ -15,7 +15,6 @@ import decsim.qpu.layouts as layouts
 import decsim.qpu.magic_state_factories as magic_state_factories
 import decsim.qpu.stim_device as stim_device
 import decsim.qpu.syndrome_devices as syndrome_devices
-import decsim.windows.settings as window_settings
 
 # qpu.kind names one of these rows: the device that emits the readout.
 SYNDROME_SOURCES = {
@@ -70,10 +69,18 @@ class QpuSettings:
         """The `qpu` section: the source kind; the sweep sets the rest."""
         return cls(kind=section["kind"])
 
-    def build_code(self, windows: window_settings.WindowSettings) -> tuple:
+    def build_code(
+        self,
+        *,
+        commit_rounds_override: Optional[int],
+        buffer_rounds_override: Optional[int],
+    ) -> tuple:
         """The code card and its layout: the built ones, or one surface code.
 
-        At most one of distance, code and layout is given.
+        At most one of distance, code and layout is given. The two
+        overrides are the window sizes the yaml declares, which size the
+        default surface code's commit and buffer regions; None leaves
+        each at the code distance.
         """
         given = []
         if self.distance is not None:
@@ -100,8 +107,8 @@ class QpuSettings:
                 distance = 3
             code = code_geometry.SurfaceCodeModel(
                 distance=distance,
-                commit_rounds_override=windows.commit_rounds,
-                buffer_rounds_override=windows.buffer_rounds,
+                commit_rounds_override=commit_rounds_override,
+                buffer_rounds_override=buffer_rounds_override,
             )
         return code, layouts.UniformLayout(code)
 

@@ -14,7 +14,6 @@ import dataclasses
 import types
 from typing import Callable, Optional
 
-import decsim.qpu.cycle_clock as cycle_clock
 import decsim.records.log_sources as log_sources
 import decsim.records.program as program_records
 
@@ -61,7 +60,7 @@ class OperationIssuer:
     ) -> None:
         """Prepare one QPU command; on_started hears its start boundary."""
         self.streams.begin(operation)
-        patches = cycle_clock.patches_of(operation)
+        patches = program_records.patches_of(operation)
         for patch in patches:
             self.idle_rounds.end_idle_period(operation, patch)
         idle_round_count = self.idle_rounds.claim(operation)

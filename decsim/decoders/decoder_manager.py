@@ -116,7 +116,7 @@ class DecoderManager:
         job.submitted = True
         job.send_input = send_input
         job.on_decoded = on_decoded
-        is_strong = job.strong_decode_for is not None
+        is_strong = job.kind is decoding_records.DecodeJobKind.STRONG_REDECODE
         if is_strong and not self.strong_requests.is_live_request(job):
             # cancelled across the link; its credits may admit another
             self.service.release_input(job)
@@ -132,7 +132,6 @@ class DecoderManager:
         label: str = "external",
         code: Optional[str] = None,
         spatial_nodes: Optional[int] = None,
-        hint: Optional[str] = None,
     ) -> None:
         """Queue a self-contained decode: a factory correction, an idle decode.
 
@@ -149,7 +148,7 @@ class DecoderManager:
             label=label,
             code=code,
             spatial_nodes=spatial_nodes,
-            hint=hint,
+            kind=decoding_records.DecodeJobKind.SELF_CONTAINED,
         )
         self.queue.add_quietly(job)
         self.dispatcher.run()
@@ -314,18 +313,17 @@ class DecoderManager:
     # ------------------------------------------------- the decode's end
 
     def decode_completed(self, job: decoding_records.DecodeJob, result) -> None:
-        """One decode finished: free the unit and settle the outcome."""
+        """One decode finished: free the unit and settle the outcome.
+
+        Which settlement is the job's kind, looked up, not asked for
+        field by field.
+        """
         if job.cancelled:
             self.service.discard_cancelled(job)
             self.dispatcher.run()
             return
-        if job.strong_decode_for is not None:
-            self._strong_decode_done(job, result)
-            return
-        if job.on_done is not None:
-            self._external_decode_done(job)
-            return
-        self._weak_decode_done(job, result)
+        settle = SETTLE_BY_JOB_KIND[job.kind]
+        settle(self, job, result)
 
     def _strong_decode_done(
         self, job: decoding_records.DecodeJob, result
@@ -340,7 +338,10 @@ class DecoderManager:
         self.outcomes.conclude_strong(job, result, deliveries)
         self.dispatcher.run()
 
-    def _external_decode_done(self, job: decoding_records.DecodeJob) -> None:
+    def _self_contained_decode_done(
+        self, job: decoding_records.DecodeJob, result
+    ) -> None:
+        del result  # a self-contained decode reports no correction
         job.completed = True
         self.service.free(job)
         # An external job that carried syndrome payloads through the
@@ -358,7 +359,7 @@ class DecoderManager:
         job.on_done()
         self.dispatcher.run()
 
-    def _weak_decode_done(
+    def _window_decode_done(
         self, job: decoding_records.DecodeJob, result
     ) -> None:
         """The decode ended; its result goes to the destination that asked."""
@@ -439,6 +440,17 @@ class DecoderManager:
         return found
 
 
+# how each job kind is settled when its decode ends; the manager reads
+# the job's declared kind instead of asking after four fields in turn
+_JOB_KINDS = decoding_records.DecodeJobKind
+SETTLE_BY_JOB_KIND = {
+    _JOB_KINDS.WINDOW: DecoderManager._window_decode_done,
+    _JOB_KINDS.STRONG_REDECODE: DecoderManager._strong_decode_done,
+    _JOB_KINDS.STRONG_BATCH: DecoderManager._strong_decode_done,
+    _JOB_KINDS.SELF_CONTAINED: DecoderManager._self_contained_decode_done,
+}
+
+
 def _refuse_spent_job(job: decoding_records.DecodeJob) -> None:
     """A DecodeJob is submitted once; a live or terminal one is refused."""
     spent = _spent_state(job)
@@ -473,9 +485,7 @@ def _is_live_weak_window_job(
     key = (job.operation_id, job.window_id)
     if key != window_key:
         return False
-    if job.strong_decode_for is not None:
-        return False
-    if job.on_done is not None:
+    if job.kind is not decoding_records.DecodeJobKind.WINDOW:
         return False
     return not job.cancelled
 

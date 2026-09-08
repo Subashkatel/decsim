@@ -28,6 +28,15 @@ import decsim.decoders.strong_requests as strong_requests_module
 import decsim.observe.trace_source as trace_source
 import decsim.records.decoding as decoding_records
 
+# the job kinds a pipelined unit serves; every other kind holds its unit
+# for the whole decode until it gets its own design pass
+PIPELINED_JOB_KINDS = frozenset(
+    {
+        decoding_records.DecodeJobKind.WINDOW,
+        decoding_records.DecodeJobKind.SELF_CONTAINED,
+    }
+)
+
 
 class DecodeService:
     """Stages, starts, prices and frees every decode on its unit.
@@ -486,10 +495,10 @@ class DecodeService:
 
         A unit pipelines when its occupancy is shorter than its latency
         (gem5's FuncUnit: an issue latency below the op latency,
-        fu_pool.hh). The pipelined model serves plain window and external
-        decodes only; the strong tier, gap siblings, and merged batches
-        keep occupancy == latency until they get their own design pass,
-        and a pipelined route there refuses loudly rather than silently
+        fu_pool.hh). The pipelined model serves the job kinds in
+        PIPELINED_JOB_KINDS; the strong tier and merged batches keep
+        occupancy == latency until they get their own design pass, and a
+        pipelined route there refuses loudly rather than silently
         serializing.
         """
         occupancy = decoder.occupancy(job)
@@ -500,9 +509,9 @@ class DecodeService:
             return None
         if _is_outside_pipelined_model(job):
             raise RuntimeError(
-                f"decode job {job.label!r}: a pipelined decoder serves plain "
-                "window or external decodes only; the strong tier, gap "
-                "siblings, and merged batches are not pipelined yet"
+                f"decode job {job.label!r}: a pipelined decoder serves "
+                "window and self-contained decodes only; the strong tier "
+                "and merged batches are not pipelined yet"
             )
         depth = decoder.pipeline_depth(job)
         return occupancy, latency_ticks, depth
@@ -579,7 +588,7 @@ class DecodeService:
 
 
 def _is_outside_pipelined_model(job: decoding_records.DecodeJob) -> bool:
-    if job.strong_decode_for is not None:
+    if job.kind not in PIPELINED_JOB_KINDS:
         return True
     return len(job.service_original_request_keys) > 1
 

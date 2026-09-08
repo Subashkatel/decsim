@@ -96,6 +96,27 @@ class DecoderServiceKey:
     run_sequence: int
 
 
+class DecodeJobKind(Enum):
+    """What one decode job is, declared once and read by everyone.
+
+    The manager, the queue, the router and the request ledger all need
+    to know what a job is before they read it, and a declared kind is
+    how a heterogeneous runtime says so: StarPU declares one codelet per
+    architecture and Legion one processor kind per task, and the
+    scheduler reads the declaration rather than inferring it. WINDOW is
+    one window's decode on the tier that owns it, forced-class solves
+    included; STRONG_REDECODE is one escalated window on the strong
+    tier; STRONG_BATCH is the merged timing-only decode that serves
+    several of those under bulk_strong; SELF_CONTAINED is a decode with
+    no window and no syndrome, a factory correction or an idle region.
+    """
+
+    WINDOW = "window"
+    STRONG_REDECODE = "strong_redecode"
+    STRONG_BATCH = "strong_batch"
+    SELF_CONTAINED = "self_contained"
+
+
 class RequestProcessingOutcome(Enum):
     """How one decode request ended, for the switching study's records."""
 
@@ -179,7 +200,7 @@ class DecodeJob:
     )
     code: Optional[str] = None  # code name, drives CodeRouter routing
     attempt: int = 0  # 0 = first (weak) decode, 1 = strong redo
-    hint: Optional[str] = None  # routing override, e.g. "strong"
+    kind: DecodeJobKind = DecodeJobKind.WINDOW  # what this job is
     # the logical class this decode is pinned to, or None to decode
     # normally; a forced solve reports that class's minimum weight
     # (Gidney et al. 2312.04522, the augmented virtual detector)

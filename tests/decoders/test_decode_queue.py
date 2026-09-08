@@ -9,8 +9,11 @@ names. The batching law's referent is Toshio et al. 2510.25222, Sec.
 III C, where the accurate decoder processes its assigned data in bulk.
 """
 
+import functools
 import random
 import statistics
+
+import pytest
 
 import decsim.config as config
 import decsim.decoders.decoders as decoders
@@ -174,6 +177,35 @@ def test_the_depth_is_reported_at_every_change():
         depths.append(depth)
     assert depths == [1, 0, 1, 0]
     assert depth_log.peak == 1
+
+
+def test_bulk_strong_is_refused_beside_a_pool_it_does_not_mean():
+    """bulk_strong merges the strong pool, and says which pool that is.
+
+    The rule used to read "not the default pool", so every job of any
+    third pool was merged as though it were a strong re-decode and the
+    batch stamped request keys those jobs do not have (design audit note
+    12 section 6.6). A pool is a capability: a rule that means the
+    strong pool names the strong pool, and a run that defines another
+    one is refused here rather than served by a rule not written for it.
+    """
+    engine = engine_module.Engine()
+    decoder = decoders.PresetLatencyDecoder(SERVICE_MICROSECONDS)
+    router = decoders.CodeRouter(decoder)
+    scheduler = schedulers.FifoScheduler()
+    build = functools.partial(
+        DecoderManager,
+        engine,
+        router=router,
+        scheduler=scheduler,
+        bulk_strong=True,
+        escalation_policy=None,
+    )
+    pools = {"default": 1, "strong": 1, "referee": 1}
+    with pytest.raises(ValueError, match="referee"):
+        build(unit_pools=pools)
+    manager = build(unit_pools={"default": 1, "strong": 1})
+    assert sorted(manager.queue.waiting_by_pool) == ["default", "strong"]
 
 
 def test_the_queued_escalations_are_served_as_one_bulk_strong_decode():

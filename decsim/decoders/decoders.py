@@ -67,6 +67,11 @@ class SwitchingRouter:
     def __init__(self, weak, strong):
         self.weak = weak
         self.strong = strong
+        kinds = decoding_records.DecodeJobKind
+        self.by_job_kind = {
+            kinds.STRONG_REDECODE: strong,
+            kinds.STRONG_BATCH: strong,
+        }
 
     def run_seed_children(self) -> tuple:
         """Every routed decoder tier under its own path."""
@@ -80,9 +85,7 @@ class SwitchingRouter:
 
     def route(self, job: decoding_records.DecodeJob):
         """Strong decoder for escalated jobs, weak for everything else."""
-        if job.hint == "strong":
-            return self.strong
-        return self.weak
+        return self.by_job_kind.get(job.kind, self.weak)
 
     def fault_model_requirement_for(
         self, code: Optional[str]

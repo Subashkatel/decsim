@@ -164,7 +164,7 @@ def test_an_escalation_routed_to_a_pipelined_unit_is_refused():
         escalation_policy=policy,
     )
     job = _window_job()
-    job.hint = "strong"
+    job.kind = decoding_records.DecodeJobKind.STRONG_REDECODE
     job.strong_decode_for = (1, 0)
     job.request_key = window_records.DecoderRequestKey(
         1, 0, window_records.DecoderTier.STRONG, 0

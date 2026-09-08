@@ -16,6 +16,7 @@ import decsim.controller.settings as controller_settings
 import decsim.decoders.decoders as decoders
 import decsim.decoders.settings as decoder_settings
 import decsim.escalation.policies as escalation_policies
+import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.escalation.threshold_sources as threshold_sources
 import decsim.frontends.settings as workload_settings
 import decsim.links.link_profiles as link_profiles
@@ -102,7 +103,9 @@ def switching_machine(
         run_both_at_once=run_both_at_once,
     )
     boundary_policy = boundary_policies.Held()
-    if strong_window == "forward":
+    # a name off the table stays, so the settings refuse it by name
+    row = strong_window_shapes.STRONG_WINDOW_SHAPES.get(strong_window)
+    if row is not None and row.absorbs_weak_windows:
         boundary_policy = None
     operation = program_records.Operation(
         id=1, name="mem1", qubits=(1,), patches=(1,)

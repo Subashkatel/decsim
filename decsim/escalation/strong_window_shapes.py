@@ -37,10 +37,9 @@ the restart window, requests its weak decode afresh and only then ends
 the claim (Sec. III C: the weak decoder resumes past the strong region
 once its rounds are stored).
 
-Wide state recorded: ForwardWindow sets nine attributes, the eight
-window components its layout touches and its registry of pending
-windows; it is one job, the forward window's layout, and the width is
-the number of components a re-slice reaches.
+Every row is built with one StrongWindowCollaborators record, so the
+root wires a shape without knowing which geometry it is and a row reads
+only the components its own layout needs.
 """
 
 import dataclasses
@@ -74,6 +73,27 @@ class StrongAssignment:
     held_plan: Any = None
     round_count: int = 0
     folded_boundaries: tuple = ()
+
+
+@dataclasses.dataclass(frozen=True)
+class StrongWindowCollaborators:
+    """The window components every strong window shape is built on.
+
+    One record so every row of STRONG_WINDOW_SHAPES has one constructor
+    signature and the root builds a row without asking which geometry it
+    is; a row reads the components its own layout needs and ignores the
+    rest. This is gem5's params object, where a SimObject's collaborators
+    arrive as one structure rather than as a signature per subclass
+    (tmp/resources/gem5/src/python/m5/SimObject.py:204-205).
+    """
+
+    engine: Any
+    regions: strong_regions.StrongRegions
+    planner: Any
+    retention: Any
+    builder: Any
+    requester: Any
+    ledger: Any
 
 
 @runtime_checkable
@@ -140,19 +160,16 @@ class ContextWindow:
     absorbs_weak_windows = False
     window_absorbed = trace_source.SILENT
 
-    def __init__(self, engine, regions, retention, builder) -> None:
-        self.engine = engine
-        self.regions = regions
-        self.retention = retention
-        self.builder = builder
+    def __init__(self, collaborators: StrongWindowCollaborators) -> None:
+        self.collaborators = collaborators
 
     def plan(self, weak_job: decoding_records.DecodeJob) -> StrongAssignment:
         """The two-sided context job, built now or held for its context."""
         key = (weak_job.operation_id, weak_job.window_id)
-        region = self.regions.context_region(key)
+        region = self.collaborators.regions.context_region(key)
         strong_window = region.window
-        model = self.regions.context_model(key, strong_window)
-        request_key = self.builder.new_request_key(
+        model = self.collaborators.regions.context_model(key, strong_window)
+        request_key = self.collaborators.builder.new_request_key(
             weak_job.operation_id,
             weak_job.window_id,
             window_records.DecoderTier.STRONG,
@@ -165,9 +182,9 @@ class ContextWindow:
             strong_window=strong_window,
             model=model,
             request_key=request_key,
-            request_created_ticks=self.engine.now,
+            request_created_ticks=self.collaborators.engine.now,
         )
-        crossing = self.retention.context_rounds_in_flight(
+        crossing = self.collaborators.retention.context_rounds_in_flight(
             key, region.context_read_keys
         )
         if crossing:
@@ -203,7 +220,7 @@ class ContextWindow:
     ) -> Optional[decoding_records.DecodeJob]:
         """The job, once every context round that arrived is stored."""
         held = assignment.held_plan
-        crossing = self.retention.context_rounds_in_flight(
+        crossing = self.collaborators.retention.context_rounds_in_flight(
             held.key, held.region.context_read_keys
         )
         if crossing:
@@ -212,7 +229,7 @@ class ContextWindow:
 
     def _log_hold(self, held: "_HeldContextWindow", crossing: tuple) -> None:
         """The context is still on controller_to_strong_buffer."""
-        self.engine.log(
+        self.collaborators.engine.log(
             decode_queue_module.LOG_SOURCE,
             f"{held.label}: strong start deferred until the context "
             f"rounds {list(crossing)} are stored in syndrome buffer 1",
@@ -224,8 +241,8 @@ class ContextWindow:
         """The context window's job, on the rounds its store now holds."""
         weak_job = held.weak_job
         payloads = strong_job_payloads(
-            self.retention,
-            self.builder,
+            self.collaborators.retention,
+            self.collaborators.builder,
             held.strong_window,
             FOLDS_NO_BOUNDARY,
         )
@@ -234,7 +251,7 @@ class ContextWindow:
             operation_id=held.key[0],
             window_id=held.key[1],
             round_count=payload_round_count,
-            ready_time=self.engine.now,
+            ready_time=self.collaborators.engine.now,
             label=held.label,
             kind=decoding_records.DecodeJobKind.STRONG_REDECODE,
             spatial_nodes=weak_job.spatial_nodes,
@@ -246,9 +263,9 @@ class ContextWindow:
             strong_decode_for=held.key,
             request_key=held.request_key,
             request_created_ticks=held.request_created_ticks,
-            gate=self.builder,
+            gate=self.collaborators.builder,
         )
-        self.retention.hold_strong_input(job)
+        self.collaborators.retention.hold_strong_input(job)
         return job
 
 
@@ -268,23 +285,8 @@ class ForwardWindow:
 
     absorbs_weak_windows = True
 
-    def __init__(
-        self,
-        engine,
-        regions,
-        planner,
-        retention,
-        builder,
-        requester,
-        ledger,
-    ) -> None:
-        self.engine = engine
-        self.regions = regions
-        self.planner = planner
-        self.retention = retention
-        self.builder = builder
-        self.requester = requester
-        self.ledger = ledger
+    def __init__(self, collaborators: StrongWindowCollaborators) -> None:
+        self.collaborators = collaborators
         self.window_absorbed = trace_source.TraceSource()
 
     # ---- the shape
@@ -300,19 +302,19 @@ class ForwardWindow:
         """
         key = (weak_job.operation_id, weak_job.window_id)
         self._refuse_second_escalation(key)
-        strong_request_key = self.builder.new_request_key(
+        strong_request_key = self.collaborators.builder.new_request_key(
             weak_job.operation_id,
             weak_job.window_id,
             window_records.DecoderTier.STRONG,
         )
-        strong_request_created_ticks = self.engine.now
-        resolved_region = self.regions.forward_region(key)
+        strong_request_created_ticks = self.collaborators.engine.now
+        resolved_region = self.collaborators.regions.forward_region(key)
         plan = resolved_region.plan
         restart_key = resolved_region.restart_window_key
         strong_window = resolved_region.strong_window
         strong_model = resolved_region.strong_model
         restart_model = resolved_region.restart_model
-        guard = self.retention.guard_restart_reads(
+        guard = self.collaborators.retention.guard_restart_reads(
             key,
             restart_key,
             resolved_region.proposed_restart_window,
@@ -331,13 +333,13 @@ class ForwardWindow:
             strong_request_created_ticks=strong_request_created_ticks,
         )
         try:
-            self.ledger.replace_contributions(
+            self.collaborators.ledger.replace_contributions(
                 key,
                 plan.commit_lo,
                 plan.commit_hi,
                 resolved_region.absorbed_window_keys,
             )
-            self.retention.hold_strong_context(
+            self.collaborators.retention.hold_strong_context(
                 key,
                 strong_request_key,
                 resolved_region.context_round_keys,
@@ -359,7 +361,7 @@ class ForwardWindow:
             )
         finally:
             if guard is not None:
-                self.retention.release_strong_hold_if_live(guard)
+                self.collaborators.retention.release_strong_hold_if_live(guard)
 
     def release_conditions(
         self, assignment: StrongAssignment
@@ -397,7 +399,9 @@ class ForwardWindow:
         """
         held = assignment.held_plan
         if held.resolved_region.restart_window_key is None:
-            stored_through = self.regions.strong_rounds_stored(held.key[0])
+            stored_through = self.collaborators.regions.strong_rounds_stored(
+                held.key[0]
+            )
             if stored_through < held.resolved_region.plan.context_hi:
                 return None
         return self._build_strong_job(held)
@@ -408,7 +412,7 @@ class ForwardWindow:
         # the plan claims the extent in the ledger before it holds
         # anything, so an escalation of a window already claimed is the
         # second one, held or committed
-        if self.ledger.owns_strong_window(key):
+        if self.collaborators.ledger.owns_strong_window(key):
             raise RuntimeError(
                 f"duplicate strong escalation for window {key}: one "
                 f"switching event creates exactly one strong job"
@@ -432,9 +436,9 @@ class ForwardWindow:
         if resolved_region.restart_window_key is not None:
             stale_keys.append(resolved_region.restart_window_key)
         for window_key in stale_keys:
-            window = self.planner.window_at(window_key)
+            window = self.collaborators.planner.window_at(window_key)
             if window.queued:
-                self.requester.withdraw(window)
+                self.collaborators.requester.withdraw(window)
 
     def _absorb_window(
         self, key: tuple, restart_key: Optional[tuple], replacement
@@ -445,13 +449,13 @@ class ForwardWindow:
         window no longer waits for it, and its rounds are the strong
         request's.
         """
-        self.planner.absorb_window(key, restart_key)
-        self.retention.release_hold_if_live(key)
-        self.retention.release_restart_reads(key)
-        self.retention.release_absorbed_strong_hold(
+        self.collaborators.planner.absorb_window(key, restart_key)
+        self.collaborators.retention.release_hold_if_live(key)
+        self.collaborators.retention.release_restart_reads(key)
+        self.collaborators.retention.release_absorbed_strong_hold(
             key, restart_key, replacement
         )
-        self.engine.log(
+        self.collaborators.engine.log(
             decode_queue_module.LOG_SOURCE,
             f"window {key} absorbed into the strong window "
             f"(weak chain skips it)",
@@ -467,7 +471,7 @@ class ForwardWindow:
         if resolved_region.restart_window_key is None:
             readiness_description = "terminal data"
         absorbed_count = len(resolved_region.absorbed_window_keys)
-        self.engine.log(
+        self.collaborators.engine.log(
             decode_queue_module.LOG_SOURCE,
             f"{held.label}: strong window rounds {plan.commit_lo}-"
             f"{plan.commit_hi} assigned; weak chain skips "
@@ -491,11 +495,11 @@ class ForwardWindow:
             plan.commit_hi,
             plan.restart_seam_fault_owner,
         )
-        restart = self.planner.window_at(restart_key)
+        restart = self.collaborators.planner.window_at(restart_key)
         # its absorbed dependency is gone; no strong sibling in the
         # forward scheme
-        self.requester.request_if_ready(restart, None)
-        self.retention.release_restart_reads(restart_key)
+        self.collaborators.requester.request_if_ready(restart, None)
+        self.collaborators.retention.release_restart_reads(restart_key)
 
     def _reslice_restart_window(
         self,
@@ -506,10 +510,12 @@ class ForwardWindow:
         seam_owner: window_records.SeamFaultOwner,
     ) -> None:
         """Install the restart window's re-sliced reads and their model."""
-        restart = self.planner.reslice_window(restart_key, buffer_lo, model)
-        self.retention.replace_window_reads(restart_key, restart)
+        restart = self.collaborators.planner.reslice_window(
+            restart_key, buffer_lo, model
+        )
+        self.collaborators.retention.replace_window_reads(restart_key, restart)
         seam_owner_name = seam_owner.name.lower()
-        self.engine.log(
+        self.collaborators.engine.log(
             decode_queue_module.LOG_SOURCE,
             f"restart window {restart_key} re-sliced across strong window "
             f"edge {strong_window_hi} (reads rounds {restart.buffer_lo}-"
@@ -532,13 +538,13 @@ class ForwardWindow:
         weak_job = held.weak_job
         strong_window = held.strong_window
         payloads = strong_job_payloads(
-            self.retention,
-            self.builder,
+            self.collaborators.retention,
+            self.collaborators.builder,
             strong_window,
             FOLDS_NO_BOUNDARY,
         )
         plan = held.resolved_region.plan
-        self.retention.require_rounds_retained(
+        self.collaborators.retention.require_rounds_retained(
             held.label, payloads, plan.context_lo, plan.context_hi
         )
         payload_round_count = decoding_records.distinct_round_count(payloads)
@@ -546,7 +552,7 @@ class ForwardWindow:
             operation_id=key[0],
             window_id=key[1],
             round_count=payload_round_count,
-            ready_time=self.engine.now,
+            ready_time=self.collaborators.engine.now,
             label=held.label,
             kind=decoding_records.DecodeJobKind.STRONG_REDECODE,
             spatial_nodes=weak_job.spatial_nodes,
@@ -558,9 +564,9 @@ class ForwardWindow:
             strong_decode_for=key,
             request_key=held.strong_request_key,
             request_created_ticks=held.strong_request_created_ticks,
-            gate=self.builder,
+            gate=self.collaborators.builder,
         )
-        self.retention.hold_strong_input(job)
+        self.collaborators.retention.hold_strong_input(job)
         return job
 
 

@@ -21,8 +21,8 @@ class LinkPath(str, Enum):
     """The hops of the reaction path, one per pair of components.
 
     In the order the reports list them. The weak buffer is syndrome
-    buffer 0, the strong buffer syndrome buffer 1; the two
-    controller-to-buffer hops are optional on a card.
+    buffer 0, the strong buffer syndrome buffer 1; a fabric card prices
+    every hop here, so none of them is ever free.
     """
 
     QPU_TO_CONTROLLER = "qpu_to_controller"  # a readout

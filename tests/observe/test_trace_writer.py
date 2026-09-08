@@ -289,6 +289,34 @@ def test_the_data_movement_counts_are_the_hop_tables(traced):
     assert by_path["Buffer 0 -> unit default#0 memory"]["rounds"] == 54
 
 
+def test_the_movement_counts_group_by_the_memory_class_they_cross(traced):
+    """Horowitz ISSCC 2014 lines 232-247, Dally CACM 2020 lines 231-234.
+
+    The class is the cost, so the report keeps the classes apart and
+    every class row sums back to the run's total. On this point the
+    readout's own hop is the only off-board move, the write into Buffer
+    0, the window's read out of it and the correction to the frame are
+    on board, and the boundary handoff stays on chip; every copy but the
+    write into Buffer 0 lands in a register or a unit's own memory.
+    """
+    machine, _result, _document = traced
+    counts = machine.observation.data_movement.json_value()
+
+    copies = counts["copies_by_memory_class"]
+    moves = counts["moves_by_memory_class"]
+    assert list(copies) == ["on_chip", "on_board"]
+    assert list(moves) == ["on_chip", "on_board", "off_board"]
+    assert copies["on_board"]["rounds"] == 30
+    assert moves["off_board"]["rounds"] == 30
+    assert moves["on_board"]["rounds"] == 138
+    copied_events = [row["events"] for row in copies.values()]
+    moved_events = [row["events"] for row in moves.values()]
+    assert sum(copied_events) == counts["copies"]
+    assert sum(moved_events) == counts["moves"]
+    copied_bits = [row["bits"] for row in copies.values()]
+    assert sum(copied_bits) == counts["copy_bits"]
+
+
 def test_a_windows_flow_joins_its_queue_its_moves_its_unit_and_the_frame(
     traced,
 ):

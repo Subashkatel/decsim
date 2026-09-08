@@ -469,7 +469,7 @@ class DecodeRequester:
         """The primary tier's jobs: one decode, or one solve per class.
 
         A confidence built from forced-class solves needs the window
-        decoded once per class, and both are asked for at one instant
+        decoded once per class, and all of them are asked for at one instant
         (CUDA launches a whole grid in one call, cuda_guide.txt:
         1888-1892; OpenMP's primary thread creates the whole team,
         openmp_spec_5_2.txt:1400-1407).
@@ -477,6 +477,8 @@ class DecodeRequester:
         if self.gap_join is None:
             return [job]
         classes = self.gap_join.signal.forced_logical_classes
+        if not classes:
+            return [job]
         job.forced_logical_class = classes[0]
         jobs = [job]
         for forced_class in classes[1:]:

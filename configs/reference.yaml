@@ -33,6 +33,22 @@ escalation:
                                    # switching_validation.yaml runs them):
 # escalation:
 #   kind: switching
+#   confidence: complementary_gap  # complementary_gap | cluster_gap: the signal
+#                                  # the weak tier reports and the threshold
+#                                  # decides on, in natural-log weight either
+#                                  # way. complementary_gap decodes the window
+#                                  # twice, each solve pinned to one logical
+#                                  # class, and subtracts the two weights
+#                                  # (Toshio 2510.25222 Sec. III A), so it needs
+#                                  # a weak decoder that minimises weight inside
+#                                  # a class: pymatching and
+#                                  # unweighted_pymatching today. cluster_gap
+#                                  # decodes the window once and walks the
+#                                  # growth that decode did (Meister 2405.07433
+#                                  # Algorithm 2), so it needs a cluster-based
+#                                  # decoder: union_find today. The pairing is
+#                                  # refused by name at load when the weak row's
+#                                  # decode cannot produce the signal's evidence
 #   gap_threshold_db: 20.0         # keep the weak result when its complementary
 #                                  # gap is at or above this, in the paper's
 #                                  # decibels (Toshio 2510.25222 gth = 20 dB).
@@ -105,7 +121,9 @@ escalation:
 #                                  # weak_decoder.units alone decides whether
 #                                  # they overlap. A priced weak card prices
 #                                  # one decode of one window, so it is
-#                                  # charged once per forced solve.
+#                                  # charged once per forced solve. The cluster
+#                                  # gap needs one job per window and charges
+#                                  # one card.
 
 workload:
   kind: memory_circuit             # memory_circuit is the one yaml row; the

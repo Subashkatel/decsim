@@ -20,7 +20,6 @@ import re
 import numpy
 import pytest
 
-import decsim.confidence.cluster as cluster
 import decsim.config as config
 import decsim.controller.policies as boundary_policies
 import decsim.controller.settings as controller_settings
@@ -36,6 +35,7 @@ import decsim.escalation.policies as escalation_policies
 import decsim.front.experiment as experiment
 import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
+import decsim.observe.settings as observe_settings
 import decsim.qpu.cycle_clock as cycle_clock
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
@@ -291,27 +291,91 @@ def test_a_load_only_job_on_a_measured_unit_holds_it_for_zero_algorithm_ticks():
     assert any("algorithm mem(" in line for line in idle_lines)
 
 
-def test_the_cluster_gap_decoder_runs_as_a_python_built_tier():
-    """The cluster-gap wrapper is a row of the port.
-
-    The manager reads pipeline_depth at dispatch and occupancy at its
-    free-time prediction; a wrapper without them stopped the run at the
-    first window with AttributeError.
-    """
-    latency_model = decoders.PresetLatencyDecoder(1.0)
-    base = union_find_decoder.UnionFindDecoder(latency_model)
-    decoder = cluster.UnionFindClusterGapDecoder(base)
-    weak_decoder = decoder_settings.DecoderSettings(decoder=decoder)
+def _switching_memory(weak_kind: str, confidence: str):
+    """A d=3 memory whose weak tier reports the named confidence signal."""
+    decibels = 20.0
+    nats = decoder_settings.decibels_to_nats(decibels)
+    escalation = decoder_settings.EscalationSettings(
+        kind="switching",
+        confidence=confidence,
+        gap_threshold_decibels=decibels,
+        gap_threshold_nats=nats,
+    )
+    weak_decoder = decoder_settings.DecoderSettings(
+        kind=weak_kind, engine_megahertz=100.0
+    )
+    strong_decoder = decoder_settings.DecoderSettings(
+        kind="pymatching", engine_megahertz=100.0
+    )
     operation = program_records.Operation(
         id=1, name="memory", qubits=(0,), patches=(0,), circuit=MEMORY_CIRCUIT
     )
     settings = _memory_on_stim_device(weak_decoder, (operation,))
+    observation = observe_settings.ObservationSettings(
+        record_switching_windows=True
+    )
+    return dataclasses.replace(
+        settings,
+        strong_decoder=strong_decoder,
+        escalation=escalation,
+        observation=observation,
+    )
+
+
+def _weak_service_ticks(machine) -> list:
+    """Every decode service's charged ticks, in the order they ended."""
+    ticks = []
+    for service in machine.observation.decode_records.services:
+        ticks.append(service.service_ticks)
+    return ticks
+
+
+def test_a_union_find_weak_tier_reports_the_gap_of_its_own_growth():
+    """The cluster gap is a signal row over the decoder that grew it.
+
+    One decode per window, its confidence read off the growth that
+    decode returned (Meister et al. 2405.07433 Algorithm 2 lines
+    518-536), and the unit charged that decode. The matching run beside
+    it is the comparison the charge is read against: Union-Find's own
+    decode is this implementation's, not sparse blossom's.
+    """
+    settings = _switching_memory("union_find", "cluster_gap")
     machine = machine_module.Machine.build(settings, 0)
     result = machine.run()
     assert result.terminal_status == "complete"
-    observables = result.operation_results[0].logical_observables
-    assert observables == (0,)
-    assert len(machine.observation.log.lines) == 19
+    assert result.operation_results[0].logical_observables == (0,)
+    requests = machine.observation.decode_records.requests
+    sources = set()
+    for record in requests:
+        if record.soft_output is not None:
+            sources.add(record.soft_output.source.method)
+    assert sources == {"cluster_gap"}
+    window_count = len(machine.observation.decode_records.services)
+    assert len(requests) == window_count
+    matching_settings = _switching_memory("pymatching", "complementary_gap")
+    matching = machine_module.Machine.build(matching_settings, 0)
+    matching.run()
+    union_find_services = _weak_service_ticks(machine)
+    matching_services = _weak_service_ticks(matching)
+    union_find_ticks = min(union_find_services)
+    matching_ticks = max(matching_services)
+    assert union_find_ticks > 3 * matching_ticks
+
+
+def test_a_weak_tier_that_cannot_produce_the_signals_evidence_is_refused():
+    """The pairing is checked at the yaml boundary, by name.
+
+    Union-Find cannot be forced into a logical class and report that
+    class's minimum weight (Lee et al. arXiv:2510.05795 Sec. 2.1.1), and
+    PyMatching's API reports no cluster radii (pymatching 2.4.0
+    Matching), so neither row can serve the other row's signal.
+    """
+    settings = _switching_memory("union_find", "complementary_gap")
+    with pytest.raises(ValueError, match="complementary_gap"):
+        machine_module.Machine.build(settings, 0)
+    settings = _switching_memory("pymatching", "cluster_gap")
+    with pytest.raises(ValueError, match="cluster_gap"):
+        machine_module.Machine.build(settings, 0)
 
 
 @pytest.mark.parametrize(
@@ -326,12 +390,11 @@ def test_the_cluster_gap_decoder_runs_as_a_python_built_tier():
 def test_the_cluster_gap_is_not_a_tier_kind_under_any_escalation(
     escalation_kind, tier
 ):
-    """The cluster gap is the Python-built Decoder of the test above.
+    """The cluster gap is a confidence row, not a decoder row.
 
-    It reports its own soft output in decibels at its weight step, where
-    switching decides on the complementary gap in nats, and no tier
-    that does not switch reads a soft output at all; so it is not a row
-    of the tier table under any escalation kind.
+    escalation.confidence names it (machine.py CONFIDENCE_SIGNALS) and
+    it reads the growth of whatever weak decoder the tier table names,
+    so it is not a kind of that table under any escalation kind.
     """
     tiers = {
         "weak": decoder_settings.DecoderSettings(

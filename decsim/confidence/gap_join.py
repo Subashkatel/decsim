@@ -1,12 +1,13 @@
-"""One window's two forced-class solves, joined into its confidence.
+"""One window's solves, joined into its confidence.
 
-The window side submits two jobs of one window, each pinned to one
-logical class, at one instant; this object is both jobs' on_decoded. It
-holds the first solve until the other arrives, the way a reservation
-station holds a value until its tag matches (Tomasulo 1967, IBM Journal
-of R&D, the tag here being the window key and the forced class), asks
-the signal for the gap between the two weights, and hands the lighter
-class's correction to the window committer, which applies the threshold.
+The window side submits a window's solves at one instant, one job per
+class the signal needs forced (two for the complementary gap, none for
+the cluster gap, which reads one ordinary decode); this object is every
+one of those jobs' on_decoded. It holds each solve until the window's
+last one arrives, the way a reservation station holds a value until its
+tag matches (Tomasulo 1967, IBM Journal of R&D, the tag here being the
+window key), asks the signal for the window's confidence, and hands the
+answering solve to the window committer, which applies the threshold.
 The join is outside the decoder manager on purpose: every fine-grained
 referent puts a two-result comparison in the producer or the consumer
 and none puts it in the scheduler (gem5's SplitDataRequest counting its
@@ -22,18 +23,18 @@ import decsim.records.decoding as decoding_records
 
 
 @dataclasses.dataclass(frozen=True)
-class HeldForcedSolve:
-    """One class's finished solve, waiting for the other class's."""
+class HeldSolve:
+    """One finished solve of a window, waiting for that window's others."""
 
     job: decoding_records.DecodeJob
     result: decoding_records.DecodeResult
 
 
-class ForcedClassGapJoin:
-    """Both forced-class jobs' on_decoded: the window's gap and its answer.
+class WindowGapJoin:
+    """Every solve's on_decoded: the window's confidence and its answer.
 
-    Trace source: solve_held(job, result) when a window's first solve
-    waits for the other, so the trace shows the held half and the join.
+    Trace source: solve_held(job, result) when a solve waits for the
+    window's others, so the trace shows the held solve and the join.
     """
 
     def __init__(self, engine, signal, committer, decode_queue) -> None:
@@ -41,36 +42,41 @@ class ForcedClassGapJoin:
         self.signal = signal
         self.committer = committer
         self.decode_queue = decode_queue
-        # window key -> the first solve of that window that finished
-        self.held_by_window: dict[tuple, HeldForcedSolve] = {}
+        # window key -> the solves of that window that have finished
+        self.held_by_window: dict[tuple, list] = {}
         self.solve_held = trace_source.TraceSource()
+
+    @property
+    def solves_per_window(self) -> int:
+        """Solves this signal reads: one per forced class, else one decode."""
+        return len(self.signal.forced_logical_classes) or 1
 
     def accept_result(
         self,
         job: decoding_records.DecodeJob,
         result: decoding_records.DecodeResult,
     ) -> None:
-        """One forced-class solve finished: hold it, or join the pair."""
+        """One solve finished: hold it, or join the window's solves."""
         key = (job.operation_id, job.window_id)
-        held = self.held_by_window.pop(key, None)
-        if held is None:
-            self._hold(key, job, result)
+        held = self.held_by_window.setdefault(key, [])
+        solve = HeldSolve(job, result)
+        held.append(solve)
+        if len(held) < self.solves_per_window:
+            self._hold(job, result)
             return
-        second = HeldForcedSolve(job, result)
-        self._join(held, second)
+        del self.held_by_window[key]
+        self._join(held)
 
     def unresolved_windows(self) -> list:
-        """The windows whose second solve never arrived, sorted."""
+        """The windows whose remaining solves never arrived, sorted."""
         return sorted(self.held_by_window)
 
     def _hold(
         self,
-        key: tuple,
         job: decoding_records.DecodeJob,
         result: decoding_records.DecodeResult,
     ) -> None:
-        """Keep the solve until the other class reports."""
-        self.held_by_window[key] = HeldForcedSolve(job, result)
+        """Keep the solve until the window's others report."""
         forced_class = job.forced_logical_class
         self.engine.log(
             decode_queue_module.LOG_SOURCE,
@@ -79,46 +85,52 @@ class ForcedClassGapJoin:
         )
         self.solve_held.fire(job, result)
 
-    def _join(self, first: HeldForcedSolve, second: HeldForcedSolve) -> None:
-        """Subtract the two weights and commit the lighter class's answer."""
-        solves = (first.result, second.result)
-        soft_output = self.signal.soft_output_for(solves)
-        lighter = _lighter_of(first, second)
-        companion = second
-        if lighter is second:
-            companion = first
-        lighter.result.soft_output = soft_output
+    def _join(self, held: list) -> None:
+        """Ask the signal for the window's gap and commit its answer."""
+        solves = []
+        for solve in held:
+            solves.append(solve.result)
+        soft_output = self.signal.soft_output_for(tuple(solves))
+        answer = _answering_solve(held)
+        answer.result.soft_output = soft_output
         gap_text = _gap_text(soft_output)
         self.engine.log(
             decode_queue_module.LOG_SOURCE,
-            f"GAP JOIN {lighter.job.label}: {gap_text}",
+            f"GAP JOIN {answer.job.label}: {gap_text}",
         )
-        self.decode_queue.close_companion_request(
-            companion.job, companion.result
-        )
-        self.committer.accept_result(lighter.job, lighter.result)
+        for solve in held:
+            if solve is not answer:
+                self.decode_queue.close_companion_request(
+                    solve.job, solve.result
+                )
+        self.committer.accept_result(answer.job, answer.result)
 
 
-def _lighter_of(
-    first: HeldForcedSolve, second: HeldForcedSolve
-) -> HeldForcedSolve:
-    """The solve of the class the decoder is in: the smaller weight.
+def _answering_solve(held: list) -> HeldSolve:
+    """The solve that carries the window's correction: the lightest one.
 
     The unconstrained minimum weight is the minimum over the classes, so
-    the lighter forced solve is the decoder's own answer. A missing
-    weight keeps the first solve, whose result then carries no gap.
+    the lightest forced solve is the decoder's own answer. A solve with
+    no weight (a signal that forces no class, or a window that pins no
+    observable) leaves the first solve answering, and its result then
+    carries whatever gap the signal reported.
     """
-    first_weight = first.result.forced_class_weight
-    second_weight = second.result.forced_class_weight
-    if first_weight is None or second_weight is None:
-        return first
-    if second_weight < first_weight:
-        return second
-    return first
+    answer = held[0]
+    answer_weight = answer.result.forced_class_weight
+    if answer_weight is None:
+        return answer
+    for solve in held[1:]:
+        weight = solve.result.forced_class_weight
+        if weight is None:
+            return answer
+        if weight < answer_weight:
+            answer = solve
+            answer_weight = weight
+    return answer
 
 
 def _gap_text(soft_output) -> str:
     """The joined gap for the log; a window without one says so."""
     if soft_output is None:
-        return "no gap (a forced solve reported no weight)"
+        return "no gap (a solve reported no evidence)"
     return f"gap {soft_output.gap:.3f}"

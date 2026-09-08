@@ -1,17 +1,15 @@
 """The cluster gap: the confidence of one weighted Union-Find window decode.
 
-Meister et al. 2405.07433 Definition 9 and Algorithm 2: the weighted edge
-intervals the hard decode grew are quotiented into a graph whose shortest
-closed walk of odd logical parity is the gap, in the growth's half-tick
-units and reported in decibels. The hard decode is Delfosse and Nickerson
-1709.06218 (union_find/window_decoder.py); UnionFindClusterGapDecoder is a
-Decoder over it, built in Python and given to a tier as its decoder, beside
-the confidence wrappers (decoder.py). The gap reads the hard decode's
-intervals, not the syndrome, so it cannot be a ConfidenceSignal on the port,
-and it is not a tier kind of the root's table either: it reports its own
-soft output, in decibels at its weight step, where the switching policy
-decides on the complementary gap in nats, and no yaml key selects another
-signal yet.
+Meister et al. 2405.07433 Definition 9 and Algorithm 2 (lines 518-536):
+the weighted edge intervals the hard decode grew are quotiented into a
+graph whose shortest closed walk of odd logical parity is the gap, in
+the growth's half-tick units, reported as natural-log weight, which is
+the unit the switching threshold is held in. The hard decode is Delfosse
+and Nickerson 1709.06218 (union_find/window_decoder.py), and this row
+reads the growth that decode already returned on its result
+(DecodeResult.cluster_evidence), so the confidence is the decoder's own
+and no second decode is run. The signal needs one ordinary decode of the
+window, not a forced-class pair, so its forced_logical_classes is empty.
 
 The exact likelihood-ratio reading of the gap holds only in the uniform
 repetition-code setting of Meister's Theorem 10; on a surface code it is
@@ -23,19 +21,12 @@ weight step.
 import heapq
 import itertools
 import math
-import time
 from fractions import Fraction
 from typing import Optional, Union
 
-import numpy
-
-import decsim.decoders.decoder as decoder_module
-import decsim.decoders.union_find.decoder as union_find_decoder
 import decsim.decoders.union_find.window_decoder as window_decoder
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.records.decoding as decoding_records
-
-_BINARY64_LN_TEN = float.fromhex("0x1.26bb1bbb55516p+1")
 
 
 def union_find_cluster_gap_source(
@@ -47,91 +38,72 @@ def union_find_cluster_gap_source(
         method="cluster_gap",
         cluster_origin="union_find_decoder",
         growth_schedule="weighted_global_fair",
-        gap_units="decibels",
+        gap_units="log_likelihood_weight",
         correction="none",
         weight_step_natural_log=normalized_step,
         references=("cluster-gap method",),
     )
 
 
-class UnionFindClusterGapDecoder(decoder_module.DecoderBase):
-    """The hard Union-Find decode with its one-logical cluster gap attached.
-
-    Latency, occupancy, pipeline depth and cancel are the base decoder's,
-    as in the confidence wrappers (decoder.py); on the measured path the
-    unit's time is the base's growth-and-peeling call plus the timed gap
-    walk, never the base's untimed setup. The gap reads the immutable
-    intervals of the same hard decode.
-    """
+class ClusterGap:
+    """The signal row: the gap of one cluster-based decode's own growth."""
 
     fault_model_requirement = fault_models.GRAPHLIKE_FAULT_MODEL_REQUIRED
+    decoder_evidence_requirement = decoding_records.CLUSTER_GROWTH_EVIDENCE
+    # the window is decoded once; the gap is read off that decode
+    forced_logical_classes = ()
 
-    def __init__(self, base: union_find_decoder.UnionFindDecoder) -> None:
-        if not isinstance(base, union_find_decoder.UnionFindDecoder):
-            raise TypeError(
-                "UnionFindClusterGapDecoder requires a UnionFindDecoder base"
-            )
-        self.base = base
+    def __init__(
+        self, weight_step: float = window_decoder.DEFAULT_WEIGHT_STEP
+    ) -> None:
+        self.weight_step = window_decoder.normalized_weight_step(weight_step)
+        self.source = union_find_cluster_gap_source(self.weight_step)
 
-    def run_seed_children(self) -> tuple:
-        """The hard decoder's seed paths; the gap draws nothing."""
-        return self.base.run_seed_children()
+    def soft_output_for(
+        self, solves: tuple
+    ) -> Optional[decoding_records.SoftOutput]:
+        """The gap of the window's one decode, in natural-log weight.
 
-    def latency(self, job: decoding_records.DecodeJob) -> int:
-        """The base decoder's timing; the gap adds no latency."""
-        return self.base.latency(job)
-
-    def occupancy(self, job: decoding_records.DecodeJob) -> Optional[int]:
-        """The base decoder's occupancy; None when it is measured."""
-        return self.base.occupancy(job)
-
-    def pipeline_depth(self, job: decoding_records.DecodeJob) -> int:
-        """The base decoder's pipeline depth."""
-        return self.base.pipeline_depth(job)
-
-    def cancel(self, job: decoding_records.DecodeJob) -> None:
-        """Stop the base decoder's job."""
-        self.base.cancel(job)
-
-    def decode(
-        self, job: decoding_records.DecodeJob
-    ) -> decoding_records.DecodeResult:
-        """Decode once, compute the cluster gap, attach the confidence."""
-        result, _elapsed_nanoseconds = self.decode_timed(job)
-        return result
-
-    def decode_timed(self, job: decoding_records.DecodeJob) -> tuple:
-        """(the result with its confidence, nanoseconds of decode and gap)."""
-        model = job.detector_error_model
-        if model is None:
-            return self.base.decode_timed(job)
-        _require_one_logical_row(model)
-        result, backend_ns = self.base.decode_timed(job)
-        started = time.perf_counter_ns()
-        gap = _cluster_gap(result.cluster_evidence, self.base.weight_step)
-        finished = time.perf_counter_ns()
-        source = union_find_cluster_gap_source(self.base.weight_step)
-        confidence = decoding_records.SoftOutput(gap=gap, source=source)
-        result.soft_output = confidence
-        gap_nanoseconds = finished - started
-        return result, backend_ns + gap_nanoseconds
+        None when the decode carried no growth: a job without a window
+        model runs no growth, and the escalation policy escalates a
+        window without a soft output (escalation/policies.py).
+        """
+        evidence = solves[0].cluster_evidence
+        if evidence is None:
+            return None
+        graph = evidence.graph
+        _require_one_logical_row(graph)
+        _require_weight_step(graph, self.weight_step)
+        gap = _cluster_gap(evidence, self.weight_step)
+        return decoding_records.SoftOutput(gap=gap, source=self.source)
 
 
-def _require_one_logical_row(model) -> None:
+def _require_one_logical_row(graph) -> None:
     """The gap is defined for exactly one nonzero logical-observable row."""
-    faults = model.require_faults(fault_models.FaultRepresentation.GRAPHLIKE)
-    observables = faults.observables.toarray()
-    row_count = observables.shape[0]
+    row_count = graph.logical_observable_count
     if row_count != 1:
         raise ValueError(
             "Union-Find cluster confidence requires exactly one logical "
             f"observable, got {row_count}"
         )
-    if not numpy.any(observables[0]):
-        raise ValueError(
-            "Union-Find cluster confidence requires one nonzero logical "
-            "observable row"
-        )
+    for edge in graph.edges:
+        if edge.logical_observables[0]:
+            return
+    raise ValueError(
+        "Union-Find cluster confidence requires one nonzero logical "
+        "observable row"
+    )
+
+
+def _require_weight_step(graph, weight_step: float) -> None:
+    """The gap is read off the ticks the growth actually used."""
+    if graph.weight_step == weight_step:
+        return
+    raise RuntimeError(
+        "the cluster gap reads the decode's own ticks: the decoder grew "
+        f"at weight step {graph.weight_step} and the signal reports "
+        f"{weight_step}"
+    )
 
 
 def _cluster_gap(
@@ -140,7 +112,7 @@ def _cluster_gap(
     gap_half_ticks = _quotient_cluster_gap(
         hard_evidence.graph, hard_evidence.edge_intervals
     )
-    return _gap_half_ticks_to_decibels(gap_half_ticks, weight_step)
+    return _gap_half_ticks_to_natural_log_weight(gap_half_ticks, weight_step)
 
 
 def _quotient_cluster_gap(
@@ -265,19 +237,22 @@ def _relax_neighbors(
             heapq.heappush(frontier, (candidate, order, neighbor_state))
 
 
-def _gap_half_ticks_to_decibels(
+def _gap_half_ticks_to_natural_log_weight(
     gap_half_ticks: Union[int, float], weight_step: float
 ) -> float:
-    """Half ticks of the growth as decibels, exactly, then rounded once."""
+    """Half ticks of the growth as natural-log weight, exactly, rounded once.
+
+    Every signal reports its gap in the units the switching threshold is
+    held in (escalation.gap_threshold_db is converted once, at the yaml
+    boundary, by decoders/settings.py decibels_to_nats), so a threshold
+    means the same thing whichever signal a run names.
+    """
     if gap_half_ticks == math.inf:
         return math.inf
     half_ticks = Fraction(gap_half_ticks, 2)
     step = Fraction.from_float(weight_step)
-    ln_ten = Fraction.from_float(_BINARY64_LN_TEN)
-    nats = half_ticks * step
-    scaled = nats * 10
-    exact_gap_decibels = scaled / ln_ten
+    exact_gap_nats = half_ticks * step
     try:
-        return float(exact_gap_decibels)
+        return float(exact_gap_nats)
     except OverflowError:
         return math.inf

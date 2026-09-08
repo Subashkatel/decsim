@@ -1144,20 +1144,27 @@ def _check_serves_the_confidence(
     missing = required - algorithm.decoder_evidence
     if not missing:
         return
-    missing_text = _evidence_text(missing)
+    reason = _missing_evidence_reason(algorithm, missing, signal)
     signal_name = signal.source.method
     raise ValueError(
-        f"{tier}_decoder.kind {kind!r} cannot serve the {signal_name}: "
-        f"its decode reports no {missing_text}"
+        f"{tier}_decoder.kind {kind!r} cannot serve the confidence "
+        f"{signal_name}: {reason}"
     )
 
 
-def _evidence_text(evidence) -> str:
-    """The named evidence a row is missing, in a stable order."""
-    names = []
-    for member in sorted(evidence, key=_evidence_order):
-        names.append(member.value)
-    return ", ".join(names)
+def _missing_evidence_reason(algorithm, missing, signal) -> str:
+    """Why this row cannot serve this signal, cited.
+
+    A row that a reader would expect to produce the evidence says why it
+    does not; every other row gets the signal's own sentence about what
+    a decoder must do to report it.
+    """
+    reasons = algorithm.missing_evidence_reasons
+    for member in sorted(missing, key=_evidence_order):
+        reason = reasons.get(member)
+        if reason is not None:
+            return reason
+    return signal.evidence_refusal
 
 
 def _evidence_order(member) -> str:

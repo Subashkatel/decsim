@@ -362,20 +362,44 @@ def test_a_union_find_weak_tier_reports_the_gap_of_its_own_growth():
     assert union_find_ticks > 3 * matching_ticks
 
 
-def test_a_weak_tier_that_cannot_produce_the_signals_evidence_is_refused():
-    """The pairing is checked at the yaml boundary, by name.
+@pytest.mark.parametrize(
+    "weak_kind, confidence, sentence",
+    [
+        ("union_find", "complementary_gap", "arXiv:2510.05795"),
+        ("bposd", "complementary_gap", "arXiv:2510.05795"),
+        ("relay_bp", "complementary_gap", "arXiv:2510.05795"),
+        ("belief_matching", "complementary_gap", "arXiv:2312.04522"),
+        ("pymatching", "cluster_gap", "pymatching 2.4.0"),
+        ("tesseract", "cluster_gap", "pymatching 2.4.0"),
+    ],
+)
+def test_a_weak_tier_that_cannot_serve_the_confidence_is_refused_by_name(
+    weak_kind, confidence, sentence
+):
+    """The pairing is refused at the yaml boundary, with its citation.
 
-    Union-Find cannot be forced into a logical class and report that
-    class's minimum weight (Lee et al. arXiv:2510.05795 Sec. 2.1.1), and
-    PyMatching's API reports no cluster radii (pymatching 2.4.0
-    Matching), so neither row can serve the other row's signal.
+    Union-Find, BP-OSD and relay-BP do not minimise weight inside a
+    fixed logical class (Lee et al. arXiv:2510.05795 Sec. 2.1.1);
+    belief matching could, but only on the posterior graph it matched
+    on (Gidney et al. arXiv:2312.04522 lines 843-846), which is not
+    built; and no row but Union-Find reports the radii the cluster gap
+    walks (pymatching 2.4.0 Matching).
     """
-    settings = _switching_memory("union_find", "complementary_gap")
-    with pytest.raises(ValueError, match="complementary_gap"):
+    settings = _switching_memory(weak_kind, confidence)
+    match = re.escape(f"weak_decoder.kind {weak_kind!r}")
+    with pytest.raises(ValueError, match=match):
         machine_module.Machine.build(settings, 0)
-    settings = _switching_memory("pymatching", "cluster_gap")
-    with pytest.raises(ValueError, match="cluster_gap"):
+    citation = re.escape(sentence)
+    with pytest.raises(ValueError, match=citation):
         machine_module.Machine.build(settings, 0)
+
+
+def test_a_weak_tier_that_serves_the_confidence_is_accepted():
+    """Each signal's own row builds; the refusal is about the pairing."""
+    settings = _switching_memory("union_find", "cluster_gap")
+    assert machine_module.Machine.build(settings, 0) is not None
+    settings = _switching_memory("pymatching", "complementary_gap")
+    assert machine_module.Machine.build(settings, 0) is not None
 
 
 @pytest.mark.parametrize(

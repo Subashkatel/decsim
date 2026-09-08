@@ -219,13 +219,16 @@ class Decoder(Protocol):
     cluster-based decode did, or neither (decsim/records/decoding.py
     DecoderEvidence). A confidence signal declares the same set as its
     requirement, and the yaml refuses a pairing the row cannot serve.
-    The unit's insides stay closed: the port learns what the decoder can
-    answer, never how.
+    missing_evidence_reasons is how a row that a reader would expect to
+    produce some evidence says why it does not; the refusal quotes it
+    instead of the signal's general sentence. The unit's insides stay
+    closed: the port learns what the decoder can answer, never how.
     """
 
     fault_model_requirement: Any
     stage_recorded: Any
     decoder_evidence: frozenset
+    missing_evidence_reasons: dict
 
     def decode(
         self, job: decoding_records.DecodeJob
@@ -473,9 +476,10 @@ class ConfidenceSignal(Protocol):
     one's, fault_model_requirement is what a window model must offer,
     decoder_evidence_requirement is what the decode itself must show
     (decsim/records/decoding.py DecoderEvidence) and is held against the
-    weak row's own declaration at the yaml boundary, and
-    forced_logical_classes are the classes the window must be decoded
-    in, one job each, empty for a signal that reads one ordinary decode.
+    weak row's own declaration at the yaml boundary, evidence_refusal is
+    the cited sentence that refusal prints, and forced_logical_classes
+    are the classes the window must be decoded in, one job each, empty
+    for a signal that reads one ordinary decode.
     The row computes the soft output from the decoder's own output: the
     solves it is given are that window's DecodeResults.
     """
@@ -483,6 +487,7 @@ class ConfidenceSignal(Protocol):
     source: decoding_records.SoftOutputSource
     fault_model_requirement: Any
     decoder_evidence_requirement: frozenset
+    evidence_refusal: str
     forced_logical_classes: tuple
 
     def soft_output_for(

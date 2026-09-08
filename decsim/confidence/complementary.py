@@ -38,6 +38,14 @@ class ComplementaryGap:
     fault_model_requirement = fault_models.GRAPHLIKE_FAULT_MODEL_REQUIRED
     decoder_evidence_requirement = decoding_records.FORCED_CLASS_SOLVES
     forced_logical_classes = FORCED_LOGICAL_CLASSES
+    evidence_refusal = (
+        "a decoder that does not find the minimum-weight correction "
+        "inside a fixed logical class reports a weight that cannot be "
+        "compared across classes, and a virtual detector wrecks a "
+        "cluster-growing decoder's locality (Lee et al. "
+        "arXiv:2510.05795 Sec. 2.1.1); use escalation.confidence "
+        "cluster_gap, or a matching weak decoder"
+    )
 
     def soft_output_for(
         self, solves: tuple

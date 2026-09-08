@@ -35,6 +35,47 @@ class LogicalLedger:
         """A window is decoded again: its contribution is gone until commit."""
         self.contributions.pop(owner_key, None)
 
+    def replace_contributions(
+        self,
+        owner_key: tuple,
+        commit_lo: int,
+        commit_hi: int,
+        replaced_keys: tuple,
+    ) -> None:
+        """A strong window takes the extent of the windows it replaces.
+
+        The windows it absorbs, and the escalated window's own entry,
+        leave the ledger; every contribution that stays must sit outside
+        the strong window's extent, since two owners never claim one
+        round (Toshio et al. 2510.25222 Theorem 1's single strong
+        decoder). Nothing live moves: the strong window's own
+        contribution carries no observables until it commits.
+        """
+        replaced = {owner_key, *replaced_keys}
+        kept = {}
+        for other_key, contribution in self.contributions.items():
+            if other_key not in replaced:
+                kept[other_key] = contribution
+        for other_key, contribution in kept.items():
+            _refuse_overlapping_extent(
+                owner_key, commit_lo, commit_hi, other_key, contribution
+            )
+        kept[owner_key] = decoding_records.LogicalContribution(
+            owner_key=owner_key,
+            commit_lo=commit_lo,
+            commit_hi=commit_hi,
+            ownership_kind="strong_window",
+            logical_observables=None,
+        )
+        self.contributions = kept
+
+    def owns_strong_window(self, owner_key: tuple) -> bool:
+        """Whether a strong window already claims that owner's extent."""
+        contribution = self.contributions.get(owner_key)
+        if contribution is None:
+            return False
+        return contribution.ownership_kind == "strong_window"
+
     def install(
         self, contribution: decoding_records.LogicalContribution
     ) -> None:
@@ -167,6 +208,27 @@ class LogicalLedger:
             covering.append(contribution)
         covering.sort(key=_extent_order)
         return covering
+
+
+def _refuse_overlapping_extent(
+    owner_key: tuple,
+    commit_lo: int,
+    commit_hi: int,
+    other_key: tuple,
+    contribution: decoding_records.LogicalContribution,
+) -> None:
+    """A kept contribution may not touch the strong window's extent."""
+    if other_key[0] != owner_key[0]:
+        return
+    is_begun = contribution.commit_lo <= commit_hi
+    is_unfinished = commit_lo <= contribution.commit_hi
+    if is_begun and is_unfinished:
+        raise RuntimeError(
+            f"strong window {owner_key} extent {commit_lo}-"
+            f"{commit_hi} overlaps unabsorbed logical "
+            f"contribution {other_key} extent "
+            f"{contribution.commit_lo}-{contribution.commit_hi}"
+        )
 
 
 def _refuse_extent(contribution: decoding_records.LogicalContribution) -> None:

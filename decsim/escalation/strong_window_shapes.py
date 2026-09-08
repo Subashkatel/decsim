@@ -274,9 +274,6 @@ class ForwardWindow:
         strong_window = resolved_region.strong_window
         strong_model = resolved_region.strong_model
         restart_model = resolved_region.restart_model
-        logical_candidate = self._strong_window_ownership_candidate(
-            key, resolved_region
-        )
         guard = self.retention.guard_restart_reads(
             key,
             restart_key,
@@ -301,7 +298,12 @@ class ForwardWindow:
             strong_request_created_ticks=strong_request_created_ticks,
         )
         try:
-            self.ledger.contributions = logical_candidate
+            self.ledger.replace_contributions(
+                key,
+                plan.commit_lo,
+                plan.commit_hi,
+                resolved_region.absorbed_window_keys,
+            )
             self.pending.register(held, operation_id, restart_key)
             self.retention.hold_strong_context(
                 key,
@@ -371,35 +373,11 @@ class ForwardWindow:
                 f"duplicate strong escalation for window {key}: one "
                 f"switching event creates exactly one strong job"
             )
-        contribution = self.ledger.contributions.get(key)
-        if contribution is None:
-            return
-        if contribution.ownership_kind == "strong_window":
+        if self.ledger.owns_strong_window(key):
             raise RuntimeError(
                 f"duplicate strong escalation for window {key}: one "
                 f"switching event creates exactly one strong job"
             )
-
-    def _strong_window_ownership_candidate(
-        self, key: tuple, resolved_region: strong_regions.ForwardRegion
-    ) -> dict:
-        """The logical-owner map with the strong window; nothing live moves."""
-        plan = resolved_region.plan
-        replaced_owner_keys = {key, *resolved_region.absorbed_window_keys}
-        candidate = {}
-        for owner_key, contribution in self.ledger.contributions.items():
-            if owner_key not in replaced_owner_keys:
-                candidate[owner_key] = contribution
-        for other_key, contribution in candidate.items():
-            _refuse_overlapping_contribution(key, plan, other_key, contribution)
-        candidate[key] = decoding_records.LogicalContribution(
-            owner_key=key,
-            commit_lo=plan.commit_lo,
-            commit_hi=plan.commit_hi,
-            ownership_kind="strong_window",
-            logical_observables=None,
-        )
-        return candidate
 
     # ---- private: landing the plan
 
@@ -419,7 +397,7 @@ class ForwardWindow:
         if resolved_region.restart_window_key is not None:
             stale_keys.append(resolved_region.restart_window_key)
         for window_key in stale_keys:
-            window = self.planner.windows_by_key[window_key]
+            window = self.planner.window_at(window_key)
             if window.queued:
                 self.requester.withdraw(window)
 
@@ -432,14 +410,7 @@ class ForwardWindow:
         window no longer waits for it, and its rounds are the strong
         request's.
         """
-        window = self.planner.windows_by_key[key]
-        assert not window.queued, f"absorbing queued {key}"
-        assert not window.committed, f"absorbing committed {key}"
-        window.queued = True  # keeps the requester away
-        window.committed = True
-        window.is_absorbed = True
-        if restart_key is not None:
-            self._unhook_restart(key, restart_key, window)
+        self.planner.absorb_window(key, restart_key)
         self.retention.release_hold_if_live(key)
         self.retention.release_restart_reads(key)
         self.retention.release_absorbed_strong_hold(
@@ -450,16 +421,6 @@ class ForwardWindow:
             f"window {key} absorbed into the strong window "
             f"(weak chain skips it)",
         )
-
-    def _unhook_restart(
-        self, key: tuple, restart_key: tuple, window: window_records.Window
-    ) -> None:
-        restart = self.planner.windows_by_key[restart_key]
-        if key in restart.deps:
-            restart.deps.remove(key)
-            restart.deps_remaining -= 1
-        if restart_key in window.dependents:
-            window.dependents.remove(restart_key)
 
     def _log_assignment(
         self,
@@ -495,7 +456,7 @@ class ForwardWindow:
             plan.commit_hi,
             plan.restart_seam_fault_owner,
         )
-        restart = self.planner.windows_by_key[restart_key]
+        restart = self.planner.window_at(restart_key)
         # its absorbed dependency is gone; no strong sibling in the
         # forward scheme
         self.requester.request_if_ready(restart, None)
@@ -510,12 +471,8 @@ class ForwardWindow:
         seam_owner: window_records.SeamFaultOwner,
     ) -> None:
         """Install the restart window's re-sliced reads and their model."""
-        restart = self.planner.windows_by_key[restart_key]
-        restart.buffer_lo = buffer_lo
-        restart.round_count = restart.buffer_hi - restart.buffer_lo + 1
+        restart = self.planner.reslice_window(restart_key, buffer_lo, model)
         self.retention.replace_window_reads(restart_key, restart)
-        if model is not None:
-            self.planner.model_by_window[restart_key] = model
         seam_owner_name = seam_owner.name.lower()
         self.engine.log(
             decode_queue_module.LOG_SOURCE,
@@ -724,25 +681,6 @@ def _released(
     """The held window's job with its selection's tick."""
     assert held.selection_arrival_ticks is not None, held.key
     return DeferredStrongJob(job, held.selection_arrival_ticks)
-
-
-def _refuse_overlapping_contribution(
-    key: tuple,
-    plan: window_records.StrongRegionPlan,
-    other_key: tuple,
-    contribution: decoding_records.LogicalContribution,
-) -> None:
-    if other_key[0] != key[0]:
-        return
-    is_begun = contribution.commit_lo <= plan.commit_hi
-    is_unfinished = plan.commit_lo <= contribution.commit_hi
-    if is_begun and is_unfinished:
-        raise RuntimeError(
-            f"strong window {key} extent {plan.commit_lo}-"
-            f"{plan.commit_hi} overlaps unabsorbed logical "
-            f"contribution {other_key} extent "
-            f"{contribution.commit_lo}-{contribution.commit_hi}"
-        )
 
 
 def _work_record_order(record: tuple) -> bytes:

@@ -228,12 +228,53 @@ class WindowPlanner:
                 later.append(self.plan.windows[(operation_id, index)])
         return later
 
+    def absorb_window(
+        self, key: tuple, restart_key: Optional[tuple]
+    ) -> window_records.Window:
+        """A window a strong region covers is never weak-decoded.
+
+        It counts queued, so the requester leaves it alone, and
+        committed with no logical contribution; the window that restarts
+        the weak chain no longer waits for it.
+        """
+        window = self.plan.windows[key]
+        assert not window.queued, f"absorbing queued {key}"
+        assert not window.committed, f"absorbing committed {key}"
+        window.queued = True
+        window.committed = True
+        window.is_absorbed = True
+        if restart_key is not None:
+            self._unhook_dependency(key, restart_key, window)
+        return window
+
+    def reslice_window(
+        self, key: tuple, buffer_lo: int, model
+    ) -> window_records.Window:
+        """Move a window's read start and install the model it reads with."""
+        window = self.plan.windows[key]
+        window.buffer_lo = buffer_lo
+        window.round_count = window.buffer_hi - window.buffer_lo + 1
+        if model is not None:
+            self.model_by_window[key] = model
+        return window
+
     def check_absorbable(self, window_keys) -> None:
         """Every listed window is still undecoded and uncommitted."""
         for key in window_keys:
             window = self.plan.windows[key]
             assert not window.committed, f"absorbing committed {key}"
             assert window.t_done is None, f"absorbing decoded {key}"
+
+    def _unhook_dependency(
+        self, key: tuple, dependent_key: tuple, window: window_records.Window
+    ) -> None:
+        """The dependent no longer waits on this window's commit."""
+        dependent = self.plan.windows[dependent_key]
+        if key in dependent.deps:
+            dependent.deps.remove(key)
+            dependent.deps_remaining -= 1
+        if dependent_key in window.dependents:
+            window.dependents.remove(dependent_key)
 
     def strong_window_model(
         self,

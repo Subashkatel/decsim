@@ -26,6 +26,20 @@ CONFIGS = pathlib.Path("configs")
 WEAK_INPUT_PATH = transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER
 
 
+def _machine_formed_at(where: str):
+    """The weak baseline at d=3, forming its detection events there."""
+    config_path = CONFIGS / "weak_decoder_baseline.yaml"
+    config = experiment.load_experiment(config_path)
+    settings = config.point_settings(
+        physical_error_probability=0.001, distance=3, round_period_us=1.0
+    )
+    controller = dataclasses.replace(
+        settings.controller, detection_events_formed_at=where
+    )
+    settings = dataclasses.replace(settings, controller=controller)
+    return machine_module.Machine.build(settings, 0)
+
+
 def _machine(**weak_changes):
     """The weak baseline at d=3, counting its data movement."""
     config_path = CONFIGS / "weak_decoder_baseline.yaml"
@@ -67,6 +81,15 @@ def _busy_unit_ticks(machine) -> int:
     """The time-integrated ticks the pool's units held their compute."""
     utilization = machine.observation.decoder_utilization.result()
     return utilization["busy_unit_ticks"]
+
+
+def _weak_input_bits(machine) -> int:
+    """The bits the weak tier's input link carried."""
+    snapshot = machine.observation.traffic.snapshot()
+    for path_snapshot in snapshot.paths:
+        if path_snapshot.path is WEAK_INPUT_PATH:
+            return path_snapshot.counters.known_payload_bits
+    return 0
 
 
 def _observables(result) -> list:
@@ -159,3 +182,31 @@ def test_a_result_blocking_value_that_is_not_a_row_is_refused_by_name():
         ValueError, match="weak_decoder.result_blocks_unit 'yes'"
     ):
         _machine(result_blocks_unit="yes")
+
+
+def test_the_formation_default_sends_the_events_from_the_controller():
+    """Controller is today's behaviour: the input link carries the events."""
+    default = _machine()
+    default.run()
+    at_the_controller = _machine_formed_at("controller")
+    at_the_controller.run()
+    assert _weak_input_bits(at_the_controller) == _weak_input_bits(default)
+
+
+def test_events_formed_at_the_decoder_widen_the_tiers_input_link():
+    """The store and the input link then carry the raw outcomes."""
+    at_the_controller = _machine_formed_at("controller")
+    controller_result = at_the_controller.run()
+    at_the_decoder = _machine_formed_at("decoder")
+    decoder_result = at_the_decoder.run()
+    assert _weak_input_bits(at_the_decoder) > _weak_input_bits(
+        at_the_controller
+    )
+    assert _observables(decoder_result) == _observables(controller_result)
+
+
+def test_a_formation_place_that_is_not_a_row_is_refused_by_name():
+    with pytest.raises(
+        ValueError, match="controller.detection_events_formed_at 'workstation'"
+    ):
+        _machine_formed_at("workstation")

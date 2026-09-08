@@ -21,6 +21,18 @@ IDLE_POLICIES = {
     "extend_stream": policies.ExtendStream,
 }
 
+# controller.detection_events_formed_at names where the round's
+# measurement outcomes become detection events, and the row is whether
+# the round leaves the controller sized by those events. At the
+# controller, "inside the workstation, measurements are converted into
+# detections and then streamed to the real-time decoding software via a
+# shared memory buffer" (Google 2408.13687 lines 474-476). At the
+# decoder, the controller writes the raw outcomes "sequentially to the
+# decoder" and "the decoder computes the syndrome from measurement
+# outcomes" (Caune et al. 2410.05202 lines 1252-1256), so the store and
+# the tier's input link carry the wider raw round.
+DETECTION_EVENT_FORMATION = {"controller": True, "decoder": False}
+
 
 class PackingOverflowPolicy(enum.Enum):
     """What the controller does with a finished round its store cannot take.
@@ -59,6 +71,10 @@ class ControllerSettings:
     hear of it (round_assembly.RoundsInFlight); None is unbounded.
     packing_overflow is what happens to a finished round the store cannot
     take: the yaml's stall or drop_round.
+    detection_events_formed_at names a row of
+    DETECTION_EVENT_FORMATION: where the round's measurement outcomes
+    become detection events, which is the width the store and the
+    decoder's input link carry.
     """
 
     readout_to_bits_microseconds: float = 0.0
@@ -66,6 +82,7 @@ class ControllerSettings:
     decision_to_pulse_microseconds: float = 0.0
     packing_rounds_in_flight: Optional[int] = None
     packing_overflow: PackingOverflowPolicy = PackingOverflowPolicy.STALL
+    detection_events_formed_at: str = "controller"
 
     def __post_init__(self) -> None:
         config.check_duration(
@@ -94,12 +111,14 @@ class ControllerSettings:
         decision_microseconds = clocks.microseconds(decision_cycles, clock)
         packing_rounds_in_flight = section.get("packing_rounds_in_flight")
         packing_overflow = _packing_overflow(section)
+        formed_at = section.get("detection_events_formed_at", "controller")
         return cls(
             readout_to_bits_microseconds=readout_microseconds,
             packing_microseconds_per_round=packing_microseconds,
             decision_to_pulse_microseconds=decision_microseconds,
             packing_rounds_in_flight=packing_rounds_in_flight,
             packing_overflow=packing_overflow,
+            detection_events_formed_at=formed_at,
         )
 
     def readout_to_bits_ticks(self) -> int:

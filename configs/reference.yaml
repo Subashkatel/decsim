@@ -228,6 +228,26 @@ controller:                        # controller work per round, in cycles of its
                                    # LILLIPUT's readout buffer overwrites the latest
                                    # value (2108.06569), a storage choice neither
                                    # word models
+  detection_events_formed_at: controller
+                                   # controller | decoder: where the round's
+                                   # measurement outcomes become detection
+                                   # events. controller sends the events on, so
+                                   # Buffer 0 and the tier's input link carry the
+                                   # narrower round: "inside the workstation,
+                                   # measurements are converted into detections
+                                   # and then streamed to the real-time decoding
+                                   # software via a shared memory buffer" (Google
+                                   # 2408.13687 lines 474-476). decoder sends the
+                                   # raw outcomes on instead, so the store and
+                                   # that link carry the wider round and the
+                                   # decoder forms the events: the controller
+                                   # writes the outcomes "sequentially to the
+                                   # decoder" and "the decoder computes the
+                                   # syndrome from measurement outcomes" (Caune
+                                   # et al. 2410.05202 lines 1252-1256). The
+                                   # values are the device's either way, because
+                                   # the formation table reads every round once,
+                                   # in round order
 
 clocks:                            # clock domain name -> MHz; a link prices its
                                    # cycles on the domain it names. More domains

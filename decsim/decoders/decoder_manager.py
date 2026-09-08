@@ -254,6 +254,27 @@ class DecoderManager:
             return
         self.outcomes.complete_strong(completion)
 
+    def charge_soft_output(
+        self, job: decoding_records.DecodeJob, ticks: int
+    ) -> None:
+        """Charge the confidence's own computation on the job's unit.
+
+        Decision D8: the walk over a decode's growth reads the evidence
+        that decode left behind, and the evidence and its reader are the
+        same hardware (Toshio 2510.25222 lines 152-160), so the time is
+        the unit's. The job's service carries it, so the record of that
+        decode ends when the confidence it fed is done, and the window
+        side waits for the same ticks before its answer moves on.
+        """
+        if ticks <= 0:
+            return
+        job.soft_output_ticks = ticks
+        unit_name = job.decoding_unit_name
+        self.engine.log(
+            decode_queue.LOG_SOURCE,
+            f"CONFIDENCE {job.label} on unit {unit_name}: {ticks} ticks",
+        )
+
     def resolve_weak_request(
         self,
         job: decoding_records.DecodeJob,

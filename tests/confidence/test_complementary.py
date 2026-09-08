@@ -98,7 +98,8 @@ def _gaps_and_failures() -> tuple:
     failures = []
     for shot, observable in zip(events, observables):
         solves = _forced_class_solves(row, model, shot)
-        soft_output = signal.soft_output_for(solves)
+        computation = signal.compute(solves)
+        soft_output = computation.soft_output
         decibels = soft_output.gap * DECIBELS_PER_NAT
         gap_decibels.append(decibels)
         weights = _class_weights(solves)
@@ -146,7 +147,9 @@ def test_a_window_without_an_observable_reports_no_weight_and_no_gap():
     solves = _forced_class_solves(row, model, events[0])
     assert _class_weights(solves) == [None, None]
     signal = complementary.ComplementaryGap()
-    assert signal.soft_output_for(solves) is None
+    computation = signal.compute(solves)
+    assert computation.soft_output is None
+    assert computation.ticks == 0
     assert signal.source is complementary.COMPLEMENTARY_GAP_SOURCE
     assert signal.fault_model_requirement is requirement
 
@@ -160,7 +163,8 @@ def test_the_gap_is_the_weight_difference_of_the_two_classes():
     events, _observables = windows.sampled_shots(circuit, 1, 3)
     solves = _forced_class_solves(row, model, events[0])
     signal = complementary.ComplementaryGap()
-    soft_output = signal.soft_output_for(solves)
+    computation = signal.compute(solves)
+    soft_output = computation.soft_output
     difference = (
         soft_output.complementary_class_weight
         - soft_output.decoded_class_weight
@@ -205,7 +209,8 @@ def test_the_two_class_weights_are_the_pinned_graphs_own_edges():
     assert weights[0] == pytest.approx(2.772588722239781, abs=1e-6)
     assert weights[1] == pytest.approx(2.2540580520993854, abs=1e-6)
     signal = complementary.ComplementaryGap()
-    soft_output = signal.soft_output_for(solves)
+    computation = signal.compute(solves)
+    soft_output = computation.soft_output
     assert soft_output.decoded_class_weight == pytest.approx(
         2.2540580520993854, abs=1e-6
     )

@@ -48,7 +48,14 @@ escalation:
 #                                  # Algorithm 2), so it needs a cluster-based
 #                                  # decoder: union_find today. The pairing is
 #                                  # refused by name at load when the weak row's
-#                                  # decode cannot produce the signal's evidence
+#                                  # decode cannot produce the signal's evidence.
+#                                  # A signal's own computation is charged on
+#                                  # the weak unit that produced the evidence
+#                                  # (decision D8): complementary_gap subtracts
+#                                  # two numbers and charges nothing, cluster_gap
+#                                  # charges the walk, measured on the host clock
+#                                  # the way a measured decoder is, so a run with
+#                                  # it reports a longer weak service
 #   gap_threshold_db: 20.0         # keep the weak result when its complementary
 #                                  # gap is at or above this, in the paper's
 #                                  # decibels (Toshio 2510.25222 gth = 20 dB).

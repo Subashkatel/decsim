@@ -365,6 +365,50 @@ def test_a_union_find_weak_tier_reports_the_gap_of_its_own_growth():
     assert union_find_ticks > 3 * matching_ticks
 
 
+def _confidence_charges(machine) -> list:
+    """The ticks each CONFIDENCE line of the run charged, in order."""
+    charged = []
+    for line in machine.observation.log.lines:
+        if "CONFIDENCE" not in line:
+            continue
+        parts = line.split(": ")
+        charge_text = parts[-1]
+        ticks_text = charge_text.replace(" ticks", "")
+        charged.append(int(ticks_text))
+    return charged
+
+
+def test_the_cluster_gaps_walk_is_charged_on_the_unit_that_grew_it():
+    """Decision D8: the walk over a decode's growth is the unit's time.
+
+    Toshio et al. 2510.25222 lines 152-160 compute the soft output on
+    the weak decoder itself, and Meister's Algorithm 2 walks the
+    union-find decode's own edge intervals (2405.07433 lines 518-536),
+    so the evidence and its reader are the same hardware. The run
+    charges one walk per window on the weak unit, and each weak service
+    ends after the decode and the walk it fed.
+    """
+    settings = _switching_memory("union_find", "cluster_gap")
+    machine = machine_module.Machine.build(settings, 0)
+    machine.run()
+    charged = _confidence_charges(machine)
+    services = machine.observation.decode_records.services
+    assert len(charged) == len(services)
+    for ticks in charged:
+        assert ticks > 0
+    named = []
+    for line in machine.observation.log.lines:
+        if "CONFIDENCE" in line:
+            named.append(line)
+    # the weak tier of this card is the default pool's one unit
+    assert "on unit default#0" in named[0]
+    service_ticks = _weak_service_ticks(machine)
+    assert min(service_ticks) > max(charged)
+    assert sum(service_ticks) > sum(charged)
+    for record in machine.observation.decode_records.requests:
+        assert record.soft_output is not None
+
+
 @pytest.mark.parametrize(
     "weak_kind, confidence, sentence",
     [

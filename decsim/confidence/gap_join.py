@@ -13,6 +13,12 @@ referent puts a two-result comparison in the producer or the consumer
 and none puts it in the scheduler (gem5's SplitDataRequest counting its
 own halves, src/cpu/o3/lsq.cc; RMT's store comparator beside the store
 queue, Mukherjee et al. ISCA 2002).
+
+The join computes nothing itself and charges nothing to itself: the
+signal row reports what its computation cost, the join asks the decoder
+side to charge those ticks on the unit that produced the evidence, and
+the window's answer waits for them, so both the unit's service and the
+window's reaction time carry the signal's work (decision D8).
 """
 
 import dataclasses
@@ -86,18 +92,36 @@ class WindowGapJoin:
         self.trace.solve_held.fire(job, result)
 
     def _join(self, held: list) -> None:
-        """Ask the signal for the window's gap and commit its answer."""
+        """Ask the signal for the window's gap and commit its answer.
+
+        The signal's own computation is charged on the unit that
+        produced the evidence, and the answer waits for it (decision
+        D8); a signal that only subtracts reports no ticks and the
+        answer goes on at once.
+        """
         solves = []
         for solve in held:
             solves.append(solve.result)
-        soft_output = self.signal.soft_output_for(tuple(solves))
+        computation = self.signal.compute(tuple(solves))
         answer = _answering_solve(held)
-        answer.result.soft_output = soft_output
-        gap_text = _gap_text(soft_output)
+        answer.result.soft_output = computation.soft_output
+        gap_text = _gap_text(computation.soft_output)
         self.engine.log(
             decode_queue_module.LOG_SOURCE,
             f"GAP JOIN {answer.job.label}: {gap_text}",
         )
+        self.decode_queue.charge_soft_output(answer.job, computation.ticks)
+        if computation.ticks <= 0:
+            self._answer(held, answer)
+            return
+        self.engine.schedule(
+            computation.ticks,
+            lambda: self._answer(held, answer),
+            label=f"soft_output_done({answer.job.label})",
+        )
+
+    def _answer(self, held: list, answer: HeldSolve) -> None:
+        """Close the window's other solves and hand its answer on."""
         for solve in held:
             if solve is not answer:
                 self.decode_queue.close_companion_request(

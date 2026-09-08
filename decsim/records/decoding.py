@@ -37,6 +37,22 @@ class SoftOutput:
     complementary_class_weight: Optional[float] = None
 
 
+@dataclass(frozen=True)
+class SoftOutputComputation:
+    """One window's soft output and what computing it cost.
+
+    ticks are the weak tier's clock ticks the signal's own computation
+    took: zero for a subtraction, the measured or declared time of a
+    walk over the decode's growth (decision D8, Meister et al.
+    2405.07433 Algorithm 2). The unit that produced the evidence is
+    charged for them, because the evidence and its reader are the same
+    hardware (Toshio et al. 2510.25222 lines 152-160).
+    """
+
+    soft_output: Optional[SoftOutput]
+    ticks: int = 0
+
+
 # ---- consumer hold tokens: who keeps rounds in a round store and why
 
 
@@ -243,6 +259,12 @@ class DecodeJob:
         field(default_factory=set)
     )
     service_dispatch_ticks: Optional[int] = None
+    # the unit that ran this decode, by name, kept after the job leaves
+    # its slot so the confidence its evidence feeds is attributed to it
+    decoding_unit_name: Optional[str] = None
+    # ticks of confidence computation charged on that unit after the
+    # decode, so the job's service carries the signal's own work (D8)
+    soft_output_ticks: int = 0
 
     def payload_bits(self) -> Optional[int]:
         """The bits of the job's payloads; None when any size is unknown."""

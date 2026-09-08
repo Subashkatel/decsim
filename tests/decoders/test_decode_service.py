@@ -89,7 +89,7 @@ def _send_after(engine, ticks):
     return send
 
 
-def _manager(engine, decoder):
+def _manager(engine, decoder, dispatch_ticks=0):
     router = decoders.CodeRouter(decoder)
     scheduler = schedulers.FifoScheduler()
     policy = escalation_policies.Baseline()
@@ -99,7 +99,54 @@ def _manager(engine, decoder):
         scheduler=scheduler,
         num_units=1,
         escalation_policy=policy,
+        dispatch_ticks=dispatch_ticks,
     )
+
+
+def _input_landing_ticks(dispatch_ticks: int) -> list:
+    """The tick each of two jobs' inputs was asked for, in order."""
+    engine = engine_module.Engine()
+    decoder = decoders.PresetLatencyDecoder(1.0)
+    manager = _manager(engine, decoder, dispatch_ticks)
+    asked = []
+    for index in (0, 1):
+        job = _job(index)
+        send = _recording_send(engine, asked, 5)
+        on_decoded = _resolving(manager)
+        manager.enqueue(job, send, on_decoded)
+    engine.run()
+    return asked
+
+
+def _recording_send(engine, asked: list, ticks: int):
+    """A send that records the tick the manager asked for the input."""
+
+    def send(on_landed):
+        asked.append(engine.now)
+        engine.schedule(ticks, on_landed)
+        return ticks
+
+    return send
+
+
+def test_the_managers_dispatch_cost_delays_every_input_send_by_itself():
+    """decoder_manager.dispatch_cycles, charged once per dispatch.
+
+    Caune et al. arXiv:2410.05202 lines 519-526 and 636-641 measure 250
+    to 370 control cycles per decode between a decode's arrival and its
+    dispatch. The cost sits between the placement and the input send, so
+    every job's input is asked for exactly one charge later than it is
+    with no cost at all, whether the job was placed at once or waited.
+    """
+    free_ticks = _input_landing_ticks(0)
+    charged = config.microseconds_to_ticks(2.0)
+    charged_ticks = _input_landing_ticks(charged)
+    assert len(free_ticks) == 2
+    shifts = []
+    for index, tick in enumerate(charged_ticks):
+        shift = tick - free_ticks[index]
+        shifts.append(shift)
+    assert shifts == [charged, charged]
 
 
 def _resolving(manager):

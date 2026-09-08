@@ -52,6 +52,7 @@ class DecoderManager:
             decoder_memory_module.DecoderMemoryConfig
         ] = None,
         escalation_policy,
+        dispatch_ticks: int = 0,
     ):
         if unit_pools is None:
             unit_pools = {"default": num_units}
@@ -76,6 +77,7 @@ class DecoderManager:
             self.strong_requests,
             on_completed=self.decode_completed,
             dispatch=self.dispatch,
+            dispatch_ticks=dispatch_ticks,
         )
         self.dispatcher = decode_dispatch.DecodeDispatcher(
             self.queue, pool, self.service

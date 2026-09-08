@@ -310,6 +310,16 @@ decoder_manager:                   # the manager that gives ready windows a unit
                                    # escalation only (it contradicts
                                    # escalation.run_both_at_once and the
                                    # double window)
+  clock: fridge                    # the domain dispatch_cycles counts in
+  dispatch_cycles: 0               # the manager's own work per dispatch,
+                                   # charged on its clock after a job is placed
+                                   # on a unit and before that job's input is
+                                   # asked for. 0 is the default and models
+                                   # none of it. Caune et al. arXiv:2410.05202
+                                   # lines 519-526 and 636-641 measure 250 to
+                                   # 370 control cycles per decode between a
+                                   # decode's arrival and its dispatch, which
+                                   # is the range to price this from
 
 pauli_frame:
   clock: fridge

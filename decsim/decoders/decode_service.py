@@ -15,6 +15,7 @@ and keeps at most its depth in flight (Hennessy and Patterson App. C;
 rowD4).
 """
 
+import functools
 from typing import Callable
 
 import numpy
@@ -61,6 +62,7 @@ class DecodeService:
         strong_requests: strong_requests_module.StrongRequests,
         on_completed: Callable[[decoding_records.DecodeJob, object], None],
         dispatch: Callable[[], None],
+        dispatch_ticks: int = 0,
     ) -> None:
         self.engine = engine
         self.pool = pool
@@ -68,6 +70,9 @@ class DecodeService:
         self.strong_requests = strong_requests
         self.on_completed = on_completed
         self.dispatch = dispatch
+        # the manager's own work per dispatch, charged before the input
+        # is asked for (decoder_manager.dispatch_cycles)
+        self.dispatch_ticks = dispatch_ticks
         self.job_dispatched = trace_source.TraceSource()
         self.input_landed = trace_source.TraceSource()
         self.job_started = trace_source.TraceSource()
@@ -135,6 +140,37 @@ class DecodeService:
             job.window.t_dispatch = self.engine.now
         self._log_assignment(pool, job, claim_compute)
         self.job_dispatched.fire(job, unit)
+        self._charge_dispatch(job, unit, claim_compute)
+
+    def _charge_dispatch(
+        self,
+        job: decoding_records.DecodeJob,
+        unit: decoder_unit_module.DecoderUnit,
+        claim_compute: bool,
+    ) -> None:
+        """The manager's own work, before this job's input is asked for.
+
+        Caune et al. 2410.05202 (lines 519-526 and 636-641) measure 250
+        to 370 cycles of the control system's own clock between a
+        decode's arrival and its dispatch;
+        decoder_manager.dispatch_cycles prices that, zero by default.
+        """
+        if self.dispatch_ticks == 0:
+            self._ask_for_input(job, unit, claim_compute)
+            return
+        ask = functools.partial(self._ask_for_input, job, unit, claim_compute)
+        label = f"dispatch_cost({job.label})"
+        self.engine.schedule(self.dispatch_ticks, ask, label=label)
+
+    def _ask_for_input(
+        self,
+        job: decoding_records.DecodeJob,
+        unit: decoder_unit_module.DecoderUnit,
+        claim_compute: bool,
+    ) -> None:
+        """Say the job's input may move; a job cancelled meanwhile does not."""
+        if job.cancelled:
+            return
         self._stage_input(job, unit)
         if claim_compute:
             self._predict_compute_free(job)

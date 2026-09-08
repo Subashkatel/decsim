@@ -60,9 +60,15 @@ class DecodeOutcomes:
         committer, or the confidence join in front of it when the
         window's answer takes two forced-class solves. The verdict on
         the window comes back later, through resolve_weak_request.
+
+        The service ends when the decode and the confidence its evidence
+        fed are both done: the join charges the signal's own computation
+        on this unit while the delivery runs (decision D8), and a run
+        whose signal only subtracts charges nothing.
         """
         job.on_decoded(job, result)
-        self.trace.service_ended.fire(job, self.engine.now)
+        service_ended_ticks = self.engine.now + job.soft_output_ticks
+        self.trace.service_ended.fire(job, service_ended_ticks)
 
     def resolve_weak_request(
         self,

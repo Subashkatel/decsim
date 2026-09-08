@@ -51,7 +51,9 @@ def test_a_decode_without_growth_reports_no_gap():
     """The fail-safe: a job with no window model grows nothing."""
     signal = cluster.ClusterGap()
     solve = decoding_records.DecodeResult(1, 0)
-    assert signal.soft_output_for((solve,)) is None
+    computation = signal.compute((solve,))
+    assert computation.soft_output is None
+    assert computation.ticks == 0
 
 
 def test_the_gap_is_read_off_the_decode_that_produced_the_correction():
@@ -68,7 +70,8 @@ def test_the_gap_is_read_off_the_decode_that_produced_the_correction():
     graph = evidence.graph
     assert graph.weight_step == window_decoder.DEFAULT_WEIGHT_STEP
     signal = cluster.ClusterGap()
-    soft_output = signal.soft_output_for((result,))
+    computation = signal.compute((result,))
+    soft_output = computation.soft_output
     assert soft_output.source is signal.source
     assert soft_output.source.gap_units == "log_likelihood_weight"
     assert soft_output.gap > 0.0
@@ -92,14 +95,16 @@ def test_the_cluster_gap_and_the_complementary_gap_agree_on_one_window():
     for shot in events:
         hard_job = windows.job_for(model, shot)
         hard_result = hard_row.decode(hard_job)
-        cluster_output = cluster_signal.soft_output_for((hard_result,))
+        cluster_computation = cluster_signal.compute((hard_result,))
+        cluster_output = cluster_computation.soft_output
         solves = []
         for forced_class in complementary_signal.forced_logical_classes:
             forced_job = windows.job_for(model, shot)
             forced_job.forced_logical_class = forced_class
             solve = matching_row.decode(forced_job)
             solves.append(solve)
-        matching_output = complementary_signal.soft_output_for(tuple(solves))
+        matching_computation = complementary_signal.compute(tuple(solves))
+        matching_output = matching_computation.soft_output
         difference = cluster_output.gap - matching_output.gap
         differences.append(abs(difference))
     weight_step = window_decoder.DEFAULT_WEIGHT_STEP

@@ -47,15 +47,20 @@ class ComplementaryGap:
         "cluster_gap, or a matching weak decoder"
     )
 
-    def soft_output_for(
-        self, solves: tuple
-    ) -> Optional[decoding_records.SoftOutput]:
+    def compute(self, solves: tuple) -> decoding_records.SoftOutputComputation:
         """The gap between the weights of one window's forced solves.
 
-        None when a weight is missing: a window whose model pins no
-        observable has no forced solve, and the escalation policy then
-        escalates it (escalation/policies.py).
+        The gap is None when a weight is missing: a window whose model
+        pins no observable has no forced solve, and the escalation
+        policy then escalates it (escalation/policies.py). The
+        computation is one subtraction of two numbers the decodes
+        already reported, so it charges no time (decision D8).
         """
+        soft_output = self._gap_of(solves)
+        return decoding_records.SoftOutputComputation(soft_output, 0)
+
+    def _gap_of(self, solves: tuple) -> Optional[decoding_records.SoftOutput]:
+        """|w(class 1) - w(class 0)|, or None when a weight is missing."""
         weights = []
         for solve in solves:
             if solve.forced_class_weight is None:

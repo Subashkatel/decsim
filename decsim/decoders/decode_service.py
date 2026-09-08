@@ -128,6 +128,9 @@ class DecodeService:
         job.pool = pool
         self._assign_service_key(job)
         unit.admit(job)
+        # kept past the job's eviction: the confidence its evidence
+        # feeds is charged on this unit and names it (decision D8)
+        job.decoding_unit_name = unit.name
         if claim_compute:
             self.pool.claim(unit, job)
         if job.window is not None:

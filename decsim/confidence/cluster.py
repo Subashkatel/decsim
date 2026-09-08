@@ -11,6 +11,15 @@ reads the growth that decode already returned on its result
 and no second decode is run. The signal needs one ordinary decode of the
 window, not a forced-class pair, so its forced_logical_classes is empty.
 
+The walk is not free. Algorithm 2 is a Dijkstra over the decode's own
+edge intervals, and this Python implementation of it takes milliseconds
+where the union-find decode takes hundreds of microseconds, so the row
+reports what it cost: measured on the host clock the way a measured
+decoder is, or the declared number of a tier that is a card. The
+evidence and its reader are the same hardware, so the time is charged on
+the unit that produced the growth (decision D8; Toshio et al.
+2510.25222 lines 152-160 compute the soft output on the weak decoder).
+
 The exact likelihood-ratio reading of the gap holds only in the uniform
 repetition-code setting of Meister's Theorem 10; on a surface code it is
 a confidence, not a calibrated failure probability. The gap needs one
@@ -21,9 +30,11 @@ weight step.
 import heapq
 import itertools
 import math
+import time
 from fractions import Fraction
 from typing import Optional, Union
 
+import decsim.config as config
 import decsim.decoders.union_find.window_decoder as window_decoder
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.records.decoding as decoding_records
@@ -62,28 +73,48 @@ class ClusterGap:
     )
 
     def __init__(
-        self, weight_step: float = window_decoder.DEFAULT_WEIGHT_STEP
+        self,
+        weight_step: float = window_decoder.DEFAULT_WEIGHT_STEP,
+        walk_microseconds: Optional[float] = None,
     ) -> None:
         self.weight_step = window_decoder.normalized_weight_step(weight_step)
         self.source = union_find_cluster_gap_source(self.weight_step)
+        # what the walk costs on the weak tier's clock: a card's declared
+        # number, or None to measure the call as a measured decoder is
+        self.walk_microseconds = walk_microseconds
 
-    def soft_output_for(
-        self, solves: tuple
-    ) -> Optional[decoding_records.SoftOutput]:
-        """The gap of the window's one decode, in natural-log weight.
+    def compute(self, solves: tuple) -> decoding_records.SoftOutputComputation:
+        """The gap of the window's one decode, and what the walk cost.
 
-        None when the decode carried no growth: a job without a window
-        model runs no growth, and the escalation policy escalates a
-        window without a soft output (escalation/policies.py).
+        The gap is in natural-log weight, and None when the decode
+        carried no growth: a job without a window model runs no growth,
+        and the escalation policy escalates a window without a soft
+        output (escalation/policies.py). A window with no growth walks
+        nothing and charges nothing.
         """
         evidence = solves[0].cluster_evidence
         if evidence is None:
-            return None
+            return decoding_records.SoftOutputComputation(None, 0)
         graph = evidence.graph
         _require_one_logical_row(graph)
         _require_weight_step(graph, self.weight_step)
+        gap, ticks = self._walk(evidence)
+        soft_output = decoding_records.SoftOutput(gap=gap, source=self.source)
+        return decoding_records.SoftOutputComputation(soft_output, ticks)
+
+    def _walk(self, evidence) -> tuple:
+        """The gap and the ticks the walk cost, declared or measured."""
+        if self.walk_microseconds is not None:
+            gap = _cluster_gap(evidence, self.weight_step)
+            ticks = config.microseconds_to_ticks(self.walk_microseconds)
+            return gap, ticks
+        started_ns = time.perf_counter_ns()
         gap = _cluster_gap(evidence, self.weight_step)
-        return decoding_records.SoftOutput(gap=gap, source=self.source)
+        finished_ns = time.perf_counter_ns()
+        elapsed_ns = finished_ns - started_ns
+        elapsed_microseconds = elapsed_ns / 1000.0
+        ticks = config.microseconds_to_ticks(elapsed_microseconds)
+        return gap, ticks
 
 
 def _require_one_logical_row(graph) -> None:

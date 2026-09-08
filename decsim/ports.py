@@ -186,6 +186,17 @@ class DecodeQueue(Protocol):
     ) -> None:
         """The selection landed: the request's result may reach the window."""
 
+    def charge_soft_output(
+        self, job: decoding_records.DecodeJob, ticks: int
+    ) -> None:
+        """Charge the confidence's own computation on the job's unit.
+
+        The window side computes no confidence: the signal row reports
+        what its computation cost and the join asks the decoder side to
+        put those ticks on the unit that produced the evidence, whose
+        service then carries them (decision D8).
+        """
+
 
 # ------------------------------------------- the decoder returns a result
 
@@ -490,10 +501,15 @@ class ConfidenceSignal(Protocol):
     evidence_refusal: str
     forced_logical_classes: tuple
 
-    def soft_output_for(
-        self, solves: tuple
-    ) -> Optional[decoding_records.SoftOutput]:
-        """The window's confidence; None when the evidence is missing."""
+    def compute(self, solves: tuple) -> decoding_records.SoftOutputComputation:
+        """The window's confidence and what computing it cost.
+
+        The soft output is None when the evidence is missing. The ticks
+        are the row's own computation on the weak tier's clock: zero for
+        a subtraction, and for a walk over the decode's growth the time
+        it took, measured on the host clock the way a measured decoder
+        is or declared as a card number (decision D8).
+        """
 
 
 @runtime_checkable

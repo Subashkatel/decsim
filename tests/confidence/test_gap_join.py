@@ -16,6 +16,7 @@ import pathlib
 import pytest
 
 import decsim.confidence.gap_join as gap_join_module
+import decsim.engine as engine_module
 import decsim.machine as machine_module
 import decsim.records.decoding as decoding_records
 import decsim.records.transfers as transfer_records
@@ -168,3 +169,99 @@ def test_a_window_whose_other_solve_never_arrives_refuses_the_run():
     join.accept_result = hold_one_solve_alone
     with pytest.raises(RuntimeError, match="unjoined solve"):
         machine.run()
+
+
+class _CostingSignal:
+    """A signal row that reports a gap and what computing it cost."""
+
+    forced_logical_classes = ()
+
+    def __init__(self, ticks: int) -> None:
+        self.ticks = ticks
+        self.source = decoding_records.SoftOutputSource(
+            method="test_signal",
+            cluster_origin="test",
+            growth_schedule="test",
+            gap_units="log_likelihood_weight",
+            correction="none",
+            weight_step_natural_log=None,
+            references=(),
+        )
+
+    def compute(self, solves):
+        """One gap, and the ticks this row's own computation took."""
+        del solves
+        soft_output = decoding_records.SoftOutput(gap=1.0, source=self.source)
+        return decoding_records.SoftOutputComputation(soft_output, self.ticks)
+
+
+class _RecordingVerdict:
+    """Keeps the tick at which each window's answer reached it."""
+
+    def __init__(self, engine) -> None:
+        self.engine = engine
+        self.answers = []
+
+    def accept_result(self, job, result):
+        """The window's answer, stamped with the tick it arrived."""
+        self.answers.append((job, result, self.engine.now))
+
+
+class _RecordingQueue:
+    """The decoder side, as the join sees it: it charges and closes."""
+
+    def __init__(self) -> None:
+        self.charges = []
+        self.closed = []
+
+    def charge_soft_output(self, job, ticks):
+        """Charge the signal's own computation on the job's unit."""
+        job.soft_output_ticks = ticks
+        self.charges.append((job, ticks))
+
+    def close_companion_request(self, job, result):
+        """The solve the window's answer did not come from."""
+        self.closed.append((job, result))
+
+
+def _join_with(signal_ticks: int):
+    engine = engine_module.Engine()
+    signal = _CostingSignal(signal_ticks)
+    verdict = _RecordingVerdict(engine)
+    queue = _RecordingQueue()
+    join = gap_join_module.WindowGapJoin(engine, signal, verdict, queue)
+    return engine, join, verdict, queue
+
+
+def _solve_job():
+    return decoding_records.DecodeJob(
+        operation_id=1, window_id=0, round_count=3, label="w0"
+    )
+
+
+def test_the_signals_own_computation_is_charged_and_the_answer_waits():
+    """D8: the walk is the unit's time, and the window waits for it."""
+    engine, join, verdict, queue = _join_with(70)
+    job = _solve_job()
+    result = decoding_records.DecodeResult(1, 0)
+    join.accept_result(job, result)
+    assert queue.charges == [(job, 70)]
+    assert job.soft_output_ticks == 70
+    assert verdict.answers == []
+    engine.run()
+    (answered_job, answered_result, tick) = verdict.answers[0]
+    assert answered_job is job
+    assert answered_result.soft_output.gap == 1.0
+    assert tick == 70
+
+
+def test_a_signal_that_only_subtracts_charges_nothing_and_answers_at_once():
+    """The complementary gap's combine is a subtraction (decision D8)."""
+    engine, join, verdict, queue = _join_with(0)
+    job = _solve_job()
+    result = decoding_records.DecodeResult(1, 0)
+    join.accept_result(job, result)
+    assert queue.charges == [(job, 0)]
+    assert job.soft_output_ticks == 0
+    assert len(verdict.answers) == 1
+    assert engine.now == 0

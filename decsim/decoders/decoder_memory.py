@@ -237,24 +237,28 @@ class DecoderMemory:
             return None
         return resident.decoder_input
 
-    def reader_count(self, job: decoding_records.DecodeJob) -> int:
-        """How many jobs read the input this job reads, here."""
-        key = _memory_key(job)
-        resident = self._inputs.get(key)
-        if resident is None:
-            return 0
-        return len(resident.readers)
-
     def rewrite(
         self, job: decoding_records.DecodeJob, decoder_input: DecoderInput
     ) -> DecoderInput:
         """Replace the input this job reads, in the unit's own memory.
 
-        Every reader of that input now reads the new one, which is why
-        the caller decides whether a second reader is allowed.
+        Every reader of that input reads the new one, so an input two
+        jobs share has no single writer and this refuses rather than
+        rewriting the sibling's window. Helios keeps its shared memory
+        single-writer (2301.08419 lines 632-640), and the rule belongs
+        to the memory that holds the input rather than to whoever asks:
+        a second caller cannot forget it.
         """
         key = _memory_key(job)
         resident = self._inputs[key]
+        readers = len(resident.readers)
+        if readers > 1:
+            raise RuntimeError(
+                f"{job.label}: rewriting an input {readers} jobs read; "
+                "one input has one writer (Helios 2301.08419 lines "
+                "632-640), so give this tier boundary_fold copy or one "
+                "job per input"
+            )
         resident.decoder_input = decoder_input
         return decoder_input
 

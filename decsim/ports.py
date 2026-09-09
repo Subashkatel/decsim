@@ -662,6 +662,50 @@ class Link(Protocol):
         """Send one transfer on the path; on_delivered runs at delivery."""
 
 
+@runtime_checkable
+class WindowTransfers(Protocol):
+    """The link fabric, as a sender that names a window or a job sees it.
+
+    One step below Link: the sender says what it moves (this window's
+    boundary, this job's rounds) and the adapter builds the transfer's
+    attribution and calls Link.send. The decoder output ports and a
+    store's output port hold it by constructor, so it is a port and not
+    a class they import. Every method here sends; an input that rides no
+    link never reaches this port, because whether an input moves at all
+    is the sending store's own decision.
+    """
+
+    def send_for_window(
+        self,
+        path: transfer_records.LinkPath,
+        window: window_records.Window,
+        operation: program_records.Operation,
+        request_key: window_records.DecoderRequestKey,
+        payload_bits: Optional[int],
+        on_delivered: Callable[[], None],
+    ) -> None:
+        """Send in a window's name; on_delivered runs at the delivery."""
+
+    def send_for_job(
+        self,
+        path: transfer_records.LinkPath,
+        job: decoding_records.DecodeJob,
+        *,
+        payload_bits: Optional[int],
+        request_key: Optional[window_records.DecoderRequestKey] = None,
+        on_delivered: Callable[[], None],
+    ) -> int:
+        """Send in a job's name; returns the delay the link expects."""
+
+    def send_boundary(
+        self,
+        attribution: transfer_records.TransferAttribution,
+        payload_bits: Optional[int],
+        on_delivered: Callable[[transfer_records.Transfer], None],
+    ) -> None:
+        """Send one boundary over decoder_to_decoder with its attribution."""
+
+
 # ------------------------------------ the pluggable policies off the path
 
 

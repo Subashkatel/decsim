@@ -5,8 +5,6 @@ result reaches the frame as one bit per logical observable.
 """
 
 import decsim.engine as engine_module
-import decsim.links.fabric as fabric
-import decsim.links.link_profiles as link_profiles
 import decsim.links.window_transfers as window_transfers
 import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
@@ -95,16 +93,3 @@ def test_a_job_send_returns_the_delay_the_link_expects():
     (_path, payload_bits, _now, attribution) = link.sent[0]
     assert payload_bits == 40
     assert (attribution.first_round, attribution.last_round) == (1, 5)
-
-
-def test_an_input_that_rides_no_link_lands_now_or_after_the_delay():
-    engine = engine_module.Engine()
-    profile = link_profiles.logical_reference_profile()
-    link = fabric.LinkFabric(profile, engine)
-    transfers = window_transfers.WindowTransfers(engine, link)
-    landed = []
-    assert transfers.land_after(0, lambda: landed.append(engine.now)) == 0
-    assert landed == [0]
-    assert transfers.land_after(5, lambda: landed.append(engine.now)) == 5
-    engine.run()
-    assert landed == [0, 5]

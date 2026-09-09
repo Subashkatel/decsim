@@ -56,10 +56,15 @@ class RoundStoreOutput:
     ) -> int:
         """A job resubmitted after a withdrawal: its rounds never left.
 
-        The rounds are already this store's, so it names itself here too.
+        The rounds are already this store's, so it names itself here too,
+        and the input rides no link: nothing is sent and no delay is
+        charged. Which inputs ride nothing is this store's own decision
+        (the decoder input row, copy against in_place), so the landing
+        happens here rather than in the link fabric.
         """
         job.input_source_name = self.name
-        return self.transfers.land_after(0, on_landed)
+        on_landed()
+        return 0
 
     def input_send_for(
         self, job: decoding_records.DecodeJob, is_input_held: bool

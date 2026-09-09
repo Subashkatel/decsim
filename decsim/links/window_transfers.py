@@ -5,7 +5,8 @@ or a job into one Link send, so a caller names what it moves and never
 the fabric. Every send rides the Link port with a TransferAttribution naming the
 operation, its patches, the window and the round range, and the request
 the transfer serves; the delivery callback runs at the link's delivery.
-An input that rides no link lands now or after a fixed delay.
+Every method here sends: an input that rides no link is the sending
+store's own business and never reaches this module.
 """
 
 import functools
@@ -23,11 +24,6 @@ class WindowTransfers:
     def __init__(self, engine, link) -> None:
         self.engine = engine
         self.link = link
-
-    @property
-    def now(self) -> int:
-        """The engine's tick."""
-        return self.engine.now
 
     def send_for_window(
         self,
@@ -88,16 +84,6 @@ class WindowTransfers:
             attribution,
             on_delivered,
         )
-
-    def land_after(
-        self, delay_ticks: int, on_landed: Callable[[], None]
-    ) -> int:
-        """Land an input that rides no link: now, or after a fixed delay."""
-        if delay_ticks == 0:
-            on_landed()
-            return 0
-        self.engine.schedule(delay_ticks, on_landed, label="held input lands")
-        return delay_ticks
 
 
 def _run_at_delivery(on_delivered: Callable[[], None], _transfer) -> None:

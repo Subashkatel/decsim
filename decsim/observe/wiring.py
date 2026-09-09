@@ -146,15 +146,12 @@ def observe(
 def _connect_window_ledger(window_manager) -> window_ledger_module.WindowLedger:
     """The window records: the plan's at build, each stream's as it grows."""
     ledger = window_ledger_module.WindowLedger()
-    planner = window_manager.planner
-    ledger.load_planned(planner.windows_by_key)
-    planner.trace.window_planned.connect(ledger.window_planned)
-    committer = window_manager.requester.verdict.committer
-    committer.trace.window_committed.connect(ledger.window_committed)
-    strong_redecode = window_manager.strong_redecode
-    if strong_redecode is not None:
-        shape = strong_redecode.shape
-        shape.window_absorbed.connect(ledger.window_absorbed)
+    planned = window_manager.planned_windows()
+    ledger.load_planned(planned)
+    sources = window_manager.window_sources()
+    sources.window_planned.connect(ledger.window_planned)
+    sources.window_committed.connect(ledger.window_committed)
+    sources.window_absorbed.connect(ledger.window_absorbed)
     return ledger
 
 
@@ -325,7 +322,8 @@ def _copy_sources(
         sources.append(strong_round_writer.trace.copy_made)
     for source in decoder_manager.copy_sources():
         sources.append(source)
-    sources.append(window_manager.requester.builder.gate.trace.copy_made)
+    for source in window_manager.copy_sources():
+        sources.append(source)
     return sources
 
 
@@ -433,21 +431,17 @@ def _connect_window_trace(
     decoder_manager,
 ) -> None:
     """The windows a stream lays, their verdicts, commits and absorptions."""
-    window_manager.planner.trace.window_planned.connect(
-        trace_writer.window_planned
-    )
-    builder = window_manager.requester.builder
-    builder.trace.window_data_complete.connect(trace_writer.window_ready)
-    committer = window_manager.requester.verdict.committer
-    committer.trace.window_committed.connect(trace_writer.window_committed)
+    sources = window_manager.window_sources()
+    sources.window_planned.connect(trace_writer.window_planned)
+    sources.window_data_complete.connect(trace_writer.window_ready)
+    sources.window_committed.connect(trace_writer.window_committed)
+    sources.window_absorbed.connect(trace_writer.window_absorbed)
     decoder_manager.outcomes.trace.verdict_given.connect(
         trace_writer.verdict_given
     )
     strong_redecode = window_manager.strong_redecode
     if strong_redecode is None:
         return
-    shape = strong_redecode.shape
-    shape.window_absorbed.connect(trace_writer.window_absorbed)
     strong_redecode.trace.strong_window_held.connect(
         trace_writer.strong_window_held
     )

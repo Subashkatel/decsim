@@ -23,13 +23,31 @@ gives a new window its first boundary and the workload's feedback mode.
 """
 
 import dataclasses
-from typing import Optional
+from typing import Any, Optional
 
 import decsim.records.identity as identity_records
 import decsim.records.log_sources as log_sources
 import decsim.records.program as program_records
 import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
+import decsim.trace_source as trace_source
+
+
+@dataclasses.dataclass(frozen=True)
+class WindowTraceSources:
+    """One window's life as the observers hear it, named once by the facade.
+
+    window_planned when the plan or a stream lays a window,
+    window_data_complete when its rounds are all there,
+    window_committed when its correction is the frame's, and
+    window_absorbed when a strong window takes it over instead.
+    """
+
+    window_planned: trace_source.TraceSource
+    window_data_complete: trace_source.TraceSource
+    window_committed: trace_source.TraceSource
+    # the silent source on a run that escalates nothing
+    window_absorbed: Any
 
 
 class WindowManager:
@@ -334,6 +352,40 @@ class WindowManager:
             patch = _representative_patch(operation)
             rows.append((operation_id, patch, waiting))
         return tuple(rows)
+
+    def window_sources(self) -> WindowTraceSources:
+        """The window life cycle's trace sources, in the order they fire.
+
+        An observer connects to what the window side reports, never to
+        the component that happens to report it: which of the package's
+        components fires which source is the package's own arrangement.
+        A run that never escalates absorbs no window and reports the
+        silent source for it.
+        """
+        absorbed = trace_source.SILENT
+        if self.strong_redecode is not None:
+            absorbed = self.strong_redecode.shape.window_absorbed
+        builder = self.requester.builder
+        committer = self.requester.verdict.committer
+        return WindowTraceSources(
+            window_planned=self.planner.trace.window_planned,
+            window_data_complete=builder.trace.window_data_complete,
+            window_committed=committer.trace.window_committed,
+            window_absorbed=absorbed,
+        )
+
+    def planned_windows(self) -> dict:
+        """Every window the plan laid, by key, for a ledger to load once."""
+        return self.planner.windows_by_key
+
+    def copy_sources(self) -> list:
+        """The copy_made sources of this side's own hops, in hop order."""
+        gate = self.requester.builder.gate
+        return [gate.trace.copy_made]
+
+    def reads_windows_from(self, store) -> bool:
+        """Whether the primary tier's window reads come from this store."""
+        return self.retention.primary_store is store
 
     # ---- what the feedback streams ask
 

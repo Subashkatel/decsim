@@ -375,6 +375,26 @@ class TraceWriter:
             )
         self._end_residence(STRONG_TIER_THREAD, request_key, closing)
 
+    def solve_held(
+        self,
+        job: decoding_records.DecodeJob,
+        result: decoding_records.DecodeResult,
+    ) -> None:
+        """One of a window's solves waits for that window's others.
+
+        A window whose confidence needs several forced-class solves is
+        answered only when the last one arrives, so the trace marks each
+        earlier one where it stops.
+        """
+        del result
+        window_key = (job.operation_id, job.window_id)
+        args = {
+            "window": window_text(window_key),
+            "request": request_text(job.request_key),
+            "forced_class": job.forced_logical_class,
+        }
+        self._instant("Window planner", "solve held", "window,confidence", args)
+
     def window_absorbed(self, key, owner_key) -> None:
         """A strong window covers the window; the weak chain skips it."""
         args = {

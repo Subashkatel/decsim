@@ -13,7 +13,7 @@ An input is held per input, not per job, with its readers recorded, so
 two jobs that read the same rounds on one unit are one copy and one
 transfer: gem5's MSHR keeps every target of a single fill
 (src/mem/cache/mshr.hh), and OpenMP's shared clause says every task
-reads the storage of the original item (openmp_spec_5_2.txt:4315-4317).
+reads the storage of the original item (openmp_spec_5_2.txt:4317-4319).
 The rule the data-movement study rests on is one copy per unit that
 reads the window, never one copy per job and never a copy taken from
 another unit.

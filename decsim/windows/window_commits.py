@@ -2,8 +2,11 @@
 
 The boundary is decoder state (the residual defects at the commit edge),
 so it leaves for the dependent windows at decode done, the way Skoric's
-blocks pass their artificial defects on (2209.08552 lines 275-278),
-LILLIPUT's state register and qLDPC's net_error do
+blocks pass their artificial defects on: the corrections crossing out of
+the commit region become artificial defects (2209.08552 lines 268-269),
+and the next window decodes them with the buffer region's unresolved
+defects and the new rounds (lines 272-275). LILLIPUT's state register
+and qLDPC's net_error do the same
 (qldpc/decoders/sinter.py decode_shots_to_error); the frame commit
 downstream never gates the next window.
 

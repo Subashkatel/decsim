@@ -10,6 +10,7 @@ import decsim.frontends.circuit_frontend as circuit_frontend
 import decsim.ports as ports
 import decsim.qpu.round_policies as round_policies
 import decsim.records.program as program_records
+import decsim.tables as tables
 import decsim.windows.built_window_models as built_window_models
 
 FEEDBACK_BOUNDARY_MODES = ("trailing_buffer", "measurement_closed")
@@ -94,19 +95,11 @@ class WorkloadSettings:
 
     @classmethod
     def from_yaml(cls, section: Mapping) -> "WorkloadSettings":
-        """The `workload` section: a memory circuit and its rounds."""
+        """The `workload` section: the kind's row reads its own keys."""
         kind = section.get("kind", "memory_circuit")
-        if kind != "memory_circuit":
-            raise ValueError(
-                "a yaml workload is a memory_circuit; the other rows "
-                "(circuit_list, surgery_ir, qlx) are built in Python"
-            )
-        rounds_per_shot = RoundsPerShot.from_yaml(section["rounds_per_shot"])
-        return cls(
-            kind=kind,
-            code_task=section["code_task"],
-            rounds_per_shot=rounds_per_shot,
-        )
+        row = tables.row(WORKLOADS, "workload.kind", kind)
+        fields = row.from_yaml(section)
+        return cls(kind=kind, **fields)
 
 
 def memory_circuit(
@@ -127,49 +120,117 @@ def memory_circuit(
     )
 
 
-def memory_circuit_operations(settings: WorkloadSettings, code) -> tuple:
-    """The memory_circuit row: one operation, its rounds fixed."""
-    if settings.physical_error_probability is None:
-        raise ValueError(
-            "a memory_circuit workload needs physical_error_probability; "
-            "the sweep sets it per point"
+class MemoryCircuitWorkload:
+    """The memory_circuit row: Stim's generated memory circuit.
+
+    One operation for the whole shot, its rounds fixed by
+    rounds_per_shot, so the run has no operation chain in front of it.
+    """
+
+    has_frontend = False
+
+    @staticmethod
+    def from_yaml(section: Mapping) -> dict:
+        """The `workload` keys this row reads, as settings fields."""
+        rounds_per_shot = RoundsPerShot.from_yaml(section["rounds_per_shot"])
+        return {
+            "code_task": section["code_task"],
+            "rounds_per_shot": rounds_per_shot,
+        }
+
+    @staticmethod
+    def operations(settings: "WorkloadSettings", code) -> tuple:
+        """One operation, its rounds fixed."""
+        if settings.physical_error_probability is None:
+            raise ValueError(
+                "a memory_circuit workload needs physical_error_probability; "
+                "the sweep sets it per point"
+            )
+        rounds = settings.rounds_per_shot.rounds_for(code.distance)
+        circuit = memory_circuit(
+            settings.code_task,
+            rounds,
+            code.distance,
+            settings.physical_error_probability,
         )
-    rounds = settings.rounds_per_shot.rounds_for(code.distance)
-    circuit = memory_circuit(
-        settings.code_task,
-        rounds,
-        code.distance,
-        settings.physical_error_probability,
-    )
-    operation = program_records.Operation(
-        id=1, name="memory", qubits=(0,), patches=(0,), circuit=circuit
-    )
-    return (operation,), round_policies.FixedRounds(rounds)
+        operation = program_records.Operation(
+            id=1, name="memory", qubits=(0,), patches=(0,), circuit=circuit
+        )
+        return (operation,), round_policies.FixedRounds(rounds)
 
 
-def circuit_list_operations(settings: WorkloadSettings, code) -> tuple:
-    """The circuit_list row: the operations as given."""
-    del code
-    return tuple(settings.operations), None
+class CircuitListWorkload:
+    """The circuit_list row: the operations as the caller built them."""
+
+    has_frontend = False
+
+    @staticmethod
+    def from_yaml(section: Mapping) -> dict:
+        """Refused: this row's operations are Operation records."""
+        del section
+        raise ValueError(
+            "workload.kind circuit_list takes a list of Operation records "
+            "with their Stim circuits, which a yaml scalar cannot carry; "
+            "build it in Python (WorkloadSettings(operations=...))"
+        )
+
+    @staticmethod
+    def operations(settings: "WorkloadSettings", code) -> tuple:
+        """The operations as given."""
+        del code
+        return tuple(settings.operations), None
 
 
-def surgery_ir_operations(settings: WorkloadSettings, code) -> tuple:
-    """The surgery_ir row: the text IR parsed and wired."""
-    del code
-    frontend = circuit_frontend.SurgeryIRFrontend(
-        settings.text, settings.qubit_to_patch
-    )
-    operations = frontend.build()
-    return tuple(operations), None
+class SurgeryIRWorkload:
+    """The surgery_ir row: the line-based text IR parsed and wired."""
+
+    has_frontend = True
+
+    @staticmethod
+    def from_yaml(section: Mapping) -> dict:
+        """Refused: this row needs the caller's qubit-to-patch mapping."""
+        del section
+        raise ValueError(
+            "workload.kind surgery_ir takes the IR text and the "
+            "qubit_to_patch mapping the caller allocated its patches "
+            "with, which no yaml key carries today; build it in Python "
+            "(WorkloadSettings(text=..., qubit_to_patch=...))"
+        )
+
+    @staticmethod
+    def operations(settings: "WorkloadSettings", code) -> tuple:
+        """The text IR parsed and wired."""
+        del code
+        frontend = circuit_frontend.SurgeryIRFrontend(
+            settings.text, settings.qubit_to_patch
+        )
+        operations = frontend.build()
+        return tuple(operations), None
 
 
-def qlx_operations(settings: WorkloadSettings, code) -> tuple:
-    """The qlx row: the lowered program's operations."""
-    del code
-    if settings.program is None:
-        raise ValueError("a qlx workload needs its lowered program")
-    operations = settings.program.build()
-    return tuple(operations), None
+class QlxWorkload:
+    """The qlx row: a lowered QLX program's operations."""
+
+    has_frontend = True
+
+    @staticmethod
+    def from_yaml(section: Mapping) -> dict:
+        """Refused: this row takes a lowered program object."""
+        del section
+        raise ValueError(
+            "workload.kind qlx takes a lowered QLX program object, which "
+            "a yaml cannot carry; lower it and build it in Python "
+            "(WorkloadSettings(program=...))"
+        )
+
+    @staticmethod
+    def operations(settings: "WorkloadSettings", code) -> tuple:
+        """The lowered program's operations."""
+        del code
+        if settings.program is None:
+            raise ValueError("a qlx workload needs its lowered program")
+        operations = settings.program.build()
+        return tuple(operations), None
 
 
 def _is_per_distance_text(value) -> bool:
@@ -182,12 +243,14 @@ def _is_per_distance_text(value) -> bool:
     return digits.isdigit()
 
 
-# workload.kind names one of these rows: a row turns its settings and
+# workload.kind names one of these rows: a row reads its own section
+# keys at the yaml boundary, declares whether an operation chain is
+# built in front of the run (has_frontend), and turns its settings and
 # the run's code into the operations and, when the row fixes them, the
 # rounds policy.
 WORKLOADS = {
-    "memory_circuit": memory_circuit_operations,
-    "circuit_list": circuit_list_operations,
-    "surgery_ir": surgery_ir_operations,
-    "qlx": qlx_operations,
+    "memory_circuit": MemoryCircuitWorkload,
+    "circuit_list": CircuitListWorkload,
+    "surgery_ir": SurgeryIRWorkload,
+    "qlx": QlxWorkload,
 }

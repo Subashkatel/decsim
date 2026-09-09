@@ -36,6 +36,21 @@ def boundary_transfers(link_traffic: dict) -> list:
     return found
 
 
+def _source_committing(commit_lo: int, commit_hi: int):
+    """A neighbour of operation 1 committing over those rounds."""
+    return window_records.WindowInfo(
+        operation_id=1,
+        window_index=0,
+        commit_lo=commit_lo,
+        commit_hi=commit_hi,
+        buffer_hi=commit_hi,
+        round_count=15,
+        buffer_lo=commit_lo,
+        deps=(),
+        dependents=(),
+    )
+
+
 def reference_run(distance: int):
     """One shot of the weak baseline at that distance."""
     config_path = CONFIGS / "weak_decoder_baseline.yaml"
@@ -102,10 +117,17 @@ def test_the_interaction_counts_the_flips_on_the_destinations_oldest_layer():
     residual = window_records.DependencyResidual(detector_ids=(10, 13, 99))
     payload = boundary_payloads.SparseSeamList()
     interaction = window_interactions.DefaultWindowInteraction(0, payload)
-    assert interaction.boundary_payload_bits(residual, destination) == 2
+    source = _source_committing(1, 3)
+    sparse_bits = interaction.boundary_payload_bits(
+        residual, destination, source
+    )
+    assert sparse_bits == 2
     dense = boundary_payloads.DenseSeamMask()
     dense_interaction = window_interactions.DefaultWindowInteraction(0, dense)
-    assert dense_interaction.boundary_payload_bits(residual, destination) == 3
+    dense_bits = dense_interaction.boundary_payload_bits(
+        residual, destination, source
+    )
+    assert dense_bits == 3
 
 
 def test_a_run_with_one_window_sends_no_boundary():
@@ -164,8 +186,9 @@ def test_the_width_is_the_rows_arithmetic_on_the_seam_not_the_round_count():
     interaction = window_interactions.DefaultWindowInteraction(0, dense)
     six_rounds = _window_reading(6)
     forty_rounds = _window_reading(40)
-    short = interaction.boundary_payload_bits(residual, six_rounds)
-    long = interaction.boundary_payload_bits(residual, forty_rounds)
+    source = _source_committing(1, 3)
+    short = interaction.boundary_payload_bits(residual, six_rounds, source)
+    long = interaction.boundary_payload_bits(residual, forty_rounds, source)
     assert short == long
     # rounds 4-9 hold three detectors, two of them on the seam layer 4
     assert short == 2
@@ -183,7 +206,9 @@ def test_a_destination_with_no_window_model_is_priced_by_its_card():
     residual = window_records.DependencyResidual(detector_ids=(10, 11))
     dense = boundary_payloads.DenseSeamMask()
     interaction = window_interactions.DefaultWindowInteraction(0, dense)
-    assert interaction.boundary_payload_bits(residual, unknown) is None
+    source = _source_committing(1, 3)
+    bits = interaction.boundary_payload_bits(residual, unknown, source)
+    assert bits is None
 
 
 def _pinned_faces(result) -> list:
@@ -204,7 +229,7 @@ def _pinned_faces(result) -> list:
     return faces
 
 
-def _pinned_run(strong_window: str, distance: int):
+def _pinned_run(strong_window: str, distance: int, seed: int = 0):
     """The switching point of configs/seam_pinned_switching.yaml, one shot.
 
     The yaml names near_seam_pinned; the row under test replaces it in
@@ -221,7 +246,7 @@ def _pinned_run(strong_window: str, distance: int):
         settings.escalation, strong_window=strong_window
     )
     settings = dataclasses.replace(settings, escalation=escalation)
-    machine = machine_module.Machine.build(settings, 0)
+    machine = machine_module.Machine.build(settings, seed)
     return machine.run()
 
 
@@ -249,9 +274,12 @@ def test_a_two_faced_window_costs_the_sum_of_its_two_one_sided_halves():
     """Toshio 2510.25222 lines 1248-1259: both ends of the strong window.
 
     The forward pinned row pins a near face and a far face, and each
-    face is its own message, so the window pays the two one-sided
-    charges added up. A window that pins one face on the same run pays
-    one of them.
+    face is its own message on the layer where its neighbour meets the
+    strong window, so the window pays the two one-sided charges added
+    up. A window that pins one face on the same run pays one of them.
+    The two layers are the same width on that run, so the halves are
+    also priced on a window whose oldest layer holds two detectors and
+    whose newest holds one: 2 and 1, a sum no single layer of it gives.
     """
     result = _pinned_run("forward_seam_pinned", 3)
     faces = _pinned_faces(result)
@@ -265,6 +293,140 @@ def test_a_two_faced_window_costs_the_sum_of_its_two_one_sided_halves():
         assert charged[window_id] == 2 * 8
     for window_id in one_faced:
         assert charged[window_id] == 8
+    near, far = _one_sided_halves()
+    assert near == 2
+    assert far == 1
+
+
+def _one_sided_halves() -> tuple:
+    """What each face of a window with two layer widths is charged.
+
+    The window reads 4-9 and commits 4-6, with two detectors on round 4
+    and one on round 9. The near face pins on the window before it, the
+    far face on the window after it, so the two messages land on the two
+    ends (Tan 2209.09219 lines 936-946).
+    """
+    positions = {10: (4, 0), 11: (4, 1), 12: (9, 0)}
+    strong = window_records.WindowInfo(
+        operation_id=1,
+        window_index=1,
+        commit_lo=4,
+        commit_hi=6,
+        buffer_hi=9,
+        round_count=6,
+        buffer_lo=4,
+        deps=(),
+        dependents=(),
+        detector_positions=positions,
+    )
+    residual = window_records.DependencyResidual(detector_ids=())
+    dense = boundary_payloads.DenseSeamMask()
+    interaction = window_interactions.DefaultWindowInteraction(0, dense)
+    earlier = _source_committing(1, 3)
+    later = _source_committing(7, 9)
+    near = interaction.boundary_payload_bits(residual, strong, earlier)
+    far = interaction.boundary_payload_bits(residual, strong, later)
+    return (near, far)
+
+
+def test_a_far_pin_is_charged_the_layer_its_mask_lands_on():
+    """The far face lands on the strong window's newest read layer.
+
+    On forward_seam_pinned at d=3, seed 100, the escalated window (1,0)
+    reads rounds 1 to 9 and pins its far face on (1,3), which commits
+    from round 10: the message updates round 9, a bulk layer of
+    d*d-1 = 8 detectors, while round 1 carries only (d*d-1)/2 = 4.
+    Bombin 2303.04846 lines 775-788 makes that update the input the
+    strong task reads, and it is one layer.
+    """
+    result = _pinned_run("forward_seam_pinned", 3, 100)
+    near, far = _pins_by_direction(result)
+    assert far == [8]
+    assert near == [8]
+
+
+def _pins_by_direction(result) -> tuple:
+    """The bits of the run's near pins and of its far pins.
+
+    A pin is attributed to the strong window that reads it, so a
+    transfer whose attributed window is not its source is a pinned face;
+    an earlier source is the near face and a later one the far face.
+    """
+    near = []
+    far = []
+    for transfer in result.link_traffic["transfers"]:
+        if transfer["path"] != "decoder_to_decoder":
+            continue
+        attribution = transfer["attribution"]
+        source = attribution["relation"]["request_key"]["window_id"]
+        window_id = attribution["window_id"]
+        if window_id == source:
+            continue
+        if source < window_id:
+            near.append(transfer["payload_bits"])
+        else:
+            far.append(transfer["payload_bits"])
+    return (near, far)
+
+
+def test_a_backward_weak_hand_off_is_charged_the_layer_it_lands_on():
+    """A later window's hand-off lands on its neighbour's newest layer.
+
+    Skoric's parallel windows (2209.08552 lines 398-401) give the middle
+    window a neighbour on each side: at d=5 window (1,1) commits and
+    reads 11-25, and window (1,2), which commits from round 26, hands
+    its boundary back onto round 25. Two of that layer's detectors are
+    flipped at seed 0, and the sparse row charges one index per flip,
+    ceil(log2(24)) = 5 bits each. Priced on round 11, where the message
+    lands nothing, it would be free.
+    """
+    result = _parallel_run(5)
+    charged = _hand_offs(result)
+    assert charged[(2, 1)] == 10
+    assert charged[(2, 3)] == 10
+    assert charged[(0, 1)] == 0
+
+
+def _parallel_run(distance: int):
+    """One shot of the weak baseline cut into parallel windows.
+
+    The sparse row prices the flips the message carries, so which layer
+    is counted is visible in the bits.
+    """
+    config_path = CONFIGS / "weak_decoder_baseline.yaml"
+    config = experiment.load_experiment(config_path)
+    settings = config.point_settings(
+        physical_error_probability=0.005,
+        distance=distance,
+        round_period_us=1.0,
+    )
+    windows = dataclasses.replace(
+        settings.windows, kind="parallel", boundary_payload="sparse_seam_list"
+    )
+    settings = dataclasses.replace(settings, windows=windows)
+    machine = machine_module.Machine.build(settings, 0)
+    return machine.run()
+
+
+def _hand_offs(result) -> dict:
+    """(source window, destination window) to the bits its message took."""
+    charged = {}
+    for transfer in result.link_traffic["transfers"]:
+        if transfer["path"] != "decoder_to_decoder":
+            continue
+        relation = transfer["attribution"]["relation"]
+        source = _window_key(relation["source_window_key"])
+        destination = _window_key(relation["destination_window_key"])
+        charged[(source[1], destination[1])] = transfer["payload_bits"]
+    return charged
+
+
+def _window_key(recorded: dict) -> tuple:
+    """The (operation, window) key a traffic record writes as a tuple."""
+    parts = []
+    for item in recorded["items"]:
+        parts.append(int(item["value"]))
+    return tuple(parts)
 
 
 def _charge_by_window(faces: list) -> dict:

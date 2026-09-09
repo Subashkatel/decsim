@@ -309,8 +309,9 @@ class BoundaryCourier:
             delivery_revision,
         )
         attribution = dataclasses.replace(window_attribution, relation=relation)
+        source_info = self._source_info(source_key)
         payload_bits = self.interaction.boundary_payload_bits(
-            record.committed, destination_info
+            record.committed, destination_info, source_info
         )
         delivered = functools.partial(self._pin_delivered, destination)
         self.decoder_output.send_boundary(attribution, payload_bits, delivered)
@@ -387,19 +388,21 @@ class BoundaryCourier:
             version,
             delivery_version,
         )
-        payload_bits = self._boundary_bits(boundary, dependent_key)
+        payload_bits = self._boundary_bits(boundary, window.key, dependent_key)
         self.decoder_output.send_boundary(attribution, payload_bits, receive)
 
-    def _boundary_bits(self, boundary, dependent_key: tuple):
+    def _boundary_bits(self, boundary, source_key: tuple, dependent_key: tuple):
         """The bits this hand-off takes on the wire, or None for the card.
 
         The interaction owns what a boundary is, so it is the one that
-        counts what crosses.
+        counts what crosses; which layer of the destination the message
+        lands on follows from the two windows, so it reads both.
         """
         destination = self.planner.windows_by_key[dependent_key]
         destination_info = self._destination_info(destination)
+        source_info = self._source_info(source_key)
         return self.interaction.boundary_payload_bits(
-            boundary, destination_info
+            boundary, destination_info, source_info
         )
 
     def _destination_info(
@@ -413,6 +416,11 @@ class BoundaryCourier:
         return window_records.WindowInfo.from_window(
             destination, detector_positions=detector_positions
         )
+
+    def _source_info(self, source_key: tuple) -> window_records.WindowInfo:
+        """The sending window as a policy reads it, its edges only."""
+        source = self.planner.windows_by_key[source_key]
+        return window_records.WindowInfo.from_window(source)
 
     def _receive_boundary(
         self,

@@ -156,8 +156,9 @@ class ContextWindow:
     A context round still crossing controller_to_strong_buffer holds the
     job instead, because Step 1 feeds both decoders the same data and a
     model that prices transport starts the strong decoder when its copy
-    lands (Table I prices T_comm^strong at ten times T_comm^weak, lines
-    1943-1950). This shape absorbs no weak window, so its
+    lands (the paper's Monte-Carlo simulations set T_comm^strong to ten
+    times T_comm^weak, lines 1109-1114; its Table I is a notation table
+    and prices nothing). This shape absorbs no weak window, so its
     window_absorbed source is the silent one.
     """
 

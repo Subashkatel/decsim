@@ -8,7 +8,6 @@ SlidingWindowDecoder tail rule, or a regular stride whose last commit is
 what is left.
 """
 
-import enum
 import math
 
 import decsim.records.windows as window_records
@@ -16,15 +15,15 @@ import decsim.windows.schemes.buffer_floors as buffer_floors
 import decsim.windows.schemes.window_data as window_data
 
 
-class SlidingTerminalPolicy(enum.Enum):
-    """How a finite serial stream drains its final buffered window."""
-
-    QUITS_TAN_FLUSH = enum.auto()
-    REGULAR_STRIDE_LOOKAHEAD = enum.auto()
-
-
 class SlidingWindowScheme:
-    """Serial commit and look-ahead buffer windows."""
+    """Serial commit and look-ahead buffer windows.
+
+    windows.terminal_policy is the one key this row reads: flush ends the
+    last window at the stream's last round, Tan's QUITS flush
+    (2209.09219 lines 1029-1030), and lookahead keeps the regular stride,
+    so the last window still reads rounds past its own commit and a
+    strong recovery has context to read.
+    """
 
     scheme_label = "sliding-window (serial commit/buffer chain)"
     commits_in_one_serial_chain = True
@@ -32,13 +31,12 @@ class SlidingWindowScheme:
 
     def __init__(
         self,
-        terminal_policy: SlidingTerminalPolicy = (
-            SlidingTerminalPolicy.QUITS_TAN_FLUSH
+        card: window_records.WindowingSchemeCard = (
+            window_records.DEFAULT_SCHEME_CARD
         ),
     ) -> None:
-        lookahead = SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD
-        self.terminal_policy = terminal_policy
-        self.has_trailing_tail_context = terminal_policy is lookahead
+        self.terminal_policy = card.terminal_policy
+        self.has_trailing_tail_context = card.terminal_policy == "lookahead"
 
     def plan_operation(
         self,
@@ -81,7 +79,7 @@ class SlidingWindowScheme:
         buffer_round_count: int,
     ) -> tuple:
         """The geometries this operation's terminal policy lays out."""
-        if self.terminal_policy is SlidingTerminalPolicy.QUITS_TAN_FLUSH:
+        if self.terminal_policy == "flush":
             return _finite_forward_window_geometries(
                 round_count, commit_round_count, buffer_round_count
             )

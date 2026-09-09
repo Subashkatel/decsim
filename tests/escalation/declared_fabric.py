@@ -27,6 +27,7 @@ import decsim.pauli_frame.pauli_frame as pauli_frame_module
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
 import decsim.records.program as program_records
+import decsim.records.windows as window_records
 import decsim.settings as machine_settings
 import decsim.windows.schemes.sliding as sliding_scheme
 import decsim.windows.settings as window_settings
@@ -122,9 +123,10 @@ def switching_machine(
         distance=3, round_period_microseconds=round_microseconds
     )
     if scheme is None:
-        terminal = sliding_scheme.SlidingTerminalPolicy
-        lookahead = terminal.REGULAR_STRIDE_LOOKAHEAD
-        scheme = sliding_scheme.SlidingWindowScheme(terminal_policy=lookahead)
+        lookahead = window_records.WindowingSchemeCard(
+            terminal_policy="lookahead"
+        )
+        scheme = sliding_scheme.SlidingWindowScheme(lookahead)
     windows = window_settings.WindowSettings(
         scheme=scheme, boundary_policy=boundary_policy
     )

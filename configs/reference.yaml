@@ -167,6 +167,18 @@ windows:
   kind: sliding                    # sliding | parallel | sandwich | naive_online
   commit_rounds: null              # rounds committed per window; null = d
   buffer_rounds: null              # look-ahead rounds per window; null = d
+  terminal_policy: null            # flush | lookahead: how a finite stream drains
+                                   # its last buffered window. flush ends the last
+                                   # window at the stream's last round, Tan's QUITS
+                                   # flush (2209.09219 lines 1029-1030); lookahead
+                                   # keeps the regular stride, so the last window
+                                   # still reads rounds past its own commit. null,
+                                   # the default, leaves the row on flush, and on
+                                   # lookahead when the escalation may escalate,
+                                   # since a strong recovery needs a last window
+                                   # with context to read. Only the sliding row
+                                   # reads this key; the other three lay their own
+                                   # tail.
   boundary_payload: dense_seam_mask # dense_seam_mask | sparse_seam_list: how a
                                    # window's hand-off to its neighbour is
                                    # written on decoder_to_decoder. The message

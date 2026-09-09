@@ -22,9 +22,9 @@ import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
 import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
+import decsim.records.windows as window_records
 import decsim.settings as machine_settings
 import decsim.tables as tables
-import decsim.windows.schemes.sliding as sliding_scheme
 import decsim.windows.settings as window_settings
 import decsim.windows.window_interactions as window_interactions
 
@@ -278,18 +278,32 @@ def _scheme(windows: window_settings.WindowSettings, escalation_policy):
 
 
 def _chosen_scheme(windows: window_settings.WindowSettings, escalation_policy):
-    """The Python-built scheme, the kind's row, or the lookahead tail."""
+    """The Python-built scheme, or the kind's row on the section's card."""
     if windows.scheme is not None:
         return windows.scheme
     row = tables.row(
         window_settings.WINDOWING_SCHEMES, "windows.kind", windows.kind
     )
-    if not escalation_policy.requires_strong_context:
-        return row()
-    if windows.kind != "sliding":
-        raise ValueError("escalation switching requires windows.kind sliding")
-    lookahead = sliding_scheme.SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD
-    return sliding_scheme.SlidingWindowScheme(terminal_policy=lookahead)
+    terminal_policy = _terminal_policy(windows, escalation_policy)
+    card = window_records.WindowingSchemeCard(terminal_policy=terminal_policy)
+    return row(card)
+
+
+def _terminal_policy(
+    windows: window_settings.WindowSettings, escalation_policy
+) -> str:
+    """The section's terminal policy, or the one the escalation needs.
+
+    A policy that may escalate reads context past the last window's
+    commit, so a silent section gets the lookahead tail; the policy's own
+    refusal (escalation/policies.py) is what stops a scheme whose last
+    window carries no trailing tail.
+    """
+    if windows.terminal_policy is not None:
+        return windows.terminal_policy
+    if escalation_policy.requires_strong_context:
+        return "lookahead"
+    return "flush"
 
 
 def _refuse_undeclared_scheme(scheme) -> None:

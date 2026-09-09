@@ -28,6 +28,7 @@ import decsim.pauli_frame.pauli_frame as pauli_frame_module
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
 import decsim.records.program as program_records
+import decsim.records.windows as window_records
 import decsim.settings as machine_settings
 import decsim.windows.schemes.sliding as sliding_scheme
 import decsim.windows.settings as window_settings
@@ -72,8 +73,8 @@ ESCALATION_THRESHOLD = 0.5
 
 def lookahead_sliding_scheme():
     """The sliding windows with the lookahead tail every run here uses."""
-    lookahead = sliding_scheme.SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD
-    return sliding_scheme.SlidingWindowScheme(terminal_policy=lookahead)
+    lookahead = window_records.WindowingSchemeCard(terminal_policy="lookahead")
+    return sliding_scheme.SlidingWindowScheme(lookahead)
 
 
 def declared_edge(base_edge, latency_microseconds):

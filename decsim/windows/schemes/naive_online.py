@@ -19,6 +19,15 @@ class NaiveOnlineScheme:
     commits_in_one_serial_chain = False
     supports_dynamic_streams = False
 
+    def __init__(
+        self,
+        card: window_records.WindowingSchemeCard = (
+            window_records.DEFAULT_SCHEME_CARD
+        ),
+    ) -> None:
+        """This row lays one window per operation, so it reads no key."""
+        del card
+
     def plan_operation(
         self,
         operation_id: int,

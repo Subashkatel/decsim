@@ -39,6 +39,7 @@ import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
 import decsim.observe.settings as observe_settings
 import decsim.qpu.cycle_clock as cycle_clock
+import decsim.qpu.magic_state_factories as magic_state_factories
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
 import decsim.qpu.stim_device as stim_device
@@ -572,6 +573,54 @@ def test_a_new_escalation_kind_is_one_class_and_one_table_row():
         tiers.append(record.tier)
     assert tiers
     assert set(tiers) == {"strong"}
+
+
+class AlwaysReadyFactory:
+    """A factory row written outside decsim: the collaborators alone.
+
+    Its constructor is InfiniteFactory's own shape, one parameter, which
+    is the shape the root refused before every row was built from one
+    collaborators record.
+    """
+
+    def __init__(self, collaborators):
+        self.engine = collaborators.engine
+        self.requests = []
+
+    def request(self, operation_id, callback):
+        """Deliver at once and remember who asked."""
+        self.requests.append(operation_id)
+        callback()
+        return magic_state_factories.Ticket(operation_id, (), self)
+
+    def cancel(self, ticket):
+        """Nothing is ever pending."""
+        del ticket
+        return False
+
+    def shutdown(self):
+        """Nothing runs, so nothing stops."""
+
+
+def test_a_factory_row_written_outside_decsim_builds_by_its_own_name():
+    """One constructor call, so a row that reads only the engine builds."""
+    config_path = CONFIGS / "weak_decoder_baseline.yaml"
+    config = experiment.load_experiment(config_path)
+    settings = config.point_settings(
+        physical_error_probability=0.003, distance=3, round_period_us=1.0
+    )
+    factory_settings = qpu_settings.FactorySettings(kind="always_ready")
+    settings = dataclasses.replace(
+        settings, magic_state_factory=factory_settings
+    )
+    qpu_settings.MAGIC_STATE_FACTORIES["always_ready"] = AlwaysReadyFactory
+    try:
+        machine = machine_module.Machine.build(settings, 0)
+        result = machine.run()
+    finally:
+        del qpu_settings.MAGIC_STATE_FACTORIES["always_ready"]
+    assert isinstance(machine.factory, AlwaysReadyFactory)
+    assert result.terminal_status == "complete"
 
 
 class RecordingBoundaryPolicy:

@@ -101,26 +101,24 @@ def build_factory(
     decoder_manager,
     plan: plan_build.Plan,
 ):
-    """The factory of the kind.
+    """The factory of the kind, from the one collaborators record.
 
     A distillation row decodes its corrections on the run's decoder
-    manager; the multi-level row paces its levels on the run's round.
+    manager; the multi-level row paces its levels on the run's round; a
+    row that needs neither reads the engine alone.
     """
     row = tables.row(
         qpu_settings.MAGIC_STATE_FACTORIES,
         "magic_state_factory.kind",
         settings.kind,
     )
-    if row is magic_state_factories.InfiniteFactory:
-        return row(engine)
-    if row is magic_state_factories.MultiLevelDistillationFactory:
-        return row(
-            engine,
-            decode_service=decoder_manager,
-            round_ticks=plan.round_ticks,
-            **settings.arguments,
-        )
-    return row(engine, decode_service=decoder_manager, **settings.arguments)
+    collaborators = magic_state_factories.FactoryCollaborators(
+        engine=engine,
+        decode_service=decoder_manager,
+        round_ticks=plan.round_ticks,
+        arguments=settings.arguments,
+    )
+    return row(collaborators)
 
 
 def build_feedback_streams(

@@ -60,6 +60,63 @@ def _switching_machine_formed_at(where: str):
     return machine_module.Machine.build(settings, 0)
 
 
+def _forward_switching_at_the_decoder():
+    """A switching run whose strong region absorbs weak windows.
+
+    The forward strong window (Toshio 2510.25222 Sec. III C) rewrites the
+    windows ahead of the seam, so the run withdraws weak decodes that
+    were already submitted.
+    """
+    config_path = CONFIGS / "seam_pinned_switching.yaml"
+    config = experiment.load_experiment(config_path)
+    settings = config.point_settings(
+        physical_error_probability=0.008, distance=3, round_period_us=1.0
+    )
+    controller = dataclasses.replace(
+        settings.controller, detection_events_formed_at="decoder"
+    )
+    escalation = dataclasses.replace(
+        settings.escalation, strong_window="forward"
+    )
+    settings = dataclasses.replace(
+        settings, controller=controller, escalation=escalation
+    )
+    return machine_module.Machine.build(settings, 0)
+
+
+def _rounds_read_by_tier(machine) -> dict:
+    """Per tier, every round a decode that started read."""
+    read = {}
+
+    def record(job, unit) -> None:
+        del unit
+        decoder_input = job.decoder_input
+        if decoder_input is None:
+            return
+        keys = read.setdefault(job.pool, set())
+        for round_input in decoder_input.rounds:
+            keys.add((round_input.operation_id, round_input.round_index))
+
+    machine.decoder_manager.service.trace.job_started.connect(record)
+    return read
+
+
+def _rounds_charged_by_tier(machine) -> dict:
+    """Per tier, every round a decode's formation stage was charged for."""
+    charged = {}
+
+    def record(job, unit) -> None:
+        del unit
+        claimed = job.detection_event_rounds
+        if claimed is None:
+            return
+        keys = charged.setdefault(job.pool, set())
+        keys.update(claimed)
+
+    machine.decoder_manager.service.trace.job_finished.connect(record)
+    return charged
+
+
 def _decoder_inputs(machine) -> list:
     """Every decode's landed input, bit by bit, in the order they started."""
     inputs = []
@@ -326,6 +383,24 @@ def test_the_second_tier_forms_the_rounds_it_reads_out_of_its_own_store():
     charged = _formed_round_keys(switching)
     charged_twice = len(charged) - len(set(charged))
     assert charged_twice > 0
+
+
+def test_no_round_a_tier_read_goes_uncharged_on_that_tier():
+    """A withdrawn weak window leaves its rounds for whoever reads them.
+
+    The forward shape withdraws weak decodes when the strong region
+    absorbs their windows, and the strong tier then reads the same
+    rounds out of Buffer 1; every round a started decode read is charged
+    once on the tier that read it.
+    """
+    forward = _forward_switching_at_the_decoder()
+    read = _rounds_read_by_tier(forward)
+    charged = _rounds_charged_by_tier(forward)
+
+    forward.run()
+
+    assert read["default"] - charged["default"] == set()
+    assert read["strong"] - charged["strong"] == set()
 
 
 def test_a_shape_that_reads_disjoint_ranges_cannot_form_at_the_decoder():

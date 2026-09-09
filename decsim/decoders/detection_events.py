@@ -39,7 +39,9 @@ class TierFormation:
     first demand for them; the rounds it is charged for are the ones no
     earlier job of this tier had already formed, frozen on the job at
     the first ask so the stage that prices the formation and the
-    dispatcher that predicts the unit's compute read one number.
+    dispatcher that predicts the unit's compute read one number. A job
+    that is cancelled before its decode starts gives that claim back,
+    since no stage of it ever ran.
     """
 
     def __init__(self, former: ports.DetectionEventFormer) -> None:
@@ -68,6 +70,23 @@ class TierFormation:
         frozen = tuple(fresh)
         job.detection_event_rounds = frozen
         return frozen
+
+    def release(self, job: decoding_records.DecodeJob) -> None:
+        """A cancelled job gives the rounds it claimed back to this tier.
+
+        A job is charged for its rounds by the formation stage, which
+        runs when its decode starts; a job cancelled or withdrawn before
+        that was never charged, so its claim goes back and the next job
+        that reads those rounds pays for forming them. A job whose
+        decode had started keeps its claim: its stage charged it.
+        """
+        if job.service_started:
+            return
+        claimed = job.detection_event_rounds
+        if claimed is None:
+            return
+        self.formed_round_keys.difference_update(claimed)
+        job.detection_event_rounds = None
 
     def _formed_fragment(
         self, fragment: round_records.RetainedSyndromeFragment

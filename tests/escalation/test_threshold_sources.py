@@ -2,7 +2,8 @@
 
 FixedThreshold is Toshio et al. 2510.25222 Sec. III A, step 3: keep at
 g >= g_th. OnlineThreshold's rate tracker is the adaptive conformal
-recursion (Gibbs and Candes, arXiv:2106.00170), its audit lane the
+recursion of Gibbs and Candes, arXiv:2106.00170, Eq. (2) at line 143,
+which two tests here run beside the tracker; its audit lane is the
 inverse-propensity estimate over a random sample of kept windows, and
 its outer loop raises the target on one bad audit and relaxes it on a
 rule-of-three clean quota.
@@ -183,3 +184,61 @@ def test_an_audit_needs_the_weak_observables_for_its_label():
     fourth = _job(4)
     with pytest.raises(ValueError, match="timing-only"):
         online.decide_keep(fourth, timing_only)
+
+
+def test_the_rate_tracker_follows_the_papers_recursion_step_for_step():
+    """The referent run beside the row.
+
+    Gibbs and Candes arXiv:2106.00170 Eq. (2), line 143:
+    alpha_{t+1} = alpha_t + gamma (alpha - err_t), with err_t the
+    indicator of the event whose rate is being pinned. Written out here
+    over the same gap stream, it reproduces the tracker's threshold at
+    every one of five hundred steps.
+    """
+    target = 0.1
+    step = 0.05
+    start = 4.6
+    tracker = threshold_sources.EscalationRateTracker(
+        target_escalation_rate=target, threshold=start, step=step
+    )
+    gap_stream = random.Random(11)
+    reference = start
+    tracked = []
+    expected = []
+    for _ in range(500):
+        gap = gap_stream.gauss(9.0, 3.0)
+        tracker.observe(gap)
+        tracked.append(tracker.threshold)
+        escalated = gap < reference
+        error = float(escalated)
+        reference = reference + step * (target - error)
+        expected.append(reference)
+    assert tracked == pytest.approx(expected)
+
+
+def test_the_realized_rate_is_pinned_by_the_distance_the_threshold_moved():
+    """Proposition 4.1's identity (2106.00170 lines 309-317).
+
+    Summing the recursion gives
+    (1/T) sum err_t - alpha = (alpha_1 - alpha_{T+1}) / (T gamma), so the
+    realized escalation rate can only stray from the target as far as the
+    threshold itself travelled, whatever the gaps did. That is what makes
+    the loop self-correcting under drift, and it holds exactly here since
+    the threshold never reached the floor.
+    """
+    target = 0.1
+    step = 0.05
+    start = 4.6
+    tracker = threshold_sources.EscalationRateTracker(
+        target_escalation_rate=target, threshold=start, step=step
+    )
+    gap_stream = random.Random(23)
+    window_count = 2000
+    for _ in range(window_count):
+        gap = gap_stream.gauss(9.0, 3.0)
+        tracker.observe(gap)
+    assert tracker.threshold > 0.0
+    travelled = start - tracker.threshold
+    drift = travelled / (window_count * step)
+    realized = tracker.escalation_rate()
+    assert realized - target == pytest.approx(drift)

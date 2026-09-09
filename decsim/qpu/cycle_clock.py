@@ -299,7 +299,7 @@ class _IdlePatch:
 
 @dataclasses.dataclass(frozen=True)
 class _TraceSources:
-    """Every event the q p u device reports, as one member.
+    """Every event the QPU device reports, as one member.
 
     gem5 groups a component's statistics into one nested Group member
     (tmp/resources/gem5/src/base/stats/group.hh:60-92) rather than one

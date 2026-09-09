@@ -358,7 +358,12 @@ machine.py's docstring names. No component recognises another
 component's row by its class: a fact a caller needs about a row is
 declared on the port and answered by every row, never read off the
 row's type, because a class is what the port promises not to reveal
-(gem5's port API, arXiv 2007.03152 lines 489-491). And `decsim/ports.py`
+(gem5's port API, arXiv 2007.03152 lines 489-491).
+`tools/check_row_recognition.py`, run by the same script, fails on any
+class a module tests against that is not on its list, and the list holds
+only the yaml boundary's types, the record shapes a reader meets two of,
+the runtime-checkable ports and the foreign types; a row class on it
+would be the defect. And `decsim/ports.py`
 is the slowest layer of all: a port method added, renamed or removed
 needs a design note saying why, the way a golden move does.
 

@@ -21,6 +21,7 @@ import dataclasses
 from typing import Optional
 
 import decsim.ports as ports
+import decsim.records.program as program_records
 import decsim.records.windows as window_records
 
 
@@ -114,6 +115,10 @@ class StrongRegions:
             restart_reads,
             context_keys,
         )
+
+    def operation(self, operation_id) -> program_records.Operation:
+        """The operation record a strong window's transfers are named by."""
+        return self.tracker.operation(operation_id)
 
     def round_count_for(
         self, operation_id, window: window_records.Window

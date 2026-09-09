@@ -52,6 +52,7 @@ import decsim.escalation.strong_regions as strong_regions
 import decsim.ports as ports
 import decsim.records.decoding as decoding_records
 import decsim.records.log_sources as log_sources
+import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.trace_source as trace_source
 
@@ -182,6 +183,7 @@ class ContextWindow:
             weak_job.window_id,
             window_records.DecoderTier.STRONG,
         )
+        operation = self.collaborators.regions.operation(weak_job.operation_id)
         held = _HeldContextWindow(
             key=key,
             weak_job=weak_job,
@@ -189,6 +191,7 @@ class ContextWindow:
             region=region,
             strong_window=strong_window,
             model=model,
+            operation=operation,
             request_key=request_key,
             request_created_ticks=self.collaborators.engine.now,
         )
@@ -249,9 +252,10 @@ class ContextWindow:
         """The context window's job, on the rounds its store now holds."""
         weak_job = held.weak_job
         payloads = strong_job_payloads(
-            self.collaborators.retention,
-            self.collaborators.builder,
+            self.collaborators,
             held.strong_window,
+            held.model,
+            held.operation,
             FOLDS_NO_BOUNDARY,
         )
         payload_round_count = decoding_records.distinct_round_count(payloads)
@@ -330,6 +334,7 @@ class ForwardWindow:
             resolved_region.context_round_keys,
             resolved_region.restart_read_keys,
         )
+        operation = self.collaborators.regions.operation(weak_job.operation_id)
         held = _HeldForwardWindow(
             key=key,
             weak_job=weak_job,
@@ -337,6 +342,7 @@ class ForwardWindow:
             resolved_region=resolved_region,
             strong_window=strong_window,
             strong_model=strong_model,
+            operation=operation,
             strong_request_key=strong_request_key,
             strong_request_created_ticks=strong_request_created_ticks,
         )
@@ -547,9 +553,10 @@ class ForwardWindow:
         weak_job = held.weak_job
         strong_window = held.strong_window
         payloads = strong_job_payloads(
-            self.collaborators.retention,
-            self.collaborators.builder,
+            self.collaborators,
             strong_window,
+            held.strong_model,
+            held.operation,
             FOLDS_NO_BOUNDARY,
         )
         plan = held.resolved_region.plan
@@ -594,6 +601,7 @@ class _HeldContextWindow:
     region: strong_regions.ContextRegion
     strong_window: window_records.Window
     model: object
+    operation: program_records.Operation
     request_key: window_records.DecoderRequestKey
     request_created_ticks: int
 
@@ -608,27 +616,35 @@ class _HeldForwardWindow:
     resolved_region: strong_regions.ForwardRegion
     strong_window: window_records.Window
     strong_model: object
+    operation: program_records.Operation
     strong_request_key: window_records.DecoderRequestKey
     strong_request_created_ticks: int
 
 
 def strong_job_payloads(
-    retention, builder, strong_window: window_records.Window, folded_boundaries
-) -> tuple:
+    collaborators: StrongWindowCollaborators,
+    strong_window: window_records.Window,
+    model,
+    operation: program_records.Operation,
+    folded_boundaries: tuple,
+) -> list:
     """The rounds a strong job reads, and the boundaries it folds into them.
 
     Both shipped rows fold no boundary: their faces are raw context, so
-    the input is the stored rounds of the window. A row that pins a face
-    carries its neighbour's committed correction into the input instead
-    (Bombin et al. 2303.04846 lines 775-788), which is the one piece of
-    machinery such a row still needs; the weak side's boundary masking
-    (windows/decode_requests.py) is where it would come from.
+    the input is the stored rounds of the window, and a mask on a face
+    read raw would double count the rounds behind it (Bombin et al.
+    2303.04846 lines 775-788). A row that pins a face carries its
+    neighbour's committed correction into the input instead: the
+    courier ships the committed boundary to this window over
+    decoder_to_decoder and writes it into the window's boundary state,
+    and the job's gate XORs it into the landed input when the decode
+    starts (windows/decode_requests.py, WindowInputGate.mask_input),
+    which is the path the weak side's boundaries already take.
     """
-    if folded_boundaries:
-        raise NotImplementedError(
-            f"the strong job folds the boundaries of {folded_boundaries} "
-            f"into its input: a shape row that pins a face needs the "
-            f"boundary conditions of windows/decode_requests.py on the "
-            f"strong side, which decsim does not build yet"
+    for source_key in folded_boundaries:
+        collaborators.courier.pin_strong_face(
+            source_key, strong_window, model, operation
         )
-    return retention.strong_window_input(builder, strong_window)
+    return collaborators.retention.strong_window_input(
+        collaborators.builder, strong_window
+    )

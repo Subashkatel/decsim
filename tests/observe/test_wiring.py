@@ -7,11 +7,27 @@ with two listeners of one class is a connection made twice, which would
 double a count without failing anything.
 """
 
+import dataclasses
+
 import decsim.config
 import decsim.decoders.settings as decoder_settings
 import decsim.decoders.staged_decoder as staged_decoder
 import decsim.machine as machine_module
+import decsim.observe.command_events as command_events_module
+import decsim.observe.controller_counters as controller_counters_module
+import decsim.observe.flight_recorder as flight_recorder_module
+import decsim.observe.log_writers as log_writers
+import decsim.observe.observation as observation_module
+import decsim.observe.queue_depth as queue_depth_module
+import decsim.observe.referee_audit as referee_audit_module
+import decsim.observe.result_ledger as result_ledger_module
+import decsim.observe.round_events as round_events_module
+import decsim.observe.runtime_stamps as runtime_stamps_module
+import decsim.observe.sampled_shots as sampled_shots_module
 import decsim.observe.settings as observe_settings
+import decsim.observe.stage_records as stage_records_module
+import decsim.observe.window_ledger as window_ledger_module
+import decsim.observe.wiring as wiring
 import decsim.records.decoding as decoding_records
 import decsim.settings as machine_settings
 import decsim.trace_source as trace_source
@@ -276,3 +292,150 @@ def test_a_decoder_row_that_only_fills_the_port_reaches_the_observers():
         if event.get("cat") == "stage":
             stage_events.append(event)
     assert stage_events != []
+
+
+def _bare_observe(observation, engine, **components):
+    """The narrator and the three listeners the run result reads, no more.
+
+    No trace writer, no data movement, no flight recorder input, no stage
+    ledger, no referee audit, no metrics, no window ledger, no round
+    events, no command events, no queue depth, no occupancy. The narrator
+    hears both of the engine's line sources, as the real wiring does when
+    observation.log_component_io is on, because a source with no listener
+    is never fired at all (decsim/engine.py log_io).
+    """
+    del observation
+    log = log_writers.LogWriter()
+    engine.line.connect(log.write)
+    engine.io_line.connect(log.write)
+    traffic_ledger = components["traffic_ledger"]
+    links = components["links"]
+    links.trace.transfer_delivered.connect(traffic_ledger.on_transfer)
+    result_ledger = result_ledger_module.ResultLedger()
+    window_manager = components["window_manager"]
+    results = window_manager.results
+    results.trace.operation_result_delivered.connect(
+        result_ledger.operation_result_delivered
+    )
+    runtime_stamps = runtime_stamps_module.RuntimeStamps()
+    execution_runtime = components["execution_runtime"]
+    execution_runtime.trace.body_finished.connect(runtime_stamps.body_finished)
+    return _bare_observation(
+        engine, log, traffic_ledger, result_ledger, runtime_stamps
+    )
+
+
+def _bare_observation(
+    engine, log, traffic_ledger, result_ledger, runtime_stamps
+):
+    """The record those three listeners hang on, every other field empty."""
+    windows = window_ledger_module.WindowLedger()
+    recorder = _bare_flight_recorder(engine, runtime_stamps)
+    corrections = flight_recorder_module.FrameCorrections()
+    queue_depth = queue_depth_module.QueueDepthLog()
+    counters = controller_counters_module.ControllerCounters()
+    commands = command_events_module.CommandEvents()
+    stages = stage_records_module.StageLedger()
+    rounds = round_events_module.RoundEventRecorder(engine)
+    audit = referee_audit_module.RefereeAudit()
+    shots = sampled_shots_module.SampledShots()
+    return observation_module.Observation(
+        log=log,
+        windows=windows,
+        results=result_ledger,
+        traffic=traffic_ledger,
+        flight_recorder=recorder,
+        frame_corrections=corrections,
+        trace_writer=None,
+        data_movement=None,
+        decode_records=None,
+        runtime_stamps=runtime_stamps,
+        queue_depth=queue_depth,
+        controller_counters=counters,
+        command_events=commands,
+        stages=stages,
+        decode_backlog=None,
+        decoder_utilization=None,
+        decoder_memory_occupancy=None,
+        round_events=rounds,
+        round_store_occupancy=None,
+        referee_audit=audit,
+        sampled_shots=shots,
+    )
+
+
+def _bare_flight_recorder(engine, runtime_stamps):
+    """A recorder over empty ledgers, so no component is heard through it."""
+    rounds = round_events_module.RoundEventRecorder(engine)
+    windows = window_ledger_module.WindowLedger()
+    commands = command_events_module.CommandEvents()
+    corrections = flight_recorder_module.FrameCorrections()
+    return flight_recorder_module.FlightRecorder(
+        rounds,
+        windows,
+        runtime_stamps,
+        commands,
+        corrections,
+        (),
+    )
+
+
+def test_the_narrator_log_is_byte_identical_with_and_without_the_observers(
+    monkeypatch,
+):
+    """The log is a pure component product, on a real gate point.
+
+    STYLE.md rule 7: observation is reached through callbacks a component
+    fires, so a component runs with no observer at all. The log the
+    frozen gate hashes is therefore written entirely by components; if an
+    observer wrote one line into it, that line would be missing here.
+    I7 Part 1 slice 4(f) moved the last such line, "NO FORCED SOLVE",
+    out of the wiring and into the decoder manager that fires it.
+    """
+    wired_machine, _wired_result = gate_point.run()
+    wired_lines = list(wired_machine.observation.log.lines)
+    monkeypatch.setattr(wiring, "observe", _bare_observe)
+    bare_machine, _bare_result = gate_point.run()
+    bare_lines = list(bare_machine.observation.log.lines)
+
+    assert bare_lines == wired_lines
+    assert len(wired_lines) > 100
+
+
+def test_a_run_with_only_those_listeners_gives_the_same_result_record(
+    monkeypatch,
+):
+    """Every field of the gate point's result, between the two wirings."""
+    wired_machine, wired = gate_point.run(**EVERY_KNOB)
+    monkeypatch.setattr(wiring, "observe", _bare_observe)
+    _bare_machine, bare = gate_point.run(**EVERY_KNOB)
+
+    assert bare.terminal_status == wired.terminal_status
+    assert bare.operation_results == wired.operation_results
+    assert bare.link_traffic == wired.link_traffic
+    assert bare.fully_done_ticks == wired.fully_done_ticks
+    assert wired_machine.observation.data_movement is not None
+
+
+def test_the_data_movement_report_is_the_only_field_that_needs_a_listener(
+    monkeypatch,
+):
+    wired_machine, wired = gate_point.run(**EVERY_KNOB)
+    monkeypatch.setattr(wiring, "observe", _bare_observe)
+    _bare_machine, bare = gate_point.run(**EVERY_KNOB)
+    wired_without = dataclasses.replace(wired, data_movement=None)
+
+    assert wired.data_movement is not None
+    assert bare.data_movement is None
+    assert bare == wired_without
+    assert wired_machine.observation.stages.records != []
+
+
+def test_every_optional_listener_off_gives_the_same_result_as_every_one_on():
+    """The observation section is a knob on what is recorded, not on the run."""
+    _every_machine, everything = gate_point.run(**EVERY_KNOB)
+    _no_machine, nothing = gate_point.run()
+
+    assert nothing.operation_results == everything.operation_results
+    assert nothing.fully_done_ticks == everything.fully_done_ticks
+    assert nothing.link_traffic == everything.link_traffic

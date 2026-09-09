@@ -290,7 +290,8 @@ controller:                        # controller work per round, in cycles of its
   detection_events_formed_at: controller
                                    # controller | decoder: where the round's
                                    # measurement outcomes become detection
-                                   # events. controller sends the events on, so
+                                   # events. controller forms them in the
+                                   # assembler and sends the events on, so
                                    # Buffer 0 and the tier's input link carry the
                                    # narrower round: "inside the workstation,
                                    # measurements are converted into detections
@@ -298,18 +299,36 @@ controller:                        # controller work per round, in cycles of its
                                    # software via a shared memory buffer" (Google
                                    # 2408.13687 lines 474-476). decoder sends the
                                    # raw outcomes on instead, so the store and
-                                   # that link carry the wider round: the
+                                   # that link carry the wider round, and each
+                                   # tier forms the rounds it reads: the
                                    # controller writes the outcomes
-                                   # "sequentially to the decoder" and "the
+                                   # "sequentially to the decoder" and "The
                                    # decoder computes the syndrome from
-                                   # measurement outcomes" (Caune et al.
-                                   # 2410.05202 lines 1252-1256). The key
-                                   # decides that width and nothing else: the
-                                   # values are computed by the device's
-                                   # formation table at the assembler under both
-                                   # rows, because the table is stateful and
-                                   # reads every round once in round order, and
-                                   # no formation time is charged in either row
+                                   # measurement outcomes and decodes it" (Caune
+                                   # et al. 2410.05202 lines 1252-1256), and
+                                   # LILLIPUT's Event Detection Logic block sits
+                                   # inside the decoder (2108.06569 lines
+                                   # 499-510). The events themselves are the same
+                                   # under both rows, since a detection event is
+                                   # a parity of the raw outcomes; what moves is
+                                   # the width above and the clock the formation
+                                   # is charged on, this section's
+                                   # detection_event_cycles_per_round under the
+                                   # first row and each tier's engine card under
+                                   # the second
+  detection_event_cycles_per_round: null
+                                   # what the conversion above costs the
+                                   # controller, charged once per completed round
+                                   # on the clock this section names, before the
+                                   # round leaves for the stores. null =
+                                   # uncharged, which is where the field leaves
+                                   # it: Google's workstation converts the
+                                   # measurements into detections (2408.13687
+                                   # lines 474-476) and publishes no time for it.
+                                   # Read by the controller row of
+                                   # detection_events_formed_at, and refused
+                                   # under the decoder row, which charges the
+                                   # tiers instead
 
 clocks:                            # clock domain name -> MHz; a link prices its
                                    # cycles on the domain it names. More domains
@@ -465,6 +484,23 @@ weak_decoder:                      # the lightweight tier: fast, higher LER
                                    # cycle (LILLIPUT FIFO, sec. 4)
     release_cycles_per_job: 1      # correction write-out per job (the
                                    # baselines use 10, an experiment card)
+    detection_event_cycles_per_round: 5
+                                   # this tier's own event-detection logic, per
+                                   # round it forms, charged only when the rounds
+                                   # reach it raw (controller.
+                                   # detection_events_formed_at decoder). 5
+                                   # cycles is Yang et al. 2605.04892 lines
+                                   # 1274-1275, "The total latency of the
+                                   # preprocessing stage for syndrome
+                                   # calculation is fixed at 20 ns (5 FPGA clock
+                                   # cycles)", counted inside "Subtotal
+                                   # (decoder) 148" in their Table I (lines
+                                   # 1049-1052); the stage sits in front of the
+                                   # decoder core, as LILLIPUT's Event Detection
+                                   # Logic block does (2108.06569 lines
+                                   # 499-510). A round two windows of this tier
+                                   # read is formed once and charged once.
+                                   # null = uncharged
 
 strong_decoder:                    # the accurate tier: slow, lower LER
   kind: belief_matching
@@ -478,6 +514,10 @@ strong_decoder:                    # the accurate tier: slow, lower LER
     clock: room                    # the strong unit lives room-side
     fetch_cycles_per_round: 1
     release_cycles_per_job: 1
+    detection_event_cycles_per_round: 5
+                                   # as above, on this tier's own clock: the
+                                   # strong tier reads Buffer 1, so it forms the
+                                   # rounds it reads itself
 
 decoder_manager:                   # the manager that gives ready windows a unit
   bulk_strong: false               # true serves the strong pool's queued

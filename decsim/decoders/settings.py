@@ -71,6 +71,13 @@ DECODER_INPUTS = {"copy": True, "in_place": False}
 # single writer, so in_place is refused there by name.
 DECODER_BOUNDARY_FOLDS = {"copy": True, "in_place": False}
 
+# <tier>_decoder.engine.detection_event_cycles_per_round, per round the
+# tier forms: Yang et al. 2605.04892 lines 1274-1275 fix "the
+# preprocessing stage for syndrome calculation ... at 20 ns (5 FPGA
+# clock cycles)" and their Table I (lines 1049-1052) counts it inside
+# the decoder's own subtotal.
+DETECTION_EVENT_CYCLES_PER_ROUND = 5
+
 
 @dataclasses.dataclass(frozen=True)
 class DecoderSettings:
@@ -96,6 +103,13 @@ class DecoderSettings:
     polled status register, the decoder holding its output until the
     reader takes it (2410.05202 lines 1256-1259). It is read on the tier
     that decodes the plan's windows.
+    detection_event_cycles_per_round prices this tier's own
+    event-detection logic, per round it forms, and is charged only when
+    the rounds reach it raw (controller.detection_events_formed_at
+    decoder). Its default is Yang et al. 2605.04892 lines 1274-1275,
+    where "The total latency of the preprocessing stage for syndrome
+    calculation is fixed at 20 ns (5 FPGA clock cycles)"; None is
+    uncharged.
     kind None is no decoder at all, right for a run that plans no
     windows. A Python-built decoder is routed as it is, with no engine
     stages around it.
@@ -109,6 +123,9 @@ class DecoderSettings:
     unit_memory_rounds: Optional[int] = None
     fetch_cycles_per_round: int = 1
     release_cycles_per_job: int = 1
+    detection_event_cycles_per_round: Optional[int] = (
+        DETECTION_EVENT_CYCLES_PER_ROUND
+    )
     engine_megahertz: Optional[float] = None
     decoder: Optional[ports.Decoder] = None
 
@@ -130,6 +147,7 @@ class DecoderSettings:
             )
         input_kind = section.get("input", "copy")
         boundary_fold = section.get("boundary_fold", "copy")
+        formation_cycles = _formation_cycles(engine)
         result_blocks_unit = section.get("result_blocks_unit", False)
         _check_boolean(section_name, "result_blocks_unit", result_blocks_unit)
         return cls(
@@ -141,6 +159,7 @@ class DecoderSettings:
             unit_memory_rounds=unit_memory_rounds,
             fetch_cycles_per_round=engine["fetch_cycles_per_round"],
             release_cycles_per_job=engine["release_cycles_per_job"],
+            detection_event_cycles_per_round=formation_cycles,
             engine_megahertz=engine_megahertz,
         )
 
@@ -217,6 +236,13 @@ def _dispatch_microseconds(
         )
     clock = section["clock"]
     return clocks.microseconds(cycles, clock)
+
+
+def _formation_cycles(engine: Mapping) -> Optional[int]:
+    """The tier's event-detection cycles per round; null is uncharged."""
+    if "detection_event_cycles_per_round" not in engine:
+        return DETECTION_EVENT_CYCLES_PER_ROUND
+    return engine["detection_event_cycles_per_round"]
 
 
 def _check_boolean(section_name: str, key: str, value) -> None:

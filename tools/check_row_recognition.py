@@ -61,6 +61,7 @@ RECORD_TYPES = frozenset(
 PORTS = frozenset(
     {
         "ports.Decoder",
+        "ports.DetectionEventFormer",
         "RunSeedComposite",
         "RunSeedConsumer",
         "seeding.RunSeedComposite",

@@ -73,7 +73,13 @@ class DecoderInputStaging:
     round_keys) instead, for a tier whose input is read in place.
     """
 
-    def __init__(self, transport, engine, copies_input_by_pool=None):
+    def __init__(
+        self,
+        transport,
+        engine,
+        copies_input_by_pool=None,
+        formation_by_pool=None,
+    ):
         self.transport = transport
         self.engine = engine
         self.trace = _TraceSources()
@@ -82,6 +88,9 @@ class DecoderInputStaging:
         # pool name -> whether that tier copies its input into the unit;
         # a pool this map does not name copies, which is the default
         self.copies_input_by_pool = copies_input_by_pool or {}
+        # pool name -> that tier's event-detection logic, for a run whose
+        # rounds arrive raw (controller.detection_events_formed_at)
+        self.formation_by_pool = formation_by_pool or {}
 
     def stage(
         self,
@@ -114,7 +123,10 @@ class DecoderInputStaging:
 
         def land(_delivered: decoding_records.DecodeJob) -> None:
             job.input_landing_ticks = self.engine.now
+            # the width that crossed the link is the width that left the
+            # store, before this tier forms anything out of it
             bits = job.payload_bits()
+            self._form_detection_events(job)
             job.decoder_input = memory.deposit(job)
             job.payloads = []
             job.memory = memory
@@ -139,6 +151,18 @@ class DecoderInputStaging:
         """Whether this job's tier is given a copy of the rounds it reads."""
         return self.copies_input_by_pool.get(job.pool, True)
 
+    def _form_detection_events(self, job: decoding_records.DecodeJob) -> None:
+        """This tier's event-detection logic runs on the rounds it received.
+
+        The landing is the first demand for them. Under controller-side
+        formation no tier holds any logic and the rounds arrived formed
+        (controller.detection_events_formed_at).
+        """
+        formation = self.formation_by_pool.get(job.pool)
+        if formation is None:
+            return
+        job.payloads = formation.form(job.payloads)
+
     def _read_in_place(
         self,
         job: decoding_records.DecodeJob,
@@ -152,6 +176,7 @@ class DecoderInputStaging:
         """
         job.send_input = None
         job.input_landing_ticks = self.engine.now
+        self._form_detection_events(job)
         decoder_input = decoder_memory_module.materialize_decoder_input(job)
         job.decoder_input = decoder_input
         job.payloads = []

@@ -216,12 +216,12 @@ def form_shot(
     table: FormationTable, packets_by_round: dict[int, Sequence[int]]
 ) -> tuple[tuple[int, ...], tuple[int, ...]]:
     """Every detector and observable bit of one shot, in index order."""
-    former = StreamingDetectorFormer(table)
+    streaming_former = StreamingDetectorFormer(table)
     detector_bits = [0] * len(table.detectors)
     observable_bits = [0] * len(table.observables)
     after_last_round = table.round_count + 1
     for round_index in range(1, after_last_round):
-        events, observables = former.feed_packet(
+        events, observables = streaming_former.feed_packet(
             round_index, packets_by_round[round_index]
         )
         _store_bits(detector_bits, events)

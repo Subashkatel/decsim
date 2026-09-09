@@ -53,6 +53,16 @@ class DecoderStage:
         round_cycles = self.cycles_per_round * job.round_count
         return self.cycles_per_job + round_cycles
 
+    def formed_round_keys(self, job: decoding_records.DecodeJob) -> tuple:
+        """The rounds this stage forms; none, for a stage that forms none.
+
+        A stage that turns rounds into detection events answers with the
+        ones it formed, so the trace says which rounds a stage's cycles
+        were spent on (decoders/detection_events.py).
+        """
+        del job
+        return ()
+
 
 @dataclasses.dataclass(frozen=True)
 class UnitTiming:
@@ -115,6 +125,9 @@ class DecoderStageRecord:
     cycles: Optional[int]  # None for the algorithm, priced in time
     start_ticks: int
     end_ticks: int
+    # the (operation, round) identities a formation stage turned into
+    # detection events here; empty for every stage that forms none
+    round_keys: tuple = ()
 
 
 class StagedDecoder(decoder_module.DecoderBase):
@@ -222,13 +235,14 @@ class StagedDecoder(decoder_module.DecoderBase):
         self.decoder.cancel(job)
 
     def _steps(self, job: decoding_records.DecodeJob) -> list:
-        """(name, cycles, ticks) per stage; the algorithm's time is its own."""
+        """One step per stage; the algorithm's time is its own."""
         ticks = self.timing.stage_ticks(job)
         steps = []
         for stage in self.timing.before:
             step = _hardware_step(stage, job, ticks)
             steps.append(step)
-        steps.append((ALGORITHM_STAGE, None, None))
+        algorithm = _Step(ALGORITHM_STAGE, None, None)
+        steps.append(algorithm)
         for stage in self.timing.after:
             step = _hardware_step(stage, job, ticks)
             steps.append(step)
@@ -243,23 +257,29 @@ class StagedDecoder(decoder_module.DecoderBase):
             self._running.pop(key, None)
             running.on_result(running.result)
             return
-        name, cycles, ticks = steps[index]
-        text = _stage_text(name, job, cycles)
+        step = steps[index]
+        text = _stage_text(step, job)
         engine.log(log_sources.DECODER_UNIT, text)
-        if name == ALGORITHM_STAGE:
+        if step.name == ALGORITHM_STAGE:
             self._enter_algorithm(running, engine, steps, index)
             return
         start = engine.now
-        end = start + ticks
+        end = start + step.ticks
         record = DecoderStageRecord(
-            job.operation_id, job.window_id, name, cycles, start, end
+            job.operation_id,
+            job.window_id,
+            step.name,
+            step.cycles,
+            start,
+            end,
+            step.round_keys,
         )
         self.stage_recorded.fire(record)
         next_index = index + 1
         engine.schedule(
-            ticks,
+            step.ticks,
             lambda: self._enter(running, engine, steps, next_index),
-            label=f"{name}({job.label})",
+            label=f"{step.name}({job.label})",
         )
 
     def _enter_algorithm(
@@ -289,6 +309,17 @@ class StagedDecoder(decoder_module.DecoderBase):
             self._enter(running, engine, steps, next_index)
 
         self.decoder.start(job, engine, on_algorithm_result)
+
+
+@dataclasses.dataclass(frozen=True)
+class _Step:
+    """One stage of one job as the walk meets it."""
+
+    name: str
+    # None for the algorithm, whose time is the wrapped decoder's own
+    cycles: Optional[int]
+    ticks: Optional[int]
+    round_keys: tuple = ()
 
 
 @dataclasses.dataclass
@@ -330,13 +361,16 @@ def _key(job: decoding_records.DecodeJob):
 
 def _hardware_step(
     stage: DecoderStage, job: decoding_records.DecodeJob, ticks: dict
-) -> tuple:
+) -> "_Step":
     cycles = stage.cycles_for(job)
-    return stage.name, cycles, ticks[stage.name]
+    round_keys = stage.formed_round_keys(job)
+    return _Step(stage.name, cycles, ticks[stage.name], round_keys)
 
 
-def _stage_text(name: str, job: decoding_records.DecodeJob, cycles) -> str:
-    text = f"{name} {job.label}"
-    if cycles is not None:
-        text += f" ({cycles} cycles)"
+def _stage_text(step: "_Step", job: decoding_records.DecodeJob) -> str:
+    text = f"{step.name} {job.label}"
+    if step.cycles is not None:
+        text += f" ({step.cycles} cycles)"
+    if step.round_keys:
+        text += f" forming {len(step.round_keys)} rounds"
     return text

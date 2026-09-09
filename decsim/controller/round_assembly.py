@@ -1,12 +1,11 @@
 """The assembler: raw measurement fragments become one packed round.
 
 The controller's packing stage merges the fragments of a round in
-fragment order, charges the packing time once per complete round, forms
-the detection events with the device's formation table when it has one,
-and hands the finished round on (on_packed). Forming them is free and
-happens here whatever controller.detection_events_formed_at says; what
-that setting decides is the width Buffer 0 and the tier's input link
-carry (DetectionEventFormation below). Caune et al. 2410.05202 measure
+fragment order, charges the packing time once per complete round, asks
+the run's detection event placement for the round that leaves, and hands
+it on (on_packed) once that placement's own time is charged
+(detector_error_model/detection_event_formation.py, named by
+controller.detection_events_formed_at). Caune et al. 2410.05202 measure
 250 to 370 FPGA cycles for packetization, bus transfer, result return
 and the conditional together, an upper bound for the packing time. The stage
 admits a bounded number of rounds at once
@@ -22,37 +21,10 @@ import functools
 from typing import Callable, Optional
 
 import decsim.controller.settings as controller_settings
+import decsim.ports as ports
 import decsim.records.identity as identity_records
 import decsim.records.rounds as round_records
 import decsim.trace_source as trace_source
-
-
-@dataclasses.dataclass(frozen=True)
-class DetectionEventFormation:
-    """The device's formation table, and where the machine forms events.
-
-    form_round is called once per complete round, in round order, and is
-    None for a timing-only or synthetic source. at_the_controller is the
-    row controller.detection_events_formed_at names, and what it decides
-    is the width the round carries onward: at the controller the round
-    leaves sized by its detection events, because "inside the
-    workstation, measurements are converted into detections and then
-    streamed to the real-time decoding software via a shared memory
-    buffer" (Google 2408.13687 lines 474-476); at the decoder the round
-    keeps its raw measurement width, because the controller writes the
-    outcomes "sequentially to the decoder" and "the decoder computes the
-    syndrome from measurement outcomes" (Caune et al. 2410.05202 lines
-    1252-1256).
-
-    The values themselves are computed here under both rows, because the
-    device's formation table is stateful and reads every round once in
-    round order, and neither row charges any time for forming them. A
-    decoder-side formation unit that forms each round on first demand,
-    with its own cost, is a component this model does not have.
-    """
-
-    form_round: Optional[Callable]
-    at_the_controller: bool = True
 
 
 class RoundAssembler:
@@ -68,7 +40,7 @@ class RoundAssembler:
         engine,
         settings: controller_settings.ControllerSettings,
         *,
-        detection_events: DetectionEventFormation,
+        detection_events: ports.DetectionEventPlacement,
         on_packed: Callable[[round_records.PackedRound], None],
         rounds_in_flight: "RoundsInFlight",
     ) -> None:
@@ -176,48 +148,35 @@ class RoundAssembler:
             "PACKED", self.engine.now, operation_id, round_index, context.route
         )
         self.trace.round_event.fire(packed_event)
-        formed_fragments = self._form_detection_events(raw_fragments)
+        leaving = self.detection_events.form_before_departure(raw_fragments)
         # the link out of the controller carries what leaves it: the
         # detection events when this row forms them here, the raw
         # outcomes when the decoder forms them
-        wire_bits = _fragment_bits(formed_fragments)
+        wire_bits = _fragment_bits(leaving)
         packet = round_records.SyndromeRoundPacket(
             operation_id=operation_id,
             round_index=round_index,
-            fragments=formed_fragments,
+            fragments=leaving,
         )
         self.workspace.forget(context)
         packed = round_records.PackedRound(packet, context.route, wire_bits)
-        self.on_packed(packed)
+        self._depart(packed)
 
-    def _form_detection_events(self, raw_fragments) -> tuple:
-        """The round's detection events; raw when no table forms them.
+    def _depart(self, packed: round_records.PackedRound) -> None:
+        """Hand the round on, after the placement's own time is charged.
 
-        The values are the device's wherever the machine forms them: the
-        formation table is stateful and reads every round once, in round
-        order, so this stage calls it for the controller and for the
-        decoder alike. Where they are formed is the width the round
-        carries onward (controller.detection_events_formed_at).
+        The controller row pays for the conversion it does here
+        (controller.detection_event_cycles_per_round); the decoder row
+        pays nothing at the controller, so the round leaves at once.
         """
-        form_round = self.detection_events.form_round
-        if form_round is None:
-            return raw_fragments
-        has_bits = all(fragment.bits is not None for fragment in raw_fragments)
-        if not has_bits:
-            return raw_fragments
-        assert len(raw_fragments) == 1, (
-            "detector formation expects one merged raw fragment per round"
+        departure_ticks = self.detection_events.departure_ticks
+        if departure_ticks == 0:
+            self.on_packed(packed)
+            return
+        hand_on = functools.partial(self.on_packed, packed)
+        self.engine.schedule(
+            departure_ticks, hand_on, label="controller form detection events"
         )
-        (raw,) = raw_fragments
-        events = form_round(raw.operation_id, raw.round_index, raw.bits)
-        return (self._formed_fragment(raw, tuple(events)),)
-
-    def _formed_fragment(self, raw, formed: tuple):
-        """The round's fragment: its events, at the width its hops carry."""
-        size_bits = raw.size_bits
-        if self.detection_events.at_the_controller:
-            size_bits = len(formed)
-        return dataclasses.replace(raw, bits=formed, size_bits=size_bits)
 
 
 @dataclasses.dataclass

@@ -23,6 +23,7 @@ import decsim.controller.settings as controller_settings
 import decsim.engine as engine_module
 import decsim.observe.round_events as round_events
 import decsim.records.rounds as round_records
+from decsim.detector_error_model import detection_event_formation
 
 PACKING_TICKS = config.microseconds_to_ticks(1.0)
 DROP = controller_settings.PackingOverflowPolicy.DROP_ROUND
@@ -46,9 +47,11 @@ def rounds_in_flight(capacity, held=0, on_route=0):
     return round_assembly.RoundsInFlight(capacity, held_rounds, transmitter)
 
 
-def formation(form_round, at_the_controller=True):
-    """The device's table and where this assembler forms its events."""
-    return round_assembly.DetectionEventFormation(form_round, at_the_controller)
+def formation(former, departure_ticks=0):
+    """The controller row: this assembler forms the round before it leaves."""
+    return detection_event_formation.ControllerSideFormation(
+        former, departure_ticks
+    )
 
 
 def assembler_with(engine, packed, recorder, **settings_fields):
@@ -181,15 +184,11 @@ def test_the_drop_knob_drops_only_the_round_that_found_no_context():
 def test_detection_events_are_formed_once_from_the_merged_bits():
     engine = engine_module.Engine()
     packed = []
-    formed_from = []
-
-    def form_round(operation_id, round_index, bits):
-        formed_from.append((operation_id, round_index, bits))
-        return (0, 1, 1)
+    former = _Former((0, 1, 1))
 
     settings = controller_settings.ControllerSettings()
     unbounded = rounds_in_flight(None)
-    events = formation(form_round)
+    events = formation(former)
     assembler = round_assembly.RoundAssembler(
         engine,
         settings,
@@ -203,7 +202,7 @@ def test_detection_events_are_formed_once_from_the_merged_bits():
     assembler.add(first, 2, round_records.WINDOW_INPUT_ROUTE)
     assembler.add(second, 2, round_records.WINDOW_INPUT_ROUTE)
 
-    assert formed_from == [(1, 1, (1, 0, 0, 1))]
+    assert former.asked == [(1, 1, (1, 0, 0, 1))]
     (round,) = packed
     (formed,) = round.packet.fragments
     assert formed.bits == (0, 1, 1)
@@ -217,12 +216,10 @@ def test_events_formed_at_the_decoder_keep_the_raw_measurement_width():
     """The store and the input link carry the outcomes, not the events."""
     engine = engine_module.Engine()
     packed = []
-
-    def form_round(_operation_id, _round_index, _bits):
-        return (0, 1, 1)
+    former = _Former((0, 1, 1))
 
     settings = controller_settings.ControllerSettings()
-    events = formation(form_round, at_the_controller=False)
+    events = detection_event_formation.DecoderSideFormation(former, 0)
     unbounded = rounds_in_flight(None)
     assembler = round_assembly.RoundAssembler(
         engine,
@@ -238,10 +235,85 @@ def test_events_formed_at_the_decoder_keep_the_raw_measurement_width():
     assembler.add(second, 2, round_records.WINDOW_INPUT_ROUTE)
 
     (round,) = packed
-    (formed,) = round.packet.fragments
-    assert formed.bits == (0, 1, 1)
-    assert formed.size_bits == 4
+    (left,) = round.packet.fragments
+    assert left.bits == (1, 0, 0, 1)
+    assert left.size_bits == 4
     assert round.wire_bits == 4
+    assert former.asked == []
+
+
+def test_the_controller_row_delays_the_round_by_its_formation_time():
+    """The charge moves the departure and nothing else."""
+    engine = engine_module.Engine()
+    departures = _Departures(engine)
+    formation_ticks = config.microseconds_to_ticks(0.02)
+    settings = controller_settings.ControllerSettings()
+    former = _Former((0, 1, 1))
+    events = formation(former, departure_ticks=formation_ticks)
+    unbounded = rounds_in_flight(None)
+    assembler = round_assembly.RoundAssembler(
+        engine,
+        settings,
+        detection_events=events,
+        on_packed=departures.record,
+        rounds_in_flight=unbounded,
+    )
+
+    only_fragment = fragment(1, bits=(1, 0))
+
+    assembler.add(only_fragment, 1, round_records.WINDOW_INPUT_ROUTE)
+    engine.run()
+
+    departure_ticks, round = departures.records[0]
+    assert departure_ticks == formation_ticks
+    assert round.wire_bits == 3
+
+
+def test_an_uncharged_controller_row_hands_the_round_on_at_once():
+    engine = engine_module.Engine()
+    departures = _Departures(engine)
+    settings = controller_settings.ControllerSettings()
+    former = _Former((0, 1, 1))
+    events = formation(former)
+    unbounded = rounds_in_flight(None)
+    assembler = round_assembly.RoundAssembler(
+        engine,
+        settings,
+        detection_events=events,
+        on_packed=departures.record,
+        rounds_in_flight=unbounded,
+    )
+    only_fragment = fragment(1, bits=(1, 0))
+
+    assembler.add(only_fragment, 1, round_records.WINDOW_INPUT_ROUTE)
+
+    departure_ticks, _round = departures.records[0]
+    assert departure_ticks == 0
+
+
+class _Departures:
+    """The tick each packed round left the assembler at, and the round."""
+
+    def __init__(self, engine):
+        self.engine = engine
+        self.records = []
+
+    def record(self, packed_round):
+        """One round handed on."""
+        self.records.append((self.engine.now, packed_round))
+
+
+class _Former:
+    """A formation table answering one round's events, and what it was asked."""
+
+    def __init__(self, events):
+        self.events = events
+        self.asked = []
+
+    def form_round(self, operation_id, round_index, bits):
+        """One round's detection events."""
+        self.asked.append((operation_id, round_index, bits))
+        return self.events
 
 
 def test_settlement_reports_a_round_still_in_assembly():

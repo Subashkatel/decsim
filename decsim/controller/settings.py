@@ -12,6 +12,7 @@ from typing import Optional
 import decsim.config as config
 import decsim.controller.policies as policies
 import decsim.ports as ports
+from decsim.detector_error_model import detection_event_formation
 
 # idle_policy.kind names one of these rows: what the controller does
 # with the rounds of a patch that is idle.
@@ -21,22 +22,16 @@ IDLE_POLICIES = {
     "extend_stream": policies.ExtendStream,
 }
 
-# controller.detection_events_formed_at names which width crosses the
-# store and the tier's input link, and the row is whether the round
-# leaves the controller sized by its detection events. At the
-# controller, "inside the workstation, measurements are converted into
-# detections and then streamed to the real-time decoding software via a
-# shared memory buffer" (Google 2408.13687 lines 474-476). At the
-# decoder, the controller writes the raw outcomes "sequentially to the
-# decoder" and "the decoder computes the syndrome from measurement
-# outcomes" (Caune et al. 2410.05202 lines 1252-1256), so the store and
-# the tier's input link carry the wider raw round. The values are the
-# device's under both rows, computed at the assembler because the
-# formation table is stateful and reads every round once in round order,
-# and no formation time is charged in either row: a decoder-side
-# formation unit that forms each round on first demand is a component of
-# its own and is not built.
-DETECTION_EVENT_FORMATION = {"controller": True, "decoder": False}
+# controller.detection_events_formed_at names one of these rows: where
+# the machine turns a round's measurement outcomes into its detection
+# events, and so which width crosses the store and the tier's input
+# link. Each row is a component built with the run's former and the
+# controller's own formation cost
+# (detector_error_model/detection_event_formation.py).
+DETECTION_EVENT_FORMATION = {
+    "controller": detection_event_formation.ControllerSideFormation,
+    "decoder": detection_event_formation.DecoderSideFormation,
+}
 
 
 class PackingOverflowPolicy(enum.Enum):
@@ -77,15 +72,18 @@ class ControllerSettings:
     packing_overflow is what happens to a finished round the store cannot
     take: the yaml's stall or drop_round.
     detection_events_formed_at names a row of
-    DETECTION_EVENT_FORMATION: which width the store and the decoder's
-    input link carry, the round's detection events or its raw
-    measurement outcomes. The values are computed at the assembler under
-    both rows and no formation time is charged in either.
+    DETECTION_EVENT_FORMATION: where the round's outcomes become its
+    detection events, and so which width the store and the tier's input
+    link carry. detection_event_microseconds_per_round is what that
+    conversion costs the controller, charged once per round before the
+    round leaves it and read by the controller row alone; no paper
+    publishes a controller-side figure, so it is zero by default.
     """
 
     readout_to_bits_microseconds: float = 0.0
     packing_microseconds_per_round: float = 0.0
     decision_to_pulse_microseconds: float = 0.0
+    detection_event_microseconds_per_round: float = 0.0
     packing_rounds_in_flight: Optional[int] = None
     packing_overflow: PackingOverflowPolicy = PackingOverflowPolicy.STALL
     detection_events_formed_at: str = "controller"
@@ -102,6 +100,10 @@ class ControllerSettings:
             "decision_to_pulse_microseconds",
             self.decision_to_pulse_microseconds,
         )
+        config.check_duration(
+            "detection_event_microseconds_per_round",
+            self.detection_event_microseconds_per_round,
+        )
 
     @classmethod
     def from_yaml(
@@ -115,6 +117,7 @@ class ControllerSettings:
         readout_microseconds = clocks.microseconds(readout_cycles, clock)
         packing_microseconds = clocks.microseconds(packing_cycles, clock)
         decision_microseconds = clocks.microseconds(decision_cycles, clock)
+        formation_microseconds = _formation_microseconds(section, clocks)
         packing_rounds_in_flight = section.get("packing_rounds_in_flight")
         packing_overflow = _packing_overflow(section)
         formed_at = section.get("detection_events_formed_at", "controller")
@@ -122,6 +125,7 @@ class ControllerSettings:
             readout_to_bits_microseconds=readout_microseconds,
             packing_microseconds_per_round=packing_microseconds,
             decision_to_pulse_microseconds=decision_microseconds,
+            detection_event_microseconds_per_round=formation_microseconds,
             packing_rounds_in_flight=packing_rounds_in_flight,
             packing_overflow=packing_overflow,
             detection_events_formed_at=formed_at,
@@ -138,6 +142,12 @@ class ControllerSettings:
     def decision_to_pulse_ticks(self) -> int:
         """The decision to pulse cost in ticks."""
         return config.microseconds_to_ticks(self.decision_to_pulse_microseconds)
+
+    def detection_event_ticks(self) -> int:
+        """The controller's own formation cost per round in ticks."""
+        return config.microseconds_to_ticks(
+            self.detection_event_microseconds_per_round
+        )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -156,6 +166,22 @@ class IdlePolicySettings:
 
     kind: str = "separate_decode_jobs"
     policy: Optional[ports.IdlePolicy] = None
+
+
+def _formation_microseconds(
+    section: Mapping, clocks: config.ClockSettings
+) -> float:
+    """detection_event_cycles_per_round on the controller's clock.
+
+    null is the default and means the controller charges nothing for the
+    conversion: Google's workstation converts measurements into
+    detections (2408.13687 lines 474-476) and publishes no time for it.
+    """
+    cycles = section.get("detection_event_cycles_per_round")
+    if cycles is None:
+        return 0.0
+    clock = section["clock"]
+    return clocks.microseconds(cycles, clock)
 
 
 def _packing_overflow(section: Mapping) -> PackingOverflowPolicy:

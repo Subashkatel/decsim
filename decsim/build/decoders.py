@@ -14,16 +14,22 @@ import decsim.build.plan as plan_build
 import decsim.decoders.decode_queue as decode_queue
 import decsim.decoders.decoder_memory as decoder_memory_module
 import decsim.decoders.decoders as decoders
+import decsim.decoders.detection_events as detection_events_module
 import decsim.decoders.schedulers as schedulers
 import decsim.decoders.settings as decoder_settings
 import decsim.decoders.staged_decoder as staged_decoder
 import decsim.escalation.settings as escalation_settings
 import decsim.observe.settings as observe_settings
+import decsim.ports as ports
 import decsim.settings as machine_settings
 import decsim.tables as tables
 from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
 )
+
+# The name the tier's event-detection stage carries in the trace, the
+# stage ledger and the narrator log.
+FORMATION_STAGE = "detection_event_formation"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -38,19 +44,27 @@ class DecoderPool:
     # pool name -> whether that tier's unit is given a copy of the
     # rounds it decodes (weak_decoder.input, strong_decoder.input)
     copies_input_by_pool: dict
+    # pool name -> that tier's event-detection logic, for a run whose
+    # rounds reach the decoder raw (controller.detection_events_formed_at)
+    formation_by_pool: dict
     # pool name -> whether a finished decode holds its unit until the
     # window side reads the result (<tier>.result_blocks_unit)
     blocks_unit_by_pool: dict
 
 
 def build_decoder_unit(
-    settings: machine_settings.MachineSettings, tier: str, policy
+    settings: machine_settings.MachineSettings,
+    tier: str,
+    policy,
+    formation: Optional[detection_events_module.TierFormation] = None,
 ):
     """The decoder unit of one tier, weak or strong, as the root builds it.
 
     A named row decodes for real inside a StagedDecoder whose fetch and
-    release stages are cycles of the tier's clock; a number is a fixed
-    core latency on the MWPM path. The tier that decodes the plan's
+    release stages are cycles of the tier's clock, with this tier's
+    event-detection logic in front of them when the rounds reach it raw
+    (formation, from the run's detection event placement); a number is a
+    fixed core latency on the MWPM path. The tier that decodes the plan's
     windows carries the Tesseract referee when the observation asks for
     it, and under a switching escalation must produce the evidence the
     run's confidence signal reads. A Python-built decoder is returned as
@@ -75,24 +89,32 @@ def build_decoder_unit(
     )
     if is_active and check is not None:
         algorithm = check(algorithm)
-    return _staged_unit(tier_settings, algorithm)
+    return _staged_unit(tier_settings, algorithm, formation)
 
 
 def build_decoder_pool(
-    settings: machine_settings.MachineSettings, plan: plan_build.Plan, policy
+    settings: machine_settings.MachineSettings,
+    plan: plan_build.Plan,
+    policy,
+    detection_events: ports.DetectionEventPlacement,
 ) -> DecoderPool:
     """The router over the tiers and the manager's pools.
 
     Switching puts two units behind one router: the strong pool serves
     escalated jobs. Any other escalation routes every job to the tier
-    that decodes the plan's windows.
+    that decodes the plan's windows. Each tier gets its own
+    event-detection logic from the run's detection event placement, so a
+    round both tiers read is formed once and charged on each tier's own
+    engine clock.
     """
     manager = settings.decoder_manager
     scheduler = manager.scheduler
     if scheduler is None:
         scheduler = schedulers.FifoScheduler()
-    weak = build_decoder_unit(settings, "weak", policy)
-    strong = build_decoder_unit(settings, "strong", policy)
+    weak_formation = _tier_formation(detection_events)
+    strong_formation = _tier_formation(detection_events)
+    weak = build_decoder_unit(settings, "weak", policy, weak_formation)
+    strong = build_decoder_unit(settings, "strong", policy, strong_formation)
     active_tier = policy.primary_tier.value
     active = weak
     if active_tier == "strong":
@@ -115,6 +137,9 @@ def build_decoder_pool(
     decoder_memory = _decoder_memory(settings, policy)
     copies_input_by_pool = _copies_input_by_pool(settings, policy, unit_pools)
     blocks_unit_by_pool = _blocks_unit_by_pool(settings, policy, unit_pools)
+    formation_by_pool = _formation_by_pool(
+        policy, unit_pools, weak_formation, strong_formation
+    )
     return DecoderPool(
         router=router,
         active=active,
@@ -123,7 +148,43 @@ def build_decoder_pool(
         scheduler=scheduler,
         copies_input_by_pool=copies_input_by_pool,
         blocks_unit_by_pool=blocks_unit_by_pool,
+        formation_by_pool=formation_by_pool,
     )
+
+
+def _tier_formation(
+    detection_events: ports.DetectionEventPlacement,
+) -> Optional[detection_events_module.TierFormation]:
+    """This tier's event-detection logic; None when rounds arrive formed."""
+    former = detection_events.decoder_side_former()
+    if former is None:
+        return None
+    return detection_events_module.TierFormation(former)
+
+
+def _formation_by_pool(
+    policy,
+    unit_pools: dict,
+    weak_formation: Optional[detection_events_module.TierFormation],
+    strong_formation: Optional[detection_events_module.TierFormation],
+) -> dict:
+    """Each pool's event-detection logic, from the tier whose units it holds.
+
+    The strong pool is the strong tier's; every other pool decodes the
+    plan's windows on the active tier. The map is empty when no tier
+    forms anything, which is the controller-side row.
+    """
+    active_formation = weak_formation
+    if policy.primary_tier.value == "strong":
+        active_formation = strong_formation
+    formation_by_pool = {}
+    if active_formation is None:
+        return formation_by_pool
+    for pool in unit_pools:
+        formation_by_pool[pool] = active_formation
+    if decode_queue.STRONG_POOL in formation_by_pool:
+        formation_by_pool[decode_queue.STRONG_POOL] = strong_formation
+    return formation_by_pool
 
 
 def _blocks_unit_by_pool(
@@ -278,22 +339,53 @@ def _evidence_order(member) -> str:
 
 
 def _staged_unit(
-    tier_settings: decoder_settings.DecoderSettings, algorithm
+    tier_settings: decoder_settings.DecoderSettings,
+    algorithm,
+    formation: Optional[detection_events_module.TierFormation],
 ) -> staged_decoder.StagedDecoder:
-    """The algorithm between its fetch and release stages.
+    """The algorithm between its stages, on the tier's engine clock.
 
-    Fetch cycles per round before it, release cycles per job after it,
-    on the tier's engine clock.
+    This tier's event-detection logic first when the rounds reach it raw,
+    then fetch cycles per round, then the algorithm, then release cycles
+    per job.
     """
+    before = []
+    formation_stage = _formation_stage(tier_settings, formation)
+    if formation_stage is not None:
+        before.append(formation_stage)
     fetch = staged_decoder.DecoderStage(
         "fetch", cycles_per_round=tier_settings.fetch_cycles_per_round
     )
+    before.append(fetch)
     release = staged_decoder.DecoderStage(
         "release", cycles_per_job=tier_settings.release_cycles_per_job
     )
     timing = staged_decoder.UnitTiming(
-        before=(fetch,),
+        before=tuple(before),
         after=(release,),
         frequency_mhz=tier_settings.engine_megahertz,
     )
     return staged_decoder.StagedDecoder(algorithm, timing)
+
+
+def _formation_stage(
+    tier_settings: decoder_settings.DecoderSettings,
+    formation: Optional[detection_events_module.TierFormation],
+) -> Optional[detection_events_module.DetectionEventFormationStage]:
+    """This tier's event-detection stage; None when it forms or charges none.
+
+    The stage is the tier's own hardware in front of its decoder core
+    (LILLIPUT's Event Detection Logic block, 2108.06569 lines 499-510;
+    Yang's preprocessing stage inside the decoder subtotal, 2605.04892
+    lines 1274-1275, Table I lines 1049-1052), so it is a stage of the
+    unit's timing rather than a component the manager schedules: the
+    decoder row behind it never learns that its rounds were raw.
+    """
+    if formation is None:
+        return None
+    cycles = tier_settings.detection_event_cycles_per_round
+    if cycles is None:
+        return None
+    return detection_events_module.DetectionEventFormationStage(
+        FORMATION_STAGE, cycles_per_round=cycles, formation=formation
+    )

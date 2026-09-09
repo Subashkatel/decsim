@@ -305,6 +305,11 @@ class DecodeJob:
     # ticks of confidence computation charged on that unit after the
     # decode, so the job's service carries the signal's own work (D8)
     soft_output_ticks: int = 0
+    # the rounds this job's tier turns into detection events for it,
+    # frozen at the first ask so the formation stage and the dispatcher
+    # read one number; None until then, and under controller-side
+    # formation nothing ever asks (decoders/detection_events.py)
+    detection_event_rounds: Optional[tuple] = None
 
     def payload_bits(self) -> Optional[int]:
         """The bits of the job's payloads; None when any size is unknown."""

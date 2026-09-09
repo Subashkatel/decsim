@@ -93,6 +93,26 @@ class DecoderManager:
             self.strong_requests,
             cancel_strong=self.cancel_strong,
         )
+        rows = decoder_pool_module.routed_decoders(router)
+        for row in rows:
+            row.forced_solve_unavailable.connect(self.report_unpinnable_model)
+
+    def report_unpinnable_model(self, model, reason: str) -> None:
+        """Say once per model that its windows can pin no logical class.
+
+        Compiling the model is where that is known. A confidence built
+        from forced-class solves reads no gap on such a model, so
+        without this line the run shows one unexplained escalation per
+        window of it. The manager narrates it because the manager owns
+        the rows that report it: the line is in the run's log whether
+        or not anything is observing.
+        """
+        detector_count = len(model.detector_ids)
+        self.engine.log(
+            log_sources.DECODER_MANAGER,
+            f"NO FORCED SOLVE on a {detector_count}-detector window model: "
+            f"{reason}",
+        )
 
     @property
     def pool(self) -> decoder_pool_module.DecoderPool:

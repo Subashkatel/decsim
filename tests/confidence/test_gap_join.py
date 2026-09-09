@@ -352,3 +352,73 @@ def test_a_two_solve_runs_trace_carries_every_held_solve(tmp_path):
     assert held[0]["ph"] == "i"
     assert held[0]["args"]["forced_class"] in (0, 1)
     assert held[0]["cat"] == "window,confidence"
+
+
+def test_the_lightest_forced_solve_is_the_windows_answer():
+    """The unconstrained minimum is the minimum over the classes.
+
+    So whichever class came back lighter is the decoder's own answer,
+    whatever order the two solves arrived in.
+    """
+    engine, join, verdict, queue = _two_solve_join(0)
+    heavy_job, heavy_result = _forced_solve("heavy", 0, 9.0)
+    light_job, light_result = _forced_solve("light", 1, 4.0)
+
+    join.accept_result(heavy_job, heavy_result)
+    join.accept_result(light_job, light_result)
+    (answered_job, _answered_result, _tick) = verdict.answers[0]
+
+    assert answered_job is light_job
+    assert queue.closed == [(heavy_job, heavy_result)]
+
+
+def test_the_lightest_solve_answers_whichever_order_it_arrived_in():
+    engine, join, verdict, queue = _two_solve_join(0)
+    light_job, light_result = _forced_solve("light", 0, 4.0)
+    heavy_job, heavy_result = _forced_solve("heavy", 1, 9.0)
+
+    join.accept_result(light_job, light_result)
+    join.accept_result(heavy_job, heavy_result)
+    (answered_job, _answered_result, _tick) = verdict.answers[0]
+
+    assert answered_job is light_job
+
+
+def test_a_solve_with_no_weight_leaves_the_first_solve_answering():
+    """A signal that forces no class, or a window that pins no observable."""
+    engine, join, verdict, queue = _two_solve_join(0)
+    first_job, first_result = _forced_solve("first", 0, 4.0)
+    weightless_job, weightless_result = _forced_solve("second", 1, 9.0)
+    weightless_result.forced_class_weight = None
+
+    join.accept_result(first_job, first_result)
+    join.accept_result(weightless_job, weightless_result)
+    (answered_job, _answered_result, _tick) = verdict.answers[0]
+
+    assert answered_job is first_job
+
+
+def test_a_first_solve_with_no_weight_answers_the_window_itself():
+    engine, join, verdict, queue = _two_solve_join(0)
+    weightless_job, weightless_result = _forced_solve("first", 0, 4.0)
+    weightless_result.forced_class_weight = None
+    other_job, other_result = _forced_solve("second", 1, 1.0)
+
+    join.accept_result(weightless_job, weightless_result)
+    join.accept_result(other_job, other_result)
+    (answered_job, _answered_result, _tick) = verdict.answers[0]
+
+    assert answered_job is weightless_job
+
+
+def test_only_the_answering_solve_carries_the_windows_soft_output():
+    """The gap belongs to the window's answer, not to every solve of it."""
+    engine, join, verdict, queue = _two_solve_join(0)
+    heavy_job, heavy_result = _forced_solve("heavy", 0, 9.0)
+    light_job, light_result = _forced_solve("light", 1, 4.0)
+
+    join.accept_result(heavy_job, heavy_result)
+    join.accept_result(light_job, light_result)
+
+    assert light_result.soft_output.gap == 1.0
+    assert heavy_result.soft_output is None

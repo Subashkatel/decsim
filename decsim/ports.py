@@ -790,6 +790,37 @@ class DetectionEventFormer(Protocol):
 
 
 @runtime_checkable
+class DetectionEventPlacement(Protocol):
+    """Where the machine forms a round's detection events.
+
+    Table rows: controller, decoder
+    (decsim/controller/settings.py DETECTION_EVENT_FORMATION, built from
+    controller.detection_events_formed_at). The two are published
+    placements of the same conversion, Google's workstation (2408.13687
+    lines 474-476) against the decoder side (Caune 2410.05202 lines
+    1252-1256, LILLIPUT 2108.06569 lines 499-510), and the values are
+    the same either way, so a row moves the width the round carries, the
+    clock its formation is charged on, and nothing else. Every row is
+    built with the run's DetectionEventFormer and the controller's own
+    formation ticks.
+
+    The controller's assembler asks form_before_departure for the round
+    that leaves it and waits departure_ticks before handing it on; the
+    root asks decoder_side_former for the former each decoder tier reads
+    its rounds through, which is None for a row that has already formed
+    them.
+    """
+
+    departure_ticks: int
+
+    def form_before_departure(self, fragments: tuple) -> tuple:
+        """The round's fragments as they leave the controller."""
+
+    def decoder_side_former(self) -> Optional[DetectionEventFormer]:
+        """The former each tier forms through, or None when none does."""
+
+
+@runtime_checkable
 class WindowModelSource(Protocol):
     """Who builds the decoder-facing error model of one window.
 

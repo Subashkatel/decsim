@@ -56,6 +56,7 @@ class DecoderManager:
         dispatch_ticks: int = 0,
         copies_input_by_pool: Optional[dict] = None,
         blocks_unit_by_pool: Optional[dict] = None,
+        formation_by_pool: Optional[dict] = None,
     ):
         if unit_pools is None:
             unit_pools = {"default": num_units}
@@ -73,7 +74,7 @@ class DecoderManager:
         )
         transport = staging_module.CancellableDecoderMemoryTransfer(engine)
         staging = staging_module.DecoderInputStaging(
-            transport, engine, copies_input_by_pool
+            transport, engine, copies_input_by_pool, formation_by_pool
         )
         self.service = decode_service.DecodeService(
             engine,

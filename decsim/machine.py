@@ -34,18 +34,18 @@ Dijkstra's THE, dijkstra_the.txt 52-57). The levels, leaves first, are
 what tools/check_uses_graph.py prints and check.sh enforces:
 
     0  config, records, tables, trace_source
-    1  detector_error_model, engine, pauli_frame, ports, seeding,
-       syndrome_buffer
-    2  confidence, controller, decoders, escalation, links, qpu, windows
-    3  frontends, observe
-    4  settings
-    5  build
-    6  machine (this file)
-    7  collect
-    8  front
-    9  __main__
+    1  engine, pauli_frame, ports, seeding, syndrome_buffer
+    2  detector_error_model, escalation, links, windows
+    3  confidence, controller, decoders, qpu
+    4  frontends, observe
+    5  settings
+    6  build
+    7  machine (this file)
+    8  collect
+    9  front
+    10 __main__
 
-Level 2 and below decode a window on a store with no window manager,
+Level 3 and below decode a window on a store with no window manager,
 which is what the decoders' own tests run.
 
 The eleven priced hops are the line where a call stops being local
@@ -147,8 +147,11 @@ class Machine:
             settings.escalation
         )
         plan = plan_build.build_plan(settings, escalation_policy)
+        detection_events = controller_side.build_detection_events(
+            settings, plan.device
+        )
         pool = decoder_build.build_decoder_pool(
-            settings, plan, escalation_policy
+            settings, plan, escalation_policy, detection_events
         )
         store_build.check_readout_cost_is_priced(settings)
         conditional_release = conditional_release_module.ConditionalRelease(
@@ -213,9 +216,6 @@ class Machine:
             publishes_from_strong_store=publishes_from_strong_store,
             held_rounds=held_rounds,
             transmitter=transmitter,
-        )
-        detection_events = controller_side.build_detection_events(
-            settings, plan.device
         )
         rounds_in_flight = round_assembly.RoundsInFlight(
             settings.controller.packing_rounds_in_flight,

@@ -5,10 +5,10 @@ from typing import Optional
 import decsim.build.decoders as decoder_build
 import decsim.build.plan as plan_build
 import decsim.controller.feedback_streams as feedback_streams
-import decsim.controller.round_assembly as round_assembly
 import decsim.controller.settings as controller_settings
 import decsim.decoders.decoder_manager as decoder_manager_module
 import decsim.engine as engine_module
+import decsim.ports as ports
 import decsim.qpu.magic_state_factories as magic_state_factories
 import decsim.qpu.settings as qpu_settings
 import decsim.records.decoding as decoding_records
@@ -35,25 +35,31 @@ def build_decoder_manager(
         dispatch_ticks=dispatch_ticks,
         copies_input_by_pool=pool.copies_input_by_pool,
         blocks_unit_by_pool=pool.blocks_unit_by_pool,
+        formation_by_pool=pool.formation_by_pool,
     )
 
 
 def build_detection_events(
     settings: machine_settings.MachineSettings, device
-) -> round_assembly.DetectionEventFormation:
-    """The device's formation table and where this machine forms events.
+) -> ports.DetectionEventPlacement:
+    """Where this machine forms its detection events, as one component.
 
     controller.detection_events_formed_at names the row; a value that is
-    not one is refused here, before the first round is packed. A source
-    with no formation table forms nothing either way.
+    not one is refused here, before the first round is packed. Both rows
+    are built the same way, with the run's former and the controller's
+    own formation cost. A source that does not answer the
+    DetectionEventFormer port forms nothing either way.
     """
-    form_round = getattr(device, "form_round", None)
-    at_the_controller = tables.row(
+    former = None
+    if isinstance(device, ports.DetectionEventFormer):
+        former = device
+    row = tables.row(
         controller_settings.DETECTION_EVENT_FORMATION,
         "controller.detection_events_formed_at",
         settings.controller.detection_events_formed_at,
     )
-    return round_assembly.DetectionEventFormation(form_round, at_the_controller)
+    departure_ticks = settings.controller.detection_event_ticks()
+    return row(former, departure_ticks)
 
 
 def process_name(

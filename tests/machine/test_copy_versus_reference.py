@@ -18,6 +18,7 @@ import pathlib
 
 import pytest
 
+import decsim.build.decoders as decoder_build
 import decsim.front.experiment as experiment
 import decsim.machine as machine_module
 import decsim.records.transfers as transfer_records
@@ -26,18 +27,86 @@ CONFIGS = pathlib.Path("configs")
 WEAK_INPUT_PATH = transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER
 
 
-def _machine_formed_at(where: str):
-    """The weak baseline at d=3, forming its detection events there."""
+def _machine_formed_at(where: str, distance: int = 3):
+    """The weak baseline, forming its detection events there."""
     config_path = CONFIGS / "weak_decoder_baseline.yaml"
     config = experiment.load_experiment(config_path)
     settings = config.point_settings(
-        physical_error_probability=0.001, distance=3, round_period_us=1.0
+        physical_error_probability=0.001,
+        distance=distance,
+        round_period_us=1.0,
+    )
+    controller = dataclasses.replace(
+        settings.controller, detection_events_formed_at=where
+    )
+    observation = dataclasses.replace(settings.observation, data_movement=True)
+    settings = dataclasses.replace(
+        settings, controller=controller, observation=observation
+    )
+    return machine_module.Machine.build(settings, 0)
+
+
+def _switching_machine_formed_at(where: str):
+    """A switching run at d=3, where both tiers decode the same rounds."""
+    config_path = CONFIGS / "seam_pinned_switching.yaml"
+    config = experiment.load_experiment(config_path)
+    settings = config.point_settings(
+        physical_error_probability=0.008, distance=3, round_period_us=1.0
     )
     controller = dataclasses.replace(
         settings.controller, detection_events_formed_at=where
     )
     settings = dataclasses.replace(settings, controller=controller)
     return machine_module.Machine.build(settings, 0)
+
+
+def _decoder_inputs(machine) -> list:
+    """Every decode's landed input, bit by bit, in the order they started."""
+    inputs = []
+
+    def record(job, unit) -> None:
+        del unit
+        if job.decoder_input is None:
+            return
+        rounds = []
+        for fragment in job.decoder_input.fragments():
+            rounds.append(
+                (fragment.operation_id, fragment.round_index, fragment.bits)
+            )
+        inputs.append((job.label, tuple(rounds)))
+
+    machine.decoder_manager.service.trace.job_started.connect(record)
+    return inputs
+
+
+def _formation_stages(machine) -> list:
+    """Every event-detection stage recorded, with its cycles and rounds."""
+    stages = []
+    for record in machine.observation.stages.records:
+        if record.stage != decoder_build.FORMATION_STAGE:
+            continue
+        ticks = record.end_ticks - record.start_ticks
+        stages.append((record.cycles, len(record.round_keys), ticks))
+    return stages
+
+
+def _formed_round_keys(machine) -> list:
+    """Every round key an event-detection stage was charged for."""
+    keys = []
+    for record in machine.observation.stages.records:
+        if record.stage != decoder_build.FORMATION_STAGE:
+            continue
+        keys.extend(record.round_keys)
+    return keys
+
+
+def _store_copy_bits(machine) -> int:
+    """The bits the assembler copied into Buffer 0 over the run."""
+    copies = machine.observation.data_movement.copies.by_path
+    for path, counts in copies.items():
+        if path == "controller assembler -> Buffer 0":
+            return counts.bits
+    return 0
 
 
 def _machine(**weak_changes):
@@ -196,6 +265,92 @@ def test_events_formed_at_the_decoder_widen_the_tiers_input_link():
         at_the_controller
     )
     assert _observables(decoder_result) == _observables(controller_result)
+
+
+def test_the_same_events_are_decoded_wherever_they_were_formed():
+    """The row moves the width and the time, never a bit of the syndrome."""
+    for distance in (3, 5):
+        at_the_controller = _machine_formed_at("controller", distance)
+        controller_inputs = _decoder_inputs(at_the_controller)
+        controller_result = at_the_controller.run()
+        at_the_decoder = _machine_formed_at("decoder", distance)
+        decoder_inputs = _decoder_inputs(at_the_decoder)
+        decoder_result = at_the_decoder.run()
+        assert decoder_inputs == controller_inputs
+        assert _observables(decoder_result) == _observables(controller_result)
+
+
+def test_the_widths_the_two_rows_send_are_the_events_and_the_outcomes():
+    """d=3: 240 bits of events into Buffer 0, 249 bits of outcomes."""
+    at_the_controller = _machine_formed_at("controller")
+    at_the_controller.run()
+    at_the_decoder = _machine_formed_at("decoder")
+    at_the_decoder.run()
+    assert _store_copy_bits(at_the_controller) == 240
+    assert _store_copy_bits(at_the_decoder) == 249
+    assert _weak_input_bits(at_the_controller) == 432
+    assert _weak_input_bits(at_the_decoder) == 441
+
+
+def test_a_tier_pays_yangs_five_cycles_for_each_round_it_forms():
+    """Six rounds at the first window, three at each window after it."""
+    at_the_decoder = _machine_formed_at("decoder")
+    at_the_decoder.run()
+    charged = _formation_stages(at_the_decoder)
+    assert charged[0] == (30, 6, 120000)
+    assert charged[1] == (15, 3, 60000)
+
+
+def test_the_controller_row_charges_no_tier_for_a_formation_it_did():
+    at_the_controller = _machine_formed_at("controller")
+    at_the_controller.run()
+    assert _formation_stages(at_the_controller) == []
+
+
+def test_one_tier_forms_and_charges_each_round_it_reads_once():
+    """Windows of one tier overlap; the rounds they share are formed once."""
+    at_the_decoder = _machine_formed_at("decoder")
+    at_the_decoder.run()
+    charged = _formed_round_keys(at_the_decoder)
+    assert len(charged) == len(set(charged))
+
+
+def test_the_second_tier_forms_the_rounds_it_reads_out_of_its_own_store():
+    """Buffer 0 and Buffer 1 hold the raw rounds, so both tiers pay."""
+    switching = _switching_machine_formed_at("decoder")
+    switching.run()
+    charged = _formed_round_keys(switching)
+    charged_twice = len(charged) - len(set(charged))
+    assert charged_twice > 0
+
+
+def test_a_shape_that_reads_disjoint_ranges_cannot_form_at_the_decoder():
+    """A tier asked out of order refuses.
+
+    Skoric A/B blocks decode disjoint round ranges (2209.08552 sec. I.C),
+    so a tier is asked for a round whose predecessor its table has
+    forgotten, and it refuses rather than form the wrong syndrome.
+    """
+    config_path = CONFIGS / "weak_decoder_baseline.yaml"
+    config = experiment.load_experiment(config_path)
+    settings = config.point_settings(
+        physical_error_probability=0.001, distance=3, round_period_us=1.0
+    )
+    controller = dataclasses.replace(
+        settings.controller, detection_events_formed_at="decoder"
+    )
+    windows = dataclasses.replace(settings.windows, kind="parallel")
+    settings = dataclasses.replace(
+        settings, controller=controller, windows=windows
+    )
+    machine = machine_module.Machine.build(settings, 0)
+
+    with pytest.raises(RuntimeError) as refusal:
+        machine.run()
+
+    sentence = str(refusal.value)
+    assert "the rounds of an operation are formed in order" in sentence
+    assert "form its events at the controller" in sentence
 
 
 def test_a_formation_place_that_is_not_a_row_is_refused_by_name():

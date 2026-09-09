@@ -5,11 +5,15 @@ and each is checked here rather than inside the running machine, which
 is where a yaml's mistake belongs (STYLE.md rule 4).
 """
 
+from unittest import mock
+
 import pytest
 
 import decsim.build.controller_side as controller_side
+import decsim.config as config
 import decsim.controller.settings as controller_settings
 import decsim.decoders.decoders as decoders
+import decsim.ports as ports
 import decsim.qpu.magic_state_factories as magic_state_factories
 import decsim.qpu.settings as qpu_settings
 import decsim.settings as machine_settings
@@ -43,16 +47,18 @@ def _settings(**changes):
     )
 
 
-def test_a_source_with_no_formation_table_forms_nothing_either_way():
+def test_a_source_that_does_not_answer_the_port_forms_nothing_either_way():
     settings = _settings()
     device = _DeviceWithNoFormationTable()
 
     formation = controller_side.build_detection_events(settings, device)
 
-    assert formation.form_round is None
+    assert formation.former is None
+    assert formation.decoder_side_former() is None
 
 
-def test_the_row_says_where_a_forming_source_narrows_the_round():
+def test_each_row_is_built_with_the_runs_former_and_the_controllers_cost():
+    """One constructor shape, so the row a name reaches is built the same."""
     forms_here = _settings(detection_events_formed_at="controller")
     forms_later = _settings(detection_events_formed_at="decoder")
     device = _DeviceThatForms()
@@ -62,9 +68,40 @@ def test_the_row_says_where_a_forming_source_narrows_the_round():
     )
     at_the_decoder = controller_side.build_detection_events(forms_later, device)
 
-    assert at_the_controller.at_the_controller is True
-    assert at_the_decoder.at_the_controller is False
-    assert at_the_controller.form_round == device.form_round
+    assert at_the_controller.former is device
+    assert at_the_controller.decoder_side_former() is None
+    assert at_the_decoder.decoder_side_former() is not None
+
+
+def test_the_controllers_formation_cost_reaches_the_row_that_charges_it():
+    forms_here = _settings(
+        detection_events_formed_at="controller",
+        detection_event_microseconds_per_round=0.02,
+    )
+    device = _DeviceThatForms()
+    charged_ticks = config.microseconds_to_ticks(0.02)
+
+    at_the_controller = controller_side.build_detection_events(
+        forms_here, device
+    )
+
+    assert at_the_controller.departure_ticks == charged_ticks
+
+
+def test_a_placement_written_outside_decsim_plugs_in_as_one_row():
+    """One class on the port and one row on the table, nothing else."""
+    rows = dict(controller_settings.DETECTION_EVENT_FORMATION)
+    rows["a_third_box"] = _PlacementOfMyOwn
+    settings = _settings(detection_events_formed_at="a_third_box")
+    device = _DeviceThatForms()
+
+    with mock.patch.object(
+        controller_settings, "DETECTION_EVENT_FORMATION", rows
+    ):
+        placement = controller_side.build_detection_events(settings, device)
+
+    assert isinstance(placement, ports.DetectionEventPlacement)
+    assert placement.form_before_departure(()) == ()
 
 
 def test_a_formation_row_that_is_not_on_the_table_is_refused():
@@ -76,7 +113,8 @@ def test_a_formation_row_that_is_not_on_the_table_is_refused():
 
     sentence = str(refusal.value)
     assert "controller.detection_events_formed_at" in sentence
-    assert list(controller_settings.DETECTION_EVENT_FORMATION) is not None
+    for row in controller_settings.DETECTION_EVENT_FORMATION:
+        assert repr(row) in sentence
 
 
 def test_the_two_formation_rows_are_the_two_the_key_offers():
@@ -175,6 +213,22 @@ def test_the_process_name_says_which_point_a_trace_is_of():
     assert name.startswith("decsim ")
     assert " d3 " in name
     assert name.endswith("seed7")
+
+
+class _PlacementOfMyOwn:
+    """A placement row written outside decsim: it forms nothing at all."""
+
+    def __init__(self, former, departure_ticks):
+        self.former = former
+        self.departure_ticks = departure_ticks
+
+    def form_before_departure(self, fragments):
+        """The round's fragments as they leave the controller."""
+        return fragments
+
+    def decoder_side_former(self):
+        """No tier forms anything either."""
+        return None
 
 
 class _EscalatingPolicy:

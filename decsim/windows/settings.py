@@ -53,9 +53,12 @@ class WindowSettings:
     when the escalation may escalate, since a strong recovery needs a
     last window that reads past its own commit. boundaries names a row of
     BOUNDARY_POLICIES (above): when a committed window ships its boundary
-    to the windows after it; null, the default, is held when the
-    escalation may escalate and the strong window does not absorb the
-    weak windows it covers, and eager otherwise. A
+    to the windows after it; null, the default, is the row the
+    escalation policy declares, or, when that policy may escalate, the
+    row its strong window shape declares (default_boundary_policy on
+    escalation/policies.py and escalation/strong_window_shapes.py):
+    held when the escalation may escalate and the strong window does not
+    absorb the weak windows it covers, and eager otherwise. A
     Python-built scheme, boundary policy or window interaction is used as
     it is; the root's defaults are the sliding scheme, Eager shipping and
     the default interaction.

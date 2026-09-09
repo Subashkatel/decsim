@@ -211,9 +211,12 @@ windows:
                                    # its boundary to the windows after it. eager
                                    # ships at every commit, held only when the
                                    # committing result is final. null, the default,
-                                   # is held when the escalation may escalate and
-                                   # the strong window does not absorb the weak
-                                   # windows it covers, and eager otherwise; a
+                                   # is the row the escalation policy declares, or
+                                   # its strong window shape's when the policy may
+                                   # escalate (default_boundary_policy): held when
+                                   # the escalation may escalate and the strong
+                                   # window does not absorb the weak windows it
+                                   # covers, and eager otherwise; a
                                    # provisional boundary that ships is never
                                    # revised when the strong tier answers later
                                    # (Toshio 2510.25222 Sec. III A).

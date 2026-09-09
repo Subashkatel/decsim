@@ -130,7 +130,12 @@ class StrongWindowShape(Protocol):
     strong region replaces the weak windows it covers, so the planner
     claims the rounds a restart would read and the weak chain keeps
     committing; a reader of the run's shape asks the row rather than a
-    yaml flag. window_absorbed(key, owner_key) is the shape's one trace
+    yaml flag. default_boundary_policy is the row of BOUNDARY_POLICIES a
+    run gets when windows.boundaries is null and the escalation may
+    escalate: an absorbing region needs the weak chain to keep
+    committing, so it names eager, and a region that absorbs nothing
+    names held, since its escalation would revise a boundary already
+    shipped. window_absorbed(key, owner_key) is the shape's one trace
     source: the forward window fires it for every weak window a strong
     one covers, and a shape that absorbs nothing exposes the silent
     source, so the machine connects the ledger and the trace without
@@ -138,6 +143,7 @@ class StrongWindowShape(Protocol):
     """
 
     absorbs_weak_windows: bool
+    default_boundary_policy: str
     window_absorbed: Any
 
     def plan(self, weak_job: decoding_records.DecodeJob) -> StrongAssignment:
@@ -186,6 +192,7 @@ class ContextWindow:
 
     absorbs_weak_windows = False
     pins_the_far_face = False
+    default_boundary_policy = "held"
     window_absorbed = trace_source.SILENT
 
     def __init__(self, collaborators: StrongWindowCollaborators) -> None:
@@ -253,6 +260,7 @@ class NearSeamWindow:
 
     absorbs_weak_windows = False
     pins_the_far_face = False
+    default_boundary_policy = "held"
     window_absorbed = trace_source.SILENT
 
     def __init__(self, collaborators: StrongWindowCollaborators) -> None:
@@ -302,6 +310,7 @@ class ForwardWindow:
 
     absorbs_weak_windows = True
     pins_the_far_face = False
+    default_boundary_policy = "eager"
 
     def __init__(self, collaborators: StrongWindowCollaborators) -> None:
         self.collaborators = collaborators

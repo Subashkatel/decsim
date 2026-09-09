@@ -36,7 +36,16 @@ class ConditionalRelease:
         self.deliver_decision: Optional[Callable] = None
 
     def connect(self, controller, deliver_decision: Callable) -> None:
-        """Wire the return path: the controller relays each decision."""
+        """Wire the return path, after both ends exist.
+
+        The wiring is two-phase because the two ends need each other: a
+        release has no way to reach the QPU except through the
+        controller's instruction output, and that output is built with
+        the execution runtime whose decision callback the release
+        delivers into. One of the two has to be constructed first, so
+        the release is constructed knowing nothing and told its
+        controller here, once the root has both.
+        """
         self.controller = controller
         self.deliver_decision = deliver_decision
 
@@ -54,6 +63,8 @@ class ConditionalRelease:
                 instruction = "conditional release"
             else:
                 instruction = "result return"
+            # the decision leaves the frame's end of the
+            # frame-to-controller path, so the line is sourced there
             self.engine.log(
                 log_sources.PAULI_FRAME,
                 f"DISPATCH {instruction} for op#{decision.target_operation_id} "

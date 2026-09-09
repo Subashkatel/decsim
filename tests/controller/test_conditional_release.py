@@ -17,7 +17,7 @@ over and logs one line per decision before handing it on.
 
 import types
 
-import decsim.pauli_frame.conditional_release as conditional_release
+import decsim.controller.conditional_release as conditional_release
 
 
 class RecordingEngine:

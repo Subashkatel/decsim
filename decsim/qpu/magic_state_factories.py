@@ -1,6 +1,6 @@
 """The magic-state factories: where a non-Clifford operation gets its state.
 
-A factory fills the MagicStateFactory seam (decsim/ports.py): an
+A factory fills the MagicStateFactory port (decsim/ports.py): an
 operation that needs a magic state calls request and is called back when
 one is ready; an empty store stalls the requester, and that supply stall
 is the quantity the factories exist to measure.

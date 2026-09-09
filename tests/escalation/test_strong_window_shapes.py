@@ -524,6 +524,7 @@ class RecordingForwardWindow:
     """
 
     absorbs_weak_windows = True
+    default_boundary_policy = "eager"
 
     def __init__(self, collaborators) -> None:
         self.inner = strong_window_shapes.ForwardWindow(collaborators)

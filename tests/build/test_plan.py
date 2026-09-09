@@ -13,7 +13,10 @@ import decsim.build.escalation as escalation_build
 import decsim.build.plan as plan_build
 import decsim.escalation.settings as escalation_settings
 import decsim.frontends.settings as workload_settings
+import decsim.records.decoding as decoding_records
+import decsim.records.windows as window_records
 import decsim.settings as machine_settings
+import decsim.trace_source as trace_source
 import decsim.windows.boundary_policies as boundary_policies
 import decsim.windows.settings as window_settings
 import tests.declared_run as declared_run
@@ -136,3 +139,114 @@ class _SilentScheme:
         """Never reached: the plan refuses this row first."""
         del arguments, sizes
         raise AssertionError("the plan should have refused this row")
+
+
+# ---- the default boundary row lives on the rows that decide it
+
+
+class _OutsideBoundaryPolicy:
+    """A boundary policy row written outside decsim; it ships when final."""
+
+    ships_provisional_boundaries = False
+
+    def on_commit(self, window, *, final: bool) -> bool:
+        """Ship when the committing result is final."""
+        del window
+        return final
+
+
+class _OutsideEscalation:
+    """An escalation row written outside decsim that never escalates."""
+
+    decides_on_a_confidence = False
+    requires_strong_context = False
+    primary_tier = window_records.DecoderTier.WEAK
+    default_boundary_policy = "outside_boundaries"
+
+    def check_plan(self, plan) -> None:
+        """Every run shape is served."""
+        del plan
+
+    def tiers_for_ready_window(self, window) -> tuple:
+        """The weak tier alone."""
+        del window
+        return (window_records.DecoderTier.WEAK,)
+
+    def verdict_for_weak_result(self, job, result):
+        """Every result is final."""
+        del job
+        del result
+        return decoding_records.Verdict.KEEP
+
+    def learn_from_strong_result(self, window_key, result) -> None:
+        """Nothing is learned."""
+        del window_key
+        del result
+
+
+class _OutsideShape:
+    """A strong window shape written outside decsim that absorbs nothing."""
+
+    absorbs_weak_windows = False
+    pins_the_far_face = False
+    default_boundary_policy = "outside_boundaries"
+    window_absorbed = trace_source.SILENT
+
+    def __init__(self, collaborators) -> None:
+        del collaborators
+
+    def plan(self, weak_job):
+        """Never reached: the test builds the plan and runs nothing."""
+        del weak_job
+        raise AssertionError("the test never escalates a window")
+
+
+def _outside_shape_switching():
+    """A switching section whose strong window is the outside shape."""
+    return escalation_settings.EscalationSettings(
+        kind="switching",
+        threshold_source="fixed",
+        gap_threshold_nats=2.0,
+        confidence="complementary_gap",
+        strong_window="outside_shape",
+    )
+
+
+def test_an_outside_escalation_row_names_its_own_default_boundary_row(
+    monkeypatch,
+):
+    """A row that never escalates names the default; plan.py holds none.
+
+    The default used to be the literal "eager" inside plan.py, so no row
+    of BOUNDARY_POLICIES written outside decsim could ever be it.
+    """
+    monkeypatch.setitem(
+        window_settings.BOUNDARY_POLICIES,
+        "outside_boundaries",
+        _OutsideBoundaryPolicy,
+    )
+    policy = _OutsideEscalation()
+    escalation = escalation_settings.EscalationSettings(policy=policy)
+
+    plan = _plan(escalation=escalation)
+
+    assert isinstance(plan.boundary_policy, _OutsideBoundaryPolicy)
+
+
+def test_an_outside_strong_window_row_names_the_escalations_default(
+    monkeypatch,
+):
+    """A row that may escalate leaves the default to its strong window."""
+    monkeypatch.setitem(
+        window_settings.BOUNDARY_POLICIES,
+        "outside_boundaries",
+        _OutsideBoundaryPolicy,
+    )
+    monkeypatch.setitem(
+        escalation_settings.STRONG_WINDOW_SHAPES, "outside_shape", _OutsideShape
+    )
+    switching = _outside_shape_switching()
+
+    plan = _plan(escalation=switching)
+
+    assert isinstance(plan.boundary_policy, _OutsideBoundaryPolicy)

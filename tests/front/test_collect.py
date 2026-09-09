@@ -377,6 +377,7 @@ class _OutsideEscalation:
     decides_on_a_confidence = False
     requires_strong_context = False
     primary_tier = window_records.DecoderTier.WEAK
+    default_boundary_policy = "eager"
 
     def __init__(self, collaborators) -> None:
         self.delegate = escalation_policies.Baseline(collaborators)

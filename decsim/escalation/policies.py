@@ -56,6 +56,14 @@ class EscalationPolicyBase:
     """
 
     decides_on_a_confidence = False
+    # The row of BOUNDARY_POLICIES a run gets when windows.boundaries is
+    # null. A policy that never revises a committed window ships every
+    # boundary at its commit; a row whose requires_strong_context is true
+    # leaves the default to its strong window shape, whose own
+    # default_boundary_policy answers, since whether the shape absorbs
+    # the weak windows it covers is what decides
+    # (strong_window_shapes.py).
+    default_boundary_policy = "eager"
 
     def __init__(self, collaborators: EscalationCollaborators) -> None:
         """A row that decides on no confidence reads none of the record."""

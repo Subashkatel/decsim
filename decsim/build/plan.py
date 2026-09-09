@@ -362,15 +362,22 @@ def _boundaries_name(
     escalation: escalation_settings.EscalationSettings,
     escalation_policy,
 ) -> str:
-    """The section's boundaries row, or the one the escalation needs."""
+    """The section's boundaries row, or the one the rows declare.
+
+    A default lives on the class that owns the parameter, gem5's rule for
+    a SimObject's params (tmp/resources/gem5/src/python/m5/SimObject.py
+    :313-318, _new_param setting the ParamDesc's default on the class it
+    is declared in, inherited through the _values parent chain set at
+    :240-254). The escalation policy row owns this one, and a row that
+    may escalate hands it to its strong window shape, whose absorption is
+    what decides.
+    """
     if windows.boundaries is not None:
         return windows.boundaries
-    absorbs_weak_windows = escalation_build.absorbs_weak_windows(escalation)
-    may_escalate = escalation_policy.requires_strong_context
-    is_serial_escalation = may_escalate and not absorbs_weak_windows
-    if is_serial_escalation:
-        return "held"
-    return "eager"
+    if not escalation_policy.requires_strong_context:
+        return escalation_policy.default_boundary_policy
+    shape = escalation_build.strong_window_row(escalation)
+    return shape.default_boundary_policy
 
 
 def _idle_policy(settings: controller_settings.IdlePolicySettings):

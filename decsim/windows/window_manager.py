@@ -23,54 +23,13 @@ gives a new window its first boundary and the workload's feedback mode.
 """
 
 import dataclasses
-from typing import Optional, Protocol, runtime_checkable
+from typing import Optional
 
 import decsim.records.identity as identity_records
 import decsim.records.log_sources as log_sources
 import decsim.records.program as program_records
 import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
-
-
-@runtime_checkable
-class ErrorModelProvider(Protocol):
-    """Builds the decoder-facing models of windows and streams."""
-
-    def register_dynamic_stream(
-        self, stream_operation, round_count: int, *, fault_model_requirement
-    ):
-        """Note a dynamic stream; its window models come per window."""
-
-    def validate_stream_length(
-        self, stream_operation, stream_round_count: int
-    ) -> None:
-        """Refuse a stream longer than the source can supply."""
-
-    def window_models_for_operation(
-        self,
-        operation,
-        windows: list,
-        round_count: int,
-        *,
-        fault_model_requirement,
-        fault_exclusion_ranges: tuple,
-        window_protocol,
-    ) -> list:
-        """One model per window of the operation."""
-
-    def window_model_for_stream(self, stream_id, window):
-        """The model of one window of a dynamic stream."""
-
-    def strong_window_model_for_operation(
-        self,
-        operation,
-        window,
-        round_count: int,
-        *,
-        fault_model_requirement,
-        exclude_faults_touching=None,
-    ):
-        """The model of one strong window of the operation."""
 
 
 class WindowManager:

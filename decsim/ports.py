@@ -556,6 +556,78 @@ class SyndromeSource(Protocol):
         """The observable flips the source drew, or None when it draws none."""
 
 
+@runtime_checkable
+class WindowModelSource(Protocol):
+    """Who builds the decoder-facing error model of one window.
+
+    The window planner holds one of these and asks it per window; the
+    run's syndrome source is the shipped answer, since the model comes
+    from the same circuit the readouts come from, but the plan takes it
+    as its own collaborator (qpu.error_model_provider) so a model built
+    anywhere else plugs in. A run whose source builds no models supplies
+    none at all: the planner holds None and asks nothing.
+
+    The requirement and the returned model are the detector error
+    model's records; this port names them by position only, so the
+    window side never imports that package to hold the port.
+    """
+
+    def window_models_for_operation(
+        self,
+        operation: program_records.Operation,
+        windows: list,
+        round_count: int,
+        *,
+        fault_model_requirement,
+        fault_exclusion_ranges: tuple,
+        window_protocol,
+    ) -> list:
+        """One model per window of a planned operation, in window order."""
+
+    def window_model_for_stream(
+        self, stream_id: Any, window: window_records.Window
+    ):
+        """The model of one window of a dynamic stream, laid at runtime."""
+
+    def register_dynamic_stream(
+        self,
+        stream_operation: program_records.Operation,
+        round_count: int,
+        *,
+        fault_model_requirement,
+    ) -> Optional[int]:
+        """Note a dynamic stream; the rounds it can supply, or None."""
+
+    def validate_stream_length(
+        self,
+        stream_operation: program_records.Operation,
+        stream_round_count: int,
+    ) -> None:
+        """Refuse a stream longer than this source can supply."""
+
+    def strong_window_model_for_operation(
+        self,
+        operation: program_records.Operation,
+        window: window_records.Window,
+        round_count: int,
+        *,
+        fault_model_requirement,
+        exclude_faults_touching=None,
+    ):
+        """One strong window's model, with one non-owned range excluded."""
+
+    def strong_window_model_for_operation_with_exclusions(
+        self,
+        operation: program_records.Operation,
+        window: window_records.Window,
+        round_count: int,
+        *,
+        fault_model_requirement,
+        fault_exclusion_ranges: tuple,
+    ):
+        """The same, with several non-owned ranges excluded."""
+
+
 # -------------------------------------------------- every hop rides a link
 
 

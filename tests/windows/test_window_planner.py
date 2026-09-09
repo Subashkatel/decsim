@@ -15,6 +15,7 @@ import types
 
 import pytest
 
+import decsim.ports as ports
 import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.windows.built_window_models as built_window_models
@@ -62,7 +63,12 @@ def _stream(operation_id="stream"):
 
 
 class _FiniteSource:
-    """A source that fixes the stream's length up front."""
+    """A source that fixes the stream's length up front.
+
+    It fills the whole WindowModelSource port: a provider the planner
+    accepts must answer every question the planner asks, and building
+    no model is one of the answers.
+    """
 
     def __init__(self, round_limit: int) -> None:
         self.round_limit = round_limit
@@ -71,9 +77,36 @@ class _FiniteSource:
         del operation, round_count
         return self.round_limit
 
+    def validate_stream_length(self, operation, stream_round_count):
+        del operation, stream_round_count
+
+    def window_models_for_operation(
+        self, operation, windows, round_count, **_arguments
+    ):
+        del operation, round_count
+        return [None] * len(windows)
+
     def window_model_for_stream(self, stream_id, window):
         del stream_id, window
         return None
+
+    def strong_window_model_for_operation(
+        self, operation, window, round_count, **_arguments
+    ):
+        del operation, window, round_count
+        return None
+
+    def strong_window_model_for_operation_with_exclusions(
+        self, operation, window, round_count, **_arguments
+    ):
+        del operation, window, round_count
+        return None
+
+
+def test_the_packages_own_test_provider_fills_the_window_model_port():
+    """A provider the planner accepts is one the port describes whole."""
+    source = _FiniteSource(9)
+    assert isinstance(source, ports.WindowModelSource)
 
 
 def _planner(source=None) -> window_planner.WindowPlanner:

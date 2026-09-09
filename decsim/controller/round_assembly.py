@@ -161,14 +161,14 @@ class RoundAssembler:
         """The round is complete: merge, form detection events, hand on."""
         operation_id, round_index = context.round_key
         raw_fragments = _merge_fragments_by_patch(context.fragments)
-        # the link out of the controller carries the raw measurement
-        # bits wherever the events are formed
-        wire_bits = _fragment_bits(raw_fragments)
+        # the workspace holds the raw measurement bits the fragments
+        # arrived with, whatever width leaves afterwards
+        raw_bits = _fragment_bits(raw_fragments)
         # the merge is what packs the round, so it is reported before the
         # round is packed, and the workspace's residence knows its bits
         self.trace.copy_made.fire(
             context.round_key,
-            wire_bits,
+            raw_bits,
             "controller intake",
             "controller assembler",
         )
@@ -177,6 +177,10 @@ class RoundAssembler:
         )
         self.trace.round_event.fire(packed_event)
         formed_fragments = self._form_detection_events(raw_fragments)
+        # the link out of the controller carries what leaves it: the
+        # detection events when this row forms them here, the raw
+        # outcomes when the decoder forms them
+        wire_bits = _fragment_bits(formed_fragments)
         packet = round_records.SyndromeRoundPacket(
             operation_id=operation_id,
             round_index=round_index,

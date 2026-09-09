@@ -208,7 +208,9 @@ def test_detection_events_are_formed_once_from_the_merged_bits():
     (formed,) = round.packet.fragments
     assert formed.bits == (0, 1, 1)
     assert formed.size_bits == 3
-    assert round.wire_bits == 4
+    # the row forms events here, so the round leaves three bits wide,
+    # not the four measurement outcomes it was merged from
+    assert round.wire_bits == 3
 
 
 def test_events_formed_at_the_decoder_keep_the_raw_measurement_width():

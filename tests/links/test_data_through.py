@@ -53,8 +53,8 @@ DECODER_INPUT_PATHS = (
     "weak_buffer_to_weak_decoder",
     "strong_buffer_to_strong_decoder",
 )
-WIRE_PATHS = (
-    "qpu_to_controller",
+READOUT_PATH = "qpu_to_controller"
+STORE_PATHS = (
     "controller_to_weak_buffer",
     "controller_to_strong_buffer",
 )
@@ -81,39 +81,43 @@ class Traffic:
 # asserted below beside the traffic):
 #   d=3, R=15: layers 4, 8, 12; raw 8 per round and 8+9 on round 15.
 #   d=5, R=15: layers 12, 24, 36; raw 24 per round and 24+25 on round 15.
+# These cards form the detection events at the controller, so the
+# readout hop carries the raw outcomes (129 and 385) and the hops into
+# the two stores carry the layers they formed (4 + 13*8 + 12 = 120,
+# 12 + 13*24 + 36 = 360).
 EXPECTED = {
     ("weak", 3): {
         "qpu_to_controller": Traffic(15, 129),
-        "controller_to_weak_buffer": Traffic(15, 129),
+        "controller_to_weak_buffer": Traffic(15, 120),
         "weak_buffer_to_weak_decoder": Traffic(4, 192),
         "decoder_to_decoder": Traffic(3, 24),
         "weak_decoder_to_frame": Traffic(4, 4),
     },
     ("weak", 5): {
         "qpu_to_controller": Traffic(15, 385),
-        "controller_to_weak_buffer": Traffic(15, 385),
+        "controller_to_weak_buffer": Traffic(15, 360),
         "weak_buffer_to_weak_decoder": Traffic(2, 480),
         "decoder_to_decoder": Traffic(1, 24),
         "weak_decoder_to_frame": Traffic(2, 2),
     },
     ("strong", 3): {
         "qpu_to_controller": Traffic(15, 129),
-        "controller_to_strong_buffer": Traffic(15, 129),
+        "controller_to_strong_buffer": Traffic(15, 120),
         "strong_buffer_to_strong_decoder": Traffic(4, 192),
         "decoder_to_decoder": Traffic(3, 24),
         "strong_decoder_to_frame": Traffic(4, 4),
     },
     ("strong", 5): {
         "qpu_to_controller": Traffic(15, 385),
-        "controller_to_strong_buffer": Traffic(15, 385),
+        "controller_to_strong_buffer": Traffic(15, 360),
         "strong_buffer_to_strong_decoder": Traffic(2, 480),
         "decoder_to_decoder": Traffic(1, 24),
         "strong_decoder_to_frame": Traffic(2, 2),
     },
     ("switching", 3): {
         "qpu_to_controller": Traffic(15, 129),
-        "controller_to_weak_buffer": Traffic(15, 129),
-        "controller_to_strong_buffer": Traffic(15, 129),
+        "controller_to_weak_buffer": Traffic(15, 120),
+        "controller_to_strong_buffer": Traffic(15, 120),
         "weak_buffer_to_weak_decoder": Traffic(5, 220),
         "weak_decoder_to_strong_decoder": Traffic(5, 0, 5),
         "strong_buffer_to_strong_decoder": Traffic(5, 312),
@@ -122,8 +126,8 @@ EXPECTED = {
     },
     ("switching", 5): {
         "qpu_to_controller": Traffic(15, 385),
-        "controller_to_weak_buffer": Traffic(15, 385),
-        "controller_to_strong_buffer": Traffic(15, 385),
+        "controller_to_weak_buffer": Traffic(15, 360),
+        "controller_to_strong_buffer": Traffic(15, 360),
         "weak_buffer_to_weak_decoder": Traffic(3, 612),
         "weak_decoder_to_strong_decoder": Traffic(3, 0, 3),
         "strong_buffer_to_strong_decoder": Traffic(3, 840),
@@ -313,20 +317,36 @@ def test_a_decoder_input_carries_its_windows_detectors(shape, distance):
     assert checked > 0
 
 
+def _checked_round_hops(transfers, width_of, distance) -> int:
+    """Hold every single-round transfer to the width its sender let go of."""
+    checked = 0
+    for transfer in transfers:
+        attribution = transfer["attribution"]
+        round_index = attribution["round_lo"]
+        expected = width_of(round_index, ROUNDS, distance)
+        assert attribution["round_hi"] == round_index
+        assert transfer["payload_bits"] == expected, attribution
+        checked += 1
+    return checked
+
+
 @pytest.mark.parametrize("shape,distance", CASES)
-def test_a_round_on_the_wire_carries_its_raw_readout(shape, distance):
-    """The three wire hops price the readout, not the detection events."""
+def test_a_round_hop_carries_the_width_its_sender_let_go_of(shape, distance):
+    """The readout hop prices the outcomes, the store hops the layer.
+
+    These cards form the detection events at the controller
+    (controller.detection_events_formed_at), so the round narrows at the
+    assembler: what leaves the QPU is the measurement outcomes, and what
+    leaves the controller for either store is the layer the store then
+    holds.
+    """
     _machine, result = run_case(shape, distance)
     grouped = transfers_by_path(result)
-    checked = 0
-    for path in WIRE_PATHS:
-        for transfer in grouped.get(path, ()):
-            attribution = transfer["attribution"]
-            round_index = attribution["round_lo"]
-            expected = raw_readout_bits(round_index, ROUNDS, distance)
-            assert attribution["round_hi"] == round_index
-            assert transfer["payload_bits"] == expected, attribution
-            checked += 1
+    readout = grouped.get(READOUT_PATH, ())
+    checked = _checked_round_hops(readout, raw_readout_bits, distance)
+    for path in STORE_PATHS:
+        stored = grouped.get(path, ())
+        checked += _checked_round_hops(stored, layer_detectors, distance)
     assert checked > 0
 
 

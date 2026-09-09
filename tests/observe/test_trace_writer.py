@@ -178,15 +178,17 @@ def test_round_ones_first_hops_are_the_notes_worked_example(traced):
         1_004_000,
         1_008_000,
     ]
-    assert [row["args"]["bits"] for row in moves] == [8, 8]
+    # the readout hop carries the eight measurement outcomes; the store
+    # hop carries what left the controller, the four detection events
+    # this card's row formed there
+    assert [row["args"]["bits"] for row in moves] == [8, 4]
 
     residence = _one(document, "X", "round 1")
     assert residence["cat"] == "round,residence"
     assert residence["args"]["tick"] == 1_004_000
     assert residence["dur"] == 5.008
-    # the store holds detection events, four per round at d 3 memory z;
-    # the eight of the note's example are the raw measurement bits the
-    # links carry, which stop at the assembler (round_assembly.py)
+    # the store holds the four detection events of round 1, which is
+    # what the hop into it carried
     assert residence["args"]["bits"] == 4
     assert residence["args"]["data_ready"] == 1_008_000
     assert residence["args"]["freed"] == 6_012_000

@@ -269,7 +269,8 @@ def _map_defects(
     """The delivery's defects in the destination's round coordinates."""
     payload = delivery.payload
     if _is_same_operation_residual(delivery, destination):
-        return _map_detector_identities(payload.detector_ids, destination)
+        mapped = _map_detector_identities(payload.detector_ids, destination)
+        return mapped
     defects = payload
     if isinstance(payload, window_records.DependencyResidual):
         defects = payload.defects
@@ -278,7 +279,37 @@ def _map_defects(
     shift = 0
     if delivery.source_key[0] != destination.operation_id:
         shift = -delivery.source_operation_round_count
-    return _map_shifted_defects(defects, shift, destination)
+    mapped = _map_shifted_defects(defects, shift, destination)
+    _check_lands_on_one_seam_layer(mapped, destination)
+    return mapped
+
+
+def _check_lands_on_one_seam_layer(mapped: dict, destination) -> None:
+    """A hand-off updates one layer of its neighbour, and it is an edge.
+
+    A boundary message is the seam between two windows, so it lands on
+    the one layer where they meet: the destination's oldest round when
+    the source is the earlier window, its newest when the source is the
+    later one (Tan 2209.09219 lines 936-946, Skoric 2209.08552 lines
+    268-269). A mask spread over the middle of a window is not a seam,
+    and boundary_payload_bits, which prices one layer, would carry the
+    rest free.
+    """
+    landed = set()
+    for key in mapped:
+        round_index = key
+        if isinstance(key, tuple):
+            round_index = key[0]
+        landed.add(round_index)
+    if not landed:
+        return
+    edges = {destination.start_round, destination.buffer_hi}
+    assert landed <= edges, (
+        f"a boundary mask landed on rounds {sorted(landed)} of window "
+        f"{destination.window_index}, which reads "
+        f"{destination.start_round}..{destination.buffer_hi}; a seam is "
+        f"one of the two layers where two windows meet"
+    )
 
 
 def _is_same_operation_residual(delivery, destination) -> bool:

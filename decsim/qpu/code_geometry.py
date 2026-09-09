@@ -44,7 +44,7 @@ class CodeModel(Protocol):
         """The leading and trailing buffer rounds the code needs."""
 
     def spatial_nodes(self, num_patches: int) -> int:
-        """Decoding-graph nodes per round for this many patches."""
+        """The per-round graph size a latency model prices this card at."""
 
     def syndrome_bits_per_round(self, num_patches: int) -> int:
         """Syndrome bits one round of this many patches produces."""
@@ -103,9 +103,16 @@ class SurfaceCodeModel:
         return (self.distance, self.distance)
 
     def spatial_nodes(self, num_patches: int) -> int:
-        """Decoding-graph nodes per round: d*d per patch, plus a d-node seam.
+        """Per-round graph size for a latency model: d*d per patch, plus a seam.
 
-        The seam strip is a heuristic for a multi-patch operation.
+        A size knob, not the detector count: a rotated patch contributes
+        d*d - 1 detector nodes per round (Stim's bulk layer, read off
+        stim.Circuit.generated at d=3, 5 and 7 as 8, 24 and 48), one
+        fewer per patch than this returns. No shipped decoder row reads
+        the number; the reader is a caller-supplied latency function
+        (decoders/decoders.py FunctionLatencyDecoder), where the
+        difference is a scale factor and reaches no correction. The seam
+        strip is a heuristic for a multi-patch operation.
         """
         node_count_per_patch = self.distance * self.distance
         seam_node_count = 0
@@ -202,7 +209,7 @@ class BivariateBicycleCodeModel:
         return self.buffer_rounds_override
 
     def spatial_nodes(self, num_patches: int) -> int:
-        """Decoding-graph nodes per round: the n checks of every patch."""
+        """Per-round graph size for a latency model: n per patch."""
         return num_patches * self.qubit_count
 
     def syndrome_bits_per_round(self, num_patches: int) -> int:

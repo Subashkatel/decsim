@@ -430,10 +430,12 @@ class RunShape:
     """What a run is made of, as the root checks it before planning.
 
     The escalation policy refuses a run it cannot serve from this
-    record, once, in Machine.build. is_absorbing_strong_window is the
-    strong window shape's own declaration that its region replaces the
-    weak windows it covers (the forward window of Toshio et al.
-    2510.25222 Sec. III C; decsim's own two-sided context absorbs
+    record, once, in Machine.build. strong_window is the row of
+    STRONG_WINDOW_SHAPES the escalation section named, so a refusal
+    names the shape the yaml chose; is_absorbing_strong_window is that
+    row's own declaration that its region replaces the weak windows it
+    covers (the forward rows of Toshio et al. 2510.25222 Sec. III C;
+    decsim's own two-sided context absorbs
     nothing); is_bulk_strong is the
     decoder manager's merging of queued strong re-decodes; operations
     are the workload's planning views; commit_round_count and
@@ -447,6 +449,7 @@ class RunShape:
     operations: tuple
     commit_round_count: int
     buffer_round_count: int
+    strong_window: str
     is_absorbing_strong_window: bool
     is_bulk_strong: bool
     has_dynamic_streams: bool

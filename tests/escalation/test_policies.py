@@ -272,6 +272,25 @@ def test_a_plan_that_contradicts_itself_is_refused_at_build_with_a_sentence():
         )
 
 
+def test_a_refusal_names_the_strong_window_row_the_yaml_chose():
+    """Four rows reach these refusals, so none of them may name one row.
+
+    The run shape carries escalation.strong_window (RunShape), and the
+    sentence a user reads names the row their yaml asked for.
+    """
+    with pytest.raises(
+        ValueError,
+        match="escalation.strong_window forward_seam_pinned defers the "
+        "strong start until the far weak boundary exists",
+    ):
+        fabric.switching_machine(
+            rounds=9,
+            escalated_windows=set(),
+            strong_window="forward_seam_pinned",
+            run_both_at_once=True,
+        )
+
+
 def _forward_window_settings(
     commit_rounds: int, buffer_rounds: int
 ) -> machine_settings.MachineSettings:
@@ -312,7 +331,7 @@ def test_a_forward_window_crossing_a_later_commit_region_is_refused(
     settings = _forward_window_settings(commit_rounds, buffer_rounds)
     with pytest.raises(
         ValueError,
-        match="the forward window's strong region, commit plus two buffers, "
+        match="the strong region of forward, commit plus two buffers, "
         "must end inside its own commit region",
     ):
         machine_module.Machine.build(settings, 0)

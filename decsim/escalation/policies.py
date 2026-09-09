@@ -131,10 +131,10 @@ class Switching(EscalationPolicyBase):
     Step 1, Toshio et al. 2510.25222 Sec. III A); otherwise the strong
     re-decode starts at the verdict, after the weak_decoder_to_strong_
     decoder hop (the serial modification of the same section). How the
-    strong window is laid out is the run's shape
-    (escalation.strong_window: decsim's own two_sided_context, or the
-    forward window of Sec. III C, strong_window_shapes.py), and whether
-    queued re-decodes are batched
+    strong window is laid out is the run's shape (the row
+    escalation.strong_window names in STRONG_WINDOW_SHAPES,
+    strong_window_shapes.py, which every refusal here names back), and
+    whether queued re-decodes are batched
     is the decoder manager's (bulk_strong); check_plan holds the policy's
     knobs and its threshold source against both once, at build.
     """
@@ -168,7 +168,9 @@ class Switching(EscalationPolicyBase):
             _refuse_eager_serial_boundaries(plan.boundary_policy)
             return
         self._refuse_absorbing_window_contradictions(plan)
-        _refuse_absorbing_window_scheme(plan.scheme, plan.boundary_policy)
+        _refuse_absorbing_window_scheme(
+            plan.strong_window, plan.scheme, plan.boundary_policy
+        )
         _refuse_crossing_strong_region(plan)
         _refuse_absorbing_window_run(plan)
 
@@ -208,17 +210,18 @@ class Switching(EscalationPolicyBase):
     def _refuse_absorbing_window_contradictions(
         self, plan: decoding_records.RunShape
     ) -> None:
-        """A forward strong window starts late and alone; these knobs do not."""
+        """An absorbing strong window starts late and alone; these do not."""
+        row_name = plan.strong_window
         if self.run_both_at_once:
             raise ValueError(
-                "escalation.strong_window forward defers the strong "
+                f"escalation.strong_window {row_name} defers the strong "
                 "start until the far weak boundary exists; "
                 "run_both_at_once starts it immediately (the two "
                 "policies contradict; pick one)"
             )
         if plan.is_bulk_strong:
             raise ValueError(
-                "escalation.strong_window forward with bulk_strong is "
+                f"escalation.strong_window {row_name} with bulk_strong is "
                 "not supported: deferred strong windows are submitted "
                 "one per escalation"
             )
@@ -251,17 +254,20 @@ def _refuse_eager_serial_boundaries(boundary_policy) -> None:
         )
 
 
-def _refuse_absorbing_window_scheme(scheme, boundary_policy) -> None:
+def _refuse_absorbing_window_scheme(
+    row_name: str, scheme, boundary_policy
+) -> None:
     if not scheme.commits_in_one_serial_chain:
         raise ValueError(
-            "escalation.strong_window forward requires a windowing scheme "
-            "whose windows commit in one serial chain, since the forward "
-            "window absorbs the weak windows its region covers"
+            f"escalation.strong_window {row_name} requires a windowing "
+            "scheme whose windows commit in one serial chain, since an "
+            "absorbing strong window takes over the weak windows its "
+            "region covers"
         )
     if not boundary_policy.ships_provisional_boundaries:
         raise ValueError(
-            "escalation.strong_window forward requires the weak chain to "
-            "keep committing "
+            f"escalation.strong_window {row_name} requires the weak chain "
+            "to keep committing "
             "(the far boundary IS the restart window's weak commit); "
             "a boundary policy that holds provisional boundaries would "
             "make later windows wait for "
@@ -270,7 +276,7 @@ def _refuse_absorbing_window_scheme(scheme, boundary_policy) -> None:
 
 
 def _refuse_crossing_strong_region(plan: decoding_records.RunShape) -> None:
-    """The forward strong window must end where a weak commit region ends.
+    """An absorbing strong region must end where a weak commit region ends.
 
     The shipped interaction's strong region is commit plus two buffers
     from the escalated window's commit start (window_interactions.py),
@@ -280,6 +286,7 @@ def _refuse_crossing_strong_region(plan: decoding_records.RunShape) -> None:
     the region's end and has no owner; the shape stops the run there
     (strong_window_shapes.py), and the settings say so at build.
     """
+    row_name = plan.strong_window
     commit_round_count = plan.commit_round_count
     buffer_round_count = plan.buffer_round_count
     strong_round_count = window_records.strong_region_round_count(
@@ -289,20 +296,21 @@ def _refuse_crossing_strong_region(plan: decoding_records.RunShape) -> None:
         return
     raise ValueError(
         f"windows.commit_rounds {commit_round_count} with "
-        f"windows.buffer_rounds {buffer_round_count} gives the forward "
-        f"window a strong region of {strong_round_count} rounds that ends "
-        "inside a later window's commit region; the forward window's "
-        "strong region, commit plus two buffers, must end inside its own "
-        "commit region, so twice buffer_rounds must be a multiple of "
-        "commit_rounds"
+        f"windows.buffer_rounds {buffer_round_count} gives "
+        f"escalation.strong_window {row_name} a strong region of "
+        f"{strong_round_count} rounds that ends inside a later window's "
+        f"commit region; the strong region of {row_name}, commit plus two "
+        "buffers, must end inside its own commit region, so twice "
+        "buffer_rounds must be a multiple of commit_rounds"
     )
 
 
 def _refuse_absorbing_window_run(plan: decoding_records.RunShape) -> None:
     """An absorbing window needs static, explicit, single-patch operations."""
+    row_name = plan.strong_window
     if plan.has_dynamic_streams or plan.has_static_decode_plan:
         raise ValueError(
-            "escalation.strong_window forward skips statically planned "
+            f"escalation.strong_window {row_name} skips statically planned "
             "windows when a "
             "strong window is assigned; stream windows created or "
             "folded at runtime (dynamic_streams/decode_ops) are not "
@@ -310,15 +318,15 @@ def _refuse_absorbing_window_run(plan: decoding_records.RunShape) -> None:
         )
     if plan.has_frontend:
         raise ValueError(
-            "escalation.strong_window forward is validated for explicit "
+            f"escalation.strong_window {row_name} is validated for explicit "
             "ops= workloads; "
             "frontend-built operation chains are not supported yet"
         )
     for operation in plan.operations:
         if operation.decoder_boundary_predecessors:
             raise ValueError(
-                "escalation.strong_window forward supports one single-patch "
-                "stream per "
+                f"escalation.strong_window {row_name} supports one "
+                "single-patch stream per "
                 "operation; decoder-boundary chains would let a strong "
                 "window cross an operation seam before its far "
                 "boundary exists"

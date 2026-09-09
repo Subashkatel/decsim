@@ -1416,7 +1416,7 @@ def test_a_landing_after_its_operations_close_costs_the_result_nothing(
 ):
     """The weak tier decided the result; the late copy changes no tick.
 
-    On a 0.028 us weak card the last window commits at 15.132 us, so
+    On a 0.028 us weak card the last window commits at 15.224 us, so
     every reader of round 15 has resolved and the operation closes
     before that round's copy lands on the room side 0.26 us later. The
     landing is dropped at the door, the run still settles (Machine.run

@@ -265,3 +265,59 @@ def test_a_signal_that_only_subtracts_charges_nothing_and_answers_at_once():
     assert job.soft_output_ticks == 0
     assert len(verdict.answers) == 1
     assert engine.now == 0
+
+
+def _forced_solve(label: str, forced_class: int, weight: float):
+    """One forced-class solve of window 0, with its answer's weight."""
+    job = decoding_records.DecodeJob(
+        operation_id=1, window_id=0, round_count=3, label=label
+    )
+    job.forced_logical_class = forced_class
+    result = decoding_records.DecodeResult(1, 0)
+    result.forced_class_weight = weight
+    return job, result
+
+
+def _two_solve_join(signal_ticks: int):
+    """A join whose signal forces two classes, as the complementary gap does."""
+    engine, join, verdict, queue = _join_with(signal_ticks)
+    join.signal.forced_logical_classes = (0, 1)
+    return engine, join, verdict, queue
+
+
+def test_the_walk_is_charged_to_the_solve_that_delivered_last():
+    """C5 item 1: two solves, and the ticks go where a service still closes.
+
+    The answering solve is the lightest, which is not in general the last
+    to arrive. decode_outcomes.deliver_weak ends a service at
+    now + job.soft_output_ticks for the job it is delivering, which is
+    the last one, so charging the lightest solve wrote the walk onto a
+    service record that had already closed. The complementary gap's card
+    (escalation.confidence_walk_microseconds) is the only way to price
+    the walk at all, and it defaults to null, so no shipped config sees
+    this.
+    """
+    engine, join, verdict, queue = _two_solve_join(90)
+    first_job, first_result = _forced_solve("first", 0, 4.0)
+    second_job, second_result = _forced_solve("second", 1, 9.0)
+    join.accept_result(first_job, first_result)
+    assert queue.charges == []
+    join.accept_result(second_job, second_result)
+    assert queue.charges == [(second_job, 90)]
+    assert second_job.soft_output_ticks == 90
+    assert first_job.soft_output_ticks == 0
+
+
+def test_the_answer_is_still_the_lightest_solve_and_still_waits():
+    """The two halves stay apart: the ticks moved, the answer did not."""
+    engine, join, verdict, queue = _two_solve_join(90)
+    first_job, first_result = _forced_solve("first", 0, 4.0)
+    second_job, second_result = _forced_solve("second", 1, 9.0)
+    join.accept_result(first_job, first_result)
+    join.accept_result(second_job, second_result)
+    assert first_result.soft_output.gap == 1.0
+    assert second_result.soft_output is None
+    engine.run()
+    (answered_job, _answered_result, tick) = verdict.answers[0]
+    assert answered_job is first_job
+    assert tick == 90

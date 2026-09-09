@@ -23,16 +23,18 @@ def _section(**overrides) -> dict:
 def test_every_windowing_scheme_row_has_one_class():
     """The table is the plug point: one name, one row (STYLE.md rule 7)."""
     rows = window_settings.WINDOWING_SCHEMES
+    row_classes = rows.values()
+    distinct_classes = set(row_classes)
 
     assert sorted(rows) == ["naive_online", "parallel", "sandwich", "sliding"]
-    assert len(set(rows.values())) == len(rows)
+    assert len(distinct_classes) == len(rows)
 
 
 def test_a_terminal_policy_that_is_not_one_of_the_two_words_is_refused():
+    section = _section(terminal_policy="drain")
+
     with pytest.raises(ValueError) as refusal:
-        window_settings.WindowSettings.from_yaml(
-            _section(terminal_policy="drain")
-        )
+        window_settings.WindowSettings.from_yaml(section)
 
     sentence = str(refusal.value)
     assert "windows.terminal_policy is one of" in sentence
@@ -41,16 +43,17 @@ def test_a_terminal_policy_that_is_not_one_of_the_two_words_is_refused():
 
 def test_both_terminal_policies_of_the_record_are_accepted():
     for policy in window_records.TERMINAL_POLICIES:
-        settings = window_settings.WindowSettings.from_yaml(
-            _section(terminal_policy=policy)
-        )
+        section = _section(terminal_policy=policy)
+        settings = window_settings.WindowSettings.from_yaml(section)
 
         assert settings.terminal_policy == policy
 
 
 def test_a_boundaries_key_that_names_no_row_is_refused():
+    section = _section(boundaries="lazy")
+
     with pytest.raises(ValueError) as refusal:
-        window_settings.WindowSettings.from_yaml(_section(boundaries="lazy"))
+        window_settings.WindowSettings.from_yaml(section)
 
     sentence = str(refusal.value)
     assert "windows.boundaries" in sentence
@@ -59,16 +62,16 @@ def test_a_boundaries_key_that_names_no_row_is_refused():
 
 def test_both_boundary_policy_rows_are_reachable_by_name():
     for name in window_settings.BOUNDARY_POLICIES:
-        settings = window_settings.WindowSettings.from_yaml(
-            _section(boundaries=name)
-        )
+        section = _section(boundaries=name)
+        settings = window_settings.WindowSettings.from_yaml(section)
 
         assert settings.boundaries == name
 
 
 def test_both_keys_default_to_null_so_the_plan_decides_them():
     """Null is not a policy: the escalation row's declared fact picks one."""
-    settings = window_settings.WindowSettings.from_yaml(_section())
+    section = _section()
+    settings = window_settings.WindowSettings.from_yaml(section)
 
     assert settings.terminal_policy is None
     assert settings.boundaries is None

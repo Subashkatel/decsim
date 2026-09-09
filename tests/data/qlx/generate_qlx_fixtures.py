@@ -134,7 +134,7 @@ def main():
                            floorplan=("direct", [1]))
             decoder = fq.decoder_config(decoder="mwpm", weights="uniform")
             # device-level noise: baked into the emitted stim circuit by the
-            # Stim emitter (digital_twin docstring) — this is the mechanism
+            # Stim emitter (digital_twin docstring): this is the mechanism
             noise = {"mz": "bitflip:2e-2", "mr": "bitflip:2e-2",
                      "idle": "depolarize:2e-2"}
 

@@ -2,8 +2,12 @@
 
 logical_reference_profile is the default when no links card is given:
 every channel unbounded, so it prices propagation only and no transfer
-ever queues; latencies from Khalid et al. Table II, and the two
-controller-to-buffer hops from Caune et al. Fig. 1a.
+ever queues; latencies from Khalid et al., arXiv 2511.10633, Table I,
+and the two controller-to-buffer hops from Caune et al. Fig. 1a. Khalid
+Table I also gives a size per channel and a channel count beside each
+latency; decsim takes the latencies only, because it wires one channel
+per path and counts each transfer's own payload from the record that
+carries it, so the paper's channel counts would price nothing here.
 bandwidth_limited_profile is the same fabric with finite calibrated rates
 so contention becomes measurable; capacity_scale sweeps the whole fabric.
 from_yaml puts the yaml's own card on any path; with_transfer_overhead
@@ -104,13 +108,14 @@ def logical_reference_profile() -> settings.FabricSettings:
     """The default card: Khalid's latencies, unbounded bandwidth.
 
     Propagation only, nothing ever queues. Actual-payload paths price the
-    runtime's own bit counts; default-payload paths price Khalid's Table
-    II sizes.
+    runtime's own bit counts; default-payload paths price a stated word
+    width, not one of Khalid's per-channel sizes.
     """
     qpu_to_controller = _actual_path(
         "qpu_to_controller",
         0.15,
-        "Khalid qc effective time",
+        "Khalid 2511.10633 Table I tqc, syndrome transfer from QPU "
+        "to controller",
         "SyndromePayload.size_bits",
     )
     controller_to_weak_buffer = _actual_path(
@@ -128,7 +133,8 @@ def logical_reference_profile() -> settings.FabricSettings:
     weak_buffer_to_weak_decoder = _actual_path(
         "weak_buffer_to_weak_decoder",
         2.0,
-        "Khalid cd latency; logical_reference integrated weak-input transfer",
+        "Khalid 2511.10633 Table I tcd, syndrome transfer from "
+        "controller to decoders; the integrated weak-input transfer",
         DECODER_INPUT_PAYLOAD_SOURCE,
     )
     weak_decoder_to_strong_decoder = _actual_path(
@@ -140,25 +146,26 @@ def logical_reference_profile() -> settings.FabricSettings:
     strong_buffer_to_strong_decoder = _actual_path(
         "strong_buffer_to_strong_decoder",
         2.0,
-        "Khalid cd mapped to the strong input",
+        "Khalid 2511.10633 Table I tcd mapped to the strong input",
         DECODER_INPUT_PAYLOAD_SOURCE,
     )
     weak_decoder_to_frame = _actual_path(
         "weak_decoder_to_frame",
         1.0,
-        "Khalid do latency mapped to the weak output",
+        "Khalid 2511.10633 Table I tdo, decoding results transfer, "
+        "mapped to the weak output",
         RESULT_PAYLOAD_SOURCE,
     )
     decoder_to_decoder = _actual_path(
         "decoder_to_decoder",
         0.5,
-        "repository boundary-hop model choice",
+        "Khalid 2511.10633 Table I tdd, decoder-to-decoder exchange",
         BOUNDARY_PAYLOAD_SOURCE,
     )
     strong_decoder_to_frame = _actual_path(
         "strong_decoder_to_frame",
         1.0,
-        "Khalid do latency",
+        "Khalid 2511.10633 Table I tdo, decoding results transfer",
         RESULT_PAYLOAD_SOURCE,
     )
     frame_to_controller = _default_path(

@@ -25,8 +25,11 @@ class QuantityBasis(str, enum.Enum):
     """Whether a rate or a payload is stated for the whole link or per lane.
 
     A link made of several parallel bit lanes is one wire with aggregate
-    bandwidth (a PCIe x4 link stripes one transfer over four lanes). The
-    values are the words the traffic report writes.
+    bandwidth (a PCIe x4 link stripes one transfer over four lanes). Every
+    card decsim ships states the aggregate, and a yaml card folds its
+    `channels` count into the rate before the setting is built, so
+    PER_LANE is the shape a card that states a per-lane number would take
+    and nothing constructs it today.
     """
 
     AGGREGATE = "direct_aggregate"
@@ -185,8 +188,9 @@ class FabricSettings:
     controller's readout processing says so, because the timing card
     prices that processing on its own line. kind names the row of
     LINK_FABRICS (link_profiles.py) that supplied these numbers and
-    builds the run's fabric from them; profile_name is the same row's
-    name with the yaml's own file appended, for the traffic report.
+    builds the run's fabric from them with build(card, engine);
+    profile_name is the same row's name with the yaml's own file
+    appended, for the traffic report.
     """
 
     qpu_to_controller: PathSettings

@@ -224,3 +224,169 @@ def test_every_job_kind_says_how_it_is_settled():
     kinds = set(decoding_records.DecodeJobKind)
     settled = set(decoder_manager.SETTLE_BY_JOB_KIND)
     assert settled == kinds
+
+
+def _blocking_manager(engine, row, *, blocks_unit: bool):
+    """A one-unit manager whose default pool blocks, or does not."""
+    router = decoders.CodeRouter(row)
+    scheduler = schedulers.FifoScheduler()
+    policy = escalation_policies.Baseline(escalation_policies.NO_CONFIDENCE)
+    return DecoderManager(
+        engine,
+        router=router,
+        scheduler=scheduler,
+        num_units=1,
+        escalation_policy=policy,
+        blocks_unit_by_pool={"default": blocks_unit},
+    )
+
+
+def test_a_tier_that_does_not_block_frees_its_unit_at_the_decodes_end():
+    """R4, false: Chen 2605.30765 lines 1618-1620, the streaming regime.
+
+    "In the streaming regime, it appends each decode result to the frame
+    without blocking the pipeline."
+    """
+    engine = engine_module.Engine()
+    row = FixedRow()
+    manager = _blocking_manager(engine, row, blocks_unit=False)
+    first = _window_job()
+    second = _window_job()
+    second.window_id = 1
+
+    resolve = _resolving(manager)
+
+    manager.enqueue(first, None, resolve)
+    manager.enqueue(second, None, resolve)
+    engine.run()
+
+    assert first.completed is True
+    assert second.completed is True
+
+
+def test_a_tier_that_blocks_holds_its_unit_until_the_result_is_read():
+    """R4, true: Caune 2410.05202 lines 1256-1259, the polled register.
+
+    "A write instruction to the decoder initiates decoding, followed by a
+    polling of the decoder's status register, which stalls the program
+    until decoding completes." The second job cannot start while the
+    first result is unread, and starts the moment it is read.
+    """
+    engine = engine_module.Engine()
+    row = FixedRow()
+    manager = _blocking_manager(engine, row, blocks_unit=True)
+    first = _window_job()
+    second = _window_job()
+    second.window_id = 1
+    decoded = []
+
+    def note(job, result):
+        del result
+        decoded.append(job)
+
+    manager.enqueue(first, None, note)
+    manager.enqueue(second, None, note)
+    engine.run()
+    held_after_the_first_decode = list(decoded)
+    manager.read_result(first)
+    engine.run()
+
+    assert held_after_the_first_decode == [first]
+    assert decoded == [first, second]
+
+
+def test_reading_a_result_of_a_tier_that_never_blocked_gives_nothing_back():
+    """The unit went back at the decode's end, so there is nothing here."""
+    engine = engine_module.Engine()
+    row = FixedRow()
+    manager = _blocking_manager(engine, row, blocks_unit=False)
+    job = _window_job()
+
+    resolve = _resolving(manager)
+
+    manager.enqueue(job, None, resolve)
+    engine.run()
+    manager.read_result(job)
+    engine.run()
+
+    assert job.completed is True
+
+
+def test_the_copy_row_deposits_the_rounds_in_the_units_own_memory():
+    """R9, copy: Collision Clustering 2309.05558 lines 268-271.
+
+    "the Init unit (Fig. 2a) processes the decoder configuration, loads
+    the input syndrome data and appropriate data into the stor[age
+    elements]".
+    """
+    engine = engine_module.Engine()
+    row = FixedRow()
+    manager = _staging_manager(engine, row, copies_input=True)
+    copies, references = _count_movements(manager)
+    job = _window_job()
+
+    resolve = _resolving(manager)
+
+    manager.enqueue(job, None, resolve)
+    engine.run()
+
+    assert copies == [job]
+    assert references == []
+
+
+def test_the_in_place_row_reads_the_rounds_where_the_store_keeps_them():
+    """R9, in_place: AFS 2001.06598 lines 528-530.
+
+    "For our specialized hardware, the processing elements can directly
+    access the data stored on-chip", so nothing is deposited in the
+    unit's memory and nothing crosses the input link.
+    """
+    engine = engine_module.Engine()
+    row = FixedRow()
+    manager = _staging_manager(engine, row, copies_input=False)
+    copies, references = _count_movements(manager)
+    job = _window_job()
+
+    resolve = _resolving(manager)
+
+    manager.enqueue(job, None, resolve)
+    engine.run()
+
+    assert copies == []
+    assert references == [job]
+    assert job.memory is None
+
+
+def _count_movements(manager):
+    """Two lists: the jobs whose input was copied, and those referenced."""
+    copies = []
+    references = []
+
+    def note_copy(job, bits, source_name, target_name):
+        del bits, source_name, target_name
+        copies.append(job)
+
+    def note_reference(job, round_keys):
+        del round_keys
+        references.append(job)
+
+    for source in manager.copy_sources():
+        source.connect(note_copy)
+    for source in manager.reference_sources():
+        source.connect(note_reference)
+    return copies, references
+
+
+def _staging_manager(engine, row, *, copies_input: bool):
+    """A one-unit manager whose default pool copies its input, or does not."""
+    router = decoders.CodeRouter(row)
+    scheduler = schedulers.FifoScheduler()
+    policy = escalation_policies.Baseline(escalation_policies.NO_CONFIDENCE)
+    return DecoderManager(
+        engine,
+        router=router,
+        scheduler=scheduler,
+        num_units=1,
+        escalation_policy=policy,
+        copies_input_by_pool={"default": copies_input},
+    )

@@ -87,7 +87,9 @@ class StrongWindowCollaborators:
     is; a row reads the components its own layout needs and ignores the
     rest. This is gem5's params object, where a SimObject's collaborators
     arrive as one structure rather than as a signature per subclass
-    (tmp/resources/gem5/src/python/m5/SimObject.py:204-205).
+    (tmp/resources/gem5/src/python/m5/SimObject.py:204-205). The courier
+    is what a row with a pinned face reads: the committed boundary of
+    the neighbour it pins on, and the hop that carries it.
     """
 
     engine: engine_module.Engine
@@ -97,6 +99,7 @@ class StrongWindowCollaborators:
     builder: ports.WindowJobBuilder
     requester: ports.WindowRequests
     ledger: ports.LogicalLedger
+    courier: ports.BoundaryCourier
 
 
 @runtime_checkable

@@ -8,6 +8,9 @@ each delivery's version, and a receiver only accepts the latest. Each
 source window has one record here; the courier owns the boundary policy
 (when a committed window may ship) and the interaction (what a boundary
 is and how it merges), and tells the window side when a delivery landed.
+A strong window whose face is pinned reads the same records: the
+courier ships the neighbour's committed boundary to it and folds it in
+(pin_strong_face, Bombin et al. 2303.04846 lines 775-788).
 """
 
 import copy
@@ -93,7 +96,7 @@ class BoundaryCourier:
         record = self.record_by_window.get(key)
         if record is None:
             return False
-        return record.has_committed
+        return record.committed_request_key is not None
 
     def committed(self, key: tuple):
         """The boundary the window shipped, or None."""
@@ -121,7 +124,7 @@ class BoundaryCourier:
             )
             source.released_dependents.discard(window.key)
         record.committed = None
-        record.has_committed = False
+        record.committed_request_key = None
         record.held = None
 
     # ---- delivery
@@ -143,7 +146,7 @@ class BoundaryCourier:
         targets = self._targets(window)
         record.version += 1
         record.committed = boundary
-        record.has_committed = True
+        record.committed_request_key = source_request_key
         for dependent_key in targets:
             delivery_version = record.delivery_version_by_dependent.get(
                 dependent_key, 0
@@ -190,6 +193,111 @@ class BoundaryCourier:
             )
         if update.accepted:
             destination.boundary_in = update.state
+
+    # ---- a strong window's pinned face
+
+    def pin_strong_face(
+        self,
+        source_key: tuple,
+        destination: window_records.Window,
+        model,
+        operation: program_records.Operation,
+    ) -> None:
+        """Pin a strong window's face on what its neighbour committed.
+
+        Bombin et al. 2303.04846 lines 775-788: the input to a later
+        decoding task is the syndrome of the errors plus the corrections
+        committed by the tasks before it, which updates the detectors of
+        the one round layer where the two windows meet (Tan et al.
+        2209.09219 lines 943-946). The strong window has its own error
+        model, so the residual is intersected with its detectors and the
+        message is priced against its own seam layer rather than the
+        weak window's. The delivery rides decoder_to_decoder, where
+        every boundary of this courier is charged; the fold is written
+        into the strong window's boundary state here and the job's gate
+        XORs it into the input when the decode starts.
+        """
+        record = self._record(source_key)
+        boundary = record.committed
+        if boundary is None:
+            raise RuntimeError(
+                f"strong window {destination.key} pins a face on window "
+                f"{source_key}, which has committed no boundary"
+            )
+        positions = _row_positions(model)
+        destination_info = window_records.WindowInfo.from_window(
+            destination, detector_positions=positions
+        )
+        self._fold_pin(source_key, destination, destination_info, record)
+        self._send_pin(source_key, destination, destination_info, operation)
+
+    def _fold_pin(
+        self,
+        source_key: tuple,
+        destination: window_records.Window,
+        destination_info: window_records.WindowInfo,
+        record: "_BoundaryRecord",
+    ) -> None:
+        """The committed boundary joins the strong window's boundary state.
+
+        The strong window carries the escalated window's key and is not
+        a dependent of the source, so the pin reads the delivery
+        bookkeeping of the weak edge and advances none of it.
+        """
+        delivery_revision = record.delivery_version_by_dependent.get(
+            destination.key, 0
+        )
+        source_round_count = self.planner.round_count_of(source_key[0])
+        delivery = window_records.BoundaryDelivery(
+            source_key=source_key,
+            destination_key=destination.key,
+            source_revision=record.version,
+            delivery_revision=delivery_revision,
+            latest_source_revision=record.version,
+            latest_delivery_revision=delivery_revision,
+            source_operation_round_count=source_round_count,
+            dependency_released=True,
+            payload=record.committed,
+        )
+        update = self._merged_update(delivery, destination, destination_info)
+        if update.accepted:
+            destination.boundary_in = update.state
+
+    def _send_pin(
+        self,
+        source_key: tuple,
+        destination: window_records.Window,
+        destination_info: window_records.WindowInfo,
+        operation: program_records.Operation,
+    ) -> None:
+        """One pinned face's message, priced on the strong window's seam.
+
+        The message is attributed the way every boundary of this courier
+        is: to the window that produced it and the request that decoded
+        it, with the relation naming the strong window it lands in.
+        """
+        record = self._record(source_key)
+        source = self.planner.windows_by_key[source_key]
+        delivery_revision = record.delivery_version_by_dependent.get(
+            destination.key, 0
+        )
+        window_attribution = transfer_records.TransferAttribution.for_window(
+            source, operation, record.committed_request_key
+        )
+        relation = transfer_records.BoundaryTransferRelation(
+            record.committed_request_key,
+            source_key,
+            destination.key,
+            record.version,
+            delivery_revision,
+        )
+        attribution = dataclasses.replace(window_attribution, relation=relation)
+        payload_bits = self.interaction.boundary_payload_bits(
+            record.committed, destination_info
+        )
+        self.decoder_output.send_boundary(
+            attribution, payload_bits, _pin_delivered
+        )
 
     # ---- private
 
@@ -357,6 +465,21 @@ class BoundaryCourier:
         destination: window_records.Window,
     ) -> window_records.BoundaryUpdate:
         """Let the interaction modify an isolated candidate boundary state."""
+        destination_info = self._destination_info(destination)
+        return self._merged_update(delivery, destination, destination_info)
+
+    def _merged_update(
+        self,
+        delivery: window_records.BoundaryDelivery,
+        destination: window_records.Window,
+        destination_info: window_records.WindowInfo,
+    ) -> window_records.BoundaryUpdate:
+        """The interaction's merge, against the model the caller reads with.
+
+        A weak window is read with the model the planner holds for it; a
+        strong window is read with the model of its own re-decode, which
+        the caller passes because both windows carry the same key.
+        """
         try:
             candidate_state = copy.deepcopy(destination.boundary_in)
         except Exception as error:
@@ -364,7 +487,6 @@ class BoundaryCourier:
                 f"boundary state for {delivery.destination_key} must support "
                 "deep copying before merge_boundary"
             ) from error
-        destination_info = self._destination_info(destination)
         update = self.interaction.merge_boundary(
             delivery, destination_info, candidate_state
         )
@@ -376,12 +498,38 @@ class BoundaryCourier:
         return update
 
 
+def _row_positions(model) -> dict:
+    """Where the model's own detector rows sit, and no other detector.
+
+    A window's input is its own checks, so the residual is intersected
+    with the rows the strong window decodes on (Bombin et al.
+    2303.04846 lines 782-788, the input to task j is restricted to
+    Sigma_j). The model also places the detectors its faults flip
+    outside the window, which belong to a neighbour's input and not to
+    this one's.
+    """
+    positions = {}
+    for detector_id in model.detector_ids:
+        positions[detector_id] = model.defect_positions[detector_id]
+    return positions
+
+
+def _pin_delivered(_transfer) -> None:
+    """A pinned face's message landed.
+
+    The pin is folded into the strong window when its job is built, so
+    the delivery charges the wire and changes nothing on arrival.
+    """
+
+
 class _BoundaryRecord:
     """One source window's boundary: shipped, versioned, held, delivered."""
 
     def __init__(self) -> None:
         self.committed = None
-        self.has_committed = False
+        # the request that produced the shipped boundary; None until
+        # the window has committed one, which is what has_committed asks
+        self.committed_request_key = None
         self.version = 0
         self.delivery_version_by_dependent: dict = {}
         self.released_dependents: set = set()

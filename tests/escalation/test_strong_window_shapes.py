@@ -569,10 +569,10 @@ def test_an_absorbing_row_added_from_outside_builds_through_the_same_call():
     assert fabric.frame_tiers(machine) == [((1, 0), "strong")]
 
 
-def test_the_shipped_collaborators_fill_the_five_window_side_ports():
+def test_the_shipped_collaborators_fill_the_six_window_side_ports():
     """A row written outside decsim programs against the ports, not classes.
 
-    StrongWindowCollaborators types its five window-side fields as
+    StrongWindowCollaborators types its six window-side fields as
     Protocols in decsim/ports.py, so the promise only means something if
     the classes the root puts there answer the whole port.
     """
@@ -583,6 +583,7 @@ def test_the_shipped_collaborators_fill_the_five_window_side_ports():
     assert isinstance(collaborators.builder, ports.WindowJobBuilder)
     assert isinstance(collaborators.requester, ports.WindowRequests)
     assert isinstance(collaborators.ledger, ports.LogicalLedger)
+    assert isinstance(collaborators.courier, ports.BoundaryCourier)
 
 
 def _gate_context_window_machine() -> machine_module.Machine:

@@ -373,6 +373,31 @@ class LogicalLedger(Protocol):
         """A strong window takes the extent of the windows it replaces."""
 
 
+@runtime_checkable
+class BoundaryCourier(Protocol):
+    """The committed boundaries a strong window pins a face on.
+
+    A shape row whose face is pinned reads the correction its neighbour
+    committed and has it delivered to its own window, which is Bombin
+    et al. 2303.04846's input adaptation (lines 775-788): the input to
+    the later decoding task is the syndrome of the errors plus the
+    corrections already committed. The message is one seam layer on
+    decoder_to_decoder, priced against the receiving window's own model.
+    """
+
+    def committed(self, key: tuple):
+        """The boundary the window shipped, or None."""
+
+    def pin_strong_face(
+        self,
+        source_key: tuple,
+        destination: window_records.Window,
+        model,
+        operation: program_records.Operation,
+    ) -> None:
+        """Ship a committed boundary to a strong window and fold it in."""
+
+
 # ----------------------------------- the decoder manager schedules a decode
 
 

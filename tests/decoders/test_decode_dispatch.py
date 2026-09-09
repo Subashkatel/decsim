@@ -75,7 +75,7 @@ def test_a_blocked_job_never_displaces_a_startable_one():
     decoder = decoders.PresetLatencyDecoder(4.0)
     router = decoders.CodeRouter(decoder)
     scheduler = schedulers.FifoScheduler()
-    policy = escalation_policies.Baseline()
+    policy = escalation_policies.Baseline(escalation_policies.NO_CONFIDENCE)
     manager = DecoderManager(
         engine,
         router=router,

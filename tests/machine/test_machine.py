@@ -1321,7 +1321,7 @@ def test_a_policy_object_decodes_where_its_name_decodes():
     same decoder, the same bits, the same ticks.
     """
     named = escalation_settings.EscalationSettings(kind="strong_only")
-    policy = escalation_policies.StrongOnly()
+    policy = escalation_policies.StrongOnly(escalation_policies.NO_CONFIDENCE)
     by_object = escalation_settings.EscalationSettings(policy=policy)
     named_settings = strong_primary_settings(named)
     named_machine = machine_module.Machine.build(named_settings, 0)
@@ -1344,7 +1344,7 @@ def test_a_policy_object_decodes_where_its_name_decodes():
 
 def test_a_policy_object_whose_tier_names_no_decoder_is_refused():
     """The refusal reads the policy's tier, not the section's name."""
-    policy = escalation_policies.StrongOnly()
+    policy = escalation_policies.StrongOnly(escalation_policies.NO_CONFIDENCE)
     escalation = escalation_settings.EscalationSettings(policy=policy)
     settings = strong_primary_settings(escalation)
     no_decoder = decoder_settings.DecoderSettings()

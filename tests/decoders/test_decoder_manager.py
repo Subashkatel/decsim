@@ -39,7 +39,7 @@ class FixedRow(decoder_module.DecoderBase):
 def _manager(engine, row):
     router = decoders.CodeRouter(row)
     scheduler = schedulers.FifoScheduler()
-    policy = escalation_policies.Baseline()
+    policy = escalation_policies.Baseline(escalation_policies.NO_CONFIDENCE)
     return DecoderManager(
         engine,
         router=router,
@@ -155,7 +155,7 @@ def test_an_escalation_routed_to_a_pipelined_unit_is_refused():
     weak = FixedRow()
     router = decoders.SwitchingRouter(weak=weak, strong=strong)
     scheduler = schedulers.FifoScheduler()
-    policy = escalation_policies.Baseline()
+    policy = escalation_policies.Baseline(escalation_policies.NO_CONFIDENCE)
     manager = DecoderManager(
         engine,
         router=router,

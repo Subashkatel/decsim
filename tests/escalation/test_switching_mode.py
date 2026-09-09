@@ -107,7 +107,7 @@ def test_switching_config_requires_both_tiers_and_the_card(tmp_path):
         }
     }
     weak_baseline_path = write_config(tmp_path, weak_baseline_card)
-    with pytest.raises(ValueError, match="never escalates"):
+    with pytest.raises(ValueError, match="decides on no confidence"):
         load_experiment(weak_baseline_path)
 
 
@@ -157,7 +157,7 @@ def test_a_wider_restart_re_read_and_another_kind_are_refused(tmp_path):
         }
     }
     weak_path = write_config(tmp_path, weak_card)
-    with pytest.raises(ValueError, match="never escalates"):
+    with pytest.raises(ValueError, match="decides on no confidence"):
         load_experiment(weak_path)
 
 

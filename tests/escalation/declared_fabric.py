@@ -100,11 +100,12 @@ def switching_machine(
     strong = decoders.PresetLatencyDecoder(DECLARED_MICROSECONDS["strong"])
     router = decoders.SwitchingRouter(weak=weak, strong=strong)
     threshold = threshold_sources.FixedThreshold(0.5)
-    policy = escalation_policies.Switching(
-        threshold,
-        decoders.SAMPLED_CONFIDENCE_SOURCE,
+    collaborators = escalation_policies.EscalationCollaborators(
+        threshold=threshold,
+        expected_source=decoders.SAMPLED_CONFIDENCE_SOURCE,
         run_both_at_once=run_both_at_once,
     )
+    policy = escalation_policies.Switching(collaborators)
     boundary_policy = boundary_policies.Held()
     # a name off the table stays, so the settings refuse it by name
     row = escalation_settings.STRONG_WINDOW_SHAPES.get(strong_window)

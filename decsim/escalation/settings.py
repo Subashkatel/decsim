@@ -4,8 +4,10 @@ One record per yaml `escalation` section, the table of escalation kinds
 and the table of strong window shapes. A row of ESCALATIONS is the only
 place a kind's facts are written: which tier decodes the plan's windows
 (primary_tier) and whether the strong context is retained
-(requires_strong_context) are read off the class, so a new kind is one
-class and one row (sinter's BUILT_IN_DECODERS shape). A row of
+(requires_strong_context) and whether it decides on a confidence
+(decides_on_a_confidence, which is also what gates this section's
+confidence keys) are read off the class, so a new kind is one class and
+one row (sinter's BUILT_IN_DECODERS shape). A row of
 STRONG_WINDOW_SHAPES is the geometry the strong tier re-decodes
 (Toshio et al. arXiv 2510.25222).
 """
@@ -23,6 +25,7 @@ import decsim.escalation.policies as escalation_policies
 import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.escalation.threshold_sources as threshold_sources
 import decsim.ports as ports
+import decsim.tables as tables
 
 # escalation.kind names one of these rows.
 ESCALATIONS = {
@@ -243,15 +246,17 @@ class EscalationSettings:
             raise ValueError(
                 f"escalation does not know {listed}; its keys are {known}"
             )
-        switching_keys = set(section) - {"kind"}
-        if kind != "switching":
-            if switching_keys:
-                listed = sorted(switching_keys)
+        row = tables.row(ESCALATIONS, "escalation.kind", kind)
+        confidence_keys = set(section) - {"kind"}
+        if not row.decides_on_a_confidence:
+            if confidence_keys:
+                listed = sorted(confidence_keys)
                 raise ValueError(
-                    f"escalation.kind {kind} never escalates; drop {listed}"
+                    f"escalation.kind {kind} decides on no confidence; "
+                    f"drop {listed}"
                 )
             return cls(kind=kind)
-        return _switching_settings(section, base_directory)
+        return _switching_settings(kind, section, base_directory)
 
     def threshold_nats_for(
         self, physical_error_probability: float, distance: int
@@ -264,7 +269,7 @@ class EscalationSettings:
         distance and p, thresholds in dB) and refuses a point the table
         does not certify, instead of guessing.
         """
-        if self.kind != "switching":
+        if not self._decides_on_a_confidence():
             return None
         if self.threshold_source in ("fixed", "online"):
             return self.gap_threshold_nats
@@ -299,7 +304,7 @@ class EscalationSettings:
         the point's whole window stream; seeded by the point's identity,
         so a rerun reproduces the same audit draws.
         """
-        if self.kind != "switching":
+        if not self._decides_on_a_confidence():
             return None
         if self.threshold_source != "online":
             return None
@@ -325,6 +330,18 @@ class EscalationSettings:
         )
         return threshold_sources.OnlineThreshold(controller, generator)
 
+    def _decides_on_a_confidence(self) -> bool:
+        """Whether this section's kind reads a confidence to decide keep.
+
+        A Python-built policy answers for itself; otherwise the kind's
+        row does, so a threshold is looked up for exactly the kinds
+        whose section carries the threshold keys.
+        """
+        if self.policy is not None:
+            return self.policy.decides_on_a_confidence
+        row = tables.row(ESCALATIONS, "escalation.kind", self.kind)
+        return row.decides_on_a_confidence
+
     def _table_path(self) -> pathlib.Path:
         table_path = pathlib.Path(self.threshold_table)
         if not table_path.is_absolute() and self.base_directory is not None:
@@ -341,9 +358,9 @@ def decibels_to_nats(decibels: float) -> float:
 
 
 def _switching_settings(
-    section: Mapping, base_directory: Optional[pathlib.Path]
+    kind: str, section: Mapping, base_directory: Optional[pathlib.Path]
 ) -> EscalationSettings:
-    """The switching knobs, every cross-key rule checked once."""
+    """The confidence knobs of an escalating kind, every rule checked once."""
     threshold_source = section.get("threshold_source", "fixed")
     if threshold_source not in THRESHOLD_SOURCES:
         raise ValueError(
@@ -368,7 +385,7 @@ def _switching_settings(
     reread_regions = _restart_reread_buffer_regions(section)
     threshold_table = section.get("threshold_table")
     return EscalationSettings(
-        kind="switching",
+        kind=kind,
         confidence=confidence,
         confidence_walk_microseconds=walk_microseconds,
         gap_threshold_decibels=gap_threshold_decibels,

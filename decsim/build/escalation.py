@@ -25,11 +25,7 @@ def primary_tier(settings: escalation_settings.EscalationSettings) -> str:
     building the policy, because a switching policy's threshold is
     resolved per sweep point and a config may reach here without one.
     """
-    if settings.policy is not None:
-        return settings.policy.primary_tier.value
-    row = tables.row(
-        escalation_settings.ESCALATIONS, "escalation.kind", settings.kind
-    )
+    row = escalation_row(settings)
     return row.primary_tier.value
 
 
@@ -50,20 +46,27 @@ def absorbs_weak_windows(
     return row.absorbs_weak_windows
 
 
+def escalation_row(settings: escalation_settings.EscalationSettings):
+    """The policy this run escalates with: the built one, or the kind's row.
+
+    Both answer the facts the port declares (primary_tier,
+    requires_strong_context, decides_on_a_confidence), so a build site
+    that has no policy object yet reads them here.
+    """
+    if settings.policy is not None:
+        return settings.policy
+    return tables.row(
+        escalation_settings.ESCALATIONS, "escalation.kind", settings.kind
+    )
+
+
 def build_escalation_policy(settings: escalation_settings.EscalationSettings):
     """The policy of the escalation kind, or the Python-built one."""
     if settings.policy is not None:
         return settings.policy
-    row = tables.row(
-        escalation_settings.ESCALATIONS, "escalation.kind", settings.kind
-    )
-    if row is escalation_policies.Switching:
-        threshold = _threshold_source(settings)
-        signal = confidence_signal(settings)
-        return escalation_policies.Switching(
-            threshold, signal.source, run_both_at_once=settings.run_both_at_once
-        )
-    return row()
+    row = escalation_row(settings)
+    collaborators = _collaborators(row, settings)
+    return row(collaborators)
 
 
 def confidence_signal(escalation: escalation_settings.EscalationSettings):
@@ -79,6 +82,26 @@ def confidence_signal(escalation: escalation_settings.EscalationSettings):
         escalation.confidence,
     )
     return row(walk_microseconds=escalation.confidence_walk_microseconds)
+
+
+def _collaborators(
+    row, settings: escalation_settings.EscalationSettings
+) -> escalation_policies.EscalationCollaborators:
+    """The one record every escalation row is built from.
+
+    A row that decides on no confidence reads none of the three fields,
+    and the escalation section carries none of the keys they come from,
+    so the record is empty for it.
+    """
+    if not row.decides_on_a_confidence:
+        return escalation_policies.NO_CONFIDENCE
+    threshold = _threshold_source(settings)
+    signal = confidence_signal(settings)
+    return escalation_policies.EscalationCollaborators(
+        threshold=threshold,
+        expected_source=signal.source,
+        run_both_at_once=settings.run_both_at_once,
+    )
 
 
 def _threshold_source(settings: escalation_settings.EscalationSettings):

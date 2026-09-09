@@ -93,7 +93,7 @@ def _send_after(engine, ticks):
 def _manager(engine, decoder, dispatch_ticks=0):
     router = decoders.CodeRouter(decoder)
     scheduler = schedulers.FifoScheduler()
-    policy = escalation_policies.Baseline()
+    policy = escalation_policies.Baseline(escalation_policies.NO_CONFIDENCE)
     return DecoderManager(
         engine,
         router=router,
@@ -200,7 +200,7 @@ def strong_primary_run(decoder):
     operation = declared_run.memory_operation(1)
     workload = declared_run.declared_workload([operation], 3)
     strong_decoder = decoder_settings.DecoderSettings(decoder=decoder)
-    policy = escalation_policies.StrongOnly()
+    policy = escalation_policies.StrongOnly(escalation_policies.NO_CONFIDENCE)
     escalation = escalation_settings.EscalationSettings(policy=policy)
     qpu = declared_run.declared_qpu()
     links = declared_run.declared_profile()

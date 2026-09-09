@@ -434,6 +434,13 @@ class EscalationPolicy(Protocol):
     # room-side store, one buffer of context on each side of every
     # window, and the strong tier's window side.
     requires_strong_context: bool
+    # Whether the policy reads a confidence to decide keep, so the
+    # escalation section carries the confidence keys, the weak decoder
+    # must serve the run's signal, and the window side joins the solves
+    # a signal needs. A row is built from one EscalationCollaborators
+    # record (escalation/policies.py) and this says which of its fields
+    # the row reads.
+    decides_on_a_confidence: bool
 
     def check_plan(self, plan: decoding_records.RunShape) -> None:
         """Refuse, with a sentence, a run shape the policy cannot serve."""

@@ -34,6 +34,20 @@ class ContextRegion:
 
 
 @dataclasses.dataclass(frozen=True)
+class NearSeamRegion:
+    """A near-pinned region: the window, its reads, the face it pins.
+
+    pinned_source_key is the window whose committed correction closes
+    the past face, or None for a window with no earlier neighbour, whose
+    past face is the operation's own first round layer.
+    """
+
+    window: window_records.Window
+    context_read_keys: tuple
+    pinned_source_key: Optional[tuple]
+
+
+@dataclasses.dataclass(frozen=True)
 class ForwardRegion:
     """One forward strong region, resolved against the live window graph."""
 
@@ -75,8 +89,33 @@ class StrongRegions:
         )
         return ContextRegion(strong_window, tuple(read_keys))
 
-    def context_model(self, key: tuple, window: window_records.Window):
-        """The error model of a two-sided context region."""
+    def near_seam_region(self, key: tuple) -> NearSeamRegion:
+        """The escalated window's commit rounds, its past face pinned.
+
+        The rounds before the commit region are not read: their defects
+        arrive as the neighbour's committed boundary instead (Bombin et
+        al. 2303.04846 lines 1456-1458). One buffer region of raw
+        context stays on the open future face.
+        """
+        weak_window = self.planner.window_at(key)
+        strong_window = _near_pinned_window_of(weak_window)
+        read_keys = self.retention.read_keys_for_bounds(
+            key[0],
+            strong_window.buffer_lo,
+            strong_window.buffer_hi,
+            strong_window,
+        )
+        pinned_key = self._near_neighbour_of(weak_window, strong_window)
+        return NearSeamRegion(strong_window, tuple(read_keys), pinned_key)
+
+    def redecode_model(self, key: tuple, window: window_records.Window):
+        """The error model of one strong redo of a window.
+
+        The redo owns the faults of its own rounds and none of the
+        rounds before its commit region: those belong to the window
+        that committed them, whether this row reads them as raw context
+        or pins them.
+        """
         round_count = self.round_count_for(key[0], window)
         exclusions = _left_fault_exclusions(window.commit_lo)
         operation = self.tracker.operation(key[0])
@@ -217,6 +256,25 @@ class StrongRegions:
             restart_model=restart_model,
         )
 
+    def _near_neighbour_of(
+        self,
+        weak_window: window_records.Window,
+        strong_window: window_records.Window,
+    ) -> Optional[tuple]:
+        """The window whose commit region ends where this one's begins.
+
+        A pinned face is a seam between two commit regions, so the
+        neighbour is the escalated window's own dependency that commits
+        the round before it (Bombin et al. 2303.04846 lines 703-704:
+        what a task commits is the restriction to its commit region).
+        """
+        seam_round = strong_window.commit_lo - 1
+        for dependency_key in weak_window.deps:
+            neighbour = self.planner.window_at(dependency_key)
+            if neighbour.commit_hi == seam_round:
+                return dependency_key
+        return None
+
     def _proposed_restart_window(
         self, restart_key: tuple, plan: window_records.StrongRegionPlan
     ) -> window_records.Window:
@@ -253,6 +311,24 @@ def _context_window_of(
         round_count=round_count,
     )
     return strong_window
+
+
+def _near_pinned_window_of(
+    weak_window: window_records.Window,
+) -> window_records.Window:
+    """The weak window's commit rounds plus one trailing buffer region."""
+    bounds = window_records.near_pinned_bounds(weak_window)
+    context_lo, commit_lo, commit_hi, context_hi = bounds
+    round_count = context_hi - context_lo + 1
+    return window_records.Window(
+        operation_id=weak_window.operation_id,
+        window_index=weak_window.window_index,
+        commit_lo=commit_lo,
+        commit_hi=commit_hi,
+        buffer_hi=context_hi,
+        buffer_lo=context_lo,
+        round_count=round_count,
+    )
 
 
 def _left_fault_exclusions(commit_lo: int) -> tuple:

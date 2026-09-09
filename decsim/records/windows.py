@@ -329,6 +329,22 @@ def strong_context_bounds(window: "Window") -> tuple:
     return context_lo, window.commit_lo, window.commit_hi, context_hi
 
 
+def near_pinned_bounds(window: "Window") -> tuple:
+    """(context_lo, commit_lo, commit_hi, context_hi) of a near-pinned redo.
+
+    A strong redo whose past face is pinned on the earlier neighbour's
+    committed correction commits the same rounds as the window it
+    replaces and reads no round before them: a fixed boundary condition
+    replaces the buffer that would otherwise open the face (Bombin et
+    al. 2303.04846 lines 1456-1458). Its future face is open, so it
+    keeps one buffer region of raw context there (lines 850-852).
+    """
+    buffer_span = window.buffer_hi - window.commit_hi
+    buffer_rounds = max(0, buffer_span)
+    context_hi = window.commit_hi + buffer_rounds
+    return window.commit_lo, window.commit_lo, window.commit_hi, context_hi
+
+
 def restart_reread_round_count(
     reread_buffer_regions: int, buffer_round_count: int
 ) -> int:

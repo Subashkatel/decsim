@@ -202,6 +202,7 @@ class BoundaryCourier:
         destination: window_records.Window,
         model,
         operation: program_records.Operation,
+        request_key: window_records.DecoderRequestKey,
     ) -> None:
         """Pin a strong window's face on what its neighbour committed.
 
@@ -218,18 +219,19 @@ class BoundaryCourier:
         XORs it into the input when the decode starts.
         """
         record = self._record(source_key)
-        boundary = record.committed
-        if boundary is None:
+        if record.committed_request_key is None:
             raise RuntimeError(
                 f"strong window {destination.key} pins a face on window "
-                f"{source_key}, which has committed no boundary"
+                f"{source_key}, which has not committed"
             )
         positions = _row_positions(model)
         destination_info = window_records.WindowInfo.from_window(
             destination, detector_positions=positions
         )
         self._fold_pin(source_key, destination, destination_info, record)
-        self._send_pin(source_key, destination, destination_info, operation)
+        self._send_pin(
+            source_key, destination, destination_info, operation, request_key
+        )
 
     def _fold_pin(
         self,
@@ -269,20 +271,23 @@ class BoundaryCourier:
         destination: window_records.Window,
         destination_info: window_records.WindowInfo,
         operation: program_records.Operation,
+        request_key: window_records.DecoderRequestKey,
     ) -> None:
         """One pinned face's message, priced on the strong window's seam.
 
-        The message is attributed the way every boundary of this courier
-        is: to the window that produced it and the request that decoded
-        it, with the relation naming the strong window it lands in.
+        The bits are the strong window's own seam layer, so the transfer
+        is attributed to that window and to the request that reads it;
+        the relation names the neighbour's committed request, its window
+        and the strong window it lands in. A weak delivery to the same
+        window key is attributed to its source instead, so the two are
+        told apart in the traffic.
         """
         record = self._record(source_key)
-        source = self.planner.windows_by_key[source_key]
         delivery_revision = record.delivery_version_by_dependent.get(
             destination.key, 0
         )
         window_attribution = transfer_records.TransferAttribution.for_window(
-            source, operation, record.committed_request_key
+            destination, operation, request_key
         )
         relation = transfer_records.BoundaryTransferRelation(
             record.committed_request_key,
@@ -506,8 +511,11 @@ def _row_positions(model) -> dict:
     2303.04846 lines 782-788, the input to task j is restricted to
     Sigma_j). The model also places the detectors its faults flip
     outside the window, which belong to a neighbour's input and not to
-    this one's.
+    this one's. A run whose windows carry no error model has no rows to
+    intersect with, and the wire prices the message by its card.
     """
+    if model is None:
+        return None
     positions = {}
     for detector_id in model.detector_ids:
         positions[detector_id] = model.defect_positions[detector_id]

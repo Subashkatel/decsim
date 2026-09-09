@@ -413,8 +413,9 @@ def test_the_parallel_sibling_waits_for_the_context_it_reads():
     Toshio arXiv:2510.25222 Sec. III A, Step 1: "a sequence of syndrome
     data sigma is simultaneously fed to both the weak and strong
     decoders" (lines 599-603). The paper prices no transport in Sec.
-    III A and prices T_comm^strong at ten times T_comm^weak in Table I
-    (lines 1943-1950), so in a model that prices transport Step 1 means
+    III A, and its simulations set T_comm^strong to ten times
+    T_comm^weak (lines 1109-1114; Table I is a notation table and prices
+    nothing), so in a model that prices transport Step 1 means
     the strong decoder starts when its copy has arrived. On the
     declared card the room-side hop is 7 us against Buffer 0's 4 us, so
     the first window's context is still crossing when the window

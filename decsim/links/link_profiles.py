@@ -87,11 +87,13 @@ BOUNDARY_PAYLOAD_SOURCE = "DependencyResidual seam-layer detectors"
 # Google, arXiv:2408.13687, gives the same topology without a per-hop
 # number: bits go to a workstation over low-latency Ethernet and are then
 # streamed to the decoder through a shared memory buffer. Toshio et al.,
-# arXiv:2510.25222, Table I price the whole controller-to-decoder path as
-# T_comm^weak = tau_gen and T_comm^strong = 10 tau_gen, which decsim
-# splits into this hop, the buffer-to-decoder hop and the
-# decoder-to-frame hop, so those symbols bound the sum of three cards
-# rather than either card here.
+# arXiv:2510.25222, run their simulations with the whole
+# controller-to-decoder path at T_comm^weak = tau_gen and
+# T_comm^strong = 10 tau_gen (lines 1109-1114; their Table I is a
+# notation table and prices nothing), which decsim splits into this hop,
+# the buffer-to-decoder hop and the decoder-to-frame hop, so those
+# simulation parameters bound the sum of three cards rather than either
+# card here.
 WEAK_STORE_LATENCY_MICROSECONDS = 0.04
 WEAK_STORE_SOURCE = (
     "Caune 2410.05202 Fig. 1a D, result message handled and prepared for "

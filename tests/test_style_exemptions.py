@@ -9,12 +9,16 @@ is checked against the code it exempts.
 import ast
 import importlib.util
 import pathlib
+import re
 
 TESTS_FILE = pathlib.Path(__file__)
 TESTS_PATH = TESTS_FILE.resolve()
 PACKAGE_ROOT = TESTS_PATH.parent.parent
 CHECKER_PATH = PACKAGE_ROOT / "tools" / "check_one_action.py"
 MAX_EXEMPTIONS = 8
+EXEMPTION_HEADING = "### Classes exempt from the six-attribute report"
+ENTRY_LINE = re.compile(r"^- `(\w+)` \(`([^`]+)`\):")
+BACKTICKED_NAME = re.compile(r"`([a-z_][a-z_0-9]*)`")
 
 
 def _checker():
@@ -147,3 +151,52 @@ def test_no_caller_reaches_two_deep_past_the_windows_facade():
             continue
         past_the_facade[reach] = where
     assert past_the_facade == {}
+
+
+def _exemption_entries(guide: str) -> dict:
+    """Each exempt (class, path) mapped to the whole text of its entry."""
+    entries = {}
+    current = None
+    listing = False
+    for line in guide.splitlines():
+        if line.startswith(EXEMPTION_HEADING):
+            listing = True
+            continue
+        if listing and line.startswith("## "):
+            break
+        if not listing:
+            continue
+        match = ENTRY_LINE.match(line)
+        if match is not None:
+            current = (match.group(1), match.group(2))
+            entries[current] = line
+            continue
+        if current is None:
+            continue
+        stripped = line.strip()
+        if stripped:
+            entries[current] = entries[current] + " " + stripped
+    return entries
+
+
+def test_every_exemption_sentence_names_every_attribute_its_class_holds():
+    """The entry is what a reader of rule 1 sees instead of the report.
+
+    An entry that does not name a collaborator leaves that collaborator
+    unexplained, which is what C8 item 8 found on three of the eight.
+    """
+    checker = _checker()
+    guide = (PACKAGE_ROOT / "STYLE.md").read_text()
+    entries = _exemption_entries(guide)
+    exemptions = checker.wide_state_exemptions()
+    assert set(entries) == exemptions
+    for (class_name, class_path), entry in entries.items():
+        path = PACKAGE_ROOT / class_path
+        node = _class_definition(path, class_name)
+        init = checker.init_method(node)
+        assigned = checker.self_attributes_assigned(init)
+        attributes = set(assigned)
+        found = BACKTICKED_NAME.findall(entry)
+        named = set(found)
+        missing = attributes - named
+        assert missing == set(), (class_name, sorted(missing))

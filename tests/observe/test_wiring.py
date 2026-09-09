@@ -7,8 +7,15 @@ with two listeners of one class is a connection made twice, which would
 double a count without failing anything.
 """
 
+import decsim.config
+import decsim.decoders.settings as decoder_settings
+import decsim.decoders.staged_decoder as staged_decoder
 import decsim.machine as machine_module
+import decsim.observe.settings as observe_settings
+import decsim.records.decoding as decoding_records
+import decsim.settings as machine_settings
 import decsim.trace_source as trace_source
+import tests.declared_run as declared_run
 import tests.observe.gate_point as gate_point
 
 EVERY_KNOB = {
@@ -170,3 +177,102 @@ def test_every_listener_the_section_asks_for_is_built_and_heard():
     assert silent.observation.decode_backlog is None
     assert silent.observation.decoder_utilization is None
     assert silent.observation.decoder_memory_occupancy is None
+
+
+class PortOnlyDecoder:
+    """A decoder row written outside decsim: the port, and no base class.
+
+    It answers every method and every attribute of ports.Decoder,
+    including the three observation sources, and inherits nothing of
+    decsim's, so it is the row the wiring must recognise by the port.
+    """
+
+    fault_model_requirement = None
+    decoder_evidence = frozenset()
+    missing_evidence_reasons: dict = {}
+
+    def __init__(self, latency_ticks: int) -> None:
+        self.latency_ticks = latency_ticks
+        self.stage_recorded = trace_source.TraceSource()
+        self.window_checked = trace_source.TraceSource()
+        self.forced_solve_unavailable = trace_source.TraceSource()
+
+    def decode(self, job):
+        """A correction of nothing; the trace is what this row is for."""
+        return decoding_records.DecodeResult(job.operation_id, job.window_id)
+
+    def latency(self, job) -> int:
+        del job
+        return self.latency_ticks
+
+    def start(self, job, engine, on_result) -> None:
+        """One stage per job, fired on the port's own source."""
+        result = self.decode(job)
+        end_tick = engine.now + self.latency_ticks
+        record = staged_decoder.DecoderStageRecord(
+            job.operation_id,
+            job.window_id,
+            "algorithm",
+            None,
+            engine.now,
+            end_tick,
+        )
+        self.stage_recorded.fire(record)
+        engine.schedule(self.latency_ticks, lambda: on_result(result))
+
+    def cancel(self, job) -> None:
+        del job
+
+    def occupancy(self, job) -> int:
+        del job
+        return self.latency_ticks
+
+    def pipeline_depth(self, job) -> int:
+        del job
+        return 1
+
+
+def _machine_on(decoder, **observation):
+    """The declared weak-only run with this row as the weak tier."""
+    operation = declared_run.memory_operation(1)
+    workload = declared_run.declared_workload([operation], 6)
+    weak_decoder = decoder_settings.DecoderSettings(decoder=decoder)
+    qpu = declared_run.declared_qpu()
+    links = declared_run.declared_profile()
+    controller = declared_run.declared_controller()
+    pauli_frame = declared_run.declared_frame()
+    watched = observe_settings.ObservationSettings(**observation)
+    settings = machine_settings.MachineSettings(
+        workload=workload,
+        qpu=qpu,
+        weak_decoder=weak_decoder,
+        links=links,
+        controller=controller,
+        pauli_frame=pauli_frame,
+        observation=watched,
+    )
+    return machine_module.Machine.build(settings, 0)
+
+
+def test_a_decoder_row_that_only_fills_the_port_reaches_the_observers():
+    """The wiring recognises a decoder by the port, not by a base class.
+
+    A row that inherits nothing of decsim's decodes every window; before
+    the walk asked the port it was invisible to the stage ledger, the
+    referee audit and the trace.
+    """
+    ticks = decsim.config.microseconds_to_ticks(1.0)
+    decoder = PortOnlyDecoder(ticks)
+    machine = _machine_on(
+        decoder, log="off", trace=observe_settings.CHROME_TRACE
+    )
+    result = machine.run()
+
+    assert result.terminal_status == "complete"
+    assert machine.observation.stages.records != []
+    assert decoder.window_checked.has_listeners
+    stage_events = []
+    for event in machine.observation.trace_writer.events:
+        if event.get("cat") == "stage":
+            stage_events.append(event)
+    assert stage_events != []

@@ -234,10 +234,20 @@ class Decoder(Protocol):
     produce some evidence says why it does not; the refusal quotes it
     instead of the signal's general sentence. The unit's insides stay
     closed: the port learns what the decoder can answer, never how.
+
+    window_checked is the same shape for a row that audits its own
+    answer against a referee, and forced_solve_unavailable fires once
+    per window model this row cannot pin to a logical class. All three
+    sources are on the port because the machine connects the trace, the
+    stage ledger and the referee audit to whatever answers this port,
+    without asking what the row is; DecoderBase gives a row that fires
+    none of them the silent source.
     """
 
     fault_model_requirement: Any
     stage_recorded: Any
+    window_checked: Any
+    forced_solve_unavailable: Any
     decoder_evidence: frozenset
     missing_evidence_reasons: dict
 

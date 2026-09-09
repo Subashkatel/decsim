@@ -18,7 +18,6 @@ afterwards would miss them.
 import functools
 from typing import Optional
 
-import decsim.decoders.decoder as decoder_module
 import decsim.decoders.decoder_manager as decoder_manager_module
 import decsim.engine as engine_module
 import decsim.observe.command_events as command_events_module
@@ -41,6 +40,7 @@ import decsim.observe.settings as observe_settings
 import decsim.observe.stage_records as stage_records_module
 import decsim.observe.trace_writer as trace_writer_module
 import decsim.observe.window_ledger as window_ledger_module
+import decsim.ports as ports
 import decsim.records.log_sources as log_sources
 import decsim.seeding as seeding
 
@@ -399,13 +399,14 @@ def _log_unpinnable_observable(engine, model, reason: str) -> None:
 def _routed_decoders(pool) -> list:
     """Every decoder row the router can reach, in the order the walk finds.
 
-    A row is a row of the Decoder port's table (decoders/decoder.py's
-    DecoderBase), and every row carries stage_recorded, so the walk asks
-    nothing about what a row has. The recursion asks the seeding
-    protocol whether a value names children of its own: the routers name
-    the tiers and the per-code rows, and a row that wraps another (the
-    confidence, staged and check wrappers) names its inner decoder the
-    same way.
+    A row is anything that answers the runtime-checkable Decoder port,
+    which every row of DECODERS does and a row written outside decsim
+    does too without inheriting decsim's base class; the port declares
+    stage_recorded, so the walk asks nothing further about what a row
+    has. The recursion asks the seeding protocol whether a value names
+    children of its own: the routers name the tiers and the per-code
+    rows, and a row that wraps another (the confidence, staged and check
+    wrappers) names its inner decoder the same way.
     """
     found = []
     seen = set()
@@ -416,7 +417,7 @@ def _routed_decoders(pool) -> list:
         if decoder is None or identity in seen:
             continue
         seen.add(identity)
-        if isinstance(decoder, decoder_module.DecoderBase):
+        if isinstance(decoder, ports.Decoder):
             found.append(decoder)
         if not isinstance(decoder, seeding.RunSeedComposite):
             continue

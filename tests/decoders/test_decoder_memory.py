@@ -291,3 +291,36 @@ def test_a_memory_that_fits_one_window_and_not_two_serializes_the_cadence():
     assert tight["w2"] - tight["w1"] == serial_sum_ticks
     assert roomy["w1"] - roomy["w0"] == compute_ticks
     assert roomy["w2"] - roomy["w1"] == compute_ticks
+
+
+def test_the_memory_refuses_a_rewrite_of_an_input_two_jobs_read():
+    """C4 item 5: the single-writer rule is the memory's, not a caller's.
+
+    The window gate checked it before asking, so a second caller of
+    rewrite would have rewritten a sibling's window with nothing to stop
+    it. Helios keeps its shared memory single-writer (2301.08419 lines
+    632-640).
+    """
+    memory = decoder_memory.DecoderMemory("default", 0, capacity_rounds=4)
+    first = timing_only_job("class 0", 3)
+    second = timing_only_job("class 1", 3)
+    input_key = window_records.DecoderRequestKey(
+        41, 7, window_records.DecoderTier.WEAK, 0
+    )
+    first.request_key = input_key
+    first.input_key = input_key
+    second.input_key = input_key
+    memory.deposit(first)
+    memory.add_reader(second)
+    with pytest.raises(RuntimeError, match="2 jobs read"):
+        memory.rewrite(first, None)
+
+
+def test_the_memory_rewrites_an_input_its_one_reader_owns():
+    """One reader, one writer: the resident input becomes the new one."""
+    memory = decoder_memory.DecoderMemory("default", 0, capacity_rounds=4)
+    only = timing_only_job("class 0", 3)
+    memory.deposit(only)
+    rewritten = memory.rewrite(only, "the masked input")
+    assert rewritten == "the masked input"
+    assert memory.input_of(only) == "the masked input"

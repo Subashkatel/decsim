@@ -120,12 +120,10 @@ class WindowInputGate:
     def _fold_in_place(
         self, job: decoding_records.DecodeJob, masked_input
     ) -> None:
-        """The mask is written into the unit's own memory, for one reader.
+        """The mask is written into the unit's own memory.
 
-        An input two jobs read has no single writer, so folding into it
-        would change what the other job decodes; Helios keeps its shared
-        memory single-writer (2301.08419 lines 632-640) and this refuses
-        rather than rewriting the sibling's window.
+        Whether one writer owns that input is the memory's own rule, so
+        the memory refuses a shared one; this asks and does not check.
         """
         memory = job.memory
         if memory is None:
@@ -134,14 +132,6 @@ class WindowInputGate:
                 "copy of the rounds, and this tier reads its input in "
                 "place (input: in_place); fold into a copy, or copy the "
                 "input"
-            )
-        readers = memory.reader_count(job)
-        if readers > 1:
-            raise RuntimeError(
-                f"{job.label}: boundary_fold in_place would rewrite an "
-                f"input {readers} jobs read; one input has one writer "
-                "(Helios 2301.08419 lines 632-640), so give this tier "
-                "boundary_fold copy or one job per input"
             )
         job.decoder_input = memory.rewrite(job, masked_input)
 

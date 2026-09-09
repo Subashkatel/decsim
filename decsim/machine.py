@@ -58,6 +58,7 @@ import decsim.build.listeners as listener_build
 import decsim.build.plan as plan_build
 import decsim.build.stores as store_build
 import decsim.build.window_side as window_side
+import decsim.controller.conditional_release as conditional_release_module
 import decsim.controller.controller as controller_module
 import decsim.controller.idle_rounds as idle_rounds_module
 import decsim.controller.instruction_output as instruction_output_module
@@ -73,7 +74,6 @@ import decsim.links.link_profiles as link_profiles
 import decsim.observe.link_traffic as link_traffic
 import decsim.observe.observation as observation_module
 import decsim.observe.wiring as wiring
-import decsim.pauli_frame.conditional_release as conditional_release_module
 import decsim.pauli_frame.pauli_frame as pauli_frame_module
 import decsim.qpu.cycle_clock as cycle_clock
 import decsim.records.results as result_records

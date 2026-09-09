@@ -27,6 +27,32 @@ class DecoderTier(Enum):
     STRONG = "strong"
 
 
+# windows.terminal_policy names one of these: how a finite serial stream
+# drains its last buffered window. flush ends the last window at the
+# stream's last round, which is Tan's QUITS flush (2209.09219 lines
+# 1029-1030); lookahead keeps the regular stride, so the last window
+# still reads rounds past its own commit.
+TERMINAL_POLICIES = ("flush", "lookahead")
+
+
+@dataclass(frozen=True)
+class WindowingSchemeCard:
+    """The windows section's keys a windowing scheme row reads.
+
+    One record so every row of WINDOWING_SCHEMES has one constructor
+    signature and the root builds a row without asking which geometry it
+    lays; a row reads the keys its own layout needs and ignores the
+    rest. This is I5 slice 1's shape for STRONG_WINDOW_SHAPES and gem5's
+    params object (tmp/resources/gem5/src/python/m5/SimObject.py:204-205).
+    """
+
+    terminal_policy: str = "flush"
+
+
+# The card a row is built on when the section names no key of its own.
+DEFAULT_SCHEME_CARD = WindowingSchemeCard()
+
+
 @dataclass(frozen=True)
 class DecoderRequestKey:
     """Identity of one decode request: its window, its tier, its ordinal.

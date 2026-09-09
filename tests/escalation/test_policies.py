@@ -136,8 +136,8 @@ def test_escalations_equal_gaps_below_the_threshold_equal_strong_frame_writes():
     )
     device = stim_device.StimDevice()
     qpu = qpu_settings.QpuSettings(distance=3, device=device)
-    lookahead = sliding_scheme.SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD
-    scheme = sliding_scheme.SlidingWindowScheme(terminal_policy=lookahead)
+    lookahead = window_records.WindowingSchemeCard(terminal_policy="lookahead")
+    scheme = sliding_scheme.SlidingWindowScheme(lookahead)
     held = boundary_policies.Held()
     windows = window_settings.WindowSettings(
         scheme=scheme, boundary_policy=held
@@ -425,23 +425,19 @@ def _confident_config(tmp_path):
     return _switching_config(tmp_path, kind="confident")
 
 
-def _switching_config(tmp_path, *, kind="switching", threshold_source=None):
+def _switching_config(
+    tmp_path,
+    *,
+    kind="switching",
+    threshold_source=None,
+    windows_kind=None,
+    terminal_policy=None,
+):
     """A yaml with no router, no boundary policy and no windowing scheme."""
     escalation = {"kind": kind, "gap_threshold_db": 20.0}
     if threshold_source is not None:
         escalation["threshold_source"] = threshold_source
-    weak_decoder = {
-        "weak_decoder": {
-            "kind": "pymatching",
-            "units": 1,
-            "unit_memory_rounds": None,
-            "engine": {
-                "clock": "fridge",
-                "fetch_cycles_per_round": 1,
-                "release_cycles_per_job": 1,
-            },
-        }
-    }
+    weak_decoder = _weak_unit()
     workload = dict(yaml_configs.MINIMAL_CONFIG["workload"])
     workload["rounds_per_shot"] = 9
     sweep_point = {
@@ -458,7 +454,34 @@ def _switching_config(tmp_path, *, kind="switching", threshold_source=None):
         **strong_decoder,
         "sweep": [sweep_point],
     }
+    card["windows"] = _windows_section(windows_kind, terminal_policy)
     return yaml_configs.write_config(tmp_path, card)
+
+
+def _weak_unit() -> dict:
+    """One pymatching unit on the fridge clock, the switching weak tier."""
+    return {
+        "weak_decoder": {
+            "kind": "pymatching",
+            "units": 1,
+            "unit_memory_rounds": None,
+            "engine": {
+                "clock": "fridge",
+                "fetch_cycles_per_round": 1,
+                "release_cycles_per_job": 1,
+            },
+        }
+    }
+
+
+def _windows_section(windows_kind, terminal_policy) -> dict:
+    """The minimal windows section, with either key the caller named."""
+    windows = dict(yaml_configs.MINIMAL_CONFIG["windows"])
+    if windows_kind is not None:
+        windows["kind"] = windows_kind
+    if terminal_policy is not None:
+        windows["terminal_policy"] = terminal_policy
+    return windows
 
 
 def test_a_fourth_escalation_row_gets_the_boundaries_router_and_join(
@@ -561,8 +584,8 @@ def _serial_switching_settings(
     boundary_policy,
 ) -> machine_settings.MachineSettings:
     """Serial switching (no forward window) with the boundary policy given."""
-    lookahead = sliding_scheme.SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD
-    scheme = sliding_scheme.SlidingWindowScheme(terminal_policy=lookahead)
+    lookahead = window_records.WindowingSchemeCard(terminal_policy="lookahead")
+    scheme = sliding_scheme.SlidingWindowScheme(lookahead)
     windows = window_settings.WindowSettings(
         scheme=scheme, boundary_policy=boundary_policy
     )
@@ -629,12 +652,17 @@ class DelegatingWindowScheme:
     commits_in_one_serial_chain = True
     supports_dynamic_streams = True
 
-    def __init__(self) -> None:
-        terminal = sliding_scheme.SlidingTerminalPolicy
-        lookahead = terminal.REGULAR_STRIDE_LOOKAHEAD
-        self.inner = sliding_scheme.SlidingWindowScheme(
-            terminal_policy=lookahead
+    def __init__(
+        self,
+        card: window_records.WindowingSchemeCard = (
+            window_records.DEFAULT_SCHEME_CARD
+        ),
+    ) -> None:
+        del card
+        lookahead = window_records.WindowingSchemeCard(
+            terminal_policy="lookahead"
         )
+        self.inner = sliding_scheme.SlidingWindowScheme(lookahead)
 
     def plan_operation(
         self,
@@ -689,6 +717,44 @@ def test_a_windowing_scheme_added_from_outside_runs_under_switching():
         ((1, 4), "weak"),
         ((1, 1), "strong"),
     ]
+
+
+def test_a_windowing_scheme_named_in_a_yaml_runs_under_switching(
+    monkeypatch, tmp_path
+):
+    """The yaml path reads the declaration too, not the kind's name.
+
+    Before this round build/plan.py refused any windows.kind but sliding
+    under switching, so a row that declares a trailing tail ran when it
+    was handed in through Python and was refused when a yaml named it.
+    """
+    monkeypatch.setitem(
+        window_settings.WINDOWING_SCHEMES,
+        "delegating",
+        DelegatingWindowScheme,
+    )
+    config_path = _switching_config(tmp_path, windows_kind="delegating")
+    config = experiment.load_experiment(config_path)
+    settings = config.point_settings(
+        physical_error_probability=0.008, distance=3, round_period_us=1.0
+    )
+    machine = machine_module.Machine.build(settings, 0)
+    planner_scheme = machine.window_manager.planner.scheme
+
+    assert isinstance(planner_scheme, DelegatingWindowScheme)
+    result = machine.run()
+    assert result.terminal_status == "complete"
+
+
+def test_a_flush_tail_named_in_a_yaml_is_refused_under_switching(tmp_path):
+    """The policy's own refusal is the only one left."""
+    config_path = _switching_config(tmp_path, terminal_policy="flush")
+    with pytest.raises(ValueError, match="no trailing tail context"):
+        config = experiment.load_experiment(config_path)
+        settings = config.point_settings(
+            physical_error_probability=0.008, distance=3, round_period_us=1.0
+        )
+        machine_module.Machine.build(settings, 0)
 
 
 def test_a_windowing_scheme_without_the_declarations_is_refused_by_name():

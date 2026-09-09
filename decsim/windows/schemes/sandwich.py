@@ -28,6 +28,15 @@ class TanSandwichScheme:
     commits_in_one_serial_chain = False
     supports_dynamic_streams = False
 
+    def __init__(
+        self,
+        card: window_records.WindowingSchemeCard = (
+            window_records.DEFAULT_SCHEME_CARD
+        ),
+    ) -> None:
+        """This row lays Tan's sandwich, so it reads no key of the card."""
+        del card
+
     def plan_operation(
         self,
         operation_id: int,

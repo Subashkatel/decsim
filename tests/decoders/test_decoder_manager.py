@@ -20,6 +20,7 @@ import decsim.observe.log_writers as log_writers
 import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
+import decsim.trace_source as trace_source
 from decsim.decoders.decoder_manager import DecoderManager
 
 
@@ -171,3 +172,42 @@ def test_an_escalation_routed_to_a_pipelined_unit_is_refused():
     )
     with pytest.raises(RuntimeError, match="not pipelined yet"):
         manager.enqueue(job, None, lambda _job, _result: None)
+
+
+class UnpinnableRow(FixedRow):
+    """A row that reports, at compile time, that no class can be forced."""
+
+    def __init__(self) -> None:
+        base = super()
+        base.__init__()
+        self.forced_solve_unavailable = trace_source.TraceSource()
+
+
+class _Model:
+    """The part of a window model the narrated line reads."""
+
+    detector_ids = (0, 1, 2, 3, 4)
+
+
+def test_the_manager_narrates_a_model_that_can_pin_no_logical_class():
+    """C8 item 5: the line belongs to the component whose row reports it.
+
+    observe wrote it, so the log the frozen gate hashes was not a pure
+    product of the components. The manager owns the rows that report
+    it, so it says it, and a run with no observer says it too.
+    """
+    engine = engine_module.Engine()
+    log = log_writers.LogWriter()
+    engine.line.connect(log.write)
+    row = UnpinnableRow()
+    _manager(engine, row)
+    model = _Model()
+    reason = "one observable, no boundary"
+    row.forced_solve_unavailable.fire(model, reason)
+    lines = []
+    for line in log.lines:
+        if "NO FORCED SOLVE" in line:
+            lines.append(line)
+    assert len(lines) == 1
+    assert "5-detector window model" in lines[0]
+    assert "one observable, no boundary" in lines[0]

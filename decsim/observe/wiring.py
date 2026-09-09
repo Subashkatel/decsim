@@ -19,6 +19,7 @@ import functools
 from typing import Optional
 
 import decsim.decoders.decoder_manager as decoder_manager_module
+import decsim.decoders.decoder_pool as decoder_pool
 import decsim.engine as engine_module
 import decsim.observe.command_events as command_events_module
 import decsim.observe.controller_counters as controller_counters_module
@@ -40,9 +41,6 @@ import decsim.observe.settings as observe_settings
 import decsim.observe.stage_records as stage_records_module
 import decsim.observe.trace_writer as trace_writer_module
 import decsim.observe.window_ledger as window_ledger_module
-import decsim.ports as ports
-import decsim.records.log_sources as log_sources
-import decsim.seeding as seeding
 
 
 def observe(
@@ -96,7 +94,6 @@ def observe(
     stages = _connect_stage_records(pool)
     referee_audit = _connect_referee_audit(pool)
     sampled_shots = _connect_sampled_shots(syndrome_source)
-    _connect_unpinnable_observables(engine, pool)
     decode_records = _decode_records(observation)
     _connect_decode_records(decoder_manager, decode_records)
     trace_writer = _trace_writer(observation, engine, process_name)
@@ -368,61 +365,8 @@ def _connect_decoder_trace(
         memory.trace.deposited.connect(deposited)
         taken = functools.partial(trace_writer.memory_taken, memory.name)
         memory.trace.taken.connect(taken)
-    for decoder in _routed_decoders(pool):
+    for decoder in decoder_pool.routed_decoders(pool.router):
         decoder.stage_recorded.connect(trace_writer.stage_recorded)
-
-
-def _connect_unpinnable_observables(engine, pool) -> None:
-    """Say once per model that its windows can pin no logical class.
-
-    Compiling the model is where that is known. A confidence built from
-    forced-class solves reads no gap on such a model, so without this
-    line the run shows one unexplained escalation per window of it.
-    """
-    report = functools.partial(_log_unpinnable_observable, engine)
-    for decoder in _routed_decoders(pool):
-        decoder.forced_solve_unavailable.connect(report)
-
-
-def _log_unpinnable_observable(engine, model, reason: str) -> None:
-    """One line naming the model and why no class can be forced."""
-    detector_count = len(model.detector_ids)
-    engine.log(
-        log_sources.DECODER_MANAGER,
-        f"NO FORCED SOLVE on a {detector_count}-detector window model: "
-        f"{reason}",
-    )
-
-
-def _routed_decoders(pool) -> list:
-    """Every decoder row the router can reach, in the order the walk finds.
-
-    A row is anything that answers the runtime-checkable Decoder port,
-    which every row of DECODERS does and a row written outside decsim
-    does too without inheriting decsim's base class; the port declares
-    stage_recorded, so the walk asks nothing further about what a row
-    has. The recursion asks the seeding protocol whether a value names
-    children of its own: the routers name the tiers and the per-code
-    rows, and a row that wraps another (the confidence, staged and check
-    wrappers) names its inner decoder the same way.
-    """
-    found = []
-    seen = set()
-    pending = [pool.router]
-    while pending:
-        decoder = pending.pop()
-        identity = id(decoder)
-        if decoder is None or identity in seen:
-            continue
-        seen.add(identity)
-        if isinstance(decoder, ports.Decoder):
-            found.append(decoder)
-        if not isinstance(decoder, seeding.RunSeedComposite):
-            continue
-        children = decoder.run_seed_children()
-        for child in children:
-            pending.append(child.child)
-    return found
 
 
 def _connect_window_trace(
@@ -508,7 +452,7 @@ def _connect_stage_records(
 ) -> stage_records_module.StageLedger:
     """The run's stage history, heard from every routed decoder."""
     stages = stage_records_module.StageLedger()
-    for decoder in _routed_decoders(pool):
+    for decoder in decoder_pool.routed_decoders(pool.router):
         decoder.stage_recorded.connect(stages.stage_recorded)
     return stages
 
@@ -516,7 +460,7 @@ def _connect_stage_records(
 def _connect_referee_audit(pool) -> referee_audit_module.RefereeAudit:
     """The referee's checks, heard from every routed decoder row."""
     audit = referee_audit_module.RefereeAudit()
-    for decoder in _routed_decoders(pool):
+    for decoder in decoder_pool.routed_decoders(pool.router):
         decoder.window_checked.connect(audit.window_checked)
     return audit
 

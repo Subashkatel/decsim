@@ -66,15 +66,13 @@ def process_name(
     return f"decsim {kind} d{distance} p{probability} seed{seed}"
 
 
-def check_strong_route(
-    settings: machine_settings.MachineSettings, router
-) -> None:
-    """A switching run routes a strong job away from the weak decoder.
+def check_strong_route(escalation_policy, router) -> None:
+    """A run that may escalate routes a strong job away from the weak one.
 
     Run once on probe jobs: one decoder for both job kinds is the
     user's mistake.
     """
-    if settings.escalation.kind != "switching":
+    if not escalation_policy.requires_strong_context:
         return
     weak_probe = decoding_records.DecodeJob(
         operation_id=-1, window_id=0, round_count=0

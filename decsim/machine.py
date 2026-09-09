@@ -159,7 +159,7 @@ class Machine:
         # The decoder manager is built first, so the requester and the
         # strong redecode take the decode queue by constructor and every
         # job carries its return path.
-        controller_side.check_strong_route(settings, pool.router)
+        controller_side.check_strong_route(escalation_policy, pool.router)
         decoder_manager = controller_side.build_decoder_manager(
             engine, settings, escalation_policy, pool
         )

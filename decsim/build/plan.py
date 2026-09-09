@@ -95,8 +95,10 @@ def build_plan(
         validate_blockers=True,
         external_blocker_ids=external_blocker_ids,
     )
-    scheme = _scheme(settings.windows, settings.escalation)
-    boundary_policy = _boundary_policy(settings.windows, settings.escalation)
+    scheme = _scheme(settings.windows, escalation_policy)
+    boundary_policy = _boundary_policy(
+        settings.windows, settings.escalation, escalation_policy
+    )
     absorbs_weak_windows = escalation_build.absorbs_weak_windows(
         settings.escalation
     )
@@ -260,31 +262,26 @@ def _decode_plan_operations(
     return tuple(planned)
 
 
-def _scheme(
-    windows: window_settings.WindowSettings,
-    escalation: escalation_settings.EscalationSettings,
-):
+def _scheme(windows: window_settings.WindowSettings, escalation_policy):
     """The windowing scheme of the kind, or the Python-built one.
 
-    Switching needs the lookahead terminal policy on sliding windows:
-    the literature-exact flush has no trailing tail context.
+    A policy that may escalate needs the lookahead terminal policy on
+    sliding windows: the literature-exact flush has no trailing tail
+    context, which is the fact the policy's own refusal reads.
     """
-    scheme = _chosen_scheme(windows, escalation)
+    scheme = _chosen_scheme(windows, escalation_policy)
     _refuse_undeclared_scheme(scheme)
     return scheme
 
 
-def _chosen_scheme(
-    windows: window_settings.WindowSettings,
-    escalation: escalation_settings.EscalationSettings,
-):
-    """The Python-built scheme, the kind's row, or switching's lookahead."""
+def _chosen_scheme(windows: window_settings.WindowSettings, escalation_policy):
+    """The Python-built scheme, the kind's row, or the lookahead tail."""
     if windows.scheme is not None:
         return windows.scheme
     row = tables.row(
         window_settings.WINDOWING_SCHEMES, "windows.kind", windows.kind
     )
-    if escalation.kind != "switching":
+    if not escalation_policy.requires_strong_context:
         return row()
     if windows.kind != "sliding":
         raise ValueError("escalation switching requires windows.kind sliding")
@@ -323,10 +320,11 @@ def _refuse_undeclared_boundary_policy(boundary_policy) -> None:
 def _boundary_policy(
     windows: window_settings.WindowSettings,
     escalation: escalation_settings.EscalationSettings,
+    escalation_policy,
 ):
     """Eager shipping, or Held while a serial escalation is pending.
 
-    Serial switching holds boundaries until results are final
+    A policy that may escalate holds boundaries until results are final
     (descendants wait out an escalation); a strong window that absorbs
     the weak windows it covers keeps the weak chain committing eagerly.
     """
@@ -334,10 +332,9 @@ def _boundary_policy(
         _refuse_undeclared_boundary_policy(windows.boundary_policy)
         return windows.boundary_policy
     absorbs_weak_windows = escalation_build.absorbs_weak_windows(escalation)
-    is_serial_switching = (
-        escalation.kind == "switching" and not absorbs_weak_windows
-    )
-    if is_serial_switching:
+    may_escalate = escalation_policy.requires_strong_context
+    is_serial_escalation = may_escalate and not absorbs_weak_windows
+    if is_serial_escalation:
         return policies.Held()
     return policies.Eager()
 

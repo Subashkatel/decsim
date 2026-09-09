@@ -63,8 +63,8 @@ def build_decoder_unit(
         return None
     algorithm = _algorithm(tier_settings.kind, tier)
     is_active = tier == policy.primary_tier.value
-    is_switching = settings.escalation.kind == "switching"
-    if is_active and is_switching:
+    decides_on_a_confidence = policy.decides_on_a_confidence
+    if is_active and decides_on_a_confidence:
         _check_serves_the_confidence(
             algorithm, tier_settings.kind, tier, settings.escalation
         )
@@ -105,7 +105,7 @@ def build_decoder_pool(
         )
     router = manager.router
     unit_pools = manager.unit_pools
-    if settings.escalation.kind == "switching" and router is None:
+    if policy.requires_strong_context and router is None:
         router, unit_pools = _switching_pools(settings, weak, strong)
     if router is None:
         router = decoders.CodeRouter(default=active)

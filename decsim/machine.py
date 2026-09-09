@@ -69,6 +69,7 @@ import decsim.decoders.decoder_manager as decoder_manager_module
 import decsim.engine as engine_module
 import decsim.frontends.execution_runtime as execution_runtime_module
 import decsim.links.fabric as fabric
+import decsim.links.link_profiles as link_profiles
 import decsim.observe.link_traffic as link_traffic
 import decsim.observe.observation as observation_module
 import decsim.observe.wiring as wiring
@@ -80,6 +81,7 @@ import decsim.seeding as seeding
 import decsim.settings as machine_settings
 import decsim.syndrome_buffer.round_store as round_store_module
 import decsim.syndrome_buffer.strong_round_writer as strong_round_writer_module
+import decsim.tables as tables
 import decsim.windows.window_manager as window_manager_module
 
 
@@ -143,7 +145,10 @@ class Machine:
             engine
         )
         traffic_ledger = link_traffic.TrafficLedger(settings.links)
-        links = fabric.LinkFabric(settings.links, engine)
+        fabric_row = tables.row(
+            link_profiles.LINK_FABRICS, "links.kind", settings.links.kind
+        )
+        links = fabric_row.build(settings.links, engine)
         held_rounds = round_writes.HeldRounds(
             engine, settings.controller.packing_overflow
         )

@@ -287,7 +287,12 @@ class Decoder(Protocol):
 
 @runtime_checkable
 class Frame(Protocol):
-    """The Pauli frame, as the window manager sees it."""
+    """The Pauli frame, as the window manager sees it.
+
+    Table row: logical_register (FRAMES,
+    pauli_frame/pauli_frame.py), named by pauli_frame.kind; every row
+    takes the engine and the write cost in ticks.
+    """
 
     def commit_correction(
         self,
@@ -392,8 +397,10 @@ class SyndromeSource(Protocol):
 class Link(Protocol):
     """The link fabric as every sender sees it.
 
-    Table rows: logical_reference, bandwidth_limited (link_profiles.py),
-    and the yaml's cards. Every hop of the reaction path is priced, and a
+    Table rows: logical_reference, bandwidth_limited (LINK_FABRICS,
+    links/link_profiles.py), named by links.kind; a row supplies the
+    numbers the section's per-path cards override and builds the fabric
+    the root sends on. Every hop of the reaction path is priced, and a
     send delivers by callback with every tick of the transfer on the
     record.
     """

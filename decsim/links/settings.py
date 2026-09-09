@@ -169,14 +169,16 @@ class PathSettings:
 
 @dataclasses.dataclass(frozen=True)
 class FabricSettings:
-    """A fabric card: one path setting per hop plus a profile name.
+    """A fabric card: one path setting per hop, a profile name and a kind.
 
     Every hop of the reaction path is priced, so a card names all eleven
     and a caller that leaves one out is refused where it constructs the
     card. A card whose QPU-to-controller latency leaves out the
     controller's readout processing says so, because the timing card
-    prices that processing on its own line. The root builds the run's
-    fabric from the card: LinkFabric(settings, engine, listener).
+    prices that processing on its own line. kind names the row of
+    LINK_FABRICS (link_profiles.py) that supplied these numbers and
+    builds the run's fabric from them; profile_name is the same row's
+    name with the yaml's own file appended, for the traffic report.
     """
 
     qpu_to_controller: PathSettings
@@ -191,6 +193,7 @@ class FabricSettings:
     controller_to_qpu: PathSettings
     controller_to_strong_buffer: PathSettings
     profile_name: str
+    kind: str = "logical_reference"
     is_controller_processing_outside_qpu_to_controller: bool = False
 
     def __post_init__(self) -> None:

@@ -25,6 +25,7 @@ from typing import Callable, Optional
 import decsim.config as config
 import decsim.records.identity as identity_records
 import decsim.records.log_sources as log_sources
+import decsim.tables as tables
 import decsim.trace_source as trace_source
 
 ObservableBits = tuple[int, ...]
@@ -38,9 +39,14 @@ class PauliFrameConfig:
     Yang et al. (2605.04892, Fig. 1) measure 4 ns per frame update inside a
     550 ns loop, one cycle at 250 MHz. Writes to different windows are
     charged in parallel, never queued behind each other.
+
+    Table row (FRAMES, below): pauli_frame.kind names the frame this run
+    commits into; logical_register is the one shipped row, the frame that
+    XORs an observable bitmask per window.
     """
 
-    commit_microseconds: float
+    kind: str = "logical_register"
+    commit_microseconds: float = 0.0
     zero_commit_cost_justification: Optional[str] = None
 
     def __post_init__(self) -> None:
@@ -69,20 +75,23 @@ class PauliFrameConfig:
     def from_yaml(
         cls, section: Mapping, clocks: config.ClockSettings
     ) -> "PauliFrameConfig":
-        """The `pauli_frame` section: write_cycles on its clock."""
+        """The `pauli_frame` section: a kind, and write_cycles on its clock."""
+        kind = section.get("kind", "logical_register")
+        tables.row(FRAMES, "pauli_frame.kind", kind)
         clock = section["clock"]
         write_cycles = section["write_cycles"]
         commit_microseconds = clocks.microseconds(write_cycles, clock)
-        return cls(commit_microseconds=commit_microseconds)
+        return cls(kind=kind, commit_microseconds=commit_microseconds)
 
     def commit_ticks(self) -> int:
         """The write cost in ticks."""
         return config.microseconds_to_ticks(self.commit_microseconds)
 
-    def resolve(self, engine) -> "PauliFrame":
-        """Build the frame these settings describe, on the run's engine."""
+    def resolve(self, engine):
+        """Build the row these settings name, on the run's engine."""
+        row = tables.row(FRAMES, "pauli_frame.kind", self.kind)
         commit_ticks = self.commit_ticks()
-        return PauliFrame(engine, commit_ticks=commit_ticks)
+        return row(engine, commit_ticks=commit_ticks)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -321,3 +330,9 @@ class _FrameState:
     pending_by_window: dict = dataclasses.field(default_factory=dict)
     committed_by_window: dict = dataclasses.field(default_factory=dict)
     windows_by_stream: dict = dataclasses.field(default_factory=dict)
+
+
+# pauli_frame.kind names one of these rows: the frame a decoder's
+# correction is committed into. Every row takes the engine and the write
+# cost in ticks, and fills the Frame port (decsim/ports.py).
+FRAMES = {"logical_register": PauliFrame}

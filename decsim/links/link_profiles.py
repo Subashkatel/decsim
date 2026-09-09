@@ -20,8 +20,10 @@ from collections.abc import Mapping
 from typing import Optional
 
 import decsim.config as config
+import decsim.links.fabric as fabric
 import decsim.links.settings as settings
 import decsim.records.transfers as transfer_records
+import decsim.tables as tables
 
 # A decoder result reaches the frame as one bit per logical observable, the
 # logical-frame convention: Caune et al. 2410.05202 return one Boolean per
@@ -180,6 +182,7 @@ def logical_reference_profile() -> settings.FabricSettings:
         controller_to_qpu=controller_to_qpu,
         controller_to_strong_buffer=controller_to_strong_buffer,
         profile_name="logical_reference",
+        kind="logical_reference",
     )
 
 
@@ -340,34 +343,88 @@ def bandwidth_limited_profile(
         controller_to_qpu=controller_to_qpu,
         controller_to_strong_buffer=controller_to_strong_buffer,
         profile_name="bandwidth_limited",
+        kind="bandwidth_limited",
     )
+
+
+class LogicalReferenceFabric:
+    """The default row: Khalid's latencies on unbounded channels.
+
+    Every channel is unbounded, so the fabric prices propagation only and
+    no transfer ever queues. This is the row a yaml gets when it names no
+    kind, and the numbers its per-path cards override.
+    """
+
+    @staticmethod
+    def base_card() -> settings.FabricSettings:
+        """The numbers a yaml's per-path cards override."""
+        return logical_reference_profile()
+
+    @staticmethod
+    def build(card: settings.FabricSettings, engine):
+        """The object that carries this run's transfers."""
+        return fabric.LinkFabric(card, engine)
+
+
+class BandwidthLimitedFabric:
+    """The same fabric with finite rates, provisioned from the geometry.
+
+    Every channel carries exactly its nominal traffic in one round, so
+    contention becomes measurable and capacity_scale sweeps the whole
+    fabric. Its numbers come from the run's own geometry, not from the
+    links section, which is why base_card refuses a yaml and names what
+    a caller has to give it.
+    """
+
+    @staticmethod
+    def base_card() -> settings.FabricSettings:
+        """Refused: this row provisions itself from the run's geometry."""
+        raise ValueError(
+            "links.kind bandwidth_limited provisions every channel from "
+            "the sweep point's own geometry (the syndrome bits per round, "
+            "the round period, the commit and buffer rounds), which the "
+            "links section does not carry and which is known only per "
+            "point; build the card with "
+            "link_profiles.bandwidth_limited_profile(...) and pass it as "
+            "the machine's links setting"
+        )
+
+    @staticmethod
+    def build(card: settings.FabricSettings, engine):
+        """The object that carries this run's transfers."""
+        return fabric.LinkFabric(card, engine)
+
+
+# links.kind names one of these rows: which fabric model carries the
+# transfers and which numbers the section's per-path cards override. A
+# row answers base_card at the yaml boundary and build at the root.
+LINK_FABRICS = {
+    "logical_reference": LogicalReferenceFabric,
+    "bandwidth_limited": BandwidthLimitedFabric,
+}
 
 
 def from_yaml(
     section: Mapping, clocks: config.ClockSettings, name: str
 ) -> settings.FabricSettings:
-    """The yaml's `links` section: one card per path over the reference.
+    """The yaml's `links` section: a kind, and one card per path over it.
 
     A card prices its path in cycles of a named clock domain: latency,
     bits per cycle per lane (null is unbounded), the lane count, and an
-    optional per-transfer setup cost. A null card keeps the reference
-    card's numbers for that path. The config prices readout
-    classification on its own line, so its qpu_to_controller card is
-    link propagation only, and the fabric says so.
+    optional per-transfer setup cost. A null card keeps the chosen row's
+    numbers for that path. The config prices readout classification on
+    its own line, so its qpu_to_controller card is link propagation only,
+    and the fabric says so.
     """
     source = f"configs/{name}.yaml links"
-    path_names = []
-    for path in transfer_records.LinkPath:
-        path_names.append(path.value)
-    for path_name in section:
-        if path_name not in path_names:
-            raise ValueError(
-                f"links names {path_name!r}, which is not a path; the "
-                f"paths are {path_names}"
-            )
-    profile = logical_reference_profile()
+    kind = section.get("kind", "logical_reference")
+    row = tables.row(LINK_FABRICS, "links.kind", kind)
+    _check_section_names(section)
+    profile = row.base_card()
     replacements = {}
     for path_name, card in section.items():
+        if path_name == "kind":
+            continue
         if card is None:
             continue
         path_settings = getattr(profile, path_name)
@@ -377,9 +434,25 @@ def from_yaml(
     return dataclasses.replace(
         profile,
         **replacements,
+        kind=kind,
         profile_name=f"{name}.yaml",
         is_controller_processing_outside_qpu_to_controller=True,
     )
+
+
+def _check_section_names(section: Mapping) -> None:
+    """The links section names the kind and paths, and nothing else."""
+    path_names = []
+    for path in transfer_records.LinkPath:
+        path_names.append(path.value)
+    for section_name in section:
+        if section_name == "kind":
+            continue
+        if section_name not in path_names:
+            raise ValueError(
+                f"links names {section_name!r}, which is not a path; the "
+                f"paths are {path_names}"
+            )
 
 
 def with_transfer_overhead(

@@ -11,10 +11,13 @@ al., MICRO 2016) for with_transfer_overhead.
 import pytest
 
 import decsim.config as config
+import decsim.front.experiment as experiment
+import decsim.links.fabric as fabric_module
 import decsim.links.link_profiles as link_profiles
 import decsim.machine as machine
 import decsim.records.transfers as transfer_records
 import decsim.settings as machine_settings
+import tests.front.yaml_configs as yaml_configs
 
 # One distance-5 patch: 24 syndrome bits per 1.0 us round, commit and
 # buffer regions of 5 rounds.
@@ -256,3 +259,73 @@ def test_a_run_without_a_card_uses_the_reference_card():
     explicit_machine = machine.Machine.build(explicit_settings)
     explicit_result = explicit_machine.run()
     assert default_result == explicit_result
+
+
+class CountingFabric:
+    """A fabric row written outside decsim: it counts what it carried.
+
+    Its base card is the reference row's, so a run on it prices every hop
+    exactly as the shipped row does and the count is the only difference.
+    """
+
+    sent = []
+
+    @staticmethod
+    def base_card():
+        """The numbers the section's per-path cards override."""
+        return link_profiles.logical_reference_profile()
+
+    @staticmethod
+    def build(card, engine):
+        """One LinkFabric, with every send counted on the way through."""
+        return _CountingLinkFabric(card, engine)
+
+
+class _CountingLinkFabric(fabric_module.LinkFabric):
+    """The reference fabric, counting the transfers it carried."""
+
+    def send(self, path, payload_bits, now_ticks, attribution, on_delivered):
+        """Count the send, then carry it."""
+        CountingFabric.sent.append(path)
+        reference = super()
+        reference.send(path, payload_bits, now_ticks, attribution, on_delivered)
+
+
+def test_a_fabric_row_written_outside_decsim_runs_from_a_yaml(
+    monkeypatch, tmp_path
+):
+    """One LINK_FABRICS row and one links.kind is the whole edit."""
+    monkeypatch.setitem(link_profiles.LINK_FABRICS, "counting", CountingFabric)
+    monkeypatch.setattr(CountingFabric, "sent", [])
+    links = dict(yaml_configs.MINIMAL_CONFIG["links"])
+    links["kind"] = "counting"
+    config_path = yaml_configs.write_config(tmp_path, {"links": links})
+    experiment_config = experiment.load_experiment(config_path)
+    settings = experiment_config.point_settings(
+        physical_error_probability=0.001, distance=3, round_period_us=1.0
+    )
+    built = machine.Machine.build(settings, 0)
+    result = built.run()
+
+    assert settings.links.kind == "counting"
+    assert isinstance(built.links, _CountingLinkFabric)
+    assert result.terminal_status == "complete"
+    assert CountingFabric.sent != []
+
+
+def test_a_links_kind_off_the_table_is_refused_naming_the_rows(tmp_path):
+    """The table's own refusal, at the yaml boundary."""
+    links = dict(yaml_configs.MINIMAL_CONFIG["links"])
+    links["kind"] = "not_a_row"
+    config_path = yaml_configs.write_config(tmp_path, {"links": links})
+    with pytest.raises(ValueError, match="links.kind 'not_a_row' is not"):
+        experiment.load_experiment(config_path)
+
+
+def test_the_bandwidth_row_says_what_it_needs_instead_of_a_yaml(tmp_path):
+    """Its channels come from the sweep point's geometry, not the section."""
+    links = dict(yaml_configs.MINIMAL_CONFIG["links"])
+    links["kind"] = "bandwidth_limited"
+    config_path = yaml_configs.write_config(tmp_path, {"links": links})
+    with pytest.raises(ValueError, match="provisions every channel"):
+        experiment.load_experiment(config_path)

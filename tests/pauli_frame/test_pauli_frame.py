@@ -13,6 +13,10 @@ import enum
 
 import pytest
 
+import decsim.front.experiment as experiment
+import decsim.machine as machine_module
+import decsim.pauli_frame.pauli_frame as pauli_frame_module
+import tests.front.yaml_configs as yaml_configs
 from decsim.engine import Engine
 from decsim.pauli_frame.pauli_frame import PauliFrame, PauliFrameConfig
 
@@ -182,3 +186,58 @@ def test_a_free_write_with_a_reason_is_accepted_and_charges_nothing():
         zero_commit_cost_justification="an idealized register write",
     )
     assert settings.commit_ticks() == 0
+
+
+class CountingFrame(pauli_frame_module.PauliFrame):
+    """A frame row written outside decsim: it counts what it committed.
+
+    Its constructor is the port's, the engine and the write cost in
+    ticks, which is what the root gives every row of FRAMES.
+    """
+
+    def __init__(self, engine, *, commit_ticks: int) -> None:
+        reference = super()
+        reference.__init__(engine, commit_ticks=commit_ticks)
+        self.committed_windows = []
+
+    def commit_correction(
+        self, *, window_key, logical_observables, request_key, on_committed
+    ) -> None:
+        """Remember the window, then commit as the shipped row does."""
+        self.committed_windows.append(window_key)
+        reference = super()
+        reference.commit_correction(
+            window_key=window_key,
+            logical_observables=logical_observables,
+            request_key=request_key,
+            on_committed=on_committed,
+        )
+
+
+def test_a_frame_row_written_outside_decsim_runs_from_a_yaml(
+    monkeypatch, tmp_path
+):
+    """One FRAMES row and one pauli_frame.kind is the whole edit."""
+    monkeypatch.setitem(pauli_frame_module.FRAMES, "counting", CountingFrame)
+    section = dict(yaml_configs.MINIMAL_CONFIG["pauli_frame"])
+    section["kind"] = "counting"
+    config_path = yaml_configs.write_config(tmp_path, {"pauli_frame": section})
+    experiment_config = experiment.load_experiment(config_path)
+    settings = experiment_config.point_settings(
+        physical_error_probability=0.001, distance=3, round_period_us=1.0
+    )
+    machine = machine_module.Machine.build(settings, 0)
+    result = machine.run()
+
+    assert isinstance(machine.pauli_frame, CountingFrame)
+    assert result.terminal_status == "complete"
+    assert machine.pauli_frame.committed_windows != []
+
+
+def test_a_frame_kind_off_the_table_is_refused_naming_the_rows(tmp_path):
+    """The table's own refusal, at the yaml boundary."""
+    section = dict(yaml_configs.MINIMAL_CONFIG["pauli_frame"])
+    section["kind"] = "not_a_row"
+    config_path = yaml_configs.write_config(tmp_path, {"pauli_frame": section})
+    with pytest.raises(ValueError, match="pauli_frame.kind 'not_a_row' is not"):
+        experiment.load_experiment(config_path)

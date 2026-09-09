@@ -269,11 +269,20 @@ clocks:                            # clock domain name -> MHz; a link prices its
   fridge: 250.0
   room: 250.0
 
-links:                             # one card per path; null = the
-                                   # logical_reference profile's numbers for that
-                                   # path (link_profiles.py
-                                   # logical_reference_profile), which prices every
-                                   # one of the eleven hops, so no hop is free.
+links:                             # a kind, then one card per path; null = the
+                                   # chosen row's numbers for that path
+  kind: logical_reference          # logical_reference | bandwidth_limited
+                                   # (LINK_FABRICS, links/link_profiles.py). The row
+                                   # supplies the numbers the per-path cards below
+                                   # override and builds the fabric the run sends
+                                   # on. logical_reference prices every one of the
+                                   # eleven hops with unbounded channels, so no hop
+                                   # is free and nothing queues.
+                                   # bandwidth_limited provisions each channel from
+                                   # the sweep point's own geometry and is refused
+                                   # here: a caller builds its card with
+                                   # link_profiles.bandwidth_limited_profile and
+                                   # passes it as the machine's links setting.
                                    # Each card, in cycles of its named clock domain:
                                    #   latency_cycles: propagation latency
                                    #   clock: the domain (a clocks: key)
@@ -445,6 +454,10 @@ decoder_manager:                   # the manager that gives ready windows a unit
                                    # is the range to price this from
 
 pauli_frame:
+  kind: logical_register           # logical_register (FRAMES,
+                                   # pauli_frame/pauli_frame.py). The frame a
+                                   # correction is committed into: one observable
+                                   # bitmask XORed per window.
   clock: fridge
   write_cycles: 1                  # XOR of a correction into the frame register
                                    # (one cycle, XQsim PFU)

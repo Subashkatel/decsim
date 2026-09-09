@@ -453,17 +453,28 @@ strong_decoder:                    # the accurate tier: slow, lower LER
 
 decoder_manager:                   # the manager that gives ready windows a unit
   bulk_strong: false               # true serves the strong pool's queued
-                                   # re-decodes as one merged decode (Toshio
-                                   # 2510.25222 Sec. III C: the strong decoder
-                                   # processes its assigned data in bulk). The
-                                   # batch is timing-only, since one decode
-                                   # cannot carry each member window's
-                                   # correction, so it prices a bulk strong
-                                   # tier and refuses a run whose accuracy is
-                                   # coupled to the strong result; serial
-                                   # escalation only (it contradicts
-                                   # escalation.run_both_at_once and the
-                                   # double window)
+                                   # re-decodes as one merged decode. Toshio
+                                   # 2510.25222 lines 1253-1264 say the strong
+                                   # decoder should decode in bulk once the
+                                   # boundaries on both sides are determined,
+                                   # and that sentence is about one
+                                   # escalation's own contiguous rstrong
+                                   # region, not about several escalations at
+                                   # once; decsim goes past it and merges every
+                                   # queued strong job, which is the cheapest
+                                   # strong tier a run can be priced against
+                                   # and so the floor of the sweep the paper
+                                   # leaves open ("could be finely tuned
+                                   # depending on the scaling of the decoding
+                                   # time and available computational
+                                   # resources", 1259-1262). The batch is
+                                   # timing-only, since one decode cannot carry
+                                   # each member window's correction, so it
+                                   # prices a bulk strong tier and refuses a
+                                   # run whose accuracy is coupled to the
+                                   # strong result; serial escalation only (it
+                                   # contradicts escalation.run_both_at_once
+                                   # and the double window)
   clock: fridge                    # the domain dispatch_cycles counts in
   dispatch_cycles: 0               # the manager's own work per dispatch,
                                    # charged on its clock after a job is placed

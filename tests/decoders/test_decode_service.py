@@ -436,3 +436,32 @@ def test_a_pipelined_unit_serves_a_strong_primary_window():
     window = machine.observation.windows.windows[(1, 0)]
     assert window.t_data_complete == config.microseconds_to_ticks(15.0)
     assert window.t_done == config.microseconds_to_ticks(121.0)
+
+
+class _MisdeclaredDepth(decoders.PresetLatencyDecoder):
+    """A row that claims a pipeline and answers at the rate it accepts."""
+
+    def pipeline_depth(self, job):
+        del job
+        return 4
+
+
+def test_a_declared_depth_that_its_timing_denies_is_refused():
+    """C4 item 6: the two halves of one fact are held against each other.
+
+    The port declares pipeline_depth, and a unit runs the pipelined
+    model when it accepts work on its own interval. A row that declares
+    a depth above one and answers at exactly the rate it accepts has
+    declared a pipeline it cannot run, and the service says so where it
+    reads both.
+    """
+    engine = engine_module.Engine()
+    decoder = _MisdeclaredDepth(1.0)
+    manager = _manager(engine, decoder)
+    job = _job(0)
+    with pytest.raises(AssertionError, match="pipeline depth of 4"):
+        manager.enqueue(job, None, _nothing_decoded)
+
+
+def _nothing_decoded(job, result) -> None:
+    del job, result

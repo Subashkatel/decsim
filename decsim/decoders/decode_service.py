@@ -552,27 +552,39 @@ class DecodeService:
     def _pipeline_of(self, decoder, job: decoding_records.DecodeJob):
         """(interval, latency, depth) of a pipelined start, else None.
 
-        A unit pipelines when its occupancy is shorter than its latency
-        (gem5's FuncUnit: an issue latency below the op latency,
-        fu_pool.hh). The pipelined model serves the job kinds in
-        PIPELINED_JOB_KINDS; the strong tier and merged batches keep
-        occupancy == latency until they get their own design pass, and a
-        pipelined route there refuses loudly rather than silently
-        serializing.
+        The row declares both halves and this asks for both. The Decoder
+        port's pipeline_depth is the decodes that may be in flight on
+        one unit, and one is no pipeline; a unit also runs the pipelined
+        model when it accepts work on its own interval rather than at
+        the rate it answers, which is a row whose occupancy differs from
+        its latency (gem5's FuncUnit declares an issue latency beside
+        its op latency, fu_pool.hh; the intake rate is the initiation
+        interval's alone, Hennessy and Patterson App. C). The two agree
+        on every row: a depth above one needs an interval shorter than
+        the latency, which the assert below says. The pipelined model
+        serves the job kinds in PIPELINED_JOB_KINDS; the strong tier and
+        merged batches are not pipelined yet, and a pipelined route
+        there refuses loudly rather than silently serializing.
         """
         occupancy = decoder.occupancy(job)
         if occupancy is None:
             return None
         latency_ticks = decoder.latency(job)
-        if occupancy == latency_ticks:
+        depth = decoder.pipeline_depth(job)
+        accepts_on_its_own_interval = occupancy != latency_ticks
+        if depth == 1 and not accepts_on_its_own_interval:
             return None
+        assert accepts_on_its_own_interval, (
+            f"decoder for {job.label!r} declares a pipeline depth of "
+            f"{depth} and an occupancy equal to its latency; a depth "
+            "above one needs an intake interval shorter than the answer"
+        )
         if _is_outside_pipelined_model(job):
             raise RuntimeError(
                 f"decode job {job.label!r}: a pipelined decoder serves "
                 "window and self-contained decodes only; the strong tier "
                 "and merged batches are not pipelined yet"
             )
-        depth = decoder.pipeline_depth(job)
         return occupancy, latency_ticks, depth
 
     def _track_pipelined_start(

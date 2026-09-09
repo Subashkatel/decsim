@@ -14,6 +14,7 @@ import math
 
 import pytest
 
+import decsim.build.escalation as escalation_build
 import decsim.escalation.settings as escalation_settings
 from decsim.front.collect_command import run_sweep
 from decsim.front.experiment import load_experiment
@@ -296,10 +297,30 @@ class _OutsideCalibratedThreshold:
 
 
 class _OutsideLearningThreshold(_OutsideCalibratedThreshold):
-    """A threshold row from outside that the front builds per sweep point."""
+    """A threshold row from outside that builds its own per-point source.
+
+    for_sweep_point is what built_per_sweep_point promises. This row
+    starts at the point's threshold in nats and learns nothing, which is
+    all the law needs: what the front installs is an instance of the row
+    the table names.
+    """
 
     reads_a_calibration_table = False
     built_per_sweep_point = True
+
+    @classmethod
+    def for_sweep_point(
+        cls,
+        online,
+        threshold_nats: float,
+        physical_error_probability: float,
+        distance: int,
+    ) -> "_OutsideLearningThreshold":
+        """One instance of this row for the point."""
+        del online
+        del physical_error_probability
+        del distance
+        return cls(threshold_nats)
 
 
 def test_an_outside_row_that_reads_a_table_gets_the_column_and_no_card(
@@ -350,3 +371,45 @@ def test_an_outside_row_built_per_point_gets_the_online_card(
     config = load_experiment(config_path)
 
     assert config.settings.escalation.online.audit_rate == 0.3
+
+
+def test_an_outside_row_built_per_point_is_the_source_the_front_installs(
+    tmp_path, monkeypatch
+):
+    """The row builds its own per-point source, and that is what runs.
+
+    online_threshold_for used to construct
+    threshold_sources.OnlineThreshold by direct class reference, so a row
+    that declared built_per_sweep_point had its card read and then got
+    the shipped calibrator instead of itself. The instance the front puts
+    on the point's task is now the row's own, and it reaches the policy
+    the root builds for the shot (build/escalation.py _threshold_source,
+    which reads the same declaration).
+    """
+    monkeypatch.setitem(
+        escalation_settings.THRESHOLD_SOURCES,
+        "outside_learning",
+        _OutsideLearningThreshold,
+    )
+    learning_card = {
+        "threshold_source": "outside_learning",
+        "gap_threshold_db": 20.0,
+        "online": {"audit_rate": 0.3},
+    }
+    config_path = source_config(tmp_path, learning_card)
+    config = load_experiment(config_path)
+    task = config.point_task(
+        physical_error_probability=NEAR_THRESHOLD_P,
+        distance=3,
+        round_period_us=1.0,
+        shots=1,
+    )
+
+    installed = task.online_threshold
+
+    assert type(installed) is _OutsideLearningThreshold
+    expected_nats = config.settings.escalation.gap_threshold_nats
+    assert installed.threshold_nats == expected_nats
+    shot_settings = task.shot_settings()
+    policy = escalation_build.build_escalation_policy(shot_settings.escalation)
+    assert policy.threshold is installed

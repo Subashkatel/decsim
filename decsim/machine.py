@@ -36,16 +36,26 @@ what tools/check_uses_graph.py prints and check.sh enforces:
     0  config, records, tables, trace_source
     1  detector_error_model, engine, pauli_frame, ports, seeding,
        syndrome_buffer
-    2  confidence, controller, decoders, links, qpu, windows
-    3  escalation, frontends, observe
+    2  confidence, controller, decoders, escalation, links, qpu, windows
+    3  frontends, observe
     4  settings
     5  build
     6  machine (this file)
     7  collect
     8  front
+    9  __main__
 
 Level 2 and below decode a window on a store with no window manager,
 which is what the decoders' own tests run.
+
+The eleven priced hops are the line where a call stops being local
+(Waldo 1994, waldo1994.txt 302-304 and 852-855): a call across a hop
+has a card, a payload a record names, and a send at one end; a call
+inside a unit is never priced. Across that line decsim models latency
+and memory access and no partial failure at all: no hop drops,
+duplicates or reorders what it carries, and nothing retries. That is a
+stated scope, not an omission, and a retry added to a hop as a tuning
+knob would be a modeling change, not a parameter.
 """
 
 import dataclasses

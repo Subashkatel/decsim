@@ -145,9 +145,22 @@ def report_levels(edges: dict, nodes: list) -> None:
         print(f"  level {number}: {joined}")
 
 
-def main() -> int:
+USAGE = (
+    "usage: check_uses_graph.py <package root>; "
+    "from the checkout, tools/check_uses_graph.py decsim"
+)
+
+
+def main(arguments) -> int:
     """Print the levels, or the cycles and a failure."""
-    root = pathlib.Path(sys.argv[1])
+    if len(arguments) != 1:
+        print(USAGE, file=sys.stderr)
+        return 2
+    root = pathlib.Path(arguments[0])
+    if not root.is_dir():
+        print(f"{root} is not a directory", file=sys.stderr)
+        print(USAGE, file=sys.stderr)
+        return 2
     edges = read_edges(root)
     nodes = nodes_of(edges)
     search = CycleSearch(edges)
@@ -162,5 +175,5 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    exit_code = main()
+    exit_code = main(sys.argv[1:])
     sys.exit(exit_code)

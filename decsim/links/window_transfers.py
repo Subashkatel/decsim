@@ -14,6 +14,7 @@ from typing import Callable, Optional
 
 import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
+import decsim.records.rounds as round_records
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 
@@ -69,6 +70,20 @@ class WindowTransfers:
         delivered = functools.partial(_run_at_delivery, on_delivered)
         self.link.send(path, payload_bits, now_ticks, attribution, delivered)
         return expected_delay_ticks
+
+    def send_for_round(
+        self,
+        path: transfer_records.LinkPath,
+        packet: round_records.SyndromeRoundPacket,
+        payload_bits: Optional[int],
+        on_delivered: Callable[[], None],
+    ) -> None:
+        """Send in a stored round's name; on_delivered runs at the delivery."""
+        attribution = transfer_records.TransferAttribution.for_packet(packet)
+        delivered = functools.partial(_run_at_delivery, on_delivered)
+        self.link.send(
+            path, payload_bits, self.engine.now, attribution, delivered
+        )
 
     def send_boundary(
         self,

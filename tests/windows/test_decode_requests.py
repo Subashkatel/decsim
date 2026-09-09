@@ -127,6 +127,7 @@ class _Fixture:
             transfers,
             transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER,
             "Buffer 0",
+            self.store,
         )
         boundary_payload = boundary_payloads.DenseSeamMask()
         interaction = window_interactions.DefaultWindowInteraction(

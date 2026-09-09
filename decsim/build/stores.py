@@ -5,9 +5,12 @@ from typing import Optional
 import decsim.controller.round_writes as round_writes
 import decsim.engine as engine_module
 import decsim.links.fabric as fabric
+import decsim.links.window_transfers as window_transfers
 import decsim.pauli_frame.pauli_frame as pauli_frame_module
+import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 import decsim.settings as machine_settings
+import decsim.syndrome_buffer.round_output as round_output
 import decsim.syndrome_buffer.round_store as round_store_module
 import decsim.syndrome_buffer.settings as round_store_settings
 import decsim.syndrome_buffer.strong_round_writer as strong_round_writer_module
@@ -60,6 +63,34 @@ def build_strong_round_writer(
         strong_round_store,
         on_round_stored=window_manager.accept_room_round,
     )
+
+
+def build_store_outputs(
+    engine: engine_module.Engine,
+    links: fabric.LinkFabric,
+    round_store,
+    strong_round_store,
+) -> tuple:
+    """Each store's outgoing port, built beside the store it belongs to.
+
+    A round leaves by the end that holds it, so the port that executes
+    the send is the store's and is wired here rather than by whoever
+    asks for the round.
+    """
+    transfers = window_transfers.WindowTransfers(engine, links)
+    weak_output = round_output.RoundStoreOutput(
+        transfers,
+        transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER,
+        "Buffer 0",
+        round_store,
+    )
+    strong_output = round_output.RoundStoreOutput(
+        transfers,
+        transfer_records.LinkPath.STRONG_BUFFER_TO_STRONG_DECODER,
+        "Buffer 1",
+        strong_round_store,
+    )
+    return weak_output, strong_output
 
 
 def build_pauli_frame(

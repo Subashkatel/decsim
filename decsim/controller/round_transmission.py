@@ -1,9 +1,11 @@
 """The transmitter: a stored round leaves on its route at the write.
 
-A window-input round rides controller_to_weak_buffer and is published to
-the windows at delivery, where its publication tick is stamped on the
-store. A feedback-memory round rides weak_buffer_to_weak_decoder
-and, at delivery, tells the windows and frees its Buffer 0 slot. The
+A window-input round rides controller_to_weak_buffer, whose sending end
+this is, and is published to the windows at delivery, where its
+publication tick is stamped on the store. A feedback-memory round rides
+weak_buffer_to_weak_decoder, whose sending end is Buffer 0, so the
+store's own outgoing port sends it and frees the slot and this
+transmitter only asks and hears the landing. The
 sender never waits for a round to land before sending the next: the DAQs
 of Yang et al. (2605.04892) and Google's control electronics
 (2408.13687) stream every round, Caune et al. (2410.05202) publish each
@@ -30,11 +32,13 @@ class RoundTransmitter:
     and FEEDBACK_MEMORY_DELIVERED.
     """
 
-    def __init__(self, engine, link, weak_store, windows) -> None:
+    def __init__(self, engine, link, windows, store_output) -> None:
         self.engine = engine
         self.link = link
-        self.weak_store = weak_store
         self.windows = windows
+        # Buffer 0's port on the data path: it stamps what lands there
+        # and sends what leaves it
+        self.store_output = store_output
         self.in_flight = 0
         self.trace = _TraceSources()
 
@@ -76,7 +80,7 @@ class RoundTransmitter:
 
     def _publish(self, packed: round_records.PackedRound) -> None:
         """The round reached Buffer 0: stamp it, record it, wake the windows."""
-        self.weak_store.mark_publication_tick(packed.round_key, self.engine.now)
+        self.store_output.mark_published(packed.round_key, self.engine.now)
         self._fire("PUBLISHED", packed)
         self.windows.accept_window_input(packed.packet)
         self._leave_after_publication()
@@ -93,21 +97,22 @@ class RoundTransmitter:
         self.in_flight -= 1
 
     def _send_feedback_memory(self, packed: round_records.PackedRound) -> None:
+        """Ask the store to send it; the controller is at neither end.
+
+        The round leaves Buffer 0 for the weak decoder, so the store's
+        own outgoing port executes the send and frees the slot; this
+        transmitter only asks and hears the landing.
+        """
         deliver = functools.partial(self._deliver_feedback_memory, packed)
-        self._send(
-            transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER,
-            packed,
-            deliver,
-        )
+        self.store_output.send_memory_round(packed, deliver)
 
     def _deliver_feedback_memory(
         self, packed: round_records.PackedRound
     ) -> None:
-        """The memory round landed: tell the windows and free its slot."""
+        """The memory round landed: tell the windows; its slot is free."""
         source_operation_id = packed.route.source_operation_id
         self.windows.accept_feedback_memory_round(source_operation_id)
         self._fire("FEEDBACK_MEMORY_DELIVERED", packed)
-        self.weak_store.release_round(packed.round_key)
         self._leave()
 
     def _fire(self, kind: str, packed: round_records.PackedRound) -> None:

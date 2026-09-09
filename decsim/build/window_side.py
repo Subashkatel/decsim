@@ -18,10 +18,8 @@ import decsim.escalation.strong_regions as strong_regions
 import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.links.window_transfers as window_transfers_module
 import decsim.records.decoding as decoding_records
-import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 import decsim.settings as machine_settings
-import decsim.syndrome_buffer.round_output as round_output
 import decsim.tables as tables
 import decsim.windows.built_window_models as built_window_models
 import decsim.windows.committed_rounds as committed_rounds
@@ -46,6 +44,8 @@ def build_window_manager(
     fault_model_requirement_for,
     round_store,
     strong_round_store,
+    weak_output,
+    strong_output,
     pauli_frame,
     decode_queue,
     on_workload_complete,
@@ -76,16 +76,6 @@ def build_window_manager(
     )
     transfers = window_transfers_module.WindowTransfers(engine, links)
     decoder_output = decoder_output_module.DecoderOutput(transfers, pauli_frame)
-    weak_output = round_output.RoundStoreOutput(
-        transfers,
-        transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER,
-        "Buffer 0",
-    )
-    strong_output = round_output.RoundStoreOutput(
-        transfers,
-        transfer_records.LinkPath.STRONG_BUFFER_TO_STRONG_DECODER,
-        "Buffer 1",
-    )
     primary_output = weak_output
     if escalation_policy.primary_tier is window_records.DecoderTier.STRONG:
         primary_output = strong_output

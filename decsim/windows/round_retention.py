@@ -172,9 +172,8 @@ class RoundRetention:
         """Rounds kept until the strong decoder is known to need them."""
         if not self.is_strong_context_retained:
             return []
-        context_lo, _commit_lo, _commit_hi, context_hi = strong_context_bounds(
-            window
-        )
+        bounds = window_records.strong_context_bounds(window)
+        context_lo, _commit_lo, _commit_hi, context_hi = bounds
         weak = set(weak_reads)
         strong = self.read_keys_for_bounds(
             window.operation_id, context_lo, context_hi, window
@@ -466,20 +465,6 @@ class RoundRetention:
                 f"syndrome buffer 1 needs {len(strong_minimum)} packet "
                 f"slots, got {strong_capacity}"
             )
-
-
-def strong_context_bounds(window: window_records.Window) -> tuple:
-    """(context_lo, commit_lo, commit_hi, context_hi) of a strong redo.
-
-    One buffer of context on each side of the commit region, clipped at
-    round 1.
-    """
-    buffer_span = window.buffer_hi - window.commit_hi
-    buffer_rounds = max(0, buffer_span)
-    context_start = window.commit_lo - buffer_rounds
-    context_lo = max(1, context_start)
-    context_hi = window.commit_hi + buffer_rounds
-    return context_lo, window.commit_lo, window.commit_hi, context_hi
 
 
 def _is_released(store, arrived_for, round_key: tuple) -> bool:

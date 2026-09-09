@@ -22,7 +22,6 @@ from typing import Optional
 
 import decsim.ports as ports
 import decsim.records.windows as window_records
-import decsim.windows.round_retention as round_retention
 
 
 @dataclasses.dataclass(frozen=True)
@@ -236,9 +235,8 @@ def _context_window_of(
     count Bombin et al. 2303.04846 lines 775-788 rule out and the row's
     own module docstring forbids.
     """
-    context_lo, commit_lo, commit_hi, context_hi = (
-        round_retention.strong_context_bounds(weak_window)
-    )
+    bounds = window_records.strong_context_bounds(weak_window)
+    context_lo, commit_lo, commit_hi, context_hi = bounds
     round_count = context_hi - context_lo + 1
     strong_window = window_records.Window(
         operation_id=weak_window.operation_id,

@@ -788,6 +788,164 @@ def test_a_yaml_names_the_near_seam_row_and_its_pin_crosses_the_wire():
     assert pinned_bits == {8}
 
 
+def test_the_forward_seam_row_reads_exactly_the_rounds_it_commits():
+    """Toshio 2510.25222 lines 1248-1250, as the paper states it.
+
+    W1 of a d=3 run commits 4-6, so the forward strong region commits
+    r_com + 2 r_buf = 9 rounds, 4-12. The shipped forward row reads one
+    buffer of raw context on each side of that, 1-15; pinning both faces
+    drops both buffers, so this row reads the 9 rounds it commits.
+    """
+    machine = fabric.switching_machine(
+        rounds=15,
+        escalated_windows={1},
+        strong_window="forward_seam_pinned",
+        round_microseconds=4.0,
+        record=True,
+    )
+    machine.run()
+    strong = _strong_request_record(machine, 1)
+    assert (strong.input_round_lo, strong.input_round_hi) == (4, 12)
+    assert strong.input_round_count == 9
+    assert fabric.frame_tiers(machine) == [
+        ((1, 0), "weak"),
+        ((1, 4), "weak"),
+        ((1, 1), "strong"),
+    ]
+
+
+def test_the_forward_seam_row_pins_its_near_and_its_far_face():
+    """One message per pinned face, both on decoder_to_decoder.
+
+    The near face is the window before the strong region, the far face
+    the window that restarts the weak chain after it, which is the
+    boundary the shipped forward row already waits for (Toshio
+    2510.25222 lines 1253-1259). Skoric 2209.08552 lines 1038-1040 sends
+    each face's defects block to block, so two faces are two messages.
+    """
+    machine = fabric.switching_machine(
+        rounds=15,
+        escalated_windows={1},
+        strong_window="forward_seam_pinned",
+        round_microseconds=4.0,
+    )
+    result = machine.run()
+    pinned = _pinned_boundary_transfers(result)
+    assert len(pinned) == 2
+    for window_id, _payload_bits in pinned:
+        assert window_id == 1
+    sources = _pin_sources(result)
+    # W1's own dependency, and the window that restarts the chain past
+    # the strong region 4-12
+    assert sources == [0, 4]
+
+
+def _pin_sources(result) -> list:
+    """The window that produced each pinned face's boundary, in send order."""
+    sources = []
+    for transfer in result.link_traffic["transfers"]:
+        if transfer["path"] != "decoder_to_decoder":
+            continue
+        attribution = transfer["attribution"]
+        source_window_id = attribution["relation"]["request_key"]["window_id"]
+        if attribution["window_id"] == source_window_id:
+            continue
+        sources.append(source_window_id)
+    return sources
+
+
+def test_the_forward_seam_row_at_the_operations_end_has_no_far_pin():
+    """Tan 2209.09219 lines 953-955: the last window's faces are closed.
+
+    A terminal strong region has no later window to pin on, so it waits
+    for the terminal data the way the shipped forward row does and reads
+    to its own last committed round.
+    """
+    machine = fabric.switching_machine(
+        rounds=9,
+        escalated_windows={2},
+        strong_window="forward_seam_pinned",
+        record=True,
+    )
+    result = machine.run()
+    submitted = fabric.log_lines_containing(
+        machine, "terminal data complete -> strong window submitted"
+    )
+    assert len(submitted) == 1
+    strong = _strong_request_record(machine, 2)
+    assert (strong.input_round_lo, strong.input_round_hi) == (7, 9)
+    sources = _pin_sources(result)
+    # only the near face: W2's own dependency
+    assert sources == [1]
+
+
+def test_the_forward_seam_row_reads_an_unpinned_near_face_raw():
+    """A window whose dependency was absorbed has nothing to pin on.
+
+    W1's strong region commits 4-12 and absorbs W2 and W3, so the
+    restart window W4 keeps no dependency: no committed correction
+    closes its past face. When W4 escalates in turn, its strong region
+    commits 13-21 and reads one buffer region of raw context behind it,
+    10-21, since an open face keeps its buffer (Bombin 2303.04846 lines
+    850-852) rather than reading nothing at all. Its far face is the
+    window that restarts the chain after 21, W7, and that one is pinned.
+    """
+    machine = fabric.switching_machine(
+        rounds=30,
+        escalated_windows={1, 4},
+        strong_window="forward_seam_pinned",
+        round_microseconds=4.0,
+        record=True,
+    )
+    result = machine.run()
+    pinned_faces = _strong_request_record(machine, 1)
+    assert (pinned_faces.input_round_lo, pinned_faces.input_round_hi) == (4, 12)
+    open_face = _strong_request_record(machine, 4)
+    assert (open_face.input_round_lo, open_face.input_round_hi) == (10, 21)
+    # W1 pins both faces (W0 and W4), W4 only its far face (W7)
+    assert _pin_sources(result) == [0, 4, 7]
+
+
+def test_a_yaml_names_the_forward_seam_row_and_it_runs():
+    """The row is one class, one table row and one yaml name.
+
+    The gate's own switching card with escalation.strong_window
+    forward_seam_pinned builds this row and runs the point through, with
+    the absorbing apparatus of the shipped forward row underneath it.
+    """
+    machine = _gate_machine("forward_seam_pinned")
+    result = machine.run()
+    shape = machine.window_manager.strong_redecode.shape
+    assert type(shape) is strong_window_shapes.ForwardSeamWindow
+    statuses = _run_statuses(result)
+    assert statuses == [(1, "logical_observables")]
+    assert not machine.window_manager.strong_redecode.has_pending()
+
+
+def test_a_pinned_far_face_refuses_a_re_reading_restart_window():
+    """Q5 of design audit note 20, settled as a refusal.
+
+    With escalation.restart_reread_buffer_regions 1 the restart window
+    commits rounds inside the strong region, so pinning the far face on
+    its correction would carry an explanation of rounds the input holds
+    raw: the double count Bombin 2303.04846 lines 775-788 rule out. 0 is
+    the paper's value (Toshio 2510.25222 Sec. III C, Fig. 12), and the
+    section refuses the pairing at load rather than reconciling it.
+    """
+    section = {
+        "kind": "switching",
+        "gap_threshold_db": 20.0,
+        "strong_window": "forward_seam_pinned",
+        "restart_reread_buffer_regions": 1,
+    }
+    with pytest.raises(ValueError) as refusal:
+        escalation_settings.EscalationSettings.from_yaml(section)
+    assert "restart_reread_buffer_regions must be 0" in str(refusal.value)
+    section["strong_window"] = "forward"
+    kept = escalation_settings.EscalationSettings.from_yaml(section)
+    assert kept.restart_reread_buffer_regions == 1
+
+
 def _strong_window_keys(machine) -> set:
     """The windows that escalated and pinned a face on their neighbour.
 

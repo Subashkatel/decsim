@@ -1,8 +1,16 @@
 """The strong window's shape: which rounds the strong tier re-decodes, and when.
 
-Two rows of STRONG_WINDOW_SHAPES (escalation/settings.py), named by
+Four rows of STRONG_WINDOW_SHAPES (escalation/settings.py), named by
 escalation.strong_window
-(Toshio et al. 2510.25222). ContextWindow reads the escalated window's
+(Toshio et al. 2510.25222). Two read every face raw and two pin a face
+on a neighbour's committed correction, which is Bombin et al.
+2303.04846's input adaptation (lines 775-788): NearSeamWindow is the
+context row's commit region with its past face pinned, and
+ForwardSeamWindow is the forward row's extent with both faces pinned. A
+fifth shape, both faces pinned and absorbing nothing, is not a row: it
+waits for the window after it, which waits for its own strong result,
+and the serial sliding chain deadlocks (design audit note 21).
+ContextWindow reads the escalated window's
 commit region with one buffer of raw context on each side, built the
 moment it is asked for; that geometry is decsim's own, not the paper's
 (see ContextWindow). ForwardWindow is Sec. III C and Fig. 12: a strong window
@@ -249,7 +257,8 @@ class NearSeamWindow:
         """The near-pinned job, built now or held for its own rounds."""
         key = (weak_job.operation_id, weak_job.window_id)
         region = self.collaborators.regions.near_seam_region(key)
-        folded_boundaries = _declared_faces(region.pinned_source_key)
+        pinned_source_key = self.collaborators.regions.near_seam_source(key)
+        folded_boundaries = _declared_faces(pinned_source_key)
         held = _held_redo(
             self.collaborators,
             weak_job,
@@ -287,6 +296,7 @@ class ForwardWindow:
     """
 
     absorbs_weak_windows = True
+    pins_the_far_face = False
 
     def __init__(self, collaborators: StrongWindowCollaborators) -> None:
         self.collaborators = collaborators
@@ -311,7 +321,8 @@ class ForwardWindow:
             window_records.DecoderTier.STRONG,
         )
         strong_request_created_ticks = self.collaborators.engine.now
-        resolved_region = self.collaborators.regions.forward_region(key)
+        resolved_region = self._resolved_region(key)
+        folded_boundaries = self._declared_faces(key, resolved_region)
         plan = resolved_region.plan
         restart_key = resolved_region.restart_window_key
         strong_window = resolved_region.strong_window
@@ -336,6 +347,7 @@ class ForwardWindow:
             operation=operation,
             strong_request_key=strong_request_key,
             strong_request_created_ticks=strong_request_created_ticks,
+            folded_boundaries=folded_boundaries,
         )
         try:
             self.collaborators.ledger.replace_contributions(
@@ -362,7 +374,7 @@ class ForwardWindow:
                 None,
                 held_plan=held,
                 round_count=strong_window.round_count,
-                folded_boundaries=FOLDS_NO_BOUNDARY,
+                folded_boundaries=folded_boundaries,
             )
         finally:
             if guard is not None:
@@ -410,6 +422,25 @@ class ForwardWindow:
             if stored_through < held.resolved_region.plan.context_hi:
                 return None
         return self._build_strong_job(held)
+
+    # ---- the two facts a row of this geometry declares
+
+    def _resolved_region(self, key: tuple) -> strong_regions.ForwardRegion:
+        """The extent, read with one buffer of raw context per face."""
+        return self.collaborators.regions.forward_region(key)
+
+    def _declared_faces(
+        self, key: tuple, resolved_region: strong_regions.ForwardRegion
+    ) -> tuple:
+        """Which neighbours' boundaries the row folds in: none here.
+
+        Both faces are read raw, and a mask on a raw-read face would
+        double count the rounds behind it (Bombin et al. 2303.04846
+        lines 775-788).
+        """
+        del key
+        del resolved_region
+        return FOLDS_NO_BOUNDARY
 
     # ---- private: the plan
 
@@ -549,7 +580,7 @@ class ForwardWindow:
             held.strong_model,
             held.operation,
             held.strong_request_key,
-            FOLDS_NO_BOUNDARY,
+            held.folded_boundaries,
         )
         plan = held.resolved_region.plan
         self.collaborators.retention.require_rounds_retained(
@@ -576,6 +607,77 @@ class ForwardWindow:
         )
         self.collaborators.retention.hold_strong_input(job)
         return job
+
+
+class ForwardSeamWindow(ForwardWindow):
+    """Sec. III C, Fig. 12 read as the paper states it: both faces pinned.
+
+    The extent is the forward row's, r_strong = r_com + 2 r_buf rounds
+    from the escalated window's commit start (Toshio et al. 2510.25222
+    line 1250), and it is read with no context at all: "the strong
+    decoder processes all the assigned data at once, after the boundary
+    conditions at both ends have been determined by the weak decoder"
+    (lines 1248-1250), and a determined boundary condition needs no
+    buffer behind it (Bombin et al. 2303.04846 lines 1456-1458). At
+    r_com = r_buf = d the row reads 3d rounds where the shipped forward
+    row reads 5d. Tan et al. 2209.09219 lines 1026-1029 call a window
+    closed at both ends a type-2 window, "the entire window is the core
+    region".
+
+    The near face is pinned on the window before the escalated one, the
+    far face on the restart window's weak commit, which is exactly the
+    boundary the shipped forward row already waits for, so the wait does
+    not change and the circular wait that a non-absorbing both-faces row
+    runs into (design audit note 21) does not arise: this row absorbs the
+    windows it covers, the weak chain keeps committing, and the restart
+    window commits the rounds past the strong region.
+
+    A strong window at the end of the operation has no later window, so
+    it has no far pin: its future face is closed by the readout and it
+    waits for the terminal data, which is what Tan says of the last
+    window (2209.09219 lines 953-955, "both time boundaries of the last
+    windows are closed").
+
+    A near face that no committed correction closes is read instead of
+    pinned, with one buffer region of raw context (Bombin lines
+    850-852). That is the window that restarts the weak chain after an
+    earlier strong region: the absorption takes its dependency out of
+    the chain, so nothing hands it the rounds before its own, and its
+    own weak decode reads that face open too.
+
+    The row needs escalation.restart_reread_buffer_regions 0, the
+    paper's value: with a re-read the restart window shares rounds with
+    the strong region, and pinning the far face on a correction that
+    explains rounds inside the region is the double count Bombin's
+    input adaptation rules out. The escalation section refuses the
+    pairing at load.
+    """
+
+    pins_the_far_face = True
+
+    def _resolved_region(self, key: tuple) -> strong_regions.ForwardRegion:
+        """The extent, read with no context on the faces it pins."""
+        near_source_key = self.collaborators.regions.near_seam_source(key)
+        pins_near_face = near_source_key is not None
+        return self.collaborators.regions.forward_seam_region(
+            key, pins_near_face=pins_near_face
+        )
+
+    def _declared_faces(
+        self, key: tuple, resolved_region: strong_regions.ForwardRegion
+    ) -> tuple:
+        """The window before the extent, and the window that restarts after it.
+
+        The restart window's weak commit is the far boundary (Toshio et
+        al. 2510.25222 lines 1253-1259); a terminal region has no
+        restart window and no far pin.
+        """
+        near_source_key = self.collaborators.regions.near_seam_source(key)
+        faces = _declared_faces(near_source_key)
+        restart_key = resolved_region.restart_window_key
+        if restart_key is None:
+            return faces
+        return faces + (restart_key,)
 
 
 # both shipped rows read raw rounds on both faces and fold no committed
@@ -752,6 +854,7 @@ class _HeldForwardWindow:
     operation: program_records.Operation
     strong_request_key: window_records.DecoderRequestKey
     strong_request_created_ticks: int
+    folded_boundaries: tuple
 
 
 def strong_job_payloads(

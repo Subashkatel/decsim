@@ -12,7 +12,7 @@ waits for the window after it, which waits for its own strong result,
 and the serial sliding chain deadlocks (design audit note 21). What
 would make it a row is a windowing scheme whose windows do not commit in
 one serial chain, the shape Skoric et al. 2209.08552 decode block by
-block (lines 265-269, 1038-1040); the row would read that off a fact the
+block (lines 398-401, 1038-1040); the row would read that off a fact the
 scheme declares, the way it reads absorption off itself, and refuse a
 scheme that does not declare it.
 ContextWindow reads the escalated window's

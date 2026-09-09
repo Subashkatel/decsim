@@ -1,9 +1,12 @@
 """The pool's offer: a free unit with room first, else least work left.
 
-Harchol-Balter, Performance Modeling and Design of Computer Systems
-(2013), Ch. 24: with known deterministic work, dispatching each job to
-the server with the least work left starts it when a central FIFO queue
-would (rowD2, compare_overlap_laws.py, law_lwl_pool).
+The law: with known deterministic work, dispatching each job to the
+server with the least work left starts it at the tick a central FIFO
+queue over the pool would. Checked against
+validation/component_matrix/rowD2_access_execute/compare_overlap_laws.py
+law_lwl_pool (rowD2). The textbook treatment is Harchol-Balter,
+Performance Modeling and Design of Computer Systems, Cambridge 2013,
+not on disk under the sandbox, so no chapter is claimed.
 """
 
 import pytest

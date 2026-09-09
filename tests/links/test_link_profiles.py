@@ -1,12 +1,15 @@
 """The number cards carry their sources' numbers.
 
-Sources: Khalid et al. Table II for the reference latencies; Caune et al.
+Sources: Khalid et al. 2511.10633 Table I for the reference latencies;
+Caune et al.
 2410.05202 (a 32-bit bus word) and Fruitwala et al. 2404.15260 (a 128-bit
 instruction word) for the default payloads; the provisioning rule of the
 bandwidth card (each path carries its nominal traffic in one commit
 region, ns-3's per-device DataRate); gem5-Aladdin's setup cost (Shao et
 al., MICRO 2016) for with_transfer_overhead.
 """
+
+import re
 
 import pytest
 
@@ -329,3 +332,82 @@ def test_the_bandwidth_row_says_what_it_needs_instead_of_a_yaml(tmp_path):
     config_path = yaml_configs.write_config(tmp_path, {"links": links})
     with pytest.raises(ValueError, match="provisions every channel"):
         experiment.load_experiment(config_path)
+
+
+# an arXiv identifier as the cards write it: four digits, a dot, four or
+# five digits
+ARXIV = re.compile(r"\b\d{4}\.\d{4,5}\b")
+
+
+def sources_of(profile):
+    """The configuration source of each path's channel, by path name."""
+    sources = {}
+    for path in transfer_records.LinkPath:
+        path_settings = profile.path_settings(path)
+        sources[path.value] = path_settings.channel.configuration_source
+    return sources
+
+
+def _cites_a_paper(source: str) -> bool:
+    """Whether one source carries an arXiv identifier."""
+    found = ARXIV.search(source)
+    return found is not None
+
+
+def _declares_a_choice(source: str) -> bool:
+    """Whether one source says the number is decsim's own."""
+    return "repository" in source
+
+
+def _named_where(sources: dict, holds) -> list:
+    """The path names whose source satisfies a predicate, in order."""
+    names = []
+    carded = sources.items()
+    items = sorted(carded)
+    for name, source in items:
+        if holds(source):
+            names.append(name)
+    return names
+
+
+def test_every_reference_latency_cites_a_paper_or_says_it_is_a_choice():
+    """A number on the card carries where it came from.
+
+    Ten of the eleven latencies are card facts read off a published
+    table, so each names its arXiv identifier; the weak-to-strong
+    selection hop has no referent on disk and says so instead of
+    borrowing the authority of one.
+    """
+    profile = link_profiles.logical_reference_profile()
+    sources = sources_of(profile)
+    cited = _named_where(sources, _cites_a_paper)
+    declared = _named_where(sources, _declares_a_choice)
+    assert declared == ["weak_decoder_to_strong_decoder"]
+    assert len(cited) == 10
+
+
+KHALID_TABLE = "Khalid 2511.10633 Table I "
+
+
+def _khalid_symbol(source: str) -> str:
+    """The Table I row symbol one source reads, or an empty string."""
+    if not source.startswith(KHALID_TABLE):
+        return ""
+    rest = source[len(KHALID_TABLE) :]
+    words = rest.split()
+    return words[0].rstrip(",")
+
+
+def test_the_khalid_latencies_name_the_table_row_they_are_read_from():
+    """Five hops take a Khalid Table I row; each names the row's symbol."""
+    profile = link_profiles.logical_reference_profile()
+    sources = sources_of(profile)
+    symbols = {}
+    for name, source in sources.items():
+        symbols[name] = _khalid_symbol(source)
+    assert symbols["qpu_to_controller"] == "tqc"
+    assert symbols["weak_buffer_to_weak_decoder"] == "tcd"
+    assert symbols["strong_buffer_to_strong_decoder"] == "tcd"
+    assert symbols["weak_decoder_to_frame"] == "tdo"
+    assert symbols["strong_decoder_to_frame"] == "tdo"
+    assert symbols["decoder_to_decoder"] == "tdd"

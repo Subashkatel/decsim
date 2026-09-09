@@ -1,7 +1,8 @@
 """decsim's per-window fault ownership beside qLDPC's, fault by fault.
 
 This is the projection the 2026-08-22 window validation harness was
-built around (tmp/reference-decoders/harness/references.py: "A fault is
+built around (archive/2026-09-09-window-harness/harness/references.py,
+in the sandbox: "A fault is
 identified everywhere by its signature (frozenset of detectors,
 frozenset of observables), never by column index"). Two implementations
 number their columns differently, so a column index proves nothing; the

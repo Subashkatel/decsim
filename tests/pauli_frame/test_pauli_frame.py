@@ -241,3 +241,45 @@ def test_a_frame_kind_off_the_table_is_refused_naming_the_rows(tmp_path):
     config_path = yaml_configs.write_config(tmp_path, {"pauli_frame": section})
     with pytest.raises(ValueError, match="pauli_frame.kind 'not_a_row' is not"):
         experiment.load_experiment(config_path)
+
+
+def test_two_windows_writes_are_charged_in_parallel_and_never_queued():
+    """C7 finding 8: the frame's parallel-write rule, never pinned.
+
+    A write is one XOR into a register, one clock cycle of the frame unit
+    (Yang et al. 2605.04892 Fig. 1 measures 4 ns inside a 550 ns loop,
+    one cycle at 250 MHz). Two windows are two registers, so the second
+    write does not wait behind the first: each caller continues one write
+    cost after its own correction arrived, not two after the first.
+    """
+    engine, frame = frame_with_commit_ticks(4)
+    continued_at = []
+
+    def note():
+        continued_at.append(engine.now)
+
+    def commit_both():
+        commit(frame, ("stream", 0), (1,), on_committed=note)
+        commit(frame, ("stream", 1), (1,), on_committed=note)
+
+    engine.schedule(10, commit_both)
+    engine.run()
+
+    assert continued_at == [14, 14]
+
+
+def test_every_write_is_stamped_with_its_own_arrival_and_its_own_end():
+    """A queue would show the second write starting where the first ended."""
+    engine, frame = frame_with_commit_ticks(4)
+
+    def commit_both():
+        commit(frame, ("stream", 0), (1,))
+        commit(frame, ("stream", 1), (1,))
+
+    engine.schedule(10, commit_both)
+    engine.run()
+    snapshot = frame.snapshot()
+    first, second = snapshot.records
+
+    assert (first.accepted_ticks, first.committed_ticks) == (10, 14)
+    assert (second.accepted_ticks, second.committed_ticks) == (10, 14)

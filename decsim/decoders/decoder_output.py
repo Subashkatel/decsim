@@ -1,8 +1,10 @@
 """The decoder side's outgoing sends: the frame, the strong tier, a peer.
 
 Whoever executes a send is an end of that hop. OMNeT++ enforces the same
-rule at runtime, that a module may only send messages it owns
-(`cSimpleModule.cc:334`), and gem5 bills a transfer to the ports it
+rule at runtime, that a module may only send a message it owns:
+cSimpleModule::send refuses one whose owner is another module
+(`tmp/resources/omnetpp/src/sim/csimplemodule.cc:333-334`, omnetpp-6.1.0,
+the diagnostic at 506-508). And gem5 bills a transfer to the ports it
 crossed and never to a proxy that arranged it: the crossbar counts a
 packet against the CPU-side and memory-side port ids it went between,
 and only once it was successfully sent (`coherent_xbar.cc:354-357`,

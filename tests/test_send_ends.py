@@ -1,8 +1,9 @@
 """Every send is executed at an end of the hop it rides.
 
 OMNeT++ enforces this at runtime, refusing a module that sends a message
-it does not own (cSimpleModule.cc:334-335), and gem5 bills a transfer to
-the port it left by rather than to whoever arranged it (packet.hh:426-428).
+it does not own (tmp/resources/omnetpp/src/sim/csimplemodule.cc:333-334,
+omnetpp-6.1.0), and gem5 bills a transfer to the port it left by rather
+than to whoever arranged it (packet.hh:424-431).
 decsim has no runtime check for it, so the rule is read out of the tree:
 a component module that names a LinkPath must be one of that path's two
 ends.

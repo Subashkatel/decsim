@@ -1,7 +1,8 @@
 """The decoder side's outgoing sends: which link, how many bits, who commits.
 
-A send is executed by an end of its hop (OMNeT++ cSimpleModule.cc:334;
-gem5 coherent_xbar.hh:210-231 bills the port a packet left by), so the
+A send is executed by an end of its hop
+(tmp/resources/omnetpp/src/sim/csimplemodule.cc:333-334, omnetpp-6.1.0;
+gem5 coherent_xbar.cc:354-357 bills the port a packet left by), so the
 correction that leaves a decoder for the Pauli frame leaves by the tier's
 own output link, and the frame's priced write gates the commit.
 """

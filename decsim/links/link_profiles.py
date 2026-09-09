@@ -428,15 +428,15 @@ def from_yaml(
         if card is None:
             continue
         path_settings = getattr(profile, path_name)
-        replacements[path_name] = _carded_path(
-            path_name, path_settings, card, clocks, source
+        carded = _carded_path(path_name, path_settings, card, clocks, source)
+        replacements[path_name] = dataclasses.replace(
+            carded, excludes_receiver_processing=True
         )
     return dataclasses.replace(
         profile,
         **replacements,
         kind=kind,
         profile_name=f"{name}.yaml",
-        is_controller_processing_outside_qpu_to_controller=True,
     )
 
 

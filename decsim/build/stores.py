@@ -106,13 +106,17 @@ def build_pauli_frame(
 def check_readout_cost_is_priced(
     settings: machine_settings.MachineSettings,
 ) -> None:
-    """A readout cost on the controller needs a card that leaves it out."""
+    """A readout cost on the controller needs a card that leaves it out.
+
+    The claim belongs to the one card it is about: a yaml that leaves
+    qpu_to_controller null keeps the reference number, which already
+    covers the controller turning the readout into bits, so a second
+    charge for that work would count it twice.
+    """
     readout_ticks = settings.controller.readout_to_bits_ticks()
-    links = settings.links
-    if readout_ticks > 0 and not (
-        links.is_controller_processing_outside_qpu_to_controller
-    ):
+    readout_hop = settings.links.qpu_to_controller
+    if readout_ticks > 0 and not readout_hop.excludes_receiver_processing:
         raise ValueError(
-            "a separate controller readout cost requires a link profile "
-            "whose QC latency excludes that cost"
+            "a separate controller readout cost requires a "
+            "qpu_to_controller card whose latency excludes that cost"
         )

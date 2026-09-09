@@ -477,15 +477,23 @@ class EscalationPolicy(Protocol):
 class ThresholdSource(Protocol):
     """Where the switching policy's threshold comes from.
 
-    Table rows: fixed, online (decsim/escalation/threshold_sources.py);
-    the yaml's table source is resolved to fixed per sweep point by the
-    front. A source that audits by escalating (the online row labels a
-    kept window by re-decoding it on the strong tier) needs one serial
-    strong re-decode per window, so Switching refuses it beside
-    run_both_at_once and the forward strong window.
+    Table rows: fixed, table, online (THRESHOLD_SOURCES,
+    escalation/settings.py). A source that audits by escalating (the
+    online row labels a kept window by re-decoding it on the strong
+    tier) needs one serial strong re-decode per window, so Switching
+    refuses it beside run_both_at_once and the forward strong window.
+    reads_a_calibration_table says the point's number comes from
+    calibrate_threshold.py's csv rather than from the section's card, so
+    the settings demand threshold_table. built_per_sweep_point says the
+    front builds this row once for a whole sweep point and hands it to
+    every shot, because the row learns across the point's windows; every
+    other row is built by the root from the point's threshold in nats,
+    which is its one constructor argument.
     """
 
     audits_by_escalating: bool
+    reads_a_calibration_table: bool
+    built_per_sweep_point: bool
 
     def decide_keep(
         self,

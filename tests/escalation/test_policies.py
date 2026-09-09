@@ -15,6 +15,7 @@ import math
 import pytest
 import stim
 
+import decsim.build.escalation as escalation_build
 import decsim.controller.policies as boundary_policies
 import decsim.decoders.decoders as decoders
 import decsim.decoders.settings as decoder_settings
@@ -421,7 +422,14 @@ class _ConfidentEscalation(policies.EscalationPolicyBase):
 
 def _confident_config(tmp_path):
     """A yaml naming the fourth row, with no router, boundary or scheme."""
-    escalation = {"kind": "confident", "gap_threshold_db": 20.0}
+    return _switching_config(tmp_path, kind="confident")
+
+
+def _switching_config(tmp_path, *, kind="switching", threshold_source=None):
+    """A yaml with no router, no boundary policy and no windowing scheme."""
+    escalation = {"kind": kind, "gap_threshold_db": 20.0}
+    if threshold_source is not None:
+        escalation["threshold_source"] = threshold_source
     weak_decoder = {
         "weak_decoder": {
             "kind": "pymatching",
@@ -490,6 +498,56 @@ def test_a_fourth_escalation_row_gets_the_boundaries_router_and_join(
     assert machine.window_manager.planner.scheme.has_trailing_tail_context
     result = machine.run()
     assert result.terminal_status == "complete"
+
+
+class _KeepEverything:
+    """A threshold source written outside decsim: the port, and no more.
+
+    Its one constructor argument is the sweep point's threshold in nats,
+    which is what the root gives every row of the table.
+    """
+
+    audits_by_escalating = False
+    reads_a_calibration_table = False
+    built_per_sweep_point = False
+
+    def __init__(self, threshold_nats: float) -> None:
+        self.threshold_nats = threshold_nats
+
+    def decide_keep(self, job, result) -> bool:
+        """Every weak result is confident enough."""
+        del job
+        del result
+        return True
+
+    def learn_from_strong_result(self, window_key, result) -> None:
+        """This source learns nothing."""
+        del window_key
+        del result
+
+
+def test_a_threshold_source_written_outside_decsim_runs_from_a_yaml(
+    monkeypatch, tmp_path
+):
+    """One THRESHOLD_SOURCES row and one yaml name, nothing else."""
+    monkeypatch.setitem(
+        escalation_settings.THRESHOLD_SOURCES,
+        "keep_everything",
+        _KeepEverything,
+    )
+    config_path = _switching_config(
+        tmp_path, threshold_source="keep_everything"
+    )
+    config = experiment.load_experiment(config_path)
+    settings = config.point_settings(
+        physical_error_probability=0.008, distance=3, round_period_us=1.0
+    )
+    policy = escalation_build.build_escalation_policy(settings.escalation)
+    assert isinstance(policy.threshold, _KeepEverything)
+    machine = machine_module.Machine.build(settings, 0)
+    result = machine.run()
+    assert result.terminal_status == "complete"
+    assert machine.decoder_manager.strong_requests.counts.needed == 0
 
 
 class _Draws:

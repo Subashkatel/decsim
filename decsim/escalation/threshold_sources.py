@@ -25,6 +25,8 @@ class FixedThreshold:
     """The paper's constant g_th: keep at gap >= threshold, escalate below."""
 
     audits_by_escalating = False
+    reads_a_calibration_table = False
+    built_per_sweep_point = False
 
     def __init__(self, threshold_nats: float) -> None:
         self.threshold_nats = threshold_nats
@@ -44,6 +46,21 @@ class FixedThreshold:
         """A fixed threshold learns nothing."""
         del window_key
         del result
+
+
+class TableThreshold(FixedThreshold):
+    """The calibration table's g_th for this sweep point.
+
+    calibrate_threshold.py writes one row per (distance, p) of
+    calibration_table.csv with the threshold in decibels; the front
+    looks the point up and converts it before the machine is built
+    (EscalationSettings.threshold_nats_for), so at run time this row
+    decides on a constant exactly as FixedThreshold does. What it
+    declares that the fixed row does not is where its number came from,
+    which is what the settings need to know to demand the csv.
+    """
+
+    reads_a_calibration_table = True
 
 
 class EscalationRateTracker:
@@ -233,6 +250,8 @@ class OnlineThreshold:
     """
 
     audits_by_escalating = True
+    reads_a_calibration_table = False
+    built_per_sweep_point = True
 
     def __init__(
         self, controller: OnlineThresholdController, random_generator

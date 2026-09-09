@@ -16,10 +16,12 @@ import statistics
 import pytest
 
 import decsim.config as config
+import decsim.decoders.decode_queue as decode_queue
 import decsim.decoders.decoders as decoders
 import decsim.decoders.schedulers as schedulers
 import decsim.engine as engine_module
 import decsim.observe.queue_depth as queue_depth
+import decsim.records.decoding as decoding_records
 import tests.declared_run as declared_run
 from decsim.decoders.decoder_manager import DecoderManager
 
@@ -252,3 +254,19 @@ def test_the_queued_escalations_are_served_as_one_bulk_strong_decode():
         ((4, 0), "strong"),
         ((4, 1), "strong"),
     ]
+
+
+def test_every_job_kind_names_the_pool_it_asks_for():
+    """The pool table is read at every enqueue, so it is closed at import.
+
+    A kind that named no pool would raise a KeyError inside the first
+    enqueue of a run that has it, which is a long way from the table
+    that is missing the row.
+    """
+    kinds = set(decoding_records.DecodeJobKind)
+    named = set(decode_queue.POOL_BY_JOB_KIND)
+    assert named == kinds
+    asked = decode_queue.POOL_BY_JOB_KIND.values()
+    pools = set(asked)
+    known = {decode_queue.DEFAULT_POOL, decode_queue.STRONG_POOL}
+    assert pools <= known

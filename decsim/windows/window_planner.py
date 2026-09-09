@@ -17,6 +17,7 @@ import dataclasses
 import types
 from typing import Optional
 
+import decsim.ports as ports
 import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.trace_source as trace_source
@@ -32,7 +33,7 @@ class WindowModels:
 
     def __init__(
         self,
-        error_model_provider,
+        error_model_provider: Optional[ports.WindowModelSource],
         fault_model_requirement_for,
         built_models: built_window_models.BuiltWindowModels,
     ) -> None:

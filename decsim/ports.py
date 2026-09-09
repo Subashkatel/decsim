@@ -21,6 +21,7 @@ traffic ledger, the trace) reaches a component through callbacks it
 fires, never through a port, so every component runs with no observer.
 """
 
+from collections.abc import Sequence
 from typing import Any, Callable, Optional, Protocol, runtime_checkable
 
 import decsim.records.decoding as decoding_records
@@ -721,8 +722,8 @@ class SyndromeSource(Protocol):
 
     Table rows: stim_device, timing_only, syndrome_bits, recorded_stim.
     Payload bits are raw measurement bits per round; a source with a
-    detector formation table also offers form_round, which syndrome
-    packing calls once per complete round.
+    detector formation table also answers DetectionEventFormer below,
+    the port the machine forms a round's detection events through.
 
     shot_sampled(operation, detection_events) is the port's shot source:
     a row that draws a whole shot fires it once per fresh shot, and a row
@@ -764,6 +765,28 @@ class SyndromeSource(Protocol):
         self, operation_id: Any
     ) -> Optional[tuple[int, ...]]:
         """The observable flips the source drew, or None when it draws none."""
+
+
+@runtime_checkable
+class DetectionEventFormer(Protocol):
+    """Who turns one round's measurement outcomes into its detection events.
+
+    Rows: the run's syndrome source, whose circuit the recipes are read
+    off (decsim/detector_error_model/detector_formation.py), and the
+    memoising former the decoder side reads through
+    (decsim/detector_error_model/detection_event_formation.py). Where the
+    machine calls it is controller.detection_events_formed_at: the
+    controller's assembler before the round leaves, or the tier that
+    reads the round. A former is called once per round, in round order,
+    because a detector compares this round's outcomes against the round
+    before it (LILLIPUT 2108.06569 lines 499-510) and the formation table
+    keeps only the packets its recipes still read.
+    """
+
+    def form_round(
+        self, operation_id: Any, round_index: int, raw_bits: Sequence[int]
+    ) -> tuple[int, ...]:
+        """The round's detection events, in detector order."""
 
 
 @runtime_checkable

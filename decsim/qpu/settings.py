@@ -121,9 +121,10 @@ class FactorySettings:
     always in stock), distillation (Litinski's 15-to-1 stage,
     1905.06903),
     multi_level (Silva's chain of levels, 2411.04270). The arguments are
-    the row's keyword arguments, everything but the engine, the decode
-    service and the round ticks the root supplies
-    (magic_state_factories.py names them). No yaml key today.
+    the row's own card keys; they ride to the row inside the one
+    FactoryCollaborators record, beside the engine, the decode service
+    and the round ticks the root supplies (magic_state_factories.py).
+    No yaml key today.
     """
 
     kind: str = "infinite"

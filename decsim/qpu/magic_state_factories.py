@@ -30,7 +30,8 @@ import collections
 import dataclasses
 import functools
 import math
-from typing import Callable, Optional, Protocol
+from collections.abc import Mapping
+from typing import Any, Callable, Optional, Protocol
 
 import decsim.config as config
 import decsim.engine
@@ -65,11 +66,31 @@ class Ticket:
         return self.factory.cancel(self)
 
 
+@dataclasses.dataclass(frozen=True)
+class FactoryCollaborators:
+    """What the root supplies every magic state factory row.
+
+    One record so every row of MAGIC_STATE_FACTORIES has one constructor
+    signature and the root builds a row without asking which supply
+    model it is; a row reads the collaborators its own model needs,
+    ignores the rest, and reads its own card out of arguments, which are
+    the magic_state_factory section's keys. This is gem5's params
+    object, where a SimObject's collaborators arrive as one structure
+    rather than as a signature per subclass
+    (tmp/resources/gem5/src/python/m5/SimObject.py:204-205).
+    """
+
+    engine: decsim.engine.Engine
+    decode_service: Optional[ports.DecodeQueue]
+    round_ticks: int
+    arguments: Mapping[str, Any] = dataclasses.field(default_factory=dict)
+
+
 class InfiniteFactory:
     """The idealized factory: a magic state is always in stock."""
 
-    def __init__(self, engine: decsim.engine.Engine):
-        self.engine = engine
+    def __init__(self, collaborators: FactoryCollaborators):
+        self.engine = collaborators.engine
 
     def request(
         self, operation_id: int, callback: Callable[[], None]
@@ -97,41 +118,10 @@ class DistillationFactory(seeding._RandomSeedConsumer):
     that carry no trace.
     """
 
-    def __init__(
-        self,
-        engine: decsim.engine.Engine,
-        unit_count: int,
-        attempt_ticks: int,
-        decode_service: ports.DecodeQueue,
-        correction_round_count: int,
-        correction_decode_count: int = 11,
-        return_ticks: int = 0,
-        success_probability: float = 1.0,
-        seed: Optional[int] = None,
-        initial_store: int = 0,
-        production_mode: str = "demand",
-        buffer_capacity: Optional[int] = None,
-    ):
-        self.engine = engine
-        self.decode_service = decode_service
-        checked_probability = _checked_probability(
-            "success_probability", success_probability
-        )
-        self.card = _DistillationCard(
-            unit_count=unit_count,
-            attempt_ticks=attempt_ticks,
-            correction_round_count=correction_round_count,
-            correction_decode_count=correction_decode_count,
-            return_ticks=return_ticks,
-            success_probability=checked_probability,
-            production_mode=production_mode,
-            buffer_capacity=buffer_capacity,
-        )
-        self._check_settings(initial_store)
-        self._initialize_run_seed_state(seed)
-        self._reset_state(initial_store)
-        if production_mode == "continuous":
-            self.engine.schedule(0, self._start_attempts, label="factory_start")
+    def __init__(self, collaborators: FactoryCollaborators):
+        self.engine = collaborators.engine
+        self.decode_service = collaborators.decode_service
+        self._read_card(**collaborators.arguments)
 
     def request(
         self, operation_id: int, callback: Callable[[], None]
@@ -173,6 +163,39 @@ class DistillationFactory(seeding._RandomSeedConsumer):
                 "n": totals.delivered_count,
             }
         return snapshot
+
+    def _read_card(
+        self,
+        unit_count: int,
+        attempt_ticks: int,
+        correction_round_count: int,
+        correction_decode_count: int = 11,
+        return_ticks: int = 0,
+        success_probability: float = 1.0,
+        seed: Optional[int] = None,
+        initial_store: int = 0,
+        production_mode: str = "demand",
+        buffer_capacity: Optional[int] = None,
+    ) -> None:
+        """This row's own magic_state_factory keys, with their defaults."""
+        checked_probability = _checked_probability(
+            "success_probability", success_probability
+        )
+        self.card = _DistillationCard(
+            unit_count=unit_count,
+            attempt_ticks=attempt_ticks,
+            correction_round_count=correction_round_count,
+            correction_decode_count=correction_decode_count,
+            return_ticks=return_ticks,
+            success_probability=checked_probability,
+            production_mode=production_mode,
+            buffer_capacity=buffer_capacity,
+        )
+        self._check_settings(initial_store)
+        self._initialize_run_seed_state(seed)
+        self._reset_state(initial_store)
+        if production_mode == "continuous":
+            self.engine.schedule(0, self._start_attempts, label="factory_start")
 
     def _check_settings(self, initial_store: int) -> None:
         _check_production_mode(
@@ -381,49 +404,10 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
     chain; continuous mode also keeps buffer_capacity states at the top.
     """
 
-    def __init__(
-        self,
-        engine: decsim.engine.Engine,
-        levels: list[DistillLevel],
-        *,
-        round_ticks: int,
-        inputs_per_round: int = 15,
-        outputs_per_round: int = 1,
-        preparation_unit_count: int = 1,
-        preparation_logical_cycles: int = 2,
-        preparation_distance: int = 3,
-        preparation_success_probability: float = 1.0,
-        decode_service: Optional[ports.DecodeQueue] = None,
-        correction_round_count: int = 0,
-        correction_decode_count: int = 0,
-        seed: Optional[int] = None,
-        production_mode: str = "demand",
-        buffer_capacity: Optional[int] = None,
-    ):
-        self.engine = engine
-        self.decode_service = decode_service
-        self.levels = _checked_levels(levels)
-        checked_ticks = _checked_preparation_ticks(
-            preparation_logical_cycles, preparation_distance, round_ticks
-        )
-        checked_probability = _checked_probability(
-            "preparation_success_probability", preparation_success_probability
-        )
-        self.card = _MultiLevelCard(
-            inputs_per_round=inputs_per_round,
-            outputs_per_round=outputs_per_round,
-            preparation_unit_count=preparation_unit_count,
-            preparation_ticks=checked_ticks,
-            preparation_success_probability=checked_probability,
-            correction_round_count=correction_round_count,
-            correction_decode_count=correction_decode_count,
-            production_mode=production_mode,
-            buffer_capacity=buffer_capacity,
-        )
-        self._check_settings()
-        self._initialize_run_seed_state(seed)
-        self._reset_state(round_ticks)
-        self._schedule_continuous_start()
+    def __init__(self, collaborators: FactoryCollaborators):
+        self.engine = collaborators.engine
+        self.decode_service = collaborators.decode_service
+        self._read_card(collaborators.round_ticks, **collaborators.arguments)
 
     def request(
         self, operation_id: int, callback: Callable[[], None]
@@ -454,6 +438,53 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
     def shutdown(self) -> None:
         """Stop the production loop; the program is complete."""
         self._is_shut_down = True
+
+    def _read_card(
+        self,
+        round_ticks: int,
+        levels: list[DistillLevel],
+        *,
+        inputs_per_round: int = 15,
+        outputs_per_round: int = 1,
+        preparation_unit_count: int = 1,
+        preparation_logical_cycles: int = 2,
+        preparation_distance: int = 3,
+        preparation_success_probability: float = 1.0,
+        correction_round_count: int = 0,
+        correction_decode_count: int = 0,
+        seed: Optional[int] = None,
+        production_mode: str = "demand",
+        buffer_capacity: Optional[int] = None,
+    ) -> None:
+        """This row's own magic_state_factory keys, with their defaults.
+
+        The preparation_logical_cycles of two and preparation_distance of
+        three are project coefficients: Silva et al. 2411.04270 Sec. II B
+        prices a level in logical cycles of its own distance but fixes
+        neither number for the physical injection stage.
+        """
+        self.levels = _checked_levels(levels)
+        checked_ticks = _checked_preparation_ticks(
+            preparation_logical_cycles, preparation_distance, round_ticks
+        )
+        checked_probability = _checked_probability(
+            "preparation_success_probability", preparation_success_probability
+        )
+        self.card = _MultiLevelCard(
+            inputs_per_round=inputs_per_round,
+            outputs_per_round=outputs_per_round,
+            preparation_unit_count=preparation_unit_count,
+            preparation_ticks=checked_ticks,
+            preparation_success_probability=checked_probability,
+            correction_round_count=correction_round_count,
+            correction_decode_count=correction_decode_count,
+            production_mode=production_mode,
+            buffer_capacity=buffer_capacity,
+        )
+        self._check_settings()
+        self._initialize_run_seed_state(seed)
+        self._reset_state(round_ticks)
+        self._schedule_continuous_start()
 
     def _check_settings(self) -> None:
         _check_production_mode(

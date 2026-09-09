@@ -31,12 +31,42 @@ class DecodeLog:
         self.engine.schedule(self.latency_ticks, on_done)
 
 
+def infinite(engine):
+    """The idealized row, built the way the root builds it."""
+    collaborators = magic_state_factories.FactoryCollaborators(
+        engine=engine, decode_service=None, round_ticks=0
+    )
+    return magic_state_factories.InfiniteFactory(collaborators)
+
+
+def distillation(engine, *, decode_service=None, **arguments):
+    """One 15-to-1 row, built the way the root builds it."""
+    collaborators = magic_state_factories.FactoryCollaborators(
+        engine=engine,
+        decode_service=decode_service,
+        round_ticks=0,
+        arguments=arguments,
+    )
+    return magic_state_factories.DistillationFactory(collaborators)
+
+
+def multi_level(engine, *, round_ticks, decode_service=None, **arguments):
+    """One level chain, built the way the root builds it."""
+    collaborators = magic_state_factories.FactoryCollaborators(
+        engine=engine,
+        decode_service=decode_service,
+        round_ticks=round_ticks,
+        arguments=arguments,
+    )
+    return magic_state_factories.MultiLevelDistillationFactory(collaborators)
+
+
 def single_stage(engine, **settings):
-    return magic_state_factories.DistillationFactory(
+    """The plainest 15-to-1 row: one unit, no correction decodes."""
+    return distillation(
         engine,
         unit_count=1,
         attempt_ticks=100,
-        decode_service=None,
         correction_round_count=0,
         correction_decode_count=0,
         **settings,
@@ -44,10 +74,11 @@ def single_stage(engine, **settings):
 
 
 def chain(engine, levels, **settings):
-    return magic_state_factories.MultiLevelDistillationFactory(
+    """The level chain the paper's numbers are read on."""
+    return multi_level(
         engine,
-        levels,
         round_ticks=10,
+        levels=levels,
         preparation_unit_count=15,
         preparation_logical_cycles=1,
         preparation_distance=1,
@@ -57,7 +88,7 @@ def chain(engine, levels, **settings):
 
 def test_the_infinite_factory_delivers_at_once():
     engine = decsim.engine.Engine()
-    factory = magic_state_factories.InfiniteFactory(engine)
+    factory = infinite(engine)
     delivered = []
     factory.request(1, lambda: delivered.append(engine.now))
     assert delivered == [0]
@@ -87,7 +118,7 @@ def test_a_warm_store_delivers_without_a_stall():
 def test_eleven_correction_decodes_run_in_parallel_before_delivery():
     engine = decsim.engine.Engine()
     decoder = DecodeLog(engine, latency_ticks=40)
-    factory = magic_state_factories.DistillationFactory(
+    factory = distillation(
         engine,
         unit_count=1,
         attempt_ticks=100,
@@ -111,7 +142,7 @@ def test_eleven_correction_decodes_run_in_parallel_before_delivery():
 def test_the_return_trip_after_the_decodes_is_the_deliver_stage():
     engine = decsim.engine.Engine()
     decoder = DecodeLog(engine, latency_ticks=40)
-    factory = magic_state_factories.DistillationFactory(
+    factory = distillation(
         engine,
         unit_count=1,
         attempt_ticks=100,
@@ -131,7 +162,7 @@ def test_the_return_trip_after_the_decodes_is_the_deliver_stage():
 def test_a_delivered_state_carries_the_tick_of_every_stage():
     engine = decsim.engine.Engine()
     decoder = DecodeLog(engine, latency_ticks=40)
-    factory = magic_state_factories.DistillationFactory(
+    factory = distillation(
         engine,
         unit_count=1,
         attempt_ticks=100,
@@ -156,7 +187,7 @@ def test_a_delivered_state_carries_the_tick_of_every_stage():
 
 def test_two_units_hold_two_states_in_flight_at_the_peak():
     engine = decsim.engine.Engine()
-    factory = magic_state_factories.DistillationFactory(
+    factory = distillation(
         engine,
         unit_count=2,
         attempt_ticks=100,
@@ -260,7 +291,7 @@ def test_the_single_stage_log_names_the_request_the_ready_state_and_delivery():
     engine = decsim.engine.Engine()
     log = log_writers.LogWriter()
     engine.line.connect(log.write)
-    factory = magic_state_factories.DistillationFactory(
+    factory = distillation(
         engine,
         unit_count=1,
         attempt_ticks=2_000_000,
@@ -282,7 +313,7 @@ def test_the_single_stage_log_names_the_request_the_ready_state_and_delivery():
 
 def test_continuous_production_keeps_the_buffer_full_ahead_of_demand():
     engine = decsim.engine.Engine()
-    factory = magic_state_factories.DistillationFactory(
+    factory = distillation(
         engine,
         unit_count=2,
         attempt_ticks=100,
@@ -301,7 +332,7 @@ def test_continuous_production_keeps_the_buffer_full_ahead_of_demand():
 
 def test_continuous_production_refills_the_slot_a_delivery_takes():
     engine = decsim.engine.Engine()
-    factory = magic_state_factories.DistillationFactory(
+    factory = distillation(
         engine,
         unit_count=2,
         attempt_ticks=100,
@@ -325,7 +356,7 @@ def test_continuous_production_refills_the_slot_a_delivery_takes():
 
 def test_a_shut_down_factory_launches_no_attempt():
     engine = decsim.engine.Engine()
-    factory = magic_state_factories.DistillationFactory(
+    factory = distillation(
         engine,
         unit_count=2,
         attempt_ticks=100,
@@ -362,8 +393,12 @@ def test_an_unknown_production_mode_is_refused():
 def test_correction_decodes_need_a_decode_service():
     engine = decsim.engine.Engine()
     with pytest.raises(ValueError, match="decode_service is required"):
-        magic_state_factories.DistillationFactory(
-            engine, 1, 1, None, 0, correction_decode_count=11
+        distillation(
+            engine,
+            unit_count=1,
+            attempt_ticks=1,
+            correction_round_count=0,
+            correction_decode_count=11,
         )
 
 
@@ -371,8 +406,13 @@ def test_a_decode_service_without_correction_decodes_is_refused():
     engine = decsim.engine.Engine()
     decoder = DecodeLog(engine, latency_ticks=1)
     with pytest.raises(ValueError, match="decode_service must be None"):
-        magic_state_factories.DistillationFactory(
-            engine, 1, 1, decoder, 0, correction_decode_count=0
+        distillation(
+            engine,
+            decode_service=decoder,
+            unit_count=1,
+            attempt_ticks=1,
+            correction_round_count=0,
+            correction_decode_count=0,
         )
 
 
@@ -380,16 +420,25 @@ def test_a_negative_correction_decode_count_is_refused():
     engine = decsim.engine.Engine()
     decoder = DecodeLog(engine, latency_ticks=1)
     with pytest.raises(ValueError, match="must be nonnegative"):
-        magic_state_factories.DistillationFactory(
-            engine, 1, 1, decoder, 0, correction_decode_count=-1
+        distillation(
+            engine,
+            decode_service=decoder,
+            unit_count=1,
+            attempt_ticks=1,
+            correction_round_count=0,
+            correction_decode_count=-1,
         )
 
 
 def test_a_factory_without_a_unit_is_refused():
     engine = decsim.engine.Engine()
     with pytest.raises(ValueError, match="unit_count must be positive"):
-        magic_state_factories.DistillationFactory(
-            engine, 0, 1, None, 0, correction_decode_count=0
+        distillation(
+            engine,
+            unit_count=0,
+            attempt_ticks=1,
+            correction_round_count=0,
+            correction_decode_count=0,
         )
 
 
@@ -486,9 +535,9 @@ def test_the_chain_log_names_a_failed_round_and_a_distilled_round():
     level = magic_state_factories.DistillLevel(
         unit_count=1, distance=3, success_probability=0.5
     )
-    factory = magic_state_factories.MultiLevelDistillationFactory(
+    factory = multi_level(
         engine,
-        [level],
+        levels=[level],
         round_ticks=10_000,
         preparation_unit_count=15,
         preparation_logical_cycles=1,

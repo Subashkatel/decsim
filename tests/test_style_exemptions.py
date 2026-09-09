@@ -93,3 +93,57 @@ def test_the_checker_reports_no_wide_state_in_the_package():
     package = PACKAGE_ROOT / "decsim"
     wide = _wide_state_findings(checker, package)
     assert wide == []
+
+
+def _reaches_through(reference: str, package: pathlib.Path) -> dict:
+    """Every <reference>.<a>.<b> written outside the facade's own package."""
+    reaches = {}
+    modules = package.rglob("*.py")
+    for path in sorted(modules):
+        if path.parent.name == "windows":
+            continue
+        text = path.read_text()
+        tree = ast.parse(text)
+        _collect_reaches(path, tree, reference, reaches)
+    return reaches
+
+
+def _collect_reaches(path, tree, reference: str, reaches: dict) -> None:
+    """Add one file's two-deep reaches through the reference."""
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Attribute):
+            continue
+        inner = node.value
+        if not isinstance(inner, ast.Attribute):
+            continue
+        if _base_name(inner.value) != reference:
+            continue
+        where = f"{path.parent.name}/{path.name}:{node.lineno}"
+        reaches[f"{inner.attr}.{node.attr}"] = where
+
+
+def _base_name(node) -> str:
+    """The name an attribute is read from, or the empty string."""
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    return ""
+
+
+def test_no_caller_reaches_two_deep_past_the_windows_facade():
+    """The exemption sentence's second half, held to the tree.
+
+    A caller asks the facade for what it wants. The one reach left is a
+    component's own trace group: observation is fired, never ported, so
+    the ports carry no source and an observer names the component that
+    fires it.
+    """
+    package = PACKAGE_ROOT / "decsim"
+    reaches = _reaches_through("window_manager", package)
+    past_the_facade = {}
+    for reach, where in reaches.items():
+        if reach.endswith(".trace"):
+            continue
+        past_the_facade[reach] = where
+    assert past_the_facade == {}

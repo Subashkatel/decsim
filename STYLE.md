@@ -104,8 +104,12 @@ visible here, beside the rule, rather than buried in the checker. The list
 stays short; past eight names the rule is wrong, not the list.
 
 - `WindowManager` (`decsim/windows/window_manager.py`): the windows
-  package's facade, whose collaborators are that package's components,
-  named once here so no caller reaches past it.
+  package's facade over that package's components, plus the escalation
+  package's strong re-decode it wakes and the workload's feedback mode.
+  A caller asks the facade for what it wants (`window_sources`,
+  `copy_sources`, `planned_windows`, `reads_windows_from`) rather than
+  for a component of it; what an observer still reaches for through it
+  is a component's own trace group, which by design no port carries.
 - `FeedbackStreams` (`decsim/controller/feedback_streams.py`): one
   protected cycle, which needs the qpu it releases, the windows it hears
   from, and the three tables the program declares it with.

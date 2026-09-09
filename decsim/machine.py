@@ -188,8 +188,8 @@ class Machine:
         transmitter = round_transmission.RoundTransmitter(
             engine, links, round_store, window_manager
         )
-        publishes_from_strong_store = (
-            window_manager.retention.primary_store is not round_store
+        publishes_from_strong_store = not window_manager.reads_windows_from(
+            round_store
         )
         round_writer = round_writes.RoundWriter(
             engine,

@@ -6,10 +6,17 @@ names the algorithm each job runs (a Decoder row, ports.py): by code, or
 by tier under switching (decoders.py). A job is offered a free unit
 with a free slot first. When every unit computes, a
 job with input to move is staged on the busy unit with room whose
-compute frees earliest: least work left (Harchol-Balter, Performance
-Modeling and Design of Computer Systems, 2013, Ch. 24; with known
-deterministic work, immediate dispatch by least work left starts every
-job when a central FIFO queue over the pool would; rowD2). A job with no
+compute frees earliest: least work left, the task-assignment rule that
+sends each job to the server whose outstanding work ends soonest. When
+the work is known and deterministic, as a declared decode cost is,
+immediate dispatch by least work left starts every job at the tick a
+central FIFO queue over the pool would, so staging costs nothing in
+start time and buys the input move. That equality is checked here, not
+taken on authority: validation/component_matrix/rowD2_access_execute/
+compare_overlap_laws.py runs law_lwl_pool against the pool. The
+textbook treatment is Harchol-Balter, Performance Modeling and Design
+of Computer Systems, Cambridge 2013, which is not on disk under the
+sandbox, so no chapter or page is claimed. A job with no
 input has nothing to prefetch and waits in the queue for free compute.
 """
 

@@ -110,27 +110,50 @@ stays short; past eight names the rule is wrong, not the list.
   `copy_sources`, `planned_windows`, `reads_windows_from`) rather than
   for a component of it; what an observer still reaches for through it
   is a component's own trace group, which by design no port carries.
+  It holds the `engine`, its package's `planner`, `tracker`,
+  `retention`, `requester`, `courier` and `results`, the escalation
+  package's `strong_redecode`, the `window_interaction` that relates
+  adjacent windows, and the workload's `feedback_boundary_mode`.
 - `FeedbackStreams` (`decsim/controller/feedback_streams.py`): one
-  protected cycle, which needs the qpu it releases, the windows it hears
-  from, and the three tables the program declares it with.
+  protected cycle, which needs the `engine`, the `qpu` it releases, the
+  `windows` it hears from, the `table` of the three the program declares
+  it with, its own `live_by_stream_id` and `bindings` indexes, and
+  `retry_ready_operations`, the issuer's callback it wakes when a stream
+  frees a patch.
 - `StrongRedecode` (`decsim/escalation/strong_redecode.py`): one strong
   re-decode of a window, which crosses both send ends, the decode queue
-  and the committer's return path in a single flow.
+  and the committer's return path in a single flow: the `engine`, the
+  `shape` that says which rounds the strong window reads, the
+  `decoder_output` and `strong_output` send ends, the `decode_queue`, the
+  `on_strong_decoded` return path, and its own `selections`, `pending`
+  and `trace`.
 - `DecodeRequester` (`decsim/windows/decode_requests.py`): one request per
-  complete window, which needs the window state, the builder, the queue,
-  the escalation verdict and the store's outgoing port to place it.
+  complete window, which needs the `tracker` and the `retention` that say
+  the window has its rounds, the `builder` that shapes the job, the
+  `decode_queue` it places the job on, the `escalation_policy` and the
+  `verdict` that say which solves to ask for, the primary store's
+  `store_output` that executes the send, and the `gap_join` that is every
+  forced solve's on_decoded.
 - `IdleRoundAccounting` (`decsim/controller/idle_rounds.py`): one idle
-  round routed by the policy, which needs the geometry, the streams and
-  the qpu the round belongs to as well as the queue it charges.
+  round routed by the `policy`, which needs the `geometry_by_patch` that
+  sizes it, the `streams` and the `qpu` the round belongs to, the
+  `decode_queue` it charges, its own `operation_by_id` and
+  `idle_by_patch` indexes, and its `trace`.
 - `RoundWriter` (`decsim/controller/round_writes.py`): one finished round
-  written to its stores or held, with both stores, the hold and the
-  transmitter that publishes the landing.
+  written or held, which needs the `engine` clock, Buffer 0
+  (`weak_store`), the `strong_writer` that owns the strong store's
+  intake, the plan's `publishes_from_strong_store`, the `held_rounds`
+  that retry a round the stores refused, the `transmitter` that publishes
+  the landing, and its `trace`.
 - `OperationResults` (`decsim/windows/operation_results.py`): one final
-  result per operation, which reads the plan, the window state, the
-  retention and the ledger before it releases a conditional operation.
+  result per operation, which reads the `planner`, the `tracker`, the
+  `retention` and the `ledger` before it releases a conditional
+  operation through `conditional_release`, and holds its own
+  `deliveries` and `trace`.
 - `DecodeRequestBuilder` (`decsim/windows/decode_requests.py`): one decode
-  job built from a window, stamped with the input gate and the run-wide
-  request ordinal.
+  job built from a window, stamped with the `gate` and the run-wide
+  `next_request_sequence` ordinal, off the `engine` clock, the `planner`,
+  the `tracker` and the `interaction`, with its own `trace`.
 
 ## Rule 2. Names are full words that say what the thing is
 

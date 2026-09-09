@@ -3,12 +3,12 @@
 The controller's packing stage merges the fragments of a round in
 fragment order, charges the packing time once per complete round, forms
 the detection events with the device's formation table when it has one,
-and hands the finished round on (on_packed). Where the events are
-formed is a setting (controller.detection_events_formed_at, and
-DetectionEventFormation below), and it decides the width Buffer 0 and
-the tier's input link carry. Caune et al. 2410.05202 measure 250 to 370
-FPGA cycles for packetization, bus transfer, result return and the
-conditional together, an upper bound for the packing time. The stage
+and hands the finished round on (on_packed). Forming them is free and
+happens here whatever controller.detection_events_formed_at says; what
+that setting decides is the width Buffer 0 and the tier's input link
+carry (DetectionEventFormation below). Caune et al. 2410.05202 measure
+250 to 370 FPGA cycles for packetization, bus transfer, result return
+and the conditional together, an upper bound for the packing time. The stage
 admits a bounded number of rounds at once
 (controller.packing_rounds_in_flight, RoundsInFlight): a round counts
 from its first fragment until the windows hear of it, whether it is
@@ -33,16 +33,22 @@ class DetectionEventFormation:
 
     form_round is called once per complete round, in round order, and is
     None for a timing-only or synthetic source. at_the_controller is the
-    row controller.detection_events_formed_at names, and it is the width
-    the round carries onward: at the controller the round leaves sized
-    by its detection events, because "inside the workstation,
-    measurements are converted into detections and then streamed to the
-    real-time decoding software via a shared memory buffer" (Google
-    2408.13687 lines 474-476); at the decoder the round keeps its raw
-    measurement width, because the controller writes the outcomes
-    "sequentially to the decoder" and "the decoder computes the syndrome
-    from measurement outcomes" (Caune et al. 2410.05202 lines
+    row controller.detection_events_formed_at names, and what it decides
+    is the width the round carries onward: at the controller the round
+    leaves sized by its detection events, because "inside the
+    workstation, measurements are converted into detections and then
+    streamed to the real-time decoding software via a shared memory
+    buffer" (Google 2408.13687 lines 474-476); at the decoder the round
+    keeps its raw measurement width, because the controller writes the
+    outcomes "sequentially to the decoder" and "the decoder computes the
+    syndrome from measurement outcomes" (Caune et al. 2410.05202 lines
     1252-1256).
+
+    The values themselves are computed here under both rows, because the
+    device's formation table is stateful and reads every round once in
+    round order, and neither row charges any time for forming them. A
+    decoder-side formation unit that forms each round on first demand,
+    with its own cost, is a component this model does not have.
     """
 
     form_round: Optional[Callable]

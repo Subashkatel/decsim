@@ -296,6 +296,32 @@ class SeamFaultOwner(Enum):
     RESTART_WINDOW = auto()
 
 
+# The forward strong region folds one buffer region into the escalated
+# window's commit region on each side, so it commits rcom + 2 rbuf
+# rounds. Toshio et al. 2510.25222 line 1352 parameterises that two as
+# alpha, so a sweep over region width changes this number here and every
+# reader of the geometry moves with it: the interaction row that plans
+# the region, the build refusal that checks it lands on a stride edge,
+# the retention that holds the rounds it would read, and the card that
+# provisions the link carrying it.
+STRONG_REGION_BUFFER_REGIONS = 2
+
+
+def strong_region_round_count(
+    commit_round_count: int, buffer_round_count: int
+) -> int:
+    """How many rounds one forward strong region covers."""
+    buffered = STRONG_REGION_BUFFER_REGIONS * buffer_round_count
+    return commit_round_count + buffered
+
+
+def restart_reread_round_count(
+    reread_buffer_regions: int, buffer_round_count: int
+) -> int:
+    """How many of the strong region's rounds the restart window re-reads."""
+    return reread_buffer_regions * buffer_round_count
+
+
 @dataclass(frozen=True)
 class StrongRegionPlan:
     """Geometry and seam ownership for one deferred strong decode."""

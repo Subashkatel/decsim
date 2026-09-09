@@ -431,7 +431,9 @@ def _hold_restart_reads(
         return
     look_ahead = window.buffer_hi - window.commit_hi
     buffer_rounds = max(0, look_ahead)
-    reread_rounds = restart_reread_buffer_regions * buffer_rounds
+    reread_rounds = window_records.restart_reread_round_count(
+        restart_reread_buffer_regions, buffer_rounds
+    )
     lower_start = window.commit_lo - reread_rounds
     lower = max(1, lower_start)
     round_keys = _read_keys(execution, operation_id, lower, window.buffer_hi)
@@ -465,7 +467,11 @@ def _hold_strong_context(
     buffer_rounds = max(0, look_ahead)
     commit_hi = window.commit_hi
     if absorbs_weak_windows:
-        extended = window.commit_hi + 2 * buffer_rounds
+        commit_round_count = window.commit_hi - window.commit_lo + 1
+        strong_rounds = window_records.strong_region_round_count(
+            commit_round_count, buffer_rounds
+        )
+        extended = window.commit_lo + strong_rounds - 1
         commit_hi = min(round_count, extended)
     context_start = window.commit_lo - buffer_rounds
     lower = max(1, context_start)

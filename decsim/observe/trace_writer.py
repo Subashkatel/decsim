@@ -583,13 +583,21 @@ class TraceWriter:
         self.events.append(row)
 
     def _counter(self, thread: str, name: str, values: dict, tick: int) -> None:
+        """One counter row: its args carry the series and nothing else.
+
+        catapult's importer makes one series per key of a counter's args
+        (trace_event_importer 402-431), so a tick alongside the value
+        would plot as a second series five orders of magnitude larger
+        and flatten the one the reader came for. The tick is in ts,
+        where every other phase carries it.
+        """
         row = {
             "ph": "C",
             "name": name,
             "ts": _microseconds(tick),
             "pid": PROCESS_ID,
             "tid": self._tid(thread),
-            "args": dict(values, tick=tick),
+            "args": dict(values),
         }
         self.events.append(row)
 
@@ -898,8 +906,6 @@ def _job_rounds_text(job: decoding_records.DecodeJob) -> str:
 
 def _holder_text(holder) -> str:
     """The hold token as the args name it: its kind and what it holds."""
-    if isinstance(holder, tuple):
-        return window_text(holder)
     kind = type(holder)
     kind_name = kind.__name__
     request_key = getattr(holder, "request_key", None)

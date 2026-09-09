@@ -422,8 +422,13 @@ def _check_row(row) -> None:
         assert row["name"] in _METADATA_NAMES
         return
     assert isinstance(row["ts"], float)
-    assert isinstance(row["args"]["tick"], int)
-    assert row["args"]["tick"] / 1_000_000 == row["ts"]
+    if row["ph"] == "C":
+        # catapult makes one series per key of a counter's args, so a
+        # counter carries its value and nothing else; ts holds the tick
+        assert "tick" not in row["args"]
+    else:
+        assert isinstance(row["args"]["tick"], int)
+        assert row["args"]["tick"] / 1_000_000 == row["ts"]
     if row["ph"] == "X":
         assert isinstance(row["dur"], float)
         assert row["dur"] >= 0
@@ -528,3 +533,20 @@ def test_a_write_with_no_prediction_is_traced_without_observables(tmp_path):
     for row in corrections:
         assert "committed" in row["args"]
         assert "observables" not in row["args"]
+
+
+def test_a_counter_row_carries_one_series_and_the_tick_stays_in_ts(traced):
+    """C8 item 6: catapult's importer makes one series per args key.
+
+    trace_event_importer 402-431 reads a counter's args as the series to
+    plot, so a tick beside the value plotted a second series five orders
+    of magnitude larger and flattened the occupancy the reader came for.
+    """
+    _machine, _result, document = traced
+    counters = _by_phase(document, "C")
+    assert counters
+    for row in counters:
+        assert len(row["args"]) == 1, row
+        assert "tick" not in row["args"]
+        for value in row["args"].values():
+            assert isinstance(value, int)

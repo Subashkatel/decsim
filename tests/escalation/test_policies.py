@@ -82,7 +82,10 @@ def _result(gap, source=SOURCE) -> decoding_records.DecodeResult:
 
 def _switching(**arguments) -> policies.Switching:
     fixed = threshold_sources.FixedThreshold(2.0)
-    return policies.Switching(fixed, SOURCE, **arguments)
+    collaborators = policies.EscalationCollaborators(
+        threshold=fixed, expected_source=SOURCE, **arguments
+    )
+    return policies.Switching(collaborators)
 
 
 def _always_auditing_online_threshold(
@@ -190,7 +193,7 @@ def test_escalations_equal_gaps_below_the_threshold_equal_strong_frame_writes():
 
 
 def test_baseline_keeps_every_weak_result():
-    baseline = policies.Baseline()
+    baseline = policies.Baseline(policies.NO_CONFIDENCE)
     assert baseline.primary_tier is window_records.DecoderTier.WEAK
     assert baseline.requires_strong_context is False
     assert baseline.tiers_for_ready_window(WINDOW) == WEAK_TIER
@@ -200,7 +203,7 @@ def test_baseline_keeps_every_weak_result():
 
 
 def test_strong_only_decodes_every_window_on_the_strong_tier_once():
-    strong_only = policies.StrongOnly()
+    strong_only = policies.StrongOnly(policies.NO_CONFIDENCE)
     assert strong_only.primary_tier is window_records.DecoderTier.STRONG
     assert strong_only.requires_strong_context is False
     assert strong_only.tiers_for_ready_window(WINDOW) == STRONG_TIER
@@ -241,7 +244,10 @@ def test_a_soft_output_from_another_signal_is_refused_with_a_sentence():
 
 def test_a_strong_result_teaches_the_online_source():
     online = _always_auditing_online_threshold(threshold=0.0)
-    switching = policies.Switching(online, SOURCE)
+    collaborators = policies.EscalationCollaborators(
+        threshold=online, expected_source=SOURCE
+    )
+    switching = policies.Switching(collaborators)
     confident = _result(5.0)
     # the kept window is audited, so its verdict escalates
     verdict = switching.verdict_for_weak_result(JOB, confident)
@@ -326,7 +332,10 @@ def test_an_online_source_under_a_forward_window_is_refused_as_serial():
     than the audited window.
     """
     online = _always_auditing_online_threshold(threshold=2.0)
-    policy = policies.Switching(online, decoders.SAMPLED_CONFIDENCE_SOURCE)
+    collaborators = policies.EscalationCollaborators(
+        threshold=online, expected_source=decoders.SAMPLED_CONFIDENCE_SOURCE
+    )
+    policy = policies.Switching(collaborators)
     escalation = escalation_settings.EscalationSettings(
         policy=policy, strong_window="forward"
     )
@@ -343,8 +352,11 @@ def test_an_online_source_under_a_forward_window_is_refused_as_serial():
 
 def test_an_online_source_beside_run_both_at_once_is_refused():
     online = _always_auditing_online_threshold(threshold=2.0)
+    collaborators = policies.EscalationCollaborators(
+        threshold=online, expected_source=SOURCE, run_both_at_once=True
+    )
     with pytest.raises(ValueError, match="nothing to audit"):
-        policies.Switching(online, SOURCE, run_both_at_once=True)
+        policies.Switching(collaborators)
 
 
 # ---- a row plugs in

@@ -218,7 +218,7 @@ def strong_only_run(
     workload = declared_workload(operations, rounds)
     decoder = decoders.PresetLatencyDecoder(DECLARED_MICROSECONDS["strong"])
     strong_decoder = decoder_settings.DecoderSettings(decoder=decoder)
-    policy = escalation_policies.StrongOnly()
+    policy = escalation_policies.StrongOnly(escalation_policies.NO_CONFIDENCE)
     escalation = escalation_settings.EscalationSettings(policy=policy)
     observation = observe_settings.ObservationSettings(
         log_component_io=io_trace, record_switching_windows=record
@@ -276,11 +276,12 @@ def switching_run(
     """
     router = switching_decoder(escalation_probability, probability_for)
     threshold = threshold_sources.FixedThreshold(ESCALATION_THRESHOLD)
-    policy = escalation_policies.Switching(
-        threshold,
-        decoders.SAMPLED_CONFIDENCE_SOURCE,
+    collaborators = escalation_policies.EscalationCollaborators(
+        threshold=threshold,
+        expected_source=decoders.SAMPLED_CONFIDENCE_SOURCE,
         run_both_at_once=run_both_at_once,
     )
+    policy = escalation_policies.Switching(collaborators)
     workload = declared_workload(operations, rounds)
     # serial switching needs Held boundaries; the forward window refuses
     # them (escalation.policies.Switching.check_plan)

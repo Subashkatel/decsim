@@ -243,7 +243,7 @@ def window_completion_ticks(
     memory_config = decoder_memory.DecoderMemoryConfig(
         {"default": capacity_rounds}
     )
-    policy = escalation_policies.Baseline()
+    policy = escalation_policies.Baseline(escalation_policies.NO_CONFIDENCE)
     manager = decoder_manager_module.DecoderManager(
         engine,
         router=router,

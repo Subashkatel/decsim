@@ -11,18 +11,55 @@ owns the units, hold-or-deliver and cancellation. Where Switching's
 threshold comes from is its ThresholdSource (threshold_sources.py).
 """
 
+import dataclasses
+from typing import Any, Optional
+
 import decsim.records.decoding as decoding_records
 import decsim.records.windows as window_records
+
+
+@dataclasses.dataclass(frozen=True)
+class EscalationCollaborators:
+    """What the root supplies every escalation policy row.
+
+    One record so every row of ESCALATIONS has one constructor signature
+    and the root builds a row without asking which policy it is; a row
+    that decides on a confidence reads all three fields, a row that
+    decides on none reads nothing. This is I5 slice 1's shape for
+    STRONG_WINDOW_SHAPES and gem5's params object, where a SimObject's
+    collaborators arrive as one structure rather than as a signature per
+    subclass (tmp/resources/gem5/src/python/m5/SimObject.py:204-205).
+
+    threshold is the ThresholdSource the row decides keep on,
+    expected_source is the soft output source the run's confidence
+    signal reports, and run_both_at_once starts the strong sibling with
+    the weak job.
+    """
+
+    threshold: Any = None
+    expected_source: Optional[decoding_records.SoftOutputSource] = None
+    run_both_at_once: bool = False
+
+
+# The record a row that decides on no confidence is built from: it reads
+# none of the three fields, so every such row shares this one value.
+NO_CONFIDENCE = EscalationCollaborators()
 
 
 class EscalationPolicyBase:
     """The defaults a policy row inherits (sinter's Decoder shape).
 
     A row declares primary_tier and requires_strong_context and answers
-    verdict_for_weak_result; the rest has a default here: every run
-    shape is served, the primary tier alone decodes a ready window, and
-    nothing is learned from a strong result.
+    verdict_for_weak_result; the rest has a default here: the row reads
+    no confidence, every run shape is served, the primary tier alone
+    decodes a ready window, and nothing is learned from a strong result.
     """
+
+    decides_on_a_confidence = False
+
+    def __init__(self, collaborators: EscalationCollaborators) -> None:
+        """A row that decides on no confidence reads none of the record."""
+        del collaborators
 
     def check_plan(self, plan: decoding_records.RunShape) -> None:
         """Every run shape is served."""
@@ -102,15 +139,13 @@ class Switching(EscalationPolicyBase):
     knobs and its threshold source against both once, at build.
     """
 
+    decides_on_a_confidence = True
     requires_strong_context = True
     primary_tier = window_records.DecoderTier.WEAK
 
-    def __init__(
-        self,
-        threshold,
-        expected_source: decoding_records.SoftOutputSource,
-        run_both_at_once: bool = False,
-    ) -> None:
+    def __init__(self, collaborators: EscalationCollaborators) -> None:
+        threshold = collaborators.threshold
+        run_both_at_once = collaborators.run_both_at_once
         if run_both_at_once and threshold.audits_by_escalating:
             raise ValueError(
                 "online threshold calibration is meaningless with "
@@ -118,7 +153,7 @@ class Switching(EscalationPolicyBase):
                 "for every window, so there is nothing to audit"
             )
         self.threshold = threshold
-        self.expected_source = expected_source
+        self.expected_source = collaborators.expected_source
         self.run_both_at_once = run_both_at_once
 
     def check_plan(self, plan: decoding_records.RunShape) -> None:

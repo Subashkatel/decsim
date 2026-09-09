@@ -138,7 +138,7 @@ class _Fixture:
             self.engine, self.planner, self.tracker, interaction, gate
         )
         self.queue = _RecordingQueue()
-        policy = escalation_policies.Baseline()
+        policy = escalation_policies.Baseline(escalation_policies.NO_CONFIDENCE)
         verdict = types.SimpleNamespace(
             accept_result=_ignore_result, accept_strong_result=_ignore_result
         )

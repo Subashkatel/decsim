@@ -81,7 +81,7 @@ class WorkloadSettings:
     decode_operations: Optional[tuple] = None
     dynamic_streams: tuple = ()
     protected_regions: tuple = ()
-    rounds_policy: Optional[round_policies.RoundsPolicy] = None
+    rounds_policy: Optional[ports.RoundsPolicy] = None
     feedback_boundary_mode: str = "trailing_buffer"
     built_models: Optional[built_window_models.BuiltWindowModels] = None
 

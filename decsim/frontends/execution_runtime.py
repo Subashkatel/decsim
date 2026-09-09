@@ -17,25 +17,13 @@ event): the runtime never receives a call back from the controller.
 import dataclasses
 import functools
 import types
-from typing import Any, Callable, Protocol, runtime_checkable
+from typing import Callable
 
 import decsim.engine
+import decsim.ports as ports
 import decsim.records.log_sources as log_sources
 import decsim.records.program as program_records
 import decsim.trace_source as trace_source
-
-
-@runtime_checkable
-class MagicStateFactory(Protocol):
-    """Where a non-Clifford operation gets its magic state."""
-
-    engine: Any
-
-    def request(self, operation_id: int, callback: Callable[[], None]):
-        """Ask for one state; callback runs once it is ready."""
-
-    def shutdown(self) -> None:
-        """Stop producing; the workload is complete."""
 
 
 class ResourceLedger:
@@ -167,7 +155,7 @@ class ExecutionRuntime:
         engine: decsim.engine.Engine,
         *,
         issuer,
-        factory,
+        factory: ports.MagicStateFactory,
         resource_claims_by_operation_id,
     ):
         self.engine = engine

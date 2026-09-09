@@ -275,6 +275,15 @@ callbacks a component fires, never through a port, so a component can
 run with no observer at all. The port file is therefore the map of the
 pipeline, and a reader who wants to follow a readout starts there.
 
+A Protocol that stays outside `decsim/ports.py` is a seam inside one
+package: every implementation of it and every caller of it sit in that
+package, so no component learns it and the package may change it alone.
+Its module docstring names it as that package's own seam. The one
+exception is `decsim/seeding.py`, a shared module beside `ports` in the
+package order whose two Protocols cannot move without making the two
+depend on each other. Everything a second package implements or calls is
+a port and lives in the port file.
+
 One root object, `Machine`, builds every component from its settings and
 wires them by constructor; no component builds or looks up another. The
 yaml has one section per component, each section builds one settings

@@ -542,6 +542,15 @@ class Decoder(Protocol):
     stage ledger and the referee audit to whatever answers this port,
     without asking what the row is; DecoderBase gives a row that fires
     none of them the silent source.
+
+    A row that routes to other rows or wraps one is asked for those rows
+    under the seeding protocol, not under this port: decoder_pool's
+    routed_decoders walks run_seed_children (decsim/seeding.py
+    RunSeedComposite) from the router down, so a routing or wrapping row
+    that does not answer it hides the rows inside it from the trace, the
+    stage ledger and the referee audit. SwitchingRouter, CodeRouter,
+    StagedDecoder, SampledConfidenceDecoder and TesseractCheckedDecoder
+    are the shipped rows that answer it.
     """
 
     fault_model_requirement: Any

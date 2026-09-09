@@ -21,16 +21,21 @@ IDLE_POLICIES = {
     "extend_stream": policies.ExtendStream,
 }
 
-# controller.detection_events_formed_at names where the round's
-# measurement outcomes become detection events, and the row is whether
-# the round leaves the controller sized by those events. At the
+# controller.detection_events_formed_at names which width crosses the
+# store and the tier's input link, and the row is whether the round
+# leaves the controller sized by its detection events. At the
 # controller, "inside the workstation, measurements are converted into
 # detections and then streamed to the real-time decoding software via a
 # shared memory buffer" (Google 2408.13687 lines 474-476). At the
 # decoder, the controller writes the raw outcomes "sequentially to the
 # decoder" and "the decoder computes the syndrome from measurement
 # outcomes" (Caune et al. 2410.05202 lines 1252-1256), so the store and
-# the tier's input link carry the wider raw round.
+# the tier's input link carry the wider raw round. The values are the
+# device's under both rows, computed at the assembler because the
+# formation table is stateful and reads every round once in round order,
+# and no formation time is charged in either row: a decoder-side
+# formation unit that forms each round on first demand is a component of
+# its own and is not built.
 DETECTION_EVENT_FORMATION = {"controller": True, "decoder": False}
 
 
@@ -72,9 +77,10 @@ class ControllerSettings:
     packing_overflow is what happens to a finished round the store cannot
     take: the yaml's stall or drop_round.
     detection_events_formed_at names a row of
-    DETECTION_EVENT_FORMATION: where the round's measurement outcomes
-    become detection events, which is the width the store and the
-    decoder's input link carry.
+    DETECTION_EVENT_FORMATION: which width the store and the decoder's
+    input link carry, the round's detection events or its raw
+    measurement outcomes. The values are computed at the assembler under
+    both rows and no formation time is charged in either.
     """
 
     readout_to_bits_microseconds: float = 0.0

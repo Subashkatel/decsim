@@ -261,7 +261,10 @@ def collect_samples(
     """Every point's microsecond samples over the shot's decoded windows.
 
     The escalation row's primary tier says which two links a window
-    rides: in from that tier's store, and home to the frame.
+    rides: in from that tier's store, and home to the frame. The
+    function stays whole past the size prompt: it is one walk over the
+    windows in key order, each window's points appended to the same
+    lists, read top to bottom.
     """
     transfers = result.link_traffic["transfers"]
     link_delay = link_delay_by_window(transfers)

@@ -18,7 +18,10 @@ The join computes nothing itself and charges nothing to itself: the
 signal row reports what its computation cost, the join asks the decoder
 side to charge those ticks on the unit that produced the evidence, and
 the window's answer waits for them, so both the unit's service and the
-window's reaction time carry the signal's work (decision D8).
+window's reaction time carry the signal's work (decision D8). On a
+window of several solves those are two different jobs: the answer is the
+lightest solve's and the ticks are the last solve's, since the last one
+to arrive is the one whose service has not closed yet.
 """
 
 import dataclasses
@@ -94,10 +97,15 @@ class WindowGapJoin:
     def _join(self, held: list) -> None:
         """Ask the signal for the window's gap and commit its answer.
 
-        The signal's own computation is charged on the unit that
-        produced the evidence, and the answer waits for it (decision
-        D8); a signal that only subtracts reports no ticks and the
-        answer goes on at once.
+        Two things the same computation decides go to two different
+        solves. The soft output goes on the answering solve, whose
+        result carries the window's correction. The ticks go on the
+        solve that delivered last, because that is the one whose
+        deliver_weak ends a service after this returns
+        (decoders/decode_outcomes.py), so the unit that produced the
+        evidence carries the work (decision D8). On a one-solve window
+        the two are the same solve. A signal that only subtracts reports
+        no ticks and the answer goes on at once.
         """
         solves = []
         for solve in held:
@@ -110,7 +118,8 @@ class WindowGapJoin:
             log_sources.DECODER_MANAGER,
             f"GAP JOIN {answer.job.label}: {gap_text}",
         )
-        self.decode_queue.charge_soft_output(answer.job, computation.ticks)
+        delivering = held[-1]
+        self.decode_queue.charge_soft_output(delivering.job, computation.ticks)
         if computation.ticks <= 0:
             self._answer(held, answer)
             return

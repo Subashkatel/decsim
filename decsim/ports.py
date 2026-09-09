@@ -383,10 +383,10 @@ class BoundaryCourier(Protocol):
     the later decoding task is the syndrome of the errors plus the
     corrections already committed. The message is one seam layer on
     decoder_to_decoder, priced against the receiving window's own model.
+    Pinning a face is the whole of what the escalation side asks for, so
+    it is the whole port; what the courier tells its own package about a
+    committed boundary stays a method of the class.
     """
-
-    def committed(self, key: tuple):
-        """The boundary the window shipped, or None."""
 
     def pin_strong_face(
         self,

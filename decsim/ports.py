@@ -213,6 +213,166 @@ class WindowInput(Protocol):
         """Note the stream round a protected segment's result waits for."""
 
 
+@runtime_checkable
+class WindowPlan(Protocol):
+    """The window plan, as the escalation side reads and reshapes it.
+
+    A strong window covers rounds several weak windows were going to
+    commit, so the strong region reads the plan and the shape row changes
+    it: one window absorbed, another's read start moved. Everything else
+    about the plan (who is ready, what commits) stays the window side's.
+    """
+
+    def window_at(self, key: tuple) -> window_records.Window:
+        """The window at (operation id, index)."""
+
+    def absorb_window(
+        self, key: tuple, restart_key: Optional[tuple]
+    ) -> window_records.Window:
+        """A window a strong region covers is never weak-decoded."""
+
+    def reslice_window(
+        self, key: tuple, buffer_lo: int, model
+    ) -> window_records.Window:
+        """Move a window's read start and install the model it reads with."""
+
+    def later_windows(self, operation_id: Any, window_index: int) -> list:
+        """The operation's windows past that index, in index order."""
+
+    def check_absorbable(self, window_keys) -> None:
+        """Every listed window is still undecoded and uncommitted."""
+
+    def strong_window_model(
+        self,
+        operation: program_records.Operation,
+        window: window_records.Window,
+        round_count: int,
+        fault_exclusion_ranges: tuple,
+    ):
+        """The error model of one strong window of that operation."""
+
+
+@runtime_checkable
+class WindowRetention(Protocol):
+    """The rounds a window may still read, as the escalation side sees it.
+
+    Which store a strong window reads is the retention's to say, not the
+    escalation's, so a caller here asks for holds and for the input
+    rather than for a store.
+    """
+
+    def hold_strong_input(self, job: decoding_records.DecodeJob) -> None:
+        """The strong job's context becomes its input hold."""
+
+    def strong_window_input(self, builder, window) -> list:
+        """The room-side payloads of a strong window, first round stamped."""
+
+    def hold_strong_context(
+        self, key: tuple, strong_request_key, context_keys
+    ) -> None:
+        """The window's potential strong read becomes the request's hold."""
+
+    def context_rounds_in_flight(self, key: tuple, read_keys) -> tuple:
+        """The context rounds that reached the upstream store and are late."""
+
+    def guard_restart_reads(
+        self,
+        key: tuple,
+        restart_key: Optional[tuple],
+        proposed_restart,
+        strong_request_key,
+        context_keys,
+        restart_read_keys,
+    ):
+        """Hold the restart window's strong context while a plan lands."""
+
+    def replace_window_reads(
+        self, key: tuple, window: window_records.Window
+    ) -> None:
+        """Re-point the window's live holds at its reads."""
+
+    def release_restart_reads(self, key: tuple) -> None:
+        """No earlier escalation can re-slice the window: its claim ends."""
+
+    def release_hold_if_live(self, owner, store=None) -> None:
+        """Drop a hold that is still live; nothing for one already gone."""
+
+    def release_strong_hold_if_live(self, owner) -> None:
+        """Drop a room-side hold when it is still registered."""
+
+    def release_absorbed_strong_hold(
+        self, key: tuple, restart_key: Optional[tuple], replacement
+    ) -> None:
+        """Drop the absorbed window's potential read; the request holds it."""
+
+    def require_rounds_retained(
+        self, label: str, payloads: list, first_round: int, last_round: int
+    ) -> None:
+        """A strong window starts only once every round it reads is held."""
+
+    def read_keys_for_bounds(
+        self,
+        operation_id: Any,
+        start_round: int,
+        buffer_hi: int,
+        window: Optional[window_records.Window] = None,
+    ) -> list:
+        """The retained round keys of a possibly cross-operation range."""
+
+    def require_retained(
+        self, round_keys: list, purpose: str, store=None
+    ) -> None:
+        """Refuse a new consumer if an already-arrived round was released."""
+
+    def require_strong_retained(self, round_keys, purpose: str) -> None:
+        """The same, on the room-side store."""
+
+
+@runtime_checkable
+class WindowJobBuilder(Protocol):
+    """Where a strong window shape gets a job's identity and its gate."""
+
+    gate: Any
+
+    def new_request_key(
+        self,
+        operation_id: Any,
+        window_id: int,
+        tier: window_records.DecoderTier,
+    ) -> window_records.DecoderRequestKey:
+        """The next request identity, run-wide ordinal included."""
+
+
+@runtime_checkable
+class WindowRequests(Protocol):
+    """The submission side, as a strong window shape steers it."""
+
+    def request_if_ready(
+        self, window: window_records.Window, strong_redecode
+    ) -> None:
+        """If the window has its data, submit it through the policy."""
+
+    def withdraw(self, window: window_records.Window) -> None:
+        """Withdraw one window's early-shipped, unstarted decode."""
+
+
+@runtime_checkable
+class LogicalLedger(Protocol):
+    """Who commits which rounds, as a strong window shape rewrites it."""
+
+    def owns_strong_window(self, owner_key: tuple) -> bool:
+        """Whether a strong window already claims that owner's extent."""
+
+    def replace_contributions(
+        self,
+        owner_key: tuple,
+        commit_lo: int,
+        commit_hi: int,
+        replaced_keys: tuple,
+    ) -> None:
+        """A strong window takes the extent of the windows it replaces."""
+
+
 # ----------------------------------- the decoder manager schedules a decode
 
 

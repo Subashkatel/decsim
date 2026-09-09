@@ -20,6 +20,7 @@ import copy
 import dataclasses
 from typing import Optional
 
+import decsim.ports as ports
 import decsim.records.windows as window_records
 import decsim.windows.round_retention as round_retention
 
@@ -50,7 +51,13 @@ class ForwardRegion:
 class StrongRegions:
     """The strong region of a window, planned, checked and modelled."""
 
-    def __init__(self, planner, tracker, retention, interaction) -> None:
+    def __init__(
+        self,
+        planner: ports.WindowPlan,
+        tracker,
+        retention: ports.WindowRetention,
+        interaction,
+    ) -> None:
         self.planner = planner
         self.tracker = tracker
         self.retention = retention

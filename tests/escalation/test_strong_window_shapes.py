@@ -33,6 +33,7 @@ import decsim.escalation.settings as escalation_settings
 import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.machine as machine_module
 import decsim.observe.run_views as run_views
+import decsim.ports as ports
 import decsim.records.decoding as decoding_records
 import decsim.records.windows as window_records
 import decsim.settings as machine_settings
@@ -565,6 +566,22 @@ def test_an_absorbing_row_added_from_outside_builds_through_the_same_call():
     assert type(shape) is RecordingForwardWindow
     assert shape.planned_windows == [0]
     assert fabric.frame_tiers(machine) == [((1, 0), "strong")]
+
+
+def test_the_shipped_collaborators_fill_the_five_window_side_ports():
+    """A row written outside decsim programs against the ports, not classes.
+
+    StrongWindowCollaborators types its five window-side fields as
+    Protocols in decsim/ports.py, so the promise only means something if
+    the classes the root puts there answer the whole port.
+    """
+    machine = fabric.switching_machine(rounds=9, escalated_windows=set())
+    collaborators = machine.window_manager.strong_redecode.shape.collaborators
+    assert isinstance(collaborators.planner, ports.WindowPlan)
+    assert isinstance(collaborators.retention, ports.WindowRetention)
+    assert isinstance(collaborators.builder, ports.WindowJobBuilder)
+    assert isinstance(collaborators.requester, ports.WindowRequests)
+    assert isinstance(collaborators.ledger, ports.LogicalLedger)
 
 
 def test_a_shape_name_off_the_table_is_refused_naming_the_rows():

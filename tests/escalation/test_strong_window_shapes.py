@@ -586,6 +586,20 @@ def test_the_shipped_collaborators_fill_the_six_window_side_ports():
     assert isinstance(collaborators.courier, ports.BoundaryCourier)
 
 
+def test_a_courier_that_only_pins_a_face_fills_the_courier_port():
+    """The port lists the one method the escalation side calls.
+
+    strong_job_payloads calls pin_strong_face and nothing else
+    (strong_window_shapes.py, the walk over folded_boundaries), so a
+    courier supplied from outside decsim answers the whole port with
+    that one method. STYLE.md rule 7: a port carries the methods one
+    component needs from another.
+    """
+    courier = _RecordingCourier()
+    assert isinstance(courier, ports.BoundaryCourier)
+    assert not hasattr(courier, "committed")
+
+
 def _gate_machine(strong_window: str) -> machine_module.Machine:
     """The gate's own switching point, on the named strong window row.
 
@@ -976,11 +990,6 @@ class _RecordingCourier:
 
     def __init__(self) -> None:
         self.pinned = []
-
-    def committed(self, key: tuple):
-        """No boundary; a row reaches the courier through the pin."""
-        del key
-        return None
 
     def pin_strong_face(
         self, source_key, destination, model, operation, request_key

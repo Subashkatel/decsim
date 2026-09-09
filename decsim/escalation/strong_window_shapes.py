@@ -164,9 +164,15 @@ class ContextWindow:
     times T_comm^weak, lines 1109-1114; its Table I is a notation table
     and prices nothing). This shape absorbs no weak window, so its
     window_absorbed source is the silent one.
+
+    Both faces are read raw, so the row folds no neighbour boundary
+    (FOLDS_NO_BOUNDARY): a mask on the commit_lo layer would flip a seam
+    whose rounds the input already carries as raw defects, which is the
+    double count Bombin et al. 2303.04846 lines 775-788 rule out.
     """
 
     absorbs_weak_windows = False
+    pins_the_far_face = False
     window_absorbed = trace_source.SILENT
 
     def __init__(self, collaborators: StrongWindowCollaborators) -> None:
@@ -176,109 +182,94 @@ class ContextWindow:
         """The two-sided context job, built now or held for its context."""
         key = (weak_job.operation_id, weak_job.window_id)
         region = self.collaborators.regions.context_region(key)
-        strong_window = region.window
-        model = self.collaborators.regions.context_model(key, strong_window)
-        request_key = self.collaborators.builder.new_request_key(
-            weak_job.operation_id,
-            weak_job.window_id,
-            window_records.DecoderTier.STRONG,
+        held = _held_redo(
+            self.collaborators,
+            weak_job,
+            region.window,
+            region.context_read_keys,
+            FOLDS_NO_BOUNDARY,
         )
-        operation = self.collaborators.regions.operation(weak_job.operation_id)
-        held = _HeldContextWindow(
-            key=key,
-            weak_job=weak_job,
-            label=weak_job.strong_label,
-            region=region,
-            strong_window=strong_window,
-            model=model,
-            operation=operation,
-            request_key=request_key,
-            request_created_ticks=self.collaborators.engine.now,
-        )
-        crossing = self.collaborators.retention.context_rounds_in_flight(
-            key, region.context_read_keys
-        )
-        if crossing:
-            self._log_hold(held, crossing)
-            return StrongAssignment(
-                request_key,
-                None,
-                held_plan=held,
-                round_count=strong_window.round_count,
-                folded_boundaries=FOLDS_NO_BOUNDARY,
-            )
-        job = self._build_strong_job(held)
-        return StrongAssignment(
-            request_key,
-            job,
-            round_count=job.round_count,
-            folded_boundaries=FOLDS_NO_BOUNDARY,
-        )
+        return _assignment_of(self.collaborators, held)
 
     def release_conditions(
         self, assignment: StrongAssignment
     ) -> pending_strong_windows.ReleaseConditions:
         """The rounds of its own context, stored in syndrome buffer 1."""
-        held = assignment.held_plan
-        return pending_strong_windows.ReleaseConditions(
-            stored_data_of_operation=held.key[0],
-            name="context_stored",
-            released_description="strong context stored in syndrome buffer 1",
-        )
+        return _stored_rounds_conditions(assignment.held_plan)
 
     def held_job(
         self, assignment: StrongAssignment
     ) -> Optional[decoding_records.DecodeJob]:
         """The job, once every context round that arrived is stored."""
-        held = assignment.held_plan
-        crossing = self.collaborators.retention.context_rounds_in_flight(
-            held.key, held.region.context_read_keys
-        )
-        if crossing:
-            return None
-        return self._build_strong_job(held)
+        return _job_once_stored(self.collaborators, assignment.held_plan)
 
-    def _log_hold(self, held: "_HeldContextWindow", crossing: tuple) -> None:
-        """The context is still on controller_to_strong_buffer."""
-        self.collaborators.engine.log(
-            log_sources.DECODER_MANAGER,
-            f"{held.label}: strong start deferred until the context "
-            f"rounds {list(crossing)} are stored in syndrome buffer 1",
-        )
 
-    def _build_strong_job(
-        self, held: "_HeldContextWindow"
-    ) -> decoding_records.DecodeJob:
-        """The context window's job, on the rounds its store now holds."""
-        weak_job = held.weak_job
-        payloads = strong_job_payloads(
+class NearSeamWindow:
+    """The commit region with its past face pinned and one open buffer.
+
+    The escalated window's commit region is re-decoded on an input
+    whose past face carries the correction the earlier neighbour
+    committed: Bombin et al. 2303.04846 lines 775-788, "the input
+    instance to decoder j will consist of the syndrome d(e + kappa_Pj)",
+    which sets a boundary condition for the task. A pinned face needs no
+    buffer behind it, "using no extra buffers as their boundary
+    conditions are now fixed" (lines 1456-1458), so the row reads the
+    commit region and one trailing buffer for its open future face,
+    which is the b >= d of lines 850-852; a run whose
+    windows.buffer_rounds is below the code distance is outside that
+    condition, which is a statement about the configuration and not
+    about the row. Tan et al. 2209.09219 lines 947-949 name the same
+    shape on the weak tier: "it has a closed past boundary and an open
+    future boundary".
+
+    The pin is on whatever the neighbour committed (Toshio et al.
+    2510.25222 line 1250, boundary conditions "determined by the weak
+    decoder"). This row absorbs no weak window, so serial switching
+    gives it Held boundaries (escalation/policies.py, check_plan), under
+    which a committed boundary is a final one; and the neighbour has
+    committed by the time its dependent escalates, since a window's weak
+    decode starts only once every boundary it owes has arrived and the
+    escalation follows that decode. The escalated window that has no
+    earlier neighbour pins nothing: its past face is the operation's
+    first round layer, closed by the initialisation.
+
+    The job waits for what the two-sided context row waits for, its own
+    rounds stored in syndrome buffer 1, and absorbs nothing, so the weak
+    chain runs on untouched and there is no restart window.
+    """
+
+    absorbs_weak_windows = False
+    pins_the_far_face = False
+    window_absorbed = trace_source.SILENT
+
+    def __init__(self, collaborators: StrongWindowCollaborators) -> None:
+        self.collaborators = collaborators
+
+    def plan(self, weak_job: decoding_records.DecodeJob) -> StrongAssignment:
+        """The near-pinned job, built now or held for its own rounds."""
+        key = (weak_job.operation_id, weak_job.window_id)
+        region = self.collaborators.regions.near_seam_region(key)
+        folded_boundaries = _declared_faces(region.pinned_source_key)
+        held = _held_redo(
             self.collaborators,
-            held.strong_window,
-            held.model,
-            held.operation,
-            FOLDS_NO_BOUNDARY,
+            weak_job,
+            region.window,
+            region.context_read_keys,
+            folded_boundaries,
         )
-        payload_round_count = decoding_records.distinct_round_count(payloads)
-        job = decoding_records.DecodeJob(
-            operation_id=held.key[0],
-            window_id=held.key[1],
-            round_count=payload_round_count,
-            ready_time=self.collaborators.engine.now,
-            label=held.label,
-            kind=decoding_records.DecodeJobKind.STRONG_REDECODE,
-            spatial_nodes=weak_job.spatial_nodes,
-            code=weak_job.code,
-            detector_error_model=held.model,
-            payloads=payloads,
-            attempt=1,
-            window=held.strong_window,
-            strong_decode_for=held.key,
-            request_key=held.request_key,
-            request_created_ticks=held.request_created_ticks,
-            gate=self.collaborators.builder.gate,
-        )
-        self.collaborators.retention.hold_strong_input(job)
-        return job
+        return _assignment_of(self.collaborators, held)
+
+    def release_conditions(
+        self, assignment: StrongAssignment
+    ) -> pending_strong_windows.ReleaseConditions:
+        """The rounds it reads, stored in syndrome buffer 1."""
+        return _stored_rounds_conditions(assignment.held_plan)
+
+    def held_job(
+        self, assignment: StrongAssignment
+    ) -> Optional[decoding_records.DecodeJob]:
+        """The job, once every round it reads is stored."""
+        return _job_once_stored(self.collaborators, assignment.held_plan)
 
 
 class ForwardWindow:
@@ -557,6 +548,7 @@ class ForwardWindow:
             strong_window,
             held.strong_model,
             held.operation,
+            held.strong_request_key,
             FOLDS_NO_BOUNDARY,
         )
         plan = held.resolved_region.plan
@@ -591,19 +583,160 @@ class ForwardWindow:
 FOLDS_NO_BOUNDARY: tuple = ()
 
 
+def _declared_faces(pinned_source_key: Optional[tuple]) -> tuple:
+    """The faces a row pins, as StrongAssignment names them."""
+    if pinned_source_key is None:
+        return FOLDS_NO_BOUNDARY
+    return (pinned_source_key,)
+
+
+def _held_redo(
+    collaborators: StrongWindowCollaborators,
+    weak_job: decoding_records.DecodeJob,
+    strong_window: window_records.Window,
+    read_keys: tuple,
+    folded_boundaries: tuple,
+) -> "_HeldStrongRedo":
+    """What a row keeps from its plan: its window, its reads, its faces."""
+    key = (weak_job.operation_id, weak_job.window_id)
+    model = collaborators.regions.redecode_model(key, strong_window)
+    request_key = collaborators.builder.new_request_key(
+        weak_job.operation_id,
+        weak_job.window_id,
+        window_records.DecoderTier.STRONG,
+    )
+    operation = collaborators.regions.operation(weak_job.operation_id)
+    return _HeldStrongRedo(
+        key=key,
+        weak_job=weak_job,
+        label=weak_job.strong_label,
+        read_keys=read_keys,
+        strong_window=strong_window,
+        model=model,
+        operation=operation,
+        request_key=request_key,
+        request_created_ticks=collaborators.engine.now,
+        folded_boundaries=folded_boundaries,
+    )
+
+
+def _assignment_of(
+    collaborators: StrongWindowCollaborators, held: "_HeldStrongRedo"
+) -> StrongAssignment:
+    """The job now, or the assignment held until its rounds are stored."""
+    crossing = collaborators.retention.context_rounds_in_flight(
+        held.key, held.read_keys
+    )
+    if crossing:
+        _log_hold(collaborators, held, crossing)
+        return StrongAssignment(
+            held.request_key,
+            None,
+            held_plan=held,
+            round_count=held.strong_window.round_count,
+            folded_boundaries=held.folded_boundaries,
+        )
+    job = _strong_job_of(collaborators, held)
+    return StrongAssignment(
+        held.request_key,
+        job,
+        round_count=job.round_count,
+        folded_boundaries=held.folded_boundaries,
+    )
+
+
+def _stored_rounds_conditions(
+    held: "_HeldStrongRedo",
+) -> pending_strong_windows.ReleaseConditions:
+    """The rounds the row reads, stored in syndrome buffer 1."""
+    return pending_strong_windows.ReleaseConditions(
+        stored_data_of_operation=held.key[0],
+        name="context_stored",
+        released_description="strong context stored in syndrome buffer 1",
+    )
+
+
+def _job_once_stored(
+    collaborators: StrongWindowCollaborators, held: "_HeldStrongRedo"
+) -> Optional[decoding_records.DecodeJob]:
+    """The job, once every round the window reads is stored."""
+    crossing = collaborators.retention.context_rounds_in_flight(
+        held.key, held.read_keys
+    )
+    if crossing:
+        return None
+    return _strong_job_of(collaborators, held)
+
+
+def _log_hold(
+    collaborators: StrongWindowCollaborators,
+    held: "_HeldStrongRedo",
+    crossing: tuple,
+) -> None:
+    """The rounds the window reads are still on controller_to_strong_buffer."""
+    collaborators.engine.log(
+        log_sources.DECODER_MANAGER,
+        f"{held.label}: strong start deferred until the context "
+        f"rounds {list(crossing)} are stored in syndrome buffer 1",
+    )
+
+
+def _strong_job_of(
+    collaborators: StrongWindowCollaborators, held: "_HeldStrongRedo"
+) -> decoding_records.DecodeJob:
+    """The row's job: the rounds its store holds, the faces it pins."""
+    weak_job = held.weak_job
+    payloads = strong_job_payloads(
+        collaborators,
+        held.strong_window,
+        held.model,
+        held.operation,
+        held.request_key,
+        held.folded_boundaries,
+    )
+    payload_round_count = decoding_records.distinct_round_count(payloads)
+    job = decoding_records.DecodeJob(
+        operation_id=held.key[0],
+        window_id=held.key[1],
+        round_count=payload_round_count,
+        ready_time=collaborators.engine.now,
+        label=held.label,
+        kind=decoding_records.DecodeJobKind.STRONG_REDECODE,
+        spatial_nodes=weak_job.spatial_nodes,
+        code=weak_job.code,
+        detector_error_model=held.model,
+        payloads=payloads,
+        attempt=1,
+        window=held.strong_window,
+        strong_decode_for=held.key,
+        request_key=held.request_key,
+        request_created_ticks=held.request_created_ticks,
+        gate=collaborators.builder.gate,
+    )
+    collaborators.retention.hold_strong_input(job)
+    return job
+
+
 @dataclasses.dataclass(frozen=True)
-class _HeldContextWindow:
-    """All the context row keeps from its plan until it builds the job."""
+class _HeldStrongRedo:
+    """What a row that waits only for its own rounds keeps from its plan.
+
+    The two rows built on it lay a strong window over the escalated
+    window's commit region and build the job as soon as the rounds it
+    reads are stored; they differ in the rounds they read and in the
+    faces they pin, which is what read_keys and folded_boundaries carry.
+    """
 
     key: tuple
     weak_job: decoding_records.DecodeJob
     label: str
-    region: strong_regions.ContextRegion
+    read_keys: tuple
     strong_window: window_records.Window
     model: object
     operation: program_records.Operation
     request_key: window_records.DecoderRequestKey
     request_created_ticks: int
+    folded_boundaries: tuple
 
 
 @dataclasses.dataclass(frozen=True)
@@ -626,6 +759,7 @@ def strong_job_payloads(
     strong_window: window_records.Window,
     model,
     operation: program_records.Operation,
+    request_key: window_records.DecoderRequestKey,
     folded_boundaries: tuple,
 ) -> list:
     """The rounds a strong job reads, and the boundaries it folds into them.
@@ -643,7 +777,7 @@ def strong_job_payloads(
     """
     for source_key in folded_boundaries:
         collaborators.courier.pin_strong_face(
-            source_key, strong_window, model, operation
+            source_key, strong_window, model, operation, request_key
         )
     return collaborators.retention.strong_window_input(
         collaborators.builder, strong_window

@@ -39,6 +39,7 @@ ESCALATIONS = {
 STRONG_WINDOW_SHAPES = {
     "two_sided_context": strong_window_shapes.ContextWindow,
     "forward": strong_window_shapes.ForwardWindow,
+    "near_seam_pinned": strong_window_shapes.NearSeamWindow,
 }
 # escalation.threshold_source names one of these rows: where the
 # switching threshold of a sweep point comes from.
@@ -208,7 +209,10 @@ class EscalationSettings:
     default, or forward, the paper's Sec. III C scheme), and
     restart_reread_buffer_regions is how many of the strong region's
     buffer regions the restarted weak window re-reads under the forward
-    shape.
+    shape; near_seam_pinned re-decodes the same commit region as
+    two_sided_context but pins its past face on the earlier neighbour's
+    committed correction and reads no context behind it (Bombin et al.
+    2303.04846 lines 775-788 and 1456-1458).
     confidence names the signal the weak tier reports and the threshold
     decides on (confidence/signals.py), and the yaml refuses a
     weak decoder whose decode cannot produce that signal's evidence;

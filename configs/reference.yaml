@@ -112,7 +112,8 @@ escalation:
 #                                  # weak_decoder_to_strong_decoder hop, which the
 #                                  # paper expects to cost little because the
 #                                  # switching rate decays with the code distance
-#   strong_window: two_sided_context  # two_sided_context | forward: the shape
+#   strong_window: two_sided_context  # two_sided_context | forward |
+#                                  # near_seam_pinned: the shape
 #                                  # of the window the strong tier re-decodes
 #                                  # (STRONG_WINDOW_SHAPES in
 #                                  # escalation/strong_window_shapes.py).
@@ -127,7 +128,19 @@ escalation:
 #                                  # paper's Sec. III C scheme: the weak chain
 #                                  # keeps committing past an escalated strong
 #                                  # window, which absorbs the windows it
-#                                  # covers and re-slices the one past it
+#                                  # covers and re-slices the one past it.
+#                                  # near_seam_pinned commits the same rounds
+#                                  # as two_sided_context and pins its past
+#                                  # face on the earlier neighbour's committed
+#                                  # correction: the input carries
+#                                  # d(e + kappa) on the seam layer (Bombin
+#                                  # 2303.04846 lines 775-788) and the row
+#                                  # reads no round behind its commit region,
+#                                  # since a fixed boundary condition needs no
+#                                  # buffer (lines 1456-1458). Its open future
+#                                  # face keeps one buffer region, which is
+#                                  # Bombin's b >= d (lines 850-852) when
+#                                  # windows.buffer_rounds is the distance
 #   restart_reread_buffer_regions: 0  # forward window only: how many of the
 #                                  # strong region's buffer regions the
 #                                  # restarted weak window re-reads. 0 is the

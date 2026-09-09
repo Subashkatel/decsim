@@ -394,6 +394,7 @@ class BoundaryCourier(Protocol):
         destination: window_records.Window,
         model,
         operation: program_records.Operation,
+        request_key: window_records.DecoderRequestKey,
     ) -> None:
         """Ship a committed boundary to a strong window and fold it in."""
 

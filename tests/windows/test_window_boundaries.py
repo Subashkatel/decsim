@@ -221,7 +221,12 @@ def test_a_pinned_face_carries_the_neighbours_committed_seam():
     engine.run()
     strong_window = _strong_window_of_the_pin()
     model = _strong_model()
-    courier.pin_strong_face((1, 0), strong_window, model, operation)
+    strong_request_key = window_records.DecoderRequestKey(
+        1, 1, window_records.DecoderTier.STRONG, 3
+    )
+    courier.pin_strong_face(
+        (1, 0), strong_window, model, operation, strong_request_key
+    )
     engine.run()
     assert dict(strong_window.boundary_in) == {4: [1, 0, 1]}
     pinned_send = recording.boundary_sends[-1]
@@ -230,13 +235,21 @@ def test_a_pinned_face_carries_the_neighbours_committed_seam():
     assert attribution.relation.source_window_key == (1, 0)
     assert attribution.relation.destination_window_key == (1, 1)
     assert attribution.relation.source_request_key == request_key
+    # the transfer is the strong window's own: its index and its reads
+    assert attribution.window_id == 1
+    assert (attribution.first_round, attribution.last_round) == (4, 9)
 
 
-def test_a_face_pinned_on_a_window_that_never_committed_is_refused():
+def test_a_face_pinned_on_a_window_that_has_not_committed_is_refused():
     engine, operation, _source, courier, _recording = _pinned_courier()
     del engine
     strong_window = _strong_window_of_the_pin()
     model = _strong_model()
+    strong_request_key = window_records.DecoderRequestKey(
+        1, 1, window_records.DecoderTier.STRONG, 3
+    )
     with pytest.raises(RuntimeError) as refusal:
-        courier.pin_strong_face((1, 0), strong_window, model, operation)
-    assert "committed no boundary" in str(refusal.value)
+        courier.pin_strong_face(
+            (1, 0), strong_window, model, operation, strong_request_key
+        )
+    assert "has not committed" in str(refusal.value)

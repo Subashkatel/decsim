@@ -642,3 +642,111 @@ def test_the_strong_context_lives_until_the_escalated_window_commits():
     assert peak == 6
     assert first_fall > expected_committed
     assert first_fall == expected_released
+
+
+def _walk_card(microseconds, weak_kind: str, confidence: str) -> dict:
+    """The switching card that prices the confidence signal's computation."""
+    escalation = {
+        "kind": "switching",
+        "gap_threshold_db": 20.0,
+        "confidence": confidence,
+        "confidence_walk_microseconds": microseconds,
+    }
+    weak_decoder = {
+        "weak_decoder": {
+            "kind": weak_kind,
+            "units": 1,
+            "unit_memory_rounds": None,
+            "engine": {
+                "clock": "fridge",
+                "fetch_cycles_per_round": 1,
+                "release_cycles_per_job": 1,
+            },
+        }
+    }
+    observation = {"observation": {"record_switching_windows": True}}
+    card = {"escalation": escalation}
+    card.update(weak_decoder)
+    card.update(observation)
+    strong_decoder = strong_unit("belief_matching")
+    card.update(strong_decoder)
+    return card
+
+
+def _confidence_charges(machine) -> list:
+    """The ticks each CONFIDENCE line of the run charged, in order."""
+    charged = []
+    for line in machine.observation.log.lines:
+        if "CONFIDENCE" not in line:
+            continue
+        parts = line.split(": ")
+        charge_text = parts[-1]
+        ticks_text = charge_text.replace(" ticks", "")
+        charged.append(int(ticks_text))
+    return charged
+
+
+def _weak_services(machine) -> list:
+    """The decode services of the weak pool, in the order they ended."""
+    weak = []
+    for service in machine.observation.decode_records.services:
+        if service.pool == "default":
+            weak.append(service)
+    return weak
+
+
+def _walk_card_machine(tmp_path, microseconds):
+    """One d=3 shot of the walk card, built and run through the yaml."""
+    from decsim.machine import Machine
+
+    card = _walk_card(microseconds, "union_find", "cluster_gap")
+    config_path = write_config(tmp_path, card)
+    config = load_experiment(config_path)
+    settings = config.point_settings(
+        physical_error_probability=NEAR_THRESHOLD_P,
+        distance=3,
+        round_period_us=1.0,
+    )
+    machine = Machine.build(settings, 0)
+    machine.run()
+    return machine
+
+
+def test_a_priced_confidence_walk_charges_its_card_once_per_window(tmp_path):
+    """escalation.confidence_walk_microseconds is a card, like a tier's.
+
+    The cluster gap's walk is a Dijkstra over the decode's own edge
+    intervals (Meister et al. 2405.07433 Algorithm 2), charged on the
+    unit that grew them (decision D8). Left null it is measured on the
+    host clock; given a number it is that number of microseconds per
+    window, so a yaml experiment can price it the way a decoder tier is
+    priced.
+    """
+    machine = _walk_card_machine(tmp_path, 12.0)
+    expected_ticks = decsim_config.microseconds_to_ticks(12.0)
+    charged = _confidence_charges(machine)
+    weak_services = _weak_services(machine)
+    assert charged
+    assert len(charged) == len(weak_services)
+    for ticks in charged:
+        assert ticks == expected_ticks
+
+
+def test_a_negative_confidence_walk_is_refused_by_name(tmp_path):
+    card = _walk_card(-1.0, "union_find", "cluster_gap")
+    config_path = write_config(tmp_path, card)
+    with pytest.raises(
+        ValueError,
+        match="escalation.confidence_walk_microseconds must be finite",
+    ):
+        load_experiment(config_path)
+
+
+def test_a_confidence_walk_that_is_not_a_number_is_refused_by_name(tmp_path):
+    card = _walk_card("fast", "union_find", "cluster_gap")
+    config_path = write_config(tmp_path, card)
+    with pytest.raises(
+        ValueError,
+        match="escalation.confidence_walk_microseconds must be a number",
+    ):
+        load_experiment(config_path)

@@ -13,6 +13,7 @@ subtraction.
 import dataclasses
 from typing import Optional
 
+import decsim.config as config
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.records.decoding as decoding_records
 
@@ -32,8 +33,14 @@ FORCED_LOGICAL_CLASSES = (0, 1)
 
 @dataclasses.dataclass(frozen=True)
 class ComplementaryGap:
-    """The signal row: the gap between one window's two forced solves."""
+    """The signal row: the gap between one window's two forced solves.
 
+    walk_microseconds is what this row's own computation costs on the
+    weak unit; None is free, because the computation is one subtraction
+    of two numbers the decodes already reported (decision D8).
+    """
+
+    walk_microseconds: Optional[float] = None
     source = COMPLEMENTARY_GAP_SOURCE
     fault_model_requirement = fault_models.GRAPHLIKE_FAULT_MODEL_REQUIRED
     decoder_evidence_requirement = decoding_records.FORCED_CLASS_SOLVES
@@ -54,10 +61,18 @@ class ComplementaryGap:
         pins no observable has no forced solve, and the escalation
         policy then escalates it (escalation/policies.py). The
         computation is one subtraction of two numbers the decodes
-        already reported, so it charges no time (decision D8).
+        already reported, so it charges no time unless the yaml prices
+        it (decision D8).
         """
         soft_output = self._gap_of(solves)
-        return decoding_records.SoftOutputComputation(soft_output, 0)
+        ticks = self._walk_ticks()
+        return decoding_records.SoftOutputComputation(soft_output, ticks)
+
+    def _walk_ticks(self) -> int:
+        """The ticks the card prices this row's computation at."""
+        if self.walk_microseconds is None:
+            return 0
+        return config.microseconds_to_ticks(self.walk_microseconds)
 
     def _gap_of(self, solves: tuple) -> Optional[decoding_records.SoftOutput]:
         """|w(class 1) - w(class 0)|, or None when a weight is missing."""

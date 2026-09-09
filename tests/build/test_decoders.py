@@ -16,6 +16,7 @@ import decsim.build.plan as plan_build
 import decsim.decoders.decode_queue as decode_queue
 import decsim.decoders.decoders as decoders
 import decsim.decoders.settings as decoder_settings
+import decsim.detector_error_model.detection_event_formation as event_formation
 import decsim.escalation.settings as escalation_settings
 import decsim.settings as machine_settings
 import tests.declared_run as declared_run
@@ -48,7 +49,10 @@ def _settings(*, escalation=None, weak=None, strong=None):
 def _pool(settings):
     policy = escalation_build.build_escalation_policy(settings.escalation)
     plan = plan_build.build_plan(settings, policy)
-    return decoder_build.build_decoder_pool(settings, plan, policy)
+    formed_at_the_controller = event_formation.ControllerSideFormation(None, 0)
+    return decoder_build.build_decoder_pool(
+        settings, plan, policy, formed_at_the_controller
+    )
 
 
 def _preset(microseconds: float):

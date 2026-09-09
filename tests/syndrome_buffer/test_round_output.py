@@ -40,17 +40,23 @@ class _Transfers:
         on_delivered()
         return 3
 
+    def send_for_round(self, path, packet, payload_bits, on_delivered) -> None:
+        del packet
+        self.sends.append((path, payload_bits))
+        on_delivered()
+
     def send_boundary(self, attribution, payload_bits, on_delivered) -> None:
         del attribution, on_delivered
         path = transfer_records.LinkPath.DECODER_TO_DECODER
         self.sends.append((path, payload_bits))
 
 
-def _output(transfers) -> round_output.RoundStoreOutput:
+def _output(transfers, store=None) -> round_output.RoundStoreOutput:
     return round_output.RoundStoreOutput(
         transfers,
         transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER,
         "Buffer 0",
+        store,
     )
 
 

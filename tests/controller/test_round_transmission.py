@@ -25,10 +25,12 @@ import decsim.engine as engine_module
 import decsim.links.fabric as fabric_module
 import decsim.links.link_profiles as link_profiles
 import decsim.links.settings as link_settings
+import decsim.links.window_transfers as window_transfers
 import decsim.observe.link_traffic as link_traffic
 import decsim.observe.round_events as round_events
 import decsim.records.rounds as round_records
 import decsim.records.transfers as transfer_records
+import decsim.syndrome_buffer.round_output as round_output
 import decsim.syndrome_buffer.round_store as round_store_module
 import decsim.syndrome_buffer.settings as round_store_settings
 
@@ -143,8 +145,15 @@ def transmitter_with(engine, profile, windows=None):
     else:
         windows = windows(engine, links)
     recorder = round_events.RoundEventRecorder(engine)
+    transfers = window_transfers.WindowTransfers(engine, links)
+    store_output = round_output.RoundStoreOutput(
+        transfers,
+        transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER,
+        "Buffer 0",
+        store,
+    )
     transmitter = round_transmission.RoundTransmitter(
-        engine, links, store, windows
+        engine, links, windows, store_output
     )
     transmitter.trace.round_event.connect(recorder.record)
     return transmitter, store, windows, recorder, ledger

@@ -158,6 +158,9 @@ class Machine:
         strong_round_store = store_build.build_strong_round_store(
             settings.strong_round_store, escalation_policy, held_rounds
         )
+        weak_output, strong_output = store_build.build_store_outputs(
+            engine, links, round_store, strong_round_store
+        )
         pauli_frame = store_build.build_pauli_frame(
             settings.pauli_frame, engine
         )
@@ -178,6 +181,8 @@ class Machine:
             fault_model_requirement_for=pool.router.fault_model_requirement_for,
             round_store=round_store,
             strong_round_store=strong_round_store,
+            weak_output=weak_output,
+            strong_output=strong_output,
             pauli_frame=pauli_frame,
             decode_queue=decoder_manager,
             on_workload_complete=lambda: factory.shutdown(),
@@ -186,7 +191,7 @@ class Machine:
             engine, links, strong_round_store, window_manager
         )
         transmitter = round_transmission.RoundTransmitter(
-            engine, links, round_store, window_manager
+            engine, links, window_manager, weak_output
         )
         publishes_from_strong_store = not window_manager.reads_windows_from(
             round_store

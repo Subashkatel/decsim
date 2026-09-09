@@ -857,6 +857,15 @@ class WindowTransfers(Protocol):
     ) -> int:
         """Send in a job's name; returns the delay the link expects."""
 
+    def send_for_round(
+        self,
+        path: transfer_records.LinkPath,
+        packet: round_records.SyndromeRoundPacket,
+        payload_bits: Optional[int],
+        on_delivered: Callable[[], None],
+    ) -> None:
+        """Send in a stored round's name; on_delivered runs at the delivery."""
+
     def send_boundary(
         self,
         attribution: transfer_records.TransferAttribution,

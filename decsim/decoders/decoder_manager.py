@@ -545,6 +545,11 @@ SETTLE_BY_JOB_KIND = {
     _JOB_KINDS.STRONG_BATCH: DecoderManager._strong_decode_done,
     _JOB_KINDS.SELF_CONTAINED: DecoderManager._self_contained_decode_done,
 }
+# a new job kind says how it settles here, at the table, and not with a
+# KeyError inside the completion of the first decode that has it
+assert set(SETTLE_BY_JOB_KIND) == set(_JOB_KINDS), (
+    "every decode job kind says how it is settled"
+)
 
 
 def _refuse_spent_job(job: decoding_records.DecodeJob) -> None:

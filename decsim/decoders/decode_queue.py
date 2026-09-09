@@ -33,6 +33,11 @@ POOL_BY_JOB_KIND = {
     decoding_records.DecodeJobKind.STRONG_BATCH: STRONG_POOL,
     decoding_records.DecodeJobKind.SELF_CONTAINED: DEFAULT_POOL,
 }
+# a new job kind names its pool here, at the table, and not with a
+# KeyError inside the first enqueue of a run
+assert set(POOL_BY_JOB_KIND) == set(decoding_records.DecodeJobKind), (
+    "every decode job kind names the pool it asks for"
+)
 
 
 class WaitingJobs:

@@ -11,6 +11,7 @@ import pytest
 
 import decsim.config as config
 import decsim.decoders.decoder as decoder_module
+import decsim.decoders.decoder_manager as decoder_manager
 import decsim.decoders.decoders as decoders
 import decsim.decoders.schedulers as schedulers
 import decsim.decoders.staged_decoder as staged_decoder
@@ -211,3 +212,15 @@ def test_the_manager_narrates_a_model_that_can_pin_no_logical_class():
     assert len(lines) == 1
     assert "5-detector window model" in lines[0]
     assert "one observable, no boundary" in lines[0]
+
+
+def test_every_job_kind_says_how_it_is_settled():
+    """The settle table is read at every completion, so it is closed at import.
+
+    A kind with no settle row would raise a KeyError inside the decode
+    completion, after the decoder has already run, rather than at the
+    table that is missing the row.
+    """
+    kinds = set(decoding_records.DecodeJobKind)
+    settled = set(decoder_manager.SETTLE_BY_JOB_KIND)
+    assert settled == kinds

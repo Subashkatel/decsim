@@ -7,6 +7,20 @@ noiseless reference parity; that is Stim's own rule
 A front end may declare the packet schedule (measurement_rounds);
 without one, the Stim generator layout applies, with the trailing data
 readout folded into the last round's packet.
+
+The folding is why a round's detector count is not constant. On a
+rotated surface-code memory Stim lays out three kinds of layer: the
+preparation layer compares each check against the prepared state and
+holds (d*d - 1)/2 detectors, every bulk layer compares a round against
+the one before it and holds d*d - 1, and the readout layer rebuilds the
+checks from the data-qubit readout and holds another (d*d - 1)/2. The
+readout layer folds into the last round, so the rounds this module
+forms carry (d*d - 1)/2 events on the first, d*d - 1 in the middle and
+3(d*d - 1)/2 on the last: 4, 8 and 12 at d=3, 12, 24 and 36 at d=5,
+24, 48 and 72 at d=7, read off stim.Circuit.generated. The raw packet
+widths differ again, d*d - 1 per round and d*d - 1 + d*d on the last,
+which is where the 240-against-249 and 1200-against-1225 bit counts of
+the store hop come from.
 """
 
 import dataclasses

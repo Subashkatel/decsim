@@ -695,23 +695,63 @@ class _StoredRounds:
         return ("the stored rounds",)
 
 
-def test_a_row_that_folds_a_neighbour_boundary_is_told_what_it_needs():
-    """The port's input declaration, and the one piece it still needs.
+class _RecordingCourier:
+    """A courier that records the faces a row asked it to pin."""
+
+    def __init__(self) -> None:
+        self.pinned = []
+
+    def committed(self, key: tuple):
+        """No boundary; a row reaches the courier through the pin."""
+        del key
+        return None
+
+    def pin_strong_face(self, source_key, destination, model, operation):
+        """Note the face the row pinned, with what the fold reads."""
+        self.pinned.append((source_key, destination, model, operation))
+
+
+def _folding_collaborators(retention, courier):
+    """The one collaborator record, with only the fold's two components."""
+    return strong_window_shapes.StrongWindowCollaborators(
+        engine=None,
+        regions=None,
+        planner=None,
+        retention=retention,
+        builder=None,
+        requester=None,
+        ledger=None,
+        courier=courier,
+    )
+
+
+def test_a_row_that_pins_a_face_folds_the_boundary_it_declares():
+    """The input adaptation is asked for once per declared face.
 
     A row that pins a face carries its neighbour's committed correction
     into the strong job's input, which is Bombin et al. 2303.04846's
-    input adaptation (lines 775-788). Both shipped rows fold none, and a
-    row that declares one is told where the missing machinery goes
-    rather than losing the declaration.
+    input adaptation (lines 775-788): the courier ships the committed
+    boundary to this window and folds it into the window's boundary
+    state, against the strong window's own model. A row that folds none
+    reads the stored rounds and asks the courier for nothing.
     """
     retention = _StoredRounds()
+    courier = _RecordingCourier()
+    collaborators = _folding_collaborators(retention, courier)
     window = object()
+    model = object()
+    operation = object()
     payloads = strong_window_shapes.strong_job_payloads(
-        retention, None, window, strong_window_shapes.FOLDS_NO_BOUNDARY
+        collaborators,
+        window,
+        model,
+        operation,
+        strong_window_shapes.FOLDS_NO_BOUNDARY,
     )
     assert payloads == ("the stored rounds",)
-    with pytest.raises(NotImplementedError) as refusal:
-        strong_window_shapes.strong_job_payloads(
-            retention, None, window, ((1, 1),)
-        )
-    assert "windows/decode_requests.py" in str(refusal.value)
+    assert courier.pinned == []
+    payloads = strong_window_shapes.strong_job_payloads(
+        collaborators, window, model, operation, ((1, 1),)
+    )
+    assert payloads == ("the stored rounds",)
+    assert courier.pinned == [((1, 1), window, model, operation)]

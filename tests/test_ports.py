@@ -40,48 +40,88 @@ def _protocol_body(tree: ast.Module, port: str) -> list:
     raise AssertionError(f"decsim/ports.py declares no {port}")
 
 
-def _called_on(reference: str, packages: tuple) -> dict:
-    """The attribute names reached for through self.<reference>, by site."""
+def _called_on(references: tuple, packages: tuple) -> dict:
+    """The attribute names reached for through one collaborator, by site.
+
+    A reference is matched wherever it stands: a field (self.weak_store),
+    a local or a parameter (store), so a package that passes the
+    collaborator down to a helper is walked too.
+    """
     sites = {}
     for package in packages:
         directory = PACKAGE_ROOT / "decsim" / package
         modules = directory.glob("*.py")
         for path in sorted(modules):
-            _collect_calls(path, reference, sites)
+            _collect_calls(path, references, sites)
     return sites
 
 
-def _collect_calls(path: pathlib.Path, reference: str, sites: dict) -> None:
-    """Add every self.<reference>.<name> of one file to the sites map."""
+def _collect_calls(path: pathlib.Path, references: tuple, sites: dict) -> None:
+    """Add every <reference>.<name> of one file to the sites map."""
     text = path.read_text()
     tree = ast.parse(text)
     for node in ast.walk(tree):
-        if not _is_reference_attribute(node, reference):
+        if not isinstance(node, ast.Attribute):
+            continue
+        if _base_name(node.value) not in references:
             continue
         where = f"{path.parent.name}/{path.name}:{node.lineno}"
         found = sites.setdefault(node.attr, [])
         found.append(where)
 
 
-def _is_reference_attribute(node, reference: str) -> bool:
-    """True for the node self.<reference>.<name>, whatever the name."""
-    if not isinstance(node, ast.Attribute):
-        return False
-    inner = node.value
-    if not isinstance(inner, ast.Attribute):
-        return False
-    if inner.attr != reference:
-        return False
-    return isinstance(inner.value, ast.Name) and inner.value.id == "self"
+def _base_name(node) -> str:
+    """The name the attribute is read from, or the empty string."""
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    return ""
+
+
+def _undeclared(called: dict, ports: tuple, exempt: tuple = ()) -> dict:
+    """The reached names no listed port declares, with their sites."""
+    declared = set(exempt)
+    for port in ports:
+        declared |= _port_names(port)
+    undeclared = {}
+    for name, sites in called.items():
+        if name not in declared:
+            undeclared[name] = sites
+    return undeclared
 
 
 def test_the_decode_queue_port_declares_what_the_window_side_calls():
     """The window and confidence sides hold a manager only as this port."""
     callers = ("windows", "escalation", "confidence", "controller")
-    called = _called_on("decode_queue", callers)
-    declared = _port_names("DecodeQueue")
-    undeclared = {}
-    for name, sites in called.items():
-        if name not in declared:
-            undeclared[name] = sites
-    assert undeclared == {}
+    called = _called_on(("decode_queue",), callers)
+    assert _undeclared(called, ("DecodeQueue",)) == {}
+
+
+def test_the_store_ports_declare_what_a_caller_outside_the_buffer_calls():
+    """Two neighbours cross a store, so two ports carry its promises.
+
+    trace is exempt by the ports' own rule: observation reaches a
+    component through the callbacks it fires, never through a port.
+    """
+    callers = ("controller", "windows", "observe")
+    references = (
+        "store",
+        "weak_store",
+        "strong_store",
+        "primary_store",
+        "round_store",
+    )
+    called = _called_on(references, callers)
+    ports = ("RoundStore", "RetainedRounds")
+    assert _undeclared(called, ports, exempt=("trace",)) == {}
+
+
+def test_the_qpu_port_declares_what_the_controller_calls():
+    called = _called_on(("qpu",), ("controller",))
+    assert _undeclared(called, ("Qpu",)) == {}
+
+
+def test_the_window_input_port_declares_what_the_controller_calls():
+    called = _called_on(("windows",), ("controller",))
+    assert _undeclared(called, ("WindowInput",)) == {}

@@ -71,6 +71,81 @@ class RoundStore(Protocol):
     def release_round(self, round_key: tuple) -> None:
         """Free the round; its consumers are done with it."""
 
+    def mark_publication_tick(
+        self, round_key: tuple, publication_tick: int
+    ) -> None:
+        """The round became readable now; it was written before that."""
+
+    def capacity_rounds(self) -> Optional[int]:
+        """The slots this store is bounded to, or None for unbounded.
+
+        A store bounded some other way than by a slot count answers
+        None and refuses nothing: the callers that size a plan, a trace
+        lane or a room check ask this instead of reading a settings
+        record, so the bound stays the store's own to decide.
+        """
+
+    def held_rounds_description(self) -> str:
+        """The live holds, in one line, for a refusal a reader must debug."""
+
+
+@runtime_checkable
+class RetainedRounds(Protocol):
+    """The same store, as the window side that reads and holds it sees it.
+
+    Two neighbours cross a store on two different handoffs: syndrome
+    packing writes rounds through RoundStore, and the window side keeps
+    the rounds one decode reads alive through this port. A hold names
+    the rounds its holder will read from the moment it is placed, so the
+    store may hold a round it has not received yet; the holder is any
+    record that answers referenced_operation_ids (decsim/records).
+    """
+
+    def register_hold(self, holder, round_keys: tuple) -> None:
+        """Keep these rounds for this holder until it releases them."""
+
+    def replace_hold(self, holder, round_keys: tuple) -> None:
+        """The holder reads a different span now; the old span may go."""
+
+    def transfer_hold(self, old_holder, new_holder) -> None:
+        """The same span passes to a new holder, with no gap between."""
+
+    def release_hold(self, holder) -> None:
+        """The holder is done; rounds no other holder wants may go."""
+
+    def has_hold(self, holder) -> bool:
+        """Whether this holder's span is live."""
+
+    def hold_round_identities(self, holder) -> tuple:
+        """The rounds this holder keeps, in the order it named them."""
+
+    def release_round_if_unheld(self, round_key: tuple) -> bool:
+        """Free the round when no holder wants it; True when it went."""
+
+    def retained_fragments(self, round_key: tuple) -> Optional[tuple]:
+        """The stored round's fragments, or None before and after storage."""
+
+    def is_round_held(self, round_key: tuple) -> bool:
+        """Whether a holder wants this round, stored or still expected."""
+
+    def publication_tick(self, round_key: tuple) -> Optional[int]:
+        """When the round became readable, or None while it is not."""
+
+    def open_operation(self, operation_id) -> None:
+        """This operation may receive rounds from now on."""
+
+    def has_operation(self, operation_id) -> bool:
+        """Whether the store still serves this operation."""
+
+    def close_operation(self, operation_id) -> None:
+        """The operation sends no more rounds; a closed one never reopens."""
+
+    def has_live_operation_reference(self, operation_id) -> bool:
+        """Whether a hold or a stored round still names this operation."""
+
+    def capacity_rounds(self) -> Optional[int]:
+        """The slots this store is bounded to, or None for unbounded."""
+
 
 @runtime_checkable
 class StrongRoundStore(Protocol):
@@ -97,12 +172,45 @@ class StrongRoundStore(Protocol):
 
 @runtime_checkable
 class WindowInput(Protocol):
-    """The window manager, as syndrome packing sees it."""
+    """The window manager, as the controller side sees it.
+
+    Two kinds of thing cross here. A round arrives: the packed round
+    itself, or the note that an idle patch produced a timing-only one. A
+    stream's shape changes: the controller learns a dynamic stream's
+    boundary, its length, or which segment folds into it, and the window
+    plan follows. Both stay one-way; the window manager answers nothing
+    back except whether it knows a stream at all.
+    """
 
     def accept_window_input(
         self, packet: round_records.SyndromeRoundPacket
     ) -> None:
         """Publish one stored round to window readiness; never refused."""
+
+    def accept_feedback_memory_round(self, source_operation_id) -> None:
+        """Record one idle or memory round and re-check waiting windows."""
+
+    def prepend_idle_rounds(self, operation_id: int, round_count: int) -> None:
+        """Fold pre-gate idle rounds into a batch-style operation."""
+
+    def has_dynamic_stream(self, stream_id) -> bool:
+        """True for a stream whose windows are planned at runtime."""
+
+    def close_stream_boundary(self, stream_id, stream_round_count: int) -> None:
+        """Mark a live stream round as a measurement-closed boundary."""
+
+    def seal_stream(self, stream_id, stream_round_count: int) -> None:
+        """Close a dynamic stream once its full length has arrived."""
+
+    def bind_stream_operation(
+        self, operation_id: int, stream_id, stream_offset: int
+    ) -> None:
+        """Note which stream and offset a segment's rounds fold into."""
+
+    def bind_required_stream_end(
+        self, operation_id: int, required_stream_end: int
+    ) -> None:
+        """Note the stream round a protected segment's result waits for."""
 
 
 # ----------------------------------- the decoder manager schedules a decode
@@ -365,10 +473,36 @@ class InstructionReceiver(Protocol):
 
 @runtime_checkable
 class Qpu(Protocol):
-    """The QPU, as the controller sees it."""
+    """The QPU, as the controller sees it.
+
+    The controller instructs and it emits: an operation body, the end of
+    the program, and the two rounds a patch produces while no body runs.
+    Where the next body may start is the QPU's own cadence, so the
+    controller asks for the boundary rather than computing it.
+    """
 
     def issue(self, command: program_records.RunOperationBody) -> None:
         """Queue one operation body; it starts on the next cycle boundary."""
+
+    def next_boundary(self) -> int:
+        """The cycle boundary at or after now, where an issue would start."""
+
+    def finish(self) -> None:
+        """The program is complete: idle patches stop after this cycle."""
+
+    def emit_idle_stream_round(
+        self,
+        operation: program_records.Operation,
+        stream_id: Any,
+        global_round: int,
+        patch: Any,
+    ) -> None:
+        """Produce and deliver one idle round of a live stream."""
+
+    def emit_feedback_memory_round(
+        self, operation_id: Any, patch: Any, round_index: int
+    ) -> None:
+        """Deliver the timing-only round of an idle patch."""
 
 
 @runtime_checkable

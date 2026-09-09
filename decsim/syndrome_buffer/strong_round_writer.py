@@ -45,7 +45,7 @@ class StrongRoundWriter:
 
     def has_room(self) -> bool:
         """A write can land: capacity counts the rounds stored and in flight."""
-        capacity = self.store.settings.rounds
+        capacity = self.store.capacity_rounds()
         if capacity is None:
             return True
         return self.store.occupancy + self.writes_in_flight < capacity

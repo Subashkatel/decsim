@@ -117,6 +117,13 @@ def test_the_store_ports_declare_what_a_caller_outside_the_buffer_calls():
     assert _undeclared(called, ports, exempt=("trace",)) == {}
 
 
+def test_the_window_transfers_port_declares_what_its_senders_call():
+    """The decoder outputs and a store's output hold the fabric adapter."""
+    callers = ("decoders", "syndrome_buffer")
+    called = _called_on(("transfers",), callers)
+    assert _undeclared(called, ("WindowTransfers",)) == {}
+
+
 def test_the_window_model_port_declares_what_the_planner_calls():
     """The planner's provider is a port, not an Any-typed field."""
     called = _called_on(("provider",), ("windows",))

@@ -156,11 +156,9 @@ class DecodeOutcomes:
         unit = completion.unit
         request_key = completion.request_job.request_key
         window_key = (request_key.operation_id, request_key.window_id)
-        if unit is None:
-            raise RuntimeError(
-                f"strong result for window {window_key} has no unit to wait "
-                "in: a finished result waits in the unit that produced it"
-            )
+        # every finished strong result was produced by a unit, and the
+        # unit is read at the decode's end, before its slot frees
+        assert unit is not None, f"strong result for {window_key} has no unit"
         unit.hold_output(window_key, completion)
 
     def report_request(

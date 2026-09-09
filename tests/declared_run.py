@@ -106,13 +106,12 @@ def declared_profile(*, strong_buffer_microseconds=None):
         base.controller_to_strong_buffer, strong_latency
     )
     declared_edges["controller_to_strong_buffer"] = strong_store
-    return dataclasses.replace(
-        base,
-        # the declared qpu tick is wire time only; readout classification
-        # prices the controller processing separately
-        is_controller_processing_outside_qpu_to_controller=True,
-        **declared_edges,
+    # the declared qpu tick is wire time only; readout classification
+    # prices the controller processing separately
+    declared_edges["qpu_to_controller"] = dataclasses.replace(
+        declared_edges["qpu_to_controller"], excludes_receiver_processing=True
     )
+    return dataclasses.replace(base, **declared_edges)
 
 
 def declared_controller(**changes):

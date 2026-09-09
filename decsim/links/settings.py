@@ -139,12 +139,20 @@ class PathSettings:
     basis as the channel's capacity, so the two describe the same lanes.
     setup_ticks is paid on the channel's setup engine before every
     transfer of the path; zero means the path programs nothing.
+    excludes_receiver_processing says what the card's latency covers: a
+    reference number measured end to end includes the receiver turning
+    the arrival into bits, and a card the run's own yaml wrote times the
+    wire alone, so only the second lets that processing be priced again
+    on the receiving component.
     """
 
     channel: ChannelSettings
     default_payload: Optional[PayloadSettings]
     actual_payload_source: Optional[str]
     setup_ticks: int = 0
+    # the card times the wire alone, so the receiving component's own
+    # processing of what arrives is priced somewhere else
+    excludes_receiver_processing: bool = False
 
     def __post_init__(self) -> None:
         has_default = self.default_payload is not None
@@ -194,7 +202,6 @@ class FabricSettings:
     controller_to_strong_buffer: PathSettings
     profile_name: str
     kind: str = "logical_reference"
-    is_controller_processing_outside_qpu_to_controller: bool = False
 
     def __post_init__(self) -> None:
         channel_by_name = {}

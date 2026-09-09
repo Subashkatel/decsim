@@ -93,7 +93,7 @@ def test_the_reference_card_is_unbounded_on_every_path():
     assert profile.frame_to_controller.channel.capacity is None
     assert profile.controller_to_qpu.channel.capacity is None
     assert profile.profile_name == "logical_reference"
-    assert profile.is_controller_processing_outside_qpu_to_controller is False
+    assert profile.qpu_to_controller.excludes_receiver_processing is False
 
 
 def test_the_reference_card_prices_a_bus_word_and_an_instruction_word():

@@ -88,7 +88,8 @@ class RoundRetention:
             window.operation_id, window.start_round, window.buffer_hi, window
         )
         strong = self.strong_context_read_keys(window, weak)
-        self.weak_store.register_hold(key, weak)
+        reads = decoding_records.WindowReads(key)
+        self.weak_store.register_hold(reads, weak)
         if self.is_strong_context_retained:
             potential = decoding_records.PotentialStrong(key)
             held = weak + strong
@@ -115,8 +116,9 @@ class RoundRetention:
         ):
             held = weak + strong
             self.strong_store.replace_hold(potential, held)
-        if self.weak_store.has_hold(key):
-            self.weak_store.replace_hold(key, weak)
+        reads = decoding_records.WindowReads(key)
+        if self.weak_store.has_hold(reads):
+            self.weak_store.replace_hold(reads, weak)
         restart = decoding_records.PotentialRestart(key)
         if self.weak_store.has_hold(restart):
             self.weak_store.replace_hold(restart, weak)
@@ -133,7 +135,8 @@ class RoundRetention:
         for round_index in range(window.start_round, stop_round):
             new_reads.append((window.operation_id, round_index))
         new_reads.sort()
-        self.weak_store.replace_hold(window.key, new_reads)
+        reads = decoding_records.WindowReads(window.key)
+        self.weak_store.replace_hold(reads, new_reads)
 
     def read_keys_for_bounds(
         self,

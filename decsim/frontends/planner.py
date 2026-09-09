@@ -395,7 +395,8 @@ def _hold_window(
     round_keys = _read_keys(
         execution, operation_id, window.start_round, window.buffer_hi
     )
-    weak.add(key, round_keys, round_keys)
+    reads = decoding_records.WindowReads(key)
+    weak.add(reads, round_keys, round_keys)
     _hold_restart_reads(
         execution,
         operation_id,

@@ -54,6 +54,22 @@ class SoftOutputComputation:
 
 
 # ---- consumer hold tokens: who keeps rounds in a round store and why
+#
+# Every token answers referenced_operation_ids: the operations it keeps
+# open beyond the ones the rounds it names belong to. A store asks the
+# token rather than reading its type, so a token added later is counted
+# by the liveness check like every other one.
+
+
+@dataclass(frozen=True)
+class WindowReads:
+    """A hold: the rounds one window's own decode reads, in its store."""
+
+    window_key: tuple
+
+    def referenced_operation_ids(self) -> tuple:
+        """None: the rounds held are the reading window's own."""
+        return ()
 
 
 @dataclass(frozen=True)
@@ -61,6 +77,10 @@ class PotentialStrong:
     """A hold: a window's rounds, kept in case its weak result escalates."""
 
     window_key: tuple
+
+    def referenced_operation_ids(self) -> tuple:
+        """None: the rounds held are the held window's own."""
+        return ()
 
 
 @dataclass(frozen=True)
@@ -76,12 +96,20 @@ class PotentialRestart:
 
     window_key: tuple
 
+    def referenced_operation_ids(self) -> tuple:
+        """None: the rounds held are the held window's own."""
+        return ()
+
 
 @dataclass(frozen=True)
 class PendingStrong:
     """A hold: rounds for an admitted, not yet served strong request."""
 
     request_key: window_records.DecoderRequestKey
+
+    def referenced_operation_ids(self) -> tuple:
+        """None: the rounds held are the requested window's own."""
+        return ()
 
 
 @dataclass(frozen=True)
@@ -90,6 +118,10 @@ class StrongInputInFlight:
 
     request_key: window_records.DecoderRequestKey
 
+    def referenced_operation_ids(self) -> tuple:
+        """None: the rounds held are the requested window's own."""
+        return ()
+
 
 @dataclass(frozen=True)
 class DecoderInputHold:
@@ -97,12 +129,20 @@ class DecoderInputHold:
 
     request_key: window_records.DecoderRequestKey
 
+    def referenced_operation_ids(self) -> tuple:
+        """None: the rounds held are the job's own."""
+        return ()
+
 
 @dataclass(frozen=True)
 class RephaseGuard:
     """A hold: a rephased suffix's rounds while its strong request is live."""
 
     request_key: window_records.DecoderRequestKey
+
+    def referenced_operation_ids(self) -> tuple:
+        """The guarded request's operation, which the suffix may outlive."""
+        return (self.request_key.operation_id,)
 
 
 @dataclass(frozen=True)

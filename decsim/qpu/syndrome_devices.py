@@ -1,6 +1,6 @@
 """Syndrome sources without a circuit: timing-only and fake-bit readout.
 
-A syndrome source fills the SyndromeDevice seam (decsim/ports.py) and
+A syndrome source fills the SyndromeSource port (decsim/ports.py) and
 is driven by the QPU cycle clock (cycle_clock.py): one payload list per
 operation round, one per idle stream round. Neither source here has a
 circuit, so both answer every detector-error-model question with nothing.

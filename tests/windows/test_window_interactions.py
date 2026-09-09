@@ -11,6 +11,8 @@ reads one buffer region of the strong region as the restart window's
 far boundary.
 """
 
+import pytest
+
 import decsim.records.windows as window_records
 import decsim.windows.boundary_payloads as boundary_payloads
 import decsim.windows.window_interactions as window_interactions
@@ -117,3 +119,70 @@ def test_a_strong_region_at_the_operations_end_has_no_restart_window():
     assert plan.commit_hi == 12
     assert plan.restart_buffer_lo is None
     assert plan.restart_seam_fault_owner is None
+
+
+def _delivery(defects: dict, destination) -> window_records.BoundaryDelivery:
+    """One current same-operation delivery carrying round-keyed defects."""
+    return window_records.BoundaryDelivery(
+        source_key=(1, 0),
+        destination_key=(destination.operation_id, destination.window_index),
+        source_revision=1,
+        delivery_revision=1,
+        latest_source_revision=1,
+        latest_delivery_revision=1,
+        source_operation_round_count=30,
+        dependency_released=False,
+        payload=defects,
+    )
+
+
+def test_a_mask_on_the_destinations_oldest_layer_is_accepted():
+    """W-3: the wire cost counts that layer, so the mask must land there."""
+    boundary_payload = boundary_payloads.DenseSeamMask()
+    interaction = window_interactions.DefaultWindowInteraction(
+        0, boundary_payload
+    )
+    destination = _weak_window_info(4)
+    delivery = _delivery({destination.start_round: [1, 0]}, destination)
+
+    update = interaction.merge_boundary(delivery, destination, None)
+
+    assert update.accepted is True
+
+
+def test_a_mask_from_the_later_neighbour_lands_on_the_newest_layer():
+    """A backward hand-off is a seam too, on the other edge.
+
+    parallel_windows at d=5 has one: window 2 hands window 1, which
+    reads 11..25, a mask on round 25.
+    """
+    boundary_payload = boundary_payloads.DenseSeamMask()
+    interaction = window_interactions.DefaultWindowInteraction(
+        0, boundary_payload
+    )
+    destination = _weak_window_info(4)
+    delivery = _delivery({destination.buffer_hi: [1, 0]}, destination)
+
+    update = interaction.merge_boundary(delivery, destination, None)
+
+    assert update.accepted is True
+
+
+def test_a_mask_inside_the_destination_is_not_a_seam_and_is_refused():
+    """A mask over the middle of a window is not a seam.
+
+    boundary_payload_bits prices one layer, so the rest would ride free.
+    Tan 2209.09219 lines 936-946 and Skoric 2209.08552 lines 268-269:
+    the message is the seam where two windows meet, which is an edge of
+    the destination's read span and never inside it.
+    """
+    boundary_payload = boundary_payloads.DenseSeamMask()
+    interaction = window_interactions.DefaultWindowInteraction(
+        0, boundary_payload
+    )
+    destination = _weak_window_info(4)
+    inside = destination.start_round + 1
+    delivery = _delivery({inside: [1, 0]}, destination)
+
+    with pytest.raises(AssertionError, match="a seam is one of the two"):
+        interaction.merge_boundary(delivery, destination, None)

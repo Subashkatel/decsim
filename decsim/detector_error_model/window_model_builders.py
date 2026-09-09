@@ -25,6 +25,12 @@ from decsim.detector_error_model import (
     window_slicer,
 )
 
+# What a neighbour of a single window has already committed; None when
+# no neighbour has, and the window's columns are every candidate fault.
+_PriorFaults = Optional[
+    dict[fault_model_contracts.FaultRepresentation, Container[int]]
+]
+
 
 def build_window_error_models(
     circuit: stim.Circuit,
@@ -75,12 +81,15 @@ def build_single_window_error_model(
     detector_rounds: Optional[dict[int, int]] = None,
     fault_model_requirement: fault_model_contracts.DecoderFaultModelRequirement,
     exclude_faults_touching: Optional[Sequence[int]] = None,
+    prior_faults: _PriorFaults = None,
 ) -> fault_model_contracts.WindowErrorModel:
     """One window on its own, with one inclusive round range it may not commit.
 
     A fault touching `exclude_faults_touching` stays in the window to
-    explain the syndrome but is never owned by it. A window built alone is
-    never terminal: it commits only what touches its commit rounds.
+    explain the syndrome but is never owned by it. A fault in
+    `prior_faults` is no column at all: a neighbour has committed it.
+    A window built alone is never terminal: it commits only what
+    touches its commit rounds.
     """
     fault_exclusion_ranges = ()
     if exclude_faults_touching is not None:
@@ -92,6 +101,7 @@ def build_single_window_error_model(
         detector_rounds=detector_rounds,
         fault_model_requirement=fault_model_requirement,
         fault_exclusion_ranges=fault_exclusion_ranges,
+        prior_faults=prior_faults,
     )
 
 
@@ -103,6 +113,7 @@ def build_single_window_error_model_with_exclusions(
     detector_rounds: Optional[dict[int, int]] = None,
     fault_model_requirement: fault_model_contracts.DecoderFaultModelRequirement,
     fault_exclusion_ranges: Sequence[Sequence[int]],
+    prior_faults: _PriorFaults = None,
 ) -> fault_model_contracts.WindowErrorModel:
     """One window on its own, with several round ranges it may not commit."""
     return _build_single_window_error_model(
@@ -112,6 +123,7 @@ def build_single_window_error_model_with_exclusions(
         detector_rounds=detector_rounds,
         fault_model_requirement=fault_model_requirement,
         fault_exclusion_ranges=fault_exclusion_ranges,
+        prior_faults=prior_faults,
     )
 
 
@@ -270,6 +282,7 @@ def _build_single_window_error_model(
     detector_rounds: Optional[dict[int, int]],
     fault_model_requirement: fault_model_contracts.DecoderFaultModelRequirement,
     fault_exclusion_ranges: Sequence[Sequence[int]],
+    prior_faults: _PriorFaults,
 ) -> fault_model_contracts.WindowErrorModel:
     exclusion_ranges = window_placement.checked_fault_exclusion_ranges(
         fault_exclusion_ranges
@@ -285,4 +298,5 @@ def _build_single_window_error_model(
         *bounds,
         is_last=False,
         fault_exclusion_ranges=exclusion_ranges,
+        explicitly_prior_faults=prior_faults,
     )

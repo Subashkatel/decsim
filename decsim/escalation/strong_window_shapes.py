@@ -663,9 +663,8 @@ class ForwardSeamWindow(ForwardWindow):
     def _resolved_region(self, key: tuple) -> strong_regions.ForwardRegion:
         """The extent, read with no context on the faces it pins."""
         near_source_key = self.collaborators.regions.near_seam_source(key)
-        pins_near_face = near_source_key is not None
         return self.collaborators.regions.forward_seam_region(
-            key, pins_near_face=pins_near_face
+            key, near_source_key=near_source_key
         )
 
     def _declared_faces(
@@ -706,7 +705,9 @@ def _held_redo(
 ) -> "_HeldStrongRedo":
     """What a row keeps from its plan: its window, its reads, its faces."""
     key = (weak_job.operation_id, weak_job.window_id)
-    model = collaborators.regions.redecode_model(key, strong_window)
+    model = collaborators.regions.redecode_model(
+        key, strong_window, folded_boundaries
+    )
     request_key = collaborators.builder.new_request_key(
         weak_job.operation_id,
         weak_job.window_id,

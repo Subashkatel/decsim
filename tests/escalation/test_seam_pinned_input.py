@@ -26,12 +26,14 @@ Bombin's consistency condition, lines 748-749, is
 d(kappa_i + kappa_j + e)(sigma) = 0 on the checks two tasks share. Two
 exact statements of it hold here: the neighbour and the strong window
 commit no fault in common (lines 703-704, each task commits the
-restriction to its own commit region), and every seam detector the pair
-leaves lit is one an unowned column of the strong window's model
-explains, which is decsim's fault-ownership partition and not a second
-explanation of the same detector. Measured rates of exact annihilation,
-and the same rates on the shipped weak chain, are in design audit
-note 21.
+restriction to its own commit region), and the pair leaves nothing lit
+on the layer where they meet. The second holds because a fault the
+neighbour owns is no column of the pinned model at all (lines 775-788,
+task j decodes over its own error generators): the residual a pair
+leaves on a seam layer is H times the columns the strong decoder
+selected and ownership then dropped, and there are none to drop.
+Measured over ten seeds at d 3, 5 and 7 in design audit note 21
+section 4.
 """
 
 import copy
@@ -42,6 +44,7 @@ import numpy
 import qldpc.decoders.dems as qldpc_dems
 import stim
 
+import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.machine as machine_module
 import decsim.records.decoding as decoding_records
 import decsim.settings as machine_settings
@@ -410,30 +413,32 @@ def _shared_fault_counts(run: tuple) -> list:
     return counts
 
 
-def test_a_lit_seam_detector_is_one_the_window_does_not_own(monkeypatch):
-    """Bombin's consistency condition, and the one way decsim escapes it.
+def test_a_pinned_pair_leaves_its_seam_layer_clean(monkeypatch):
+    """Bombin's consistency condition on the layer two tasks share.
 
-    d(kappa_i + kappa_j + e) = 0 on the shared checks (lines 748-749)
-    holds on the seam layer unless the strong decode explained a
-    detector with a fault it does not own, which its own model still
-    carries as a column and which its correction therefore drops
-    (window_placement.py: an excluded fault is never owned). Every seam
-    detector the pair leaves lit is such a detector, on the pinned rows
-    and on the shipped weak chain alike (design audit note 21).
+    d(kappa_i + kappa_j + e) = 0 on the shared checks (lines 748-749).
+    The residual a pair leaves on its seam layer is H times the columns
+    the strong decoder selected and ownership dropped, so it is zero
+    exactly when the model carries no column the neighbour owns. Both
+    faces of both pinned rows are read, at d 3, 5 and 7.
     """
-    unexplained = []
+    residuals = []
     for case in NEAR_CASES:
         run = _run_case(monkeypatch, case, "near_seam_pinned")
-        counts = _lit_seams_with_no_unowned_explanation(run)
-        unexplained.extend(counts)
-    assert unexplained
-    assert set(unexplained) == {0}
+        near = _seam_residuals(run)
+        residuals.extend(near)
+    for case in FORWARD_CASES:
+        run = _run_case(monkeypatch, case, "forward_seam_pinned")
+        forward = _seam_residuals(run)
+        residuals.extend(forward)
+    assert residuals
+    assert set(residuals) == {0}
 
 
-def _lit_seams_with_no_unowned_explanation(run: tuple) -> list:
-    """Per pinned job, the lit seam detectors no unowned column flips."""
+def _seam_residuals(run: tuple) -> list:
+    """Per pinned face, the seam detectors the pair leaves lit."""
     capture, flip, columns = run
-    counts = []
+    residuals = []
     for job, raw_input, _masked, sources in capture.pinned_jobs():
         strong = _strong_kappa(capture, job, flip, columns)
         if strong is None:
@@ -442,10 +447,83 @@ def _lit_seams_with_no_unowned_explanation(run: tuple) -> list:
         both = (neighbour + strong) % 2
         flipped = _flipped_detectors(flip, both)
         raw = _detector_bits(job, raw_input)
-        lit = _lit_seam_detectors(job, raw, flipped)
-        owned_only = _owned_only_count(job, lit)
-        counts.append(owned_only)
+        for layer in _pinned_seam_layers(job, sources):
+            lit = _lit_seam_detectors(job, raw, flipped, layer)
+            residuals.append(len(lit))
+    return residuals
+
+
+def _pinned_seam_layers(job, sources) -> list:
+    """The layer each pinned face lands on.
+
+    A source that commits after the strong window pins its newest read
+    layer and one that commits before it pins its oldest (Tan
+    2209.09219 lines 936-946).
+    """
+    layers = []
+    for _source_key, committed in sources:
+        source_job, _result = committed
+        if source_job.window.commit_lo > job.window.commit_hi:
+            layers.append(job.window.buffer_hi)
+            continue
+        layers.append(job.window.start_round)
+    return layers
+
+
+def test_a_neighbour_owned_fault_is_no_column_of_the_pinned_model(monkeypatch):
+    """Task j decodes over its own error generators (lines 775-788).
+
+    A fault the pinned neighbour owns has been decided by the neighbour
+    and its effect is already in the input, so the strong model does not
+    offer it again as a column the decoder could spend and ownership
+    would then drop, leaving the seam detector unexplained.
+    """
+    shared = []
+    for case in NEAR_CASES:
+        run = _run_case(monkeypatch, case, "near_seam_pinned")
+        near = _neighbour_owned_columns(run)
+        shared.extend(near)
+    for case in FORWARD_CASES:
+        run = _run_case(monkeypatch, case, "forward_seam_pinned")
+        forward = _neighbour_owned_columns(run)
+        shared.extend(forward)
+    assert shared
+    assert set(shared) == {0}
+
+
+def _neighbour_owned_columns(run: tuple) -> list:
+    """Per pinned face, the neighbour-owned faults the model still carries."""
+    capture, _flip, _columns = run
+    counts = []
+    for job, _raw, _masked, sources in capture.pinned_jobs():
+        model = job.detector_error_model
+        for _source_key, committed in sources:
+            source_job, _result = committed
+            neighbour = source_job.detector_error_model
+            count = _shared_column_count(model, neighbour)
+            counts.append(count)
     return counts
+
+
+def _shared_column_count(model, neighbour) -> int:
+    """The neighbour's owned faults that are columns of the strong model."""
+    owned_by_representation = neighbour.owned_fault_ids()
+    shared = 0
+    for representation, owned in owned_by_representation.items():
+        placed = _placed_view(model, representation)
+        if placed is None:
+            continue
+        columns = set(placed.source_fault_ids)
+        still_offered = columns & owned
+        shared += len(still_offered)
+    return shared
+
+
+def _placed_view(model, representation):
+    """One representation's columns of a window model, or None."""
+    if representation is fault_models.FaultRepresentation.GRAPHLIKE:
+        return model.graphlike_faults
+    return model.physical_faults
 
 
 def _strong_kappa(capture, job, flip, columns):
@@ -473,10 +551,9 @@ def _neighbour_kappa(sources, flip, columns):
     return kappa
 
 
-def _lit_seam_detectors(job, raw: dict, flipped: set) -> list:
+def _lit_seam_detectors(job, raw: dict, flipped: set, seam_round: int) -> list:
     """The seam layer's detectors the two corrections leave lit."""
     positions = job.detector_error_model.defect_positions
-    seam_round = job.window.start_round
     lit = []
     for detector_id, bit in raw.items():
         place = positions[detector_id]
@@ -487,26 +564,3 @@ def _lit_seam_detectors(job, raw: dict, flipped: set) -> list:
         if residual:
             lit.append(detector_id)
     return lit
-
-
-def _owned_only_count(job, lit: list) -> int:
-    """How many lit detectors no unowned column of the model flips."""
-    placed = _placed_faults(job.detector_error_model)
-    owned = numpy.asarray(placed.owned, dtype=bool)
-    check = placed.check.tocsr()
-    row_of = _row_index(job)
-    owned_only = 0
-    for detector_id in lit:
-        row = check.getrow(row_of[detector_id])
-        columns = row.indices
-        unowned = numpy.count_nonzero(~owned[columns])
-        owned_only += int(not unowned)
-    return owned_only
-
-
-def _row_index(job) -> dict:
-    """Which row of the check matrix each detector is."""
-    row_of = {}
-    for index, detector_id in enumerate(job.detector_error_model.detector_ids):
-        row_of[detector_id] = index
-    return row_of

@@ -120,6 +120,7 @@ class TimingOnlyDevice:
         *,
         fault_model_requirement: fault_models.DecoderFaultModelRequirement,
         exclude_faults_touching: Optional[tuple] = None,
+        prior_faults: Optional[dict] = None,
     ) -> None:
         """No circuit, so no strong re-decode has an error model."""
 
@@ -131,6 +132,7 @@ class TimingOnlyDevice:
         *,
         fault_model_requirement: fault_models.DecoderFaultModelRequirement,
         fault_exclusion_ranges: tuple,
+        prior_faults: Optional[dict] = None,
     ) -> None:
         """No circuit, so no strong re-decode has an error model."""
 
@@ -253,6 +255,7 @@ class SyndromeBitDevice(seeding._RandomSeedConsumer):
         *,
         fault_model_requirement: fault_models.DecoderFaultModelRequirement,
         exclude_faults_touching: Optional[tuple] = None,
+        prior_faults: Optional[dict] = None,
     ) -> None:
         """No circuit, so no strong re-decode has an error model."""
 
@@ -264,6 +267,7 @@ class SyndromeBitDevice(seeding._RandomSeedConsumer):
         *,
         fault_model_requirement: fault_models.DecoderFaultModelRequirement,
         fault_exclusion_ranges: tuple,
+        prior_faults: Optional[dict] = None,
     ) -> None:
         """No circuit, so no strong re-decode has an error model."""
 

@@ -49,6 +49,19 @@ class _ForwardProposal:
 
 
 @dataclasses.dataclass(frozen=True)
+class _PinnedFaces:
+    """The faces a forward row pins its input on.
+
+    A row that pins nothing passes None instead of this record and
+    reads every face raw. near_source_key is the window before the
+    region, or None when no committed correction closes that face; the
+    far face pins on the restart window whenever the region has one.
+    """
+
+    near_source_key: Optional[tuple]
+
+
+@dataclasses.dataclass(frozen=True)
 class ForwardRegion:
     """One forward strong region, resolved against the live window graph."""
 
@@ -126,20 +139,44 @@ class StrongRegions:
                 return dependency_key
         return None
 
-    def redecode_model(self, key: tuple, window: window_records.Window):
+    def redecode_model(
+        self,
+        key: tuple,
+        window: window_records.Window,
+        pinned_source_keys: tuple,
+    ):
         """The error model of one strong redo of a window.
 
         The redo owns the faults of its own rounds and none of the
         rounds before its commit region: those belong to the window
         that committed them, whether this row reads them as raw context
-        or pins them.
+        or pins them. A face read raw keeps those faults as columns, so
+        the decoder can still explain a defect with one; a pinned face
+        does not, because the neighbour has decided them and its answer
+        is already in the input (Bombin et al. 2303.04846 lines
+        775-788, task j decodes over its own error generators).
         """
         round_count = self.round_count_for(key[0], window)
         exclusions = _left_fault_exclusions(window.commit_lo)
         operation = self.tracker.operation(key[0])
+        prior_faults = self._faults_the_pins_carry(pinned_source_keys)
         return self.planner.strong_window_model(
-            operation, window, round_count, exclusions
+            operation, window, round_count, exclusions, prior_faults
         )
+
+    def _faults_the_pins_carry(self, pinned_source_keys: tuple):
+        """What the windows behind the pinned faces have committed.
+
+        The union over the pinned faces, per fault representation. None
+        when the row pins nothing, or when the run builds no error
+        models and no window owns anything.
+        """
+        owned_sets = []
+        for source_key in pinned_source_keys:
+            owned = self.planner.owned_faults_of(source_key)
+            if owned is not None:
+                owned_sets.append(owned)
+        return _union_of_owned_faults(owned_sets)
 
     def forward_region(self, key: tuple) -> ForwardRegion:
         """The forward strong region of an escalated window, resolved.
@@ -149,10 +186,10 @@ class StrongRegions:
         to be retained before anything moves.
         """
         proposal = self._proposed_forward_region(key)
-        return self._resolved_forward_region(key, proposal)
+        return self._resolved_forward_region(key, proposal, pinned_faces=None)
 
     def forward_seam_region(
-        self, key: tuple, *, pins_near_face: bool
+        self, key: tuple, *, near_source_key: Optional[tuple]
     ) -> ForwardRegion:
         """The same extent, read with no context on its pinned faces.
 
@@ -171,13 +208,16 @@ class StrongRegions:
         proposal = self._proposed_forward_region(key)
         plan = proposal.plan
         context_lo = plan.context_lo
-        if pins_near_face:
+        if near_source_key is not None:
             context_lo = plan.commit_lo
         pinned_plan = dataclasses.replace(
             plan, context_lo=context_lo, context_hi=plan.commit_hi
         )
         pinned = dataclasses.replace(proposal, plan=pinned_plan)
-        return self._resolved_forward_region(key, pinned)
+        pinned_faces = _PinnedFaces(near_source_key)
+        return self._resolved_forward_region(
+            key, pinned, pinned_faces=pinned_faces
+        )
 
     def _proposed_forward_region(self, key: tuple) -> "_ForwardProposal":
         """The extent the interaction proposes, with what it was read on."""
@@ -196,7 +236,11 @@ class StrongRegions:
         )
 
     def _resolved_forward_region(
-        self, key: tuple, proposal: "_ForwardProposal"
+        self,
+        key: tuple,
+        proposal: "_ForwardProposal",
+        *,
+        pinned_faces: Optional["_PinnedFaces"],
     ) -> ForwardRegion:
         """The proposed extent checked against the windows that exist."""
         operation_id = key[0]
@@ -220,6 +264,7 @@ class StrongRegions:
             restart_key,
             restart_reads,
             context_keys,
+            pinned_faces,
         )
 
     def operation(self, operation_id) -> program_records.Operation:
@@ -294,23 +339,38 @@ class StrongRegions:
         restart_key: Optional[tuple],
         restart_reads: tuple,
         context_keys: list,
+        pinned_faces: Optional["_PinnedFaces"],
     ) -> ForwardRegion:
-        """The resolved region with the two windows' error models."""
+        """The resolved region with the two windows' error models.
+
+        The restart window is modelled first, because a row that pins
+        its far face on that window's commit takes the faults the
+        restart window owns as prior faults of its own model.
+        """
         operation = self.tracker.operation(key[0])
         strong_exclusions, restart_exclusions = _fault_exclusions(
             plan, round_count, restart_key
         )
         strong_window = _strong_window_of(key, plan)
-        strong_model = self.planner.strong_window_model(
-            operation, strong_window, round_count, strong_exclusions
-        )
         proposed_restart = None
         restart_model = None
         if restart_key is not None:
             proposed_restart = self._proposed_restart_window(restart_key, plan)
             restart_model = self.planner.strong_window_model(
-                operation, proposed_restart, round_count, restart_exclusions
+                operation,
+                proposed_restart,
+                round_count,
+                restart_exclusions,
+                None,
             )
+        prior_faults = self._forward_prior_faults(pinned_faces, restart_model)
+        strong_model = self.planner.strong_window_model(
+            operation,
+            strong_window,
+            round_count,
+            strong_exclusions,
+            prior_faults,
+        )
         return ForwardRegion(
             plan=plan,
             absorbed_window_keys=absorbed,
@@ -323,6 +383,30 @@ class StrongRegions:
             restart_model=restart_model,
         )
 
+    def _forward_prior_faults(
+        self, pinned_faces: Optional["_PinnedFaces"], restart_model
+    ):
+        """What the faces of a forward region's pins carry.
+
+        The near face pins on the window before the region, whose
+        committed faults the planner holds; the far face pins on the
+        restart window, whose model is the one built just above. A row
+        that pins neither face gets None and keeps every candidate fault
+        as a column.
+        """
+        if pinned_faces is None:
+            return None
+        owned_sets = []
+        near_source_key = pinned_faces.near_source_key
+        if near_source_key is not None:
+            near_owned = self.planner.owned_faults_of(near_source_key)
+            if near_owned is not None:
+                owned_sets.append(near_owned)
+        if restart_model is not None:
+            restart_owned = restart_model.owned_fault_ids()
+            owned_sets.append(restart_owned)
+        return _union_of_owned_faults(owned_sets)
+
     def _proposed_restart_window(
         self, restart_key: tuple, plan: window_records.StrongRegionPlan
     ) -> window_records.Window:
@@ -331,6 +415,19 @@ class StrongRegions:
         proposed = copy.deepcopy(restart)
         proposed.buffer_lo = plan.restart_buffer_lo
         return proposed
+
+
+def _union_of_owned_faults(owned_sets: list):
+    """One prior-fault map from several windows' owned sets, or None."""
+    if not owned_sets:
+        return None
+    union: dict = {}
+    empty: frozenset = frozenset()
+    for owned in owned_sets:
+        for representation, fault_ids in owned.items():
+            already = union.get(representation, empty)
+            union[representation] = already | fault_ids
+    return union
 
 
 def _context_window_of(

@@ -324,10 +324,13 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         *,
         fault_model_requirement: fault_models.DecoderFaultModelRequirement,
         exclude_faults_touching: Optional[tuple] = None,
+        prior_faults: Optional[dict] = None,
     ) -> Optional[fault_models.WindowErrorModel]:
         """An independent two-sided context model for a strong re-decode.
 
-        One optional inclusive range is assigned to another seam side.
+        One optional inclusive range is assigned to another seam side,
+        and a pinned face's neighbour supplies the faults it has already
+        committed, which are no columns of this model.
         """
         if operation.circuit is None:
             return None
@@ -341,6 +344,7 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
             detector_rounds=detector_rounds,
             fault_model_requirement=fault_model_requirement,
             exclude_faults_touching=exclude_faults_touching,
+            prior_faults=prior_faults,
         )
 
     def strong_window_model_for_operation_with_exclusions(
@@ -351,6 +355,7 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         *,
         fault_model_requirement: fault_models.DecoderFaultModelRequirement,
         fault_exclusion_ranges: tuple,
+        prior_faults: Optional[dict] = None,
     ) -> Optional[fault_models.WindowErrorModel]:
         """A strong re-decode model with several non-owned inclusive ranges."""
         if operation.circuit is None:
@@ -365,6 +370,7 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
             detector_rounds=detector_rounds,
             fault_model_requirement=fault_model_requirement,
             fault_exclusion_ranges=fault_exclusion_ranges,
+            prior_faults=prior_faults,
         )
 
     def _prepare_run_seed_state(self, effective_seed):

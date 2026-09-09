@@ -24,6 +24,7 @@ CONFIGS_DIR = _REPOSITORY_ROOT / "configs"
 # writes into configs/ of their own checkout fails none of them.
 SHIPPED_CONFIGS = (
     "reference.yaml",
+    "seam_pinned_switching.yaml",
     "strong_decoder_baseline.yaml",
     "strong_latency.yaml",
     "strong_latency_preview.yaml",

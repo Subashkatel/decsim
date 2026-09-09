@@ -120,9 +120,9 @@ class StrongWindowCollaborators:
 class StrongWindowShape(Protocol):
     """How the strong tier's window is laid out, as the redecode sees it.
 
-    Table rows: two_sided_context and forward
-    (STRONG_WINDOW_SHAPES, escalation/settings.py). A row that cannot
-    build its job at the escalation returns an
+    Every row of STRONG_WINDOW_SHAPES (escalation/settings.py)
+    implements it, and escalation.strong_window names one. A row that
+    cannot build its job at the escalation returns an
     assignment with no job and declares what releases it
     (release_conditions), and the redecode asks held_job for the job when
     those conditions fire; the row never learns which hook rang.

@@ -130,6 +130,7 @@ def build_plan(
         operations=views,
         commit_round_count=commit_round_count,
         buffer_round_count=buffer_round_count,
+        strong_window=settings.escalation.strong_window,
         is_absorbing_strong_window=absorbs_weak_windows,
         is_bulk_strong=settings.decoder_manager.bulk_strong,
         has_dynamic_streams=bool(dynamic_streams),

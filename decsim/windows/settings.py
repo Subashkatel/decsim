@@ -6,13 +6,14 @@ from typing import Optional
 
 import decsim.ports as ports
 import decsim.records.windows as window_records
+import decsim.tables as tables
 import decsim.windows.boundary_payloads as boundary_payloads
+import decsim.windows.boundary_policies as boundary_policies
 import decsim.windows.schemes.naive_online as naive_online_scheme
 import decsim.windows.schemes.parallel as parallel_scheme
 import decsim.windows.schemes.sandwich as sandwich_scheme
 import decsim.windows.schemes.sliding as sliding_scheme
 import decsim.windows.window_interactions as window_interactions
-import decsim.windows.window_manager as window_manager
 
 # windows.kind names one of these rows: how the stream is cut into
 # windows.
@@ -21,6 +22,12 @@ WINDOWING_SCHEMES = {
     "parallel": parallel_scheme.ParallelWindowScheme,
     "sandwich": sandwich_scheme.TanSandwichScheme,
     "naive_online": naive_online_scheme.NaiveOnlineScheme,
+}
+# windows.boundaries names one of these rows: when a committed window
+# ships its boundary to the windows after it.
+BOUNDARY_POLICIES = {
+    "eager": boundary_policies.Eager,
+    "held": boundary_policies.Held,
 }
 # windows.boundary_payload names one of these rows: how the hand-off
 # between two windows is written on decoder_to_decoder.
@@ -44,7 +51,11 @@ class WindowSettings:
     records/windows.py), how a finite stream drains its last buffered
     window; null, the default, leaves the row on flush, and on lookahead
     when the escalation may escalate, since a strong recovery needs a
-    last window that reads past its own commit. A
+    last window that reads past its own commit. boundaries names a row of
+    BOUNDARY_POLICIES (above): when a committed window ships its boundary
+    to the windows after it; null, the default, is held when the
+    escalation may escalate and the strong window does not absorb the
+    weak windows it covers, and eager otherwise. A
     Python-built scheme, boundary policy or window interaction is used as
     it is; the root's defaults are the sliding scheme, Eager shipping and
     the default interaction.
@@ -55,8 +66,9 @@ class WindowSettings:
     buffer_rounds: Optional[int] = None
     boundary_payload: str = "dense_seam_mask"
     terminal_policy: Optional[str] = None
+    boundaries: Optional[str] = None
     scheme: Optional[ports.WindowingScheme] = None
-    boundary_policy: Optional[window_manager.BoundaryPolicy] = None
+    boundary_policy: Optional[ports.BoundaryPolicy] = None
     window_interaction: Optional[window_interactions.WindowInteraction] = None
 
     @classmethod
@@ -65,12 +77,16 @@ class WindowSettings:
         boundary_payload = section.get("boundary_payload", "dense_seam_mask")
         terminal_policy = section.get("terminal_policy")
         _check_terminal_policy(terminal_policy)
+        boundaries = section.get("boundaries")
+        if boundaries is not None:
+            tables.row(BOUNDARY_POLICIES, "windows.boundaries", boundaries)
         return cls(
             kind=section["kind"],
             commit_rounds=section["commit_rounds"],
             buffer_rounds=section["buffer_rounds"],
             boundary_payload=boundary_payload,
             terminal_policy=terminal_policy,
+            boundaries=boundaries,
         )
 
 

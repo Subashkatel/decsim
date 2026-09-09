@@ -179,6 +179,16 @@ windows:
                                    # with context to read. Only the sliding row
                                    # reads this key; the other three lay their own
                                    # tail.
+  boundaries: null                 # eager | held: when a committed window ships
+                                   # its boundary to the windows after it. eager
+                                   # ships at every commit, held only when the
+                                   # committing result is final. null, the default,
+                                   # is held when the escalation may escalate and
+                                   # the strong window does not absorb the weak
+                                   # windows it covers, and eager otherwise; a
+                                   # provisional boundary that ships is never
+                                   # revised when the strong tier answers later
+                                   # (Toshio 2510.25222 Sec. III A).
   boundary_payload: dense_seam_mask # dense_seam_mask | sparse_seam_list: how a
                                    # window's hand-off to its neighbour is
                                    # written on decoder_to_decoder. The message

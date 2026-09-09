@@ -1,9 +1,8 @@
-"""The two policy seams a run fills: boundaries and idle rounds.
+"""How an idle round of a waiting patch travels: the idle policy rows.
 
-boundary_policy tells the window manager when a committed boundary ships
-(Eager, Held); idle_policy tells the controller how an idle round of a
-waiting patch travels (Ignore, ExtendStream, SeparateDecodeJobs). Any
-object with the same methods works.
+idle_policy names one of Ignore, ExtendStream or SeparateDecodeJobs; each
+fills the IdlePolicy seam (decsim/ports.py). The boundary policy rows
+live beside the windows they ship for (windows/boundary_policies.py).
 
 Idle rounds are real decoder workload. Terhal's backlog bound sets the
 rate syndrome bits are generated, rgen, against the rate they are
@@ -17,29 +16,6 @@ modeling choice: only data feeding the next non-Clifford decision is
 latency-critical (Skoric 2209.08552), so each policy below is valid for a
 different claim.
 """
-
-
-class Eager:
-    """Ships every committed boundary, final or provisional."""
-
-    ships_provisional_boundaries = True
-
-    def on_commit(self, window, final: bool) -> bool:
-        """Ship."""
-        del window
-        del final
-        return True
-
-
-class Held:
-    """Opt-in: ship only when the committing result is final."""
-
-    ships_provisional_boundaries = False
-
-    def on_commit(self, window, final: bool) -> bool:
-        """Ship when final."""
-        del window
-        return final
 
 
 class Ignore:

@@ -22,7 +22,7 @@ import pytest
 
 import decsim.build.escalation as escalation_build
 import decsim.config as config
-import decsim.controller.policies as boundary_policies
+import decsim.controller.policies as idle_policies
 import decsim.controller.settings as controller_settings
 import decsim.decoders.decoder as decoder_module
 import decsim.decoders.decoders as decoders
@@ -53,6 +53,7 @@ import decsim.seeding as seeding
 import decsim.settings as machine_settings
 import decsim.syndrome_buffer.round_store as round_store_module
 import decsim.syndrome_buffer.settings as round_store_settings
+import decsim.windows.boundary_policies as boundary_policies
 import decsim.windows.settings as window_settings
 import tests.declared_run as declared_run
 
@@ -653,9 +654,7 @@ def test_the_default_policies_are_eager_boundaries_and_charged_idle_rounds():
     assert type(first_boundary) is boundary_policies.Eager
     assert type(second_boundary) is boundary_policies.Eager
     assert first_boundary is not second_boundary
-    assert type(first.idle_rounds.policy) is (
-        boundary_policies.SeparateDecodeJobs
-    )
+    assert type(first.idle_rounds.policy) is (idle_policies.SeparateDecodeJobs)
     assert first.idle_rounds.policy is not second.idle_rounds.policy
 
 
@@ -673,7 +672,7 @@ def test_a_policy_written_outside_decsim_is_used_on_its_own_axis():
         boundary_policy
     )
     assert type(with_boundary.idle_rounds.policy) is (
-        boundary_policies.SeparateDecodeJobs
+        idle_policies.SeparateDecodeJobs
     )
     assert with_idle.idle_rounds.policy is idle_policy
     assert type(with_idle.window_manager.courier.boundary_policy) is (

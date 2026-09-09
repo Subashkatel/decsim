@@ -113,6 +113,15 @@ class RoundStore:
             raise RuntimeError(f"round {round_key!r} has live consumer holds")
         self._free_round(round_key)
 
+    def capacity_rounds(self) -> Optional[int]:
+        """The slots this store is bounded to, or None for unbounded.
+
+        The plan check, the trace lane and the room-side writer ask this
+        instead of reading the settings record, so a row bounded some
+        other way answers for itself.
+        """
+        return self.settings.rounds
+
     # ---- reads
 
     @property

@@ -443,7 +443,7 @@ class RoundRetention:
         strong_is_primary = (
             self.primary_tier is window_records.DecoderTier.STRONG
         )
-        capacity = self.weak_store.settings.rounds
+        capacity = self.weak_store.capacity_rounds()
         minimum = buffering_plan.minimum_live_rounds
         if strong_is_primary:
             minimum = ()
@@ -454,7 +454,7 @@ class RoundRetention:
             )
         if self.strong_store is None:
             return
-        strong_capacity = self.strong_store.settings.rounds
+        strong_capacity = self.strong_store.capacity_rounds()
         strong_minimum = buffering_plan.sb1_minimum_live_rounds
         if strong_is_primary:
             # the plan's window reads live on the room-side store

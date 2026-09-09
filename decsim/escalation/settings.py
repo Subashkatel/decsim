@@ -16,7 +16,6 @@ import csv
 import dataclasses
 import math
 import pathlib
-import random
 from collections.abc import Mapping
 from numbers import Real
 from typing import Optional
@@ -244,7 +243,7 @@ class EscalationSettings:
     restart_reread_buffer_regions: int = 0
     policy: Optional[ports.EscalationPolicy] = None
     gap_threshold_nats: Optional[float] = None
-    online_threshold: Optional[threshold_sources.OnlineThreshold] = None
+    online_threshold: Optional[ports.ThresholdSource] = None
     base_directory: Optional[pathlib.Path] = None
 
     @classmethod
@@ -312,39 +311,27 @@ class EscalationSettings:
 
     def online_threshold_for(
         self, physical_error_probability: float, distance: int
-    ) -> Optional[threshold_sources.OnlineThreshold]:
-        """One online threshold source per sweep point (source online).
+    ) -> Optional[ports.ThresholdSource]:
+        """The row's own source for this sweep point, when it builds one.
 
-        Shared by every shot of the point so the controller learns over
-        the point's whole window stream; seeded by the point's identity,
-        so a rerun reproduces the same audit draws.
+        A row that declares built_per_sweep_point builds it, so what the
+        front installs on the point's task is the row the table names.
+        Every other row answers None: the root builds those from the
+        point's threshold in nats instead. The instance is shared by
+        every shot of the point, so the source learns over the point's
+        whole window stream.
         """
         if not self._decides_on_a_confidence():
             return None
         row = self._threshold_row()
         if not row.built_per_sweep_point:
             return None
-        online = self.online
-        step_nats = online.step_nats()
-        tracker = threshold_sources.EscalationRateTracker(
-            target_escalation_rate=online.target_escalation_rate,
-            threshold=self.gap_threshold_nats,
-            step=step_nats,
+        return row.for_sweep_point(
+            self.online,
+            self.gap_threshold_nats,
+            physical_error_probability,
+            distance,
         )
-        audit = threshold_sources.AuditLane(audit_rate=online.audit_rate)
-        adjustment = threshold_sources.TargetAdjustment(
-            kept_bad_budget=online.kept_bad_budget,
-            adjust_factor=online.adjust_factor,
-            min_escalation_rate=online.min_escalation_rate,
-            max_escalation_rate=online.max_escalation_rate,
-        )
-        controller = threshold_sources.OnlineThresholdController(
-            tracker, audit, adjustment
-        )
-        generator = random.Random(
-            f"online-threshold d={distance} p={physical_error_probability}"
-        )
-        return threshold_sources.OnlineThreshold(controller, generator)
 
     def _threshold_row(self):
         """The row escalation.threshold_source names."""

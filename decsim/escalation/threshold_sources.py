@@ -17,6 +17,7 @@ decibels.
 
 import dataclasses
 import math
+import random
 
 import decsim.records.decoding as decoding_records
 
@@ -30,8 +31,11 @@ class FixedThreshold:
     strong results it forces, which is why such a row is serial-only;
     reads_a_calibration_table says its number comes from a csv, which
     opens threshold_table and threshold_column and closes
-    gap_threshold_db; built_per_sweep_point says the front builds one
-    instance per sweep point, which is what the online card configures.
+    gap_threshold_db; built_per_sweep_point says the row builds its own
+    instance for a sweep point, through for_sweep_point, which is what
+    the online card configures, while a row that declares it False is
+    built by the root from the point's threshold in nats, its one
+    constructor argument.
     """
 
     audits_by_escalating = False
@@ -269,6 +273,48 @@ class OnlineThreshold:
     audits_by_escalating = True
     reads_a_calibration_table = False
     built_per_sweep_point = True
+
+    @classmethod
+    def for_sweep_point(
+        cls,
+        online,
+        threshold_nats: float,
+        physical_error_probability: float,
+        distance: int,
+    ) -> "OnlineThreshold":
+        """The one instance a sweep point's shots share, seeded by the point.
+
+        A row that declares built_per_sweep_point builds its own
+        instance, so what the front installs is the row the table names
+        and nothing else. Both loops are assembled here, where they are
+        read: the rate tracker starting at the point's threshold in nats,
+        the audit lane, and the target adjustment. The random stream is
+        seeded from the point's identity alone, so a rerun of the point
+        draws the same audits.
+
+        online is the escalation section's card, typed where it is
+        declared (escalation/settings.py OnlineThresholdSettings); that
+        module imports this one, so an annotation here cannot point back
+        at it.
+        """
+        step_nats = online.step_nats()
+        tracker = EscalationRateTracker(
+            target_escalation_rate=online.target_escalation_rate,
+            threshold=threshold_nats,
+            step=step_nats,
+        )
+        audit = AuditLane(audit_rate=online.audit_rate)
+        adjustment = TargetAdjustment(
+            kept_bad_budget=online.kept_bad_budget,
+            adjust_factor=online.adjust_factor,
+            min_escalation_rate=online.min_escalation_rate,
+            max_escalation_rate=online.max_escalation_rate,
+        )
+        controller = OnlineThresholdController(tracker, audit, adjustment)
+        generator = random.Random(
+            f"online-threshold d={distance} p={physical_error_probability}"
+        )
+        return cls(controller, generator)
 
     def __init__(
         self, controller: OnlineThresholdController, random_generator

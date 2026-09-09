@@ -226,7 +226,16 @@ class StrongRegions:
 def _context_window_of(
     weak_window: window_records.Window,
 ) -> window_records.Window:
-    """The weak window with one buffer of raw context on each side."""
+    """The weak window with one buffer of raw context on each side.
+
+    The strong window starts with the empty boundary state a Window is
+    given, and not the escalated weak window's. This row folds no
+    neighbour's boundary into its input (FOLDS_NO_BOUNDARY): both faces
+    are read raw, so a mask on the commit_lo layer would flip a seam the
+    rounds before it already carry as raw defects, which is the double
+    count Bombin et al. 2303.04846 lines 775-788 rule out and the row's
+    own module docstring forbids.
+    """
     context_lo, commit_lo, commit_hi, context_hi = (
         round_retention.strong_context_bounds(weak_window)
     )
@@ -240,7 +249,6 @@ def _context_window_of(
         buffer_lo=context_lo,
         round_count=round_count,
     )
-    strong_window.boundary_in = weak_window.boundary_in
     return strong_window
 
 

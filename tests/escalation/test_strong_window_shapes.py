@@ -38,6 +38,7 @@ import decsim.records.decoding as decoding_records
 import decsim.records.windows as window_records
 import decsim.settings as machine_settings
 import decsim.trace_source as trace_source
+import decsim.windows.decode_requests as decode_requests
 import tests.escalation.declared_fabric as fabric
 
 # The gate's switching card, section by section as the yaml reads.
@@ -582,6 +583,95 @@ def test_the_shipped_collaborators_fill_the_five_window_side_ports():
     assert isinstance(collaborators.builder, ports.WindowJobBuilder)
     assert isinstance(collaborators.requester, ports.WindowRequests)
     assert isinstance(collaborators.ledger, ports.LogicalLedger)
+
+
+def _gate_context_window_machine() -> machine_module.Machine:
+    """The gate's own switching point, on the shipped context row.
+
+    p 0.008, d 3, 1 us rounds, seed 0: the point where the weak tier
+    commits a correction that flips a seam detector of a window that
+    later escalates, so the two-solve case the row must not fold is on
+    the run.
+    """
+    sections = copy.deepcopy(GATE_SWITCHING_CARD)
+    base_directory = pathlib.Path(".")
+    settings = machine_settings.MachineSettings.from_mapping(
+        sections, name="switching_validation", base_directory=base_directory
+    )
+    qpu = dataclasses.replace(
+        settings.qpu, distance=3, round_period_microseconds=1.0
+    )
+    workload = dataclasses.replace(
+        settings.workload, physical_error_probability=0.008
+    )
+    settings = dataclasses.replace(settings, qpu=qpu, workload=workload)
+    return machine_module.Machine.build(settings, 0)
+
+
+def _masked_jobs(monkeypatch) -> list:
+    """Records (kind, window key, whether the gate changed the input)."""
+    original = decode_requests.WindowInputGate.mask_input
+    masked = []
+
+    def watch(self, job):
+        before = _input_bits(job.decoder_input)
+        original(self, job)
+        after = _input_bits(job.decoder_input)
+        key = None
+        if job.window is not None:
+            key = job.window.key
+        changed = before != after
+        masked.append((job.kind, key, changed))
+
+    monkeypatch.setattr(decode_requests.WindowInputGate, "mask_input", watch)
+    return masked
+
+
+def _input_bits(decoder_input) -> tuple:
+    """Every fragment's bits of a job's input, in read order."""
+    if decoder_input is None:
+        return ()
+    bits = []
+    for round_input in decoder_input.rounds:
+        for fragment in round_input.fragments:
+            bits.append(fragment.bits)
+    return tuple(bits)
+
+
+def test_a_context_row_strong_job_reads_the_raw_rounds_of_its_span(
+    monkeypatch,
+):
+    """The row folds no boundary, so nothing masks its input.
+
+    The context window reads one buffer of raw context on each side, so
+    a mask on its commit_lo layer would flip a seam whose rounds are
+    already in the input as raw defects: the double count Bombin et al.
+    2303.04846 lines 775-788 rule out. The weak job of the same window
+    is masked on this run, which is what makes the check meaningful.
+    """
+    masked = _masked_jobs(monkeypatch)
+    machine = _gate_context_window_machine()
+    machine.run()
+    weak_masked = _keys_of(masked, strong=False, changed_only=True)
+    strong_keys = _keys_of(masked, strong=True, changed_only=False)
+    strong_masked = _keys_of(masked, strong=True, changed_only=True)
+    assert strong_keys
+    assert weak_masked & strong_keys
+    assert strong_masked == set()
+
+
+def _keys_of(masked: list, *, strong: bool, changed_only: bool) -> set:
+    """The window keys of the recorded jobs of one tier."""
+    strong_redecode = decoding_records.DecodeJobKind.STRONG_REDECODE
+    keys = set()
+    for kind, key, changed in masked:
+        is_strong = kind is strong_redecode
+        if is_strong is not strong:
+            continue
+        if changed_only and not changed:
+            continue
+        keys.add(key)
+    return keys
 
 
 def test_a_shape_name_off_the_table_is_refused_naming_the_rows():

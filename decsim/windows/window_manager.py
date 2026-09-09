@@ -39,7 +39,8 @@ class WindowTraceSources:
 
     window_planned when the plan or a stream lays a window,
     window_data_complete when its rounds are all there,
-    window_committed when its correction is the frame's, and
+    solve_held when one of a window's several solves waits for the
+    others, window_committed when its correction is the frame's, and
     window_absorbed when a strong window takes it over instead.
     """
 
@@ -48,6 +49,8 @@ class WindowTraceSources:
     window_committed: trace_source.TraceSource
     # the silent source on a run that escalates nothing
     window_absorbed: Any
+    # the silent source on a run whose confidence reads one solve
+    solve_held: Any
 
 
 class WindowManager:
@@ -359,12 +362,17 @@ class WindowManager:
         An observer connects to what the window side reports, never to
         the component that happens to report it: which of the package's
         components fires which source is the package's own arrangement.
-        A run that never escalates absorbs no window and reports the
-        silent source for it.
+        A run that never escalates absorbs no window and a run whose
+        confidence reads one solve holds none, so each reports the
+        silent source instead.
         """
         absorbed = trace_source.SILENT
         if self.strong_redecode is not None:
             absorbed = self.strong_redecode.shape.window_absorbed
+        held = trace_source.SILENT
+        gap_join = self.requester.gap_join
+        if gap_join is not None:
+            held = gap_join.trace.solve_held
         builder = self.requester.builder
         committer = self.requester.verdict.committer
         return WindowTraceSources(
@@ -372,6 +380,7 @@ class WindowManager:
             window_data_complete=builder.trace.window_data_complete,
             window_committed=committer.trace.window_committed,
             window_absorbed=absorbed,
+            solve_held=held,
         )
 
     def planned_windows(self) -> dict:

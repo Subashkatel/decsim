@@ -434,6 +434,7 @@ def _connect_window_trace(
     sources = window_manager.window_sources()
     sources.window_planned.connect(trace_writer.window_planned)
     sources.window_data_complete.connect(trace_writer.window_ready)
+    sources.solve_held.connect(trace_writer.solve_held)
     sources.window_committed.connect(trace_writer.window_committed)
     sources.window_absorbed.connect(trace_writer.window_absorbed)
     decoder_manager.outcomes.trace.verdict_given.connect(

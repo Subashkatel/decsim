@@ -11,6 +11,7 @@ overlap, and the committed corrections are the same either way.
 
 import copy
 import dataclasses
+import json
 import pathlib
 
 import pytest
@@ -30,7 +31,9 @@ WEAK_INPUT_PATH = transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER
 UNJOINED_WINDOW_ID = 999
 
 
-def _switching_machine(weak_units: int, weak_microseconds: float = 4.0):
+def _switching_machine(
+    weak_units: int, weak_microseconds: float = 4.0, trace_path=None
+):
     """The gate's switching card at d=3, priced so its ticks are declared."""
     sections = copy.deepcopy(GATE_SWITCHING_CARD)
     sections["weak_decoder"]["kind"] = weak_microseconds
@@ -46,8 +49,11 @@ def _switching_machine(weak_units: int, weak_microseconds: float = 4.0):
     workload = dataclasses.replace(
         settings.workload, physical_error_probability=0.008
     )
+    trace = "off"
+    if trace_path is not None:
+        trace = str(trace_path)
     observation = dataclasses.replace(
-        settings.observation, record_switching_windows=True
+        settings.observation, record_switching_windows=True, trace=trace
     )
     settings = dataclasses.replace(
         settings, qpu=qpu, workload=workload, observation=observation
@@ -321,3 +327,28 @@ def test_the_answer_is_still_the_lightest_solve_and_still_waits():
     (answered_job, _answered_result, tick) = verdict.answers[0]
     assert answered_job is first_job
     assert tick == 90
+
+
+def test_a_two_solve_runs_trace_carries_every_held_solve(tmp_path):
+    """C5 item 4: the source was fired and nobody listened.
+
+    solve_held was the only one of the declared trace sources with no
+    listener, while the join's own docstring said the trace shows the
+    held solve. Every window of this run needs two forced-class solves,
+    so every window holds exactly one.
+    """
+    path = tmp_path / "switching.trace.json"
+    machine = _switching_machine(1, trace_path=path)
+    machine.run()
+    machine.observation.trace_writer.write(str(path))
+    text = path.read_text()
+    document = json.loads(text)
+    held = []
+    for row in document:
+        if row.get("name") == "solve held":
+            held.append(row)
+    windows = len(machine.observation.windows.windows)
+    assert len(held) == windows
+    assert held[0]["ph"] == "i"
+    assert held[0]["args"]["forced_class"] in (0, 1)
+    assert held[0]["cat"] == "window,confidence"

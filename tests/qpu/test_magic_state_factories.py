@@ -15,6 +15,7 @@ import pytest
 
 import decsim.engine
 import decsim.observe.log_writers as log_writers
+import decsim.ports as ports
 import decsim.qpu.magic_state_factories as magic_state_factories
 
 
@@ -84,6 +85,23 @@ def chain(engine, levels, **settings):
         preparation_distance=1,
         **settings,
     )
+
+
+def test_every_factory_row_fills_the_port_it_is_built_behind():
+    """The rows are in qpu and the port is in decsim/ports.py.
+
+    The runtime that asks for a state never names a row, so the promise
+    is only real if every row of the table answers the whole port.
+    """
+    engine = decsim.engine.Engine()
+    rows = [infinite(engine), single_stage(engine)]
+    level = magic_state_factories.DistillLevel(
+        unit_count=1, distance=3, logical_cycles_per_round=13
+    )
+    level_chain = chain(engine, [level])
+    rows.append(level_chain)
+    for row in rows:
+        assert isinstance(row, ports.MagicStateFactory), type(row)
 
 
 def test_the_infinite_factory_delivers_at_once():

@@ -1,6 +1,6 @@
 """The round policies: how many syndrome rounds an operation occupies.
 
-Every policy fills the RoundsPolicy seam (decsim/ports.py): given an
+Every policy fills the RoundsPolicy port (decsim/ports.py): given an
 operation and its code card, return the round count, at least one. The
 lattice-surgery unit of d rounds per step comes from Horsman et al.
 (arXiv 1111.4022v3, Sec. 3.1, 3.2 and 6: d rounds of error correction per
@@ -9,20 +9,11 @@ merge, per split, and per operation) and Litinski (arXiv 1808.02892v3,
 one time step of d code cycles).
 """
 
-from typing import Optional, Protocol, runtime_checkable
+from typing import Optional
 
+import decsim.ports as ports
 import decsim.qpu.code_geometry as code_geometry
 import decsim.records.program as program_records
-
-
-@runtime_checkable
-class RoundsPolicy(Protocol):
-    """How many syndrome rounds an operation runs for; always at least 1."""
-
-    def rounds_for(
-        self, operation: program_records.OperationPlanningView, code
-    ) -> int:
-        """The operation's round count on this code."""
 
 
 class FixedRounds:
@@ -53,7 +44,7 @@ class PerOperationRounds:
     def __init__(
         self,
         rounds_by_operation: dict,
-        fallback: Optional[RoundsPolicy] = None,
+        fallback: Optional[ports.RoundsPolicy] = None,
     ):
         self.rounds_by_operation = {}
         rounds_by_operation = dict(rounds_by_operation)
@@ -146,7 +137,7 @@ class TemporalRounds:
     def __init__(
         self,
         temporal_distance: int,
-        base: Optional[RoundsPolicy] = None,
+        base: Optional[ports.RoundsPolicy] = None,
     ):
         temporal_distance = int(temporal_distance)
         self.temporal_distance = _at_least_one_round(

@@ -1074,6 +1074,42 @@ class WindowingScheme(Protocol):
 
 
 @runtime_checkable
+class RoundsPolicy(Protocol):
+    """How many syndrome rounds an operation runs for; always at least 1.
+
+    Rows: fixed_rounds, per_operation_rounds, distance_rounds
+    (qpu/round_policies.py); the workload's section names one and the
+    QLX frontend fills a per-operation row from each task's duration. The
+    lattice-surgery unit of d rounds per step is Horsman 1111.4022 Sec.
+    3.1 and Litinski 1808.02892.
+    """
+
+    def rounds_for(
+        self, operation: program_records.OperationPlanningView, code
+    ) -> int:
+        """The operation's round count on this code."""
+
+
+@runtime_checkable
+class MagicStateFactory(Protocol):
+    """Where a non-Clifford operation gets its magic state.
+
+    Table rows: infinite, distillation, multi_level
+    (MAGIC_STATE_FACTORIES, qpu/settings.py), each built from one
+    FactoryCollaborators record. The runtime asks and is called back; a
+    factory that produces on demand answers at once.
+    """
+
+    engine: Any
+
+    def request(self, operation_id: int, callback: Callable[[], None]):
+        """Ask for one state; callback runs once it is ready."""
+
+    def shutdown(self) -> None:
+        """Stop producing; the workload is complete."""
+
+
+@runtime_checkable
 class IdlePolicy(Protocol):
     """How idle rounds travel while an operation waits for feedback.
 

@@ -13,7 +13,11 @@ import pathlib
 TESTS_FILE = pathlib.Path(__file__)
 TESTS_PATH = TESTS_FILE.resolve()
 PACKAGE_ROOT = TESTS_PATH.parent.parent
-PORTS_PATH = PACKAGE_ROOT / "decsim" / "ports.py"
+DECSIM_ROOT = PACKAGE_ROOT / "decsim"
+PORTS_PATH = DECSIM_ROOT / "ports.py"
+# STYLE.md rule 7: a shared module beside ports in the package order, so
+# its two Protocols cannot move into ports without a cycle of levels
+SHARED_PROTOCOL_MODULE = "seeding"
 
 
 def _port_names(port: str) -> set:
@@ -152,3 +156,89 @@ def test_the_qpu_port_declares_what_the_controller_calls():
 def test_the_window_input_port_declares_what_the_controller_calls():
     called = _called_on(("windows",), ("controller",))
     assert _undeclared(called, ("WindowInput",)) == {}
+
+
+def _decsim_modules() -> list:
+    """Every module of the package, in path order."""
+    modules = DECSIM_ROOT.rglob("*.py")
+    return sorted(modules)
+
+
+def _local_protocols() -> dict:
+    """Every Protocol declared outside decsim/ports.py, by declaring file."""
+    declared = {}
+    for path in _decsim_modules():
+        if path == PORTS_PATH:
+            continue
+        _add_protocols(path, declared)
+    return declared
+
+
+def _add_protocols(path: pathlib.Path, declared: dict) -> None:
+    """Add one module's top-level Protocol declarations."""
+    text = path.read_text()
+    tree = ast.parse(text)
+    for node in tree.body:
+        if not isinstance(node, ast.ClassDef):
+            continue
+        if _is_protocol(node):
+            declared[node.name] = path
+
+
+def _is_protocol(node: ast.ClassDef) -> bool:
+    """True when the class inherits Protocol directly."""
+    for base in node.bases:
+        if isinstance(base, ast.Name) and base.id == "Protocol":
+            return True
+    return False
+
+
+def _package_of(path: pathlib.Path) -> str:
+    """The package a module belongs to; a root module is its own."""
+    if path.parent == DECSIM_ROOT:
+        return path.stem
+    return path.parent.name
+
+
+def _named_outside(name: str, package: str, declaring: pathlib.Path) -> list:
+    """Every place outside the package that names the Protocol in code."""
+    sites = []
+    for path in _decsim_modules():
+        if path == declaring:
+            continue
+        if _package_of(path) == package:
+            continue
+        _add_mentions(path, name, sites)
+    return sites
+
+
+def _add_mentions(path: pathlib.Path, name: str, sites: list) -> None:
+    """Add every code mention of the name in one module."""
+    text = path.read_text()
+    tree = ast.parse(text)
+    where = f"{path.parent.name}/{path.name}"
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and node.id == name:
+            sites.append(f"{where}:{node.lineno}")
+        if isinstance(node, ast.Attribute) and node.attr == name:
+            sites.append(f"{where}:{node.lineno}")
+
+
+def test_every_protocol_outside_the_port_file_is_one_packages_seam():
+    """STYLE.md rule 7's sentence, held to the tree.
+
+    A Protocol that is not in decsim/ports.py is a seam inside one
+    package: nothing outside that package names it, so no component
+    learns it and the package may change it alone. decsim/seeding.py is
+    the named exception.
+    """
+    crossing = {}
+    protocols = _local_protocols()
+    for name, path in protocols.items():
+        package = _package_of(path)
+        if package == SHARED_PROTOCOL_MODULE:
+            continue
+        sites = _named_outside(name, package, path)
+        if sites:
+            crossing[name] = sites
+    assert crossing == {}

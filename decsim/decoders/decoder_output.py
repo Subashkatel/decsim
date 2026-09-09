@@ -2,9 +2,13 @@
 
 Whoever executes a send is an end of that hop. OMNeT++ enforces the same
 rule at runtime, that a module may only send messages it owns
-(`cSimpleModule.cc:334`), and gem5 bills a transfer to the port it left
-by and never to a proxy that arranged it (`coherent_xbar.hh:210-231`,
-`packet.hh:426-428`). Three hops leave a decoder: the correction to the
+(`cSimpleModule.cc:334`), and gem5 bills a transfer to the ports it
+crossed and never to a proxy that arranged it: the crossbar counts a
+packet against the CPU-side and memory-side port ids it went between,
+and only once it was successfully sent (`coherent_xbar.cc:354-357`,
+`xbar.hh:400-411`), and it hands its forwarding latency to "the
+neighbouring object that actually makes the packet wait"
+(`packet.hh:424-431`). Three hops leave a decoder: the correction to the
 Pauli frame, the escalation selection to the strong decoder, and one
 window's boundary to the decoder of a dependent window. The window side
 decides that they happen, and this decoder-side component executes them,

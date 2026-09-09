@@ -197,6 +197,38 @@ class DecodeQueue(Protocol):
         service then carries them (decision D8).
         """
 
+    def resolve_weak_request(
+        self,
+        job: decoding_records.DecodeJob,
+        result: decoding_records.DecodeResult,
+        verdict: decoding_records.Verdict,
+    ) -> None:
+        """The window side decided this weak request; close its attempt.
+
+        The verdict is the window's, not the manager's: the manager
+        learns here whether the weak answer stands or a strong re-decode
+        follows, and closes the attempt either way.
+        """
+
+    def read_result(self, job: decoding_records.DecodeJob) -> None:
+        """The window side has this job's result in hand.
+
+        A tier whose result blocks its unit gets the unit back here; a
+        tier that gave it back at the decode's end has nothing to give.
+        """
+
+    def close_companion_request(
+        self,
+        job: decoding_records.DecodeJob,
+        result: decoding_records.DecodeResult,
+    ) -> None:
+        """This forced solve lost; its window is answered by the other.
+
+        The confidence side knows which of a window's solves answered
+        it, so the losing solve is closed from there, not by the
+        manager's own schedule.
+        """
+
 
 # ------------------------------------------- the decoder returns a result
 

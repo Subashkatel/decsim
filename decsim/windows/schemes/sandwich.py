@@ -94,7 +94,17 @@ class _TanCores:
         self.type_1_count = type_1_count
 
     def type_1_window(self, index: int) -> window_records.WindowGeometry:
-        """Core index reads w rounds from 1 + index*s, commits the middle s."""
+        """Core index reads w rounds from 1 + index*s and commits s - 1.
+
+        The round left over in each period of s is the one-layer type-2
+        seam to this core's right, which is what makes the construction
+        zero-seam (Tan et al. 2209.09219 supplement S8). The two ends
+        are wider on purpose: the first core commits from round 1
+        because nothing precedes it, and the last commits through the
+        operation's last round because no seam follows it. At s=5, b=2
+        over 30 rounds the interior cores commit four rounds each and
+        the seams commit rounds 7, 12, 17 and 22.
+        """
         read_lo = 1 + index * self.step
         commit_lo = read_lo + self.buffer
         if index == 0:

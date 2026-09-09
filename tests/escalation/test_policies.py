@@ -16,6 +16,7 @@ import pytest
 import stim
 
 import decsim.build.escalation as escalation_build
+import decsim.confidence.cluster as cluster
 import decsim.decoders.decoders as decoders
 import decsim.decoders.settings as decoder_settings
 import decsim.escalation.policies as policies
@@ -803,3 +804,126 @@ def test_a_windowing_scheme_without_the_declarations_is_refused_by_name():
         "has_trailing_tail_context",
     ):
         fabric.switching_machine(rounds=9, escalated_windows={1}, scheme=scheme)
+
+
+def _switching_policy(threshold_nats: float):
+    """A switching row over a fixed threshold and the complementary gap."""
+    settings = escalation_settings.EscalationSettings(
+        kind="switching",
+        threshold_source="fixed",
+        gap_threshold_nats=threshold_nats,
+        confidence="complementary_gap",
+    )
+    return escalation_build.build_escalation_policy(settings)
+
+
+def test_a_weak_result_with_no_soft_output_escalates_its_window():
+    """The fail-safe: no confidence is not a confident answer.
+
+    A job with no window model runs no growth and a signal that reports
+    nothing leaves the result bare, so the window goes to the strong
+    tier rather than being kept on a confidence nobody computed.
+    """
+    policy = _switching_policy(2.0)
+    job = decoding_records.DecodeJob(operation_id=1, window_id=0, round_count=3)
+    bare = decoding_records.DecodeResult(1, 0)
+
+    verdict = policy.verdict_for_weak_result(job, bare)
+
+    assert bare.soft_output is None
+    assert verdict is decoding_records.Verdict.ESCALATE
+
+
+def test_a_soft_output_from_another_signal_is_refused():
+    """The threshold means one thing, so it reads one signal's gap."""
+    policy = _switching_policy(2.0)
+    job = decoding_records.DecodeJob(operation_id=1, window_id=0, round_count=3)
+    cluster_source = cluster.union_find_cluster_gap_source()
+    result = decoding_records.DecodeResult(1, 0)
+    result.soft_output = decoding_records.SoftOutput(
+        gap=9.0, source=cluster_source
+    )
+
+    with pytest.raises(ValueError) as refusal:
+        policy.verdict_for_weak_result(job, result)
+
+    assert "does not match the switching threshold source" in str(refusal.value)
+
+
+def test_the_papers_twenty_decibels_is_the_threshold_the_yaml_writes():
+    """Toshio 2510.25222 line 1623: "fix the gap threshold to be gth = 20 dB".
+
+    The key is in decibels because that is the paper's unit; the machine
+    holds nats, so the conversion happens once, at the yaml boundary.
+    """
+    twenty_decibels = escalation_settings.decibels_to_nats(20.0)
+    natural_log_of_ten = math.log(10.0)
+    by_hand = 20.0 * natural_log_of_ten / 10.0
+
+    assert twenty_decibels == pytest.approx(4.605170185988092)
+    assert twenty_decibels == pytest.approx(by_hand)
+
+
+def test_a_gap_at_the_papers_threshold_is_kept_and_one_below_escalates():
+    """The equality case is a keep, which is Toshio's Fig. 12 caption."""
+    threshold = escalation_settings.decibels_to_nats(20.0)
+    policy = _switching_policy(threshold)
+    job = decoding_records.DecodeJob(operation_id=1, window_id=0, round_count=3)
+
+    a_hair_under = threshold - 1e-9
+    well_over = threshold + 1.0
+    at_the_threshold = _result_with_gap(policy, threshold)
+    just_below = _result_with_gap(policy, a_hair_under)
+    well_above = _result_with_gap(policy, well_over)
+
+    assert (
+        policy.verdict_for_weak_result(job, at_the_threshold)
+        is decoding_records.Verdict.KEEP
+    )
+    assert (
+        policy.verdict_for_weak_result(job, just_below)
+        is decoding_records.Verdict.ESCALATE
+    )
+    assert (
+        policy.verdict_for_weak_result(job, well_above)
+        is decoding_records.Verdict.KEEP
+    )
+
+
+def test_the_policy_instance_is_the_authority_over_its_settings_row():
+    """Decision D10: the built object answers, the kind only names one.
+
+    sinter resolves the caller's own sampler before its built-in table
+    (sinter/_collection/_mux_sampler.py:33-40) and gem5 reads a built
+    object's own params rather than its class table
+    (src/python/m5/SimObject.py:204-205).
+    """
+    built = policies.StrongOnly(policies.NO_CONFIDENCE)
+    settings = escalation_settings.EscalationSettings(
+        kind="switching", policy=built
+    )
+
+    row = escalation_build.escalation_row(settings)
+    policy = escalation_build.build_escalation_policy(settings)
+    tier = escalation_build.primary_tier(settings)
+
+    assert row is built
+    assert policy is built
+    assert tier == window_records.DecoderTier.STRONG.value
+
+
+def test_every_escalation_row_answers_the_three_facts_the_build_reads():
+    """A row is never recognised by class, so it declares what it is."""
+    for name, row in escalation_settings.ESCALATIONS.items():
+        assert isinstance(row.decides_on_a_confidence, bool), name
+        assert isinstance(row.requires_strong_context, bool), name
+        assert isinstance(row.primary_tier, window_records.DecoderTier), name
+
+
+def _result_with_gap(policy, gap: float):
+    """One weak result carrying the policy's own expected signal source."""
+    result = decoding_records.DecodeResult(1, 0)
+    result.soft_output = decoding_records.SoftOutput(
+        gap=gap, source=policy.expected_source
+    )
+    return result

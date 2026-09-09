@@ -21,6 +21,7 @@ import decsim.decoders.settings as decoder_settings
 import decsim.escalation.policies as policies
 import decsim.escalation.settings as escalation_settings
 import decsim.escalation.threshold_sources as threshold_sources
+import decsim.front.experiment as experiment
 import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
 import decsim.observe.settings as observe_settings
@@ -35,6 +36,7 @@ import decsim.settings as machine_settings
 import decsim.windows.schemes.sliding as sliding_scheme
 import decsim.windows.settings as window_settings
 import tests.escalation.declared_fabric as fabric
+import tests.front.yaml_configs as yaml_configs
 
 SOURCE = decoding_records.SoftOutputSource(
     method="matching-gap",
@@ -390,6 +392,104 @@ def test_a_policy_row_added_to_the_table_runs_a_switching_point(monkeypatch):
         ((1, 1), "strong"),
         ((1, 2), "strong"),
     ]
+
+
+class _ConfidentEscalation(policies.EscalationPolicyBase):
+    """A fourth row: it escalates, and it decides on a confidence.
+
+    Its threshold and the source it expects arrive in the one
+    EscalationCollaborators record, so the build learns what this row
+    needs from the two facts it declares and from nothing else.
+    """
+
+    decides_on_a_confidence = True
+    requires_strong_context = True
+    primary_tier = window_records.DecoderTier.WEAK
+
+    def __init__(self, collaborators):
+        self.threshold = collaborators.threshold
+        self.expected_source = collaborators.expected_source
+
+    def verdict_for_weak_result(self, job, result) -> decoding_records.Verdict:
+        """Keep what the threshold keeps; a result with no gap escalates."""
+        if result.soft_output is None:
+            return decoding_records.Verdict.ESCALATE
+        if self.threshold.decide_keep(job, result):
+            return decoding_records.Verdict.KEEP
+        return decoding_records.Verdict.ESCALATE
+
+
+def _confident_config(tmp_path):
+    """A yaml naming the fourth row, with no router, boundary or scheme."""
+    escalation = {"kind": "confident", "gap_threshold_db": 20.0}
+    weak_decoder = {
+        "weak_decoder": {
+            "kind": "pymatching",
+            "units": 1,
+            "unit_memory_rounds": None,
+            "engine": {
+                "clock": "fridge",
+                "fetch_cycles_per_round": 1,
+                "release_cycles_per_job": 1,
+            },
+        }
+    }
+    workload = dict(yaml_configs.MINIMAL_CONFIG["workload"])
+    workload["rounds_per_shot"] = 9
+    sweep_point = {
+        "physical_error_probability": [0.008],
+        "distance": [3],
+        "round_period_us": [1.0],
+        "shots": 1,
+    }
+    strong_decoder = yaml_configs.strong_unit("belief_matching")
+    card = {
+        "escalation": escalation,
+        "workload": workload,
+        **weak_decoder,
+        **strong_decoder,
+        "sweep": [sweep_point],
+    }
+    return yaml_configs.write_config(tmp_path, card)
+
+
+def test_a_fourth_escalation_row_gets_the_boundaries_router_and_join(
+    monkeypatch, tmp_path
+):
+    """The wiring reads the row's declared facts, not the kind's name.
+
+    A row that escalates and decides on a confidence, named from a yaml
+    that gives no router, no boundary policy and no windowing scheme,
+    gets held boundaries, the two-pool router and the confidence join.
+    """
+    monkeypatch.setitem(
+        escalation_settings.ESCALATIONS, "confident", _ConfidentEscalation
+    )
+    config_path = _confident_config(tmp_path)
+    config = experiment.load_experiment(config_path)
+    settings = config.point_settings(
+        physical_error_probability=0.008, distance=3, round_period_us=1.0
+    )
+    machine = machine_module.Machine.build(settings, 0)
+    boundary_policy = machine.window_manager.courier.boundary_policy
+    assert isinstance(boundary_policy, boundary_policies.Held)
+    assert machine.window_manager.requester.gap_join is not None
+    pool = machine.decoder_manager.pool
+    assert sorted(pool.units_by_pool) == ["default", "strong"]
+    strong_probe = decoding_records.DecodeJob(
+        operation_id=-1,
+        window_id=0,
+        round_count=0,
+        kind=decoding_records.DecodeJobKind.STRONG_REDECODE,
+    )
+    weak_probe = decoding_records.DecodeJob(
+        operation_id=-1, window_id=0, round_count=0
+    )
+    router = pool.router
+    assert router.route(strong_probe) is not router.route(weak_probe)
+    assert machine.window_manager.planner.scheme.has_trailing_tail_context
+    result = machine.run()
+    assert result.terminal_status == "complete"
 
 
 class _Draws:

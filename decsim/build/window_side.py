@@ -195,15 +195,16 @@ def _copies_the_boundary_fold(
 def _window_gap_join(
     settings: machine_settings.MachineSettings, engine, verdict, decode_queue
 ):
-    """The confidence join of a switching run: every solve's on_decoded.
+    """The confidence join of an escalating run: every solve's on_decoded.
 
-    None when the escalation is not the root's switching policy: a
-    Python-built policy brings its own decoder, which reports its own
-    soft output from one decode.
+    None when the row decides on no confidence, and none for a
+    Python-built policy, which brings its own decoder and reports its
+    own soft output from one decode.
     """
-    if settings.escalation.kind != "switching":
-        return None
     if settings.escalation.policy is not None:
+        return None
+    row = escalation_build.escalation_row(settings.escalation)
+    if not row.decides_on_a_confidence:
         return None
     signal = escalation_build.confidence_signal(settings.escalation)
     return gap_join_module.WindowGapJoin(engine, signal, verdict, decode_queue)

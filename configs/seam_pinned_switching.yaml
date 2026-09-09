@@ -1,0 +1,54 @@
+# The seam-pinned switching point: weak pymatching with the
+# complementary gap, escalating to belief matching below the paper's
+# 20 dB threshold (Toshio 2510.25222 Sec. IV), with the escalated
+# window's near face pinned on its neighbour's committed correction
+# (Bombin 2303.04846 lines 775-788). Near-threshold p so escalations and
+# logical errors are frequent enough to measure. Every key is documented
+# in reference.yaml.
+
+extends: weak_decoder_baseline.yaml
+
+escalation:
+  kind: switching
+  gap_threshold_db: 20.0
+  strong_window: near_seam_pinned
+
+links:
+  qpu_to_controller:  {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
+  controller_to_weak_buffer: {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
+  controller_to_strong_buffer: {latency_cycles: 1, clock: room, bits_per_cycle: null}
+  weak_buffer_to_weak_decoder: {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
+  weak_decoder_to_strong_decoder: {latency_cycles: 1, clock: room, bits_per_cycle: null}
+  strong_buffer_to_strong_decoder: {latency_cycles: 1, clock: room, bits_per_cycle: null}
+  decoder_to_decoder:  {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
+  weak_decoder_to_frame: {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
+  strong_decoder_to_frame:  {latency_cycles: 1, clock: room, bits_per_cycle: null}
+  frame_to_controller:  null
+  controller_to_qpu:  null
+
+weak_decoder:
+  kind: pymatching
+  units: 1
+  unit_memory_rounds: null
+  engine:
+    clock: fridge
+    fetch_cycles_per_round: 1
+    release_cycles_per_job: 10
+strong_decoder:
+  kind: belief_matching
+  units: 1
+  unit_memory_rounds: null
+  engine:
+    clock: room
+    fetch_cycles_per_round: 1
+    release_cycles_per_job: 10
+
+sweep:
+  - physical_error_probability: [0.008]   # the paired accuracy study, d=3
+    distance: [3]
+    round_period_us: [1.0]
+    shots: 2000
+  - physical_error_probability: [0.008]   # the same study at d=5
+    distance: [5]
+    round_period_us: [1.0]
+    shots: 2000

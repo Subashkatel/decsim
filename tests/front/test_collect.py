@@ -25,11 +25,15 @@ import yaml
 
 import decsim.collect as collect
 import decsim.decoders.settings as decoder_settings
+import decsim.escalation.policies as escalation_policies
+import decsim.escalation.settings as escalation_settings
 import decsim.front.collect_command as run
 import decsim.front.experiment as experiment
 import decsim.front.measure as measure_shot
 import decsim.front.report as sweep_report
+import decsim.records.windows as window_records
 import decsim.windows.built_window_models as built_window_models
+import tests.front.yaml_configs as yaml_configs
 
 THIS_FILE = pathlib.Path(__file__)
 DATA = THIS_FILE.parent / "data"
@@ -356,3 +360,74 @@ def test_the_summary_off_the_written_files_is_the_summary_of_the_shots(
     measured_links = sweep_report.link_rows(record.shot_links)
     read_links = sweep_report.link_rows(read_shot_links)
     assert read_links == measured_links
+
+
+# ---- an escalation row written outside decsim
+
+
+class _OutsideEscalation:
+    """An escalation row written outside decsim, delegating to Baseline.
+
+    It subclasses no shipped row: every fact the front and the machine
+    read off a row is declared here and every call is forwarded, which is
+    the shape the P8 plug-in probe used. What the front reads to measure
+    a shot is primary_tier.
+    """
+
+    decides_on_a_confidence = False
+    requires_strong_context = False
+    primary_tier = window_records.DecoderTier.WEAK
+
+    def __init__(self, collaborators) -> None:
+        self.delegate = escalation_policies.Baseline(collaborators)
+
+    def check_plan(self, plan) -> None:
+        self.delegate.check_plan(plan)
+
+    def tiers_for_ready_window(self, window) -> tuple:
+        return self.delegate.tiers_for_ready_window(window)
+
+    def verdict_for_weak_result(self, job, result):
+        return self.delegate.verdict_for_weak_result(job, result)
+
+    def learn_from_strong_result(self, window_key, result) -> None:
+        self.delegate.learn_from_strong_result(window_key, result)
+
+
+def _measured_shot(tmp_path, escalation_kind: str):
+    """One seeded shot of the minimal config under that escalation row."""
+    card = {"escalation": {"kind": escalation_kind}}
+    config_path = yaml_configs.write_config(tmp_path, card)
+    config = experiment.load_experiment(config_path)
+    return yaml_configs.measure_point_shot(
+        config,
+        physical_error_probability=0.001,
+        distance=3,
+        round_period_us=1.0,
+        seed=0,
+    )
+
+
+def test_an_outside_escalation_row_is_measured_over_its_tiers_links(
+    tmp_path, monkeypatch
+):
+    """The front reads the row's tier, so a row off the table measures.
+
+    The front used to index its link tables by the escalation's name, so
+    `decsim collect` raised KeyError on any name but the three shipped
+    ones while the machine ran the row fine.
+    """
+    shipped_directory = tmp_path / "shipped"
+    shipped_directory.mkdir()
+    shipped = _measured_shot(shipped_directory, "weak_baseline")
+    monkeypatch.setitem(
+        escalation_settings.ESCALATIONS, "outside_baseline", _OutsideEscalation
+    )
+    outside_directory = tmp_path / "outside"
+    outside_directory.mkdir()
+
+    outside = _measured_shot(outside_directory, "outside_baseline")
+
+    assert outside.samples == shipped.samples
+    assert outside.means == shipped.means
+    assert outside.logical_failure == shipped.logical_failure

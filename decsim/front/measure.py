@@ -5,10 +5,10 @@ reads the run's listeners (`machine.observation`) and its RunResult, and
 no component: the window ledger, the stage ledger, the frame's
 corrections, the queue depth log, the referee's audit, the sampled shot
 and the link traffic of the result. The input and output transfers are
-named by role, not by wire, because the escalation kind picks the wire:
-weak_baseline moves windows on weak_buffer_to_weak_decoder and results
-on weak_decoder_to_frame, strong_only on
-strong_buffer_to_strong_decoder and strong_decoder_to_frame.
+named by role, not by wire, and which wire carries each role follows
+from the escalation row's declared primary_tier (ports.py
+EscalationPolicy), so a row written outside decsim is measured like any
+other.
 """
 
 import dataclasses
@@ -22,8 +22,11 @@ import stim
 import decsim.build.escalation as escalation_build
 import decsim.collect as collect
 import decsim.config as config_module
+import decsim.decoders.decoder_output as decoder_output
 import decsim.observe.observation as observation_module
 import decsim.records.results as result_records
+import decsim.records.transfers as transfer_records
+import decsim.records.windows as window_records
 import decsim.settings as machine_settings
 
 # Latency points, in path order, in microseconds per window unless noted.
@@ -53,15 +56,16 @@ POINTS = (
     "qpu_first_round_to_frame",  # first required round off QPU -> frame
 )
 
-INPUT_LINK = {
-    "weak_baseline": "weak_buffer_to_weak_decoder",
-    "strong_only": "strong_buffer_to_strong_decoder",
-    "switching": "weak_buffer_to_weak_decoder",
-}
-OUTPUT_LINK = {
-    "weak_baseline": "weak_decoder_to_frame",
-    "strong_only": "strong_decoder_to_frame",
-    "switching": "weak_decoder_to_frame",
+# which store's output link carries a tier's window in; the way home is
+# the decoders' own FRAME_PATH_BY_TIER, and both are keyed by the tier
+# the escalation row declares rather than by the row's name
+INPUT_LINK_BY_TIER = {
+    window_records.DecoderTier.WEAK: (
+        transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER
+    ),
+    window_records.DecoderTier.STRONG: (
+        transfer_records.LinkPath.STRONG_BUFFER_TO_STRONG_DECODER
+    ),
 }
 
 
@@ -252,9 +256,13 @@ def frame_records_by_window(
 def collect_samples(
     observation: observation_module.Observation,
     result: result_records.RunResult,
-    escalation_kind: str,
+    escalation_row,
 ) -> dict:
-    """Every point's microsecond samples over the shot's decoded windows."""
+    """Every point's microsecond samples over the shot's decoded windows.
+
+    The escalation row's primary tier says which two links a window
+    rides: in from that tier's store, and home to the frame.
+    """
     transfers = result.link_traffic["transfers"]
     link_delay = link_delay_by_window(transfers)
     qpu_send = qpu_send_ticks(transfers)
@@ -263,8 +271,11 @@ def collect_samples(
     for point in POINTS:
         samples[point] = []
     samples["cwb_per_round"] = controller_to_weak_buffer_delays_us(transfers)
-    input_path = INPUT_LINK[escalation_kind]
-    output_path = OUTPUT_LINK[escalation_kind]
+    primary_tier = escalation_row.primary_tier
+    input_link = INPUT_LINK_BY_TIER[primary_tier]
+    output_link = decoder_output.FRAME_PATH_BY_TIER[primary_tier]
+    input_path = input_link.value
+    output_path = output_link.value
     window_items = observation.windows.windows.items()
     all_windows = sorted(window_items)
     stages = observation.stages
@@ -385,8 +396,8 @@ def _measurement(
     wall_seconds: float,
 ) -> ShotMeasurement:
     """Read every number of one completed shot off its records."""
-    escalation_kind = settings.escalation.kind
-    samples = collect_samples(observation, result, escalation_kind)
+    escalation_row = escalation_build.escalation_row(settings.escalation)
+    samples = collect_samples(observation, result, escalation_row)
     verdicts = _logical_verdicts(observation, result)
     throughput = _throughput_per_microsecond(
         observation, settings, samples, distance

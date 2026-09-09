@@ -531,7 +531,7 @@ def test_a_windows_hold_reaches_into_the_successors_it_overflows_into():
     )
 
     owner, held_rounds = buffering.weak_holds[0]
-    assert owner == (1, 0)
+    assert owner == decoding_records.WindowReads((1, 0))
     assert held_rounds == (
         (1, 1),
         (1, 2),

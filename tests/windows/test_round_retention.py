@@ -124,7 +124,8 @@ def test_a_window_holds_its_read_range_plus_the_successor_overflow():
         round_count=6,
     )
     retention.register_window((1, 0), window)
-    held = store.hold_round_identities((1, 0))
+    reads = decoding_records.WindowReads((1, 0))
+    held = store.hold_round_identities(reads)
     assert held == ((1, 1), (1, 2), (1, 3), (1, 4), (2, 1), (2, 2))
 
 
@@ -149,8 +150,9 @@ def test_the_hold_moves_to_the_request_and_releases_when_the_input_lands():
     job = decoding_records.DecodeJob(
         operation_id=1, window_id=0, round_count=5, request_key=request_key
     )
-    retention.bind_input_hold(job, (1, 0))
-    assert not store.has_hold((1, 0))
+    reads = decoding_records.WindowReads((1, 0))
+    retention.bind_input_hold(job, reads)
+    assert not store.has_hold(reads)
     input_hold = decoding_records.DecoderInputHold(request_key)
     assert store.has_hold(input_hold)
     assert retention.holds_input(job)
@@ -183,7 +185,8 @@ def test_a_clipped_tail_keeps_only_its_commit_range():
     window.commit_hi = 5
     window.buffer_hi = 7
     retention.reset_clipped_window_reads(window)
-    held = store.hold_round_identities(("stream", 1))
+    reads = decoding_records.WindowReads(("stream", 1))
+    held = store.hold_round_identities(reads)
     assert held == (("stream", 4), ("stream", 5))
 
 
@@ -224,9 +227,10 @@ def test_a_potential_restart_read_outlives_the_landing_and_follows_a_reslice():
     job = decoding_records.DecodeJob(
         operation_id=1, window_id=1, round_count=6, request_key=request_key
     )
-    retention.bind_input_hold(job, (1, 1))
+    reads = decoding_records.WindowReads((1, 1))
+    retention.bind_input_hold(job, reads)
     job.input_hold()  # the input landed: the request's hold ends
-    assert not store.has_hold((1, 1))
+    assert not store.has_hold(reads)
     assert store.retained_fragments((1, 4)) is not None
     assert store.retained_fragments((1, 9)) is not None
     # the re-slice: the window now reads one buffer into the strong region

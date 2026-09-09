@@ -21,6 +21,7 @@ import decsim.engine as engine_module
 import decsim.links.fabric as fabric_module
 import decsim.links.link_profiles as link_profiles
 import decsim.links.settings as link_settings
+import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
 import decsim.records.transfers as transfer_records
 import decsim.syndrome_buffer.round_store as round_store_module
@@ -103,7 +104,8 @@ def test_a_write_lands_after_the_crossing_and_the_listener_hears_it_once():
         listener=listener,
         on_round_stored=lambda *key: stored.append(key),
     )
-    writer.store.register_hold("reader", [(1, 1)])
+    reads = decoding_records.WindowReads((1, 0))
+    writer.store.register_hold(reads, [(1, 1)])
 
     first = packet(1)
     first_attribution = attribution(1)
@@ -120,7 +122,8 @@ def test_a_write_lands_after_the_crossing_and_the_listener_hears_it_once():
 def test_the_writer_counts_a_write_in_flight_as_room_taken():
     engine = engine_module.Engine()
     writer = priced_writer(engine, rounds=1)
-    writer.store.register_hold("reader", [(1, 1)])
+    reads = decoding_records.WindowReads((1, 0))
+    writer.store.register_hold(reads, [(1, 1)])
 
     first = packet(1)
     first_attribution = attribution(1)
@@ -137,12 +140,13 @@ def test_the_writer_counts_a_write_in_flight_as_room_taken():
 def test_a_round_whose_readers_resolved_while_crossing_is_dropped_at_landing():
     engine = engine_module.Engine()
     writer = priced_writer(engine)
-    writer.store.register_hold("reader", [(1, 1)])
+    reads = decoding_records.WindowReads((1, 0))
+    writer.store.register_hold(reads, [(1, 1)])
 
     first = packet(1)
     first_attribution = attribution(1)
     writer.write(first, packet_bits=3, attribution=first_attribution)
-    writer.store.release_hold("reader")
+    writer.store.release_hold(reads)
     engine.run()
 
     assert writer.store.retained_fragments((1, 1)) is None
@@ -152,7 +156,8 @@ def test_a_round_whose_readers_resolved_while_crossing_is_dropped_at_landing():
 def test_settlement_reports_a_write_still_in_flight():
     engine = engine_module.Engine()
     writer = priced_writer(engine)
-    writer.store.register_hold("reader", [(1, 1)])
+    reads = decoding_records.WindowReads((1, 0))
+    writer.store.register_hold(reads, [(1, 1)])
     first = packet(1)
     first_attribution = attribution(1)
     writer.write(first, packet_bits=3, attribution=first_attribution)

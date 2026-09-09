@@ -27,6 +27,7 @@ import decsim.config as config
 import decsim.controller.round_writes as round_writes
 import decsim.controller.settings as controller_settings
 import decsim.engine as engine_module
+import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
 import decsim.syndrome_buffer.round_store as round_store_module
 import decsim.syndrome_buffer.settings as round_store_settings
@@ -223,14 +224,16 @@ def test_a_stored_round_is_released_when_its_last_hold_releases():
     the_store = store(
         on_slot_freed=lambda: freed.append(True), listener=listener
     )
-    the_store.register_hold("first", [(1, 1)])
-    the_store.register_hold("second", [(1, 1)])
+    weak_reads = decoding_records.WindowReads((1, 0))
+    strong_reads = decoding_records.PotentialStrong((1, 0))
+    the_store.register_hold(weak_reads, [(1, 1)])
+    the_store.register_hold(strong_reads, [(1, 1)])
     first = packet(1)
     the_store.accept_packed_round(first, publication_tick=0)
 
-    the_store.release_hold("first")
+    the_store.release_hold(weak_reads)
     held_after_first = the_store.retained_fragments((1, 1)) is not None
-    the_store.release_hold("second")
+    the_store.release_hold(strong_reads)
 
     assert held_after_first is True
     assert the_store.retained_fragments((1, 1)) is None
@@ -241,7 +244,8 @@ def test_a_stored_round_is_released_when_its_last_hold_releases():
 def test_the_listener_hears_a_stored_round_once():
     listener = RecordingListener()
     the_store = store(listener=listener)
-    the_store.register_hold("window", [(1, 1)])
+    reads = decoding_records.WindowReads((1, 0))
+    the_store.register_hold(reads, [(1, 1)])
 
     first = packet(1)
     the_store.accept_packed_round(first, publication_tick=0)
@@ -251,7 +255,8 @@ def test_the_listener_hears_a_stored_round_once():
 
 def test_publication_is_stamped_at_delivery_for_a_priced_hop():
     the_store = store()
-    the_store.register_hold("window", [(1, 1)])
+    reads = decoding_records.WindowReads((1, 0))
+    the_store.register_hold(reads, [(1, 1)])
     first = packet(1)
     the_store.accept_packed_round(first, publication_tick=None)
 
@@ -264,7 +269,8 @@ def test_publication_is_stamped_at_delivery_for_a_priced_hop():
 
 def test_an_unheld_round_is_freed_on_arrival_and_a_held_one_is_not():
     the_store = store()
-    the_store.register_hold("window", [(1, 2)])
+    reads = decoding_records.WindowReads((1, 0))
+    the_store.register_hold(reads, [(1, 2)])
     first = packet(1)
     the_store.accept_packed_round(first, publication_tick=0)
     second = packet(2)
@@ -289,7 +295,8 @@ def test_a_closed_operation_identity_never_reopens():
 
 def test_settlement_reports_a_hold_on_a_round_never_written():
     the_store = store()
-    the_store.register_hold("window", [(1, 5)])
+    reads = decoding_records.WindowReads((1, 0))
+    the_store.register_hold(reads, [(1, 5)])
 
     with pytest.raises(RuntimeError, match=r"unresolved holds on \[\(1, 5\)\]"):
         the_store.check_settled()
@@ -311,13 +318,15 @@ def test_the_hold_sources_carry_the_token_and_its_rounds():
     the_store.trace.hold_registered.connect(registered)
     the_store.trace.hold_transferred.connect(transferred)
     the_store.trace.hold_released.connect(released)
-    the_store.register_hold("window", [(1, 1), (1, 2)])
-    the_store.transfer_hold("window", "job")
-    the_store.release_hold("job")
+    reads = decoding_records.WindowReads((1, 0))
+    potential = decoding_records.PotentialStrong((1, 0))
+    the_store.register_hold(reads, [(1, 1), (1, 2)])
+    the_store.transfer_hold(reads, potential)
+    the_store.release_hold(potential)
     assert heard == [
-        ("registered", "window", ((1, 1), (1, 2))),
-        ("transferred", "window", "job"),
-        ("released", "job"),
+        ("registered", reads, ((1, 1), (1, 2))),
+        ("transferred", reads, potential),
+        ("released", potential),
     ]
 
 

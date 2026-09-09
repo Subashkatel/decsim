@@ -489,7 +489,8 @@ class DecodeRequester:
         window.queued = True
         tiers = self.escalation_policy.tiers_for_ready_window(window)
         primary_jobs = self._primary_jobs(job, forced_classes)
-        is_input_held = self._bind_input_hold(primary_jobs, window.key)
+        window_reads = decoding_records.WindowReads(window.key)
+        is_input_held = self._bind_input_hold(primary_jobs, window_reads)
         submissions = []
         for tier in tiers:
             if tier is primary_tier:
@@ -547,7 +548,7 @@ class DecodeRequester:
         send_input = self.store_output.input_send_for(job, is_input_held)
         return decoding_records.Submission(job, send_input)
 
-    def _bind_input_hold(self, primary_jobs: list, key: tuple) -> bool:
+    def _bind_input_hold(self, primary_jobs: list, window_reads) -> bool:
         """Move the window's hold to the attempt; whether it was held already.
 
         The jobs of one attempt read the same rounds, so they share one
@@ -559,7 +560,7 @@ class DecodeRequester:
         if first.submitted or self.retention.holds_input(first):
             return True
         store = self.retention.primary_store
-        self.retention.bind_input_hold(first, key, store)
+        self.retention.bind_input_hold(first, window_reads, store)
         reader_count = len(primary_jobs)
         if reader_count == 1:
             return False

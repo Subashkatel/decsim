@@ -21,7 +21,6 @@ new_holder) and hold_released(holder) for the consumers' tokens.
 import dataclasses
 from typing import Callable, Optional
 
-import decsim.records.decoding as decoding_records
 import decsim.records.identity as identity_records
 import decsim.records.rounds as round_records
 import decsim.syndrome_buffer.round_holds as round_holds
@@ -279,14 +278,18 @@ class RoundStore:
         self.operations[operation_id] = True
 
     def _hold_record(self, holder, round_keys) -> round_holds.HoldRecord:
-        """The record of a hold; a hold may name rounds not yet written."""
+        """The record of a hold; a hold may name rounds not yet written.
+
+        A hold keeps open the operations its rounds belong to and the
+        ones its token names beyond them, which the token answers.
+        """
         unique = dict.fromkeys(round_keys)
         keys = tuple(unique)
         references = set()
         for round_key in keys:
             references.add(round_key[0])
-        if type(holder) is decoding_records.RephaseGuard:
-            references.add(holder.request_key.operation_id)
+        for operation_id in holder.referenced_operation_ids():
+            references.add(operation_id)
         for operation_id in references:
             self._open(operation_id)
         referenced = frozenset(references)

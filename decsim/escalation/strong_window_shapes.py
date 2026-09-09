@@ -457,7 +457,8 @@ class ForwardWindow:
         request's.
         """
         self.collaborators.planner.absorb_window(key, restart_key)
-        self.collaborators.retention.release_hold_if_live(key)
+        reads = decoding_records.WindowReads(key)
+        self.collaborators.retention.release_hold_if_live(reads)
         self.collaborators.retention.release_restart_reads(key)
         self.collaborators.retention.release_absorbed_strong_hold(
             key, restart_key, replacement

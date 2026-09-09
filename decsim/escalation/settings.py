@@ -384,26 +384,35 @@ def decibels_to_nats(decibels: float) -> float:
 def _switching_settings(
     kind: str, section: Mapping, base_directory: Optional[pathlib.Path]
 ) -> EscalationSettings:
-    """The confidence knobs of an escalating kind, every rule checked once."""
+    """The confidence knobs of an escalating kind, every rule checked once.
+
+    Which keys the section may carry is the threshold row's to say, not
+    its name's: reads_a_calibration_table opens threshold_table and
+    threshold_column and closes gap_threshold_db, built_per_sweep_point
+    opens the online card, and audits_by_escalating is what serial-only
+    calibration means (threshold_sources.py).
+    """
     threshold_source = section.get("threshold_source", "fixed")
-    tables.row(
+    threshold_row = tables.row(
         THRESHOLD_SOURCES, "escalation.threshold_source", threshold_source
     )
-    gap_threshold_decibels = _gap_threshold_decibels(section, threshold_source)
+    gap_threshold_decibels = _gap_threshold_decibels(
+        section, threshold_source, threshold_row
+    )
     gap_threshold_nats = None
     if gap_threshold_decibels is not None:
         gap_threshold_nats = decibels_to_nats(gap_threshold_decibels)
     threshold_column = None
-    if threshold_source == "table":
+    if threshold_row.reads_a_calibration_table:
         raw_column = section.get("threshold_column", "gth_eq4_wilson")
         threshold_column = str(raw_column)
-    online = _online_settings(section, threshold_source)
+    online = _online_settings(section, threshold_source, threshold_row)
     named_confidence = section.get("confidence", "complementary_gap")
     confidence = str(named_confidence)
     walk_microseconds = _confidence_walk_microseconds(section)
     run_both_at_once = _switching_boolean(section, "run_both_at_once")
     strong_window = _strong_window(section)
-    _check_serial_only(threshold_source, strong_window)
+    _check_serial_only(threshold_source, threshold_row, strong_window)
     reread_regions = _restart_reread_buffer_regions(section)
     _check_far_pin_reread(strong_window, reread_regions)
     threshold_table = section.get("threshold_table")
@@ -449,28 +458,18 @@ def _restart_reread_buffer_regions(section: Mapping) -> int:
 
 
 def _gap_threshold_decibels(
-    section: Mapping, threshold_source: str
+    section: Mapping, threshold_source: str, threshold_row
 ) -> Optional[float]:
-    """The card's threshold; the table source computes it instead."""
-    if threshold_source == "table":
-        if "gap_threshold_db" in section:
-            raise ValueError(
-                "threshold_source table computes the threshold from "
-                "threshold_table; drop gap_threshold_db"
-            )
-        if "threshold_table" not in section:
-            raise ValueError(
-                "threshold_source table needs threshold_table, the "
-                "calibration csv path (calibrate offline for this run's "
-                "window geometry)"
-            )
-        return None
+    """The card's threshold; a row that reads a table computes it instead."""
+    if threshold_row.reads_a_calibration_table:
+        return _calibrated_threshold(section, threshold_source)
     has_table_key = "threshold_table" in section
     has_column_key = "threshold_column" in section
     if has_table_key or has_column_key:
         raise ValueError(
-            "threshold_table/threshold_column belong to threshold_source "
-            f"table; the source is {threshold_source}"
+            "threshold_table/threshold_column belong to a "
+            "threshold_source that reads a calibration table; the source "
+            f"{threshold_source} does not"
         )
     if "gap_threshold_db" not in section:
         raise ValueError(
@@ -480,15 +479,35 @@ def _gap_threshold_decibels(
     return float(section["gap_threshold_db"])
 
 
-def _online_settings(
+def _calibrated_threshold(
     section: Mapping, threshold_source: str
-) -> Optional[OnlineThresholdSettings]:
-    if "online" in section and threshold_source != "online":
+) -> Optional[float]:
+    """A row that reads a table carries the csv path and no card."""
+    if "gap_threshold_db" in section:
         raise ValueError(
-            "the online card belongs to threshold_source online; the "
-            f"source is {threshold_source}"
+            f"threshold_source {threshold_source} computes the threshold "
+            "from threshold_table; drop gap_threshold_db"
         )
-    if threshold_source != "online":
+    if "threshold_table" not in section:
+        raise ValueError(
+            f"threshold_source {threshold_source} needs threshold_table, "
+            "the calibration csv path (calibrate offline for this run's "
+            "window geometry)"
+        )
+    return None
+
+
+def _online_settings(
+    section: Mapping, threshold_source: str, threshold_row
+) -> Optional[OnlineThresholdSettings]:
+    """The online card, read by a row the front builds per sweep point."""
+    learns_across_a_point = threshold_row.built_per_sweep_point
+    if "online" in section and not learns_across_a_point:
+        raise ValueError(
+            "the online card belongs to a threshold_source built once "
+            f"per sweep point; the source is {threshold_source}"
+        )
+    if not learns_across_a_point:
         return None
     raw_online = section.get("online") or {}
     return OnlineThresholdSettings.from_yaml(raw_online)
@@ -532,15 +551,17 @@ def _check_far_pin_reread(strong_window: str, reread_regions: int) -> None:
     )
 
 
-def _check_serial_only(threshold_source: str, strong_window: str) -> None:
-    """Online calibration is validated for serial switching."""
+def _check_serial_only(
+    threshold_source: str, threshold_row, strong_window: str
+) -> None:
+    """A row that audits by escalating is validated for serial switching."""
     row = STRONG_WINDOW_SHAPES[strong_window]
     if not row.absorbs_weak_windows:
         return
-    if threshold_source == "online":
+    if threshold_row.audits_by_escalating:
         raise ValueError(
-            "threshold_source online is serial-only: an audit label "
-            "compares one window's weak and strong committed "
+            f"threshold_source {threshold_source} is serial-only: an "
+            "audit label compares one window's weak and strong committed "
             "observables, and a strong window that absorbs the weak "
             "windows it covers owns a larger extent than the audited "
             "window"

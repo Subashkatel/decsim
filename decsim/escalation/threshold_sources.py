@@ -22,7 +22,17 @@ import decsim.records.decoding as decoding_records
 
 
 class FixedThreshold:
-    """The paper's constant g_th: keep at gap >= threshold, escalate below."""
+    """The paper's constant g_th: keep at gap >= threshold, escalate below.
+
+    The three declarations below are what the yaml boundary and the root
+    read off a row instead of its name (escalation/settings.py,
+    build/escalation.py): audits_by_escalating says the row learns from
+    strong results it forces, which is why such a row is serial-only;
+    reads_a_calibration_table says its number comes from a csv, which
+    opens threshold_table and threshold_column and closes
+    gap_threshold_db; built_per_sweep_point says the front builds one
+    instance per sweep point, which is what the online card configures.
+    """
 
     audits_by_escalating = False
     reads_a_calibration_table = False

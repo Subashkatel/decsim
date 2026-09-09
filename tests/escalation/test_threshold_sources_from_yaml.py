@@ -14,6 +14,7 @@ import math
 
 import pytest
 
+import decsim.escalation.settings as escalation_settings
 from decsim.front.collect_command import run_sweep
 from decsim.front.experiment import load_experiment
 from tests.escalation.test_switching_mode import (
@@ -263,3 +264,89 @@ def test_online_source_reproduces_its_decisions(tmp_path):
     assert [m.logical_failure for m in first] == [
         m.logical_failure for m in second
     ]
+
+
+# ---- a threshold row written outside decsim
+
+
+class _OutsideCalibratedThreshold:
+    """A threshold row written outside decsim whose number comes from a csv.
+
+    It subclasses no shipped row: the three facts the yaml boundary reads
+    are declared here and the decision is a constant, exactly as the
+    shipped rows behave once the front has resolved the point.
+    """
+
+    audits_by_escalating = False
+    reads_a_calibration_table = True
+    built_per_sweep_point = False
+
+    def __init__(self, threshold_nats: float) -> None:
+        self.threshold_nats = threshold_nats
+
+    def decide_keep(self, job, result) -> bool:
+        """The gap against the threshold, both in nats."""
+        del job
+        return result.soft_output.gap >= self.threshold_nats
+
+    def learn_from_strong_result(self, window_key, result) -> None:
+        """A constant learns nothing."""
+        del window_key
+        del result
+
+
+class _OutsideLearningThreshold(_OutsideCalibratedThreshold):
+    """A threshold row from outside that the front builds per sweep point."""
+
+    reads_a_calibration_table = False
+    built_per_sweep_point = True
+
+
+def test_an_outside_row_that_reads_a_table_gets_the_column_and_no_card(
+    tmp_path, monkeypatch
+):
+    """The table keys follow reads_a_calibration_table, not the row's name."""
+    monkeypatch.setitem(
+        escalation_settings.THRESHOLD_SOURCES,
+        "outside_calibrated",
+        _OutsideCalibratedThreshold,
+    )
+    table = calibration_table(tmp_path)
+    table_card = {
+        "threshold_source": "outside_calibrated",
+        "threshold_table": table,
+        "threshold_column": "gth_eq4",
+    }
+    table_path = source_config(tmp_path, table_card)
+    config = load_experiment(table_path)
+    assert config.settings.escalation.threshold_column == "gth_eq4"
+    with_card = {
+        "threshold_source": "outside_calibrated",
+        "threshold_table": table,
+        "gap_threshold_db": 20.0,
+    }
+    with_card_path = source_config(tmp_path, with_card)
+
+    with pytest.raises(ValueError, match="drop gap_threshold_db"):
+        load_experiment(with_card_path)
+
+
+def test_an_outside_row_built_per_point_gets_the_online_card(
+    tmp_path, monkeypatch
+):
+    """The online card follows built_per_sweep_point, not the row's name."""
+    monkeypatch.setitem(
+        escalation_settings.THRESHOLD_SOURCES,
+        "outside_learning",
+        _OutsideLearningThreshold,
+    )
+    learning_card = {
+        "threshold_source": "outside_learning",
+        "gap_threshold_db": 20.0,
+        "online": {"audit_rate": 0.3},
+    }
+    config_path = source_config(tmp_path, learning_card)
+
+    config = load_experiment(config_path)
+
+    assert config.settings.escalation.online.audit_rate == 0.3

@@ -54,12 +54,11 @@ INSTRUCTION_WORD_SOURCE = (
     "(QubiC distributed processor, Fruitwala et al. 2404.15260)"
 )
 
-# The two controller-to-store hops carry the packed round as the
-# controller assembled it: the raw measurement bits, counted before the
-# detection events are formed (controller/round_assembly.py, wire_bits
-# of the merged raw fragments). The store then holds the formed events,
-# so a store's contents and the bits this card charges are two different
-# counts on the same round.
+# The two controller-to-store hops carry the packed round at the width
+# it leaves the controller: the detection events where the controller
+# forms them and the raw measurement outcomes where the decoder does
+# (controller.detection_events_formed_at,
+# controller/round_assembly.py's wire_bits of the fragments that leave).
 ROUND_PAYLOAD_SOURCE = "PackedRound.wire_bits"
 
 # Both decoder-input hops carry the job's own payload count, read by the

@@ -1257,16 +1257,18 @@ def test_the_controller_writes_every_round_into_buffer_0_over_a_priced_hop():
     between the system controller and the weak decoder as T_comm^weak
     (Table I), so the write into syndrome buffer 0 is a transfer like
     every other hop rather than a free store: reference.yaml at d = 3
-    puts its fifteen rounds and their 129 measured bits on
-    controller_to_weak_buffer, the same bits they put on
-    qpu_to_controller.
+    puts its fifteen rounds on controller_to_weak_buffer. The two hops
+    carry different widths, because the card's row forms the detection
+    events at the controller: the readout hop carries the 129 measured
+    outcomes, and the store hop the 120 events they formed, eight per
+    round.
     """
     machine = reference_run("weak_baseline")
     store_hop = transfer_records.LinkPath.CONTROLLER_TO_WEAK_BUFFER
     readout_hop = transfer_records.LinkPath.QPU_TO_CONTROLLER
     room_hop = transfer_records.LinkPath.CONTROLLER_TO_STRONG_BUFFER
 
-    assert link_totals(machine, store_hop) == (15, 129)
+    assert link_totals(machine, store_hop) == (15, 120)
     assert link_totals(machine, readout_hop) == (15, 129)
     assert link_totals(machine, room_hop) == (0, 0)
 
@@ -1277,14 +1279,15 @@ def test_a_strong_only_run_writes_every_round_into_buffer_1_over_a_priced_hop():
     T_comm^strong is Toshio's symbol for the same transport to the
     strong decoder, and a strong-primary plan reads its windows from
     syndrome buffer 1, so every round takes controller_to_strong_buffer
-    once and syndrome buffer 0 sees none of them.
+    once, at the width it leaves the controller, and syndrome buffer 0
+    sees none of them.
     """
     machine = reference_run("strong_only")
     store_hop = transfer_records.LinkPath.CONTROLLER_TO_WEAK_BUFFER
     readout_hop = transfer_records.LinkPath.QPU_TO_CONTROLLER
     room_hop = transfer_records.LinkPath.CONTROLLER_TO_STRONG_BUFFER
 
-    assert link_totals(machine, room_hop) == (15, 129)
+    assert link_totals(machine, room_hop) == (15, 120)
     assert link_totals(machine, readout_hop) == (15, 129)
     assert link_totals(machine, store_hop) == (0, 0)
 

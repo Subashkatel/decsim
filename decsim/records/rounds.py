@@ -127,8 +127,10 @@ class SyndromeRoundPacket:
 class PackedRound:
     """A finished round as it leaves the assembler.
 
-    The packet, its route, and its size on the wire: the raw measurement
-    bits, before detection formation, which is what the links carry.
+    The packet, its route, and its size on the wire: what leaves the
+    controller, which is the detection events where the controller forms
+    them and the raw measurement outcomes where the decoder does
+    (controller.detection_events_formed_at).
     """
 
     packet: SyndromeRoundPacket

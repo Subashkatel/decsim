@@ -56,7 +56,10 @@ class WindowInteraction(Protocol):
         """Fold one delivered boundary into a landed round of the window."""
 
     def boundary_payload_bits(
-        self, payload: Any, destination: window_records.WindowInfo
+        self,
+        payload: Any,
+        destination: window_records.WindowInfo,
+        source: window_records.WindowInfo,
     ) -> Optional[int]:
         """The bits one hand-off takes on the wire, None when unknown."""
 
@@ -153,16 +156,19 @@ class DefaultWindowInteraction:
             bits = tuple(masked)
         return dataclasses.replace(payload, bits=bits)
 
-    def boundary_payload_bits(self, payload, destination):
+    def boundary_payload_bits(self, payload, destination, source):
         """The bits this hand-off takes in the configured representation.
 
-        The message updates the destination's oldest round layer (Tan
-        2209.09219 lines 936-946), so the seam is that layer's detectors
-        and the flips landing on it, and the representation turns the
-        seam into bits. A destination with no window model has no layer
-        to count, and the wire prices the transfer by its card instead.
+        The message updates one layer of the destination (Tan 2209.09219
+        lines 936-946), the one the two windows share, so the seam is
+        that layer's detectors and the flips landing on it, and the
+        representation turns the seam into bits. Which layer it is
+        follows from the source, so the interaction that decides where a
+        delivery lands also prices it. A destination with no window
+        model has no layer to count, and the wire prices the transfer by
+        its card instead.
         """
-        seam = _seam_of(payload, destination)
+        seam = _seam_of(payload, destination, source)
         if seam is None:
             return None
         return self.boundary_payload.bits(seam)
@@ -227,18 +233,35 @@ class DefaultWindowInteraction:
         return window_records.SeamFaultOwner.STRONG_REGION
 
 
-def _seam_of(payload, destination):
-    """The destination's oldest layer, and the flips landing on it."""
+def _seam_of(payload, destination, source):
+    """The layer the source's mask lands on, and the flips landing on it."""
     positions = destination.detector_positions
     if positions is None:
         return None
-    seam_round = destination.start_round
+    seam_round = _seam_round(source, destination)
     detector_count = 0
     for round_index, _position in positions.values():
         if round_index == seam_round:
             detector_count += 1
     flip_count = _seam_flip_count(payload, positions, seam_round)
     return window_records.BoundarySeam(detector_count, flip_count)
+
+
+def _seam_round(source, destination) -> int:
+    """The destination layer a message from that source lands on.
+
+    A hand-off updates the one layer where the two windows meet (Tan
+    2209.09219 lines 936-946): the destination's newest read round when
+    the source commits past the destination's commit region, its oldest
+    read round otherwise. A source in another operation is an earlier
+    window, whose defects are shifted back into the destination's first
+    rounds.
+    """
+    if source.operation_id != destination.operation_id:
+        return destination.start_round
+    if source.commit_lo > destination.commit_hi:
+        return destination.buffer_hi
+    return destination.start_round
 
 
 def _seam_flip_count(payload, positions, seam_round: int) -> int:

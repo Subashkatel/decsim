@@ -9,7 +9,6 @@ table).
 import decsim.confidence.signals as confidence_signals
 import decsim.escalation.policies as escalation_policies
 import decsim.escalation.settings as escalation_settings
-import decsim.escalation.threshold_sources as threshold_sources
 import decsim.tables as tables
 
 
@@ -105,18 +104,38 @@ def _collaborators(
 
 
 def _threshold_source(settings: escalation_settings.EscalationSettings):
-    """The sweep point's online source, or the fixed threshold.
+    """The row escalation.threshold_source names, for this sweep point.
 
-    The table source is resolved to a fixed threshold per sweep point by
-    the front (ExperimentConfig.point_settings), so a table run reaches
-    the root with its threshold in nats or not at all.
+    A row the front builds once per point (it learns across the point's
+    shots) arrives already built; every other row is built here from the
+    point's threshold in nats, its one constructor argument. The table
+    source is resolved to a number per sweep point by the front
+    (ExperimentConfig.point_settings), so a table run reaches the root
+    with its threshold in nats or not at all.
     """
-    if settings.online_threshold is not None:
-        return settings.online_threshold
+    row = tables.row(
+        escalation_settings.THRESHOLD_SOURCES,
+        "escalation.threshold_source",
+        settings.threshold_source,
+    )
+    if row.built_per_sweep_point:
+        return _sweep_point_source(settings)
     if settings.gap_threshold_nats is None:
         raise ValueError(
             "escalation.threshold_source table resolves the threshold per "
             "sweep point in the front (ExperimentConfig.point_settings); "
             "build the machine through it, or give gap_threshold_db"
         )
-    return threshold_sources.FixedThreshold(settings.gap_threshold_nats)
+    return row(settings.gap_threshold_nats)
+
+
+def _sweep_point_source(settings: escalation_settings.EscalationSettings):
+    """The source the front built for this point, which every shot shares."""
+    if settings.online_threshold is None:
+        raise ValueError(
+            "escalation.threshold_source online is built once per sweep "
+            "point by the front (ExperimentConfig.point_settings), which "
+            "seeds it and shares it across the point's shots; build the "
+            "machine through it"
+        )
+    return settings.online_threshold

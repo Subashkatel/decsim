@@ -40,7 +40,13 @@ STRONG_WINDOW_SHAPES = {
     "two_sided_context": strong_window_shapes.ContextWindow,
     "forward": strong_window_shapes.ForwardWindow,
 }
-THRESHOLD_SOURCES = ("fixed", "table", "online")
+# escalation.threshold_source names one of these rows: where the
+# switching threshold of a sweep point comes from.
+THRESHOLD_SOURCES = {
+    "fixed": threshold_sources.FixedThreshold,
+    "table": threshold_sources.TableThreshold,
+    "online": threshold_sources.OnlineThreshold,
+}
 # How many of the strong region's buffer regions the restarted weak
 # window re-reads under the forward strong window (Toshio 2510.25222
 # Sec. III C, Fig. 12). 0, the default, is the paper: the weak decoder
@@ -271,7 +277,8 @@ class EscalationSettings:
         """
         if not self._decides_on_a_confidence():
             return None
-        if self.threshold_source in ("fixed", "online"):
+        row = self._threshold_row()
+        if not row.reads_a_calibration_table:
             return self.gap_threshold_nats
         table_path = self._table_path()
         rows = _table_rows(table_path, self.threshold_column)
@@ -306,7 +313,8 @@ class EscalationSettings:
         """
         if not self._decides_on_a_confidence():
             return None
-        if self.threshold_source != "online":
+        row = self._threshold_row()
+        if not row.built_per_sweep_point:
             return None
         online = self.online
         step_nats = online.step_nats()
@@ -329,6 +337,14 @@ class EscalationSettings:
             f"online-threshold d={distance} p={physical_error_probability}"
         )
         return threshold_sources.OnlineThreshold(controller, generator)
+
+    def _threshold_row(self):
+        """The row escalation.threshold_source names."""
+        return tables.row(
+            THRESHOLD_SOURCES,
+            "escalation.threshold_source",
+            self.threshold_source,
+        )
 
     def _decides_on_a_confidence(self) -> bool:
         """Whether this section's kind reads a confidence to decide keep.
@@ -362,11 +378,9 @@ def _switching_settings(
 ) -> EscalationSettings:
     """The confidence knobs of an escalating kind, every rule checked once."""
     threshold_source = section.get("threshold_source", "fixed")
-    if threshold_source not in THRESHOLD_SOURCES:
-        raise ValueError(
-            "escalation.threshold_source must be one of "
-            f"{THRESHOLD_SOURCES}, got {threshold_source!r}"
-        )
+    tables.row(
+        THRESHOLD_SOURCES, "escalation.threshold_source", threshold_source
+    )
     gap_threshold_decibels = _gap_threshold_decibels(section, threshold_source)
     gap_threshold_nats = None
     if gap_threshold_decibels is not None:

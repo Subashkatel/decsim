@@ -144,6 +144,7 @@ def build_window_manager(
         strong_output,
         requester,
         ledger,
+        courier,
         plan.window_interaction,
         decode_queue,
         verdict.accept_strong_result,
@@ -212,6 +213,7 @@ def _strong_redecode(
     strong_output,
     requester,
     ledger,
+    courier,
     interaction,
     decode_queue,
     on_strong_decoded,
@@ -235,6 +237,7 @@ def _strong_redecode(
         builder=builder,
         requester=requester,
         ledger=ledger,
+        courier=courier,
     )
     shape = row(collaborators)
     return strong_redecode_module.StrongRedecode(

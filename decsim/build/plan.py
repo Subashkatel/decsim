@@ -119,7 +119,10 @@ def build_plan(
             "dynamic streams require a windowing scheme that supports them"
         )
     has_static_decode_plan = settings.workload.decode_operations is not None
-    has_frontend = settings.workload.kind in ("surgery_ir", "qlx")
+    workload_row = tables.row(
+        workload_settings.WORKLOADS, "workload.kind", settings.workload.kind
+    )
+    has_frontend = workload_row.has_frontend
     commit_round_count = code.commit_rounds()
     buffer_round_count = code.buffer_rounds()
     run_shape = decoding_records.RunShape(
@@ -200,7 +203,7 @@ def _operations(settings: workload_settings.WorkloadSettings, code) -> tuple:
     row = tables.row(
         workload_settings.WORKLOADS, "workload.kind", settings.kind
     )
-    source_operations, fixed_rounds_policy = row(settings, code)
+    source_operations, fixed_rounds_policy = row.operations(settings, code)
     rounds_policy = settings.rounds_policy
     if rounds_policy is None:
         rounds_policy = fixed_rounds_policy

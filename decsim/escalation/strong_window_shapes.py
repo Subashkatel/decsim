@@ -49,14 +49,11 @@ from typing import Any, Optional, Protocol, runtime_checkable
 import decsim.engine as engine_module
 import decsim.escalation.pending_strong_windows as pending_strong_windows
 import decsim.escalation.strong_regions as strong_regions
+import decsim.ports as ports
 import decsim.records.decoding as decoding_records
 import decsim.records.log_sources as log_sources
 import decsim.records.windows as window_records
 import decsim.trace_source as trace_source
-import decsim.windows.committed_rounds as committed_rounds
-import decsim.windows.decode_requests as decode_requests
-import decsim.windows.round_retention as round_retention
-import decsim.windows.window_planner as window_planner
 
 
 @dataclasses.dataclass(frozen=True)
@@ -95,11 +92,11 @@ class StrongWindowCollaborators:
 
     engine: engine_module.Engine
     regions: strong_regions.StrongRegions
-    planner: window_planner.WindowPlanner
-    retention: round_retention.RoundRetention
-    builder: decode_requests.DecodeRequestBuilder
-    requester: decode_requests.DecodeRequester
-    ledger: committed_rounds.LogicalLedger
+    planner: ports.WindowPlan
+    retention: ports.WindowRetention
+    builder: ports.WindowJobBuilder
+    requester: ports.WindowRequests
+    ledger: ports.LogicalLedger
 
 
 @runtime_checkable

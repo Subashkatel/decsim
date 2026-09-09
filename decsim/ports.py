@@ -139,7 +139,12 @@ class RetainedRounds(Protocol):
         """Whether the store still serves this operation."""
 
     def close_operation(self, operation_id) -> None:
-        """The operation sends no more rounds; a closed one never reopens."""
+        """The operation sends no more rounds; a closed one never reopens.
+
+        A round still crossing a priced link when its operation closes
+        never enters the store: no hold can name a closed operation, so
+        the round has no reader and its writer drops it at the landing.
+        """
 
     def has_live_operation_reference(self, operation_id) -> bool:
         """Whether a hold or a stored round still names this operation."""

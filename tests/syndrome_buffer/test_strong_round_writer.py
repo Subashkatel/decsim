@@ -153,6 +153,27 @@ def test_a_round_whose_readers_resolved_while_crossing_is_dropped_at_landing():
     writer.check_settled()
 
 
+def test_a_round_that_lands_after_its_operation_closed_is_dropped():
+    engine = engine_module.Engine()
+    writer = priced_writer(engine, rounds=1)
+    writer.store.open_operation(1)
+    room_before = writer.has_room()
+
+    first = packet(1)
+    first_attribution = attribution(1)
+    writer.write(first, packet_bits=3, attribution=first_attribution)
+    writer.store.close_operation(1)
+    engine.run()
+
+    assert room_before is True
+    assert writer.store.retained_fragments((1, 1)) is None
+    assert writer.store.occupancy == 0
+    assert writer.store.has_operation(1) is False
+    assert writer.writes_in_flight == 0
+    assert writer.has_room() is True
+    writer.check_settled()
+
+
 def test_settlement_reports_a_write_still_in_flight():
     engine = engine_module.Engine()
     writer = priced_writer(engine)

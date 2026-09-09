@@ -10,7 +10,9 @@ source window has one record here; the courier owns the boundary policy
 is and how it merges), and tells the window side when a delivery landed.
 A strong window whose face is pinned reads the same records: the
 courier ships the neighbour's committed boundary to it and folds it in
-(pin_strong_face, Bombin et al. 2303.04846 lines 775-788).
+(pin_strong_face, Bombin et al. 2303.04846 lines 775-788), and that
+window owes the boundary until the message lands, so its decode waits
+the way a weak window's does.
 """
 
 import copy
@@ -217,6 +219,15 @@ class BoundaryCourier:
         every boundary of this courier is charged; the fold is written
         into the strong window's boundary state here and the job's gate
         XORs it into the input when the decode starts.
+
+        The strong window owes that boundary until the message lands.
+        Toshio et al. 2510.25222 lines 1248-1250 start the strong
+        decoder after the boundary conditions have been determined, and
+        Bombin et al. 2303.04846 lines 782-788 make kappa_Pj part of the
+        input task j reads, so the decode may not begin before the
+        message that carries it: deps_remaining counts it, and
+        WindowInputGate.may_start parks the job until the delivery
+        clears it, which is the weak side's own rule.
         """
         record = self._record(source_key)
         if record.committed_request_key is None:
@@ -229,6 +240,7 @@ class BoundaryCourier:
             destination, detector_positions=positions
         )
         self._fold_pin(source_key, destination, destination_info, record)
+        destination.deps_remaining += 1
         self._send_pin(
             source_key, destination, destination_info, operation, request_key
         )
@@ -300,9 +312,21 @@ class BoundaryCourier:
         payload_bits = self.interaction.boundary_payload_bits(
             record.committed, destination_info
         )
-        self.decoder_output.send_boundary(
-            attribution, payload_bits, _pin_delivered
-        )
+        delivered = functools.partial(self._pin_delivered, destination)
+        self.decoder_output.send_boundary(attribution, payload_bits, delivered)
+
+    def _pin_delivered(
+        self, destination: window_records.Window, _transfer
+    ) -> None:
+        """A pinned face's message landed: the strong window may start.
+
+        The fold was written when the job was built, so nothing changes
+        in the input here; what changes is that the window no longer
+        owes the boundary, and the parked decode is woken the way a weak
+        window's is (_receive_boundary).
+        """
+        destination.deps_remaining -= 1
+        self.on_boundary_received(destination.key, True)
 
     # ---- private
 
@@ -520,14 +544,6 @@ def _row_positions(model) -> dict:
     for detector_id in model.detector_ids:
         positions[detector_id] = model.defect_positions[detector_id]
     return positions
-
-
-def _pin_delivered(_transfer) -> None:
-    """A pinned face's message landed.
-
-    The pin is folded into the strong window when its job is built, so
-    the delivery charges the wire and changes nothing on arrival.
-    """
 
 
 class _BoundaryRecord:

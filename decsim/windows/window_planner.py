@@ -116,8 +116,13 @@ class WindowModels:
         window: window_records.Window,
         round_count: int,
         fault_exclusion_ranges: tuple,
+        prior_faults: Optional[dict],
     ):
-        """The model of one strong window, with the listed faults excluded."""
+        """The model of one strong window, with the listed faults excluded.
+
+        prior_faults is what the neighbour of a pinned face has already
+        committed; those faults are no columns of this model.
+        """
         if self.provider is None:
             return None
         requirement = self.requirement_for(resolved_operation)
@@ -131,6 +136,7 @@ class WindowModels:
                 round_count,
                 fault_model_requirement=requirement,
                 exclude_faults_touching=exclusion,
+                prior_faults=prior_faults,
             )
         return self.provider.strong_window_model_for_operation_with_exclusions(
             operation,
@@ -138,6 +144,7 @@ class WindowModels:
             round_count,
             fault_model_requirement=requirement,
             fault_exclusion_ranges=fault_exclusion_ranges,
+            prior_faults=prior_faults,
         )
 
 
@@ -286,12 +293,25 @@ class WindowPlanner:
         window: window_records.Window,
         round_count: int,
         fault_exclusion_ranges: tuple,
+        prior_faults: Optional[dict],
     ):
         """The error model of one strong window of that operation."""
         resolved = self.resolved_operation_by_id[operation.id]
         return self.models.strong_model_for_operation(
-            operation, resolved, window, round_count, fault_exclusion_ranges
+            operation,
+            resolved,
+            window,
+            round_count,
+            fault_exclusion_ranges,
+            prior_faults,
         )
+
+    def owned_faults_of(self, key: tuple) -> Optional[dict]:
+        """The faults the window at that key commits, per representation."""
+        model = self.models.model_by_window.get(key)
+        if model is None:
+            return None
+        return model.owned_fault_ids()
 
     def window_indices_of(self, operation_id) -> list:
         """The operation's window indices in order; none when unplanned."""

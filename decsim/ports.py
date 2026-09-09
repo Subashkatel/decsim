@@ -248,8 +248,23 @@ class WindowPlan(Protocol):
         window: window_records.Window,
         round_count: int,
         fault_exclusion_ranges: tuple,
+        prior_faults: Optional[dict],
     ):
-        """The error model of one strong window of that operation."""
+        """The error model of one strong window of that operation.
+
+        prior_faults is what a pinned face's neighbour has committed,
+        per fault representation, and None when the row pins no face.
+        """
+
+    def owned_faults_of(self, key: tuple) -> Optional[dict]:
+        """The faults the window at that key commits, per representation.
+
+        A row that pins a face on a neighbour asks for this, so that the
+        neighbour's faults are prior faults of its own strong model
+        rather than columns it may spend twice (Bombin et al.
+        2303.04846 lines 775-788). None when the run builds no error
+        models.
+        """
 
 
 @runtime_checkable
@@ -799,8 +814,14 @@ class WindowModelSource(Protocol):
         *,
         fault_model_requirement,
         exclude_faults_touching=None,
+        prior_faults=None,
     ):
-        """One strong window's model, with one non-owned range excluded."""
+        """One strong window's model, with one non-owned range excluded.
+
+        prior_faults names the faults a pinned face's neighbour has
+        already committed; they are no columns of this model at all
+        (Bombin et al. 2303.04846 lines 775-788).
+        """
 
     def strong_window_model_for_operation_with_exclusions(
         self,
@@ -810,6 +831,7 @@ class WindowModelSource(Protocol):
         *,
         fault_model_requirement,
         fault_exclusion_ranges: tuple,
+        prior_faults=None,
     ):
         """The same, with several non-owned ranges excluded."""
 

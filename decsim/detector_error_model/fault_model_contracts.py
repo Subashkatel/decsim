@@ -178,6 +178,33 @@ class WindowErrorModel:
             )
         return faults
 
+    def owned_fault_ids(
+        self,
+    ) -> dict[FaultRepresentation, frozenset[int]]:
+        """The catalog faults this window commits, per representation.
+
+        A later window is handed these as its prior faults, so that the
+        fault its neighbour has already decided is no column of its own
+        model (Bombin et al. 2303.04846 lines 775-788: task j decodes
+        over its own error generators). The ids index the circuit's
+        fault catalog, which every model of one circuit and one decoder
+        requirement shares.
+        """
+        owned_by_representation = {}
+        for representation in FaultRepresentation:
+            faults = self._faults_or_none(representation)
+            if faults is None:
+                continue
+            owned_by_representation[representation] = _owned_ids(faults)
+        return owned_by_representation
+
+    def _faults_or_none(
+        self, representation: FaultRepresentation
+    ) -> Optional[PlacedFaultModel]:
+        if representation is FaultRepresentation.GRAPHLIKE:
+            return self.graphlike_faults
+        return self.physical_faults
+
 
 _PHYSICAL_ONLY = frozenset({FaultRepresentation.PHYSICAL})
 _BOTH_REPRESENTATIONS = GRAPHLIKE_ONLY | _PHYSICAL_ONLY
@@ -189,6 +216,15 @@ PHYSICAL_FAULT_MODEL_REQUIRED = DecoderFaultModelRequirement(_PHYSICAL_ONLY)
 LINKED_FAULT_MODELS_REQUIRED = DecoderFaultModelRequirement(
     _BOTH_REPRESENTATIONS, require_physical_to_graphlike_link=True
 )
+
+
+def _owned_ids(faults: PlacedFaultModel) -> frozenset[int]:
+    """The catalog ids of the columns one placed view commits."""
+    owned_ids = set()
+    for column_index, fault_id in enumerate(faults.source_fault_ids):
+        if faults.owned[column_index]:
+            owned_ids.add(fault_id)
+    return frozenset(owned_ids)
 
 
 def _frozen_array(value: object) -> object:

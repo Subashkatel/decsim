@@ -315,6 +315,20 @@ def strong_region_round_count(
     return commit_round_count + buffered
 
 
+def strong_context_bounds(window: "Window") -> tuple:
+    """(context_lo, commit_lo, commit_hi, context_hi) of a strong redo.
+
+    A strong redo of one window commits the same rounds and reads one
+    buffer region of context on each side of them, clipped at round 1.
+    """
+    buffer_span = window.buffer_hi - window.commit_hi
+    buffer_rounds = max(0, buffer_span)
+    context_start = window.commit_lo - buffer_rounds
+    context_lo = max(1, context_start)
+    context_hi = window.commit_hi + buffer_rounds
+    return context_lo, window.commit_lo, window.commit_hi, context_hi
+
+
 def restart_reread_round_count(
     reread_buffer_regions: int, buffer_round_count: int
 ) -> int:

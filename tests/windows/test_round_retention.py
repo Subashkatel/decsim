@@ -190,19 +190,6 @@ def test_a_clipped_tail_keeps_only_its_commit_range():
     assert held == (("stream", 4), ("stream", 5))
 
 
-def test_strong_context_is_one_buffer_on_each_side_of_the_commit():
-    window = window_records.Window(
-        operation_id=1,
-        window_index=2,
-        commit_lo=7,
-        commit_hi=9,
-        buffer_hi=11,
-        round_count=5,
-    )
-    bounds = round_retention.strong_context_bounds(window)
-    assert bounds == (5, 7, 9, 11)
-
-
 def test_a_potential_restart_read_outlives_the_landing_and_follows_a_reslice():
     store = _store()
     retention = _retention(store, {1: 12}, {1: []})

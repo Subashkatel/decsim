@@ -282,7 +282,9 @@ def _refuse_crossing_strong_region(plan: decoding_records.RunShape) -> None:
     """
     commit_round_count = plan.commit_round_count
     buffer_round_count = plan.buffer_round_count
-    strong_round_count = commit_round_count + 2 * buffer_round_count
+    strong_round_count = window_records.strong_region_round_count(
+        commit_round_count, buffer_round_count
+    )
     if strong_round_count % commit_round_count == 0:
         return
     raise ValueError(

@@ -180,7 +180,9 @@ class DefaultWindowInteraction:
         """
         commit_round_count = weak_window.commit_hi - weak_window.commit_lo + 1
         buffer_round_count = weak_window.buffer_hi - weak_window.commit_hi
-        strong_round_count = commit_round_count + 2 * buffer_round_count
+        strong_round_count = window_records.strong_region_round_count(
+            commit_round_count, buffer_round_count
+        )
         commit_lo = weak_window.commit_lo
         strong_end = commit_lo + strong_round_count - 1
         commit_hi = min(strong_end, operation_round_count)
@@ -195,7 +197,9 @@ class DefaultWindowInteraction:
         restart_seam_fault_owner = None
         if has_restart:
             reread_regions = self.restart_reread_buffer_regions
-            reread_round_count = reread_regions * buffer_round_count
+            reread_round_count = window_records.restart_reread_round_count(
+                reread_regions, buffer_round_count
+            )
             restart_start = commit_hi - reread_round_count + 1
             restart_buffer_lo = max(commit_lo, restart_start)
             restart_seam_fault_owner = self._restart_seam_fault_owner()

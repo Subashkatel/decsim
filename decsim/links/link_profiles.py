@@ -23,6 +23,7 @@ import decsim.config as config
 import decsim.links.fabric as fabric
 import decsim.links.settings as settings
 import decsim.records.transfers as transfer_records
+import decsim.records.windows as window_records
 import decsim.tables as tables
 
 # A decoder result reaches the frame as one bit per logical observable, the
@@ -213,7 +214,9 @@ def bandwidth_limited_profile(
     commit_region_microseconds = commit_rounds * round_microseconds
     weak_window_rounds = commit_rounds + buffer_rounds
     weak_window_bits = weak_window_rounds * syndrome_bits_per_round
-    strong_window_rounds = commit_rounds + 2 * buffer_rounds
+    strong_window_rounds = window_records.strong_region_round_count(
+        commit_rounds, buffer_rounds
+    )
     strong_window_bits = strong_window_rounds * syndrome_bits_per_round
     one_per_region = 1 / commit_region_microseconds
     round_bits_per_microsecond = syndrome_bits_per_round / round_microseconds

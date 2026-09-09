@@ -68,13 +68,18 @@ class EscalationRateTracker:
 
     Label-free: every window reveals whether it escalated
     (gap < threshold), so the escalation fraction is fully observable.
-    The update is the adaptive conformal recursion (Gibbs and Candes,
-    arXiv:2106.00170): raise the threshold a little on every kept
-    window, lower it a lot on every escalation, balancing at the target
-    quantile of the live gap distribution with a per-sequence long-run
-    guarantee under any drift. Hardware precedent: O-GEHL's update
-    threshold is servoed by the same event-rate-balancing counter
-    (Seznec, CBP-1 2004).
+    The update is the adaptive conformal recursion of Gibbs and Candes,
+    arXiv:2106.00170, Eq. (2) at line 143,
+    alpha_{t+1} = alpha_t + gamma (alpha - err_t): here alpha is the
+    target escalation rate, err_t whether this window escalated, and
+    gamma the step, so the threshold rises a little on every kept window
+    and falls a lot on every escalation. It balances at the target
+    quantile of the live gap distribution, and their Proposition 4.1
+    (lines 309-317) bounds the long-run average of err_t around alpha
+    with no assumption on the data-generating distribution, which is
+    what a drifting gap distribution needs. The same shape is old in
+    hardware, where an update threshold is servoed by the balance of two
+    event rates (Seznec's O-GEHL, CBP-1 2004).
     """
 
     def __init__(
@@ -107,18 +112,20 @@ class EscalationRateTracker:
 class AuditLane:
     """Randomized strong-decoder audits of kept windows.
 
-    The lane is cache set-dueling's move (Qureshi et al., ISCA 2007):
-    dedicate a small fixed sample to the expensive path so ground truth
-    keeps flowing whatever threshold is live. Sampling kept windows is
-    what breaks the selective-labels bias (Lakkaraju et al., KDD 2017):
-    without it every label comes from below the threshold and the kept
-    region is pure extrapolation.
+    The lane dedicates a small fixed sample to the expensive path so
+    ground truth keeps flowing whatever threshold is live, which is the
+    move of set-dueling in caches (Qureshi et al., ISCA 2007). Sampling
+    kept windows is what avoids the selective-labels problem (Lakkaraju
+    et al., KDD 2017): without it every label comes from below the
+    threshold and the kept region is pure extrapolation. Neither paper
+    is on disk here, so neither is cited by line.
 
     kept_bad_rate estimates P(weak revised and kept) per window, the
-    quantity the paper's Eq. 4 bounds with epsilon * PL_strong. Each
-    audited bad outcome counts 1/audit_rate kept windows (inverse
-    propensity). The label is disagreement with the strong result, the
-    reference the paper's protocol also measures against.
+    quantity Toshio et al. 2510.25222 bound with epsilon * PL_strong in
+    Eq. (4), line 890. Each audited bad outcome counts 1/audit_rate kept
+    windows (inverse propensity). The label is disagreement with the
+    strong result, which is the reference that paper measures against
+    too.
     """
 
     def __init__(self, audit_rate: float) -> None:

@@ -4,12 +4,18 @@ gem5's instruction queue holds ready work in priority order and hands
 it out through one scheduling rule (src/cpu/o3/inst_queue.hh:160-178,
 scheduleReadyInsts); here the Scheduler port (schedulers.py) is that
 rule, per pool. A job queues in the pool its kind names, when the run
-has that pool, else the default pool. Under bulk_strong the STRONG POOL
-alone is served as one merged batch: every queued strong job,
-timing-only, becomes one decode serving every member request, so a run
-that names a pool bulk_strong does not mean is refused rather than
-merged. The queue depth is sampled on every change for the switching
-study.
+has that pool, else the default pool. Under the yaml's
+decoder_manager.bulk_strong the STRONG POOL alone is served as one
+merged batch: every queued strong job, timing-only, becomes one decode
+serving every member request, so a run that names a pool bulk_strong
+does not mean is refused rather than merged. Toshio et al. 2510.25222
+lines 1253-1264 ask for bulk decoding of one escalation's own
+contiguous region once both its boundaries are determined; merging
+several independent escalated windows is decsim's own step past that,
+and it exists because it is the cheapest strong tier the study can
+price a run against, the floor of the tuning the paper explicitly
+leaves open at 1259-1262. The queue depth is sampled on every change
+for the switching study.
 """
 
 import dataclasses

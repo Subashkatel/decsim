@@ -67,13 +67,18 @@ def build_escalation_policy(settings: escalation_settings.EscalationSettings):
 
 
 def confidence_signal(escalation: escalation_settings.EscalationSettings):
-    """The signal row a switching run's weak decoder reports and decides on."""
+    """The signal row a switching run's weak decoder reports and decides on.
+
+    Every row takes the same one argument, the card that prices its own
+    computation on the weak unit; None leaves the row on its own cost
+    model.
+    """
     row = tables.row(
         confidence_signals.CONFIDENCE_SIGNALS,
         "escalation.confidence",
         escalation.confidence,
     )
-    return row()
+    return row(walk_microseconds=escalation.confidence_walk_microseconds)
 
 
 def _threshold_source(settings: escalation_settings.EscalationSettings):

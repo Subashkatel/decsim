@@ -16,6 +16,7 @@ import math
 import pathlib
 import random
 from collections.abc import Mapping
+from numbers import Real
 from typing import Optional
 
 import decsim.escalation.policies as escalation_policies
@@ -49,6 +50,7 @@ RESTART_REREAD_BUFFER_REGIONS = (0, 1)
 ESCALATION_KEYS = (
     "kind",
     "confidence",
+    "confidence_walk_microseconds",
     "gap_threshold_db",
     "run_both_at_once",
     "strong_window",
@@ -200,7 +202,10 @@ class EscalationSettings:
     shape.
     confidence names the signal the weak tier reports and the threshold
     decides on (confidence/signals.py), and the yaml refuses a
-    weak decoder whose decode cannot produce that signal's evidence.
+    weak decoder whose decode cannot produce that signal's evidence;
+    confidence_walk_microseconds is the card that prices the signal's own
+    computation on the weak unit, null leaving each row on its own cost
+    model.
     The complementary gap's two forced-class solves are two ordinary
     jobs of the weak pool, so weak_decoder.units alone decides whether
     they overlap. A Python-built policy is used as it is. The
@@ -211,6 +216,7 @@ class EscalationSettings:
 
     kind: str = "weak_baseline"
     confidence: str = "complementary_gap"
+    confidence_walk_microseconds: Optional[float] = None
     gap_threshold_decibels: Optional[float] = None
     threshold_source: str = "fixed"
     threshold_table: Optional[str] = None
@@ -355,6 +361,7 @@ def _switching_settings(
     online = _online_settings(section, threshold_source)
     named_confidence = section.get("confidence", "complementary_gap")
     confidence = str(named_confidence)
+    walk_microseconds = _confidence_walk_microseconds(section)
     run_both_at_once = _switching_boolean(section, "run_both_at_once")
     strong_window = _strong_window(section)
     _check_serial_only(threshold_source, strong_window)
@@ -363,6 +370,7 @@ def _switching_settings(
     return EscalationSettings(
         kind="switching",
         confidence=confidence,
+        confidence_walk_microseconds=walk_microseconds,
         gap_threshold_decibels=gap_threshold_decibels,
         gap_threshold_nats=gap_threshold_nats,
         threshold_source=threshold_source,
@@ -522,3 +530,25 @@ def _certified_nats(
         )
     gap_threshold_decibels = float(cell)
     return decibels_to_nats(gap_threshold_decibels)
+
+
+def _confidence_walk_microseconds(section: Mapping) -> Optional[float]:
+    """The card that prices a confidence signal's own computation."""
+    if "confidence_walk_microseconds" not in section:
+        return None
+    value = section["confidence_walk_microseconds"]
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, Real):
+        raise ValueError(
+            "escalation.confidence_walk_microseconds must be a number of "
+            f"microseconds, or null to leave the signal on its own cost "
+            f"model (got {value!r})"
+        )
+    microseconds = float(value)
+    if not math.isfinite(microseconds) or microseconds < 0.0:
+        raise ValueError(
+            "escalation.confidence_walk_microseconds must be finite and "
+            f"not negative (got {value!r})"
+        )
+    return microseconds

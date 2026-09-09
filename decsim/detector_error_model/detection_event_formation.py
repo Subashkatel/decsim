@@ -67,7 +67,8 @@ class DecoderSideFormation:
     link at its raw measurement width. The controller charges nothing
     for a conversion it does not do, so a controller-side charge under
     this row is refused where the yaml names it; the tier's own charge
-    is <tier>_decoder.engine.detection_event_cycles_per_round.
+    is <tier>_decoder.engine.detection_event_latency_cycles and its
+    detection_event_cycles_per_round.
 
     The two tiers read the same rounds out of two stores and hold the
     same value of every event, so one former forms each round once, in
@@ -86,7 +87,7 @@ class DecoderSideFormation:
                 "controller for a conversion this run does at the decoder "
                 "(controller.detection_events_formed_at); charge the tier "
                 "with <tier>_decoder.engine."
-                "detection_event_cycles_per_round, or write null"
+                "detection_event_latency_cycles, or write null"
             )
         self.former = _remembered(former)
         self.departure_ticks = 0

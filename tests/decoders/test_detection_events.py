@@ -1,13 +1,17 @@
 """One tier's event-detection logic and the stage that prices it.
 
-The cost is Yang et al. 2605.04892 lines 1274-1275, "The total latency
-of the preprocessing stage for syndrome calculation is fixed at 20 ns (5
-FPGA clock cycles)", counted inside "Subtotal (decoder) 148" in their
-Table I (lines 1049-1052); the block sits in front of the decoder core,
-as LILLIPUT's Event Detection Logic does (2108.06569 lines 499-510). The
-laws here are the tier's: a round it has already formed is neither
-formed nor charged again, and a round is charged to the job that first
-asks for it.
+The cost is Yang et al. 2605.04892 lines 1273-1275, "All variables are
+stored in FPGA registers, enabling fully pipelined operation. The total
+latency of the preprocessing stage for syndrome calculation is fixed at
+20 ns (5 FPGA clock cycles)", counted inside "Subtotal (decoder) 148" in
+their Table I (lines 1049-1052); the block sits in front of the decoder
+core, as LILLIPUT's Event Detection Logic does (2108.06569 lines
+499-510). Fully pipelined means one round a clock after the first, the
+rate LILLIPUT's FIFO reads at (2108.06569 line 593), so n rounds cost
+the latency plus n - 1. The laws here are the tier's: a round it has
+already formed is neither formed nor charged again, a round is charged
+to the job that first asks for it, and a job that never runs gives its
+rounds back.
 """
 
 import decsim.decoders.detection_events as detection_events
@@ -15,7 +19,8 @@ import decsim.detector_error_model.detection_event_formation as event_formation
 import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
 
-YANG_CYCLES_PER_ROUND = 5
+YANG_LATENCY_CYCLES = 5
+ONE_ROUND_A_CLOCK = 1
 
 
 class Former:
@@ -59,7 +64,8 @@ def job(round_indices):
 def stage(formation):
     return detection_events.DetectionEventFormationStage(
         "detection_event_formation",
-        cycles_per_round=YANG_CYCLES_PER_ROUND,
+        cycles_per_job=YANG_LATENCY_CYCLES,
+        cycles_per_round=ONE_ROUND_A_CLOCK,
         formation=formation,
     )
 
@@ -90,7 +96,7 @@ def test_a_round_two_windows_read_is_formed_once():
     assert formed_first[1].bits == formed_second[0].bits
 
 
-def test_a_window_pays_five_cycles_for_every_round_it_forms():
+def test_a_window_pays_the_stages_latency_then_one_round_a_clock():
     former = Former()
     formation = detection_events.TierFormation(former)
     formation_stage = stage(formation)
@@ -98,11 +104,23 @@ def test_a_window_pays_five_cycles_for_every_round_it_forms():
 
     cycles = formation_stage.cycles_for(reading_six_rounds)
 
-    assert cycles == 30
+    assert cycles == 10
+
+
+def test_one_round_costs_the_stages_latency_and_nothing_more():
+    """A pipelined stage's fixed latency is one round's way through it."""
+    former = Former()
+    formation = detection_events.TierFormation(former)
+    formation_stage = stage(formation)
+    reading_one_round = job([1])
+
+    cycles = formation_stage.cycles_for(reading_one_round)
+
+    assert cycles == 5
 
 
 def test_an_overlapping_window_pays_only_for_the_rounds_it_brings():
-    """Five cycles times r - b: the b rounds it shares are already formed."""
+    """5 + (r - b - 1): the b rounds it shares are already formed."""
     former = Former()
     formation = detection_events.TierFormation(former)
     formation_stage = stage(formation)
@@ -112,8 +130,8 @@ def test_an_overlapping_window_pays_only_for_the_rounds_it_brings():
     first_cycles = formation_stage.cycles_for(first)
     second_cycles = formation_stage.cycles_for(second)
 
-    assert first_cycles == 30
-    assert second_cycles == 15
+    assert first_cycles == 10
+    assert second_cycles == 7
 
 
 def test_the_second_tier_charges_its_own_rounds():
@@ -129,8 +147,8 @@ def test_the_second_tier_charges_its_own_rounds():
     weak_cycles = weak_stage.cycles_for(weak_job)
     strong_cycles = strong_stage.cycles_for(strong_job)
 
-    assert weak_cycles == 15
-    assert strong_cycles == 15
+    assert weak_cycles == 7
+    assert strong_cycles == 7
     assert former.asked == []
 
 
@@ -144,8 +162,8 @@ def test_the_rounds_a_job_pays_for_are_frozen_at_the_first_ask():
     at_dispatch = formation_stage.cycles_for(reading_three_rounds)
     at_the_walk = formation_stage.cycles_for(reading_three_rounds)
 
-    assert at_dispatch == 15
-    assert at_the_walk == 15
+    assert at_dispatch == 7
+    assert at_the_walk == 7
 
 
 def test_the_stage_reports_the_rounds_it_formed():

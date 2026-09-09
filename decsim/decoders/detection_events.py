@@ -6,10 +6,11 @@ decoder-side papers put the work: LILLIPUT "generates error detection
 events by comparing the stabilizer measurement outcomes from two
 consecutive QEC cycles ... This step is accomplished by the Event
 Detection Logic block shown in Figure 4", inside the decoder (2108.06569
-lines 499-510), and Yang et al. fix "The total latency of the
-preprocessing stage for syndrome calculation ... at 20 ns (5 FPGA clock
-cycles)" and count it inside their decoder subtotal (2605.04892 lines
-1274-1275, Table I lines 1049-1052).
+lines 499-510), and Yang et al. keep "All variables ... in FPGA
+registers, enabling fully pipelined operation" and fix "The total
+latency of the preprocessing stage for syndrome calculation ... at 20 ns
+(5 FPGA clock cycles)", counted inside their decoder subtotal
+(2605.04892 lines 1273-1275, Table I lines 1049-1052).
 
 Each tier has its own: the weak tier reads Buffer 0 and the strong tier
 reads Buffer 1, two copies of the same raw rounds in two stores, each
@@ -85,21 +86,30 @@ class TierFormation:
 class DetectionEventFormationStage(staged_decoder.DecoderStage):
     """The tier's event-detection logic, priced in front of its core.
 
-    Yang et al. 2605.04892 lines 1274-1275 fix the preprocessing stage
-    for syndrome calculation at 20 ns, 5 FPGA clock cycles, and their
-    Table I (lines 1049-1052) counts "Syndrome calculation 20" inside
-    "Subtotal (decoder) 148": the cost is the decoder's own, per round
-    it forms. The stage prices the rounds this job forms on this tier
+    A pipelined stage, so its cycles are a fixed latency once and its
+    rate for every round after the first. Yang et al. 2605.04892 lines
+    1273-1275 store "All variables ... in FPGA registers, enabling fully
+    pipelined operation" and fix "The total latency of the preprocessing
+    stage for syndrome calculation ... at 20 ns (5 FPGA clock cycles)",
+    counted inside "Subtotal (decoder) 148" in their Table I (lines
+    1049-1052): the 20 ns is one round's way through the stage, not the
+    price of every round, since a pipelined stage takes a new round
+    every clock. The stage prices the rounds this job forms on this tier
     and no others, so a window that overlaps an earlier one pays for the
     rounds the earlier window did not bring.
+
+    cycles_per_job is that fixed latency and cycles_per_round the rate.
     """
 
     formation: Optional[TierFormation] = None
 
     def cycles_for(self, job: decoding_records.DecodeJob) -> int:
-        """The stage's cycles: per round this job forms on this tier."""
+        """Latency once, then the rate for each round after the first."""
         rounds = self.formation.rounds_to_form(job)
-        return self.cycles_per_round * len(rounds)
+        if not rounds:
+            return 0
+        after_the_first = len(rounds) - 1
+        return self.cycles_per_job + self.cycles_per_round * after_the_first
 
     def formed_round_keys(self, job: decoding_records.DecodeJob) -> tuple:
         """The rounds this stage forms for the job, for the trace."""

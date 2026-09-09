@@ -71,12 +71,21 @@ DECODER_INPUTS = {"copy": True, "in_place": False}
 # single writer, so in_place is refused there by name.
 DECODER_BOUNDARY_FOLDS = {"copy": True, "in_place": False}
 
-# <tier>_decoder.engine.detection_event_cycles_per_round, per round the
-# tier forms: Yang et al. 2605.04892 lines 1274-1275 fix "the
-# preprocessing stage for syndrome calculation ... at 20 ns (5 FPGA
-# clock cycles)" and their Table I (lines 1049-1052) counts it inside
-# the decoder's own subtotal.
-DETECTION_EVENT_CYCLES_PER_ROUND = 5
+# <tier>_decoder.engine.detection_event_latency_cycles, the fixed
+# latency of the tier's event-detection stage: Yang et al. 2605.04892
+# lines 1273-1275, "All variables are stored in FPGA registers, enabling
+# fully pipelined operation. The total latency of the preprocessing
+# stage for syndrome calculation is fixed at 20 ns (5 FPGA clock
+# cycles)", counted inside the decoder's own subtotal (Table I, lines
+# 1049-1052).
+DETECTION_EVENT_LATENCY_CYCLES = 5
+
+# <tier>_decoder.engine.detection_event_cycles_per_round, the pipelined
+# stage's rate: fully pipelined (Yang 2605.04892 line 1273) means the
+# stage takes a new round every clock, which is the rate the fetch stage
+# already reads at (LILLIPUT 2108.06569 line 593, the FIFO of the last m
+# rounds).
+DETECTION_EVENT_CYCLES_PER_ROUND = 1
 
 
 @dataclasses.dataclass(frozen=True)
@@ -103,13 +112,17 @@ class DecoderSettings:
     polled status register, the decoder holding its output until the
     reader takes it (2410.05202 lines 1256-1259). It is read on the tier
     that decodes the plan's windows.
-    detection_event_cycles_per_round prices this tier's own
-    event-detection logic, per round it forms, and is charged only when
-    the rounds reach it raw (controller.detection_events_formed_at
-    decoder). Its default is Yang et al. 2605.04892 lines 1274-1275,
-    where "The total latency of the preprocessing stage for syndrome
-    calculation is fixed at 20 ns (5 FPGA clock cycles)"; None is
-    uncharged.
+    detection_event_latency_cycles and detection_event_cycles_per_round
+    price this tier's own event-detection logic, charged only when the
+    rounds reach it raw (controller.detection_events_formed_at decoder).
+    The stage is pipelined, so a job forming n rounds pays the fixed
+    latency once and the rate for every round after the first: Yang et
+    al. 2605.04892 lines 1273-1275 store "All variables ... in FPGA
+    registers, enabling fully pipelined operation" and fix "The total
+    latency of the preprocessing stage for syndrome calculation ... at
+    20 ns (5 FPGA clock cycles)", which is the latency default; the rate
+    default is one round a clock. A null latency is uncharged and the
+    rate is then read by nobody.
     kind None is no decoder at all, right for a run that plans no
     windows. A Python-built decoder is routed as it is, with no engine
     stages around it.
@@ -123,9 +136,10 @@ class DecoderSettings:
     unit_memory_rounds: Optional[int] = None
     fetch_cycles_per_round: int = 1
     release_cycles_per_job: int = 1
-    detection_event_cycles_per_round: Optional[int] = (
-        DETECTION_EVENT_CYCLES_PER_ROUND
+    detection_event_latency_cycles: Optional[int] = (
+        DETECTION_EVENT_LATENCY_CYCLES
     )
+    detection_event_cycles_per_round: int = DETECTION_EVENT_CYCLES_PER_ROUND
     engine_megahertz: Optional[float] = None
     decoder: Optional[ports.Decoder] = None
 
@@ -147,7 +161,8 @@ class DecoderSettings:
             )
         input_kind = section.get("input", "copy")
         boundary_fold = section.get("boundary_fold", "copy")
-        formation_cycles = _formation_cycles(engine)
+        formation_latency = _formation_latency_cycles(engine)
+        formation_rate = _formation_cycles_per_round(engine)
         result_blocks_unit = section.get("result_blocks_unit", False)
         _check_boolean(section_name, "result_blocks_unit", result_blocks_unit)
         return cls(
@@ -159,7 +174,8 @@ class DecoderSettings:
             unit_memory_rounds=unit_memory_rounds,
             fetch_cycles_per_round=engine["fetch_cycles_per_round"],
             release_cycles_per_job=engine["release_cycles_per_job"],
-            detection_event_cycles_per_round=formation_cycles,
+            detection_event_latency_cycles=formation_latency,
+            detection_event_cycles_per_round=formation_rate,
             engine_megahertz=engine_megahertz,
         )
 
@@ -238,8 +254,15 @@ def _dispatch_microseconds(
     return clocks.microseconds(cycles, clock)
 
 
-def _formation_cycles(engine: Mapping) -> Optional[int]:
-    """The tier's event-detection cycles per round; null is uncharged."""
+def _formation_latency_cycles(engine: Mapping) -> Optional[int]:
+    """The fixed latency of the tier's event-detection stage; null is off."""
+    if "detection_event_latency_cycles" not in engine:
+        return DETECTION_EVENT_LATENCY_CYCLES
+    return engine["detection_event_latency_cycles"]
+
+
+def _formation_cycles_per_round(engine: Mapping) -> int:
+    """The rate that stage accepts rounds at, one a clock by default."""
     if "detection_event_cycles_per_round" not in engine:
         return DETECTION_EVENT_CYCLES_PER_ROUND
     return engine["detection_event_cycles_per_round"]

@@ -107,7 +107,7 @@ def test_a_controller_charge_under_the_decoder_row_is_refused():
 
     sentence = str(refusal.value)
     assert "controller.detection_event_cycles_per_round" in sentence
-    assert "detection_event_cycles_per_round, or write null" in sentence
+    assert "detection_event_latency_cycles, or write null" in sentence
 
 
 def test_the_former_forms_each_round_once_and_remembers_it():

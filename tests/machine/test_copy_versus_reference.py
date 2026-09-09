@@ -292,13 +292,17 @@ def test_the_widths_the_two_rows_send_are_the_events_and_the_outcomes():
     assert _weak_input_bits(at_the_decoder) == 441
 
 
-def test_a_tier_pays_yangs_five_cycles_for_each_round_it_forms():
-    """Six rounds at the first window, three at each window after it."""
+def test_a_tier_pays_yangs_latency_then_one_round_a_clock():
+    """Six rounds at the first window, three at each window after it.
+
+    The stage is pipelined (Yang 2605.04892 line 1273), so the cycles
+    are 5 + (r - 1) and 5 + (r - b - 1), not 5 per round.
+    """
     at_the_decoder = _machine_formed_at("decoder")
     at_the_decoder.run()
     charged = _formation_stages(at_the_decoder)
-    assert charged[0] == (30, 6, 120000)
-    assert charged[1] == (15, 3, 60000)
+    assert charged[0] == (10, 6, 40000)
+    assert charged[1] == (7, 3, 28000)
 
 
 def test_the_controller_row_charges_no_tier_for_a_formation_it_did():

@@ -377,15 +377,20 @@ def _formation_stage(
     The stage is the tier's own hardware in front of its decoder core
     (LILLIPUT's Event Detection Logic block, 2108.06569 lines 499-510;
     Yang's preprocessing stage inside the decoder subtotal, 2605.04892
-    lines 1274-1275, Table I lines 1049-1052), so it is a stage of the
+    lines 1273-1275, Table I lines 1049-1052), so it is a stage of the
     unit's timing rather than a component the manager schedules: the
-    decoder row behind it never learns that its rounds were raw.
+    decoder row behind it never learns that its rounds were raw. It is
+    pipelined, so the card's two keys are a fixed latency and a rate.
     """
     if formation is None:
         return None
-    cycles = tier_settings.detection_event_cycles_per_round
-    if cycles is None:
+    latency_cycles = tier_settings.detection_event_latency_cycles
+    if latency_cycles is None:
         return None
+    cycles_per_round = tier_settings.detection_event_cycles_per_round
     return detection_events_module.DetectionEventFormationStage(
-        FORMATION_STAGE, cycles_per_round=cycles, formation=formation
+        FORMATION_STAGE,
+        cycles_per_job=latency_cycles,
+        cycles_per_round=cycles_per_round,
+        formation=formation,
     )

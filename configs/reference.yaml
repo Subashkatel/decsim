@@ -484,13 +484,15 @@ weak_decoder:                      # the lightweight tier: fast, higher LER
                                    # cycle (LILLIPUT FIFO, sec. 4)
     release_cycles_per_job: 1      # correction write-out per job (the
                                    # baselines use 10, an experiment card)
-    detection_event_cycles_per_round: 5
-                                   # this tier's own event-detection logic, per
-                                   # round it forms, charged only when the rounds
-                                   # reach it raw (controller.
+    detection_event_latency_cycles: 5
+                                   # the fixed latency of this tier's own
+                                   # event-detection logic, charged only when the
+                                   # rounds reach it raw (controller.
                                    # detection_events_formed_at decoder). 5
                                    # cycles is Yang et al. 2605.04892 lines
-                                   # 1274-1275, "The total latency of the
+                                   # 1273-1275: "All variables are stored in FPGA
+                                   # registers, enabling fully pipelined
+                                   # operation. The total latency of the
                                    # preprocessing stage for syndrome
                                    # calculation is fixed at 20 ns (5 FPGA clock
                                    # cycles)", counted inside "Subtotal
@@ -500,7 +502,17 @@ weak_decoder:                      # the lightweight tier: fast, higher LER
                                    # Logic block does (2108.06569 lines
                                    # 499-510). A round two windows of this tier
                                    # read is formed once and charged once.
-                                   # null = uncharged
+                                   # null = uncharged, and the rate below is
+                                   # then read by nobody
+    detection_event_cycles_per_round: 1
+                                   # the rate that pipelined stage accepts rounds
+                                   # at, so a job forming n rounds pays the
+                                   # latency above once and this for each round
+                                   # after the first. Fully pipelined (Yang
+                                   # 2605.04892 line 1273) is one round a clock,
+                                   # the rate the fetch stage above reads at
+                                   # (LILLIPUT's FIFO of the last m rounds,
+                                   # 2108.06569 line 593)
 
 strong_decoder:                    # the accurate tier: slow, lower LER
   kind: belief_matching
@@ -514,10 +526,13 @@ strong_decoder:                    # the accurate tier: slow, lower LER
     clock: room                    # the strong unit lives room-side
     fetch_cycles_per_round: 1
     release_cycles_per_job: 1
-    detection_event_cycles_per_round: 5
+    detection_event_latency_cycles: 5
                                    # as above, on this tier's own clock: the
                                    # strong tier reads Buffer 1, so it forms the
                                    # rounds it reads itself
+    detection_event_cycles_per_round: 1
+                                   # as above: one round a clock through the
+                                   # pipelined stage
 
 decoder_manager:                   # the manager that gives ready windows a unit
   bulk_strong: false               # true serves the strong pool's queued

@@ -6,7 +6,9 @@ publication, so the strong tier's context lives at room temperature. The
 writer answers has_room counting the writes still in flight, gem5's
 queue counting its reserved entries (src/mem/cache/queue.hh isFull), and
 stores each round at its landing; the store's holds and lifetime are
-RoundStore's.
+RoundStore's. A landing whose operation closed while the round crossed
+is dropped at the door instead of stored, since no reader can ever name
+it (_drop_landing).
 """
 
 import dataclasses
@@ -78,6 +80,17 @@ class StrongRoundWriter:
         packet: round_records.SyndromeRoundPacket,
         packet_bits: Optional[int],
     ) -> None:
+        """Store the round, or drop it when its operation already closed."""
+        if self.store.has_operation(packet.operation_id):
+            self._store_landing(packet, packet_bits)
+            return
+        self._drop_landing(packet, packet_bits)
+
+    def _store_landing(
+        self,
+        packet: round_records.SyndromeRoundPacket,
+        packet_bits: Optional[int],
+    ) -> None:
         self.store.accept_packed_round(packet, publication_tick=self.engine.now)
         round_key = (packet.operation_id, packet.round_index)
         # a round whose every reader resolved while it crossed the link
@@ -92,12 +105,45 @@ class StrongRoundWriter:
         if self.on_round_stored is not None:
             self.on_round_stored(packet.operation_id, packet.round_index)
 
+    def _drop_landing(
+        self,
+        packet: round_records.SyndromeRoundPacket,
+        packet_bits: Optional[int],
+    ) -> None:
+        """The operation closed while the round crossed: it has no reader.
+
+        The same rule as the unheld landing above, one step later. A
+        store closes an operation only when no hold and no stored round
+        names it (round_store.py close_operation), and a hold on a closed
+        operation cannot be registered afterwards, so a round of a closed
+        operation provably has no reader ever and must not enter the
+        store. The copy still fires: the bits did cross
+        controller_to_strong_buffer, and the link's traffic ledger
+        charged the transfer, so a suppressed copy would leave the two
+        accounts of the same hop disagreeing.
+        """
+        round_key = (packet.operation_id, packet.round_index)
+        self.trace.copy_made.fire(
+            round_key, packet_bits, "controller assembler", "Buffer 1"
+        )
+        self.engine.log_io(
+            log_sources.STRONG_BUFFER, lambda: self._dropped_text(packet)
+        )
+
     def _received_text(self, packet: round_records.SyndromeRoundPacket) -> str:
         defects = packet.defects_text()
         holds = self.store.held_rounds_description()
         return (
             f"received round {packet.round_index} of op {packet.operation_id} "
             f"from controller_to_strong_buffer; {defects}; holds {holds}"
+        )
+
+    def _dropped_text(self, packet: round_records.SyndromeRoundPacket) -> str:
+        holds = self.store.held_rounds_description()
+        return (
+            f"dropped round {packet.round_index} of op {packet.operation_id} "
+            f"from controller_to_strong_buffer: op {packet.operation_id} "
+            f"closed while the round crossed; holds {holds}"
         )
 
     def check_settled(self) -> None:

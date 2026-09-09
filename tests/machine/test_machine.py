@@ -21,6 +21,7 @@ import numpy
 import pytest
 
 import decsim.build.escalation as escalation_build
+import decsim.collect as collect
 import decsim.config as config
 import decsim.controller.policies as idle_policies
 import decsim.controller.settings as controller_settings
@@ -56,6 +57,7 @@ import decsim.syndrome_buffer.settings as round_store_settings
 import decsim.windows.boundary_policies as boundary_policies
 import decsim.windows.settings as window_settings
 import tests.declared_run as declared_run
+import tests.front.yaml_configs as yaml_configs
 
 THIS_FILE = pathlib.Path(__file__)
 TESTS_DIRECTORY = THIS_FILE.parents[1]
@@ -1354,3 +1356,88 @@ def test_a_policy_object_whose_tier_names_no_decoder_is_refused():
     with pytest.raises(ValueError) as refusal:
         machine_module.Machine.build(settings, 0)
     assert "decodes windows on the strong tier" in str(refusal.value)
+
+
+# ---- a room-side landing that arrives after its operation closed
+
+# The reproducer's links: every hop of the weak path one fridge cycle,
+# so the weak tier commits the last window before round 15's copy
+# finishes crossing controller_to_strong_buffer, whose 0.26 us is the
+# reference card's (Caune 2410.05202 Fig. 1a F).
+FRIDGE_CYCLE = {"latency_cycles": 1, "clock": "fridge", "bits_per_cycle": None}
+LATE_LANDING_LINKS = {
+    "qpu_to_controller": FRIDGE_CYCLE,
+    "controller_to_weak_buffer": FRIDGE_CYCLE,
+    "weak_buffer_to_weak_decoder": FRIDGE_CYCLE,
+    "decoder_to_decoder": FRIDGE_CYCLE,
+    "weak_decoder_to_frame": FRIDGE_CYCLE,
+}
+FREE_CROSSING = {"latency_cycles": 0, "clock": "fridge", "bits_per_cycle": None}
+LATE_LANDING_ESCALATION = {
+    "kind": "switching",
+    "confidence": "complementary_gap",
+    "gap_threshold_db": 20.0,
+    "threshold_source": "fixed",
+    "strong_window": "two_sided_context",
+}
+
+
+def late_landing_shot(directory, links):
+    """One seeded shot of the reproducer, its room-side crossing as given."""
+    directory.mkdir(parents=True, exist_ok=True)
+    strong_decoder = yaml_configs.strong_unit(30.0)
+    card = {
+        "escalation": LATE_LANDING_ESCALATION,
+        "links": links,
+        **strong_decoder,
+    }
+    config_path = yaml_configs.write_config(directory, card)
+    experiment_config = experiment.load_experiment(config_path)
+    task = experiment_config.point_task(
+        physical_error_probability=0.001,
+        distance=3,
+        round_period_us=1.0,
+        shots=1,
+    )
+    return collect.run_shot(task, 0)
+
+
+def frame_commit_ticks(machine):
+    """The tick every frame record committed on, in commit order."""
+    snapshot = machine.pauli_frame.snapshot()
+    ticks = []
+    for record in snapshot.records:
+        ticks.append(record.committed_ticks)
+    return tuple(ticks)
+
+
+def test_a_landing_after_its_operations_close_costs_the_result_nothing(
+    tmp_path,
+):
+    """The weak tier decided the result; the late copy changes no tick.
+
+    On a 0.028 us weak card the last window commits at 15.132 us, so
+    every reader of round 15 has resolved and the operation closes
+    before that round's copy lands on the room side 0.26 us later. The
+    landing is dropped at the door, the run still settles (Machine.run
+    checks every component), and the same run with a free crossing,
+    where every landing precedes the close, commits on exactly the same
+    ticks.
+    """
+    priced_directory = tmp_path / "priced"
+    priced = late_landing_shot(priced_directory, LATE_LANDING_LINKS)
+    free_links = {
+        **LATE_LANDING_LINKS,
+        "controller_to_strong_buffer": FREE_CROSSING,
+    }
+    free_directory = tmp_path / "free"
+    free = late_landing_shot(free_directory, free_links)
+
+    assert priced.result.terminal_status == "complete"
+    assert priced.machine.strong_round_writer.store.occupancy == 0
+    assert frame_commit_ticks(priced.machine) == frame_commit_ticks(
+        free.machine
+    )
+    priced_result = priced.result.operation_results[0]
+    free_result = free.result.operation_results[0]
+    assert priced_result.logical_observables == free_result.logical_observables

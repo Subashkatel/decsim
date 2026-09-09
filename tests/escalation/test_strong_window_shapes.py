@@ -39,6 +39,7 @@ import decsim.records.windows as window_records
 import decsim.settings as machine_settings
 import decsim.trace_source as trace_source
 import decsim.windows.decode_requests as decode_requests
+import decsim.windows.window_boundaries as window_boundaries
 import tests.escalation.declared_fabric as fabric
 
 # The gate's switching card, section by section as the yaml reads.
@@ -598,6 +599,70 @@ def test_a_courier_that_only_pins_a_face_fills_the_courier_port():
     courier = _RecordingCourier()
     assert isinstance(courier, ports.BoundaryCourier)
     assert not hasattr(courier, "committed")
+
+
+def test_a_pinned_strong_decode_starts_no_earlier_than_its_pin_lands():
+    """Toshio 2510.25222 lines 1248-1250, priced on the wire.
+
+    The strong decoder starts after the boundary conditions have been
+    determined, and Bombin 2303.04846 lines 782-788 make the neighbour's
+    correction part of the input task j reads, so a decode whose face is
+    pinned may not begin before the message that carries the pin has
+    crossed decoder_to_decoder. Run on a card whose decoder_to_decoder
+    latency is 400 fridge cycles, so the delivery is far from the
+    landing of the rounds.
+    """
+    machine = _slow_boundary_machine("near_seam_pinned")
+    engine = machine.engine
+    delivered_ticks = {}
+    started_ticks = {}
+    _watch_pin_and_start(engine, delivered_ticks, started_ticks)
+    machine.run()
+    pinned_keys = set(delivered_ticks) & set(started_ticks)
+    assert pinned_keys
+    for key in sorted(pinned_keys):
+        assert started_ticks[key] >= delivered_ticks[key]
+
+
+def _watch_pin_and_start(engine, delivered_ticks, started_ticks):
+    """The tick each window's last pin lands, and its strong decode starts."""
+    original_delivery = window_boundaries.BoundaryCourier._pin_delivered
+    original_mask = decode_requests.WindowInputGate.mask_input
+
+    def delivered(self, destination, transfer):
+        delivered_ticks[destination.key] = engine.now
+        original_delivery(self, destination, transfer)
+
+    def start(self, job):
+        original_mask(self, job)
+        if job.kind is decoding_records.DecodeJobKind.STRONG_REDECODE:
+            started_ticks[job.window.key] = engine.now
+
+    window_boundaries.BoundaryCourier._pin_delivered = delivered
+    decode_requests.WindowInputGate.mask_input = start
+
+
+def _slow_boundary_machine(strong_window: str) -> machine_module.Machine:
+    """The gate's switching card with a long decoder_to_decoder hop."""
+    sections = copy.deepcopy(GATE_SWITCHING_CARD)
+    sections["escalation"]["strong_window"] = strong_window
+    sections["links"]["decoder_to_decoder"] = {
+        "latency_cycles": 400,
+        "clock": "fridge",
+        "bits_per_cycle": None,
+    }
+    base_directory = pathlib.Path(".")
+    settings = machine_settings.MachineSettings.from_mapping(
+        sections, name="pinned_delivery", base_directory=base_directory
+    )
+    qpu = dataclasses.replace(
+        settings.qpu, distance=3, round_period_microseconds=1.0
+    )
+    workload = dataclasses.replace(
+        settings.workload, physical_error_probability=0.008
+    )
+    settings = dataclasses.replace(settings, qpu=qpu, workload=workload)
+    return machine_module.Machine.build(settings, 0)
 
 
 def _gate_machine(strong_window: str) -> machine_module.Machine:

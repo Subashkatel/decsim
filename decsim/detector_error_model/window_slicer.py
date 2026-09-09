@@ -69,11 +69,16 @@ class WindowSlicer:
         """One window's model; advances ownership unless owners are given.
 
         `is_last` is given only for a window whose commit rounds reach
-        round_count.
+        round_count. A prior map alone removes the named faults from the
+        columns and leaves this window to work out its own ownership
+        from its commit rounds, which is what a window sliced on its own
+        beside a neighbour that has already committed needs.
         """
         has_owners = explicitly_owned_faults is not None
         has_priors = explicitly_prior_faults is not None
-        assert has_owners == has_priors, "owner and prior maps come together"
+        assert has_priors or not has_owners, (
+            "an owner map comes with the prior map its ancestors own"
+        )
         context = self._placement_context(
             first_buffer_round,
             first_commit_round,

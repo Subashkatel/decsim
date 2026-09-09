@@ -39,6 +39,7 @@ import decsim.records.windows as window_records
 import decsim.settings as machine_settings
 import decsim.trace_source as trace_source
 import decsim.windows.decode_requests as decode_requests
+import decsim.windows.window_boundaries as window_boundaries
 import tests.escalation.declared_fabric as fabric
 
 # The gate's switching card, section by section as the yaml reads.
@@ -569,10 +570,10 @@ def test_an_absorbing_row_added_from_outside_builds_through_the_same_call():
     assert fabric.frame_tiers(machine) == [((1, 0), "strong")]
 
 
-def test_the_shipped_collaborators_fill_the_five_window_side_ports():
+def test_the_shipped_collaborators_fill_the_six_window_side_ports():
     """A row written outside decsim programs against the ports, not classes.
 
-    StrongWindowCollaborators types its five window-side fields as
+    StrongWindowCollaborators types its six window-side fields as
     Protocols in decsim/ports.py, so the promise only means something if
     the classes the root puts there answer the whole port.
     """
@@ -583,17 +584,97 @@ def test_the_shipped_collaborators_fill_the_five_window_side_ports():
     assert isinstance(collaborators.builder, ports.WindowJobBuilder)
     assert isinstance(collaborators.requester, ports.WindowRequests)
     assert isinstance(collaborators.ledger, ports.LogicalLedger)
+    assert isinstance(collaborators.courier, ports.BoundaryCourier)
 
 
-def _gate_context_window_machine() -> machine_module.Machine:
-    """The gate's own switching point, on the shipped context row.
+def test_a_courier_that_only_pins_a_face_fills_the_courier_port():
+    """The port lists the one method the escalation side calls.
+
+    strong_job_payloads calls pin_strong_face and nothing else
+    (strong_window_shapes.py, the walk over folded_boundaries), so a
+    courier supplied from outside decsim answers the whole port with
+    that one method. STYLE.md rule 7: a port carries the methods one
+    component needs from another.
+    """
+    courier = _RecordingCourier()
+    assert isinstance(courier, ports.BoundaryCourier)
+    assert not hasattr(courier, "committed")
+
+
+def test_a_pinned_strong_decode_starts_no_earlier_than_its_pin_lands():
+    """Toshio 2510.25222 lines 1248-1250, priced on the wire.
+
+    The strong decoder starts after the boundary conditions have been
+    determined, and Bombin 2303.04846 lines 782-788 make the neighbour's
+    correction part of the input task j reads, so a decode whose face is
+    pinned may not begin before the message that carries the pin has
+    crossed decoder_to_decoder. Run on a card whose decoder_to_decoder
+    latency is 400 fridge cycles, so the delivery is far from the
+    landing of the rounds.
+    """
+    machine = _slow_boundary_machine("near_seam_pinned")
+    engine = machine.engine
+    delivered_ticks = {}
+    started_ticks = {}
+    _watch_pin_and_start(engine, delivered_ticks, started_ticks)
+    machine.run()
+    pinned_keys = set(delivered_ticks) & set(started_ticks)
+    assert pinned_keys
+    for key in sorted(pinned_keys):
+        assert started_ticks[key] >= delivered_ticks[key]
+
+
+def _watch_pin_and_start(engine, delivered_ticks, started_ticks):
+    """The tick each window's last pin lands, and its strong decode starts."""
+    original_delivery = window_boundaries.BoundaryCourier._pin_delivered
+    original_mask = decode_requests.WindowInputGate.mask_input
+
+    def delivered(self, destination, transfer):
+        delivered_ticks[destination.key] = engine.now
+        original_delivery(self, destination, transfer)
+
+    def start(self, job):
+        original_mask(self, job)
+        if job.kind is decoding_records.DecodeJobKind.STRONG_REDECODE:
+            started_ticks[job.window.key] = engine.now
+
+    window_boundaries.BoundaryCourier._pin_delivered = delivered
+    decode_requests.WindowInputGate.mask_input = start
+
+
+def _slow_boundary_machine(strong_window: str) -> machine_module.Machine:
+    """The gate's switching card with a long decoder_to_decoder hop."""
+    sections = copy.deepcopy(GATE_SWITCHING_CARD)
+    sections["escalation"]["strong_window"] = strong_window
+    sections["links"]["decoder_to_decoder"] = {
+        "latency_cycles": 400,
+        "clock": "fridge",
+        "bits_per_cycle": None,
+    }
+    base_directory = pathlib.Path(".")
+    settings = machine_settings.MachineSettings.from_mapping(
+        sections, name="pinned_delivery", base_directory=base_directory
+    )
+    qpu = dataclasses.replace(
+        settings.qpu, distance=3, round_period_microseconds=1.0
+    )
+    workload = dataclasses.replace(
+        settings.workload, physical_error_probability=0.008
+    )
+    settings = dataclasses.replace(settings, qpu=qpu, workload=workload)
+    return machine_module.Machine.build(settings, 0)
+
+
+def _gate_machine(strong_window: str) -> machine_module.Machine:
+    """The gate's own switching point, on the named strong window row.
 
     p 0.008, d 3, 1 us rounds, seed 0: the point where the weak tier
     commits a correction that flips a seam detector of a window that
-    later escalates, so the two-solve case the row must not fold is on
-    the run.
+    later escalates, so the two-solve case a raw-read row must not fold
+    is on the run, and so is the seam a pinned row must carry.
     """
     sections = copy.deepcopy(GATE_SWITCHING_CARD)
+    sections["escalation"]["strong_window"] = strong_window
     base_directory = pathlib.Path(".")
     settings = machine_settings.MachineSettings.from_mapping(
         sections, name="switching_validation", base_directory=base_directory
@@ -650,7 +731,7 @@ def test_a_context_row_strong_job_reads_the_raw_rounds_of_its_span(
     is masked on this run, which is what makes the check meaningful.
     """
     masked = _masked_jobs(monkeypatch)
-    machine = _gate_context_window_machine()
+    machine = _gate_machine("two_sided_context")
     machine.run()
     weak_masked = _keys_of(masked, strong=False, changed_only=True)
     strong_keys = _keys_of(masked, strong=True, changed_only=False)
@@ -675,13 +756,288 @@ def _keys_of(masked: list, *, strong: bool, changed_only: bool) -> set:
 
 
 def test_a_shape_name_off_the_table_is_refused_naming_the_rows():
+    """both_faces_pinned is the shape decsim refuses to build.
+
+    A strong window that pins both faces and absorbs nothing waits for
+    the window after it, which waits for the strong result: the serial
+    sliding chain deadlocks on it (design audit note 21). It is not a
+    row, and a name that is not a row is refused naming the rows.
+    """
     with pytest.raises(ValueError) as refusal:
         fabric.switching_machine(
-            rounds=9, escalated_windows=set(), strong_window="seam_pinned"
+            rounds=9,
+            escalated_windows=set(),
+            strong_window="both_faces_pinned",
         )
-    assert "escalation.strong_window 'seam_pinned' is not a row" in str(
+    assert "escalation.strong_window 'both_faces_pinned' is not a row" in str(
         refusal.value
     )
+
+
+def test_the_near_seam_row_reads_its_commit_region_and_one_buffer():
+    """Bombin 2303.04846 lines 1456-1458: a pinned face needs no buffer.
+
+    W1 of a d=3 run commits rounds 4-6. The two-sided context row reads
+    1-9; pinning the past face on W0's committed correction drops the
+    leading buffer, so this row reads 4-9 and commits the same rounds.
+    """
+    machine = fabric.switching_machine(
+        rounds=12,
+        escalated_windows={1},
+        strong_window="near_seam_pinned",
+        record=True,
+    )
+    machine.run()
+    strong = _strong_request_record(machine, 1)
+    assert (strong.input_round_lo, strong.input_round_hi) == (4, 9)
+    assert strong.input_round_count == 6
+    assert fabric.frame_tiers(machine) == [
+        ((1, 0), "weak"),
+        ((1, 1), "strong"),
+        ((1, 2), "weak"),
+        ((1, 3), "weak"),
+    ]
+
+
+def test_the_near_seam_row_pins_nothing_at_the_operations_first_window():
+    """W0 has no earlier neighbour, so its past face is the readout's.
+
+    The first window's oldest layer is the operation's own first round
+    layer, closed by the initialisation, so the row declares no face
+    and the job reads its commit region and one buffer.
+    """
+    machine = fabric.switching_machine(
+        rounds=12,
+        escalated_windows={0},
+        strong_window="near_seam_pinned",
+        record=True,
+    )
+    machine.run()
+    strong = _strong_request_record(machine, 0)
+    assert (strong.input_round_lo, strong.input_round_hi) == (1, 6)
+    assert strong.input_round_count == 6
+
+
+def _pinned_boundary_transfers(result) -> list:
+    """(window index, payload bits) of every pinned face on the wire.
+
+    A weak delivery is attributed to the window that produced it; a
+    pinned face is attributed to the strong window that reads it, so a
+    transfer whose attribution names a window other than the producing
+    request's is a pin.
+    """
+    pinned = []
+    for transfer in result.link_traffic["transfers"]:
+        if transfer["path"] != "decoder_to_decoder":
+            continue
+        attribution = transfer["attribution"]
+        source_window_id = attribution["relation"]["request_key"]["window_id"]
+        if attribution["window_id"] == source_window_id:
+            continue
+        pinned.append((attribution["window_id"], transfer["payload_bits"]))
+    return pinned
+
+
+def test_a_yaml_names_the_near_seam_row_and_its_pin_crosses_the_wire():
+    """The row is one class, one table row and one yaml name.
+
+    The gate's own switching card with escalation.strong_window
+    near_seam_pinned builds this row, and every face it pins is a
+    message on decoder_to_decoder: Skoric 2209.08552 lines 1038-1040
+    sends the artificial defects block to block, and Bombin's Fig. 14
+    (lines 2256-2259) routes them through the boundary condition data
+    store between decoder modules. A pinned face that crossed nothing
+    would be free in the model.
+    """
+    machine = _gate_machine("near_seam_pinned")
+    result = machine.run()
+    shape = machine.window_manager.strong_redecode.shape
+    assert type(shape) is strong_window_shapes.NearSeamWindow
+    strong_windows = _strong_window_keys(machine)
+    pinned = _pinned_boundary_transfers(result)
+    pinned_windows = set()
+    pinned_bits = set()
+    for window_id, payload_bits in pinned:
+        pinned_windows.add((1, window_id))
+        pinned_bits.add(payload_bits)
+    assert pinned_windows == strong_windows
+    assert len(pinned) == len(strong_windows)
+    # a d=3 bulk layer carries d*d-1 = 8 detectors, one bit each under
+    # the dense row
+    assert pinned_bits == {8}
+
+
+def test_the_forward_seam_row_reads_exactly_the_rounds_it_commits():
+    """Toshio 2510.25222 lines 1248-1250, as the paper states it.
+
+    W1 of a d=3 run commits 4-6, so the forward strong region commits
+    r_com + 2 r_buf = 9 rounds, 4-12. The shipped forward row reads one
+    buffer of raw context on each side of that, 1-15; pinning both faces
+    drops both buffers, so this row reads the 9 rounds it commits.
+    """
+    machine = fabric.switching_machine(
+        rounds=15,
+        escalated_windows={1},
+        strong_window="forward_seam_pinned",
+        round_microseconds=4.0,
+        record=True,
+    )
+    machine.run()
+    strong = _strong_request_record(machine, 1)
+    assert (strong.input_round_lo, strong.input_round_hi) == (4, 12)
+    assert strong.input_round_count == 9
+    assert fabric.frame_tiers(machine) == [
+        ((1, 0), "weak"),
+        ((1, 4), "weak"),
+        ((1, 1), "strong"),
+    ]
+
+
+def test_the_forward_seam_row_pins_its_near_and_its_far_face():
+    """One message per pinned face, both on decoder_to_decoder.
+
+    The near face is the window before the strong region, the far face
+    the window that restarts the weak chain after it, which is the
+    boundary the shipped forward row already waits for (Toshio
+    2510.25222 lines 1253-1259). Skoric 2209.08552 lines 1038-1040 sends
+    each face's defects block to block, so two faces are two messages.
+    """
+    machine = fabric.switching_machine(
+        rounds=15,
+        escalated_windows={1},
+        strong_window="forward_seam_pinned",
+        round_microseconds=4.0,
+    )
+    result = machine.run()
+    pinned = _pinned_boundary_transfers(result)
+    assert len(pinned) == 2
+    for window_id, _payload_bits in pinned:
+        assert window_id == 1
+    sources = _pin_sources(result)
+    # W1's own dependency, and the window that restarts the chain past
+    # the strong region 4-12
+    assert sources == [0, 4]
+
+
+def _pin_sources(result) -> list:
+    """The window that produced each pinned face's boundary, in send order."""
+    sources = []
+    for transfer in result.link_traffic["transfers"]:
+        if transfer["path"] != "decoder_to_decoder":
+            continue
+        attribution = transfer["attribution"]
+        source_window_id = attribution["relation"]["request_key"]["window_id"]
+        if attribution["window_id"] == source_window_id:
+            continue
+        sources.append(source_window_id)
+    return sources
+
+
+def test_the_forward_seam_row_at_the_operations_end_has_no_far_pin():
+    """Tan 2209.09219 lines 953-955: the last window's faces are closed.
+
+    A terminal strong region has no later window to pin on, so it waits
+    for the terminal data the way the shipped forward row does and reads
+    to its own last committed round.
+    """
+    machine = fabric.switching_machine(
+        rounds=9,
+        escalated_windows={2},
+        strong_window="forward_seam_pinned",
+        record=True,
+    )
+    result = machine.run()
+    submitted = fabric.log_lines_containing(
+        machine, "terminal data complete -> strong window submitted"
+    )
+    assert len(submitted) == 1
+    strong = _strong_request_record(machine, 2)
+    assert (strong.input_round_lo, strong.input_round_hi) == (7, 9)
+    sources = _pin_sources(result)
+    # only the near face: W2's own dependency
+    assert sources == [1]
+
+
+def test_the_forward_seam_row_reads_an_unpinned_near_face_raw():
+    """A window whose dependency was absorbed has nothing to pin on.
+
+    W1's strong region commits 4-12 and absorbs W2 and W3, so the
+    restart window W4 keeps no dependency: no committed correction
+    closes its past face. When W4 escalates in turn, its strong region
+    commits 13-21 and reads one buffer region of raw context behind it,
+    10-21, since an open face keeps its buffer (Bombin 2303.04846 lines
+    850-852) rather than reading nothing at all. Its far face is the
+    window that restarts the chain after 21, W7, and that one is pinned.
+    """
+    machine = fabric.switching_machine(
+        rounds=30,
+        escalated_windows={1, 4},
+        strong_window="forward_seam_pinned",
+        round_microseconds=4.0,
+        record=True,
+    )
+    result = machine.run()
+    pinned_faces = _strong_request_record(machine, 1)
+    assert (pinned_faces.input_round_lo, pinned_faces.input_round_hi) == (4, 12)
+    open_face = _strong_request_record(machine, 4)
+    assert (open_face.input_round_lo, open_face.input_round_hi) == (10, 21)
+    # W1 pins both faces (W0 and W4), W4 only its far face (W7)
+    assert _pin_sources(result) == [0, 4, 7]
+
+
+def test_a_yaml_names_the_forward_seam_row_and_it_runs():
+    """The row is one class, one table row and one yaml name.
+
+    The gate's own switching card with escalation.strong_window
+    forward_seam_pinned builds this row and runs the point through, with
+    the absorbing apparatus of the shipped forward row underneath it.
+    """
+    machine = _gate_machine("forward_seam_pinned")
+    result = machine.run()
+    shape = machine.window_manager.strong_redecode.shape
+    assert type(shape) is strong_window_shapes.ForwardSeamWindow
+    statuses = _run_statuses(result)
+    assert statuses == [(1, "logical_observables")]
+    assert not machine.window_manager.strong_redecode.has_pending()
+
+
+def test_a_pinned_far_face_refuses_a_re_reading_restart_window():
+    """Q5 of design audit note 20, settled as a refusal.
+
+    With escalation.restart_reread_buffer_regions 1 the restart window
+    commits rounds inside the strong region, so pinning the far face on
+    its correction would carry an explanation of rounds the input holds
+    raw: the double count Bombin 2303.04846 lines 775-788 rule out. 0 is
+    the paper's value (Toshio 2510.25222 Sec. III C, Fig. 12), and the
+    section refuses the pairing at load rather than reconciling it.
+    """
+    section = {
+        "kind": "switching",
+        "gap_threshold_db": 20.0,
+        "strong_window": "forward_seam_pinned",
+        "restart_reread_buffer_regions": 1,
+    }
+    with pytest.raises(ValueError) as refusal:
+        escalation_settings.EscalationSettings.from_yaml(section)
+    assert "restart_reread_buffer_regions must be 0" in str(refusal.value)
+    section["strong_window"] = "forward"
+    kept = escalation_settings.EscalationSettings.from_yaml(section)
+    assert kept.restart_reread_buffer_regions == 1
+
+
+def _strong_window_keys(machine) -> set:
+    """The windows that escalated and pinned a face on their neighbour.
+
+    The operation's first window pins nothing, so it is not among them.
+    """
+    keys = set()
+    for window_key, tier in fabric.frame_tiers(machine):
+        if tier != "strong":
+            continue
+        if window_key[1] == 0:
+            continue
+        keys.add(window_key)
+    return keys
 
 
 class _StoredRounds:
@@ -694,23 +1050,64 @@ class _StoredRounds:
         return ("the stored rounds",)
 
 
-def test_a_row_that_folds_a_neighbour_boundary_is_told_what_it_needs():
-    """The port's input declaration, and the one piece it still needs.
+class _RecordingCourier:
+    """A courier that records the faces a row asked it to pin."""
+
+    def __init__(self) -> None:
+        self.pinned = []
+
+    def pin_strong_face(
+        self, source_key, destination, model, operation, request_key
+    ):
+        """Note the face the row pinned, with what the fold reads."""
+        self.pinned.append(
+            (source_key, destination, model, operation, request_key)
+        )
+
+
+def _folding_collaborators(retention, courier):
+    """The one collaborator record, with only the fold's two components."""
+    return strong_window_shapes.StrongWindowCollaborators(
+        engine=None,
+        regions=None,
+        planner=None,
+        retention=retention,
+        builder=None,
+        requester=None,
+        ledger=None,
+        courier=courier,
+    )
+
+
+def test_a_row_that_pins_a_face_folds_the_boundary_it_declares():
+    """The input adaptation is asked for once per declared face.
 
     A row that pins a face carries its neighbour's committed correction
     into the strong job's input, which is Bombin et al. 2303.04846's
-    input adaptation (lines 775-788). Both shipped rows fold none, and a
-    row that declares one is told where the missing machinery goes
-    rather than losing the declaration.
+    input adaptation (lines 775-788): the courier ships the committed
+    boundary to this window and folds it into the window's boundary
+    state, against the strong window's own model. A row that folds none
+    reads the stored rounds and asks the courier for nothing.
     """
     retention = _StoredRounds()
+    courier = _RecordingCourier()
+    collaborators = _folding_collaborators(retention, courier)
     window = object()
+    model = object()
+    operation = object()
+    request_key = object()
     payloads = strong_window_shapes.strong_job_payloads(
-        retention, None, window, strong_window_shapes.FOLDS_NO_BOUNDARY
+        collaborators,
+        window,
+        model,
+        operation,
+        request_key,
+        strong_window_shapes.FOLDS_NO_BOUNDARY,
     )
     assert payloads == ("the stored rounds",)
-    with pytest.raises(NotImplementedError) as refusal:
-        strong_window_shapes.strong_job_payloads(
-            retention, None, window, ((1, 1),)
-        )
-    assert "windows/decode_requests.py" in str(refusal.value)
+    assert courier.pinned == []
+    payloads = strong_window_shapes.strong_job_payloads(
+        collaborators, window, model, operation, request_key, ((1, 1),)
+    )
+    assert payloads == ("the stored rounds",)
+    assert courier.pinned == [((1, 1), window, model, operation, request_key)]

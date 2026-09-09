@@ -248,8 +248,23 @@ class WindowPlan(Protocol):
         window: window_records.Window,
         round_count: int,
         fault_exclusion_ranges: tuple,
+        prior_faults: Optional[dict],
     ):
-        """The error model of one strong window of that operation."""
+        """The error model of one strong window of that operation.
+
+        prior_faults is what a pinned face's neighbour has committed,
+        per fault representation, and None when the row pins no face.
+        """
+
+    def owned_faults_of(self, key: tuple) -> Optional[dict]:
+        """The faults the window at that key commits, per representation.
+
+        A row that pins a face on a neighbour asks for this, so that the
+        neighbour's faults are prior faults of its own strong model
+        rather than columns it may spend twice (Bombin et al.
+        2303.04846 lines 775-788). None when the run builds no error
+        models.
+        """
 
 
 @runtime_checkable
@@ -371,6 +386,32 @@ class LogicalLedger(Protocol):
         replaced_keys: tuple,
     ) -> None:
         """A strong window takes the extent of the windows it replaces."""
+
+
+@runtime_checkable
+class BoundaryCourier(Protocol):
+    """The committed boundaries a strong window pins a face on.
+
+    A shape row whose face is pinned reads the correction its neighbour
+    committed and has it delivered to its own window, which is Bombin
+    et al. 2303.04846's input adaptation (lines 775-788): the input to
+    the later decoding task is the syndrome of the errors plus the
+    corrections already committed. The message is one seam layer on
+    decoder_to_decoder, priced against the receiving window's own model.
+    Pinning a face is the whole of what the escalation side asks for, so
+    it is the whole port; what the courier tells its own package about a
+    committed boundary stays a method of the class.
+    """
+
+    def pin_strong_face(
+        self,
+        source_key: tuple,
+        destination: window_records.Window,
+        model,
+        operation: program_records.Operation,
+        request_key: window_records.DecoderRequestKey,
+    ) -> None:
+        """Ship a committed boundary to a strong window and fold it in."""
 
 
 # ----------------------------------- the decoder manager schedules a decode
@@ -782,8 +823,14 @@ class WindowModelSource(Protocol):
         *,
         fault_model_requirement,
         exclude_faults_touching=None,
+        prior_faults=None,
     ):
-        """One strong window's model, with one non-owned range excluded."""
+        """One strong window's model, with one non-owned range excluded.
+
+        prior_faults names the faults a pinned face's neighbour has
+        already committed; they are no columns of this model at all
+        (Bombin et al. 2303.04846 lines 775-788).
+        """
 
     def strong_window_model_for_operation_with_exclusions(
         self,
@@ -793,6 +840,7 @@ class WindowModelSource(Protocol):
         *,
         fault_model_requirement,
         fault_exclusion_ranges: tuple,
+        prior_faults=None,
     ):
         """The same, with several non-owned ranges excluded."""
 

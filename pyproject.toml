@@ -31,6 +31,10 @@ include = ["decsim*"]
 # starts from (architecture, glossary, plug_in_a_component, reading_a_trace).
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# pytest's own default skips any folder named "build" when it walks a
+# tree, which silently dropped tests/build/ from the suite; the list
+# below is that default without "build".
+norecursedirs = [".*", "*.egg", "_darcs", "CVS", "dist", "node_modules", "venv", "{arch}"]
 
 # The style gate (STYLE.md rule 9): Google Python style, 80
 # columns, Google docstrings. The one-action rule of rule 1 is checked

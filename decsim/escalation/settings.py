@@ -40,6 +40,7 @@ STRONG_WINDOW_SHAPES = {
     "two_sided_context": strong_window_shapes.ContextWindow,
     "forward": strong_window_shapes.ForwardWindow,
     "near_seam_pinned": strong_window_shapes.NearSeamWindow,
+    "forward_seam_pinned": strong_window_shapes.ForwardSeamWindow,
 }
 # escalation.threshold_source names one of these rows: where the
 # switching threshold of a sweep point comes from.
@@ -212,7 +213,10 @@ class EscalationSettings:
     shape; near_seam_pinned re-decodes the same commit region as
     two_sided_context but pins its past face on the earlier neighbour's
     committed correction and reads no context behind it (Bombin et al.
-    2303.04846 lines 775-788 and 1456-1458).
+    2303.04846 lines 775-788 and 1456-1458); forward_seam_pinned is
+    forward's extent read with no context, both faces pinned, which is
+    Toshio's Sec. III C as it is stated (lines 1248-1259) and which
+    needs restart_reread_buffer_regions 0.
     confidence names the signal the weak tier reports and the threshold
     decides on (confidence/signals.py), and the yaml refuses a
     weak decoder whose decode cannot produce that signal's evidence;
@@ -401,6 +405,7 @@ def _switching_settings(
     strong_window = _strong_window(section)
     _check_serial_only(threshold_source, strong_window)
     reread_regions = _restart_reread_buffer_regions(section)
+    _check_far_pin_reread(strong_window, reread_regions)
     threshold_table = section.get("threshold_table")
     return EscalationSettings(
         kind=kind,
@@ -499,6 +504,32 @@ def _strong_window(section: Mapping) -> str:
             f"table; the rows are {rows}"
         )
     return str(named)
+
+
+def _check_far_pin_reread(strong_window: str, reread_regions: int) -> None:
+    """A pinned far face and a re-reading restart window double count.
+
+    A row that pins its far face on the restart window's commit needs
+    the restart window to share no round with the strong region, which
+    is escalation.restart_reread_buffer_regions 0, the paper's value
+    (Toshio et al. 2510.25222 Sec. III C, Fig. 12). With a re-read the
+    restart window commits rounds inside the region, so pinning on its
+    correction would carry an explanation of those rounds into an input
+    that already holds them raw, the double count Bombin et al.
+    2303.04846 lines 775-788 rule out.
+    """
+    row = STRONG_WINDOW_SHAPES[strong_window]
+    if not row.pins_the_far_face:
+        return
+    if reread_regions == 0:
+        return
+    raise ValueError(
+        f"escalation.strong_window {strong_window} pins its far face on "
+        "the restart window's committed correction, so the restart window "
+        "must share no round with the strong region: "
+        "escalation.restart_reread_buffer_regions must be 0 (got "
+        f"{reread_regions})"
+    )
 
 
 def _check_serial_only(threshold_source: str, strong_window: str) -> None:

@@ -26,25 +26,26 @@ import decsim.records.windows as window_records
 
 
 @dataclasses.dataclass(frozen=True)
-class ContextRegion:
-    """The two-sided context region: the window to decode and its model."""
+class RedoRegion:
+    """One strong redo of one window: the window, and the rounds it reads."""
 
     window: window_records.Window
     context_read_keys: tuple
 
 
 @dataclasses.dataclass(frozen=True)
-class NearSeamRegion:
-    """A near-pinned region: the window, its reads, the face it pins.
+class _ForwardProposal:
+    """The extent an interaction proposes, before it is checked.
 
-    pinned_source_key is the window whose committed correction closes
-    the past face, or None for a window with no earlier neighbour, whose
-    past face is the operation's own first round layer.
+    A row that reads the extent with no context narrows the plan here,
+    so the checks, the holds and the models that follow all read the
+    rounds the row will really read.
     """
 
-    window: window_records.Window
-    context_read_keys: tuple
-    pinned_source_key: Optional[tuple]
+    weak_window: window_records.Window
+    round_count: int
+    later_windows: list
+    plan: window_records.StrongRegionPlan
 
 
 @dataclasses.dataclass(frozen=True)
@@ -77,7 +78,7 @@ class StrongRegions:
         self.retention = retention
         self.interaction = interaction
 
-    def context_region(self, key: tuple) -> ContextRegion:
+    def context_region(self, key: tuple) -> RedoRegion:
         """The escalated window with one buffer of raw context per side."""
         weak_window = self.planner.window_at(key)
         strong_window = _context_window_of(weak_window)
@@ -87,9 +88,9 @@ class StrongRegions:
             strong_window.buffer_hi,
             strong_window,
         )
-        return ContextRegion(strong_window, tuple(read_keys))
+        return RedoRegion(strong_window, tuple(read_keys))
 
-    def near_seam_region(self, key: tuple) -> NearSeamRegion:
+    def near_seam_region(self, key: tuple) -> RedoRegion:
         """The escalated window's commit rounds, its past face pinned.
 
         The rounds before the commit region are not read: their defects
@@ -105,8 +106,25 @@ class StrongRegions:
             strong_window.buffer_hi,
             strong_window,
         )
-        pinned_key = self._near_neighbour_of(weak_window, strong_window)
-        return NearSeamRegion(strong_window, tuple(read_keys), pinned_key)
+        return RedoRegion(strong_window, tuple(read_keys))
+
+    def near_seam_source(self, key: tuple) -> Optional[tuple]:
+        """The window whose commit region ends where this one's begins.
+
+        A pinned face is the seam between two commit regions, so the
+        source is the escalated window's own dependency that commits the
+        round before it (Bombin et al. 2303.04846 lines 703-704: what a
+        task commits is the restriction to its commit region). None for
+        a window with no earlier neighbour, whose past face is the
+        operation's first round layer, closed by the initialisation.
+        """
+        weak_window = self.planner.window_at(key)
+        seam_round = weak_window.commit_lo - 1
+        for dependency_key in weak_window.deps:
+            neighbour = self.planner.window_at(dependency_key)
+            if neighbour.commit_hi == seam_round:
+                return dependency_key
+        return None
 
     def redecode_model(self, key: tuple, window: window_records.Window):
         """The error model of one strong redo of a window.
@@ -130,6 +148,39 @@ class StrongRegions:
         windows that exist, and the rounds each side reads are required
         to be retained before anything moves.
         """
+        proposal = self._proposed_forward_region(key)
+        return self._resolved_forward_region(key, proposal)
+
+    def forward_seam_region(
+        self, key: tuple, *, pins_near_face: bool
+    ) -> ForwardRegion:
+        """The same extent, read with no context on its pinned faces.
+
+        Toshio et al. 2510.25222 Fig. 12 assigns the strong decoder
+        r_strong rounds and no more, "after the boundary conditions at
+        both ends have been determined by the weak decoder" (lines
+        1248-1250). A determined boundary condition needs no buffer
+        behind it (Bombin et al. 2303.04846 lines 1456-1458), and the
+        future face is determined either by the restart window's commit
+        or, at the operation's end, by the readout (Tan et al.
+        2209.09219 lines 953-955), so the region never reads past its
+        commit region. A near face that no committed correction closes
+        is open, and an open face keeps one buffer region of raw context
+        (Bombin lines 850-852).
+        """
+        proposal = self._proposed_forward_region(key)
+        plan = proposal.plan
+        context_lo = plan.context_lo
+        if pins_near_face:
+            context_lo = plan.commit_lo
+        pinned_plan = dataclasses.replace(
+            plan, context_lo=context_lo, context_hi=plan.commit_hi
+        )
+        pinned = dataclasses.replace(proposal, plan=pinned_plan)
+        return self._resolved_forward_region(key, pinned)
+
+    def _proposed_forward_region(self, key: tuple) -> "_ForwardProposal":
+        """The extent the interaction proposes, with what it was read on."""
         operation_id, escalated_index = key
         weak_window = self.planner.window_at(key)
         round_count = self.round_count_for(operation_id, weak_window)
@@ -137,6 +188,22 @@ class StrongRegions:
             operation_id, escalated_index
         )
         plan = self._plan_region(weak_window, later_windows, round_count)
+        return _ForwardProposal(
+            weak_window=weak_window,
+            round_count=round_count,
+            later_windows=later_windows,
+            plan=plan,
+        )
+
+    def _resolved_forward_region(
+        self, key: tuple, proposal: "_ForwardProposal"
+    ) -> ForwardRegion:
+        """The proposed extent checked against the windows that exist."""
+        operation_id = key[0]
+        weak_window = proposal.weak_window
+        round_count = proposal.round_count
+        later_windows = proposal.later_windows
+        plan = proposal.plan
         _check_region_bounds(key, weak_window, round_count, plan)
         absorbed = _absorbed_window_keys(later_windows, plan)
         _refuse_crossing_window(later_windows, plan)
@@ -255,25 +322,6 @@ class StrongRegions:
             proposed_restart_window=proposed_restart,
             restart_model=restart_model,
         )
-
-    def _near_neighbour_of(
-        self,
-        weak_window: window_records.Window,
-        strong_window: window_records.Window,
-    ) -> Optional[tuple]:
-        """The window whose commit region ends where this one's begins.
-
-        A pinned face is a seam between two commit regions, so the
-        neighbour is the escalated window's own dependency that commits
-        the round before it (Bombin et al. 2303.04846 lines 703-704:
-        what a task commits is the restriction to its commit region).
-        """
-        seam_round = strong_window.commit_lo - 1
-        for dependency_key in weak_window.deps:
-            neighbour = self.planner.window_at(dependency_key)
-            if neighbour.commit_hi == seam_round:
-                return dependency_key
-        return None
 
     def _proposed_restart_window(
         self, restart_key: tuple, plan: window_records.StrongRegionPlan

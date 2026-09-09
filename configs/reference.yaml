@@ -113,7 +113,8 @@ escalation:
 #                                  # paper expects to cost little because the
 #                                  # switching rate decays with the code distance
 #   strong_window: two_sided_context  # two_sided_context | forward |
-#                                  # near_seam_pinned: the shape
+#                                  # near_seam_pinned | forward_seam_pinned:
+#                                  # the shape
 #                                  # of the window the strong tier re-decodes
 #                                  # (STRONG_WINDOW_SHAPES in
 #                                  # escalation/strong_window_shapes.py).
@@ -140,8 +141,22 @@ escalation:
 #                                  # buffer (lines 1456-1458). Its open future
 #                                  # face keeps one buffer region, which is
 #                                  # Bombin's b >= d (lines 850-852) when
-#                                  # windows.buffer_rounds is the distance
-#   restart_reread_buffer_regions: 0  # forward window only: how many of the
+#                                  # windows.buffer_rounds is the distance.
+#                                  # forward_seam_pinned is the paper's
+#                                  # Sec. III C as it is stated: the same
+#                                  # r_com + 2 r_buf extent as forward, read
+#                                  # with no context, its near face pinned on
+#                                  # the window before it and its far face on
+#                                  # the restart window's weak commit (Toshio
+#                                  # 2510.25222 lines 1248-1259). It absorbs
+#                                  # the windows it covers as forward does,
+#                                  # needs restart_reread_buffer_regions 0
+#                                  # (refused otherwise), and reads one buffer
+#                                  # region of raw context on a near face that
+#                                  # no committed correction closes
+#   restart_reread_buffer_regions: 0  # forward window only (refused with
+#                                  # forward_seam_pinned, whose far pin needs
+#                                  # 0): how many of the
 #                                  # strong region's buffer regions the
 #                                  # restarted weak window re-reads. 0 is the
 #                                  # paper (Toshio 2510.25222 Sec. III C lines

@@ -16,7 +16,6 @@ import pytest
 import stim
 
 import decsim.build.escalation as escalation_build
-import decsim.controller.policies as boundary_policies
 import decsim.decoders.decoders as decoders
 import decsim.decoders.settings as decoder_settings
 import decsim.escalation.policies as policies
@@ -34,6 +33,7 @@ import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.settings as machine_settings
+import decsim.windows.boundary_policies as boundary_policies
 import decsim.windows.schemes.sliding as sliding_scheme
 import decsim.windows.settings as window_settings
 import tests.escalation.declared_fabric as fabric
@@ -432,6 +432,7 @@ def _switching_config(
     threshold_source=None,
     windows_kind=None,
     terminal_policy=None,
+    boundaries=None,
 ):
     """A yaml with no router, no boundary policy and no windowing scheme."""
     escalation = {"kind": kind, "gap_threshold_db": 20.0}
@@ -454,7 +455,9 @@ def _switching_config(
         **strong_decoder,
         "sweep": [sweep_point],
     }
-    card["windows"] = _windows_section(windows_kind, terminal_policy)
+    card["windows"] = _windows_section(
+        windows_kind, terminal_policy, boundaries
+    )
     return yaml_configs.write_config(tmp_path, card)
 
 
@@ -474,13 +477,15 @@ def _weak_unit() -> dict:
     }
 
 
-def _windows_section(windows_kind, terminal_policy) -> dict:
-    """The minimal windows section, with either key the caller named."""
+def _windows_section(windows_kind, terminal_policy, boundaries) -> dict:
+    """The minimal windows section, with the keys the caller named."""
     windows = dict(yaml_configs.MINIMAL_CONFIG["windows"])
     if windows_kind is not None:
         windows["kind"] = windows_kind
     if terminal_policy is not None:
         windows["terminal_policy"] = terminal_policy
+    if boundaries is not None:
+        windows["boundaries"] = boundaries
     return windows
 
 
@@ -744,6 +749,38 @@ def test_a_windowing_scheme_named_in_a_yaml_runs_under_switching(
     assert isinstance(planner_scheme, DelegatingWindowScheme)
     result = machine.run()
     assert result.terminal_status == "complete"
+
+
+def test_eager_boundaries_named_in_a_yaml_are_refused_under_switching(
+    tmp_path,
+):
+    """The boundary policy's key reaches the escalation's own refusal.
+
+    A yaml may name windows.boundaries; the escalation's check_plan is
+    what refuses eager shipping against a serial escalation, by the fact
+    the row declares.
+    """
+    config_path = _switching_config(tmp_path, boundaries="eager")
+    with pytest.raises(ValueError, match="serial switching requires held"):
+        config = experiment.load_experiment(config_path)
+        settings = config.point_settings(
+            physical_error_probability=0.008, distance=3, round_period_us=1.0
+        )
+        machine_module.Machine.build(settings, 0)
+
+
+def test_held_boundaries_named_in_a_yaml_are_the_rows_the_run_gets(tmp_path):
+    """The key is read, not only defaulted."""
+    config_path = _switching_config(tmp_path, boundaries="held")
+    config = experiment.load_experiment(config_path)
+    settings = config.point_settings(
+        physical_error_probability=0.008, distance=3, round_period_us=1.0
+    )
+    machine = machine_module.Machine.build(settings, 0)
+    boundary_policy = machine.window_manager.courier.boundary_policy
+
+    assert settings.windows.boundaries == "held"
+    assert isinstance(boundary_policy, boundary_policies.Held)
 
 
 def test_a_flush_tail_named_in_a_yaml_is_refused_under_switching(tmp_path):

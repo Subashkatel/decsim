@@ -13,7 +13,6 @@ from typing import Any
 import stim
 
 import decsim.build.escalation as escalation_build
-import decsim.controller.policies as policies
 import decsim.controller.settings as controller_settings
 import decsim.escalation.settings as escalation_settings
 import decsim.frontends.planner as planner
@@ -339,21 +338,38 @@ def _boundary_policy(
     escalation: escalation_settings.EscalationSettings,
     escalation_policy,
 ):
-    """Eager shipping, or Held while a serial escalation is pending.
+    """The row windows.boundaries names, or the one the escalation needs.
 
     A policy that may escalate holds boundaries until results are final
     (descendants wait out an escalation); a strong window that absorbs
     the weak windows it covers keeps the weak chain committing eagerly.
+    The boundary policy's own check_plan refuses the wrong pairing when a
+    yaml names it against the escalation.
     """
     if windows.boundary_policy is not None:
         _refuse_undeclared_boundary_policy(windows.boundary_policy)
         return windows.boundary_policy
+    boundaries = _boundaries_name(windows, escalation, escalation_policy)
+    row = tables.row(
+        window_settings.BOUNDARY_POLICIES, "windows.boundaries", boundaries
+    )
+    return row()
+
+
+def _boundaries_name(
+    windows: window_settings.WindowSettings,
+    escalation: escalation_settings.EscalationSettings,
+    escalation_policy,
+) -> str:
+    """The section's boundaries row, or the one the escalation needs."""
+    if windows.boundaries is not None:
+        return windows.boundaries
     absorbs_weak_windows = escalation_build.absorbs_weak_windows(escalation)
     may_escalate = escalation_policy.requires_strong_context
     is_serial_escalation = may_escalate and not absorbs_weak_windows
     if is_serial_escalation:
-        return policies.Held()
-    return policies.Eager()
+        return "held"
+    return "eager"
 
 
 def _idle_policy(settings: controller_settings.IdlePolicySettings):

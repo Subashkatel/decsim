@@ -1,9 +1,8 @@
-"""The two policy seams a run fills: boundaries and idle rounds.
+"""How an idle round of a waiting patch travels, and what it costs.
 
-boundary_policy answers one question for the window manager, whether a
-committed boundary ships now (Eager) or only when its result is final
-(Held). idle_policy answers one for the idle accounting, how the rounds
-of a patch that waits travel and what they cost.
+idle_policy answers one question for the idle accounting: how the rounds
+of a patch that waits travel and what they cost. The boundary policy rows
+are tested beside them, in tests/windows/test_boundary_policies.py.
 
 The three idle rows are three defensible cards, not one right answer.
 Idle rounds are decoder workload, so the charged row is the default:
@@ -38,30 +37,6 @@ class RecordingIdleRounds:
             return False
         self.stream_rounds.append((operation, patch))
         return True
-
-
-def test_eager_ships_a_provisional_boundary():
-    eager = policies.Eager()
-    window = object()
-    assert eager.on_commit(window, final=False) is True
-
-
-def test_eager_ships_a_final_boundary():
-    eager = policies.Eager()
-    window = object()
-    assert eager.on_commit(window, final=True) is True
-
-
-def test_held_holds_a_provisional_boundary():
-    held = policies.Held()
-    window = object()
-    assert held.on_commit(window, final=False) is False
-
-
-def test_held_ships_a_final_boundary():
-    held = policies.Held()
-    window = object()
-    assert held.on_commit(window, final=True) is True
 
 
 def test_ignore_sends_the_idle_round_as_a_memory_round():

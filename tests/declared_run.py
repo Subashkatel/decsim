@@ -11,7 +11,6 @@ tests/controller/test_round_assembly.py).
 
 import dataclasses
 
-import decsim.controller.policies as boundary_policies
 import decsim.controller.settings as controller_settings
 import decsim.decoders.decoder_memory as decoder_memory
 import decsim.decoders.decoders as decoders
@@ -30,6 +29,7 @@ import decsim.qpu.settings as qpu_settings
 import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.settings as machine_settings
+import decsim.windows.boundary_policies as boundary_policies
 import decsim.windows.schemes.sliding as sliding_scheme
 import decsim.windows.settings as window_settings
 from decsim.config import microseconds_to_ticks

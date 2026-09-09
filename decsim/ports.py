@@ -428,6 +428,24 @@ class Link(Protocol):
 
 
 @runtime_checkable
+class BoundaryPolicy(Protocol):
+    """When a committed window ships its boundary to the windows after it.
+
+    Table rows: eager, held (BOUNDARY_POLICIES, windows/settings.py),
+    named by windows.boundaries. Eager ships at every commit; held ships
+    only once the committing result is final. A provisional boundary that
+    ships is never revised, so a run that may revise a weak result needs
+    a row that holds. ships_provisional_boundaries is that fact, declared
+    by the row so a caller reads it rather than the row's class.
+    """
+
+    ships_provisional_boundaries: bool
+
+    def on_commit(self, window: window_records.Window, *, final: bool) -> bool:
+        """Whether to ship the boundary now."""
+
+
+@runtime_checkable
 class EscalationPolicy(Protocol):
     """Whether and when a window is decoded again by the strong tier.
 
@@ -618,7 +636,8 @@ class IdlePolicy(Protocol):
     """How idle rounds travel while an operation waits for feedback.
 
     Table rows: separate_decode_jobs, ignore, extend_stream
-    (controller/policies.py). relay carries one idle round through the
+    (controller/policies.py, beside the accounting they serve). relay
+    carries one idle round through the
     idle accounting it is given (controller/idle_rounds.py);
     end_idle_period runs when an operation claims the patch, so rounds
     the policy has not charged yet can be settled.

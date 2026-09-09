@@ -13,6 +13,7 @@ import decsim.config as config
 import decsim.decoders.decoder as decoder_module
 import decsim.decoders.decoder_manager as decoder_manager
 import decsim.decoders.decoders as decoders
+import decsim.decoders.detection_events as detection_events
 import decsim.decoders.schedulers as schedulers
 import decsim.decoders.staged_decoder as staged_decoder
 import decsim.engine as engine_module
@@ -38,7 +39,16 @@ class FixedRow(decoder_module.DecoderBase):
         )
 
 
-def _manager(engine, row):
+class OneEventPerRound:
+    """A former whose events are the round index: the value is not the law."""
+
+    def form_round(self, operation_id, round_index, raw_bits):
+        """One round's detection events."""
+        del operation_id, raw_bits
+        return (round_index,)
+
+
+def _manager(engine, row, formation_by_pool=None):
     router = decoders.CodeRouter(row)
     scheduler = schedulers.FifoScheduler()
     policy = escalation_policies.Baseline(escalation_policies.NO_CONFIDENCE)
@@ -48,6 +58,7 @@ def _manager(engine, row):
         scheduler=scheduler,
         num_units=1,
         escalation_policy=policy,
+        formation_by_pool=formation_by_pool,
     )
 
 
@@ -135,6 +146,49 @@ def test_a_withdrawn_window_leaves_the_queue_and_the_ledger():
     manager.withdraw_window((1, 1))
     assert waiting.cancelled is True
     assert waiting.unit is None
+    engine.run()
+    manager.check_decode_work_settled()
+
+
+def test_a_withdrawn_windows_rounds_go_back_to_its_tier():
+    """A decode that never started was never charged for forming them.
+
+    The rounds a job forms are frozen on it at the first ask, which can
+    be the dispatcher's compute prediction, before its input has landed.
+    A strong region then absorbs the window and the job is withdrawn, so
+    the job that reads those rounds next has to pay for forming them.
+    """
+    engine = engine_module.Engine()
+    row = FixedRow()
+    former = OneEventPerRound()
+    formation = detection_events.TierFormation(former)
+    manager = _manager(engine, row, {"default": formation})
+    formation_stage = detection_events.DetectionEventFormationStage(
+        "detection_event_formation",
+        cycles_per_job=5,
+        cycles_per_round=1,
+        formation=formation,
+    )
+    busy = _window_job()
+    busy.label = "busy"
+    on_decoded = _resolving(manager)
+    manager.enqueue(busy, None, on_decoded)
+    waiting = _window_job()
+    waiting.window_id = 1
+    waiting.label = "waiting"
+    waiting.request_key = window_records.DecoderRequestKey(
+        1, 1, window_records.DecoderTier.WEAK, 1
+    )
+    manager.enqueue(waiting, None, on_decoded)
+    at_the_prediction = formation_stage.cycles_for(waiting)
+
+    manager.withdraw_window((1, 1))
+
+    strong = _window_job()
+    strong.label = "strong"
+    after_the_withdrawal = formation_stage.cycles_for(strong)
+    assert at_the_prediction == 5
+    assert after_the_withdrawal == 5
     engine.run()
     manager.check_decode_work_settled()
 

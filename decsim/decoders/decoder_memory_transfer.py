@@ -224,8 +224,12 @@ class DecoderInputStaging:
 
         Every step is idempotent, so a request in transport, waiting for
         round credits, already stored or already cleared is safe to
-        cancel.
+        cancel. This is the one place every cancellation passes through,
+        so it is also where the job's tier takes back the rounds it had
+        claimed to form: a withdrawn or cancelled decode never reached
+        the stage that charges them.
         """
+        self._release_formation_claim(job)
         self.transport.cancel(job)
         self._drop_awaited(job)
         self.release(job)
@@ -233,6 +237,13 @@ class DecoderInputStaging:
         if hold is not None:
             hold()
             job.input_hold = None
+
+    def _release_formation_claim(self, job: decoding_records.DecodeJob) -> None:
+        """The job's tier takes back the rounds it claimed, never formed."""
+        formation = self.formation_by_pool.get(job.pool)
+        if formation is None:
+            return
+        formation.release(job)
 
     def _drop_awaited(self, job: decoding_records.DecodeJob) -> None:
         """Forget a landing this job was sending or waiting for.

@@ -19,8 +19,7 @@ replaced without any other component knowing. That is gem5's modular
 port interface: "gem5 provides a modular port interface which allows any
 component that implements the port API to be connected to any other
 component implementing the same API" (Lowe-Power and the gem5 community,
-arXiv:2007.03152, lines 489-491 of the text under
-`tmp/resources/gem5`).
+arXiv:2007.03152, lines 489-491 of the text extraction).
 
 **A pluggable part is a table of rows.** A row is one name a yaml may
 write and one class the machine builds for it. That is sinter's shape,
@@ -101,7 +100,7 @@ An arrow nobody makes fails the suite.
 | Escalation | `escalation/` | a weak result and its confidence | the verdict: keep it, or re-decode the region on the strong tier |
 | Boundary courier | `windows/` | a committed correction | the neighbouring window, with that correction folded into its input |
 | Pauli frame | `pauli_frame/` | one correction per window | the folded frame per stream, and the release of whatever waited |
-| Conditional release | `controller/` | an operation whose result is final | the instruction back to the QPU |
+| Conditional release | `controller/` | an operation whose result is final | the decision, which the frame's end sends and the controller relays as the instruction to the QPU |
 | Observation | `observe/` | callbacks every component fires | the metrics, the traffic ledger, the trace |
 
 Observation is reached through callbacks a component fires, never

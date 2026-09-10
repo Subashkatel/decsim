@@ -107,7 +107,7 @@ broadcast (240 to 260 nanoseconds at the stated worst case).
 
 **Flagged with the decision.** The reference card's weak-side sum
 exceeds Toshio's own communication time for the weak side, because the
-card's nine latencies are taken from one source's table rather than
+card's six latencies are taken from one source's table rather than
 derived from one referent. Re-deriving the fabric card from a single
 referent is open work.
 
@@ -227,7 +227,7 @@ point-to-point channel schedules `PointToPointNetDevice::Receive` on the
 destination device (`point-to-point-channel.cc:88-92`), and that receive
 is the destination device's own method
 (`point-to-point-net-device.cc:324`). That the publication never precedes
-the store is the buffer contract of the behaviour gate. The two hops
+the store is a law of the store, and its tests hold it. The two hops
 keep the referents they had: Caune
 arXiv:2410.05202 Fig. 1a stage D for hop 2's latency, and Toshio
 arXiv:2510.25222 line 1248 for what Buffer 1 is assigned.
@@ -335,19 +335,19 @@ messages (`MessageBuffer.cc:181`, the two sizes read at `:155-158`).
 **Where to see it.** `decsim/syndrome_buffer/round_input.py`, the
 `RoundStore` and `RoundStoreInput` ports in `decsim/ports.py`,
 `tests/syndrome_buffer/test_round_input.py`, and hop 2 of
-[The data path, hop by hop](data_path.md). The research behind it is
-note 27 of the design audit, in the sandbox.
+[The data path, hop by hop](data_path.md). The research behind it read the referents above side by side, the
+classical queues first and the quantum control papers second.
 
 ## What is not modelled yet
 
 These are open, recorded rather than hidden, so that a reader does not
 mistake a gap for a result.
 
-- **O1. The switching gate points still run on the host wall clock.**
-  The three switching points of the behaviour gate price two real
-  decoders from the measured clock, at weak 12 to 119 microseconds and
+- **O1. A switching run on two real decoders runs on the host wall clock.**
+  Such a run prices both decoders from the measured clock, at weak 12 to 119 microseconds and
   strong 0.94 to 46 milliseconds against a one microsecond round. That
-  is the whole source of order and queue-depth variance in the gate. The
+  is the whole source of order and queue-depth variance between two
+  runs of one seed. The
   proposal on the table is a latency key on the decoder section, with
   the two points priced at Toshio's generation time and ten times it.
 - **O2. The `bandwidth_limited` link row cannot be named from a yaml.**
@@ -375,19 +375,19 @@ mistake a gap for a result.
   unknown key by name the way `decoder_manager` does, so a misspelt key
   there runs the default in silence.
 
-A sixth row, O4, was a real mispricing of a backward hand-off in the
+A seventh row, O4, was a real mispricing of a backward hand-off in the
 parallel scheme, and it is closed: the two layers that differ are now
-tested. A seventh, O10, said that a timing-only round's landing reached
+tested. An eighth, O10, said that a timing-only round's landing reached
 no object of the receiving package; it is closed too, by the decoders'
-own end for such a round (`decsim/decoders/memory_rounds.py`). An
-eighth, O5, said the boundary fold was executed by the window gate
+own end for such a round (`decsim/decoders/memory_rounds.py`). A
+ninth, O5, said the boundary fold was executed by the window gate
 because moving it would reorder the copy trace sources; it is closed as
 well, and no trace source moved: the gate hands the mask and the
 decoder side writes it (`decsim/decoders/decoder_memory_transfer.py`,
-D11). A ninth, O3, held two payload-source strings that named no real
-field until the golden file next moved; it is closed by naming what the
+D11). A tenth, O3, held two payload-source strings that named no real
+field; it is closed by naming what the
 sends carry, `QPUReadout.size_bits` on the readout hop and no payload at
-all on the escalation hop, under one regeneration note.
+all on the escalation hop, and the traffic ledger names them.
 
 ## Read next
 

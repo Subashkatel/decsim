@@ -29,9 +29,8 @@ escalated.
 ## Step 1. Read the config
 
 This lesson's config ships with decsim, as `configs/two_tiers.yaml`.
-It is the shape of the behaviour gate's own switching point: both
-tiers priced by cards rather than measured, so every tick below is the
-same on your machine as on this page's.
+Both tiers are priced by cards rather than measured, so every tick
+below is the same on your machine as on this page's.
 
 ```yaml
 # Two tiers on priced cards, so the whole switching loop is
@@ -103,8 +102,7 @@ decode costs one microsecond and `kind: 10.0` says the strong decode
 costs ten. Those numbers are the paper's ratio. One microsecond is this
 sweep's round period, which is one **syndrome generation time**, the
 time the machine takes to produce a round of syndrome
-(arXiv:2510.25222, `2510.25222.txt` lines 186-187 in the sandbox's
-`tmp/papers/txt/` extraction), and Toshio's own backlog simulations
+(arXiv:2510.25222, lines 186-187 of the text extraction), and Toshio's own backlog simulations
 set the strong decoding time to ten of them (lines 1110-1112).
 
 A card prices the algorithm stage and nothing else: both tiers still
@@ -177,6 +175,8 @@ throughput: 0.537 rounds per us
 queue wait, mean: 12.850 us
 service time per window, mean: 7.799 us
 ready to frame commit: median 24.000 us, p99 65.312 us
+
+data movement: observation.data_movement was off, so this run counted no copies, references or moves
 
 every column: results/2026-09-10T03-22-57Z-two_tiers/sweep.csv
 ```

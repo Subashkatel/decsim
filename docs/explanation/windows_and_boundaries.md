@@ -27,9 +27,8 @@ decsim's **window** is one step of that method. Skoric et al. give the
 two regions their names: "a window can be divided into two regions: a
 commit region consisting of the 'long-lived' defects in the first
 `n_com` rounds, and a buffer region containing the last `n_buf` rounds"
-(arXiv:2209.08552, Sec. I B, `2209.08552.txt` lines 194-199, the
-sandbox's `tmp/papers/txt/` extraction, which the code's docstrings cite
-too). Toshio et
+(arXiv:2209.08552, Sec. I B, lines 194-199 of the text extraction,
+which the code's docstrings cite too). Toshio et
 al. write the same two as `r_com` and `r_buf`. In decsim they are
 `commit_round_count` and `buffer_round_count`, and both default to the
 code distance.

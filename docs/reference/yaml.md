@@ -94,6 +94,10 @@ an `extends` chain says what you meant.
 | `configs/two_tiers.yaml` | switching with both tiers on priced cards, the third tutorial's run |
 | `configs/priced_cards_example.yaml` | one tier on a priced card, for a timing study |
 | `configs/my_first_sweep.yaml` | three distances at one error rate, the second tutorial's run |
+| `configs/data_movement.yaml` | the data-movement study: every copy, reference and move counted per hop |
+| `configs/data_movement_input_in_place.yaml` | the same with the weak input referenced in place instead of copied |
+| `configs/data_movement_fold_in_place.yaml` | the same with the boundary folded in place |
+| `configs/data_movement_switching.yaml` | the same under the switching escalation |
 | `configs/campaigns_2026_09/` | the six 2026-09 decoder campaigns: one shared base, six campaign files that differ only in their decoder rows, one file per campaign and distance for the Slurm arrays, and `configs/campaigns_2026_09/PLAN.md` with the shot table, the costs and the submit lines |
 
 ## Read next

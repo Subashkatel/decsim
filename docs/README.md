@@ -125,7 +125,7 @@ sources, and the ideas behind the tree.
 | Folder | What is in it |
 | --- | --- |
 | `decsim/` | the simulator: twenty-five packages on eleven uses levels, mapped in [The map of the package](reference/map.md) |
-| `decsim/ports.py` | the thirty-four ports, the only way two packages talk |
+| `decsim/ports.py` | the thirty-eight ports, the only way two packages talk |
 | `configs/` | the yaml experiments. `configs/reference.yaml` documents every key. |
 | `results/` | what a run writes, one folder per run. Not tracked by git. |
 | `tests/` | the test suite, one folder per package |

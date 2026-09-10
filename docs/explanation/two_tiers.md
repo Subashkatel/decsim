@@ -25,8 +25,8 @@ switching** is their answer to it (arXiv:2510.25222 Sec. III).
 decsim calls the two decoders the **weak tier** and the **strong tier**,
 which are Toshio's own words: "we refer to these paired decoders as
 'weak decoder' and 'strong decoder'" (`2510.25222.txt` lines 590-598,
-Sec. III A; every paper line on these pages is into the sandbox's
-`tmp/papers/txt/` extraction, the one the code's own docstrings cite). The weak decoder is fast and reports a **soft output**; the
+Sec. III A; every paper line on these pages is into the plain-text
+extraction of the paper, the one the code's own docstrings cite). The weak decoder is fast and reports a **soft output**; the
 strong decoder is accurate and has a relatively high latency.
 
 Three rows of `ESCALATIONS` say which of the two arrangements a run is:

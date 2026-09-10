@@ -83,7 +83,7 @@ window with Tesseract and counts the disagreements into
 `tests/machine/test_machine.py::test_a_new_decoder_is_one_class_and_one_table_row`
 plugs a decoder in from outside decsim in a few lines, and
 `tests/machine/test_machine.py::test_a_second_table_row_runs_gate_point_one`
-runs one through a whole point.
+runs one through a whole run of a shipped config.
 
 ## Read next
 

@@ -27,8 +27,8 @@ where = ["."]
 include = ["decsim*"]
 
 # tests/ is the whole suite, and the only place with tests: `python -m pytest
-# -q` collects it and nothing else. docs/ holds the four pages a reader
-# starts from (architecture, glossary, plug_in_a_component, reading_a_trace).
+# -q` collects it and nothing else. docs/ holds the documentation, in the
+# Diataxis scheme, and docs/index.md is its front door.
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 # pytest's own default skips any folder named "build" when it walks a

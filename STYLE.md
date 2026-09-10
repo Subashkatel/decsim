@@ -158,8 +158,8 @@ stays short; past eight names the rule is wrong, not the list.
 ## Rule 2. Names are full words that say what the thing is
 
 No abbreviations. No acronyms except these, which are words in this field
-and stay: qpu, id, io, xor, yaml, json. docs/glossary.md maps every plain
-name to the exact term the literature uses, so
+and stay: qpu, id, io, xor, yaml, json. docs/reference/glossary.md maps
+every plain name to the exact term the literature uses, so
 `minimum_weight_perfect_matching` is listed beside "MWPM", and it carries
 the renamed modules too.
 

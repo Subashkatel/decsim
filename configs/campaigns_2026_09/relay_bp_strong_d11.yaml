@@ -1,0 +1,26 @@
+# relay_bp_strong, distance 11 alone: one Slurm array of the campaign
+# (PLAN.md). Every other key is relay_bp_strong.yaml's.
+
+extends: relay_bp_strong.yaml
+
+sweep:
+  - physical_error_probability: [0.002]
+    distance: [11]
+    round_period_us: [1.0]
+    shots: 200000
+  - physical_error_probability: [0.003]
+    distance: [11]
+    round_period_us: [1.0]
+    shots: 95238
+  - physical_error_probability: [0.005]
+    distance: [11]
+    round_period_us: [1.0]
+    shots: 4237
+  - physical_error_probability: [0.007]
+    distance: [11]
+    round_period_us: [1.0]
+    shots: 728
+  - physical_error_probability: [0.01]
+    distance: [11]
+    round_period_us: [1.0]
+    shots: 400

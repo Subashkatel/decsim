@@ -12,25 +12,49 @@ script assigns ports.
 
 ```mermaid
 graph TD
-    QPU -->|"ReadoutReceiver.accept_qpu_readout"| Controller
+    %% Qpu = qpu
+    %% Controller = controller
+    %% Formation = detector_error_model
+    %% Buffer0 = syndrome_buffer
+    %% Buffer1 = syndrome_buffer
+    %% Windows = windows
+    %% Models = qpu
+    %% Decoders = decoders
+    %% Unit = decoders
+    %% Escalation = escalation
+    %% Courier = windows
+    %% Frame = pauli_frame
+    %% Release = controller
+    Qpu["QPU device"] -->|"ReadoutReceiver.accept_qpu_readout"| Controller
+    Controller -->|"DetectionEventPlacement.form_before_departure"| Formation["Detection event formation"]
     Controller -->|"RoundStore.accept_packed_round"| Buffer0["Syndrome buffer 0"]
     Controller -->|"StrongRoundStore.write"| Buffer1["Syndrome buffer 1"]
-    Buffer0 -->|"WindowInput.accept_window_input"| Windows["Window manager"]
+    Controller -->|"WindowInput.accept_window_input"| Windows["Window manager"]
+    Windows -->|"WindowModelSource.window_models_for_operation"| Models["Window fault models"]
     Windows -->|"DecodeQueue.enqueue"| Decoders["Decoder manager"]
+    Buffer0 -->|"WindowTransfers.send_for_job"| Decoders
+    Decoders -->|"WindowInputGate.may_stage"| Windows
     Decoders -->|"Decoder.start"| Unit["Decoder unit"]
-    Decoders -->|"WindowInputGate.may_start"| Windows
-    Decoders -->|"EscalationPolicy.verdict_for_weak_result"| Escalation
-    Windows -->|"Frame.commit_correction"| Frame["Pauli frame"]
+    Windows -->|"EscalationPolicy.verdict_for_weak_result"| Escalation["Escalation policy"]
+    Escalation -->|"DecodeQueue.await_strong_result"| Decoders
+    Escalation -->|"BoundaryCourier.pin_strong_face"| Courier["Boundary courier"]
+    Buffer1 -->|"WindowTransfers.send_for_job"| Decoders
+    Decoders -->|"Frame.commit_correction"| Frame["Pauli frame"]
     Windows -->|"ReleaseReceiver.release_waiters"| Release["Conditional release"]
     Release -->|"InstructionReceiver.relay_instruction"| Controller
-    Controller -->|"Qpu.issue"| QPU
+    Controller -->|"Qpu.issue"| Qpu
 ```
 
-Each arrow is one port method, and the component at its tail knows the
-one at its head only through that port. Buffer 1 and the decoder unit
-answer the decoder manager: it stages a window's rounds out of a buffer
-into a unit's input slot, and starts the unit when the window's own gate
-allows it.
+The `%%` lines are mermaid comments, and they say which package each
+node is: `tests/test_docs.py` reads them, checks that the port on every
+arrow declares that method in `decsim/ports.py`, and walks the package
+at the arrow's tail to find the call. An arrow nobody makes fails the
+suite.
+
+Each arrow is one port method, and the component at its tail is the one
+that makes the call. The decoder manager stages a window's rounds out of
+a buffer into a unit's input slot, and starts the unit when the window
+side's own gate allows it.
 
 Every arrow between two components also rides a link card
 (`Link.send`, `decsim/links/`), which charges the hop its serialization
@@ -43,7 +67,7 @@ reports one row per path.
 | Component | Package | It is handed | It hands on |
 | --- | --- | --- | --- |
 | QPU device | `qpu/` | one operation body per patch | one readout per round, on the cycle boundary |
-| Controller | `controller/` | readouts | one packed round per round, with its detection events formed |
+| Controller | `controller/` | readouts | one packed round per round, with its detection events formed when the `controller` row of `DETECTION_EVENT_FORMATION` is chosen, and raw when the `decoder` row is |
 | Syndrome buffer 0 | `syndrome_buffer/` | packed rounds | the rounds a window reads, kept until every hold releases |
 | Syndrome buffer 1 | `syndrome_buffer/` | the same packed rounds, in parallel | the rounds a strong window reads |
 | Window manager | `windows/` | published rounds | one decode job per closed window, and each window's boundary to the next |
@@ -54,18 +78,12 @@ reports one row per path.
 | Pauli frame | `pauli_frame/` | one correction per window | the folded frame per stream, and the release of what waited |
 | Observation | `observe/` | callbacks every component fires | the metrics, the traffic ledger, the trace |
 
-The syndrome source, the round store, the decoder, the escalation
-policy, the confidence signal, the windowing scheme, the idle policy
-and the workload are the pluggable parts a table picks: each has its
-abstract class in `decsim/ports.py` and one table of rows in the
-settings module of the package that owns it. Two parts are pluggable through their own
-settings section instead. The link fabric is built from the `links`
-section, a number card read by `link_profiles.from_yaml` and wired by
-`fabric.LinkFabric`, so a card of your own is numbers in that section,
-not a row. The threshold source is `escalation.threshold_source`: fixed
-and table both reach the root as a threshold in nats, resolved per sweep
-point by the front, and online reaches it as the calibrator object
-itself (`_threshold_source`).
+Seventeen pluggable parts are picked by a table, the link fabric and the
+threshold source among them. Each part has its port in `decsim/ports.py`
+and one table of rows in the package that owns it;
+`docs/reference/tables.md` lists all seventeen with their rows. A port
+is a `typing.Protocol`, which is structural: a class fills it by having
+the methods, and inherits nothing.
 
 ## The hops, one row each
 

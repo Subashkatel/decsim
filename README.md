@@ -102,13 +102,16 @@ every summary is derived from them when it is read.
 | --- | --- |
 | `shots.csv` | shot: its scalars, and each latency point's mean and max over that shot's windows |
 | `shot_links.csv` | shot per link: that shot's own ledger counters |
+| `shot_data_movement.csv` | shot per path: that shot's own copy and move counters and the memory class the path crosses, written only when `observation.data_movement` is on |
 | `window_samples.csv` | point, latency point and distinct microsecond value: how many windows carried it, which is where a median and a p99 come from |
 | `latency_samples.csv` | window of a timing run: the sample a wall-clock decoder measured |
 | `sweep.csv` | sweep point, summarized from the rows above |
 | `links.csv` | sweep point per link, averaged over the point's shots |
+| `data_movement.csv` | sweep point per path, then per memory class, averaged over the point's shots |
+| `residence.csv` | traced shot per structure, then per link path: how long a round or window sat there, and how long a move waited on the wire |
 | `manifest.json` | the run: the resolved config, the git state, the library versions, how it was invoked |
 | `trace/<shot>.trace.json` | traced shot: its Chrome trace |
-| `*.png` | figure `decsim plot` drew (`timeline`, `stage_breakdown`, `latency`, `ler_vs_d`) |
+| `*.png` | figure `decsim plot` drew (`timeline`, `stage_breakdown`, `latency`, `ler_vs_d`, `data_movement`) |
 
 ## Where to look next
 

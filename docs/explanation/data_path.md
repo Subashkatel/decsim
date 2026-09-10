@@ -241,8 +241,12 @@ not. Default latency 1.0 microseconds each.
 ### 10. `frame_to_controller`
 
 The conditional release. Ends: `pauli_frame` to `controller`; the send
-is executed by `decsim/controller/instruction_output.py`, asked for by
-`decsim/controller/conditional_release.py`.
+is executed by `decsim/pauli_frame/decision_dispatch.py`, which the
+controller's `decsim/controller/conditional_release.py` asks once a
+result is final, and the landing is
+`decsim/controller/instruction_output.py`. The decision leaves by the
+frame's port, so that end executes the send and narrates it, the way
+gem5 bills a transfer to the port it left by (`packet.hh:424-431`).
 
 What crosses: a decision, no data. The card charges one 32-bit control
 bus word, the decoder sequencer's WISHBONE interface width (Caune

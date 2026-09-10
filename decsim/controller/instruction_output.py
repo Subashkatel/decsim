@@ -1,7 +1,8 @@
 """The controller's output: commands and decisions to the QPU.
 
-A decision from the Pauli frame crosses frame_to_controller and is
-available at the controller; a release starts its operation's command,
+A decision from the Pauli frame lands here over frame_to_controller,
+which the frame side executes, and is available at the controller the
+instant it lands; a release starts its operation's command,
 a result return is reported to the QPU. Either payload then pays the
 decision-to-pulse cost (a 42 ns conditional jump and a 52 ns next pulse
 on QICK, 2110.00557 Table II) and crosses controller_to_qpu, and the
@@ -62,45 +63,24 @@ class InstructionOutput:
         decision: program_records.Decision,
         deliver: Callable[[program_records.Decision], None],
     ) -> None:
-        """Carry a Pauli-frame decision over frame_to_controller.
+        """Take a Pauli-frame decision at the landing of frame_to_controller.
 
-        A release is consumed at the controller; the command it releases
-        crosses the output path in send_command. A result return crosses
-        the output path before it is available at the QPU.
+        The frame side executes that crossing
+        (pauli_frame/decision_dispatch.py); the decision is available at
+        the controller the instant this runs. A release is consumed
+        here, and the command it releases crosses the output path in
+        send_command. A result return crosses the output path before it
+        is available at the QPU.
         """
-        attribution = transfer_records.TransferAttribution(
-            operation_id=decision.target_operation_id,
-            patch_ids=(),
-            window_id=None,
-            first_round=None,
-            last_round=None,
-        )
-
-        def at_controller(_transfer=None):
-            self._fire(
-                "DECISION_AVAILABLE", decision.target_operation_id, decision
-            )
-            if decision.releases_operation:
-                deliver(decision)
-                return
-            self._send(
-                decision,
-                decision.target_operation_id,
-                "CONTROL_DECISION_ISSUED",
-                deliver,
-            )
-
-        if self.link is None:
-            self.engine.schedule(
-                0, at_controller, label="pauli frame->controller"
-            )
+        self._fire("DECISION_AVAILABLE", decision.target_operation_id, decision)
+        if decision.releases_operation:
+            deliver(decision)
             return
-        self.link.send(
-            transfer_records.LinkPath.FRAME_TO_CONTROLLER,
-            None,
-            self.engine.now,
-            attribution,
-            at_controller,
+        self._send(
+            decision,
+            decision.target_operation_id,
+            "CONTROL_DECISION_ISSUED",
+            deliver,
         )
 
     def finish(self) -> None:

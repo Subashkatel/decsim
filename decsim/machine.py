@@ -84,6 +84,7 @@ import decsim.links.link_profiles as link_profiles
 import decsim.observe.link_traffic as link_traffic
 import decsim.observe.observation as observation_module
 import decsim.observe.wiring as wiring
+import decsim.pauli_frame.decision_dispatch as decision_dispatch_module
 import decsim.pauli_frame.pauli_frame as pauli_frame_module
 import decsim.qpu.cycle_clock as cycle_clock
 import decsim.records.results as result_records
@@ -308,8 +309,11 @@ class Machine:
             memory_model=None,
         )
         seeding.bind_run_seed(root_seed, seed_roots)
+        decision_dispatch = decision_dispatch_module.DecisionDispatch(
+            engine, links, instruction_output
+        )
         conditional_release.connect(
-            instruction_output, execution_runtime.on_decision
+            decision_dispatch, execution_runtime.on_decision
         )
         process_name = controller_side.process_name(settings, seed)
         listeners = wiring.observe(

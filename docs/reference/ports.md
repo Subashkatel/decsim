@@ -254,13 +254,21 @@ The conditional release, as the window manager sees it.
 | --- | --- |
 | `release_waiters` | A final result is in: send every decision it releases. |
 
-### `InstructionReceiver`
+### `DecisionDispatch`
 
-The controller, as the conditional release sees it.
+The frame's dispatch, as the conditional release sees it.
 
 | Method | What it does |
 | --- | --- |
-| `relay_instruction` | Carry one decision to the controller; deliver runs on arrival. |
+| `dispatch_decision` | Send one decision to the controller; deliver runs at the QPU. |
+
+### `InstructionReceiver`
+
+The controller, as the frame's dispatch sees it.
+
+| Method | What it does |
+| --- | --- |
+| `relay_instruction` | Take one decision at the landing; deliver runs at the QPU. |
 
 ## the controller instructs the QPU
 

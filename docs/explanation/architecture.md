@@ -55,6 +55,7 @@ graph TD
     %% Courier = windows
     %% Frame = pauli_frame
     %% Release = controller
+    %% Dispatch = pauli_frame
     Qpu["QPU device"] -->|"ReadoutReceiver.accept_qpu_readout"| Controller
     Controller -->|"DetectionEventPlacement.form_before_departure"| Formation["Detection event formation"]
     Controller -->|"RoundStore.accept_packed_round"| Buffer0["Syndrome buffer 0"]
@@ -72,7 +73,8 @@ graph TD
     Buffer1 -->|"WindowTransfers.send_for_job"| Decoders
     Decoders -->|"Frame.commit_correction"| Frame["Pauli frame"]
     Windows -->|"ReleaseReceiver.release_waiters"| Release["Conditional release"]
-    Release -->|"InstructionReceiver.relay_instruction"| Controller
+    Release -->|"DecisionDispatch.dispatch_decision"| Dispatch["Frame dispatch"]
+    Dispatch -->|"InstructionReceiver.relay_instruction"| Controller
     Controller -->|"Qpu.issue"| Qpu
 ```
 

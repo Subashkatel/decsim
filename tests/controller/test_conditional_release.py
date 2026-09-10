@@ -11,8 +11,10 @@ whichever way the result came out), so nothing here reads the result's
 bits.
 
 Every decision travels to the QPU through the controller, never straight
-from the frame, which is why the unit holds the controller it relays
-over and logs one line per decision before handing it on.
+from the frame, and it leaves by the frame's end of
+frame_to_controller: the unit holds that dispatch and hands each
+decision to it, with the delivery the runtime waits on
+(tests/pauli_frame/test_decision_dispatch.py carries the send itself).
 """
 
 import types
@@ -21,24 +23,20 @@ import decsim.controller.conditional_release as conditional_release
 
 
 class RecordingEngine:
-    """A clock a test sets, and the lines the unit narrated."""
+    """A clock a test sets."""
 
     def __init__(self, now=0):
         self.now = now
-        self.lines = []
-
-    def log(self, component, message):
-        self.lines.append((component, message))
 
 
-class RecordingController:
-    """The relay: which decisions reached the controller, and over what."""
+class RecordingDispatch:
+    """The frame's end: which decisions were sent, and with what delivery."""
 
     def __init__(self):
-        self.relayed = []
+        self.dispatched = []
 
-    def relay_instruction(self, decision, deliver_decision):
-        self.relayed.append((decision.target_operation_id, deliver_decision))
+    def dispatch_decision(self, decision, deliver_decision):
+        self.dispatched.append((decision.target_operation_id, deliver_decision))
 
 
 def operation(operation_id, name="decode", requires_return=False):
@@ -50,19 +48,19 @@ def operation(operation_id, name="decode", requires_return=False):
 
 
 def bare_release():
-    """The unit with no controller wired: only its decisions are read."""
+    """The unit with no dispatch wired: only its decisions are read."""
     engine = RecordingEngine()
     return conditional_release.ConditionalRelease(engine)
 
 
 def connected_release():
-    """The unit wired to a recording controller and one delivery path."""
+    """The unit wired to a recording dispatch and one delivery path."""
     engine = RecordingEngine(now=13)
-    controller = RecordingController()
+    dispatch = RecordingDispatch()
     deliver_decision = object()
     unit = conditional_release.ConditionalRelease(engine)
-    unit.connect(controller, deliver_decision)
-    return unit, engine, controller, deliver_decision
+    unit.connect(dispatch, deliver_decision)
+    return unit, dispatch, deliver_decision
 
 
 def test_every_waiting_operation_is_registered_once_per_edge():
@@ -120,47 +118,25 @@ def test_a_result_nobody_waits_for_and_the_qpu_ignores_releases_nothing():
     assert unit.decisions_for(unheard_of) == []
 
 
-def test_every_decision_reaches_the_qpu_through_the_controller():
-    unit, engine, controller, deliver_decision = connected_release()
+def test_every_decision_leaves_by_the_frames_end_with_its_delivery():
+    unit, dispatch, deliver_decision = connected_release()
     unit.register_blocked_operation(12, 7)
     unit.register_blocked_operation(4, 7)
     source = operation(7)
 
     unit.release_waiters(source)
 
-    relayed = [operation_id for operation_id, _sink in controller.relayed]
-    sinks = [sink for _operation_id, sink in controller.relayed]
-    assert relayed == [12, 4]
+    sent = [operation_id for operation_id, _sink in dispatch.dispatched]
+    sinks = [sink for _operation_id, sink in dispatch.dispatched]
+    assert sent == [12, 4]
     assert sinks == [deliver_decision, deliver_decision]
 
 
-def test_each_decision_is_narrated_before_it_is_relayed():
-    unit, engine, controller, _deliver = connected_release()
-    unit.register_blocked_operation(12, 7)
-    source = operation(7)
-
-    unit.release_waiters(source)
-
-    assert engine.lines == [
-        (
-            "PauliFrame",
-            "DISPATCH conditional release for op#12 -> controller "
-            "-> controller sequencer",
-        )
-    ]
-
-
-def test_a_result_return_is_narrated_as_a_return():
-    unit, engine, controller, _deliver = connected_release()
+def test_a_result_return_leaves_by_the_same_end():
+    """Nothing waits, but the QPU needs the outcome: one return goes out."""
+    unit, dispatch, _deliver = connected_release()
 
     source = operation(9, requires_return=True)
     unit.release_waiters(source)
 
-    assert engine.lines == [
-        (
-            "PauliFrame",
-            "DISPATCH result return for op#9 -> controller "
-            "-> controller sequencer",
-        )
-    ]
-    assert controller.relayed[0][0] == 9
+    assert dispatch.dispatched[0][0] == 9

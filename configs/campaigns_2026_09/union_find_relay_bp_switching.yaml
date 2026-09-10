@@ -1,0 +1,30 @@
+# Pair 2, switching: union find escalating to Relay-BP below the 20 dB
+# cluster gap (Meister et al. 2405.07433 Algorithm 2), the confidence a
+# union find decode gives; otherwise as pair 1's switching campaign.
+# Every other key is base.yaml's.
+
+extends: base.yaml
+
+escalation:
+  kind: switching
+  confidence: cluster_gap
+  gap_threshold_db: 20.0
+  strong_window: near_seam_pinned
+
+weak_decoder:
+  kind: union_find
+  units: 1
+  unit_memory_rounds: null
+  engine:
+    clock: fridge
+    fetch_cycles_per_round: 1
+    release_cycles_per_job: 10
+
+strong_decoder:
+  kind: relay_bp
+  units: 1
+  unit_memory_rounds: null
+  engine:
+    clock: room
+    fetch_cycles_per_round: 1
+    release_cycles_per_job: 10

@@ -1,0 +1,76 @@
+# The shared base of the six 2026-09 campaigns: two decoder pairs
+# (pymatching with belief matching, union find with Relay-BP), each pair
+# as the weak tier alone, the strong tier alone, and switching. Every
+# campaign extends this file and changes only its escalation section
+# and its decoder rows, so any difference between two campaigns' rows
+# is the decoders' and nothing else. Every key is documented in
+# reference.yaml; the workload, windows, clocks, links, engine stages
+# and idle policy are the 2026-08-27 weak_ler and strong_ler settings.
+#
+# Grid (owner 2026-09-09): d 3 to 15 and the August error rates 0.001
+# to 0.01. Shots per point: SHOTS_PER_POINT below, the one number the
+# owner sets before the arrays are queued.
+
+qpu:
+  kind: stim_device
+
+workload:
+  kind: memory_circuit
+  code_task: surface_code:rotated_memory_z
+  rounds_per_shot: 10d
+
+windows:
+  kind: sliding
+  commit_rounds: null                # d
+  buffer_rounds: null                # d
+  terminal_policy: lookahead         # one window plan for all six: switching
+                                     # needs it (Toshio 2510.25222 Sec. III C,
+                                     # a strong recovery reads past the commit)
+                                     # and the single-tier campaigns take the
+                                     # same plan so the comparison is fair
+
+sweep:
+  - physical_error_probability: [0.001, 0.002, 0.003, 0.005, 0.007, 0.01]
+    distance: [3, 5, 7, 9, 11, 13, 15]
+    round_period_us: [1.0]
+    shots: 1000000                   # SHOTS_PER_POINT
+
+controller:
+  clock: fridge
+  readout_to_bits_cycles: 0
+  decision_to_pulse_cycles: 0
+  packing_cycles_per_round: 0
+  packing_rounds_in_flight: null
+
+clocks:
+  fridge: 250.0
+  room: 250.0
+
+links:
+  qpu_to_controller:  {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
+  controller_to_weak_buffer: {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
+  controller_to_strong_buffer: {latency_cycles: 1, clock: room, bits_per_cycle: null}
+  weak_buffer_to_weak_decoder: {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
+  weak_decoder_to_strong_decoder: {latency_cycles: 1, clock: room, bits_per_cycle: null}
+  strong_buffer_to_strong_decoder: {latency_cycles: 1, clock: room, bits_per_cycle: null}
+  decoder_to_decoder:  {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
+  weak_decoder_to_frame: {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
+  strong_decoder_to_frame:  {latency_cycles: 1, clock: room, bits_per_cycle: null}
+  frame_to_controller:  null
+  controller_to_qpu:  null
+
+round_store:
+  rounds: null
+strong_round_store:
+  rounds: null
+
+pauli_frame:
+  clock: fridge
+  write_cycles: 1
+
+idle_policy: separate_decode_jobs
+observation:
+  check_windows_with: none
+  log_component_io: false
+  log: off
+  trace: off

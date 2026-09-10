@@ -51,16 +51,14 @@ def build_strong_round_store(
 
 def build_strong_round_writer(
     engine: engine_module.Engine,
-    links: fabric.LinkFabric,
     strong_round_store,
     window_manager,
 ):
-    """The crossing into the room-side store; the window manager hears it."""
+    """The room-side end of the crossing; the window manager hears it."""
     if strong_round_store is None:
         return None
     return strong_round_writer_module.StrongRoundWriter(
         engine,
-        links,
         strong_round_store,
         on_round_stored=window_manager.accept_room_round,
     )

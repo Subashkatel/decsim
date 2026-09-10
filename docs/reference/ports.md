@@ -62,7 +62,8 @@ The room-side store (syndrome buffer 1), as syndrome packing sees it.
 | Method | What it does |
 | --- | --- |
 | `has_room` | Whether one more write can land. |
-| `write` | Carry the round over the store's link and keep it on arrival. |
+| `reserve_write` | Take the room one crossing round will need, before it leaves. |
+| `receive_round` | Take one round that landed here and keep it on arrival. |
 
 ### `RoundStoreInput`
 

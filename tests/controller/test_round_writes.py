@@ -7,15 +7,27 @@ retry; Ciw ciw/node.py release_blocked_individual), or is dropped under
 the drop knob (ns-3 point-to-point-net-device.cc Send: Enqueue false,
 packet dropped). A strong-primary plan takes one hop, into the strong
 store; a feedback-memory round still crosses Buffer 0.
+
+The controller is also the end the room-side round leaves by, so it
+executes the controller_to_strong_buffer send and the room side handles
+the landing (OMNeT++ csimplemodule.cc:333-334, a module sends only what
+it owns; gem5 packet.hh:424-431, a transfer is billed to the port it
+left by). The crossing's own delay is the card's, on the reference
+profile.
 """
 
+import decsim.config as config
 import decsim.controller.round_writes as round_writes
 import decsim.controller.settings as controller_settings
 import decsim.engine as engine_module
+import decsim.links.fabric as fabric_module
+import decsim.links.link_profiles as link_profiles
 import decsim.observe.round_events as round_events
+import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
 import decsim.syndrome_buffer.round_store as round_store_module
 import decsim.syndrome_buffer.settings as round_store_settings
+import decsim.syndrome_buffer.strong_round_writer as strong_round_writer
 
 STALL = controller_settings.PackingOverflowPolicy.STALL
 DROP = controller_settings.PackingOverflowPolicy.DROP_ROUND
@@ -45,15 +57,21 @@ class RecordingTransmitter:
 
 
 class RecordingStrongWriter:
+    """The room side of the crossing, recording what reaches it."""
+
     def __init__(self, room=True):
         self.room = room
+        self.reserved = 0
         self.written = []
 
     def has_room(self):
         return self.room
 
-    def write(self, packet, *, packet_bits, attribution):
-        del packet_bits, attribution
+    def reserve_write(self):
+        self.reserved += 1
+
+    def receive_round(self, packet, packet_bits):
+        del packet_bits
         self.written.append(packet.round_index)
 
 
@@ -72,8 +90,11 @@ def writer_with(
         settings, on_slot_freed=held.retry
     )
     transmitter = RecordingTransmitter(engine)
+    profile = link_profiles.logical_reference_profile()
+    links = fabric_module.LinkFabric(profile, engine)
     writer = round_writes.RoundWriter(
         engine,
+        links,
         weak_store,
         strong_writer,
         publishes_from_strong_store=publishes_from_strong_store,
@@ -120,11 +141,44 @@ def test_a_strong_primary_window_round_takes_one_hop_into_the_strong_store():
 
     writer.admit(window_round)
     writer.admit(memory_round)
+    engine.run()
 
     assert strong_writer.written == [1, 2]
     assert weak_store.retained_fragments((1, 1)) is None
     assert weak_store.retained_fragments((1, 2)) is not None
     assert transmitter.sent == [2]
+
+
+def test_the_controller_carries_the_round_to_the_room_side_and_lands_it():
+    """The send is the controller's; the landing is the room side's.
+
+    The reference card prices controller_to_strong_buffer at 0.26
+    microseconds (Caune 2410.05202 Fig. 1a stage F), so the round is
+    reserved and sent at the write and stored one card delay later, by
+    the room side's own method.
+    """
+    engine = engine_module.Engine()
+    store_settings = round_store_settings.RoundStoreSettings()
+    strong_store = round_store_module.RoundStore(store_settings)
+    reads = decoding_records.WindowReads((1, 0))
+    strong_store.register_hold(reads, [(1, 1)])
+    room_side = strong_round_writer.StrongRoundWriter(engine, strong_store)
+    writer, _weak_store, _transmitter, _recorder = writer_with(
+        engine, strong_writer=room_side
+    )
+    first = packed(1)
+
+    writer.admit(first)
+    reserved_while_crossing = room_side.writes_in_flight
+    stored_at_the_write = strong_store.occupancy
+    engine.run()
+
+    crossing_ticks = config.microseconds_to_ticks(0.26)
+    assert reserved_while_crossing == 1
+    assert stored_at_the_write == 0
+    assert strong_store.occupancy == 1
+    assert strong_store.publication_tick((1, 1)) == crossing_ticks
+    assert room_side.writes_in_flight == 0
 
 
 def test_a_full_strong_store_holds_the_round_too():

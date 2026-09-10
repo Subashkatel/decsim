@@ -14,6 +14,7 @@ leaves on its route at the write (RoundTransmitter).
 """
 
 import dataclasses
+import functools
 from typing import Callable
 
 import decsim.controller.settings as controller_settings
@@ -106,6 +107,7 @@ class RoundWriter:
     def __init__(
         self,
         engine,
+        link,
         weak_store,
         strong_writer,
         *,
@@ -114,6 +116,8 @@ class RoundWriter:
         transmitter,
     ) -> None:
         self.engine = engine
+        # the controller's own fabric: it executes the crossing to Buffer 1
+        self.link = link
         self.weak_store = weak_store
         self.strong_writer = strong_writer
         # a strong-primary plan reads its windows from the room side, so a
@@ -178,12 +182,34 @@ class RoundWriter:
         return self.strong_writer.has_room()
 
     def _write_strong(self, packed: round_records.PackedRound) -> None:
+        """Carry the round over controller_to_strong_buffer to Buffer 1.
+
+        The controller is the end this round leaves by, so it executes
+        the send (OMNeT++ refuses a module that sends a message it does
+        not own, tmp/resources/omnetpp/src/sim/csimplemodule.cc:333-334;
+        gem5 bills a transfer to the port it left by, packet.hh:424-431).
+        The room side takes the room before the round leaves, gem5's
+        cache reserving its write buffer entry before the send
+        (src/mem/cache/queue.hh:150-152), and handles the landing itself.
+        """
         attribution = transfer_records.TransferAttribution.for_packet(
             packed.packet
         )
-        self.strong_writer.write(
-            packed.packet, packet_bits=packed.wire_bits, attribution=attribution
+        self.strong_writer.reserve_write()
+        landed = functools.partial(self._land_in_strong_store, packed)
+        self.link.send(
+            transfer_records.LinkPath.CONTROLLER_TO_STRONG_BUFFER,
+            packed.wire_bits,
+            self.engine.now,
+            attribution,
+            landed,
         )
+
+    def _land_in_strong_store(
+        self, packed: round_records.PackedRound, _transfer
+    ) -> None:
+        """The round reached Buffer 1: that end handles the landing."""
+        self.strong_writer.receive_round(packed.packet, packed.wire_bits)
 
 
 def _received_text(

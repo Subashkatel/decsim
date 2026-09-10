@@ -157,20 +157,23 @@ class RetainedRounds(Protocol):
 class StrongRoundStore(Protocol):
     """The room-side store (syndrome buffer 1), as syndrome packing sees it.
 
-    The writer counts the rounds still crossing its link as room taken.
+    The store counts the rounds still crossing toward it as room taken:
+    the controller reserves that room before a round leaves and the
+    store keeps the round when it lands.
     """
 
     def has_room(self) -> bool:
         """Whether one more write can land."""
 
-    def write(
+    def reserve_write(self) -> None:
+        """Take the room one crossing round will need, before it leaves."""
+
+    def receive_round(
         self,
         packet: round_records.SyndromeRoundPacket,
-        *,
         packet_bits: Optional[int],
-        attribution: transfer_records.TransferAttribution,
     ) -> None:
-        """Carry the round over the store's link and keep it on arrival."""
+        """Take one round that landed here and keep it on arrival."""
 
 
 @runtime_checkable

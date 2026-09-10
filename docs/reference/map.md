@@ -73,7 +73,7 @@ docstring.
 - `decsim/syndrome_buffer/round_output.py`: A round store's outgoing port: it sends the rounds that leave the store.
 - `decsim/syndrome_buffer/round_store.py`: A round store: finished rounds held until their last hold releases.
 - `decsim/syndrome_buffer/settings.py`: The settings of a round store: its capacity in rounds.
-- `decsim/syndrome_buffer/strong_round_writer.py`: The priced controller_to_strong_buffer crossing into a round store.
+- `decsim/syndrome_buffer/strong_round_writer.py`: The room-side end of controller_to_strong_buffer: room, then landing.
 
 ## Level 2: detector_error_model, escalation, links, windows
 

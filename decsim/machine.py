@@ -201,7 +201,7 @@ class Machine:
             on_workload_complete=lambda: factory.shutdown(),
         )
         strong_round_writer = store_build.build_strong_round_writer(
-            engine, links, strong_round_store, window_manager
+            engine, strong_round_store, window_manager
         )
         store_input = store_build.build_round_store_input(
             engine, round_store, weak_output, window_manager
@@ -214,6 +214,7 @@ class Machine:
         )
         round_writer = round_writes.RoundWriter(
             engine,
+            links,
             round_store,
             strong_round_writer,
             publishes_from_strong_store=publishes_from_strong_store,

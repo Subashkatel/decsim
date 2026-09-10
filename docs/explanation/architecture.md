@@ -59,7 +59,7 @@ graph TD
     Controller -->|"DetectionEventPlacement.form_before_departure"| Formation["Detection event formation"]
     Controller -->|"RoundStore.accept_packed_round"| Buffer0["Syndrome buffer 0"]
     Controller -->|"RoundStoreInput.receive_round"| Buffer0
-    Controller -->|"StrongRoundStore.write"| Buffer1["Syndrome buffer 1"]
+    Controller -->|"StrongRoundStore.receive_round"| Buffer1["Syndrome buffer 1"]
     Buffer0 -->|"WindowInput.accept_window_input"| Windows["Window manager"]
     Windows -->|"WindowModelSource.window_models_for_operation"| Models["Window fault models"]
     Windows -->|"DecodeQueue.enqueue"| Decoders["Decoder manager"]

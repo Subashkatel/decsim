@@ -155,14 +155,14 @@ def test_without_the_strong_writers_landing_callback_the_room_side_deadlocks(
 ):
     """The cycle: the writer lands a round, the window manager waits for it.
 
-    build/stores.py:61 gives the writer `window_manager.accept_room_round`;
+    build/stores.py gives the writer `window_manager.accept_room_round`;
     the window manager is built before the writer, so the writer takes
     the callback and the manager never names the writer.
     """
     real = store_build.build_strong_round_writer
 
-    def writer_without_the_callback(engine, links, store, window_manager):
-        writer = real(engine, links, store, window_manager)
+    def writer_without_the_callback(engine, store, window_manager):
+        writer = real(engine, store, window_manager)
         writer.on_round_stored = _hear_nothing
         return writer
 

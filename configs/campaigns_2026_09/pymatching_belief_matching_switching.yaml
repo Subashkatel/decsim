@@ -1,0 +1,31 @@
+# Pair 1, switching: pymatching escalating to belief matching below the
+# paper's 20 dB complementary gap (Toshio 2510.25222 Sec. IV), the
+# escalated window's near face pinned on its neighbour's committed
+# correction (Bombin 2303.04846 lines 775-788), as seam_pinned_switching.yaml.
+# Every other key is base.yaml's.
+
+extends: base.yaml
+
+escalation:
+  kind: switching
+  confidence: complementary_gap
+  gap_threshold_db: 20.0
+  strong_window: near_seam_pinned
+
+weak_decoder:
+  kind: pymatching
+  units: 1
+  unit_memory_rounds: null
+  engine:
+    clock: fridge
+    fetch_cycles_per_round: 1
+    release_cycles_per_job: 10
+
+strong_decoder:
+  kind: belief_matching
+  units: 1
+  unit_memory_rounds: null
+  engine:
+    clock: room
+    fetch_cycles_per_round: 1
+    release_cycles_per_job: 10

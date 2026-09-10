@@ -74,6 +74,14 @@ A round store's incoming port, as the controller's transmitter sees it.
 | `receive_round` | Take one round that landed here: publish it, then announce it. |
 | `send_memory_round` | Send one timing-only round to the decoder side the store feeds. |
 
+### `MemoryRoundArrivals`
+
+The decoders' end for a timing-only round, as the controller sees it.
+
+| Method | What it does |
+| --- | --- |
+| `receive_memory_round` | Take one timing-only round that landed at the decoder side. |
+
 ## the window manager closes a window
 
 ### `WindowInput`

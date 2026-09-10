@@ -15,6 +15,7 @@ import decsim.decoders.decode_queue as decode_queue
 import decsim.decoders.decoder_memory as decoder_memory_module
 import decsim.decoders.decoders as decoders
 import decsim.decoders.detection_events as detection_events_module
+import decsim.decoders.memory_rounds as memory_rounds_module
 import decsim.decoders.schedulers as schedulers
 import decsim.decoders.settings as decoder_settings
 import decsim.decoders.staged_decoder as staged_decoder
@@ -394,3 +395,12 @@ def _formation_stage(
         cycles_per_round=cycles_per_round,
         formation=formation,
     )
+
+
+def build_memory_round_arrivals(engine, window_manager):
+    """The decoders' end of the memory route, built after the windows.
+
+    The end tells the window side what landed, so it is built once the
+    window manager exists, as the room-side writer is.
+    """
+    return memory_rounds_module.MemoryRoundArrivals(engine, window_manager)

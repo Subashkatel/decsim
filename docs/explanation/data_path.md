@@ -145,7 +145,11 @@ A window's rounds into a weak unit's memory. Ends: `syndrome_buffer` to
 What crosses: the whole input of one decode job, every payload round of
 the window at once. The bit count is `job.payload_bits()`
 (`decsim/records/decoding.py`). The same path also carries a
-timing-only feedback-memory round.
+timing-only feedback-memory round, which is sent by Buffer 0 on the
+controller's ask and lands at the decoders' own end for it
+(`decsim/decoders/memory_rounds.py`): nothing is deposited in a unit's
+memory, and what the end does is count the round its stream stage was
+handed and tell the window side.
 
 Move, on board, with a copy into the unit's own memory at the landing.
 That is the `copy` row of the tier's `input` key, and it is the default,

@@ -183,6 +183,7 @@ docstring.
 - `decsim/decoders/decoder_unit.py`: One decoder unit's occupancy: slots, memory, compute claim, flights.
 - `decsim/decoders/decoders.py`: Timing-only decoders, the routers and the sampled-confidence wrapper.
 - `decsim/decoders/detection_events.py`: One tier's event-detection logic: it forms the rounds that tier reads.
+- `decsim/decoders/memory_rounds.py`: The decoder side's end for a timing-only round that lands here.
 - `decsim/decoders/minimum_weight_perfect_matching/__init__.py`: PyMatching-backed minimum-weight perfect matching decoders.
 - `decsim/decoders/minimum_weight_perfect_matching/decoder.py`: The PyMatching adapter: minimum-weight perfect matching on one window.
 - `decsim/decoders/minimum_weight_perfect_matching/weights.py`: Prior to matching-weight conversion, shared by the MWPM decoders.

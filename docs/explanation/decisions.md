@@ -236,7 +236,11 @@ arXiv:2510.25222 line 1248 for what Buffer 1 is assigned.
 
 **Where to see it.** `decsim/syndrome_buffer/round_input.py`, the
 `RoundStoreInput` port in `decsim/ports.py`, and `tests/test_send_ends.py`,
-whose receive-end law reads every delivery callback out of the tree.
+whose receive-end law reads every delivery callback out of the tree. The
+same rule decides who writes a structure at a handoff off the wire: a
+window's boundary mask is computed by the window side and written into
+the decoder unit's memory, or into the masked duplicate the unit reads,
+by the decoder side that owns both (`DecoderInputFold`).
 
 ## D12. A hop's ends are the packages that hold the objects at them
 
@@ -298,9 +302,6 @@ mistake a gap for a result.
   `SyndromePayload.size_bits` and `switching decision payload_bits`
   travel into the gate's link traffic and are held until the next time
   the golden file moves, so the correction is not made twice.
-- **O5. The boundary fold executes in the window gate.** Moving it where
-  the design would otherwise put it reorders the copy trace sources,
-  which the gate pins.
 - **O6. `MAGIC_STATE_FACTORIES` has a table and no yaml section.** Its
   rows cannot be selected from a config the way every other table's rows
   can.
@@ -326,7 +327,12 @@ A sixth row, O4, was a real mispricing of a backward hand-off in the
 parallel scheme, and it is closed: the two layers that differ are now
 tested. A seventh, O10, said that a timing-only round's landing reached
 no object of the receiving package; it is closed too, by the decoders'
-own end for such a round (`decsim/decoders/memory_rounds.py`).
+own end for such a round (`decsim/decoders/memory_rounds.py`). An
+eighth, O5, said the boundary fold was executed by the window gate
+because moving it would reorder the copy trace sources; it is closed as
+well, and no trace source moved: the gate hands the mask and the
+decoder side writes it (`decsim/decoders/decoder_memory_transfer.py`,
+D11).
 
 ## Read next
 

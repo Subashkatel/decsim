@@ -13,6 +13,7 @@ import types
 import pytest
 
 import decsim.decoders.decoder_memory as decoder_memory
+import decsim.decoders.decoder_memory_transfer as decoder_memory_transfer
 import decsim.engine as engine_module
 import decsim.escalation.policies as escalation_policies
 import decsim.links.window_transfers as window_transfers
@@ -133,7 +134,12 @@ class _Fixture:
         interaction = window_interactions.DefaultWindowInteraction(
             0, boundary_payload
         )
-        gate = decode_requests.WindowInputGate(self.planner, interaction)
+        input_fold = decoder_memory_transfer.DecoderInputStaging(
+            None, self.engine
+        )
+        gate = decode_requests.WindowInputGate(
+            self.planner, interaction, input_fold
+        )
         self.gate = gate
         self.builder = decode_requests.DecodeRequestBuilder(
             self.engine, self.planner, self.tracker, interaction, gate

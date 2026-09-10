@@ -387,9 +387,12 @@ class WindowManager:
         return self.planner.windows_by_key
 
     def copy_sources(self) -> list:
-        """The copy_made sources of this side's own hops, in hop order."""
-        gate = self.requester.builder.gate
-        return [gate.trace.copy_made]
+        """The copy_made sources of this side's own hops, in hop order.
+
+        None: every copy on the window side's hops lands in a structure
+        another package owns, and is booked by the package that owns it.
+        """
+        return []
 
     def reads_windows_from(self, store) -> bool:
         """Whether the primary tier's window reads come from this store."""

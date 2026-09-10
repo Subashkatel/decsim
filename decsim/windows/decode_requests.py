@@ -32,23 +32,26 @@ class WindowInputGate:
 
     The decoder side calls back into this through job.gate: may_stage
     says whether a boundary-blocked job may occupy an input slot yet,
-    may_start whether the landed job may decode, mask_input folds the
-    window's boundary into the landed input once. It is decoder-side
-    policy about one window, so it is its own class rather than a second
-    face of the builder. Trace source: copy_made(job, bits, memory_name,
-    "masked view") when the mask is folded into a second copy of the
-    landed input (data_path.md, correction 2 moves that copy behind the
-    port); a tier that folds in place edits the unit's own memory and
-    copies nothing (<tier>.boundary_fold, decoders/settings.py).
+    may_start whether the landed job may decode, mask_input says what the
+    landed input must read once the window's boundary is folded in. It is
+    decoder-side policy about one window, so it is its own class rather
+    than a second face of the builder. What the mask is, and which row
+    the tier declares, are decided here; the write itself is the decoder
+    side's, which owns the memory and the working copy it lands in
+    (<tier>.boundary_fold, decoders/settings.py, and
+    decoders/decoder_memory_transfer.py).
     """
 
-    def __init__(self, planner, interaction, copies_the_fold: bool = True):
+    def __init__(
+        self, planner, interaction, input_fold, copies_the_fold: bool = True
+    ):
         self.planner = planner
         self.interaction = interaction
+        # the decoder side's input, which installs what this hands it
+        self.input_fold = input_fold
         # weak_decoder.boundary_fold: copy duplicates the landed input,
         # in_place XORs the mask into the unit's own memory
         self.copies_the_fold = copies_the_fold
-        self.trace = _GateTraceSources()
 
     def may_stage(self, job: decoding_records.DecodeJob) -> bool:
         """May this boundary-blocked job occupy an input slot yet?
@@ -83,11 +86,13 @@ class WindowInputGate:
     def mask_input(self, job: decoding_records.DecodeJob) -> None:
         """XOR the window's boundary mask into the input the decode reads.
 
-        With the copy fold the unit's stored rounds stay raw (cudaq-x
-        keeps raw rounds and applies syndrome_mods at window assembly)
-        and the job reads a masked duplicate; with the in-place fold the
-        mask is written into the unit's own memory and nothing is
-        duplicated.
+        The mask is this side's: what a boundary is and how it lands on a
+        round layer are the window interaction's. Where the masked input
+        is written is the decoder side's, which is handed it here: with
+        the copy fold the unit's stored rounds stay raw (cudaq-x keeps
+        raw rounds and applies syndrome_mods at window assembly) and the
+        job reads a masked duplicate; with the in-place fold the mask
+        goes into the unit's own memory and nothing is duplicated.
         """
         window = job.window
         if window is None:
@@ -104,36 +109,9 @@ class WindowInputGate:
             job.decoder_input, rounds=tuple(masked_rounds)
         )
         if self.copies_the_fold:
-            self._fold_into_a_copy(job, masked_input)
+            self.input_fold.fold_into_a_copy(job, masked_input)
             return
-        self._fold_in_place(job, masked_input)
-
-    def _fold_into_a_copy(
-        self, job: decoding_records.DecodeJob, masked_input
-    ) -> None:
-        """The job reads a masked duplicate; the unit's rounds stay raw."""
-        job.decoder_input = masked_input
-        bits = _input_bit_count(masked_input)
-        source_name = _input_source_name(job)
-        self.trace.copy_made.fire(job, bits, source_name, "masked view")
-
-    def _fold_in_place(
-        self, job: decoding_records.DecodeJob, masked_input
-    ) -> None:
-        """The mask is written into the unit's own memory.
-
-        Whether one writer owns that input is the memory's own rule, so
-        the memory refuses a shared one; this asks and does not check.
-        """
-        memory = job.memory
-        if memory is None:
-            raise RuntimeError(
-                f"{job.label}: boundary_fold in_place needs the unit's own "
-                "copy of the rounds, and this tier reads its input in "
-                "place (input: in_place); fold into a copy, or copy the "
-                "input"
-            )
-        job.decoder_input = memory.rewrite(job, masked_input)
+        self.input_fold.fold_in_place(job, masked_input)
 
     # ---- private
 
@@ -640,33 +618,8 @@ def _first_forced_class(forced_classes: tuple) -> Optional[int]:
     return forced_classes[0]
 
 
-def _input_source_name(job: decoding_records.DecodeJob) -> str:
-    """Where the rounds the mask is folded out of sit."""
-    memory = job.memory
-    if memory is None:
-        return job.input_source_name
-    return memory.name
-
-
-def _input_bit_count(decoder_input) -> Optional[int]:
-    """The bits of a landed input; None when any fragment has no bits."""
-    bit_count = 0
-    for fragment in decoder_input.fragments():
-        if fragment.bits is None:
-            return None
-        bit_count += len(fragment.bits)
-    return bit_count
-
-
 def _fragment_patch_order(fragment):
     return identity_records.stable_identity_order_key(fragment.patch_id)
-
-
-@dataclasses.dataclass(frozen=True)
-class _GateTraceSources:
-    """Every event the window input gate reports, as one member."""
-
-    copy_made: trace_source.TraceSource = trace_source.new_source()
 
 
 @dataclasses.dataclass(frozen=True)

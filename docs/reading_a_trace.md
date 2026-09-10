@@ -70,6 +70,10 @@ is the exact occupancy; the rows are the viewer's arrangement.
   apart from the time its input took to arrive.
 - `decsim collect` draws `timeline.png` from a trace file, not from the
   machine, so a point that traced no shot draws no timeline.
+- `residence.csv` is read back from the same files: one row per traced
+  shot per structure, with the mean and longest a round or window sat
+  there, and one per link path with the longest a move waited on the
+  wire. A point that traced no shot writes no row, for the same reason.
 
 ## Read next
 

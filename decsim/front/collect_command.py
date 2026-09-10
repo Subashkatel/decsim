@@ -3,7 +3,8 @@
 The config is the experiment; this module only orchestrates. It collects
 every shot of every sweep point (decsim.collect), records the shots'
 additive facts, derives one row per point from them, and writes both
-plus the figures into the run folder (report, run_folder, plots).
+plus the figures into the run folder (report, run_folder, plots), and
+the residence and wait table of the shots that were traced (residence).
 Rerunning the same config reproduces the same rows
 (seeds 0..shots-1 per point; only the wall-clock column varies), and so
 does running it with a process pool or in shards that `decsim combine`
@@ -22,6 +23,7 @@ import decsim.front.experiment as experiment
 import decsim.front.measure as measure
 import decsim.front.plots as plots
 import decsim.front.report as report
+import decsim.front.residence as residence
 import decsim.front.run_folder as run_folder
 
 NATS_TO_DECIBELS = 10.0 / math.log(10.0)
@@ -88,6 +90,8 @@ def run_experiment(
     record = report.record_of(measurements)
     rows = report.summarize(record.shots, record.window_samples)
     report.write_report(rows, run_dir, record)
+    residence_rows = residence.rows_of(measurements)
+    residence.write_residence(residence_rows, run_dir)
     plots.plots(config, rows, run_dir, measurements)
     _finish_the_manifest(config, run_dir, started_utc, how_it_ran)
     return run_dir, rows

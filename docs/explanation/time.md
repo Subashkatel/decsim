@@ -108,8 +108,8 @@ Three things follow, and they matter.
 - **The behaviour gate has to know the difference.** Twenty-one of its
   twenty-six points are priced by cards and are compared bit for bit;
   the five that name a decoder are compared on a projection that leaves
-  the tick-bearing fields out. `docs/reference/frozen_gate.md` says
-  which and why.
+  the tick-bearing fields out. The gate is the maintainers' own and
+  lives outside this tree.
 
 The two are not exclusive. A study of accuracy names a decoder and reads
 the logical error rate; a study of the reaction time sets cards and
@@ -130,6 +130,5 @@ write into the buffer. `docs/reference/run_folder.md` lists all of them.
 ## Read next
 
 - `docs/reference/run_folder.md`: every latency point, defined.
-- `docs/reference/frozen_gate.md`: strict points and semantic points.
 - `docs/how-to/run_a_timing_only_study.md`: a run whose ticks are
   configuration alone.

@@ -105,7 +105,5 @@ samples none. Use a priced card on a real device instead.
 ## Read next
 
 - `docs/explanation/time.md`: ticks, clocks and the wall-clock decoder.
-- `docs/reference/frozen_gate.md`: why the gate treats the two kinds of
-  point differently.
 - `docs/how-to/compare_two_runs.md`: putting a card run beside a
   measured one.

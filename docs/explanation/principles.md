@@ -54,8 +54,8 @@ classified as a design error" (`parnas1972.txt` lines 370-379).
 **In decsim.** A port method promises a set where a set is enough. The
 same rule applies to the tests and to the behaviour gate: a comparison
 that pins an order the code does not promise fails for reasons that are
-not defects, which is exactly the weakness
-`docs/reference/frozen_gate.md` records.
+not defects, which the maintainers' own behaviour gate has shown on its
+switching points.
 
 ## 4. An interface is the set of assumptions two programs make about each other
 

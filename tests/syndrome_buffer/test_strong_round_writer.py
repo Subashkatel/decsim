@@ -1,29 +1,23 @@
-"""The strong writer: one crossing per round, room counts writes in flight.
+"""The room-side end: room counts writes in flight, the landing stores.
 
 Referent: gem5's queue counts its reserved entries as taken before they
-are allocated (gem5 src/mem/cache/queue.hh:150-153,
-isFull over allocated plus reserve); the writer counts a round crossing
-the link the same way. The link law itself is the channel's
-(tests/links/test_channel.py); here a priced controller_to_strong_buffer
-hop of 0.5 us lands the round 0.5 us after the write.
+are allocated (gem5 src/mem/cache/queue.hh:150-153, isFull over
+allocated plus reserve); this end counts a round crossing toward it the
+same way, reserved by the controller before the round leaves. The
+crossing itself is the controller's send and is tested where it is
+executed (tests/controller/test_round_writes.py).
 
 The whole-run law at the end of the file places that landing in the
 pipeline: under a strong-primary policy the landing is what makes a
 window ready, on the declared card of tests/declared_run.py.
 """
 
-import dataclasses
-
 import pytest
 
 import decsim.config as config
 import decsim.engine as engine_module
-import decsim.links.fabric as fabric_module
-import decsim.links.link_profiles as link_profiles
-import decsim.links.settings as link_settings
 import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
-import decsim.records.transfers as transfer_records
 import decsim.syndrome_buffer.round_store as round_store_module
 import decsim.syndrome_buffer.settings as round_store_settings
 import decsim.syndrome_buffer.strong_round_writer as strong_round_writer
@@ -44,16 +38,6 @@ def packet(round_index: int) -> round_records.SyndromeRoundPacket:
     return round_records.SyndromeRoundPacket(1, round_index, (fragment,))
 
 
-def attribution(round_index: int) -> transfer_records.TransferAttribution:
-    return transfer_records.TransferAttribution(
-        operation_id=1,
-        patch_ids=(0,),
-        window_id=None,
-        first_round=round_index,
-        last_round=round_index,
-    )
-
-
 class RecordingListener:
     def __init__(self):
         self.stored = []
@@ -66,40 +50,34 @@ class RecordingListener:
         self.released.append(round_key)
 
 
-def priced_writer(engine, rounds=None, listener=None, on_round_stored=None):
-    reference = link_profiles.logical_reference_profile()
-    crossing = half_microsecond_crossing(reference)
-    settings = dataclasses.replace(
-        reference, controller_to_strong_buffer=crossing
-    )
-    link = fabric_module.LinkFabric(settings, engine)
+def room_side(engine, rounds=None, listener=None, on_round_stored=None):
     store_settings = round_store_settings.RoundStoreSettings(rounds=rounds)
     store = round_store_module.RoundStore(store_settings)
     if listener is not None:
         store.trace.round_stored.connect(listener.round_stored)
         store.trace.round_released.connect(listener.round_released)
     return strong_round_writer.StrongRoundWriter(
-        engine, link, store, on_round_stored=on_round_stored
+        engine, store, on_round_stored=on_round_stored
     )
 
 
-def half_microsecond_crossing(reference):
-    """The room-side write at half a microsecond, no rate bound."""
-    base = reference.controller_to_strong_buffer
-    latency_ticks = config.microseconds_to_ticks(0.5)
-    channel = link_settings.ChannelSettings(
-        base.channel.name, latency_ticks, None, "test"
-    )
-    return link_settings.PathSettings(
-        channel, base.default_payload, base.actual_payload_source
-    )
+def cross(engine, writer, round_index: int) -> None:
+    """One round on its way over the crossing, landing after 0.5 us.
+
+    The controller reserves the room and sends; the send itself is the
+    controller's and is tested at tests/controller/test_round_writes.py,
+    so this file stands the round up at the landing tick instead.
+    """
+    writer.reserve_write()
+    landing = packet(round_index)
+    engine.schedule(LANDING_TICKS, lambda: writer.receive_round(landing, 3))
 
 
 def test_a_write_lands_after_the_crossing_and_the_listener_hears_it_once():
     engine = engine_module.Engine()
     listener = RecordingListener()
     stored = []
-    writer = priced_writer(
+    writer = room_side(
         engine,
         listener=listener,
         on_round_stored=lambda *key: stored.append(key),
@@ -107,9 +85,7 @@ def test_a_write_lands_after_the_crossing_and_the_listener_hears_it_once():
     reads = decoding_records.WindowReads((1, 0))
     writer.store.register_hold(reads, [(1, 1)])
 
-    first = packet(1)
-    first_attribution = attribution(1)
-    writer.write(first, packet_bits=3, attribution=first_attribution)
+    cross(engine, writer, 1)
     in_flight = writer.store.retained_fragments((1, 1))
     engine.run()
 
@@ -121,13 +97,11 @@ def test_a_write_lands_after_the_crossing_and_the_listener_hears_it_once():
 
 def test_the_writer_counts_a_write_in_flight_as_room_taken():
     engine = engine_module.Engine()
-    writer = priced_writer(engine, rounds=1)
+    writer = room_side(engine, rounds=1)
     reads = decoding_records.WindowReads((1, 0))
     writer.store.register_hold(reads, [(1, 1)])
 
-    first = packet(1)
-    first_attribution = attribution(1)
-    writer.write(first, packet_bits=3, attribution=first_attribution)
+    cross(engine, writer, 1)
     room_while_crossing = writer.has_room()
     engine.run()
 
@@ -139,13 +113,11 @@ def test_the_writer_counts_a_write_in_flight_as_room_taken():
 
 def test_a_round_whose_readers_resolved_while_crossing_is_dropped_at_landing():
     engine = engine_module.Engine()
-    writer = priced_writer(engine)
+    writer = room_side(engine)
     reads = decoding_records.WindowReads((1, 0))
     writer.store.register_hold(reads, [(1, 1)])
 
-    first = packet(1)
-    first_attribution = attribution(1)
-    writer.write(first, packet_bits=3, attribution=first_attribution)
+    cross(engine, writer, 1)
     writer.store.release_hold(reads)
     engine.run()
 
@@ -155,13 +127,11 @@ def test_a_round_whose_readers_resolved_while_crossing_is_dropped_at_landing():
 
 def test_a_round_that_lands_after_its_operation_closed_is_dropped():
     engine = engine_module.Engine()
-    writer = priced_writer(engine, rounds=1)
+    writer = room_side(engine, rounds=1)
     writer.store.open_operation(1)
     room_before = writer.has_room()
 
-    first = packet(1)
-    first_attribution = attribution(1)
-    writer.write(first, packet_bits=3, attribution=first_attribution)
+    cross(engine, writer, 1)
     writer.store.close_operation(1)
     engine.run()
 
@@ -176,12 +146,10 @@ def test_a_round_that_lands_after_its_operation_closed_is_dropped():
 
 def test_settlement_reports_a_write_still_in_flight():
     engine = engine_module.Engine()
-    writer = priced_writer(engine)
+    writer = room_side(engine)
     reads = decoding_records.WindowReads((1, 0))
     writer.store.register_hold(reads, [(1, 1)])
-    first = packet(1)
-    first_attribution = attribution(1)
-    writer.write(first, packet_bits=3, attribution=first_attribution)
+    cross(engine, writer, 1)
 
     with pytest.raises(RuntimeError, match="1 controller_to_strong_buffer"):
         writer.check_settled()

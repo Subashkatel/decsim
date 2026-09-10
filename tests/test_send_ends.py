@@ -132,10 +132,10 @@ DELIVERY_CALLBACKS = {
     ("controller/round_transmission.py", "CONTROLLER_TO_WEAK_BUFFER"): (
         "_publish"
     ),
-    ("decoders/decoder_output.py", "WEAK_DECODER_TO_STRONG_DECODER"): None,
-    ("syndrome_buffer/strong_round_writer.py", "CONTROLLER_TO_STRONG_BUFFER"): (
-        "landed"
+    ("controller/round_writes.py", "CONTROLLER_TO_STRONG_BUFFER"): (
+        "_land_in_strong_store"
     ),
+    ("decoders/decoder_output.py", "WEAK_DECODER_TO_STRONG_DECODER"): None,
 }
 
 # The collaborators a delivery callback may reach that are neither end

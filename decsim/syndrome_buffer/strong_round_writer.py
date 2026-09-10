@@ -1,14 +1,19 @@
-"""The priced controller_to_strong_buffer crossing into a round store.
+"""The room-side end of controller_to_strong_buffer: room, then landing.
 
-Every packed round is written out of the fridge exactly once over the
-crossing and stored on the room side in parallel with its Buffer 0
-publication, so the strong tier's context lives at room temperature. The
-writer answers has_room counting the writes still in flight, gem5's
-queue counting its reserved entries (src/mem/cache/queue.hh isFull), and
-stores each round at its landing; the store's holds and lifetime are
-RoundStore's. A landing whose operation closed while the round crossed
-is dropped at the door instead of stored, since no reader can ever name
-it (_drop_landing).
+Every packed round is carried out of the fridge exactly once and stored
+on the room side in parallel with its Buffer 0 publication, so the
+strong tier's context lives at room temperature. The controller
+executes that crossing, being the end the round leaves by (OMNeT++
+refuses a module that sends a message it does not own,
+tmp/resources/omnetpp/src/sim/csimplemodule.cc:333-334; gem5 bills a
+transfer to the port it left by, packet.hh:424-431). This end owns the
+room and the landing: it answers has_room counting the writes still in
+flight, reserves one before the crossing starts, gem5's queue counting
+its reserved entries as taken (src/mem/cache/queue.hh:150-152 isFull,
+src/mem/cache/base.cc allocateWriteBuffer), and stores each round at its
+landing; the store's holds and lifetime are RoundStore's. A landing
+whose operation closed while the round crossed is dropped at the door
+instead of stored, since no reader can ever name it (_drop_landing).
 """
 
 import dataclasses
@@ -16,13 +21,12 @@ from typing import Callable, Optional
 
 import decsim.records.log_sources as log_sources
 import decsim.records.rounds as round_records
-import decsim.records.transfers as transfer_records
 import decsim.syndrome_buffer.round_store as round_store_module
 import decsim.trace_source as trace_source
 
 
 class StrongRoundWriter:
-    """The crossing, the writes in flight, and the landing into the store.
+    """The room, the writes in flight, and the landing into the store.
 
     Trace source: copy_made(round_key, bits, "controller assembler",
     "Buffer 1") at every landing, the dual write's copy (data_path.md
@@ -32,13 +36,11 @@ class StrongRoundWriter:
     def __init__(
         self,
         engine,
-        link,
         store: round_store_module.RoundStore,
         *,
         on_round_stored: Optional[Callable] = None,
     ) -> None:
         self.engine = engine
-        self.link = link
         self.store = store
         self.writes_in_flight = 0
         # hears (operation_id, round_index) once a round is stored
@@ -52,28 +54,19 @@ class StrongRoundWriter:
             return True
         return self.store.occupancy + self.writes_in_flight < capacity
 
-    def write(
-        self,
-        packet: round_records.SyndromeRoundPacket,
-        *,
-        packet_bits: Optional[int],
-        attribution: transfer_records.TransferAttribution,
-    ) -> None:
-        """Carry the round over the crossing and store it at landing."""
+    def reserve_write(self) -> None:
+        """Take the room one crossing round will need, before it leaves."""
         assert self.has_room(), "a round was written into a full strong store"
         self.writes_in_flight += 1
 
-        def landed(_transfer) -> None:
-            self.writes_in_flight -= 1
-            self._land(packet, packet_bits)
-
-        self.link.send(
-            transfer_records.LinkPath.CONTROLLER_TO_STRONG_BUFFER,
-            packet_bits,
-            self.engine.now,
-            attribution,
-            landed,
-        )
+    def receive_round(
+        self,
+        packet: round_records.SyndromeRoundPacket,
+        packet_bits: Optional[int],
+    ) -> None:
+        """Take one round that landed here: its room is now its slot."""
+        self.writes_in_flight -= 1
+        self._land(packet, packet_bits)
 
     def _land(
         self,

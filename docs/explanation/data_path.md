@@ -116,9 +116,11 @@ is the right one.
 ### 3. `controller_to_strong_buffer`
 
 The same packed round into syndrome buffer 1, in parallel. Ends:
-`controller` to `syndrome_buffer`; the send is executed by
-`decsim/syndrome_buffer/strong_round_writer.py`, which is the receiving
-end and handles the landing there too: it stores the round with the
+`controller` to `syndrome_buffer`; the send is executed by the
+controller's round writer (`decsim/controller/round_writes.py`), and the
+landing is handled by the room side
+(`decsim/syndrome_buffer/strong_round_writer.py`), which reserves the
+room the round will take before it leaves and then stores it with the
 landing tick, or drops it at the door when its operation closed while it
 crossed.
 

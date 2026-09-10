@@ -93,7 +93,7 @@ def test_a_strong_primary_run_gets_the_room_side_store():
 
 
 def test_no_room_side_store_means_no_strong_writer():
-    writer = store_build.build_strong_round_writer(None, None, None, None)
+    writer = store_build.build_strong_round_writer(None, None, None)
 
     assert writer is None
 

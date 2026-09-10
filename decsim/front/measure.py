@@ -14,6 +14,7 @@ other.
 import dataclasses
 import pathlib
 import statistics
+from typing import Optional
 
 import numpy
 import pymatching
@@ -96,6 +97,10 @@ class ShotMeasurement:
     # for links.csv; the totals come straight off the ledger's counters
     link_totals: dict
     sim_wall_seconds: float
+    # the shot's copies, references and moves as the RunResult carries
+    # them, None when observation.data_movement is off, so a run that
+    # counted none writes no data-movement row rather than a row of zeros
+    data_movement: Optional[dict]
 
 
 def measure_shot(shot: collect.Shot, run_dir=None) -> ShotMeasurement:
@@ -434,6 +439,7 @@ def _measurement(
         tesseract_window_disagreements=referee.window_disagreements,
         link_totals=totals,
         sim_wall_seconds=wall_seconds,
+        data_movement=result.data_movement,
     )
 
 

@@ -44,7 +44,7 @@ class MemoryClass(enum.Enum):
 
 
 # the order the grouped report lists the classes in, cheapest first
-_CLASS_ORDER = (
+CLASS_ORDER = (
     MemoryClass.ON_CHIP,
     MemoryClass.ON_BOARD,
     MemoryClass.OFF_BOARD,
@@ -101,6 +101,9 @@ MEMORY_CLASS_BY_STRUCTURE = {
 }
 _STORE_PREFIX = "Buffer "
 _UNIT_PREFIX = "unit "
+# a copy's path names where the bits came from and where they landed,
+# which no link path is; the report keeps the two apart by this word
+PATH_SEPARATOR = " -> "
 
 
 def memory_class_of_structure(name: str) -> MemoryClass:
@@ -151,7 +154,7 @@ class DataMovement:
 
     def copy_made(self, key, bits, source_name: str, target_name: str) -> None:
         """One structure duplicated the bits into another."""
-        path = f"{source_name} -> {target_name}"
+        path = f"{source_name}{PATH_SEPARATOR}{target_name}"
         rounds = _rounds(key)
         memory_class = memory_class_of_structure(target_name)
         self._add(self.copies, path, bits, rounds, memory_class)
@@ -212,8 +215,8 @@ class DataMovement:
             "moves": self.moves.total.events,
             "moved_rounds": self.moves.total.rounds,
             "move_bits": self.moves.total.bits,
-            "copies_by_path": _as_rows(self.copies.by_path),
-            "moves_by_path": _as_rows(self.moves.by_path),
+            "copies_by_path": _as_rows(self.copies),
+            "moves_by_path": _as_rows(self.moves),
             "copies_by_memory_class": _as_class_rows(self.copies.by_class),
             "moves_by_memory_class": _as_class_rows(self.moves.by_class),
         }
@@ -228,6 +231,7 @@ class DataMovement:
     ) -> None:
         row = _row_of(kind.by_path, path)
         class_row = _row_of(kind.by_class, memory_class)
+        kind.class_by_path[path] = memory_class
         for counts in (kind.total, row, class_row):
             counts.events += 1
             counts.rounds += rounds
@@ -259,18 +263,26 @@ def _row_of(rows: dict, key):
     return counts
 
 
-def _as_rows(by_path: dict) -> dict:
-    """One row per path, in path order."""
+def _as_rows(kind: "_PathCounts") -> dict:
+    """One row per path, in path order, each naming the class it crosses.
+
+    The class travels with the path because the report groups by it and
+    a reported path is the only name the report has: reading the class
+    back off that text would put this table's placement in two files.
+    """
     rows = {}
-    for path in sorted(by_path):
-        rows[path] = _as_row(by_path[path])
+    for path in sorted(kind.by_path):
+        row = _as_row(kind.by_path[path])
+        memory_class = kind.class_by_path[path]
+        row["memory_class"] = memory_class.value
+        rows[path] = row
     return rows
 
 
 def _as_class_rows(by_class: dict) -> dict:
     """One row per memory class the run crossed, in cost order."""
     rows = {}
-    for memory_class in _CLASS_ORDER:
+    for memory_class in CLASS_ORDER:
         counts = by_class.get(memory_class)
         if counts is None:
             continue
@@ -289,11 +301,16 @@ def _as_row(counts: "_Counts") -> dict:
 
 @dataclasses.dataclass
 class _PathCounts:
-    """One kind's tally: the run's total, one row per path, one per class."""
+    """One kind's tally: the total, a row per path, a row per class.
+
+    class_by_path is the class each path crossed, kept so a path row can
+    name it without the reader parsing the path's text.
+    """
 
     total: _Counts = dataclasses.field(default_factory=_Counts)
     by_path: dict = dataclasses.field(default_factory=dict)
     by_class: dict = dataclasses.field(default_factory=dict)
+    class_by_path: dict = dataclasses.field(default_factory=dict)
 
 
 @dataclasses.dataclass

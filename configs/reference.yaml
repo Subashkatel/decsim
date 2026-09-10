@@ -636,4 +636,11 @@ observation:                       # what a run records beyond its results
   decoder_memory_occupancy: false  # true samples each unit memory's held-round count,
                                    # thrust 2's sweep over unit memory
   data_movement: false             # true counts the copies, references and moves of
-                                   # every round, on the RunResult without the trace
+                                   # every round, on the RunResult without the trace,
+                                   # and writes them to the run folder:
+                                   # shot_data_movement.csv, one row per shot per path,
+                                   # and data_movement.csv, the point's mean over shots
+                                   # by path and then by memory class. false writes
+                                   # neither file, because a run that counted nothing
+                                   # has no counts and a row of zeros would say
+                                   # otherwise

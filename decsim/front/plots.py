@@ -17,12 +17,16 @@ ler vs d       both tiers' logical error rate against code distance at
                one physical error rate, from each run's sweep.csv:
                `decsim plot <run_dir> <run_dir> --figure ler_vs_d
                --probability <p>`
+data_movement  bits copied and moved per shot, by the memory class the
+               hop crosses, against code distance, one panel per study
+               config, from each run's data_movement.csv
 
 Every time is in microseconds.
 """
 
 import csv
 import dataclasses
+import json
 import math
 import statistics
 from pathlib import Path
@@ -71,7 +75,16 @@ FIGURES = {
     "stage_breakdown": "stage_breakdown.png",
     "latency": "latency_combined.png",
     "ler_vs_d": "ler_vs_distance.png",
+    "data_movement": "data_movement.png",
 }
+# the two data-movement quantities that have bits, and the line each one
+# is drawn with; a reference books the rounds a hold keeps where they
+# are and copies no bits at all (observe/data_movement.py), so it has no
+# series on an axis of bits
+MOVEMENT_SERIES = (
+    ("copy_bits_per_shot", "copied", "o", "-"),
+    ("move_bits_per_shot", "moved", "s", "--"),
+)
 # where collect_command leaves the traces of the shots it traced
 TRACE_DIR = "trace"
 
@@ -228,6 +241,61 @@ def ler_vs_distance_plot(
     axis.set_title(f"Logical error rate vs distance, p={probability_label}")
     axis.grid(alpha=0.3, which="both")
     axis.legend(fontsize=8)
+    figure.tight_layout()
+    figure.savefig(path, dpi=150)
+    plt.close(figure)
+
+
+def memory_class_series(run_dir) -> dict:
+    """One run's bits per shot by memory class, then by copied and moved.
+
+    memory class -> word -> (distances, bits), read from that folder's
+    data_movement.csv memory-class rows. A distance whose bits are zero
+    is left out: an off-board hop of this machine moves and never
+    copies, and zero has no place on a log axis.
+    """
+    rows = _memory_class_rows(run_dir)
+    series = {}
+    for memory_class in _classes_in_order(rows):
+        at_class = _rows_of_class(rows, memory_class)
+        by_word = {}
+        for column, word, _marker, _style in MOVEMENT_SERIES:
+            by_word[word] = _series_of(at_class, column)
+        series[memory_class] = by_word
+    return series
+
+
+def data_movement_plot(run_dirs: list, path: Path) -> None:
+    """Bits copied and moved per shot by memory class, against distance.
+
+    One panel per study config, read from each run folder's
+    data_movement.csv memory-class rows. The classes are kept apart
+    rather than summed because the classical sources make the class the
+    cost: a DRAM access is "a couple of orders-of-magnitude higher than
+    the cost of an internal cache access" (Horowitz, ISSCC 2014 lines
+    232-247) and an accelerator's access costs what the memory it reads
+    costs (Dally, CACM 2020 lines 231-234).
+
+        decsim plot <run_dir>... --figure data_movement
+    """
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    panels = len(run_dirs)
+    width = 4.8 * panels
+    figure, axes = plt.subplots(
+        1, panels, figsize=(width, 3.6), sharey=True, squeeze=False
+    )
+    for panel_index, run_dir in enumerate(run_dirs):
+        axis = axes[0][panel_index]
+        series = memory_class_series(run_dir)
+        _draw_movement_panel(axis, series)
+        title = _study_config_name(run_dir)
+        axis.set_title(title, fontsize=9)
+    first_axis = axes[0][0]
+    first_axis.set_ylabel("Bits per shot")
     figure.tight_layout()
     figure.savefig(path, dpi=150)
     plt.close(figure)
@@ -432,6 +500,9 @@ def _draw_named_figure(
     if name == "latency":
         sample_files = _sample_files(run_dirs)
         combined_latency_plot(sample_files, out_path)
+        return
+    if name == "data_movement":
+        data_movement_plot(run_dirs, out_path)
         return
     if probability is None:
         raise refusal.RefusalError(
@@ -1077,6 +1148,117 @@ def _csv_tier_label(algorithm_field: str) -> str:
         tier = "strong"
     display_name = algorithm_name.replace("_", " ")
     return f"{display_name} ({tier})"
+
+
+def _memory_class_rows(run_dir) -> list:
+    """One run folder's per-class data-movement rows, by rising distance.
+
+    A folder whose run had observation.data_movement off wrote no file
+    and is refused, because the figure has nothing to draw for it.
+    """
+    movement_path = Path(run_dir) / "data_movement.csv"
+    if not movement_path.is_file():
+        raise refusal.RefusalError(
+            f"{run_dir} has no data_movement.csv; the data movement figure "
+            "reads the copy and move bits per memory class, which a run "
+            "records when its observation section says data_movement: true"
+        )
+    all_rows = _csv_rows(movement_path)
+    class_rows = []
+    for row in all_rows:
+        if row["grouping"] == "memory_class":
+            class_rows.append(row)
+    return sorted(class_rows, key=_row_distance)
+
+
+def _row_distance(row: dict) -> int:
+    """One row's code distance, as the csv wrote it."""
+    return int(row["distance"])
+
+
+def _classes_in_order(rows: list) -> list:
+    """The memory classes these rows carry, in the order they appear."""
+    classes = []
+    for row in rows:
+        if row["name"] not in classes:
+            classes.append(row["name"])
+    return classes
+
+
+def _rows_of_class(rows: list, memory_class: str) -> list:
+    """Every row of one memory class, in the order they were sorted."""
+    found = []
+    for row in rows:
+        if row["name"] == memory_class:
+            found.append(row)
+    return found
+
+
+def _draw_movement_panel(axis, series: dict) -> None:
+    """One config's classes, copied solid and moved dashed, on a log axis."""
+    swept = _swept_distances_of(series)
+    class_index = 0
+    for memory_class, by_word in series.items():
+        color = f"C{class_index}"
+        _draw_class_series(axis, by_word, memory_class, color)
+        class_index += 1
+    axis.set_yscale("log")
+    axis.set_xticks(swept)
+    axis.set_xlabel("Code distance")
+    axis.grid(alpha=0.3, which="both")
+    axis.legend(fontsize=8)
+
+
+def _draw_class_series(axis, by_word: dict, memory_class: str, color) -> None:
+    """One memory class's two lines; a line of only zeros is not drawn."""
+    for _column, word, marker, style in MOVEMENT_SERIES:
+        drawn_distances, drawn_bits = by_word[word]
+        if not drawn_bits:
+            continue
+        axis.plot(
+            drawn_distances,
+            drawn_bits,
+            marker=marker,
+            linestyle=style,
+            color=color,
+            label=f"{memory_class} {word}",
+        )
+
+
+def _swept_distances_of(series: dict) -> list:
+    """Every distance any class of one run carries, rising."""
+    swept = set()
+    for by_word in series.values():
+        for distances, _bits in by_word.values():
+            swept.update(distances)
+    return sorted(swept)
+
+
+def _series_of(rows: list, column: str) -> tuple:
+    """The distances and bits of one column, zeros left off the log axis."""
+    distances = []
+    bits = []
+    for row in rows:
+        value = float(row[column])
+        if value <= 0:
+            continue
+        distance = _row_distance(row)
+        distances.append(distance)
+        bits.append(value)
+    return distances, bits
+
+
+def _study_config_name(run_dir) -> str:
+    """The yaml a run folder ran, off the manifest it recorded."""
+    folder = Path(run_dir)
+    manifest_path = folder / "manifest.json"
+    if not manifest_path.is_file():
+        return folder.name
+    manifest_text = manifest_path.read_text()
+    manifest = json.loads(manifest_text)
+    config_files = manifest["config_files"]
+    named = Path(config_files[0])
+    return named.stem
 
 
 def _csv_rows(path) -> list:

@@ -42,8 +42,29 @@ import decsim.front.experiment as experiment
 import decsim.front.measure as measure
 import decsim.front.refusal as refusal
 import decsim.front.run_folder as run_folder
+import decsim.observe.data_movement as data_movement
 
-BULKY_FIELDS = ("samples", "means", "maxes", "link_totals")
+BULKY_FIELDS = (
+    "samples",
+    "means",
+    "maxes",
+    "link_totals",
+    "data_movement",
+)
+# the counters shot_data_movement.csv carries per path, as
+# observe/data_movement.py's json_value names them
+MOVEMENT_COUNTERS = (
+    "copies",
+    "copied_rounds",
+    "copy_bits",
+    "moves",
+    "moved_rounds",
+    "move_bits",
+)
+# the counters a hold books for the whole shot: a reference is a token
+# on a store's slot and belongs to no path, so these repeat on every row
+# of one shot
+REFERENCE_COUNTERS = ("references", "referenced_rounds")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -51,15 +72,16 @@ class RunRecord:
     """The additive facts one or more run folders hold.
 
     Each field is a list of csv rows and each list is one file of the
-    run folder: shots.csv, shot_links.csv, window_samples.csv and
-    latency_samples.csv. No field holds a summary, so two folders'
-    records join by concatenation (the window samples' counts add), and
-    the summaries derived from the join are the summaries a single run
-    over the same shots would have written.
+    run folder: shots.csv, shot_links.csv, shot_data_movement.csv,
+    window_samples.csv and latency_samples.csv. No field holds a
+    summary, so two folders' records join by concatenation (the window
+    samples' counts add), and the summaries derived from the join are
+    the summaries a single run over the same shots would have written.
     """
 
     shots: list
     shot_links: list
+    shot_data_movement: list
     window_samples: list
     latency_samples: list
 
@@ -191,17 +213,32 @@ def write_csv(rows: list, path: Path) -> None:
         writer.writerows(rows)
 
 
-def terminal_lines(rows: list) -> list:
+def terminal_lines(rows: list, report_dir: Path) -> list:
     """The terminal summary: one labeled block per sweep point.
 
-    Full names, no abbreviations; the full record is sweep.csv.
+    Full names, no abbreviations; the full record is sweep.csv. Under
+    each point come the bits its shots copied and moved, grouped by the
+    memory class the hop crossed, read back from the folder's
+    data_movement.csv. A run with observation.data_movement off wrote no
+    such file and says so once at the end, because a run that counted
+    nothing has no counts and a row of zeros would claim otherwise.
     """
+    movement = _data_movement_of(report_dir)
     blocks = []
     for row in rows:
         block = _terminal_block(row)
-        blocks.append(block)
+        at_point = _movement_at_point(movement, row)
+        with_classes = _block_with_classes(block, at_point)
+        blocks.append(with_classes)
     joined_blocks = "\n\n".join(blocks)
-    return joined_blocks.split("\n")
+    lines = joined_blocks.split("\n")
+    if not movement:
+        lines.append("")
+        lines.append(
+            "data movement: observation.data_movement was off, so this run "
+            "counted no copies, references or moves"
+        )
+    return lines
 
 
 def link_rows(shot_links: list) -> list:
@@ -214,6 +251,56 @@ def link_rows(shot_links: list) -> list:
     for point, group in grouped_by_sweep_point(shot_links):
         for path in _links_of(group):
             row = _link_row(point, group, path)
+            rows.append(row)
+    return rows
+
+
+def data_movement_rows(shot_data_movement: list) -> list:
+    """One row per sweep point per path, then one per memory class.
+
+    Two tables in one file, told apart by the grouping column. The
+    second one is the grouping the classical sources ask for: a DRAM
+    access costs "a couple of orders-of-magnitude higher than the cost
+    of an internal cache access" (Horowitz, ISSCC 2014 lines 232-247)
+    and an accelerator's access costs what the memory it reads costs
+    (Dally, CACM 2020 lines 231-234), so a copy into a register and a
+    copy across a cryostat link may not be summed into one count. Every
+    number is a mean over the point's shots.
+    """
+    rows = []
+    for point, group in grouped_by_sweep_point(shot_data_movement):
+        seeds = _seeds_of(group)
+        for path in _named_values(group, "path"):
+            at_path = _rows_named(group, "path", path)
+            row = _movement_row(point, "path", path, at_path, seeds)
+            rows.append(row)
+        for memory_class in _classes_of(group):
+            at_class = _rows_named(group, "memory_class", memory_class)
+            row = _movement_row(
+                point, "memory_class", memory_class, at_class, seeds
+            )
+            rows.append(row)
+    return rows
+
+
+def shot_data_movement_rows(measurements: list) -> list:
+    """One row per shot per path: that shot's own copy and move counters.
+
+    A path is a copy's source and target (`controller intake -> Buffer
+    0`) or a link's own name, and each row names the memory class that
+    path crosses, which observe/data_movement.py places from the
+    sources. A shot whose run had observation.data_movement off writes
+    no row at all: a run that counted nothing has no counts, which is
+    not the same fact as a run whose counts were zero.
+    """
+    rows = []
+    for measurement in measurements:
+        counted = measurement.data_movement
+        if counted is None:
+            continue
+        point = _measured_point(measurement)
+        for path in _paths_counted(counted):
+            row = _shot_movement_row(point, measurement, counted, path)
             rows.append(row)
     return rows
 
@@ -295,17 +382,20 @@ def record_of(measurements: list) -> RunRecord:
     """The additive facts of the shots this process measured."""
     shots = shot_rows(measurements)
     links = shot_link_rows(measurements)
+    movement = shot_data_movement_rows(measurements)
     samples = window_sample_rows(measurements)
     latency = latency_sample_rows(measurements)
-    return RunRecord(shots, links, samples, latency)
+    return RunRecord(shots, links, movement, samples, latency)
 
 
 def write_record(record: RunRecord, report_dir: Path) -> None:
-    """The record's four files; one with no rows is not written."""
+    """The record's five files; one with no rows is not written."""
     shots_path = report_dir / "shots.csv"
     _write_rows(record.shots, shots_path)
     links_path = report_dir / "shot_links.csv"
     _write_rows(record.shot_links, links_path)
+    movement_path = report_dir / "shot_data_movement.csv"
+    _write_rows(record.shot_data_movement, movement_path)
     samples_path = report_dir / "window_samples.csv"
     _write_rows(record.window_samples, samples_path)
     latency_path = report_dir / "latency_samples.csv"
@@ -332,15 +422,21 @@ def read_record(run_dirs: list, positions: dict) -> RunRecord:
     """
     shots = _rows_of_every_folder(run_dirs, "shots.csv")
     shot_links = _rows_of_every_folder(run_dirs, "shot_links.csv")
+    movement = _rows_of_every_folder(run_dirs, "shot_data_movement.csv")
     samples = _rows_of_every_folder(run_dirs, "window_samples.csv")
     latency = _rows_of_every_folder(run_dirs, "latency_samples.csv")
     counts = _counts_of_rows(samples)
     ordered_shots = _in_task_and_seed_order(shots, positions)
     ordered_links = _in_task_and_seed_order(shot_links, positions)
+    ordered_movement = _in_task_and_seed_order(movement, positions)
     ordered_samples = _rows_of_counts(counts)
     ordered_latency = _in_task_and_seed_order(latency, positions)
     return RunRecord(
-        ordered_shots, ordered_links, ordered_samples, ordered_latency
+        ordered_shots,
+        ordered_links,
+        ordered_movement,
+        ordered_samples,
+        ordered_latency,
     )
 
 
@@ -390,8 +486,9 @@ def write_report(
 ) -> None:
     """sweep.csv per point, and the additive files when a record comes.
 
-    links.csv is derived from the record's per-shot link rows, so a
-    combined folder's file is built the way a single run's file was.
+    links.csv and data_movement.csv are derived from the record's
+    per-shot rows, so a combined folder's files are built the way a
+    single run's files were.
     """
     report_dir.mkdir(parents=True, exist_ok=True)
     sweep_path = report_dir / "sweep.csv"
@@ -402,6 +499,9 @@ def write_report(
     per_link = link_rows(record.shot_links)
     links_path = report_dir / "links.csv"
     write_csv(per_link, links_path)
+    per_movement = data_movement_rows(record.shot_data_movement)
+    movement_path = report_dir / "data_movement.csv"
+    _write_rows(per_movement, movement_path)
 
 
 def _write_rows(rows: list, path: Path) -> None:
@@ -850,6 +950,169 @@ def _link_row(point: tuple, shot_links: list, path: str) -> dict:
     )
     row["propagation_us_per_shot"] = _mean_of(at_this_link, "propagation_us")
     return row
+
+
+def _paths_counted(counted: dict) -> list:
+    """Every path one shot copied or moved along, in path order."""
+    paths = set(counted["copies_by_path"])
+    for path in counted["moves_by_path"]:
+        paths.add(path)
+    return sorted(paths)
+
+
+def _shot_movement_row(
+    point: tuple, measurement, counted: dict, path: str
+) -> dict:
+    """One shot's copies and moves on one path, plus its own references."""
+    row = _point_columns(point)
+    row["seed"] = measurement.seed
+    row["path"] = path
+    copied = counted["copies_by_path"].get(path)
+    moved = counted["moves_by_path"].get(path)
+    row["memory_class"] = _class_of_path(copied, moved)
+    row["copies"] = _tally_of(copied, "events")
+    row["copied_rounds"] = _tally_of(copied, "rounds")
+    row["copy_bits"] = _tally_of(copied, "bits")
+    row["moves"] = _tally_of(moved, "events")
+    row["moved_rounds"] = _tally_of(moved, "rounds")
+    row["move_bits"] = _tally_of(moved, "bits")
+    for counter in REFERENCE_COUNTERS:
+        row[counter] = counted[counter]
+    return row
+
+
+def _class_of_path(copied: Optional[dict], moved: Optional[dict]) -> str:
+    """The memory class the path crosses, as its counter row named it."""
+    if copied is not None:
+        return copied["memory_class"]
+    return moved["memory_class"]
+
+
+def _tally_of(counters: Optional[dict], name: str) -> int:
+    """One counter of a path's row; a path with no row of that kind is 0."""
+    if counters is None:
+        return 0
+    return counters[name]
+
+
+def _seeds_of(rows: list) -> list:
+    """Every shot of one sweep point, in the order the rows were written."""
+    seeds = []
+    for row in rows:
+        if row["seed"] not in seeds:
+            seeds.append(row["seed"])
+    return seeds
+
+
+def _named_values(rows: list, column: str) -> list:
+    """Every distinct value of one column, in its own sorted order."""
+    values = set()
+    for row in rows:
+        values.add(row[column])
+    return sorted(values)
+
+
+def _classes_of(rows: list) -> list:
+    """The memory classes these rows crossed, cheapest first.
+
+    The order is observe/data_movement.py's own CLASS_ORDER, so the
+    grouped table reads the way the counters group it.
+    """
+    crossed = _named_values(rows, "memory_class")
+    listed = []
+    for memory_class in data_movement.CLASS_ORDER:
+        if memory_class.value in crossed:
+            listed.append(memory_class.value)
+    return listed
+
+
+def _rows_named(rows: list, column: str, value) -> list:
+    """The rows whose column holds that value, in the order written."""
+    found = []
+    for row in rows:
+        if row[column] == value:
+            found.append(row)
+    return found
+
+
+def _movement_row(
+    point: tuple, grouping: str, name: str, rows: list, seeds: list
+) -> dict:
+    """One point's mean over shots for one path or one memory class."""
+    row = _point_columns(point)
+    row["grouping"] = grouping
+    row["name"] = name
+    shots = len(seeds)
+    for counter in MOVEMENT_COUNTERS:
+        total = _sum_of(rows, counter)
+        row[f"{counter}_per_shot"] = total / shots
+    for counter in REFERENCE_COUNTERS:
+        total = _summed_once_per_shot(rows, counter)
+        row[f"{counter}_per_shot"] = total / shots
+    return row
+
+
+def _summed_once_per_shot(rows: list, counter: str) -> int:
+    """A whole-shot counter added up over the shots these rows carry.
+
+    A reference belongs to the shot and not to a path, so it repeats on
+    every row of that shot and only the first row of each is read.
+    """
+    seen = {}
+    for row in rows:
+        seed = row["seed"]
+        if seed in seen:
+            continue
+        seen[seed] = row[counter]
+    total = 0
+    for value in seen.values():
+        total += value
+    return total
+
+
+def _data_movement_of(report_dir: Path) -> list:
+    """A folder's per-point data-movement rows, empty when it wrote none."""
+    path = Path(report_dir) / "data_movement.csv"
+    if not path.is_file():
+        return []
+    return read_rows(path)
+
+
+def _movement_at_point(movement: list, row: dict) -> list:
+    """The memory-class rows of one sweep point, in cost order."""
+    point = sweep_point_of(row)
+    found = []
+    for movement_row in movement:
+        if movement_row["grouping"] != "memory_class":
+            continue
+        if sweep_point_of(movement_row) == point:
+            found.append(movement_row)
+    return found
+
+
+def _block_with_classes(block: str, at_point: list) -> str:
+    """One point's block with its by-class bit lines under it."""
+    if not at_point:
+        return block
+    lines = [block]
+    copied = _class_bits_line("bits copied per shot", at_point, "copy_bits")
+    lines.append(copied)
+    moved = _class_bits_line("bits moved per shot", at_point, "move_bits")
+    lines.append(moved)
+    return "\n".join(lines)
+
+
+def _class_bits_line(label: str, at_point: list, counter: str) -> str:
+    """One line: a class and its bits per shot, the classes it crossed."""
+    named = []
+    for row in at_point:
+        bits = row[f"{counter}_per_shot"]
+        if bits:
+            named.append(f"{row['name']} {bits:.0f}")
+    if not named:
+        return f"{label} by memory class: none"
+    listed = ", ".join(named)
+    return f"{label} by memory class: {listed}"
 
 
 def _rows_of_one_link(shot_links: list, path: str) -> list:

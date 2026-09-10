@@ -10,12 +10,13 @@ packet against the CPU-side and memory-side port ids it went between,
 and only once it was successfully sent (`coherent_xbar.cc:354-357`,
 `xbar.hh:400-411`), and it hands its forwarding latency to "the
 neighbouring object that actually makes the packet wait"
-(`packet.hh:424-431`). Three hops leave a decoder: the correction to the
-Pauli frame, the escalation selection to the strong decoder, and one
-window's boundary to the decoder of a dependent window. The window side
-decides that they happen, and this decoder-side component executes them,
-which is also how the reaction path is booked: Yang et al. 2605.04892
-Table I counts the frame update inside the decoder's own subtotal.
+(`packet.hh:424-431`). Two hops leave a decoder: the correction to the
+Pauli frame and the escalation selection to the strong decoder. Both
+carry a result the decoder produced, which is also how the reaction path
+is booked: Yang et al. 2605.04892 Table I counts the frame update inside
+the decoder's own subtotal. A window's boundary does not leave here: it
+is the window side's record and leaves by the object that holds it
+(windows/window_boundaries.py, decisions.md D12).
 """
 
 import functools
@@ -85,19 +86,6 @@ class DecoderOutput:
             request_key=strong_request_key,
             on_delivered=on_delivered,
         )
-
-    def send_boundary(
-        self,
-        attribution: transfer_records.TransferAttribution,
-        payload_bits: Optional[int],
-        on_delivered: Callable[[transfer_records.Transfer], None],
-    ) -> None:
-        """Send one window's boundary to a dependent window's decoder.
-
-        The bits are the ones the window side counted on the seam the
-        message updates; None leaves the transfer to the card.
-        """
-        self.transfers.send_boundary(attribution, payload_bits, on_delivered)
 
     def _commit(
         self,

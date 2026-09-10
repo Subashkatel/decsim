@@ -2,7 +2,12 @@
 
 A boundary is the residual defects at a window's commit edge, produced by
 the decoder at decode done and delivered to dependent windows over
-decoder_to_decoder; a held boundary waits for a final result. Versions
+decoder_to_decoder, whose two ends this package holds: the record kept
+here is what leaves, and the destination window's record is what it
+lands in, so this component executes the send and handles the landing
+(OMNeT++ refuses a module that sends a message it does not own,
+tmp/resources/omnetpp/src/sim/csimplemodule.cc:333-334; decisions.md
+D12). A held boundary waits for a final result. Versions
 make late deliveries harmless: every send bumps the source's version and
 each delivery's version, and a receiver only accepts the latest. Each
 source window has one record here; the courier owns the boundary policy
@@ -41,14 +46,14 @@ class BoundaryCourier:
     def __init__(
         self,
         planner,
-        decoder_output,
+        transfers,
         interaction,
         boundary_policy,
         on_boundary_received: Callable[[tuple, bool], None],
     ) -> None:
         self.planner = planner
-        # the boundary leaves a decoder, so the decoder side sends it
-        self.decoder_output = decoder_output
+        # the boundary is this component's record, so it sends it itself
+        self.transfers = transfers
         self.interaction = interaction
         self.boundary_policy = boundary_policy
         # (source window key, is_unblocked): a delivery landed in a window;
@@ -288,13 +293,39 @@ class BoundaryCourier:
         """One pinned face's message, priced on the strong window's seam.
 
         The bits are the strong window's own seam layer, so the transfer
-        is attributed to that window and to the request that reads it;
-        the relation names the neighbour's committed request, its window
-        and the strong window it lands in. A weak delivery to the same
-        window key is attributed to its source instead, so the two are
-        told apart in the traffic.
+        is attributed to that window and to the request that reads it
+        (_pin_attribution).
         """
         record = self._record(source_key)
+        attribution = self._pin_attribution(
+            record, source_key, destination, operation, request_key
+        )
+        source_info = self._source_info(source_key)
+        payload_bits = self.interaction.boundary_payload_bits(
+            record.committed, destination_info, source_info
+        )
+        delivered = functools.partial(self._pin_delivered, destination)
+        self.transfers.send_boundary(
+            transfer_records.LinkPath.DECODER_TO_DECODER,
+            attribution,
+            payload_bits,
+            delivered,
+        )
+
+    def _pin_attribution(
+        self,
+        record: "_BoundaryRecord",
+        source_key: tuple,
+        destination: window_records.Window,
+        operation: program_records.Operation,
+        request_key: window_records.DecoderRequestKey,
+    ) -> transfer_records.TransferAttribution:
+        """Whose message this is: the strong window, and the relation.
+
+        The relation names the neighbour's committed request, its window
+        and the strong window the message lands in, so a pinned delivery
+        and a weak one to the same window key are told apart.
+        """
         delivery_revision = record.delivery_version_by_dependent.get(
             destination.key, 0
         )
@@ -308,13 +339,7 @@ class BoundaryCourier:
             record.version,
             delivery_revision,
         )
-        attribution = dataclasses.replace(window_attribution, relation=relation)
-        source_info = self._source_info(source_key)
-        payload_bits = self.interaction.boundary_payload_bits(
-            record.committed, destination_info, source_info
-        )
-        delivered = functools.partial(self._pin_delivered, destination)
-        self.decoder_output.send_boundary(attribution, payload_bits, delivered)
+        return dataclasses.replace(window_attribution, relation=relation)
 
     def _pin_delivered(
         self, destination: window_records.Window, _transfer
@@ -389,7 +414,12 @@ class BoundaryCourier:
             delivery_version,
         )
         payload_bits = self._boundary_bits(boundary, window.key, dependent_key)
-        self.decoder_output.send_boundary(attribution, payload_bits, receive)
+        self.transfers.send_boundary(
+            transfer_records.LinkPath.DECODER_TO_DECODER,
+            attribution,
+            payload_bits,
+            receive,
+        )
 
     def _boundary_bits(self, boundary, source_key: tuple, dependent_key: tuple):
         """The bits this hand-off takes on the wire, or None for the card.

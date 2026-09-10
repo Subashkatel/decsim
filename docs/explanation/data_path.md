@@ -194,8 +194,12 @@ beside the strong decoder.
 ### 7. `decoder_to_decoder`
 
 One committed window's boundary to the next window. Ends: both
-`decoders`; the send is executed by `decsim/decoders/decoder_output.py`,
-asked for by `decsim/windows/window_boundaries.py`.
+`windows`; the send is executed by the boundary courier
+(`decsim/windows/window_boundaries.py`), which holds the record that
+leaves, and the landing is handled by the same component, which owns the
+destination window's record. The card still prices the wire between two
+decoders; what the ends name is which package holds the objects at them
+([The design decisions](decisions.md) D12).
 
 What crosses: the residual defects on the seam layer the two windows
 share. Under the default `dense_seam_mask` row of `BOUNDARY_PAYLOADS`

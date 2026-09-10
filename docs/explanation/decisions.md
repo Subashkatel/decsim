@@ -2,7 +2,7 @@
 
 # The design decisions
 
-Eleven decisions shape what decsim charges and where it charges it. Each is
+Twelve decisions shape what decsim charges and where it charges it. Each is
 recorded here with what was decided, why, and the source the answer came
 from, because a modelling question is answered by reading the referent
 rather than by choosing (`STYLE.md` rule 8). The last section says what
@@ -237,6 +237,46 @@ arXiv:2510.25222 line 1248 for what Buffer 1 is assigned.
 **Where to see it.** `decsim/syndrome_buffer/round_input.py`, the
 `RoundStoreInput` port in `decsim/ports.py`, and `tests/test_send_ends.py`,
 whose receive-end law reads every delivery callback out of the tree.
+
+## D12. A hop's ends are the packages that hold the objects at them
+
+**Decided.** `ENDS_OF_PATH` names, for each hop, the packages that hold
+the object the message leaves and the object it lands in, not the
+hardware the card is named after. On `decoder_to_decoder` both of those
+are the window side: the boundary is a record the courier keeps for a
+committed window, and it lands in the destination window's own record,
+where it waits until the decode that reads it starts. So the courier
+executes that send and handles that landing, and the decoders package,
+which held a three-line pass-through with no state of its own, holds
+nothing of this hop any more. The card is unchanged: it still prices the
+0.5 microsecond on-chip wire between two decoders.
+
+**Why.** The rule that decides it is ownership. A component may send
+only what it owns, and nothing in the decoders package owned the
+boundary: `DecoderOutput.send_boundary` forwarded an attribution and a
+bit count it had not made, to a delivery callback that belonged to the
+window side, and no decoder-side object heard the landing at all. The
+alternative, moving the boundary's state into the decoders package, was
+turned down because it would move the window model with it: what a
+boundary is, how two boundaries merge, which version wins and when a
+window may start are the windowing scheme's laws, and a decoder unit in
+decsim is a plug-in that decodes one job and keeps no window state.
+
+**Sources.** OMNeT++ refuses at runtime a module that sends a message it
+does not own (`src/sim/csimplemodule.cc:333-334`), and gem5's requesting
+port names a peer that receives (`src/mem/protocol/timing.cc:49-53`),
+which on this hop did not exist. What crosses is Skoric's exchange
+between decoding blocks: "Once DA_i finishes decoding, it sends the
+artificial defects and unresolved syndromes from the bottom d rounds to
+DB_{i-1} ... When the data from DA_i and DA_{i+1} has been received, the
+DB_i block can start decoding" (arXiv:2209.08552,
+`2209.08552.txt` lines 1038-1046). decsim's model of a decoding block's
+own state, what it has received and whether it may start, is the window
+record, which is what these two ends hold.
+
+**Where to see it.** `decsim/windows/window_boundaries.py`, the
+`ENDS_OF_PATH` row in `tests/test_send_ends.py`, and hop 7 of
+[The data path, hop by hop](data_path.md).
 
 ## What is not modelled yet
 

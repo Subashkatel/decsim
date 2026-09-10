@@ -112,10 +112,14 @@ class _RecordingTransfers:
         self.transfers = transfers
         self.boundary_sends = []
 
-    def send_boundary(self, attribution, payload_bits, on_delivered) -> None:
+    def send_boundary(
+        self, path, attribution, payload_bits, on_delivered
+    ) -> None:
         """Record the hand-off, then send it over the real fabric."""
         self.boundary_sends.append((attribution, payload_bits))
-        self.transfers.send_boundary(attribution, payload_bits, on_delivered)
+        self.transfers.send_boundary(
+            path, attribution, payload_bits, on_delivered
+        )
 
 
 def _pinned_courier():

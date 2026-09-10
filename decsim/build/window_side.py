@@ -105,7 +105,7 @@ def build_window_manager(
         committer_redecode = late
     courier = window_boundaries.BoundaryCourier(
         planner,
-        decoder_output,
+        transfers,
         plan.window_interaction,
         plan.boundary_policy,
         late.accept_boundary,

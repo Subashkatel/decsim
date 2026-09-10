@@ -1,0 +1,85 @@
+# The weak decoder baseline. Every key is documented in reference.yaml.
+
+qpu:
+  kind: stim_device
+
+escalation:
+  kind: weak_baseline
+workload:
+  kind: memory_circuit
+  code_task: surface_code:rotated_memory_z
+  rounds_per_shot: 10d
+
+windows:
+  kind: sliding
+  commit_rounds: null
+  buffer_rounds: null
+
+sweep:
+  - physical_error_probability: [0.001]                                   # timing
+    distance: [3]
+    round_period_us: [10.0, 5.0, 2.0, 1.0, 0.9, 0.85, 0.8, 0.5, 0.2, 0.1, 0.05, 0.02]
+    shots: 10
+  - physical_error_probability: [0.001, 0.002, 0.003, 0.005, 0.007, 0.01] # LER
+    distance: [3, 5]
+    round_period_us: [1.0]
+    shots: 2000
+  - physical_error_probability: [0.001, 0.002, 0.003, 0.005, 0.007, 0.01] # LER, d=7
+    distance: [7]
+    round_period_us: [1.0]
+    shots: 500
+  - physical_error_probability: [0.001, 0.002, 0.003, 0.005, 0.007, 0.01] # LER, d=9
+    distance: [9]
+    round_period_us: [1.0]
+    shots: 500
+  - physical_error_probability: [0.001, 0.002, 0.003, 0.005, 0.007, 0.01] # LER, d=11
+    distance: [11]
+    round_period_us: [1.0]
+    shots: 300
+
+controller:
+  clock: fridge
+  readout_to_bits_cycles: 0
+  decision_to_pulse_cycles: 0
+  packing_cycles_per_round: 0
+  packing_rounds_in_flight: null
+
+clocks:
+  fridge: 250.0
+  room: 250.0
+
+links:
+  qpu_to_controller:  {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
+  controller_to_weak_buffer: {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
+  weak_buffer_to_weak_decoder: {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
+  decoder_to_decoder:  {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
+  weak_decoder_to_frame: {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
+  controller_to_strong_buffer: null
+  strong_buffer_to_strong_decoder: null
+  weak_decoder_to_strong_decoder: null
+  frame_to_controller:  null
+  controller_to_qpu:  null
+
+round_store:
+  rounds: null
+strong_round_store:
+  rounds: null
+
+weak_decoder:
+  kind: 0.028                       # LILLIPUT card
+  units: 1
+  unit_memory_rounds: null
+  engine:
+    clock: fridge
+    fetch_cycles_per_round: 1
+    release_cycles_per_job: 10
+
+pauli_frame:
+  clock: fridge
+  write_cycles: 1
+
+idle_policy: separate_decode_jobs
+observation:
+  check_windows_with: none
+  log_component_io: false
+  log: off

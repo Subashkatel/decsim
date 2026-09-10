@@ -1,23 +1,16 @@
-"""Parity reduction and the exported decoder-input matrix validators.
+"""Reduces one fault identity modulo two, where the catalog is built.
 
-Reduces target ids to their odd-multiplicity identity and validates fault
-identities, placed matrices, graphlike matrices and belief-matching matrices.
-
-Leaf module: it references no Stim object, no window concept and no other
-module of this package, so an external backend can validate its own matrices
-with it.
-
-Package-internal seam: _xor_target_ids lives here, with the identity
-validators that consume it, and is also imported by stim_dem_catalog.
+A target listed twice in one error cancels, and a fault that flips an
+observable but no detector is undetectable and refused (Stim,
+doc/file_format_dem_detector_error_model.md).
 """
 
-from __future__ import annotations
-
+from collections.abc import Iterable
 from typing import Optional
 
 
-def _xor_target_ids(target_ids) -> tuple[int, ...]:
-    """Return the sorted ids with even multiplicities removed."""
+def xor_target_ids(target_ids: Iterable[int]) -> tuple[int, ...]:
+    """The sorted ids that occur an odd number of times."""
     odd_ids: set[int] = set()
     for target_id in target_ids:
         if target_id in odd_ids:
@@ -28,14 +21,17 @@ def _xor_target_ids(target_ids) -> tuple[int, ...]:
 
 
 def validate_fault_identity(
-    detector_ids,
-    logical_observable_ids,
+    detector_ids: Iterable[int],
+    logical_observable_ids: Iterable[int],
     *,
     location: str,
 ) -> Optional[tuple[tuple[int, ...], tuple[int, ...]]]:
-    """Canonicalize one placed fault without changing its decoder domain."""
-    detectors = _xor_target_ids(detector_ids)
-    logical_observables = _xor_target_ids(logical_observable_ids)
+    """Reduce one fault modulo two; None when it flips nothing.
+
+    Raises ValueError for a fault that flips an observable but no detector.
+    """
+    detectors = xor_target_ids(detector_ids)
+    logical_observables = xor_target_ids(logical_observable_ids)
     if not detectors:
         if logical_observables:
             raise ValueError(
@@ -47,16 +43,14 @@ def validate_fault_identity(
 
 
 def validate_graphlike_fault(
-    detector_ids,
-    logical_observable_ids,
+    detector_ids: Iterable[int],
+    logical_observable_ids: Iterable[int],
     *,
     location: str,
 ) -> Optional[tuple[tuple[int, ...], tuple[int, ...]]]:
-    """Canonicalize one fault and require the one-/two-detector domain."""
+    """Reduce one fault and require at most two detectors."""
     fault = validate_fault_identity(
-        detector_ids,
-        logical_observable_ids,
-        location=location,
+        detector_ids, logical_observable_ids, location=location
     )
     if fault is None:
         return None
@@ -67,198 +61,3 @@ def validate_graphlike_fault(
             "this graphlike decoder supports one or two detectors per fault"
         )
     return detectors, logical_observables
-
-
-def _binary_matrix(value, *, location: str, name: str):
-    """Return one rank-2 binary matrix as a csc_matrix with sorted indices,
-    without changing its identities; dense input is converted."""
-    import numpy as np
-    from scipy.sparse import csc_matrix, issparse
-
-    if issparse(value):
-        matrix = value.tocsc().copy()   # the placed matrices are frozen; normalise a copy
-    else:
-        dense = np.asarray(value)
-        if dense.ndim != 2:
-            raise ValueError(f"{location} {name} must be a rank-2 matrix")
-        matrix = csc_matrix(dense)
-    matrix.sum_duplicates()
-    matrix.sort_indices()
-    if not np.all((matrix.data == 0) | (matrix.data == 1)):
-        raise ValueError(f"{location} {name} must contain only binary values")
-    matrix.eliminate_zeros()
-    return matrix.astype(np.uint8, copy=False)
-
-
-def _column_rows(matrix, column: int):
-    """Sorted row indices of one column of a csc_matrix."""
-    return matrix.indices[matrix.indptr[column]:matrix.indptr[column + 1]]
-
-
-def _placed_matrix_faults(
-    check,
-    observables,
-    *,
-    location: str,
-) -> tuple[tuple[int, tuple[int, ...], tuple[int, ...]], ...]:
-    """Return canonical ids for every placed matrix fault column."""
-    import numpy as np
-
-    check_matrix = _binary_matrix(
-        check,
-        location=location,
-        name="check",
-    )
-    observable_matrix = _binary_matrix(
-        observables,
-        location=location,
-        name="observable matrix",
-    )
-    if check_matrix.shape[1] != observable_matrix.shape[1]:
-        raise ValueError(
-            f"{location} check and observable matrices have different fault "
-            f"counts: {check_matrix.shape[1]} and "
-            f"{observable_matrix.shape[1]}"
-        )
-    faults = []
-    for fault_index in range(check_matrix.shape[1]):
-        detector_ids = _column_rows(check_matrix, fault_index)
-        logical_observable_ids = _column_rows(observable_matrix, fault_index)
-        faults.append(
-            (
-                fault_index,
-                tuple(int(value) for value in detector_ids),
-                tuple(int(value) for value in logical_observable_ids),
-            )
-        )
-    return tuple(faults)
-
-
-def validate_placed_fault_matrices(
-    check,
-    observables,
-    *,
-    location: str,
-) -> None:
-    """Reject lost logical identity while preserving a decoder's degree domain."""
-    for fault_index, detector_ids, logical_ids in _placed_matrix_faults(
-        check,
-        observables,
-        location=location,
-    ):
-        validate_fault_identity(
-            detector_ids,
-            logical_ids,
-            location=f"{location} column {fault_index}",
-        )
-
-
-def validate_graphlike_matrices(
-    check,
-    observables,
-    *,
-    location: str,
-) -> None:
-    """Validate every placed fault column at a graphlike consumer boundary."""
-    for fault_index, detector_ids, logical_ids in _placed_matrix_faults(
-        check,
-        observables,
-        location=location,
-    ):
-        validate_graphlike_fault(
-            detector_ids,
-            logical_ids,
-            location=f"{location} column {fault_index}",
-        )
-
-
-def validate_belief_matching_matrices(
-    check,
-    observables,
-    hyperedge_check,
-    hyperedge_priors,
-    hyperedge_to_edge,
-    *,
-    location: str,
-) -> None:
-    """Validate the linked physical and graphlike belief-matching domains."""
-    import numpy as np
-
-    check_matrix = _binary_matrix(
-        check,
-        location=location,
-        name="component check",
-    )
-    observable_matrix = _binary_matrix(
-        observables,
-        location=location,
-        name="component observable matrix",
-    )
-    hyperedge_check_matrix = _binary_matrix(
-        hyperedge_check,
-        location=location,
-        name="physical check",
-    )
-    hyperedge_to_edge_matrix = _binary_matrix(
-        hyperedge_to_edge,
-        location=location,
-        name="physical-to-component map",
-    )
-    if check_matrix.shape[0] != hyperedge_check_matrix.shape[0]:
-        raise ValueError(
-            f"{location} component and physical checks have different "
-            "detector counts"
-        )
-    expected_map_shape = (
-        check_matrix.shape[1],
-        hyperedge_check_matrix.shape[1],
-    )
-    if hyperedge_to_edge_matrix.shape != expected_map_shape:
-        raise ValueError(
-            f"{location} physical-to-component map has shape "
-            f"{hyperedge_to_edge_matrix.shape}; expected {expected_map_shape}"
-        )
-
-    priors = np.asarray(hyperedge_priors, dtype=float)
-    if priors.ndim != 1:
-        raise ValueError(f"{location} physical priors must be rank 1")
-    if priors.shape[0] != hyperedge_check_matrix.shape[1]:
-        raise ValueError(
-            f"{location} has {priors.shape[0]} physical priors for "
-            f"{hyperedge_check_matrix.shape[1]} physical fault columns"
-        )
-    if not np.all(np.isfinite(priors)):
-        raise ValueError(f"{location} physical priors must be finite")
-    if not np.all((0.0 <= priors) & (priors <= 1.0)):
-        raise ValueError(
-            f"{location} physical priors must lie in the inclusive range [0, 1]"
-        )
-
-    validate_graphlike_matrices(
-        check_matrix,
-        observable_matrix,
-        location=f"{location} component graph",
-    )
-    for physical_index in range(hyperedge_check_matrix.shape[1]):
-        component_indices = _column_rows(hyperedge_to_edge_matrix, physical_index)
-        derived_detector_bits = np.asarray(
-            check_matrix[:, component_indices].sum(axis=1)).ravel() % 2
-        stored_detector_bits = np.zeros(check_matrix.shape[0], dtype=np.uint8)
-        stored_detector_bits[_column_rows(hyperedge_check_matrix, physical_index)] = 1
-        if not np.array_equal(derived_detector_bits, stored_detector_bits):
-            raise ValueError(
-                f"{location} physical column {physical_index} detector "
-                "identity does not equal its component XOR"
-            )
-        derived_logical_bits = np.asarray(
-            observable_matrix[:, component_indices].sum(axis=1)).ravel() % 2
-        identity = validate_fault_identity(
-            np.nonzero(stored_detector_bits)[0],
-            np.nonzero(derived_logical_bits)[0],
-            location=f"{location} physical column {physical_index}",
-        )
-        if identity is None:
-            raise ValueError(
-                f"{location} physical column {physical_index} is inert and "
-                "must be removed before belief matching"
-            )

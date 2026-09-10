@@ -11,16 +11,23 @@ __pycache__/
 .env
 .env.*
 
-# Build artifacts
-build/
+# Build artifacts. The pattern is anchored to the root: decsim/build/ is
+# the machine's build script, not an artifact.
+/build/
 *.egg-info/
 
 # Editor/OS noise
 .DS_Store
 
 # Stray slurm logs at the repo root; every run keeps its own copies
-# under experiments/results/<run>/logs/
+# under results/<run>/logs/
 /slurm-*.out
+
+# Run output. gem5 never tracks m5out and sinter writes its csv where the
+# user points it: a run folder is evidence, not code. The five folders
+# this repository used to track are archived in the sandbox at
+# archive/2026-09-06-results-out-of-tree/.
+/results/
 
 # Core dumps
 core.[0-9]*

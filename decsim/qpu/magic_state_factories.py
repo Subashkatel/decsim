@@ -1,555 +1,919 @@
-"""Magic-state supply models."""
+"""The magic-state factories: where a non-Clifford operation gets its state.
 
-from __future__ import annotations
+A factory fills the MagicStateFactory port (decsim/ports.py): an
+operation that needs a magic state calls request and is called back when
+one is ready; an empty store stalls the requester, and that supply stall
+is the quantity the factories exist to measure.
 
-from collections import deque
-from dataclasses import dataclass
+InfiniteFactory is the idealized supply with no stall. DistillationFactory
+is one 15-to-1 distillation stage: every unit attempts a distillation
+every attempt_ticks, a success submits one correction decode per
+multi-qubit pi/8 rotation of the 15-to-1 circuit, 11 of them (rotations
+5 to 15 of Fig. 3; the first four are single-qubit rotations whose
+Clifford corrections are Pauli corrections and need no ancilla: Litinski,
+Magic state distillation: not as costly as you think, arXiv 1905.06903,
+Sec. 4, text lines 1038-1043; Silva 2411.04270 line 381 counts the same
+11 logical cycles for the T gates) to the run's decoder pool, where they
+compete with the core's windows, and the state reaches the store one
+return trip after the last decode. MultiLevelDistillationFactory
+is the pull-driven supply chain of Silva et al., Optimizing multi-level
+magic state factories for fault-tolerant quantum architectures (arXiv
+2411.04270, Sec. II B): level 0 prepares physical states, each level
+above consumes inputs_per_round states from the buffer below and, after
+logical_cycles_per_round * distance rounds, yields outputs_per_round
+states with its success probability; a failure discards the inputs. A
+request at the top propagates demand down the chain, so no level
+free-runs unless production_mode is "continuous".
+"""
+
+import collections
+import dataclasses
+import functools
 import math
-from typing import Callable, Optional, TYPE_CHECKING
+from collections.abc import Mapping
+from typing import Any, Callable, Optional, Protocol
 
-from ..config import fmt
-from ..seeding import _RandomSeedConsumer
-from ..engine import Engine
-
-if TYPE_CHECKING:
-    from ..protocols import ResourcePool as DecodeService
-
-
-def _validate_production_mode(production: str, buffer_capacity: Optional[int]) -> None:
-    """Validate the factory production mode and buffer setting."""
-    if production not in ("demand", "continuous"):
-        raise ValueError(
-            f"production must be 'demand' or 'continuous' (got {production!r})")
-    if production == "continuous" and buffer_capacity is None:
-        raise ValueError("continuous production needs buffer_capacity >= 1")
+import decsim.config as config
+import decsim.engine
+import decsim.ports as ports
+import decsim.records.log_sources as log_sources
+import decsim.seeding as seeding
 
 
-def _validate_exact_integer(name: str, value, *, minimum: int) -> int:
-    if value < minimum:
-        relation = "positive" if minimum == 1 else "nonnegative"
-        raise ValueError(f"{name} must be {relation}")
-    return value
-
-
-def _validate_probability(name: str, value) -> float:
-    normalized = float(value)
-    if not math.isfinite(normalized) or not 0.0 <= normalized <= 1.0:
-        raise ValueError(f"{name} must be finite and in [0, 1]")
-    return normalized
-
-
-def _validate_correction_decode_service(decode_service, n_corr: int) -> None:
-    """Require one unambiguous correction-service disposition."""
-    if n_corr < 0:
-        raise ValueError("n_corr must be nonnegative")
-    if n_corr == 0 and decode_service is not None:
-        raise ValueError("decode_service must be None when n_corr is zero")
-    if n_corr > 0 and decode_service is None:
-        raise ValueError("decode_service is required when n_corr is positive")
-
-
-@dataclass
+@dataclasses.dataclass
 class StateTrace:
-    """Per-magic-state production and delivery timestamps."""
+    """When one magic state was distilled, corrected, released, delivered."""
 
     state_id: int
-    t_distill_start: int            # distillation began
-    t_phys_done: int                # physical distillation done
-    t_corr_submit: int              # correction decodes submitted
-    t_corr_done: Optional[int] = None   # last correction decode returned
-    t_released: Optional[int] = None    # entered store (after return trip)
-    t_delivered: Optional[int] = None   # handed to consumer
+    distill_start_tick: int
+    physical_done_tick: int
+    correction_submit_tick: int
+    correction_done_tick: Optional[int] = None
+    released_tick: Optional[int] = None
+    delivered_tick: Optional[int] = None
 
 
-
-@dataclass
+@dataclasses.dataclass
 class Ticket:
-    """Cancellable handle for one factory request."""
+    """A cancellable handle on one factory request."""
 
-    op_id: int
-    entry: tuple
-    factory: object
+    operation_id: int
+    request: tuple
+    factory: "_CancellingFactory"
 
     def cancel(self) -> bool:
+        """Withdraw the request; False when it was already delivered."""
         return self.factory.cancel(self)
 
 
+@dataclasses.dataclass(frozen=True)
+class FactoryCollaborators:
+    """What the root supplies every magic state factory row.
+
+    One record so every row of MAGIC_STATE_FACTORIES has one constructor
+    signature and the root builds a row without asking which supply
+    model it is; a row reads the collaborators its own model needs,
+    ignores the rest, and reads its own card out of arguments, which are
+    the magic_state_factory section's keys. This is gem5's params
+    object, where a SimObject's collaborators arrive as one structure
+    rather than as a signature per subclass
+    (tmp/resources/gem5/src/python/m5/SimObject.py:204-205).
+    """
+
+    engine: decsim.engine.Engine
+    decode_service: Optional[ports.DecodeQueue]
+    round_ticks: int
+    arguments: Mapping[str, Any] = dataclasses.field(default_factory=dict)
+
+
 class InfiniteFactory:
-    """Idealized factory with unlimited magic states."""
+    """The idealized factory: a magic state is always in stock."""
 
-    def __init__(self, engine: Engine):
-        self.engine = engine
+    def __init__(self, collaborators: FactoryCollaborators):
+        self.engine = collaborators.engine
 
-    def request(self, op_id: int, callback: Callable[[], None]) -> "Ticket":
-        """Deliver instantly."""
+    def request(
+        self, operation_id: int, callback: Callable[[], None]
+    ) -> Ticket:
+        """Deliver at once."""
         callback()
-        return Ticket(op_id, (), self)
+        return Ticket(operation_id, (), self)
 
-    def cancel(self, ticket: "Ticket") -> bool:
-        """Nothing pending to cancel (delivery was instant)."""
+    def cancel(self, ticket: Ticket) -> bool:
+        """Nothing is ever pending, so nothing is cancelled."""
+        del ticket
         return False
 
     def shutdown(self) -> None:
-        """Nothing to stop."""
-        return None
+        """Nothing runs, so nothing stops."""
 
 
-class DistillationFactory(_RandomSeedConsumer):
-    """Single-level magic-state factory with optional continuous production."""
+class DistillationFactory(seeding._RandomSeedConsumer):
+    """One 15-to-1 distillation stage with optional continuous production.
 
-    def __init__(self, engine: Engine, num_units: int, cycle_ticks: int,
-                 decode_service: "DecodeService", corr_rounds: int, n_corr: int = 11,
-                 return_ticks: int = 0, p_success: float = 1.0,
-                 seed: Optional[int] = None,
-                 initial_store: int = 0, production: str = "demand",
-                 buffer_capacity: Optional[int] = None):
-        _validate_production_mode(production, buffer_capacity)
-        _validate_correction_decode_service(decode_service, n_corr)
-        num_units = _validate_exact_integer(
-            "num_units", num_units, minimum=1
+    Demand mode starts an attempt only for an unmet request; continuous
+    mode also keeps buffer_capacity states in the pipeline. A state with
+    no correction decodes to wait on is released one return trip after
+    the physical attempt. initial_store warm-starts the store with states
+    that carry no trace.
+    """
+
+    def __init__(self, collaborators: FactoryCollaborators):
+        self.engine = collaborators.engine
+        self.decode_service = collaborators.decode_service
+        self._read_card(**collaborators.arguments)
+
+    def request(
+        self, operation_id: int, callback: Callable[[], None]
+    ) -> Ticket:
+        """Deliver a state now if one is in stock, else when one is ready."""
+        request = (operation_id, callback)
+        self.waiting.append(request)
+        self._stall_start_by_operation_id[operation_id] = self.engine.now
+        waiting_count = len(self.waiting)
+        self.engine.log(
+            log_sources.MAGIC_STATE_FACTORY,
+            f"op#{operation_id} requests a magic state "
+            f"(store {self.stored_state_count}, waiting {waiting_count})",
         )
-        cycle_ticks = _validate_exact_integer(
-            "cycle_ticks", cycle_ticks, minimum=0
+        self._deliver_to_waiting()
+        self._start_attempts()
+        return Ticket(operation_id, request, self)
+
+    def cancel(self, ticket: Ticket) -> bool:
+        """Withdraw an undelivered request; the others keep their order."""
+        if ticket.request not in self.waiting:
+            return False
+        self.waiting.remove(ticket.request)
+        self._stall_start_by_operation_id.pop(ticket.operation_id, None)
+        return True
+
+    def shutdown(self) -> None:
+        """Stop launching attempts; the program is complete."""
+        self._is_shut_down = True
+
+    def latency_aggregate_snapshot(self) -> dict:
+        """Exact totals over every delivery, whatever traces were evicted."""
+        snapshot = {}
+        totals = self._latency_totals
+        for stage, total in totals.sum_by_stage.items():
+            snapshot[stage] = {
+                "sum": total,
+                "max": totals.max_by_stage[stage],
+                "n": totals.delivered_count,
+            }
+        return snapshot
+
+    def _read_card(
+        self,
+        unit_count: int,
+        attempt_ticks: int,
+        correction_round_count: int,
+        correction_decode_count: int = 11,
+        return_ticks: int = 0,
+        success_probability: float = 1.0,
+        seed: Optional[int] = None,
+        initial_store: int = 0,
+        production_mode: str = "demand",
+        buffer_capacity: Optional[int] = None,
+    ) -> None:
+        """This row's own magic_state_factory keys, with their defaults."""
+        checked_probability = _checked_probability(
+            "success_probability", success_probability
         )
-        corr_rounds = _validate_exact_integer(
-            "corr_rounds", corr_rounds, minimum=0
+        self.card = _DistillationCard(
+            unit_count=unit_count,
+            attempt_ticks=attempt_ticks,
+            correction_round_count=correction_round_count,
+            correction_decode_count=correction_decode_count,
+            return_ticks=return_ticks,
+            success_probability=checked_probability,
+            production_mode=production_mode,
+            buffer_capacity=buffer_capacity,
         )
-        return_ticks = _validate_exact_integer(
-            "return_ticks", return_ticks, minimum=0
-        )
-        initial_store = _validate_exact_integer(
-            "initial_store", initial_store, minimum=0
-        )
-        p_success = _validate_probability("p_success", p_success)
-        self.engine = engine
-        self.num_units = num_units
-        self.cycle_ticks = cycle_ticks
-        self.decode_service = decode_service
-        self.corr_rounds = corr_rounds
-        self.n_corr = n_corr
-        self.return_ticks = return_ticks
-        self.p_success = p_success
+        self._check_settings(initial_store)
         self._initialize_run_seed_state(seed)
-        self.production = production
-        self.buffer_capacity = buffer_capacity
-        self._initial_store = initial_store
-        self._init_runtime_state(initial_store)
+        self._reset_state(initial_store)
+        if production_mode == "continuous":
+            self.engine.schedule(0, self._start_attempts, label="factory_start")
 
-        if production == "continuous":
-            self.engine.schedule(0, self._maybe_start, label="factory_start")
-
-    def _init_runtime_state(self, initial_store: int) -> None:
-        """Initialize queues, counters, and bounded diagnostic traces."""
-        self.store = initial_store
-        self.waiting: list[tuple[int, Callable[[], None]]] = []
-        self.produced = 0
-        self.in_flight = 0
-        self.busy_units = 0
-        self.peak_in_flight = 0
-        self.total_stall = 0
-        self._stall_start: dict[int, int] = {}
-        self._shutdown = False
-        self.traces: deque = deque(maxlen=4096)
-        self._delivered_latency_count = 0
-        self._delivered_latency_sums = dict.fromkeys(
-            ("distill", "corr_decode", "deliver", "total"), 0
+    def _check_settings(self, initial_store: int) -> None:
+        _check_production_mode(
+            self.card.production_mode, self.card.buffer_capacity
         )
-        self._delivered_latency_maxima = self._delivered_latency_sums.copy()
+        _check_decode_service(
+            self.decode_service, self.card.correction_decode_count
+        )
+        _check_count("unit_count", self.card.unit_count, minimum=1)
+        _check_count("attempt_ticks", self.card.attempt_ticks, minimum=0)
+        _check_count(
+            "correction_round_count",
+            self.card.correction_round_count,
+            minimum=0,
+        )
+        _check_count("return_ticks", self.card.return_ticks, minimum=0)
+        _check_count("initial_store", initial_store, minimum=0)
+
+    def _reset_state(self, initial_store: int) -> None:
+        self.stored_state_count = initial_store
+        self.waiting: list[tuple[int, Callable[[], None]]] = []
+        self.produced_count = 0
+        self.in_flight_count = 0
+        self.busy_unit_count = 0
+        self.peak_in_flight_count = 0
+        self.total_stall_ticks = 0
+        self._stall_start_by_operation_id: dict[int, int] = {}
+        self._is_shut_down = False
+        self.traces: collections.deque = collections.deque(maxlen=4096)
+        sum_by_stage = dict.fromkeys(_LATENCY_STAGES, 0)
+        max_by_stage = dict.fromkeys(_LATENCY_STAGES, 0)
+        self._latency_totals = _LatencyTotals(0, sum_by_stage, max_by_stage)
         self._ready_traces: list[StateTrace] = []
         self._next_state_id = 0
 
-    def shutdown(self) -> None:
-        """Stop launching new attempts (called when the circuit is complete)."""
-        self._shutdown = True
+    def _start_attempts(self) -> None:
+        """Launch attempts while demand is unmet or the pipeline is short."""
+        while self._can_start_attempt():
+            self.busy_unit_count += 1
+            self.engine.schedule(
+                self.card.attempt_ticks,
+                self._finish_attempt,
+                label="distill_attempt",
+            )
 
-    def _maybe_start(self) -> None:
-        """Launch attempts while demand is unmet, or (continuous) while
-        the pipeline is below buffer_capacity."""
-        while not self._shutdown and self.busy_units < self.num_units:
-            demand = len(self.waiting) > self.busy_units + self.in_flight
-            stocking = (self.production == "continuous"
-                        and self.store + self.in_flight + self.busy_units
-                        < self.buffer_capacity + len(self.waiting))
-            if not (demand or stocking):
-                break
-            self.busy_units += 1
-            self.engine.schedule(self.cycle_ticks, self._attempt_done,
-                                 label="distill_attempt")
+    def _can_start_attempt(self) -> bool:
+        if self._is_shut_down:
+            return False
+        if self.busy_unit_count >= self.card.unit_count:
+            return False
+        committed_count = self.busy_unit_count + self.in_flight_count
+        has_unmet_demand = len(self.waiting) > committed_count
+        if has_unmet_demand:
+            return True
+        if self.card.production_mode != "continuous":
+            return False
+        pipeline_count = self.stored_state_count + committed_count
+        wanted_count = self.card.buffer_capacity + len(self.waiting)
+        return pipeline_count < wanted_count
 
-    def _attempt_done(self) -> None:
-        """A distillation attempt finished; on success, queue its correction decode."""
-        self.busy_units -= 1
+    def _finish_attempt(self) -> None:
+        """A success waits for its corrections; a failure retries."""
+        self.busy_unit_count -= 1
         self._mark_stochastic_use()
-        if self._rng.random() < self.p_success:
-            self.in_flight += 1
-            self.peak_in_flight = max(self.peak_in_flight, self.in_flight)
-            trace = StateTrace(state_id=self._next_state_id,
-                               t_distill_start=self.engine.now - self.cycle_ticks,
-                               t_phys_done=self.engine.now,
-                               t_corr_submit=self.engine.now)
-            self._next_state_id += 1
-            remaining = {"n": self.n_corr, "trace": trace}
-            if self.n_corr:
-                self.engine.log("Factory",
-                                f"a unit distilled a state; submitting {self.n_corr} "
-                                f"correction-qubit decode jobs to the cluster (parallel)")
-                for _ in range(self.n_corr):
-                    self.decode_service.submit_decode(
-                        self.corr_rounds,
-                        on_done=lambda rem=remaining: self._corr_done(rem),
-                        label="MSF-corr")
-            else:
-                # No correction decodes to wait on: release after physical
-                # distillation instead of hanging forever (parity with the
-                # multi-level factory's `and self.n_corr` guard).
-                trace.t_corr_done = self.engine.now
-                self.engine.schedule(
-                    self.return_ticks,
-                    lambda t=trace: self._release(t),
-                    label="distill_release")
+        is_success = self._rng.random() < self.card.success_probability
+        if is_success:
+            self._submit_corrections()
         else:
-            self.engine.log("Factory", "a unit's distillation DISCARDED, retrying")
-        self._maybe_start()                    # keep going only if demand remains
+            self.engine.log(
+                log_sources.MAGIC_STATE_FACTORY,
+                "a unit's distillation DISCARDED, retrying",
+            )
+        self._start_attempts()
 
-    def _corr_done(self, remaining: dict) -> None:
-        """A correction decode finished; the state is now ready in the store."""
-        remaining["n"] -= 1
-        if remaining["n"] == 0:
-            remaining["trace"].t_corr_done = self.engine.now
-            self.engine.schedule(self.return_ticks,
-                                 lambda trace=remaining["trace"]: self._release(trace),
-                                 label="distill_release")
+    def _submit_corrections(self) -> None:
+        self.in_flight_count += 1
+        self.peak_in_flight_count = max(
+            self.peak_in_flight_count, self.in_flight_count
+        )
+        now = self.engine.now
+        distill_start_tick = now - self.card.attempt_ticks
+        trace = StateTrace(
+            state_id=self._next_state_id,
+            distill_start_tick=distill_start_tick,
+            physical_done_tick=now,
+            correction_submit_tick=now,
+        )
+        self._next_state_id += 1
+        if not self.card.correction_decode_count:
+            # Nothing to wait on: the state returns after the physical
+            # attempt, as it does in the multi-level factory.
+            trace.correction_done_tick = now
+            self.engine.schedule(
+                self.card.return_ticks,
+                lambda: self._release(trace),
+                label="distill_release",
+            )
+            return
+        self.engine.log(
+            log_sources.MAGIC_STATE_FACTORY,
+            f"a unit distilled a state; submitting "
+            f"{self.card.correction_decode_count} correction-qubit decode jobs "
+            f"to the cluster (parallel)",
+        )
+        batch = _CorrectionBatch(self.card.correction_decode_count, trace)
+        on_done = functools.partial(self._finish_correction_decode, batch)
+        for _ in range(self.card.correction_decode_count):
+            self.decode_service.enqueue_without_input(
+                self.card.correction_round_count,
+                on_done=on_done,
+                label="MSF-corr",
+            )
+
+    def _finish_correction_decode(self, batch: "_CorrectionBatch") -> None:
+        batch.remaining_count -= 1
+        if batch.remaining_count != 0:
+            return
+        trace = batch.trace
+        trace.correction_done_tick = self.engine.now
+        self.engine.schedule(
+            self.card.return_ticks,
+            lambda: self._release(trace),
+            label="distill_release",
+        )
 
     def _release(self, trace: StateTrace) -> None:
-        """Hand a finished state to the oldest waiting request."""
-        self.in_flight -= 1
-        self.store += 1
-        self.produced += 1
-        trace.t_released = self.engine.now
+        """A corrected state reaches the store and serves the oldest request."""
+        self.in_flight_count -= 1
+        self.stored_state_count += 1
+        self.produced_count += 1
+        trace.released_tick = self.engine.now
         self._ready_traces.append(trace)
-        self.engine.log("Factory", f"magic state ready (store now {self.store})")
-        self._fulfil()
-        self._maybe_start()
+        self.engine.log(
+            log_sources.MAGIC_STATE_FACTORY,
+            f"magic state ready (store now {self.stored_state_count})",
+        )
+        self._deliver_to_waiting()
+        self._start_attempts()
 
-    def request(self, op_id: int, callback: Callable[[], None]) -> "Ticket":
-        """A gate asks for a state: deliver now if in stock, else deliver when ready."""
-        entry = (op_id, callback)
-        self.waiting.append(entry)
-        self._stall_start[op_id] = self.engine.now
-        self.engine.log("Factory",
-                        f"op#{op_id} requests a magic state "
-                        f"(store {self.store}, waiting {len(self.waiting)})")
-        self._fulfil()
-        self._maybe_start()
-        return Ticket(op_id, entry, self)
-
-    def cancel(self, ticket: "Ticket") -> bool:
-        """Withdraw an undelivered request; FIFO order of the rest is preserved."""
-        if ticket.entry in self.waiting:
-            self.waiting.remove(ticket.entry)
-            self._stall_start.pop(ticket.op_id, None)
-            return True
-        return False
-
-    def _fulfil(self) -> None:
-        """Deliver a state to a waiting request and log it."""
-        while self.store > 0 and self.waiting:
-            self.store -= 1
-            if self._ready_traces:             # warm-start states have no trace
-                trace = self._ready_traces.pop(0)
-                trace.t_delivered = self.engine.now
-                self._record_delivered_trace(trace)
-                self.traces.append(trace)
-            op_id, callback = self.waiting.pop(0)
-            waited = self.engine.now - self._stall_start.pop(op_id, self.engine.now)
-            self.total_stall += waited
-            tag = "" if waited == 0 else f"  (supply stall {fmt(waited).strip()})"
-            self.engine.log("Factory",
-                            f"  -> delivered to op#{op_id} (store now {self.store}){tag}")
+    def _deliver_to_waiting(self) -> None:
+        while self.stored_state_count > 0 and self.waiting:
+            self.stored_state_count -= 1
+            self._stamp_delivered_trace()
+            operation_id, callback = self.waiting.pop(0)
+            waited_ticks = self._stall_ticks_of(operation_id)
+            self.total_stall_ticks += waited_ticks
+            tag = _stall_tag(waited_ticks)
+            self.engine.log(
+                log_sources.MAGIC_STATE_FACTORY,
+                f"  -> delivered to op#{operation_id} "
+                f"(store now {self.stored_state_count}){tag}",
+            )
             callback()
-            self._maybe_start()                # continuous mode: refill the slot just taken
+
+    def _stamp_delivered_trace(self) -> None:
+        # A warm-start state has no trace.
+        if not self._ready_traces:
+            return
+        trace = self._ready_traces.pop(0)
+        trace.delivered_tick = self.engine.now
+        self._record_delivered_trace(trace)
+        self.traces.append(trace)
+
+    def _stall_ticks_of(self, operation_id: int) -> int:
+        now = self.engine.now
+        started = self._stall_start_by_operation_id.pop(operation_id, now)
+        return now - started
 
     def _record_delivered_trace(self, trace: StateTrace) -> None:
-        values = {
-            "distill": trace.t_phys_done - trace.t_distill_start,
-            "corr_decode": trace.t_corr_done - trace.t_phys_done,
-            "deliver": trace.t_delivered - trace.t_corr_done,
-            "total": trace.t_delivered - trace.t_distill_start,
+        ticks_by_stage = {
+            "distill": trace.physical_done_tick - trace.distill_start_tick,
+            "corr_decode": trace.correction_done_tick
+            - trace.physical_done_tick,
+            "deliver": trace.delivered_tick - trace.correction_done_tick,
+            "total": trace.delivered_tick - trace.distill_start_tick,
         }
-        self._delivered_latency_count += 1
-        for stage, value in values.items():
-            self._delivered_latency_sums[stage] += value
-            self._delivered_latency_maxima[stage] = max(
-                self._delivered_latency_maxima[stage], value
-            )
+        totals = self._latency_totals
+        totals.delivered_count += 1
+        for stage, ticks in ticks_by_stage.items():
+            totals.sum_by_stage[stage] += ticks
+            totals.max_by_stage[stage] = max(totals.max_by_stage[stage], ticks)
 
-    def latency_aggregate_snapshot(self) -> dict:
-        """Return exact all-delivery totals independent of trace eviction."""
-        return {
-            stage: {
-                "sum": total,
-                "max": self._delivered_latency_maxima[stage],
-                "n": self._delivered_latency_count,
-            }
-            for stage, total in self._delivered_latency_sums.items()
-        }
 
-@dataclass
+@dataclasses.dataclass
 class DistillLevel:
-    """One level of a multi-level magic-state factory."""
+    """One level of the multi-level factory: its units and its protocol."""
 
-    units: int
-    d: int
-    O: int = 13
-    P: float = 1.0
+    unit_count: int
+    distance: int
+    # None takes the paper's count for the level's place in the chain: 13
+    # logical cycles at the first level, 15 above it, where two more
+    # cycles load the inputs (Silva et al. 2411.04270, Fig. 2 caption,
+    # text lines 223-224 and 249-251).
+    logical_cycles_per_round: Optional[int] = None
+    success_probability: float = 1.0
 
 
-class MultiLevelDistillationFactory(_RandomSeedConsumer):
-    """Multi-level pull-driven magic-state factory."""
+class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
+    """A pull-driven chain of distillation levels feeding one store.
 
-    def __init__(self, engine: Engine, levels: list[DistillLevel], *,
-                 W_ticks: int, M: int = 15, N: int = 1,
-                 prep_units: int = 1, prep_O: int = 2, prep_d: int = 3, prep_P: float = 1.0,
-                 decode_service: Optional["DecodeService"] = None,
-                 corr_rounds: int = 0, n_corr: int = 0,
-                 seed: Optional[int] = None,
-                 production: str = "demand", buffer_capacity: Optional[int] = None):
-        _validate_production_mode(production, buffer_capacity)
-        _validate_correction_decode_service(decode_service, n_corr)
-        validated_levels = []
-        for index, level in enumerate(levels):
-            validated_levels.append(
-                DistillLevel(
-                    units=_validate_exact_integer(
-                        f"levels[{index}].units", level.units, minimum=1
-                    ),
-                    d=_validate_exact_integer(
-                        f"levels[{index}].d", level.d, minimum=1
-                    ),
-                    O=_validate_exact_integer(
-                        f"levels[{index}].O", level.O, minimum=0
-                    ),
-                    P=_validate_probability(
-                        f"levels[{index}].P", level.P
-                    ),
-                )
-            )
-        W_ticks = _validate_exact_integer("W_ticks", W_ticks, minimum=0)
-        M = _validate_exact_integer("M", M, minimum=1)
-        N = _validate_exact_integer("N", N, minimum=1)
-        prep_units = _validate_exact_integer(
-            "prep_units", prep_units, minimum=1
+    Level 0 holds preparation_unit_count units that each inject a physical
+    state into a distance preparation_distance patch, one prepared state
+    every preparation_logical_cycles * preparation_distance rounds. Level l
+    consumes inputs_per_round states of level l - 1 per round and yields
+    outputs_per_round. A request at the top level pulls demand down the
+    chain; continuous mode also keeps buffer_capacity states at the top.
+    """
+
+    def __init__(self, collaborators: FactoryCollaborators):
+        self.engine = collaborators.engine
+        self.decode_service = collaborators.decode_service
+        self._read_card(collaborators.round_ticks, **collaborators.arguments)
+
+    def request(
+        self, operation_id: int, callback: Callable[[], None]
+    ) -> Ticket:
+        """Record the demand for a final state and pull the chain."""
+        request = (operation_id, callback)
+        self.waiting.append(request)
+        self._stall_start_by_operation_id[operation_id] = self.engine.now
+        top_counters = self.counters_by_level[len(self.levels)]
+        top_store = top_counters.stored_state_count
+        waiting_count = len(self.waiting)
+        self.engine.log(
+            log_sources.MAGIC_STATE_FACTORY,
+            f"op#{operation_id} requests a magic state "
+            f"(top-level store {top_store}, waiting {waiting_count})",
         )
-        prep_O = _validate_exact_integer("prep_O", prep_O, minimum=0)
-        prep_d = _validate_exact_integer("prep_d", prep_d, minimum=1)
-        prep_P = _validate_probability("prep_P", prep_P)
-        corr_rounds = _validate_exact_integer(
-            "corr_rounds", corr_rounds, minimum=0
-        )
-        self.production = production
-        self.buffer_capacity = buffer_capacity
-        self.engine = engine
-        self.levels = tuple(validated_levels)
-        self.L = len(self.levels)
-        self.M = M
-        self.N = N
-        self.prep_units = prep_units
-        self.prep_time = prep_O * prep_d * W_ticks
-        self.prep_P = prep_P
-        self._window_ticks = W_ticks
-        self._prep_O = prep_O
-        self._prep_d = prep_d
-        self.decode_service = decode_service
-        self.corr_rounds = corr_rounds
-        self.n_corr = n_corr
-        self._initialize_run_seed_state(seed)
-        self._init_multilevel_state(W_ticks)
+        self._start_work()
+        return Ticket(operation_id, request, self)
 
-        if production == "continuous":
-            self.engine.schedule(0, self._drive, label="factory_start")
-
-    def _init_multilevel_state(self, W_ticks: int) -> None:
-        """Initialize buffers, busy counts, counters, and round times."""
-        self.round_time = {
-            level: self.levels[level - 1].O * self.levels[level - 1].d * W_ticks
-            for level in range(1, self.L + 1)
-        }
-        self.buffer = {level: 0 for level in range(0, self.L + 1)}
-        self.busy = {level: 0 for level in range(0, self.L + 1)}
-        self.produced = {level: 0 for level in range(0, self.L + 1)}
-        self.failures = {level: 0 for level in range(0, self.L + 1)}
-        self.waiting: list[tuple[int, Callable[[], None]]] = []
-        self.total_stall = 0
-        self._stall_start: dict[int, int] = {}
-        self.peak_in_flight = 0
-        self._shutdown = False
+    def cancel(self, ticket: Ticket) -> bool:
+        """Withdraw an undelivered request; the others keep their order."""
+        if ticket.request not in self.waiting:
+            return False
+        self.waiting.remove(ticket.request)
+        self._stall_start_by_operation_id.pop(ticket.operation_id, None)
+        return True
 
     def shutdown(self) -> None:
-        """Stop the production loop."""
-        self._shutdown = True
+        """Stop the production loop; the program is complete."""
+        self._is_shut_down = True
 
-    def request(self, op_id: int, callback: Callable[[], None]) -> "Ticket":
-        """A gate asks for a final state; record demand and start producing."""
-        entry = (op_id, callback)
-        self.waiting.append(entry)
-        self._stall_start[op_id] = self.engine.now
-        self.engine.log("Factory",
-                        f"op#{op_id} requests a magic state "
-                        f"(top-level store {self.buffer[self.L]}, waiting {len(self.waiting)})")
-        self._drive()
-        return Ticket(op_id, entry, self)
+    def _read_card(
+        self,
+        round_ticks: int,
+        levels: list[DistillLevel],
+        *,
+        inputs_per_round: int = 15,
+        outputs_per_round: int = 1,
+        preparation_unit_count: int = 1,
+        preparation_logical_cycles: int = 2,
+        preparation_distance: int = 3,
+        preparation_success_probability: float = 1.0,
+        correction_round_count: int = 0,
+        correction_decode_count: int = 0,
+        seed: Optional[int] = None,
+        production_mode: str = "demand",
+        buffer_capacity: Optional[int] = None,
+    ) -> None:
+        """This row's own magic_state_factory keys, with their defaults.
 
-    def cancel(self, ticket: "Ticket") -> bool:
-        """Withdraw an undelivered request; FIFO order of the rest is preserved."""
-        if ticket.entry in self.waiting:
-            self.waiting.remove(ticket.entry)
-            self._stall_start.pop(ticket.op_id, None)
-            return True
-        return False
+        The preparation_logical_cycles of two and preparation_distance of
+        three are project coefficients: Silva et al. 2411.04270 Sec. II B
+        prices a level in logical cycles of its own distance but fixes
+        neither number for the physical injection stage.
+        """
+        self.levels = _checked_levels(levels)
+        checked_ticks = _checked_preparation_ticks(
+            preparation_logical_cycles, preparation_distance, round_ticks
+        )
+        checked_probability = _checked_probability(
+            "preparation_success_probability", preparation_success_probability
+        )
+        self.card = _MultiLevelCard(
+            inputs_per_round=inputs_per_round,
+            outputs_per_round=outputs_per_round,
+            preparation_unit_count=preparation_unit_count,
+            preparation_ticks=checked_ticks,
+            preparation_success_probability=checked_probability,
+            correction_round_count=correction_round_count,
+            correction_decode_count=correction_decode_count,
+            production_mode=production_mode,
+            buffer_capacity=buffer_capacity,
+        )
+        self._check_settings()
+        self._initialize_run_seed_state(seed)
+        self._reset_state(round_ticks)
+        self._schedule_continuous_start()
 
-    def _fulfil_core(self) -> None:
-        """Deliver a finished final state to a waiting request."""
-        while self.buffer[self.L] > 0 and self.waiting:
-            self.buffer[self.L] -= 1
-            op_id, callback = self.waiting.pop(0)
-            waited = self.engine.now - self._stall_start.pop(op_id, self.engine.now)
-            self.total_stall += waited
-            tag = "" if waited == 0 else f"  (supply stall {fmt(waited).strip()})"
-            self.engine.log("Factory", f"  -> delivered final state to op#{op_id}{tag}")
+    def _check_settings(self) -> None:
+        _check_production_mode(
+            self.card.production_mode, self.card.buffer_capacity
+        )
+        _check_decode_service(
+            self.decode_service, self.card.correction_decode_count
+        )
+        _check_count("inputs_per_round", self.card.inputs_per_round, minimum=1)
+        _check_count(
+            "outputs_per_round", self.card.outputs_per_round, minimum=1
+        )
+        _check_count(
+            "preparation_unit_count",
+            self.card.preparation_unit_count,
+            minimum=1,
+        )
+        _check_count(
+            "correction_round_count",
+            self.card.correction_round_count,
+            minimum=0,
+        )
+
+    def _schedule_continuous_start(self) -> None:
+        if self.card.production_mode == "continuous":
+            self.engine.schedule(0, self._start_work, label="factory_start")
+
+    def _reset_state(self, round_ticks: int) -> None:
+        self.round_ticks_by_level = {}
+        above_top_level = len(self.levels) + 1
+        for level in range(1, above_top_level):
+            settings = self.levels[level - 1]
+            self.round_ticks_by_level[level] = _round_ticks(
+                settings.logical_cycles_per_round,
+                settings.distance,
+                round_ticks,
+            )
+        # Level 0 is preparation; level l is self.levels[l - 1].
+        self.counters_by_level = {}
+        for level in range(0, above_top_level):
+            self.counters_by_level[level] = _LevelCounters()
+        self.waiting: list[tuple[int, Callable[[], None]]] = []
+        self.total_stall_ticks = 0
+        self._stall_start_by_operation_id: dict[int, int] = {}
+        self.peak_in_flight_count = 0
+        self._is_shut_down = False
+
+    def _deliver_to_waiting(self) -> None:
+        top_counters = self.counters_by_level[len(self.levels)]
+        while top_counters.stored_state_count > 0 and self.waiting:
+            top_counters.stored_state_count -= 1
+            operation_id, callback = self.waiting.pop(0)
+            waited_ticks = self._stall_ticks_of(operation_id)
+            self.total_stall_ticks += waited_ticks
+            tag = _stall_tag(waited_ticks)
+            self.engine.log(
+                log_sources.MAGIC_STATE_FACTORY,
+                f"  -> delivered final state to op#{operation_id}{tag}",
+            )
             callback()
 
-    def _drive(self) -> None:
-        """Pull engine: recompute demand top-down and start work each level can do."""
-        if self._shutdown:
+    def _stall_ticks_of(self, operation_id: int) -> int:
+        now = self.engine.now
+        started = self._stall_start_by_operation_id.pop(operation_id, now)
+        return now - started
+
+    def _start_work(self) -> None:
+        """Deliver what is ready, then start every round the demand allows."""
+        if self._is_shut_down:
             return
+        self._deliver_to_waiting()
+        has_progress = True
+        while has_progress:
+            demand_by_level = self._demand_by_level()
+            has_started_preparation = self._start_preparation(demand_by_level)
+            has_started_distillation = self._start_distillation(demand_by_level)
+            has_progress = has_started_preparation or has_started_distillation
+        total_busy_unit_count = 0
+        for counters in self.counters_by_level.values():
+            total_busy_unit_count += counters.busy_unit_count
+        self.peak_in_flight_count = max(
+            self.peak_in_flight_count, total_busy_unit_count
+        )
 
-        self._fulfil_core()
-        progress = True
-        while progress:
-            need = self._pull_demand()
-            prep_started = self._start_preparation_work(need)
-            distillation_started = self._start_distillation_work(need)
-            progress = prep_started or distillation_started
-        self.peak_in_flight = max(self.peak_in_flight, sum(self.busy.values()))
+    def _demand_by_level(self) -> dict:
+        """How many states each level must supply, top down."""
+        top_level = len(self.levels)
+        demand_by_level = {top_level: len(self.waiting)}
+        if self.card.production_mode == "continuous":
+            demand_by_level[top_level] += self.card.buffer_capacity
+        for level in range(top_level, 0, -1):
+            wanted_round_count = self._wanted_round_count(
+                level, demand_by_level[level]
+            )
+            input_level = level - 1
+            demand_by_level[input_level] = (
+                self.card.inputs_per_round * wanted_round_count
+            )
+        return demand_by_level
 
-    def _pull_demand(self) -> dict:
-        """Compute how many input states each level must supply."""
-        import math
+    def _wanted_round_count(self, level: int, demand: int) -> int:
+        """Rounds a level must run to cover a demand for its outputs."""
+        counters = self.counters_by_level[level]
+        in_progress_count = (
+            counters.busy_unit_count * self.card.outputs_per_round
+        )
+        committed_count = counters.stored_state_count + in_progress_count
+        deficit_count = demand - committed_count
+        if deficit_count <= 0:
+            return 0
+        fractional_round_count = deficit_count / self.card.outputs_per_round
+        return math.ceil(fractional_round_count)
 
-        need = {self.L: len(self.waiting)}
-        if self.production == "continuous":
-            need[self.L] += self.buffer_capacity
+    def _start_preparation(self, demand_by_level: dict) -> bool:
+        has_progress = False
+        counters = self.counters_by_level[0]
+        idle_unit_count = (
+            self.card.preparation_unit_count - counters.busy_unit_count
+        )
+        shortfall_count = demand_by_level[0] - counters.stored_state_count
+        shortfall_count -= counters.busy_unit_count
+        deficit_count = max(0, shortfall_count)
+        while deficit_count > 0 and idle_unit_count > 0:
+            counters.busy_unit_count += 1
+            self.engine.schedule(
+                self.card.preparation_ticks,
+                self._finish_preparation,
+                label="prep",
+            )
+            idle_unit_count -= 1
+            deficit_count -= 1
+            has_progress = True
+        return has_progress
 
-        for level in range(self.L, 0, -1):
-            deficit = max(
-                0,
-                need[level] - self.buffer[level] - self.busy[level] * self.N)
-            rounds = math.ceil(deficit / self.N) if deficit > 0 else 0
-            need[level - 1] = self.M * rounds
-        return need
+    def _start_distillation(self, demand_by_level: dict) -> bool:
+        has_progress = False
+        above_top_level = len(self.levels) + 1
+        for level in range(1, above_top_level):
+            has_started_rounds = self._start_level_rounds(
+                level, demand_by_level[level]
+            )
+            if has_started_rounds:
+                has_progress = True
+        return has_progress
 
-    def _start_preparation_work(self, need: dict) -> bool:
-        """Start level-0 preparation jobs if inputs are needed."""
-        progress = False
-        idle_units = self.prep_units - self.busy[0]
-        deficit = max(0, need[0] - self.buffer[0] - self.busy[0])
-
-        while deficit > 0 and idle_units > 0:
-            self.busy[0] += 1
-            self.engine.schedule(self.prep_time, self._prep_done, label="prep")
-            idle_units -= 1
-            deficit -= 1
-            progress = True
-        return progress
-
-    def _start_distillation_work(self, need: dict) -> bool:
-        """Start every distillation level that has inputs and idle units."""
-        progress = False
-        for level in range(1, self.L + 1):
-            if self._start_level_work(level, need):
-                progress = True
-        return progress
-
-    def _start_level_work(self, level: int, need: dict) -> bool:
-        """Start distillation rounds for one level."""
-        import math
-
-        progress = False
-        deficit = max(
-            0,
-            need[level] - self.buffer[level] - self.busy[level] * self.N)
-        rounds_wanted = math.ceil(deficit / self.N) if deficit > 0 else 0
-        idle_units = self.levels[level - 1].units - self.busy[level]
-
-        while rounds_wanted > 0 and idle_units > 0 and self.buffer[level - 1] >= self.M:
-            self.buffer[level - 1] -= self.M
-            self.busy[level] += 1
+    def _start_level_rounds(self, level: int, demand: int) -> bool:
+        has_progress = False
+        wanted_round_count = self._wanted_round_count(level, demand)
+        settings = self.levels[level - 1]
+        counters = self.counters_by_level[level]
+        idle_unit_count = settings.unit_count - counters.busy_unit_count
+        input_counters = self.counters_by_level[level - 1]
+        while wanted_round_count > 0 and idle_unit_count > 0:
+            if input_counters.stored_state_count < self.card.inputs_per_round:
+                break
+            input_counters.stored_state_count -= self.card.inputs_per_round
+            counters.busy_unit_count += 1
             self._start_round(level)
-            idle_units -= 1
-            rounds_wanted -= 1
-            progress = True
-        return progress
+            idle_unit_count -= 1
+            wanted_round_count -= 1
+            has_progress = True
+        return has_progress
 
     def _start_round(self, level: int) -> None:
-        """Begin one distillation round at a level."""
-        round_state = {"level": level, "phys": False, "decodes_left": 0, "done": False}
+        distillation_round = _DistillationRound(level)
         self.engine.schedule(
-            self.round_time[level],
-            lambda state=round_state: self._phys_done(state),
+            self.round_ticks_by_level[level],
+            lambda: self._finish_physical_round(distillation_round),
             label=f"distill_L{level}",
         )
 
-    def _phys_done(self, round_state: dict) -> None:
-        """Physical time elapsed; submit the correction decodes now. In
-        every factory the corrections start at the end of the physical
-        attempt, because measurement data exists only then."""
-        round_state["phys"] = True
-        if self.decode_service is not None and self.n_corr:
-            round_state["decodes_left"] = self.n_corr
-            level = round_state["level"]
-            for _ in range(self.n_corr):
-                self.decode_service.submit_decode(
-                    self.corr_rounds,
-                    on_done=lambda state=round_state: self._corr_done(state),
-                    label=f"MSF-corr-L{level}")
-        self._finish_round(round_state)
-
-    def _corr_done(self, round_state: dict) -> None:
-        """One correction decode returned."""
-        round_state["decodes_left"] -= 1
-        self._finish_round(round_state)
-
-    def _finish_round(self, round_state: dict) -> None:
-        """Produce the state once physical time and correction decodes are complete."""
-        if round_state["done"] or not round_state["phys"] or round_state["decodes_left"] > 0:
-            return
-        round_state["done"] = True
-        level = round_state["level"]
-        self.busy[level] -= 1
-        self._mark_stochastic_use()
-        if self._rng.random() < self.levels[level - 1].P:
-            self.buffer[level] += self.N
-            self.produced[level] += self.N
-            destination = "final state to core buffer" if level == self.L \
-                else f"level-{level} state to buffer"
-            self.engine.log("Factory",
-                            f"level {level} distilled a state ({destination}; "
-                            f"consumed {self.M} level-{level - 1} states)")
-        else:
-            self.failures[level] += 1
-            self.engine.log(
-                "Factory",
-                f"level {level} distillation failed (inputs discarded), retrying",
+    def _finish_physical_round(
+        self, distillation_round: "_DistillationRound"
+    ) -> None:
+        """Submit the correction decodes; measurement data exists only now."""
+        distillation_round.is_physically_done = True
+        if self.card.correction_decode_count:
+            distillation_round.remaining_decode_count = (
+                self.card.correction_decode_count
             )
-        self._drive()
+            level = distillation_round.level
+            on_done = functools.partial(
+                self._finish_correction_decode, distillation_round
+            )
+            for _ in range(self.card.correction_decode_count):
+                self.decode_service.enqueue_without_input(
+                    self.card.correction_round_count,
+                    on_done=on_done,
+                    label=f"MSF-corr-L{level}",
+                )
+        self._finish_round(distillation_round)
 
-    def _prep_done(self) -> None:
-        """A level-0 prepared state is ready; add it to the buffer."""
-        self.busy[0] -= 1
+    def _finish_correction_decode(
+        self, distillation_round: "_DistillationRound"
+    ) -> None:
+        distillation_round.remaining_decode_count -= 1
+        self._finish_round(distillation_round)
+
+    def _finish_round(self, distillation_round: "_DistillationRound") -> None:
+        """Yield the round's states once physical time and decodes are done."""
+        if distillation_round.is_done:
+            return
+        if not distillation_round.is_physically_done:
+            return
+        if distillation_round.remaining_decode_count > 0:
+            return
+        distillation_round.is_done = True
+        level = distillation_round.level
+        counters = self.counters_by_level[level]
+        counters.busy_unit_count -= 1
         self._mark_stochastic_use()
-        if self._rng.random() < self.prep_P:
-            self.buffer[0] += 1
-            self.produced[0] += 1
+        settings = self.levels[level - 1]
+        is_success = self._rng.random() < settings.success_probability
+        if is_success:
+            self._add_outputs(level)
         else:
-            self.failures[0] += 1
-        self._drive()
+            counters.failure_count += 1
+            self.engine.log(
+                log_sources.MAGIC_STATE_FACTORY,
+                f"level {level} distillation failed (inputs discarded), "
+                "retrying",
+            )
+        self._start_work()
+
+    def _add_outputs(self, level: int) -> None:
+        counters = self.counters_by_level[level]
+        counters.stored_state_count += self.card.outputs_per_round
+        counters.produced_count += self.card.outputs_per_round
+        destination = f"level-{level} state to buffer"
+        if level == len(self.levels):
+            destination = "final state to core buffer"
+        input_level = level - 1
+        consumed = self.card.inputs_per_round
+        self.engine.log(
+            log_sources.MAGIC_STATE_FACTORY,
+            f"level {level} distilled a state ({destination}; "
+            f"consumed {consumed} level-{input_level} states)",
+        )
+
+    def _finish_preparation(self) -> None:
+        counters = self.counters_by_level[0]
+        counters.busy_unit_count -= 1
+        self._mark_stochastic_use()
+        is_success = (
+            self._rng.random() < self.card.preparation_success_probability
+        )
+        if is_success:
+            counters.stored_state_count += 1
+            counters.produced_count += 1
+        else:
+            counters.failure_count += 1
+        self._start_work()
+
+
+_LATENCY_STAGES = ("distill", "corr_decode", "deliver", "total")
+
+
+class _CancellingFactory(Protocol):
+    """A factory a Ticket can withdraw its request from."""
+
+    def cancel(self, ticket: Ticket) -> bool: ...
+
+
+@dataclasses.dataclass
+class _LatencyTotals:
+    """Exact sums and maxima per latency stage over every delivery."""
+
+    delivered_count: int
+    sum_by_stage: dict
+    max_by_stage: dict
+
+
+@dataclasses.dataclass
+class _LevelCounters:
+    """The states in store, units busy, states made and rounds failed."""
+
+    stored_state_count: int = 0
+    busy_unit_count: int = 0
+    produced_count: int = 0
+    failure_count: int = 0
+
+
+@dataclasses.dataclass
+class _CorrectionBatch:
+    """The correction decodes one distilled state is waiting on."""
+
+    remaining_count: int
+    trace: StateTrace
+
+
+@dataclasses.dataclass
+class _DistillationRound:
+    """One distillation round in flight at one level."""
+
+    level: int
+    is_physically_done: bool = False
+    remaining_decode_count: int = 0
+    is_done: bool = False
+
+
+def _check_production_mode(
+    production_mode: str, buffer_capacity: Optional[int]
+) -> None:
+    if production_mode not in ("demand", "continuous"):
+        raise ValueError(
+            "production_mode must be 'demand' or 'continuous' "
+            f"(got {production_mode!r})"
+        )
+    if production_mode != "continuous":
+        return
+    if buffer_capacity is None or buffer_capacity < 1:
+        raise ValueError("continuous production needs buffer_capacity >= 1")
+
+
+def _check_decode_service(decode_service, correction_decode_count: int) -> None:
+    """Require one unambiguous correction-service disposition."""
+    if correction_decode_count < 0:
+        raise ValueError("correction_decode_count must be nonnegative")
+    if correction_decode_count == 0 and decode_service is not None:
+        raise ValueError(
+            "decode_service must be None when correction_decode_count is zero"
+        )
+    if correction_decode_count > 0 and decode_service is None:
+        raise ValueError(
+            "decode_service is required when correction_decode_count is "
+            "positive"
+        )
+
+
+def _check_count(name: str, value, *, minimum: int) -> None:
+    if value < minimum:
+        relation = "nonnegative"
+        if minimum == 1:
+            relation = "positive"
+        raise ValueError(f"{name} must be {relation}")
+
+
+def _checked_probability(name: str, value) -> float:
+    probability = float(value)
+    if not math.isfinite(probability) or not 0.0 <= probability <= 1.0:
+        raise ValueError(f"{name} must be finite and in [0, 1]")
+    return probability
+
+
+def _checked_levels(levels: list) -> tuple:
+    checked = []
+    for index, level in enumerate(levels):
+        _check_count(f"levels[{index}].unit_count", level.unit_count, minimum=1)
+        _check_count(f"levels[{index}].distance", level.distance, minimum=1)
+        logical_cycles = level.logical_cycles_per_round
+        if logical_cycles is None:
+            logical_cycles = _paper_logical_cycles(index)
+        _check_count(
+            f"levels[{index}].logical_cycles_per_round",
+            logical_cycles,
+            minimum=0,
+        )
+        success_probability = _checked_probability(
+            f"levels[{index}].success_probability", level.success_probability
+        )
+        checked_level = DistillLevel(
+            level.unit_count,
+            level.distance,
+            logical_cycles,
+            success_probability,
+        )
+        checked.append(checked_level)
+    return tuple(checked)
+
+
+def _paper_logical_cycles(level_index: int) -> int:
+    """Silva 2411.04270: 13 logical cycles at the first level, 15 above it."""
+    if level_index == 0:
+        return 13
+    return 15
+
+
+def _checked_preparation_ticks(
+    logical_cycles: int, distance: int, round_ticks: int
+) -> int:
+    _check_count("preparation_logical_cycles", logical_cycles, minimum=0)
+    _check_count("preparation_distance", distance, minimum=1)
+    _check_count("round_ticks", round_ticks, minimum=0)
+    return _round_ticks(logical_cycles, distance, round_ticks)
+
+
+def _round_ticks(logical_cycles: int, distance: int, round_ticks: int) -> int:
+    """The ticks one distillation round lasts: cycles times distance rounds."""
+    round_count = logical_cycles * distance
+    return round_count * round_ticks
+
+
+def _stall_tag(waited_ticks: int) -> str:
+    if waited_ticks == 0:
+        return ""
+    stall_text = config.format_ticks(waited_ticks)
+    stall_text = stall_text.strip()
+    return f"  (supply stall {stall_text})"
+
+
+@dataclasses.dataclass(frozen=True)
+class _DistillationCard:
+    """The numbers one 15-to-1 stage is priced by.
+
+    A component's card numbers are one member, the way a gem5 SimObject
+    carries its parameters in one params structure rather than one
+    attribute per number (src/python/m5/SimObject.py:204-205).
+    """
+
+    unit_count: int
+    attempt_ticks: int
+    correction_round_count: int
+    correction_decode_count: int
+    return_ticks: int
+    success_probability: float
+    production_mode: str
+    buffer_capacity: Optional[int]
+
+
+@dataclasses.dataclass(frozen=True)
+class _MultiLevelCard:
+    """The numbers the level chain and its preparation stage are priced by."""
+
+    inputs_per_round: int
+    outputs_per_round: int
+    preparation_unit_count: int
+    preparation_ticks: int
+    preparation_success_probability: float
+    correction_round_count: int
+    correction_decode_count: int
+    production_mode: str
+    buffer_capacity: Optional[int]

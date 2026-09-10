@@ -1,95 +1,130 @@
-"""Runtime belief-matching decoder adapter."""
+"""The belief-matching adapter: the strong tier's decoder on one window.
 
-from __future__ import annotations
+Belief propagation on the physical hyperedges, then matching on the
+graphlike edges with posterior weights: Higgott et al., beliefmatching's
+BeliefMatching.decode (.pydeps/beliefmatching/belief_matching.py:344-358).
+ldpc's BpDecoder gives the hyperedge posteriors, the window's projection
+maps them onto matching edges, PyMatching matches with -log(posterior)
+weights. The posterior clamp is 1e-15 here and 1e-14 there. Toshio et
+al. 2510.25222 run belief matching as the accurate decoder
+invoked on demand.
+"""
 
-from typing import TYPE_CHECKING
+from typing import Optional
 
-from ..window_decode_results import (
-    BackendDecodeStatus,
-    check_syndrome_size,
-    payload_syndrome,
-    result_from_selected_faults,
-)
-from ...message import DecodeResult, RunSeedChild, RunSeedPathSegment
-from ...detector_error_model.fault_model_contracts import (
-    FaultRepresentation,
-    LINKED_FAULT_MODELS_REQUIRED,
-)
-from .window_decoder import belief_matching_window_decoder
+import ldpc
+import numpy
+import pymatching
+import scipy.sparse
+import scipy.special
 
-if TYPE_CHECKING:
-    from ...message import DecodeJob
-    from ...protocols import Decoder
+import decsim.decoders.decoder as decoder_module
+import decsim.detector_error_model.fault_model_contracts as fault_models
+import decsim.records.decoding as decoding_records
+
+POSTERIOR_FLOOR = 1e-15
+POSTERIOR_CEILING = 1.0 - POSTERIOR_FLOOR
 
 
-class BeliefMatchingDecoder:
-    """Decode one hyperedge-bearing window with belief matching; simulated
-    latency comes from a latency model, or, with ``latency_model=None``, from
-    the measured wall clock of the BP-plus-matching call itself (software
-    decoder on this host, the PyMatchingDecoder pattern)."""
+class BeliefMatchingDecoder(decoder_module.WindowDecoderBase):
+    """Decode one hyperedge-bearing window with belief matching.
 
-    fault_model_requirement = LINKED_FAULT_MODELS_REQUIRED
+    Measured mode times the BP-plus-matching call only, never the
+    one-time BP build, the same contract as PyMatchingDecoder's warm-up.
+    """
 
-    def __init__(self, latency_model: "Optional[Decoder]" = None,
-                 max_iter: int = 30, bp_method: str = "product_sum"):
-        self.latency_model = latency_model
-        self.measures_wall_clock = latency_model is None
-        self.last_decode_ns = None
-        self._warmed_models: set = set()
-        self.max_iter = max_iter
-        self.bp_method = bp_method
-        self._inner = belief_matching_window_decoder(max_iter=max_iter, bp_method=bp_method)
-
-    def run_seed_children(self):
-        """Expose the latency model that controls simulated service time."""
-        return (
-            RunSeedChild(
-                (RunSeedPathSegment("field", "latency_model"),),
-                self.latency_model,
-            ),
+    fault_model_requirement = fault_models.LINKED_FAULT_MODELS_REQUIRED
+    fault_representation = fault_models.FaultRepresentation.GRAPHLIKE
+    missing_evidence_reasons = {
+        decoding_records.DecoderEvidence.FORCED_CLASS_WEIGHT: (
+            "belief matching matches on the posterior graph belief "
+            "propagation reweights, so its forced pair must be built on "
+            "that graph and not on the window's raw priors (Gidney et "
+            "al. arXiv:2312.04522 lines 843-846); that pair is not "
+            "built yet, and a gap from another graph is not this "
+            "decoder's confidence"
         )
+    }
 
-    def latency(self, job: "DecodeJob") -> int:
-        """Timing comes from the wrapped latency model."""
-        if self.measures_wall_clock:
-            raise RuntimeError("measured wall-clock timing needs the DecoderEngine: "
-                               "it decodes first and charges the measured time")
-        return self.latency_model.latency(job)
+    def __init__(
+        self,
+        latency_model: Optional[decoder_module.DecoderBase] = None,
+        max_iterations: int = 30,
+        belief_propagation_method: str = "product_sum",
+    ):
+        decoder_module.WindowDecoderBase.__init__(self, latency_model)
+        self.max_iterations = max_iterations
+        self.belief_propagation_method = belief_propagation_method
 
-    def decode(self, job: "DecodeJob") -> DecodeResult:
-        """Run real windowed belief-matching on the job's hyperedge-bearing window model."""
-        model = job.dem
-        if model is None:
-            return DecodeResult(job.op_id, job.window_id)
-        faults = model.require_faults(FaultRepresentation.GRAPHLIKE)
-        model.require_faults(FaultRepresentation.PHYSICAL)
-        if model.physical_to_graphlike_detector_projection is None:
+    def compile(self, faults, model) -> tuple:
+        """The model's BP decoder and sparse hyperedge-to-edge map, warm.
+
+        The first decode on a model builds ldpc's message-passing state;
+        one decode of the empty syndrome takes that outside the timed
+        call.
+        """
+        physical = model.require_faults(
+            fault_models.FaultRepresentation.PHYSICAL
+        )
+        projection = model.physical_to_graphlike_detector_projection
+        if projection is None:
             raise ValueError(
-                f"{job.label}: BeliefMatchingDecoder needs the physical-to-"
-                "graphlike link"
+                "belief matching needs the physical-to-graphlike link"
             )
-        syndrome = payload_syndrome(job)
-        check_syndrome_size(job, syndrome, faults)
-        decode_status = None
-        import time
-        if self.measures_wall_clock and id(model) not in self._warmed_models:
-            # measured mode times the BP-plus-matching call only, never the
-            # one-time window-model construction (validation, BP build), the
-            # same contract as PyMatchingDecoder's warm-up
-            import numpy as np
-            self._inner(model, np.zeros_like(np.asarray(syndrome)))
-            self._warmed_models.add(id(model))
-        started_ns = time.perf_counter_ns()
+        physical_check = scipy.sparse.csr_matrix(physical.check)
+        error_channel = list(physical.priors)
+        belief_propagation = ldpc.BpDecoder(
+            physical_check,
+            error_channel=error_channel,
+            max_iter=self.max_iterations,
+            bp_method=self.belief_propagation_method,
+            input_vector_type="syndrome",
+        )
+        projection = projection.astype(numpy.float64)
+        edge_from_hyperedge = scipy.sparse.csr_matrix(projection)
+        backend = (belief_propagation, edge_from_hyperedge)
+        detector_count = physical.check.shape[0]
+        empty_syndrome = numpy.zeros(detector_count, dtype=numpy.uint8)
+        self.decode_window(backend, model, faults, empty_syndrome)
+        return backend
+
+    def decode_window(self, backend, model, faults, syndrome):
+        """BP on the hyperedges, then a matching with posterior weights.
+
+        PyMatching raises on odd parity in a boundaryless component (see
+        the PyMatching adapter); that case is an empty correction marked
+        invalid.
+        """
+        del model
+        belief_propagation, edge_from_hyperedge = backend
+        edge_posteriors = _edge_posteriors(
+            belief_propagation, edge_from_hyperedge, syndrome
+        )
+        edge_weights = -numpy.log(edge_posteriors)
+        check = faults.check.copy()
+        matching = pymatching.Matching.from_check_matrix(
+            check, weights=edge_weights
+        )
         try:
-            selected = self._inner(model, syndrome)
-            self.last_decode_ns = time.perf_counter_ns() - started_ns
+            selected = matching.decode(syndrome)
         except ValueError as error:
-            self.last_decode_ns = time.perf_counter_ns() - started_ns
-            # PyMatching: odd parity in a boundaryless component, see mwpm
             if "perfect matching" not in str(error):
                 raise
-            import numpy as np
-            selected = np.zeros(faults.check.shape[1], dtype=np.uint8)
-            decode_status = BackendDecodeStatus.INVALID_CORRECTION
-        return result_from_selected_faults(job, model, faults, selected,
-                                           decode_status=decode_status)
+            fault_count = faults.check.shape[1]
+            empty = numpy.zeros(fault_count, dtype=numpy.uint8)
+            invalid = decoder_module.BackendDecodeStatus.INVALID_CORRECTION
+            return decoding_records.WindowDecode(empty, invalid)
+        correction = numpy.asarray(selected, dtype=numpy.uint8)
+        return decoding_records.WindowDecode(correction)
+
+
+def _edge_posteriors(belief_propagation, edge_from_hyperedge, syndrome):
+    """Run BP and map hyperedge posteriors onto matching-edge posteriors."""
+    belief_propagation.decode(syndrome)
+    log_likelihood_ratios = numpy.asarray(
+        belief_propagation.log_prob_ratios, dtype=float
+    )
+    log_likelihood_ratios = numpy.nan_to_num(log_likelihood_ratios, nan=0.0)
+    hyperedge_posteriors = scipy.special.expit(-log_likelihood_ratios)
+    edge_posteriors = edge_from_hyperedge @ hyperedge_posteriors
+    return numpy.clip(edge_posteriors, POSTERIOR_FLOOR, POSTERIOR_CEILING)

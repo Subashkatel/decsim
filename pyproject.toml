@@ -10,38 +10,53 @@ readme = "README.md"
 requires-python = ">=3.9"
 dependencies = []
 
+[project.scripts]
+decsim = "decsim.front.command:main"
+
 [project.optional-dependencies]
 stim = ["stim"]
 pymatching = ["pymatching"]
-experiments = ["stim", "pymatching", "numpy", "scipy", "matplotlib"]
-bb-experiments = ["quits==1.1.0", "relay-bp==0.2.2", "tesseract-decoder==0.1.1.dev20260802231159"]
+run = ["stim", "pymatching", "numpy", "scipy", "matplotlib"]
+bb-decoders = ["quits==1.1.0", "relay-bp==0.2.2", "tesseract-decoder==0.1.1.dev20260802231159"]
 
-# Flat layout: the decsim/ package sits at the repo root. Discover it (and its
-# subpackages decsim.adapters / decsim.frontends) from there. No package-dir remap.
+# Flat layout: the decsim/ package sits at the repo root. Discover it and every
+# subpackage (decsim.front, decsim.decoders, ...) from there. No package-dir
+# remap.
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["decsim*"]
 
-# (decsim.qpu.stimcircuits is Apache-2.0 / Oscar Higgott; the license must travel with it).
-[tool.setuptools.package-data]
-"decsim.qpu.stimcircuits" = ["LICENSE", "NOTICE.md"]
-
-# docs/ holds cloned third-party artifacts (e.g. the SWIPER repo) whose own
-# test suites must not be collected by our `python -m pytest -q` entry point.
+# tests/ is the whole suite, and the only place with tests: `python -m pytest
+# -q` collects it and nothing else. docs/ holds the four pages a reader
+# starts from (architecture, glossary, plug_in_a_component, reading_a_trace).
 [tool.pytest.ini_options]
-testpaths = ["tests", "experiments/tests"]
+testpaths = ["tests"]
+# pytest's own default skips any folder named "build" when it walks a
+# tree, which silently dropped tests/build/ from the suite; the list
+# below is that default without "build".
+norecursedirs = [".*", "*.egg", "_darcs", "CVS", "dist", "node_modules", "venv", "{arch}"]
 
-# The rewrite's style gate (REWRITE.md rule 7): Google Python style, 80
-# columns, Google docstrings. The one-action rule is checked separately by
-# tools/check_one_action.py.
+# The style gate (STYLE.md rule 9): Google Python style, 80
+# columns, Google docstrings. The one-action rule of rule 1 is checked
+# separately by tools/check_one_action.py.
 [tool.ruff]
 line-length = 80
 target-version = "py39"
-extend-exclude = [".pydeps", ".venv", "tmp", "archive", "decsim/qpu/stimcircuits/surface_code.py"]
+# tests/data holds the frozen QLX artifacts and the scripts that
+# produced them inside the QLX container. They are provenance, not
+# decsim code, and are kept exactly as they ran.
+extend-exclude = [
+    ".pydeps",
+    ".venv",
+    "tmp",
+    "archive",
+    "results",
+    "tests/data",
+]
 
 [tool.ruff.lint]
 # SIM is off on purpose: it asks for inline conditionals and merged
-# conditions, the opposite of REWRITE.md rule 1.
+# conditions, the opposite of STYLE.md rule 1.
 select = ["E", "W", "F", "N", "D", "B", "I", "UP", "ARG"]
 ignore = [
   "D105",  # magic methods need no docstring
@@ -56,10 +71,9 @@ ignore = [
 convention = "google"
 
 [tool.ruff.lint.isort]
-known-first-party = ["decsim", "experiments"]
+known-first-party = ["decsim", "tests"]
 
 [tool.ruff.lint.per-file-ignores]
 # A test module keeps its docstring (it names the source it checks
 # against); test functions and helper classes need none.
 "tests/**" = ["D101", "D102", "D103", "D104"]
-"experiments/tests/**" = ["D101", "D102", "D103", "D104"]

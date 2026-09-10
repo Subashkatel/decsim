@@ -1,16 +1,220 @@
-"""Code models used by planning, timing, and metrics.
+"""The code cards: the numbers the simulator needs from a QEC code.
 
-A code model is a small frozen card of numbers, not a stabilizer code:
-the simulator prices decoder timing, so all it needs from a QEC code is
-window sizes, decoding-graph size per round, and syndrome bandwidth.
-The numbers can be set by hand or taken from any upstream tool's captured
-output (e.g. a QLX decoder-params artifact); decsim itself never imports
-or requires such tools and runs standalone."""
+A card is a small frozen record, not a stabilizer code. The simulator
+prices decoder timing, so all it takes from a code is its distance, its
+window sizes, the size of the decoding graph per round, and the syndrome
+bits per round. The numbers can be set by hand or copied from an upstream
+tool's output; decsim never imports such a tool.
 
-from __future__ import annotations
+The rotated surface-code card follows Stim's generated
+``surface_code:rotated_memory_z`` circuit (Stim, src/stim/gen/
+gen_surface_code.cc): a distance-d patch has d*d data qubits and d*d - 1
+measure qubits, and every round reads out every measure qubit once. The
+bivariate-bicycle card follows Bravyi et al., High-threshold and
+low-overhead fault-tolerant quantum memory (Nature 627, 778, 2024; arXiv
+2308.07915): a [[n, k, d]] code whose round measures n/2 X checks and n/2
+Z checks, the [[144, 12, 12]] gross code by default.
+"""
 
-from dataclasses import dataclass
-from typing import Optional
+import dataclasses
+from typing import Optional, Protocol, runtime_checkable
+
+
+@runtime_checkable
+class CodeModel(Protocol):
+    """A code card: window sizes, cycle length, graph size, syndrome width."""
+
+    name: str
+    distance: int
+    window_floor_justification: Optional[str]
+
+    def rounds_per_logical_cycle(self) -> int:
+        """Syndrome rounds per logical cycle."""
+
+    def round_period_us(self) -> Optional[float]:
+        """The card's own round period, or None for the run's cadence."""
+
+    def commit_rounds(self) -> int:
+        """Rounds committed per decode window."""
+
+    def buffer_rounds(self) -> int:
+        """Look-ahead rounds per decode window."""
+
+    def buffering_floor(self) -> tuple[int, int]:
+        """The leading and trailing buffer rounds the code needs."""
+
+    def spatial_nodes(self, num_patches: int) -> int:
+        """The per-round graph size a latency model prices this card at."""
+
+    def syndrome_bits_per_round(self, num_patches: int) -> int:
+        """Syndrome bits one round of this many patches produces."""
+
+
+@dataclasses.dataclass(frozen=True)
+class SurfaceCodeModel:
+    """Timing and sizing card of one rotated surface-code patch.
+
+    A buffer below the (d, d) floor degrades windowed accuracy (Skoric et
+    al. 2209.08552; Tan et al., PRX Quantum 4, 040344). Running there on
+    purpose, as a sweep may, needs a written reason in
+    window_floor_justification, the way a free frame write does.
+    """
+
+    distance: int = 3
+    # None: the run's cadence.
+    round_microseconds: Optional[float] = None
+    # None: the distance.
+    commit_rounds_override: Optional[int] = None
+    buffer_rounds_override: Optional[int] = None
+    window_floor_justification: Optional[str] = None
+
+    def __post_init__(self) -> None:
+        round_microseconds = _optional_float(self.round_microseconds)
+        object.__setattr__(self, "round_microseconds", round_microseconds)
+        _check_justification(self.window_floor_justification)
+
+    @property
+    def name(self) -> str:
+        """The routing and readout identity of this card."""
+        return f"rotated surface code (d={self.distance})"
+
+    def rounds_per_logical_cycle(self) -> int:
+        """Syndrome rounds per logical cycle: the distance."""
+        return self.distance
+
+    def round_period_us(self) -> Optional[float]:
+        """The card's own round period, or None for the run's cadence."""
+        return self.round_microseconds
+
+    def commit_rounds(self) -> int:
+        """Rounds committed per decode window; the distance by default."""
+        if self.commit_rounds_override is not None:
+            return self.commit_rounds_override
+        return self.distance
+
+    def buffer_rounds(self) -> int:
+        """Look-ahead rounds per decode window; the distance by default."""
+        if self.buffer_rounds_override is not None:
+            return self.buffer_rounds_override
+        return self.distance
+
+    def buffering_floor(self) -> tuple[int, int]:
+        """The smallest leading and trailing buffers: (d, d)."""
+        return (self.distance, self.distance)
+
+    def spatial_nodes(self, num_patches: int) -> int:
+        """Per-round graph size for a latency model: d*d per patch, plus a seam.
+
+        A size knob, not the detector count: a rotated patch contributes
+        d*d - 1 detector nodes per round (Stim's bulk layer, read off
+        stim.Circuit.generated at d=3, 5 and 7 as 8, 24 and 48), one
+        fewer per patch than this returns. No shipped decoder row reads
+        the number; the reader is a caller-supplied latency function
+        (decoders/decoders.py FunctionLatencyDecoder), where the
+        difference is a scale factor and reaches no correction. The seam
+        strip is a heuristic for a multi-patch operation.
+        """
+        node_count_per_patch = self.distance * self.distance
+        seam_node_count = 0
+        if num_patches > 1:
+            seam_node_count = self.distance
+        patch_node_count = num_patches * node_count_per_patch
+        return patch_node_count + seam_node_count
+
+    def syndrome_bits_per_round(self, num_patches: int) -> int:
+        """Bits read out per round: the d*d - 1 stabilizers of every patch."""
+        qubit_count = self.distance * self.distance
+        stabilizer_count = qubit_count - 1
+        return num_patches * stabilizer_count
+
+
+@dataclasses.dataclass(frozen=True)
+class BivariateBicycleCodeModel:
+    """Timing and sizing card of one bivariate-bicycle CSS code.
+
+    One modeled round is one complete extraction cycle: n/2 X checks and
+    n/2 Z checks. The detector error model owns the exact window-local
+    detector rows.
+    """
+
+    qubit_count: int = 144
+    logical_qubit_count: int = 12
+    distance: int = 12
+    # None: the run's cadence.
+    round_microseconds: Optional[float] = None
+    commit_rounds_override: Optional[int] = None
+    buffer_rounds_override: Optional[int] = None
+    window_floor_justification: Optional[str] = None
+
+    def __post_init__(self) -> None:
+        _check_justification(self.window_floor_justification)
+        _require_positive_int(self.qubit_count, "qubit_count")
+        _require_positive_int(self.logical_qubit_count, "logical_qubit_count")
+        _require_positive_int(self.distance, "distance")
+        if self.qubit_count % 2:
+            raise ValueError(
+                f"qubit_count must be even; got {self.qubit_count!r}"
+            )
+        if self.logical_qubit_count > self.qubit_count:
+            raise ValueError(
+                "logical_qubit_count must not exceed qubit_count; got "
+                f"logical_qubit_count={self.logical_qubit_count!r}, "
+                f"qubit_count={self.qubit_count!r}"
+            )
+        if self.distance > self.qubit_count:
+            raise ValueError(
+                "distance must not exceed qubit_count; got "
+                f"distance={self.distance!r}, qubit_count={self.qubit_count!r}"
+            )
+        if self.commit_rounds_override is not None:
+            _require_positive_int(
+                self.commit_rounds_override, "commit_rounds_override"
+            )
+        has_buffer_override = self.buffer_rounds_override is not None
+        if has_buffer_override and self.buffer_rounds_override < 0:
+            raise ValueError("buffer_rounds_override must be nonnegative")
+        round_microseconds = _optional_float(self.round_microseconds)
+        object.__setattr__(self, "round_microseconds", round_microseconds)
+
+    @property
+    def name(self) -> str:
+        """The routing and readout identity of this card."""
+        return (
+            f"bivariate-bicycle code [[{self.qubit_count},"
+            f"{self.logical_qubit_count},{self.distance}]]"
+        )
+
+    def rounds_per_logical_cycle(self) -> int:
+        """Syndrome rounds per logical cycle: the distance."""
+        return self.distance
+
+    def round_period_us(self) -> Optional[float]:
+        """The card's own round period, or None for the run's cadence."""
+        return self.round_microseconds
+
+    def buffering_floor(self) -> tuple[int, int]:
+        """No buffering floor: (0, 0)."""
+        return (0, 0)
+
+    def commit_rounds(self) -> int:
+        """Rounds committed per decode window; the distance by default."""
+        if self.commit_rounds_override is None:
+            return self.distance
+        return self.commit_rounds_override
+
+    def buffer_rounds(self) -> int:
+        """Look-ahead rounds per decode window; none by default."""
+        if self.buffer_rounds_override is None:
+            return 0
+        return self.buffer_rounds_override
+
+    def spatial_nodes(self, num_patches: int) -> int:
+        """Per-round graph size for a latency model: n per patch."""
+        return num_patches * self.qubit_count
+
+    def syndrome_bits_per_round(self, num_patches: int) -> int:
+        """Bits read out per round: the n X-plus-Z checks of every patch."""
+        return num_patches * self.qubit_count
 
 
 def _require_positive_int(value, field_name: str) -> None:
@@ -18,152 +222,17 @@ def _require_positive_int(value, field_name: str) -> None:
         raise ValueError(f"{field_name} must be positive; got {value!r}")
 
 
-def _check_round_us(value) -> Optional[float]:
+def _optional_float(value) -> Optional[float]:
     if value is None:
         return None
     return float(value)
 
 
 def _check_justification(value) -> None:
-    if value is not None and (not isinstance(value, str) or not value.strip()):
-        raise ValueError("window_floor_justification must be a non-empty string or None")
-
-
-@dataclass(frozen=True)
-class SurfaceCodeModel:
-    """Rotated surface-code timing and sizing model."""
-
-    d: int = 3                                   # code distance
-    round_us: Optional[float] = None             # per-code round period; None = global cadence
-    commit_rounds_override: Optional[int] = None  # window commit size; None = d
-    buffer_rounds_override: Optional[int] = None  # window look-ahead size; None = d
-    # A buffer below the (d, d) floor degrades windowed accuracy (Skoric
-    # 2209.08552, Tan PRX Quantum 4, 040344); running there deliberately, as a
-    # sweep may, needs a written reason, the way a zero frame commit cost does.
-    window_floor_justification: Optional[str] = None
-
-    def __post_init__(self) -> None:
-        """Normalize the optional per-code cadence."""
-        object.__setattr__(self, "round_us", _check_round_us(self.round_us))
-        _check_justification(self.window_floor_justification)
-
-    @property
-    def name(self) -> str:
-        """Stable routing and readout identity for this code card."""
-        return f"rotated surface code (d={self.d})"
-
-    @property
-    def distance(self) -> int:
-        """Code distance d (errors up to ~d/2 are corrected)."""
-        return self.d
-
-    def rounds_per_logical_cycle(self) -> int:
-        """Syndrome rounds per logical cycle."""
-        return self.d
-
-    def round_period_us(self) -> Optional[float]:
-        return self.round_us
-
-    def commit_rounds(self) -> int:
-        """Rounds committed per decode window (commit_rounds_override, else d)."""
-        return self.commit_rounds_override if self.commit_rounds_override is not None else self.d
-
-    def buffer_rounds(self) -> int:
-        """Look-ahead buffer rounds per window (buffer_rounds_override, else d)."""
-        return self.buffer_rounds_override if self.buffer_rounds_override is not None else self.d
-
-    def buffering_floor(self) -> tuple[int, int]:
-        """Return the minimum leading and trailing buffers: ``(d, d)``."""
-        return (self.d, self.d)
-
-    def spatial_nodes(self, num_patches: int) -> int:
-        """Bulk timing proxy with a heuristic d-node multi-patch seam strip."""
-        return num_patches * self.d * self.d + (
-            self.d if num_patches > 1 else 0
+    if value is None:
+        return
+    is_text = isinstance(value, str)
+    if not is_text or not value.strip():
+        raise ValueError(
+            "window_floor_justification must be a non-empty string or None"
         )
-
-    def syndrome_bits_per_round(self, num_patches: int) -> int:
-        """Syndrome bits measured per round: the d^2 - 1 stabilizers of a
-        rotated surface-code patch."""
-        return num_patches * (self.d * self.d - 1)
-
-
-@dataclass(frozen=True)
-class BBCodeModel:
-    """Timing model for a bivariate-bicycle CSS code.
-
-    One modeled syndrome round is one complete extraction cycle measuring
-    ``n/2`` X checks and ``n/2`` Z checks. Exact window-local detector rows
-    remain owned by the detector error model.
-    """
-
-    n: int = 144                     # physical qubits
-    k: int = 12                      # logical qubits
-    d: int = 12                      # code distance
-    round_us: Optional[float] = None  # per-code round period; None = global cadence
-    commit_rounds_override: Optional[int] = None
-    buffer_rounds_override: Optional[int] = None
-    window_floor_justification: Optional[str] = None
-
-    def __post_init__(self) -> None:
-        """Validate the built-in BB timing and sizing card."""
-        _check_justification(self.window_floor_justification)
-        for field_name in ("n", "k", "d"):
-            _require_positive_int(getattr(self, field_name), field_name)
-        if self.n % 2:
-            raise ValueError(f"n must be even; got {self.n!r}")
-        if self.k > self.n:
-            raise ValueError(f"k must not exceed n; got k={self.k!r}, n={self.n!r}")
-        if self.d > self.n:
-            raise ValueError(f"d must not exceed n; got d={self.d!r}, n={self.n!r}")
-        if self.commit_rounds_override is not None:
-            _require_positive_int(
-                self.commit_rounds_override, "commit_rounds_override"
-            )
-        if self.buffer_rounds_override is not None and self.buffer_rounds_override < 0:
-            raise ValueError("buffer_rounds_override must be nonnegative")
-        object.__setattr__(self, "round_us", _check_round_us(self.round_us))
-
-    @property
-    def name(self) -> str:
-        """Stable routing and readout identity for this code card."""
-        return f"bivariate-bicycle code [[{self.n},{self.k},{self.d}]]"
-
-    @property
-    def distance(self) -> int:
-        """Configured code distance."""
-        return self.d
-
-    def rounds_per_logical_cycle(self) -> int:
-        """Logical cycle modeled as d syndrome rounds."""
-        return self.d
-
-    def round_period_us(self) -> Optional[float]:
-        return self.round_us
-
-    def buffering_floor(self) -> tuple[int, int]:
-        return (0, 0)
-
-    def commit_rounds(self) -> int:
-        """Rounds committed per decode window."""
-        return (
-            self.d
-            if self.commit_rounds_override is None
-            else self.commit_rounds_override
-        )
-
-    def buffer_rounds(self) -> int:
-        """Look-ahead buffer rounds per window."""
-        return (
-            0
-            if self.buffer_rounds_override is None
-            else self.buffer_rounds_override
-        )
-
-    def spatial_nodes(self, num_patches: int) -> int:
-        """Combined check count used as a bulk timing proxy."""
-        return num_patches * self.n
-
-    def syndrome_bits_per_round(self, num_patches: int) -> int:
-        """Raw X-plus-Z check bits measured per modeled round."""
-        return num_patches * self.n

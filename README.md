@@ -1,125 +1,124 @@
 # decsim
 
 decsim is a discrete-event simulator for the classical control and decoding
-path of a quantum error corrected computer. You describe one system
-configuration, run a workload through it, and measure reaction time and
-logical error rate.
+path of a quantum error corrected computer. You describe one system, run a
+workload through it, and measure the reaction time and the logical error
+rate the system achieves.
 
-The simulated path is the full loop: QPU rounds, controller readout, links,
-syndrome buffer, window creation, decoder memory, decoder units, and the
-Pauli frame. Every hop charges its configured latency and bandwidth, so you
-can ask where time goes and which component limits the reaction time.
-Decoding is real: windows of a Stim circuit are decoded by PyMatching,
-BP-OSD, belief matching, union find, Relay-BP, or Tesseract. Timing-only
-runs skip the data path and charge modeled latencies instead.
+The simulated path is the whole loop: QPU rounds, controller readout,
+links, the syndrome buffers, window creation, decoder memory, decoder
+units, the Pauli frame, and the instruction back to the QPU. Every hop
+charges its configured latency and bandwidth, so a run says where the time
+went and which component set the reaction time. Decoding is real: windows
+of a Stim circuit are decoded by PyMatching, BP-OSD, belief matching, union
+find, Relay-BP or Tesseract. A timing-only run skips the data path and
+charges modeled latencies instead.
 
-## Requirements
+## Install
 
-- Python 3.9 or newer. The core package imports no third-party libraries.
-- Runs on real syndrome data need the `experiments` extra:
+Python 3.9 or newer, and the `run` extra: the root imports Stim, and a
+run on real syndrome data needs PyMatching, numpy, scipy and matplotlib
+as well.
 
 ```bash
-python -m pip install -e ".[experiments]"
+python -m pip install -e ".[run]"
 ```
 
-## Quickstart
+The `bb-decoders` extra adds the three optional backends (Relay-BP,
+Tesseract, BP-OSD through quits); each one is one row of a table and
+nothing else needs it.
 
-A run is one `RunSpec` handed to `simulate`. Every field has a default;
-you set only what you study. This timing-only run needs no dependencies:
+## Run one shot
+
+A run is one `Machine`, built from one `MachineSettings`, run once. The
+settings come from a yaml file, which is decsim's config script, or from
+Python directly.
+
+```bash
+decsim run configs/reference.yaml --seed 0 --trace
+```
+
+The same thing from Python is a build and a run:
 
 ```python
-from decsim import RunSpec, simulate, PerRoundDecoder, cnot_plus_two_t_circuit, fmt
+from decsim.front.experiment import load_experiment
+from decsim.machine import Machine
 
-completed = simulate(RunSpec(
-    ops=cnot_plus_two_t_circuit(),
-    decoder=PerRoundDecoder(tau_us=1.0)))
-print("workload done at", fmt(completed.result.fully_done_ticks))
+experiment = load_experiment("configs/reference.yaml")
+settings = experiment.point_settings(
+    physical_error_probability=0.001, distance=3, round_period_us=1.0
+)
+result = Machine.build(settings, seed=0).run()
 ```
 
-```
-workload done at  79.850 us
-```
-
-To decode real data, give the operation a Stim circuit and pick a device
-and a decoder:
-
-```python
-import stim
-
-from decsim import PresetLatencyDecoder, RunSpec, simulate
-from decsim.decoders.mwpm.decoder import PyMatchingDecoder
-from decsim.message import Operation
-from decsim.qpu.round_policies import FixedRounds
-from decsim.qpu.stim_device import StimDevice
-
-circuit = stim.Circuit.generated(
-    "surface_code:rotated_memory_z", distance=3, rounds=9,
-    after_clifford_depolarization=0.003,
-    before_round_data_depolarization=0.003,
-    before_measure_flip_probability=0.003,
-    after_reset_flip_probability=0.003)
-operation = Operation(id=1, name="memory", qubits=(0,), patches=(0,),
-                      circuit=circuit)
-
-completed = simulate(RunSpec(
-    ops=[operation], d=3, rounds_policy=FixedRounds(9),
-    device=StimDevice(), decoder=PyMatchingDecoder(PresetLatencyDecoder(1.0)),
-    seed=0))
-
-outcome = completed.result.operation_results[0]
-print("prediction:", outcome.logical_observables)
-print("truth:     ", outcome.observable_truth)
-print("failure:   ", outcome.logical_failure)
-```
-
-The device samples the circuit, streams raw measurements round by round,
-and the run decodes them in sliding windows. `outcome.logical_failure`
-compares the prediction against the sampled truth; count failures over
-seeds to estimate a logical error rate. To charge each decode's measured
-wall clock instead of a fixed latency, wrap `PyMatchingDecoder()` in a
-`DecoderEngine`.
-
-`completed.result` is the immutable outcome (timing, per-operation logical
-results, link traffic, metric values). `completed` also carries the runtime
-owners (`window_manager`, `decoder_manager`, `controller`, `qpu`, ...) for
+`result` is the immutable outcome: how the run ended and when, one logical
+result per operation, the link traffic per path and, when the observation
+section asked for it, the data movement. The `Machine` keeps its components
+(`qpu`, `controller`, `window_manager`, `decoder_manager`, `pauli_frame`) for
 inspection after the run.
 
-## Configure a run
+A yaml describes a sweep, so one point of it names one machine.
+`configs/reference.yaml` documents every key the yaml layer reads, section
+by section, and `decsim show configs/reference.yaml` prints what a yaml
+resolves to without running anything.
 
-Each `RunSpec` field selects one component. A field left `None` takes the
-default. `resolve_run_configuration` in `decsim/run_configuration.py`
-applies every default and validates the combination in one place.
+To build a machine with no yaml at all, set only the fields you study;
+every settings record has a default. Each package's settings module
+holds one table per pluggable part it owns, and the `kind` in a settings
+record is a row of it.
 
-| To change | Pass | Options in |
-| --- | --- | --- |
-| Code and distance | `d=` or `code=` or `layout=` (at most one; default surface code, d=3) | `decsim/qpu/code_geometry.py` |
-| Windowing scheme | `scheme=` (default sliding) | `decsim/windows/windowing_schemes.py` |
-| Decoder | `decoder=`, per-code `decoders=`, or `router=` | `decsim/decoders/` |
-| Decoder count and memory | `num_units=`, `decoder_memory=` | `decsim/decoders/decoder_memory.py` |
-| Rounds per operation | `rounds_policy=` (default gate rounds) | `decsim/qpu/round_policies.py` |
-| Link latency and bandwidth | `links=` (default `logical_reference_profile()`) | `decsim/links/link_profiles.py` |
-| Round period and controller costs | `timing=TimingConfig(...)` | `decsim/config.py` |
-| Syndrome source | `device=` (timing-only, syndrome bits, or Stim sampling) | `decsim/qpu/` |
-| Pauli frame commit cost | `pauli_frame=PauliFrameConfig(...)` | `decsim/pauli_frame/pauli_frame.py` |
-| Reproducibility | `seed=` (one root seed drives every component) | `decsim/seeding.py` |
+## Run one sweep
 
-## Package layout
+```bash
+decsim collect configs/weak_ler.yaml --processes 8
+decsim collect configs/weak_ler.yaml --shard 0/4
+decsim combine results/<first> results/<second>
+decsim plot results/<run> --figure timeline
+decsim plot results/<run> --figure ler_vs_d --probability 0.001
+decsim trace follow results/<run>/trace/<shot>.trace.json --round 1:1
+```
 
-- `run_spec.py`, `run_configuration.py`: composition root; `simulate(RunSpec(...))` is the one entry point.
-- `engine.py`: the discrete-event core (integer ticks, 1 tick = 1e-6 us).
-- `message.py`, `protocols.py`: the typed objects that flow between components, and the Protocol seams a custom component implements.
-- `qpu/`: codes and layouts, round policies, cycle clock, Stim devices, magic-state factories.
-- `controller/`: readout handling, detector formation at ingress, feedback streams.
-- `links/`: link cards with latency, bandwidth, and traffic accounting per path.
-- `syndrome_buffer/`: upstream round retention with explicit backpressure.
-- `windows/`: window manager and the windowing schemes (sliding, parallel, sandwich, naive).
-- `detector_error_model/`: slices the whole-circuit detector error model into per-window models.
-- `decoders/`: manager, engine stages (fetch, algorithm, release), and the six backends.
-- `pauli_frame/`, `observe/`: frame commit, conditional release, and run metrics.
-- `frontends/`: workload builders that produce `Operation` lists.
+`configs/weak_ler.yaml` is the real thing: 35 points and 10.4 million
+shots, sized for a Slurm array, and its own header says how to launch
+one. For a smoke run take `configs/reference.yaml`, whose sweep is two
+shots at one point.
 
-To add your own decoder, scheme, or policy, implement the matching Protocol
-in `decsim/protocols.py` and pass the instance to `RunSpec`.
+`collect` runs every point of the sweep and writes a run folder.
+`--processes` gives each worker one task, `--shard i/n` gives one Slurm
+array task its share of the work units, and `--shots-per-unit` sets how
+many shots a unit is: a smaller unit trades the per-task window-model
+cache for shards that fit a time limit. `combine` folds the shards of one
+sweep into one folder's rows. `plot` draws one figure from a run
+folder; `ler_vs_d` reads one probability out of the sweep, so it asks
+for `--probability`.
+
+## Where the output lands
+
+Under `results/`, one folder per collect, which is gem5's `m5out/`: it is
+output and is not tracked. A run folder holds the facts that add up, and
+every summary is derived from them when it is read.
+
+| File | One row per |
+| --- | --- |
+| `shots.csv` | shot: its scalars, and each latency point's mean and max over that shot's windows |
+| `shot_links.csv` | shot per link: that shot's own ledger counters |
+| `window_samples.csv` | point, latency point and distinct microsecond value: how many windows carried it, which is where a median and a p99 come from |
+| `latency_samples.csv` | window of a timing run: the sample a wall-clock decoder measured |
+| `sweep.csv` | sweep point, summarized from the rows above |
+| `links.csv` | sweep point per link, averaged over the point's shots |
+| `manifest.json` | the run: the resolved config, the git state, the library versions, how it was invoked |
+| `trace/<shot>.trace.json` | traced shot: its Chrome trace |
+| `*.png` | figure `decsim plot` drew (`timeline`, `stage_breakdown`, `latency`, `ler_vs_d`) |
+
+## Where to look next
+
+- `docs/architecture.md`: the components in pipeline order, and the port
+  each hands the next through.
+- `docs/plug_in_a_component.md`: how to add your own decoder, link, store
+  or window scheme.
+- `docs/glossary.md`: what the papers call the names this code uses.
+- `docs/reading_a_trace.md`: how to open a trace and what is in it.
+- `STYLE.md`: the rules every line of this package is written to.
 
 ## Run the tests
 

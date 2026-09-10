@@ -1,0 +1,639 @@
+# The reference config: every key the yaml layer reads, in one runnable file,
+# and the one home of the yaml surface's documentation: the shipped baselines
+# stay comment-light and point here.
+# Values here are the defaults the two shipped baselines
+# (weak_decoder_baseline.yaml, strong_decoder_baseline.yaml) share; the tiny
+# sweep makes this file cheap to run, so the test suite runs it as a smoke check.
+#
+# One section per component; a pluggable component's section carries a
+# `kind` key naming a row of a table in that package's settings module,
+# and each section is read by the package it configures (its
+# settings.py). Kept honest by tests/front/test_yaml_surface.py:
+# the test fails if this file and the readers drift apart. Knobs the yaml
+# cannot reach are Python objects on the settings records: multi-op
+# workloads, dynamic streams, routers, escalation families, schedulers,
+# devices, policies, magic state factories.
+
+qpu:
+  kind: stim_device                # stim_device | timing_only | syndrome_bits
+                                   # | recorded_stim: what the QPU reads out
+                                   # each round. stim_device samples the
+                                   # workload's circuit (real detector data);
+                                   # the sweep sets the distance and the round
+                                   # period
+
+escalation:
+  kind: weak_baseline              # weak_baseline | strong_only | switching.
+                                   # strong_only wakes windows from syndrome
+                                   # buffer 1, moves inputs on
+                                   # strong_buffer_to_strong_decoder, results
+                                   # on strong_decoder_to_frame. switching adds
+                                   # the keys below (refused for any other
+                                   # kind, so they are documented as comments;
+                                   # switching_validation.yaml runs them):
+# escalation:
+#   kind: switching
+#   confidence: complementary_gap  # complementary_gap | cluster_gap: the signal
+#                                  # the weak tier reports and the threshold
+#                                  # decides on, in natural-log weight either
+#                                  # way. complementary_gap decodes the window
+#                                  # twice, each solve pinned to one logical
+#                                  # class, and subtracts the two weights
+#                                  # (Toshio 2510.25222 Sec. III A), so it needs
+#                                  # a weak decoder that minimises weight inside
+#                                  # a class: pymatching and
+#                                  # unweighted_pymatching today. cluster_gap
+#                                  # decodes the window once and walks the
+#                                  # growth that decode did (Meister 2405.07433
+#                                  # Algorithm 2), so it needs a cluster-based
+#                                  # decoder: union_find today. The pairing is
+#                                  # refused by name at load when the weak row's
+#                                  # decode cannot produce the signal's evidence.
+#                                  # A signal's own computation is charged on
+#                                  # the weak unit that produced the evidence
+#                                  # (decision D8)
+#   confidence_walk_microseconds: 12.0  # what the signal's own computation
+#                                  # costs on the weak unit, priced as a card
+#                                  # the way a decoder tier is. null, the
+#                                  # default, leaves each row on its own cost
+#                                  # model: complementary_gap subtracts two
+#                                  # numbers the decodes already reported and
+#                                  # charges nothing, cluster_gap measures its
+#                                  # walk on the host clock the way a measured
+#                                  # decoder is, so a run with it reports a
+#                                  # longer weak service. A number is charged
+#                                  # once per window on the unit that produced
+#                                  # the evidence; negative or not a number is
+#                                  # refused by name
+#   gap_threshold_db: 20.0         # keep the weak result when its complementary
+#                                  # gap is at or above this, in the paper's
+#                                  # decibels (Toshio 2510.25222 gth = 20 dB).
+#                                  # threshold_source table computes the value
+#                                  # instead and refuses this key
+#   threshold_source: fixed        # fixed | table | online. fixed uses
+#                                  # gap_threshold_db as given. table looks the
+#                                  # sweep point up in an offline calibration csv
+#                                  # and refuses uncalibrated points. online
+#                                  # starts at gap_threshold_db and adapts it
+#                                  # across the point's shots (serial only)
+#   threshold_table: cal.csv       # table only: calibrate_threshold.py's
+#                                  # calibration_table.csv (one row per d and p,
+#                                  # thresholds in dB), path relative to this
+#                                  # config file. Calibrate for this run's
+#                                  # window geometry; thresholds do not transfer
+#                                  # between geometries
+#   threshold_column: gth_eq4_wilson  # table only: which computed column;
+#                                  # gth_brute_force | gth_eq4 | gth_eq4_wilson
+#                                  # (default: the Wilson-conservative one)
+#   online:                        # online only; defaults are the validated
+#                                  # drift-replay configuration
+#     target_escalation_rate: 1e-3 # the rate tracker's starting duty target
+#     step_db: 0.25                # threshold step per window (adaptive
+#                                  # conformal recursion, arXiv:2106.00170)
+#     audit_rate: 0.01             # fraction of KEPT windows strong-decoded
+#                                  # anyway for ground truth (set-dueling's
+#                                  # sampler sets; breaks the selective-labels
+#                                  # bias)
+#     kept_bad_budget: 2e-4        # budget on P(weak revised AND kept); one
+#                                  # blown audit doubles the target, and only
+#                                  # ceil(3/budget) consecutive clean audits
+#                                  # halve it back (rule of three)
+#     adjust_factor: 2.0           # the raise/relax multiplier
+#     min_escalation_rate: 1e-5    # the target's floor
+#     max_escalation_rate: 0.30    # the target's cap: the Theorem 1 backlog
+#                                  # bound on strong duty
+#   run_both_at_once: false        # Toshio 2510.25222 Sec. III A Step 1 (lines
+#                                  # 598-600): the strong decoder starts with the
+#                                  # weak one on the same syndrome and is cancelled
+#                                  # when the weak result is confident. false, the
+#                                  # default, is the same section's on-demand
+#                                  # variant (lines 631-640): the strong decode
+#                                  # starts at the verdict, after the
+#                                  # weak_decoder_to_strong_decoder hop, which the
+#                                  # paper expects to cost little because the
+#                                  # switching rate decays with the code distance
+#   strong_window: two_sided_context  # two_sided_context | forward |
+#                                  # near_seam_pinned | forward_seam_pinned:
+#                                  # the shape
+#                                  # of the window the strong tier re-decodes
+#                                  # (STRONG_WINDOW_SHAPES in
+#                                  # escalation/strong_window_shapes.py).
+#                                  # two_sided_context, the default, re-decodes
+#                                  # the escalated window's commit region with
+#                                  # one buffer of raw context on each side and
+#                                  # escalates serially, with Held boundaries;
+#                                  # that geometry is decsim's own, since
+#                                  # discarding the weak result unpins the past
+#                                  # face (Skoric 2209.08552 line 388, Tan
+#                                  # 2209.09219 line 1021). forward is the
+#                                  # paper's Sec. III C scheme: the weak chain
+#                                  # keeps committing past an escalated strong
+#                                  # window, which absorbs the windows it
+#                                  # covers and re-slices the one past it.
+#                                  # near_seam_pinned commits the same rounds
+#                                  # as two_sided_context and pins its past
+#                                  # face on the earlier neighbour's committed
+#                                  # correction: the input carries
+#                                  # d(e + kappa) on the seam layer (Bombin
+#                                  # 2303.04846 lines 775-788) and the row
+#                                  # reads no round behind its commit region,
+#                                  # since a fixed boundary condition needs no
+#                                  # buffer (lines 1456-1458). Its open future
+#                                  # face keeps one buffer region, which is
+#                                  # Bombin's b >= d (lines 850-852) when
+#                                  # windows.buffer_rounds is the distance.
+#                                  # forward_seam_pinned is the paper's
+#                                  # Sec. III C as it is stated: the same
+#                                  # r_com + 2 r_buf extent as forward, read
+#                                  # with no context, its near face pinned on
+#                                  # the window before it and its far face on
+#                                  # the restart window's weak commit (Toshio
+#                                  # 2510.25222 lines 1248-1259). It absorbs
+#                                  # the windows it covers as forward does,
+#                                  # needs restart_reread_buffer_regions 0
+#                                  # (refused otherwise), and reads one buffer
+#                                  # region of raw context on a near face that
+#                                  # no committed correction closes
+#   restart_reread_buffer_regions: 0  # forward window only (refused with
+#                                  # forward_seam_pinned, whose far pin needs
+#                                  # 0): how many of the
+#                                  # strong region's buffer regions the
+#                                  # restarted weak window re-reads. 0 is the
+#                                  # paper (Toshio 2510.25222 Sec. III C lines
+#                                  # 1241-1246, Fig. 12): the weak decoder
+#                                  # resumes on the commit plus buffer rounds
+#                                  # stored after the strong region and reads
+#                                  # nothing inside it, and the restart window
+#                                  # owns the faults of the rounds it reads.
+#                                  # 1 re-reads one buffer region of the strong
+#                                  # region as the restart window's far
+#                                  # boundary, and the strong region keeps the
+#                                  # crossing faults; it costs Buffer 0 one
+#                                  # more buffer region per bounded window
+#                                  # The complementary gap is two solves of
+#                                  # one window, each pinned to one logical
+#                                  # class, submitted at one instant as two
+#                                  # ordinary jobs of the weak pool; so
+#                                  # weak_decoder.units alone decides whether
+#                                  # they overlap. A priced weak card prices
+#                                  # one decode of one window, so it is
+#                                  # charged once per forced solve. The cluster
+#                                  # gap needs one job per window and charges
+#                                  # one card.
+
+workload:
+  kind: memory_circuit             # memory_circuit is the one yaml row; the
+                                   # other rows (circuit_list, surgery_ir, qlx)
+                                   # are built in Python
+  code_task: surface_code:rotated_memory_z   # stim generator task
+  rounds_per_shot: 15              # QEC rounds per shot: a fixed count, or
+                                   # "<n>d" to scale with the swept distance
+                                   # ("10d" = the 10 d-round memory experiment,
+                                   # Toshio 2510.25222 Fig. 4)
+
+windows:
+  kind: sliding                    # sliding | parallel | sandwich | naive_online
+  commit_rounds: null              # rounds committed per window; null = d
+  buffer_rounds: null              # look-ahead rounds per window; null = d
+  terminal_policy: null            # flush | lookahead: how a finite stream drains
+                                   # its last buffered window. flush ends the last
+                                   # window at the stream's last round, Tan's QUITS
+                                   # flush (2209.09219 lines 1029-1030); lookahead
+                                   # keeps the regular stride, so the last window
+                                   # still reads rounds past its own commit. null,
+                                   # the default, leaves the row on flush, and on
+                                   # lookahead when the escalation may escalate,
+                                   # since a strong recovery needs a last window
+                                   # with context to read. Only the sliding row
+                                   # reads this key; the other three lay their own
+                                   # tail.
+  boundaries: null                 # eager | held: when a committed window ships
+                                   # its boundary to the windows after it. eager
+                                   # ships at every commit, held only when the
+                                   # committing result is final. null, the default,
+                                   # is the row the escalation policy declares, or
+                                   # its strong window shape's when the policy may
+                                   # escalate (default_boundary_policy): held when
+                                   # the escalation may escalate and the strong
+                                   # window does not absorb the weak windows it
+                                   # covers, and eager otherwise; a
+                                   # provisional boundary that ships is never
+                                   # revised when the strong tier answers later
+                                   # (Toshio 2510.25222 Sec. III A).
+  boundary_payload: dense_seam_mask # dense_seam_mask | sparse_seam_list: how a
+                                   # window's hand-off to its neighbour is
+                                   # written on decoder_to_decoder. The message
+                                   # updates the detectors of the neighbour's
+                                   # oldest round layer and nothing else (Tan
+                                   # 2209.09219 lines 936-946; quits
+                                   # sliding_window.py:164-174; cuda-q QEC
+                                   # sliding_window.cpp:325-344). dense_seam_mask
+                                   # charges one bit per detector of that layer
+                                   # (d*d-1 on a bulk layer), the mask both
+                                   # compiled implementations carry, so the cost
+                                   # does not move with the noise.
+                                   # sparse_seam_list charges one index per
+                                   # flipped detector, ceil(log2(seam
+                                   # detectors)) bits each: Skoric's artificial
+                                   # defect list (2209.08552 lines 265-269,
+                                   # 1038-1040) and Bombin's "small number of
+                                   # check generators" (2303.04846 lines
+                                   # 784-786)
+
+# The sweep: a list of blocks; each block is the cross product of its three
+# axes, `shots` seeds per point (0..shots-1); a point named twice runs
+# once. The algorithm is NOT a sweep axis: it is structure, fixed per unit
+# on the decoder sections below; comparing algorithms is comparing configs.
+# The baselines put shots where they matter: a timing block sweeps many
+# round periods with few shots (the weak baseline's 0.9/0.85/0.8 bracket
+# the load = 1 knee of its 0.028 card), and an LER block sweeps several
+# probabilities with many shots at one timing point, since timing knobs
+# never change the decoded answer (Gate 10).
+sweep:
+  - physical_error_probability: [0.001]    # p on all four Stim noise channels
+    distance: [3]                          # code distance d; one LER curve per d
+    round_period_us: [1.0]                 # the QPU's physical round period, in us:
+                                           # a quantum-device cadence, deliberately
+                                           # not a classical clock's cycles
+    shots: 2
+
+controller:                        # controller work per round, in cycles of its
+                                   # named clock domain
+  clock: fridge
+  readout_to_bits_cycles: 0        # post-readout classification; the QPU
+                                   # measurement window remains in the QEC
+                                   # cycle. Classification is inside the priced
+                                   # round: Google's 921 ns cycle includes the
+                                   # 500 ns measurement and 160 ns reset (Nature
+                                   # 614, 2023, arXiv 2207.06431, Methods)
+  decision_to_pulse_cycles: 0      # online branch, sequencing, pulse
+                                   # generation; controller_to_qpu is a
+                                   # separate link
+  packing_cycles_per_round: 0      # packet assembly cost, charged once per
+                                   # completed round. Caune et al. 2410.05202
+                                   # measure 250 to 370 cycles for packetization,
+                                   # bus transfer, result return and the
+                                   # conditional together: an upper bound here
+  packing_rounds_in_flight: null   # packing assembly workspace: rounds in flight
+                                   # through the packing stage. null = unbounded
+  packing_overflow: stall          # stall | drop_round: what the controller does
+                                   # with a finished round Buffer 0 (or the packing
+                                   # workspace) cannot take. stall holds it upstream
+                                   # and writes it in order once a slot frees, the
+                                   # backpressure real-time stacks apply to their
+                                   # source (Caune et al. 2410.05202: the sequencer
+                                   # polls the decoder's status register and stalls);
+                                   # under stall a full packing workspace stops the
+                                   # run. drop_round drops it instead, ns-3's drop
+                                   # tail (point-to-point-net-device.cc Send:
+                                   # Enqueue false, the packet is dropped).
+                                   # LILLIPUT's readout buffer overwrites the latest
+                                   # value (2108.06569), a storage choice neither
+                                   # word models
+  detection_events_formed_at: controller
+                                   # controller | decoder: where the round's
+                                   # measurement outcomes become detection
+                                   # events. controller forms them in the
+                                   # assembler and sends the events on, so
+                                   # Buffer 0 and the tier's input link carry the
+                                   # narrower round: "inside the workstation,
+                                   # measurements are converted into detections
+                                   # and then streamed to the real-time decoding
+                                   # software via a shared memory buffer" (Google
+                                   # 2408.13687 lines 474-476). decoder sends the
+                                   # raw outcomes on instead, so the store and
+                                   # that link carry the wider round, and each
+                                   # tier forms the rounds it reads: the
+                                   # controller writes the outcomes
+                                   # "sequentially to the decoder" and "The
+                                   # decoder computes the syndrome from
+                                   # measurement outcomes and decodes it" (Caune
+                                   # et al. 2410.05202 lines 1252-1256), and
+                                   # LILLIPUT's Event Detection Logic block sits
+                                   # inside the decoder (2108.06569 lines
+                                   # 499-510). The events themselves are the same
+                                   # under both rows, since a detection event is
+                                   # a parity of the raw outcomes; what moves is
+                                   # the width above and the clock the formation
+                                   # is charged on, this section's
+                                   # detection_event_cycles_per_round under the
+                                   # first row and each tier's engine card under
+                                   # the second
+  detection_event_cycles_per_round: null
+                                   # what the conversion above costs the
+                                   # controller, charged once per completed round
+                                   # on the clock this section names, before the
+                                   # round leaves for the stores. null =
+                                   # uncharged, which is where the field leaves
+                                   # it: Google's workstation converts the
+                                   # measurements into detections (2408.13687
+                                   # lines 474-476) and publishes no time for it.
+                                   # Read by the controller row of
+                                   # detection_events_formed_at, and refused
+                                   # under the decoder row, which charges the
+                                   # tiers instead
+
+clocks:                            # clock domain name -> MHz; a link prices its
+                                   # cycles on the domain it names. More domains
+                                   # (an mK stage, a 4K SFQ decoder) are one more
+                                   # entry here. Both start at LILLIPUT's 250 MHz
+                                   # ([d=3,m=2] FPGA clock, 2108.06569 Table 4).
+  fridge: 250.0
+  room: 250.0
+
+links:                             # a kind, then one card per path; null = the
+                                   # chosen row's numbers for that path
+  kind: logical_reference          # logical_reference | bandwidth_limited
+                                   # (LINK_FABRICS, links/link_profiles.py). The row
+                                   # supplies the numbers the per-path cards below
+                                   # override and builds the fabric the run sends
+                                   # on. logical_reference prices every one of the
+                                   # eleven hops with unbounded channels, so no hop
+                                   # is free and nothing queues.
+                                   # bandwidth_limited provisions each channel from
+                                   # the sweep point's own geometry and is refused
+                                   # here: a caller builds its card with
+                                   # link_profiles.bandwidth_limited_profile and
+                                   # passes it as the machine's links setting.
+                                   # Each card, in cycles of its named clock domain:
+                                   #   latency_cycles: propagation latency
+                                   #   clock: the domain (a clocks: key)
+                                   #   bits_per_cycle: per-lane capacity
+                                   #     (null = unbounded)
+                                   #   channels: parallel one-bit lanes (default 1);
+                                   #     aggregate bandwidth = bits_per_cycle x
+                                   #     channels x clock MHz
+                                   #   setup_cycles_per_transfer: optional fixed
+                                   #     per-transfer DMA setup (setups serialize)
+  qpu_to_controller: {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
+                                   # QPU -> controller, one readout
+  controller_to_weak_buffer: {latency_cycles: 1, clock: fridge, bits_per_cycle: 1.0, channels: 8}
+                                   # controller -> syndrome buffer 0 (the weak
+                                   # buffer), one round
+  controller_to_strong_buffer: null
+                                   # controller -> syndrome buffer 1 (the strong
+                                   # buffer), one round. Parallel switching
+                                   # (escalation.run_both_at_once) builds the strong
+                                   # job at weak readiness, so this hop must not lag
+                                   # the buffer 0 publication path
+                                   # (controller_to_weak_buffer); a slower one
+                                   # refuses loudly at strong-job build
+                                   # ("controller_to_strong_buffer lag beyond
+                                   # the escalation margin")
+  weak_buffer_to_weak_decoder: {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
+                                   # buffer 0 -> weak decoder, one window
+  weak_decoder_to_strong_decoder: null
+                                   # weak -> strong escalation decision
+  strong_buffer_to_strong_decoder: null
+                                   # syndrome buffer 1 -> strong decoder, one window
+  decoder_to_decoder: {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
+                                   # decoder -> decoder boundary handoff
+  weak_decoder_to_frame: {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
+                                   # weak decoder -> Pauli frame
+  strong_decoder_to_frame: null    # strong decoder -> Pauli frame
+  frame_to_controller: null        # Pauli frame -> controller, a release
+  controller_to_qpu: null          # controller -> QPU, an instruction
+
+round_store:                       # Buffer 0, the upstream round store
+  kind: round_store                # the one row today
+  rounds: null                     # capacity in rounds. When it is full the
+                                   # controller holds the finished round and
+                                   # publishes it in order once a slot frees,
+                                   # the backpressure real systems apply to their
+                                   # source; controller.packing_overflow chooses
+                                   # that hold or a drop. null = unbounded
+
+strong_round_store:                # syndrome buffer 1, the strong-side store
+                                   # (exists only when the escalation uses it)
+  kind: round_store
+  rounds: null                     # capacity in rounds; overflow is a hard
+                                   # error. null = unbounded
+
+# The two decoder tiers are two distinct units (Toshio 2510.25222:
+# lightweight decoders decode constantly, a separate accurate decoder is
+# invoked on demand). The escalation kind picks the active unit:
+# weak_baseline decodes on weak_decoder, strong_only on strong_decoder;
+# the unused tier's section may be omitted.
+weak_decoder:                      # the lightweight tier: fast, higher LER
+  kind: pymatching                 # pymatching | unweighted_pymatching |
+                                   # belief_matching | union_find |
+                                   # tesseract | relay_bp | bposd: the
+                                   # real algorithm,
+                                   # measured wall clock per window; or a
+                                   # number: fixed core latency in us.
+                                   # Known number cards: 0.028 = LILLIPUT-class
+                                   # core, [d=3, m=2] 7 cycles at 250 MHz
+                                   # (2108.06569 sec. 6.3, Table 4); 5.0 = the
+                                   # old accuracy-first strong reference card.
+                                   # A card prices the algorithm stage ONLY;
+                                   # fetch and release cycles are separate
+  units: 1                         # decoder units in this tier's pool
+  input: copy                      # copy | in_place: how this tier's unit gets
+                                   # the rounds it decodes. copy moves them over
+                                   # the tier's input link into the unit's own
+                                   # memory, which is what a decoder with
+                                   # off-chip input does (Collision Clustering's
+                                   # Init unit loads the syndrome into the
+                                   # storage elements, 2309.05558 lines
+                                   # 268-271). in_place reads them where the
+                                   # store keeps them: no link move, no deposit,
+                                   # the store's hold kept for the whole decode,
+                                   # and the run counts a reference instead of a
+                                   # copy (AFS's processing elements "can
+                                   # directly access the data stored on-chip",
+                                   # 2001.06598 lines 528-531). copy is what
+                                   # every hop of this tree does today
+  boundary_fold: copy              # copy | in_place: how the window's boundary
+                                   # mask reaches the decode. copy duplicates
+                                   # the landed input and XORs the mask into the
+                                   # duplicate, leaving the unit's rounds raw,
+                                   # which is what a software decoder does
+                                   # (cuda-q QEC rebuilds the window syndrome
+                                   # each time, sliding_window.cpp:283-292).
+                                   # in_place XORs it into the unit's own
+                                   # memory, which is what a hardware decoder
+                                   # does (AFS 2001.06598 lines 528-531; Helios
+                                   # keeps its shared memory single-writer,
+                                   # 2301.08419 lines 632-640), and is refused
+                                   # by name when two jobs read that input or
+                                   # when the tier reads its input in place.
+                                   # Only the tier that decodes the plan's
+                                   # windows folds a boundary
+  result_blocks_unit: false        # false | true: when a finished decode gives
+                                   # its unit's compute back. false gives it
+                                   # back at the decode's end, because the frame
+                                   # manager takes the correction without
+                                   # blocking the decoder (Chen 2605.30765 lines
+                                   # 1618-1620). true holds the unit until the
+                                   # window commits, which is a decoder whose
+                                   # output sits in a status register until the
+                                   # reader polls it (Riverlane 2410.05202 lines
+                                   # 1256-1259); the unit is then busy for the
+                                   # output hop and the frame write too. Read on
+                                   # the tier that decodes the plan's windows: a
+                                   # strong re-decode's result waits in its unit
+                                   # until the window side takes it in any case.
+                                   # A confidence that forces two class solves
+                                   # per window needs a unit per forced class
+                                   # under true, because the join reads neither
+                                   # solve until both have finished
+  unit_memory_rounds: null         # input SRAM rounds PER UNIT; null = unbounded.
+                                   # Each unit holds two windows when they fit
+                                   # (transfer overlaps compute); a unit sized
+                                   # for one window falls back to serial residency
+  engine:
+    clock: fridge                  # cycle-priced stages on this clock domain
+    fetch_cycles_per_round: 1      # read one round out of decoder memory per
+                                   # cycle (LILLIPUT FIFO, sec. 4)
+    release_cycles_per_job: 1      # correction write-out per job (the
+                                   # baselines use 10, an experiment card)
+    detection_event_latency_cycles: 5
+                                   # the fixed latency of this tier's own
+                                   # event-detection logic, charged only when the
+                                   # rounds reach it raw (controller.
+                                   # detection_events_formed_at decoder). 5
+                                   # cycles is Yang et al. 2605.04892 lines
+                                   # 1273-1275: "All variables are stored in FPGA
+                                   # registers, enabling fully pipelined
+                                   # operation. The total latency of the
+                                   # preprocessing stage for syndrome
+                                   # calculation is fixed at 20 ns (5 FPGA clock
+                                   # cycles)", counted inside "Subtotal
+                                   # (decoder) 148" in their Table I (lines
+                                   # 1049-1052); the stage sits in front of the
+                                   # decoder core, as LILLIPUT's Event Detection
+                                   # Logic block does (2108.06569 lines
+                                   # 499-510). A round two windows of this tier
+                                   # read is formed once and charged once.
+                                   # null = uncharged, and the rate below is
+                                   # then read by nobody
+    detection_event_cycles_per_round: 1
+                                   # the rate that pipelined stage accepts rounds
+                                   # at, so a job forming n rounds pays the
+                                   # latency above once and this for each round
+                                   # after the first. Fully pipelined (Yang
+                                   # 2605.04892 line 1273) is one round a clock,
+                                   # the rate the fetch stage above reads at
+                                   # (LILLIPUT's FIFO of the last m rounds,
+                                   # 2108.06569 line 593)
+
+strong_decoder:                    # the accurate tier: slow, lower LER
+  kind: belief_matching
+  units: 1
+  input: copy                      # copy | in_place, as above; the strong hop
+                                   # transfers the assigned data in the paper
+                                   # (Toshio 2510.25222 lines 1248-1250), which
+                                   # is the copy row
+  unit_memory_rounds: null
+  engine:
+    clock: room                    # the strong unit lives room-side
+    fetch_cycles_per_round: 1
+    release_cycles_per_job: 1
+    detection_event_latency_cycles: 5
+                                   # as above, on this tier's own clock: the
+                                   # strong tier reads Buffer 1, so it forms the
+                                   # rounds it reads itself
+    detection_event_cycles_per_round: 1
+                                   # as above: one round a clock through the
+                                   # pipelined stage
+
+decoder_manager:                   # the manager that gives ready windows a unit
+  bulk_strong: false               # true serves the strong pool's queued
+                                   # re-decodes as one merged decode. Toshio
+                                   # 2510.25222 lines 1253-1264 say the strong
+                                   # decoder should decode in bulk once the
+                                   # boundaries on both sides are determined,
+                                   # and that sentence is about one
+                                   # escalation's own contiguous rstrong
+                                   # region, not about several escalations at
+                                   # once; decsim goes past it and merges every
+                                   # queued strong job, which is the cheapest
+                                   # strong tier a run can be priced against
+                                   # and so the floor of the sweep the paper
+                                   # leaves open ("could be finely tuned
+                                   # depending on the scaling of the decoding
+                                   # time and available computational
+                                   # resources", 1259-1262). The batch is
+                                   # timing-only, since one decode cannot carry
+                                   # each member window's correction, so it
+                                   # prices a bulk strong tier and refuses a
+                                   # run whose accuracy is coupled to the
+                                   # strong result; serial escalation only (it
+                                   # contradicts escalation.run_both_at_once
+                                   # and the double window)
+  clock: fridge                    # the domain dispatch_cycles counts in
+  dispatch_cycles: 0               # the manager's own work per dispatch,
+                                   # charged on its clock after a job is placed
+                                   # on a unit and before that job's input is
+                                   # asked for. 0 is the default and models
+                                   # none of it. Caune et al. arXiv:2410.05202
+                                   # lines 519-526 and 636-641 measure 250 to
+                                   # 370 control cycles per decode between a
+                                   # decode's arrival and its dispatch, which
+                                   # is the range to price this from
+
+pauli_frame:
+  kind: logical_register           # logical_register (FRAMES,
+                                   # pauli_frame/pauli_frame.py). The frame a
+                                   # correction is committed into: one observable
+                                   # bitmask XORed per window.
+  clock: fridge
+  write_cycles: 1                  # XOR of a correction into the frame register
+                                   # (one cycle, XQsim PFU)
+
+idle_policy: separate_decode_jobs  # separate_decode_jobs | ignore | extend_stream.
+                                   # How an idle patch's rounds are charged; idle
+                                   # rounds are decoder workload, since the backlog
+                                   # bound counts every generated syndrome bit
+                                   # against the decoder's processing rate (Terhal
+                                   # 1302.3428 lines 3151-3159; Battistel et al.
+                                   # 2303.00054 line 144), so the default costs one
+                                   # load-only decode job per idle commit region.
+                                   # ignore is the optimistic card for active-path
+                                   # latency studies. Inert while the workload is a
+                                   # single always-busy operation.
+
+observation:                       # what a run records beyond its results
+  check_windows_with: none         # none | tesseract. tesseract re-decodes every
+                                   # window with the official Tesseract backend and
+                                   # counts disagreements in the owned observable
+                                   # contribution; never latency-priced. A window is
+                                   # a d-round problem at any shot length, so this
+                                   # holds at every distance (9.6 ms/window at d=9,
+                                   # 18.1 ms at d=11, measured 2026-08-26).
+  log_component_io: false          # true adds component I/O lines to the trace:
+                                   # what each store and unit received, holds
+                                   # (rounds, residents), and emitted
+  log: off                         # off | print | file | both. The engine narrator:
+                                   # print shows it live on screen; file writes each
+                                   # shot's full line record to the run folder,
+                                   # results/<stamp>-<name>/log/, one file per shot
+                                   # named p<p>_d<d>_algo<card>_round<T>us_seed<n>.log;
+                                   # both does both. results/ is not tracked
+  trace: chrome                    # off | chrome | <path>. The Chrome trace of the
+                                   # data path: where every round and window sat, for
+                                   # how long, and whether each hop copied the bits or
+                                   # referenced them. chrome writes one file per traced
+                                   # shot next to the results; a path writes there
+                                   # instead (.gz compresses). Opens in Perfetto or
+                                   # chrome://tracing. It costs one file per traced
+                                   # shot, holding every hop of every round and window
+                                   # of that shot: 69 kB for this file's d3, 15-round
+                                   # point, growing with the rounds and windows a shot
+                                   # has. `decsim collect` draws timeline.png from it,
+                                   # and `decsim trace follow` reads one round's or
+                                   # window's path out of it
+  trace_shots: [0]                 # the shots the trace is written for; a sweep point
+                                   # of 2000 shots writes one file, not 2000
+  record_switching_windows: false  # true keeps every decode request and service record
+                                   # for the switching study's per-window rows
+  round_store_occupancy: false     # true samples Buffer 0's held-round count at every
+                                   # change, the occupancy the L5 harness reads
+  backlog_trace: false             # true samples the undecoded-round backlog after
+                                   # every action, the step function the D7 harness reads
+  decoder_utilization: false       # true integrates each decoder unit's busy time,
+                                   # thrust 2's sweep over unit count
+  decoder_memory_occupancy: false  # true samples each unit memory's held-round count,
+                                   # thrust 2's sweep over unit memory
+  data_movement: false             # true counts the copies, references and moves of
+                                   # every round, on the RunResult without the trace

@@ -223,6 +223,16 @@ mistake a gap for a result.
   former that forms in arrival order from the tier's own store, which is
   also how LILLIPUT's block and Yang's stage run: on the stream, not on
   the window.
+- **O8. `decsim collect` refuses a `timing_only` device.** The device
+  builds and runs as a machine, but the front's per-shot measurement
+  compares the loop's prediction against PyMatching on the sampled shot,
+  and a timing-only device samples none, so `collect` raises `KeyError`.
+  A priced card on a real device is the way to a host-independent run
+  today.
+- **O9. A decoder section ignores a key it does not know.** The
+  `weak_decoder` and `strong_decoder` sections do not yet refuse an
+  unknown key by name the way `decoder_manager` does, so a misspelt key
+  there runs the default in silence.
 
 A sixth row, O4, was a real mispricing of a backward hand-off in the
 parallel scheme, and it is closed: the two layers that differ are now

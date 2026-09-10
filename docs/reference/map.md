@@ -161,7 +161,7 @@ docstring.
 
 ### decoders
 
-- `decsim/decoders/__init__.py`: decoders component.
+- `decsim/decoders/__init__.py`: The decoder side: a window's rounds become a correction, at a price.
 - `decsim/decoders/backend_outcome.py`: The backend outcome record Tesseract and Relay-BP return.
 - `decsim/decoders/belief_matching/__init__.py`: Belief-matching decoders backed by ldpc and PyMatching.
 - `decsim/decoders/belief_matching/decoder.py`: The belief-matching adapter: the strong tier's decoder on one window.

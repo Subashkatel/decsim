@@ -110,7 +110,7 @@ def _collect(argv: list) -> None:
     )
     if not rows:
         return
-    lines = report.terminal_lines(rows)
+    lines = report.terminal_lines(rows, run_dir)
     text = "\n".join(lines)
     print(text)
     print(f"\nevery column: {run_dir}/sweep.csv")
@@ -131,7 +131,7 @@ def _combine(argv: list) -> None:
     parsed = parser.parse_args(argv)
     out_dir = run_folder.combined_run_dir(parsed.out)
     rows = report.combine(parsed.run_dirs, out_dir)
-    lines = report.terminal_lines(rows)
+    lines = report.terminal_lines(rows, out_dir)
     text = "\n".join(lines)
     print(text)
     print(f"\nevery column: {out_dir}/sweep.csv")

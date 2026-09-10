@@ -7,11 +7,15 @@ same run's own listeners and its RunResult, so the file is proven to
 carry the figure.
 """
 
+import dataclasses
+
 import matplotlib
 
+import decsim.front.experiment as experiment
 import decsim.front.plots as plots
 import decsim.front.trace_file as trace_file
 import decsim.machine as machine_module
+import tests.front.yaml_configs as yaml_configs
 import tests.observe.gate_point as gate_point
 
 matplotlib.use("Agg")
@@ -30,6 +34,42 @@ def _traced_run(trace_path):
 
 def _microseconds(ticks):
     return ticks / TICKS_PER_MICROSECOND
+
+
+def _traced_switching_run(tmp_path, trace_path):
+    """One switching shot of nine rounds at d 3, traced.
+
+    Switching keeps the lookahead terminal policy, so the last window
+    commits rounds 7 to 9 and names rounds 10 to 12 in its buffer, rounds
+    the stream never has.
+    """
+    workload = dict(yaml_configs.MINIMAL_CONFIG["workload"])
+    workload["rounds_per_shot"] = 9
+    sweep_point = {
+        "physical_error_probability": [0.008],
+        "distance": [3],
+        "round_period_us": [1.0],
+        "shots": 1,
+    }
+    card = {
+        "escalation": {"kind": "switching", "gap_threshold_db": 20.0},
+        "workload": workload,
+        **yaml_configs.strong_unit("belief_matching"),
+        "sweep": [sweep_point],
+    }
+    config_path = yaml_configs.write_config(tmp_path, card)
+    config = experiment.load_experiment(config_path)
+    shipped = config.point_settings(
+        physical_error_probability=0.008, distance=3, round_period_us=1.0
+    )
+    observation = dataclasses.replace(
+        shipped.observation, trace=str(trace_path)
+    )
+    settings = dataclasses.replace(shipped, observation=observation)
+    machine = machine_module.Machine.build(settings, gate_point.SEED)
+    result = machine.run()
+    machine.observation.trace_writer.write(str(trace_path))
+    return machine, result
 
 
 def test_the_timeline_windows_are_the_runs_own_windows(tmp_path):
@@ -107,6 +147,25 @@ def test_the_timeline_reads_the_lanes_and_the_period_off_the_file(tmp_path):
 def test_the_timeline_figure_is_written_from_the_file(tmp_path):
     trace_path = tmp_path / "point1.trace.json"
     _traced_run(trace_path)
+    figure_path = tmp_path / "timeline.png"
+    plots.timeline_plot(trace_path, figure_path)
+    status = figure_path.stat()
+    assert status.st_size > 0
+
+
+def test_a_last_window_reading_past_the_stream_is_drawn_to_the_last_round(
+    tmp_path,
+):
+    """The figure reads to the last stored round, as the decode did."""
+    trace_path = tmp_path / "switching.trace.json"
+    _traced_switching_run(tmp_path, trace_path)
+    document = trace_file.load(trace_path)
+    shot = plots._timeline_shot(document)
+    lanes = plots._timeline_lanes(document)
+    stored = plots._stored_rounds(lanes, shot)
+    last_window = shot.windows[max(shot.windows)]
+    assert last_window.read_hi > max(stored)
+    assert plots._stored_read_end(last_window, stored) == max(stored)
     figure_path = tmp_path / "timeline.png"
     plots.timeline_plot(trace_path, figure_path)
     status = figure_path.stat()

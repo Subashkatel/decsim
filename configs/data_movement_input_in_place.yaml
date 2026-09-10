@@ -1,0 +1,26 @@
+# The data-movement study, the weak unit reading its input in place.
+#
+# The one setting this changes is `weak_decoder.input`: in_place reads
+# the rounds where Buffer 0 keeps them, so the tier's input link moves
+# nothing, the unit deposits nothing, and the store's hold stays for the
+# whole decode. That is the software decoder on the controller host,
+# which Google runs: the detections are "streamed to the real-time
+# decoding software via a shared memory buffer" and the decoder threads
+# read them "as it is streamed in" (2408.13687 lines 476-477, 487-489),
+# and it is the other value of the research note's section 5 row
+# `decoders.<tier>.input`, whose default copy the base config runs.
+#
+# Every key is documented in reference.yaml.
+
+extends: data_movement.yaml
+
+weak_decoder:
+  kind: 1.0
+  units: 1
+  input: in_place
+  boundary_fold: copy
+  unit_memory_rounds: null
+  engine:
+    clock: fridge
+    fetch_cycles_per_round: 1
+    release_cycles_per_job: 10

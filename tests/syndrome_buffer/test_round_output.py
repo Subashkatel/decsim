@@ -94,8 +94,27 @@ def test_a_held_input_rides_no_link_and_lands_now():
     output = _output(transfers)
     job = _job()
     landed = []
-    delay = output.land_held_input(job, lambda: landed.append(engine.now))
+    send = output.input_send_for(job, True)
+    delay = send(lambda: landed.append(engine.now))
     assert delay == 0
     assert landed == [0]
     assert transfers.sends == []
     assert job.input_source_name == "Buffer 0"
+
+
+def test_a_store_names_itself_when_the_job_is_bound_and_not_when_it_sends():
+    """A tier that reads its input in place never runs the send it is given.
+
+    It takes the send and drops it (<tier>.input in_place,
+    decoders/decoder_memory_transfer.py), so a store that named itself
+    only inside the send would leave every observer of that job with no
+    source at all.
+    """
+    transfers = _Transfers()
+    output = _output(transfers)
+    job = _job()
+
+    output.input_send_for(job, False)
+
+    assert job.input_source_name == "Buffer 0"
+    assert transfers.sends == []

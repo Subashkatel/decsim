@@ -51,11 +51,10 @@ class RoundStoreOutput:
 
         The bits are the job's payloads, which the staging clears when
         the input lands, so they are read here while they are still the
-        job's, and the job is stamped with this store's name: whoever
-        records the landing reads where the rounds came from rather than
-        deriving it from the job's tier.
+        job's. The strong re-decode calls this send without asking for
+        one first, so this names the store too.
         """
-        job.input_source_name = self.name
+        self.name_this_store(job)
         payload_bits = job.payload_bits()
         return self.transfers.send_for_job(
             self.path, job, payload_bits=payload_bits, on_delivered=on_landed
@@ -68,13 +67,14 @@ class RoundStoreOutput:
     ) -> int:
         """A job resubmitted after a withdrawal: its rounds never left.
 
-        The rounds are already this store's, so it names itself here too,
-        and the input rides no link: nothing is sent and no delay is
-        charged. Which inputs ride nothing is this store's own decision
-        (the decoder input row, copy against in_place), so the landing
-        happens here rather than in the link fabric.
+        The input rides no link: nothing is sent and no delay is charged.
+        Which inputs ride nothing is this store's own decision (the
+        decoder input row, copy against in_place), so the landing happens
+        here rather than in the link fabric.
         """
-        job.input_source_name = self.name
+        # the send is bound to its job by input_send_for, which is also
+        # where this store names itself on it; the landing reads nothing
+        del job
         on_landed()
         return 0
 
@@ -118,6 +118,20 @@ class RoundStoreOutput:
         self, job: decoding_records.DecodeJob, is_input_held: bool
     ) -> Callable[[Callable[[], None]], int]:
         """The send the manager calls at dispatch, bound to this job."""
+        self.name_this_store(job)
         if is_input_held:
             return functools.partial(self.land_held_input, job)
         return functools.partial(self.send_input, job)
+
+    def name_this_store(self, job: decoding_records.DecodeJob) -> None:
+        """Stamp the job with this store's name, where its rounds sit.
+
+        The naming happens where the job is bound to this store and not
+        where its send runs, because a tier that reads its input in place
+        never runs one (<tier>.input in_place,
+        decoders/decoder_memory_transfer.py) and would otherwise reach
+        the observers with no source at all. Whoever records the landing
+        then reads where the rounds came from rather than deriving it
+        from the job's tier.
+        """
+        job.input_source_name = self.name

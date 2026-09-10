@@ -1,0 +1,62 @@
+# The data-movement study, with the strong tier so hops 8 and 9 appear.
+#
+# The base config runs one tier, so the data path stops at hop 7. This
+# one escalates, which opens the last two hops of data_path.md's table:
+# hop 8, the weak result to the escalation, which is a verdict and no
+# data (Toshio 2510.25222 lines 605-622, the discarded weak outcome), and
+# hop 9, Buffer 1 to the strong decoder, which is the assigned region
+# copied over a link, "processed all at once, after the boundary
+# conditions at both ends have been determined" (2510.25222 lines
+# 1248-1250) and a PCIe or network traversal on a separate host (Chen
+# 2605.30765 lines 1609-1611). It also opens the controller's second
+# write, hop 4, since Buffer 1 is written in parallel.
+#
+# The strong tier's own `input` stays copy, the research note's section 5
+# default for `decoders.<tier>.input` on this row (2510.25222 lines
+# 1248-1250; 2605.30765 lines 1609-1611); in_place there is the
+# GPU-visible buffer, which no decoder row models yet.
+#
+# Both cards are priced, tau_gen and ten tau_gen (Toshio 2510.25222
+# lines 1109-1114), so the study stays deterministic, and the threshold
+# is the paper's 20 dB (Sec. IV). Every key is documented in
+# reference.yaml.
+
+extends: data_movement.yaml
+
+escalation:
+  kind: switching
+  gap_threshold_db: 20.0
+  strong_window: two_sided_context
+
+links:
+  qpu_to_controller:  {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
+  controller_to_weak_buffer: {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
+  controller_to_strong_buffer: {latency_cycles: 1, clock: room, bits_per_cycle: null}
+  weak_buffer_to_weak_decoder: {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
+  weak_decoder_to_strong_decoder: {latency_cycles: 1, clock: room, bits_per_cycle: null}
+  strong_buffer_to_strong_decoder: {latency_cycles: 1, clock: room, bits_per_cycle: null}
+  decoder_to_decoder:  {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
+  weak_decoder_to_frame: {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
+  strong_decoder_to_frame:  {latency_cycles: 1, clock: room, bits_per_cycle: null}
+  frame_to_controller:  null
+  controller_to_qpu:  null
+
+weak_decoder:
+  kind: 1.0                         # tau_gen, Toshio 2510.25222
+  units: 1
+  input: copy
+  boundary_fold: copy
+  unit_memory_rounds: null
+  engine:
+    clock: fridge
+    fetch_cycles_per_round: 1
+    release_cycles_per_job: 10
+strong_decoder:
+  kind: 10.0                        # ten tau_gen, Toshio 2510.25222
+  units: 1
+  input: copy
+  unit_memory_rounds: null
+  engine:
+    clock: room
+    fetch_cycles_per_round: 1
+    release_cycles_per_job: 10

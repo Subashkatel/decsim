@@ -1,0 +1,47 @@
+# The data-movement study, base point: every hop copies.
+#
+# The study reads the copies, references and moves of the data path
+# against what the sources say each hop does, so its four configs differ
+# in one setting each and nothing else. This one is the tree's own
+# behaviour, and the research note's defaults: the weak unit is given a
+# copy of the rounds it decodes (docs/rewrite/notes/
+# data_movement_research.md section 5, `decoders.<tier>.input` copy, from
+# AFS 2001.06598 lines 520-535 and Collision Clustering 2309.05558 lines
+# 268-272), and the window's boundary mask is XORed into a duplicate of
+# that copy (the same table's `boundary_fold`, cuda-q QEC's
+# sliding_window.cpp:283-292).
+#
+# Both tiers are priced cards so the study is deterministic: a card
+# prices the algorithm stage and nothing is measured on the host clock,
+# so the same yaml gives the same counts on any machine. The numbers are
+# Toshio 2510.25222 lines 1109-1114, tau_gen and ten tau_gen, with
+# tau_gen the 1.0 us round period swept here.
+#
+# Every key is documented in reference.yaml.
+
+extends: weak_decoder_baseline.yaml
+
+weak_decoder:
+  kind: 1.0                         # tau_gen, Toshio 2510.25222 lines 1109-1114
+  units: 1
+  input: copy
+  boundary_fold: copy
+  unit_memory_rounds: null
+  engine:
+    clock: fridge
+    fetch_cycles_per_round: 1
+    release_cycles_per_job: 10
+
+observation:
+  data_movement: true               # the copy, reference and move counters
+  trace: chrome                     # one traced shot a point, for residence.csv
+  trace_shots: [0]
+  check_windows_with: none
+  log_component_io: false
+  log: off
+
+sweep:
+  - physical_error_probability: [0.003]
+    distance: [3, 5, 7]
+    round_period_us: [1.0]
+    shots: 100

@@ -42,6 +42,7 @@ def build_window_manager(
     links,
     conditional_release,
     fault_model_requirement_for,
+    input_fold,
     round_store,
     strong_round_store,
     weak_output,
@@ -81,7 +82,7 @@ def build_window_manager(
         primary_output = strong_output
     copies_the_fold = _copies_the_boundary_fold(settings, escalation_policy)
     gate = decode_requests.WindowInputGate(
-        planner, plan.window_interaction, copies_the_fold
+        planner, plan.window_interaction, input_fold, copies_the_fold
     )
     builder = decode_requests.DecodeRequestBuilder(
         engine, planner, tracker, plan.window_interaction, gate

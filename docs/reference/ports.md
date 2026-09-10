@@ -174,6 +174,15 @@ The committed boundaries a strong window pins a face on.
 
 ## the decoder manager schedules a decode
 
+### `DecoderInputFold`
+
+The decoder side's input, as the window's gate hands it a mask.
+
+| Method | What it does |
+| --- | --- |
+| `fold_into_a_copy` | Give the job a masked duplicate; the unit's rounds stay raw. |
+| `fold_in_place` | Write the masked input into the unit's own memory. |
+
 ### `WindowInputGate`
 
 The window side's say over a job's input, carried on the job.

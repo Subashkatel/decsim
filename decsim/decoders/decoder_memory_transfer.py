@@ -69,7 +69,8 @@ class DecoderInputStaging:
 
     Trace sources: copy_made(job, bits, store_name, memory_name) at every
     landing that deposits rounds, the copy out of the store into the
-    unit's own memory (data_path.md hops 5 and 9); hold_registered(job,
+    unit's own memory (data_path.md hops 5 and 9), and at every boundary
+    folded into a masked duplicate the unit reads; hold_registered(job,
     round_keys) instead, for a tier whose input is read in place.
     """
 
@@ -146,6 +147,40 @@ class DecoderInputStaging:
         landing_ticks = self.engine.now + expected_delay_ticks
         job.input_landing_ticks = landing_ticks
         awaited.expected_landing_ticks = landing_ticks
+
+    def fold_into_a_copy(
+        self, job: decoding_records.DecodeJob, masked_input
+    ) -> None:
+        """The job reads a masked duplicate; the unit's rounds stay raw.
+
+        The duplicate is the decoder side's own working copy, so it is
+        made and booked here (<tier>.boundary_fold copy, cudaq-x keeps
+        raw rounds and applies syndrome_mods at window assembly).
+        """
+        job.decoder_input = masked_input
+        bits = _input_bit_count(masked_input)
+        source_name = _input_source_name(job)
+        self.trace.copy_made.fire(job, bits, source_name, "masked view")
+
+    def fold_in_place(
+        self, job: decoding_records.DecodeJob, masked_input
+    ) -> None:
+        """The mask is written into the unit's own memory, nothing copied.
+
+        The memory that holds the input performs the write and refuses a
+        shared one itself (DecoderMemory.rewrite, Helios 2301.08419 lines
+        632-640); the destination takes what it is handed before it acts
+        (OMNeT++ csimplemodule.cc:782-783).
+        """
+        memory = job.memory
+        if memory is None:
+            raise RuntimeError(
+                f"{job.label}: boundary_fold in_place needs the unit's own "
+                "copy of the rounds, and this tier reads its input in "
+                "place (input: in_place); fold into a copy, or copy the "
+                "input"
+            )
+        job.decoder_input = memory.rewrite(job, masked_input)
 
     def copies_input(self, job: decoding_records.DecodeJob) -> bool:
         """Whether this job's tier is given a copy of the rounds it reads."""
@@ -372,3 +407,21 @@ class _TraceSources:
 
     copy_made: trace_source.TraceSource = trace_source.new_source()
     hold_registered: trace_source.TraceSource = trace_source.new_source()
+
+
+def _input_source_name(job: decoding_records.DecodeJob) -> str:
+    """Where the rounds the mask is folded out of sit."""
+    memory = job.memory
+    if memory is None:
+        return job.input_source_name
+    return memory.name
+
+
+def _input_bit_count(decoder_input) -> Optional[int]:
+    """The bits of a landed input; None when any fragment has no bits."""
+    bit_count = 0
+    for fragment in decoder_input.fragments():
+        if fragment.bits is None:
+            return None
+        bit_count += len(fragment.bits)
+    return bit_count

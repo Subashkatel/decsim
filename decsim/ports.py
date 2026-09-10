@@ -462,6 +462,27 @@ class BoundaryCourier(Protocol):
 
 
 @runtime_checkable
+class DecoderInputFold(Protocol):
+    """The decoder side's input, as the window's gate hands it a mask.
+
+    The gate says what the landed input must read once the window's
+    boundary is folded in; which row the tier declares decides which of
+    these two the gate calls, and the decoder side performs the write
+    into the storage it owns.
+    """
+
+    def fold_into_a_copy(
+        self, job: decoding_records.DecodeJob, masked_input
+    ) -> None:
+        """Give the job a masked duplicate; the unit's rounds stay raw."""
+
+    def fold_in_place(
+        self, job: decoding_records.DecodeJob, masked_input
+    ) -> None:
+        """Write the masked input into the unit's own memory."""
+
+
+@runtime_checkable
 class WindowInputGate(Protocol):
     """The window side's say over a job's input, carried on the job.
 

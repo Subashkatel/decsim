@@ -184,6 +184,7 @@ class Machine:
         decoder_manager = controller_side.build_decoder_manager(
             engine, settings, escalation_policy, pool
         )
+        input_fold = decoder_manager.input_fold()
         window_manager = window_side.build_window_manager(
             engine,
             settings,
@@ -192,6 +193,7 @@ class Machine:
             links=links,
             conditional_release=conditional_release,
             fault_model_requirement_for=pool.router.fault_model_requirement_for,
+            input_fold=input_fold,
             round_store=round_store,
             strong_round_store=strong_round_store,
             weak_output=weak_output,

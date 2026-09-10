@@ -132,6 +132,15 @@ class DecoderManager:
         """
         return [self.service.staging.trace.hold_registered]
 
+    def input_fold(self):
+        """The input a window's gate hands its boundary mask to.
+
+        The manager owns the unit memory the fold writes, so the window
+        side asks the manager for the end that performs it rather than
+        writing that memory itself (decisions.md D11).
+        """
+        return self.service.staging
+
     def input_transport(self):
         """The transport that moves an input into a unit's memory.
 

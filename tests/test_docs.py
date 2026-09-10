@@ -22,6 +22,9 @@ a page is enforced here.
    listed in FOREIGN_NAMES; and there are seventeen plug-in tables.
 6. No em dash in docs/, README.md, STYLE.md, or any docstring of the
    package, the tests or the tools.
+7. Every relative link in docs/ and README.md opens a file in the tree,
+   its anchor names a heading of that file, and docs/README.md links to
+   every page, so a reader can reach any page from the front page.
 """
 
 import ast
@@ -55,6 +58,9 @@ EDGE = re.compile(
 )
 MERMAID_OPEN = "```mermaid"
 MERMAID_CLOSE = "```"
+RELATIVE_LINK = re.compile(r"\]\(([^)#:]+)(?:#([^)]+))?\)")
+HEADING = re.compile(r"^#+\s+(.*?)\s*$", re.MULTILINE)
+NOT_A_SLUG_CHARACTER = re.compile(r"[^a-z0-9 _-]")
 
 # Names decsim does not define, written in backticks because they name
 # the referent a decision came from.
@@ -466,3 +472,59 @@ DOCUMENTED = (
     ast.FunctionDef,
     ast.AsyncFunctionDef,
 )
+
+
+def test_every_relative_link_in_the_docs_opens_a_heading_of_a_page():
+    """A link a reader clicks lands on a file, and on the heading it names."""
+    for page in _prose_files():
+        text = page.read_text()
+        for target, anchor in RELATIVE_LINK.findall(text):
+            _check_one_link(page, target, anchor)
+
+
+def _check_one_link(page: pathlib.Path, target: str, anchor: str) -> None:
+    """One link, resolved from the folder of the page that carries it."""
+    path = page.parent / target
+    assert path.exists(), f"{page.name} links to {target}, which is not there"
+    if not anchor:
+        return
+    slugs = _heading_slugs(path)
+    assert anchor in slugs, (
+        f"{page.name} links to {target}#{anchor}, and {path.name} has no "
+        f"such heading; its headings are {sorted(slugs)}"
+    )
+
+
+def _heading_slugs(path: pathlib.Path) -> frozenset:
+    """The anchors GitHub gives the headings of one page."""
+    text = path.read_text()
+    found = HEADING.findall(text)
+    slugs = set()
+    for heading in found:
+        slug = _slug(heading)
+        slugs.add(slug)
+    return frozenset(slugs)
+
+
+def _slug(heading: str) -> str:
+    """GitHub's anchor for a heading: lowercase, punctuation dropped."""
+    text = heading.replace("`", "")
+    lowered = text.lower()
+    kept = NOT_A_SLUG_CHARACTER.sub("", lowered)
+    return kept.replace(" ", "-")
+
+
+def test_the_front_page_links_to_every_page():
+    """docs/README.md is the one page from which every other is reachable."""
+    front = DOCS / "README.md"
+    text = front.read_text()
+    linked = set()
+    for target, _anchor in RELATIVE_LINK.findall(text):
+        resolved = (DOCS / target).resolve()
+        linked.add(resolved)
+    for page in DOCS.rglob("*.md"):
+        if page.name == "README.md":
+            continue
+        assert page.resolve() in linked, (
+            f"docs/README.md does not link to {page.name}"
+        )

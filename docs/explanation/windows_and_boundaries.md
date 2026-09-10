@@ -1,3 +1,5 @@
+[decsim docs](../README.md) › [Explanation](README.md)
+
 # Windows and boundaries
 
 A decoder cannot wait for the end of a computation before it decides
@@ -134,8 +136,8 @@ right. `tests/windows/test_boundary_payloads.py` and
 
 ## Read next
 
-- `docs/explanation/two_tiers.md`: what happens when a committed window
+- [`docs/explanation/two_tiers.md`](two_tiers.md): what happens when a committed window
   has to be decoded again.
-- `docs/reference/glossary.md`: `r_com`, `r_buf`, `r_strong` and the
+- [`docs/reference/glossary.md`](../reference/glossary.md): `r_com`, `r_buf`, `r_strong` and the
   rest, with their sources.
-- `docs/how-to/add_a_table_row.md`: adding a scheme of your own.
+- [`docs/how-to/add_a_table_row.md`](../how-to/add_a_table_row.md): adding a scheme of your own.

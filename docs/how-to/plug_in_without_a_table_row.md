@@ -1,3 +1,5 @@
+[decsim docs](../README.md) › [How-to guides](README.md)
+
 # How to plug a component in without a table row
 
 While a class is still changing, you do not want to edit decsim at all.
@@ -39,7 +41,7 @@ else works: the ports, the engine, the trace, the metrics.
 ## When to add the row
 
 When the class stops changing, or the moment you want to sweep it.
-`docs/how-to/add_a_table_row.md` is one entry in a dictionary and one
+[`docs/how-to/add_a_table_row.md`](add_a_table_row.md) is one entry in a dictionary and one
 key in `configs/reference.yaml`.
 
 ## The worked examples
@@ -55,6 +57,6 @@ Each of these builds a class outside decsim and runs it:
 
 ## Read next
 
-- `docs/how-to/add_a_table_row.md`: the three steps when you want the
+- [`docs/how-to/add_a_table_row.md`](add_a_table_row.md): the three steps when you want the
   yaml to name it.
-- `docs/reference/ports.md`: the port your class fills.
+- [`docs/reference/ports.md`](../reference/ports.md): the port your class fills.

@@ -1,3 +1,5 @@
+[decsim docs](../README.md) › [Explanation](README.md)
+
 # Time
 
 Everything decsim reports is a time, so it is worth being exact about
@@ -125,10 +127,10 @@ clock when a window's rounds are available to the decoder
 start it when the physics happened, as the round left the QPU
 (`qpu_last_round_to_frame`, `qpu_first_round_to_frame`), so those two
 also carry the link out of the fridge, the controller's own work and the
-write into the buffer. `docs/reference/run_folder.md` lists all of them.
+write into the buffer. [`docs/reference/run_folder.md`](../reference/run_folder.md) lists all of them.
 
 ## Read next
 
-- `docs/reference/run_folder.md`: every latency point, defined.
-- `docs/how-to/run_a_timing_only_study.md`: a run whose ticks are
+- [`docs/reference/run_folder.md`](../reference/run_folder.md): every latency point, defined.
+- [`docs/how-to/run_a_timing_only_study.md`](../how-to/run_a_timing_only_study.md): a run whose ticks are
   configuration alone.

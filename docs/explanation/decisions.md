@@ -1,3 +1,5 @@
+[decsim docs](../README.md) › [Explanation](README.md)
+
 # The design decisions
 
 Ten decisions shape what decsim charges and where it charges it. Each is
@@ -101,7 +103,7 @@ weak-side write (40 nanoseconds) and stage F for the inter-node
 broadcast (240 to 260 nanoseconds at the stated worst case).
 
 **Where to see it.** `decsim/links/link_profiles.py`, and
-`docs/explanation/data_path.md` hops 2 and 3.
+[`docs/explanation/data_path.md`](data_path.md) hops 2 and 3.
 
 **Flagged with the decision.** The reference card's weak-side sum
 exceeds Toshio's own communication time for the weak side, because the
@@ -228,8 +230,8 @@ tested.
 
 ## Read next
 
-- `docs/explanation/principles.md`: the ideas these decisions were made
+- [`docs/explanation/principles.md`](principles.md): the ideas these decisions were made
   under.
-- `docs/explanation/data_path.md`: D1, D5 and D9 as they appear on the
+- [`docs/explanation/data_path.md`](data_path.md): D1, D5 and D9 as they appear on the
   wire.
 - `STYLE.md` rule 8: why a modelling question is answered from a source.

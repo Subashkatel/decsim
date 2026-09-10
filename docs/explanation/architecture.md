@@ -1,3 +1,5 @@
+[decsim docs](../README.md) › [Explanation](README.md)
+
 # Architecture
 
 decsim is one root object and a row of components, in the order a
@@ -33,7 +35,7 @@ component builds or looks up another. gem5's configuration script does
 the same job, naming each component once and assigning its ports.
 
 `decsim/ports.py` is therefore the map of the pipeline, and a reader who
-wants to follow a readout starts there. `docs/reference/ports.md` is
+wants to follow a readout starts there. [`docs/reference/ports.md`](../reference/ports.md) is
 that file as a page.
 
 ## The components, in the order a readout travels
@@ -105,7 +107,7 @@ why `observe/` can be switched off without a single other line changing.
 
 ## The pluggable parts
 
-Seventeen tables, listed with every row in `docs/reference/tables.md`.
+Seventeen tables, listed with every row in [`docs/reference/tables.md`](../reference/tables.md).
 The parts a study is most likely to change:
 
 - the **syndrome source**, which is what the QPU reads out
@@ -120,7 +122,7 @@ The parts a study is most likely to change:
   when a window is escalated (`CONFIDENCE_SIGNALS`, `THRESHOLD_SOURCES`).
 
 Every one of them is one class filling one port and one row in a table.
-`docs/how-to/add_a_table_row.md` is the recipe.
+[`docs/how-to/add_a_table_row.md`](../how-to/add_a_table_row.md) is the recipe.
 
 ## The package order
 
@@ -139,7 +141,7 @@ lines 52-57).
 `tools/check_uses_graph.py`, which `tools/check.sh` runs, fails on any
 cycle and prints the levels. There are twenty-five packages on eleven
 levels; `decsim/machine.py`'s docstring names them and
-`docs/reference/map.md` lists every module under them. Nothing at level
+[`docs/reference/map.md`](../reference/map.md) lists every module under them. Nothing at level
 3 or below imports `decsim/build/` or `decsim/machine.py`, so the
 decoders' own tests build a decoder pool and a store and decode a window
 with no root at all.
@@ -157,11 +159,11 @@ and nothing retries. That is a stated scope, written into
 `decsim/machine.py`'s own docstring, not an omission. A retry added to a
 hop as a tuning knob would be a modelling change, not a parameter.
 
-`docs/explanation/data_path.md` walks all eleven.
+[`docs/explanation/data_path.md`](data_path.md) walks all eleven.
 
 ## Read next
 
-- `docs/reference/ports.md`: every port and every method.
-- `docs/reference/map.md`: every package and module, in the uses order.
-- `docs/explanation/data_path.md`: the eleven hops, one at a time.
-- `docs/explanation/principles.md`: the eleven ideas behind this shape.
+- [`docs/reference/ports.md`](../reference/ports.md): every port and every method.
+- [`docs/reference/map.md`](../reference/map.md): every package and module, in the uses order.
+- [`docs/explanation/data_path.md`](data_path.md): the eleven hops, one at a time.
+- [`docs/explanation/principles.md`](principles.md): the eleven ideas behind this shape.

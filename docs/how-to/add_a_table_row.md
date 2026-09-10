@@ -1,9 +1,11 @@
+[decsim docs](../README.md) › [How-to guides](README.md)
+
 # How to add a row to a table
 
 A pluggable part of decsim is a **table**: a dictionary whose keys are
 the names a yaml file may write and whose values are the classes the
 machine builds. There are seventeen of them, listed with every row in
-`docs/reference/tables.md`. This is the recipe for adding a row to any
+[`docs/reference/tables.md`](../reference/tables.md). This is the recipe for adding a row to any
 of them.
 
 Adding a row must touch exactly three things: your class, the table, and
@@ -13,7 +15,7 @@ port rather than with your class.
 ## 1. Find the port and fill it
 
 Open `decsim/ports.py` and find the port your part fills.
-`docs/reference/ports.md` is the same file as a page, with every method
+[`docs/reference/ports.md`](../reference/ports.md) is the same file as a page, with every method
 and what it does. The ports are in pipeline order, so the part you want
 is near the component that uses it.
 
@@ -29,7 +31,7 @@ model contracts your decoder wants
 (`decsim/detector_error_model/fault_model_contracts.py`), and
 `Decoder.stage_recorded` says which trace source it fires, `SILENT` for
 a decoder with no internal stages. The members are listed per port in
-`docs/reference/ports.md`.
+[`docs/reference/ports.md`](../reference/ports.md).
 
 ## 2. Add the row
 
@@ -43,7 +45,7 @@ DECODERS = {
 }
 ```
 
-`docs/reference/tables.md` says which file each table is in and which
+[`docs/reference/tables.md`](../reference/tables.md) says which file each table is in and which
 yaml key names it.
 
 ## 3. Name it in the yaml, and in the reference
@@ -124,7 +126,7 @@ and its path, so one seed reproduces one shot exactly. See
 
 ## Read next
 
-- `docs/how-to/plug_in_without_a_table_row.md`: skip step 2 while the
+- [`docs/how-to/plug_in_without_a_table_row.md`](plug_in_without_a_table_row.md): skip step 2 while the
   class is still changing.
-- `docs/how-to/add_a_decoder_backend.md`: the decoder case in full.
-- `docs/reference/tables.md`: all seventeen tables and their rows.
+- [`docs/how-to/add_a_decoder_backend.md`](add_a_decoder_backend.md): the decoder case in full.
+- [`docs/reference/tables.md`](../reference/tables.md): all seventeen tables and their rows.

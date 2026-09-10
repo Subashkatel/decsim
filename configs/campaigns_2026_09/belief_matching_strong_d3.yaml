@@ -1,0 +1,30 @@
+# belief_matching_strong, distance 3 alone: one Slurm array of the campaign
+# (PLAN.md). Every other key is belief_matching_strong.yaml's.
+
+extends: belief_matching_strong.yaml
+
+sweep:
+  - physical_error_probability: [0.001]
+    distance: [3]
+    round_period_us: [1.0]
+    shots: 17064
+  - physical_error_probability: [0.002]
+    distance: [3]
+    round_period_us: [1.0]
+    shots: 4432
+  - physical_error_probability: [0.003]
+    distance: [3]
+    round_period_us: [1.0]
+    shots: 1998
+  - physical_error_probability: [0.005]
+    distance: [3]
+    round_period_us: [1.0]
+    shots: 794
+  - physical_error_probability: [0.007]
+    distance: [3]
+    round_period_us: [1.0]
+    shots: 471
+  - physical_error_probability: [0.01]
+    distance: [3]
+    round_period_us: [1.0]
+    shots: 400

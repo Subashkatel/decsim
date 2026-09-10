@@ -29,11 +29,159 @@ windows:
                                      # and the single-tier campaigns take the
                                      # same plan so the comparison is fair
 
-sweep:
-  - physical_error_probability: [0.001, 0.002, 0.003, 0.005, 0.007, 0.01]
-    distance: [3, 5, 7, 9, 11, 13, 15]
+sweep:                             # one table for all six campaigns, so the
+                                   # same seeds, hence the same syndrome
+                                   # histories, reach every decoder: each point
+                                   # sized for about 100 logical failures
+                                   # (sinter's max_errors rule, applied ahead
+                                   # of time) from the 2026-08-27 strong_ler
+                                   # rates, floor 400, cap 200,000; four points
+                                   # that would see under 3 failures at the cap
+                                   # are left out (PLAN.md)
+  - physical_error_probability: [0.001]
+    distance: [3]
     round_period_us: [1.0]
-    shots: 1000000                   # SHOTS_PER_POINT
+    shots: 17064
+  - physical_error_probability: [0.002]
+    distance: [3]
+    round_period_us: [1.0]
+    shots: 4432
+  - physical_error_probability: [0.003]
+    distance: [3]
+    round_period_us: [1.0]
+    shots: 1998
+  - physical_error_probability: [0.005]
+    distance: [3]
+    round_period_us: [1.0]
+    shots: 794
+  - physical_error_probability: [0.007]
+    distance: [3]
+    round_period_us: [1.0]
+    shots: 471
+  - physical_error_probability: [0.01]
+    distance: [3]
+    round_period_us: [1.0]
+    shots: 400
+  - physical_error_probability: [0.001]
+    distance: [5]
+    round_period_us: [1.0]
+    shots: 96153
+  - physical_error_probability: [0.002]
+    distance: [5]
+    round_period_us: [1.0]
+    shots: 14492
+  - physical_error_probability: [0.003]
+    distance: [5]
+    round_period_us: [1.0]
+    shots: 5037
+  - physical_error_probability: [0.005]
+    distance: [5]
+    round_period_us: [1.0]
+    shots: 1123
+  - physical_error_probability: [0.007]
+    distance: [5]
+    round_period_us: [1.0]
+    shots: 467
+  - physical_error_probability: [0.01]
+    distance: [5]
+    round_period_us: [1.0]
+    shots: 400
+  - physical_error_probability: [0.001]
+    distance: [7]
+    round_period_us: [1.0]
+    shots: 200000
+  - physical_error_probability: [0.002]
+    distance: [7]
+    round_period_us: [1.0]
+    shots: 73529
+  - physical_error_probability: [0.003]
+    distance: [7]
+    round_period_us: [1.0]
+    shots: 12987
+  - physical_error_probability: [0.005]
+    distance: [7]
+    round_period_us: [1.0]
+    shots: 1930
+  - physical_error_probability: [0.007]
+    distance: [7]
+    round_period_us: [1.0]
+    shots: 543
+  - physical_error_probability: [0.01]
+    distance: [7]
+    round_period_us: [1.0]
+    shots: 400
+  - physical_error_probability: [0.001, 0.002]
+    distance: [9]
+    round_period_us: [1.0]
+    shots: 200000
+  - physical_error_probability: [0.003]
+    distance: [9]
+    round_period_us: [1.0]
+    shots: 35714
+  - physical_error_probability: [0.005]
+    distance: [9]
+    round_period_us: [1.0]
+    shots: 2702
+  - physical_error_probability: [0.007]
+    distance: [9]
+    round_period_us: [1.0]
+    shots: 586
+  - physical_error_probability: [0.01]
+    distance: [9]
+    round_period_us: [1.0]
+    shots: 400
+  - physical_error_probability: [0.002]
+    distance: [11]
+    round_period_us: [1.0]
+    shots: 200000
+  - physical_error_probability: [0.003]
+    distance: [11]
+    round_period_us: [1.0]
+    shots: 95238
+  - physical_error_probability: [0.005]
+    distance: [11]
+    round_period_us: [1.0]
+    shots: 4237
+  - physical_error_probability: [0.007]
+    distance: [11]
+    round_period_us: [1.0]
+    shots: 728
+  - physical_error_probability: [0.01]
+    distance: [11]
+    round_period_us: [1.0]
+    shots: 400
+  - physical_error_probability: [0.002, 0.003]
+    distance: [13]
+    round_period_us: [1.0]
+    shots: 200000
+  - physical_error_probability: [0.005]
+    distance: [13]
+    round_period_us: [1.0]
+    shots: 6643
+  - physical_error_probability: [0.007]
+    distance: [13]
+    round_period_us: [1.0]
+    shots: 906
+  - physical_error_probability: [0.01]
+    distance: [13]
+    round_period_us: [1.0]
+    shots: 400
+  - physical_error_probability: [0.003]
+    distance: [15]
+    round_period_us: [1.0]
+    shots: 200000
+  - physical_error_probability: [0.005]
+    distance: [15]
+    round_period_us: [1.0]
+    shots: 10415
+  - physical_error_probability: [0.007]
+    distance: [15]
+    round_period_us: [1.0]
+    shots: 1126
+  - physical_error_probability: [0.01]
+    distance: [15]
+    round_period_us: [1.0]
+    shots: 400
 
 controller:
   clock: fridge

@@ -1,0 +1,30 @@
+# union_find_weak, distance 5 alone: one Slurm array of the campaign
+# (PLAN.md). Every other key is union_find_weak.yaml's.
+
+extends: union_find_weak.yaml
+
+sweep:
+  - physical_error_probability: [0.001]
+    distance: [5]
+    round_period_us: [1.0]
+    shots: 96153
+  - physical_error_probability: [0.002]
+    distance: [5]
+    round_period_us: [1.0]
+    shots: 14492
+  - physical_error_probability: [0.003]
+    distance: [5]
+    round_period_us: [1.0]
+    shots: 5037
+  - physical_error_probability: [0.005]
+    distance: [5]
+    round_period_us: [1.0]
+    shots: 1123
+  - physical_error_probability: [0.007]
+    distance: [5]
+    round_period_us: [1.0]
+    shots: 467
+  - physical_error_probability: [0.01]
+    distance: [5]
+    round_period_us: [1.0]
+    shots: 400

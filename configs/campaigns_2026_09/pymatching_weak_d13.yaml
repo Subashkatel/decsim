@@ -1,0 +1,22 @@
+# pymatching_weak, distance 13 alone: one Slurm array of the campaign
+# (PLAN.md). Every other key is pymatching_weak.yaml's.
+
+extends: pymatching_weak.yaml
+
+sweep:
+  - physical_error_probability: [0.002, 0.003]
+    distance: [13]
+    round_period_us: [1.0]
+    shots: 200000
+  - physical_error_probability: [0.005]
+    distance: [13]
+    round_period_us: [1.0]
+    shots: 6643
+  - physical_error_probability: [0.007]
+    distance: [13]
+    round_period_us: [1.0]
+    shots: 906
+  - physical_error_probability: [0.01]
+    distance: [13]
+    round_period_us: [1.0]
+    shots: 400

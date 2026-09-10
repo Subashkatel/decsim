@@ -70,7 +70,12 @@ class InstructionOutput:
         the controller the instant this runs. A release is consumed
         here, and the command it releases crosses the output path in
         send_command. A result return crosses the output path before it
-        is available at the QPU.
+        is available at the QPU, and what receives it there is the
+        execution runtime, the classical program that branches on the
+        outcome, because the QPU device models the cycle cadence and the
+        pulses and holds no register an outcome lands in (QubiC runs the
+        branch on the control processor beside the qubit, Fruitwala et
+        al. 2404.15260 Sec. III and IV).
         """
         self._fire("DECISION_AVAILABLE", decision.target_operation_id, decision)
         if decision.releases_operation:

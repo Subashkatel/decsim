@@ -147,6 +147,32 @@ def command_arrivals_for(machine, operation_id):
     return arrivals
 
 
+def test_a_result_return_is_reported_to_the_execution_runtime():
+    """The modelled destination of a result return is the runtime.
+
+    The return pays frame_to_controller, the pulse cost and
+    controller_to_qpu, and the object that takes the outcome is the
+    execution runtime, which stands for the classical program: Caune et
+    al. 2410.05202 stalls that program on the decoder's status register
+    and goes on (lines 364-367), and QubiC executes the branch on the
+    control processor beside the qubit (Fruitwala et al. 2404.15260
+    Sec. III and IV). The QPU device runs no command for it, so the only
+    command that reached it is the operation's own start.
+    """
+    operation = declared_run.memory_operation(
+        1, requires_result_return_to_qpu=True
+    )
+    machine = declared_run.weak_only_run(rounds=6, operations=(operation,))
+    commit = commit_tick_of(machine, (1, 0))
+    to_controller = config.microseconds_to_ticks(2.0)
+    to_qpu = config.microseconds_to_ticks(2.0)
+    stamps = machine.observation.runtime_stamps
+    arrivals = command_arrivals_for(machine, 1)
+
+    assert stamps.result_return == {1: commit + to_controller + to_qpu}
+    assert [arrival.tick for arrival in arrivals] == [0]
+
+
 def test_the_feedback_chain_is_the_frame_commit_plus_each_stage_once():
     """A blocked successor pays frame_to_controller, the pulse, then cq.
 

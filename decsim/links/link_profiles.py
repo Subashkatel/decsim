@@ -54,6 +54,18 @@ INSTRUCTION_WORD_SOURCE = (
     "(QubiC distributed processor, Fruitwala et al. 2404.15260)"
 )
 
+# The readout hop carries the QPU-side readout at the width the QPU
+# reports for it (controller/controller.py sends readout.size_bits).
+READOUT_PAYLOAD_SOURCE = "QPUReadout.size_bits"
+
+# The escalation hop carries no bits: the weak decoder names the strong
+# request and the strong input travels on its own hop
+# (decoders/decoder_output.py sends payload_bits=None). The card says so
+# rather than naming a count nothing supplies.
+ESCALATION_PAYLOAD_SOURCE = (
+    "no payload; the escalation names the strong request"
+)
+
 # The two controller-to-store hops carry the packed round at the width
 # it leaves the controller: the detection events where the controller
 # forms them and the raw measurement outcomes where the decoder does
@@ -117,7 +129,7 @@ def logical_reference_profile() -> settings.FabricSettings:
         0.15,
         "Khalid 2511.10633 Table I tqc, syndrome transfer from QPU "
         "to controller",
-        "SyndromePayload.size_bits",
+        READOUT_PAYLOAD_SOURCE,
     )
     controller_to_weak_buffer = _actual_path(
         "controller_to_weak_buffer",
@@ -142,7 +154,7 @@ def logical_reference_profile() -> settings.FabricSettings:
         "weak_decoder_to_strong_decoder",
         0.5,
         "repository weak-to-strong model choice",
-        "switching decision payload_bits",
+        ESCALATION_PAYLOAD_SOURCE,
     )
     strong_buffer_to_strong_decoder = _actual_path(
         "strong_buffer_to_strong_decoder",
@@ -255,7 +267,7 @@ def bandwidth_limited_profile(
         syndrome_bits_per_round,
         round_bits_per_microsecond,
         "one syndrome round per round period",
-        "SyndromePayload.size_bits",
+        READOUT_PAYLOAD_SOURCE,
     )
     controller_to_weak_buffer = provisioning.path(
         "controller_to_weak_buffer",
@@ -289,7 +301,7 @@ def bandwidth_limited_profile(
         1,
         one_per_region,
         "one escalation decision per commit region",
-        "switching decision payload_bits",
+        ESCALATION_PAYLOAD_SOURCE,
     )
     strong_buffer_to_strong_decoder = provisioning.path(
         "strong_buffer_to_strong_decoder",

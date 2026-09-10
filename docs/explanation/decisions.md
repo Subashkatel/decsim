@@ -298,10 +298,6 @@ mistake a gap for a result.
   Its card is built before the sweep point sets the geometry, so
   reaching it from a config would mean building the links card inside
   the per-point settings.
-- **O3. Two payload-source strings name no real field.**
-  `SyndromePayload.size_bits` and `switching decision payload_bits`
-  travel into the gate's link traffic and are held until the next time
-  the golden file moves, so the correction is not made twice.
 - **O6. `MAGIC_STATE_FACTORIES` has a table and no yaml section.** Its
   rows cannot be selected from a config the way every other table's rows
   can.
@@ -332,7 +328,10 @@ eighth, O5, said the boundary fold was executed by the window gate
 because moving it would reorder the copy trace sources; it is closed as
 well, and no trace source moved: the gate hands the mask and the
 decoder side writes it (`decsim/decoders/decoder_memory_transfer.py`,
-D11).
+D11). A ninth, O3, held two payload-source strings that named no real
+field until the golden file next moved; it is closed by naming what the
+sends carry, `QPUReadout.size_bits` on the readout hop and no payload at
+all on the escalation hop, under one regeneration note.
 
 ## Read next
 

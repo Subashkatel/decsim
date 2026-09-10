@@ -22,9 +22,9 @@ import decsim.trace_source as trace_source
 class Controller:
     """The readout intake; implements the ReadoutReceiver port.
 
-    Trace sources: round_event(RoundEvent) with kind EMITTED as a readout
-    leaves the QPU; copy_made(round_key, bits, "readout", "controller
-    intake") for the intake's copy of the bits (data_path.md hop 1).
+    Trace source: copy_made(round_key, bits, "readout", "controller
+    intake") for the intake's copy of the bits (data_path.md hop 1). The
+    instant the readout left is the QPU's own event (qpu/cycle_clock.py).
     """
 
     def __init__(
@@ -55,15 +55,6 @@ class Controller:
         self.trace.copy_made.fire(
             round_key, readout.size_bits, "readout", "controller intake"
         )
-        emitted = round_records.RoundEvent.of(
-            "EMITTED",
-            self.engine.now,
-            fragment.operation_id,
-            fragment.round_index,
-            route,
-            fragment.patch_id,
-        )
-        self.trace.round_event.fire(emitted)
         attribution = transfer_records.TransferAttribution.for_round(
             fragment.operation_id, (fragment.patch_id,), fragment.round_index
         )
@@ -99,5 +90,4 @@ class _TraceSources:
     listener reaches all of them through one name.
     """
 
-    round_event: trace_source.TraceSource = trace_source.new_source()
     copy_made: trace_source.TraceSource = trace_source.new_source()

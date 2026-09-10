@@ -45,7 +45,11 @@ class QPUDevice:
     idle patch. The receivers may arrive later through connect_*. Trace
     sources: command_event(QPUCommandEvent) when a command arrives and
     when it starts; round_emitted(readout) for every readout a round
-    hands to the controller.
+    hands to the controller, and round_event(RoundEvent) with kind
+    EMITTED for the same instant on the readout path's own ledger. The
+    event is the emitter's own: gem5's SimObject reports its statistics
+    from the object the event happened in
+    (tmp/resources/gem5/src/base/stats/group.hh:60-92).
     """
 
     def __init__(
@@ -143,7 +147,7 @@ class QPUDevice:
         route = round_records.SyndromePacketRoute.feedback_memory_round(
             operation_id
         )
-        self.receivers.readout.accept_qpu_readout(payload, route)
+        self._hand_to_the_controller(payload, route)
 
     def _schedule_boundary(self, boundary: int) -> None:
         if boundary in self._live.scheduled_boundaries:
@@ -276,9 +280,22 @@ class QPUDevice:
                 payload, fragment_count=fragment_count, fragment_index=index
             )
             self.trace.round_emitted.fire(readout)
-            self.receivers.readout.accept_qpu_readout(
+            self._hand_to_the_controller(
                 readout, round_records.WINDOW_INPUT_ROUTE
             )
+
+    def _hand_to_the_controller(self, readout, route) -> None:
+        """The readout leaves the QPU: report the instant, then hand it on."""
+        emitted = round_records.RoundEvent.of(
+            "EMITTED",
+            self.engine.now,
+            readout.operation_id,
+            readout.round_index,
+            route,
+            readout.patch_id,
+        )
+        self.trace.round_event.fire(emitted)
+        self.receivers.readout.accept_qpu_readout(readout, route)
 
 
 @dataclasses.dataclass
@@ -309,6 +326,7 @@ class _TraceSources:
 
     command_event: trace_source.TraceSource = trace_source.new_source()
     round_emitted: trace_source.TraceSource = trace_source.new_source()
+    round_event: trace_source.TraceSource = trace_source.new_source()
 
 
 @dataclasses.dataclass

@@ -13,9 +13,8 @@ accelerator's invoke, then DMA into the unit's memory, then compute),
 and this port executes the move, so the link a store's rounds ride is
 the store's own fact and not the window side's. And a timing-only
 feedback-memory round, which the controller packs and asks for: the
-store sends it and frees its own slot at the delivery. This port is the
-store's face on the data path in both directions, so a round landing
-here is stamped through it too.
+store sends it and frees its own slot at the delivery. What lands in
+the store is the incoming port's (round_input.py); this one sends.
 """
 
 import functools
@@ -77,14 +76,6 @@ class RoundStoreOutput:
         del job
         on_landed()
         return 0
-
-    def mark_published(self, round_key: tuple, publication_tick: int) -> None:
-        """A round that landed here is readable from this tick on.
-
-        The record is the store's, so the sender that carried the round
-        to this end hands the tick over instead of writing it.
-        """
-        self.store.mark_publication_tick(round_key, publication_tick)
 
     def send_memory_round(
         self,

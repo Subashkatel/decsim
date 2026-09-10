@@ -1,8 +1,8 @@
 """The transmitter: a stored round leaves on its route at the write.
 
 A window-input round rides controller_to_weak_buffer, whose sending end
-this is, and is published to the windows at delivery, where its
-publication tick is stamped on the store. A feedback-memory round rides
+this is; Buffer 0's own incoming port handles the landing, which is
+where the round is published. A feedback-memory round rides
 weak_buffer_to_weak_decoder, whose sending end is Buffer 0, so the
 store's own outgoing port sends it and frees the slot and this
 transmitter only asks and hears the landing. The
@@ -26,19 +26,19 @@ import decsim.trace_source as trace_source
 
 
 class RoundTransmitter:
-    """Sends a stored round on its route and tells the windows at delivery.
+    """Sends a stored round on its route and counts it until it lands.
 
-    Trace source: round_event(RoundEvent) with kinds CWB_SENT, PUBLISHED
-    and FEEDBACK_MEMORY_DELIVERED.
+    Trace source: round_event(RoundEvent) with kinds CWB_SENT and
+    FEEDBACK_MEMORY_DELIVERED.
     """
 
-    def __init__(self, engine, link, windows, store_output) -> None:
+    def __init__(self, engine, link, windows, store_input) -> None:
         self.engine = engine
         self.link = link
         self.windows = windows
-        # Buffer 0's port on the data path: it stamps what lands there
-        # and sends what leaves it
-        self.store_output = store_output
+        # Buffer 0's port toward the controller: it handles what lands
+        # there and asks the store to send what leaves it
+        self.store_input = store_input
         self.in_flight = 0
         self.trace = _TraceSources()
 
@@ -79,10 +79,16 @@ class RoundTransmitter:
         )
 
     def _publish(self, packed: round_records.PackedRound) -> None:
-        """The round reached Buffer 0: stamp it, record it, wake the windows."""
-        self.store_output.mark_published(packed.round_key, self.engine.now)
-        self._fire("PUBLISHED", packed)
-        self.windows.accept_window_input(packed.packet)
+        """The round reached Buffer 0: that end handles the landing.
+
+        Everything the landing does to Buffer 0's record and to whoever
+        waits on it is Buffer 0's (syndrome_buffer/round_input.py); this
+        sender hears the landing for its in_flight count alone, as gem5's
+        requesting port hands the packet to the peer's own receive method
+        (tmp/resources/gem5/src/mem/port.hh:603-614, whose
+        src/mem/protocol/timing.cc:49-53 calls peer->recvTimingReq).
+        """
+        self.store_input.receive_round(packed)
         self._leave_after_publication()
 
     def _leave_after_publication(self) -> None:
@@ -104,7 +110,7 @@ class RoundTransmitter:
         transmitter only asks and hears the landing.
         """
         deliver = functools.partial(self._deliver_feedback_memory, packed)
-        self.store_output.send_memory_round(packed, deliver)
+        self.store_input.send_memory_round(packed, deliver)
 
     def _deliver_feedback_memory(
         self, packed: round_records.PackedRound

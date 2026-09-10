@@ -1,9 +1,9 @@
 """The transmitter: a stored round leaves at the write and lands on its route.
 
-A window-input round rides controller_to_weak_buffer and is published at
-delivery, where the store is stamped. A feedback-memory round tells the
-windows at delivery and frees its slot. The sender never waits for a
-landing:
+A window-input round rides controller_to_weak_buffer and reaches Buffer
+0's incoming port at delivery, which publishes it. A feedback-memory
+round tells the windows at delivery and frees its slot. The sender never
+waits for a landing:
 two memory rounds one QEC cycle apart on a 5 us weak_buffer_to_weak_decoder
 land one cycle apart (Yang et al. 2605.04892 and Google 2408.13687 stream
 every round; gem5 src/dev/dma_device.cc transmitList; ns-3
@@ -30,6 +30,7 @@ import decsim.observe.link_traffic as link_traffic
 import decsim.observe.round_events as round_events
 import decsim.records.rounds as round_records
 import decsim.records.transfers as transfer_records
+import decsim.syndrome_buffer.round_input as round_input
 import decsim.syndrome_buffer.round_output as round_output
 import decsim.syndrome_buffer.round_store as round_store_module
 import decsim.syndrome_buffer.settings as round_store_settings
@@ -152,10 +153,14 @@ def transmitter_with(engine, profile, windows=None):
         "Buffer 0",
         store,
     )
+    store_input = round_input.RoundStoreInput(
+        engine, store, store_output, windows
+    )
     transmitter = round_transmission.RoundTransmitter(
-        engine, links, windows, store_output
+        engine, links, windows, store_input
     )
     transmitter.trace.round_event.connect(recorder.record)
+    store_input.trace.round_event.connect(recorder.record)
     return transmitter, store, windows, recorder, ledger
 
 

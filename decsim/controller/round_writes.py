@@ -98,8 +98,9 @@ class RoundWriter:
 
     Trace source: copy_made(round_key, bits, "controller assembler",
     "Buffer 0") for the write (data_path.md hop 3). It narrates Buffer
-    0's intake on the engine's io_line; the publication is the
-    transmitter's, at the round's landing in Buffer 0.
+    0's intake on the engine's io_line; the publication is Buffer 0's
+    own, at the round's landing there
+    (syndrome_buffer/round_input.py).
     """
 
     def __init__(
@@ -135,7 +136,7 @@ class RoundWriter:
         if not self._strong_has_room():
             return self.held_rounds.refuse(packed, self.admit)
         # the round is published when its controller_to_weak_buffer
-        # transfer lands, which is where the transmitter stamps it
+        # transfer lands, where Buffer 0's own incoming port stamps it
         self.weak_store.accept_packed_round(
             packed.packet, publication_tick=None
         )

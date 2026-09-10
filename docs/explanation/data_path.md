@@ -91,7 +91,12 @@ a syndrome, Yang arXiv:2605.04892).
 
 The packed round into syndrome buffer 0. Ends: `controller` to
 `syndrome_buffer`; the send is executed by the controller's transmitter
-(`decsim/controller/round_transmission.py`).
+(`decsim/controller/round_transmission.py`), and the landing is handled
+by Buffer 0's own incoming port
+(`decsim/syndrome_buffer/round_input.py`), which stamps the publication
+tick on the store's record and announces the published round to the
+window manager. The transmitter hears the landing for its count of the
+rounds on their route and for nothing else.
 
 What crosses: one **packed round**, every fragment that leaves the
 controller. The bit count is `PackedRound.wire_bits`, computed in
@@ -100,8 +105,10 @@ controller. The bit count is `PackedRound.wire_bits`, computed in
 narrower than the raw outcomes; under the `decoder` row it is the raw
 outcomes and each tier forms its own events.
 
-Move, on board, with a copy into Buffer 0 at the landing. Default
-latency 0.04 microseconds, taken from Caune arXiv:2410.05202 Fig. 1a
+Move, on board, with a copy into Buffer 0's record. The record is
+written before the wire is used, so the store can refuse a round for
+room before it leaves the controller, and the landing publishes that
+record rather than making it. Default latency 0.04 microseconds, taken from Caune arXiv:2410.05202 Fig. 1a
 stage D, "result message handled and prepared for broadcast", 40
 nanoseconds. Buffer 0 sits with the controller, which is why that stage
 is the right one.
@@ -110,7 +117,10 @@ is the right one.
 
 The same packed round into syndrome buffer 1, in parallel. Ends:
 `controller` to `syndrome_buffer`; the send is executed by
-`decsim/syndrome_buffer/strong_round_writer.py`.
+`decsim/syndrome_buffer/strong_round_writer.py`, which is the receiving
+end and handles the landing there too: it stores the round with the
+landing tick, or drops it at the door when its operation closed while it
+crossed.
 
 What crosses: the same round, the same bit count.
 

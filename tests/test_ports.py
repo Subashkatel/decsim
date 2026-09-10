@@ -166,9 +166,17 @@ def test_the_former_port_declares_what_every_row_that_forms_calls():
     assert _undeclared(called, ("DetectionEventFormer",)) == {}
 
 
-def test_the_window_input_port_declares_what_the_controller_calls():
-    called = _called_on(("windows",), ("controller",))
+def test_the_window_input_port_declares_what_its_two_callers_call():
+    """The controller and Buffer 0's incoming port hold the manager."""
+    callers = ("controller", "syndrome_buffer")
+    called = _called_on(("windows",), callers)
     assert _undeclared(called, ("WindowInput",)) == {}
+
+
+def test_the_store_input_port_declares_what_the_transmitter_calls():
+    """The controller holds Buffer 0's incoming port only as this port."""
+    called = _called_on(("store_input",), ("controller",))
+    assert _undeclared(called, ("RoundStoreInput",)) == {}
 
 
 def _decsim_modules() -> list:

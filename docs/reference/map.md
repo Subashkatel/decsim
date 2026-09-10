@@ -146,7 +146,7 @@ docstring.
 
 ### controller
 
-- `decsim/controller/__init__.py`: controller component.
+- `decsim/controller/__init__.py`: The controller: the room-side machine between the QPU and the stores.
 - `decsim/controller/conditional_release.py`: Conditional release: letting go of the operations that waited on a result.
 - `decsim/controller/controller.py`: The controller's intake: a QPU readout becomes a fragment for the assembler.
 - `decsim/controller/feedback_streams.py`: Stream bookkeeping on the controller's QPU-facing side.

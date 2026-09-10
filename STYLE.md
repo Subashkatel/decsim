@@ -334,8 +334,9 @@ qLDPC, Stim, PyMatching and beliefmatching as installed. Compilers,
 simulators and schedulers outside this field are referents too when they
 solve the same shape of problem. The code's docstring names the referent
 for each decision. When the referents disagree or are silent, the
-docstring says so and the code picks the simplest law that the gate can
-pin.
+docstring says so and the code picks the simplest law it can state and
+test; when that law moves the gate, the gate is regenerated under a
+note, and the gate is never the reason for the law.
 
 ## Rule 9. Google Python style, enforced
 

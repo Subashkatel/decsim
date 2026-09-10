@@ -1,87 +1,114 @@
-# Data-core semantics adapted from PECOS PauliFrameAccumulator and ObsMask.
-# Source: https://github.com/PECOS-packages/PECOS
-# Commit: 7c679509ec7e87410f99445c2ec5442eb91016fd
-# Files: crates/pecos-decoder-core/src/pauli_frame.rs:53-108; crates/pecos-decoder-core/src/obs_mask.rs:132-141
-# Copyright 2026 The PECOS Developers.
-# License: Apache-2.0. Full text: tmp/references/code/pecos/LICENSE.
-# NOTICE: Copyright 2018 The PECOS Developers. The copyright for the code in PECOS is held by the contributors (or their
-# NOTICE: employers) for the code they contributed and is licensed under Apache-2.0. See the revision history in source control
-# NOTICE: for the list of contributors.
-# NOTICE: 
-# NOTICE: Copyright 2018 National Technology & Engineering Solutions of Sandia, LLC (NTESS). Under the terms of Contract
-# NOTICE: DE-NA0003525 with NTESS, the U.S. Government retains certain rights in this software.
-# Modified for decsim: Python tuple/None semantics, stream and window keys, idempotent async commit transaction, immutable records, and simulated commit latency.
+"""The Pauli frame remembers the corrections the decoders have made.
 
-"""Minimal final-weak Pauli-frame sink with explicitly priced writes.
+Each window gets one correction: a few bits, one per logical observable.
+The frame stores that correction and refuses a second one for the same
+window. A stream's total correction is all of its window corrections
+XORed together.
 
-The frame records corrections that are final for their window; an
-escalation-pending weak result is withheld by design. The write cost is
-charged before the commit body, so it also delays boundary handoff and the
-potential-strong hold release; there is no outstanding-write queue.
+Every write costs a fixed number of ticks. The caller is called back only
+after that time has passed, so anything waiting on the write waits too.
+
+The XOR fold follows PECOS's Pauli frame accumulator. Applying a
+correction exactly once follows Riesebos, "Pauli Frames for Quantum
+Computer Architectures", TU Delft MSc thesis CE-MS-2016, Sec. 3.2
+Table 3.1: a flush applies the gates in a Pauli record on the target
+qubit and then resets that record to I, so a tracked correction leaves
+the frame once. One write costs one clock cycle, 4 ns at 250 MHz (Yang
+et al. 2605.04892).
 """
-from dataclasses import dataclass
+
+import dataclasses
 import math
-from typing import Any, Callable, Optional
+from collections.abc import Mapping
+from typing import Callable, Optional
 
-from ..config import us
-from ..message import stable_identity_order_key
+import decsim.config as config
+import decsim.records.identity as identity_records
+import decsim.records.log_sources as log_sources
+import decsim.tables as tables
+import decsim.trace_source as trace_source
+
+ObservableBits = tuple[int, ...]
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class PauliFrameConfig:
-    """Card selecting the minimal Pauli frame and pricing one frame write.
+    """The frame's settings: what one write costs.
 
-    A frame write is one XOR into a register: one clock cycle of the frame
-    unit. Measured point: 4 ns per Pauli frame update on the FPGA of a
-    550 ns closed loop (Yang et al. 2605.04892, Fig. 1), one cycle at
-    250 MHz; XQsim's PFU likewise updates in one cycle. Writes to
-    different windows are charged in parallel, never queued.
+    A write is one XOR into a register, one clock cycle of the frame unit.
+    Yang et al. (2605.04892, Fig. 1) measure 4 ns per frame update inside a
+    550 ns loop, one cycle at 250 MHz. Writes to different windows are
+    charged in parallel, never queued behind each other.
+
+    Table row (FRAMES, below): pauli_frame.kind names the frame this run
+    commits into; logical_register is the one shipped row, the frame that
+    XORs an observable bitmask per window.
     """
 
-    commit_us: float
+    kind: str = "logical_register"
+    commit_microseconds: float = 0.0
     zero_commit_cost_justification: Optional[str] = None
 
     def __post_init__(self) -> None:
-        if not math.isfinite(self.commit_us) or self.commit_us < 0:
-            raise ValueError("commit_us must be a finite nonnegative number")
-        if self.commit_us > 0 and us(self.commit_us) == 0:
-            raise ValueError("commit_us is positive but rounds to zero ticks")
-        if self.commit_us == 0 and not self.zero_commit_cost_justification:
+        cost = self.commit_microseconds
+        if not math.isfinite(cost) or cost < 0:
             raise ValueError(
-                "zero commit_us requires zero_commit_cost_justification"
+                "commit_microseconds must be finite and not negative"
             )
-        if (
-            self.commit_us > 0
-            and self.zero_commit_cost_justification is not None
-        ):
+        ticks = config.microseconds_to_ticks(cost)
+        if cost > 0 and ticks == 0:
             raise ValueError(
-                "zero_commit_cost_justification is only valid for zero commit_us"
+                "commit_microseconds is positive but rounds to zero ticks"
             )
+        is_free = cost == 0
+        has_justification = bool(self.zero_commit_cost_justification)
+        if is_free and not has_justification:
+            raise ValueError(
+                "a free write needs zero_commit_cost_justification"
+            )
+        if not is_free and has_justification:
+            raise ValueError(
+                "zero_commit_cost_justification needs a free write"
+            )
+
+    @classmethod
+    def from_yaml(
+        cls, section: Mapping, clocks: config.ClockSettings
+    ) -> "PauliFrameConfig":
+        """The `pauli_frame` section: a kind, and write_cycles on its clock."""
+        kind = section.get("kind", "logical_register")
+        tables.row(FRAMES, "pauli_frame.kind", kind)
+        clock = section["clock"]
+        write_cycles = section["write_cycles"]
+        commit_microseconds = clocks.microseconds(write_cycles, clock)
+        return cls(kind=kind, commit_microseconds=commit_microseconds)
 
     def commit_ticks(self) -> int:
-        """Return the configured write cost in integer ticks."""
-        return us(self.commit_us)
+        """The write cost in ticks."""
+        return config.microseconds_to_ticks(self.commit_microseconds)
 
-    def resolve(self, engine) -> "PauliFrame":
-        """Build this card's runtime frame on the run engine."""
-        return PauliFrame(engine, commit_ticks=self.commit_ticks())
+    def resolve(self, engine):
+        """Build the row these settings name, on the run's engine."""
+        row = tables.row(FRAMES, "pauli_frame.kind", self.kind)
+        commit_ticks = self.commit_ticks()
+        return row(engine, commit_ticks=commit_ticks)
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class PauliFrameCommitRecord:
-    """One accepted write, retained in acceptance order."""
+    """One accepted correction, kept in the order the frame accepted it."""
 
     window_key: tuple
     tier: str
     run_sequence: int
     accepted_ticks: int
     committed_ticks: int
-    logical_observables: Optional[tuple[int, ...]]
+    logical_observables: Optional[ObservableBits]
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class PauliFrameSnapshot:
-    """Immutable report of the frame at one instant."""
+    """What the frame holds at one instant."""
 
     configured_commit_ticks: int
     commit_count: int
@@ -93,145 +120,219 @@ class PauliFrameSnapshot:
     records: tuple
 
 
-@dataclass(frozen=True)
-class _AcceptedWrite:
-    """One reserved write awaiting installation."""
+class PauliFrame:
+    """Keeps every committed correction and charges each write once.
+
+    Trace sources: correction_accepted(record) when a window's
+    correction is taken and its write charged, correction_committed(
+    record) when the write has landed; the record is the frame's own
+    PauliFrameCommitRecord.
+    """
+
+    def __init__(self, engine, *, commit_ticks: int) -> None:
+        self.engine = engine
+        self.commit_ticks = commit_ticks
+        self._state = _FrameState()
+        self.trace = _TraceSources()
+
+    def commit_correction(
+        self, *, window_key, logical_observables, request_key, on_committed
+    ) -> None:
+        """Accept a window's correction, charge the write, then call back."""
+        if self._has_accepted(window_key):
+            earlier_tier = self._tier_of(window_key)
+            raise RuntimeError(
+                f"window {window_key} already has a {earlier_tier} "
+                f"correction; the {request_key.tier.value} correction "
+                f"(request {request_key.run_sequence}) is a second write"
+            )
+        observables = _as_observable_bits(logical_observables)
+        tier = request_key.tier.value
+        self._log_received(tier, window_key, observables)
+        accepted_ticks = self.engine.now
+        committed_ticks = accepted_ticks + self.commit_ticks
+        record = PauliFrameCommitRecord(
+            window_key=window_key,
+            tier=tier,
+            run_sequence=request_key.run_sequence,
+            accepted_ticks=accepted_ticks,
+            committed_ticks=committed_ticks,
+            logical_observables=observables,
+        )
+        self._state.records.append(record)
+        pending = _PendingWrite(record, on_committed)
+        self._state.pending_by_window[window_key] = pending
+        self.trace.correction_accepted.fire(record)
+        self._charge_write(window_key)
+
+    def frame_for_stream(self, stream_id) -> Optional[ObservableBits]:
+        """The XOR of every committed correction on one stream.
+
+        Empty when the stream has no corrections yet. None when any of its
+        corrections carries no observables, since a fold over an unknown
+        value is unknown.
+        """
+        window_keys = self._state.windows_by_stream.get(stream_id, ())
+        records = [self._state.committed_by_window[key] for key in window_keys]
+        if not records:
+            return ()
+        observables_per_record = [
+            record.logical_observables for record in records
+        ]
+        has_unknown = any(
+            observables is None for observables in observables_per_record
+        )
+        if has_unknown:
+            return None
+        return _fold_by_xor(observables_per_record, stream_id)
+
+    def snapshot(self) -> PauliFrameSnapshot:
+        """A frozen copy of what the frame holds now."""
+        stream_ids = sorted(
+            self._state.windows_by_stream,
+            key=identity_records.stable_identity_order_key,
+        )
+        frames = []
+        for stream_id in stream_ids:
+            frame = self.frame_for_stream(stream_id)
+            frames.append((stream_id, frame))
+        commit_ticks = [
+            record.committed_ticks for record in self._state.records
+        ]
+        commit_count = len(self._state.records)
+        first_commit_ticks = None
+        last_commit_ticks = None
+        if commit_ticks:
+            first_commit_ticks = commit_ticks[0]
+            last_commit_ticks = commit_ticks[-1]
+        charged_ticks = commit_count * self.commit_ticks
+        return PauliFrameSnapshot(
+            configured_commit_ticks=self.commit_ticks,
+            commit_count=commit_count,
+            pending_write_count=len(self._state.pending_by_window),
+            charged_ticks=charged_ticks,
+            first_commit_ticks=first_commit_ticks,
+            last_commit_ticks=last_commit_ticks,
+            frames=tuple(frames),
+            records=tuple(self._state.records),
+        )
+
+    def _log_received(self, tier, window_key, observables) -> None:
+        self.engine.log_io(
+            log_sources.PAULI_FRAME,
+            lambda: (
+                f"received {tier} correction for window {window_key}; "
+                f"logical observables {observables}"
+            ),
+        )
+
+    def _charge_write(self, window_key) -> None:
+        if self.commit_ticks == 0:
+            self._finish_write(window_key)
+            return
+        self.engine.schedule(
+            self.commit_ticks,
+            lambda: self._finish_write(window_key),
+            label=f"pauli frame commit {window_key}",
+        )
+
+    def _has_accepted(self, window_key) -> bool:
+        is_pending = window_key in self._state.pending_by_window
+        is_committed = window_key in self._state.committed_by_window
+        return is_pending or is_committed
+
+    def _tier_of(self, window_key) -> str:
+        pending = self._state.pending_by_window.get(window_key)
+        if pending is not None:
+            return pending.record.tier
+        record = self._state.committed_by_window[window_key]
+        return record.tier
+
+    def _finish_write(self, window_key) -> None:
+        pending = self._state.pending_by_window.pop(window_key)
+        record = pending.record
+        self._state.committed_by_window[window_key] = record
+        # A window key starts with the stream it belongs to.
+        stream_id = window_key[0]
+        windows_on_stream = self._state.windows_by_stream.setdefault(
+            stream_id, []
+        )
+        windows_on_stream.append(window_key)
+        held = len(self._state.committed_by_window)
+        self.engine.log_io(
+            log_sources.PAULI_FRAME,
+            lambda: (
+                f"committed window {window_key}; logical observables "
+                f"{record.logical_observables}; holds {held} window corrections"
+            ),
+        )
+        self.trace.correction_committed.fire(record)
+        pending.on_committed()
+
+
+@dataclasses.dataclass(frozen=True)
+class _PendingWrite:
+    """A correction whose write cost is still being charged."""
 
     record: PauliFrameCommitRecord
     on_committed: Callable[[], None]
 
 
-class PauliFrame:
-    """Accumulate committed weak corrections, charging every accepted write."""
+def _as_observable_bits(logical_observables) -> Optional[ObservableBits]:
+    if logical_observables is None:
+        return None
+    return tuple(logical_observables)
 
-    def __init__(self, engine, *, commit_ticks: int) -> None:
-        self.engine = engine
-        self.commit_ticks = commit_ticks
-        self._accepted_window_keys: set = set()
-        self._pending_by_window_key: dict[tuple, _AcceptedWrite] = {}
-        self._entry_by_window_key: dict[tuple, PauliFrameCommitRecord] = {}
-        self._window_keys_by_stream: dict[Any, list] = {}
-        self._records: list[PauliFrameCommitRecord] = []
 
-    def commit_weak_correction(
-        self,
-        *,
-        window_key,
-        logical_observables,
-        request_key,
-        on_committed,
-    ) -> None:
-        """Accept one window correction once, charge its write, then continue.
-        A second correction for a window is a protocol violation: the frame
-        applies each window's correction exactly once, and a swallowed write
-        would strand its caller's continuation. Correction gates from QEC
-        are Pauli gates stored in the frame's records (Riesebos, Pauli
-        frames for quantum computer architectures, TU Delft 2016 and DAC
-        2017); the refusal is a simulator invariant guard, stricter than any
-        frame implementation (PECOS's accumulator would XOR a repeated mask
-        and cancel it silently)."""
-        if window_key in self._accepted_window_keys:
+def _fold_by_xor(
+    observables_per_record: list[ObservableBits], stream_id
+) -> ObservableBits:
+    """XOR corrections bit by bit; every correction must have the same width."""
+    width = len(observables_per_record[0])
+    folded = [0] * width
+    for observables in observables_per_record:
+        if len(observables) != width:
             raise RuntimeError(
-                f"window {window_key} already accepted a "
-                f"{self._entry_tier(window_key)} correction; the "
-                f"{request_key.tier.value} correction (request "
-                f"{request_key.run_sequence}) is a second write for it")
+                f"Pauli frame stream {stream_id!r} changed its number of "
+                f"observables mid-run"
+            )
+        for index, bit in enumerate(observables):
+            folded[index] ^= bit
+    return tuple(folded)
 
-        self._accepted_window_keys.add(window_key)
-        self.engine.log_io(
-            "PauliFrame",
-            lambda: f"received {request_key.tier.value} correction for "
-                    f"window {window_key}; logical observables "
-                    f"{None if logical_observables is None else tuple(logical_observables)}")
-        accepted_ticks = self.engine.now
-        record = PauliFrameCommitRecord(
-            window_key=window_key,
-            tier=request_key.tier.value,
-            run_sequence=request_key.run_sequence,
-            accepted_ticks=accepted_ticks,
-            committed_ticks=accepted_ticks + self.commit_ticks,
-            logical_observables=(
-                None
-                if logical_observables is None
-                else tuple(logical_observables)
-            ),
-        )
-        accepted_write = _AcceptedWrite(record, on_committed)
-        self._pending_by_window_key[window_key] = accepted_write
-        self._records.append(record)
 
-        if self.commit_ticks == 0:
-            self._install_accepted_write(window_key)
-            return
-        self.engine.schedule(
-            self.commit_ticks,
-            lambda: self._install_accepted_write(window_key),
-            label=f"pauli frame commit {window_key}",
-        )
+@dataclasses.dataclass(frozen=True)
+class _TraceSources:
+    """Every event the pauli frame reports, as one member.
 
-    def _entry_tier(self, window_key) -> str:
-        pending = self._pending_by_window_key.get(window_key)
-        record = pending.record if pending is not None else self._entry_by_window_key[window_key]
-        return record.tier
+    gem5 groups a component's statistics into one nested Group member
+    (tmp/resources/gem5/src/base/stats/group.hh:60-92) rather than one
+    member per counter; a component's events are the same shape, so a
+    listener reaches all of them through one name.
+    """
 
-    def _install_accepted_write(self, window_key) -> None:
-        accepted_write = self._pending_by_window_key.pop(window_key)
-        record = accepted_write.record
-        self._entry_by_window_key[window_key] = record
-        stream_id = window_key[0]
-        self._window_keys_by_stream.setdefault(stream_id, []).append(window_key)
-        self.engine.log_io(
-            "PauliFrame",
-            lambda: f"committed window {window_key}; logical observables "
-                    f"{record.logical_observables}; holds "
-                    f"{len(self._entry_by_window_key)} window corrections")
-        accepted_write.on_committed()
+    correction_accepted: trace_source.TraceSource = trace_source.new_source()
+    correction_committed: trace_source.TraceSource = trace_source.new_source()
 
-    # Adapted data core: non-destructive, zero-seeded, width-independent XOR.
-    def frame_for(self, stream_id) -> Optional[tuple[int, ...]]:
-        """Return one stream's non-destructive observable-frame fold."""
-        window_keys = self._window_keys_by_stream.get(stream_id, ())
-        records = tuple(
-            self._entry_by_window_key[window_key]
-            for window_key in window_keys
-        )
-        if not records:
-            return ()
-        if any(record.logical_observables is None for record in records):
-            return None
 
-        observable_arity = len(records[0].logical_observables)
-        frame = [0] * observable_arity
-        for record in records:
-            logical_observables = record.logical_observables
-            if len(logical_observables) != observable_arity:
-                raise RuntimeError(
-                    f"Pauli frame stream {stream_id!r} changed observable "
-                    "arity during aggregation"
-                )
-            for observable_index, bit in enumerate(logical_observables):
-                frame[observable_index] ^= bit
-        return tuple(frame)
+@dataclasses.dataclass
+class _FrameState:
+    """What the frame holds: its records and its two registries.
 
-    def snapshot(self) -> PauliFrameSnapshot:
-        """Return a frozen, non-destructive report of current frame state."""
-        stream_ids = sorted(
-            self._window_keys_by_stream,
-            key=stable_identity_order_key,
-        )
-        frames = tuple(
-            (stream_id, self.frame_for(stream_id))
-            for stream_id in stream_ids
-        )
-        commit_ticks = tuple(record.committed_ticks for record in self._records)
-        commit_count = len(self._accepted_window_keys)
-        return PauliFrameSnapshot(
-            configured_commit_ticks=self.commit_ticks,
-            commit_count=commit_count,
-            pending_write_count=len(self._pending_by_window_key),
-            charged_ticks=commit_count * self.commit_ticks,
-            first_commit_ticks=commit_ticks[0] if commit_ticks else None,
-            last_commit_ticks=commit_ticks[-1] if commit_ticks else None,
-            frames=frames,
-            records=tuple(self._records),
-        )
+    records is every committed correction in commit order;
+    pending_by_window is the writes charged and not yet landed;
+    committed_by_window is the window that already has a correction, so
+    a second one is refused. A stream id is whatever the front end
+    chose, and the frame never looks inside it.
+    """
+
+    records: list = dataclasses.field(default_factory=list)
+    pending_by_window: dict = dataclasses.field(default_factory=dict)
+    committed_by_window: dict = dataclasses.field(default_factory=dict)
+    windows_by_stream: dict = dataclasses.field(default_factory=dict)
+
+
+# pauli_frame.kind names one of these rows: the frame a decoder's
+# correction is committed into. Every row takes the engine and the write
+# cost in ticks, and fills the Frame port (decsim/ports.py).
+FRAMES = {"logical_register": PauliFrame}

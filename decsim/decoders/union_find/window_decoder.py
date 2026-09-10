@@ -1,84 +1,127 @@
-"""Prior-weighted graphlike Union-Find growth and peeling."""
+"""Prior-weighted graphlike Union-Find: weighted growth and peeling.
 
-from __future__ import annotations
+Delfosse and Nickerson 1709.06218:
+every odd cluster grows by one half-edge per round (Algorithm 1, step
+4), clusters that meet fuse, and the peeling decoder reads the
+correction off a spanning forest of the grown erasure (Algorithm 2).
+The weighted variant is Huang, Newman and Brown 2004.04693 (same
+folder): an edge of log-odds weight w has the integer length
+round(w / weight_step), never below one tick, so a likelier fault is
+crossed sooner; that quantization is _quantize_weight_ticks. Growth
+here is event driven: each round jumps to the next tick at which some
+front closes an edge, and a front advances one half-tick per tick.
+
+What a decode leaves behind is a record a confidence signal reads, so
+the graph, its edges, the open and closed intervals and the weight step
+live in decsim/records/decoder_evidence.py; the growth and the peeling
+are here.
+"""
 
 import math
-from dataclasses import dataclass
-from numbers import Real
 from typing import Optional
 
+import numpy
+
+import decsim.records.decoder_evidence as evidence_records
 
 BOUNDARY = -1
 
 
-@dataclass(frozen=True)
-class Open:
-    """The uncovered interval between two growing edge fronts."""
+def graph_from_model(
+    faults, *, location: str, weight_step: float
+) -> evidence_records.UnionFindGraph:
+    """The weighted graph of one placed graphlike model.
 
-    lower_tick: int
-    upper_tick: int
+    Faults likelier than one half are the baseline correction; every
+    other column becomes an edge whose length is its residual log-odds
+    in weight ticks.
+    """
+    check = faults.check
+    raw_priors = numpy.asarray(faults.priors)
+    fault_count = check.shape[1]
+    _check_priors(raw_priors, fault_count, location)
+    # observables are few rows; dense per-fault columns are cheap to read
+    observables = faults.observables.toarray()
+    observables = observables.astype(numpy.uint8, copy=False)
+    priors = raw_priors.astype(float, copy=False)
+    likely = priors > 0.5
+    baseline = likely.astype(numpy.uint8)
+    baseline_syndrome = _parity_product(check, baseline)
+    edges = []
+    for fault_index in range(fault_count):
+        edge = _edge_of(
+            check, priors, baseline, observables, fault_index, weight_step
+        )
+        if edge is not None:
+            edges.append(edge)
+    logical_columns = _logical_columns(observables, fault_count)
+    baseline_faults = _int_tuple(baseline)
+    baseline_syndrome = _int_tuple(baseline_syndrome)
+    return evidence_records.UnionFindGraph(
+        detector_count=check.shape[0],
+        fault_count=fault_count,
+        edges=tuple(edges),
+        baseline_faults=baseline_faults,
+        baseline_syndrome=baseline_syndrome,
+        logical_observables_by_fault=logical_columns,
+        logical_observable_count=observables.shape[0],
+        weight_step=weight_step,
+    )
 
 
-@dataclass(frozen=True)
-class Closed:
-    """A fully covered edge."""
-
-
-@dataclass(frozen=True)
-class UnionFindEdge:
-    """One graphlike residual fault column in the weighted graph."""
-
-    fault_index: int
-    detector_a: int
-    detector_b: int
-    logical_observables: tuple[int, ...]
-    length_half_ticks: int
-
-
-@dataclass(frozen=True)
-class UnionFindGraph:
-    """Immutable graph state shared by decodes of one placed fault model."""
-
-    detector_count: int
-    fault_count: int
-    edges: tuple[UnionFindEdge, ...]
-    baseline_faults: tuple[int, ...]
-    baseline_syndrome: tuple[int, ...]
-    logical_observables_by_fault: tuple[tuple[int, ...], ...] = ()
-    logical_observable_count: int = 0
-
-
-@dataclass(frozen=True)
-class UnionFindHardEvidence:
-    """Immutable weighted growth and peeling evidence from one hard decode."""
-
-    graph: UnionFindGraph
-    syndrome: tuple[int, ...]
-    residual_syndrome: tuple[int, ...]
-    selected_faults: tuple[int, ...]
-    contact_faults: tuple[int, ...]
-    edge_intervals: tuple[Open | Closed, ...]
-    erasure_forest_faults: tuple[int, ...]
-    logical_observables: tuple[int, ...]
-    # detectors the best-effort correction leaves unexplained: an odd cluster
-    # that ran out of edges before reaching another defect or the boundary
-    unmatched_detectors: tuple[int, ...] = ()
+def decode_graph(
+    graph: evidence_records.UnionFindGraph, syndrome
+) -> evidence_records.UnionFindHardEvidence:
+    """Decode one syndrome on the graph: grow, take the forest, peel, report."""
+    syndrome_array = _checked_syndrome(graph, syndrome)
+    baseline_syndrome = numpy.asarray(
+        graph.baseline_syndrome, dtype=numpy.uint8
+    )
+    syndrome_bits = _int_tuple(syndrome_array)
+    residual_syndrome = syndrome_array ^ baseline_syndrome
+    residual_bits = _int_tuple(residual_syndrome)
+    _disjoint_set, intervals, contacts = _weighted_growth_outcome(
+        graph, residual_syndrome
+    )
+    forest = _minimum_weight_contact_forest(graph, contacts)
+    selected_residual_edges = _peel_forest(graph, residual_syndrome, forest)
+    selected_faults = _selected_faults(graph, selected_residual_edges)
+    reproduced = _reproduced_syndrome(
+        graph, baseline_syndrome, selected_residual_edges
+    )
+    mismatch = reproduced ^ syndrome_array
+    unmatched = numpy.nonzero(mismatch)
+    unmatched_detectors = _int_tuple(unmatched[0])
+    logical_observables = _logical_observables(graph, selected_faults)
+    contact_faults = _fault_indices(graph, contacts)
+    erasure_forest_faults = _fault_indices(graph, forest)
+    return evidence_records.UnionFindHardEvidence(
+        graph=graph,
+        syndrome=syndrome_bits,
+        residual_syndrome=residual_bits,
+        selected_faults=tuple(selected_faults),
+        contact_faults=contact_faults,
+        edge_intervals=intervals,
+        erasure_forest_faults=erasure_forest_faults,
+        logical_observables=logical_observables,
+        unmatched_detectors=unmatched_detectors,
+    )
 
 
 class _DisjointSet:
     """Per-decode cluster parity and shared-boundary state."""
 
     def __init__(self, detector_count: int, syndrome) -> None:
-        boundary_node = detector_count
         node_count = detector_count + 1
         self.parent = list(range(node_count))
-        self.parity = [
-            int(syndrome[node]) if node < detector_count else 0
-            for node in range(node_count)
-        ]
-        self.touches_boundary = [
-            node == boundary_node for node in range(node_count)
-        ]
+        parity = []
+        for node in range(detector_count):
+            parity.append(int(syndrome[node]))
+        parity.append(0)  # the boundary node carries no defect
+        self.parity = parity
+        touches_boundary = [False] * detector_count
+        touches_boundary.append(True)
+        self.touches_boundary = touches_boundary
 
     def find(self, node: int) -> int:
         root = node
@@ -99,36 +142,36 @@ class _DisjointSet:
         self.parent[absorbed] = survivor
         self.parity[survivor] ^= self.parity[absorbed]
         self.touches_boundary[survivor] = (
-            self.touches_boundary[survivor]
-            or self.touches_boundary[absorbed]
+            self.touches_boundary[survivor] or self.touches_boundary[absorbed]
         )
         return survivor
 
     def is_active(self, root: int) -> bool:
+        """An odd cluster that does not touch the boundary keeps growing."""
         root = self.find(root)
-        return self.parity[root] == 1 and not self.touches_boundary[root]
+        if self.touches_boundary[root]:
+            return False
+        return self.parity[root] == 1
 
 
 def _natural_log_odds(residual_probability: float) -> float:
     if residual_probability == 0.5:
         return 0.0
     if residual_probability >= 0.25:
-        return math.log1p(
-            (1.0 - 2.0 * residual_probability) / residual_probability
-        )
-    return math.log1p(-residual_probability) - math.log(residual_probability)
-
-
-def _normalize_weight_step(weight_step) -> float:
-    if isinstance(weight_step, bool) or not isinstance(weight_step, Real):
-        raise TypeError("Union-Find weight_step must be a real number")
-    normalized = float(weight_step)
-    if not math.isfinite(normalized) or normalized <= 0.0:
-        raise ValueError("Union-Find weight_step must be finite and positive")
-    return normalized
+        ratio = (1.0 - 2.0 * residual_probability) / residual_probability
+        return math.log1p(ratio)
+    log_survival = math.log1p(-residual_probability)
+    log_probability = math.log(residual_probability)
+    return log_survival - log_probability
 
 
 def _quantize_weight_ticks(weight: float, weight_step: float) -> int:
+    """The edge length in weight ticks: round(weight / weight_step), at least 1.
+
+    Exact in rational arithmetic, so equal weights get equal lengths on
+    every platform (Huang, Newman and Brown 2004.04693: integer edge
+    lengths from the log-odds).
+    """
     if weight == 0.0:
         return 0
     weight_numerator, weight_denominator = weight.as_integer_ratio()
@@ -136,273 +179,347 @@ def _quantize_weight_ticks(weight: float, weight_step: float) -> int:
     numerator = weight_numerator * step_denominator
     denominator = weight_denominator * step_numerator
     whole, remainder = divmod(numerator, denominator)
-    return max(1, whole + (2 * remainder >= denominator))
+    rounds_up = 2 * remainder >= denominator
+    ticks = whole + int(rounds_up)
+    return max(1, ticks)
 
 
 def _endpoint_node(detector: int, detector_count: int) -> int:
-    return detector_count if detector == BOUNDARY else detector
+    if detector == BOUNDARY:
+        return detector_count
+    return detector
 
 
-def _graph_from_model(
-    faults,
-    *,
-    location: str,
-    weight_step: float,
-) -> UnionFindGraph:
-    import numpy as np
-
-    from ...detector_error_model.fault_identity_validation import (
-        validate_graphlike_matrices,
-    )
-
-    check = faults.check
-    raw_priors = np.asarray(faults.priors)
-    validate_graphlike_matrices(check, faults.observables, location=location)
-    fault_count = check.shape[1]
+def _check_priors(raw_priors, fault_count: int, location: str) -> None:
     if raw_priors.ndim != 1 or raw_priors.size != fault_count:
         raise ValueError(
             f"{location} priors must have one entry per fault column"
         )
-    if not np.all(np.isfinite(raw_priors)):
+    is_finite = numpy.isfinite(raw_priors)
+    if not numpy.all(is_finite):
         raise ValueError(f"{location} priors must be finite")
-    if not np.all((raw_priors >= 0.0) & (raw_priors <= 1.0)):
+    at_least_zero = raw_priors >= 0.0
+    at_most_one = raw_priors <= 1.0
+    inside = at_least_zero & at_most_one
+    if not numpy.all(inside):
         raise ValueError(f"{location} priors must lie in [0, 1]")
 
-    # observables are few rows; dense per-fault columns are cheap to read
-    observables = faults.observables.toarray().astype(np.uint8, copy=False)
-    priors = raw_priors.astype(float, copy=False)
-    baseline = (priors > 0.5).astype(np.uint8)
-    baseline_syndrome = np.asarray(
-        check.astype(np.int64) @ baseline.astype(np.int64)).ravel() % 2
 
-    edges = []
+def _parity_product(matrix, vector):
+    """The matrix times the vector over GF(2), as a flat array."""
+    matrix_integers = matrix.astype(numpy.int64)
+    vector_integers = vector.astype(numpy.int64)
+    product = matrix_integers @ vector_integers
+    product = numpy.asarray(product)
+    flat = product.ravel()
+    return flat % 2
+
+
+def _edge_of(
+    check, priors, baseline, observables, fault_index: int, weight_step: float
+) -> Optional[evidence_records.UnionFindEdge]:
+    """The edge of one fault column; None when its residual is certain."""
+    probability = float(priors[fault_index])
+    residual_probability = probability
+    if baseline[fault_index]:
+        residual_probability = 1.0 - probability
+    if residual_probability == 0.0:
+        return None
+    detector_a, detector_b = _endpoints(check, fault_index)
+    log_odds = _natural_log_odds(residual_probability)
+    weight_ticks = _quantize_weight_ticks(log_odds, weight_step)
+    column = observables[:, fault_index]
+    logical_observables = _int_tuple(column)
+    length_half_ticks = 2 * weight_ticks
+    return evidence_records.UnionFindEdge(
+        fault_index=fault_index,
+        detector_a=detector_a,
+        detector_b=detector_b,
+        logical_observables=logical_observables,
+        length_half_ticks=length_half_ticks,
+    )
+
+
+def _endpoints(check, fault_index: int) -> tuple:
+    """The two detectors of a column; a missing one is the boundary."""
+    start = check.indptr[fault_index]
+    end = check.indptr[fault_index + 1]
+    detectors = _int_tuple(check.indices[start:end])
+    if len(detectors) == 0:
+        return BOUNDARY, BOUNDARY
+    if len(detectors) == 1:
+        return detectors[0], BOUNDARY
+    detector_a, detector_b = detectors
+    return detector_a, detector_b
+
+
+def _logical_columns(observables, fault_count: int) -> tuple:
+    """Each fault's logical-observable column as a tuple of bits."""
+    columns = []
     for fault_index in range(fault_count):
-        probability = float(priors[fault_index])
-        residual_probability = (
-            1.0 - probability if baseline[fault_index] else probability
-        )
-        if residual_probability == 0.0:
-            continue
-        detectors = tuple(
-            int(value)
-            for value in check.indices[check.indptr[fault_index]:check.indptr[fault_index + 1]]
-        )
-        if len(detectors) == 0:
-            detector_a = BOUNDARY
-            detector_b = BOUNDARY
-        elif len(detectors) == 1:
-            detector_a = detectors[0]
-            detector_b = BOUNDARY
-        else:
-            detector_a, detector_b = detectors
-        weight_ticks = _quantize_weight_ticks(
-            _natural_log_odds(residual_probability),
-            weight_step,
-        )
-        edge = UnionFindEdge(
-            fault_index=fault_index,
-            detector_a=detector_a,
-            detector_b=detector_b,
-            logical_observables=tuple(
-                int(value) for value in observables[:, fault_index]
-            ),
-            length_half_ticks=2 * weight_ticks,
-        )
-        edges.append(edge)
+        column = observables[:, fault_index]
+        bits = _int_tuple(column)
+        columns.append(bits)
+    return tuple(columns)
 
-    logical_columns = tuple(
-        tuple(int(value) for value in observables[:, fault_index])
-        for fault_index in range(fault_count)
-    )
-    return UnionFindGraph(
-        detector_count=check.shape[0],
-        fault_count=fault_count,
-        edges=tuple(edges),
-        baseline_faults=tuple(int(value) for value in baseline),
-        baseline_syndrome=tuple(int(value) for value in baseline_syndrome),
-        logical_observables_by_fault=logical_columns,
-        logical_observable_count=observables.shape[0],
-    )
+
+def _int_tuple(values) -> tuple:
+    integers = []
+    for value in values:
+        integers.append(int(value))
+    return tuple(integers)
+
+
+def _fault_indices(
+    graph: evidence_records.UnionFindGraph, edge_indices
+) -> tuple:
+    fault_indices = []
+    for edge_index in edge_indices:
+        fault_indices.append(graph.edges[edge_index].fault_index)
+    return tuple(fault_indices)
+
+
+def _in_fault_order(
+    graph: evidence_records.UnionFindGraph, edge_indices
+) -> tuple:
+    keyed = []
+    for edge_index in edge_indices:
+        keyed.append((graph.edges[edge_index].fault_index, edge_index))
+    keyed.sort()
+    ordered = []
+    for _fault_index, edge_index in keyed:
+        ordered.append(edge_index)
+    return tuple(ordered)
+
+
+def _frozen_roots(
+    graph: evidence_records.UnionFindGraph, disjoint_set: _DisjointSet
+) -> tuple:
+    """(root of a, root of b) per edge, as the clusters stand now."""
+    detector_count = graph.detector_count
+    roots = []
+    for edge in graph.edges:
+        node_a = _endpoint_node(edge.detector_a, detector_count)
+        node_b = _endpoint_node(edge.detector_b, detector_count)
+        root_a = disjoint_set.find(node_a)
+        root_b = disjoint_set.find(node_b)
+        roots.append((root_a, root_b))
+    return tuple(roots)
+
+
+def _active_roots(
+    graph: evidence_records.UnionFindGraph, disjoint_set: _DisjointSet
+) -> dict:
+    """Whether each cluster still grows, by its root."""
+    all_roots = set()
+    node_count = graph.detector_count + 1
+    for node in range(node_count):
+        root = disjoint_set.find(node)
+        all_roots.add(root)
+    active = {}
+    for root in all_roots:
+        active[root] = disjoint_set.is_active(root)
+    return active
 
 
 def _closed_contact_batch(
-    graph: UnionFindGraph,
+    graph: evidence_records.UnionFindGraph,
     disjoint_set: _DisjointSet,
-    edge_intervals: list[Open | Closed],
-) -> tuple[int, ...]:
-    detector_count = graph.detector_count
-    frozen_roots = tuple(
-        (
-            disjoint_set.find(
-                _endpoint_node(edge.detector_a, detector_count)
-            ),
-            disjoint_set.find(
-                _endpoint_node(edge.detector_b, detector_count)
-            ),
-        )
-        for edge in graph.edges
-    )
-    contacts = tuple(
-        edge_index
-        for edge_index, interval in enumerate(edge_intervals)
-        if isinstance(interval, Closed)
-        and frozen_roots[edge_index][0] != frozen_roots[edge_index][1]
-    )
-    return tuple(
-        sorted(contacts, key=lambda index: graph.edges[index].fault_index)
-    )
+    edge_intervals: list,
+) -> tuple:
+    """Closed edges whose ends are still in different clusters."""
+    frozen_roots = _frozen_roots(graph, disjoint_set)
+    contacts = []
+    for edge_index, interval in enumerate(edge_intervals):
+        if not isinstance(interval, evidence_records.Closed):
+            continue
+        left_root, right_root = frozen_roots[edge_index]
+        if left_root == right_root:
+            continue
+        contacts.append(edge_index)
+    return _in_fault_order(graph, contacts)
 
 
 def _union_contact_batch(
-    graph: UnionFindGraph,
+    graph: evidence_records.UnionFindGraph,
     disjoint_set: _DisjointSet,
-    contact_edge_indices: tuple[int, ...],
+    contact_edge_indices,
 ) -> None:
     detector_count = graph.detector_count
     for edge_index in contact_edge_indices:
         edge = graph.edges[edge_index]
-        disjoint_set.union(
-            _endpoint_node(edge.detector_a, detector_count),
-            _endpoint_node(edge.detector_b, detector_count),
-        )
+        node_a = _endpoint_node(edge.detector_a, detector_count)
+        node_b = _endpoint_node(edge.detector_b, detector_count)
+        disjoint_set.union(node_a, node_b)
 
 
 def _advance_open_interval(
-    interval: Open,
+    interval: evidence_records.Open,
     length_half_ticks: int,
     elapsed_ticks: int,
     left_active: bool,
     right_active: bool,
-) -> Open:
-    lower_tick = (
-        interval.lower_tick + elapsed_ticks
-        if left_active else interval.lower_tick
-    )
-    upper_tick = (
-        interval.upper_tick - elapsed_ticks
-        if right_active else interval.upper_tick
-    )
-    if not (0 <= lower_tick < upper_tick <= length_half_ticks):
+) -> evidence_records.Open:
+    lower_tick = interval.lower_tick
+    if left_active:
+        lower_tick += elapsed_ticks
+    upper_tick = interval.upper_tick
+    if right_active:
+        upper_tick -= elapsed_ticks
+    if not 0 <= lower_tick < upper_tick <= length_half_ticks:
         raise RuntimeError(
             "weighted Union-Find edge update lost represented interval order"
         )
-    return Open(lower_tick, upper_tick)
+    return evidence_records.Open(lower_tick, upper_tick)
 
 
-def _weighted_growth_outcome(graph: UnionFindGraph, syndrome):
-    disjoint_set = _DisjointSet(graph.detector_count, syndrome)
-    edge_intervals: list[Open | Closed] = [
-        Closed() if edge.length_half_ticks == 0
-        else Open(0, edge.length_half_ticks)
-        for edge in graph.edges
-    ]
-    contact_edges = list(
-        _closed_contact_batch(graph, disjoint_set, edge_intervals)
+def _initial_intervals(graph: evidence_records.UnionFindGraph) -> list:
+    intervals = []
+    for edge in graph.edges:
+        interval = evidence_records.Open(0, edge.length_half_ticks)
+        if edge.length_half_ticks == 0:
+            interval = evidence_records.Closed()
+        intervals.append(interval)
+    return intervals
+
+
+def _closing_candidates(
+    edge_intervals: list, frozen_roots: tuple, frozen_active: dict
+) -> list:
+    """(ticks until the edge closes, edge index) for every growing edge."""
+    candidates = []
+    for edge_index, interval in enumerate(edge_intervals):
+        if not isinstance(interval, evidence_records.Open):
+            continue
+        left_root, right_root = frozen_roots[edge_index]
+        if left_root == right_root:
+            continue
+        rate = int(frozen_active[left_root]) + int(frozen_active[right_root])
+        if rate == 0:
+            continue
+        remaining_ticks = interval.upper_tick - interval.lower_tick
+        padded_ticks = remaining_ticks + rate - 1
+        ticks_until_close = padded_ticks // rate
+        candidates.append((ticks_until_close, edge_index))
+    return candidates
+
+
+def _next_event_ticks(candidates: list) -> int:
+    ticks = []
+    for ticks_until_close, _edge_index in candidates:
+        ticks.append(ticks_until_close)
+    elapsed = min(ticks)
+    if elapsed <= 0:
+        raise RuntimeError(
+            "weighted Union-Find event has no positive represented growth"
+        )
+    return elapsed
+
+
+def _edges_closing_at(candidates: list, elapsed: int) -> set:
+    selected = set()
+    for ticks_until_close, edge_index in candidates:
+        if ticks_until_close == elapsed:
+            selected.add(edge_index)
+    return selected
+
+
+def _advanced_interval(
+    edge: evidence_records.UnionFindEdge,
+    edge_index: int,
+    interval,
+    frozen_roots: tuple,
+    frozen_active: dict,
+    elapsed: int,
+    selected: set,
+):
+    """The edge's interval after every active front grew by elapsed ticks."""
+    if not isinstance(interval, evidence_records.Open):
+        return interval
+    left_root, right_root = frozen_roots[edge_index]
+    left_active = frozen_active[left_root]
+    right_active = frozen_active[right_root]
+    if left_root != right_root:
+        if edge_index in selected:
+            return evidence_records.Closed()
+        return _advance_open_interval(
+            interval, edge.length_half_ticks, elapsed, left_active, right_active
+        )
+    # both ends in one cluster: its front grows inward from both sides
+    if not left_active:
+        return interval
+    remaining_ticks = interval.upper_tick - interval.lower_tick
+    if 2 * elapsed >= remaining_ticks:
+        return evidence_records.Closed()
+    return _advance_open_interval(
+        interval, edge.length_half_ticks, elapsed, True, True
     )
-    _union_contact_batch(graph, disjoint_set, tuple(contact_edges))
 
+
+def _advanced_intervals(
+    graph: evidence_records.UnionFindGraph,
+    edge_intervals: list,
+    frozen_roots: tuple,
+    frozen_active: dict,
+    elapsed: int,
+    selected: set,
+) -> list:
+    proposals = []
+    for edge_index, interval in enumerate(edge_intervals):
+        edge = graph.edges[edge_index]
+        proposal = _advanced_interval(
+            edge,
+            edge_index,
+            interval,
+            frozen_roots,
+            frozen_active,
+            elapsed,
+            selected,
+        )
+        proposals.append(proposal)
+    return proposals
+
+
+def _weighted_growth_outcome(
+    graph: evidence_records.UnionFindGraph, syndrome
+) -> tuple:
+    """Grow every odd cluster until none is left or none can grow.
+
+    Returns the clusters, the edge intervals and the contact edges in
+    the order they closed.
+    """
+    disjoint_set = _DisjointSet(graph.detector_count, syndrome)
+    edge_intervals = _initial_intervals(graph)
+    first_contacts = _closed_contact_batch(graph, disjoint_set, edge_intervals)
+    contact_edges = list(first_contacts)
+    _union_contact_batch(graph, disjoint_set, first_contacts)
     event_count = 0
     while True:
-        detector_count = graph.detector_count
-        frozen_roots = tuple(
-            (
-                disjoint_set.find(
-                    _endpoint_node(edge.detector_a, detector_count)
-                ),
-                disjoint_set.find(
-                    _endpoint_node(edge.detector_b, detector_count)
-                ),
-            )
-            for edge in graph.edges
-        )
-        all_roots = {
-            disjoint_set.find(node)
-            for node in range(graph.detector_count + 1)
-        }
-        frozen_active = {
-            root: disjoint_set.is_active(root) for root in all_roots
-        }
-        if not any(frozen_active.values()):
+        frozen_roots = _frozen_roots(graph, disjoint_set)
+        frozen_active = _active_roots(graph, disjoint_set)
+        growing = frozen_active.values()
+        if not any(growing):
             break
-
-        candidates = []
-        for edge_index, (edge, interval) in enumerate(
-            zip(graph.edges, edge_intervals)
-        ):
-            if not isinstance(interval, Open):
-                continue
-            left_root, right_root = frozen_roots[edge_index]
-            if left_root == right_root:
-                continue
-            rate = int(frozen_active[left_root]) + int(
-                frozen_active[right_root]
-            )
-            if rate:
-                remaining_ticks = interval.upper_tick - interval.lower_tick
-                candidates.append(
-                    ((remaining_ticks + rate - 1) // rate, edge_index)
-                )
+        candidates = _closing_candidates(
+            edge_intervals, frozen_roots, frozen_active
+        )
         if not candidates:
             # every remaining odd cluster has no outward edge left: the
-            # syndrome is not satisfiable inside this window; stop growing and
-            # peel what there is (PECOS and ldpc do the same: best effort)
+            # syndrome is not satisfiable inside this window; stop growing
+            # and peel what there is (PECOS and ldpc do the same: best
+            # effort)
             break
-        elapsed = min(candidate for candidate, _edge_index in candidates)
-        if elapsed <= 0:
-            raise RuntimeError(
-                "weighted Union-Find event has no positive represented growth"
-            )
-        selected = {
-            edge_index
-            for candidate, edge_index in candidates
-            if candidate == elapsed
-        }
-
-        proposals: list[Open | Closed] = []
-        for edge_index, (edge, interval) in enumerate(
-            zip(graph.edges, edge_intervals)
-        ):
-            if not isinstance(interval, Open):
-                proposals.append(interval)
-                continue
-            left_root, right_root = frozen_roots[edge_index]
-            left_active = frozen_active[left_root]
-            right_active = frozen_active[right_root]
-            if left_root != right_root:
-                if edge_index in selected:
-                    proposals.append(Closed())
-                else:
-                    proposals.append(
-                        _advance_open_interval(
-                            interval,
-                            edge.length_half_ticks,
-                            elapsed,
-                            left_active,
-                            right_active,
-                        )
-                    )
-                continue
-            if not left_active:
-                proposals.append(interval)
-                continue
-            remaining_ticks = interval.upper_tick - interval.lower_tick
-            if 2 * elapsed >= remaining_ticks:
-                proposals.append(Closed())
-            else:
-                proposals.append(
-                    _advance_open_interval(
-                        interval,
-                        edge.length_half_ticks,
-                        elapsed,
-                        True,
-                        True,
-                    )
-                )
-
-        edge_intervals = proposals
-        contact_batch = tuple(
-            sorted(selected, key=lambda index: graph.edges[index].fault_index)
+        elapsed = _next_event_ticks(candidates)
+        selected = _edges_closing_at(candidates, elapsed)
+        edge_intervals = _advanced_intervals(
+            graph,
+            edge_intervals,
+            frozen_roots,
+            frozen_active,
+            elapsed,
+            selected,
         )
+        contact_batch = _in_fault_order(graph, selected)
         contact_edges.extend(contact_batch)
         _union_contact_batch(graph, disjoint_set, contact_batch)
         event_count += 1
@@ -410,44 +527,65 @@ def _weighted_growth_outcome(graph: UnionFindGraph, syndrome):
             raise RuntimeError(
                 "weighted Union-Find growth exceeded its finite graph bound"
             )
-
     return disjoint_set, tuple(edge_intervals), tuple(contact_edges)
 
 
+def _by_length_then_fault(
+    graph: evidence_records.UnionFindGraph, edge_indices
+) -> list:
+    keyed = []
+    for edge_index in edge_indices:
+        edge = graph.edges[edge_index]
+        keyed.append((edge.length_half_ticks, edge.fault_index, edge_index))
+    keyed.sort()
+    ordered = []
+    for _length, _fault_index, edge_index in keyed:
+        ordered.append(edge_index)
+    return ordered
+
+
 def _minimum_weight_contact_forest(
-    graph: UnionFindGraph,
-    contact_edge_indices: tuple[int, ...],
-) -> tuple[int, ...]:
-    forest_set = _DisjointSet(
-        graph.detector_count,
-        [0] * graph.detector_count,
-    )
+    graph: evidence_records.UnionFindGraph, contact_edge_indices: tuple
+) -> tuple:
+    """A spanning forest of the contacts, lightest edges first (Kruskal)."""
+    no_defects = [0] * graph.detector_count
+    forest_set = _DisjointSet(graph.detector_count, no_defects)
     forest_edges = []
-    for edge_index in sorted(
-        contact_edge_indices,
-        key=lambda index: (
-            graph.edges[index].length_half_ticks,
-            graph.edges[index].fault_index,
-        ),
-    ):
+    for edge_index in _by_length_then_fault(graph, contact_edge_indices):
         edge = graph.edges[edge_index]
         left = _endpoint_node(edge.detector_a, graph.detector_count)
         right = _endpoint_node(edge.detector_b, graph.detector_count)
-        if forest_set.find(left) == forest_set.find(right):
+        left_root = forest_set.find(left)
+        right_root = forest_set.find(right)
+        if left_root == right_root:
             continue
         forest_set.union(left, right)
         forest_edges.append(edge_index)
     return tuple(forest_edges)
 
 
-def _peel_forest(
-    graph: UnionFindGraph,
-    syndrome,
-    forest_edges: tuple[int, ...],
-) -> tuple[int, ...]:
+def _sort_neighbors(
+    graph: evidence_records.UnionFindGraph, neighbors: list
+) -> None:
+    """Neighbors by their edge's fault index, then by node, in place."""
+    keyed = []
+    for neighbor, edge_index in neighbors:
+        fault_index = graph.edges[edge_index].fault_index
+        keyed.append((fault_index, neighbor, edge_index))
+    keyed.sort()
+    neighbors.clear()
+    for _fault_index, neighbor, edge_index in keyed:
+        neighbors.append((neighbor, edge_index))
+
+
+def _forest_adjacency(
+    graph: evidence_records.UnionFindGraph, forest_edges: tuple
+) -> dict:
     detector_count = graph.detector_count
-    boundary_node = detector_count
-    adjacency = {node: [] for node in range(detector_count + 1)}
+    node_count = detector_count + 1
+    adjacency = {}
+    for node in range(node_count):
+        adjacency[node] = []
     for edge_index in forest_edges:
         edge = graph.edges[edge_index]
         left = _endpoint_node(edge.detector_a, detector_count)
@@ -455,134 +593,159 @@ def _peel_forest(
         adjacency[left].append((right, edge_index))
         adjacency[right].append((left, edge_index))
     for neighbors in adjacency.values():
-        neighbors.sort(
-            key=lambda item: (graph.edges[item[1]].fault_index, item[0])
-        )
+        _sort_neighbors(graph, neighbors)
+    return adjacency
 
-    selected_edges: set[int] = set()
-    unseen = set(range(detector_count + 1))
+
+def _component_of(adjacency: dict, start: int) -> set:
+    component = set()
+    pending = [start]
+    while pending:
+        node = pending.pop()
+        if node in component:
+            continue
+        component.add(node)
+        for neighbor, _edge_index in adjacency[node]:
+            pending.append(neighbor)
+    return component
+
+
+def _has_defect(component: set, syndrome, boundary_node: int) -> bool:
+    for node in component:
+        if node == boundary_node:
+            continue
+        if syndrome[node]:
+            return True
+    return False
+
+
+def _defect_of(node: int, syndrome, boundary_node: int) -> int:
+    if node == boundary_node:
+        return 0
+    return int(syndrome[node])
+
+
+def _adopt_children(
+    node: int, neighbors: list, parents: dict, parent_edges: dict, pending: list
+) -> None:
+    for neighbor, edge_index in reversed(neighbors):
+        if neighbor in parents:
+            continue
+        parents[neighbor] = node
+        parent_edges[neighbor] = edge_index
+        pending.append(neighbor)
+
+
+def _tree_order(
+    adjacency: dict, root: int, parents: dict, parent_edges: dict
+) -> list:
+    """The tree's nodes from the root outward; parents filled on the way."""
+    order = []
+    pending = [root]
+    while pending:
+        node = pending.pop()
+        order.append(node)
+        _adopt_children(node, adjacency[node], parents, parent_edges, pending)
+    return order
+
+
+def _peel_component(
+    adjacency: dict, component: set, root: int, syndrome, boundary_node: int
+) -> set:
+    """Peel one tree leaf to root: a defect leaf selects its parent edge.
+
+    An odd component without the boundary keeps its root defect
+    unmatched; the caller reports it through unmatched_detectors.
+    """
+    parents = {root: None}
+    parent_edges = {}
+    order = _tree_order(adjacency, root, parents, parent_edges)
+    residual = {}
+    for node in component:
+        residual[node] = _defect_of(node, syndrome, boundary_node)
+    selected = set()
+    for node in reversed(order[1:]):
+        if residual[node] == 0:
+            continue
+        edge_index = parent_edges[node]
+        selected.add(edge_index)
+        parent = parents[node]
+        assert parent is not None, "every peeled node has a parent"
+        residual[parent] ^= 1
+    return selected
+
+
+def _peel_forest(
+    graph: evidence_records.UnionFindGraph, syndrome, forest_edges: tuple
+) -> tuple:
+    """The forest edges that pair the defects (peeling, Algorithm 2)."""
+    adjacency = _forest_adjacency(graph, forest_edges)
+    boundary_node = graph.detector_count
+    selected_edges = set()
+    node_count = graph.detector_count + 1
+    unseen = set(range(node_count))
     while unseen:
         component_start = min(unseen)
-        component = set()
-        pending = [component_start]
-        while pending:
-            node = pending.pop()
-            if node in component:
-                continue
-            component.add(node)
-            pending.extend(neighbor for neighbor, _edge in adjacency[node])
+        component = _component_of(adjacency, component_start)
         unseen.difference_update(component)
-        if not any(
-            node != boundary_node and syndrome[node] for node in component
-        ):
+        if not _has_defect(component, syndrome, boundary_node):
             continue
-
-        root = boundary_node if boundary_node in component else min(component)
-        parents: dict[int, Optional[int]] = {root: None}
-        parent_edges: dict[int, int] = {}
-        order = []
-        pending = [root]
-        while pending:
-            node = pending.pop()
-            order.append(node)
-            for neighbor, edge_index in reversed(adjacency[node]):
-                if neighbor in parents:
-                    continue
-                parents[neighbor] = node
-                parent_edges[neighbor] = edge_index
-                pending.append(neighbor)
-        residual = {
-            node: 0 if node == boundary_node else int(syndrome[node])
-            for node in component
-        }
-        for node in reversed(order[1:]):
-            if residual[node] == 0:
-                continue
-            edge_index = parent_edges[node]
-            selected_edges.add(edge_index)
-            parent = parents[node]
-            assert parent is not None
-            residual[parent] ^= 1
-        # an odd component without the boundary keeps its root defect
-        # unmatched; the caller reports it through unmatched_detectors
+        root = min(component)
+        if boundary_node in component:
+            root = boundary_node
+        peeled = _peel_component(
+            adjacency, component, root, syndrome, boundary_node
+        )
+        selected_edges.update(peeled)
     return tuple(sorted(selected_edges))
 
 
-def _decode_graph(graph: UnionFindGraph, syndrome) -> UnionFindHardEvidence:
-    import numpy as np
-
-    raw_syndrome = np.asarray(syndrome)
+def _checked_syndrome(graph: evidence_records.UnionFindGraph, syndrome):
+    raw_syndrome = numpy.asarray(syndrome)
     if raw_syndrome.ndim != 1 or raw_syndrome.size != graph.detector_count:
         raise ValueError(
             "Union-Find syndrome must be a one-dimensional detector vector "
             f"of length {graph.detector_count}"
         )
-    if not np.all((raw_syndrome == 0) | (raw_syndrome == 1)):
+    is_zero = raw_syndrome == 0
+    is_one = raw_syndrome == 1
+    is_bit = is_zero | is_one
+    if not numpy.all(is_bit):
         raise ValueError("Union-Find syndrome must contain only binary values")
-    syndrome_array = raw_syndrome.astype(np.uint8, copy=False)
-    baseline_syndrome = np.asarray(graph.baseline_syndrome, dtype=np.uint8)
-    residual_syndrome = syndrome_array ^ baseline_syndrome
+    return raw_syndrome.astype(numpy.uint8, copy=False)
 
-    _disjoint_set, intervals, contacts = _weighted_growth_outcome(
-        graph, residual_syndrome
-    )
-    forest = _minimum_weight_contact_forest(graph, contacts)
-    selected_residual_edges = _peel_forest(
-        graph, residual_syndrome, forest
-    )
-    selected_faults = list(graph.baseline_faults)
-    for edge_index in selected_residual_edges:
-        selected_faults[graph.edges[edge_index].fault_index] ^= 1
 
+def _selected_faults(
+    graph: evidence_records.UnionFindGraph, edge_indices: tuple
+) -> list:
+    selected = list(graph.baseline_faults)
+    for edge_index in edge_indices:
+        fault_index = graph.edges[edge_index].fault_index
+        selected[fault_index] ^= 1
+    return selected
+
+
+def _reproduced_syndrome(
+    graph: evidence_records.UnionFindGraph, baseline_syndrome, edge_indices
+):
     reproduced = baseline_syndrome.copy()
-    for edge_index in selected_residual_edges:
+    for edge_index in edge_indices:
         edge = graph.edges[edge_index]
         if edge.detector_a != BOUNDARY:
             reproduced[edge.detector_a] ^= 1
         if edge.detector_b != BOUNDARY:
             reproduced[edge.detector_b] ^= 1
-    unmatched_detectors = tuple(
-        int(value) for value in np.nonzero(reproduced ^ syndrome_array)[0]
-    )
-
-    logical_observables = tuple(
-        sum(
-            selected_faults[fault_index]
-            * graph.logical_observables_by_fault[fault_index][logical_index]
-            for fault_index in range(graph.fault_count)
-        )
-        % 2
-        for logical_index in range(graph.logical_observable_count)
-    )
-    return UnionFindHardEvidence(
-        graph=graph,
-        syndrome=tuple(int(value) for value in syndrome_array),
-        residual_syndrome=tuple(int(value) for value in residual_syndrome),
-        selected_faults=tuple(selected_faults),
-        contact_faults=tuple(
-            graph.edges[index].fault_index for index in contacts
-        ),
-        edge_intervals=intervals,
-        erasure_forest_faults=tuple(
-            graph.edges[index].fault_index for index in forest
-        ),
-        logical_observables=logical_observables,
-        unmatched_detectors=unmatched_detectors,
-    )
+    return reproduced
 
 
-def decode_union_find_model(
-    model,
-    syndrome,
-    weight_step=0.1,
-) -> UnionFindHardEvidence:
-    """Decode one placed weighted graphlike model and return hard evidence."""
-    from ...detector_error_model.fault_model_contracts import FaultRepresentation
-
-    faults = model.require_faults(FaultRepresentation.GRAPHLIKE)
-    graph = _graph_from_model(
-        faults,
-        location="Union-Find window model",
-        weight_step=_normalize_weight_step(weight_step),
-    )
-    return _decode_graph(graph, syndrome)
+def _logical_observables(
+    graph: evidence_records.UnionFindGraph, selected_faults: list
+) -> tuple:
+    parities = [0] * graph.logical_observable_count
+    for fault_index in range(graph.fault_count):
+        if not selected_faults[fault_index]:
+            continue
+        column = graph.logical_observables_by_fault[fault_index]
+        for logical_index, flips in enumerate(column):
+            parities[logical_index] ^= flips
+    return tuple(parities)

@@ -203,8 +203,11 @@ class Machine:
         strong_round_writer = store_build.build_strong_round_writer(
             engine, links, strong_round_store, window_manager
         )
+        store_input = store_build.build_round_store_input(
+            engine, round_store, weak_output, window_manager
+        )
         transmitter = round_transmission.RoundTransmitter(
-            engine, links, window_manager, weak_output
+            engine, links, window_manager, store_input
         )
         publishes_from_strong_store = not window_manager.reads_windows_from(
             round_store
@@ -318,6 +321,7 @@ class Machine:
             held_rounds=held_rounds,
             round_writer=round_writer,
             transmitter=transmitter,
+            store_input=store_input,
             instruction_output=instruction_output,
             round_store=round_store,
             strong_round_store=strong_round_store,

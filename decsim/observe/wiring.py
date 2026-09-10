@@ -59,6 +59,7 @@ def observe(
     held_rounds,
     round_writer,
     transmitter,
+    store_input,
     instruction_output,
     round_store,
     strong_round_store,
@@ -78,6 +79,7 @@ def observe(
         assembler=assembler,
         held_rounds=held_rounds,
         transmitter=transmitter,
+        store_input=store_input,
         instruction_output=instruction_output,
         strong_round_store=strong_round_store,
     )
@@ -434,12 +436,14 @@ def _connect_round_events(
     assembler,
     held_rounds,
     transmitter,
+    store_input,
     instruction_output,
     strong_round_store,
 ) -> round_events_module.RoundEventRecorder:
     """The recorder hears every round event, output and strong landing."""
     round_events = round_events_module.RoundEventRecorder(engine)
-    for component in (controller, assembler, held_rounds, transmitter):
+    components = (controller, assembler, held_rounds, transmitter, store_input)
+    for component in components:
         component.trace.round_event.connect(round_events.record)
     instruction_output.trace.output_event.connect(round_events.output)
     if strong_round_store is not None:

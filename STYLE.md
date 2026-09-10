@@ -144,8 +144,8 @@ stays short; past eight names the rule is wrong, not the list.
   written or held, which needs the `engine` clock, Buffer 0
   (`weak_store`), the `strong_writer` that owns the strong store's
   intake, the plan's `publishes_from_strong_store`, the `held_rounds`
-  that retry a round the stores refused, the `transmitter` that publishes
-  the landing, and its `trace`.
+  that retry a round the stores refused, the `transmitter` that sends it
+  on its route, and its `trace`.
 - `OperationResults` (`decsim/windows/operation_results.py`): one final
   result per operation, which reads the `planner`, the `tracker`, the
   `retention` and the `ledger` before it releases a conditional

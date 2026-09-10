@@ -173,6 +173,28 @@ class StrongRoundStore(Protocol):
         """Carry the round over the store's link and keep it on arrival."""
 
 
+@runtime_checkable
+class RoundStoreInput(Protocol):
+    """A round store's incoming port, as the controller's transmitter sees it.
+
+    The transfer that carries a round to the store lands here, and this
+    end handles the landing: it stamps the store's record and announces
+    the published round to whoever waits on it. The same port takes the
+    controller's ask for a timing-only round, which leaves by the
+    store's own outgoing port.
+    """
+
+    def receive_round(self, packed: round_records.PackedRound) -> None:
+        """Take one round that landed here: publish it, then announce it."""
+
+    def send_memory_round(
+        self,
+        packed: round_records.PackedRound,
+        on_delivered: Callable[[], None],
+    ) -> None:
+        """Send one timing-only round to the decoder side the store feeds."""
+
+
 # ------------------------------------------- the window manager closes a window
 
 

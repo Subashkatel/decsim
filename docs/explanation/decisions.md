@@ -2,7 +2,7 @@
 
 # The design decisions
 
-Ten decisions shape what decsim charges and where it charges it. Each is
+Eleven decisions shape what decsim charges and where it charges it. Each is
 recorded here with what was decided, why, and the source the answer came
 from, because a modelling question is answered by reading the referent
 rather than by choosing (`STYLE.md` rule 8). The last section says what
@@ -190,6 +190,54 @@ which returns the built policy when there is one; and
 `tools/check_row_recognition.py`, which fails on any module that tests
 against a row's class.
 
+## D11. The receiving end handles the landing
+
+**Decided.** At a priced hop the sender's delivery callback does one
+thing: it calls one method of the receiving end, or its own accounting.
+Everything the receiver owns, its record, its publication tick, its
+announcement to whoever waits on it, happens inside that call, in the
+receiving package. On `controller_to_weak_buffer` the controller's
+transmitter sends and hears the landing for its count of the rounds on
+their route; Buffer 0's own incoming port stamps the publication tick on
+the store's record and tells the window manager. On
+`controller_to_strong_buffer` the rule already held: the strong writer
+is the receiving end and stores each round at its landing. The record of
+a Buffer 0 round is still written before the wire is used, because a
+store answers for room before a round leaves; what the landing adds is
+the publication, and the announcement never precedes it.
+
+**Why.** The tempting alternative, "the sender that arranged the
+transfer finishes the job", puts one component's state in another
+component's callback: the controller stamped Buffer 0's record and woke
+the window manager, so a reader of Buffer 0 could not see when its own
+rounds became readable, and the two ends of one hop could drift apart
+without either file changing. The narrow rule is the one every referent
+keeps, and it can be checked mechanically.
+
+**Sources.** gem5's requesting port hands the packet to the peer's own
+receive method rather than writing the peer's state
+(`src/mem/port.hh:603-614`, whose `src/mem/protocol/timing.cc:49-53`
+calls `peer->recvTimingReq(pkt)`, declared at
+`src/mem/protocol/timing.hh:170-172`), and bills a transfer to the port
+it left by (`packet.hh:424-431`). OMNeT++ hands the message's ownership
+to the destination module before that module's `handleMessage` runs
+(`src/sim/csimplemodule.cc:777-799`, `take(msg)` at 783) and refuses a
+send of a message the sender does not own (`333-334`). ns-3's
+point-to-point channel schedules `PointToPointNetDevice::Receive` on the
+destination device (`point-to-point-channel.cc:88-92`), and that receive
+is the destination device's own method
+(`point-to-point-net-device.cc:324`). That the room for a round is
+answered before the wire is used is gem5's queue, which reserves an
+entry before the send (`src/mem/cache/queue.hh:150-152`); that the
+publication never precedes the store is the buffer contract of the
+behaviour gate. The two hops keep the referents they had: Caune
+arXiv:2410.05202 Fig. 1a stage D for hop 2's latency, and Toshio
+arXiv:2510.25222 line 1248 for what Buffer 1 is assigned.
+
+**Where to see it.** `decsim/syndrome_buffer/round_input.py`, the
+`RoundStoreInput` port in `decsim/ports.py`, and `tests/test_send_ends.py`,
+whose receive-end law reads every delivery callback out of the tree.
+
 ## What is not modelled yet
 
 These are open, recorded rather than hidden, so that a reader does not
@@ -233,6 +281,13 @@ mistake a gap for a result.
   `weak_decoder` and `strong_decoder` sections do not yet refuse an
   unknown key by name the way `decoder_manager` does, so a misspelt key
   there runs the default in silence.
+
+- **O10. A timing-only round's landing is announced by its sender.**
+  A feedback-memory round leaves Buffer 0 for the weak decoder, and the
+  controller's transmitter, which asked for that send, tells the window
+  manager when it lands. Nothing on the decoder side models a
+  timing-only round, so that hop has no receiving component for D11 to
+  put the announcement in.
 
 A sixth row, O4, was a real mispricing of a backward hand-off in the
 parallel scheme, and it is closed: the two layers that differ are now

@@ -64,6 +64,15 @@ The room-side store (syndrome buffer 1), as syndrome packing sees it.
 | `has_room` | Whether one more write can land. |
 | `write` | Carry the round over the store's link and keep it on arrival. |
 
+### `RoundStoreInput`
+
+A round store's incoming port, as the controller's transmitter sees it.
+
+| Method | What it does |
+| --- | --- |
+| `receive_round` | Take one round that landed here: publish it, then announce it. |
+| `send_memory_round` | Send one timing-only round to the decoder side the store feeds. |
+
 ## the window manager closes a window
 
 ### `WindowInput`

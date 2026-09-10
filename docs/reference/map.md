@@ -69,6 +69,7 @@ docstring.
 
 - `decsim/syndrome_buffer/__init__.py`: The round stores: a finished round kept until its last reader is done.
 - `decsim/syndrome_buffer/round_holds.py`: Which consumer keeps which rounds alive in a round store.
+- `decsim/syndrome_buffer/round_input.py`: A round store's incoming port: the store handles what lands in it.
 - `decsim/syndrome_buffer/round_output.py`: A round store's outgoing port: it sends the rounds that leave the store.
 - `decsim/syndrome_buffer/round_store.py`: A round store: finished rounds held until their last hold releases.
 - `decsim/syndrome_buffer/settings.py`: The settings of a round store: its capacity in rounds.
@@ -265,7 +266,7 @@ docstring.
 - `decsim/build/escalation.py`: Build the escalation policy the yaml names, and what it decides on.
 - `decsim/build/listeners.py`: Register the workload with every component, and name every seed root.
 - `decsim/build/plan.py`: Build the run's plan: the code, the workload's operations, the windows.
-- `decsim/build/stores.py`: Build the two round stores, the strong writer and the Pauli frame.
+- `decsim/build/stores.py`: Build the two round stores, their ports, the strong writer and the frame.
 - `decsim/build/window_side.py`: Build the window manager and everything behind its facade.
 
 ## Level 7: machine

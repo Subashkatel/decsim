@@ -1,4 +1,4 @@
-"""Build the two round stores, the strong writer and the Pauli frame."""
+"""Build the two round stores, their ports, the strong writer and the frame."""
 
 from typing import Optional
 
@@ -10,6 +10,7 @@ import decsim.pauli_frame.pauli_frame as pauli_frame_module
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 import decsim.settings as machine_settings
+import decsim.syndrome_buffer.round_input as round_input
 import decsim.syndrome_buffer.round_output as round_output
 import decsim.syndrome_buffer.round_store as round_store_module
 import decsim.syndrome_buffer.settings as round_store_settings
@@ -91,6 +92,22 @@ def build_store_outputs(
         strong_round_store,
     )
     return weak_output, strong_output
+
+
+def build_round_store_input(
+    engine: engine_module.Engine,
+    round_store,
+    weak_output: round_output.RoundStoreOutput,
+    window_manager,
+) -> round_input.RoundStoreInput:
+    """Buffer 0's port toward the controller, built after the windows.
+
+    The port announces a published round to the window manager, so it is
+    built once the manager exists, as the strong writer is.
+    """
+    return round_input.RoundStoreInput(
+        engine, round_store, weak_output, window_manager
+    )
 
 
 def build_pauli_frame(

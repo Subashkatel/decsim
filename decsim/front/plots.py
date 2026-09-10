@@ -848,7 +848,7 @@ def _draw_windows(
         range_text = _window_range_text(window)
         window_ranges.append(range_text)
         _draw_store_fill(timeline, lanes, window, color, stored)
-        stored_tick = stored[window.read_hi].end_us
+        stored_tick = _stored_by_end_us(stored, window.read_hi)
         timeline.window_bar(
             "wait", stored_tick, window.dispatch_us, window_id, color
         )
@@ -879,15 +879,38 @@ def _draw_store_fill(
     """
     row = f"{lanes.store_name} fill"
     window_id = window.window_id
-    first_round = stored[window.read_lo].end_us
-    commit_stored = stored[window.commit_hi].end_us
+    first_round = _stored_by_end_us(stored, window.read_lo)
+    commit_stored = _stored_by_end_us(stored, window.commit_hi)
     timeline.window_bar(row, first_round, commit_stored, window_id, color)
     if window.read_hi <= window.commit_hi:
         return
-    stored_tick = stored[window.read_hi].end_us
+    stored_tick = _stored_by_end_us(stored, window.read_hi)
     timeline.window_bar(
         row, commit_stored, stored_tick, window_id, color, alpha=0.45
     )
+
+
+def _stored_by_end_us(stored: dict, round_number: int) -> float:
+    """When the store held that round, or the last round it did hold.
+
+    A window may name a round the stream never produced: on the
+    lookahead tail the last window keeps the regular stride and reads
+    past the stream's own end, which is the row the sliding scheme takes
+    when the escalation may escalate, since a strong recovery needs a
+    last window with context to read (windows.terminal_policy,
+    reference.yaml; Tan et al. 2209.09219 lines 1029-1030 is the flush
+    row it is the alternative to). The bar is then drawn to the last
+    round that actually landed.
+    """
+    span = stored.get(round_number)
+    if span is not None:
+        return span.end_us
+    landed = []
+    for held in stored:
+        if held <= round_number:
+            landed.append(held)
+    last_landed = max(landed)
+    return stored[last_landed].end_us
 
 
 def _draw_window_transfers(

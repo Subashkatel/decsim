@@ -125,3 +125,57 @@ def test_the_first_traced_shot_of_a_run_folder_is_the_figures_shot(tmp_path):
     first = trace_dir / "p0.003_d3_seed0.trace.json"
     first.write_text("[]")
     assert plots.first_trace_file(tmp_path) == first
+
+
+def test_a_lookahead_tail_draws_to_the_last_round_the_store_held(tmp_path):
+    """The last window of a lookahead tail reads past the stream's end.
+
+    The sliding scheme keeps the regular stride on that tail when the
+    escalation may escalate, so the last window names rounds the stream
+    never produced (windows.terminal_policy, reference.yaml). The
+    timeline draws its fill to the last round that landed rather than
+    failing on a round the store never held.
+    """
+    from decsim.front.collect_command import run_experiment
+    from tests.front.yaml_configs import strong_unit, write_config
+
+    strong_decoder_section = strong_unit(10.0)
+    config_path = write_config(
+        tmp_path,
+        {
+            "escalation": {"kind": "switching", "gap_threshold_db": 20.0},
+            "weak_decoder": {
+                "kind": 1.0,
+                "units": 1,
+                "input": "copy",
+                "unit_memory_rounds": None,
+                "engine": {
+                    "clock": "fridge",
+                    "fetch_cycles_per_round": 1,
+                    "release_cycles_per_job": 1,
+                },
+            },
+            **strong_decoder_section,
+            "observation": {"trace": "chrome", "trace_shots": [0]},
+            "sweep": [
+                {
+                    "physical_error_probability": [0.003],
+                    "distance": [3],
+                    "round_period_us": [1.0],
+                    "shots": 1,
+                }
+            ],
+        },
+    )
+    out_dir = tmp_path / "lookahead"
+    run_dir, _rows = run_experiment(config_path, out_dir)
+    trace_path = plots.first_trace_file(run_dir)
+    document = trace_file.load(trace_path)
+    shot = plots._timeline_shot(document)
+    lanes = plots._timeline_lanes(document)
+    stored = plots._stored_rounds(lanes, shot)
+    last_window = shot.windows[max(shot.windows)]
+    figure_path = run_dir / "timeline.png"
+
+    assert last_window.read_hi > max(stored)
+    assert figure_path.exists()

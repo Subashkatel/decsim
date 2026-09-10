@@ -360,6 +360,14 @@ was more likely to be right, and it arrived 10 microseconds later than
 the weak answer would have, on a machine whose rounds are 1 microsecond
 apart.
 
+To price the strong tier's off-board hops with a measured cable instead
+of the one-cycle room-clock cards above, set `links.kind` to
+`roce_v2_cpu` or `roce_v2_gpu` and delete the four strong-side cards, so
+the row's numbers stand: half of Backline's measured round trip on the
+write into syndrome buffer 1, on the escalation and on the reply, and
+zero on the strong store's own read
+([D14](../explanation/decisions.md#d14-the-strong-tiers-off-board-path-can-be-priced-by-a-measured-round-trip)).
+
 ## What you learned
 
 - Switching runs the weak tier on everything and the strong tier on the

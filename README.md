@@ -111,7 +111,7 @@ every summary is derived from them when it is read.
 | `residence.csv` | traced shot per structure, then per link path: how long a round or window sat there, and how long a move waited on the wire |
 | `manifest.json` | the run: the resolved config, the git state, the library versions, how it was invoked |
 | `trace/<shot>.trace.json` | traced shot: its Chrome trace |
-| `*.png` | figure `decsim plot` drew (`timeline`, `stage_breakdown`, `latency`, `ler_vs_d`) |
+| `*.png` | figure `decsim plot` drew (`timeline`, `stage_breakdown`, `latency`, `ler_vs_d`, `data_movement`) |
 
 ## Where to look next
 

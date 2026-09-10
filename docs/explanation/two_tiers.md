@@ -22,8 +22,9 @@ switching** is their answer to it (arXiv:2510.25222 Sec. III).
 
 decsim calls the two decoders the **weak tier** and the **strong tier**,
 which are Toshio's own words: "we refer to these paired decoders as
-'weak decoder' and 'strong decoder'" (`2510.25222.txt` lines 596-604,
-Sec. III A). The weak decoder is fast and reports a **soft output**; the
+'weak decoder' and 'strong decoder'" (`2510.25222.txt` lines 590-598,
+Sec. III A; every paper line on these pages is into the sandbox's
+`tmp/papers/txt/` extraction, the one the code's own docstrings cite). The weak decoder is fast and reports a **soft output**; the
 strong decoder is accurate and has a relatively high latency.
 
 Three rows of `ESCALATIONS` say which of the two arrangements a run is:
@@ -46,7 +47,7 @@ Escalating usefully needs the weak decoder to know when it is unsure.
 **Soft information** is the name for that: an analog number quantifying
 how reliable the decoder's own estimate is, rather than a hard decision
 about the most likely logical error (Toshio Sec. II B,
-`2510.25222.txt` lines 390-400). decsim's name for the number is the
+`2510.25222.txt` lines 386-396). decsim's name for the number is the
 `SoftOutput`, and `CONFIDENCE_SIGNALS` has two rows for how to get it.
 
 **`complementary_gap`.** Decode the window twice, each solve pinned to
@@ -110,7 +111,7 @@ faced, and would have little reason to do better.
 
 Toshio's own assumption for the size is `r_strong = r_com + 2 r_buf`
 ("In this paper, we assume that rstrong = rcom + 2rbuf",
-`2510.25222.txt` line 1263).
+`2510.25222.txt` line 1250).
 
 **Pinning a face** means reading the neighbour's already committed
 correction and folding it into the strong window's input rather than

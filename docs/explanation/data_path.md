@@ -55,7 +55,11 @@ arranged it (`packet.hh:424-431`).
 The paths are the `LinkPath` values in `decsim/records/transfers.py`.
 The default latencies below are the `logical_reference` card in
 `decsim/links/link_profiles.py`; they are the card's numbers, and a
-config that sets its own replaces them.
+config that sets its own replaces them. Six of them (hops 1, 4, 6, 7, 8
+and 9) carry the source string "Khalid 2511.10633 Table I" in the card:
+one table's numbers, reported here as the card's facts and not as a
+derivation, which `docs/explanation/decisions.md` D5 flags as open
+work.
 
 ### 1. `qpu_to_controller`
 
@@ -115,7 +119,8 @@ stated worst case. It is off board because the strong tier is a separate
 machine, room side in this tree, which is given its assigned data:
 "we assign the syndrome data of rstrong rounds, which includes the
 region with the small soft output, to the strong decoder" (Toshio
-arXiv:2510.25222, `2510.25222.txt` line 1261).
+arXiv:2510.25222, `2510.25222.txt` line 1248, the sandbox's
+`tmp/papers/txt/` extraction, which the code's docstrings cite too).
 
 ### 4. `weak_buffer_to_weak_decoder`
 
@@ -132,13 +137,14 @@ Move, on board, with a copy into the unit's own memory at the landing.
 That is the `copy` row of the tier's `input` key, and it is the default,
 because a hardware decoder loads the syndrome into its storage elements
 before it decodes, which `decsim/decoders/settings.py` cites Collision
-Clustering's Init unit for (arXiv:2309.05558). The other row,
-`in_place`, sends nothing at all and books a reference instead: the unit
-reads the rounds where they sit, which is what a decoder with its input
-on chip does, and the same comment cites AFS (arXiv:2001.06598) for it.
-Neither paper has a text file in the sandbox, so those two citations are
-the code's, carried here rather than re-checked. Default latency 2.0
-microseconds.
+Clustering's Init unit for (arXiv:2309.05558, `2309.05558.txt` lines
+268-272: the Init unit "loads the input syndrome data and appropriate
+data into the storage elements"). The other row, `in_place`, sends
+nothing at all and books a reference instead: the unit reads the rounds
+where they sit, which is what a decoder with its input on chip does,
+and the same comment cites AFS for it (arXiv:2001.06598,
+`2001.06598.txt` lines 520-535: "the processing elements can directly
+access the data stored on-chip"). Default latency 2.0 microseconds.
 
 ### 5. `weak_decoder_to_strong_decoder`
 
@@ -183,7 +189,7 @@ the cost is the seam layer's whole detector count, `d*d - 1`, because
 both compiled implementations carry a mask whatever the noise did. Under
 `sparse_seam_list` it is the flipped detectors and their index width,
 which is how Skoric's blocks exchange the artificial defects themselves
-(arXiv:2209.08552, `2209.08552.txt` lines 272-284, where they are named
+(arXiv:2209.08552, `2209.08552.txt` lines 269-281, where they are named
 and their creation described) and how
 `decsim/windows/boundary_payloads.py` cites Bombin arXiv:2303.04846 for
 bounding the update to a small number of check generators.

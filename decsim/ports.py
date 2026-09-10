@@ -995,12 +995,12 @@ class WindowModelSource(Protocol):
 class Link(Protocol):
     """The link fabric as every sender sees it.
 
-    Table rows: logical_reference, bandwidth_limited (LINK_FABRICS,
-    links/link_profiles.py), named by links.kind; a row supplies the
-    numbers the section's per-path cards override and builds the fabric
-    the root sends on. Every hop of the reaction path is priced, and a
-    send delivers by callback with every tick of the transfer on the
-    record.
+    Table rows: logical_reference, bandwidth_limited, roce_v2_cpu,
+    roce_v2_gpu (LINK_FABRICS, links/link_profiles.py), named by
+    links.kind; a row supplies the numbers the section's per-path cards
+    override and builds the fabric the root sends on. Every hop of the
+    reaction path is priced, and a send delivers by callback with every
+    tick of the transfer on the record.
     """
 
     def expected_delay_ticks(

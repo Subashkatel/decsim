@@ -6,7 +6,8 @@ Caune et al.
 instruction word) for the default payloads; the provisioning rule of the
 bandwidth card (each path carries its nominal traffic in one commit
 region, ns-3's per-device DataRate); gem5-Aladdin's setup cost (Shao et
-al., MICRO 2016) for with_transfer_overhead.
+al., MICRO 2016) for with_transfer_overhead; Backline 2609.09270
+Table III, the CPU and GPU echo rows, for the two measured RoCE v2 rows.
 """
 
 import ast
@@ -248,6 +249,12 @@ def test_every_payload_source_that_names_a_field_names_a_real_one():
     bandwidth = link_profiles.bandwidth_limited_profile(**DISTANCE_5_GEOMETRY)
     provisioned = payload_sources_of(bandwidth)
     stated.extend(provisioned)
+    measured_cpu = link_profiles.roce_v2_measured_profile("cpu")
+    measured_on_the_cpu_path = payload_sources_of(measured_cpu)
+    stated.extend(measured_on_the_cpu_path)
+    measured_gpu = link_profiles.roce_v2_measured_profile("gpu")
+    measured_on_the_gpu_path = payload_sources_of(measured_gpu)
+    stated.extend(measured_on_the_gpu_path)
     unknown = {}
     for source in stated:
         _add_unknown_field(source, declared, unknown)
@@ -522,3 +529,181 @@ def test_the_khalid_latencies_name_the_table_row_they_are_read_from():
     assert symbols["weak_decoder_to_frame"] == "tdo"
     assert symbols["strong_decoder_to_frame"] == "tdo"
     assert symbols["decoder_to_decoder"] == "tdd"
+
+
+# The hops the measured RoCE v2 rows reprice: the write into syndrome
+# buffer 1, the escalation, the strong window's input, and the reply.
+STRONG_SIDE_PATHS = (
+    "controller_to_strong_buffer",
+    "weak_decoder_to_strong_decoder",
+    "strong_buffer_to_strong_decoder",
+    "strong_decoder_to_frame",
+)
+
+
+def _priced(path_settings) -> tuple:
+    """One path's latency, capacity and payload rule."""
+    channel = path_settings.channel
+    return (
+        channel.propagation_latency_ticks,
+        channel.capacity,
+        path_settings.default_payload,
+        path_settings.actual_payload_source,
+    )
+
+
+def paths_outside_the_strong_side(profile) -> dict:
+    """What every hop but the four strong-side ones is priced at."""
+    priced = {}
+    for path in transfer_records.LinkPath:
+        if path.value in STRONG_SIDE_PATHS:
+            continue
+        path_settings = profile.path_settings(path)
+        priced[path.value] = _priced(path_settings)
+    return priced
+
+
+def _cites_backline(source: str) -> bool:
+    """Whether one source carries Backline's arXiv identifier."""
+    found = ARXIV.search(source)
+    if found is None:
+        return False
+    identifier = found.group()
+    return identifier == "2609.09270"
+
+
+def test_the_cpu_row_charges_half_the_measured_round_trip_on_each_leg():
+    """Backline times one round trip; decsim needs a number per hop.
+
+    The controller's one-sided write into syndrome buffer 1, the
+    escalation request and the reply to the frame are each half of the
+    2.305 us median (2609.09270 Table III, CPU echo); the strong store's
+    read into the strong decoder is free, because the coprocessor polls
+    a slot in its own memory. The escalation round trip is therefore the
+    measured median exactly.
+    """
+    profile = link_profiles.roce_v2_measured_profile("cpu")
+    latencies = latencies_of(profile)
+    half = config.microseconds_to_ticks(1.1525)
+    assert latencies["controller_to_strong_buffer"] == half
+    assert latencies["weak_decoder_to_strong_decoder"] == half
+    assert latencies["strong_buffer_to_strong_decoder"] == 0
+    assert latencies["strong_decoder_to_frame"] == half
+    escalation_round_trip = (
+        latencies["weak_decoder_to_strong_decoder"]
+        + latencies["strong_buffer_to_strong_decoder"]
+        + latencies["strong_decoder_to_frame"]
+    )
+    assert escalation_round_trip == config.microseconds_to_ticks(2.305)
+
+
+def test_the_gpu_row_charges_half_the_measured_round_trip_on_each_leg():
+    """The same split on the 4.5 us GPU echo row of Table III."""
+    profile = link_profiles.roce_v2_measured_profile("gpu")
+    latencies = latencies_of(profile)
+    half = config.microseconds_to_ticks(2.25)
+    assert latencies["controller_to_strong_buffer"] == half
+    assert latencies["weak_decoder_to_strong_decoder"] == half
+    assert latencies["strong_buffer_to_strong_decoder"] == 0
+    assert latencies["strong_decoder_to_frame"] == half
+    escalation_round_trip = (
+        latencies["weak_decoder_to_strong_decoder"]
+        + latencies["strong_buffer_to_strong_decoder"]
+        + latencies["strong_decoder_to_frame"]
+    )
+    assert escalation_round_trip == config.microseconds_to_ticks(4.5)
+
+
+def test_the_measured_rows_keep_the_reference_card_off_the_strong_side():
+    """Only the four strong-side hops move: the rest is the default card."""
+    reference = link_profiles.logical_reference_profile()
+    measured_cpu = link_profiles.roce_v2_measured_profile("cpu")
+    measured_gpu = link_profiles.roce_v2_measured_profile("gpu")
+    unchanged = paths_outside_the_strong_side(reference)
+    assert paths_outside_the_strong_side(measured_cpu) == unchanged
+    assert paths_outside_the_strong_side(measured_gpu) == unchanged
+
+
+def test_the_cpu_rows_strong_side_sources_cite_backline():
+    """Four hops read one measurement, and none of them is a choice now.
+
+    On the reference card the weak-to-strong hop names no paper and says
+    "repository weak-to-strong model choice"; on this row it is a leg of
+    a measured round trip and cites the paper it was read from.
+    """
+    profile = link_profiles.roce_v2_measured_profile("cpu")
+    sources = sources_of(profile)
+    cited = _named_where(sources, _cites_backline)
+    assert cited == [
+        "controller_to_strong_buffer",
+        "strong_buffer_to_strong_decoder",
+        "strong_decoder_to_frame",
+        "weak_decoder_to_strong_decoder",
+    ]
+    declared = _named_where(sources, _declares_a_choice)
+    assert declared == []
+
+
+def test_the_gpu_rows_strong_side_sources_cite_backline():
+    """The same four hops, read from the GPU echo row."""
+    profile = link_profiles.roce_v2_measured_profile("gpu")
+    sources = sources_of(profile)
+    cited = _named_where(sources, _cites_backline)
+    assert cited == [
+        "controller_to_strong_buffer",
+        "strong_buffer_to_strong_decoder",
+        "strong_decoder_to_frame",
+        "weak_decoder_to_strong_decoder",
+    ]
+    declared = _named_where(sources, _declares_a_choice)
+    assert declared == []
+
+
+def test_a_coprocessor_backline_did_not_echo_from_is_refused():
+    """The measurement covers two paths, and the refusal names them."""
+    with pytest.raises(ValueError, match="'cpu' or 'gpu'"):
+        link_profiles.roce_v2_measured_profile("fpga")
+
+
+def strong_buffer_source_of(built) -> str:
+    """The source a run's traffic report kept for the strong-buffer hop."""
+    snapshot = built.observation.traffic.snapshot()
+    wanted = transfer_records.LinkPath.CONTROLLER_TO_STRONG_BUFFER
+    for channel in snapshot.channels:
+        if wanted in channel.member_paths:
+            return channel.settings.configuration_source
+    return ""
+
+
+def test_the_measured_cpu_row_runs_from_a_yaml(tmp_path):
+    """One links.kind is the whole edit, and the run carries the source."""
+    links = dict(yaml_configs.MINIMAL_CONFIG["links"])
+    links["kind"] = "roce_v2_cpu"
+    config_path = yaml_configs.write_config(tmp_path, {"links": links})
+    experiment_config = experiment.load_experiment(config_path)
+    settings = experiment_config.point_settings(
+        physical_error_probability=0.001, distance=3, round_period_us=1.0
+    )
+    built = machine.Machine.build(settings, 0)
+    result = built.run()
+
+    assert settings.links.kind == "roce_v2_cpu"
+    assert result.terminal_status == "complete"
+    assert "2609.09270" in strong_buffer_source_of(built)
+
+
+def test_the_measured_gpu_row_runs_from_a_yaml(tmp_path):
+    """The same, on the row that prices the GPU coprocessor's path."""
+    links = dict(yaml_configs.MINIMAL_CONFIG["links"])
+    links["kind"] = "roce_v2_gpu"
+    config_path = yaml_configs.write_config(tmp_path, {"links": links})
+    experiment_config = experiment.load_experiment(config_path)
+    settings = experiment_config.point_settings(
+        physical_error_probability=0.001, distance=3, round_period_us=1.0
+    )
+    built = machine.Machine.build(settings, 0)
+    result = built.run()
+
+    assert settings.links.kind == "roce_v2_gpu"
+    assert result.terminal_status == "complete"
+    assert "2609.09270" in strong_buffer_source_of(built)

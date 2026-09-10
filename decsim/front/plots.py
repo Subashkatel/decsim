@@ -845,10 +845,11 @@ def _draw_windows(
         if window_id not in shot.frame:
             continue
         color = WINDOW_COLORS[window_id % len(WINDOW_COLORS)]
-        range_text = _window_range_text(window)
+        range_text = _window_range_text(window, stored)
         window_ranges.append(range_text)
         _draw_store_fill(timeline, lanes, window, color, stored)
-        stored_tick = stored[window.read_hi].end_us
+        read_end = _stored_read_end(window, stored)
+        stored_tick = stored[read_end].end_us
         timeline.window_bar(
             "wait", stored_tick, window.dispatch_us, window_id, color
         )
@@ -857,13 +858,27 @@ def _draw_windows(
     return window_ranges
 
 
-def _window_range_text(window: _TimelineWindow) -> str:
+def _window_range_text(window: _TimelineWindow, stored: dict) -> str:
     """The legend line for one window: what it commits and what it reads."""
+    read_end = _stored_read_end(window, stored)
     return (
         f"window {window.window_id}: "
         f"commits {window.commit_lo}-{window.commit_hi}, "
-        f"reads {window.read_lo}-{window.read_hi}"
+        f"reads {window.read_lo}-{read_end}"
     )
+
+
+def _stored_read_end(window: _TimelineWindow, stored: dict) -> int:
+    """The last round of the window's read range that reached the store.
+
+    Under the lookahead terminal policy the last window keeps the regular
+    stride, so its buffer names rounds past the stream's end
+    (windows/schemes/sliding.py); the decode reads to the last round the
+    stream has (windows/decode_requests.py, assemble_payloads), and so
+    does the figure.
+    """
+    last_stored = max(stored)
+    return min(window.read_hi, last_stored)
 
 
 def _draw_store_fill(
@@ -882,9 +897,10 @@ def _draw_store_fill(
     first_round = stored[window.read_lo].end_us
     commit_stored = stored[window.commit_hi].end_us
     timeline.window_bar(row, first_round, commit_stored, window_id, color)
-    if window.read_hi <= window.commit_hi:
+    read_end = _stored_read_end(window, stored)
+    if read_end <= window.commit_hi:
         return
-    stored_tick = stored[window.read_hi].end_us
+    stored_tick = stored[read_end].end_us
     timeline.window_bar(
         row, commit_stored, stored_tick, window_id, color, alpha=0.45
     )

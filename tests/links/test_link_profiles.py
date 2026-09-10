@@ -9,6 +9,8 @@ region, ns-3's per-device DataRate); gem5-Aladdin's setup cost (Shao et
 al., MICRO 2016) for with_transfer_overhead.
 """
 
+import ast
+import pathlib
 import re
 
 import pytest
@@ -21,6 +23,16 @@ import decsim.machine as machine
 import decsim.records.transfers as transfer_records
 import decsim.settings as machine_settings
 import tests.front.yaml_configs as yaml_configs
+
+TESTS_FILE = pathlib.Path(__file__)
+TESTS_PATH = TESTS_FILE.resolve()
+PACKAGE_ROOT = TESTS_PATH.parent.parent.parent
+DECSIM_ROOT = PACKAGE_ROOT / "decsim"
+
+# A payload source written as Record.field, or Record.method(), states
+# where a transfer's bit count came from; anything else is prose about
+# what the card assumes.
+NAMED_FIELD = re.compile(r"^([A-Z]\w+)\.(\w+)(\(\))?$")
 
 # One distance-5 patch: 24 syndrome bits per 1.0 us round, commit and
 # buffer regions of 5 rounds.
@@ -117,7 +129,7 @@ def test_the_reference_card_names_the_runtime_quantity_of_each_actual_path():
     profile = link_profiles.logical_reference_profile()
     assert (
         profile.qpu_to_controller.actual_payload_source
-        == "SyndromePayload.size_bits"
+        == "QPUReadout.size_bits"
     )
     assert profile.controller_to_weak_buffer.actual_payload_source == (
         "PackedRound.wire_bits"
@@ -130,7 +142,7 @@ def test_the_reference_card_names_the_runtime_quantity_of_each_actual_path():
     )
     assert (
         profile.weak_decoder_to_strong_decoder.actual_payload_source
-        == "switching decision payload_bits"
+        == "no payload; the escalation names the strong request"
     )
     assert profile.strong_buffer_to_strong_decoder.actual_payload_source == (
         "DecodeJob.payload_bits()"
@@ -141,6 +153,105 @@ def test_the_reference_card_names_the_runtime_quantity_of_each_actual_path():
     assert profile.strong_decoder_to_frame.actual_payload_source == (
         "DecodeResult.logical_observables bits"
     )
+
+
+def payload_sources_of(profile) -> list:
+    """Every payload source string one card states, path by path."""
+    sources = []
+    for path in transfer_records.LinkPath:
+        path_settings = profile.path_settings(path)
+        _add_payload_sources(path_settings, sources)
+    return sources
+
+
+def _add_payload_sources(path_settings, sources: list) -> None:
+    """Add one path's actual source and its default payload's source."""
+    actual = path_settings.actual_payload_source
+    if actual is not None:
+        sources.append(actual)
+    default_payload = path_settings.default_payload
+    if default_payload is not None:
+        sources.append(default_payload.source)
+
+
+def names_by_class() -> dict:
+    """Every class decsim declares, with the names it carries."""
+    declared = {}
+    modules = DECSIM_ROOT.rglob("*.py")
+    for module in sorted(modules):
+        text = module.read_text()
+        tree = ast.parse(text)
+        _add_module_classes(tree, declared)
+    return declared
+
+
+def _add_module_classes(tree: ast.Module, declared: dict) -> None:
+    """Add one module's classes to the map of declared names."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef):
+            carried = declared.setdefault(node.name, set())
+            carried |= _names_of_class(node)
+
+
+def _names_of_class(node: ast.ClassDef) -> set:
+    """The fields and methods one class body declares."""
+    names = set()
+    for statement in node.body:
+        _add_statement_name(statement, names)
+    return names
+
+
+def _add_statement_name(statement, names: set) -> None:
+    """Add the name one class-body statement declares, if it declares one."""
+    if isinstance(statement, ast.FunctionDef):
+        names.add(statement.name)
+        return
+    if isinstance(statement, ast.AnnAssign):
+        target = statement.target
+        if isinstance(target, ast.Name):
+            names.add(target.id)
+        return
+    if isinstance(statement, ast.Assign):
+        _add_assigned_names(statement, names)
+
+
+def _add_assigned_names(statement: ast.Assign, names: set) -> None:
+    """Add the plain names one assignment in a class body writes to."""
+    for target in statement.targets:
+        if isinstance(target, ast.Name):
+            names.add(target.id)
+
+
+def _add_unknown_field(source: str, declared: dict, unknown: dict) -> None:
+    """Record a payload source that names a field the tree does not have."""
+    match = NAMED_FIELD.match(source)
+    if match is None:
+        return
+    class_name, field_name = match.group(1), match.group(2)
+    carried = declared.get(class_name, set())
+    if field_name in carried:
+        return
+    unknown[source] = class_name
+
+
+def test_every_payload_source_that_names_a_field_names_a_real_one():
+    """A card that names a runtime quantity names one the tree carries.
+
+    The string travels into the traffic ledger as the transfer's
+    payload_source, so a record or field the tree does not have is a
+    false statement about what crossed. A card that carries no runtime
+    count says so in prose instead, and this law leaves prose alone.
+    """
+    declared = names_by_class()
+    reference = link_profiles.logical_reference_profile()
+    stated = payload_sources_of(reference)
+    bandwidth = link_profiles.bandwidth_limited_profile(**DISTANCE_5_GEOMETRY)
+    provisioned = payload_sources_of(bandwidth)
+    stated.extend(provisioned)
+    unknown = {}
+    for source in stated:
+        _add_unknown_field(source, declared, unknown)
+    assert unknown == {}
 
 
 def test_every_hop_of_the_reaction_path_has_a_reference_card():

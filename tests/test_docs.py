@@ -17,8 +17,9 @@ a page is enforced here.
    declares which package each of its nodes is, in `%% Node = package`
    comment lines, so the check knows where to look.
 5. Every uppercase name in backticks in docs/ and README.md is a name
-   decsim/ defines at module level, apart from the foreign names listed
-   in FOREIGN_NAMES; and there are seventeen plug-in tables.
+   the tree defines: a module-level name of decsim/ or tests/, or a
+   shell variable one of the scripts reads, apart from the foreign names
+   listed in FOREIGN_NAMES; and there are seventeen plug-in tables.
 6. No em dash in docs/, README.md, STYLE.md, or any docstring of the
    package, the tests or the tools.
 """
@@ -36,6 +37,9 @@ TESTS_PATH = TESTS_FILE.resolve()
 CHECKOUT = TESTS_PATH.parent.parent
 PACKAGE = CHECKOUT / "decsim"
 DOCS = CHECKOUT / "docs"
+TESTS = CHECKOUT / "tests"
+TOOLS = CHECKOUT / "tools"
+SLURM = CHECKOUT / "slurm"
 EM_DASH = "—"
 TABLE_COUNT = 17
 
@@ -43,6 +47,7 @@ PATH_PREFIXES = ("decsim/", "tests/", "tools/", "docs/", "configs/", "slurm/")
 ROOT_FILES = ("README.md", "STYLE.md", "pyproject.toml")
 BACKTICKED = re.compile(r"`([^`\n]+)`")
 UPPER_NAME = re.compile(r"^[A-Z][A-Z0-9_]{2,}$")
+SHELL_NAME = re.compile(r"\$\{?([A-Z][A-Z0-9_]{2,})")
 NODE_PACKAGE = re.compile(r"^\s*%%\s*(\w+)\s*=\s*([a-z_]+)\s*$")
 EDGE = re.compile(
     r'^\s*(\w+)(?:\[[^\]]*\])?\s*--[->]*\|"([A-Za-z_]+)\.([A-Za-z_]+)"\|'
@@ -84,6 +89,13 @@ def _module_paths() -> tuple:
 
 
 @functools.cache
+def _test_module_paths() -> tuple:
+    """Every module of tests/, in path order."""
+    globbed = TESTS.rglob("*.py")
+    return tuple(sorted(globbed))
+
+
+@functools.cache
 def _prose_files() -> tuple:
     """Every page a reader reads: docs/ and the root's own markdown."""
     globbed = DOCS.rglob("*.md")
@@ -112,11 +124,35 @@ def _collected_tests() -> frozenset:
 
 @functools.cache
 def _module_level_names() -> frozenset:
-    """Every name decsim/ assigns at module level, in any of its modules."""
-    named = set()
-    for path in _module_paths():
+    """Every module-level name decsim/ or tests/ assigns.
+
+    A page names a table the tests own as readily as one the package
+    owns: ENDS_OF_PATH is the rule the data path page describes, and it
+    lives in tests/test_send_ends.py.
+    """
+    shell = _shell_names()
+    named = set(shell)
+    for path in _module_paths() + _test_module_paths():
         assigned = _names_assigned(path)
         named.update(assigned)
+    return frozenset(named)
+
+
+@functools.cache
+def _shell_names() -> frozenset:
+    """Every shell variable the scripts of the tree read.
+
+    A page that shows how to launch a job names the variables that job
+    reads, and RUN is one of them: slurm/slurm_run.sh takes it as the
+    folder an array task writes its shard into.
+    """
+    named = set()
+    for folder in (SLURM, TOOLS):
+        globbed = folder.rglob("*.sh")
+        for path in sorted(globbed):
+            text = path.read_text()
+            found = SHELL_NAME.findall(text)
+            named.update(found)
     return frozenset(named)
 
 
@@ -343,7 +379,7 @@ def _check_one_name(quoted: str, defined: frozenset, page) -> None:
     if quoted in FOREIGN_NAMES:
         return
     assert quoted in defined, (
-        f"{page.name} names {quoted}, which decsim/ does not define"
+        f"{page.name} names {quoted}, which the tree does not define"
     )
 
 

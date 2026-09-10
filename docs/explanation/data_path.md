@@ -38,10 +38,12 @@ them up per class, never in one total.
 Between two components a call is not just a call: it is a transfer with
 a card. The card gives the path a propagation latency, optionally a
 bandwidth in bits per cycle of a named clock, the channel it shares with
-other paths, and a per-transfer setup cost. `LINK_FABRICS` has two rows:
+other paths, and a per-transfer setup cost. `LINK_FABRICS` has four rows:
 `logical_reference`, the default, which charges propagation only and
-never queues, and `bandwidth_limited`, which gives the channels finite
-rates provisioned from the code geometry.
+never queues; `bandwidth_limited`, which gives the channels finite
+rates provisioned from the code geometry; and `roce_v2_cpu` and
+`roce_v2_gpu`, the default card with the strong tier's off-board hops
+priced by a measured round trip ([D14](decisions.md#d14-the-strong-tiers-off-board-path-can-be-priced-by-a-measured-round-trip)).
 
 Whoever executes a send is an end of that hop. `tests/test_send_ends.py`
 holds the rule: its `ENDS_OF_PATH` table names each path's two ends as

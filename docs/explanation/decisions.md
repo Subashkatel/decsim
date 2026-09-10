@@ -2,7 +2,7 @@
 
 # The design decisions
 
-Thirteen decisions shape what decsim charges and where it charges it. Each is
+Fourteen decisions shape what decsim charges and where it charges it. Each is
 recorded here with what was decided, why, and the source the answer came
 from, because a modelling question is answered by reading the referent
 rather than by choosing (`STYLE.md` rule 8). The last section says what
@@ -109,7 +109,8 @@ broadcast (240 to 260 nanoseconds at the stated worst case).
 exceeds Toshio's own communication time for the weak side, because the
 card's six latencies are taken from one source's table rather than
 derived from one referent. Re-deriving the fabric card from a single
-referent is open work.
+referent is open work; D14 prices the strong tier's four off-board hops
+from one measured round trip instead, on two rows a config can name.
 
 ## D6. Pair placement is deferred
 
@@ -337,6 +338,50 @@ messages (`MessageBuffer.cc:181`, the two sizes read at `:155-158`).
 `tests/syndrome_buffer/test_round_input.py`, and hop 2 of
 [The data path, hop by hop](data_path.md). The research behind it read the referents above side by side, the
 classical queues first and the quantum control papers second.
+
+## D14. The strong tier's off-board path can be priced by a measured round trip
+
+**Decided.** Two rows of `LINK_FABRICS`, `roce_v2_cpu` and `roce_v2_gpu`,
+are the default card with four hops repriced from one measurement:
+Backline's steady-state round trip from an FPGA controller to a CPU
+coprocessor over RoCE v2, 2.305 microseconds in the median, and to a GPU
+coprocessor, 4.5 microseconds. The controller's write into syndrome
+buffer 1 (hop 3), the escalation request (hop 5) and the strong decoder's
+reply to the frame (hop 9) are each half of the round trip; the strong
+store's read into the strong decoder (hop 6) is zero, because the
+coprocessor polls a slot in its own memory. On either row the escalation
+round trip, hops 5, 6 and 9, is the measured median exactly. Every other
+hop keeps the default card's number and source. The default row does not
+change, so no existing result moves.
+
+**Why.** On the default card hop 5 had no source: its string says
+"repository weak-to-strong model choice". The three cited hops around it
+come from one table each. A measured cable is a better kind of fact for
+that path than a table row, and a config that asks "strong tier on a CPU
+or on a GPU" needs a card behind each answer. The split is decsim's rule,
+stated in the docstring, because the measurement is one number and
+neither the paper nor its published runtime gives a per-direction
+figure: one hardware timer starts at the controller's doorbell and stops
+when the reply lands. The rows price the median; the first, warm-up
+round trip (4.64 and 9.27 microseconds) and the tails are on the
+docstring and not on the card.
+
+**Sources.** Backline, Lee et al. arXiv:2609.09270, Sec. V-C1 lines 1607
+to 1633 for the measurement (a 16-byte payload with an 8-byte syndrome
+as a one-sided RDMA write, the coprocessor polling its buffer, the reply
+as a one-sided write, the GPU signalling a CPU thread that writes back,
+the FPGA timing the round trip in its own clock), Table III lines 1736
+to 1745 for the echo rows the card takes, footnote 3 lines 1629 to 1631
+for the excluded warm-up trip. The published runtime confirms the shape:
+one 16-byte frame in a 64-byte slot of a 256-slot ring, the receiver
+spinning on the slot's sequence number, the reply posted as an inline
+RDMA write, the round trip read from the engine's own timer.
+
+**Where to see it.** `roce_v2_measured_profile` and the two rows in
+`decsim/links/link_profiles.py`, the `links.kind` comment in
+`configs/reference.yaml`, and `tests/links/test_link_profiles.py`, which
+holds the split, the exact escalation sum, the unchanged remainder of the
+card, the four Backline citations and both rows running from a yaml.
 
 ## What is not modelled yet
 

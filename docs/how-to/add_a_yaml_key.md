@@ -1,3 +1,5 @@
+[decsim docs](../README.md) › [How-to guides](README.md)
+
 # How to add a yaml key
 
 You want a knob a config file can set. A key belongs to exactly one
@@ -70,6 +72,6 @@ that keeps the old behaviour moves no result of any existing run.
 
 ## Read next
 
-- `docs/reference/yaml.md`: how the yaml layer is put together.
-- `docs/how-to/add_a_table_row.md`: when the knob is a whole component.
+- [`docs/reference/yaml.md`](../reference/yaml.md): how the yaml layer is put together.
+- [`docs/how-to/add_a_table_row.md`](add_a_table_row.md): when the knob is a whole component.
 - `configs/reference.yaml`: the file you are adding to.

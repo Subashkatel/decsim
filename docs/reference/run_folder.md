@@ -1,3 +1,5 @@
+[decsim docs](../README.md) › [Reference](README.md)
+
 # The run folder
 
 Every `decsim collect` writes one folder under `results/`, named for the
@@ -191,6 +193,6 @@ with the resolved config of the folders it folded.
 
 ## Read next
 
-- `docs/how-to/compare_two_runs.md`: read two folders side by side.
-- `docs/reference/cli.md`: the commands that write and read these files.
-- `docs/tutorials/first_sweep.md`: a sweep, its shards and its error bars.
+- [`docs/how-to/compare_two_runs.md`](../how-to/compare_two_runs.md): read two folders side by side.
+- [`docs/reference/cli.md`](cli.md): the commands that write and read these files.
+- [`docs/tutorials/first_sweep.md`](../tutorials/first_sweep.md): a sweep, its shards and its error bars.

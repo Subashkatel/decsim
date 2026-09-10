@@ -36,11 +36,13 @@ decsim run configs/reference.yaml --seed 0 --trace
 
 That is one shot of the smallest shipped config, with a Chrome trace of
 every round and window written into the run folder it names.
-`docs/tutorials/first_run.md` walks through it and its output.
+[[`docs/tutorials/first_run.md`](docs/tutorials/first_run.md)](docs/tutorials/first_run.md) walks
+through it and its output.
 
 ## The documentation
 
-`docs/index.md` is the front door. It is arranged in the Diataxis
+[[`docs/README.md`](docs/README.md)](docs/README.md) is the front door: every page, with
+its sections, on one page. The pages are arranged in the Diataxis
 scheme: tutorials to learn from, how-to guides for one task each,
 reference to look things up in, and explanation for the design and its
 sources.

@@ -1,3 +1,5 @@
+[decsim docs](../README.md) › [Tutorials](README.md)
+
 # Your first run
 
 This lesson takes about ten minutes. By the end you will have run one
@@ -86,7 +88,7 @@ Your two tick numbers will differ from the ones above. The default
 decoder is a real PyMatching call, and decsim charges the decoder unit
 the wall-clock time that call actually took on your machine
 (`decsim/decoders/decoder.py`, `decode_timed`). A faster computer gives
-a faster machine. `docs/explanation/time.md` says what that means and
+a faster machine. [`docs/explanation/time.md`](../explanation/time.md) says what that means and
 how to run a timing study that does not depend on your hardware.
 
 ## Step 3. Run the sweep and get a run folder
@@ -163,7 +165,7 @@ tracked by git. `config/` holds a verbatim copy of the yaml files that
 produced it, `manifest.json` holds the git commit, the library versions
 and the command line, and the csv files hold the facts. Every summary is
 computed when a file is read, never stored, so two folders of the same
-sweep can be added together. `docs/reference/run_folder.md` has one row
+sweep can be added together. [`docs/reference/run_folder.md`](../reference/run_folder.md) has one row
 per file.
 
 ## Step 5. Read one row and one figure
@@ -183,7 +185,7 @@ distance,physical_error_probability,algorithm,round_period_us,shots,windows_per_
 did not match the truth: zero out of two here. `ler_wilson_low` and
 `ler_wilson_high` bracket it. Two shots say almost nothing, which is why
 the interval runs from 0 to 0.66. The next tutorial,
-`docs/tutorials/first_sweep.md`, explains that interval and runs enough
+[`docs/tutorials/first_sweep.md`](first_sweep.md), explains that interval and runs enough
 shots to make it narrow.
 
 `collect` also drew a figure. Draw a second one:
@@ -260,7 +262,7 @@ decode held that unit for 16.9 microseconds.
 The `transfer` column is the vocabulary decsim uses for data movement: a
 **move** leaves the bits behind, a **copy** ends with both sides holding
 them, and a **reference** hands over an object both sides read.
-`docs/explanation/data_path.md` walks every hop.
+[`docs/explanation/data_path.md`](../explanation/data_path.md) walks every hop.
 
 The same command follows a window instead of a round:
 
@@ -284,7 +286,7 @@ the frame at 22.950 microseconds.
 
 ## Read next
 
-- `docs/tutorials/first_sweep.md`: run a real sweep and read the error
+- [`docs/tutorials/first_sweep.md`](first_sweep.md): run a real sweep and read the error
   bars.
-- `docs/explanation/architecture.md`: what each component is.
+- [`docs/explanation/architecture.md`](../explanation/architecture.md): what each component is.
 - `configs/reference.yaml`: every key you can set, with its source.

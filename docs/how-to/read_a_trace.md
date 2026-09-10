@@ -1,3 +1,5 @@
+[decsim docs](../README.md) › [How-to guides](README.md)
+
 # How to read a trace and follow one round or one window
 
 A **trace** is one shot's data path written out: where every round and
@@ -158,4 +160,4 @@ point that traced no shot writes no row, for the same reason.
 - `configs/reference.yaml`, the `observation` section: every trace knob
   and what it costs.
 - `decsim/observe/trace_writer.py`: which event each source becomes.
-- `docs/explanation/data_path.md`: what each hop in the table is.
+- [`docs/explanation/data_path.md`](../explanation/data_path.md): what each hop in the table is.

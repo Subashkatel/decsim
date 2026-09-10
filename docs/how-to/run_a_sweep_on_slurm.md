@@ -1,3 +1,5 @@
+[decsim docs](../README.md) › [How-to guides](README.md)
+
 # How to run a sweep on Slurm
 
 A real sweep is millions of shots and does not fit in one job.
@@ -70,7 +72,7 @@ simply by being the one you pass.
 
 ## Read next
 
-- `docs/tutorials/first_sweep.md`: a small sweep end to end, with the
+- [`docs/tutorials/first_sweep.md`](../tutorials/first_sweep.md): a small sweep end to end, with the
   error bars explained.
-- `docs/reference/run_folder.md`: what each shard writes.
-- `docs/reference/cli.md`: every flag of `collect` and `combine`.
+- [`docs/reference/run_folder.md`](../reference/run_folder.md): what each shard writes.
+- [`docs/reference/cli.md`](../reference/cli.md): every flag of `collect` and `combine`.

@@ -1,3 +1,5 @@
+[decsim docs](../README.md) › [How-to guides](README.md)
+
 # How to run a timing study whose numbers do not depend on your computer
 
 By default a decoder row in decsim runs for real and is charged the wall
@@ -104,6 +106,6 @@ samples none. Use a priced card on a real device instead.
 
 ## Read next
 
-- `docs/explanation/time.md`: ticks, clocks and the wall-clock decoder.
-- `docs/how-to/compare_two_runs.md`: putting a card run beside a
+- [`docs/explanation/time.md`](../explanation/time.md): ticks, clocks and the wall-clock decoder.
+- [`docs/how-to/compare_two_runs.md`](compare_two_runs.md): putting a card run beside a
   measured one.

@@ -1,3 +1,5 @@
+[decsim docs](../README.md) › [How-to guides](README.md)
+
 # How to add a decoder backend
 
 You have a decoder, in Python or wrapped from C, and you want decsim to
@@ -7,7 +9,7 @@ job.
 ## 1. Write the class
 
 A decoder fills the `Decoder` port (`decsim/ports.py`;
-`docs/reference/ports.md` lists its methods and members). The shortest
+[`docs/reference/ports.md`](../reference/ports.md) lists its methods and members). The shortest
 way is to inherit `DecoderBase` from `decsim/decoders/decoder.py`, which
 gives you the port's defaults: `start`, `cancel`, `occupancy`,
 `pipeline_depth`, the two members every row must answer, and the
@@ -50,7 +52,7 @@ fails on a module that tests against a row's class).
 One entry in `DECODERS` (`decsim/decoders/settings.py`), one folder or
 one module beside the other rows, and the key in
 `configs/reference.yaml` in the same commit.
-`docs/how-to/add_a_table_row.md` is the general recipe with the refusal
+[`docs/how-to/add_a_table_row.md`](add_a_table_row.md) is the general recipe with the refusal
 a typo gets.
 
 If your backend is an optional dependency, put it behind an import
@@ -85,7 +87,7 @@ runs one through a whole point.
 
 ## Read next
 
-- `docs/reference/ports.md`: the `Decoder` port in full.
-- `docs/explanation/time.md`: measured wall clock against a priced card.
-- `docs/how-to/run_a_timing_only_study.md`: pricing your decoder instead
+- [`docs/reference/ports.md`](../reference/ports.md): the `Decoder` port in full.
+- [`docs/explanation/time.md`](../explanation/time.md): measured wall clock against a priced card.
+- [`docs/how-to/run_a_timing_only_study.md`](run_a_timing_only_study.md): pricing your decoder instead
   of measuring it.

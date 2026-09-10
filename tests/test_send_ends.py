@@ -25,7 +25,9 @@ ENDS_OF_PATH = {
     "WEAK_DECODER_TO_STRONG_DECODER": ("decoders",),
     "STRONG_BUFFER_TO_STRONG_DECODER": ("syndrome_buffer", "decoders"),
     "WEAK_DECODER_TO_FRAME": ("decoders", "pauli_frame"),
-    "DECODER_TO_DECODER": ("decoders",),
+    # a boundary is a window-side record and both its ends hold one
+    # (decisions.md D12)
+    "DECODER_TO_DECODER": ("windows",),
     "STRONG_DECODER_TO_FRAME": ("decoders", "pauli_frame"),
     "FRAME_TO_CONTROLLER": ("pauli_frame", "controller"),
     "CONTROLLER_TO_QPU": ("controller", "qpu"),
@@ -117,25 +119,30 @@ def _assigned_names(statement: ast.Assign) -> list:
     return names
 
 
-# Where each hop's delivery callback is registered: the module that
-# names the path, and the function the sender hands the link. The table
-# is asserted against the tree, so a send that stops resolving is
-# visible here rather than passing unseen. A callback the asker supplies
-# is recorded as None: that sender sends on another component's ask, and
-# what runs at the landing is written where the ask is made.
+# Where each hop's delivery callbacks are registered: the module that
+# names the path, and the functions the sender hands the link, in the
+# order the sends stand in the file. The table is asserted against the
+# tree, so a send that stops resolving is visible here rather than
+# passing unseen. A callback the asker supplies is recorded as None:
+# that sender sends on another component's ask, and what runs at the
+# landing is written where the ask is made.
 DELIVERY_CALLBACKS = {
-    ("controller/controller.py", "QPU_TO_CONTROLLER"): "at_controller",
+    ("controller/controller.py", "QPU_TO_CONTROLLER"): ("at_controller",),
     ("controller/instruction_output.py", "FRAME_TO_CONTROLLER"): (
-        "at_controller"
+        "at_controller",
     ),
-    ("controller/instruction_output.py", "CONTROLLER_TO_QPU"): "delivered",
+    ("controller/instruction_output.py", "CONTROLLER_TO_QPU"): ("delivered",),
     ("controller/round_transmission.py", "CONTROLLER_TO_WEAK_BUFFER"): (
-        "_publish"
+        "_publish",
     ),
     ("controller/round_writes.py", "CONTROLLER_TO_STRONG_BUFFER"): (
-        "_land_in_strong_store"
+        "_land_in_strong_store",
     ),
-    ("decoders/decoder_output.py", "WEAK_DECODER_TO_STRONG_DECODER"): None,
+    ("decoders/decoder_output.py", "WEAK_DECODER_TO_STRONG_DECODER"): (None,),
+    ("windows/window_boundaries.py", "DECODER_TO_DECODER"): (
+        "_pin_delivered",
+        "_receive_boundary",
+    ),
 }
 
 # The collaborators a delivery callback may reach that are neither end
@@ -157,8 +164,11 @@ def test_every_delivery_callback_leaves_the_landing_to_the_receiving_end():
     the message to the destination module before that module's
     handleMessage runs (csimplemodule.cc:777-799), and ns-3 schedules
     Receive on the destination device (point-to-point-channel.cc:88-92).
-    So every method a delivery callback reaches through a collaborator
-    is defined in a package that is an end of that hop.
+    So every method a delivery callback reaches through a collaborator,
+    and that a component package defines, is defined by a package that
+    is an end of that hop. A name no component package defines is a
+    builtin, a record's own method or a foreign object's, and this law
+    says nothing about those.
     """
     wrong_end = {}
     for site in _delivery_sites_of_the_tree():
@@ -182,8 +192,8 @@ def test_the_table_of_delivery_callbacks_matches_the_tree():
     """A new send, or a callback that stops resolving, is visible here."""
     found = {}
     for site in _delivery_sites_of_the_tree():
-        found[(site.where, site.path_name)] = site.callback_name
-    assert found == DELIVERY_CALLBACKS
+        _add_found_callback(site, found)
+    assert _as_tuples(found) == DELIVERY_CALLBACKS
 
 
 class _DeliverySite:
@@ -451,20 +461,35 @@ def _add_module_names(tree: ast.Module, package: str, packages: dict) -> None:
             defined.add(package)
 
 
+def _add_found_callback(site, found: dict) -> None:
+    """Add one site's callback under its module and path."""
+    at_the_site = found.setdefault((site.where, site.path_name), [])
+    at_the_site.append(site.callback_name)
+
+
+def _as_tuples(found: dict) -> dict:
+    """The found callbacks as tuples, the shape the table is written in."""
+    tabled = {}
+    for where, names in found.items():
+        tabled[where] = tuple(names)
+    return tabled
+
+
 def _add_wrong_receivers(site, wrong: dict) -> None:
     """Add every method the callback reaches outside the hop's two ends."""
     ends = set(ENDS_OF_PATH[site.path_name])
     defined = _packages_defining()
     for method, lineno in _reached_methods(site):
         packages = defined.get(method, set())
-        on_an_end = packages & ends
         reached = (method, lineno)
-        _add_wrong_end(site, reached, on_an_end, wrong)
+        _add_wrong_end(site, reached, packages, ends, wrong)
 
 
-def _add_wrong_end(site, reached: tuple, on_an_end: set, wrong: dict) -> None:
-    """Record a reached method that no end of the hop defines."""
-    if on_an_end:
+def _add_wrong_end(site, reached: tuple, packages, ends, wrong: dict) -> None:
+    """Record a reached method that a package other than an end defines."""
+    if not packages:
+        return
+    if packages & ends:
         return
     method, lineno = reached
     wrong[f"{site.where}:{lineno}"] = f"{method} for {site.path_name}"

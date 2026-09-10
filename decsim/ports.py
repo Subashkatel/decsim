@@ -1009,11 +1009,12 @@ class WindowTransfers(Protocol):
 
     def send_boundary(
         self,
+        path: transfer_records.LinkPath,
         attribution: transfer_records.TransferAttribution,
         payload_bits: Optional[int],
         on_delivered: Callable[[transfer_records.Transfer], None],
     ) -> None:
-        """Send one boundary over decoder_to_decoder with its attribution."""
+        """Send one boundary on its path, in its attribution's name."""
 
 
 # ------------------------------------ the pluggable policies off the path

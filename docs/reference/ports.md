@@ -330,7 +330,7 @@ The link fabric, as a sender that names a window or a job sees it.
 | `send_for_window` | Send in a window's name; on_delivered runs at the delivery. |
 | `send_for_job` | Send in a job's name; returns the delay the link expects. |
 | `send_for_round` | Send in a stored round's name; on_delivered runs at the delivery. |
-| `send_boundary` | Send one boundary over decoder_to_decoder with its attribution. |
+| `send_boundary` | Send one boundary on its path, in its attribution's name. |
 
 ## the pluggable policies off the path
 

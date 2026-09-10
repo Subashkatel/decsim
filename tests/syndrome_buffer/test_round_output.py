@@ -46,9 +46,10 @@ class _Transfers:
         self.sends.append((path, payload_bits))
         on_delivered()
 
-    def send_boundary(self, attribution, payload_bits, on_delivered) -> None:
+    def send_boundary(
+        self, path, attribution, payload_bits, on_delivered
+    ) -> None:
         del attribution, on_delivered
-        path = transfer_records.LinkPath.DECODER_TO_DECODER
         self.sends.append((path, payload_bits))
 
 

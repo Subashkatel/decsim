@@ -1,0 +1,49 @@
+# Two tiers on priced cards, so the whole switching loop is
+# deterministic and the same on every host. The weak card is one
+# syndrome generation time at this sweep's round period and the strong
+# card is ten of them, the ratio Toshio et al. use in their own backlog
+# simulations (arXiv:2510.25222, tau_strong_dec = 10 tau_gen).
+# docs/tutorials/two_tiers.md runs this config. Every key is documented
+# in reference.yaml.
+extends: weak_decoder_baseline.yaml
+
+escalation:
+  kind: switching
+  gap_threshold_db: 20.0
+  strong_window: two_sided_context
+
+links:
+  qpu_to_controller:  {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
+  controller_to_weak_buffer: {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
+  controller_to_strong_buffer: {latency_cycles: 1, clock: room, bits_per_cycle: null}
+  weak_buffer_to_weak_decoder: {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
+  weak_decoder_to_strong_decoder: {latency_cycles: 1, clock: room, bits_per_cycle: null}
+  strong_buffer_to_strong_decoder: {latency_cycles: 1, clock: room, bits_per_cycle: null}
+  decoder_to_decoder:  {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
+  weak_decoder_to_frame: {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
+  strong_decoder_to_frame:  {latency_cycles: 1, clock: room, bits_per_cycle: null}
+  frame_to_controller:  null
+  controller_to_qpu:  null
+
+weak_decoder:
+  kind: 1.0                         # one tau_gen
+  units: 1
+  unit_memory_rounds: null
+  engine:
+    clock: fridge
+    fetch_cycles_per_round: 1
+    release_cycles_per_job: 10
+strong_decoder:
+  kind: 10.0                        # ten tau_gen
+  units: 1
+  unit_memory_rounds: null
+  engine:
+    clock: room
+    fetch_cycles_per_round: 1
+    release_cycles_per_job: 10
+
+sweep:
+  - physical_error_probability: [0.008]
+    distance: [3, 5]
+    round_period_us: [1.0]
+    shots: 50

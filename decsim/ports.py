@@ -198,6 +198,19 @@ class RoundStoreInput(Protocol):
         """Send one timing-only round to the decoder side the store feeds."""
 
 
+@runtime_checkable
+class MemoryRoundArrivals(Protocol):
+    """The decoders' end for a timing-only round, as the controller sees it.
+
+    A feedback-memory round carries no syndrome to decode; it lands at
+    the decoder side so that the stream stage it occupies is accounted
+    for, and that end tells whoever waits on it.
+    """
+
+    def receive_memory_round(self, source_operation_id) -> None:
+        """Take one timing-only round that landed at the decoder side."""
+
+
 # ------------------------------------------- the window manager closes a window
 
 

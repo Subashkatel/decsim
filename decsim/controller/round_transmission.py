@@ -4,8 +4,8 @@ A window-input round rides controller_to_weak_buffer, whose sending end
 this is; Buffer 0's own incoming port handles the landing, which is
 where the round is published. A feedback-memory round rides
 weak_buffer_to_weak_decoder, whose sending end is Buffer 0, so the
-store's own outgoing port sends it and frees the slot and this
-transmitter only asks and hears the landing. The
+store's own outgoing port sends it and frees the slot, and the decoders'
+own end takes its landing; this transmitter only asks and counts. The
 sender never waits for a round to land before sending the next: the DAQs
 of Yang et al. (2605.04892) and Google's control electronics
 (2408.13687) stream every round, Caune et al. (2410.05202) publish each
@@ -32,10 +32,11 @@ class RoundTransmitter:
     FEEDBACK_MEMORY_DELIVERED.
     """
 
-    def __init__(self, engine, link, windows, store_input) -> None:
+    def __init__(self, engine, link, memory_arrivals, store_input) -> None:
         self.engine = engine
         self.link = link
-        self.windows = windows
+        # the decoders' end of the memory route, which hears its landing
+        self.memory_arrivals = memory_arrivals
         # Buffer 0's port toward the controller: it handles what lands
         # there and asks the store to send what leaves it
         self.store_input = store_input
@@ -115,9 +116,13 @@ class RoundTransmitter:
     def _deliver_feedback_memory(
         self, packed: round_records.PackedRound
     ) -> None:
-        """The memory round landed: tell the windows; its slot is free."""
+        """The memory round reached the decoder side: that end takes it.
+
+        Its Buffer 0 slot was freed by the store that sent it; what is
+        left for this asker is its count of the rounds on their route.
+        """
         source_operation_id = packed.route.source_operation_id
-        self.windows.accept_feedback_memory_round(source_operation_id)
+        self.memory_arrivals.receive_memory_round(source_operation_id)
         self._fire("FEEDBACK_MEMORY_DELIVERED", packed)
         self._leave()
 

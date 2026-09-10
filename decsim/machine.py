@@ -206,8 +206,11 @@ class Machine:
         store_input = store_build.build_round_store_input(
             engine, round_store, weak_output, window_manager
         )
+        memory_arrivals = decoder_build.build_memory_round_arrivals(
+            engine, window_manager
+        )
         transmitter = round_transmission.RoundTransmitter(
-            engine, links, window_manager, store_input
+            engine, links, memory_arrivals, store_input
         )
         publishes_from_strong_store = not window_manager.reads_windows_from(
             round_store

@@ -260,14 +260,13 @@ class WindowManager:
             )
 
     def accept_feedback_memory_round(self, source_operation_id) -> None:
-        """Record one idle or memory round and re-check waiting windows."""
-        memory_rounds = self.tracker.note_memory_round(source_operation_id)
-        operation = self.tracker.operation_by_id[source_operation_id]
-        self.engine.log(
-            log_sources.DECODER_MANAGER,
-            f"memory round for {operation.name} "
-            f"(idle buffer rounds: {memory_rounds})",
-        )
+        """Record one idle or memory round and re-check waiting windows.
+
+        The round's arrival is narrated by the end it arrived at
+        (decoders/memory_rounds.py); what is kept here is the window
+        side's own count of the operation's memory rounds.
+        """
+        self.tracker.note_memory_round(source_operation_id)
         self.check_windows_for_operation(source_operation_id)
 
     def accept_room_round(self, operation_id, round_index: int) -> None:

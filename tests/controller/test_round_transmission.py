@@ -48,6 +48,8 @@ REFERENCE_CWB_TICKS = config.microseconds_to_ticks(0.04)
 
 
 class RecordingWindows:
+    """The window side and the decoders' memory end, in one recorder."""
+
     def __init__(self, engine):
         self.engine = engine
         self.published = []
@@ -56,7 +58,7 @@ class RecordingWindows:
     def accept_window_input(self, packet):
         self.published.append((self.engine.now, packet.round_index))
 
-    def accept_feedback_memory_round(self, source_operation_id):
+    def receive_memory_round(self, source_operation_id):
         self.memory_rounds.append((self.engine.now, source_operation_id))
 
 
@@ -70,7 +72,7 @@ class DispatchingWindows:
         self.memory_rounds = []
         self.decode_inputs_delivered = []
 
-    def accept_feedback_memory_round(self, source_operation_id):
+    def receive_memory_round(self, source_operation_id):
         self.memory_rounds.append((self.engine.now, source_operation_id))
 
     def accept_window_input(self, packet):

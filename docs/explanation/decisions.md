@@ -322,16 +322,11 @@ mistake a gap for a result.
   unknown key by name the way `decoder_manager` does, so a misspelt key
   there runs the default in silence.
 
-- **O10. A timing-only round's landing is announced by its sender.**
-  A feedback-memory round leaves Buffer 0 for the weak decoder, and the
-  controller's transmitter, which asked for that send, tells the window
-  manager when it lands. Nothing on the decoder side models a
-  timing-only round, so that hop has no receiving component for D11 to
-  put the announcement in.
-
 A sixth row, O4, was a real mispricing of a backward hand-off in the
 parallel scheme, and it is closed: the two layers that differ are now
-tested.
+tested. A seventh, O10, said that a timing-only round's landing reached
+no object of the receiving package; it is closed too, by the decoders'
+own end for such a round (`decsim/decoders/memory_rounds.py`).
 
 ## Read next
 

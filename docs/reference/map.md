@@ -65,7 +65,7 @@ docstring.
 
 ### syndrome_buffer
 
-- `decsim/syndrome_buffer/__init__.py`: syndrome_buffer component.
+- `decsim/syndrome_buffer/__init__.py`: The round stores: a finished round kept until its last reader is done.
 - `decsim/syndrome_buffer/round_holds.py`: Which consumer keeps which rounds alive in a round store.
 - `decsim/syndrome_buffer/round_output.py`: A round store's outgoing port: it sends the rounds that leave the store.
 - `decsim/syndrome_buffer/round_store.py`: A round store: finished rounds held until their last hold releases.

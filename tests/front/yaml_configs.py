@@ -23,12 +23,15 @@ CONFIGS_DIR = _REPOSITORY_ROOT / "configs"
 # shipped config walk this tuple and not the folder, so a config a user
 # writes into configs/ of their own checkout fails none of them.
 SHIPPED_CONFIGS = (
+    "my_first_sweep.yaml",
+    "priced_cards_example.yaml",
     "reference.yaml",
     "seam_pinned_switching.yaml",
     "strong_decoder_baseline.yaml",
     "strong_latency.yaml",
     "strong_latency_preview.yaml",
     "strong_ler.yaml",
+    "two_tiers.yaml",
     "weak_decoder_baseline.yaml",
     "weak_latency.yaml",
     "weak_ler.yaml",

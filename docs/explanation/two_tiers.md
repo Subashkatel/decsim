@@ -162,12 +162,12 @@ Everything above has a price, and decsim's point is to charge all of it:
 
 A study of switching is a study of whether the accuracy bought is worth
 that list. `configs/seam_pinned_switching.yaml` is a worked point, and
-[`docs/tutorials/two_tiers.md`](../tutorials/two_tiers.md) runs one.
+[Two tiers](../tutorials/two_tiers.md) runs one.
 
 ## Read next
 
-- [`docs/tutorials/two_tiers.md`](../tutorials/two_tiers.md): a switching run, with the trace of an
+- [Two tiers](../tutorials/two_tiers.md): a switching run, with the trace of an
   escalation.
-- [`docs/explanation/windows_and_boundaries.md`](windows_and_boundaries.md): what a face and a seam
+- [Windows and boundaries](windows_and_boundaries.md): what a face and a seam
   are.
-- [`docs/reference/tables.md`](../reference/tables.md): the four tables named above, with rows.
+- [The plug-in tables](../reference/tables.md): the four tables named above, with rows.

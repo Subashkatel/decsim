@@ -44,7 +44,7 @@ below know nothing of (`dijkstra_the.txt` lines 52-57).
 fails on any cycle. Nothing at level 3 or below imports `decsim/build/`
 or `decsim/machine.py`, so the decoders' own tests decode a window on a
 store with no root at all. The levels are listed in
-[`docs/reference/map.md`](../reference/map.md).
+[The map of the package](../reference/map.md).
 
 ## 3. An interface reveals as little as it can, and never an order it does not need
 
@@ -88,7 +88,7 @@ stochastic component derives its generator from the root seed and its
 own path in the machine, so one seed reproduces one shot exactly
 (`decsim/seeding.py`). The one exception is deliberate and named: a tier
 that prices its decode from the host wall clock is not a function of its
-arguments, which is why [`docs/explanation/time.md`](time.md) exists and why the
+arguments, which is why [Time](time.md) exists and why the
 behaviour gate compares those points on a projection.
 
 ## 6. Model objects, a separate configuration script, a port API, timing apart from function
@@ -165,7 +165,7 @@ their organizations lean and flexible" (line 119).
 **In decsim.** The port file is written from the design record rather
 than grown from whatever was convenient at the call site, because every
 port method is a negotiation between two components and therefore
-between two pieces of work. [`docs/explanation/decisions.md`](decisions.md) is where
+between two pieces of work. [The design decisions](decisions.md) is where
 those negotiations are recorded.
 
 ## 11. Local and remote calls differ in kind, and the interface must say which
@@ -196,6 +196,6 @@ Liskov and Zilles 1974.
 ## Read next
 
 - `STYLE.md`: these eleven as rules, with the tools that check them.
-- [`docs/explanation/decisions.md`](decisions.md): the ten modelling decisions made
+- [The design decisions](decisions.md): the ten modelling decisions made
   under them.
-- [`docs/explanation/architecture.md`](architecture.md): the shape they produced.
+- [Architecture](architecture.md): the shape they produced.

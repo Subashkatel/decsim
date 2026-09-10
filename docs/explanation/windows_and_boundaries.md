@@ -136,8 +136,8 @@ right. `tests/windows/test_boundary_payloads.py` and
 
 ## Read next
 
-- [`docs/explanation/two_tiers.md`](two_tiers.md): what happens when a committed window
+- [Two tiers](two_tiers.md): what happens when a committed window
   has to be decoded again.
-- [`docs/reference/glossary.md`](../reference/glossary.md): `r_com`, `r_buf`, `r_strong` and the
+- [Glossary](../reference/glossary.md): `r_com`, `r_buf`, `r_strong` and the
   rest, with their sources.
-- [`docs/how-to/add_a_table_row.md`](../how-to/add_a_table_row.md): adding a scheme of your own.
+- [How to add a row to a table](../how-to/add_a_table_row.md): adding a scheme of your own.

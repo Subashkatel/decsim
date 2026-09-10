@@ -60,7 +60,7 @@ The default latencies below are the `logical_reference` card in
 config that sets its own replaces them. Six of them (hops 1, 4, 6, 7, 8
 and 9) carry the source string "Khalid 2511.10633 Table I" in the card:
 one table's numbers, reported here as the card's facts and not as a
-derivation, which [`docs/explanation/decisions.md`](decisions.md) D5 flags as open
+derivation, which [The design decisions](decisions.md) D5 flags as open
 work.
 
 ### 1. `qpu_to_controller`
@@ -268,11 +268,11 @@ Where a real system does read in place, decsim has a row for it: the
 Every hop above appears in a trace, and `decsim trace follow` prints one
 round's or one window's hops in tick order, with the transfer word and
 the bit count on each line.
-[`docs/how-to/read_a_trace.md`](../how-to/read_a_trace.md) shows how.
+[How to read a trace and follow one round or one window](../how-to/read_a_trace.md) shows how.
 
 ## Read next
 
-- [`docs/reference/glossary.md`](../reference/glossary.md): the path names in one list.
-- [`docs/explanation/architecture.md`](architecture.md): the components at the ends.
-- [`docs/explanation/windows_and_boundaries.md`](windows_and_boundaries.md): what hop 7 carries, in
+- [Glossary](../reference/glossary.md): the path names in one list.
+- [Architecture](architecture.md): the components at the ends.
+- [Windows and boundaries](windows_and_boundaries.md): what hop 7 carries, in
   detail.

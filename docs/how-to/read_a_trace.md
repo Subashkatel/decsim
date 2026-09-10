@@ -160,4 +160,4 @@ point that traced no shot writes no row, for the same reason.
 - `configs/reference.yaml`, the `observation` section: every trace knob
   and what it costs.
 - `decsim/observe/trace_writer.py`: which event each source becomes.
-- [`docs/explanation/data_path.md`](../explanation/data_path.md): what each hop in the table is.
+- [The data path, hop by hop](../explanation/data_path.md): what each hop in the table is.

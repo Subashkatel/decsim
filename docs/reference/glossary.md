@@ -75,7 +75,7 @@ both are built. The papers' figures call them Buffer 0 and Buffer 1.
 ## The link paths
 
 Every hop is booked under one path name, the `LinkPath` values in
-`decsim/records/transfers.py`. [`docs/explanation/data_path.md`](../explanation/data_path.md) walks
+`decsim/records/transfers.py`. [The data path, hop by hop](../explanation/data_path.md) walks
 them in order; this is the name list.
 
 | decsim | The hop |
@@ -94,5 +94,5 @@ them in order; this is the name list.
 ## Read next
 
 - `decsim/records/`: the frozen records these names belong to.
-- [`docs/explanation/architecture.md`](../explanation/architecture.md): where each of them sits.
-- [`docs/reference/ports.md`](ports.md): the handoffs between them.
+- [Architecture](../explanation/architecture.md): where each of them sits.
+- [The ports](ports.md): the handoffs between them.

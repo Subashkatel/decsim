@@ -11,7 +11,7 @@ the classes it lists, in the package that owns the part, and
 `decsim/tables.py` is the one function that reads them all, so
 a name that is not a row is refused the same way everywhere
 with the rows printed. Each class fills the port named in
-[`docs/reference/ports.md`](ports.md).
+[The ports](ports.md).
 
 ## `BOUNDARY_PAYLOADS`
 

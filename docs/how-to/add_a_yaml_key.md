@@ -72,6 +72,6 @@ that keeps the old behaviour moves no result of any existing run.
 
 ## Read next
 
-- [`docs/reference/yaml.md`](../reference/yaml.md): how the yaml layer is put together.
-- [`docs/how-to/add_a_table_row.md`](add_a_table_row.md): when the knob is a whole component.
+- [The yaml surface](../reference/yaml.md): how the yaml layer is put together.
+- [How to add a row to a table](add_a_table_row.md): when the knob is a whole component.
 - `configs/reference.yaml`: the file you are adding to.

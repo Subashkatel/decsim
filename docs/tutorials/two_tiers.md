@@ -6,7 +6,7 @@ This lesson runs a machine with two decoders and watches one window get
 decoded twice. It takes about ten minutes, four of which are the machine
 running.
 
-It assumes you have done [`docs/tutorials/first_run.md`](first_run.md), so you know what
+It assumes you have done [Your first run](first_run.md), so you know what
 a round, a window and a commit are.
 
 ## What escalation is
@@ -112,7 +112,7 @@ decode for real, on the minimum-weight perfect matching path, so the
 logical failures below are measured and only the time is stated
 (`decsim/decoders/settings.py`, `DecoderSettings`). Priced rather than
 measured means every tick on this page is the same on your machine.
-[`docs/how-to/run_a_timing_only_study.md`](../how-to/run_a_timing_only_study.md) says more about cards.
+[How to run a timing study whose numbers do not depend on your computer](../how-to/run_a_timing_only_study.md) says more about cards.
 
 One row is chosen for you and matters below. `decsim show` prints it:
 
@@ -255,7 +255,7 @@ longest residence: 64.256 us in Decoder unit default#0 (residence, unbounded, da
 longest queue wait: 0.000 us in Window planner (queued, dispatched to default#0)
 ```
 
-Two things here are new since [`docs/tutorials/first_run.md`](first_run.md).
+Two things here are new since [Your first run](first_run.md).
 
 The window was **dispatched twice**, and the algorithm ran twice, at
 6.036 and again at 7.076. That is the confidence being computed: two
@@ -371,10 +371,10 @@ apart.
 
 ## Read next
 
-- [`docs/explanation/two_tiers.md`](../explanation/two_tiers.md): the four tables behind the knobs
+- [Two tiers](../explanation/two_tiers.md): the four tables behind the knobs
   above, the other confidence signal, and the other strong window
   shapes.
-- [`docs/explanation/windows_and_boundaries.md`](../explanation/windows_and_boundaries.md): what a commit region, a
+- [Windows and boundaries](../explanation/windows_and_boundaries.md): what a commit region, a
   buffer region and a seam are.
-- [`docs/how-to/read_a_trace.md`](../how-to/read_a_trace.md): the trace format and the other ways to
+- [How to read a trace and follow one round or one window](../how-to/read_a_trace.md): the trace format and the other ways to
   read it.

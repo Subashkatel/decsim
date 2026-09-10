@@ -2,7 +2,7 @@
 
 # Your first sweep
 
-In [`docs/tutorials/first_run.md`](first_run.md) you ran two shots and got a logical
+In [Your first run](first_run.md) you ran two shots and got a logical
 error rate of 0 with an interval running from 0 to 0.66, which says
 almost nothing. This lesson runs a real, small sweep, explains that
 interval, and shows how a sweep is cut into pieces and put back
@@ -203,9 +203,9 @@ into shards changes nothing about the result.
 
 The tick columns do move a little between the two, because this run
 names a decoder and is charged its measured wall clock. See
-[`docs/explanation/time.md`](../explanation/time.md).
+[Time](../explanation/time.md).
 
-[`docs/how-to/run_a_sweep_on_slurm.md`](../how-to/run_a_sweep_on_slurm.md) is the same mechanism as a cluster
+[How to run a sweep on Slurm](../how-to/run_a_sweep_on_slurm.md) is the same mechanism as a cluster
 array job.
 
 ## What you learned
@@ -219,7 +219,7 @@ array job.
 
 ## Read next
 
-- [`docs/tutorials/two_tiers.md`](two_tiers.md): a run with two decoders and an
+- [Two tiers](two_tiers.md): a run with two decoders and an
   escalation.
-- [`docs/how-to/run_a_sweep_on_slurm.md`](../how-to/run_a_sweep_on_slurm.md): the same sweep on a cluster.
-- [`docs/reference/run_folder.md`](../reference/run_folder.md): every column you did not read here.
+- [How to run a sweep on Slurm](../how-to/run_a_sweep_on_slurm.md): the same sweep on a cluster.
+- [The run folder](../reference/run_folder.md): every column you did not read here.

@@ -183,10 +183,13 @@ def test_round_ones_first_hops_are_the_notes_worked_example(traced):
     # this card's row formed there
     assert [row["args"]["bits"] for row in moves] == [8, 4]
 
+    # the round takes its Buffer 0 slot where its bits are, at the
+    # landing of the hop that carried them, which is also when it
+    # becomes readable
     residence = _one(document, "X", "round 1")
     assert residence["cat"] == "round,residence"
-    assert residence["args"]["tick"] == 1_004_000
-    assert residence["dur"] == 5.008
+    assert residence["args"]["tick"] == 1_008_000
+    assert residence["dur"] == 5.004
     # the store holds the four detection events of round 1, which is
     # what the hop into it carried
     assert residence["args"]["bits"] == 4
@@ -252,9 +255,11 @@ def test_one_rounds_flow_chain_equals_the_round_events_recorded(traced):
     flow = _flow_of(document, "1:1")
     assert [row["ph"] for row in flow] == ["s", "t", "t", "t", "f"]
     flow_ticks = [row["args"]["tick"] for row in flow]
-    assert flow_ticks == [1_000_000, 1_004_000, 1_004_000, 6_008_000, 6_012_000]
-    # the recorder's own chain for the same round, same ticks up to the
-    # store landing; the flow ends one hop later, in the unit's memory
+    assert flow_ticks == [1_000_000, 1_004_000, 1_008_000, 6_008_000, 6_012_000]
+    # the recorder's own chain for the same round; the store step of the
+    # flow is the landing that takes the slot, the tick the recorder
+    # calls PUBLISHED, and the flow ends one hop later, in the unit's
+    # memory
     assert recorded == [
         ("EMITTED", 1_000_000),
         ("BINARY_AVAILABLE", 1_004_000),

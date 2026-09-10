@@ -66,8 +66,10 @@ def test_round_one_sits_in_buffer_zero_as_detection_events(traced):
     followed = trace_follow.follow(traced, "round", "1:1")
 
     residence = _row_of(followed, "Buffer 0", "residence")
-    assert residence.tick == 1_004_000
-    assert residence.duration_ticks == 5_008_000
+    # the slot is taken where the bits are, at the landing of
+    # controller_to_weak_buffer, which is also when the round is readable
+    assert residence.tick == 1_008_000
+    assert residence.duration_ticks == 5_004_000
     assert residence.transfer == "copy"
     assert residence.bits == 4
     assert "data ready 1.008" in residence.what
@@ -97,7 +99,7 @@ def test_round_ones_counts_are_the_notes_counts(traced):
     assert counts.holds == 1
     assert counts.moves == 3
     assert counts.longest_residence.where == "Buffer 0"
-    assert counts.longest_residence.duration_ticks == 5_008_000
+    assert counts.longest_residence.duration_ticks == 5_004_000
 
 
 def test_a_rounds_path_ends_where_its_bits_land_in_the_unit(traced):

@@ -1,12 +1,19 @@
-"""The writer: a finished round enters every store it must reach, or waits.
+"""The writer: a finished round leaves for every store it reaches, or waits.
 
-The backpressure law: a store answers has_room before any write; a round
-that finds no room waits in HeldRounds and enters in completion order
-when a slot frees (gem5 src/mem/cache/base.cc clearBlocked and the
-retry; Ciw ciw/node.py release_blocked_individual), or is dropped under
-the drop knob (ns-3 point-to-point-net-device.cc Send: Enqueue false,
-packet dropped). A strong-primary plan takes one hop, into the strong
-store; a feedback-memory round still crosses Buffer 0.
+The backpressure law: each store's own end answers has_room before any
+round leaves for it, counting the rounds it holds and the writes it has
+in flight, and the room is reserved before the wire is used (gem5's
+queue counts its reserved entries as taken,
+tmp/resources/gem5/src/mem/cache/queue.hh:150-153 isFull with the
+reserve at :87-93; Ruby MessageBuffer.cc:181 sums the same two counts).
+A round that finds no room waits in HeldRounds and enters in completion
+order when a slot frees (gem5 src/mem/cache/base.cc:255-257 setBlocked,
+:266-271 clearBlocked and the retry; Ciw
+tmp/resources/l5_buffers/Ciw/ciw/node.py:470-473
+release_blocked_individual), or is dropped under the drop knob (ns-3
+point-to-point-net-device.cc Send: Enqueue false, packet dropped). A
+strong-primary plan takes one hop, into the strong store; a
+feedback-memory round still takes a Buffer 0 slot.
 
 The controller is also the end the room-side round leaves by, so it
 executes the controller_to_strong_buffer send and the room side handles
@@ -25,6 +32,7 @@ import decsim.links.link_profiles as link_profiles
 import decsim.observe.round_events as round_events
 import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
+import decsim.syndrome_buffer.round_input as round_input
 import decsim.syndrome_buffer.round_store as round_store_module
 import decsim.syndrome_buffer.settings as round_store_settings
 import decsim.syndrome_buffer.strong_round_writer as strong_round_writer
@@ -54,6 +62,16 @@ class RecordingTransmitter:
 
     def send(self, round):
         self.sent.append(round.packet.round_index)
+
+
+class RecordingWindows:
+    """The window side, which hears a round once Buffer 0 publishes it."""
+
+    def __init__(self):
+        self.published = []
+
+    def accept_window_input(self, packet):
+        self.published.append(packet.round_index)
 
 
 class RecordingStrongWriter:
@@ -92,21 +110,31 @@ def writer_with(
     transmitter = RecordingTransmitter(engine)
     profile = link_profiles.logical_reference_profile()
     links = fabric_module.LinkFabric(profile, engine)
+    windows = RecordingWindows()
+    weak_input = round_input.RoundStoreInput(engine, weak_store, None, windows)
     writer = round_writes.RoundWriter(
         engine,
         links,
-        weak_store,
+        weak_input,
         strong_writer,
         publishes_from_strong_store=publishes_from_strong_store,
         held_rounds=held,
         transmitter=transmitter,
     )
-    return writer, weak_store, transmitter, recorder
+    return writer, weak_input, transmitter, recorder
 
 
 def test_a_round_with_no_room_is_held_and_written_in_order_when_a_slot_frees():
+    """One slot, taken by a round in flight: the next waits for it to free.
+
+    The room a crossing round will need is spent the moment it leaves,
+    so a Buffer 0 of one slot refuses the second round while the first
+    is still on controller_to_weak_buffer, and still refuses it once the
+    first lands and holds the slot. The slot frees, and the head of the
+    waiting line enters.
+    """
     engine = engine_module.Engine()
-    writer, weak_store, transmitter, recorder = writer_with(
+    writer, weak_input, transmitter, recorder = writer_with(
         engine, weak_rounds=1
     )
     first = packed(1)
@@ -114,12 +142,15 @@ def test_a_round_with_no_room_is_held_and_written_in_order_when_a_slot_frees():
 
     first_admitted = writer.admit(first)
     second_admitted = writer.admit(second)
-    held_before_release = writer.held_rounds.count
-    weak_store.release_round((1, 1))
+    held_while_in_flight = writer.held_rounds.count
+    weak_input.receive_round(first)
+    held_after_the_landing = writer.held_rounds.count
+    weak_input.store.release_round((1, 1))
 
     assert first_admitted is True
     assert second_admitted is False
-    assert held_before_release == 1
+    assert held_while_in_flight == 1
+    assert held_after_the_landing == 1
     assert transmitter.sent == [1, 2]
     assert writer.held_rounds.count == 0
     stalled = [
@@ -133,7 +164,7 @@ def test_a_round_with_no_room_is_held_and_written_in_order_when_a_slot_frees():
 def test_a_strong_primary_window_round_takes_one_hop_into_the_strong_store():
     engine = engine_module.Engine()
     strong_writer = RecordingStrongWriter()
-    writer, weak_store, transmitter, _recorder = writer_with(
+    writer, weak_input, transmitter, _recorder = writer_with(
         engine, strong_writer=strong_writer, publishes_from_strong_store=True
     )
     window_round = packed(1)
@@ -144,8 +175,7 @@ def test_a_strong_primary_window_round_takes_one_hop_into_the_strong_store():
     engine.run()
 
     assert strong_writer.written == [1, 2]
-    assert weak_store.retained_fragments((1, 1)) is None
-    assert weak_store.retained_fragments((1, 2)) is not None
+    assert weak_input.writes_in_flight == 1
     assert transmitter.sent == [2]
 
 
@@ -184,7 +214,7 @@ def test_the_controller_carries_the_round_to_the_room_side_and_lands_it():
 def test_a_full_strong_store_holds_the_round_too():
     engine = engine_module.Engine()
     strong_writer = RecordingStrongWriter(room=False)
-    writer, weak_store, transmitter, _recorder = writer_with(
+    writer, weak_input, transmitter, _recorder = writer_with(
         engine, strong_writer=strong_writer
     )
     first = packed(1)
@@ -192,14 +222,15 @@ def test_a_full_strong_store_holds_the_round_too():
     admitted = writer.admit(first)
 
     assert admitted is False
-    assert weak_store.occupancy == 0
+    assert weak_input.store.occupancy == 0
+    assert weak_input.writes_in_flight == 0
     assert transmitter.sent == []
     assert writer.held_rounds.count == 1
 
 
 def test_the_drop_knob_drops_a_round_that_found_no_room():
     engine = engine_module.Engine()
-    writer, _weak_store, transmitter, recorder = writer_with(
+    writer, _weak_input, transmitter, recorder = writer_with(
         engine, weak_rounds=1, on_full=DROP
     )
     first = packed(1)
@@ -211,27 +242,3 @@ def test_the_drop_knob_drops_a_round_that_found_no_room():
     assert transmitter.sent == [1]
     assert recorder.packing_drops == 1
     assert writer.held_rounds.count == 0
-
-
-def test_the_buffer_0_line_is_narrated_only_on_the_io_line():
-    import decsim.observe.log_writers as log_writers
-
-    engine = engine_module.Engine()
-    log = log_writers.LogWriter()
-    engine.io_line.connect(log.write)
-    writer, _weak_store, _transmitter, _recorder = writer_with(engine)
-    silent_engine = engine_module.Engine()
-    silent_log = log_writers.LogWriter()
-    silent_engine.line.connect(silent_log.write)
-    silent_writer, _store, _sent, _events = writer_with(silent_engine)
-    first = packed(1)
-
-    writer.admit(first)
-    silent_writer.admit(first)
-
-    assert silent_log.lines == []
-    (line,) = log.lines
-    assert line.endswith(
-        "Buffer 0: received round 1 of op 1 from packing; "
-        "defects {0}; holds op 1 rounds 1 (1)"
-    )

@@ -22,14 +22,13 @@ The controller, as the QPU sees it: it takes every readout.
 
 ### `RoundStore`
 
-The upstream round store (Buffer 0), as syndrome packing sees it.
+The upstream round store (Buffer 0), as its own incoming port sees it.
 
 | Method | What it does |
 | --- | --- |
 | `has_room` | Whether one more round fits now. |
-| `accept_packed_round` | Keep one finished round; the writer asked has_room first. |
+| `accept_packed_round` | Keep one landed round, readable at that tick; None publishes none. |
 | `release_round` | Free the round; its consumers are done with it. |
-| `mark_publication_tick` | The round became readable now; it was written before that. |
 | `capacity_rounds` | The slots this store is bounded to, or None for unbounded. |
 | `held_rounds_description` | The live holds, in one line, for a refusal a reader must debug. |
 
@@ -67,11 +66,13 @@ The room-side store (syndrome buffer 1), as syndrome packing sees it.
 
 ### `RoundStoreInput`
 
-A round store's incoming port, as the controller's transmitter sees it.
+A round store's incoming port, as the controller sees it.
 
 | Method | What it does |
 | --- | --- |
-| `receive_round` | Take one round that landed here: publish it, then announce it. |
+| `has_room` | Whether one more round fits: the stored ones and those in flight. |
+| `reserve_write` | Take the room one crossing round will need, before it leaves. |
+| `receive_round` | Take one round that landed here: store it, then announce it. |
 | `send_memory_round` | Send one timing-only round to the decoder side the store feeds. |
 
 ### `MemoryRoundArrivals`

@@ -179,9 +179,14 @@ def test_the_memory_round_port_declares_what_the_transmitter_calls():
     assert _undeclared(called, ("MemoryRoundArrivals",)) == {}
 
 
-def test_the_store_input_port_declares_what_the_transmitter_calls():
-    """The controller holds Buffer 0's incoming port only as this port."""
-    called = _called_on(("store_input",), ("controller",))
+def test_the_store_input_port_declares_what_the_controller_calls():
+    """The controller holds Buffer 0's incoming port only as this port.
+
+    Both of the controller's references to it: the transmitter's, which
+    sends and hears the landing, and the writer's, which asks that end
+    for room and reserves it before the round leaves.
+    """
+    called = _called_on(("store_input", "weak_input"), ("controller",))
     assert _undeclared(called, ("RoundStoreInput",)) == {}
 
 

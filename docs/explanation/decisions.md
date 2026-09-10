@@ -2,7 +2,7 @@
 
 # The design decisions
 
-Twelve decisions shape what decsim charges and where it charges it. Each is
+Thirteen decisions shape what decsim charges and where it charges it. Each is
 recorded here with what was decided, why, and the source the answer came
 from, because a modelling question is answered by reading the referent
 rather than by choosing (`STYLE.md` rule 8). The last section says what
@@ -201,10 +201,10 @@ transmitter sends and hears the landing for its count of the rounds on
 their route; Buffer 0's own incoming port stamps the publication tick on
 the store's record and tells the window manager. On
 `controller_to_strong_buffer` the rule already held: the strong writer
-is the receiving end and stores each round at its landing. The record of
-a Buffer 0 round is still written before the wire is used, because a
-store answers for room before a round leaves; what the landing adds is
-the publication, and the announcement never precedes it.
+is the receiving end and stores each round at its landing. What the
+sender keeps is its own count of the rounds on their route; what a store
+does with a round is the store's, at its own door. D13 settles when that
+door takes a slot.
 
 **Why.** The tempting alternative, "the sender that arranged the
 transfer finishes the job", puts one component's state in another
@@ -226,11 +226,9 @@ send of a message the sender does not own (`333-334`). ns-3's
 point-to-point channel schedules `PointToPointNetDevice::Receive` on the
 destination device (`point-to-point-channel.cc:88-92`), and that receive
 is the destination device's own method
-(`point-to-point-net-device.cc:324`). That the room for a round is
-answered before the wire is used is gem5's queue, which reserves an
-entry before the send (`src/mem/cache/queue.hh:150-152`); that the
-publication never precedes the store is the buffer contract of the
-behaviour gate. The two hops keep the referents they had: Caune
+(`point-to-point-net-device.cc:324`). That the publication never precedes
+the store is the buffer contract of the behaviour gate. The two hops
+keep the referents they had: Caune
 arXiv:2410.05202 Fig. 1a stage D for hop 2's latency, and Toshio
 arXiv:2510.25222 line 1248 for what Buffer 1 is assigned.
 
@@ -281,6 +279,64 @@ record, which is what these two ends hold.
 **Where to see it.** `decsim/windows/window_boundaries.py`, the
 `ENDS_OF_PATH` row in `tests/test_send_ends.py`, and hop 7 of
 [The data path, hop by hop](data_path.md).
+
+## D13. A round occupies a slot when its bits are in the store
+
+**Decided.** One rule for both stores. A round takes a slot in a store
+at the landing of the hop that carries its bits, in the receiving
+package, and it is readable at that same instant: the store and the
+publication are one call at one tick. The sender still refuses before it
+sends, by asking that same end for room against the rounds it holds plus
+the writes it has in flight, and reserving one before the round leaves.
+Buffer 0 used to be written by the controller at the round's completion
+and published a link delay later, so its occupancy counted rounds that
+were still on the wire and its capacity was answered by a different
+clock from Buffer 1's; now `RoundStoreInput` owns Buffer 0's room, its
+slot, its intake line and its announcement, the shape
+`StrongRoundWriter` already had. The publication tick does not move: it
+was the `controller_to_weak_buffer` landing before and it is the same
+landing now.
+
+**Why.** The tempting alternative, "book the slot when the sender
+commits the round", makes the refusal simple but makes every occupancy
+figure mean something the name does not say: a store whose bits are not
+there yet is reported full. Keeping the two counts apart, occupancy at
+the landing and the in-flight writes on the end that answers for room,
+gives the same admission decision with both numbers true. Credits would
+give the same decision again, since each store has exactly one writer,
+and were left unbuilt because they would add a return-path model nothing
+needs.
+
+**Sources.** Every referent that models storage writes it at the
+landing. ns-3's channel schedules the destination device's own `Receive`
+after the transmission and the propagation
+(`point-to-point-channel.cc:88-92` into `point-to-point-net-device.cc:324`).
+OMNeT++ takes ownership into the destination module and inserts inside
+that module's handler (`src/sim/csimplemodule.cc:782-783`, `:799`, with
+`queueinglib/Queue.cc:84-94` checking the capacity and inserting there).
+Ciw counts the individual in the destination's own `accept`
+(`ciw/node.py:602` into `:102-103`), and blocks the sender upstream when
+the destination is full (`:470-473`). Ruby's arrival time is the tick
+the message may be read (`MessageBuffer.cc:243`). In the quantum control
+literature the store is on the far side of the wire too: Caune
+arXiv:2410.05202 lines 1243-1247 stores the outcomes "in the decoder
+sequencer's memory" only after a 1.4 microsecond propagation; Google
+arXiv:2408.13687 lines 471-477 puts the shared memory buffer "inside the
+workstation" reached "via low-latency Ethernet"; Maurer arXiv:2510.21600
+lines 593-597 fills the syndrome FIFO at the decoder FPGA after the
+serial link. That the room counts the writes in flight is gem5's queue,
+whose `isFull` counts reserved entries (`src/mem/cache/queue.hh:150-153`,
+the reserve at `:87-93`), its cache blocking the port when the write
+buffer fills (`src/mem/cache/base.cc:255-257`, `:266-271`) and the
+refusal being the receiver's answer (`src/mem/port.hh:244-255`); and
+Ruby's `areNSlotsAvailable`, which sums the queue and the stalled
+messages (`MessageBuffer.cc:181`, the two sizes read at `:155-158`).
+
+**Where to see it.** `decsim/syndrome_buffer/round_input.py`, the
+`RoundStore` and `RoundStoreInput` ports in `decsim/ports.py`,
+`tests/syndrome_buffer/test_round_input.py`, and hop 2 of
+[The data path, hop by hop](data_path.md). The research behind it is
+note 27 of the design audit, in the sandbox.
 
 ## What is not modelled yet
 

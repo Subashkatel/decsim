@@ -141,12 +141,12 @@ stays short; past eight names the rule is wrong, not the list.
   `decode_queue` it charges, its own `operation_by_id` and
   `idle_by_patch` indexes, and its `trace`.
 - `RoundWriter` (`decsim/controller/round_writes.py`): one finished round
-  written or held, which needs the `engine` clock, the `link` it carries
-  the round to Buffer 1 by, Buffer 0 (`weak_store`), the
-  `strong_writer` that owns the strong store's room and landing, the
+  sent or held, which needs the `engine` clock, the `link` it carries
+  the round to Buffer 1 by, the `weak_input` that owns Buffer 0's room
+  and landing, the `strong_writer` that owns the strong store's, the
   plan's `publishes_from_strong_store`, the `held_rounds` that retry a
-  round the stores refused, the `transmitter` that sends it on its
-  route, and its `trace`.
+  round the stores refused, and the `transmitter` that sends it on its
+  route.
 - `OperationResults` (`decsim/windows/operation_results.py`): one final
   result per operation, which reads the `planner`, the `tracker`, the
   `retention` and the `ledger` before it releases a conditional

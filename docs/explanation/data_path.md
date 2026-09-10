@@ -93,10 +93,13 @@ The packed round into syndrome buffer 0. Ends: `controller` to
 `syndrome_buffer`; the send is executed by the controller's transmitter
 (`decsim/controller/round_transmission.py`), and the landing is handled
 by Buffer 0's own incoming port
-(`decsim/syndrome_buffer/round_input.py`), which stamps the publication
-tick on the store's record and announces the published round to the
-window manager. The transmitter hears the landing for its count of the
-rounds on their route and for nothing else.
+(`decsim/syndrome_buffer/round_input.py`), which stores the round with
+the landing tick as its publication tick, narrates the copy and the
+intake, and announces the published round to the window manager. That
+end also answers for the room, counting the rounds it holds and the
+writes still in flight, and the controller's writer reserves that room
+before the round leaves. The transmitter hears the landing for its count
+of the rounds on their route and for nothing else.
 
 What crosses: one **packed round**, every fragment that leaves the
 controller. The bit count is `PackedRound.wire_bits`, computed in
@@ -105,10 +108,11 @@ controller. The bit count is `PackedRound.wire_bits`, computed in
 narrower than the raw outcomes; under the `decoder` row it is the raw
 outcomes and each tier forms its own events.
 
-Move, on board, with a copy into Buffer 0's record. The record is
-written before the wire is used, so the store can refuse a round for
-room before it leaves the controller, and the landing publishes that
-record rather than making it. Default latency 0.04 microseconds, taken from Caune arXiv:2410.05202 Fig. 1a
+Move, on board, with a copy into Buffer 0's record at the landing. The
+round occupies a slot when its bits are in the store, and it is readable
+at that same instant; the room it will need is reserved before the wire
+is used, so the store can still refuse a round before it leaves the
+controller. Default latency 0.04 microseconds, taken from Caune arXiv:2410.05202 Fig. 1a
 stage D, "result message handled and prepared for broadcast", 40
 nanoseconds. Buffer 0 sits with the controller, which is why that stage
 is the right one.

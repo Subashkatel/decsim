@@ -1,7 +1,7 @@
 """A round store: finished rounds held until their last hold releases.
 
-Table row round_store. The controller's packing stage writes each
-finished round once (accept_packed_round) after asking has_room, the
+Table row round_store. The store's own incoming port writes each round
+once at its landing (accept_packed_round) after asking has_room, the
 window side keeps it alive with holds (RoundHolds), and the slot is
 freed when the last hold releases; on_slot_freed then tells the writer,
 so a round held for room enters in order. That is gem5's cache queue
@@ -91,7 +91,7 @@ class RoundStore:
         *,
         publication_tick: Optional[int],
     ) -> None:
-        """Keep one finished round; the writer asked has_room first."""
+        """Keep one landed round, readable at that tick; None publishes none."""
         assert self.has_room(), "a round was written into a full store"
         round_key = (packet.operation_id, packet.round_index)
         assert round_key not in self.round_by_key, (
@@ -151,16 +151,6 @@ class RoundStore:
         if stored is None:
             return None
         return stored.publication_tick
-
-    def mark_publication_tick(self, round_key, publication_tick: int) -> None:
-        """Stamp a stored round when its priced publication arrives."""
-        stored = self.round_by_key.get(round_key)
-        if stored is None:
-            raise RuntimeError(f"round {round_key!r} is not stored")
-        if stored.publication_tick is not None:
-            raise RuntimeError(f"round {round_key!r} was already published")
-        stored.publication_tick = publication_tick
-        self.trace.round_published.fire(round_key, publication_tick)
 
     # ---- operation scope
 

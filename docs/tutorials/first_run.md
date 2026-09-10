@@ -117,6 +117,8 @@ queue wait, mean: 7.150 us
 service time per window, mean: 21.922 us
 ready to frame commit: median 32.910 us, p99 42.246 us
 
+data movement: observation.data_movement was off, so this run counted no copies, references or moves
+
 every column: results/2026-09-10T02-29-33Z-reference/sweep.csv
 ```
 
@@ -148,6 +150,7 @@ config
 latency_samples.csv
 links.csv
 manifest.json
+residence.csv
 shot_links.csv
 shots.csv
 sweep.csv
@@ -234,8 +237,8 @@ tick (us)  where                        what                                    
 1.004      Controller                   controller assembler copy                                                      copy       8
 1.004      Controller                   residence, unbounded, freed at packed                                0.000     copy       8
 1.004      controller_to_weak_buffer    move                                                                 0.006     move       4
-1.004      Buffer 0                     Buffer 0 copy                                                                  copy       4
-1.004      Buffer 0                     residence, unbounded, data ready 1.010, freed at last hold released  5.012     copy       4
+1.010      Buffer 0                     Buffer 0 copy                                                                  copy       4
+1.010      Buffer 0                     residence, unbounded, data ready 1.010, freed at last hold released  5.006     copy       4
 6.012      Window planner               W0 ready
 6.012      weak_buffer_to_weak_decoder  move, with W0 rounds 1..6                                            0.004     move       44
 6.016      Decoder unit default#0       unit default#0 memory copy                                                     copy       44

@@ -7,9 +7,9 @@ somebody else's, each is quoted from a source on disk, and each has a
 consequence you can see in the code. They are the reasons behind
 `STYLE.md`, which is the same ideas written as rules a tool can check.
 
-The source texts sit in the research sandbox under
-`tmp/papers/architecture/`, and the line numbers below are into those
-text files.
+Each source is cited by title and, where it has one, arXiv number; a
+line number is into the plain-text extraction of that source, the same
+one the code's docstrings cite.
 
 ## 1. A module hides one decision that is likely to change
 
@@ -54,10 +54,10 @@ we can build without changing the definitions ... must clearly be
 classified as a design error" (`parnas1972.txt` lines 370-379).
 
 **In decsim.** A port method promises a set where a set is enough. The
-same rule applies to the tests and to the behaviour gate: a comparison
-that pins an order the code does not promise fails for reasons that are
-not defects, which the maintainers' own behaviour gate has shown on its
-switching points.
+same rule applies to the tests: a comparison that pins an order the
+code does not promise fails for reasons that are not defects, which a
+run that prices two real decoders from the host clock shows whenever
+their order flips.
 
 ## 4. An interface is the set of assumptions two programs make about each other
 
@@ -73,7 +73,7 @@ deliver" (lines 157-158).
 
 **In decsim.** `decsim/ports.py` is the slowest-changing layer in the
 tree. A port method added, renamed or removed needs a design note saying
-why, the way a move of the behaviour gate's golden file does. Every port
+why. Every port
 method has a caller outside its own package, or it should not be a port.
 
 ## 5. An update is a function of its arguments, so a run can be replayed
@@ -88,8 +88,8 @@ stochastic component derives its generator from the root seed and its
 own path in the machine, so one seed reproduces one shot exactly
 (`decsim/seeding.py`). The one exception is deliberate and named: a tier
 that prices its decode from the host wall clock is not a function of its
-arguments, which is why [Time](time.md) exists and why the
-behaviour gate compares those points on a projection.
+arguments, which is why [Time](time.md) exists and why a regression comparison
+of such a run must leave the tick-bearing fields out.
 
 ## 6. Model objects, a separate configuration script, a port API, timing apart from function
 
@@ -188,14 +188,14 @@ retries.
 
 ## What is not here
 
-Three sources that would belong on this list were not available and are
-therefore not cited: Saltzer and Kaashoek's *Principles of Computer
-System Design*, Ousterhout's *A Philosophy of Software Design*, and
-Liskov and Zilles 1974.
+Three sources that belong on this list were not read when it was
+written and are therefore not cited: Saltzer and Kaashoek's *Principles
+of Computer System Design* (chapter 1), Ousterhout's *A Philosophy of
+Software Design*, and Liskov and Zilles 1974.
 
 ## Read next
 
 - `STYLE.md`: these eleven as rules, with the tools that check them.
-- [The design decisions](decisions.md): the ten modelling decisions made
+- [The design decisions](decisions.md): the thirteen modelling decisions made
   under them.
 - [Architecture](architecture.md): the shape they produced.

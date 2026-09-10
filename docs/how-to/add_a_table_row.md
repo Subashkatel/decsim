@@ -90,7 +90,7 @@ than any description of it.
 | You are writing | Read |
 | --- | --- |
 | a decoder | `tests/machine/test_machine.py::test_a_new_decoder_is_one_class_and_one_table_row` |
-| a decoder, through a whole gate point | `tests/machine/test_machine.py::test_a_second_table_row_runs_gate_point_one` |
+| a decoder, through a whole run of a shipped config | `tests/machine/test_machine.py::test_a_second_table_row_runs_gate_point_one` |
 | a round store | `tests/machine/test_machine.py::test_a_new_round_store_is_one_class_and_one_table_row` |
 | a code card | `tests/machine/test_machine.py::test_a_code_card_written_outside_decsim_runs_with_no_registration` |
 | a layout | `tests/qpu/test_layouts.py::test_a_layout_written_outside_decsim_hears_every_hook_of_a_run` |

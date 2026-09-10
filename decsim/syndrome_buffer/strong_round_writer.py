@@ -30,7 +30,7 @@ class StrongRoundWriter:
 
     Trace source: copy_made(round_key, bits, "controller assembler",
     "Buffer 1") at every landing, the dual write's copy (data_path.md
-    hop 4).
+    hop 3).
     """
 
     def __init__(

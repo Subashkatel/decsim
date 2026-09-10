@@ -48,7 +48,7 @@ holds the rule: its `ENDS_OF_PATH` table names each path's two ends as
 packages, and the test walks `decsim/` to check that no other component
 names that path. The rule is OMNeT++'s, which refuses at runtime a
 module that sends a message it does not own
-(`tmp/resources/omnetpp/src/sim/csimplemodule.cc:333-334`), and gem5's,
+(OMNeT++ `src/sim/csimplemodule.cc:333-334`), and gem5's,
 which bills a transfer to the port it left by rather than to whoever
 arranged it (`packet.hh:424-431`).
 
@@ -137,8 +137,8 @@ stated worst case. It is off board because the strong tier is a separate
 machine, room side in this tree, which is given its assigned data:
 "we assign the syndrome data of rstrong rounds, which includes the
 region with the small soft output, to the strong decoder" (Toshio
-arXiv:2510.25222, `2510.25222.txt` line 1248, the sandbox's
-`tmp/papers/txt/` extraction, which the code's docstrings cite too).
+arXiv:2510.25222, line 1248 of the text extraction the code's
+docstrings cite).
 
 ### 4. `weak_buffer_to_weak_decoder`
 

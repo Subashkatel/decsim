@@ -107,11 +107,10 @@ Three things follow, and they matter.
 - **The measured number is a software wall clock, not a hardware
   latency.** PyMatching in a Python process is not an ASIC. A run that
   wants to say what a decoder of a given speed would do sets a card.
-- **The behaviour gate has to know the difference.** Twenty-one of its
-  twenty-six points are priced by cards and are compared bit for bit;
-  the five that name a decoder are compared on a projection that leaves
-  the tick-bearing fields out. The gate is the maintainers' own and
-  lives outside this tree.
+- **A comparison of two runs has to know the difference.** Two runs of
+  a card-priced config on one seed agree bit for bit; two runs of a
+  config that names a decoder agree only on the fields that carry no
+  measured tick, so compare those and leave the rest out.
 
 The two are not exclusive. A study of accuracy names a decoder and reads
 the logical error rate; a study of the reaction time sets cards and

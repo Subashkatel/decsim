@@ -7,8 +7,8 @@ names are letters and acronyms. This page is the map, both ways: what
 the code calls a thing, what the papers call it, and where in the papers
 to read it. Every reference below was opened before it was written down,
 and every decsim name below exists in the tree. A line number into a
-paper is into the research sandbox's `tmp/papers/txt/<id>.txt`, the
-extraction the code's own docstrings cite.
+paper is into the plain-text extraction of that paper, the one the
+code's own docstrings cite.
 
 ## The words this code means precisely
 
@@ -69,7 +69,7 @@ both are built. The papers' figures call them Buffer 0 and Buffer 1.
 | decsim | The papers | What it is for |
 | --- | --- | --- |
 | syndrome buffer 0, `RoundStore` in `decsim/syndrome_buffer/round_store.py` | Buffer 0, the streamed decoder buffer | what the weak tier reads, round by round, as it arrives |
-| syndrome buffer 1, `StrongRoundStore` in `decsim/syndrome_buffer/strong_round_writer.py` | Buffer 1, the room-side store | what a strong re-decode reads, in bulk, once its boundaries are known |
+| syndrome buffer 1, the `StrongRoundStore` port in `decsim/ports.py`, written by `StrongRoundWriter` in `decsim/syndrome_buffer/strong_round_writer.py` | Buffer 1, the room-side store | what a strong re-decode reads, in bulk, once its boundaries are known |
 | hold, `DecoderInputHold`, `PotentialStrong`, `PotentialRestart` | the reason a round may not be dropped yet | one token per consumer that still needs the round |
 
 ## The link paths

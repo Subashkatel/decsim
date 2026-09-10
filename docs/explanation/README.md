@@ -5,6 +5,10 @@
 These pages say why the machine is shaped the way it is. They are for
 reading away from the keyboard, and every claim in them names its
 source, a paper or a reference implementation, so you can check it.
+The code keeps the same habit: each component's module docstring
+names the paper or the reference implementation it follows, with the
+section or the file and line, so the source of any one rule is beside
+the rule.
 
 ## The machine
 
@@ -27,7 +31,7 @@ source, a paper or a reference implementation, so you can check it.
 
 ## Why it is shaped this way
 
-- [The design decisions](decisions.md): the ten modelling decisions,
+- [The design decisions](decisions.md): the thirteen modelling decisions,
   each with what was decided, why, and its source, and the open rows.
 - [The principles behind the shape](principles.md): the eleven ideas
   the tree is built on, each quoted from its source, and what each

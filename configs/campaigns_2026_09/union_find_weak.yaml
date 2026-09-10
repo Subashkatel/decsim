@@ -1,0 +1,16 @@
+# Pair 2, the weak tier alone: union find (decsim's own weighted growth and peeling, Python).
+# Every other key is base.yaml's.
+
+extends: base.yaml
+
+escalation:
+  kind: weak_baseline
+
+weak_decoder:
+  kind: union_find
+  units: 1
+  unit_memory_rounds: null
+  engine:
+    clock: fridge
+    fetch_cycles_per_round: 1
+    release_cycles_per_job: 10

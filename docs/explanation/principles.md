@@ -39,9 +39,10 @@ below know nothing of (`dijkstra_the.txt` lines 52-57).
 
 **In decsim.** Twenty-five packages on eleven levels, printed by
 `tools/check_uses_graph.py` and enforced by `tools/check.sh`, which
-fails on any cycle. Level 3 and below decode a window on a store with no
-window manager, which is what the decoders' own tests run. The levels
-are listed in `docs/reference/map.md`.
+fails on any cycle. Nothing at level 3 or below imports `decsim/build/`
+or `decsim/machine.py`, so the decoders' own tests decode a window on a
+store with no root at all. The levels are listed in
+`docs/reference/map.md`.
 
 ## 3. An interface reveals as little as it can, and never an order it does not need
 

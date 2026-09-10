@@ -139,9 +139,10 @@ lines 52-57).
 `tools/check_uses_graph.py`, which `tools/check.sh` runs, fails on any
 cycle and prints the levels. There are twenty-five packages on eleven
 levels; `decsim/machine.py`'s docstring names them and
-`docs/reference/map.md` lists every module under them. Level 3 and below
-decode a window on a store with no window manager at all, which is what
-the decoders' own tests do.
+`docs/reference/map.md` lists every module under them. Nothing at level
+3 or below imports `decsim/build/` or `decsim/machine.py`, so the
+decoders' own tests build a decoder pool and a store and decode a window
+with no root at all.
 
 ## The line where a call stops being local
 

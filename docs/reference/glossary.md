@@ -4,7 +4,9 @@ decsim's names are full words (`STYLE.md` rule 2) and the literature's
 names are letters and acronyms. This page is the map, both ways: what
 the code calls a thing, what the papers call it, and where in the papers
 to read it. Every reference below was opened before it was written down,
-and every decsim name below exists in the tree.
+and every decsim name below exists in the tree. A line number into a
+paper is into the research sandbox's `tmp/papers/txt/<id>.txt`, the
+extraction the code's own docstrings cite.
 
 ## The words this code means precisely
 
@@ -37,22 +39,22 @@ and every decsim name below exists in the tree.
 
 | decsim | The papers | Where |
 | --- | --- | --- |
-| commit region, `commit_round_count` | `r_com` in Toshio, `n_com` in Skoric: the part of a window whose correction is taken as final | Toshio, arXiv:2510.25222, Sec. III C; Skoric, arXiv:2209.08552, Sec. I B (2209.08552.txt lines 196-201) |
-| buffer region, `buffer_round_count` | `r_buf` in Toshio, `n_buf` in Skoric: the lookahead rounds a window reads but does not commit | Toshio Sec. III C; Skoric Sec. I B (2209.08552.txt lines 196-201) |
+| commit region, `commit_round_count` | `r_com` in Toshio, `n_com` in Skoric: the part of a window whose correction is taken as final | Toshio, arXiv:2510.25222, Sec. III C; Skoric, arXiv:2209.08552, Sec. I B (2209.08552.txt lines 194-199) |
+| buffer region, `buffer_round_count` | `r_buf` in Toshio, `n_buf` in Skoric: the lookahead rounds a window reads but does not commit | Toshio Sec. III C; Skoric Sec. I B (2209.08552.txt lines 194-199) |
 | window | one step of the overlapping recovery method: `commit + buffer` rounds | Dennis, Kitaev, Landahl and Preskill, arXiv:quant-ph/0110143, "Overlapping recovery method" and Fig. 13; Skoric Sec. I B, which cites it |
-| strong region, `StrongWindowShape` | `r_strong`, what the strong decoder re-decodes. Toshio assumes `r_strong = r_com + 2 r_buf` | Toshio Sec. III C, Fig. 12 (2510.25222.txt lines 1261-1264) |
-| restart window, `PotentialRestart` | the window the weak decoder restarts on after an escalation | Toshio Sec. III C, Fig. 12 (2510.25222.txt lines 1244-1264) |
+| strong region, `StrongWindowShape` | `r_strong`, what the strong decoder re-decodes. Toshio assumes `r_strong = r_com + 2 r_buf` | Toshio Sec. III C, Fig. 12 (2510.25222.txt lines 1248-1251) |
+| restart window, `PotentialRestart` | the window the weak decoder restarts on after an escalation | Toshio Sec. III C, Fig. 12 (2510.25222.txt lines 1232-1251) |
 | re-read width, `restart_reread_buffer_regions` | how far back into the strong region the restarted weak decode reads | Toshio Sec. III C |
-| boundary, `boundary_in`, artificial defects | the previous window's correction folded into this one. qLDPC calls it `net_error`, cuda-q QEC calls it `syndrome_mods` | Skoric Sec. I B, which calls them artificial defects (2209.08552.txt lines 272-284) |
+| boundary, `boundary_in`, artificial defects | the previous window's correction folded into this one. qLDPC calls it `net_error`, cuda-q QEC calls it `syndrome_mods` | Skoric Sec. I B, which calls them artificial defects (2209.08552.txt lines 269-281) |
 | seam window, sandwich schedule | Tan's type-2 window, the block between two independent type-1 windows | Tan, arXiv:2209.09219, supplementary material, the sandwich decoder section, p.14 of the arXiv pdf, and Fig. S4(b) |
 
 ## The two tiers and the confidence
 
 | decsim | The papers | Where |
 | --- | --- | --- |
-| weak tier, strong tier | the fast soft-output decoder and the accurate, high-latency one it escalates to. Toshio's own words are "weak decoder" and "strong decoder" | Toshio Sec. III A, "Protocol" (2510.25222.txt lines 596-604) |
-| confidence, `SoftOutput` | soft information: an analog number saying how much the decoder trusts its own answer, rather than the answer itself | Toshio Sec. II B, "Soft information in decoding problem" (2510.25222.txt lines 390-400) |
-| `complementary_gap` row of `CONFIDENCE_SIGNALS` | the complementary gap: decode the window twice, each solve pinned to one logical class, and subtract the two weights | Toshio Sec. II B and Fig. 3(a,b) (2510.25222.txt lines 440-462); Gidney, Newman, Brooks and Jones, arXiv:2312.04522, Sec. "Complementary gaps" |
+| weak tier, strong tier | the fast soft-output decoder and the accurate, high-latency one it escalates to. Toshio's own words are "weak decoder" and "strong decoder" | Toshio Sec. III A, "Protocol" (2510.25222.txt lines 590-598) |
+| confidence, `SoftOutput` | soft information: an analog number saying how much the decoder trusts its own answer, rather than the answer itself | Toshio Sec. II B, "Soft information in decoding problem" (2510.25222.txt lines 386-396) |
+| `complementary_gap` row of `CONFIDENCE_SIGNALS` | the complementary gap: decode the window twice, each solve pinned to one logical class, and subtract the two weights | Toshio Sec. II B and Fig. 3(a,b) (2510.25222.txt lines 436-457); Gidney, Newman, Brooks and Jones, arXiv:2312.04522, Sec. "Complementary gaps" |
 | `cluster_gap` row of `CONFIDENCE_SIGNALS` | the cluster gap: decode the window once and walk the clustering that decode already did | Toshio Sec. II B and Fig. 3(c,d), which cites it as ref. 47; Meister, arXiv:2405.07433, Algorithm 2 |
 | threshold, `gap_threshold_nats` | `g_th`, the value of the soft output below which a window is escalated | Toshio Sec. III A, step 3 |
 | osd | ordered statistics decoding, the post-processing step after belief propagation in BP-OSD. decsim calls the `ldpc` package's `BpOsdDecoder` | `decsim/decoders/belief_propagation_osd/decoder.py`, which names `ldpc`'s own `osd.hpp` and `stimbposd`'s `bp_osd.py` |

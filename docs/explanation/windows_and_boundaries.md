@@ -25,7 +25,9 @@ decsim's **window** is one step of that method. Skoric et al. give the
 two regions their names: "a window can be divided into two regions: a
 commit region consisting of the 'long-lived' defects in the first
 `n_com` rounds, and a buffer region containing the last `n_buf` rounds"
-(arXiv:2209.08552, Sec. I B, `2209.08552.txt` lines 196-201). Toshio et
+(arXiv:2209.08552, Sec. I B, `2209.08552.txt` lines 194-199, the
+sandbox's `tmp/papers/txt/` extraction, which the code's docstrings cite
+too). Toshio et
 al. write the same two as `r_com` and `r_buf`. In decsim they are
 `commit_round_count` and `buffer_round_count`, and both default to the
 code distance.
@@ -46,7 +48,7 @@ physics did not put there. Skoric calls these **artificial defects**:
 they are "defects" the previous window's own correction created at the
 boundary, and the next window has to be told about them or it will
 decode a syndrome that is not the one it is really facing
-(`2209.08552.txt` lines 272-284).
+(`2209.08552.txt` lines 269-281).
 
 That message is the **boundary**. In decsim it arrives at the receiving
 window as `boundary_in`, and it rides the `decoder_to_decoder` hop. The

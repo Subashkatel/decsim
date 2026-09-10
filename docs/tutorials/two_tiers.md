@@ -101,8 +101,9 @@ decode costs one microsecond and `kind: 10.0` says the strong decode
 costs ten. Those numbers are the paper's ratio. One microsecond is this
 sweep's round period, which is one **syndrome generation time**, the
 time the machine takes to produce a round of syndrome
-(arXiv:2510.25222 lines 188-189), and Toshio's own backlog simulations
-set the strong decoding time to ten of them (lines 1121-1123).
+(arXiv:2510.25222, `2510.25222.txt` lines 186-187 in the sandbox's
+`tmp/papers/txt/` extraction), and Toshio's own backlog simulations
+set the strong decoding time to ten of them (lines 1110-1112).
 
 A card prices the algorithm stage and nothing else: both tiers still
 decode for real, on the minimum-weight perfect matching path, so the

@@ -46,7 +46,7 @@ to 1.08.
 
 That comparison is between a software wall clock and a hardware card,
 which is a comparison of two questions rather than of two machines. Say
-so when you report it. [`docs/explanation/time.md`](../explanation/time.md) says why.
+so when you report it. [Time](../explanation/time.md) says why.
 
 ## If you want a picture, hand `plot` both folders
 
@@ -82,6 +82,6 @@ physical error rate out of the sweep, so it asks which one; `timeline`,
 
 ## Read next
 
-- [`docs/reference/run_folder.md`](../reference/run_folder.md): every file and column.
-- [`docs/tutorials/first_sweep.md`](../tutorials/first_sweep.md): what a Wilson interval is.
-- [`docs/how-to/run_a_timing_only_study.md`](run_a_timing_only_study.md): making the ticks comparable.
+- [The run folder](../reference/run_folder.md): every file and column.
+- [Your first sweep](../tutorials/first_sweep.md): what a Wilson interval is.
+- [How to run a timing study whose numbers do not depend on your computer](run_a_timing_only_study.md): making the ticks comparable.

@@ -106,6 +106,6 @@ samples none. Use a priced card on a real device instead.
 
 ## Read next
 
-- [`docs/explanation/time.md`](../explanation/time.md): ticks, clocks and the wall-clock decoder.
-- [`docs/how-to/compare_two_runs.md`](compare_two_runs.md): putting a card run beside a
+- [Time](../explanation/time.md): ticks, clocks and the wall-clock decoder.
+- [How to compare two runs](compare_two_runs.md): putting a card run beside a
   measured one.

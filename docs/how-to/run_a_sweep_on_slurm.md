@@ -78,7 +78,7 @@ simply by being the one you pass.
 
 ## Read next
 
-- [`docs/tutorials/first_sweep.md`](../tutorials/first_sweep.md): a small sweep end to end, with the
+- [Your first sweep](../tutorials/first_sweep.md): a small sweep end to end, with the
   error bars explained.
-- [`docs/reference/run_folder.md`](../reference/run_folder.md): what each shard writes.
-- [`docs/reference/cli.md`](../reference/cli.md): every flag of `collect` and `combine`.
+- [The run folder](../reference/run_folder.md): what each shard writes.
+- [The commands](../reference/cli.md): every flag of `collect` and `combine`.

@@ -23,7 +23,7 @@ sections, in the order the root reads them:
 `observation`.
 
 A section a component owns carries a `kind` key naming a row of that
-component's table, and [`docs/reference/tables.md`](tables.md) lists every table with
+component's table, and [The plug-in tables](tables.md) lists every table with
 its rows. A `kind` that is not a row is refused when the file is loaded,
 with the rows printed, so a typo never runs.
 
@@ -99,5 +99,5 @@ an `extends` chain says what you meant.
 ## Read next
 
 - `configs/reference.yaml` itself: every key, with its source.
-- [`docs/reference/tables.md`](tables.md): the rows a `kind` may name.
-- [`docs/how-to/add_a_yaml_key.md`](../how-to/add_a_yaml_key.md): adding one.
+- [The plug-in tables](tables.md): the rows a `kind` may name.
+- [How to add a yaml key](../how-to/add_a_yaml_key.md): adding one.

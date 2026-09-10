@@ -8,7 +8,7 @@ into one row per structure and one row per link path.
 These come from the traced shots only, and that is the design and not a
 gap: a trace is one shot's whole data path, so a run writes a file for
 the shots `observation.trace_shots` names and a point of two thousand
-shots writes one (docs/reading_a_trace.md, and reference.yaml's
+shots writes one (docs/how-to/read_a_trace.md, and reference.yaml's
 observation section says what a trace costs). A point whose shots were
 not traced writes no row here, the way a point that traced nothing draws
 no timeline.

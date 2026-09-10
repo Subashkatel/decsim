@@ -5,7 +5,7 @@ before the reader runs: a structure's row is the residences the trace
 records on that structure's lane, in microseconds off `args.tick` and
 the event's own duration, and a link path's row is the queue waits its
 moves carry. The file is the Chrome Trace Event Format the writer emits
-(docs/reading_a_trace.md), read through front/trace_file.py, the reader
+(docs/how-to/read_a_trace.md), read through front/trace_file.py, the reader
 `decsim trace follow` uses.
 """
 

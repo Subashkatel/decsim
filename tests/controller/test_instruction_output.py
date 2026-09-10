@@ -1,11 +1,13 @@
 """The output: decisions and commands reach the QPU after the pulse cost.
 
-A release is consumed at the controller as soon as it crosses
-frame_to_controller; a result return without an operation pays the
-decision-to-pulse cost (17 ticks here; QubiC's 8 clocks at 500 MHz are
-16 ns, 2110.00557) and the controller_to_qpu crossing before it is
-available at the QPU. The link law is the channel's
-(tests/links/test_channel.py); here the reference card prices both hops.
+A release is consumed at the controller the instant it lands from
+frame_to_controller, whose crossing the frame side executes and prices
+(tests/pauli_frame/test_decision_dispatch.py); a result return without
+an operation pays the decision-to-pulse cost (17 ticks here; QubiC's 8
+clocks at 500 MHz are 16 ns, 2110.00557) and the controller_to_qpu
+crossing before it is available at the QPU. The link law is the
+channel's (tests/links/test_channel.py); here the reference card prices
+the output hop.
 
 The pulse cost is the control processor's own work and stands even with
 no fabric at all (QubiC holds the conditional jump and the pulse on the
@@ -29,7 +31,8 @@ import tests.declared_run as declared_run
 PULSE_TICKS = 17
 
 
-def test_a_release_is_delivered_when_it_reaches_the_controller():
+def test_a_release_is_consumed_where_it_lands():
+    """The crossing is already paid: the release is available at once."""
     engine = engine_module.Engine()
     reference = link_profiles.logical_reference_profile()
     link = fabric_module.LinkFabric(reference, engine)
@@ -38,9 +41,6 @@ def test_a_release_is_delivered_when_it_reaches_the_controller():
         engine, link, None, PULSE_TICKS
     )
     output.trace.output_event.connect(recorder.output)
-    crossing_ticks = link.expected_delay_ticks(
-        transfer_records.LinkPath.FRAME_TO_CONTROLLER, None, 0
-    )
     release = program_records.Decision(2, releases_operation=True)
     delivered = []
 
@@ -50,11 +50,11 @@ def test_a_release_is_delivered_when_it_reaches_the_controller():
     output.relay_instruction(release, deliver)
     engine.run()
 
-    assert delivered == [(crossing_ticks, release)]
+    assert delivered == [(0, release)]
     kinds_and_ticks = [
         (event.kind, event.tick) for event in recorder.output_events
     ]
-    assert kinds_and_ticks == [("DECISION_AVAILABLE", crossing_ticks)]
+    assert kinds_and_ticks == [("DECISION_AVAILABLE", 0)]
 
 
 def test_a_result_return_pays_the_pulse_cost_and_the_crossing_to_the_qpu():
@@ -66,9 +66,6 @@ def test_a_result_return_pays_the_pulse_cost_and_the_crossing_to_the_qpu():
         engine, link, None, PULSE_TICKS
     )
     output.trace.output_event.connect(recorder.output)
-    to_controller = link.expected_delay_ticks(
-        transfer_records.LinkPath.FRAME_TO_CONTROLLER, None, 0
-    )
     to_qpu = link.expected_delay_ticks(
         transfer_records.LinkPath.CONTROLLER_TO_QPU, None, 0
     )
@@ -81,19 +78,18 @@ def test_a_result_return_pays_the_pulse_cost_and_the_crossing_to_the_qpu():
     output.relay_instruction(result, deliver)
     engine.run()
 
-    issued_tick = to_controller + PULSE_TICKS
-    assert delivered == [(issued_tick + to_qpu, result)]
+    assert delivered == [(PULSE_TICKS + to_qpu, result)]
     kinds_and_ticks = [
         (event.kind, event.tick) for event in recorder.output_events
     ]
     assert kinds_and_ticks == [
-        ("DECISION_AVAILABLE", to_controller),
-        ("CONTROL_DECISION_ISSUED", issued_tick),
+        ("DECISION_AVAILABLE", 0),
+        ("CONTROL_DECISION_ISSUED", PULSE_TICKS),
     ]
 
 
 def test_a_result_return_with_no_link_still_pays_the_pulse_cost():
-    """An unpriced fabric drops the crossings, not the local work.
+    """An unpriced fabric drops the crossing, not the local work.
 
     The decision-to-pulse cost is the control processor's own work
     between the decision and the pulse it triggers, which QubiC runs on

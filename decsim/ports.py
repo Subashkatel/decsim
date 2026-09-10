@@ -732,15 +732,32 @@ class ReleaseReceiver(Protocol):
 
 
 @runtime_checkable
+class DecisionDispatch(Protocol):
+    """The frame's dispatch, as the conditional release sees it.
+
+    The decision leaves by the frame's end of frame_to_controller, so
+    the send is executed there and the controller is reached at the
+    landing.
+    """
+
+    def dispatch_decision(
+        self,
+        decision: program_records.Decision,
+        deliver: Callable[[program_records.Decision], None],
+    ) -> None:
+        """Send one decision to the controller; deliver runs at the QPU."""
+
+
+@runtime_checkable
 class InstructionReceiver(Protocol):
-    """The controller, as the conditional release sees it."""
+    """The controller, as the frame's dispatch sees it."""
 
     def relay_instruction(
         self,
         decision: program_records.Decision,
         deliver: Callable[[program_records.Decision], None],
     ) -> None:
-        """Carry one decision to the controller; deliver runs on arrival."""
+        """Take one decision at the landing; deliver runs at the QPU."""
 
 
 # ------------------------------------------ the controller instructs the QPU

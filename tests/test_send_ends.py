@@ -128,9 +128,6 @@ def _assigned_names(statement: ast.Assign) -> list:
 # landing is written where the ask is made.
 DELIVERY_CALLBACKS = {
     ("controller/controller.py", "QPU_TO_CONTROLLER"): ("at_controller",),
-    ("controller/instruction_output.py", "FRAME_TO_CONTROLLER"): (
-        "at_controller",
-    ),
     ("controller/instruction_output.py", "CONTROLLER_TO_QPU"): ("delivered",),
     ("controller/round_transmission.py", "CONTROLLER_TO_WEAK_BUFFER"): (
         "_publish",
@@ -139,6 +136,9 @@ DELIVERY_CALLBACKS = {
         "_land_in_strong_store",
     ),
     ("decoders/decoder_output.py", "WEAK_DECODER_TO_STRONG_DECODER"): (None,),
+    ("pauli_frame/decision_dispatch.py", "FRAME_TO_CONTROLLER"): (
+        "_at_the_controller",
+    ),
     ("windows/window_boundaries.py", "DECODER_TO_DECODER"): (
         "_pin_delivered",
         "_receive_boundary",

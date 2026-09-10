@@ -55,6 +55,7 @@ docstring.
 ### pauli_frame
 
 - `decsim/pauli_frame/__init__.py`: One final correction per window, folded into a stream's logical frame.
+- `decsim/pauli_frame/decision_dispatch.py`: The frame's end of the frame-to-controller path.
 - `decsim/pauli_frame/pauli_frame.py`: The Pauli frame remembers the corrections the decoders have made.
 
 ### ports

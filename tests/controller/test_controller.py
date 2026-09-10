@@ -5,7 +5,9 @@ qpu_to_controller as classified bits and become a normalized fragment for
 the assembler after the readout-to-bits delay (Fermilab 2406.18807: 40 ns
 in-FPGA discrimination; Yang 2605.04892: 20 ns to a syndrome). The link
 law is the channel's (tests/links/test_channel.py); here the reference
-card prices the hop and the controller adds 3 us on top.
+card prices the hop and the controller adds 3 us on top. The instant the
+readout left the QPU is the QPU's own event, and the law for it is
+tests/qpu/test_cycle_clock.py.
 """
 
 import decsim.controller.controller as controller_module
@@ -13,7 +15,6 @@ import decsim.controller.settings as controller_settings
 import decsim.engine as engine_module
 import decsim.links.fabric as fabric_module
 import decsim.links.link_profiles as link_profiles
-import decsim.observe.round_events as round_events
 import decsim.records.rounds as round_records
 import decsim.records.transfers as transfer_records
 
@@ -33,13 +34,8 @@ class RecordingAssembler:
         self.added.append((self.engine.now, fragment, fragment_count, route))
 
 
-def controller_with(engine, links, assembler, recorder, settings=SETTINGS):
-    controller = controller_module.Controller(
-        engine, links, settings, assembler
-    )
-    if recorder is not None:
-        controller.trace.round_event.connect(recorder.record)
-    return controller
+def controller_with(engine, links, assembler, settings=SETTINGS):
+    return controller_module.Controller(engine, links, settings, assembler)
 
 
 def test_a_readout_reaches_the_assembler_after_the_crossing_and_the_delay():
@@ -47,8 +43,7 @@ def test_a_readout_reaches_the_assembler_after_the_crossing_and_the_delay():
     reference = link_profiles.logical_reference_profile()
     links = fabric_module.LinkFabric(reference, engine)
     assembler = RecordingAssembler(engine)
-    recorder = round_events.RoundEventRecorder(engine)
-    controller = controller_with(engine, links, assembler, recorder)
+    controller = controller_with(engine, links, assembler)
     readout = round_records.QPUReadout(
         7, "patch-a", 4, bits=[True, False, 1, 0], size_bits=4
     )
@@ -66,8 +61,6 @@ def test_a_readout_reaches_the_assembler_after_the_crossing_and_the_delay():
     assert fragment.size_bits == 4
     assert fragment_count == 1
     assert route is round_records.WINDOW_INPUT_ROUTE
-    kinds_and_ticks = [(event.kind, event.tick) for event in recorder.events]
-    assert kinds_and_ticks == [("EMITTED", 0)]
 
 
 def test_a_readout_with_no_delay_reaches_the_assembler_at_the_crossing():
@@ -75,9 +68,8 @@ def test_a_readout_with_no_delay_reaches_the_assembler_at_the_crossing():
     reference = link_profiles.logical_reference_profile()
     links = fabric_module.LinkFabric(reference, engine)
     assembler = RecordingAssembler(engine)
-    recorder = None
     controller = controller_with(
-        engine, links, assembler, recorder, settings=FREE_SETTINGS
+        engine, links, assembler, settings=FREE_SETTINGS
     )
     readout = round_records.QPUReadout(7, "patch-a", 4, bits=[1], size_bits=1)
     crossing_ticks = links.expected_delay_ticks(

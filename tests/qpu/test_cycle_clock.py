@@ -376,6 +376,34 @@ def test_an_idle_stream_round_carries_the_sources_bits_to_the_windows():
     assert route == round_records.WINDOW_INPUT_ROUTE
 
 
+def test_the_emitted_event_is_the_qpus_own_at_the_instant_it_emits():
+    """The event belongs to the object the emission happened in.
+
+    gem5 reports a component's statistics from that component's own
+    group (tmp/resources/gem5/src/base/stats/group.hh:60-92), so the
+    instant a readout leaves is the QPU's event and not the receiver's.
+    Every readout the clock hands on carries one, the timing-only
+    feedback-memory round included, each with the route it travels.
+    """
+    engine, qpu, log = clocked_qpu(1_000_000)
+    events = []
+    qpu.trace.round_event.connect(events.append)
+    body = memory_body(1, 2, 1_000_000)
+    qpu.issue(body)
+    engine.schedule(2_000_000, qpu.finish)
+    engine.run()
+    qpu.emit_feedback_memory_round(7, "A", 4)
+
+    kinds = [event.kind for event in events]
+    ticks = [event.tick for event in events]
+    rounds = [event.round_index for event in events]
+    routes = [event.route for event in events]
+    assert kinds == ["EMITTED", "EMITTED", "EMITTED"]
+    assert ticks == [1_000_000, 2_000_000, 2_000_000]
+    assert rounds == [1, 2, 4]
+    assert routes == ["WINDOW_INPUT", "WINDOW_INPUT", "FEEDBACK_MEMORY_ROUND"]
+
+
 def test_a_feedback_memory_round_is_routed_to_its_source_operation():
     engine, qpu, log = clocked_qpu(10)
     qpu.emit_feedback_memory_round(7, "A", 4)

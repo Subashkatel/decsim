@@ -75,7 +75,7 @@ def observe(
     links.trace.transfer_delivered.connect(traffic_ledger.on_transfer)
     round_events = _connect_round_events(
         engine,
-        controller=controller,
+        qpu=qpu,
         assembler=assembler,
         held_rounds=held_rounds,
         transmitter=transmitter,
@@ -432,7 +432,7 @@ def _connect_runtime_stamps(
 def _connect_round_events(
     engine: engine_module.Engine,
     *,
-    controller,
+    qpu,
     assembler,
     held_rounds,
     transmitter,
@@ -442,7 +442,7 @@ def _connect_round_events(
 ) -> round_events_module.RoundEventRecorder:
     """The recorder hears every round event, output and strong landing."""
     round_events = round_events_module.RoundEventRecorder(engine)
-    components = (controller, assembler, held_rounds, transmitter, store_input)
+    components = (qpu, assembler, held_rounds, transmitter, store_input)
     for component in components:
         component.trace.round_event.connect(round_events.record)
     instruction_output.trace.output_event.connect(round_events.output)

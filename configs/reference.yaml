@@ -343,7 +343,8 @@ clocks:                            # clock domain name -> MHz; a link prices its
 
 links:                             # a kind, then one card per path; null = the
                                    # chosen row's numbers for that path
-  kind: logical_reference          # logical_reference | bandwidth_limited
+  kind: logical_reference          # logical_reference | bandwidth_limited |
+                                   # roce_v2_cpu | roce_v2_gpu
                                    # (LINK_FABRICS, links/link_profiles.py). The row
                                    # supplies the numbers the per-path cards below
                                    # override and builds the fabric the run sends
@@ -355,6 +356,13 @@ links:                             # a kind, then one card per path; null = the
                                    # here: a caller builds its card with
                                    # link_profiles.bandwidth_limited_profile and
                                    # passes it as the machine's links setting.
+                                   # roce_v2_cpu is the reference card with the
+                                   # strong tier's off-board hops priced by
+                                   # Backline's measured FPGA-to-CPU round trip over
+                                   # RoCE v2 (2609.09270 Table III), half of the
+                                   # 2.305 us median on each leg it crosses.
+                                   # roce_v2_gpu is the same card on the FPGA-to-GPU
+                                   # round trip, 4.5 us in the median.
                                    # Each card, in cycles of its named clock domain:
                                    #   latency_cycles: propagation latency
                                    #   clock: the domain (a clocks: key)

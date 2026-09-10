@@ -1,4 +1,4 @@
-"""The link number cards: the two reference fabrics and the yaml's own.
+"""The link number cards: the four shipped rows and the yaml's own.
 
 logical_reference_profile is the default when no links card is given:
 every channel unbounded, so it prices propagation only and no transfer
@@ -10,8 +10,10 @@ per path and counts each transfer's own payload from the record that
 carries it, so the paper's channel counts would price nothing here.
 bandwidth_limited_profile is the same fabric with finite calibrated rates
 so contention becomes measurable; capacity_scale sweeps the whole fabric.
-from_yaml puts the yaml's own card on any path; with_transfer_overhead
-adds a setup cost to either fabric.
+roce_v2_measured_profile is the reference card with the strong tier's
+off-board path priced by Backline's measured RoCE v2 round trip; it is
+the roce_v2_cpu and roce_v2_gpu rows. from_yaml puts the yaml's own card
+on any path; with_transfer_overhead adds a setup cost to any fabric.
 
 Every number carries a source string that travels into the traffic
 report; paper locators are arXiv numbers and sections. To
@@ -114,6 +116,51 @@ STRONG_STORE_LATENCY_MICROSECONDS = 0.26
 STRONG_STORE_SOURCE = (
     "Caune 2410.05202 Fig. 1a F, inter-node broadcast between control "
     "system chassis, 240 to 260 ns at the stated worst case"
+)
+
+# Backline (Xanadu and AMD), arXiv 2609.09270, Sec. V-C and Table III.
+# An FPGA controller posts a 16-byte payload (an 8-byte syndrome) as a
+# one-sided RDMA write into the coprocessor's memory over RoCE v2; the
+# coprocessor polls that buffer and writes the reply back with a
+# one-sided write, and on the GPU path it signals a CPU thread which
+# writes back. The FPGA times the round trip in its own clock, so the
+# measurement is one number per round trip and the paper states no
+# per-direction split. These are the medians of the echo rows, which
+# carry no decoding work and price the fabric alone.
+ROCE_V2_CPU_ROUND_TRIP_MICROSECONDS = 2.305
+ROCE_V2_GPU_ROUND_TRIP_MICROSECONDS = 4.5
+ROCE_V2_CPU_SOURCE = (
+    "Backline 2609.09270 Table III CPU echo, 2.305 us median round trip, "
+    "FPGA controller to CPU coprocessor over RoCE v2"
+)
+ROCE_V2_GPU_SOURCE = (
+    "Backline 2609.09270 Table III GPU echo, 4.5 us median round trip, "
+    "FPGA controller to GPU coprocessor over RoCE v2"
+)
+
+# decsim prices one number per hop, so each leg of the round trip is
+# charged half of it and the coprocessor's own poll is charged nothing.
+# The legs the measurement covers are the controller's write into the
+# ring (paper lines 1611-1613), the coprocessor's poll of the slot
+# (1616-1618, the Catalyst runtime's poll_message_arrival spinning on
+# seq_num) and the reply's write back (1618-1620).
+ROCE_V2_WRITE_LEG = (
+    "the controller's one-sided write into the coprocessor's ring, one "
+    "half of the measured round trip; the paper gives no per-direction "
+    "split"
+)
+ROCE_V2_ESCALATION_LEG = (
+    "the escalation request, the same one-sided write from the "
+    "controller side, one half of the measured round trip; the paper "
+    "gives no per-direction split"
+)
+ROCE_V2_POLL_LEG = (
+    "zero: the coprocessor polls its own memory for the slot the write "
+    "landed in"
+)
+ROCE_V2_REPLY_LEG = (
+    "the reply's one-sided write back to the controller, one half of the "
+    "measured round trip; the paper gives no per-direction split"
 )
 
 
@@ -370,6 +417,47 @@ def bandwidth_limited_profile(
     )
 
 
+def roce_v2_measured_profile(coprocessor: str) -> settings.FabricSettings:
+    """The reference card with the strong path on a measured round trip.
+
+    Backline (arXiv 2609.09270, Sec. V-C and Table III) measures one
+    number: an FPGA controller writes into a coprocessor's memory over
+    RoCE v2 with a one-sided RDMA write, the coprocessor polls that
+    buffer and writes the reply back, and the controller times the whole
+    round trip in its own clock. The paper gives no per-direction
+    number, and neither does the published code, so the split below is
+    decsim's rule rather than a measurement: the controller's write into
+    syndrome buffer 1, the escalation request and the strong decoder's
+    reply to the frame are each one half of the round trip, and the
+    strong store's read into the strong decoder is zero because the
+    coprocessor polls a slot in its own memory. The escalation round
+    trip on this card, weak_decoder_to_strong_decoder plus
+    strong_buffer_to_strong_decoder plus strong_decoder_to_frame, is
+    therefore the measured median exactly.
+
+    The card prices that median. It does not cover the first, warm-up
+    round trip, 4.64 us on the CPU path and 9.27 us on the GPU path, nor
+    the tails, which on the CPU path reach 2.420 us at P99, 2.475 us at
+    P99.999 and 2.590 us at the maximum, and on the GPU path 4.985 us,
+    5.255 us and 5.285 us. Every other hop keeps the number and the
+    source of logical_reference_profile.
+
+    Args:
+        coprocessor: "cpu" or "gpu", the two paths Backline measured.
+    """
+    round_trip_microseconds, measurement_source = _roce_v2_measurement(
+        coprocessor
+    )
+    strong_paths = _roce_v2_strong_paths(
+        round_trip_microseconds, measurement_source
+    )
+    reference = logical_reference_profile()
+    row_name = f"roce_v2_{coprocessor}"
+    return dataclasses.replace(
+        reference, **strong_paths, profile_name=row_name, kind=row_name
+    )
+
+
 class LogicalReferenceFabric:
     """The default row: Khalid's latencies on unbounded channels.
 
@@ -418,12 +506,58 @@ class BandwidthLimitedFabric:
         return fabric.LinkFabric(card, engine)
 
 
+class RoceV2CpuFabric:
+    """The reference card with the strong path on Backline's CPU round trip.
+
+    The four strong-side hops are priced by Backline's measured
+    FPGA-to-CPU round trip over RoCE v2, 2.305 us in the median
+    (arXiv 2609.09270, Table III): half of it on each leg the write
+    crosses, and nothing for the coprocessor's poll of its own memory.
+    Every other hop keeps the reference numbers.
+    """
+
+    @staticmethod
+    def base_card() -> settings.FabricSettings:
+        """The numbers a yaml's per-path cards override."""
+        return roce_v2_measured_profile("cpu")
+
+    @staticmethod
+    def build(card: settings.FabricSettings, engine):
+        """The object that carries this run's transfers."""
+        return fabric.LinkFabric(card, engine)
+
+
+class RoceV2GpuFabric:
+    """The reference card with the strong path on Backline's GPU round trip.
+
+    The four strong-side hops are priced by Backline's measured
+    FPGA-to-GPU round trip over RoCE v2, 4.5 us in the median
+    (arXiv 2609.09270, Table III): half of it on each leg the write
+    crosses, and nothing for the coprocessor's poll of its own memory.
+    The GPU path is the slower and the wider of the two Backline
+    measured, because the reply is written by a CPU thread the GPU
+    signals. Every other hop keeps the reference numbers.
+    """
+
+    @staticmethod
+    def base_card() -> settings.FabricSettings:
+        """The numbers a yaml's per-path cards override."""
+        return roce_v2_measured_profile("gpu")
+
+    @staticmethod
+    def build(card: settings.FabricSettings, engine):
+        """The object that carries this run's transfers."""
+        return fabric.LinkFabric(card, engine)
+
+
 # links.kind names one of these rows: which fabric model carries the
 # transfers and which numbers the section's per-path cards override. A
 # row answers base_card at the yaml boundary and build at the root.
 LINK_FABRICS = {
     "logical_reference": LogicalReferenceFabric,
     "bandwidth_limited": BandwidthLimitedFabric,
+    "roce_v2_cpu": RoceV2CpuFabric,
+    "roce_v2_gpu": RoceV2GpuFabric,
 }
 
 
@@ -507,6 +641,59 @@ def with_transfer_overhead(
         **replacements,
         profile_name=f"{profile.profile_name}+transfer_overhead",
     )
+
+
+def _roce_v2_measurement(coprocessor: str) -> tuple:
+    """(round trip in microseconds, source) of one echo row of Table III."""
+    if coprocessor == "cpu":
+        return ROCE_V2_CPU_ROUND_TRIP_MICROSECONDS, ROCE_V2_CPU_SOURCE
+    if coprocessor == "gpu":
+        return ROCE_V2_GPU_ROUND_TRIP_MICROSECONDS, ROCE_V2_GPU_SOURCE
+    raise ValueError(
+        f"a measured RoCE v2 card names the coprocessor Backline echoed "
+        f"from, 'cpu' or 'gpu', not {coprocessor!r}"
+    )
+
+
+def _roce_v2_strong_paths(
+    round_trip_microseconds: float, measurement_source: str
+) -> dict:
+    """The four strong-side paths, priced from one measured round trip."""
+    leg_microseconds = round_trip_microseconds / 2
+    write_source = f"{measurement_source}; {ROCE_V2_WRITE_LEG}"
+    escalation_source = f"{measurement_source}; {ROCE_V2_ESCALATION_LEG}"
+    poll_source = f"{measurement_source}; {ROCE_V2_POLL_LEG}"
+    reply_source = f"{measurement_source}; {ROCE_V2_REPLY_LEG}"
+    controller_to_strong_buffer = _actual_path(
+        "controller_to_strong_buffer",
+        leg_microseconds,
+        write_source,
+        ROUND_PAYLOAD_SOURCE,
+    )
+    weak_decoder_to_strong_decoder = _actual_path(
+        "weak_decoder_to_strong_decoder",
+        leg_microseconds,
+        escalation_source,
+        ESCALATION_PAYLOAD_SOURCE,
+    )
+    strong_buffer_to_strong_decoder = _actual_path(
+        "strong_buffer_to_strong_decoder",
+        0.0,
+        poll_source,
+        DECODER_INPUT_PAYLOAD_SOURCE,
+    )
+    strong_decoder_to_frame = _actual_path(
+        "strong_decoder_to_frame",
+        leg_microseconds,
+        reply_source,
+        RESULT_PAYLOAD_SOURCE,
+    )
+    return {
+        "controller_to_strong_buffer": controller_to_strong_buffer,
+        "weak_decoder_to_strong_decoder": weak_decoder_to_strong_decoder,
+        "strong_buffer_to_strong_decoder": strong_buffer_to_strong_decoder,
+        "strong_decoder_to_frame": strong_decoder_to_frame,
+    }
 
 
 def _card_microseconds(card: Mapping, clocks: config.ClockSettings) -> tuple:

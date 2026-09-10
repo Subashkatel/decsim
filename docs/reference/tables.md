@@ -99,6 +99,8 @@ In `decsim/links/link_profiles.py`. A yaml names a row of it under `links.kind`.
 | --- | --- | --- |
 | `logical_reference` | `LogicalReferenceFabric` in `decsim/links/link_profiles.py` | The default row: Khalid's latencies on unbounded channels. |
 | `bandwidth_limited` | `BandwidthLimitedFabric` in `decsim/links/link_profiles.py` | The same fabric with finite rates, provisioned from the geometry. |
+| `roce_v2_cpu` | `RoceV2CpuFabric` in `decsim/links/link_profiles.py` | The reference card with the strong path on Backline's CPU round trip. |
+| `roce_v2_gpu` | `RoceV2GpuFabric` in `decsim/links/link_profiles.py` | The reference card with the strong path on Backline's GPU round trip. |
 
 ## `MAGIC_STATE_FACTORIES`
 

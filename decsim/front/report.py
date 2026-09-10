@@ -295,14 +295,15 @@ def data_movement_rows(shot_data_movement: list) -> list:
     rows = []
     for point, group in grouped_by_sweep_point(shot_data_movement):
         seeds = _seeds_of(group)
+        held = _references_per_shot(group, seeds)
         for path in _named_values(group, "path"):
             at_path = _rows_named(group, "path", path)
-            row = _movement_row(point, "path", path, at_path, seeds)
+            row = _movement_row(point, "path", path, at_path, seeds, held)
             rows.append(row)
         for memory_class in _classes_of(group):
             at_class = _rows_named(group, "memory_class", memory_class)
             row = _movement_row(
-                point, "memory_class", memory_class, at_class, seeds
+                point, "memory_class", memory_class, at_class, seeds, held
             )
             rows.append(row)
     return rows
@@ -1040,9 +1041,20 @@ def _rows_named(rows: list, column: str, value) -> list:
 
 
 def _movement_row(
-    point: tuple, grouping: str, name: str, rows: list, seeds: list
+    point: tuple,
+    grouping: str,
+    name: str,
+    rows: list,
+    seeds: list,
+    held: dict,
 ) -> dict:
-    """One point's mean over shots for one path or one memory class."""
+    """One point's mean over shots for one path or one memory class.
+
+    held carries the point's reference columns, the same on every row:
+    a reference belongs to the shot and not to a path, so it is counted
+    over the point's shots and not over the rows of one path, which some
+    of the point's shots may not have at all.
+    """
     row = point_columns(point)
     row["grouping"] = grouping
     row["name"] = name
@@ -1051,27 +1063,35 @@ def _movement_row(
         total = _sum_of(rows, counter)
         row[f"{counter}_per_shot"] = total / shots
     for counter in REFERENCE_COUNTERS:
-        total = _summed_once_per_shot(rows, counter)
-        row[f"{counter}_per_shot"] = total / shots
+        row[f"{counter}_per_shot"] = held[counter]
     return row
 
 
-def _summed_once_per_shot(rows: list, counter: str) -> int:
-    """A whole-shot counter added up over the shots these rows carry.
+def _references_per_shot(group: list, seeds: list) -> dict:
+    """One point's hold counters, averaged over its shots.
 
-    A reference belongs to the shot and not to a path, so it repeats on
-    every row of that shot and only the first row of each is read.
+    Each of a shot's rows carries the shot's own reference counters, so
+    one row per shot is read and the mean is over the point's shots.
     """
+    held = {}
+    for counter in REFERENCE_COUNTERS:
+        by_seed = _one_value_per_shot(group, counter)
+        total = 0
+        for value in by_seed.values():
+            total += value
+        held[counter] = total / len(seeds)
+    return held
+
+
+def _one_value_per_shot(rows: list, counter: str) -> dict:
+    """A whole-shot counter, read off the first row of each shot."""
     seen = {}
     for row in rows:
         seed = row["seed"]
         if seed in seen:
             continue
         seen[seed] = row[counter]
-    total = 0
-    for value in seen.values():
-        total += value
-    return total
+    return seen
 
 
 def _data_movement_of(report_dir: Path) -> list:

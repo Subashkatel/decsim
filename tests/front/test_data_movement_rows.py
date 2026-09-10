@@ -29,16 +29,29 @@ COUNTING_SWEEP = {
         }
     ],
 }
+# noisy enough that some shots fold a boundary into a copy and some do
+# not, so a path is in part of the point's shots and not the rest
+FOLDING_SWEEP = {
+    "observation": {"data_movement": True},
+    "sweep": [
+        {
+            "physical_error_probability": [0.01],
+            "distance": [3],
+            "round_period_us": [1.0],
+            "shots": 8,
+        }
+    ],
+}
 
 
-def measured_shots(config_path, count):
+def measured_shots(config_path, count, probability=0.001):
     """That config's first point, one measured shot per seed."""
     config = load_experiment(config_path)
     measurements = []
     for seed in range(count):
         measurement = measure_point_shot(
             config,
-            physical_error_probability=0.001,
+            physical_error_probability=probability,
             distance=3,
             round_period_us=1.0,
             seed=seed,
@@ -148,6 +161,38 @@ def test_a_references_column_counts_one_shots_holds_once(tmp_path):
 
     for row in point_rows:
         assert row["references_per_shot"] == mean_references
+
+
+def test_a_path_only_some_shots_took_still_carries_the_points_holds(
+    tmp_path,
+):
+    """A reference belongs to the shot, so it is not cut by a rare path.
+
+    The window's boundary is folded into a copy only when the neighbour's
+    seam carried a defect, so its path is in some of a point's shots and
+    not others; counting the point's holds over that path's rows alone
+    would divide a whole-shot counter by the wrong number of shots.
+    """
+    config_path = write_config(tmp_path, FOLDING_SWEEP)
+    measurements = measured_shots(config_path, 8, probability=0.01)
+    shot_rows = sweep_report.shot_data_movement_rows(measurements)
+    point_rows = sweep_report.data_movement_rows(shot_rows)
+    folding_shots = _shots_with_a_path(shot_rows, "masked view")
+    references = []
+    for row in point_rows:
+        references.append(row["references_per_shot"])
+
+    assert 0 < folding_shots < len(measurements)
+    assert len(set(references)) == 1
+
+
+def _shots_with_a_path(shot_rows: list, ending: str) -> int:
+    """How many of a point's shots have a row on a path with that ending."""
+    seeds = set()
+    for row in shot_rows:
+        if row["path"].endswith(ending):
+            seeds.add(row["seed"])
+    return len(seeds)
 
 
 def test_a_run_that_counted_no_movement_writes_no_rows(tmp_path, monkeypatch):

@@ -44,12 +44,16 @@ import decsim.front.refusal as refusal
 import decsim.front.run_folder as run_folder
 import decsim.observe.data_movement as data_movement
 
-BULKY_FIELDS = (
+# the measurement's fields that are not columns of shots.csv: the
+# per-window collections, the counter tables of their own files, and the
+# path of a file rather than a fact of the shot
+NON_COLUMN_FIELDS = (
     "samples",
     "means",
     "maxes",
     "link_totals",
     "data_movement",
+    "trace_path",
 )
 # the counters shot_data_movement.csv carries per path, as
 # observe/data_movement.py's json_value names them
@@ -132,6 +136,27 @@ def sweep_point_of(row: dict) -> tuple:
     )
 
 
+def measured_point(measurement) -> tuple:
+    """The sweep point one measured shot belongs to."""
+    return (
+        measurement.distance,
+        measurement.physical_error_probability,
+        measurement.algorithm,
+        measurement.round_period_us,
+    )
+
+
+def point_columns(point: tuple) -> dict:
+    """The four columns that name a sweep point."""
+    distance, physical_error_probability, algorithm, round_period_us = point
+    return {
+        "distance": distance,
+        "physical_error_probability": physical_error_probability,
+        "algorithm": algorithm,
+        "round_period_us": round_period_us,
+    }
+
+
 def grouped_by_sweep_point(rows: list) -> list:
     """(sweep point, that point's rows) pairs, in a stable order."""
     points = set()
@@ -184,7 +209,7 @@ def summarize_point(shots: list, counts: dict) -> dict:
     }
     for name in measure.POINTS:
         multiset = counts.get((point, name), {})
-        _add_point_columns(row, shots, name, multiset)
+        _addpoint_columns(row, shots, name, multiset)
     return row
 
 
@@ -298,7 +323,7 @@ def shot_data_movement_rows(measurements: list) -> list:
         counted = measurement.data_movement
         if counted is None:
             continue
-        point = _measured_point(measurement)
+        point = measured_point(measurement)
         for path in _paths_counted(counted):
             row = _shot_movement_row(point, measurement, counted, path)
             rows.append(row)
@@ -333,7 +358,7 @@ def shot_link_rows(measurements: list) -> list:
     """
     rows = []
     for measurement in measurements:
-        point = _measured_point(measurement)
+        point = measured_point(measurement)
         for path in sorted(measurement.link_totals):
             row = _shot_link_row(point, measurement, path)
             rows.append(row)
@@ -536,7 +561,7 @@ def _counts_of_samples(measurements: list) -> dict:
     """(point, latency point) -> value -> how many windows carried it."""
     counts = {}
     for measurement in measurements:
-        point = _measured_point(measurement)
+        point = measured_point(measurement)
         for name, values in measurement.samples.items():
             at_this_name = counts.setdefault((point, name), {})
             _count_the_values(at_this_name, values)
@@ -576,7 +601,7 @@ def _rows_of_counts(counts: dict) -> list:
 def _rows_of_one_multiset(key: tuple, multiset: dict) -> list:
     """One latency point's counts at one sweep point, by rising value."""
     point, name = key
-    columns = _point_columns(point)
+    columns = point_columns(point)
     rows = []
     for value in sorted(multiset):
         row = dict(columns)
@@ -788,32 +813,11 @@ def _rows_at_point(rows: list, point: tuple) -> list:
     return group
 
 
-def _measured_point(measurement) -> tuple:
-    """The sweep point one measured shot belongs to."""
-    return (
-        measurement.distance,
-        measurement.physical_error_probability,
-        measurement.algorithm,
-        measurement.round_period_us,
-    )
-
-
-def _point_columns(point: tuple) -> dict:
-    """The four columns that name a sweep point."""
-    distance, physical_error_probability, algorithm, round_period_us = point
-    return {
-        "distance": distance,
-        "physical_error_probability": physical_error_probability,
-        "algorithm": algorithm,
-        "round_period_us": round_period_us,
-    }
-
-
 def _scalar_fields(measurement) -> dict:
     """The measurement's own fields, the per-window collections left out."""
     row = {}
     for name in measurement.__dataclass_fields__:
-        if name in BULKY_FIELDS:
+        if name in NON_COLUMN_FIELDS:
             continue
         row[name] = getattr(measurement, name)
     return row
@@ -821,7 +825,7 @@ def _scalar_fields(measurement) -> dict:
 
 def _shot_link_row(point: tuple, measurement, path: str) -> dict:
     """One shot's ledger counters on one link."""
-    row = _point_columns(point)
+    row = point_columns(point)
     row["seed"] = measurement.seed
     row["link"] = path
     counters = measurement.link_totals[path]
@@ -875,7 +879,7 @@ def _max_of(rows: list, field: str):
     return max(values)
 
 
-def _add_point_columns(
+def _addpoint_columns(
     row: dict, shots: list, name: str, multiset: dict
 ) -> None:
     """One latency point's mean, median, p99 and max columns.
@@ -936,7 +940,7 @@ def _link_row(point: tuple, shot_links: list, path: str) -> dict:
     bits_per_transfer = 0.0
     if transfers:
         bits_per_transfer = payload_bits / transfers
-    row = _point_columns(point)
+    row = point_columns(point)
     row["link"] = path
     row["transfers_per_shot"] = transfers
     row["payload_bits_per_shot"] = payload_bits
@@ -964,7 +968,7 @@ def _shot_movement_row(
     point: tuple, measurement, counted: dict, path: str
 ) -> dict:
     """One shot's copies and moves on one path, plus its own references."""
-    row = _point_columns(point)
+    row = point_columns(point)
     row["seed"] = measurement.seed
     row["path"] = path
     copied = counted["copies_by_path"].get(path)
@@ -1039,7 +1043,7 @@ def _movement_row(
     point: tuple, grouping: str, name: str, rows: list, seeds: list
 ) -> dict:
     """One point's mean over shots for one path or one memory class."""
-    row = _point_columns(point)
+    row = point_columns(point)
     row["grouping"] = grouping
     row["name"] = name
     shots = len(seeds)

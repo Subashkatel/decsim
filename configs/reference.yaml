@@ -622,7 +622,11 @@ observation:                       # what a run records beyond its results
                                    # point, growing with the rounds and windows a shot
                                    # has. `decsim collect` draws timeline.png from it,
                                    # and `decsim trace follow` reads one round's or
-                                   # window's path out of it
+                                   # window's path out of it. `decsim collect` also
+                                   # reads the traced shots back into residence.csv:
+                                   # how long a round or window sat in each store and
+                                   # unit memory, and how long a move waited on each
+                                   # link path
   trace_shots: [0]                 # the shots the trace is written for; a sweep point
                                    # of 2000 shots writes one file, not 2000
   record_switching_windows: false  # true keeps every decode request and service record

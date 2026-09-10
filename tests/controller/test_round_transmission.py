@@ -173,7 +173,6 @@ def test_a_priced_hop_publishes_at_delivery_and_stamps_the_store():
         engine, profile
     )
     first = packed(1)
-    store.accept_packed_round(first.packet, publication_tick=None)
 
     transmitter.send(first)
     engine.run()
@@ -192,7 +191,6 @@ def test_a_memory_round_tells_the_windows_at_delivery_and_frees_its_slot():
         engine, profile
     )
     memory_round = packed(1, route=MEMORY_ROUTE)
-    store.accept_packed_round(memory_round.packet, publication_tick=None)
 
     transmitter.send(memory_round)
     engine.run()
@@ -213,7 +211,6 @@ def test_memory_rounds_pipeline_onto_the_link_without_a_landing_wait():
     second = packed(2, route=MEMORY_ROUTE)
 
     def send(memory_round):
-        store.accept_packed_round(memory_round.packet, publication_tick=None)
         transmitter.send(memory_round)
 
     engine.schedule(0, lambda: send(first))
@@ -259,7 +256,6 @@ def test_two_routes_take_one_wire_in_the_order_they_reach_it(
     window_round = packed(2, wire_bits=ROUND_BITS)
 
     def send(finished):
-        store.accept_packed_round(finished.packet, publication_tick=None)
         transmitter.send(finished)
 
     engine.schedule(0, lambda: send(window_round))

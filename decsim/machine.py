@@ -90,6 +90,7 @@ import decsim.qpu.cycle_clock as cycle_clock
 import decsim.records.results as result_records
 import decsim.seeding as seeding
 import decsim.settings as machine_settings
+import decsim.syndrome_buffer.round_input as round_input_module
 import decsim.syndrome_buffer.round_store as round_store_module
 import decsim.syndrome_buffer.strong_round_writer as strong_round_writer_module
 import decsim.tables as tables
@@ -112,6 +113,7 @@ class Machine:
     links: fabric.LinkFabric
     conditional_release: conditional_release_module.ConditionalRelease
     round_store: round_store_module.RoundStore
+    store_input: round_input_module.RoundStoreInput
     strong_round_store: Optional[round_store_module.RoundStore]
     strong_round_writer: Optional[strong_round_writer_module.StrongRoundWriter]
     pauli_frame: Optional[pauli_frame_module.PauliFrame]
@@ -221,7 +223,7 @@ class Machine:
         round_writer = round_writes.RoundWriter(
             engine,
             links,
-            round_store,
+            store_input,
             strong_round_writer,
             publishes_from_strong_store=publishes_from_strong_store,
             held_rounds=held_rounds,
@@ -329,7 +331,6 @@ class Machine:
             idle_rounds=idle_rounds,
             assembler=assembler,
             held_rounds=held_rounds,
-            round_writer=round_writer,
             transmitter=transmitter,
             store_input=store_input,
             instruction_output=instruction_output,
@@ -357,6 +358,7 @@ class Machine:
             links=links,
             conditional_release=conditional_release,
             round_store=round_store,
+            store_input=store_input,
             strong_round_store=strong_round_store,
             strong_round_writer=strong_round_writer,
             pauli_frame=pauli_frame,
@@ -391,6 +393,7 @@ class Machine:
         self.assembler.check_settled()
         self.round_writer.check_settled()
         self.transmitter.check_settled()
+        self.store_input.check_settled()
         if self.strong_round_writer is not None:
             self.strong_round_writer.check_settled()
         return _capture_result(self)

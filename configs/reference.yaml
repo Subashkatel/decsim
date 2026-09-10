@@ -406,8 +406,10 @@ round_store:                       # Buffer 0, the upstream round store
 strong_round_store:                # syndrome buffer 1, the strong-side store
                                    # (exists only when the escalation uses it)
   kind: round_store
-  rounds: null                     # capacity in rounds; overflow is a hard
-                                   # error. null = unbounded
+  rounds: null                     # capacity in rounds. When it is full the
+                                   # controller holds the finished round, the
+                                   # same waiting line Buffer 0 uses, and it
+                                   # enters once a slot frees. null = unbounded
 
 # The two decoder tiers are two distinct units (Toshio 2510.25222:
 # lightweight decoders decode constantly, a separate accurate decoder is

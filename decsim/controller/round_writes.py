@@ -1,16 +1,23 @@
 """The writer: a finished round into every store it must reach, or held.
 
-The backpressure law of the readout path: a store answers has_room before
-any write; a finished round that finds no room in either store waits in
-HeldRounds, upstream of the stores, and enters when a slot frees, in the
-order the rounds were completed. gem5's blocked port keeps the request at
-the requester and re-sends it when clearBlocked schedules the retry
-(src/mem/cache/base.cc, setBlocked, clearBlocked, processSendRetry);
-Ciw's Type I blocking keeps the customer at the upstream node and
-releases the longest blocked one when the destination has capacity
-(ciw/node.py, block_individual, release_blocked_individual). Nothing is
-reordered; under the stall policy nothing is dropped. The written round
-leaves on its route at the write (RoundTransmitter).
+The backpressure law of the readout path: each store's own end answers
+has_room before any round leaves for it, counting the rounds it holds
+and the writes it has in flight, and the room is reserved before the
+wire is used (gem5's queue counts its reserved entries as taken,
+tmp/resources/gem5/src/mem/cache/queue.hh:150-153 isFull, the reserve at
+:87-93; Ruby sums the same two counts, MessageBuffer.cc:181). A finished
+round that finds no room in either store waits in HeldRounds, upstream
+of the stores, and enters when a slot frees, in the order the rounds
+were completed. gem5's blocked port keeps the request at the requester
+and re-sends it when clearBlocked schedules the retry
+(src/mem/cache/base.cc:255-257 setBlocked when the write buffer fills,
+:266-271 clearBlocked when it drains, processSendRetry); Ciw's Type I
+blocking keeps the customer at the upstream node and releases the
+longest blocked one when the destination has capacity
+(tmp/resources/l5_buffers/Ciw/ciw/node.py:470-473, block_individual,
+release_blocked_individual). Nothing is reordered; under the stall
+policy nothing is dropped. The written round leaves on its route at the
+write (RoundTransmitter) and takes its slot where it lands.
 """
 
 import dataclasses
@@ -18,7 +25,6 @@ import functools
 from typing import Callable
 
 import decsim.controller.settings as controller_settings
-import decsim.records.log_sources as log_sources
 import decsim.records.rounds as round_records
 import decsim.records.transfers as transfer_records
 import decsim.trace_source as trace_source
@@ -95,20 +101,19 @@ class HeldRounds:
 
 
 class RoundWriter:
-    """Writes a finished round into Buffer 0 and the strong store, or holds.
+    """Sends a finished round to Buffer 0 and the strong store, or holds it.
 
-    Trace source: copy_made(round_key, bits, "controller assembler",
-    "Buffer 0") for the write (data_path.md hop 3). It narrates Buffer
-    0's intake on the engine's io_line; the publication is Buffer 0's
-    own, at the round's landing there
-    (syndrome_buffer/round_input.py).
+    It reserves the room each store's own end answers for and hands the
+    round to the sends; the slot, the copy and the intake line are the
+    receiving end's, at the round's landing there
+    (syndrome_buffer/round_input.py, syndrome_buffer/strong_round_writer.py).
     """
 
     def __init__(
         self,
         engine,
         link,
-        weak_store,
+        weak_input,
         strong_writer,
         *,
         publishes_from_strong_store: bool,
@@ -118,7 +123,8 @@ class RoundWriter:
         self.engine = engine
         # the controller's own fabric: it executes the crossing to Buffer 1
         self.link = link
-        self.weak_store = weak_store
+        # Buffer 0's own end: its room, and the landing that takes the slot
+        self.weak_input = weak_input
         self.strong_writer = strong_writer
         # a strong-primary plan reads its windows from the room side, so a
         # window-input round takes one hop, into the strong store; a
@@ -126,7 +132,6 @@ class RoundWriter:
         self.publishes_from_strong_store = publishes_from_strong_store
         self.held_rounds = held_rounds
         self.transmitter = transmitter
-        self.trace = _RoundWriterTraceSources()
 
     def admit(self, packed: round_records.PackedRound) -> bool:
         """Write the round where it belongs; False when it had to wait."""
@@ -135,25 +140,13 @@ class RoundWriter:
                 return self.held_rounds.refuse(packed, self.admit)
             self._write_strong(packed)
             return True
-        if not self.weak_store.has_room():
+        if not self.weak_input.has_room():
             return self.held_rounds.refuse(packed, self.admit)
         if not self._strong_has_room():
             return self.held_rounds.refuse(packed, self.admit)
-        # the round is published when its controller_to_weak_buffer
-        # transfer lands, where Buffer 0's own incoming port stamps it
-        self.weak_store.accept_packed_round(
-            packed.packet, publication_tick=None
-        )
-        self.trace.copy_made.fire(
-            packed.round_key,
-            packed.wire_bits,
-            "controller assembler",
-            log_sources.WEAK_BUFFER,
-        )
-        self.engine.log_io(
-            log_sources.WEAK_BUFFER,
-            lambda: _received_text(packed.packet, self.weak_store),
-        )
+        # the round takes its Buffer 0 slot when its bits are there: the
+        # room is reserved here, and the landing stores and publishes it
+        self.weak_input.reserve_write()
         if self.strong_writer is not None:
             # the dual write: the same round leaves for the room side in
             # parallel with its Buffer 0 publication
@@ -212,17 +205,6 @@ class RoundWriter:
         self.strong_writer.receive_round(packed.packet, packed.wire_bits)
 
 
-def _received_text(
-    packet: round_records.SyndromeRoundPacket, weak_store
-) -> str:
-    defects = packet.defects_text()
-    holds = weak_store.held_rounds_description()
-    return (
-        f"received round {packet.round_index} of "
-        f"op {packet.operation_id} from packing; {defects}; holds {holds}"
-    )
-
-
 @dataclasses.dataclass(frozen=True)
 class _HeldRoundsTraceSources:
     """Every event the held rounds reports, as one member.
@@ -234,16 +216,3 @@ class _HeldRoundsTraceSources:
     """
 
     round_event: trace_source.TraceSource = trace_source.new_source()
-
-
-@dataclasses.dataclass(frozen=True)
-class _RoundWriterTraceSources:
-    """Every event the round writer reports, as one member.
-
-    gem5 groups a component's statistics into one nested Group member
-    (tmp/resources/gem5/src/base/stats/group.hh:60-92) rather than one
-    member per counter; a component's events are the same shape, so a
-    listener reaches all of them through one name.
-    """
-
-    copy_made: trace_source.TraceSource = trace_source.new_source()

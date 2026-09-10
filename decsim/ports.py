@@ -50,12 +50,17 @@ class ReadoutReceiver(Protocol):
 
 @runtime_checkable
 class RoundStore(Protocol):
-    """The upstream round store (Buffer 0), as syndrome packing sees it.
+    """The upstream round store (Buffer 0), as its own incoming port sees it.
 
-    Table row: round_store. The writer asks has_room before every
-    write (gem5's queue answers isFull, then allocates); a packed round
-    is written once and kept until every consumer releases it. A store
-    never refuses a write: a round that finds no room waits upstream.
+    Table row: round_store. A round occupies a slot when its bits are in
+    the store, which is at the landing of the hop that carried them, and
+    it is readable at that same instant: the store and the publication
+    are one call at one tick. The end that takes the landing asks
+    has_room first, counting the writes it has in flight (gem5's queue
+    answers isFull with its reserved entries taken,
+    src/mem/cache/queue.hh:150-153, :87-93); a packed round is written
+    once and kept until every consumer releases it. A store never
+    refuses a write: a round that finds no room waits upstream.
     """
 
     def has_room(self) -> bool:
@@ -67,15 +72,10 @@ class RoundStore(Protocol):
         *,
         publication_tick: Optional[int],
     ) -> None:
-        """Keep one finished round; the writer asked has_room first."""
+        """Keep one landed round, readable at that tick; None publishes none."""
 
     def release_round(self, round_key: tuple) -> None:
         """Free the round; its consumers are done with it."""
-
-    def mark_publication_tick(
-        self, round_key: tuple, publication_tick: int
-    ) -> None:
-        """The round became readable now; it was written before that."""
 
     def capacity_rounds(self) -> Optional[int]:
         """The slots this store is bounded to, or None for unbounded.
@@ -178,17 +178,25 @@ class StrongRoundStore(Protocol):
 
 @runtime_checkable
 class RoundStoreInput(Protocol):
-    """A round store's incoming port, as the controller's transmitter sees it.
+    """A round store's incoming port, as the controller sees it.
 
-    The transfer that carries a round to the store lands here, and this
-    end handles the landing: it stamps the store's record and announces
-    the published round to whoever waits on it. The same port takes the
-    controller's ask for a timing-only round, which leaves by the
-    store's own outgoing port.
+    This end owns the store's room and its landing. It answers has_room
+    against the rounds stored and the writes still in flight, the writer
+    reserves that room before the round leaves, and the transfer that
+    carries the round lands here: this end stores it, which is the tick
+    it becomes readable, and announces it to whoever waits on it. The
+    same port takes the controller's ask for a timing-only round, which
+    takes its slot here and leaves by the store's own outgoing port.
     """
 
+    def has_room(self) -> bool:
+        """Whether one more round fits: the stored ones and those in flight."""
+
+    def reserve_write(self) -> None:
+        """Take the room one crossing round will need, before it leaves."""
+
     def receive_round(self, packed: round_records.PackedRound) -> None:
-        """Take one round that landed here: publish it, then announce it."""
+        """Take one round that landed here: store it, then announce it."""
 
     def send_memory_round(
         self,

@@ -253,17 +253,21 @@ def test_the_listener_hears_a_stored_round_once():
     assert listener.stored == [(1, 1)]
 
 
-def test_publication_is_stamped_at_delivery_for_a_priced_hop():
+def test_a_round_is_readable_at_the_tick_it_is_stored_and_not_before():
+    """One call, one tick: the bits and the publication arrive together.
+
+    A round with no publication tick is a timing-only round, which no
+    window reads (syndrome_buffer/round_input.py send_memory_round).
+    """
     the_store = store()
     reads = decoding_records.WindowReads((1, 0))
     the_store.register_hold(reads, [(1, 1)])
     first = packet(1)
-    the_store.accept_packed_round(first, publication_tick=None)
+    unstored = the_store.publication_tick((1, 1))
 
-    unpublished = the_store.publication_tick((1, 1))
-    the_store.mark_publication_tick((1, 1), 7)
+    the_store.accept_packed_round(first, publication_tick=7)
 
-    assert unpublished is None
+    assert unstored is None
     assert the_store.publication_tick((1, 1)) == 7
 
 

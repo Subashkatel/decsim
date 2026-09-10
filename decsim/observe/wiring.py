@@ -57,7 +57,6 @@ def observe(
     idle_rounds,
     assembler,
     held_rounds,
-    round_writer,
     transmitter,
     store_input,
     instruction_output,
@@ -107,7 +106,7 @@ def observe(
         qpu=qpu,
         controller=controller,
         assembler=assembler,
-        round_writer=round_writer,
+        store_input=store_input,
         round_store=round_store,
         strong_round_store=strong_round_store,
         strong_round_writer=strong_round_writer,
@@ -229,7 +228,7 @@ def _connect_data_path(
     qpu,
     controller,
     assembler,
-    round_writer,
+    store_input,
     round_store,
     strong_round_store,
     strong_round_writer,
@@ -255,7 +254,7 @@ def _connect_data_path(
         for source in _copy_sources(
             controller,
             assembler,
-            round_writer,
+            store_input,
             strong_round_writer,
             decoder_manager,
             window_manager,
@@ -269,7 +268,7 @@ def _connect_data_path(
     for source in _copy_sources(
         controller,
         assembler,
-        round_writer,
+        store_input,
         strong_round_writer,
         decoder_manager,
         window_manager,
@@ -306,7 +305,7 @@ def _connect_store_counts(
 def _copy_sources(
     controller,
     assembler,
-    round_writer,
+    store_input,
     strong_round_writer,
     decoder_manager,
     window_manager,
@@ -315,7 +314,7 @@ def _copy_sources(
     sources = [
         controller.trace.copy_made,
         assembler.trace.copy_made,
-        round_writer.trace.copy_made,
+        store_input.trace.copy_made,
     ]
     if strong_round_writer is not None:
         sources.append(strong_round_writer.trace.copy_made)

@@ -1,8 +1,9 @@
 # How decsim is written
 
 The rules every line of this package is written to. Every change also
-passes the behavior gate: a frozen set of points whose results and seed
-paths are hashed, so a change that moves a tick or a bit fails loudly.
+passes a behaviour gate the maintainers keep outside this tree: a
+frozen set of runs whose results and logs are hashed, so a change that
+moves a tick or a bit fails loudly.
 
 ## The target
 

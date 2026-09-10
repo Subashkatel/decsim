@@ -65,9 +65,8 @@ DECSIM_PYDEPS=/path/to/decsim/.pydeps tools/check.sh
 python -m pytest tests
 ```
 
-A yaml key is a settings change, not a behaviour change, so the frozen
-gate should be unmoved unless your default is not the old behaviour.
-`docs/reference/frozen_gate.md` says how to run it.
+A yaml key is a settings change, not a behaviour change, so a default
+that keeps the old behaviour moves no result of any existing run.
 
 ## Read next
 

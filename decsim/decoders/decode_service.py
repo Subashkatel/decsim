@@ -457,6 +457,8 @@ class DecodeService:
     ) -> None:
         """Every transfer landed: start now, or wait for the unit's compute."""
         job.input_landed = True
+        if not self._is_boundary_owed(job):
+            self._mark_ready(job)
         self.engine.log_io(
             f"unit {unit.name} SRAM",
             lambda: _landed_description(job, unit),
@@ -474,6 +476,31 @@ class DecodeService:
             self.begin(job)
         # otherwise the compute is busy: the compute offer picks this
         # job up at the next compute end
+
+    def mark_startable(self, window_key: tuple) -> None:
+        """The window's boundary is in: its landed decodes may start now.
+
+        The tick a decode may start is the tick its dependency was met,
+        whether or not a unit is free to run it then. gem5's queue
+        wakes an instruction when its operands arrive (inst_queue.cc
+        wakeDependents at 1074, addIfReady at 1536-1562) and counts the
+        wait for a functional unit apart from it (NoFreeFU and fuBusy,
+        inst_queue.cc:1009-1014).
+        """
+        for job in self.resident_jobs():
+            if (job.operation_id, job.window_id) != window_key:
+                continue
+            if not job.input_landed:
+                continue
+            if self._is_boundary_owed(job):
+                continue
+            self._mark_ready(job)
+
+    def _mark_ready(self, job: decoding_records.DecodeJob) -> None:
+        """Stamp the first tick this decode may compute, and only the first."""
+        if job.ready_ticks is not None:
+            return
+        job.ready_ticks = self.engine.now
 
     def _is_boundary_owed(self, job: decoding_records.DecodeJob) -> bool:
         if job.gate is None:

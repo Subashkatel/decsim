@@ -7,9 +7,11 @@ distance 3, and sliding windows that commit 3 rounds and buffer 3. The
 chain is the one Skoric et al. 2209.08552 describe: each window's decode
 takes its own time (tau_W, lines 429-435) and waits for the seam before
 it starts (the artificial defects of the block before it, lines
-268-275). The two must not be one number, so the tests read service and
-dep_block apart and check that the points of one window still sum to
-the window's whole reaction time.
+268-275). The two must not be one number, so the tests read service and the park
+apart, and the park itself is two points by cause: dep_block until the
+boundary it waits for is in, compute_wait until the unit's compute is
+free. The points of one window still sum to the window's whole reaction
+time.
 
 The two-tier config gives every hop of the strong path a card of its
 own, so a point's value names the wire it was read from: the strong
@@ -71,6 +73,7 @@ CHAIN = (
     "weak_attempt",
     "input_link_per_window",
     "dep_block",
+    "compute_wait",
     "service",
     "output_link_per_window",
     "frame_commit",
@@ -267,12 +270,16 @@ def test_service_is_the_compute_and_the_park_is_its_own_point(tmp_path):
     waited. What grows with the backlog is the wait: the ready-queue
     wait before a unit takes the job, and the park after the input has
     landed, which holds until the window before it hands over its
-    boundary 0.004 us after its own decode ends.
+    boundary 0.004 us after its own decode ends. That park is all
+    dependency: the one unit ended the predecessor's decode before it
+    handed the boundary over, so its compute was already free when the
+    window became startable and compute_wait is zero on every window.
     """
     measurement = slow_unit_shot(tmp_path, 1)
 
     samples = measurement.samples
     assert samples["service"] == [5.064] * 9
+    assert samples["compute_wait"] == [0.0] * 9
     assert samples["dep_block"] == [
         0.0,
         2.068,
@@ -346,6 +353,13 @@ def test_a_second_unit_moves_the_wait_and_leaves_service_alone(tmp_path):
     does not move. What moves is where the wait is booked: the second
     unit takes each window as it arrives, so the ready-queue wait almost
     disappears and the same microseconds appear in the park instead.
+    They appear in the dependency half of it and not in the structural
+    half: the boundary a window waits for leaves after its
+    predecessor's decode has ended, and by then the unit holding the
+    window is idle, so compute_wait stays zero however many units the
+    pool has. The two halves trade places where two decodes of one
+    window share a unit, which is the forced-class pair of
+    test_a_kept_weak_result_is_measured_on_the_weak_hops.
     """
     one_unit = slow_unit_shot(tmp_path, 1)
     two_units = slow_unit_shot(tmp_path, 2)
@@ -357,6 +371,7 @@ def test_a_second_unit_moves_the_wait_and_leaves_service_alone(tmp_path):
         == one_unit.samples["buffer0_ready_to_frame"]
     )
     assert two_units.samples["queue_wait"] == [0.0] * 8 + [1.340]
+    assert two_units.samples["compute_wait"] == [0.0] * 9
     assert two_units.samples["dep_block"] == [
         0.0,
         2.068,
@@ -394,6 +409,7 @@ def test_an_escalated_window_is_measured_on_the_strong_tiers_own_hops(
     assert samples["output_link_per_window"] == [0.012] * 10
     assert samples["escalation_link_per_window"] == [0.020] * 10
     assert samples["dep_block"] == [0.012] * 10
+    assert samples["compute_wait"] == [0.0] * 10
     assert samples["algorithm"] == [10.0] * 10
     assert samples["weak_attempt"][2] == 13.308
 
@@ -423,12 +439,22 @@ def test_a_kept_weak_result_is_measured_on_the_weak_hops(tmp_path):
     had already brought into the unit's memory, so that decode crossed
     no link at all and its own hop is zero. The window's rounds still
     crossed once, and shot_links.csv still counts that crossing.
+
+    Window 3 is where the park's two halves trade places. Its decode
+    was dispatched with its sibling and waited 0.004 us for the input
+    the sibling's transfer brought, which is the dependency it had, and
+    then 1.064 us more for the unit's compute to finish that sibling's
+    solve, which is the structural wait gem5 counts as fuBusy. Window 9
+    is the plain case beside it: 1.064 us of dependency wait and no
+    structural wait at all.
     """
     measurement = switching_shot(tmp_path, -1000000.0)
 
     samples = measurement.samples
     weak_hops = [0.004] * 3 + [0.0] + [0.004] * 6
     assert samples["input_link_per_window"] == weak_hops
+    assert samples["dep_block"] == [0.0] * 3 + [0.004] + [0.0] * 5 + [1.064]
+    assert samples["compute_wait"] == [0.0] * 3 + [1.064] + [0.0] * 6
     assert samples["output_link_per_window"] == [0.004] * 10
     assert samples["escalation_link_per_window"] == [0.0] * 10
     assert samples["weak_attempt"] == [0.0] * 10

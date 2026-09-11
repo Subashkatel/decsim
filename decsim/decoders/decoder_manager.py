@@ -216,6 +216,7 @@ class DecoderManager:
 
         A job still in transfer passes the gate at its own landing instead.
         """
+        self.service.mark_startable(window_key)
         for job in self.service.parked_jobs():
             key = (job.operation_id, job.window_id)
             if key != window_key:

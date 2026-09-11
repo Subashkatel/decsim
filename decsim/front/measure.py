@@ -43,12 +43,16 @@ POINTS = (
     "csb_stall_per_round",
     # the window's first round readable -> its last (waiting on the QPU)
     "buffer_fill",
-    # the committing decode's input landed in its unit's memory -> its
-    # compute started: the park for the predecessor's boundary, for the
-    # escalation message beside the input hop, and for the unit's
-    # compute. An input the decode found already there starts this at
-    # the tick a unit took the decode instead
+    # the committing decode's input landed in its unit's memory -> the
+    # first tick it may compute: the dependency wait, for the
+    # predecessor's boundary and for the escalation message beside the
+    # input hop, and zero when nothing was owed at the landing. An input
+    # the decode found already there starts this at the tick a unit took
+    # the decode instead
     "dep_block",
+    # that first startable tick -> the compute started: the wait for the
+    # unit's own compute, busy with another decode (gem5's fuBusy)
+    "compute_wait",
     # the job entered the decode queue -> a unit took the window's first
     # decode
     "queue_wait",
@@ -348,16 +352,24 @@ def window_points_us(
 
     The decode's own time and the time it waited are two points, not
     one: a window's service is what its compute took on the unit, and
-    the park before that compute (for the predecessor's boundary and
-    for the unit's compute to free) is dep_block. Skoric et al.
-    2209.08552 keep the same two apart, tau_W the window's decoding
-    time against which the backlog condition is read (2209.08552.txt
-    lines 429-435) and tau_0 the time to send a window to a worker and
-    start it (lines 1004-1008); gem5's functional-unit pool marks a
-    unit busy at issue and frees it one operation latency later
-    (tmp/resources/gem5/src/cpu/o3/fu_pool.cc:165-190,
-    src/cpu/o3/inst_queue.cc:911-971), so work that is not ready waits
-    in the queue and no unit counts it.
+    the park before that compute is two points by cause. dep_block is
+    the dependency wait, from the input landing in the unit's memory to
+    the first tick the decode may start, which is where the
+    predecessor's boundary arrived and is the landing itself when
+    nothing was owed. compute_wait is the rest, from that tick to the
+    compute starting, which is the unit's own compute busy with another
+    decode. Skoric et al. 2209.08552 keep decode and wait apart, tau_W
+    the window's decoding time against which the backlog condition is
+    read (2209.08552.txt lines 429-435) and tau_0 the time to send a
+    window to a worker and start it (lines 1004-1008); gem5 keeps the
+    two waits apart, an instruction reaching the ready list only when
+    its operands are there (inst_queue.cc addIfReady 1536-1562,
+    wakeDependents 1074) and a ready instruction that finds no
+    functional unit counted on its own (NoFreeFU and statFuBusy,
+    inst_queue.cc:1009-1014, the stats at 306-316); and Ciw's per
+    customer record keeps the whole pre-service wait as named parts
+    rather than one number (tmp/resources/l5_buffers/Ciw/
+    ciw/data_record.py lines 3-21).
     """
     window_id = window.key[1]
     last_emitted_round = max(qpu_send)
@@ -371,14 +383,16 @@ def window_points_us(
     attempt_end = _attempt_end_ticks(window, decode, first_dispatch)
     input_key = (input_path, window_id, decode.run_sequence)
     input_ticks, input_landed = input_hop.get(input_key, (0, attempt_end))
+    startable = _startable_ticks(decode, input_landed)
     last_required_send = qpu_send[last_required_round]
     first_required_send = qpu_send[window.start_round]
     return {
         "buffer_fill": _span_microseconds(
             window.t_data_complete, window.t_first_round
         ),
-        "dep_block": _span_microseconds(
-            decode.compute_start_ticks, input_landed
+        "dep_block": _span_microseconds(startable, input_landed),
+        "compute_wait": _span_microseconds(
+            decode.compute_start_ticks, startable
         ),
         "queue_wait": _span_microseconds(first_dispatch, window.t_queued),
         "input_link_per_window": ticks_to_microseconds(input_ticks),
@@ -638,6 +652,7 @@ class _CommittedDecode:
     compute_start_ticks: int
     done_ticks: int
     dispatch_ticks: int  # a unit took this decode
+    ready_ticks: Optional[int]  # it first may compute, whatever the unit did
     run_sequence: int  # the run ordinal of the request it committed
 
 
@@ -760,8 +775,9 @@ def _committed_decode(stages, frame_record) -> _CommittedDecode:
     first = min(starts)
     last = max(ends)
     dispatch = _dispatch_ticks(records, first)
+    ready = _ready_ticks(records)
     run_sequence = frame_record.run_sequence
-    return _CommittedDecode(tier, first, last, dispatch, run_sequence)
+    return _CommittedDecode(tier, first, last, dispatch, ready, run_sequence)
 
 
 def _dispatch_ticks(records: list, fallback: int) -> int:
@@ -777,6 +793,23 @@ def _dispatch_ticks(records: list, fallback: int) -> int:
             ticks.append(record.dispatch_ticks)
     if not ticks:
         return fallback
+    return min(ticks)
+
+
+def _ready_ticks(records: list):
+    """The tick this decode first may compute, off its own stage records.
+
+    The dependency it waited for was met then, and what it waited for
+    after it is the unit's compute. A decoder that records none (a
+    backend firing its own stages without it) leaves it unknown and the
+    points read the whole park as the dependency wait.
+    """
+    ticks = []
+    for record in records:
+        if record.ready_ticks is not None:
+            ticks.append(record.ready_ticks)
+    if not ticks:
+        return None
     return min(ticks)
 
 
@@ -827,6 +860,21 @@ def _committing_stage_records(
         if run_sequence in record.run_sequences:
             records.append(record)
     return records
+
+
+def _startable_ticks(decode: _CommittedDecode, input_landed: int) -> int:
+    """Where the dependency wait ends and the wait for the compute begins.
+
+    The decode's own stamp, held inside the park the two points divide:
+    never before its input was readable in the unit's memory, never
+    after its compute began. A decode that recorded no such tick reads
+    the whole park as its dependency wait.
+    """
+    ready = decode.ready_ticks
+    if ready is None:
+        return decode.compute_start_ticks
+    ready = max(ready, input_landed)
+    return min(ready, decode.compute_start_ticks)
 
 
 def _attempt_end_ticks(window, decode: _CommittedDecode, first_dispatch) -> int:

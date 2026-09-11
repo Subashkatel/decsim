@@ -383,6 +383,58 @@ RDMA write, the round trip read from the engine's own timer.
 holds the split, the exact escalation sum, the unchanged remainder of the
 card, the four Backline citations and both rows running from a yaml.
 
+## D15. The park before a decode is two points, by what it waited for
+
+**Decided.** `dep_block` keeps its name and means the dependency wait
+only: from the committing decode's input landing in its unit's memory,
+or from the tick a unit took it when the input was already there, to the
+first tick that decode may compute, which is where its window's last
+boundary arrived and is the landing itself when nothing was owed. The
+rest of the park, from that tick to the compute starting, is its own
+point, `compute_wait`: the unit's compute was busy with another decode.
+The tick that divides them is stamped per decode where the decode
+becomes startable, on the job and on its stage records beside the
+dispatch tick, so a window decoded more than once divides each decode's
+own park. The identity gains the new point and still closes to the tick.
+
+**Why.** One number for both hides the two answers a reader of a sweep
+wants apart. A dependency wait is the windowing's doing and shrinks by
+changing the geometry or the boundary policy; a wait on a busy unit is
+the machine's doing and shrinks by adding units. Reported as one park,
+a run with a long dependency chain and a run with too few units look
+the same, and the second unit that fixes one of them moves the number
+in a way nothing explains. The name stays `dep_block` because that is
+what it now means exactly; renaming a column that keeps its meaning
+would break every recorded sweep for nothing. `compute_wait` is a new
+name and takes the tree's own word for the resource: the units claim,
+release and free their `compute`.
+
+**Sources.** gem5's instruction queue keeps the two waits apart. An
+instruction reaches the ready list only when its operands are there
+(`src/cpu/o3/inst_queue.cc:1536-1562`, `addIfReady`, woken by
+`wakeDependents` at `:1074`), and a ready instruction that finds no
+functional unit is counted on its own line
+(`src/cpu/o3/inst_queue.cc:1009-1014`, `FUPool::NoFreeFU` into
+`statFuBusy` and `fuBusy`, the stats declared at `:306-316`). Bombin et
+al. arXiv:2303.04846 names the first wait as the decoder's data
+dependency: a decoder unit "needs to wait for said outcomes to be
+available before it can begin solving its task" (lines 932-934), and
+modules "lay idle waiting for other modules to complete their tasks
+which are needed for input boundary conditions" (lines 1346-1349). Ciw's
+per-customer record keeps `waiting_time` apart from `service_time` and
+from `time_blocked` (`ciw/data_record.py:3-21`), so the whole
+pre-service wait is a sum of named parts and never one number.
+
+**Where to see it.** `POINTS` and `window_points_us` in
+`decsim/front/measure.py`, the ready tick stamped in
+`decsim/decoders/decode_service.py` (`mark_startable`, and the landing
+itself when no boundary is owed), carried on `decsim/records/decoding.py`
+and on the stage record in `decsim/decoders/staged_decoder.py`, the two
+rows in [The run folder](../reference/run_folder.md), and
+`tests/front/test_measure.py`, which holds the one-unit run where the
+whole park is dependency and the forced-class pair where the two trade
+places.
+
 ## What is not modelled yet
 
 These are open, recorded rather than hidden, so that a reader does not

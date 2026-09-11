@@ -1,9 +1,8 @@
 """The latency points of one shot, against a hand derivation of its run.
 
-Every number here is arithmetic over the declared cards of the config
-below: a 250 MHz fabric whose every hop is one cycle (0.004 us), a weak
-unit whose fetch is one cycle per round, whose algorithm is 5.0 us and
-whose release is ten cycles (0.040 us), 30 one-microsecond rounds at
+Every number here is arithmetic over the declared cards of the configs
+below: a 250 MHz fabric, a weak unit whose fetch is one cycle per round
+and whose release is ten cycles (0.040 us), 30 one-microsecond rounds at
 distance 3, and sliding windows that commit 3 rounds and buffer 3. The
 chain is the one Skoric et al. 2209.08552 describe: each window's decode
 takes its own time (tau_W, lines 429-435) and waits for the seam before
@@ -11,6 +10,13 @@ it starts (the artificial defects of the block before it, lines
 268-275). The two must not be one number, so the tests read service and
 dep_block apart and check that the points of one window still sum to
 the window's whole reaction time.
+
+The two-tier config gives every hop of the strong path a card of its
+own, so a point's value names the wire it was read from: the strong
+store's hop is two cycles, the escalation hop five and the strong
+decoder's way home three, against one cycle everywhere on the weak
+path. Escalating every window or none is the threshold's doing, which
+is Toshio et al. 2510.25222 Sec. III A step 3 driven to its two ends.
 """
 
 import yaml
@@ -56,12 +62,38 @@ ONE_TIER_LINKS = {
 # in Buffer 0 and its correction being committed in the frame
 CHAIN = (
     "queue_wait",
+    "weak_attempt",
     "input_link_per_window",
     "dep_block",
     "service",
     "output_link_per_window",
     "frame_commit",
 )
+
+
+def fridge_hop(cycles: int) -> dict:
+    """One link card of that many cycles of the 250 MHz fridge clock."""
+    return {
+        "latency_cycles": cycles,
+        "clock": "fridge",
+        "bits_per_cycle": None,
+    }
+
+
+# the two-tier fabric, every strong hop on a card of its own
+TWO_TIER_LINKS = {
+    "qpu_to_controller": fridge_hop(1),
+    "controller_to_weak_buffer": fridge_hop(1),
+    "controller_to_strong_buffer": fridge_hop(1),
+    "weak_buffer_to_weak_decoder": fridge_hop(1),
+    "strong_buffer_to_strong_decoder": fridge_hop(2),
+    "weak_decoder_to_strong_decoder": fridge_hop(5),
+    "decoder_to_decoder": fridge_hop(1),
+    "weak_decoder_to_frame": fridge_hop(1),
+    "strong_decoder_to_frame": fridge_hop(3),
+    "frame_to_controller": None,
+    "controller_to_qpu": None,
+}
 
 
 def slow_unit_shot(tmp_path, units: int):
@@ -88,6 +120,55 @@ def slow_unit_shot(tmp_path, units: int):
     return measure_point_shot(
         config,
         physical_error_probability=0.001,
+        distance=3,
+        round_period_us=1.0,
+        seed=0,
+    )
+
+
+def switching_shot(tmp_path, gap_threshold_db: float):
+    """One shot of a 1.0 us weak tier that escalates to a 10.0 us one.
+
+    A threshold far above every gap escalates every window and one far
+    below escalates none, so the same two cards answer both branches.
+    """
+    raw = dict(MINIMAL_CONFIG)
+    workload = dict(MINIMAL_CONFIG["workload"])
+    workload["rounds_per_shot"] = 30
+    raw["workload"] = workload
+    raw["links"] = TWO_TIER_LINKS
+    raw["escalation"] = {
+        "kind": "switching",
+        "gap_threshold_db": gap_threshold_db,
+        "strong_window": "two_sided_context",
+    }
+    raw["weak_decoder"] = {
+        "kind": 1.0,
+        "units": 1,
+        "unit_memory_rounds": None,
+        "engine": {
+            "clock": "fridge",
+            "fetch_cycles_per_round": 1,
+            "release_cycles_per_job": 10,
+        },
+    }
+    raw["strong_decoder"] = {
+        "kind": 10.0,
+        "units": 1,
+        "unit_memory_rounds": None,
+        "engine": {
+            "clock": "fridge",
+            "fetch_cycles_per_round": 1,
+            "release_cycles_per_job": 10,
+        },
+    }
+    config_path = tmp_path / "switching.yaml"
+    config_text = yaml.safe_dump(raw)
+    config_path.write_text(config_text)
+    config = experiment.load_experiment(config_path)
+    return measure_point_shot(
+        config,
+        physical_error_probability=0.008,
         distance=3,
         round_period_us=1.0,
         seed=0,
@@ -231,3 +312,58 @@ def test_a_second_unit_moves_the_wait_and_leaves_service_alone(tmp_path):
         14.476,
         15.204,
     ]
+
+
+def test_an_escalated_window_is_measured_on_the_strong_tiers_own_hops(
+    tmp_path,
+):
+    """Every window escalates: the points are the strong decode's.
+
+    The result the frame committed crossed the strong store's hop in
+    (0.008 us) and the strong decoder's hop home (0.012 us), and the
+    decode it describes is the 10.0 us one. The weak decode that did not
+    commit is the weak_attempt point, and the escalation hop that
+    carried the selection to the strong tier (0.020 us) is its own
+    point: it runs beside the strong input hop, so what it costs the
+    decode is the 0.012 us the input waited for it, which is dep_block.
+    """
+    measurement = switching_shot(tmp_path, 1000000.0)
+
+    samples = measurement.samples
+    assert samples["input_link_per_window"] == [0.008] * 10
+    assert samples["output_link_per_window"] == [0.012] * 10
+    assert samples["escalation_link_per_window"] == [0.020] * 10
+    assert samples["dep_block"] == [0.012] * 10
+    assert samples["algorithm"] == [10.0] * 10
+    assert samples["weak_attempt"][2] == 12.244
+
+
+def test_an_escalated_windows_points_sum_to_its_reaction_time(tmp_path):
+    """The chain runs weak attempt first, then the strong decode.
+
+    Toshio et al. 2510.25222 Sec. III A orders it: the weak decoder
+    answers, the verdict sends the window to the strong decoder, the
+    strong decoder answers and that is what commits. Every point on that
+    order adds up to the window's reaction time to the tick.
+    """
+    measurement = switching_shot(tmp_path, 1000000.0)
+
+    totals = chain_sum_ticks(measurement)
+    assert totals == reaction_ticks(measurement)
+
+
+def test_a_kept_weak_result_is_measured_on_the_weak_hops(tmp_path):
+    """No window escalates: the weak hops, and no escalation at all.
+
+    The same config below the threshold keeps every weak result, so both
+    link points read the weak path's one cycle and the two escalation
+    points are zero on every window.
+    """
+    measurement = switching_shot(tmp_path, -1000000.0)
+
+    samples = measurement.samples
+    assert samples["input_link_per_window"] == [0.004] * 10
+    assert samples["output_link_per_window"] == [0.004] * 10
+    assert samples["escalation_link_per_window"] == [0.0] * 10
+    assert samples["weak_attempt"] == [0.0] * 10
+    assert samples["algorithm"] == [1.0] * 10

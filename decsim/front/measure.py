@@ -50,9 +50,16 @@ POINTS = (
     "fetch",
     "algorithm",  # the fetch's end -> the decoding algorithm's end
     "release",  # the algorithm's end -> the correction written out
-    # the compute start -> the decode's end: fetch, algorithm, release,
+    # the compute start -> the decode's end: every stage the unit ran,
     # and nothing the decode waited for
     "service",
+    # the escalated window's unit assignment -> the verdict that
+    # escalated it: the weak attempt whose result did not commit, zero
+    # for a window the first decode committed
+    "weak_attempt",
+    # weak decoder -> strong decoder, the escalation hop, zero for a
+    # window that did not escalate
+    "escalation_link_per_window",
     # the decode's end -> the boundary readable in the next window
     "dd_per_window",
     # the decode's end -> the correction at the Pauli frame
@@ -69,7 +76,7 @@ POINTS = (
 
 # which store's output link carries a tier's window in; the way home is
 # the decoders' own FRAME_PATH_BY_TIER, and both are keyed by the tier
-# the escalation row declares rather than by the row's name
+# whose decode the frame committed rather than by the row's name
 INPUT_LINK_BY_TIER = {
     window_records.DecoderTier.WEAK: (
         transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER
@@ -228,6 +235,7 @@ def qpu_send_ticks(transfers: list) -> dict:
 def window_points_us(
     window,
     frame_record,
+    decode,
     stage_us: dict,
     link_delay: dict,
     link_landing: dict,
@@ -256,6 +264,9 @@ def window_points_us(
     committed = frame_record.committed_ticks
     input_ticks = link_delay.get((input_path, window_id), 0)
     handoff_ticks = link_delay.get(("decoder_to_decoder", window_id), 0)
+    escalation_ticks = link_delay.get(
+        ("weak_decoder_to_strong_decoder", window_id), 0
+    )
     output_ticks = link_delay.get((output_path, window_id), 0)
     input_landed = link_landing.get((input_path, window_id))
     if input_landed is None:  # a tier that reads its input in place
@@ -266,13 +277,19 @@ def window_points_us(
         "buffer_fill": _span_microseconds(
             window.t_data_complete, window.t_first_round
         ),
-        "dep_block": _span_microseconds(window.t_compute_start, input_landed),
+        "dep_block": _span_microseconds(
+            decode.compute_start_ticks, input_landed
+        ),
         "queue_wait": _span_microseconds(window.t_dispatch, window.t_queued),
         "input_link_per_window": ticks_to_microseconds(input_ticks),
         "fetch": stage_us["fetch"],
         "algorithm": stage_us["algorithm"],
         "release": stage_us["release"],
-        "service": _span_microseconds(window.t_done, window.t_compute_start),
+        "service": _span_microseconds(
+            decode.done_ticks, decode.compute_start_ticks
+        ),
+        "weak_attempt": _weak_attempt_microseconds(window, decode),
+        "escalation_link_per_window": ticks_to_microseconds(escalation_ticks),
         "dd_per_window": ticks_to_microseconds(handoff_ticks),
         "output_link_per_window": ticks_to_microseconds(output_ticks),
         "frame_commit": _span_microseconds(
@@ -307,15 +324,16 @@ def frame_records_by_window(
 def collect_samples(
     observation: observation_module.Observation,
     result: result_records.RunResult,
-    escalation_row,
 ) -> dict:
     """Every point's microsecond samples over the shot's decoded windows.
 
-    The escalation row's primary tier says which two links a window
-    rides: in from that tier's store, and home to the frame. The
-    function stays whole past the size prompt: it is one walk over the
-    windows in key order, each window's points appended to the same
-    lists, read top to bottom.
+    Every point of a window describes the decode whose result the frame
+    committed: the two links it rode, in from its tier's store and home
+    to the frame, its own stages, and the wait in front of it. The
+    frame's record names that decode, by the tier it ran on and by the
+    run ordinal of its request. The function stays whole past the size
+    prompt: it is one walk over the windows in key order, each window's
+    points appended to the same lists, read top to bottom.
     """
     transfers = result.link_traffic["transfers"]
     link_delay = link_delay_by_window(transfers)
@@ -326,11 +344,6 @@ def collect_samples(
     for point in POINTS:
         samples[point] = []
     samples["cwb_per_round"] = controller_to_weak_buffer_delays_us(transfers)
-    primary_tier = escalation_row.primary_tier
-    input_link = INPUT_LINK_BY_TIER[primary_tier]
-    output_link = decoder_output.FRAME_PATH_BY_TIER[primary_tier]
-    input_path = input_link.value
-    output_path = output_link.value
     window_items = observation.windows.windows.items()
     all_windows = sorted(window_items)
     stages = observation.stages
@@ -338,10 +351,16 @@ def collect_samples(
         frame_record = frame_by_window.get(window_id)
         if frame_record is None or window.t_done is None:
             continue
+        decode = _committed_decode(stages, frame_record)
+        input_link = INPUT_LINK_BY_TIER[decode.tier]
+        output_link = decoder_output.FRAME_PATH_BY_TIER[decode.tier]
+        input_path = input_link.value
+        output_path = output_link.value
         stage_us = _stage_microseconds(stages, operation_id, window_id)
         points = window_points_us(
             window,
             frame_record,
+            decode,
             stage_us,
             link_delay,
             link_landing,
@@ -455,8 +474,7 @@ def _measurement(
     trace_path: Optional[str],
 ) -> ShotMeasurement:
     """Read every number of one completed shot off its records."""
-    escalation_row = escalation_build.escalation_row(settings.escalation)
-    samples = collect_samples(observation, result, escalation_row)
+    samples = collect_samples(observation, result)
     verdicts = _logical_verdicts(observation, result)
     throughput = _throughput_per_microsecond(
         observation, settings, samples, distance
@@ -493,6 +511,24 @@ def _measurement(
         data_movement=result.data_movement,
         trace_path=trace_path,
     )
+
+
+@dataclasses.dataclass(frozen=True)
+class _CommittedDecode:
+    """The decode whose result the frame committed, as the points read it.
+
+    One window can be decoded several times: the two forced-class solves
+    of a complementary gap (decision D2), a strong re-decode after an
+    escalation (Toshio et al. 2510.25222 Sec. III A), and under
+    run_both_at_once a sibling that is cancelled. Every stage record of
+    all of them carries the same window key, so the decode that
+    committed is named by the frame's own record: the tier it ran on and
+    the run ordinal of its request.
+    """
+
+    tier: window_records.DecoderTier
+    compute_start_ticks: int
+    done_ticks: int
 
 
 @dataclasses.dataclass(frozen=True)
@@ -583,6 +619,59 @@ def _max_queued_windows(
 def _span_microseconds(end_ticks: int, start_ticks: int) -> float:
     span_ticks = end_ticks - start_ticks
     return ticks_to_microseconds(span_ticks)
+
+
+def _committed_decode(stages, frame_record) -> _CommittedDecode:
+    """The committing decode's tier and the ticks its compute ran between.
+
+    Its stage records are the ones whose request ordinals hold the
+    frame record's, so a merged batch answers for every window it
+    served. The compute began at its first stage and ended at its last.
+    """
+    tier = window_records.DecoderTier(frame_record.tier)
+    operation_id, window_id = frame_record.window_key
+    records = _committing_stage_records(
+        stages, operation_id, window_id, frame_record.run_sequence
+    )
+    assert records, (
+        f"window ({operation_id}, {window_id}) committed the result of "
+        f"request {frame_record.run_sequence}, which recorded no stage"
+    )
+    starts = []
+    ends = []
+    for record in records:
+        starts.append(record.start_ticks)
+        ends.append(record.end_ticks)
+    first = min(starts)
+    last = max(ends)
+    return _CommittedDecode(tier, first, last)
+
+
+def _committing_stage_records(
+    stages, operation_id, window_id, run_sequence: int
+) -> list:
+    """One window's stage records that belong to one request ordinal."""
+    records = []
+    for record in stages.records_for(operation_id, window_id):
+        if run_sequence in record.run_sequences:
+            records.append(record)
+    return records
+
+
+def _weak_attempt_microseconds(window, decode: _CommittedDecode) -> float:
+    """The window's own decode when the committing decode waited for it.
+
+    An escalated window answers once on the weak tier and the strong
+    decode starts from that verdict (Toshio et al. 2510.25222 Sec. III A
+    steps 3 and 4), so the weak attempt is on the window's path and the
+    span from the unit assignment to the verdict is this point. When the
+    committing decode was already computing by then, which is the weak
+    result committing and which is run_both_at_once's parallel sibling,
+    the attempt cost the window nothing and the point is zero.
+    """
+    if window.t_done >= decode.compute_start_ticks:
+        return 0.0
+    return _span_microseconds(window.t_done, window.t_dispatch)
 
 
 def _stage_microseconds(stages, operation_id, window_id) -> dict:

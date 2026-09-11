@@ -128,6 +128,11 @@ class DecoderStageRecord:
     # the (operation, round) identities a formation stage turned into
     # detection events here; empty for every stage that forms none
     round_keys: tuple = ()
+    # the run ordinals of the requests this decode serves, so a reader
+    # can tell one window's decodes apart: its two forced-class solves,
+    # its strong re-decode, and the members of a merged batch all carry
+    # the same window key and different ordinals
+    run_sequences: tuple = ()
 
 
 class StagedDecoder(decoder_module.DecoderBase):
@@ -265,6 +270,7 @@ class StagedDecoder(decoder_module.DecoderBase):
             return
         start = engine.now
         end = start + step.ticks
+        sequences = _run_sequences(job)
         record = DecoderStageRecord(
             job.operation_id,
             job.window_id,
@@ -273,6 +279,7 @@ class StagedDecoder(decoder_module.DecoderBase):
             start,
             end,
             step.round_keys,
+            sequences,
         )
         self.stage_recorded.fire(record)
         next_index = index + 1
@@ -296,6 +303,7 @@ class StagedDecoder(decoder_module.DecoderBase):
             result: Optional[decoding_records.DecodeResult],
         ) -> None:
             running.result = result
+            sequences = _run_sequences(job)
             record = DecoderStageRecord(
                 job.operation_id,
                 job.window_id,
@@ -303,6 +311,8 @@ class StagedDecoder(decoder_module.DecoderBase):
                 None,
                 start,
                 engine.now,
+                (),
+                sequences,
             )
             self.stage_recorded.fire(record)
             next_index = index + 1
@@ -350,6 +360,17 @@ def _check_pipeline(
         )
     if pipeline_depth is not None and pipeline_depth < 1:
         raise ValueError("pipeline_depth must be at least 1")
+
+
+def _run_sequences(job: decoding_records.DecodeJob) -> tuple:
+    """The run ordinals of every request this decode serves."""
+    keys = job.service_original_request_keys
+    if not keys and job.request_key is not None:
+        keys = (job.request_key,)
+    sequences = []
+    for key in keys:
+        sequences.append(key.run_sequence)
+    return tuple(sequences)
 
 
 def _key(job: decoding_records.DecodeJob):

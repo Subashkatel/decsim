@@ -61,6 +61,8 @@ PROCESS_ID = 1
 # the controller's packing workspace draws on the controller's own lane
 ASSEMBLER_THREAD = "Controller"
 ASSEMBLER_COUNTER = "controller assembler rounds"
+# and so does its waiting line for store room, beside the workspace
+HELD_ROUNDS_COUNTER = "controller rounds held for store room"
 
 
 def round_text(round_key) -> str:
@@ -177,6 +179,22 @@ class TraceWriter:
             return
         if event.kind == "DROPPED":
             self._end_assembly(round_key, "dropped, workspace full")
+
+    def round_held_for_room(self, event) -> None:
+        """A packed round waiting in front of a full store, and its release.
+
+        The workspace frees the round at the packing
+        (controller/round_assembly.py), so the wait for store room is a
+        residence of its own on the controller's lane, from the refusal
+        to the slot that admitted it; a round that found room opens
+        none.
+        """
+        round_key = (event.operation_id, event.round_index)
+        if event.kind == "STALLED":
+            self._begin_held_round(round_key, event)
+            return
+        if event.kind == "RELEASED":
+            self._end_held_round(round_key)
 
     def command_event(self, event) -> None:
         """A command arrived at the QPU or started on a boundary."""
@@ -638,6 +656,28 @@ class TraceWriter:
         closing = {"freed": self.engine.now, "freed_reason": reason}
         self._end_residence(ASSEMBLER_THREAD, round_key, closing)
         self._count(ASSEMBLER_THREAD, ASSEMBLER_COUNTER, -1)
+
+    def _begin_held_round(self, round_key, event) -> None:
+        """The round found no room: its wait opens here."""
+        args = {
+            "round": round_text(round_key),
+            "transfer": "reference",
+            "held_from": event.tick,
+        }
+        name = f"hold round {round_key[1]} for store room"
+        self._begin_residence(
+            ASSEMBLER_THREAD, round_key, name, "round,residence", args
+        )
+        self._count(ASSEMBLER_THREAD, HELD_ROUNDS_COUNTER, 1)
+
+    def _end_held_round(self, round_key) -> None:
+        """A slot freed and the round left the waiting line."""
+        closing = {
+            "freed": self.engine.now,
+            "freed_reason": "store room freed",
+        }
+        self._end_residence(ASSEMBLER_THREAD, round_key, closing)
+        self._count(ASSEMBLER_THREAD, HELD_ROUNDS_COUNTER, -1)
 
     def _begin_residence(
         self, thread: str, key, name: str, category: str, args: dict

@@ -106,6 +106,7 @@ def observe(
         qpu=qpu,
         controller=controller,
         assembler=assembler,
+        held_rounds=held_rounds,
         store_input=store_input,
         round_store=round_store,
         strong_round_store=strong_round_store,
@@ -228,6 +229,7 @@ def _connect_data_path(
     qpu,
     controller,
     assembler,
+    held_rounds,
     store_input,
     round_store,
     strong_round_store,
@@ -279,6 +281,7 @@ def _connect_data_path(
         assembler.settings.packing_rounds_in_flight,
     )
     assembler.trace.round_event.connect(in_assembly)
+    held_rounds.trace.round_event.connect(trace_writer.round_held_for_room)
     _connect_store_trace(trace_writer, round_store, "Buffer 0")
     if strong_round_store is not None:
         _connect_store_trace(trace_writer, strong_round_store, "Buffer 1")

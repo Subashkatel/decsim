@@ -36,6 +36,11 @@ import decsim.settings as machine_settings
 POINTS = (
     # per round: the controller's send -> the round readable in Buffer 0
     "cwb_per_round",
+    # per round: the round found Buffer 0 full -> the slot that freed
+    # admitted it, zero for a round that found room
+    "cwb_stall_per_round",
+    # per round: the same wait in front of Buffer 1
+    "csb_stall_per_round",
     # the window's first round readable -> its last (waiting on the QPU)
     "buffer_fill",
     # the input landed in the unit's memory -> the compute started: the
@@ -219,6 +224,61 @@ def controller_to_weak_buffer_delays_us(transfers: list) -> list:
     return delays
 
 
+def round_stall_ticks(round_events: list) -> dict:
+    """Ticks each held round waited for store room, by (operation, round).
+
+    The wait is the waiting line's own two events: the refusal that held
+    the round and the freed slot that admitted it
+    (controller/round_writes.py, HeldRounds). A round that found room is
+    not in here at all.
+    """
+    held_at = {}
+    waits = {}
+    for event in round_events:
+        key = (event.operation_id, event.round_index)
+        if event.kind == "STALLED":
+            held_at[key] = event.tick
+        if event.kind == "RELEASED":
+            held_tick = held_at[key]
+            waits[key] = event.tick - held_tick
+    return waits
+
+
+def round_stall_delays_us(round_keys: list, waits: dict) -> list:
+    """The wait for store room of every round that reached one store.
+
+    One sample per round, in the order the rounds reached it, zero for a
+    round that found room, so the point reads beside that store's own
+    per-round hop.
+    """
+    delays = []
+    for key in round_keys:
+        ticks = waits.get(key, 0)
+        delay = ticks_to_microseconds(ticks)
+        delays.append(delay)
+    return delays
+
+
+def weak_store_round_keys(round_events: list) -> list:
+    """Every round that left for Buffer 0, in the order they left."""
+    keys = []
+    for event in round_events:
+        if event.kind != "CWB_SENT":
+            continue
+        key = (event.operation_id, event.round_index)
+        keys.append(key)
+    return keys
+
+
+def strong_store_round_keys(stored_rounds: list) -> list:
+    """Every round that landed in Buffer 1, in the order they landed."""
+    keys = []
+    for _tick, operation_id, round_index in stored_rounds:
+        key = (operation_id, round_index)
+        keys.append(key)
+    return keys
+
+
 def qpu_send_ticks(transfers: list) -> dict:
     """The tick each round left the QPU (its earliest QC send), by round."""
     send = {}
@@ -344,6 +404,12 @@ def collect_samples(
     for point in POINTS:
         samples[point] = []
     samples["cwb_per_round"] = controller_to_weak_buffer_delays_us(transfers)
+    round_events = observation.round_events
+    waits = round_stall_ticks(round_events.events)
+    weak_keys = weak_store_round_keys(round_events.events)
+    strong_keys = strong_store_round_keys(round_events.stored_rounds)
+    samples["cwb_stall_per_round"] = round_stall_delays_us(weak_keys, waits)
+    samples["csb_stall_per_round"] = round_stall_delays_us(strong_keys, waits)
     window_items = observation.windows.windows.items()
     all_windows = sorted(window_items)
     stages = observation.stages

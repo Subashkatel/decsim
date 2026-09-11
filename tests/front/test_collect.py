@@ -7,7 +7,10 @@ the raw readout width: the recorded run's own buffer fill, its
 per-round store hop and that hop's link row. Eight zero columns were
 added to it when the escalation points were added, the weak attempt
 that did not commit and the escalation hop, which a weak-only sweep
-never reaches. The weak decoder of
+never reaches, and eight more when the two per-round back-pressure
+points were added, the wait a full Buffer 0 or a full Buffer 1 puts on
+the writer, which a sweep with room in both stores never sees. The weak
+decoder of
 reference.yaml is pymatching, which prices its measured wall clock, so the
 columns that carry decode time (algorithm, service, queue wait, the park
 before the compute, the four totals, load, throughput, the queue peak and

@@ -69,6 +69,13 @@ POINTS = (
     # the compute start -> the decode's end: every stage the unit ran,
     # and nothing the decode waited for
     "service",
+    # the committing decode's end -> the verdict on the window's answer:
+    # the confidence signal's own computation, which is the walk under
+    # cluster_gap and the sibling forced solve's remaining time under
+    # complementary_gap. Zero for an escalated window, whose committing
+    # decode is the strong one and whose weak_attempt already runs to
+    # the verdict
+    "confidence",
     # a unit took the window's first decode -> the verdict that
     # escalated it: the weak attempt whose result did not commit, zero
     # for a window the first decode committed
@@ -384,6 +391,7 @@ def window_points_us(
     input_key = (input_path, window_id, decode.run_sequence)
     input_ticks, input_landed = input_hop.get(input_key, (0, attempt_end))
     startable = _startable_ticks(decode, input_landed)
+    confidence_ticks = _confidence_ticks(window, decode)
     last_required_send = qpu_send[last_required_round]
     first_required_send = qpu_send[window.start_round]
     return {
@@ -402,6 +410,7 @@ def window_points_us(
         "service": _span_microseconds(
             decode.done_ticks, decode.compute_start_ticks
         ),
+        "confidence": ticks_to_microseconds(confidence_ticks),
         "weak_attempt": _span_microseconds(attempt_end, first_dispatch),
         "escalation_link_per_window": ticks_to_microseconds(escalation_ticks),
         "dd_per_window": ticks_to_microseconds(handoff_ticks),
@@ -525,19 +534,28 @@ def chain_load(
 ) -> float:
     """rho: the serial chain's service per window over the window period.
 
-    Service is the decode's own compute plus the DD boundary handoff
-    that serialises the chain; the window inter-arrival time is commit
-    rounds times the round period. Above 1 the chain cannot keep up,
-    which is Skoric et al. 2209.08552's backlog condition read as a
+    Service is the unit's occupancy per window plus the DD boundary
+    handoff that serialises the chain; the window inter-arrival time is
+    commit rounds times the round period. Above 1 the chain cannot keep
+    up, which is Skoric et al. 2209.08552's backlog condition read as a
     ratio (2209.08552.txt lines 429-435).
+
+    The occupancy is the committing decode's compute and the confidence
+    step after it, because that step is the same unit's time: the walk
+    is charged on the weak unit that produced the evidence (decision
+    D8), and under complementary_gap the window's second forced-class
+    solve is its own job's service on that unit (decision D2). A window
+    whose signal costs nothing adds nothing, so a run without a gap
+    reads as it always did.
     """
     service_us = _mean_or_zero(samples["service"])
+    confidence_us = _mean_or_zero(samples["confidence"])
     handoff_us = _mean_or_zero(samples["dd_per_window"])
     commit_rounds = settings.windows.commit_rounds
     if commit_rounds is None:
         commit_rounds = distance
     inter_arrival_us = commit_rounds * round_period_us
-    chain_us = service_us + handoff_us
+    chain_us = service_us + confidence_us + handoff_us
     return chain_us / inter_arrival_us
 
 
@@ -860,6 +878,27 @@ def _committing_stage_records(
         if run_sequence in record.run_sequences:
             records.append(record)
     return records
+
+
+def _confidence_ticks(window, decode: _CommittedDecode) -> int:
+    """The confidence step: the committing decode's end to the verdict.
+
+    The weak tier reports a soft output for each window and the window
+    is answered on it, so the signal's own computation is on the
+    window's path (Toshio et al. 2510.25222 lines 657-663, the weak
+    decoder "simultaneously generates a soft output g for each decoding
+    window", and lines 360-363, the response time running to the
+    correction). What that computation is depends on the row: the walk
+    under cluster_gap, charged on the weak unit (decision D8), and the
+    sibling forced-class solve's remaining time under complementary_gap,
+    which is that solve's own service on the same unit (decision D2).
+    An escalated window has none: its committing decode is the strong
+    one, which answers after the verdict, and weak_attempt already runs
+    from the window's first dispatch to that verdict.
+    """
+    if window.t_done <= decode.done_ticks:
+        return 0
+    return window.t_done - decode.done_ticks
 
 
 def _startable_ticks(decode: _CommittedDecode, input_landed: int) -> int:

@@ -435,6 +435,51 @@ rows in [The run folder](../reference/run_folder.md), and
 whole park is dependency and the forced-class pair where the two trade
 places.
 
+## D16. The confidence step is a point of the window's path
+
+**Decided.** A new latency point, `confidence`: the committing decode's
+end to the verdict on the window's answer, for a window whose weak
+result committed. It is the sibling forced-class solve's remaining time
+under `complementary_gap`, the walk under `cluster_gap`, and zero under
+`weak_baseline`, whose verdict needs no signal. For a window that
+escalated it is zero too: its committing decode is the strong one,
+which answers after the verdict, and `weak_attempt` already runs from
+the window's first dispatch to that verdict. With it the chain identity
+closes on every window of every config this repository ships, so the
+exception the reference page carried is gone, and `run_both_at_once`
+is the only run left outside the sum. `chain_load` counts the step as
+the unit's occupancy, because it is the unit's time.
+
+**Why.** The span was on the reaction time and in no column, which made
+a real cost invisible in exactly the runs it is largest in: on
+`two_tiers.yaml` it is the second forced solve, 1.064 microseconds on
+six windows of ten, and on a `cluster_gap` run with a priced walk it is
+that walk on every window the weak tier answered. A reader who summed
+the columns of such a window found less than its reaction time and had
+no column to blame. The alternative, folding the step into `service`,
+would have made service stop meaning the decode's own compute, which
+is the one thing it has always meant. The name is the tree's own word:
+the `ConfidenceSignal` port, the `escalation.confidence` key, D3 and
+D8 all call this the confidence.
+
+**Sources.** Toshio et al. arXiv:2510.25222 makes the signal part of
+the weak decoder's per-window work: the weak decoder "simultaneously
+generates a soft output g for each decoding window" (lines 657-663),
+the device computes it on the weak decoder (Fig. 1 caption, lines
+152-158), and the Response Time the whole sum must reach is "the total
+time elapsed from the generation of the final syndrome to the
+application of the correction" (lines 360-363). In the tree the step is
+already a component with an owner: D3 puts the signal behind the
+`ConfidenceSignal` port and D8 charges its computation on the weak unit
+that produced the evidence, which is why the same span is the unit's
+occupancy in `load`.
+
+**Where to see it.** `POINTS`, `window_points_us` and `chain_load` in
+`decsim/front/measure.py`, the row in
+[The run folder](../reference/run_folder.md),
+`configs/cluster_gap_switching.yaml`, and the four shipped-config
+identity tests in `tests/front/test_measure.py`.
+
 ## What is not modelled yet
 
 These are open, recorded rather than hidden, so that a reader does not

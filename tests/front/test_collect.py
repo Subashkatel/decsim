@@ -12,7 +12,9 @@ points were added, the wait a full Buffer 0 or a full Buffer 1 puts on
 the writer, which a sweep with room in both stores never sees, and four
 more when the park was split by cause: this sweep's one unit is always
 free by the time a window's boundary is in, so its compute_wait is zero
-on every window of both recorded runs. The weak
+on every window of both recorded runs. Four more came with the
+confidence step, which a weak-baseline sweep answers on its decode and
+never spends. The weak
 decoder of
 reference.yaml is pymatching, which prices its measured wall clock, so the
 columns that carry decode time (algorithm, service, queue wait, the park

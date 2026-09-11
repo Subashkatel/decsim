@@ -460,7 +460,12 @@ class TraceWriter:
         self._complete(thread, name, "window,service", start, duration, args)
 
     def stage_recorded(self, record) -> None:
-        """One stage of one job on the lane of the unit that started it."""
+        """One stage of one job on the lane of the unit that started it.
+
+        A stage the cancel closed carries the mark, so the trace shows
+        where the decode stopped rather than where its card would have
+        ended.
+        """
         window_key = (record.operation_id, record.window_id)
         thread = self._open.unit_thread_by_window.get(window_key)
         if thread is None:
@@ -469,6 +474,8 @@ class TraceWriter:
             "window": window_text(window_key),
             "cycles": record.cycles,
         }
+        if record.cancelled:
+            args["cancelled"] = True
         start = record.start_ticks
         duration = record.end_ticks - start
         self._complete(thread, record.stage, "stage", start, duration, args)

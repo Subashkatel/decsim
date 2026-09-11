@@ -257,13 +257,15 @@ def test_a_job_cancelled_before_it_starts_holds_the_unit_but_never_decodes():
     assert inner.decode_ticks == []
 
 
-def test_a_cancel_during_a_hardware_stage_stops_the_remaining_stages():
-    """A cancel mid-walk ends the job silently, with the started stage kept.
+def test_a_cancel_during_a_hardware_stage_ends_that_stage_at_the_cancel():
+    """A cancel mid-walk ends the open stage there and marks it.
 
     cancel is the manager's abort of work whose answer is no longer
-    wanted (staged_decoder.py, StagedDecoder.cancel: "no further stages,
-    no completion callback"), so the stage that had already opened stays
-    in the trace and nothing after it is charged or reported.
+    wanted, and the stage that was open ends at the cancel rather than
+    at the time its cycles would have taken: gem5 abandons a squashed
+    instruction where it stands and counts it apart
+    (tmp/resources/gem5/src/cpu/o3/inst_queue.cc:895-908, :294-298).
+    Nothing after it is charged or reported.
     """
     engine = engine_module.Engine()
     inner = RecordingInner(engine, latency_microseconds=5.0)
@@ -284,6 +286,44 @@ def test_a_cancel_during_a_hardware_stage_stops_the_remaining_stages():
     assert delivered == []
     assert inner.decode_ticks == []
     assert stage_names == ["fetch"]
+    fetch = records[0]
+    assert fetch.cancelled
+    assert fetch.start_ticks == 0
+    assert fetch.end_ticks == CYCLE_TICKS
+
+
+def test_a_cancel_during_the_algorithm_closes_it_and_the_timer_adds_none():
+    """The card's timer still fires, and writes nothing after a cancel.
+
+    The engine schedules and never unschedules, so a cancelled decode's
+    algorithm event arrives at the end of its card either way. The
+    record was closed by the cancel, at the cancel, and the late event
+    leaves the ledger alone: what a run reports for a decode that was
+    halted is the time it actually ran (Toshio et al. 2510.25222
+    Sec. III A step 3, 2510.25222.txt lines 610-612).
+    """
+    engine = engine_module.Engine()
+    inner = RecordingInner(engine, latency_microseconds=5.0)
+    timing = fetch_and_release_timing()
+    decoder = staged_decoder.StagedDecoder(inner, timing)
+    ledger = ledger_hearing(decoder)
+    job = decode_job(round_count=3)
+    cancel_ticks = config.microseconds_to_ticks(1.0)
+    fetch_ticks = 3 * CYCLE_TICKS
+
+    delivered = []
+    decoder.start(job, engine, delivered.append)
+    engine.schedule(cancel_ticks, lambda: decoder.cancel(job))
+    engine.run()
+    records = ledger.records_for(1, 0)
+    stage_names = [record.stage for record in records]
+    assert stage_names == ["fetch", "algorithm"]
+    algorithm = records[1]
+    assert algorithm.cancelled
+    assert algorithm.start_ticks == fetch_ticks
+    assert algorithm.end_ticks == cancel_ticks
+    assert delivered == []
+    assert engine.now == fetch_ticks + config.microseconds_to_ticks(5.0)
 
 
 def test_a_hardware_stage_may_not_be_named_algorithm():

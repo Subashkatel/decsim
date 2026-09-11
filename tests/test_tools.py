@@ -1,19 +1,24 @@
-"""The style tools answer for themselves.
+"""The repository's own scripts answer for themselves.
 
 tools/check.sh runs three checkers over the tree, and a checker that
 misreads its arguments fails open: it exits 0 having looked at nothing,
-and the check silently stops holding. These tests hold each tool to what
-it does with no argument and with the tree.
+and the check silently stops holding. slurm/slurm_run.sh fails the same
+way, by computing a shard of the wrong count and writing a folder that
+holds the wrong share of the sweep. These tests hold each script to what
+it does with its arguments.
 """
 
 import ast
 import importlib.util
+import os
 import pathlib
+import subprocess
 
 TESTS_FILE = pathlib.Path(__file__)
 TESTS_PATH = TESTS_FILE.resolve()
 PACKAGE_ROOT = TESTS_PATH.parent.parent
 TOOLS = PACKAGE_ROOT / "tools"
+SLURM_RUNNER = PACKAGE_ROOT / "slurm" / "slurm_run.sh"
 
 
 def _tool(name: str):
@@ -121,3 +126,73 @@ def test_every_class_on_the_tools_list_is_still_tested_against_somewhere():
             tested.add(name)
     stale = tool.ALLOWED - tested
     assert stale == set()
+
+
+def _stub_python(tmp_path):
+    """An interpreter that writes down the command line it was given.
+
+    It answers the runner's question about where decsim was imported
+    from with a path of its own, so the test never runs a sweep.
+    """
+    recorded = tmp_path / "argv.txt"
+    stub = tmp_path / "python"
+    stub.write_text(
+        "#!/usr/bin/env bash\n"
+        'if [ "$1" = "-c" ]; then\n'
+        f'  echo "{tmp_path}"\n'
+        "  exit 0\n"
+        "fi\n"
+        f'printf "%s\\n" "$@" > "{recorded}"\n'
+    )
+    stub.chmod(0o755)
+    return stub, recorded
+
+
+def _run_the_runner(tmp_path, task_id, task_count, shards=None):
+    """One array task of the runner, against a stub interpreter."""
+    stub, recorded = _stub_python(tmp_path)
+    environment = dict(os.environ)
+    environment["SLURM_SUBMIT_DIR"] = str(PACKAGE_ROOT)
+    environment["SLURM_ARRAY_TASK_ID"] = str(task_id)
+    environment["SLURM_ARRAY_TASK_COUNT"] = str(task_count)
+    run_dir = tmp_path / "run"
+    environment["RUN"] = str(run_dir)
+    environment["DECSIM_PYTHON"] = str(stub)
+    # the tree under test is the one being edited, which is the case the
+    # runner refuses; the refusal has its own reason to exist and is not
+    # what this test reads
+    environment["ALLOW_DIRTY"] = "1"
+    if shards is not None:
+        environment["SHARDS"] = str(shards)
+    completed = subprocess.run(
+        ["bash", str(SLURM_RUNNER), "configs/weak_ler.yaml"],
+        capture_output=True,
+        text=True,
+        env=environment,
+    )
+    assert completed.returncode == 0, completed.stderr
+    recorded_text = recorded.read_text()
+    arguments = recorded_text.splitlines()
+    return completed.stdout, arguments
+
+
+def test_the_slurm_runner_shards_by_the_count_it_is_given(tmp_path):
+    """A partial re-run of a 500 shard array is one sbatch line.
+
+    Without SHARDS the count would be the array's own, so re-running
+    tasks 447 to 499 alone would compute shard 447 of 53 and the folder
+    would hold a share of the sweep no other folder holds.
+    """
+    printed, arguments = _run_the_runner(tmp_path, 447, 53, shards=500)
+
+    assert "shard: 447 of 500" in printed
+    assert "--shard" in arguments
+    assert arguments[arguments.index("--shard") + 1] == "447/500"
+
+
+def test_the_slurm_runner_falls_back_to_the_arrays_own_count(tmp_path):
+    """The whole sweep in one array needs no count of its own."""
+    printed, arguments = _run_the_runner(tmp_path, 3, 200)
+
+    assert "shard: 3 of 200" in printed
+    assert arguments[arguments.index("--shard") + 1] == "3/200"

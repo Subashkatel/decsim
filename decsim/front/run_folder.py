@@ -25,6 +25,10 @@ import stim
 import decsim.collect as collect
 
 RESULTS_DIR = Path("results")
+# What the launcher saw of the tree it was about to run, for a process
+# whose interpreter has no git of its own (slurm/slurm_run.sh exports
+# it): "1" dirty, "0" clean, unset means nobody looked.
+TREE_DIRTY_VARIABLE = "DECSIM_TREE_DIRTY"
 
 
 def run_dir_for(config, out_dir=None) -> Path:
@@ -78,7 +82,8 @@ def snapshot_code_state(config, run_dir: Path) -> None:
 
     The config chain goes verbatim into config/, and any uncommitted code
     into code_state.patch, so manifest commit + patch + config = the
-    whole experiment.
+    whole experiment. The patch is the imported tree's, for the reason
+    the manifest's commit is (_checkout).
     """
     config_dir = run_dir / "config"
     config_dir.mkdir(exist_ok=True)
@@ -86,7 +91,8 @@ def snapshot_code_state(config, run_dir: Path) -> None:
         source = Path(config_file)
         target = config_dir / source.name
         shutil.copy2(config_file, target)
-    diff = _git_output("git", "diff", "HEAD")
+    checkout = _checkout()
+    diff = _git_output("git", "-C", str(checkout), "diff", "HEAD")
     if diff:
         patch_path = run_dir / "code_state.patch"
         patch_path.write_text(diff)
@@ -207,32 +213,79 @@ def _container() -> Optional[str]:
     return container
 
 
-def _git_state() -> dict:
-    """The commit and whether the tree is dirty; None where git is absent.
+def _checkout() -> Path:
+    """The tree this code was imported from, which is the code that ran.
 
-    The container image has no git binary, so the commit falls back to
-    reading .git directly; dirty stays a host-side best effort.
+    Not the working directory: a cluster task starts in the folder its
+    job was submitted from and may import a checkout pinned at a commit
+    somewhere else (docs/how-to/run_a_sweep_on_slurm.md), so a folder
+    that named the working directory's commit would name code no part
+    of the run read.
     """
-    commit = _git_output("git", "rev-parse", "HEAD")
+    this_file = Path(__file__)
+    here = this_file.resolve()
+    return here.parents[2]
+
+
+def _git_state() -> dict:
+    """The commit the code came from, and whether that tree was dirty.
+
+    gem5 prints its version, its build date, the host and the command
+    line at every start, so a result says what produced it
+    (tmp/resources/gem5/src/python/m5/main.py:524-537), and sinter
+    carries the decoder and the task's metadata in every row of its csv
+    for the same reason (sinter/_data/_task_stats.py:196-204 through
+    _data/_csv_out.py:56-65). decsim's run folder is where that belongs
+    here, so the manifest names the commit and says whether the tree had
+    uncommitted changes.
+
+    The launcher's answer to the second question wins when it is given,
+    because the launcher looked at the tree as the job started, which is
+    the tree the process went on to import; this process's own git looks
+    later, and edits made after the import did not run. The container
+    image ships no git binary at all, which is why the commit falls back
+    to reading the tree's own git files and why the dirty flag is None
+    rather than clean when nobody could answer.
+    """
+    checkout = _checkout()
+    commit = _git_output("git", "-C", str(checkout), "rev-parse", "HEAD")
     if not commit:
-        commit = _commit_from_git_files()
-    porcelain = _git_output("git", "status", "--porcelain")
-    is_dirty = None
-    if porcelain is not None:
-        is_dirty = bool(porcelain)
+        commit = _commit_from_git_files(checkout)
+    is_dirty = _dirty_from_the_launcher()
+    if is_dirty is None:
+        porcelain = _git_output(
+            "git", "-C", str(checkout), "status", "--porcelain"
+        )
+        if porcelain is not None:
+            is_dirty = bool(porcelain)
     return {"commit": commit, "dirty": is_dirty}
 
 
+def _dirty_from_the_launcher() -> Optional[bool]:
+    """What the launcher saw, when it exported it (slurm/slurm_run.sh)."""
+    said = os.environ.get(TREE_DIRTY_VARIABLE)
+    if said is None or said == "":
+        return None
+    return said != "0"
+
+
 def _git_output(*arguments) -> Optional[str]:
+    """One git command's output; None when git could not answer."""
     try:
         completed = subprocess.run(arguments, capture_output=True, text=True)
     except FileNotFoundError:
         return None
+    if completed.returncode != 0:
+        return None
     return completed.stdout.strip()
 
 
-def _commit_from_git_files() -> Optional[str]:
-    head_path = Path(".git/HEAD")
+def _commit_from_git_files(checkout: Path) -> Optional[str]:
+    """The checkout's own HEAD, read without git."""
+    git_dir = _git_dir(checkout)
+    if git_dir is None:
+        return None
+    head_path = git_dir / "HEAD"
     if not head_path.exists():
         return None
     head_text = head_path.read_text()
@@ -240,14 +293,50 @@ def _commit_from_git_files() -> Optional[str]:
     if not head.startswith("ref: "):
         return head
     reference = head[len("ref: ") :]
-    reference_path = Path(".git") / reference
+    common = _common_git_dir(git_dir)
+    for directory in (git_dir, common):
+        found = _reference_in(directory, reference)
+        if found is not None:
+            return found
+    return None
+
+
+def _reference_in(directory: Path, reference: str) -> Optional[str]:
+    """One reference in one git directory, loose or packed."""
+    reference_path = directory / reference
     if reference_path.exists():
         reference_text = reference_path.read_text()
         return reference_text.strip()
-    packed = Path(".git/packed-refs")
-    if packed.exists():
-        return _packed_reference(packed, reference)
-    return None
+    packed = directory / "packed-refs"
+    if not packed.exists():
+        return None
+    return _packed_reference(packed, reference)
+
+
+def _git_dir(checkout: Path) -> Optional[Path]:
+    """The checkout's .git, or where it points when it is a worktree."""
+    git_path = checkout / ".git"
+    if git_path.is_dir():
+        return git_path
+    if not git_path.is_file():
+        return None
+    pointer = git_path.read_text()
+    text = pointer.strip()
+    prefix = "gitdir: "
+    if not text.startswith(prefix):
+        return None
+    return Path(text[len(prefix) :])
+
+
+def _common_git_dir(git_dir: Path) -> Path:
+    """Where a worktree's git dir keeps the refs it shares with the repo."""
+    commondir = git_dir / "commondir"
+    if not commondir.exists():
+        return git_dir
+    written = commondir.read_text()
+    relative = written.strip()
+    common = git_dir / relative
+    return common.resolve()
 
 
 def _packed_reference(packed: Path, reference: str) -> Optional[str]:

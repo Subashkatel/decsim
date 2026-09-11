@@ -8,12 +8,14 @@ command line is never the only record of a number.
 
 import csv
 import json
+import pathlib
 
 import pytest
 
 import decsim.front.command as command
 import decsim.front.experiment as experiment
 import decsim.front.run_command as run_command
+import decsim.front.run_folder as run_folder
 import decsim.machine as machine_module
 import tests.front.yaml_configs as yaml_configs
 import tests.observe.gate_point as gate_point
@@ -97,6 +99,29 @@ def _manifest_of(run_dir):
     path = run_dir / "manifest.json"
     text = path.read_text()
     return json.loads(text)
+
+
+def _commit_of_this_tree():
+    """This test file's own checkout at HEAD, read without git.
+
+    Walked up from this file rather than from the module under test, so
+    a manifest that named some other tree would fail here. The container
+    the suite runs in has no git binary, which is why the git files are
+    read directly.
+    """
+    this_file = pathlib.Path(__file__)
+    here = this_file.resolve()
+    checkout = here
+    while not (checkout / ".git").exists():
+        checkout = checkout.parent
+    git_dir = checkout / ".git"
+    head_text = (git_dir / "HEAD").read_text()
+    head = head_text.strip()
+    if not head.startswith("ref: "):
+        return head
+    reference = head[len("ref: ") :]
+    reference_text = (git_dir / reference).read_text()
+    return reference_text.strip()
 
 
 def _seeds_of_every_shot(run_dir):
@@ -498,6 +523,54 @@ def test_a_manifest_records_the_shard_and_the_unit_size_it_ran(tmp_path):
     assert sharded["shots_per_unit"] == 1
     assert combined["folded"] == [str(whole_dir)]
     assert combined["resolved_config"] == whole["resolved_config"]
+
+
+def test_a_manifest_names_the_commit_of_the_tree_it_imported(
+    tmp_path, monkeypatch
+):
+    """A folder names its code, whatever folder the job ran from.
+
+    A cluster task starts in the folder its job was submitted from and
+    may import a checkout pinned somewhere else, so the manifest reads
+    the tree decsim came from. Here the run is made from a directory
+    that is no checkout at all, and the commit is still the one this
+    test's own tree is at.
+    """
+    config_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)
+    out_dir = tmp_path / "run"
+    monkeypatch.chdir(tmp_path)
+    command.main(["collect", str(config_path), "--out", str(out_dir)])
+    manifest = _manifest_of(out_dir)
+    recorded = manifest["git"]
+
+    assert recorded["commit"] == _commit_of_this_tree()
+    assert "dirty" in recorded
+
+
+def test_a_manifest_takes_the_dirty_flag_from_the_launcher_that_looked(
+    tmp_path, monkeypatch
+):
+    """The interpreter may have no git; the launcher did.
+
+    slurm/slurm_run.sh looks at the tree as the job starts and exports
+    what it saw, because the container image this runs in ships no git
+    binary and a folder that cannot say whether its code was committed
+    must say that rather than say clean.
+    """
+    config_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)
+    dirty_dir = tmp_path / "dirty"
+    clean_dir = tmp_path / "clean"
+    monkeypatch.setenv(run_folder.TREE_DIRTY_VARIABLE, "1")
+    command.main(["collect", str(config_path), "--out", str(dirty_dir)])
+    monkeypatch.setenv(run_folder.TREE_DIRTY_VARIABLE, "0")
+    command.main(["collect", str(config_path), "--out", str(clean_dir)])
+
+    dirty_manifest = _manifest_of(dirty_dir)
+    clean_manifest = _manifest_of(clean_dir)
+    dirty = dirty_manifest["git"]
+    clean = clean_manifest["git"]
+    assert dirty["dirty"] is True
+    assert clean["dirty"] is False
 
 
 def test_a_shard_with_no_work_unit_says_so_and_writes_no_rows(tmp_path, capsys):

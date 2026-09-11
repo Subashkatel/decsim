@@ -66,6 +66,7 @@ NOT_A_SLUG_CHARACTER = re.compile(r"[^a-z0-9 _-]")
 # the referent a decision came from.
 FOREIGN_NAMES = (
     "BUILT_IN_DECODERS",
+    "PYTHONPATH",
     "SIM",
 )
 

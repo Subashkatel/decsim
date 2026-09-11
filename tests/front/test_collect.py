@@ -4,7 +4,10 @@ Referent one is a sweep of reference.yaml recorded before decsim.collect
 existed, its sweep.csv and links.csv kept in data/. Ten of its numbers
 were amended when the controller-to-store hop stopped being priced at
 the raw readout width: the recorded run's own buffer fill, its
-per-round store hop and that hop's link row. The weak decoder of
+per-round store hop and that hop's link row. Eight zero columns were
+added to it when the escalation points were added, the weak attempt
+that did not commit and the escalation hop, which a weak-only sweep
+never reaches. The weak decoder of
 reference.yaml is pymatching, which prices its measured wall clock, so the
 columns that carry decode time (algorithm, service, queue wait, the park
 before the compute, the four totals, load, throughput, the queue peak and

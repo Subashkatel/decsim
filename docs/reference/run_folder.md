@@ -76,6 +76,8 @@ and they are the same names in `shots.csv`, `window_samples.csv` and
 | `algorithm` | the decoding algorithm itself |
 | `release` | the unit writing the correction out |
 | `service` | the compute start, to the decode done: the fetch, the algorithm and the release, and nothing the decode waited for |
+| `weak_attempt` | a unit taking an escalated window's weak job, to the verdict that escalated it: the attempt whose result did not commit, zero when the first decode committed |
+| `escalation_link_per_window` | the weak decoder to the strong decoder: the escalation hop, zero for a window that did not escalate |
 | `dd_per_window` | one decoder to the next: the boundary handoff |
 | `output_link_per_window` | the decoder to the Pauli frame |
 | `frame_commit` | the frame accepting a correction, to it being committed |
@@ -88,6 +90,22 @@ The two `buffer0` totals start the clock where the decoder could first
 have started. The two `qpu` totals start it where the physics did, so
 they also carry the link out of the fridge, the controller's own work
 and the write into Buffer 0.
+
+Every point of a window describes the decode whose result the frame
+committed, which the frame's own record names by tier and by request
+ordinal: for a window the strong tier recovered, the two link points are
+the strong tier's hops and the stage points are the strong decode's.
+`queue_wait`, `weak_attempt`, `input_link_per_window`, `dep_block`,
+`service`, `output_link_per_window` and `frame_commit` are that decode's
+path end to end, so on a serial path they add up to
+`buffer0_ready_to_frame` to the tick. Two runs are outside that sum, and
+knowingly: under `escalation.run_both_at_once` the weak attempt and the
+strong decode overlap rather than follow each other, and a window that
+ran the two forced-class solves of a complementary gap has the solve
+that did not commit between the committed one and its verdict.
+`escalation_link_per_window` is a hop that is measured and not summed,
+like `dd_per_window`: the escalation hop runs beside the strong input
+hop, and what it makes the strong decode wait for is in `dep_block`.
 
 ### `shot_links.csv`
 

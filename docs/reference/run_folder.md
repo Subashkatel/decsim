@@ -79,6 +79,7 @@ and they are the same names in `shots.csv`, `window_samples.csv` and
 | `algorithm` | the decoding algorithm itself |
 | `release` | the unit writing the correction out |
 | `service` | the compute start, to the decode done: the fetch, the algorithm and the release, and nothing the decode waited for |
+| `confidence` | the committing decode's end, to the verdict on the window's answer: the confidence signal's own computation, which is the walk under `cluster_gap` and the sibling forced-class solve's remaining time under `complementary_gap`, and zero for a window that escalated |
 | `weak_attempt` | a unit taking an escalated window's weak job, to the verdict that escalated it: the attempt whose result did not commit, zero when the first decode committed |
 | `escalation_link_per_window` | the weak decoder to the strong decoder: the escalation hop, zero for a window that did not escalate |
 | `dd_per_window` | one decoder to the next: the boundary handoff |
@@ -105,8 +106,10 @@ window to the strong tier, and is zero when the first decode is the one
 that committed; `input_link_per_window`, `dep_block`, `compute_wait`,
 `service` and `output_link_per_window` are the committing decode's own
 hop, the two halves of its park, its compute and its way home;
-`frame_commit` closes it. On a serial path those eight add up to
-`buffer0_ready_to_frame` to the tick.
+`confidence` is the signal the verdict needs, computed after that
+decode ended; `frame_commit` closes it. On a serial path those nine add
+up to `buffer0_ready_to_frame` to the tick, on every window of every
+config this repository ships.
 
 The park is two points because it has two causes. `dep_block` is what
 the decode waited for its window's last boundary, and it ends at the
@@ -125,17 +128,15 @@ link once and `shot_links.csv` still counts that crossing; `dep_block`
 then starts where the decode's own path started, at the dispatch or at
 the verdict, and runs to the tick that input was readable.
 
-Two runs are outside that sum, and knowingly. Under
+One run is outside that sum, and knowingly: under
 `escalation.run_both_at_once` the weak attempt and the strong decode
-overlap rather than follow each other. And a window whose complementary
-gap ran its second forced-class solve after the solve that committed is
-short by exactly that solve: the window answers when both have
-answered, so the correction leaves the decoder only then, and the span
-between the committing decode's end and the window's own answer is on
-the reaction time and on no point. `tests/front/test_measure.py` asserts
-both halves of this on `configs/weak_decoder_baseline.yaml`,
-`configs/two_tiers.yaml` and `configs/seam_pinned_switching.yaml`, the
-exceptions named window by window.
+overlap rather than follow each other, so adding both would count the
+same wall time twice. `tests/front/test_measure.py` asserts the
+identity window by window on `configs/weak_decoder_baseline.yaml`,
+`configs/two_tiers.yaml`, `configs/seam_pinned_switching.yaml` and
+`configs/cluster_gap_switching.yaml`, which are a run with no signal to
+compute, a run whose signal is a second forced-class solve, the same on
+a host-clock strong tier, and a run whose signal is a priced walk.
 
 `escalation_link_per_window` is a hop that is measured and not summed,
 like `dd_per_window`: the escalation hop runs beside the strong input

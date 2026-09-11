@@ -75,6 +75,7 @@ CHAIN = (
     "dep_block",
     "compute_wait",
     "service",
+    "confidence",
     "output_link_per_window",
     "frame_commit",
 )
@@ -508,9 +509,9 @@ def later_solve_ticks(shot, window_id: int) -> int:
 
     A complementary gap is two forced-class solves of one window
     (decision D2) and the window answers when both have, so the solve
-    that did not commit can run after the one that did. That span is on
-    the window's reaction time and on no point of the chain, which is
-    the one exception the chain identity has.
+    that did not commit can run after the one that did. That span is
+    the window's confidence step, the point of the same name, so the
+    tests read it here and expect it there.
     """
     observation = shot.machine.observation
     frames = measure.frame_records_by_window(observation)
@@ -529,29 +530,32 @@ def test_the_shipped_weak_baseline_sums_to_its_reaction_time():
     """The identity on a config the repository ships, not a test's own.
 
     configs/weak_decoder_baseline.yaml decodes each of its nine windows
-    once, so there is no second solve and no exception: every window's
-    seven points are its whole path from its data being complete in
-    Buffer 0 to its correction committed in the frame.
+    once and answers on that decode, so its confidence step is zero and
+    every window's points are its whole path from its data being
+    complete in Buffer 0 to its correction committed in the frame.
     """
     shot = shipped_shot("weak_decoder_baseline.yaml")
 
     measurement = measure.measure_shot(shot)
     gaps = chain_gap_ticks(shot, measurement)
     assert len(gaps) == 9
+    assert measurement.samples["confidence"] == [0.0] * 9
     for window_id, gap in gaps.items():
         assert later_solve_ticks(shot, window_id) == 0
         assert gap == 0
 
 
 def test_the_shipped_two_tier_config_sums_to_its_reaction_time():
-    """The identity, and its one exception by name, on configs/two_tiers.yaml.
+    """The identity on every window of configs/two_tiers.yaml.
 
     Windows 3 to 6 escalated: their weak attempt, the strong decode that
-    committed and the hops around it are the whole path, and they sum to
-    the tick. The other six kept a weak result whose complementary gap
-    ran a second forced-class solve after it, so each of them is short
-    by exactly that solve (decision D2, and Toshio et al. 2510.25222
-    Sec. III A steps 2 to 4 for the order of the escalated ones).
+    committed and the hops around it are the whole path, and their
+    confidence step is zero because the attempt already runs to the
+    verdict. The other six kept a weak result whose complementary gap
+    ran a second forced-class solve after it, and that solve is their
+    confidence step (decision D2, and Toshio et al. 2510.25222 Sec.
+    III A steps 2 to 4 for the order of the escalated ones). Both sum
+    to the tick.
     """
     shot = shipped_shot("two_tiers.yaml")
 
@@ -563,11 +567,10 @@ def test_the_shipped_two_tier_config_sums_to_its_reaction_time():
     assert sorted(gaps) == sorted(decoded)
     for window_id in escalated:
         assert later_solve_ticks(shot, window_id) == 0
-        assert gaps[window_id] == 0
     for window_id in with_a_later_solve:
-        later = later_solve_ticks(shot, window_id)
-        assert later > 0
-        assert gaps[window_id] == -later
+        assert later_solve_ticks(shot, window_id) > 0
+    for gap in gaps.values():
+        assert gap == 0
 
 
 def test_the_shipped_pinned_config_sums_to_its_reaction_time():
@@ -575,17 +578,55 @@ def test_the_shipped_pinned_config_sums_to_its_reaction_time():
 
     configs/seam_pinned_switching.yaml names a belief-matching strong
     tier, whose decode time is read off the host clock, so the values
-    move from host to host and the identity does not: every window is
-    its chain sum plus whatever it decoded after the decode that
-    committed.
+    move from host to host and the identity does not: every window's
+    points still add up to its reaction time to the tick, the solve it
+    ran after the committing one being its confidence step.
     """
     shot = shipped_shot("seam_pinned_switching.yaml")
 
     measurement = measure.measure_shot(shot)
     gaps = chain_gap_ticks(shot, measurement)
     assert gaps
+    confidence = measurement.samples["confidence"]
+    window_ids = decoded_window_ids(shot)
     for window_id, gap in gaps.items():
-        assert gap == -later_solve_ticks(shot, window_id)
+        assert gap == 0
+        index = window_ids.index(window_id)
+        later = later_solve_ticks(shot, window_id)
+        assert ticks_of(confidence[index]) == later
+
+
+def test_the_shipped_cluster_gap_config_sums_to_its_reaction_time():
+    """The identity where the confidence step is a card of its own.
+
+    configs/cluster_gap_switching.yaml walks a union find decode for its
+    signal and prices that walk at 12.0 us on the weak unit (decision
+    D8), so a window the weak tier answered carries the walk between its
+    decode's end and its verdict. A window that escalated carries none:
+    its weak attempt already runs to the verdict and the strong decode
+    it commits answers after it. The union find decode itself is read
+    off the host clock, so the assertions are in ticks and about the
+    identity, never about a magnitude.
+    """
+    shot = shipped_shot("cluster_gap_switching.yaml")
+
+    measurement = measure.measure_shot(shot)
+    gaps = chain_gap_ticks(shot, measurement)
+    confidence = measurement.samples["confidence"]
+    walk_us = 12.0
+    kept = []
+    for index, value in enumerate(confidence):
+        if value:
+            kept.append(index)
+    assert kept
+    assert len(kept) < len(confidence)
+    for index, value in enumerate(confidence):
+        if index in kept:
+            assert value == walk_us
+        else:
+            assert value == 0.0
+    for gap in gaps.values():
+        assert gap == 0
 
 
 def test_the_stage_points_are_the_committing_decodes_own_stages(tmp_path):

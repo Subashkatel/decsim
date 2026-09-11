@@ -136,6 +136,10 @@ class DecoderStageRecord:
     # the decode was cancelled while this stage was open: the stage ends
     # at the cancel, and no latency point reads it
     cancelled: bool = False
+    # the tick a unit took this decode. The window record keeps the last
+    # decode's, so a window decoded more than once needs each decode's
+    # own here, beside the run ordinals that name them
+    dispatch_ticks: Optional[int] = None
 
 
 class StagedDecoder(decoder_module.DecoderBase):
@@ -318,6 +322,7 @@ class StagedDecoder(decoder_module.DecoderBase):
             step.round_keys,
             sequences,
             cancelled,
+            job.dispatch_ticks,
         )
         self.stage_recorded.fire(record)
 

@@ -24,7 +24,11 @@ import yaml
 import decsim.collect as collect
 import decsim.front.experiment as experiment
 import decsim.front.measure as measure
-from tests.front.yaml_configs import MINIMAL_CONFIG, measure_point_shot
+from tests.front.yaml_configs import (
+    CONFIGS_DIR,
+    MINIMAL_CONFIG,
+    measure_point_shot,
+)
 
 # every hop of the weak-only fabric at one cycle of the fridge clock
 ONE_TIER_LINKS = {
@@ -378,6 +382,10 @@ def test_an_escalated_window_is_measured_on_the_strong_tiers_own_hops(
     carried the selection to the strong tier (0.020 us) is its own
     point: it runs beside the strong input hop, so what it costs the
     decode is the 0.012 us the input waited for it, which is dep_block.
+    The weak attempt starts where a unit took the window's first decode,
+    so on window 2, whose complementary gap ran its two forced-class
+    solves one after the other, it is both of them: 1.064 us of the
+    first solve on top of the 12.244 us from the second one's dispatch.
     """
     measurement = switching_shot(tmp_path, 1000000.0)
 
@@ -387,7 +395,7 @@ def test_an_escalated_window_is_measured_on_the_strong_tiers_own_hops(
     assert samples["escalation_link_per_window"] == [0.020] * 10
     assert samples["dep_block"] == [0.012] * 10
     assert samples["algorithm"] == [10.0] * 10
-    assert samples["weak_attempt"][2] == 12.244
+    assert samples["weak_attempt"][2] == 13.308
 
 
 def test_an_escalated_windows_points_sum_to_its_reaction_time(tmp_path):
@@ -409,16 +417,149 @@ def test_a_kept_weak_result_is_measured_on_the_weak_hops(tmp_path):
 
     The same config below the threshold keeps every weak result, so both
     link points read the weak path's one cycle and the two escalation
-    points are zero on every window.
+    points are zero on every window. Window 3 is the exception that
+    makes the rule plain: the result it committed came from the second
+    of its two forced-class solves, which read the input the first solve
+    had already brought into the unit's memory, so that decode crossed
+    no link at all and its own hop is zero. The window's rounds still
+    crossed once, and shot_links.csv still counts that crossing.
     """
     measurement = switching_shot(tmp_path, -1000000.0)
 
     samples = measurement.samples
-    assert samples["input_link_per_window"] == [0.004] * 10
+    weak_hops = [0.004] * 3 + [0.0] + [0.004] * 6
+    assert samples["input_link_per_window"] == weak_hops
     assert samples["output_link_per_window"] == [0.004] * 10
     assert samples["escalation_link_per_window"] == [0.0] * 10
     assert samples["weak_attempt"] == [0.0] * 10
     assert samples["algorithm"] == [1.0] * 10
+
+
+def shipped_shot(config_name: str):
+    """One seeded shot of a config this repository ships.
+
+    p 0.008, distance 3, one microsecond rounds, seed 0: the point the
+    component validation of 2026-09-11 reads, so what these assertions
+    walk is a run folder a reader can build from the shipped yaml.
+    """
+    config_path = CONFIGS_DIR / config_name
+    config = experiment.load_experiment(config_path)
+    task = config.point_task(
+        physical_error_probability=0.008,
+        distance=3,
+        round_period_us=1.0,
+        shots=1,
+    )
+    return collect.run_shot(task, 0)
+
+
+def decoded_window_ids(shot) -> list:
+    """The windows the measurement's samples are in the order of."""
+    observation = shot.machine.observation
+    frames = measure.frame_records_by_window(observation)
+    window_ids = []
+    windows = observation.windows.windows.items()
+    for key, window in sorted(windows):
+        window_id = key[1]
+        if window_id in frames and window.t_done is not None:
+            window_ids.append(window_id)
+    return window_ids
+
+
+def chain_gap_ticks(shot, measurement) -> dict:
+    """Window id -> its chain sum minus its reaction time, in ticks."""
+    gaps = {}
+    window_ids = decoded_window_ids(shot)
+    sums = chain_sum_ticks(measurement)
+    reactions = reaction_ticks(measurement)
+    for index, window_id in enumerate(window_ids):
+        gaps[window_id] = sums[index] - reactions[index]
+    return gaps
+
+
+def later_solve_ticks(shot, window_id: int) -> int:
+    """What the window decoded after the decode that committed, in ticks.
+
+    A complementary gap is two forced-class solves of one window
+    (decision D2) and the window answers when both have, so the solve
+    that did not commit can run after the one that did. That span is on
+    the window's reaction time and on no point of the chain, which is
+    the one exception the chain identity has.
+    """
+    observation = shot.machine.observation
+    frames = measure.frame_records_by_window(observation)
+    frame = frames[window_id]
+    window = observation.windows.windows[(1, window_id)]
+    ends = []
+    for record in observation.stages.records_for(1, window_id):
+        if frame.run_sequence in record.run_sequences:
+            ends.append(record.end_ticks)
+    committing_end = max(ends)
+    later_ticks = window.t_done - committing_end
+    return max(0, later_ticks)
+
+
+def test_the_shipped_weak_baseline_sums_to_its_reaction_time():
+    """The identity on a config the repository ships, not a test's own.
+
+    configs/weak_decoder_baseline.yaml decodes each of its nine windows
+    once, so there is no second solve and no exception: every window's
+    seven points are its whole path from its data being complete in
+    Buffer 0 to its correction committed in the frame.
+    """
+    shot = shipped_shot("weak_decoder_baseline.yaml")
+
+    measurement = measure.measure_shot(shot)
+    gaps = chain_gap_ticks(shot, measurement)
+    assert len(gaps) == 9
+    for window_id, gap in gaps.items():
+        assert later_solve_ticks(shot, window_id) == 0
+        assert gap == 0
+
+
+def test_the_shipped_two_tier_config_sums_to_its_reaction_time():
+    """The identity, and its one exception by name, on configs/two_tiers.yaml.
+
+    Windows 3 to 6 escalated: their weak attempt, the strong decode that
+    committed and the hops around it are the whole path, and they sum to
+    the tick. The other six kept a weak result whose complementary gap
+    ran a second forced-class solve after it, so each of them is short
+    by exactly that solve (decision D2, and Toshio et al. 2510.25222
+    Sec. III A steps 2 to 4 for the order of the escalated ones).
+    """
+    shot = shipped_shot("two_tiers.yaml")
+
+    measurement = measure.measure_shot(shot)
+    gaps = chain_gap_ticks(shot, measurement)
+    escalated = [3, 4, 5, 6]
+    with_a_later_solve = [0, 1, 2, 7, 8, 9]
+    decoded = escalated + with_a_later_solve
+    assert sorted(gaps) == sorted(decoded)
+    for window_id in escalated:
+        assert later_solve_ticks(shot, window_id) == 0
+        assert gaps[window_id] == 0
+    for window_id in with_a_later_solve:
+        later = later_solve_ticks(shot, window_id)
+        assert later > 0
+        assert gaps[window_id] == -later
+
+
+def test_the_shipped_pinned_config_sums_to_its_reaction_time():
+    """The same law where the strong tier's time is measured, not declared.
+
+    configs/seam_pinned_switching.yaml names a belief-matching strong
+    tier, whose decode time is read off the host clock, so the values
+    move from host to host and the identity does not: every window is
+    its chain sum plus whatever it decoded after the decode that
+    committed.
+    """
+    shot = shipped_shot("seam_pinned_switching.yaml")
+
+    measurement = measure.measure_shot(shot)
+    gaps = chain_gap_ticks(shot, measurement)
+    assert gaps
+    for window_id, gap in gaps.items():
+        assert gap == -later_solve_ticks(shot, window_id)
 
 
 def test_the_stage_points_are_the_committing_decodes_own_stages(tmp_path):

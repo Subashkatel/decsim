@@ -43,12 +43,19 @@ POINTS = (
     "csb_stall_per_round",
     # the window's first round readable -> its last (waiting on the QPU)
     "buffer_fill",
-    # the input landed in the unit's memory -> the compute started: the
-    # park for the predecessor's boundary and for the unit's compute
+    # the committing decode's input landed in its unit's memory -> its
+    # compute started: the park for the predecessor's boundary, for the
+    # escalation message beside the input hop, and for the unit's
+    # compute. An input the decode found already there starts this at
+    # the tick a unit took the decode instead
     "dep_block",
-    # the job entered the decode queue -> a unit took it
+    # the job entered the decode queue -> a unit took the window's first
+    # decode
     "queue_wait",
-    # a unit took the job -> its input landed in that unit's memory
+    # the committing decode's own input hop, from its tier's store into
+    # the unit's memory: zero when that decode read an input already
+    # there, which is a tier reading in place and the second forced
+    # solve reading what the first one brought
     "input_link_per_window",
     # the compute start -> the fetch stage's end (the unit reads the
     # window out of its own memory)
@@ -58,7 +65,7 @@ POINTS = (
     # the compute start -> the decode's end: every stage the unit ran,
     # and nothing the decode waited for
     "service",
-    # the escalated window's unit assignment -> the verdict that
+    # a unit took the window's first decode -> the verdict that
     # escalated it: the weak attempt whose result did not commit, zero
     # for a window the first decode committed
     "weak_attempt",
@@ -198,19 +205,42 @@ def link_delay_by_window(transfers: list) -> dict:
     return delay
 
 
-def link_landing_by_window(transfers: list) -> dict:
-    """The last delivery tick by (path, window id), the landing of an input.
+def input_hop_by_request(transfers: list) -> dict:
+    """(path, window id, run ordinal) -> (delay ticks, last delivery tick).
 
-    A decode starts once every transfer of its input has landed, so the
-    latest delivery on the path is the landing the compute waited for.
+    Every transfer that serves a decoder request names it
+    (records/transfers.py, RequestTransferRelation), so a window decoded
+    more than once has one entry per decode and a point reads the hop of
+    the decode it describes rather than the window's last. The delay is
+    summed and the landing is the latest delivery, because a decode
+    starts once every transfer of its input has landed.
     """
-    landing = {}
+    hops = {}
     for row in transfers:
-        key = (row["path"], row["attribution"]["window_id"])
-        earlier = landing.get(key)
-        if earlier is None or row["delivery_ticks"] > earlier:
-            landing[key] = row["delivery_ticks"]
-    return landing
+        run_sequence = _request_run_sequence(row)
+        if run_sequence is None:
+            continue
+        key = (row["path"], row["attribution"]["window_id"], run_sequence)
+        delay, landing = hops.get(key, (0, 0))
+        delay += row["delivery_ticks"] - row["send_ticks"]
+        landing = max(landing, row["delivery_ticks"])
+        hops[key] = (delay, landing)
+    return hops
+
+
+def _request_run_sequence(row: dict):
+    """The run ordinal of the request a transfer serves, None when it has none.
+
+    A boundary hand-off names its source request instead, and a round's
+    transfer names no request at all.
+    """
+    relation = row["attribution"].get("relation")
+    if not relation:
+        return None
+    request_key = relation.get("request_key")
+    if request_key is None:
+        return None
+    return request_key["run_sequence"]
 
 
 def controller_to_weak_buffer_delays_us(transfers: list) -> list:
@@ -296,14 +326,25 @@ def window_points_us(
     window,
     frame_record,
     decode,
+    first_dispatch: int,
     stage_us: dict,
     link_delay: dict,
-    link_landing: dict,
+    input_hop: dict,
     qpu_send: dict,
     input_path: str,
     output_path: str,
 ) -> dict:
     """The per-window latency points, in us, for one decoded window.
+
+    Every tick here belongs to one decode. The window waits in the ready
+    queue until a unit takes its first decode; a window the strong tier
+    recovered then spends its weak attempt, which ends at the verdict
+    (Toshio et al. 2510.25222 Sec. III A steps 2 to 4, lines 602-617);
+    and the input hop, the park, the compute and the way home are the
+    committing decode's own, named by the frame record's tier and run
+    ordinal. Mixing them is what a window decoded more than once
+    punishes: its two forced-class solves (decision D2) are two decodes
+    with two dispatches, and the window record keeps only the last.
 
     The decode's own time and the time it waited are two points, not
     one: a window's service is what its compute took on the unit, and
@@ -322,15 +363,14 @@ def window_points_us(
     last_emitted_round = max(qpu_send)
     last_required_round = min(window.buffer_hi, last_emitted_round)
     committed = frame_record.committed_ticks
-    input_ticks = link_delay.get((input_path, window_id), 0)
     handoff_ticks = link_delay.get(("decoder_to_decoder", window_id), 0)
     escalation_ticks = link_delay.get(
         ("weak_decoder_to_strong_decoder", window_id), 0
     )
     output_ticks = link_delay.get((output_path, window_id), 0)
-    input_landed = link_landing.get((input_path, window_id))
-    if input_landed is None:  # a tier that reads its input in place
-        input_landed = window.t_dispatch
+    attempt_end = _attempt_end_ticks(window, decode, first_dispatch)
+    input_key = (input_path, window_id, decode.run_sequence)
+    input_ticks, input_landed = input_hop.get(input_key, (0, attempt_end))
     last_required_send = qpu_send[last_required_round]
     first_required_send = qpu_send[window.start_round]
     return {
@@ -340,7 +380,7 @@ def window_points_us(
         "dep_block": _span_microseconds(
             decode.compute_start_ticks, input_landed
         ),
-        "queue_wait": _span_microseconds(window.t_dispatch, window.t_queued),
+        "queue_wait": _span_microseconds(first_dispatch, window.t_queued),
         "input_link_per_window": ticks_to_microseconds(input_ticks),
         "fetch": stage_us["fetch"],
         "algorithm": stage_us["algorithm"],
@@ -348,7 +388,7 @@ def window_points_us(
         "service": _span_microseconds(
             decode.done_ticks, decode.compute_start_ticks
         ),
-        "weak_attempt": _weak_attempt_microseconds(window, decode),
+        "weak_attempt": _span_microseconds(attempt_end, first_dispatch),
         "escalation_link_per_window": ticks_to_microseconds(escalation_ticks),
         "dd_per_window": ticks_to_microseconds(handoff_ticks),
         "output_link_per_window": ticks_to_microseconds(output_ticks),
@@ -397,7 +437,7 @@ def collect_samples(
     """
     transfers = result.link_traffic["transfers"]
     link_delay = link_delay_by_window(transfers)
-    link_landing = link_landing_by_window(transfers)
+    input_hop = input_hop_by_request(transfers)
     qpu_send = qpu_send_ticks(transfers)
     frame_by_window = frame_records_by_window(observation)
     samples = {}
@@ -418,6 +458,7 @@ def collect_samples(
         if frame_record is None or window.t_done is None:
             continue
         decode = _committed_decode(stages, frame_record)
+        first_dispatch = _first_dispatch_ticks(stages, window, frame_record)
         input_link = INPUT_LINK_BY_TIER[decode.tier]
         output_link = decoder_output.FRAME_PATH_BY_TIER[decode.tier]
         input_path = input_link.value
@@ -427,9 +468,10 @@ def collect_samples(
             window,
             frame_record,
             decode,
+            first_dispatch,
             stage_us,
             link_delay,
-            link_landing,
+            input_hop,
             qpu_send,
             input_path,
             output_path,
@@ -595,6 +637,8 @@ class _CommittedDecode:
     tier: window_records.DecoderTier
     compute_start_ticks: int
     done_ticks: int
+    dispatch_ticks: int  # a unit took this decode
+    run_sequence: int  # the run ordinal of the request it committed
 
 
 @dataclasses.dataclass(frozen=True)
@@ -688,11 +732,16 @@ def _span_microseconds(end_ticks: int, start_ticks: int) -> float:
 
 
 def _committed_decode(stages, frame_record) -> _CommittedDecode:
-    """The committing decode's tier and the ticks its compute ran between.
+    """The committing decode's tier and the ticks of its own life.
 
     Its stage records are the ones whose request ordinals hold the
     frame record's, so a merged batch answers for every window it
-    served. The compute began at its first stage and ended at its last.
+    served. The compute began at its first stage and ended at its last,
+    and the records carry the two ticks before that compute: the tick a
+    unit took this decode and the tick its input was readable in that
+    unit's memory. Every one of them belongs to this decode, so a window
+    decoded more than once never mixes one decode's dispatch with
+    another's compute.
     """
     tier = window_records.DecoderTier(frame_record.tier)
     operation_id, window_id = frame_record.window_key
@@ -710,7 +759,63 @@ def _committed_decode(stages, frame_record) -> _CommittedDecode:
         ends.append(record.end_ticks)
     first = min(starts)
     last = max(ends)
-    return _CommittedDecode(tier, first, last)
+    dispatch = _dispatch_ticks(records, first)
+    run_sequence = frame_record.run_sequence
+    return _CommittedDecode(tier, first, last, dispatch, run_sequence)
+
+
+def _dispatch_ticks(records: list, fallback: int) -> int:
+    """The tick a unit took this decode, off its own stage records.
+
+    Every stage of one decode carries it; a decoder that records none (a
+    backend firing its own stages without it) leaves the points to the
+    fallback rather than to a missing tick.
+    """
+    ticks = []
+    for record in records:
+        if record.dispatch_ticks is not None:
+            ticks.append(record.dispatch_ticks)
+    if not ticks:
+        return fallback
+    return min(ticks)
+
+
+def _first_dispatch_ticks(stages, window, frame_record) -> int:
+    """The tick a unit took the first decode of this window.
+
+    The window's queue wait ends there, and the weak attempt of an
+    escalated window starts there (Toshio et al. 2510.25222 Sec. III A
+    steps 2 to 4, lines 602-617: the weak decoder answers, the verdict
+    is read, and only then does the strong decode that commits begin).
+    A window decoded once has one dispatch and this is it; a window that
+    ran its two forced-class solves (decision D2) or escalated has
+    several, and the first is the one its wait in the ready queue ended
+    at. A decode the cancel closed is not on the window's path at all
+    (Toshio Sec. III A step 1), so it is left out.
+    """
+    operation_id, window_id = frame_record.window_key
+    records = stages.records_for(operation_id, window_id)
+    cancelled = _cancelled_run_sequences(records)
+    ticks = []
+    for record in records:
+        if cancelled.intersection(record.run_sequences):
+            continue
+        if record.dispatch_ticks is None:
+            continue
+        ticks.append(record.dispatch_ticks)
+    if not ticks:
+        return window.t_dispatch
+    return min(ticks)
+
+
+def _cancelled_run_sequences(records) -> set:
+    """The run ordinals of the decodes a cancel closed."""
+    ordinals = set()
+    for record in records:
+        if not record.cancelled:
+            continue
+        ordinals.update(record.run_sequences)
+    return ordinals
 
 
 def _committing_stage_records(
@@ -724,20 +829,21 @@ def _committing_stage_records(
     return records
 
 
-def _weak_attempt_microseconds(window, decode: _CommittedDecode) -> float:
-    """The window's own decode when the committing decode waited for it.
+def _attempt_end_ticks(window, decode: _CommittedDecode, first_dispatch) -> int:
+    """Where the window's weak attempt ended and the committing decode began.
 
     An escalated window answers once on the weak tier and the strong
     decode starts from that verdict (Toshio et al. 2510.25222 Sec. III A
-    steps 3 and 4), so the weak attempt is on the window's path and the
-    span from the unit assignment to the verdict is this point. When the
-    committing decode was already computing by then, which is the weak
-    result committing and which is run_both_at_once's parallel sibling,
-    the attempt cost the window nothing and the point is zero.
+    steps 2 to 4, lines 602-617), so the span from the unit assignment
+    to the verdict is the weak_attempt point and the committing decode's
+    own hop starts there. When the committing decode was already
+    computing at that answer, which is a kept weak result and which is
+    run_both_at_once's parallel sibling, the attempt cost the window
+    nothing and both start at the dispatch.
     """
     if window.t_done >= decode.compute_start_ticks:
-        return 0.0
-    return _span_microseconds(window.t_done, window.t_dispatch)
+        return first_dispatch
+    return window.t_done
 
 
 def _stage_microseconds(stages, frame_record) -> dict:

@@ -115,7 +115,10 @@ class Window:
         None  # tick the last buffered round arrived
     )
     t_queued: Optional[int] = None  # tick the job entered the decode queue
-    t_dispatch: Optional[int] = None  # tick a decoder unit started it
+    t_dispatch: Optional[int] = None  # tick a decoder unit took the job
+    # tick the unit began computing the job it took: the input had
+    # landed in the unit's memory and the window owed no boundary
+    t_compute_start: Optional[int] = None
     t_done: Optional[int] = None  # tick the decode finished
 
     @property

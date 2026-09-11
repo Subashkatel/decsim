@@ -6,10 +6,11 @@ were amended when the controller-to-store hop stopped being priced at
 the raw readout width: the recorded run's own buffer fill, its
 per-round store hop and that hop's link row. The weak decoder of
 reference.yaml is pymatching, which prices its measured wall clock, so the
-columns that carry decode time (algorithm, service, queue wait, the four
-totals, load, throughput, the queue peak and the wall seconds) vary between
-two runs of the same code; they are left out of the comparison, and the
-columns kept are exactly the ones two recorded runs agreed on. Referent two
+columns that carry decode time (algorithm, service, queue wait, the park
+before the compute, the four totals, load, throughput, the queue peak and
+the wall seconds) vary between two runs of the same code; they are left
+out of the comparison, and the columns kept are exactly the ones two
+recorded runs agreed on. Referent two
 is sinter (sinter/_collection/_collection.py collect, sinter/_data/_task.py
 strong_id): a task named twice runs once, and a decoder off the table is
 refused by name (sinter/_decoding/_decoding.py "Unrecognized decoder").
@@ -42,6 +43,7 @@ REFERENCE_YAML = CONFIGS / "reference.yaml"
 # The sweep.csv columns that carry the decoder's measured wall clock.
 WALL_CLOCK_POINTS = (
     "algorithm",
+    "dep_block",
     "queue_wait",
     "service",
     "buffer0_ready_to_frame",

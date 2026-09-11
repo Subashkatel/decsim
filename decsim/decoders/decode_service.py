@@ -189,6 +189,7 @@ class DecodeService:
         job.service_started = True
         if job.window is not None:
             job.window.service_began = True
+            job.window.t_compute_start = self.engine.now
         decoder = self.pool.decoder_for(job)
         self.engine.log(
             log_sources.DECODER_MANAGER, f"START DECODE {job.label}"

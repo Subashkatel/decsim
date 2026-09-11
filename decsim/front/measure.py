@@ -31,23 +31,33 @@ import decsim.records.windows as window_records
 import decsim.settings as machine_settings
 
 # Latency points, in path order, in microseconds per window unless noted.
+# Every point is one span, and its comment names the two ticks it runs
+# between.
 POINTS = (
-    # controller -> Buffer 0, one round (latency + serialization + queue)
+    # per round: the controller's send -> the round readable in Buffer 0
     "cwb_per_round",
-    # first round in window arrives -> last arrives (waiting on the QPU)
+    # the window's first round readable -> its last (waiting on the QPU)
     "buffer_fill",
-    "dep_block",  # window complete -> job queued (dependencies)
-    "queue_wait",  # queued -> unit assigned (ready-queue wait)
-    # unit assigned -> input in decoder memory (the tier's input link)
+    # the input landed in the unit's memory -> the compute started: the
+    # park for the predecessor's boundary and for the unit's compute
+    "dep_block",
+    # the job entered the decode queue -> a unit took it
+    "queue_wait",
+    # a unit took the job -> its input landed in that unit's memory
     "input_link_per_window",
-    "fetch",  # engine: read the window out of decoder memory
-    "algorithm",  # engine: the decoding algorithm
-    "release",  # engine: correction write-out
-    # unit assigned -> decode done (transfer + fetch + algorithm + release)
+    # the compute start -> the fetch stage's end (the unit reads the
+    # window out of its own memory)
+    "fetch",
+    "algorithm",  # the fetch's end -> the decoding algorithm's end
+    "release",  # the algorithm's end -> the correction written out
+    # the compute start -> the decode's end: fetch, algorithm, release,
+    # and nothing the decode waited for
     "service",
-    "dd_per_window",  # decoder -> next decoder, the boundary handoff
-    "output_link_per_window",  # decoder -> Pauli frame (the tier's link)
-    "frame_commit",  # Pauli frame accepted -> committed
+    # the decode's end -> the boundary readable in the next window
+    "dd_per_window",
+    # the decode's end -> the correction at the Pauli frame
+    "output_link_per_window",
+    "frame_commit",  # the frame accepted the correction -> committed
     # Totals. The buffer0 pair starts the clock at Buffer 0 publication;
     # the qpu pair starts it when the round leaves the QPU (the QC send),
     # so it includes QC, controller processing, packing and CWB.
@@ -176,6 +186,21 @@ def link_delay_by_window(transfers: list) -> dict:
     return delay
 
 
+def link_landing_by_window(transfers: list) -> dict:
+    """The last delivery tick by (path, window id), the landing of an input.
+
+    A decode starts once every transfer of its input has landed, so the
+    latest delivery on the path is the landing the compute waited for.
+    """
+    landing = {}
+    for row in transfers:
+        key = (row["path"], row["attribution"]["window_id"])
+        earlier = landing.get(key)
+        if earlier is None or row["delivery_ticks"] > earlier:
+            landing[key] = row["delivery_ticks"]
+    return landing
+
+
 def controller_to_weak_buffer_delays_us(transfers: list) -> list:
     """Every round's controller-to-Buffer-0 delay, in microseconds."""
     delays = []
@@ -205,11 +230,26 @@ def window_points_us(
     frame_record,
     stage_us: dict,
     link_delay: dict,
+    link_landing: dict,
     qpu_send: dict,
     input_path: str,
     output_path: str,
 ) -> dict:
-    """The per-window latency points, in us, for one decoded window."""
+    """The per-window latency points, in us, for one decoded window.
+
+    The decode's own time and the time it waited are two points, not
+    one: a window's service is what its compute took on the unit, and
+    the park before that compute (for the predecessor's boundary and
+    for the unit's compute to free) is dep_block. Skoric et al.
+    2209.08552 keep the same two apart, tau_W the window's decoding
+    time against which the backlog condition is read (2209.08552.txt
+    lines 429-435) and tau_0 the time to send a window to a worker and
+    start it (lines 1004-1008); gem5's functional-unit pool marks a
+    unit busy at issue and frees it one operation latency later
+    (tmp/resources/gem5/src/cpu/o3/fu_pool.cc:165-190,
+    src/cpu/o3/inst_queue.cc:911-971), so work that is not ready waits
+    in the queue and no unit counts it.
+    """
     window_id = window.key[1]
     last_emitted_round = max(qpu_send)
     last_required_round = min(window.buffer_hi, last_emitted_round)
@@ -217,21 +257,22 @@ def window_points_us(
     input_ticks = link_delay.get((input_path, window_id), 0)
     handoff_ticks = link_delay.get(("decoder_to_decoder", window_id), 0)
     output_ticks = link_delay.get((output_path, window_id), 0)
+    input_landed = link_landing.get((input_path, window_id))
+    if input_landed is None:  # a tier that reads its input in place
+        input_landed = window.t_dispatch
     last_required_send = qpu_send[last_required_round]
     first_required_send = qpu_send[window.start_round]
     return {
         "buffer_fill": _span_microseconds(
             window.t_data_complete, window.t_first_round
         ),
-        "dep_block": _span_microseconds(
-            window.t_queued, window.t_data_complete
-        ),
+        "dep_block": _span_microseconds(window.t_compute_start, input_landed),
         "queue_wait": _span_microseconds(window.t_dispatch, window.t_queued),
         "input_link_per_window": ticks_to_microseconds(input_ticks),
         "fetch": stage_us["fetch"],
         "algorithm": stage_us["algorithm"],
         "release": stage_us["release"],
-        "service": _span_microseconds(window.t_done, window.t_dispatch),
+        "service": _span_microseconds(window.t_done, window.t_compute_start),
         "dd_per_window": ticks_to_microseconds(handoff_ticks),
         "output_link_per_window": ticks_to_microseconds(output_ticks),
         "frame_commit": _span_microseconds(
@@ -278,6 +319,7 @@ def collect_samples(
     """
     transfers = result.link_traffic["transfers"]
     link_delay = link_delay_by_window(transfers)
+    link_landing = link_landing_by_window(transfers)
     qpu_send = qpu_send_ticks(transfers)
     frame_by_window = frame_records_by_window(observation)
     samples = {}
@@ -302,6 +344,7 @@ def collect_samples(
             frame_record,
             stage_us,
             link_delay,
+            link_landing,
             qpu_send,
             input_path,
             output_path,
@@ -341,9 +384,11 @@ def chain_load(
 ) -> float:
     """rho: the serial chain's service per window over the window period.
 
-    Service is unit assigned to decode done plus the DD boundary handoff;
-    the window inter-arrival time is commit rounds times the round
-    period. Above 1 the chain cannot keep up.
+    Service is the decode's own compute plus the DD boundary handoff
+    that serialises the chain; the window inter-arrival time is commit
+    rounds times the round period. Above 1 the chain cannot keep up,
+    which is Skoric et al. 2209.08552's backlog condition read as a
+    ratio (2209.08552.txt lines 429-435).
     """
     service_us = _mean_or_zero(samples["service"])
     handoff_us = _mean_or_zero(samples["dd_per_window"])

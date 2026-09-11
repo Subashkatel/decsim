@@ -126,11 +126,16 @@ def slow_unit_shot(tmp_path, units: int):
     )
 
 
-def switching_shot(tmp_path, gap_threshold_db: float):
+def switching_shot(
+    tmp_path, gap_threshold_db: float, run_both_at_once: bool = False
+):
     """One shot of a 1.0 us weak tier that escalates to a 10.0 us one.
 
     A threshold far above every gap escalates every window and one far
     below escalates none, so the same two cards answer both branches.
+    run_both_at_once starts the strong sibling with the weak job and
+    cancels it when the weak result is kept, which is Toshio et al.
+    2510.25222 Sec. III A step 1.
     """
     raw = dict(MINIMAL_CONFIG)
     workload = dict(MINIMAL_CONFIG["workload"])
@@ -141,6 +146,7 @@ def switching_shot(tmp_path, gap_threshold_db: float):
         "kind": "switching",
         "gap_threshold_db": gap_threshold_db,
         "strong_window": "two_sided_context",
+        "run_both_at_once": run_both_at_once,
     }
     raw["weak_decoder"] = {
         "kind": 1.0,
@@ -367,3 +373,57 @@ def test_a_kept_weak_result_is_measured_on_the_weak_hops(tmp_path):
     assert samples["escalation_link_per_window"] == [0.0] * 10
     assert samples["weak_attempt"] == [0.0] * 10
     assert samples["algorithm"] == [1.0] * 10
+
+
+def test_the_stage_points_are_the_committing_decodes_own_stages(tmp_path):
+    """Fetch, algorithm and release add up to the service they are in.
+
+    Every window of this run escalates, so the decode the frame took is
+    the strong one and its three stages are the compute the service
+    point measures: a nine-round strong window fetches 0.036 us, decodes
+    10.0 and releases 0.040, and the two six-round ones at the ends
+    fetch 0.024.
+    """
+    measurement = switching_shot(tmp_path, 1000000.0)
+
+    samples = measurement.samples
+    stage_totals = []
+    for index in range(len(samples["service"])):
+        total = ticks_of(samples["fetch"][index])
+        total += ticks_of(samples["algorithm"][index])
+        total += ticks_of(samples["release"][index])
+        stage_totals.append(total)
+    service_ticks = []
+    for sample in samples["service"]:
+        ticks = ticks_of(sample)
+        service_ticks.append(ticks)
+    assert stage_totals == service_ticks
+    assert samples["fetch"] == [0.024] + [0.036] * 8 + [0.024]
+
+
+def test_a_cancelled_siblings_card_is_not_the_windows_algorithm(tmp_path):
+    """A parallel run that escalates nothing reports the weak card.
+
+    run_both_at_once starts a strong sibling on every window and cancels
+    it at the verdict, and the sibling records its own stages under the
+    same window key. The window's algorithm point is the decode that
+    committed, which is the 1.0 us weak one on every window here.
+    """
+    measurement = switching_shot(tmp_path, -1000000.0, True)
+
+    samples = measurement.samples
+    assert samples["algorithm"] == [1.0] * 10
+    assert measurement.means["algorithm"] == 1.0
+    assert samples["service"] == [1.064] * 9 + [1.052]
+
+
+def test_a_second_forced_solve_is_not_the_windows_algorithm(tmp_path):
+    """The complementary gap runs two solves; one of them committed.
+
+    Both are jobs of the same window and each is charged one card
+    (decisions D2 and D7), so the window's algorithm point is one card's
+    1.0 us and never their sum.
+    """
+    measurement = switching_shot(tmp_path, -1000000.0)
+
+    assert measurement.samples["algorithm"] == [1.0] * 10

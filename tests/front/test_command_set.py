@@ -95,6 +95,20 @@ def _combined(first_dir, second_dir, out_dir):
     )
 
 
+@pytest.fixture(autouse=True)
+def one_tree_reading_per_test():
+    """Every test here takes its own reading of the tree.
+
+    run_folder reads the tree once per process, which is what a cluster
+    task is. The suite is one process running many runs, and one of
+    these tests answers for git itself, so the reading is dropped
+    around each test rather than carried between them.
+    """
+    run_folder._tree_reading.cache_clear()
+    yield
+    run_folder._tree_reading.cache_clear()
+
+
 def _manifest_of(run_dir):
     path = run_dir / "manifest.json"
     text = path.read_text()
@@ -556,13 +570,19 @@ def test_a_manifest_takes_the_dirty_flag_from_the_launcher_that_looked(
     what it saw, because the container image this runs in ships no git
     binary and a folder that cannot say whether its code was committed
     must say that rather than say clean.
+
+    A process reads the tree once, so the two runs here take a reading
+    each on purpose: one process launched by two different launchers is
+    the test bench's own shape and never a cluster job's.
     """
     config_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)
     dirty_dir = tmp_path / "dirty"
     clean_dir = tmp_path / "clean"
     monkeypatch.setenv(run_folder.TREE_DIRTY_VARIABLE, "1")
+    run_folder._tree_reading.cache_clear()
     command.main(["collect", str(config_path), "--out", str(dirty_dir)])
     monkeypatch.setenv(run_folder.TREE_DIRTY_VARIABLE, "0")
+    run_folder._tree_reading.cache_clear()
     command.main(["collect", str(config_path), "--out", str(clean_dir)])
 
     dirty_manifest = _manifest_of(dirty_dir)
@@ -571,6 +591,42 @@ def test_a_manifest_takes_the_dirty_flag_from_the_launcher_that_looked(
     clean = clean_manifest["git"]
     assert dirty["dirty"] is True
     assert clean["dirty"] is False
+
+
+def test_both_manifests_of_a_run_name_the_tree_it_started_on(
+    tmp_path, monkeypatch
+):
+    """A run writes its manifest twice and both name one reading.
+
+    The campaign of 2026-09-09 left 500 shard folders naming 18
+    different commits, four of which did not exist when those tasks
+    started: the tree was being committed to while the array ran, and
+    each task read it again as it finished. Here git answers one commit
+    for the first write and another for the second, and both manifests
+    name the first, which is the code the run imported.
+    """
+    config_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)
+    out_dir = tmp_path / "run"
+    started_utc = run_folder.utc_now()
+    config = experiment.load_experiment(config_path)
+    out_dir.mkdir()
+    monkeypatch.setenv(run_folder.TREE_DIRTY_VARIABLE, "0")
+    monkeypatch.setattr(run_folder, "_git_output", lambda *_: "aaaaaaa")
+    run_folder._tree_reading.cache_clear()
+
+    run_folder.write_manifest(config, out_dir, started_utc)
+    at_the_start = _manifest_of(out_dir)
+    monkeypatch.setenv(run_folder.TREE_DIRTY_VARIABLE, "1")
+    monkeypatch.setattr(run_folder, "_git_output", lambda *_: "bbbbbbb")
+    finished_utc = run_folder.utc_now()
+    run_folder.write_manifest(
+        config, out_dir, started_utc, finished_utc=finished_utc
+    )
+    at_the_end = _manifest_of(out_dir)
+
+    assert at_the_start["git"] == {"commit": "aaaaaaa", "dirty": False}
+    assert at_the_end["git"] == at_the_start["git"]
+    assert at_the_end["finished_utc"] is not None
 
 
 def test_a_shard_with_no_work_unit_says_so_and_writes_no_rows(tmp_path, capsys):

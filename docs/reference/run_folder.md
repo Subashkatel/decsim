@@ -234,7 +234,7 @@ One object. Its keys, from `write_manifest` in
 | `config_files` | the yaml chain, in the order it was read |
 | `resolved_config` | the whole config after every `extends` was folded in, as json |
 | `shard`, `shots_per_unit` | the `--shard` and `--shots-per-unit` this process ran with, or null |
-| `git` | the commit and whether the checkout was dirty |
+| `git` | the commit and whether the checkout was dirty, read once when the process started |
 | `container` | the container image, when one was in use |
 | `versions` | the Python, Stim, PyMatching and numpy versions |
 | `host`, `slurm_job_id` | where it ran |
@@ -243,6 +243,13 @@ One object. Its keys, from `write_manifest` in
 
 `decsim combine` writes the same shape through `write_combined_manifest`,
 with the resolved config of the folders it folded.
+
+The manifest is written twice, once when the run starts and once when
+it ends with `finished_utc` filled in, and both writes name the same
+tree: the reading is taken once, before the first shot, and reused. A
+tree that moves while a run is going, which is what an array running
+for hours out of a checkout somebody commits to does, would otherwise
+leave every folder naming code that no part of the run read.
 
 ## Read next
 

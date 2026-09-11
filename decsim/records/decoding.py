@@ -247,6 +247,10 @@ class DecodeJob:
     # tick a unit took this decode, the end of its own queue wait; the
     # window record keeps the last one, this keeps each decode's own
     dispatch_ticks: Optional[int] = None
+    # tick this decode first may compute: its input has landed in the
+    # unit's memory and its window owes no boundary. What it waits for
+    # after this tick is the unit's compute, not a dependency
+    ready_ticks: Optional[int] = None
     memory: Optional[Any] = (
         None  # that unit's DecoderMemory while it holds this job's input
     )

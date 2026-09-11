@@ -9,7 +9,10 @@ added to it when the escalation points were added, the weak attempt
 that did not commit and the escalation hop, which a weak-only sweep
 never reaches, and eight more when the two per-round back-pressure
 points were added, the wait a full Buffer 0 or a full Buffer 1 puts on
-the writer, which a sweep with room in both stores never sees. The weak
+the writer, which a sweep with room in both stores never sees, and four
+more when the park was split by cause: this sweep's one unit is always
+free by the time a window's boundary is in, so its compute_wait is zero
+on every window of both recorded runs. The weak
 decoder of
 reference.yaml is pymatching, which prices its measured wall clock, so the
 columns that carry decode time (algorithm, service, queue wait, the park

@@ -71,7 +71,8 @@ and they are the same names in `shots.csv`, `window_samples.csv` and
 | `cwb_stall_per_round` | the packed round finding Buffer 0 full, to the freed slot that admitted it: the store's back-pressure on the controller, zero for a round that found room |
 | `csb_stall_per_round` | the same wait in front of Buffer 1, one sample per round that reached it |
 | `buffer_fill` | the first round of a window arriving, to the last: the wait on the QPU |
-| `dep_block` | the input landing in the unit's memory, to the compute starting: the park for the predecessor's boundary and for the unit's compute |
+| `dep_block` | the input landing in the unit's memory, to the first tick the decode may compute: the dependency wait, for the predecessor's boundary and for the escalation message, and zero when nothing was owed at the landing |
+| `compute_wait` | that first startable tick, to the compute starting: the wait for the unit's own compute, busy with another decode |
 | `queue_wait` | queued, to a unit assigned |
 | `input_link_per_window` | a unit assigned, to the input in that unit's memory |
 | `fetch` | the unit reading the window out of its own memory |
@@ -101,10 +102,20 @@ window can be decoded more than once, and then every tick still belongs
 to one decode. `queue_wait` ends where a unit took the window's first
 decode; `weak_attempt` runs from there to the verdict that sent the
 window to the strong tier, and is zero when the first decode is the one
-that committed; `input_link_per_window`, `dep_block`, `service` and
-`output_link_per_window` are the committing decode's own hop, park,
-compute and way home; `frame_commit` closes it. On a serial path those
-seven add up to `buffer0_ready_to_frame` to the tick.
+that committed; `input_link_per_window`, `dep_block`, `compute_wait`,
+`service` and `output_link_per_window` are the committing decode's own
+hop, the two halves of its park, its compute and its way home;
+`frame_commit` closes it. On a serial path those eight add up to
+`buffer0_ready_to_frame` to the tick.
+
+The park is two points because it has two causes. `dep_block` is what
+the decode waited for its window's last boundary, and it ends at the
+first tick the decode may compute, whether or not a unit is free then;
+`compute_wait` is the rest, the unit's compute still busy with another
+decode. A run whose windows wait on the seam reports the park in the
+first and zero in the second; two decodes of one window sharing a unit,
+which is what a complementary gap's forced-class pair is, report it in
+the second.
 
 `input_link_per_window` is that decode's own hop, so it is zero when the
 decode read an input that was already in its unit's memory: a tier
@@ -112,7 +123,7 @@ reading in place, and the second forced-class solve of a complementary
 gap reading what the first solve brought. The rounds still crossed the
 link once and `shot_links.csv` still counts that crossing; `dep_block`
 then starts where the decode's own path started, at the dispatch or at
-the verdict.
+the verdict, and runs to the tick that input was readable.
 
 Two runs are outside that sum, and knowingly. Under
 `escalation.run_both_at_once` the weak attempt and the strong decode

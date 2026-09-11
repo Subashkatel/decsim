@@ -140,6 +140,10 @@ class DecoderStageRecord:
     # decode's, so a window decoded more than once needs each decode's
     # own here, beside the run ordinals that name them
     dispatch_ticks: Optional[int] = None
+    # the tick this decode first may compute: its input landed and its
+    # window owed no boundary. What it waited for after this tick is the
+    # unit's compute, which is a wait of a different kind
+    ready_ticks: Optional[int] = None
 
 
 class StagedDecoder(decoder_module.DecoderBase):
@@ -323,6 +327,7 @@ class StagedDecoder(decoder_module.DecoderBase):
             sequences,
             cancelled,
             job.dispatch_ticks,
+            job.ready_ticks,
         )
         self.stage_recorded.fire(record)
 

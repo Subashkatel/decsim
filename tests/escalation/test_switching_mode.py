@@ -412,7 +412,7 @@ def test_the_parallel_sibling_waits_for_the_context_it_reads():
 
     Toshio arXiv:2510.25222 Sec. III A, Step 1: "a sequence of syndrome
     data sigma is simultaneously fed to both the weak and strong
-    decoders" (lines 599-603). The paper prices no transport in Sec.
+    decoders" (lines 598-601). The paper prices no transport in Sec.
     III A, and its simulations set T_comm^strong to ten times
     T_comm^weak (lines 1109-1114; Table I is a notation table and prices
     nothing), so in a model that prices transport Step 1 means

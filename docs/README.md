@@ -71,6 +71,7 @@ and reading what it wrote.
 - [How to read a trace and follow one round or one window](how-to/read_a_trace.md)
 - [How to compare two runs](how-to/compare_two_runs.md)
 - [How to run a timing study whose numbers do not depend on your computer](how-to/run_a_timing_only_study.md)
+- [How to run a workload whose next operation waits on a decision](how-to/run_a_feedback_workload.md)
 
 ## Reference
 

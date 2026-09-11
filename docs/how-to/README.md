@@ -41,3 +41,6 @@ read back.
 - [How to run a timing study whose numbers do not depend on your computer](run_a_timing_only_study.md):
   price the decoders with cards so the ticks are a function of the
   configuration and the seed.
+- [How to run a workload whose next operation waits on a decision](run_a_feedback_workload.md):
+  the smallest two-operation workload that sends a decision back to the
+  QPU, and the two links it lights up.

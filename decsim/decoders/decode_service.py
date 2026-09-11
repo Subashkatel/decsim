@@ -134,6 +134,7 @@ class DecodeService:
         job.decoding_unit_name = unit.name
         if claim_compute:
             self.pool.claim(unit, job)
+        job.dispatch_ticks = self.engine.now
         if job.window is not None:
             job.window.t_dispatch = self.engine.now
         self._log_assignment(pool, job, claim_compute)

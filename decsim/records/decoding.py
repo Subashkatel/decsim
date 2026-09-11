@@ -244,6 +244,9 @@ class DecodeJob:
     # the store the input leaves from, stamped by that store's own port
     input_source_name: Optional[str] = None
     unit: Optional[Any] = None  # the DecoderUnit assigned at dispatch
+    # tick a unit took this decode, the end of its own queue wait; the
+    # window record keeps the last one, this keeps each decode's own
+    dispatch_ticks: Optional[int] = None
     memory: Optional[Any] = (
         None  # that unit's DecoderMemory while it holds this job's input
     )

@@ -96,15 +96,36 @@ and the write into Buffer 0.
 Every point of a window describes the decode whose result the frame
 committed, which the frame's own record names by tier and by request
 ordinal: for a window the strong tier recovered, the two link points are
-the strong tier's hops and the stage points are the strong decode's.
-`queue_wait`, `weak_attempt`, `input_link_per_window`, `dep_block`,
-`service`, `output_link_per_window` and `frame_commit` are that decode's
-path end to end, so on a serial path they add up to
-`buffer0_ready_to_frame` to the tick. Two runs are outside that sum, and
-knowingly: under `escalation.run_both_at_once` the weak attempt and the
-strong decode overlap rather than follow each other, and a window that
-ran the two forced-class solves of a complementary gap has the solve
-that did not commit between the committed one and its verdict.
+the strong tier's hops and the stage points are the strong decode's. A
+window can be decoded more than once, and then every tick still belongs
+to one decode. `queue_wait` ends where a unit took the window's first
+decode; `weak_attempt` runs from there to the verdict that sent the
+window to the strong tier, and is zero when the first decode is the one
+that committed; `input_link_per_window`, `dep_block`, `service` and
+`output_link_per_window` are the committing decode's own hop, park,
+compute and way home; `frame_commit` closes it. On a serial path those
+seven add up to `buffer0_ready_to_frame` to the tick.
+
+`input_link_per_window` is that decode's own hop, so it is zero when the
+decode read an input that was already in its unit's memory: a tier
+reading in place, and the second forced-class solve of a complementary
+gap reading what the first solve brought. The rounds still crossed the
+link once and `shot_links.csv` still counts that crossing; `dep_block`
+then starts where the decode's own path started, at the dispatch or at
+the verdict.
+
+Two runs are outside that sum, and knowingly. Under
+`escalation.run_both_at_once` the weak attempt and the strong decode
+overlap rather than follow each other. And a window whose complementary
+gap ran its second forced-class solve after the solve that committed is
+short by exactly that solve: the window answers when both have
+answered, so the correction leaves the decoder only then, and the span
+between the committing decode's end and the window's own answer is on
+the reaction time and on no point. `tests/front/test_measure.py` asserts
+both halves of this on `configs/weak_decoder_baseline.yaml`,
+`configs/two_tiers.yaml` and `configs/seam_pinned_switching.yaml`, the
+exceptions named window by window.
+
 `escalation_link_per_window` is a hop that is measured and not summed,
 like `dd_per_window`: the escalation hop runs beside the strong input
 hop, and what it makes the strong decode wait for is in `dep_block`.

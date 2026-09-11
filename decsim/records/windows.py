@@ -115,6 +115,14 @@ class Window:
         None  # tick the last buffered round arrived
     )
     t_queued: Optional[int] = None  # tick the job entered the decode queue
+    # The three ticks below are the window's own decodes as they happen,
+    # so a window decoded more than once (the two forced-class solves of
+    # a complementary gap, decision D2) keeps the last one's dispatch
+    # and the last one's compute start, and t_done is the tick its last
+    # weak answer arrived. A reader that needs one decode's own ticks
+    # reads the stage records, which carry the run ordinals they served
+    # and the tick a unit took that decode (decoders/staged_decoder.py);
+    # the latency points do (front/measure.py).
     t_dispatch: Optional[int] = None  # tick a decoder unit took the job
     # tick the unit began computing the job it took: the input had
     # landed in the unit's memory and the window owed no boundary

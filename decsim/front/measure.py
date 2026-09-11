@@ -347,7 +347,7 @@ def collect_samples(
     window_items = observation.windows.windows.items()
     all_windows = sorted(window_items)
     stages = observation.stages
-    for (operation_id, window_id), window in all_windows:
+    for (_operation_id, window_id), window in all_windows:
         frame_record = frame_by_window.get(window_id)
         if frame_record is None or window.t_done is None:
             continue
@@ -356,7 +356,7 @@ def collect_samples(
         output_link = decoder_output.FRAME_PATH_BY_TIER[decode.tier]
         input_path = input_link.value
         output_path = output_link.value
-        stage_us = _stage_microseconds(stages, operation_id, window_id)
+        stage_us = _stage_microseconds(stages, frame_record)
         points = window_points_us(
             window,
             frame_record,
@@ -674,10 +674,23 @@ def _weak_attempt_microseconds(window, decode: _CommittedDecode) -> float:
     return _span_microseconds(window.t_done, window.t_dispatch)
 
 
-def _stage_microseconds(stages, operation_id, window_id) -> dict:
-    """The recorded duration of each of a window's stages, in microseconds."""
+def _stage_microseconds(stages, frame_record) -> dict:
+    """The committing decode's stages, in microseconds, by stage name.
+
+    Every decode of a window records its stages under the window's key:
+    the two forced-class solves of a complementary gap, which are two
+    jobs of one window and are charged one card each (decisions D2 and
+    D7), the strong re-decode of an escalated window, and a sibling that
+    was cancelled. Keeping the last record of each name mixes them, so
+    the stages are the committing request's, which is the rule every
+    other point of the window follows.
+    """
+    operation_id, window_id = frame_record.window_key
+    records = _committing_stage_records(
+        stages, operation_id, window_id, frame_record.run_sequence
+    )
     stage_us = {}
-    for record in stages.records_for(operation_id, window_id):
+    for record in records:
         stage_us[record.stage] = _span_microseconds(
             record.end_ticks, record.start_ticks
         )

@@ -86,19 +86,29 @@ class WindowInputGate:
     def mask_input(self, job: decoding_records.DecodeJob) -> None:
         """XOR the window's boundary mask into the input the decode reads.
 
-        The mask is this side's: what a boundary is and how it lands on a
-        round layer are the window interaction's. Where the masked input
-        is written is the decoder side's, which is handed it here: with
-        the copy fold the unit's stored rounds stay raw (cudaq-x keeps
-        raw rounds and applies syndrome_mods at window assembly) and the
-        job reads a masked duplicate; with the in-place fold the mask
-        goes into the unit's own memory and nothing is duplicated.
+        The fold's condition is that a boundary arrived, which the window
+        interaction answers, and not that a bit is set in it: cuda-q QEC
+        applies the accumulated syndrome mods to every window past the
+        first, whatever they hold (sliding_window.cpp:283-292, the
+        `w > 0` branch), and a fold skipped on an all-zero mask would
+        make the work the seam costs follow the noise, which is the cost
+        D9 (docs/explanation/decisions.md:156-164) prices independent of
+        it so that a sweep can read it. The mask is this side's: what a
+        boundary is and how it lands on a round layer are the window
+        interaction's. Where the masked input is written is the decoder
+        side's, which is handed it here: with the copy fold the unit's
+        stored rounds stay raw (cudaq-x keeps raw rounds and applies
+        syndrome_mods at window assembly) and the job reads a masked
+        duplicate; with the in-place fold the mask goes into the unit's
+        own memory and nothing is duplicated.
         """
         window = job.window
         if window is None:
             return
         state = window.boundary_in
-        if not state or job.decoder_input is None:
+        if job.decoder_input is None:
+            return
+        if not self.interaction.boundary_arrived(state):
             return
         window_info = window_records.WindowInfo.from_window(window)
         masked_rounds = []

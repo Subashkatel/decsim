@@ -273,27 +273,29 @@ def test_the_data_movement_counts_are_the_hop_tables(traced):
     """data_path.md sections 3 and 4, counted per round as the table does.
 
     Predicted before the run: 30 rounds each copied at the controller's
-    intake, at its assembler and into Buffer 0 (hops 1 to 3), and one
+    intake, at its assembler and into Buffer 0 (hops 1 to 3), one
     unit-memory copy per window of the six rounds it reads (hop 5, nine
-    windows of six): 30 x 3 + 54 = 144 copied rounds. The nine window
-    input holds reference 54 rounds where they sit; each hold is
-    registered, transferred to its request and released, so 27 hold
-    events. The links carry 86 moves.
+    windows of six), and the masked view each window past the first
+    folds its predecessor's boundary into (eight of six): 30 x 3 + 54 +
+    48 = 192 copied rounds. The nine window input holds reference 54
+    rounds where they sit; each hold is registered, transferred to its
+    request and released, so 27 hold events. The links carry 86 moves.
     """
     machine, _result, _document = traced
     counts = machine.observation.data_movement.json_value()
 
     assert counts["rounds"] == 30
-    assert counts["copied_rounds"] == 144
+    assert counts["copied_rounds"] == 192
     assert counts["referenced_rounds"] == 54
     assert counts["hold_events"] == 27
     assert counts["moves"] == 86
-    assert counts["copies"] == 99
+    assert counts["copies"] == 107
     by_path = counts["copies_by_path"]
     assert by_path["readout -> controller intake"]["rounds"] == 30
     assert by_path["controller intake -> controller assembler"]["rounds"] == 30
     assert by_path["controller assembler -> Buffer 0"]["rounds"] == 30
     assert by_path["Buffer 0 -> unit default#0 memory"]["rounds"] == 54
+    assert by_path["unit default#0 memory -> masked view"]["rounds"] == 48
 
 
 def test_the_movement_counts_group_by_the_memory_class_they_cross(traced):

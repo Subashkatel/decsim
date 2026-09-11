@@ -16,6 +16,7 @@ import decsim.decoders.decoder_memory as decoder_memory
 import decsim.decoders.decoder_memory_transfer as decoder_memory_transfer
 import decsim.engine as engine_module
 import decsim.escalation.policies as escalation_policies
+import decsim.front.experiment as experiment
 import decsim.links.window_transfers as window_transfers
 import decsim.observe.run_views as run_views
 import decsim.records.decoding as decoding_records
@@ -31,6 +32,7 @@ import decsim.windows.decode_requests as decode_requests
 import decsim.windows.round_retention as round_retention
 import decsim.windows.window_interactions as window_interactions
 import tests.declared_run as declared_run
+import tests.front.yaml_configs as yaml_configs
 
 
 class _RecordingQueue:
@@ -159,6 +161,29 @@ class _Fixture:
             store_output,
         )
         self.retention.register_window((1, 0), self.window)
+        self.interaction = interaction
+
+    def deliver_boundary(self, defects: dict) -> None:
+        """The window's one predecessor hands it this seam mask.
+
+        Through the interaction, because the state a fold reads is the
+        interaction's own and carries which sources contributed to it.
+        """
+        info = window_records.WindowInfo.from_window(self.window)
+        delivery = window_records.BoundaryDelivery(
+            source_key=(1, 9),
+            destination_key=(1, 0),
+            source_revision=1,
+            delivery_revision=0,
+            latest_source_revision=1,
+            latest_delivery_revision=0,
+            source_operation_round_count=6,
+            dependency_released=True,
+            payload=defects,
+        )
+        empty = self.interaction.initial_boundary_state(info)
+        update = self.interaction.merge_boundary(delivery, info, empty)
+        self.window.boundary_in = update.state
 
     def _has_first_round(self, _window) -> bool:
         return self.arrived >= 1
@@ -196,14 +221,14 @@ def test_a_blocked_window_ships_raw_rounds_and_is_masked_at_start():
     fixture = _Fixture()
     fixture.window.deps = [(1, 9)]
     fixture.window.deps_remaining = 1
-    fixture.window.boundary_in = {2: [1, 0, 1]}
+    fixture.deliver_boundary({5: [1, 0, 1]})
     for round_index in (1, 2, 3, 4, 5):
         fixture.arrive(round_index)
     (job, _send_input) = fixture.queue.enqueued[0]
     assert fixture.gate.may_start(job) is False
-    raw = job.payloads[1]
+    raw = job.payloads[4]
     assert raw.bits is None
-    landed = decoder_memory.MaterializedSyndromeRound(1, 2, (raw,))
+    landed = decoder_memory.MaterializedSyndromeRound(1, 5, (raw,))
     job.decoder_input = decoder_memory.DecoderInput(
         1, 0, job.request_key, (landed,)
     )
@@ -213,6 +238,36 @@ def test_a_blocked_window_ships_raw_rounds_and_is_masked_at_start():
     assert masked.bits == (1, 0, 1)
     fixture.window.deps_remaining = 0
     assert fixture.gate.may_start(job) is True
+
+
+def test_a_boundary_that_flipped_nothing_is_still_folded():
+    """The fold follows the arrival, not the bits the arrival carried.
+
+    cuda-q QEC applies the accumulated syndrome mods to every window
+    past the first whatever they hold (sliding_window.cpp:283-292), so
+    an all-zero seam still costs the window its masked view; the rounds
+    it reads come out of the fold unchanged.
+    """
+    fixture = _Fixture()
+    fixture.window.deps = [(1, 9)]
+    fixture.window.deps_remaining = 1
+    fixture.deliver_boundary({5: [0, 0, 0]})
+    for round_index in (1, 2, 3, 4, 5):
+        fixture.arrive(round_index)
+    (job, _send_input) = fixture.queue.enqueued[0]
+    raw = _fragment(5, bits=(1, 0, 1))
+    landed = decoder_memory.MaterializedSyndromeRound(1, 5, (raw,))
+    job.decoder_input = decoder_memory.DecoderInput(
+        1, 0, job.request_key, (landed,)
+    )
+    job.memory = decoder_memory.DecoderMemory("default", 0, None)
+    folded = job.decoder_input
+
+    fixture.gate.mask_input(job)
+
+    (masked,) = job.decoder_input.rounds[0].fragments
+    assert job.decoder_input is not folded
+    assert masked.bits == (1, 0, 1)
 
 
 def test_a_withdrawn_window_is_requested_again_fresh():
@@ -265,7 +320,7 @@ def _landed_job(fixture, folds_in_place: bool):
     """One blocked window's job, landed in a real unit memory."""
     fixture.window.deps = [(1, 9)]
     fixture.window.deps_remaining = 1
-    fixture.window.boundary_in = {2: [1, 0, 1]}
+    fixture.deliver_boundary({5: [1, 0, 1]})
     for round_index in (1, 2, 3, 4, 5):
         fixture.arrive(round_index)
     (job, _send_input) = fixture.queue.enqueued[0]
@@ -283,9 +338,9 @@ def test_the_copy_fold_leaves_the_units_rounds_raw():
     job, memory = _landed_job(fixture, folds_in_place=False)
     fixture.gate.mask_input(job)
     resident = memory.input_of(job)
-    (masked,) = job.decoder_input.rounds[1].fragments
+    (masked,) = job.decoder_input.rounds[4].fragments
     assert masked.bits == (1, 0, 1)
-    (raw,) = resident.rounds[1].fragments
+    (raw,) = resident.rounds[4].fragments
     assert raw.bits is None
     assert job.decoder_input is not resident
 
@@ -297,7 +352,7 @@ def test_the_in_place_fold_writes_the_units_own_memory():
     fixture.gate.mask_input(job)
     resident = memory.input_of(job)
     assert job.decoder_input is resident
-    (masked,) = resident.rounds[1].fragments
+    (masked,) = resident.rounds[4].fragments
     assert masked.bits == (1, 0, 1)
 
 
@@ -314,3 +369,48 @@ def test_an_in_place_fold_of_an_input_two_jobs_read_is_refused():
     memory.add_reader(sibling)
     with pytest.raises(RuntimeError, match="2 jobs read"):
         fixture.gate.mask_input(job)
+
+
+# one sweep point per noise level, counting the movement each shot made
+FOLD_COUNTING_SWEEP = {
+    "observation": {"data_movement": True},
+    "sweep": [
+        {
+            "physical_error_probability": [0.001, 0.01],
+            "distance": [3],
+            "round_period_us": [1.0],
+            "shots": 1,
+        }
+    ],
+}
+
+
+@pytest.mark.parametrize("probability", (0.001, 0.01))
+def test_every_window_with_a_predecessor_folds_its_boundary(
+    tmp_path, probability
+):
+    """The fold's count is the geometry's, not the noise's.
+
+    Fifteen rounds at distance 3 are four sliding windows, so three of
+    them have a predecessor and three masked views are made, at a noise
+    level where almost no seam carries a defect and at one where many
+    do. The rounds come out of a fold that changed nothing unchanged, so
+    the shot still agrees with whole-circuit PyMatching.
+    """
+    config_path = yaml_configs.write_config(tmp_path, FOLD_COUNTING_SWEEP)
+    config = experiment.load_experiment(config_path)
+    measurement = yaml_configs.measure_point_shot(
+        config,
+        physical_error_probability=probability,
+        distance=3,
+        round_period_us=1.0,
+        seed=0,
+    )
+    by_path = measurement.data_movement["copies_by_path"]
+    folds = by_path["unit default#0 memory -> masked view"]
+
+    assert measurement.windows == 4
+    assert folds["events"] == measurement.windows - 1
+    assert folds["rounds"] == 18
+    assert measurement.logical_failure is False
+    assert measurement.direct_mismatch is False

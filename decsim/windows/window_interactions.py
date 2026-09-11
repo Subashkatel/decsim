@@ -46,6 +46,9 @@ class WindowInteraction(Protocol):
     ) -> window_records.BoundaryUpdate:
         """The destination's boundary after this delivery."""
 
+    def boundary_arrived(self, state: Any) -> bool:
+        """Whether any source has delivered a boundary into this state."""
+
     def apply_boundary(
         self,
         state: Any,
@@ -136,6 +139,18 @@ class DefaultWindowInteraction:
             accepted=True,
             release_dependency=release_dependency,
         )
+
+    def boundary_arrived(self, state):
+        """Whether a source has contributed to this window's mask.
+
+        merge_boundary records the source's contribution whatever bits
+        it carried, so a state whose combined mask is all zeros is still
+        a boundary that arrived: an empty mask is a neighbour that
+        committed no defect on the seam, not a neighbour that sent
+        nothing.
+        """
+        contributions = getattr(state, "contributions", None)
+        return bool(contributions)
 
     def apply_boundary(self, state, _window, payload, round_key):
         """XOR the round's mask into the payload's bits.

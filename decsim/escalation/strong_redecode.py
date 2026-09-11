@@ -69,7 +69,7 @@ class StrongRedecode:
         it or cancels it. A sibling whose input has not landed yet is
         held instead and enqueued when its condition fires, so there is
         no submission for the requester to make: Step 1 feeds both
-        decoders the same data (2510.25222 lines 599-603), and in a
+        decoders the same data (2510.25222 lines 598-601), and in a
         model that prices transport the strong decoder starts when its
         copy has arrived.
         """

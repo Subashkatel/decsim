@@ -103,7 +103,7 @@ escalation:
 #     max_escalation_rate: 0.30    # the target's cap: the Theorem 1 backlog
 #                                  # bound on strong duty
 #   run_both_at_once: false        # Toshio 2510.25222 Sec. III A Step 1 (lines
-#                                  # 598-600): the strong decoder starts with the
+#                                  # 598-601): the strong decoder starts with the
 #                                  # weak one on the same syndrome and is cancelled
 #                                  # when the weak result is confident. false, the
 #                                  # default, is the same section's on-demand

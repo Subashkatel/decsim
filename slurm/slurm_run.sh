@@ -15,12 +15,14 @@
 #   RUN=results/weak_ler SHARDS=500 sbatch -a 447-499 slurm/slurm_run.sh \
 #     configs/weak_ler.yaml --shots-per-unit 50000
 #
-# $ALLOW_DIRTY lets a job start from a tree with uncommitted changes.
-# Without it a dirty tree is refused, because every task imports the
-# tree as it stands when that task starts: an edit or a commit landing
-# while the array is still launching gives different tasks different
-# code, and the folders would name a commit none of them ran. Submit
-# from a worktree pinned at a commit instead
+# $ALLOW_DIRTY lets a job start from a tree whose state git does not
+# vouch for. Without it a dirty tree is refused, because every task
+# imports the tree as it stands when that task starts: an edit or a
+# commit landing while the array is still launching gives different
+# tasks different code, and the folders would name a commit none of them
+# ran. A tree git cannot read at all is refused for the same reason:
+# the job must name the code it ran, and there nothing can. Submit from
+# a worktree pinned at a commit instead
 # (docs/how-to/run_a_sweep_on_slurm.md).
 #SBATCH --partition=cpu
 #SBATCH --nodes=1
@@ -65,6 +67,12 @@ if [ "$dirty" = 1 ] && [ -z "${ALLOW_DIRTY:-}" ]; then
   echo "refusing to start: $checkout has uncommitted changes, so this" \
     "task would import whatever the tree holds when it starts; commit" \
     "them, submit from a worktree pinned at a commit, or set ALLOW_DIRTY=1" >&2
+  exit 1
+fi
+if [ "$dirty" = unknown ] && [ -z "${ALLOW_DIRTY:-}" ]; then
+  echo "refusing to start: git says nothing about $checkout, so this" \
+    "task cannot name the code it ran; submit from a git checkout" \
+    "pinned at a commit, or set ALLOW_DIRTY=1" >&2
   exit 1
 fi
 

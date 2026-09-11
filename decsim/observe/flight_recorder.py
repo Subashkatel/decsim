@@ -339,6 +339,7 @@ def _store_landings(
 _WINDOW_STAMPS = (
     ("DECODE_QUEUED", "t_queued"),
     ("UNIT_ASSIGNED", "t_dispatch"),
+    ("DECODE_STARTED", "t_compute_start"),
     ("DECODE_DONE", "t_done"),
 )
 

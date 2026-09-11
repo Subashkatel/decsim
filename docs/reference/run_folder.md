@@ -69,13 +69,13 @@ and they are the same names in `shots.csv`, `window_samples.csv` and
 | --- | --- |
 | `cwb_per_round` | the controller to Buffer 0, one round: latency, serialization and queue |
 | `buffer_fill` | the first round of a window arriving, to the last: the wait on the QPU |
-| `dep_block` | the window complete, to its job queued: the wait on dependencies |
+| `dep_block` | the input landing in the unit's memory, to the compute starting: the park for the predecessor's boundary and for the unit's compute |
 | `queue_wait` | queued, to a unit assigned |
 | `input_link_per_window` | a unit assigned, to the input in that unit's memory |
 | `fetch` | the unit reading the window out of its own memory |
 | `algorithm` | the decoding algorithm itself |
 | `release` | the unit writing the correction out |
-| `service` | a unit assigned, to the decode done: the input link, the fetch, the algorithm and the release together |
+| `service` | the compute start, to the decode done: the fetch, the algorithm and the release, and nothing the decode waited for |
 | `dd_per_window` | one decoder to the next: the boundary handoff |
 | `output_link_per_window` | the decoder to the Pauli frame |
 | `frame_commit` | the frame accepting a correction, to it being committed |

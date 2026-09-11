@@ -12,11 +12,13 @@ import types
 
 import pytest
 
+import decsim.collect as collect
 import decsim.decoders.decoder_memory as decoder_memory
 import decsim.decoders.decoder_memory_transfer as decoder_memory_transfer
 import decsim.engine as engine_module
 import decsim.escalation.policies as escalation_policies
 import decsim.front.experiment as experiment
+import decsim.front.measure as measure
 import decsim.links.window_transfers as window_transfers
 import decsim.observe.run_views as run_views
 import decsim.records.decoding as decoding_records
@@ -356,19 +358,55 @@ def test_the_in_place_fold_writes_the_units_own_memory():
     assert masked.bits == (1, 0, 1)
 
 
-def test_an_in_place_fold_of_an_input_two_jobs_read_is_refused():
-    """One input has one writer (Helios 2301.08419 lines 632-640)."""
+def test_a_shared_input_is_written_once_and_the_other_solve_reads_it():
+    """One input has one writer (Helios 2301.08419 lines 632-640).
+
+    The jobs that share one landed input are the two forced-class solves
+    of one window's request (decision D2), so the boundary they fold is
+    that window's one boundary: the solve that starts first writes the
+    mask into the unit's memory and the other reads exactly those
+    rounds, which is what the copy fold gives each of them too.
+    """
     fixture = _Fixture()
     job, memory = _landed_job(fixture, folds_in_place=True)
+    sibling = _sibling_solve(job, memory)
+
+    fixture.gate.mask_input(job)
+    fixture.gate.mask_input(sibling)
+
+    resident = memory.input_of(job)
+    assert sibling.decoder_input is resident
+    (masked,) = resident.rounds[4].fragments
+    assert masked.bits == (1, 0, 1)
+
+
+def test_an_input_that_carries_its_mask_is_not_masked_again():
+    """A second write would be a second mask over the first.
+
+    The memory that holds the input refuses it, so a caller that folds
+    twice is told rather than decoding rounds the boundary has been
+    XORed into twice (Helios 2301.08419 lines 632-640).
+    """
+    fixture = _Fixture()
+    job, memory = _landed_job(fixture, folds_in_place=True)
+    fixture.gate.mask_input(job)
+
+    with pytest.raises(RuntimeError, match="already written"):
+        memory.rewrite(job, job.decoder_input)
+
+
+def _sibling_solve(job, memory):
+    """The window's other forced-class solve, reading the same input."""
     sibling = decoding_records.DecodeJob(
-        operation_id=1,
-        window_id=0,
-        round_count=5,
+        operation_id=job.operation_id,
+        window_id=job.window_id,
+        round_count=job.round_count,
         request_key=job.request_key,
+        window=job.window,
+        memory=memory,
     )
-    memory.add_reader(sibling)
-    with pytest.raises(RuntimeError, match="2 jobs read"):
-        fixture.gate.mask_input(job)
+    sibling.decoder_input = memory.add_reader(sibling)
+    return sibling
 
 
 # one sweep point per noise level, counting the movement each shot made
@@ -385,6 +423,9 @@ FOLD_COUNTING_SWEEP = {
 }
 
 
+FOLD_SEEDS = (0, 1, 2, 3, 4)
+
+
 @pytest.mark.parametrize("probability", (0.001, 0.01))
 def test_every_window_with_a_predecessor_folds_its_boundary(
     tmp_path, probability
@@ -395,22 +436,111 @@ def test_every_window_with_a_predecessor_folds_its_boundary(
     them have a predecessor and three masked views are made, at a noise
     level where almost no seam carries a defect and at one where many
     do. The rounds come out of a fold that changed nothing unchanged, so
-    the shot still agrees with whole-circuit PyMatching.
+    every one of five seeds still agrees with whole-circuit PyMatching.
     """
     config_path = yaml_configs.write_config(tmp_path, FOLD_COUNTING_SWEEP)
     config = experiment.load_experiment(config_path)
-    measurement = yaml_configs.measure_point_shot(
-        config,
+    for seed in FOLD_SEEDS:
+        measurement = yaml_configs.measure_point_shot(
+            config,
+            physical_error_probability=probability,
+            distance=3,
+            round_period_us=1.0,
+            seed=seed,
+        )
+        by_path = measurement.data_movement["copies_by_path"]
+        folds = by_path["unit default#0 memory -> masked view"]
+
+        assert measurement.windows == 4
+        assert folds["events"] == measurement.windows - 1
+        assert folds["rounds"] == 18
+        assert measurement.direct_mismatch is False
+
+
+# switching, so every window's request runs the two forced-class solves
+# of a complementary gap and they read one landed input (decision D2)
+SWITCHING_FOLD_SWEEP = {
+    "escalation": {
+        "kind": "switching",
+        "gap_threshold_db": 20.0,
+        "strong_window": "two_sided_context",
+        "run_both_at_once": False,
+    },
+    "strong_decoder": {
+        "kind": 1.0,
+        "units": 1,
+        "unit_memory_rounds": None,
+        "engine": {
+            "clock": "fridge",
+            "fetch_cycles_per_round": 1,
+            "release_cycles_per_job": 1,
+        },
+    },
+    "sweep": [
+        {
+            "physical_error_probability": [0.0001, 0.008],
+            "distance": [3],
+            "round_period_us": [1.0],
+            "shots": len(FOLD_SEEDS),
+        }
+    ],
+}
+
+
+@pytest.mark.parametrize("probability", (0.0001, 0.008))
+def test_two_solves_of_one_request_fold_one_mask_into_one_input(
+    tmp_path, probability
+):
+    """The in-place fold under switching answers what the copy fold does.
+
+    The two forced-class solves of one window read one landed input
+    (decision D2) and fold one window's boundary, so the mask is written
+    into the unit's memory once and both solves read those rounds: one
+    input, one writer (Helios 2301.08419 lines 632-640). Five seeds at
+    each of two noise levels, one where almost no seam carries a defect
+    and one where many do: every window's committed logical observables,
+    the shot's logical outcome and its agreement with whole-circuit
+    PyMatching are what the copy fold reaches on the same seed.
+    """
+    in_place = _fold_run(tmp_path, "in_place", probability)
+    copied = _fold_run(tmp_path, "copy", probability)
+
+    assert in_place == copied
+
+
+def _fold_run(tmp_path, boundary_fold: str, probability: float) -> list:
+    """Each seed's committed corrections and verdicts under that fold row."""
+    overrides = dict(SWITCHING_FOLD_SWEEP)
+    weak_decoder = dict(yaml_configs.MINIMAL_CONFIG["weak_decoder"])
+    weak_decoder["input"] = "copy"
+    weak_decoder["boundary_fold"] = boundary_fold
+    overrides["weak_decoder"] = weak_decoder
+    directory = tmp_path / boundary_fold
+    directory.mkdir()
+    config_path = yaml_configs.write_config(directory, overrides)
+    config = experiment.load_experiment(config_path)
+    outcomes = []
+    for seed in FOLD_SEEDS:
+        outcome = _fold_outcome(config, probability, seed)
+        outcomes.append(outcome)
+    return outcomes
+
+
+def _fold_outcome(config, probability: float, seed: int) -> tuple:
+    """One shot's committed corrections, its outcome and its agreement."""
+    task = config.point_task(
         physical_error_probability=probability,
         distance=3,
         round_period_us=1.0,
-        seed=0,
+        shots=len(FOLD_SEEDS),
     )
-    by_path = measurement.data_movement["copies_by_path"]
-    folds = by_path["unit default#0 memory -> masked view"]
-
-    assert measurement.windows == 4
-    assert folds["events"] == measurement.windows - 1
-    assert folds["rounds"] == 18
-    assert measurement.logical_failure is False
-    assert measurement.direct_mismatch is False
+    shot = collect.run_shot(task, seed)
+    measurement = measure.measure_shot(shot)
+    corrections = []
+    for record in shot.machine.observation.frame_corrections.committed:
+        corrections.append((record.window_key, record.logical_observables))
+    return (
+        sorted(corrections),
+        measurement.logical_failure,
+        measurement.direct_mismatch,
+    )

@@ -147,8 +147,8 @@ class PackedRound:
 class RoundEvent:
     """One recorded transition of one syndrome round through the controller.
 
-    kind is one of EMITTED, BINARY_AVAILABLE, PACKED, STALLED, CWB_SENT,
-    PUBLISHED, DROPPED, FEEDBACK_MEMORY_DELIVERED.
+    kind is one of EMITTED, BINARY_AVAILABLE, PACKED, STALLED, RELEASED,
+    CWB_SENT, PUBLISHED, DROPPED, FEEDBACK_MEMORY_DELIVERED.
     """
 
     kind: str

@@ -34,7 +34,18 @@ class HeldRounds:
     """The waiting line in front of the stores, and what a full store does.
 
     Trace source: round_event(RoundEvent) with kind STALLED when a round
-    is held for room, DROPPED when the policy drops it.
+    is held for room, RELEASED when a freed slot admits it, DROPPED when
+    the policy drops it. The two ends are the wait itself, which is the
+    back-pressure a full store applies to its writer and is measured
+    nowhere else: the round waits here, before the wire is asked for, so
+    its transfer carries none of it. Ruby's MessageBuffer counts that
+    wait as the buffer's own statistic, the ticks a message was stalled
+    in it (tmp/resources/gem5/src/mem/ruby/network/MessageBuffer.cc:76-82
+    for the stall counters, :331 where the wait is summed at the
+    dequeue), and ns-3's queue disc stamps a packet at the enqueue and
+    reads the sojourn time back at the dequeue
+    (tmp/resources/l5_buffers/ns3-traffic-control/queue-disc.cc:851
+    and :701, the trace source described at queue-disc.h:162-167).
     """
 
     def __init__(
@@ -87,11 +98,24 @@ class HeldRounds:
             if not admitted:
                 return
             self.waiting.pop(0)
+            self._released(packed)
 
     @property
     def count(self) -> int:
         """How many rounds wait."""
         return len(self.waiting)
+
+    def _released(self, packed: round_records.PackedRound) -> None:
+        """The round left the waiting line: its wait ends at this tick."""
+        operation_id, round_index = packed.round_key
+        released = round_records.RoundEvent.of(
+            "RELEASED",
+            self.engine.now,
+            operation_id,
+            round_index,
+            packed.route,
+        )
+        self.trace.round_event.fire(released)
 
     def _is_holding(self, packed: round_records.PackedRound) -> bool:
         for held, _admit in self.waiting:

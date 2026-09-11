@@ -68,6 +68,8 @@ and they are the same names in `shots.csv`, `window_samples.csv` and
 | Point | From, to |
 | --- | --- |
 | `cwb_per_round` | the controller to Buffer 0, one round: latency, serialization and queue |
+| `cwb_stall_per_round` | the packed round finding Buffer 0 full, to the freed slot that admitted it: the store's back-pressure on the controller, zero for a round that found room |
+| `csb_stall_per_round` | the same wait in front of Buffer 1, one sample per round that reached it |
 | `buffer_fill` | the first round of a window arriving, to the last: the wait on the QPU |
 | `dep_block` | the input landing in the unit's memory, to the compute starting: the park for the predecessor's boundary and for the unit's compute |
 | `queue_wait` | queued, to a unit assigned |

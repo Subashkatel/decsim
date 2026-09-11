@@ -191,6 +191,42 @@ def switching_shot(
     return measure.measure_shot(shot)
 
 
+def bounded_store_shot(tmp_path):
+    """One shot whose Buffer 0 holds six rounds and whose unit is slow.
+
+    Thirty rounds arrive a microsecond apart into a store of six, and
+    the 5.0 us unit frees three slots per window it reads, so the
+    controller has to hold rounds it has already packed.
+    """
+    raw = dict(MINIMAL_CONFIG)
+    workload = dict(MINIMAL_CONFIG["workload"])
+    workload["rounds_per_shot"] = 30
+    raw["workload"] = workload
+    raw["links"] = ONE_TIER_LINKS
+    raw["round_store"] = {"rounds": 6}
+    raw["weak_decoder"] = {
+        "kind": 5.0,
+        "units": 1,
+        "unit_memory_rounds": None,
+        "engine": {
+            "clock": "fridge",
+            "fetch_cycles_per_round": 1,
+            "release_cycles_per_job": 10,
+        },
+    }
+    config_path = tmp_path / "bounded_store.yaml"
+    config_text = yaml.safe_dump(raw)
+    config_path.write_text(config_text)
+    config = experiment.load_experiment(config_path)
+    return measure_point_shot(
+        config,
+        physical_error_probability=0.001,
+        distance=3,
+        round_period_us=1.0,
+        seed=0,
+    )
+
+
 def ticks_of(microseconds: float) -> int:
     """One point's microseconds back in ticks, so a sum is exact."""
     ticks = microseconds * 1000000
@@ -467,3 +503,45 @@ def test_a_cancelled_siblings_record_ends_at_the_cancel(tmp_path):
     assert ends == verdicts
     for record in cancelled:
         assert record.stage == "algorithm"
+
+
+def test_a_full_buffer_0_holds_rounds_and_the_wait_is_a_point(tmp_path):
+    """The store's back-pressure on the controller, round by round.
+
+    Rounds 1 to 15 find room. Round 16 is packed at 16.004 us into a
+    full store and waits 0.144 us for the slot window 3's input frees at
+    16.148; rounds 19 to 21 wait 2.212, 1.212 and 0.212 us for the three
+    slots window 4 frees at 21.216, and the pattern repeats to round 30,
+    the worst wait being 8.416 us on round 28. Thirteen rounds wait,
+    51.912 us in all.
+    """
+    measurement = bounded_store_shot(tmp_path)
+
+    stalls = measurement.samples["cwb_stall_per_round"]
+    assert stalls[:15] == [0.0] * 15
+    assert stalls[15] == 0.144
+    assert stalls[18:21] == [2.212, 1.212, 0.212]
+    assert stalls[27] == 8.416
+    waiting = []
+    for stall in stalls:
+        if stall > 0.0:
+            waiting.append(stall)
+    total_ticks = 0
+    for stall in stalls:
+        total_ticks += ticks_of(stall)
+    assert len(waiting) == 13
+    assert total_ticks == 51912000
+
+
+def test_the_store_wait_is_not_in_the_hop_the_round_then_crosses(tmp_path):
+    """The round waits before the wire is asked for.
+
+    The hop's own point is the card's 0.004 us on every one of the
+    thirty rounds, held room or not, because the transfer is requested
+    at the release; the wait is the store's and is reported as the
+    store's.
+    """
+    measurement = bounded_store_shot(tmp_path)
+
+    assert measurement.samples["cwb_per_round"] == [0.004] * 30
+    assert measurement.means["cwb_stall_per_round"] == 51.912 / 30

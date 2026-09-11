@@ -71,7 +71,11 @@ with your row named as `weak_decoder.kind`. The summary line
 through the machine and PyMatching decoding the same shots straight
 through, outside it, and comparing the predictions. A backend that is
 correct and different from matching will disagree on some windows; a
-backend that is broken disagrees on most.
+backend that is broken disagrees on most. Even a matching backend
+disagrees on a few, because the window commits without the rounds the
+whole-circuit decode reads (4 shots in 1800 at distances 3 and 5 and
+physical error rates 0.003 to 0.01), so read a handful as the windowing
+and a noticeable fraction as the bug.
 
 For a second opinion per window rather than per shot, set
 `observation.check_windows_with: tesseract`, which re-decodes every

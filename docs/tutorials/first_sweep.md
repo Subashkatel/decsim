@@ -109,8 +109,22 @@ a better logical qubit.
 every shot. decsim decodes the shot in windows, through the whole
 machine, while the front decodes the same shot's detection events in one
 piece with PyMatching outside the machine, and the two predictions are
-compared. Zero mismatches means the windowing did not change the answer
-on any of these shots.
+compared.
+
+Do not read zero as a promise. A sliding window commits its correction
+without the rounds the whole-circuit decode can see, so windowed
+decoding is an approximation of global decoding, and the two are
+expected to disagree on a small fraction of shots: Skoric et al.
+(arXiv:2209.08552, Sec. I B) put it as processing only a subset of the
+syndrome data inevitably reducing the logical fidelity, with a fidelity
+close to the global decoder's retained by buffering a whole distance,
+which is what decsim's default window does. A run of 1800 shots at
+distances 3 and 5 and physical error rates 0.003 to 0.01 disagreed on 4
+of them, about 0.2 percent, while the windowed and whole-circuit failure
+counts stayed within that many of each other at every point. So zero
+here says these 400 shots had no disagreement, and a handful in a larger
+sweep is the approximation showing, not a broken machine. A number that
+is a noticeable fraction of the shots is a broken machine.
 
 ## Step 3. Read the error bars
 

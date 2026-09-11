@@ -167,10 +167,19 @@ class DecoderInputStaging:
     ) -> None:
         """The mask is written into the unit's own memory, nothing copied.
 
-        The memory that holds the input performs the write and refuses a
-        shared one itself (DecoderMemory.rewrite, Helios 2301.08419 lines
-        632-640); the destination takes what it is handed before it acts
-        (OMNeT++ csimplemodule.cc:782-783).
+        The memory that holds the input performs the write and keeps it
+        single-writer itself (DecoderMemory.rewrite, Helios 2301.08419
+        lines 632-640); the destination takes what it is handed before
+        it acts (OMNeT++ csimplemodule.cc:782-783).
+
+        The mask is written once per input, not once per job. The jobs
+        that share one landed input are the forced-class solves of one
+        window's request (decision D2), so they share one window and one
+        boundary: the solve that starts first writes the mask into the
+        unit's memory and every solve after it reads exactly those
+        rounds, which is what the copy fold gives each of them too. A
+        job whose input another has already written finds the memory
+        holding rounds it is not reading yet, and takes them.
         """
         memory = job.memory
         if memory is None:
@@ -180,6 +189,10 @@ class DecoderInputStaging:
                 "place (input: in_place); fold into a copy, or copy the "
                 "input"
             )
+        resident = memory.input_of(job)
+        if resident is not job.decoder_input:
+            job.decoder_input = resident
+            return
         job.decoder_input = memory.rewrite(job, masked_input)
 
     def copies_input(self, job: decoding_records.DecodeJob) -> bool:

@@ -464,9 +464,15 @@ weak_decoder:                      # the lightweight tier: fast, higher LER
                                    # memory, which is what a hardware decoder
                                    # does (AFS 2001.06598 lines 528-531; Helios
                                    # keeps its shared memory single-writer,
-                                   # 2301.08419 lines 632-640), and is refused
-                                   # by name when two jobs read that input or
-                                   # when the tier reads its input in place.
+                                   # 2301.08419 lines 632-640). The mask is
+                                   # written once per input, not once per job:
+                                   # the two forced-class solves of one window
+                                   # read one landed input (decision D2) and one
+                                   # boundary, so the solve that starts first
+                                   # writes it and the other reads those rounds.
+                                   # in_place is refused by name when the tier
+                                   # reads its input in place, which leaves it
+                                   # no memory of its own to write.
                                    # Only the tier that decodes the plan's
                                    # windows folds a boundary
   result_blocks_unit: false        # false | true: when a finished decode gives

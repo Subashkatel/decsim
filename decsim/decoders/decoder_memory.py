@@ -114,6 +114,10 @@ class ResidentInput:
 
     decoder_input: DecoderInput
     readers: list
+    # a job has written its window's boundary into these rounds; the
+    # jobs that share them read what it wrote and none of them writes
+    # again, which is the single-writer rule rewrite states
+    rewritten: bool = False
 
 
 @dataclasses.dataclass(frozen=True)
@@ -242,24 +246,29 @@ class DecoderMemory:
     ) -> DecoderInput:
         """Replace the input this job reads, in the unit's own memory.
 
-        Every reader of that input reads the new one, so an input two
-        jobs share has no single writer and this refuses rather than
-        rewriting the sibling's window. Helios keeps its shared memory
+        Every reader of that input reads the new one, so the input is
+        written once and by one job: Helios keeps its shared memory
         single-writer (2301.08419 lines 632-640), and the rule belongs
-        to the memory that holds the input rather than to whoever asks:
-        a second caller cannot forget it.
+        to the memory that holds the input rather than to whoever asks,
+        so a second caller cannot forget it. The jobs that share one
+        landed input are the forced-class solves of one window's request
+        (decision D2), and the boundary they fold is that window's one
+        boundary, so the first of them writes it and the rest read what
+        it wrote (DecoderInputTransfer.fold_in_place). A second write
+        would be a second mask over the first and is refused here.
         """
         key = _memory_key(job)
         resident = self._inputs[key]
-        readers = len(resident.readers)
-        if readers > 1:
+        if resident.rewritten:
+            readers = len(resident.readers)
             raise RuntimeError(
-                f"{job.label}: rewriting an input {readers} jobs read; "
-                "one input has one writer (Helios 2301.08419 lines "
-                "632-640), so give this tier boundary_fold copy or one "
-                "job per input"
+                f"{job.label}: rewriting an input that is already "
+                f"written, and {readers} jobs read it; one input has one "
+                "writer (Helios 2301.08419 lines 632-640), so give this "
+                "tier boundary_fold copy or one job per input"
             )
         resident.decoder_input = decoder_input
+        resident.rewritten = True
         return decoder_input
 
     def take(self, job: decoding_records.DecodeJob) -> None:

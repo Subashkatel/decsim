@@ -293,13 +293,15 @@ def test_a_memory_that_fits_one_window_and_not_two_serializes_the_cadence():
     assert roomy["w2"] - roomy["w1"] == compute_ticks
 
 
-def test_the_memory_refuses_a_rewrite_of_an_input_two_jobs_read():
+def test_the_memory_refuses_a_second_write_of_one_input():
     """C4 item 5: the single-writer rule is the memory's, not a caller's.
 
-    The window gate checked it before asking, so a second caller of
-    rewrite would have rewritten a sibling's window with nothing to stop
-    it. Helios keeps its shared memory single-writer (2301.08419 lines
-    632-640).
+    An input two jobs read is written once: the jobs that share one
+    landed input are the forced-class solves of one window's request
+    (decision D2) and the boundary they fold is that window's one
+    boundary, so the first write stands and a second is refused here
+    rather than XORing a second mask over the first. Helios keeps its
+    shared memory single-writer (2301.08419 lines 632-640).
     """
     memory = decoder_memory.DecoderMemory("default", 0, capacity_rounds=4)
     first = timing_only_job("class 0", 3)
@@ -312,8 +314,9 @@ def test_the_memory_refuses_a_rewrite_of_an_input_two_jobs_read():
     second.input_key = input_key
     memory.deposit(first)
     memory.add_reader(second)
-    with pytest.raises(RuntimeError, match="2 jobs read"):
-        memory.rewrite(first, None)
+    assert memory.rewrite(first, "the masked input") == "the masked input"
+    with pytest.raises(RuntimeError, match="already written"):
+        memory.rewrite(second, "a second mask")
 
 
 def test_the_memory_rewrites_an_input_its_one_reader_owns():

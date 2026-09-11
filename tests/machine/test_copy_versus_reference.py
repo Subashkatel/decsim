@@ -185,12 +185,21 @@ def _machine(**weak_changes):
 
 def _unit_input_copies(machine) -> int:
     """The copies into a decoder unit's own memory."""
+    return _copies_on_paths_ending_with(machine, "memory")
+
+
+def _masked_view_copies(machine) -> int:
+    """The masked duplicates the boundary fold made of those inputs."""
+    return _copies_on_paths_ending_with(machine, "masked view")
+
+
+def _copies_on_paths_ending_with(machine, ending: str) -> int:
     copies = 0
     for (
         path,
         counts,
     ) in machine.observation.data_movement.copies.by_path.items():
-        if "unit" in path:
+        if "unit" in path and path.endswith(ending):
             copies += counts.events
     return copies
 
@@ -238,18 +247,21 @@ def test_the_input_default_copies_the_rounds_into_the_unit():
 
 
 def test_the_boundary_fold_default_leaves_the_run_as_it_is():
-    """Copy is today's behaviour; the fold itself is tested on the gate.
+    """Copy is today's behaviour: a masked view per window past the first.
 
     tests/windows/test_decode_requests.py exercises both rows against a
-    real unit memory, because no shipped config blocks a window long
-    enough to fold a boundary at its start.
+    real unit memory; here the shipped baseline shows the count the fold
+    adds, which is the windows that have a predecessor and not the seams
+    that carried a defect.
     """
     copied = _machine()
     copied_result = copied.run()
     folded = _machine(boundary_fold="copy")
     folded_result = folded.run()
+    windows = len(copied.observation.windows.windows)
     assert _observables(folded_result) == _observables(copied_result)
     assert _unit_input_copies(folded) == _unit_input_copies(copied)
+    assert _masked_view_copies(copied) == windows - 1
 
 
 def test_an_in_place_input_references_the_rounds_and_moves_nothing():

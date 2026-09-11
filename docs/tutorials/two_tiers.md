@@ -288,6 +288,7 @@ tick (us)  where                            what                                
 15.008     Window planner                   queued, dispatched to default#0                                0.000
 15.008     Window planner                   queued, dispatched to default#0                                0.000
 15.008     weak_buffer_to_weak_decoder      move, with W3 rounds 10..15                                    0.004     move      48
+15.012     Window planner                   masked view copy                                                         copy      48
 15.012     Decoder unit default#0           unit default#0 memory copy                                               copy      48
 15.012     Decoder unit default#0           stage fetch                                                    0.024
 15.012     Decoder unit default#0           decode service                                                 1.064
@@ -295,6 +296,7 @@ tick (us)  where                            what                                
 15.012     Decoder unit default#0           residence, unbounded, data ready 15.012, freed at end of run   55.256    copy      48
 15.036     Decoder unit default#0           stage algorithm                                                1.000
 16.036     Decoder unit default#0           stage release                                                  0.040
+16.076     Window planner                   masked view copy                                                         copy      48
 16.076     Window planner                   solve held
 16.076     Decoder unit default#0           stage fetch                                                    0.024
 16.076     Decoder unit default#0           decode service                                                 1.064
@@ -316,15 +318,20 @@ tick (us)  where                            what                                
 27.228     decoder_to_decoder               move, with W3 rounds 10..15                                    0.004     move      8
 27.228     Frame                            1:3 committed
 
-copies 2, references 3 jobs and 0 holds, moves 5
+copies 4, references 3 jobs and 0 holds, moves 5
 longest residence: 55.256 us in Decoder unit default#0 (residence, unbounded, data ready 15.012, freed at end of run)
 longest queue wait: 0.000 us in Window planner (queued, dispatched to default#0)
 ```
 
-The first half is the same: two weak solves, one microsecond each,
-finishing at 17.140. Then the `verdict` goes the other way, and five
-things happen that did not happen for window 0.
+The first half is nearly the same: two weak solves, one microsecond
+each, finishing at 17.140. Then the `verdict` goes the other way, and
+six things happen that did not happen for window 0.
 
+- **`masked view copy`, twice.** Window 0 had no window before it;
+  window 3 does, so each of its two solves reads a duplicate of its
+  rounds with window 2's boundary folded in. The fold happens on every
+  window that has a predecessor, whatever that predecessor's seam
+  carried.
 - **`queued, dispatched to strong#0`.** A third decode job, on the other
   pool's unit.
 - **`strong_buffer_to_strong_decoder`, 72 bits.** The strong decoder's

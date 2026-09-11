@@ -29,13 +29,29 @@ COUNTING_SWEEP = {
         }
     ],
 }
-# noisy enough that some shots fold a boundary into a copy and some do
-# not, so a path is in part of the point's shots and not the rest
-FOLDING_SWEEP = {
+# a threshold most windows clear and some do not, so the strong tier's
+# paths are in part of the point's shots and not the rest
+ESCALATING_SWEEP = {
     "observation": {"data_movement": True},
+    "escalation": {
+        "kind": "switching",
+        "gap_threshold_db": 20.0,
+        "strong_window": "two_sided_context",
+        "run_both_at_once": False,
+    },
+    "strong_decoder": {
+        "kind": 1.0,
+        "units": 1,
+        "unit_memory_rounds": None,
+        "engine": {
+            "clock": "fridge",
+            "fetch_cycles_per_round": 1,
+            "release_cycles_per_job": 1,
+        },
+    },
     "sweep": [
         {
-            "physical_error_probability": [0.01],
+            "physical_error_probability": [0.005],
             "distance": [3],
             "round_period_us": [1.0],
             "shots": 8,
@@ -168,21 +184,24 @@ def test_a_path_only_some_shots_took_still_carries_the_points_holds(
 ):
     """A reference belongs to the shot, so it is not cut by a rare path.
 
-    The window's boundary is folded into a copy only when the neighbour's
-    seam carried a defect, so its path is in some of a point's shots and
-    not others; counting the point's holds over that path's rows alone
-    would divide a whole-shot counter by the wrong number of shots.
+    A window reaches the strong tier only when its gap fell under the
+    threshold, so the strong store's hop is in some of a point's shots
+    and not others; counting the point's holds over that path's rows
+    alone would divide a whole-shot counter by the wrong number of
+    shots.
     """
-    config_path = write_config(tmp_path, FOLDING_SWEEP)
-    measurements = measured_shots(config_path, 8, probability=0.01)
+    config_path = write_config(tmp_path, ESCALATING_SWEEP)
+    measurements = measured_shots(config_path, 8, probability=0.005)
     shot_rows = sweep_report.shot_data_movement_rows(measurements)
     point_rows = sweep_report.data_movement_rows(shot_rows)
-    folding_shots = _shots_with_a_path(shot_rows, "masked view")
+    escalating_shots = _shots_with_a_path(
+        shot_rows, "strong_buffer_to_strong_decoder"
+    )
     references = []
     for row in point_rows:
         references.append(row["references_per_shot"])
 
-    assert 0 < folding_shots < len(measurements)
+    assert 0 < escalating_shots < len(measurements)
     assert len(set(references)) == 1
 
 

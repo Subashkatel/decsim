@@ -35,8 +35,11 @@ cd ../decsim-weak_ler
 ```
 
 Submit from that directory. `slurm/slurm_run.sh` prints the tree it
-imports from and that tree's commit, and refuses to start from a tree
-with uncommitted changes unless `ALLOW_DIRTY` is set:
+imports from and that tree's commit, and refuses to start unless git
+vouches for that tree: a tree with uncommitted changes is refused, and
+so is a tree git cannot read at all, which prints `dirty: unknown` and
+is the case where nothing can say what the task ran. `ALLOW_DIRTY=1`
+starts either one anyway.
 
 ```
 decsim tree: /scratch/.../decsim-weak_ler

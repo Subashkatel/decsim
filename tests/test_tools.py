@@ -128,18 +128,21 @@ def test_every_class_on_the_tools_list_is_still_tested_against_somewhere():
     assert stale == set()
 
 
-def _stub_python(tmp_path):
+def _stub_python(tmp_path, checkout=None):
     """An interpreter that writes down the command line it was given.
 
     It answers the runner's question about where decsim was imported
-    from with a path of its own, so the test never runs a sweep.
+    from with the checkout it is given, so the test never runs a sweep
+    and chooses which tree the runner reads.
     """
+    if checkout is None:
+        checkout = tmp_path
     recorded = tmp_path / "argv.txt"
     stub = tmp_path / "python"
     stub.write_text(
         "#!/usr/bin/env bash\n"
         'if [ "$1" = "-c" ]; then\n'
-        f'  echo "{tmp_path}"\n'
+        f'  echo "{checkout}"\n'
         "  exit 0\n"
         "fi\n"
         f'printf "%s\\n" "$@" > "{recorded}"\n'
@@ -158,9 +161,9 @@ def _run_the_runner(tmp_path, task_id, task_count, shards=None):
     run_dir = tmp_path / "run"
     environment["RUN"] = str(run_dir)
     environment["DECSIM_PYTHON"] = str(stub)
-    # the tree under test is the one being edited, which is the case the
-    # runner refuses; the refusal has its own reason to exist and is not
-    # what this test reads
+    # the stub reports a tree git says nothing about, which the runner
+    # refuses; the refusal has its own tests and is not what this one
+    # reads
     environment["ALLOW_DIRTY"] = "1"
     if shards is not None:
         environment["SHARDS"] = str(shards)
@@ -196,3 +199,84 @@ def test_the_slurm_runner_falls_back_to_the_arrays_own_count(tmp_path):
 
     assert "shard: 3 of 200" in printed
     assert arguments[arguments.index("--shard") + 1] == "3/200"
+
+
+def _stub_git(tmp_path, status):
+    """A git that answers about the checkout without one existing.
+
+    `status` is what `git status --porcelain` does: print a changed file,
+    print nothing, or fail the way git fails outside a repository.
+    """
+    answers = {
+        "dirty": ('  echo "?? edited.py"', "echo 264853ada3"),
+        "clean": ("  :", "echo 264853ada3"),
+        "unknown": ("  exit 128", "exit 128"),
+    }
+    porcelain, revision = answers[status]
+    stub = tmp_path / "git"
+    stub.write_text(
+        "#!/usr/bin/env bash\n"
+        'if [ "$3" = "status" ]; then\n'
+        f"{porcelain}\n"
+        "  exit 0\n"
+        "fi\n"
+        f"{revision}\n"
+    )
+    stub.chmod(0o755)
+    return stub
+
+
+def _refused_run(tmp_path, status):
+    """The runner started against a tree, with no ALLOW_DIRTY to excuse it."""
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    stub, _recorded = _stub_python(tmp_path, checkout)
+    _stub_git(tmp_path, status)
+    environment = dict(os.environ)
+    environment.pop("ALLOW_DIRTY", None)
+    environment["SLURM_SUBMIT_DIR"] = str(PACKAGE_ROOT)
+    environment["DECSIM_PYTHON"] = str(stub)
+    path = environment.get("PATH", "")
+    environment["PATH"] = f"{tmp_path}:{path}"
+    return subprocess.run(
+        ["bash", str(SLURM_RUNNER), "configs/weak_ler.yaml"],
+        capture_output=True,
+        text=True,
+        env=environment,
+    )
+
+
+def test_the_slurm_runner_refuses_a_tree_with_uncommitted_changes(tmp_path):
+    """A dirty tree is refused, and the message says how to proceed.
+
+    Every task imports the tree as it stands when that task starts, so a
+    sweep launched from a tree still being edited runs code no folder of
+    it can name.
+    """
+    completed = _refused_run(tmp_path, "dirty")
+
+    assert completed.returncode != 0
+    assert "has uncommitted changes" in completed.stderr
+    assert "ALLOW_DIRTY=1" in completed.stderr
+
+
+def test_the_slurm_runner_refuses_a_tree_git_cannot_read(tmp_path):
+    """A tree with no git is refused for the reason the runner states.
+
+    The job must name the code it ran; where git says nothing, nothing
+    can, so an unknown tree is as unrunnable as a dirty one.
+    """
+    completed = _refused_run(tmp_path, "unknown")
+
+    assert completed.returncode != 0
+    assert "dirty: unknown" in completed.stdout
+    assert "git says nothing about" in completed.stderr
+    assert "ALLOW_DIRTY=1" in completed.stderr
+
+
+def test_the_slurm_runner_starts_from_a_clean_tree(tmp_path):
+    """A tree git vouches for runs, and the refusals read only the tree."""
+    completed = _refused_run(tmp_path, "clean")
+
+    assert completed.returncode == 0, completed.stderr
+    assert "dirty: 0" in completed.stdout

@@ -9,6 +9,7 @@ overwritten (src/python/m5/main.py --outdir).
 """
 
 import datetime
+import functools
 import json
 import os
 import platform
@@ -228,7 +229,7 @@ def _checkout() -> Path:
 
 
 def _git_state() -> dict:
-    """The commit the code came from, and whether that tree was dirty.
+    """The manifest's git block: the one reading this process took.
 
     gem5 prints its version, its build date, the host and the command
     line at every start, so a result says what produced it
@@ -238,10 +239,37 @@ def _git_state() -> dict:
     _data/_csv_out.py:56-65). decsim's run folder is where that belongs
     here, so the manifest names the commit and says whether the tree had
     uncommitted changes.
+    """
+    commit, is_dirty = _tree_reading()
+    return {"commit": commit, "dirty": is_dirty}
 
-    The launcher's answer to the second question wins when it is given,
-    because the launcher looked at the tree as the job started, which is
-    the tree the process went on to import; this process's own git looks
+
+@functools.lru_cache(maxsize=1)
+def _tree_reading() -> tuple:
+    """(commit, dirty) of the tree this code came from, read once.
+
+    Read at the first ask, which is before the first shot, and reused by
+    every later ask. A run writes its manifest at its start and again at
+    its end, and a tree can move between the two: a Slurm array running
+    for hours out of a checkout somebody commits to would name, in every
+    folder, whatever the tree held when that task finished, which is
+    code no part of the run read. A manifest whose commit is not the
+    code's is worse than none.
+
+    Both referents record provenance before the work and not after.
+    gem5 prints its version, its build date, its host, its pid and its
+    command line at :524-556 of
+    tmp/resources/gem5/src/python/m5/main.py, then executes the
+    simulation script at :687. sinter writes its csv header into the
+    save file before the collect loop
+    (sinter/_collection/_collection.py:385-397 against the loop at
+    :401), and every row's strong id is computed from the task and
+    cached on it rather than recomputed per row
+    (sinter/_data/_task.py:248-270).
+
+    The launcher's answer about dirtiness wins when it is given, because
+    the launcher looked at the tree as the job started, which is the
+    tree the process went on to import; this process's own git looks
     later, and edits made after the import did not run. The container
     image ships no git binary at all, which is why the commit falls back
     to reading the tree's own git files and why the dirty flag is None
@@ -258,7 +286,7 @@ def _git_state() -> dict:
         )
         if porcelain is not None:
             is_dirty = bool(porcelain)
-    return {"commit": commit, "dirty": is_dirty}
+    return commit, is_dirty
 
 
 def _dirty_from_the_launcher() -> Optional[bool]:

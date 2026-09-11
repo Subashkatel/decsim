@@ -133,6 +133,9 @@ class DecoderStageRecord:
     # its strong re-decode, and the members of a merged batch all carry
     # the same window key and different ordinals
     run_sequences: tuple = ()
+    # the decode was cancelled while this stage was open: the stage ends
+    # at the cancel, and no latency point reads it
+    cancelled: bool = False
 
 
 class StagedDecoder(decoder_module.DecoderBase):
@@ -142,10 +145,17 @@ class StagedDecoder(decoder_module.DecoderBase):
     (priced, or measured on the host clock); the result reaches on_result
     when the last stage ends (None when the job was cancelled meanwhile).
     Trace source: stage_recorded(record), one DecoderStageRecord per
-    stage, fired when the stage's end is known (at entry for a priced
-    stage, at the result for the algorithm), the lane a hardware model
-    fills in for its own stages. The decoder keeps no history; the run's
-    StageLedger (observe/stage_records.py) holds what it fires.
+    stage, fired when the stage ends, the lane a hardware model fills in
+    for its own stages. A stage ends at its own time or at a cancel, and
+    a record closed by a cancel says so: gem5 stops a squashed
+    instruction where it stands and counts it apart from the rest
+    (tmp/resources/gem5/src/cpu/o3/inst_queue.cc:895-908 for the issue
+    it abandons, :294-298 and :1442 for the squashed counters), and
+    decoder switching halts the strong decoder's ongoing computation at
+    the weak decoder's confident verdict (Toshio et al. 2510.25222
+    Sec. III A step 1, 2510.25222.txt lines 598-601, and step 3, lines
+    610-612). The decoder keeps no history; the run's StageLedger
+    (observe/stage_records.py) holds what it fires.
     """
 
     def __init__(self, decoder, timing: UnitTiming):
@@ -225,18 +235,24 @@ class StagedDecoder(decoder_module.DecoderBase):
         on_result: Callable[[Optional[decoding_records.DecodeResult]], None],
     ) -> None:
         """Walk the stages as engine events on the unit the manager granted."""
-        running = _RunningDecode(job, on_result)
+        running = _RunningDecode(job, on_result, engine)
         steps = self._steps(job)
         key = _key(job)
         self._running[key] = running
         self._enter(running, engine, steps, 0)
 
     def cancel(self, job: decoding_records.DecodeJob) -> None:
-        """Abort a running job: no further stages, no completion callback."""
+        """Abort a running job: its open stage ends here, marked cancelled.
+
+        The engine schedules and never unschedules (engine.py), so the
+        stage's own timer still fires; the record is closed by this call
+        and the timer then finds the walk aborted and writes nothing.
+        """
         key = _key(job)
         running = self._running.pop(key, None)
         if running is not None:
             running.aborted = True
+            self._close_stage(running, True)
         self.decoder.cancel(job)
 
     def _steps(self, job: decoding_records.DecodeJob) -> list:
@@ -265,29 +281,45 @@ class StagedDecoder(decoder_module.DecoderBase):
         step = steps[index]
         text = _stage_text(step, job)
         engine.log(log_sources.DECODER_UNIT, text)
+        running.open_stage = step
+        running.open_start_ticks = engine.now
         if step.name == ALGORITHM_STAGE:
             self._enter_algorithm(running, engine, steps, index)
             return
-        start = engine.now
-        end = start + step.ticks
+        next_index = index + 1
+        engine.schedule(
+            step.ticks,
+            lambda: self._leave(running, engine, steps, next_index),
+            label=f"{step.name}({job.label})",
+        )
+
+    def _leave(self, running, engine, steps: list, index: int) -> None:
+        """A hardware stage's time ended: close its record, then go on."""
+        if running.aborted:
+            return
+        self._close_stage(running, False)
+        self._enter(running, engine, steps, index)
+
+    def _close_stage(self, running, cancelled: bool) -> None:
+        """Write the open stage's record, ending it at this instant."""
+        step = running.open_stage
+        if step is None:
+            return
+        running.open_stage = None
+        job = running.job
         sequences = _run_sequences(job)
         record = DecoderStageRecord(
             job.operation_id,
             job.window_id,
             step.name,
             step.cycles,
-            start,
-            end,
+            running.open_start_ticks,
+            running.engine.now,
             step.round_keys,
             sequences,
+            cancelled,
         )
         self.stage_recorded.fire(record)
-        next_index = index + 1
-        engine.schedule(
-            step.ticks,
-            lambda: self._enter(running, engine, steps, next_index),
-            label=f"{step.name}({job.label})",
-        )
 
     def _enter_algorithm(
         self, running, engine, steps: list, index: int
@@ -297,24 +329,14 @@ class StagedDecoder(decoder_module.DecoderBase):
         if job.decoder_input is not None:
             # the read out of this unit's memory
             job.payloads = job.decoder_input.fragments()
-        start = engine.now
 
         def on_algorithm_result(
             result: Optional[decoding_records.DecodeResult],
         ) -> None:
+            if running.aborted:
+                return
             running.result = result
-            sequences = _run_sequences(job)
-            record = DecoderStageRecord(
-                job.operation_id,
-                job.window_id,
-                ALGORITHM_STAGE,
-                None,
-                start,
-                engine.now,
-                (),
-                sequences,
-            )
-            self.stage_recorded.fire(record)
+            self._close_stage(running, False)
             next_index = index + 1
             self._enter(running, engine, steps, next_index)
 
@@ -334,10 +356,15 @@ class _Step:
 
 @dataclasses.dataclass
 class _RunningDecode:
+    """One walk in progress: what it decodes, and the stage now open."""
+
     job: decoding_records.DecodeJob
     on_result: Callable[[Optional[decoding_records.DecodeResult]], None]
+    engine: object  # the clock the open stage's record is closed against
     result: Optional[decoding_records.DecodeResult] = None
     aborted: bool = False
+    open_stage: Optional["_Step"] = None
+    open_start_ticks: int = 0
 
 
 def _check_pipeline(

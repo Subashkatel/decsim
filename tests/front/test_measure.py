@@ -21,7 +21,9 @@ is Toshio et al. 2510.25222 Sec. III A step 3 driven to its two ends.
 
 import yaml
 
+import decsim.collect as collect
 import decsim.front.experiment as experiment
+import decsim.front.measure as measure
 from tests.front.yaml_configs import MINIMAL_CONFIG, measure_point_shot
 
 # every hop of the weak-only fabric at one cycle of the fridge clock
@@ -126,10 +128,10 @@ def slow_unit_shot(tmp_path, units: int):
     )
 
 
-def switching_shot(
+def switching_run(
     tmp_path, gap_threshold_db: float, run_both_at_once: bool = False
 ):
-    """One shot of a 1.0 us weak tier that escalates to a 10.0 us one.
+    """One collected shot of a 1.0 us weak tier beside a 10.0 us one.
 
     A threshold far above every gap escalates every window and one far
     below escalates none, so the same two cards answer both branches.
@@ -172,13 +174,21 @@ def switching_shot(
     config_text = yaml.safe_dump(raw)
     config_path.write_text(config_text)
     config = experiment.load_experiment(config_path)
-    return measure_point_shot(
-        config,
+    task = config.point_task(
         physical_error_probability=0.008,
         distance=3,
         round_period_us=1.0,
-        seed=0,
+        shots=1,
     )
+    return collect.run_shot(task, 0)
+
+
+def switching_shot(
+    tmp_path, gap_threshold_db: float, run_both_at_once: bool = False
+):
+    """That shot's measurement."""
+    shot = switching_run(tmp_path, gap_threshold_db, run_both_at_once)
+    return measure.measure_shot(shot)
 
 
 def ticks_of(microseconds: float) -> int:
@@ -427,3 +437,33 @@ def test_a_second_forced_solve_is_not_the_windows_algorithm(tmp_path):
     measurement = switching_shot(tmp_path, -1000000.0)
 
     assert measurement.samples["algorithm"] == [1.0] * 10
+
+
+def test_a_cancelled_siblings_record_ends_at_the_cancel(tmp_path):
+    """The strong sibling stops where the weak verdict stopped it.
+
+    run_both_at_once starts the strong decoder on every window and the
+    confident weak verdict halts it (Toshio et al. 2510.25222 Sec. III A
+    steps 1 and 3). The engine cannot unschedule the card's timer, so
+    the cancel is what closes the sibling's open stage: one cancelled
+    record per window, each ending at that window's verdict rather than
+    ten microseconds later, and the weak decode's own records untouched.
+    """
+    shot = switching_run(tmp_path, -1000000.0, True)
+
+    stages = shot.machine.observation.stages
+    windows = shot.machine.observation.windows.windows
+    cancelled = []
+    for record in stages.records:
+        if record.cancelled:
+            cancelled.append(record)
+    ends = []
+    verdicts = []
+    for record in cancelled:
+        ends.append(record.end_ticks)
+        window = windows[(1, record.window_id)]
+        verdicts.append(window.t_done)
+    assert len(cancelled) == 10
+    assert ends == verdicts
+    for record in cancelled:
+        assert record.stage == "algorithm"

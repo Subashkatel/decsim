@@ -504,9 +504,8 @@ def decoded_window_ids(shot) -> list:
     window_ids = []
     windows = observation.windows.windows.items()
     for key, window in sorted(windows):
-        window_id = key[1]
-        if window_id in frames and window.t_done is not None:
-            window_ids.append(window_id)
+        if key in frames and window.t_done is not None:
+            window_ids.append(key[1])
     return window_ids
 
 
@@ -532,7 +531,7 @@ def later_solve_ticks(shot, window_id: int) -> int:
     """
     observation = shot.machine.observation
     frames = measure.frame_records_by_window(observation)
-    frame = frames[window_id]
+    frame = frames[(1, window_id)]
     window = observation.windows.windows[(1, window_id)]
     ends = []
     for record in observation.stages.records_for(1, window_id):
@@ -875,3 +874,34 @@ def test_a_windows_seam_delay_is_the_same_however_many_streams_run():
     assert one_stream.samples["dd_per_window"] == one_stream_seams
     assert two_streams.samples["dd_per_window"] == one_stream_seams * 2
     assert two_streams.load == one_stream.load
+
+
+def test_every_streams_window_is_measured_against_its_own_frame_record():
+    """Two streams commit eighteen corrections and none is dropped.
+
+    The frame writes one correction per window and a window is its
+    operation and its index, so the two streams' nine windows each
+    commit their own. Filed by the index alone, the second stream's
+    record of every index replaced the first stream's and nine of the
+    eighteen were lost, so the windows that lost theirs were measured
+    against the other stream's decode. Filed by the whole key, every
+    window reads the record it wrote, and each stream's frame commit is
+    the one-stream run's 0.004 us on all nine of its windows.
+    """
+    one_stream_run = seam_streams_shot(1)
+    two_stream_run = seam_streams_shot(2)
+    observation = two_stream_run.machine.observation
+    committed = observation.frame_corrections.committed
+    frames = measure.frame_records_by_window(observation)
+    one_stream = measure.measure_shot(one_stream_run)
+    two_streams = measure.measure_shot(two_stream_run)
+
+    filed_keys = sorted(frames)
+    written_keys = sorted(record.window_key for record in committed)
+    assert len(committed) == 18
+    assert filed_keys == written_keys
+    assert filed_keys[:9] == [(1, index) for index in range(9)]
+    assert filed_keys[9:] == [(2, index) for index in range(9)]
+    one_stream_commits = one_stream.samples["frame_commit"]
+    assert one_stream_commits == [0.004] * 9
+    assert two_streams.samples["frame_commit"] == one_stream_commits * 2

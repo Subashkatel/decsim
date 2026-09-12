@@ -458,11 +458,22 @@ def window_points_us(
 def frame_records_by_window(
     observation: observation_module.Observation,
 ) -> dict:
-    """The frame's committed corrections, by the window each one wrote."""
+    """The frame's committed corrections, by the window each one wrote.
+
+    A window is named by its operation and its index, never by its index
+    alone: the window record's own key is (operation_id, window_index)
+    (records/windows.py:79-82 and 144-146), and a frame record carries
+    that whole key. Keyed by the index alone, a workload of several
+    streams would keep one stream's correction per index and drop the
+    rest, and the windows that lost theirs would be measured against
+    another stream's decode. gem5 asks the same way: an instruction in
+    the reorder buffer is found by its thread and its sequence number,
+    findInst(ThreadID tid, InstSeqNum squash_inst)
+    (tmp/resources/gem5/src/cpu/o3/rob.hh:131-134).
+    """
     records = {}
     for record in observation.frame_corrections.committed:
-        window_id = record.window_key[1]
-        records[window_id] = record
+        records[record.window_key] = record
     return records
 
 
@@ -498,8 +509,8 @@ def collect_samples(
     window_items = observation.windows.windows.items()
     all_windows = sorted(window_items)
     stages = observation.stages
-    for (_operation_id, window_id), window in all_windows:
-        frame_record = frame_by_window.get(window_id)
+    for window_key, window in all_windows:
+        frame_record = frame_by_window.get(window_key)
         if frame_record is None or window.t_done is None:
             continue
         decode = _committed_decode(stages, frame_record)

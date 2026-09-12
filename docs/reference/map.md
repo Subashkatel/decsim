@@ -291,6 +291,7 @@ docstring.
 - `decsim/front/collect_command.py`: `decsim collect`: every shot of every sweep point of one yaml.
 - `decsim/front/command.py`: `decsim <verb>`: the command set, dispatched on the first word.
 - `decsim/front/experiment.py`: One yaml file is one experiment; this module is the only yaml reader.
+- `decsim/front/fold.py`: Many run folders' additive rows folded into one, none of them held.
 - `decsim/front/measure.py`: One collected shot -> one shot's numbers.
 - `decsim/front/plots.py`: The experiment figures.
 - `decsim/front/refusal.py`: The one refusal the front raises when it will not do what was asked.

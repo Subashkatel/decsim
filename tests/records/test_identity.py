@@ -91,3 +91,22 @@ def test_stable_identity_ordering_and_json_preserve_typed_structure():
             },
         ],
     }
+
+
+def test_an_identity_read_back_from_its_json_is_the_identity():
+    """The json round trip returns a value that keys a dict again.
+
+    A reader that keys by an operation or a window takes the identity
+    out of the recorded json, which is a dict and cannot be a key
+    itself. A large integer comes back exact, since the json carries
+    its decimal text and not a json number.
+    """
+    nested = (3, "patch", (4,))
+    large = 2**70
+    recorded_nested = identity_records.stable_identity_json(nested)
+    recorded_large = identity_records.stable_identity_json(large)
+    recorded_empty = identity_records.stable_identity_json(())
+
+    assert identity_records.stable_identity_from_json(recorded_nested) == nested
+    assert identity_records.stable_identity_from_json(recorded_large) == large
+    assert identity_records.stable_identity_from_json(recorded_empty) == ()

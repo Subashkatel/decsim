@@ -90,6 +90,21 @@ def stable_identity_json(identity: Any) -> dict:
     return {"kind": "tuple", "value": None, "items": items}
 
 
+def stable_identity_from_json(recorded: dict) -> Any:
+    """The identity a recorded json value names, the inverse of the above.
+
+    A reader that keys by an identity needs the identity itself: the
+    json is a dict and a dict is no key.
+    """
+    kind = recorded["kind"]
+    if kind == "integer":
+        return int(recorded["value"])
+    if kind == "string":
+        return recorded["value"]
+    items = [stable_identity_from_json(item) for item in recorded["items"]]
+    return tuple(items)
+
+
 def _is_stable_string(value: Any) -> bool:
     """Whether a str is exactly a str and free of surrogate code points.
 

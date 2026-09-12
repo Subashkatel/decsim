@@ -25,6 +25,7 @@ import decsim.collect as collect
 import decsim.config as config_module
 import decsim.decoders.decoder_output as decoder_output
 import decsim.observe.observation as observation_module
+import decsim.records.identity as identity_records
 import decsim.records.results as result_records
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
@@ -207,10 +208,29 @@ def link_totals(traffic: dict) -> dict:
 
 
 def link_delay_by_window(transfers: list) -> dict:
-    """Ticks from send to delivery by (path, window id), summed per key."""
+    """Ticks from send to delivery by (path, window key), summed per key.
+
+    A window is named by its operation and its index, never by its index
+    alone: the window record's own key is (operation_id, window_index)
+    (records/windows.py:79-82 and 144-146), so a workload of several
+    streams holds one window 3 per stream and a key without the
+    operation would sum every stream's window 3 into one entry. gem5
+    names a per-instruction fact the same way: the reorder buffer finds
+    an instruction by its thread and its sequence number, findInst(
+    ThreadID tid, InstSeqNum squash_inst) walking instList[tid]
+    (tmp/resources/gem5/src/cpu/o3/rob.hh:131-134 and rob.cc:515-523),
+    and a retired instruction's counters land in that thread's own
+    bucket, commitStats[tid] and thread[tid]->threadStats
+    (tmp/resources/gem5/src/cpu/o3/cpu.cc:1156-1174).
+    """
     delay = {}
     for row in transfers:
-        key = (row["path"], row["attribution"]["window_id"])
+        attribution = row["attribution"]
+        recorded_operation = attribution["operation_id"]
+        operation_id = identity_records.stable_identity_from_json(
+            recorded_operation
+        )
+        key = (row["path"], operation_id, attribution["window_id"])
         transfer_ticks = row["delivery_ticks"] - row["send_ticks"]
         delay[key] = delay.get(key, 0) + transfer_ticks
     return delay
@@ -378,15 +398,17 @@ def window_points_us(
     rather than one number (tmp/resources/l5_buffers/Ciw/
     ciw/data_record.py lines 3-21).
     """
-    window_id = window.key[1]
+    operation_id, window_id = window.key
     last_emitted_round = max(qpu_send)
     last_required_round = min(window.buffer_hi, last_emitted_round)
     committed = frame_record.committed_ticks
-    handoff_ticks = link_delay.get(("decoder_to_decoder", window_id), 0)
-    escalation_ticks = link_delay.get(
-        ("weak_decoder_to_strong_decoder", window_id), 0
+    handoff_ticks = link_delay.get(
+        ("decoder_to_decoder", operation_id, window_id), 0
     )
-    output_ticks = link_delay.get((output_path, window_id), 0)
+    escalation_ticks = link_delay.get(
+        ("weak_decoder_to_strong_decoder", operation_id, window_id), 0
+    )
+    output_ticks = link_delay.get((output_path, operation_id, window_id), 0)
     attempt_end = _attempt_end_ticks(window, decode, first_dispatch)
     input_key = (input_path, window_id, decode.run_sequence)
     input_ticks, input_landed = input_hop.get(input_key, (0, attempt_end))

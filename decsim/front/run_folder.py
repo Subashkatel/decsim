@@ -99,6 +99,21 @@ def snapshot_code_state(config, run_dir: Path) -> None:
         patch_path.write_text(diff)
 
 
+def read_the_tree() -> None:
+    """Take this process's reading of the tree, before its work starts.
+
+    A manifest carries the reading the process took at its first ask,
+    and the ask belongs before the work rather than after
+    (_tree_reading). A run needs no call here: it writes a manifest
+    before its first shot, so its own first ask is at its start.
+    `decsim combine` writes one manifest and writes it at the end, so
+    it asks here instead, beside the time it started and before the
+    first folder is opened, and a fold long enough for the tree to move
+    still names the commit its code came from.
+    """
+    _tree_reading()
+
+
 def write_manifest(
     config,
     run_dir: Path,
@@ -248,13 +263,14 @@ def _git_state() -> dict:
 def _tree_reading() -> tuple:
     """(commit, dirty) of the tree this code came from, read once.
 
-    Read at the first ask, which is before the first shot, and reused by
-    every later ask. A run writes its manifest at its start and again at
-    its end, and a tree can move between the two: a Slurm array running
-    for hours out of a checkout somebody commits to would name, in every
-    folder, whatever the tree held when that task finished, which is
-    code no part of the run read. A manifest whose commit is not the
-    code's is worse than none.
+    Read at the first ask, which every caller takes before its work,
+    and reused by every later ask. A run writes its manifest at its
+    start and again at its end, and a fold writes one at its end and
+    asks at its start (read_the_tree); a tree can move in between. A
+    Slurm array running for hours out of a checkout somebody commits
+    to would otherwise name, in every folder, whatever the tree held
+    when that task finished, which is code no part of the run read. A
+    manifest whose commit is not the code's is worse than none.
 
     Both referents record provenance before the work and not after.
     gem5 prints its version, its build date, its host, its pid and its

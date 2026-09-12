@@ -14,6 +14,7 @@ import pytest
 
 import decsim.front.command as command
 import decsim.front.experiment as experiment
+import decsim.front.fold as fold
 import decsim.front.run_command as run_command
 import decsim.front.run_folder as run_folder
 import decsim.machine as machine_module
@@ -627,6 +628,47 @@ def test_both_manifests_of_a_run_name_the_tree_it_started_on(
     assert at_the_start["git"] == {"commit": "aaaaaaa", "dirty": False}
     assert at_the_end["git"] == at_the_start["git"]
     assert at_the_end["finished_utc"] is not None
+
+
+def test_a_combined_folders_manifest_names_the_tree_the_fold_ran_on(
+    tmp_path, monkeypatch
+):
+    """A fold writes one manifest, at the end, and it names the start.
+
+    The fold of the 2026-09-09 campaign's 500 shard folders took 71
+    minutes and a commit landed five minutes into it, so the combined
+    folder named a tree whose code no part of the fold read. Here git
+    answers one commit until the first folder is opened and another
+    after, and the manifest names the first.
+    """
+    config_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)
+    first_dir = tmp_path / "shard0"
+    second_dir = tmp_path / "shard1"
+    combined_dir = tmp_path / "combined"
+    _collect_one_shard(config_path, first_dir, "0/2", 1)
+    _collect_one_shard(config_path, second_dir, "1/2", 1)
+    reading = ["aaaaaaa"]
+    opened_folders = []
+    rows_of_a_folder = fold.row_stream
+
+    def moving_tree(*_):
+        return reading[0]
+
+    def commit_while_the_fold_reads(path):
+        opened_folders.append(path)
+        reading[0] = "bbbbbbb"
+        return rows_of_a_folder(path)
+
+    monkeypatch.setenv(run_folder.TREE_DIRTY_VARIABLE, "0")
+    monkeypatch.setattr(run_folder, "_git_output", moving_tree)
+    monkeypatch.setattr(fold, "row_stream", commit_while_the_fold_reads)
+    run_folder._tree_reading.cache_clear()
+
+    _combined(first_dir, second_dir, combined_dir)
+
+    manifest = _manifest_of(combined_dir)
+    assert opened_folders
+    assert manifest["git"] == {"commit": "aaaaaaa", "dirty": False}
 
 
 def test_a_shard_with_no_work_unit_says_so_and_writes_no_rows(tmp_path, capsys):

@@ -481,9 +481,13 @@ def combine(run_dirs: list, out_dir: Path) -> list:
     The combined folder is itself a run folder: the additive files and a
     manifest recording the sweep every folded folder shares, so a shard
     that lands after the fold folds into it in turn, which is the shape
-    a Slurm array finishing in waves has.
+    a Slurm array finishing in waves has. That manifest is the only one
+    a fold writes and it is written at the end, so the tree is read
+    here, at the start (run_folder.read_the_tree), and the folder names
+    the code the fold ran rather than whatever HEAD moved to inside it.
     """
     started_utc = run_folder.utc_now()
+    run_folder.read_the_tree()
     recorded_config = _one_sweeps_config(run_dirs)
     positions = experiment.task_positions(recorded_config["sweep"])
     folders = _folders_that_ran_shots(run_dirs)

@@ -1168,7 +1168,13 @@ def _addpoint_columns(row: dict, totals, name: str, multiset: dict) -> None:
 
 
 def _terminal_block(row: dict) -> str:
-    """One sweep point's terminal block, one labeled line per number."""
+    """One sweep point's terminal block, one labeled line per number.
+
+    The lines above the latency ones are columns every row has. The
+    latency lines are the points the row holds (_points_held), because
+    a row folded from an older tree's folders holds only the points
+    that tree measured.
+    """
     algorithm = row["algorithm"]
     algorithm_text = _algorithm_text(algorithm)
     lines = [
@@ -1181,13 +1187,39 @@ def _terminal_block(row: dict) -> str:
         f"mismatches vs direct PyMatching: "
         f"{row['prediction_mismatches_vs_direct']}",
         f"throughput: {row['throughput_rounds_per_us']:.3f} rounds per us",
-        f"queue wait, mean: {row['queue_wait_mean_us']:.3f} us",
-        f"service time per window, mean: {row['service_mean_us']:.3f} us",
-        f"ready to frame commit: median "
-        f"{row['buffer0_ready_to_frame_median_us']:.3f} us, "
-        f"p99 {row['buffer0_ready_to_frame_p99_us']:.3f} us",
     ]
+    latency_lines = _terminal_latency_lines(row)
+    lines.extend(latency_lines)
     return "\n".join(lines)
+
+
+def _terminal_latency_lines(row: dict) -> list:
+    """The block's latency lines, for the points the row holds.
+
+    A point the row does not hold gets no line at all, not a line of
+    zeros and not a placeholder, for the reason it gets no column
+    either (_points_held): a zero here would say the windows took no
+    time, when what happened is that nobody measured them. sinter
+    prints the same way, a counter a file does not carry being simply
+    absent from what the folded table shows
+    (.pydeps/sinter/_data/_task_stats.py:71, custom_counts is a
+    Counter[str]).
+    """
+    held = _points_held(row)
+    lines = []
+    if "queue_wait" in held:
+        lines.append(f"queue wait, mean: {row['queue_wait_mean_us']:.3f} us")
+    if "service" in held:
+        lines.append(
+            f"service time per window, mean: {row['service_mean_us']:.3f} us"
+        )
+    if "buffer0_ready_to_frame" in held:
+        lines.append(
+            f"ready to frame commit: median "
+            f"{row['buffer0_ready_to_frame_median_us']:.3f} us, "
+            f"p99 {row['buffer0_ready_to_frame_p99_us']:.3f} us"
+        )
+    return lines
 
 
 def _algorithm_text(algorithm) -> str:

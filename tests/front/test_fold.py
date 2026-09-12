@@ -361,6 +361,31 @@ def test_a_fold_reports_the_latency_points_the_folders_rows_hold(tmp_path):
         assert older[0][column] == whole[0][column]
 
 
+def test_the_terminal_prints_the_latency_points_the_folded_rows_hold(tmp_path):
+    """The terminal keeps the rule the columns keep, or combine dies.
+
+    `decsim combine` writes the folder and then prints it, so a
+    terminal line that asks for a point the rows do not hold raises
+    KeyError after the folder is on disk, and command.main catches only
+    a refusal. Here two folders lack service, as an older tree's
+    folders do, and the summary prints its other lines and says nothing
+    about service.
+    """
+    run_dirs = _shards_of_one_point(tmp_path, 4, 2)
+    for run_dir in run_dirs:
+        _without_a_point(run_dir, "service")
+    out_dir = tmp_path / "combined"
+    rows = report.combine(run_dirs, out_dir)
+
+    assert "service_mean_us" not in rows[0]
+    lines = report.terminal_lines(rows, out_dir)
+    printed = "\n".join(lines)
+    assert "service time per window" not in printed
+    assert "queue wait, mean:" in printed
+    assert "ready to frame commit:" in printed
+    assert "throughput:" in printed
+
+
 def test_folders_that_hold_different_columns_are_refused(tmp_path):
     """A folded file has one header, so its folders record one set.
 

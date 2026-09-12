@@ -493,6 +493,7 @@ def combine(run_dirs: list, out_dir: Path) -> list:
     folders = _folders_that_ran_shots(run_dirs)
     order = functools.partial(_row_task_and_seed, positions)
     _refuse_folders_of_different_columns(folders)
+    _refuse_a_point_this_tree_cannot_place(folders)
     _refuse_a_repeated_shot(folders, order)
     out_dir.mkdir(parents=True, exist_ok=True)
     rows = _fold_the_folders(folders, order, out_dir)
@@ -977,6 +978,65 @@ def _refuse_folders_of_different_columns(run_dirs: list) -> None:
     """Every folder of one fold records the same columns in a folded file."""
     for name in FOLDED_FILES:
         _refuse_one_files_different_columns(run_dirs, name)
+
+
+def _refuse_a_point_this_tree_cannot_place(run_dirs: list) -> None:
+    """Every folder's window samples name a point this tree measures.
+
+    window_samples.csv is the one folded file read by a column's values
+    and not by its header: every row names a latency point, and the
+    fold writes that point's counts where the point sits among this
+    tree's own (_point_and_name_order calls measure.POINTS.index). A
+    folder whose rows name a point this tree does not measure, which is
+    the other half of two trees measuring different points, has no
+    place in that order, so without this check the fold raised a bare
+    ValueError out of a sort with sweep.csv and shots.csv already
+    written. It is checked here, at the boundary, before out_dir
+    exists, the way the folded files' columns are, and it costs one
+    pass over the small file: a campaign shard's window_samples.csv is
+    188 rows and 9 KB.
+
+    Only the names are checked, not that the folders name the same set.
+    A point may hold a column and no sample at all, measured:
+    csb_stall_per_round has a mean column in every shots.csv and no
+    window sample on a weak-only tree, because no round reached the
+    strong store. And the counts add per (sweep point, latency point),
+    so a folder with no sample of a point contributes none and the
+    fold's multiset is still the one a single run over the same shots
+    would have written. What would be wrong, a folder written by a tree
+    whose points are not this tree's, is already refused by the columns:
+    shot_rows writes one _mean_us column per point of the tree that
+    wrote it, so the folded files' headers already pin every folder to
+    one points list.
+    """
+    for run_dir in run_dirs:
+        path = Path(run_dir) / "window_samples.csv"
+        if not path.is_file():
+            continue
+        names = _window_sample_names(path)
+        _refuse_the_point(run_dir, names)
+
+
+def _window_sample_names(path: Path) -> list:
+    """The latency points one folder's window samples name, sorted."""
+    names = set()
+    for row in fold.row_stream(path):
+        names.add(row["name"])
+    return sorted(names)
+
+
+def _refuse_the_point(run_dir, names: list) -> None:
+    """Say which folder names which point that this tree cannot place."""
+    for name in names:
+        if name in measure.POINTS:
+            continue
+        raise refusal.RefusalError(
+            f"{run_dir} holds window samples of the latency point {name!r}, "
+            "which this tree does not measure; a fold writes a point's "
+            "counts where that point sits among this tree's own, so a "
+            "folder naming one it has no place for is refused before the "
+            "fold reads a row"
+        )
 
 
 def _refuse_one_files_different_columns(run_dirs: list, name: str) -> None:

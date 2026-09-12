@@ -324,6 +324,24 @@ def _without_a_point(run_dir, name):
     _write_rows(samples_path, kept)
 
 
+def _with_a_renamed_point(run_dir, name, renamed):
+    """The folder as a tree that called that latency point something else."""
+    folder = pathlib.Path(run_dir)
+    shots_path = folder / "shots.csv"
+    rows = _rows_of(shots_path)
+    for row in rows:
+        row[f"{renamed}_mean_us"] = row.pop(f"{name}_mean_us")
+        row[f"{renamed}_max_us"] = row.pop(f"{name}_max_us")
+    _write_rows(shots_path, rows)
+    samples_path = folder / "window_samples.csv"
+    samples = _rows_of(samples_path)
+    for row in samples:
+        if row["name"] != name:
+            continue
+        row["name"] = renamed
+    _write_rows(samples_path, samples)
+
+
 def test_a_fold_reports_the_latency_points_the_folders_rows_hold(tmp_path):
     """A newer tree folds the folders an older tree wrote.
 
@@ -384,6 +402,28 @@ def test_the_terminal_prints_the_latency_points_the_folded_rows_hold(tmp_path):
     assert "queue wait, mean:" in printed
     assert "ready to frame commit:" in printed
     assert "throughput:" in printed
+
+
+def test_a_folder_naming_a_point_this_tree_cannot_place_is_refused(tmp_path):
+    """A renamed point has no place in this tree's order of points.
+
+    A fold writes a point's counts where that point sits among this
+    tree's own, so a folder whose window samples name a point this tree
+    does not measure used to raise a bare ValueError out of that sort,
+    with sweep.csv and shots.csv already written and a half folder left
+    behind. It is refused at the boundary instead, by name.
+    """
+    run_dirs = _shards_of_one_point(tmp_path, 4, 2)
+    for run_dir in run_dirs:
+        _with_a_renamed_point(run_dir, "service", "park")
+    out_dir = tmp_path / "combined"
+    with pytest.raises(refusal.RefusalError) as refused:
+        report.combine(run_dirs, out_dir)
+    message = str(refused.value)
+    assert "'park'" in message
+    assert "this tree does not measure" in message
+    assert run_dirs[0] in message
+    assert not out_dir.exists()
 
 
 def test_folders_that_hold_different_columns_are_refused(tmp_path):

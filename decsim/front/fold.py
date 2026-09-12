@@ -97,6 +97,13 @@ def number_of(value):
     return value
 
 
+def header_of(path: Path) -> list:
+    """One csv file's column names, read without its rows."""
+    with open(path, newline="") as handle:
+        reader = csv.reader(handle)
+        return next(reader, [])
+
+
 def row_stream(path: Path):
     """One csv file's rows, one alive at a time, values as their text.
 

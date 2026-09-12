@@ -91,6 +91,14 @@ SHOT_MEANS = (
 SHOT_MAXES = ("max_queued_windows",)
 SHOT_SUMS = ("tesseract_windows_checked", "tesseract_window_disagreements")
 SHOT_TRUE_COUNTS = ("logical_failure", "direct_failure", "direct_mismatch")
+# the files a fold reads row by row and writes back out, which one
+# header each: the folders of one fold hold the same columns in them
+FOLDED_FILES = (
+    "shots.csv",
+    "shot_links.csv",
+    "shot_data_movement.csv",
+    "latency_samples.csv",
+)
 # links.csv is the mean of these over a point's shots, one row per link
 LINK_MEANS = (
     "transfers",
@@ -225,7 +233,7 @@ def summarize_point(point: tuple, totals, counts: dict) -> dict:
         "load": totals.mean("load"),
         "sim_wall_seconds_per_shot": totals.mean("sim_wall_seconds"),
     }
-    for name in measure.POINTS:
+    for name in _points_held(totals.means):
         multiset = counts.get((point, name), {})
         _addpoint_columns(row, totals, name, multiset)
     return row
@@ -480,6 +488,7 @@ def combine(run_dirs: list, out_dir: Path) -> list:
     positions = experiment.task_positions(recorded_config["sweep"])
     folders = _folders_that_ran_shots(run_dirs)
     order = functools.partial(_row_task_and_seed, positions)
+    _refuse_folders_of_different_columns(folders)
     _refuse_a_repeated_shot(folders, order)
     out_dir.mkdir(parents=True, exist_ok=True)
     rows = _fold_the_folders(folders, order, out_dir)
@@ -683,11 +692,11 @@ def _folder_files(folders: list, name: str) -> list:
     return paths
 
 
-def _shot_totals() -> fold.RowTotals:
+def _shot_totals(row: dict) -> fold.RowTotals:
     """What one sweep point's shot rows add up to, role by role."""
     means = list(SHOT_MEANS)
     maxes = list(SHOT_MAXES)
-    for name in measure.POINTS:
+    for name in _points_held(row):
         means.append(f"{name}_mean_us")
         maxes.append(f"{name}_max_us")
     return fold.RowTotals(
@@ -696,6 +705,29 @@ def _shot_totals() -> fold.RowTotals:
         sums=SHOT_SUMS,
         true_counts=SHOT_TRUE_COUNTS,
     )
+
+
+def _points_held(fields) -> list:
+    """The latency points a shot row or its totals hold, in POINTS order.
+
+    A run folder is read by the columns it holds and not by the columns
+    the reading tree would write: the 500 shard folders of the
+    2026-09-09 campaign hold the sixteen latency points that tree
+    measured, and this tree measures twenty-two, so a summary that asked
+    for its own could not read those folders at all. It is the rule that
+    lets a fold read a folder an older tree wrote, which is the same
+    rule sinter's counter table keeps, where a counter a file does not
+    carry is simply not in the folded row
+    (.pydeps/sinter/_data/_task_stats.py:117-150, custom_counts is a
+    Counter). A point a folder did not measure gets no column, because a
+    column of zeros would say its windows took no time.
+    """
+    held = []
+    for name in measure.POINTS:
+        column = f"{name}_mean_us"
+        if column in fields:
+            held.append(name)
+    return held
 
 
 def _shot_totals_by_point(shots: list) -> dict:
@@ -711,7 +743,7 @@ def _add_a_shot(totals: dict, row: dict) -> None:
     point = sweep_point_of(row)
     at_point = totals.get(point)
     if at_point is None:
-        at_point = _shot_totals()
+        at_point = _shot_totals(row)
         totals[point] = at_point
     at_point.add(row)
 
@@ -935,6 +967,55 @@ def _refuse_folders_of_different_sweeps(
             "folds the shards of one sweep, and every shard of a sweep "
             "records the same resolved config"
         )
+
+
+def _refuse_folders_of_different_columns(run_dirs: list) -> None:
+    """Every folder of one fold records the same columns in a folded file."""
+    for name in FOLDED_FILES:
+        _refuse_one_files_different_columns(run_dirs, name)
+
+
+def _refuse_one_files_different_columns(run_dirs: list, name: str) -> None:
+    """One folded file's columns, as every folder that wrote it has them.
+
+    A folded file has one header, so the folders' rows have to carry the
+    same columns; a folder that wrote no row of this kind has none to
+    carry. Two trees' folders differ when a column was added between
+    them, and folding them would leave that column empty for the older
+    folder's shots rather than say so.
+    """
+    first_dir = None
+    first_columns = None
+    for run_dir in run_dirs:
+        path = Path(run_dir) / name
+        if not path.is_file():
+            continue
+        columns = fold.header_of(path)
+        if first_columns is None:
+            first_dir = run_dir
+            first_columns = columns
+            continue
+        if columns == first_columns:
+            continue
+        _refuse_the_columns(run_dir, first_dir, name, columns, first_columns)
+
+
+def _refuse_the_columns(
+    run_dir, first_dir, name: str, columns: list, first_columns: list
+) -> None:
+    """Say which folder's columns differ from the first folder's, and how."""
+    held = set(columns)
+    first_held = set(first_columns)
+    absent = first_held - held
+    added = held - first_held
+    missing = sorted(absent)
+    extra = sorted(added)
+    raise refusal.RefusalError(
+        f"{run_dir} does not hold the columns {first_dir} holds in {name}: "
+        f"missing {missing}, extra {extra}; a folded file has one header, so "
+        "the folders of one fold record the same columns, and two trees' "
+        "folders differ when a column was added between them"
+    )
 
 
 def _refuse_a_repeated_shot(run_dirs: list, order) -> None:

@@ -1,16 +1,20 @@
 """The rules a fold of many run folders keeps (decsim/front/fold.py).
 
-Three of them, each pinned here against the thing it claims to equal:
+Four of them, each pinned here against the thing it claims to equal:
 the merged order is the stable sort of the folders' rows, a streamed sum
-is math.fsum of the values it was given, and what a fold holds does not
-grow with the shots the folders hold. The last one is the reason the
-module exists: `decsim combine` over the 500 shard folders of the
-2026-09-09 weak_ler campaign was OOM-killed at 120 GB while reading
-their 115 million link rows into lists.
+is math.fsum of the values it was given, what a fold holds does not grow
+with the shots the folders hold, and a summary reports the latency
+points its folders' rows hold. The third is the reason the module
+exists: `decsim combine` over the 500 shard folders of the 2026-09-09
+weak_ler campaign was OOM-killed at 120 GB while reading their 115
+million link rows into lists. The fourth is why that campaign can be
+folded at all: its shards hold the sixteen latency points that tree
+measured, and this tree measures twenty-two.
 """
 
 import csv
 import math
+import pathlib
 import random
 import statistics
 
@@ -294,3 +298,80 @@ def test_a_fold_holds_one_row_of_each_folder_however_many_shots_they_hold(
         peaks[shots] = _peak_rows_alive(monkeypatch, run_dirs, out_dir)
     assert peaks[3] == peaks[9]
     assert peaks[9] <= shards + 1
+
+
+def _rows_of(path):
+    with open(path, newline="") as handle:
+        reader = csv.DictReader(handle)
+        return list(reader)
+
+
+def _without_a_point(run_dir, name):
+    """The folder as a tree that never measured that latency point wrote it."""
+    folder = pathlib.Path(run_dir)
+    shots_path = folder / "shots.csv"
+    rows = _rows_of(shots_path)
+    for row in rows:
+        row.pop(f"{name}_mean_us")
+        row.pop(f"{name}_max_us")
+    _write_rows(shots_path, rows)
+    samples_path = folder / "window_samples.csv"
+    kept = []
+    for row in _rows_of(samples_path):
+        if row["name"] == name:
+            continue
+        kept.append(row)
+    _write_rows(samples_path, kept)
+
+
+def test_a_fold_reports_the_latency_points_the_folders_rows_hold(tmp_path):
+    """A newer tree folds the folders an older tree wrote.
+
+    The 500 shard folders of the 2026-09-09 campaign hold sixteen
+    latency points and this tree measures twenty-two, so a summary that
+    asked for its own columns could not read those folders at all. Here
+    two folders lose one point's columns, as an older tree's folders
+    lack them, and the fold reports the points they hold and every other
+    column exactly as the fold of the same folders whole does.
+    """
+    run_dirs = _shards_of_one_point(tmp_path, 4, 2)
+    whole_dir = tmp_path / "whole"
+    older_dir = tmp_path / "older"
+    report.combine(run_dirs, whole_dir)
+    for run_dir in run_dirs:
+        _without_a_point(run_dir, "confidence")
+    report.combine(run_dirs, older_dir)
+
+    whole_path = whole_dir / "sweep.csv"
+    older_path = older_dir / "sweep.csv"
+    whole = _rows_of(whole_path)
+    older = _rows_of(older_path)
+    dropped = (
+        "confidence_mean_us",
+        "confidence_median_us",
+        "confidence_p99_us",
+        "confidence_max_us",
+    )
+    for column in dropped:
+        assert column in whole[0]
+        assert column not in older[0]
+    for column in whole[0]:
+        if column in dropped:
+            continue
+        assert older[0][column] == whole[0][column]
+
+
+def test_folders_that_hold_different_columns_are_refused(tmp_path):
+    """A folded file has one header, so its folders record one set.
+
+    Folding them would write the older folder's shots with that column
+    empty, which reads as a measurement of nothing.
+    """
+    run_dirs = _shards_of_one_point(tmp_path, 4, 2)
+    _without_a_point(run_dirs[0], "confidence")
+    out_dir = tmp_path / "combined"
+    with pytest.raises(refusal.RefusalError) as refused:
+        report.combine(run_dirs, out_dir)
+    assert "does not hold the columns" in str(refused.value)
+    assert "confidence_mean_us" in str(refused.value)
+    assert not out_dir.exists()

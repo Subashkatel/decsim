@@ -124,6 +124,14 @@ def _peak_rows_alive(monkeypatch, run_dirs, out_dir):
     return max(peak)
 
 
+def _running_float_sum(values) -> float:
+    """A plain running float sum, the thing an exact sum is not."""
+    total = 0.0
+    for value in values:
+        total += float(value)
+    return total
+
+
 def test_an_exact_sum_equals_math_fsum_of_the_values_it_was_given():
     """Values whose plain float sum cancels away, and random ones."""
     running = fold.ExactSum()
@@ -146,8 +154,60 @@ def test_an_exact_sum_equals_math_fsum_of_the_values_it_was_given():
         assert running.total() == math.fsum(values)
 
 
+def test_an_exact_sum_equals_math_fsum_only_on_finite_values():
+    """Where the claim stops, which is why the docstring says finite.
+
+    The partials loop computes inf - (inf - 1.0) and lands on nan where
+    math.fsum lands on inf, and overflowing partials raise a different
+    exception from math.fsum's or none. These are the four cases
+    CPython's own test of fsum pins (test_math.py:735-740). No column a
+    fold sums can reach them, so nothing refuses them and this test
+    says where the two part company rather than asking them to agree.
+    """
+    finite = fold.ExactSum()
+    for value in CANCELLING:
+        finite.add(value)
+    assert finite.total() == math.fsum(CANCELLING)
+
+    with_infinity = fold.ExactSum()
+    with_infinity.add(1.0)
+    with_infinity.add(math.inf)
+    past_infinity = with_infinity.total()
+    assert math.isnan(past_infinity)
+    assert math.fsum([1.0, math.inf]) == math.inf
+
+    overflowing = fold.ExactSum()
+    overflowing.add(1e308)
+    overflowing.add(1e308)
+    with pytest.raises(ValueError):
+        overflowing.total()
+    with pytest.raises(OverflowError):
+        math.fsum([1e308, 1e308])
+
+
 def test_an_exact_sum_is_the_same_whichever_order_the_values_arrive_in():
-    """A fold reads the shards in whatever order it was given them."""
+    """A fold reads the shards in whatever order it was given them.
+
+    The values are chosen so that the thing this replaces does not have
+    the property: a plain running float sum of one big value and ten
+    ones loses every one added after the big value, because the gap
+    between neighbouring floats at 1e16 is 2, and keeps every one added
+    before it, so it reads 1e16 forwards and 1e16 + 10 backwards. The
+    first assertion is that, so a reader can see the test would pass on
+    anything.
+    """
+    swallowed = [1e16] + [1.0] * 10
+    backwards_first = list(reversed(swallowed))
+    assert _running_float_sum(swallowed) != _running_float_sum(backwards_first)
+    forwards = fold.ExactSum()
+    for value in swallowed:
+        forwards.add(value)
+    backwards = fold.ExactSum()
+    for value in backwards_first:
+        backwards.add(value)
+    assert forwards.total() == backwards.total()
+    assert forwards.total() == math.fsum(swallowed)
+
     generator = random.Random(7)
     values = []
     for _index in range(200):
@@ -155,27 +215,32 @@ def test_an_exact_sum_is_the_same_whichever_order_the_values_arrive_in():
         digits = generator.random()
         value = digits * 10.0**exponent
         values.append(value)
-    forwards = fold.ExactSum()
+    spread = fold.ExactSum()
     for value in values:
-        forwards.add(value)
-    backwards = fold.ExactSum()
-    for value in reversed(values):
-        backwards.add(value)
-    assert forwards.total() == backwards.total()
-    assert forwards.total() == math.fsum(values)
+        spread.add(value)
+    assert spread.total() == math.fsum(values)
 
 
 def test_an_exact_sum_skips_a_zero_and_still_equals_math_fsum():
-    """A zero changes no partial, and fsum returns 0.0 and never -0.0."""
-    zeros = (0.0, 0.5, 0.0, -0.0)
+    """A zero changes no partial, and fsum returns 0.0 and never -0.0.
+
+    The zeros sit inside values that cancel, so the sum is 2.0 where a
+    plain running float sum reads 1.0: skipping the zeros must not cost
+    the exactness around them. The two negative zeros on their own are
+    the case ExactSum.add's docstring names, math.fsum of zeros being
+    0.0 and never -0.0.
+    """
+    zeros = (1e100, 0.0, 1.0, -0.0, -1e100, 0.0, 1.0)
+    assert _running_float_sum(zeros) != math.fsum(zeros)
     with_zeros = fold.ExactSum()
     for value in zeros:
         with_zeros.add(value)
     assert with_zeros.total() == math.fsum(zeros)
+    assert with_zeros.total() == 2.0
     only_zeros = fold.ExactSum()
-    only_zeros.add(0.0)
     only_zeros.add(-0.0)
-    two_zeros = [0.0, -0.0]
+    only_zeros.add(-0.0)
+    two_zeros = [-0.0, -0.0]
     total = only_zeros.total()
     assert total == math.fsum(two_zeros)
     sign = math.copysign(1.0, total)
@@ -430,13 +495,25 @@ def test_folders_that_hold_different_columns_are_refused(tmp_path):
     """A folded file has one header, so its folders record one set.
 
     Folding them would write the older folder's shots with that column
-    empty, which reads as a measurement of nothing.
+    empty, which reads as a measurement of nothing. The sentence names
+    the folder that lacks the columns whichever order the folders were
+    given, because the folder the walk reaches second is not always the
+    one that lacks anything.
     """
     run_dirs = _shards_of_one_point(tmp_path, 4, 2)
     _without_a_point(run_dirs[0], "confidence")
+    lacking = run_dirs[0]
     out_dir = tmp_path / "combined"
     with pytest.raises(refusal.RefusalError) as refused:
         report.combine(run_dirs, out_dir)
-    assert "does not hold the columns" in str(refused.value)
-    assert "confidence_mean_us" in str(refused.value)
+    said = str(refused.value)
+    assert said.startswith(f"{lacking} does not hold the columns")
+    assert "confidence_mean_us" in said
+    assert not out_dir.exists()
+
+    backwards = list(reversed(run_dirs))
+    with pytest.raises(refusal.RefusalError) as refused_backwards:
+        report.combine(backwards, out_dir)
+    said_backwards = str(refused_backwards.value)
+    assert said_backwards.startswith(f"{lacking} does not hold the columns")
     assert not out_dir.exists()

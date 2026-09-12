@@ -134,16 +134,31 @@ def merged_rows(paths: list, key):
 
 
 class ExactSum:
-    """A running sum that equals math.fsum of the values it was given.
+    """A running sum that equals math.fsum of the finite values it was given.
 
     The state is the list of non-overlapping partial sums whose total is
     the exact sum of every value added, which is what math.fsum keeps
     while it walks a list: Shewchuk's adaptive-precision addition
     (Shewchuk 1997, "Adaptive Precision Floating-Point Arithmetic and
-    Fast Robust Geometric Predicates"), in the pure Python form CPython's
-    own test of fsum carries and asserts equal to it
-    (/opt/python/lib/python3.11/test/test_math.py:656-659 and 733, the
-    msum recipe of http://code.activestate.com/recipes/393090/).
+    Fast Robust Geometric Predicates"), the recipe named at
+    /opt/python/lib/python3.11/test/test_math.py:657-659, "Based on the
+    'lsum' function at http://code.activestate.com/recipes/393090/".
+    Neither the paper nor the recipe is on this machine, and the msum
+    that test file carries at :656-681 is a different algorithm, the
+    frexp/ldexp integer one the file itself labels so at :649-651. What
+    is on this machine, and what the tests here compare against value
+    for value, is math.fsum itself.
+
+    Finite is the whole claim and not a hedge: on a value that is not
+    finite, or on partials that overflow, this sum and math.fsum part
+    company. math.fsum([1.0, inf]) is inf and this returns nan, because
+    the loop computes inf - (inf - 1.0); math.fsum raises OverflowError
+    on [1e308, 1e308] and this raises ValueError out of total, and on
+    [1e308, 1e308, -1e308] this returns nan (the four cases CPython's
+    own test pins at test_math.py:735-740). Nothing here refuses them,
+    because every column a fold sums is a microsecond span or a bit
+    count of a run that finished, and STYLE.md rule 4 leaves out a check
+    no caller can trigger.
 
     `total` rounds that list once, so it is the sum math.fsum returns
     for the same values in any order, and a mean folded over a campaign's
@@ -161,11 +176,14 @@ class ExactSum:
         A zero leaves an exact sum as it was and is skipped, which is
         three quarters of a campaign's link fields: it changes no
         partial, and it takes no sign with it either, because math.fsum
-        of zeros is 0.0 and not -0.0 (tests/front/test_fold.py). The partials
-        loop stays in this one function because a fold of the 500-folder
-        campaign adds four hundred million values and each call of it
-        costs 1.5 us (measured 2026-09-12), which is STYLE.md's one
-        concession to a hot path.
+        of zeros is 0.0 and not -0.0 (tests/front/test_fold.py). The
+        partials loop stays in this one function because a fold of the
+        500-folder campaign adds four hundred million values and each
+        call of it walks the whole partials list: measured over a
+        million calls on 2026-09-12, 0.43 us for a value whose
+        magnitude is the ones before it (two partials), 1.86 us across a
+        1e-30 to 1e30 spread (fourteen), and 0.07 us for a zero, which
+        is skipped. That is STYLE.md's one concession to a hot path.
         """
         addend = float(value)
         if not addend:

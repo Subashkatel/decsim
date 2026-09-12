@@ -722,10 +722,12 @@ def _points_held(fields) -> list:
     for its own could not read those folders at all. It is the rule that
     lets a fold read a folder an older tree wrote, which is the same
     rule sinter's counter table keeps, where a counter a file does not
-    carry is simply not in the folded row
-    (.pydeps/sinter/_data/_task_stats.py:117-150, custom_counts is a
-    Counter). A point a folder did not measure gets no column, because a
-    column of zeros would say its windows took no time.
+    carry is simply not in the folded row: custom_counts is declared
+    Counter[str] with collections.Counter as its default factory
+    (.pydeps/sinter/_data/_task_stats.py:71) and folded by adding the
+    two counters (:117-150). A point a folder did not measure gets no
+    column, because a column of zeros would say its windows took no
+    time.
     """
     held = []
     for name in measure.POINTS:
@@ -1067,15 +1069,28 @@ def _refuse_one_files_different_columns(run_dirs: list, name: str) -> None:
 def _refuse_the_columns(
     run_dir, first_dir, name: str, columns: list, first_columns: list
 ) -> None:
-    """Say which folder's columns differ from the first folder's, and how."""
+    """Say which folder lacks the other's columns, which they are, and how.
+
+    The folder the sentence is about is the one that lacks columns, and
+    that is not always the folder the walk reached second: a folder
+    that only added columns lacks none, and the folder it was compared
+    against is then the subject.
+    """
     held = set(columns)
     first_held = set(first_columns)
     absent = first_held - held
     added = held - first_held
     missing = sorted(absent)
     extra = sorted(added)
+    lacking = run_dir
+    compared = first_dir
+    if not missing:
+        lacking = first_dir
+        compared = run_dir
+        missing = extra
+        extra = []
     raise refusal.RefusalError(
-        f"{run_dir} does not hold the columns {first_dir} holds in {name}: "
+        f"{lacking} does not hold the columns {compared} holds in {name}: "
         f"missing {missing}, extra {extra}; a folded file has one header, so "
         "the folders of one fold record the same columns, and two trees' "
         "folders differ when a column was added between them"

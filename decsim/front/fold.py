@@ -160,8 +160,8 @@ class ExactSum:
 
         A zero leaves an exact sum as it was and is skipped, which is
         three quarters of a campaign's link fields: it changes no
-        partial, and it cannot change the sign either, since math.fsum
-        adds into a zero and so returns 0.0 and never -0.0. The partials
+        partial, and it takes no sign with it either, because math.fsum
+        of zeros is 0.0 and not -0.0 (tests/front/test_fold.py). The partials
         loop stays in this one function because a fold of the 500-folder
         campaign adds four hundred million values and each call of it
         costs 1.5 us (measured 2026-09-12), which is STYLE.md's one

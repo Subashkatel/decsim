@@ -156,24 +156,24 @@ distance: 3
 physical error rate: 0.008
 algorithm: 1 us
 round period: 1 us
-load (service per window / window inter-arrival): 2.25
+load (service per window / window inter-arrival): 2.01
 logical failures: 15 of 50 shots
 mismatches vs direct PyMatching: 0
 throughput: 0.420 rounds per us
-queue wait, mean: 15.950 us
-service time per window, mean: 6.748 us
+queue wait, mean: 15.260 us
+service time per window, mean: 5.586 us
 ready to frame commit: median 21.440 us, p99 77.976 us
 
 distance: 5
 physical error rate: 0.008
 algorithm: 1 us
 round period: 1 us
-load (service per window / window inter-arrival): 1.56
+load (service per window / window inter-arrival): 1.40
 logical failures: 16 of 50 shots
 mismatches vs direct PyMatching: 0
 throughput: 0.537 rounds per us
-queue wait, mean: 12.850 us
-service time per window, mean: 7.799 us
+queue wait, mean: 12.097 us
+service time per window, mean: 6.687 us
 ready to frame commit: median 24.000 us, p99 65.312 us
 
 data movement: observation.data_movement was off, so this run counted no copies, references or moves

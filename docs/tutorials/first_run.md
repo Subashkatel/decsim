@@ -173,7 +173,7 @@ per file.
 
 ## Step 5. Read one row and one figure
 
-`sweep.csv` has one row per sweep point and 83 columns. The first few:
+`sweep.csv` has one row per sweep point and 107 columns. The first few:
 
 ```bash
 cut -d, -f1-10 results/2026-09-10T02-29-33Z-reference/sweep.csv
@@ -256,7 +256,8 @@ detection event is a check whose value changed from the round before,
 which is what a decoder actually reads. Four bits left the controller
 rather than eight, because in the first round of a memory experiment
 only half the checks have a value to compare against
-(`decsim/controller/round_assembly.py`, `form_before_departure`). That
+(`decsim/detector_error_model/detection_event_formation.py`,
+`form_before_departure`, which the controller's assembler calls). That
 round moved into Buffer 0, the store the decoder reads from, and sat
 there 5 microseconds waiting for the rest of its window. At 6.012 microseconds window 0 had all six of its rounds, so
 all 44 bits moved together into the decoder unit's memory, and the

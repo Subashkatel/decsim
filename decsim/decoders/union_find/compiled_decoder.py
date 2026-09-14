@@ -177,15 +177,33 @@ def _selected_edges(selected) -> tuple:
 
 
 def _intervals(is_closed, lower_tick, upper_tick) -> tuple:
+    """One interval per edge, shared between the edges that carry it.
+
+    Open and Closed are frozen and carry no identity: every reader tests
+    the type and reads the bounds, so one instance stands for every edge
+    with the same interval. A window has tens of thousands of edges and
+    a few hundred distinct intervals, and building one object each was
+    three quarters of a decode's Python time. The arrays are read whole
+    because element by element indexing of numpy costs more than the
+    list does.
+    """
     closed = evidence_records.Closed()
+    closed_flags = is_closed.tolist()
+    lower_ticks = lower_tick.tolist()
+    upper_ticks = upper_tick.tolist()
+    open_by_bounds = {}
     intervals = []
-    for edge_index, closed_flag in enumerate(is_closed):
+    for edge_index, closed_flag in enumerate(closed_flags):
         if closed_flag:
             intervals.append(closed)
             continue
-        lower = int(lower_tick[edge_index])
-        upper = int(upper_tick[edge_index])
-        interval = evidence_records.Open(lower, upper)
+        lower = lower_ticks[edge_index]
+        upper = upper_ticks[edge_index]
+        bounds = (lower, upper)
+        interval = open_by_bounds.get(bounds)
+        if interval is None:
+            interval = evidence_records.Open(lower, upper)
+            open_by_bounds[bounds] = interval
         intervals.append(interval)
     return tuple(intervals)
 

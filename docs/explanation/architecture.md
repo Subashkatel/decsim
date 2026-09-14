@@ -16,10 +16,8 @@ component needs from another. It is structural, so a class fills a port
 by having the methods and inherits nothing. A component depends on
 ports, never on another component's class, so an implementation can be
 replaced without any other component knowing. That is gem5's modular
-port interface: "gem5 provides a modular port interface which allows any
-component that implements the port API to be connected to any other
-component implementing the same API" (Lowe-Power and the gem5 community,
-arXiv:2007.03152, lines 489-491 of the text extraction).
+port interface, quoted in
+[The principles behind the shape](principles.md#6-model-objects-a-separate-configuration-script-a-port-api-timing-apart-from-function).
 
 **A pluggable part is a table of rows.** A row is one name a yaml may
 write and one class the machine builds for it. That is sinter's shape,

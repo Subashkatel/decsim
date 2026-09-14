@@ -202,18 +202,15 @@ transmitter sends and hears the landing for its count of the rounds on
 their route; Buffer 0's own incoming port stamps the publication tick on
 the store's record and tells the window manager. On
 `controller_to_strong_buffer` the strong writer is the receiving end and
-stores each round at its landing. What the
-sender keeps is its own count of the rounds on their route; what a store
-does with a round is the store's, at its own door. D13 settles when that
-door takes a slot.
+stores each round at its landing. What a store does with a round is the
+store's, at its own door. D13 settles when that door takes a slot.
 
 **Why.** The tempting alternative, "the sender that arranged the
 transfer finishes the job", puts one component's state in another
 component's callback: a controller that stamps Buffer 0's record and
 wakes the window manager leaves a reader of Buffer 0 unable to see when
 its own rounds become readable, and lets the two ends of one hop drift
-apart without either file changing. The narrow rule is the one every referent
-keeps, and it can be checked mechanically.
+apart without either file changing.
 
 **Sources.** gem5's requesting port hands the packet to the peer's own
 receive method rather than writing the peer's state
@@ -228,10 +225,10 @@ point-to-point channel schedules `PointToPointNetDevice::Receive` on the
 destination device (`point-to-point-channel.cc:88-92`), and that receive
 is the destination device's own method
 (`point-to-point-net-device.cc:324`). That the publication never precedes
-the store is a law of the store, and its tests hold it. The two hops
-keep the referents they had: Caune
-arXiv:2410.05202 Fig. 1a stage D for hop 2's latency, and Toshio
-arXiv:2510.25222 line 1248 for what Buffer 1 is assigned.
+the store is a law of the store, and its tests hold it. Each hop keeps
+its own latency source: Caune arXiv:2410.05202 Fig. 1a stage D for hop
+2, and Toshio arXiv:2510.25222 line 1248 for what Buffer 1 is
+assigned.
 
 **Where to see it.** `decsim/syndrome_buffer/round_input.py`, the
 `RoundStoreInput` port in `decsim/ports.py`, and `tests/test_send_ends.py`,
@@ -266,14 +263,14 @@ decsim is a plug-in that decodes one job and keeps no window state.
 
 **Sources.** OMNeT++ refuses at runtime a module that sends a message it
 does not own (`src/sim/csimplemodule.cc:333-334`), and gem5's requesting
-port names a peer that receives (`src/mem/protocol/timing.cc:49-53`). What crosses is Skoric's exchange
-between decoding blocks: "Once DA_i finishes decoding, it sends the
-artificial defects and unresolved syndromes from the bottom d rounds to
-DB_{i-1} ... When the data from DA_i and DA_{i+1} has been received, the
-DB_i block can start decoding" (arXiv:2209.08552,
-`2209.08552.txt` lines 1038-1046). decsim's model of a decoding block's
-own state, what it has received and whether it may start, is the window
-record, which is what these two ends hold.
+port names a peer that receives (`src/mem/protocol/timing.cc:49-53`).
+What crosses is Skoric's exchange between decoding blocks: "Once DA_i
+finishes decoding, it sends the artificial defects and unresolved
+syndromes from the bottom d rounds to DB_{i-1} ... When the data from
+DA_i and DA_{i+1} has been received, the DB_i block can start decoding"
+(arXiv:2209.08552, `2209.08552.txt` lines 1038-1046). decsim's model of
+a decoding block's own state, what it has received and whether it may
+start, is the window record, which is what these two ends hold.
 
 **Where to see it.** `decsim/windows/window_boundaries.py`, the
 `ENDS_OF_PATH` row in `tests/test_send_ends.py`, and hop 7 of
@@ -436,10 +433,10 @@ under `complementary_gap`, the walk under `cluster_gap`, and zero under
 `weak_baseline`, whose verdict needs no signal. For a window that
 escalated it is zero too: its committing decode is the strong one,
 which answers after the verdict, and `weak_attempt` already runs from
-the window's first dispatch to that verdict. The chain identity
-closes on every window of every config this repository ships, and
-`run_both_at_once` is the only run outside the sum. `chain_load` counts the step as
-the unit's occupancy, because it is the unit's time.
+the window's first dispatch to that verdict. The chain identity closes
+on every window of every config this repository ships, and
+`run_both_at_once` is the only run outside the sum. `chain_load` counts
+the step as the unit's occupancy, because it is the unit's time.
 
 **Why.** A span that is on the reaction time and in no column makes a
 real cost invisible in exactly the runs it is largest in: on
@@ -448,9 +445,9 @@ run with a priced walk it is that walk on every window the weak tier
 answered. A reader who sums the columns of such a window finds less
 than its reaction time and no column to blame. The alternative, folding
 the step into `service`, would make service stop meaning the decode's
-own compute. The name is the tree's own word:
-the `ConfidenceSignal` port, the `escalation.confidence` key, D3 and
-D8 all call this the confidence.
+own compute. The name is the tree's own word: the `ConfidenceSignal`
+port, the `escalation.confidence` key, D3 and D8 all call this the
+confidence.
 
 **Sources.** Toshio et al. arXiv:2510.25222 makes the signal part of
 the weak decoder's per-window work: the weak decoder "simultaneously
@@ -489,8 +486,8 @@ long a decoder runs, so a faster decoder must move the bill and no
 result. The bill is the reason: the campaigns in
 `configs/campaigns_2026_09` run union find at distances up to 15, where
 the Python row cost 48 seconds a shot. Identity is held by a property
-test rather than by review: the Python growth, forest and peeling live on as the oracle at
-`tests/decoders/union_find_oracle.py`, and
+test rather than by review: the Python growth, forest and peeling live
+on as the oracle at `tests/decoders/union_find_oracle.py`, and
 `tests/decoders/test_union_find_compiled_decoder.py` puts the two side
 by side on Stim's rotated surface code circuits and on random graphs
 that carry the shapes a surface code never makes.
@@ -581,12 +578,12 @@ These are open, recorded rather than hidden, so that a reader does not
 mistake a gap for a result.
 
 - **O1. A switching run on two real decoders runs on the host wall clock.**
-  Such a run prices both decoders from the measured clock, at weak 12 to 119 microseconds and
-  strong 0.94 to 46 milliseconds against a one microsecond round. That
-  is the whole source of order and queue-depth variance between two
-  runs of one seed. The
-  proposal on the table is a latency key on the decoder section, with
-  the two points priced at Toshio's generation time and ten times it.
+  Such a run prices both decoders from the measured clock, at weak 12
+  to 119 microseconds and strong 0.94 to 46 milliseconds against a one
+  microsecond round, which is the whole source of order and queue-depth
+  variance between two runs of one seed. The proposal on the table is a
+  latency key on the decoder section, with the two points priced at
+  Toshio's generation time and ten times it.
 - **O2. The `bandwidth_limited` link row cannot be named from a yaml.**
   Its card is built before the sweep point sets the geometry, so
   reaching it from a config would mean building the links card inside
@@ -628,8 +625,8 @@ all on the escalation hop, and the traffic ledger names them.
 
 ## Read next
 
-- [The principles behind the shape](principles.md): the ideas these decisions were made
-  under.
-- [The data path, hop by hop](data_path.md): D1, D5 and D9 as they appear on the
-  wire.
+- [The principles behind the shape](principles.md): the ideas these
+  decisions were made under.
+- [The data path, hop by hop](data_path.md): D1, D5 and D9 as they
+  appear on the wire.
 - `STYLE.md` rule 8: why a modelling question is answered from a source.

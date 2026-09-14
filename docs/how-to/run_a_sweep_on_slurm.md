@@ -82,9 +82,9 @@ Without an array the same script runs the whole sweep in one job.
 
 `slurm/campaign_run.sh` is the same script shaped for a sweep too large
 for one array: it takes `SHARDS` and `OFFSET` from the environment, so
-several arrays of at most 2,500 tasks can carry one sweep between them.
-`configs/campaigns_2026_09/PLAN.md` has the submit lines of a sweep run
-that way.
+several arrays of whatever size the cluster allows can carry one sweep
+between them. `configs/campaigns_2026_09/PLAN.md` has the submit lines
+of a sweep run that way, in slices of at most 150 tasks.
 
 The script's own `#SBATCH` lines are the defaults: one node, one task,
 two cpus, 16 gigabytes, 16 hours, on the `cpu` partition. Override them

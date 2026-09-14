@@ -61,8 +61,23 @@ SANITIZED_GRAPH_COUNT = 40
 # a column takes two detectors, one and the boundary, or neither
 ENDPOINT_COUNTS = (0, 1, 2, 2, 2)
 # one half is an ordinary zero-weight fault and anything above it is a
-# baseline fault, so both sides of the half are drawn
-PRIOR_CHOICES = (0.5, 0.001, 0.05, 0.1, 0.1, 0.25, 0.3, 0.7, 0.9, 0.999)
+# baseline fault, so both sides of the half are drawn; zero and one are
+# the only priors that drop a column, which is the only way an edge
+# index parts from its fault index
+PRIOR_CHOICES = (
+    0.0,
+    0.5,
+    1.0,
+    0.001,
+    0.05,
+    0.1,
+    0.1,
+    0.25,
+    0.3,
+    0.7,
+    0.9,
+    0.999,
+)
 DUPLICATE_COLUMN_RATE = 0.25
 OBSERVABLE_ROWS = 2
 
@@ -207,6 +222,27 @@ def test_the_property_corpus_of_the_two_largest_distances_matches_the_oracle():
 def test_the_property_corpus_of_random_small_graphs_matches_the_oracle():
     """Two hundred random graphs, one syndrome each, decode for decode."""
     compare_random_graphs(RANDOM_GRAPH_COUNT, RANDOM_GRAPH_SEED)
+
+
+def test_the_graph_emits_its_edges_in_increasing_fault_order():
+    """The contract union_find.h states: an edge index is a fault order.
+
+    The C never sees a fault index. It sorts the closing batch, the
+    Kruskal ties and every node's forest neighbours by the edge index
+    instead, which is the same order only while the graph emits one
+    edge per fault column in increasing fault index. A column whose
+    residual is certain is dropped, so the two indices part there, and
+    the priors below drop three of six.
+    """
+    check = [[1, 0, 1, 0, 1, 0], [0, 1, 0, 1, 0, 1]]
+    priors = [0.0, 0.1, 1.0, 0.2, 0.0, 0.3]
+    observables = [[0, 0, 0, 0, 0, 0]]
+    graph = graph_of(check, priors, observables)
+    edges = graph.edges
+    assert len(edges) == 3
+    assert edges[0].fault_index == 1
+    assert edges[1].fault_index == 3
+    assert edges[2].fault_index == 5
 
 
 def test_a_syndrome_of_the_wrong_length_is_refused():

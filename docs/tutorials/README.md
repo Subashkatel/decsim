@@ -4,9 +4,9 @@
 
 A tutorial is a lesson: you follow it at the keyboard and something
 happens at every step. These three build on each other, so do them in
-order. Each was run end to end on the day it was written, and every
-output on its page is from that run, so if your screen disagrees with
-the page, the page is out of date and worth reporting.
+order. Each was run end to end, and every output on its page is from
+that run, so if your screen disagrees with the page, the page is out of
+date and worth reporting.
 
 - [Your first run](first_run.md): install, run one shot, open the run
   folder, read a figure, and follow one round of syndrome data through

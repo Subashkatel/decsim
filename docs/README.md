@@ -42,8 +42,7 @@ outline button at the top of any page lists that page's sections.
 
 ## Tutorials
 
-Three lessons, to do in order. Each was run end to end, and every output
-on its page is from that run.
+Three lessons, to do in order.
 
 - [Your first run](tutorials/first_run.md): one shot, the run folder,
   and one round followed through the machine.
@@ -75,9 +74,8 @@ and reading what it wrote.
 
 ## Reference
 
-Facts to look up. Four of these pages are generated from the source by
-`tools/docs_map.py` and checked by `tests/test_docs.py`, so they cannot
-drift from the code.
+Facts to look up. Four of these pages are generated from the source and
+cannot drift from the code.
 
 **What goes in and what comes out.**
 

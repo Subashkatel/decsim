@@ -130,15 +130,8 @@ Every one of them is one class filling one port and one row in a table.
 
 The packages import each other in one direction only. The `uses`
 relation is a partial order, so the top levels can be cut off and the
-rest still runs. Parnas states the rule and its point: "We have a
-hierarchical structure if a certain relation may be defined between the
-modules or programs and that relation is a partial ordering. The
-relation we are concerned with is 'uses' or 'depends upon'"
-(`parnas1972.txt` lines 504-511), and with the hierarchy "we are able to
-cut off the upper levels and still have a usable and useful product"
-(lines 518-520). Dijkstra's THE builds the same order level by level,
-each level knowing nothing of the levels above it (`dijkstra_the.txt`
-lines 52-57).
+rest still runs; Parnas and Dijkstra are quoted for it in
+[The principles behind the shape](principles.md#2-the-uses-relation-is-a-partial-order).
 
 `tools/check_uses_graph.py`, which `tools/check.sh` runs, fails on any
 cycle and prints the levels. There are twenty-five packages on eleven
@@ -150,10 +143,10 @@ with no root at all.
 
 ## The line where a call stops being local
 
-The eleven priced hops are that line (Waldo, Wyant, Wollrath and
-Kendall, *A Note on Distributed Computing*, `waldo1994.txt` lines
-302-304 and 852-855). A call across a hop has a card, a payload a record
-names, and a send at one end; a call inside a unit is never priced.
+The eleven priced hops are that line, and Waldo is quoted for it in
+[The principles behind the shape](principles.md#11-local-and-remote-calls-differ-in-kind-and-the-interface-must-say-which).
+A call across a hop has a card, a payload a record names, and a send at
+one end; a call inside a unit is never priced.
 
 Across that line decsim models latency and memory access and no partial
 failure at all: no hop drops, duplicates or reorders what it carries,

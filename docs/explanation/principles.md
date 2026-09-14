@@ -188,14 +188,14 @@ retries.
 
 ## What is not here
 
-Three sources that belong on this list were not read when it was
-written and are therefore not cited: Saltzer and Kaashoek's *Principles
-of Computer System Design* (chapter 1), Ousterhout's *A Philosophy of
-Software Design*, and Liskov and Zilles 1974.
+Three sources that belong on this list are not cited, because they
+have not been read: Saltzer and Kaashoek's *Principles of Computer
+System Design* (chapter 1), Ousterhout's *A Philosophy of Software
+Design*, and Liskov and Zilles 1974.
 
 ## Read next
 
 - `STYLE.md`: these eleven as rules, with the tools that check them.
-- [The design decisions](decisions.md): the thirteen modelling decisions made
+- [The design decisions](decisions.md): the eighteen modelling decisions made
   under them.
 - [Architecture](architecture.md): the shape they produced.

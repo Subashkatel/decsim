@@ -47,6 +47,13 @@ CORPUS_PROBABILITIES = (0.001, 0.005, 0.01)
 CORPUS_SHOTS = 300
 CIRCUIT_SEED = 5
 
+# the two distances above that, at the rate the campaign's largest
+# points run, with fewer shots because the oracle costs a second a
+# decode there
+LARGE_DISTANCES = (11, 13)
+LARGE_PROBABILITY = 0.005
+LARGE_SHOTS = 30
+
 RANDOM_GRAPH_COUNT = 200
 RANDOM_GRAPH_SEED = 11
 SANITIZED_GRAPH_COUNT = 40
@@ -169,7 +176,7 @@ def compare_random_graphs(count: int, seed: int) -> None:
         compare_one_decode(graph, syndrome)
 
 
-def compare_corpus_point(distance: int, probability: float) -> None:
+def compare_corpus_point(distance: int, probability: float, shots: int) -> None:
     """Every sampled shot of one distance and error rate, decode for decode."""
     circuit = windows.memory_circuit(distance, distance, probability)
     model = windows.whole_circuit_window(circuit, distance, REQUIREMENT)
@@ -178,10 +185,8 @@ def compare_corpus_point(distance: int, probability: float) -> None:
         location="corpus window",
         weight_step=WEIGHT_STEP,
     )
-    shots, _observables = windows.sampled_shots(
-        circuit, CORPUS_SHOTS, CIRCUIT_SEED
-    )
-    for shot in shots:
+    sampled, _observables = windows.sampled_shots(circuit, shots, CIRCUIT_SEED)
+    for shot in sampled:
         syndrome = windows.row_syndrome(model, shot)
         compare_one_decode(graph, syndrome)
 
@@ -190,7 +195,13 @@ def test_the_property_corpus_of_surface_code_shots_matches_the_oracle():
     """Twelve points of three hundred sampled syndromes, decode for decode."""
     for distance in CORPUS_DISTANCES:
         for probability in CORPUS_PROBABILITIES:
-            compare_corpus_point(distance, probability)
+            compare_corpus_point(distance, probability, CORPUS_SHOTS)
+
+
+def test_the_property_corpus_of_the_two_largest_distances_matches_the_oracle():
+    """Distances eleven and thirteen, thirty sampled syndromes each."""
+    for distance in LARGE_DISTANCES:
+        compare_corpus_point(distance, LARGE_PROBABILITY, LARGE_SHOTS)
 
 
 def test_the_property_corpus_of_random_small_graphs_matches_the_oracle():

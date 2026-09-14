@@ -111,14 +111,12 @@ decode ended; `frame_commit` closes it. On a serial path those nine add
 up to `buffer0_ready_to_frame` to the tick, on every window of every
 config this repository ships.
 
-The park is two points because it has two causes. `dep_block` is what
-the decode waited for its window's last boundary, and it ends at the
-first tick the decode may compute, whether or not a unit is free then;
-`compute_wait` is the rest, the unit's compute still busy with another
-decode. A run whose windows wait on the seam reports the park in the
-first and zero in the second; two decodes of one window sharing a unit,
-which is what a complementary gap's forced-class pair is, report it in
-the second.
+The park is two points because it has two causes
+([D15](../explanation/decisions.md#d15-the-park-before-a-decode-is-two-points-by-what-it-waited-for)).
+A run whose windows wait on the seam reports the park in `dep_block` and
+zero in `compute_wait`; two decodes of one window sharing a unit, which
+is what a complementary gap's forced-class pair is, report it in the
+second.
 
 `input_link_per_window` is that decode's own hop, so it is zero when the
 decode read an input that was already in its unit's memory: a tier

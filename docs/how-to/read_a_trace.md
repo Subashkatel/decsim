@@ -79,10 +79,8 @@ duration is the host's wall clock and every tick after it differs from
 one machine to the next; the shape of the path does not.
 
 A round key is `operation_id:round_index`, counted from 1. Read the
-table in tick order as one round's life. Under it come the counts: how
-many hops copied the bits, how many referenced them as a job or a hold,
-how many moved them, and the longest residence and queue wait on that
-path.
+table in tick order as one round's life, and the counts under it as that
+path's totals.
 
 ## 4. For one window, the same command
 

@@ -48,11 +48,9 @@ priced by a measured round trip ([D14](decisions.md#d14-the-strong-tiers-off-boa
 Whoever executes a send is an end of that hop. `tests/test_send_ends.py`
 holds the rule: its `ENDS_OF_PATH` table names each path's two ends as
 packages, and the test walks `decsim/` to check that no other component
-names that path. The rule is OMNeT++'s, which refuses at runtime a
-module that sends a message it does not own
-(OMNeT++ `src/sim/csimplemodule.cc:333-334`), and gem5's,
-which bills a transfer to the port it left by rather than to whoever
-arranged it (`packet.hh:424-431`).
+names that path.
+[D1](decisions.md#d1-whoever-executes-a-send-is-an-end-of-that-hop) has
+the referents it comes from.
 
 ## The eleven hops
 

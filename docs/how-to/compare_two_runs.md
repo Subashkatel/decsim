@@ -22,18 +22,20 @@ Every folder's `sweep.csv` has one row per sweep point. Pick the point
 the two runs share and the columns the question is about.
 
 For example, the reference config at distance 3, decoded by PyMatching
-and charged its measured wall clock:
+and charged its measured wall clock. Every column after `shots` is that
+host's, so yours will differ:
 
 ```
 distance,algorithm,shots,load,queue_wait_mean_us,algorithm_mean_us,buffer0_ready_to_frame_median_us
 3,pymatching,2,7.308208333333333,7.149500000000001,12.753125,32.91
 ```
 
-and the same point with the decoder priced at one microsecond by a card:
+and the same point with the decoder priced at one microsecond by a
+card, which is the same on every host:
 
 ```
 distance,algorithm,shots,load,queue_wait_mean_us,algorithm_mean_us,buffer0_ready_to_frame_median_us
-3,1.0,20,0.3571851851851852,0.0,1.0,1.076
+3,1.0,20,0.35585185185185186,0.0,1.0,1.076
 ```
 
 Read across. The algorithm went from a measured 12.75 microseconds to a

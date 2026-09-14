@@ -28,8 +28,10 @@ The `bb-decoders` extra adds the three optional backends (Relay-BP,
 Tesseract, BP-OSD through quits); each one is one row of a table and
 nothing else needs it.
 
-The union find row decodes in C. Build its library once, and again
-whenever `decsim/decoders/union_find/union_find.c` changes:
+The union find row decodes in C, and the cluster gap that reads its
+growth walks in C beside it, in one library. Build it once, and again
+whenever `decsim/decoders/union_find/union_find.c` or its
+`cluster_gap.c` changes:
 
 ```bash
 tools/build_union_find.sh

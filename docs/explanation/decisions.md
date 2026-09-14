@@ -2,7 +2,7 @@
 
 # The design decisions
 
-Seventeen decisions shape what decsim charges and where it charges it. Each is
+Eighteen decisions shape what decsim charges and where it charges it. Each is
 recorded here with what was decided, why, and the source the answer came
 from, because a modelling question is answered by reading the referent
 rather than by choosing (`STYLE.md` rule 8). The last section says what
@@ -534,6 +534,60 @@ header, `decsim/decoders/union_find/compiled_decoder.py`,
 `tools/build_union_find.sh`, `tests/conftest.py`, and
 `tests/decoders/test_union_find_compiled_decoder.py`, whose corpus test
 is the identity claim.
+
+## D18. The cluster gap's walk runs in C beside the growth it reads
+
+**Decided.** The walk that turns one Union-Find growth into a gap is
+`decsim/decoders/union_find/cluster_gap.c`, in the same library as the
+decoder and reached through the same binding.
+`decsim/confidence/cluster.py` keeps the signal row: what the gap is
+defined on, the two refusals, the reading back into natural-log weight,
+and what the step costs the run. The C returns the same half ticks the
+Python returned for every growth, and that Python walk lives on as the
+oracle at `tests/confidence/cluster_gap_oracle.py`.
+
+**Why.** The walk was the larger half of a switching shot. A profile of
+one distance nine switching shot spent 76.6 of its 105 seconds inside
+the Python walk, 20,085 searches and 9.8 million edge relaxations for
+ten windows, where the whole union find row cost 13.7 seconds a shot at
+distance 15. Nothing about the value changes: the gap is a minimum over
+the quotient graph's nodes of a doubled-state Dijkstra distance, so
+neither the order the nodes are visited in nor the cutoff each search
+carries can move it, and a switching run makes the same decisions on
+the same shots.
+
+**What the measured time means now.** A run that declares
+`escalation.confidence_walk_microseconds` charges that number and is
+untouched by this. A run that leaves it null charges what the walk cost
+on the host clock, the way a decoder with no latency card is charged,
+so its confidence term falls by the factor the walk got faster and
+every span that waits on the confidence step gets shorter. That number
+was the host's before and is the host's now, which is what open issue
+O1 records for a real decoder; it is not a hardware estimate either
+way.
+
+**The uses order.** `decsim/confidence` imports
+`decsim/decoders/union_find/compiled_decoder.py`, so it sits at level 4
+rather than level 3. The relation stays a partial order, since no
+decoder module imports the confidence package, and the cluster gap is
+defined on a Union-Find growth alone, so the dependency is the one the
+signal already had in prose.
+
+**Sources.** Meister et al. arXiv:2405.07433 Definition 9 quotients the
+decoding graph by the grown clusters and takes "the length of the
+shortest path that covers a logical operator" (`2405.07433.txt` lines
+518-521); Algorithm 2 line 2 is the search, "Run Dijkstra's algorithm
+on G'_D" (lines 531-532), "with runtime O(|ED| +|VD| log|VD|)" (line
+536). The C runs one such search per node over the parity-doubled node
+set, with a binary heap, an array of distances two states wide, and a
+generation stamp in place of a pass over every state between sources.
+
+**Where to see it.** `decsim/decoders/union_find/cluster_gap.c` and its
+header, `cluster_gap` and `cluster_gap_entry_point` in
+`decsim/decoders/union_find/compiled_decoder.py`, `_cluster_gap` in
+`decsim/confidence/cluster.py`, and
+`tests/confidence/test_compiled_cluster_gap.py`, whose corpus test is
+the identity claim.
 
 ## What is not modelled yet
 

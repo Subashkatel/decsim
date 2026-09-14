@@ -149,10 +149,12 @@ constructing software is not to construct it at all" (lines 547-548).
 **In decsim.** The essential complexity is the set of states a window
 and a decode job can be in, and it is written down as records with
 phases rather than spread across flags. The parts that are bought
-instead of built are the decoders (PyMatching, union find, belief
-matching, Relay-BP, Tesseract, BP-OSD), Stim for the circuits and their
-error models, Chrome's trace format and its viewers, and sinter's shape
-for the collect layer.
+instead of built are every decoder row but union find (PyMatching,
+belief matching, Relay-BP, Tesseract, BP-OSD), Stim for the circuits and
+their error models, Chrome's trace format and its viewers, and sinter's
+shape for the collect layer. Union find is the one algorithm this tree
+writes, in C
+([D17](decisions.md#d17-the-union-find-growth-forest-and-peeling-run-in-c)).
 
 ## 10. The system copies the organisation that builds it
 

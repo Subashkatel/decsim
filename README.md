@@ -28,16 +28,18 @@ The `bb-decoders` extra adds the three optional backends (Relay-BP,
 Tesseract, BP-OSD through quits); each one is one row of a table and
 nothing else needs it.
 
-The union find row decodes in C. Build its library once with a C
-compiler, and again whenever
-`decsim/decoders/union_find/union_find.c` changes:
+The union find row decodes in C. Build its library once, and again
+whenever `decsim/decoders/union_find/union_find.c` changes:
 
 ```bash
 tools/build_union_find.sh
 ```
 
-The test suite builds it for you when it is missing, and the row says
-so and names this command when it is not there at run time.
+Run that where a C compiler is, which is the host rather than any
+container or environment the suite's interpreter may live in; the
+suite only loads the library. The suite builds it for you when it is
+missing and a compiler is reachable, and otherwise stops with one
+sentence naming this command.
 
 ## One run
 

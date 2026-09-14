@@ -49,7 +49,6 @@ RECORD_TYPES = frozenset(
     {
         "decoding_records.DecodeJob",
         "evidence_records.Closed",
-        "evidence_records.Open",
         "transfer_records.BoundaryTransferRelation",
         "window_records.DependencyResidual",
     }

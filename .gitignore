@@ -16,6 +16,10 @@ __pycache__/
 /build/
 *.egg-info/
 
+# The compiled Union-Find decoder, built from its C source by
+# tools/build_union_find.sh. Source is tracked, objects are not.
+*.so
+
 # Editor/OS noise
 .DS_Store
 

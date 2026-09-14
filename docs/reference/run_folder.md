@@ -187,9 +187,10 @@ number produces no rows here.
 
 ### `sweep.csv`
 
-One row per sweep point, 83 columns, summarized from `shots.csv` and
+One row per sweep point, summarized from `shots.csv` and
 `window_samples.csv` by `summarize_point` in `decsim/front/report.py`.
-The scalars come first:
+The nineteen scalars come first, then four columns for every latency
+point the run held:
 
 | Column | What it is |
 | --- | --- |

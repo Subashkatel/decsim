@@ -2,7 +2,7 @@
 
 # The design decisions
 
-Fourteen decisions shape what decsim charges and where it charges it. Each is
+Eighteen decisions shape what decsim charges and where it charges it. Each is
 recorded here with what was decided, why, and the source the answer came
 from, because a modelling question is answered by reading the referent
 rather than by choosing (`STYLE.md` rule 8). The last section says what
@@ -479,6 +479,115 @@ occupancy in `load`.
 [The run folder](../reference/run_folder.md),
 `configs/cluster_gap_switching.yaml`, and the four shipped-config
 identity tests in `tests/front/test_measure.py`.
+
+## D17. The Union-Find growth, forest and peeling run in C
+
+**Decided.** The one decoder decsim implements itself decodes in C.
+`decsim/decoders/union_find/union_find.c` grows the clusters, takes the
+minimum weight contact forest and peels it; the Python beside it builds
+the graph of a placed model, turns a syndrome into a residual one, and
+turns the outcome back into the evidence record a confidence signal
+reads. The two are bound by ctypes, the library is a build artifact
+that `tools/build_union_find.sh` makes and the suite makes when it is
+missing, and the C must make the same decisions the Python made, not
+merely correct ones: the same selected faults, the same intervals, the
+same contacts in the same order, the same forest, the same unmatched
+detectors.
+
+**Why.** decsim's timing comes from the latency card and never from how
+long a decoder runs, so a faster decoder must move the bill and no
+result. The bill is the reason: the 2026-09 campaign
+(`configs/campaigns_2026_09/PLAN.md`) wants union find at distances up
+to 15, where the Python row cost 48 seconds a shot and the campaign
+117,000 core-hours. Identity is held by a property test rather than by
+review: the Python growth, forest and peeling live on as the oracle at
+`tests/decoders/union_find_oracle.py`, and
+`tests/decoders/test_union_find_compiled_decoder.py` puts the two side
+by side on Stim's rotated surface code circuits and on random graphs
+that carry the shapes a surface code never makes.
+
+Every other decoder row is an adapter over an installed package, so
+this is the only row where the algorithm is decsim's to write, and the
+only row where a compiled artifact enters the tree. The cost of that is
+a build step; the row says so in one sentence when its library is
+missing, and names the command.
+
+**Sources.** Delfosse and Nickerson arXiv:1709.06218 give the two
+algorithms and the data structure the growth uses: a cluster keeps a
+list of its boundary, and "To grow a cluster, we must then simply
+iterate over this list and grow the incident edges" (lines 506-507),
+fusion appends one list to the other (lines 528-531), and a last pass
+removes what is no longer on the boundary (lines 537-539). Huang,
+Newman and Brown arXiv:2004.04693 give the weighted growth that this
+row implements and iterate over the same boundary edges: "we first
+iterate over the boundary edges to identify the smallest boundary edge
+weight wmin, and then again iterate over the boundary edges to grow the
+radius of the cluster by wmin" (lines 88-94). The C follows the LLVM
+Coding Standards in the points `STYLE.md` now lists under rule 9, which
+is where this tree's rule for C lives; before this change it had none,
+and the answer came from the brief that commissioned the row. The
+naming is the exception and is deliberate: the file is `snake_case`
+like the Python beside it, not LLVM's capitalization.
+
+**Where to see it.** `decsim/decoders/union_find/union_find.c` and its
+header, `decsim/decoders/union_find/compiled_decoder.py`,
+`tools/build_union_find.sh`, `tests/conftest.py`, and
+`tests/decoders/test_union_find_compiled_decoder.py`, whose corpus test
+is the identity claim.
+
+## D18. The cluster gap's walk runs in C beside the growth it reads
+
+**Decided.** The walk that turns one Union-Find growth into a gap is
+`decsim/decoders/union_find/cluster_gap.c`, in the same library as the
+decoder and reached through the same binding.
+`decsim/confidence/cluster.py` keeps the signal row: what the gap is
+defined on, the two refusals, the reading back into natural-log weight,
+and what the step costs the run. The C returns the same half ticks the
+Python returned for every growth, and that Python walk lives on as the
+oracle at `tests/confidence/cluster_gap_oracle.py`.
+
+**Why.** The walk was the larger half of a switching shot. A profile of
+one distance nine switching shot spent 76.6 of its 105 seconds inside
+the Python walk, 20,085 searches and 9.8 million edge relaxations for
+ten windows, where the whole union find row cost 13.7 seconds a shot at
+distance 15. Nothing about the value changes: the gap is a minimum over
+the quotient graph's nodes of a doubled-state Dijkstra distance, so
+neither the order the nodes are visited in nor the cutoff each search
+carries can move it, and a switching run makes the same decisions on
+the same shots.
+
+**What the measured time means now.** A run that declares
+`escalation.confidence_walk_microseconds` charges that number and is
+untouched by this. A run that leaves it null charges what the walk cost
+on the host clock, the way a decoder with no latency card is charged,
+so its confidence term falls by the factor the walk got faster and
+every span that waits on the confidence step gets shorter. That number
+was the host's before and is the host's now, which is what open issue
+O1 records for a real decoder; it is not a hardware estimate either
+way.
+
+**The uses order.** `decsim/confidence` imports
+`decsim/decoders/union_find/compiled_decoder.py`, so it sits at level 4
+rather than level 3. The relation stays a partial order, since no
+decoder module imports the confidence package, and the cluster gap is
+defined on a Union-Find growth alone, so the dependency is the one the
+signal already had in prose.
+
+**Sources.** Meister et al. arXiv:2405.07433 Definition 9 quotients the
+decoding graph by the grown clusters and takes "the length of the
+shortest path that covers a logical operator" (`2405.07433.txt` lines
+518-521); Algorithm 2 line 2 is the search, "Run Dijkstra's algorithm
+on G'_D" (lines 531-532), "with runtime O(|ED| +|VD| log|VD|)" (line
+536). The C runs one such search per node over the parity-doubled node
+set, with a binary heap, an array of distances two states wide, and a
+generation stamp in place of a pass over every state between sources.
+
+**Where to see it.** `decsim/decoders/union_find/cluster_gap.c` and its
+header, `cluster_gap` and `cluster_gap_entry_point` in
+`decsim/decoders/union_find/compiled_decoder.py`, `_cluster_gap` in
+`decsim/confidence/cluster.py`, and
+`tests/confidence/test_compiled_cluster_gap.py`, whose corpus test is
+the identity claim.
 
 ## What is not modelled yet
 

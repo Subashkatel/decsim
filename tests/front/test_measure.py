@@ -19,13 +19,30 @@ store's hop is two cycles, the escalation hop five and the strong
 decoder's way home three, against one cycle everywhere on the weak
 path. Escalating every window or none is the threshold's doing, which
 is Toshio et al. 2510.25222 Sec. III A step 3 driven to its two ends.
+
+The last run here is the one the yaml cannot declare: the memory_circuit
+row is one operation for the whole shot, so the several-stream workload
+that tells a per-window point apart from a per-index one is built in
+Python through the circuit_list row, on a fabric whose only priced hop
+is the decoder-to-decoder seam.
 """
 
 import yaml
 
 import decsim.collect as collect
+import decsim.config as config_module
+import decsim.decoders.settings as decoder_settings
 import decsim.front.experiment as experiment
 import decsim.front.measure as measure
+import decsim.frontends.settings as workload_settings
+import decsim.links.link_profiles as link_profiles
+import decsim.pauli_frame.pauli_frame as pauli_frame_module
+import decsim.qpu.round_policies as round_policies
+import decsim.qpu.settings as qpu_settings
+import decsim.qpu.stim_device as stim_device
+import decsim.records.program as program_records
+import decsim.settings as machine_settings
+import decsim.windows.settings as window_settings
 from tests.front.yaml_configs import (
     CONFIGS_DIR,
     MINIMAL_CONFIG,
@@ -487,9 +504,8 @@ def decoded_window_ids(shot) -> list:
     window_ids = []
     windows = observation.windows.windows.items()
     for key, window in sorted(windows):
-        window_id = key[1]
-        if window_id in frames and window.t_done is not None:
-            window_ids.append(window_id)
+        if key in frames and window.t_done is not None:
+            window_ids.append(key[1])
     return window_ids
 
 
@@ -515,7 +531,7 @@ def later_solve_ticks(shot, window_id: int) -> int:
     """
     observation = shot.machine.observation
     frames = measure.frame_records_by_window(observation)
-    frame = frames[window_id]
+    frame = frames[(1, window_id)]
     window = observation.windows.windows[(1, window_id)]
     ends = []
     for record in observation.stages.records_for(1, window_id):
@@ -753,3 +769,139 @@ def test_the_store_wait_is_not_in_the_hop_the_round_then_crosses(tmp_path):
 
     assert measurement.samples["cwb_per_round"] == [0.004] * 30
     assert measurement.means["cwb_stall_per_round"] == 51.912 / 30
+
+
+def seam_streams(stream_count: int) -> tuple:
+    """That many memory streams, one patch and one qubit each.
+
+    Every stream is the same 30-round distance-3 memory circuit, which
+    is the circuit_list row of the workload table: the yaml's
+    memory_circuit row plans one operation for the whole shot, so a run
+    with more than one stream is declared here instead.
+    """
+    circuit = workload_settings.memory_circuit(
+        "surface_code:rotated_memory_z", 30, 3, 0.001
+    )
+    operations = []
+    for index in range(stream_count):
+        operation_id = index + 1
+        operation = program_records.Operation(
+            id=operation_id,
+            name=f"mem{operation_id}",
+            qubits=(index,),
+            patches=(index,),
+            circuit=circuit,
+        )
+        operations.append(operation)
+    return tuple(operations)
+
+
+def seam_only_fabric():
+    """The logical reference card with one hop priced: the seam.
+
+    decoder_to_decoder is 125 cycles of the 250 MHz fridge clock, which
+    is 0.5 us, and every other hop is free, so a window's outgoing
+    boundary is the only thing a link charges for in the whole run.
+    """
+    clocks = config_module.ClockSettings({"fridge": 250.0, "room": 250.0})
+    seam_card = {
+        "latency_cycles": 125.0,
+        "clock": "fridge",
+        "bits_per_cycle": None,
+    }
+    fabric = {"kind": "logical_reference", "decoder_to_decoder": seam_card}
+    return link_profiles.from_yaml(fabric, clocks, "one_card")
+
+
+def seam_streams_shot(stream_count: int):
+    """One shot of those streams on that fabric.
+
+    Eight one-microsecond weak units decode them, so the streams run
+    side by side and each plans nine sliding windows.
+    """
+    operations = seam_streams(stream_count)
+    links = seam_only_fabric()
+    rounds_policy = round_policies.FixedRounds(30)
+    workload = workload_settings.WorkloadSettings(
+        operations=operations,
+        rounds_policy=rounds_policy,
+        physical_error_probability=0.001,
+    )
+    device = stim_device.StimDevice()
+    qpu = qpu_settings.QpuSettings(
+        distance=3, device=device, round_period_microseconds=1.0
+    )
+    weak_decoder = decoder_settings.DecoderSettings(
+        kind=1.0, units=8, engine_megahertz=1000.0
+    )
+    manager = decoder_settings.DecoderManagerSettings(dispatch_microseconds=0.0)
+    windows = window_settings.WindowSettings(
+        kind="sliding", terminal_policy="flush"
+    )
+    frame = pauli_frame_module.PauliFrameConfig(commit_microseconds=0.004)
+    settings = machine_settings.MachineSettings(
+        workload=workload,
+        qpu=qpu,
+        windows=windows,
+        weak_decoder=weak_decoder,
+        decoder_manager=manager,
+        pauli_frame=frame,
+        links=links,
+    )
+    task = collect.Task.at_point(settings, 1, {})
+    return collect.run_shot(task, 0)
+
+
+def test_a_windows_seam_delay_is_the_same_however_many_streams_run():
+    """Two streams each have a window 3, and each paid one 0.5 us seam.
+
+    dd_per_window is the decoder-to-decoder hop a window's own boundary
+    rode. Keyed by the window index alone the two streams' windows of
+    that index landed on one entry and every window read both seams, so
+    the point doubled with the stream count and load went with it: 0.484
+    at one stream, 0.632 at two, 1.521 at eight, a chain busier than its
+    windows arrive with nothing physical behind it. Keyed by the window,
+    which is its operation and its index, each of the eighteen windows
+    reads the one card it crossed, and the last window of a stream reads
+    nothing because no window follows it.
+    """
+    one_stream_run = seam_streams_shot(1)
+    two_stream_run = seam_streams_shot(2)
+    one_stream = measure.measure_shot(one_stream_run)
+    two_streams = measure.measure_shot(two_stream_run)
+
+    one_stream_seams = [0.5] * 8 + [0.0]
+    assert one_stream.samples["dd_per_window"] == one_stream_seams
+    assert two_streams.samples["dd_per_window"] == one_stream_seams * 2
+    assert two_streams.load == one_stream.load
+
+
+def test_every_streams_window_is_measured_against_its_own_frame_record():
+    """Two streams commit eighteen corrections and none is dropped.
+
+    The frame writes one correction per window and a window is its
+    operation and its index, so the two streams' nine windows each
+    commit their own. Filed by the index alone, the second stream's
+    record of every index replaced the first stream's and nine of the
+    eighteen were lost, so the windows that lost theirs were measured
+    against the other stream's decode. Filed by the whole key, every
+    window reads the record it wrote, and each stream's frame commit is
+    the one-stream run's 0.004 us on all nine of its windows.
+    """
+    one_stream_run = seam_streams_shot(1)
+    two_stream_run = seam_streams_shot(2)
+    observation = two_stream_run.machine.observation
+    committed = observation.frame_corrections.committed
+    frames = measure.frame_records_by_window(observation)
+    one_stream = measure.measure_shot(one_stream_run)
+    two_streams = measure.measure_shot(two_stream_run)
+
+    filed_keys = sorted(frames)
+    written_keys = sorted(record.window_key for record in committed)
+    assert len(committed) == 18
+    assert filed_keys == written_keys
+    assert filed_keys[:9] == [(1, index) for index in range(9)]
+    assert filed_keys[9:] == [(2, index) for index in range(9)]
+    one_stream_commits = one_stream.samples["frame_commit"]
+    assert one_stream_commits == [0.004] * 9
+    assert two_streams.samples["frame_commit"] == one_stream_commits * 2

@@ -2,7 +2,7 @@
 
 # The design decisions
 
-Fourteen decisions shape what decsim charges and where it charges it. Each is
+Seventeen decisions shape what decsim charges and where it charges it. Each is
 recorded here with what was decided, why, and the source the answer came
 from, because a modelling question is answered by reading the referent
 rather than by choosing (`STYLE.md` rule 8). The last section says what
@@ -479,6 +479,58 @@ occupancy in `load`.
 [The run folder](../reference/run_folder.md),
 `configs/cluster_gap_switching.yaml`, and the four shipped-config
 identity tests in `tests/front/test_measure.py`.
+
+## D17. The Union-Find growth, forest and peeling run in C
+
+**Decided.** The one decoder decsim implements itself decodes in C.
+`decsim/decoders/union_find/union_find.c` grows the clusters, takes the
+minimum weight contact forest and peels it; the Python beside it builds
+the graph of a placed model, turns a syndrome into a residual one, and
+turns the outcome back into the evidence record a confidence signal
+reads. The two are bound by ctypes, the library is a build artifact
+that `tools/build_union_find.sh` makes and the suite makes when it is
+missing, and the C must make the same decisions the Python made, not
+merely correct ones: the same selected faults, the same intervals, the
+same contacts in the same order, the same forest, the same unmatched
+detectors.
+
+**Why.** decsim's timing comes from the latency card and never from how
+long a decoder runs, so a faster decoder must move the bill and no
+result. The bill is the reason: the 2026-09 campaign
+(`configs/campaigns_2026_09/PLAN.md`) wants union find at distances up
+to 15, where the Python row cost 48 seconds a shot and the campaign
+117,000 core-hours. Identity is held by a property test rather than by
+review: the Python growth, forest and peeling live on as the oracle at
+`tests/decoders/union_find_oracle.py`, and
+`tests/decoders/test_union_find_compiled_decoder.py` puts the two side
+by side on Stim's rotated surface code circuits and on random graphs
+that carry the shapes a surface code never makes.
+
+Every other decoder row is an adapter over an installed package, so
+this is the only row where the algorithm is decsim's to write, and the
+only row where a compiled artifact enters the tree. The cost of that is
+a build step; the row says so in one sentence when its library is
+missing, and names the command.
+
+**Sources.** Delfosse and Nickerson arXiv:1709.06218 give the two
+algorithms and the data structure the growth uses: a cluster keeps a
+list of its boundary, and "To grow a cluster, we must then simply
+iterate over this list and grow the incident edges" (lines 506-507),
+fusion appends one list to the other (lines 528-531), and a last pass
+removes what is no longer on the boundary (lines 537-539). Huang,
+Newman and Brown arXiv:2004.04693 give the weighted growth that this
+row implements and iterate over the same boundary edges: "we first
+iterate over the boundary edges to identify the smallest boundary edge
+weight wmin, and then again iterate over the boundary edges to grow the
+radius of the cluster by wmin" (lines 88-94). The C is written to the
+LLVM Coding Standards, which `STYLE.md` rule 9 defers to for what it
+does not cover.
+
+**Where to see it.** `decsim/decoders/union_find/union_find.c` and its
+header, `decsim/decoders/union_find/compiled_decoder.py`,
+`tools/build_union_find.sh`, `tests/conftest.py`, and
+`tests/decoders/test_union_find_compiled_decoder.py`, whose corpus test
+is the identity claim.
 
 ## What is not modelled yet
 

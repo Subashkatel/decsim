@@ -375,9 +375,10 @@ confirm `decsim.__file__` is the worktree before trusting any result.
 
 ### The C in the tree
 
-One file is not Python: the Union-Find decoder's growth, forest and
-peeling, `decsim/decoders/union_find/union_find.c` with its header. The
-LLVM Coding Standards bind there, in these points: 80 columns, two
+Two files are not Python: the Union-Find decoder's growth, forest and
+peeling, `decsim/decoders/union_find/union_find.c`, and the cluster
+gap's walk, `cluster_gap.c` beside it, each with its header. The LLVM
+Coding Standards bind there, in these points: 80 columns, two
 spaces and no tab; early exits and flat control flow; one function does
 one thing; names that are full words; a file header comment saying what
 the file is; and comments that state an invariant in the present tense
@@ -389,7 +390,7 @@ platform.
 
 Names are `snake_case`, like the Python beside them, rather than LLVM's
 capitalization. Rule 2 is this tree's own naming rule and every name in
-the file keeps it, and a reader crossing from `window_decoder.py` into
+the files keeps it, and a reader crossing from `window_decoder.py` into
 `union_find.c` should have to change language and nothing else.
 
 ## Rule 10. The package order, the rows, and the ports

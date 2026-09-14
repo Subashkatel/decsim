@@ -1,9 +1,9 @@
 # The 2026-09 campaigns: the plan
 
 Sixteen campaigns on one shot table, every run differing from every
-other in its decoders and nothing else (owner 2026-09-14: weak alone,
-strong alone, and switching, for pymatching, union find, Relay-BP and
-BP-OSD, distance 3 to 15). The families:
+other in its decoders and nothing else: weak alone, strong alone, and
+switching, for pymatching, union find, Relay-BP and BP-OSD, distance 3
+to 15. The families:
 
 - weak tier alone: pymatching_weak, union_find_weak, relay_bp_weak,
   bposd_weak
@@ -25,46 +25,29 @@ about 100 failures from the August strong-tier rates, floor 400, cap
 200,000; four points skipped: d 11 to 15 at p 0.001 and d 15 at p
 0.002. 1,792,115 shots a campaign.
 
-Costs: seconds a shot measured 2026-09-14 at p 0.003 on the compiled
-union find (D17) and the compiled cluster gap walk (D18), four shots a
-point at d 3 to 9 and two at d 11 to 15, the model build included;
-the union find pairs were timed on the tree at 70526eca, the rest on
-81c69496's parent tree, which is the same code for them. A switching
-shot costs many times its two tiers alone because every escalated
-window builds a strong window model with its neighbour's committed
-faults excluded (window_planner.py strong_model_for_operation).
+Costs: seconds a shot at p 0.003 on the compiled union find (D17) and
+the compiled cluster gap walk (D18), the model build included. A
+switching shot costs many times its two tiers alone because every
+escalated window builds a strong window model with its neighbour's
+committed faults excluded (window_planner.py
+strong_model_for_operation).
 
 Arrays: one sbatch line per campaign, distance and slice of at most 150
 tasks; one work unit per task, sized to about two and a half hours so a
 task fits its 04:00:00 limit with room for a slow shot and can
 backfill, and never more than 8,000 shots, since a run keeps every
-shot's samples until its csv is written; OFFSET carries the shard index from one line to the next and
-SHARDS is the distance's whole unit count, so a task's folder is
-results/campaigns_2026_09/<campaign>/<shard>.
+shot's samples until its csv is written; OFFSET carries the shard index
+from one line to the next and SHARDS is the distance's whole unit
+count, so a task's folder is results/campaigns_2026_09/<campaign>/<shard>.
 
 Memory per task: a base by distance (d 3 to 7 4G, d 9 6G, d 11 8G,
-d 13 12G, d 15 16G; the pilots' largest resident set at d 15 was 7.6
-GB, relay_bp_strong) plus what the unit's shots accumulate, 0.012 MB a
-shot a unit of distance measured on the first day's shards (0.06 MB a
-shot at d 5 for pymatching, union find and BP-OSD, twice that for
-Relay-BP), with a margin of one half. The first day's d 3 and d 5 lines
-ran on the base alone with units of up to 34,000 shots; one
-relay_bp_strong d 5 unit of 21,327 shots reached 4.19 GB and was killed
-at 4G, and was resubmitted alone at 8G.
+d 13 12G, d 15 16G) plus what the unit's shots accumulate, 0.012 MB a
+shot a unit of distance (0.06 MB a shot at d 5 for pymatching, union
+find and BP-OSD, twice that for Relay-BP), with a margin of one half.
 
-Pacing (owner 2026-09-14: do not oversaturate the cluster): the lines
-are fed to sbatch by a loop that submits the next line only while fewer
-than 200 of our tasks are queued or running, so at most 350 are in the
-queue at once against the QOS's 400 running and 1,000 submitted per
-user; the cpu partition holds about 15,500 cores. Lines are ordered
-cheapest campaign distance first, so every single-tier family completes
-before the large switching distances start, and a line still in the
-queue file can be removed before it is submitted.
-
-The generator scripts and the queue live in the research sandbox,
-tmp/architecture-study/campaign (make_campaign_configs.py,
-make_submit_lines.py with costs.csv, feeder.sh); the queue as submitted
-is copied to docs/rewrite/design_audit/campaign_2026_09 there.
+Lines go in cheapest campaign distance first, a few hundred tasks at a
+time, so every single-tier family completes before the large switching
+distances start.
 
 | campaign | d | shots | s per shot | core-hours | shots per unit | tasks | sbatch lines | memory |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |

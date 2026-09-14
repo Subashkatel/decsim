@@ -496,11 +496,10 @@ detectors.
 
 **Why.** decsim's timing comes from the latency card and never from how
 long a decoder runs, so a faster decoder must move the bill and no
-result. The bill is the reason: the 2026-09 campaign
-(`configs/campaigns_2026_09/PLAN.md`) wants union find at distances up
-to 15, where the Python row cost 48 seconds a shot and the campaign
-117,000 core-hours. Identity is held by a property test rather than by
-review: the Python growth, forest and peeling live on as the oracle at
+result. The bill is the reason: the campaigns in
+`configs/campaigns_2026_09` run union find at distances up to 15, where
+the Python row cost 48 seconds a shot. Identity is held by a property
+test rather than by review: the Python growth, forest and peeling live on as the oracle at
 `tests/decoders/union_find_oracle.py`, and
 `tests/decoders/test_union_find_compiled_decoder.py` puts the two side
 by side on Stim's rotated surface code circuits and on random graphs
@@ -523,10 +522,9 @@ row implements and iterate over the same boundary edges: "we first
 iterate over the boundary edges to identify the smallest boundary edge
 weight wmin, and then again iterate over the boundary edges to grow the
 radius of the cluster by wmin" (lines 88-94). The C follows the LLVM
-Coding Standards in the points `STYLE.md` now lists under rule 9, which
-is where this tree's rule for C lives; before this change it had none,
-and the answer came from the brief that commissioned the row. The
-naming is the exception and is deliberate: the file is `snake_case`
+Coding Standards in the points `STYLE.md` lists under rule 9, which is
+where this tree's rule for C lives. The naming is the exception and is
+deliberate: the file is `snake_case`
 like the Python beside it, not LLVM's capitalization.
 
 **Where to see it.** `decsim/decoders/union_find/union_find.c` and its
@@ -546,11 +544,10 @@ and what the step costs the run. The C returns the same half ticks the
 Python returned for every growth, and that Python walk lives on as the
 oracle at `tests/confidence/cluster_gap_oracle.py`.
 
-**Why.** The walk was the larger half of a switching shot. A profile of
-one distance nine switching shot spent 76.6 of its 105 seconds inside
-the Python walk, 20,085 searches and 9.8 million edge relaxations for
-ten windows, where the whole union find row cost 13.7 seconds a shot at
-distance 15. Nothing about the value changes: the gap is a minimum over
+**Why.** The walk was the larger part of a switching shot: about three
+quarters of one at distance nine, one search from every node of the
+quotient graph, where the whole union find row cost 13.7 seconds a shot
+at distance 15. Nothing about the value changes: the gap is a minimum over
 the quotient graph's nodes of a doubled-state Dijkstra distance, so
 neither the order the nodes are visited in nor the cutoff each search
 carries can move it, and a switching run makes the same decisions on

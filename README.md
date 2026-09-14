@@ -37,11 +37,9 @@ whenever `decsim/decoders/union_find/union_find.c` or its
 tools/build_union_find.sh
 ```
 
-Run that where a C compiler is, which is the host rather than any
-container or environment the suite's interpreter may live in; the
-suite only loads the library. The suite builds it for you when it is
-missing and a compiler is reachable, and otherwise stops with one
-sentence naming this command.
+Run it where a C compiler is; the suite only loads the library. The
+suite builds it for you when it is missing and a compiler is
+reachable, and otherwise stops with one sentence naming this command.
 
 ## One run
 

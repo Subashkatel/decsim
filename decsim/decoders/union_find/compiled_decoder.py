@@ -1,18 +1,22 @@
-"""The compiled growth, forest and peeling: the binding to union_find.c.
+"""The compiled Union-Find row: the binding to its two C sources.
 
-The decisions are the C file's; this module lays one graph and one
-residual syndrome out as flat arrays, makes one call, and reads the
-outcome back as the records the evidence carries. ctypes rather than
-cffi because ctypes is in the standard library, so a checkout that
-compiles the C needs nothing else, and one call carries a whole decode,
-so the per-call cost of either binding is beside the point.
+The decisions are the C files' (union_find.c grows, takes the contact
+forest and peels; cluster_gap.c walks the quotient graph of a growth);
+this module lays a graph, a residual syndrome and a growth out as flat
+arrays, makes one call, and reads the outcome back as the records the
+evidence carries. ctypes rather than cffi because ctypes is in the
+standard library, so a checkout that compiles the C needs nothing else,
+and one call carries a whole window, so the per-call cost of either
+binding is beside the point.
 """
 
 import ctypes
 import dataclasses
 import functools
+import math
 import os
 import pathlib
+from typing import Union
 
 import numpy
 
@@ -21,6 +25,8 @@ import decsim.records.decoder_evidence as evidence_records
 LIBRARY_FILE = "union_find.so"
 BUILD_COMMAND = "tools/build_union_find.sh"
 LIBRARY_VARIABLE = "DECSIM_UNION_FIND_LIBRARY"
+_DECODE_SYMBOL = "union_find_decode"
+_CLUSTER_GAP_SYMBOL = "union_find_cluster_gap"
 
 _OK = 0
 _OUT_OF_MEMORY = 1
@@ -50,7 +56,7 @@ _TICK_ARRAY = numpy.ctypeslib.ndpointer(
 _BIT_ARRAY = numpy.ctypeslib.ndpointer(
     dtype=numpy.uint8, ndim=1, flags="C_CONTIGUOUS"
 )
-_ARGUMENT_TYPES = [
+_DECODE_ARGUMENT_TYPES = [
     ctypes.c_int32,
     ctypes.c_int32,
     _INDEX_ARRAY,
@@ -66,6 +72,20 @@ _ARGUMENT_TYPES = [
     _INDEX_ARRAY,
     _INDEX_ARRAY,
 ]
+_CLUSTER_GAP_ARGUMENT_TYPES = [
+    ctypes.c_int32,
+    ctypes.c_int32,
+    _INDEX_ARRAY,
+    _INDEX_ARRAY,
+    _TICK_ARRAY,
+    _BIT_ARRAY,
+    _BIT_ARRAY,
+    _TICK_ARRAY,
+    _TICK_ARRAY,
+    _TICK_ARRAY,
+]
+# the gap the C writes when the growth admits no odd closed walk
+_UNREACHABLE_GAP = -1
 
 
 @dataclasses.dataclass(frozen=True)
@@ -120,20 +140,50 @@ def decode(graph: evidence_records.UnionFindGraph, residual_syndrome):
     )
 
 
+def cluster_gap(
+    graph: evidence_records.UnionFindGraph, edge_intervals: tuple
+) -> Union[int, float]:
+    """The shortest odd closed walk of one growth, in half ticks.
+
+    Infinite when the growth admits no such walk, which is what a
+    window whose logical row the growth never crosses leaves behind.
+    """
+    edge_count = len(graph.edges)
+    _require_one_interval_per_edge(edge_count, edge_intervals)
+    endpoint_a, endpoint_b, lengths = _graph_arrays(graph)
+    parities = _logical_parities(graph)
+    is_closed, lower_tick, upper_tick = _interval_arrays(edge_intervals)
+    gap = numpy.zeros(1, dtype=numpy.int64)
+    walk = cluster_gap_entry_point()
+    status = walk(
+        graph.detector_count,
+        edge_count,
+        endpoint_a,
+        endpoint_b,
+        lengths,
+        parities,
+        is_closed,
+        lower_tick,
+        upper_tick,
+        gap,
+    )
+    _refuse_failure(status)
+    half_ticks = int(gap[0])
+    if half_ticks == _UNREACHABLE_GAP:
+        return math.inf
+    return half_ticks
+
+
 @functools.cache
 def entry_point():
-    """The one exported function, bound once per process."""
-    path = library_path()
-    if not path.exists():
-        raise RuntimeError(
-            "the Union-Find decoder needs its compiled library at "
-            f"{path}; build it with {BUILD_COMMAND}"
-        )
-    library = ctypes.CDLL(str(path))
-    decode_window = library.union_find_decode
-    decode_window.argtypes = _ARGUMENT_TYPES
-    decode_window.restype = ctypes.c_int32
-    return decode_window
+    """The decode, bound once per process."""
+    return _bound(_DECODE_SYMBOL, _DECODE_ARGUMENT_TYPES)
+
+
+@functools.cache
+def cluster_gap_entry_point():
+    """The cluster gap walk, bound once per process."""
+    return _bound(_CLUSTER_GAP_SYMBOL, _CLUSTER_GAP_ARGUMENT_TYPES)
 
 
 def library_path() -> pathlib.Path:
@@ -144,6 +194,21 @@ def library_path() -> pathlib.Path:
     here = pathlib.Path(__file__)
     folder = here.parent
     return folder / LIBRARY_FILE
+
+
+def _bound(symbol: str, argument_types: list):
+    """One exported function of the library, with its call declared."""
+    path = library_path()
+    if not path.exists():
+        raise RuntimeError(
+            "the Union-Find decoder needs its compiled library at "
+            f"{path}; build it with {BUILD_COMMAND}"
+        )
+    library = ctypes.CDLL(str(path))
+    function = getattr(library, symbol)
+    function.argtypes = argument_types
+    function.restype = ctypes.c_int32
+    return function
 
 
 def _graph_arrays(graph: evidence_records.UnionFindGraph) -> tuple:
@@ -206,6 +271,52 @@ def _intervals(is_closed, lower_tick, upper_tick) -> tuple:
             open_by_bounds[bounds] = interval
         intervals.append(interval)
     return tuple(intervals)
+
+
+def _require_one_interval_per_edge(
+    edge_count: int, edge_intervals: tuple
+) -> None:
+    """The C reads one interval per edge and sizes nothing itself."""
+    interval_count = len(edge_intervals)
+    if interval_count == edge_count:
+        return
+    raise ValueError(
+        "the Union-Find cluster gap walks one interval per edge: the "
+        f"graph has {edge_count} edges and the growth left "
+        f"{interval_count} intervals"
+    )
+
+
+def _logical_parities(graph: evidence_records.UnionFindGraph):
+    """Each edge's logical row, the parity its first segment carries."""
+    parities = []
+    for edge in graph.edges:
+        parities.append(edge.logical_observables[0])
+    return numpy.asarray(parities, dtype=numpy.uint8)
+
+
+def _interval_arrays(edge_intervals: tuple) -> tuple:
+    """The growth as the three flat arrays the C reads, in edge order."""
+    closed_flags = []
+    lower_ticks = []
+    upper_ticks = []
+    for interval in edge_intervals:
+        is_closed = isinstance(interval, evidence_records.Closed)
+        closed_flags.append(is_closed)
+        lower, upper = _open_bounds(interval, is_closed)
+        lower_ticks.append(lower)
+        upper_ticks.append(upper)
+    first = numpy.asarray(closed_flags, dtype=numpy.uint8)
+    second = numpy.asarray(lower_ticks, dtype=numpy.int64)
+    third = numpy.asarray(upper_ticks, dtype=numpy.int64)
+    return first, second, third
+
+
+def _open_bounds(interval, is_closed: bool) -> tuple:
+    """A closed edge has no uncovered span, and its bounds go unread."""
+    if is_closed:
+        return 0, 0
+    return interval.lower_tick, interval.upper_tick
 
 
 def _prefix(values, count) -> tuple:

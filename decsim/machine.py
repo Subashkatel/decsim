@@ -36,8 +36,8 @@ what tools/check_uses_graph.py prints and check.sh enforces:
     0  config, records, tables, trace_source
     1  engine, pauli_frame, ports, seeding, syndrome_buffer
     2  detector_error_model, escalation, links, windows
-    3  confidence, controller, decoders, qpu
-    4  frontends, observe
+    3  controller, decoders, qpu
+    4  confidence, frontends, observe
     5  settings
     6  build
     7  machine (this file)

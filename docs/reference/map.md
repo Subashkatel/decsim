@@ -138,15 +138,7 @@ docstring.
 - `decsim/windows/window_manager.py`: The windows facade: the window life cycle of every operation.
 - `decsim/windows/window_planner.py`: The window planner: which windows exist, planned or grown.
 
-## Level 3: confidence, controller, decoders, qpu
-
-### confidence
-
-- `decsim/confidence/__init__.py`: The confidence signals: the soft output a weak decode reports.
-- `decsim/confidence/cluster.py`: The cluster gap: the confidence of one weighted Union-Find window decode.
-- `decsim/confidence/complementary.py`: The complementary gap: the confidence of one window's two forced solves.
-- `decsim/confidence/gap_join.py`: One window's solves, joined into its confidence.
-- `decsim/confidence/signals.py`: The soft output rows a switching run's weak decoder can report.
+## Level 3: controller, decoders, qpu
 
 ### controller
 
@@ -199,7 +191,7 @@ docstring.
 - `decsim/decoders/tesseract/decoder.py`: The Tesseract adapter: the referee's decoder as a tier of its own.
 - `decsim/decoders/tesseract/window_decoder.py`: Tesseract decoding over one explicitly physical window fault model.
 - `decsim/decoders/union_find/__init__.py`: Prior-weighted graphlike Union-Find hard decoding.
-- `decsim/decoders/union_find/compiled_decoder.py`: The compiled growth, forest and peeling: the binding to union_find.c.
+- `decsim/decoders/union_find/compiled_decoder.py`: The compiled Union-Find row: the binding to its two C sources.
 - `decsim/decoders/union_find/decoder.py`: The Union-Find adapter: decsim's own weighted growth and peeling.
 - `decsim/decoders/union_find/window_decoder.py`: Prior-weighted graphlike Union-Find: the graph and one decode on it.
 - `decsim/decoders/verify_windows.py`: The referee: every window re-decoded by Tesseract and compared.
@@ -216,7 +208,15 @@ docstring.
 - `decsim/qpu/stim_device.py`: The Stim syndrome source: one sampled shot, emitted as raw bits by round.
 - `decsim/qpu/syndrome_devices.py`: Syndrome sources without a circuit: timing-only and fake-bit readout.
 
-## Level 4: frontends, observe
+## Level 4: confidence, frontends, observe
+
+### confidence
+
+- `decsim/confidence/__init__.py`: The confidence signals: the soft output a weak decode reports.
+- `decsim/confidence/cluster.py`: The cluster gap: the confidence of one weighted Union-Find window decode.
+- `decsim/confidence/complementary.py`: The complementary gap: the confidence of one window's two forced solves.
+- `decsim/confidence/gap_join.py`: One window's solves, joined into its confidence.
+- `decsim/confidence/signals.py`: The soft output rows a switching run's weak decoder can report.
 
 ### frontends
 

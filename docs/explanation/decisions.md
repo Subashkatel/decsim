@@ -609,19 +609,13 @@ mistake a gap for a result.
   unknown key by name the way `decoder_manager` does, so a misspelt key
   there runs the default in silence.
 
-A seventh row, O4, was a real mispricing of a backward hand-off in the
-parallel scheme, and it is closed: the two layers that differ are now
-tested. An eighth, O10, said that a timing-only round's landing reached
-no object of the receiving package; it is closed too, by the decoders'
-own end for such a round (`decsim/decoders/memory_rounds.py`). A
-ninth, O5, said the boundary fold was executed by the window gate
-because moving it would reorder the copy trace sources; it is closed as
-well, and no trace source moved: the gate hands the mask and the
-decoder side writes it (`decsim/decoders/decoder_memory_transfer.py`,
-D11). A tenth, O3, held two payload-source strings that named no real
-field; it is closed by naming what the
-sends carry, `QPUReadout.size_bits` on the readout hop and no payload at
-all on the escalation hop, and the traffic ledger names them.
+O3, O4, O5 and O10 are closed: the sends name what they carry
+(`QPUReadout.size_bits` on the readout hop, nothing on the escalation
+hop), the backward hand-off of the parallel scheme is priced and tested,
+the boundary fold is written by the decoder side from the gate's mask
+(`decsim/decoders/decoder_memory_transfer.py`, D11), and a timing-only
+round ends in the decoders' own end for it
+(`decsim/decoders/memory_rounds.py`).
 
 ## Read next
 

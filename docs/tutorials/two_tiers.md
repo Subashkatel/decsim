@@ -20,11 +20,11 @@ about.
 decsim calls the two the **weak tier** and the **strong tier**, which
 are the words Toshio et al. use (arXiv:2510.25222, Sec. III A).
 "Unsure" has to be a number, and that number is the window's
-**confidence**, or soft output: decode the window twice, each solve
-forced into one of the two possible logical answers, and subtract the
-two weights. If the two answers were nearly equally likely, the decoder
-had almost no reason to prefer the one it picked, and the window is
-escalated.
+**confidence**: this config's signal decodes the window twice, each
+solve forced into one of the two logical answers, and subtracts the two
+weights, so a small gap means the decoder had almost no reason to prefer
+the answer it picked. [Two tiers](../explanation/two_tiers.md) explains
+the signals and the shapes behind the knobs.
 
 ## Step 1. Read the config
 
@@ -98,18 +98,14 @@ The `escalation` section is the new part.
   buffer region of raw context on each side.
 
 The two decoder sections are priced cards: `kind: 1.0` says the weak
-decode costs one microsecond and `kind: 10.0` says the strong decode
-costs ten. Those numbers are the paper's ratio. One microsecond is this
-sweep's round period, which is one **syndrome generation time**, the
-time the machine takes to produce a round of syndrome
-(arXiv:2510.25222, lines 186-187 of the text extraction), and Toshio's own backlog simulations
-set the strong decoding time to ten of them (lines 1110-1112).
+decode costs one microsecond, which is this sweep's round period and so
+one **syndrome generation time**, and `kind: 10.0` says the strong
+decode costs ten of them, the ratio the yaml comment above cites.
 
 A card prices the algorithm stage and nothing else: both tiers still
 decode for real, on the minimum-weight perfect matching path, so the
 logical failures below are measured and only the time is stated
-(`decsim/decoders/settings.py`, `DecoderSettings`). Priced rather than
-measured means every tick on this page is the same on your machine.
+(`decsim/decoders/settings.py`, `DecoderSettings`).
 [How to run a timing study whose numbers do not depend on your computer](../how-to/run_a_timing_only_study.md) says more about cards.
 
 One row is chosen for you and matters below. `decsim show` prints it:
@@ -212,8 +208,7 @@ operation 1: logical_observables, observables (0,), truth (0,)
 run dir: results/2026-09-10T03-13-39Z-two_tiers
 ```
 
-The timestamp in your run folder's name will be your own. Substitute it
-in the two commands below.
+Substitute your own run folder's name in the two commands below.
 
 ## Step 4. A window that was kept
 

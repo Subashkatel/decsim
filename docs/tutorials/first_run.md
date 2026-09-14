@@ -50,7 +50,7 @@ configuration: it carries every key the yaml layer reads, and its sweep
 is deliberately tiny so that it runs in seconds. `--trace` asks for a
 record of the data path, which step 6 reads.
 
-The output, from this page's own run at commit `172da23`:
+The output:
 
 ```
 config: reference
@@ -134,10 +134,11 @@ Two new words:
   time from a window having all its rounds to its correction being
   recorded, which is the reaction time this configuration achieves.
 
-`load: 7.31` is the ratio of the time a window spends being decoded to
-the time between windows arriving. Above 1 the decoder cannot keep up,
-and work queues. It is 7.31 here because PyMatching in Python on a small
-window is slow compared to one microsecond a round.
+`load` is the ratio of the time a window spends being decoded to the
+time between windows arriving. Above 1 the decoder cannot keep up, and
+work queues. It is far above 1 here because PyMatching in Python on a
+small window is slow compared to one microsecond a round; the figure
+itself is this host's, like every tick in the block.
 
 ## Step 4. Open the run folder
 
@@ -165,11 +166,9 @@ commands below.
 
 The folder is written under `results/`, which is output and is not
 tracked by git. `config/` holds a verbatim copy of the yaml files that
-produced it, `manifest.json` holds the git commit, the library versions
-and the command line, and the csv files hold the facts. Every summary is
-computed when a file is read, never stored, so two folders of the same
-sweep can be added together. [The run folder](../reference/run_folder.md) has one row
-per file.
+produced it, `manifest.json` the git commit and the command line, and
+the csv files the facts.
+[The run folder](../reference/run_folder.md) has one row per file.
 
 ## Step 5. Read one row and one figure
 
@@ -202,12 +201,11 @@ results/2026-09-10T02-29-33Z-reference/stage_breakdown.png
 ```
 
 `stage_breakdown.png` shows where a window's time went, stage by stage:
-waiting in the queue, crossing the link into the decoder unit, fetching,
-running the algorithm, and releasing the answer. `timeline.png`, which
-`collect` drew for you, shows one traced shot as a timeline. `collect`
-draws a figure only when its input is there, which is why this run has a
-timeline and no others: it traced a shot, but its sweep has one physical
-error rate and one distance.
+the queue, the link into the decoder unit, the fetch, the algorithm and
+the release. `collect` draws a figure only when its input is there,
+which is why this run has the `timeline.png` it drew for you and no
+others: it traced a shot, but its sweep has one physical error rate and
+one distance.
 
 ## Step 6. Follow one round
 
@@ -261,7 +259,8 @@ only half the checks have a value to compare against
 round moved into Buffer 0, the store the decoder reads from, and sat
 there 5 microseconds waiting for the rest of its window. At 6.012 microseconds window 0 had all six of its rounds, so
 all 44 bits moved together into the decoder unit's memory, and the
-decode held that unit for 16.9 microseconds.
+decode held that unit for the wall clock PyMatching took, 16.9
+microseconds on this host.
 
 The `transfer` column is the vocabulary decsim uses for data movement: a
 **move** leaves the bits behind, a **copy** ends with both sides holding
@@ -278,7 +277,7 @@ decsim trace follow \
 
 That path ends where the round's path leaves off: the decode's stages,
 the verdict, the boundary passed to the next window, and the commit into
-the frame at 22.950 microseconds.
+the frame.
 
 ## What you learned
 

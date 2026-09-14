@@ -23,13 +23,14 @@ windows:
   kind: sliding
   commit_rounds: null                # d
   buffer_rounds: null                # d
-  terminal_policy: lookahead         # one window plan for all six: switching
-                                     # needs it (Toshio 2510.25222 Sec. III C,
-                                     # a strong recovery reads past the commit)
-                                     # and the single-tier campaigns take the
-                                     # same plan so the comparison is fair
+  terminal_policy: lookahead         # one window plan for all sixteen:
+                                     # switching needs it (Toshio 2510.25222
+                                     # Sec. III C, a strong recovery reads past
+                                     # the commit) and the single-tier campaigns
+                                     # take the same plan so the comparison is
+                                     # fair
 
-sweep:                             # one table for all six campaigns, so the
+sweep:                             # one table for all sixteen, so the
                                    # same seeds, hence the same syndrome
                                    # histories, reach every decoder: each point
                                    # sized for about 100 logical failures

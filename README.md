@@ -37,9 +37,9 @@ whenever `decsim/decoders/union_find/union_find.c` or its
 tools/build_union_find.sh
 ```
 
-Run it where a C compiler is; the suite only loads the library. The
-suite builds it for you when it is missing and a compiler is
-reachable, and otherwise stops with one sentence naming this command.
+Run it where a C compiler is. The suite builds the library for you when
+it is missing and a compiler is reachable, and otherwise stops with one
+sentence naming this command.
 
 ## One run
 
@@ -47,17 +47,17 @@ reachable, and otherwise stops with one sentence naming this command.
 decsim run configs/reference.yaml --seed 0 --trace
 ```
 
-That is one shot of the smallest shipped config, with a Chrome trace of
-every round and window written into the run folder it names.
+That is one shot of the reference config, the one that documents every
+key, with a Chrome trace of every round and window written into the run
+folder it names.
 [Your first run](docs/tutorials/first_run.md) walks through it and its
 output.
 
 ## The documentation
 
-[decsim documentation](docs/README.md) is the front door. It introduces
-the four kinds of page, tutorials to learn from, how-to guides for one
-task each, reference to look things up in, and explanation for the
-design and its sources, and links every page.
+[decsim documentation](docs/README.md) is the front door: tutorials to
+learn from, how-to guides for one task each, reference to look things up
+in, explanation for the design and its sources, and a link to every page.
 
 ## The tests
 

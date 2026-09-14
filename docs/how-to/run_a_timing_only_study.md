@@ -65,15 +65,15 @@ logical failures: 0 of 20 shots
 mismatches vs direct PyMatching: 0
 throughput: 0.997 rounds per us
 queue wait, mean: 0.000 us
-service time per window, mean: 1.068 us
+service time per window, mean: 1.064 us
 ready to frame commit: median 1.076 us, p99 1.076 us
 ```
 
 `algorithm: 1 us` is the card. `load: 0.36` says the decoder is
 comfortably ahead of the round rate, which is what a 1 microsecond
 decode against a 1 microsecond round with a distance 3 commit region
-should give. Compare that with the same sweep on a named decoder, where
-the load was above 7.
+should give. Compare that with the same sweep on a named decoder, whose
+load is whatever the host's wall clock gives.
 
 ## 3. Check that it is deterministic
 

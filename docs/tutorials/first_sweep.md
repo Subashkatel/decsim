@@ -72,8 +72,9 @@ decsim collect configs/my_first_sweep.yaml --processes 4
 unit stay serial, which is what keeps a shot's result a function of its
 seed alone.
 
-This took two minutes on the machine this page was written on. The
-summary, from that run:
+The summary, from a run of it. Its counts are yours too; its ticks are
+that host's, because this config names a decoder rather than pricing
+one:
 
 ```
 p 0.003, d 3, round period 1.0 us: 400 shots done
@@ -120,11 +121,9 @@ syndrome data inevitably reducing the logical fidelity, with a fidelity
 close to the global decoder's retained by buffering a whole distance,
 which is what decsim's default window does. A run of 1800 shots at
 distances 3 and 5 and physical error rates 0.003 to 0.01 disagreed on 4
-of them, about 0.2 percent, while the windowed and whole-circuit failure
-counts stayed within that many of each other at every point. So zero
-here says these 400 shots had no disagreement, and a handful in a larger
-sweep is the approximation showing, not a broken machine. A number that
-is a noticeable fraction of the shots is a broken machine.
+of them. So zero here says these 400 shots had no disagreement; a
+handful in a larger sweep is the approximation showing, and a noticeable
+fraction of the shots is a broken machine.
 
 ## Step 3. Read the error bars
 
@@ -215,8 +214,8 @@ is derived from the run's seed and the shot's position, so shot 173 of
 distance 5 is the same shot whichever process runs it. Cutting a sweep
 into shards changes nothing about the result.
 
-The tick columns do move a little between the two, because this run
-names a decoder and is charged its measured wall clock. See
+The tick columns do move a little between the two, because this run is
+charged its decoder's measured wall clock. See
 [Time](../explanation/time.md).
 
 [How to run a sweep on Slurm](../how-to/run_a_sweep_on_slurm.md) is the same mechanism as a cluster

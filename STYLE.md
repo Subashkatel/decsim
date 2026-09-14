@@ -60,9 +60,8 @@ When the value that would be hoisted has no honest name, keep the call in
 the condition: `if not math.isfinite(cost) or cost < 0:` is one decision
 and needs no `cost_is_a_number`.
 
-This rule makes dense code longer. That is intended. A file that grows
-because its lines were unpacked is right; a file that grows for the
-reasons listed under "Size" is wrong.
+This rule makes dense code longer. That is intended; "Size" below says
+which growth is right and which is not.
 
 `tools/check_one_action.py` enforces the rule. It reports: a call inside
 another call's arguments; arithmetic, a comparison or a boolean inside a
@@ -108,62 +107,38 @@ stays short; past eight names the rule is wrong, not the list.
   package's facade over that package's components, plus the escalation
   package's strong re-decode it wakes and the workload's feedback mode.
   A caller asks the facade for what it wants (`window_sources`,
-  `copy_sources`, `planned_windows`, `reads_windows_from`) rather than
-  for a component of it; what an observer still reaches for through it
-  is a component's own trace group, which by design no port carries.
-  It holds the `engine`, its package's `planner`, `tracker`,
-  `retention`, `requester`, `courier` and `results`, the escalation
-  package's `strong_redecode`, the `window_interaction` that relates
-  adjacent windows, and the workload's `feedback_boundary_mode`.
+  `planned_windows`) rather than for a component of it.
 - `FeedbackStreams` (`decsim/controller/feedback_streams.py`): one
-  protected cycle, which needs the `engine`, the `qpu` it releases, the
-  `windows` it hears from, the `table` of the three the program declares
-  it with, its own `live_by_stream_id` and `bindings` indexes, and
-  `retry_ready_operations`, the issuer's callback it wakes when a stream
+  protected cycle, which spans the QPU it releases, the windows it hears
+  from, the table the program declares the cycle with, its own live and
+  binding indexes, and the issuer's callback it wakes when a stream
   frees a patch.
 - `StrongRedecode` (`decsim/escalation/strong_redecode.py`): one strong
   re-decode of a window, which crosses both send ends, the decode queue
-  and the committer's return path in a single flow: the `engine`, the
-  `shape` that says which rounds the strong window reads, the
-  `decoder_output` and `strong_output` send ends, the `decode_queue`, the
-  `on_strong_decoded` return path, and its own `selections`, `pending`
-  and `trace`.
-- `DecodeRequester` (`decsim/windows/decode_requests.py`): one request per
-  complete window, which needs the `tracker` and the `retention` that say
-  the window has its rounds, the `builder` that shapes the job, the
-  `decode_queue` it places the job on, the `escalation_policy` and the
-  `verdict` that say which solves to ask for, the primary store's
-  `store_output` that executes the send, and the `gap_join` that is every
-  forced solve's on_decoded.
+  and the committer's return path in a single flow.
+- `DecodeRequester` (`decsim/windows/decode_requests.py`): one request
+  per complete window, which needs what says the window has its rounds,
+  what shapes the job, where the job is placed, and what says which
+  solves to ask for.
 - `IdleRoundAccounting` (`decsim/controller/idle_rounds.py`): one idle
-  round routed by the `policy`, which needs the `geometry_by_patch` that
-  sizes it, the `streams` and the `qpu` the round belongs to, the
-  `decode_queue` it charges, its own `operation_by_id` and
-  `idle_by_patch` indexes, and its `trace`.
-- `RoundWriter` (`decsim/controller/round_writes.py`): one finished round
-  sent or held, which needs the `engine` clock, the `link` it carries
-  the round to Buffer 1 by, the `weak_input` that owns Buffer 0's room
-  and landing, the `strong_writer` that owns the strong store's, the
-  plan's `publishes_from_strong_store`, the `held_rounds` that retry a
-  round the stores refused, and the `transmitter` that sends it on its
-  route.
+  round routed by the `policy`, which needs the geometry that sizes it,
+  the stream and the QPU it belongs to, and the decode queue it charges.
+- `RoundWriter` (`decsim/controller/round_writes.py`): one finished
+  round sent or held, which needs the end that owns Buffer 0's room, the
+  end that owns Buffer 1's, the link between them, the retry of a round
+  the stores refused, and the transmitter that sends it on its route.
 - `OperationResults` (`decsim/windows/operation_results.py`): one final
-  result per operation, which reads the `planner`, the `tracker`, the
-  `retention` and the `ledger` before it releases a conditional
-  operation through `conditional_release`, and holds its own
-  `deliveries` and `trace`.
-- `DecodeRequestBuilder` (`decsim/windows/decode_requests.py`): one decode
-  job built from a window, stamped with the `gate` and the run-wide
-  `next_request_sequence` ordinal, off the `engine` clock, the `planner`,
-  the `tracker` and the `interaction`, with its own `trace`.
+  result per operation, which reads the planner, the tracker, the
+  retention and the ledger before it releases a conditional operation.
+- `DecodeRequestBuilder` (`decsim/windows/decode_requests.py`): one
+  decode job built from a window, stamped with the gate and the run-wide
+  request ordinal off the engine clock.
 
 ## Rule 2. Names are full words that say what the thing is
 
 No abbreviations. No acronyms except these, which are words in this field
 and stay: qpu, id, io, xor, yaml, json. docs/reference/glossary.md maps
-every plain name to the exact term the literature uses, so
-`minimum_weight_perfect_matching` is listed beside "MWPM", and it carries
-the renamed modules too.
+decsim's names to the literature's names, both ways.
 
     wm            -> window_manager
     dem           -> detector_error_model
@@ -188,16 +163,12 @@ starts with `is_`, `has_`, `can_`, or reads as a question (`verbose` and
 `idle` are fine; `flag` is not). A duration field ends in `_microseconds`
 or `_ticks`; a count ends in `_count`.
 
-Link paths and yaml keys are plain words too: qpu_to_controller,
-controller_to_weak_buffer, controller_to_strong_buffer,
-weak_buffer_to_weak_decoder, strong_buffer_to_strong_decoder,
-weak_decoder_to_strong_decoder, decoder_to_decoder,
-weak_decoder_to_frame, strong_decoder_to_frame, frame_to_controller,
-controller_to_qpu; and the config keys readout_to_bits_cycles,
-decision_to_pulse_cycles, packing_cycles_per_round, weak_buffer_rounds,
-strong_buffer_rounds, packing_rounds_in_flight, unit_memory_rounds,
-write_cycles, setup_cycles_per_transfer, circuit, log_component_io,
-check_windows_with, decode_path.
+Link paths and yaml keys are plain words too. The link path names are
+listed in [The link paths](docs/reference/glossary.md#the-link-paths),
+and the config keys read the same way: readout_to_bits_cycles,
+decision_to_pulse_cycles, packing_cycles_per_round,
+packing_rounds_in_flight, unit_memory_rounds, write_cycles,
+setup_cycles_per_transfer, log_component_io, check_windows_with.
 
 ## Rule 3. Comments say why, in the present tense
 
@@ -238,13 +209,10 @@ for one; LLVM's "assert liberally" and Google's rule that an assert is
 never application logic both apply.
 
 Everything else is not necessary and is deleted, with its test. Inside
-the machine a function trusts what its callers send. A function in a
-package that only decsim's own components call refuses nothing that
-those components cannot send; whether a hand-written call could break it
-is not a reason for a check. A check no caller can trigger is deleted
-together with the test that forced the state by hand. A reviewer does
-not ask for a check on an input that no yaml, no front call and no
-runtime path produces; such a finding is out of scope, not a defect.
+the machine a function trusts what its callers send: a check that no
+yaml, no front call and no runtime path can trigger goes, together with
+the test that forced the state by hand. Asking for such a check is out
+of scope, not a defect.
 
 ## Rule 5. No compatibility layer
 
@@ -483,8 +451,8 @@ Chapter 20's bar for a checker is a false-positive rate under ten
 percent; when the one-action checker flags a line that reads well, the
 fix is to the checker's rules, recorded here, never a per-file
 exception. Chapter 22's rule for a large change: past a few hundred
-edits, write the tool that makes the edit (the tick-helper rename was
-one), and add a check so the old form cannot come back. Chapters 11 to
+edits, write the tool that makes the edit, and add a check so the old
+form cannot come back. Chapters 11 to
 14 give the test rules above: test behaviors through the public surface,
 keep tests obvious and unchanging, prefer real implementations, and use
 A/B diffs across a migration (a differential review is chapter 14's).

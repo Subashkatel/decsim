@@ -22,27 +22,26 @@ Every folder's `sweep.csv` has one row per sweep point. Pick the point
 the two runs share and the columns the question is about.
 
 For example, the reference config at distance 3, decoded by PyMatching
-and charged its measured wall clock:
+and charged its measured wall clock. Every column after `shots` is that
+host's, so yours will differ:
 
 ```
 distance,algorithm,shots,load,queue_wait_mean_us,algorithm_mean_us,buffer0_ready_to_frame_median_us
 3,pymatching,2,7.308208333333333,7.149500000000001,12.753125,32.91
 ```
 
-and the same point with the decoder priced at one microsecond by a card:
+and the same point with the decoder priced at one microsecond by a
+card, which is the same on every host:
 
 ```
 distance,algorithm,shots,load,queue_wait_mean_us,algorithm_mean_us,buffer0_ready_to_frame_median_us
-3,1.0,20,0.3571851851851852,0.0,1.0,1.076
+3,1.0,20,0.35585185185185186,0.0,1.0,1.076
 ```
 
-Read across. The algorithm went from a measured 12.75 microseconds to a
-stated 1.0. The load went from 7.3, where the decoder cannot keep up and
-work queues, to 0.36, where it can. The queue wait went from 7.1
-microseconds to nothing at all, which is the load crossing 1 showing up
-as a delay. And the reaction time, the median from a window having its
-rounds to its correction reaching the frame, went from 32.9 microseconds
-to 1.08.
+Read across. The card's smaller algorithm time takes the load under 1,
+and a load under 1 is why the queue wait falls to nothing and the
+reaction time, the median from a window having its rounds to its
+correction reaching the frame, falls with it.
 
 That comparison is between a software wall clock and a hardware card,
 which is a comparison of two questions rather than of two machines. Say

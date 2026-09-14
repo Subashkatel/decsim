@@ -1,15 +1,15 @@
-# The shared base of the six 2026-09 campaigns: two decoder pairs
-# (pymatching with belief matching, union find with Relay-BP), each pair
-# as the weak tier alone, the strong tier alone, and switching. Every
+# The shared base of the sixteen 2026-09 campaigns (PLAN.md): each of
+# pymatching, union find, Relay-BP and BP-OSD as the weak tier alone,
+# as the strong tier alone (belief matching too), and switching from a
+# weak tier that reports a confidence to each strong tier. Every
 # campaign extends this file and changes only its escalation section
 # and its decoder rows, so any difference between two campaigns' rows
 # is the decoders' and nothing else. Every key is documented in
 # reference.yaml; the workload, windows, clocks, links, engine stages
-# and idle policy are the 2026-08-27 weak_ler and strong_ler settings.
+# and idle policy are the weak_ler and strong_ler settings.
 #
-# Grid (owner 2026-09-09): d 3 to 15 and the August error rates 0.001
-# to 0.01. Shots per point: SHOTS_PER_POINT below, the one number the
-# owner sets before the arrays are queued.
+# Grid: d 3 to 15 and error rates 0.001 to 0.01, the shots of each
+# point in the sweep below.
 
 qpu:
   kind: stim_device
@@ -23,13 +23,14 @@ windows:
   kind: sliding
   commit_rounds: null                # d
   buffer_rounds: null                # d
-  terminal_policy: lookahead         # one window plan for all six: switching
-                                     # needs it (Toshio 2510.25222 Sec. III C,
-                                     # a strong recovery reads past the commit)
-                                     # and the single-tier campaigns take the
-                                     # same plan so the comparison is fair
+  terminal_policy: lookahead         # one window plan for all sixteen:
+                                     # switching needs it (Toshio 2510.25222
+                                     # Sec. III C, a strong recovery reads past
+                                     # the commit) and the single-tier campaigns
+                                     # take the same plan so the comparison is
+                                     # fair
 
-sweep:                             # one table for all six campaigns, so the
+sweep:                             # one table for all sixteen, so the
                                    # same seeds, hence the same syndrome
                                    # histories, reach every decoder: each point
                                    # sized for about 100 logical failures

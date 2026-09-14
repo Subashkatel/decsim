@@ -118,8 +118,8 @@ from one measured round trip instead, on two rows a config can name.
 together on one unit or spread across two stays a scheduler row, to be
 added when it matters.
 
-**Why.** The record gives timing as the reason and no more. It carries
-no source, and this page does not invent one.
+**Why.** Timing. No referent answers this one, and this page does not
+invent a source.
 
 ## D7. A priced weak card is charged once per forced solve
 
@@ -146,8 +146,8 @@ that produced the evidence. `escalation.confidence_walk_microseconds` is
 the card; leaving it null puts each row on its own cost model.
 
 **Why.** Toshio's device computes the soft output on the weak decoder,
-so that is where the work happens. Before this decision the walk was
-charged to nothing at all, which is a component running for free.
+so that is where the work happens, and a walk charged to nothing is a
+component running for free.
 
 **Source.** Toshio arXiv:2510.25222, Fig. 1 and its caption, for where
 the soft output is computed; Meister arXiv:2405.07433 Algorithm 2 for
@@ -178,9 +178,9 @@ Bombin et al. arXiv:2303.04846 for the sparse form.
 object itself, through facts declared on the port, never by a settings
 key beside it and never by the object's class.
 
-**Why.** The settings row and the object could disagree, and did: the
-same run named one way and built the other way routed to different
-decoders and finished at different ticks.
+**Why.** The settings row and the object can disagree: one run named
+one way and built the other way routes to different decoders and
+finishes at different ticks.
 
 **Sources.** sinter resolves a caller's own object first and its table
 second; gem5's port API is what a port promises not to reveal about a
@@ -201,19 +201,16 @@ receiving package. On `controller_to_weak_buffer` the controller's
 transmitter sends and hears the landing for its count of the rounds on
 their route; Buffer 0's own incoming port stamps the publication tick on
 the store's record and tells the window manager. On
-`controller_to_strong_buffer` the rule already held: the strong writer
-is the receiving end and stores each round at its landing. What the
-sender keeps is its own count of the rounds on their route; what a store
-does with a round is the store's, at its own door. D13 settles when that
-door takes a slot.
+`controller_to_strong_buffer` the strong writer is the receiving end and
+stores each round at its landing. What a store does with a round is the
+store's, at its own door. D13 settles when that door takes a slot.
 
 **Why.** The tempting alternative, "the sender that arranged the
 transfer finishes the job", puts one component's state in another
-component's callback: the controller stamped Buffer 0's record and woke
-the window manager, so a reader of Buffer 0 could not see when its own
-rounds became readable, and the two ends of one hop could drift apart
-without either file changing. The narrow rule is the one every referent
-keeps, and it can be checked mechanically.
+component's callback: a controller that stamps Buffer 0's record and
+wakes the window manager leaves a reader of Buffer 0 unable to see when
+its own rounds become readable, and lets the two ends of one hop drift
+apart without either file changing.
 
 **Sources.** gem5's requesting port hands the packet to the peer's own
 receive method rather than writing the peer's state
@@ -228,10 +225,10 @@ point-to-point channel schedules `PointToPointNetDevice::Receive` on the
 destination device (`point-to-point-channel.cc:88-92`), and that receive
 is the destination device's own method
 (`point-to-point-net-device.cc:324`). That the publication never precedes
-the store is a law of the store, and its tests hold it. The two hops
-keep the referents they had: Caune
-arXiv:2410.05202 Fig. 1a stage D for hop 2's latency, and Toshio
-arXiv:2510.25222 line 1248 for what Buffer 1 is assigned.
+the store is a law of the store, and its tests hold it. Each hop keeps
+its own latency source: Caune arXiv:2410.05202 Fig. 1a stage D for hop
+2, and Toshio arXiv:2510.25222 line 1248 for what Buffer 1 is
+assigned.
 
 **Where to see it.** `decsim/syndrome_buffer/round_input.py`, the
 `RoundStoreInput` port in `decsim/ports.py`, and `tests/test_send_ends.py`,
@@ -249,17 +246,16 @@ hardware the card is named after. On `decoder_to_decoder` both of those
 are the window side: the boundary is a record the courier keeps for a
 committed window, and it lands in the destination window's own record,
 where it waits until the decode that reads it starts. So the courier
-executes that send and handles that landing, and the decoders package,
-which held a three-line pass-through with no state of its own, holds
-nothing of this hop any more. The card is unchanged: it still prices the
+executes that send and handles that landing, and the decoders package
+holds nothing of this hop. The card is unchanged: it still prices the
 0.5 microsecond on-chip wire between two decoders.
 
 **Why.** The rule that decides it is ownership. A component may send
-only what it owns, and nothing in the decoders package owned the
-boundary: `DecoderOutput.send_boundary` forwarded an attribution and a
-bit count it had not made, to a delivery callback that belonged to the
-window side, and no decoder-side object heard the landing at all. The
-alternative, moving the boundary's state into the decoders package, was
+only what it owns, and nothing in the decoders package owns the
+boundary: a send from that side would forward an attribution and a bit
+count it had not made, to a delivery callback that belongs to the window
+side, and no decoder-side object would hear the landing. The
+alternative, moving the boundary's state into the decoders package, is
 turned down because it would move the window model with it: what a
 boundary is, how two boundaries merge, which version wins and when a
 window may start are the windowing scheme's laws, and a decoder unit in
@@ -267,15 +263,14 @@ decsim is a plug-in that decodes one job and keeps no window state.
 
 **Sources.** OMNeT++ refuses at runtime a module that sends a message it
 does not own (`src/sim/csimplemodule.cc:333-334`), and gem5's requesting
-port names a peer that receives (`src/mem/protocol/timing.cc:49-53`),
-which on this hop did not exist. What crosses is Skoric's exchange
-between decoding blocks: "Once DA_i finishes decoding, it sends the
-artificial defects and unresolved syndromes from the bottom d rounds to
-DB_{i-1} ... When the data from DA_i and DA_{i+1} has been received, the
-DB_i block can start decoding" (arXiv:2209.08552,
-`2209.08552.txt` lines 1038-1046). decsim's model of a decoding block's
-own state, what it has received and whether it may start, is the window
-record, which is what these two ends hold.
+port names a peer that receives (`src/mem/protocol/timing.cc:49-53`).
+What crosses is Skoric's exchange between decoding blocks: "Once DA_i
+finishes decoding, it sends the artificial defects and unresolved
+syndromes from the bottom d rounds to DB_{i-1} ... When the data from
+DA_i and DA_{i+1} has been received, the DB_i block can start decoding"
+(arXiv:2209.08552, `2209.08552.txt` lines 1038-1046). decsim's model of
+a decoding block's own state, what it has received and whether it may
+start, is the window record, which is what these two ends hold.
 
 **Where to see it.** `decsim/windows/window_boundaries.py`, the
 `ENDS_OF_PATH` row in `tests/test_send_ends.py`, and hop 7 of
@@ -289,14 +284,9 @@ package, and it is readable at that same instant: the store and the
 publication are one call at one tick. The sender still refuses before it
 sends, by asking that same end for room against the rounds it holds plus
 the writes it has in flight, and reserving one before the round leaves.
-Buffer 0 used to be written by the controller at the round's completion
-and published a link delay later, so its occupancy counted rounds that
-were still on the wire and its capacity was answered by a different
-clock from Buffer 1's; now `RoundStoreInput` owns Buffer 0's room, its
-slot, its intake line and its announcement, the shape
-`StrongRoundWriter` already had. The publication tick does not move: it
-was the `controller_to_weak_buffer` landing before and it is the same
-landing now.
+`RoundStoreInput` owns Buffer 0's room, its slot, its intake line and
+its announcement, the shape `StrongRoundWriter` has, and the publication
+tick is the `controller_to_weak_buffer` landing.
 
 **Why.** The tempting alternative, "book the slot when the sender
 commits the round", makes the refusal simple but makes every occupancy
@@ -305,7 +295,7 @@ there yet is reported full. Keeping the two counts apart, occupancy at
 the landing and the in-flight writes on the end that answers for room,
 gives the same admission decision with both numbers true. Credits would
 give the same decision again, since each store has exactly one writer,
-and were left unbuilt because they would add a return-path model nothing
+and are not built because they would add a return-path model nothing
 needs.
 
 **Sources.** Every referent that models storage writes it at the
@@ -336,8 +326,7 @@ messages (`MessageBuffer.cc:181`, the two sizes read at `:155-158`).
 **Where to see it.** `decsim/syndrome_buffer/round_input.py`, the
 `RoundStore` and `RoundStoreInput` ports in `decsim/ports.py`,
 `tests/syndrome_buffer/test_round_input.py`, and hop 2 of
-[The data path, hop by hop](data_path.md). The research behind it read the referents above side by side, the
-classical queues first and the quantum control papers second.
+[The data path, hop by hop](data_path.md).
 
 ## D14. The strong tier's off-board path can be priced by a measured round trip
 
@@ -351,10 +340,10 @@ reply to the frame (hop 9) are each half of the round trip; the strong
 store's read into the strong decoder (hop 6) is zero, because the
 coprocessor polls a slot in its own memory. On either row the escalation
 round trip, hops 5, 6 and 9, is the measured median exactly. Every other
-hop keeps the default card's number and source. The default row does not
-change, so no existing result moves.
+hop keeps the default card's number and source, and the default row is
+unchanged.
 
-**Why.** On the default card hop 5 had no source: its string says
+**Why.** On the default card hop 5 has no source: its string reads
 "repository weak-to-strong model choice". The three cited hops around it
 come from one table each. A measured cable is a better kind of fact for
 that path than a table row, and a config that asks "strong tier on a CPU
@@ -395,7 +384,7 @@ point, `compute_wait`: the unit's compute was busy with another decode.
 The tick that divides them is stamped per decode where the decode
 becomes startable, on the job and on its stage records beside the
 dispatch tick, so a window decoded more than once divides each decode's
-own park. The identity gains the new point and still closes to the tick.
+own park. The identity closes to the tick with both points.
 
 **Why.** One number for both hides the two answers a reader of a sweep
 wants apart. A dependency wait is the windowing's doing and shrinks by
@@ -444,23 +433,21 @@ under `complementary_gap`, the walk under `cluster_gap`, and zero under
 `weak_baseline`, whose verdict needs no signal. For a window that
 escalated it is zero too: its committing decode is the strong one,
 which answers after the verdict, and `weak_attempt` already runs from
-the window's first dispatch to that verdict. With it the chain identity
-closes on every window of every config this repository ships, so the
-exception the reference page carried is gone, and `run_both_at_once`
-is the only run left outside the sum. `chain_load` counts the step as
-the unit's occupancy, because it is the unit's time.
+the window's first dispatch to that verdict. The chain identity closes
+on every window of every config this repository ships, and
+`run_both_at_once` is the only run outside the sum. `chain_load` counts
+the step as the unit's occupancy, because it is the unit's time.
 
-**Why.** The span was on the reaction time and in no column, which made
-a real cost invisible in exactly the runs it is largest in: on
-`two_tiers.yaml` it is the second forced solve, 1.064 microseconds on
-six windows of ten, and on a `cluster_gap` run with a priced walk it is
-that walk on every window the weak tier answered. A reader who summed
-the columns of such a window found less than its reaction time and had
-no column to blame. The alternative, folding the step into `service`,
-would have made service stop meaning the decode's own compute, which
-is the one thing it has always meant. The name is the tree's own word:
-the `ConfidenceSignal` port, the `escalation.confidence` key, D3 and
-D8 all call this the confidence.
+**Why.** A span that is on the reaction time and in no column makes a
+real cost invisible in exactly the runs it is largest in: on
+`two_tiers.yaml` it is the second forced solve, and on a `cluster_gap`
+run with a priced walk it is that walk on every window the weak tier
+answered. A reader who sums the columns of such a window finds less
+than its reaction time and no column to blame. The alternative, folding
+the step into `service`, would make service stop meaning the decode's
+own compute. The name is the tree's own word: the `ConfidenceSignal`
+port, the `escalation.confidence` key, D3 and D8 all call this the
+confidence.
 
 **Sources.** Toshio et al. arXiv:2510.25222 makes the signal part of
 the weak decoder's per-window work: the weak decoder "simultaneously
@@ -499,8 +486,8 @@ long a decoder runs, so a faster decoder must move the bill and no
 result. The bill is the reason: the campaigns in
 `configs/campaigns_2026_09` run union find at distances up to 15, where
 the Python row cost 48 seconds a shot. Identity is held by a property
-test rather than by review: the Python growth, forest and peeling live on as the oracle at
-`tests/decoders/union_find_oracle.py`, and
+test rather than by review: the Python growth, forest and peeling live
+on as the oracle at `tests/decoders/union_find_oracle.py`, and
 `tests/decoders/test_union_find_compiled_decoder.py` puts the two side
 by side on Stim's rotated surface code circuits and on random graphs
 that carry the shapes a surface code never makes.
@@ -553,15 +540,14 @@ neither the order the nodes are visited in nor the cutoff each search
 carries can move it, and a switching run makes the same decisions on
 the same shots.
 
-**What the measured time means now.** A run that declares
+**What the measured time means.** A run that declares
 `escalation.confidence_walk_microseconds` charges that number and is
 untouched by this. A run that leaves it null charges what the walk cost
 on the host clock, the way a decoder with no latency card is charged,
-so its confidence term falls by the factor the walk got faster and
-every span that waits on the confidence step gets shorter. That number
-was the host's before and is the host's now, which is what open issue
-O1 records for a real decoder; it is not a hardware estimate either
-way.
+so its confidence term is what the C walk costs on that host, and
+every span that waits on the confidence step carries it. That number is
+the host's, which is what open issue O1 records for a real decoder; it
+is not a hardware estimate.
 
 **The uses order.** `decsim/confidence` imports
 `decsim/decoders/union_find/compiled_decoder.py`, so it sits at level 4
@@ -592,12 +578,12 @@ These are open, recorded rather than hidden, so that a reader does not
 mistake a gap for a result.
 
 - **O1. A switching run on two real decoders runs on the host wall clock.**
-  Such a run prices both decoders from the measured clock, at weak 12 to 119 microseconds and
-  strong 0.94 to 46 milliseconds against a one microsecond round. That
-  is the whole source of order and queue-depth variance between two
-  runs of one seed. The
-  proposal on the table is a latency key on the decoder section, with
-  the two points priced at Toshio's generation time and ten times it.
+  Such a run prices both decoders from the measured clock, at weak 12
+  to 119 microseconds and strong 0.94 to 46 milliseconds against a one
+  microsecond round, which is the whole source of order and queue-depth
+  variance between two runs of one seed. The proposal on the table is a
+  latency key on the decoder section, with the two points priced at
+  Toshio's generation time and ten times it.
 - **O2. The `bandwidth_limited` link row cannot be named from a yaml.**
   Its card is built before the sweep point sets the geometry, so
   reaching it from a config would mean building the links card inside
@@ -623,24 +609,18 @@ mistake a gap for a result.
   unknown key by name the way `decoder_manager` does, so a misspelt key
   there runs the default in silence.
 
-A seventh row, O4, was a real mispricing of a backward hand-off in the
-parallel scheme, and it is closed: the two layers that differ are now
-tested. An eighth, O10, said that a timing-only round's landing reached
-no object of the receiving package; it is closed too, by the decoders'
-own end for such a round (`decsim/decoders/memory_rounds.py`). A
-ninth, O5, said the boundary fold was executed by the window gate
-because moving it would reorder the copy trace sources; it is closed as
-well, and no trace source moved: the gate hands the mask and the
-decoder side writes it (`decsim/decoders/decoder_memory_transfer.py`,
-D11). A tenth, O3, held two payload-source strings that named no real
-field; it is closed by naming what the
-sends carry, `QPUReadout.size_bits` on the readout hop and no payload at
-all on the escalation hop, and the traffic ledger names them.
+O3, O4, O5 and O10 are closed: the sends name what they carry
+(`QPUReadout.size_bits` on the readout hop, nothing on the escalation
+hop), the backward hand-off of the parallel scheme is priced and tested,
+the boundary fold is written by the decoder side from the gate's mask
+(`decsim/decoders/decoder_memory_transfer.py`, D11), and a timing-only
+round ends in the decoders' own end for it
+(`decsim/decoders/memory_rounds.py`).
 
 ## Read next
 
-- [The principles behind the shape](principles.md): the ideas these decisions were made
-  under.
-- [The data path, hop by hop](data_path.md): D1, D5 and D9 as they appear on the
-  wire.
+- [The principles behind the shape](principles.md): the ideas these
+  decisions were made under.
+- [The data path, hop by hop](data_path.md): D1, D5 and D9 as they
+  appear on the wire.
 - `STYLE.md` rule 8: why a modelling question is answered from a source.

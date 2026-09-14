@@ -38,7 +38,9 @@ task fits its 04:00:00 limit with room for a slow shot and can
 backfill, and never more than 8,000 shots, since a run keeps every
 shot's samples until its csv is written; OFFSET carries the shard index
 from one line to the next and SHARDS is the distance's whole unit
-count, so a task's folder is results/campaigns_2026_09/<campaign>/<shard>.
+count, and every distance has its own run folder because its shard
+indices start at zero, so a task's folder is
+results/campaigns_2026_09/<campaign>/d<d>/<shard>.
 
 Memory per task: a base by distance (d 3 to 7 4G, d 9 6G, d 11 8G,
 d 13 12G, d 15 16G) plus what the unit's shots accumulate, 0.012 MB a
@@ -172,7 +174,7 @@ distance's unit count from the table, OFFSET stepping by 150 and the
 array running to the smaller of 149 and the remaining units:
 
 ```bash
-DECSIM_PYTHON=<interpreter> RUN=results/campaigns_2026_09/<campaign> SHARDS=<tasks> OFFSET=<o> sbatch -J <campaign>_d<d> -a 0-<n> --time=04:00:00 --mem=<memory from the table> -o results/campaigns_2026_09/<campaign>/logs/%x_%A_%a.out slurm/campaign_run.sh configs/campaigns_2026_09/<campaign>_d<d>.yaml --shots-per-unit <shots per unit>
+DECSIM_PYTHON=<interpreter> RUN=results/campaigns_2026_09/<campaign>/d<d> SHARDS=<tasks> OFFSET=<o> sbatch -J <campaign>_d<d> -a 0-<n> --time=04:00:00 --mem=<memory from the table> -o results/campaigns_2026_09/<campaign>/logs/%x_%A_%a.out slurm/campaign_run.sh configs/campaigns_2026_09/<campaign>_d<d>.yaml --shots-per-unit <shots per unit>
 ```
 
 DECSIM_PYTHON names the interpreter when the checkout has no venv of
@@ -183,7 +185,7 @@ first line is submitted.
 ## After an array finishes
 
 ```bash
-decsim combine results/campaigns_2026_09/<campaign>/*          # all distances of one campaign into one report
+decsim combine results/campaigns_2026_09/<campaign>/*/*        # all distances of one campaign into one report
 decsim plot results/campaigns_2026_09/<campaign>/combined --figure ler_vs_d --probability 0.003
 ```
 

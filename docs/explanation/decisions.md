@@ -522,9 +522,12 @@ Newman and Brown arXiv:2004.04693 give the weighted growth that this
 row implements and iterate over the same boundary edges: "we first
 iterate over the boundary edges to identify the smallest boundary edge
 weight wmin, and then again iterate over the boundary edges to grow the
-radius of the cluster by wmin" (lines 88-94). The C is written to the
-LLVM Coding Standards, which `STYLE.md` rule 9 defers to for what it
-does not cover.
+radius of the cluster by wmin" (lines 88-94). The C follows the LLVM
+Coding Standards in the points `STYLE.md` now lists under rule 9, which
+is where this tree's rule for C lives; before this change it had none,
+and the answer came from the brief that commissioned the row. The
+naming is the exception and is deliberate: the file is `snake_case`
+like the Python beside it, not LLVM's capitalization.
 
 **Where to see it.** `decsim/decoders/union_find/union_find.c` and its
 header, `decsim/decoders/union_find/compiled_decoder.py`,

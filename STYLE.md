@@ -60,9 +60,8 @@ When the value that would be hoisted has no honest name, keep the call in
 the condition: `if not math.isfinite(cost) or cost < 0:` is one decision
 and needs no `cost_is_a_number`.
 
-This rule makes dense code longer. That is intended. A file that grows
-because its lines were unpacked is right; a file that grows for the
-reasons listed under "Size" is wrong.
+This rule makes dense code longer. That is intended; "Size" below says
+which growth is right and which is not.
 
 `tools/check_one_action.py` enforces the rule. It reports: a call inside
 another call's arguments; arithmetic, a comparison or a boolean inside a
@@ -161,9 +160,7 @@ stays short; past eight names the rule is wrong, not the list.
 
 No abbreviations. No acronyms except these, which are words in this field
 and stay: qpu, id, io, xor, yaml, json. docs/reference/glossary.md maps
-every plain name to the exact term the literature uses, so
-`minimum_weight_perfect_matching` is listed beside "MWPM", and it carries
-the renamed modules too.
+decsim's names to the literature's names, both ways.
 
     wm            -> window_manager
     dem           -> detector_error_model
@@ -188,16 +185,12 @@ starts with `is_`, `has_`, `can_`, or reads as a question (`verbose` and
 `idle` are fine; `flag` is not). A duration field ends in `_microseconds`
 or `_ticks`; a count ends in `_count`.
 
-Link paths and yaml keys are plain words too: qpu_to_controller,
-controller_to_weak_buffer, controller_to_strong_buffer,
-weak_buffer_to_weak_decoder, strong_buffer_to_strong_decoder,
-weak_decoder_to_strong_decoder, decoder_to_decoder,
-weak_decoder_to_frame, strong_decoder_to_frame, frame_to_controller,
-controller_to_qpu; and the config keys readout_to_bits_cycles,
-decision_to_pulse_cycles, packing_cycles_per_round, weak_buffer_rounds,
-strong_buffer_rounds, packing_rounds_in_flight, unit_memory_rounds,
-write_cycles, setup_cycles_per_transfer, circuit, log_component_io,
-check_windows_with, decode_path.
+Link paths and yaml keys are plain words too. The link path names are
+listed in [The link paths](docs/reference/glossary.md#the-link-paths),
+and the config keys read the same way: readout_to_bits_cycles,
+decision_to_pulse_cycles, packing_cycles_per_round,
+packing_rounds_in_flight, unit_memory_rounds, write_cycles,
+setup_cycles_per_transfer, log_component_io, check_windows_with.
 
 ## Rule 3. Comments say why, in the present tense
 
@@ -238,13 +231,10 @@ for one; LLVM's "assert liberally" and Google's rule that an assert is
 never application logic both apply.
 
 Everything else is not necessary and is deleted, with its test. Inside
-the machine a function trusts what its callers send. A function in a
-package that only decsim's own components call refuses nothing that
-those components cannot send; whether a hand-written call could break it
-is not a reason for a check. A check no caller can trigger is deleted
-together with the test that forced the state by hand. A reviewer does
-not ask for a check on an input that no yaml, no front call and no
-runtime path produces; such a finding is out of scope, not a defect.
+the machine a function trusts what its callers send: a check that no
+yaml, no front call and no runtime path can trigger goes, together with
+the test that forced the state by hand. Asking for such a check is out
+of scope, not a defect.
 
 ## Rule 5. No compatibility layer
 
@@ -483,8 +473,8 @@ Chapter 20's bar for a checker is a false-positive rate under ten
 percent; when the one-action checker flags a line that reads well, the
 fix is to the checker's rules, recorded here, never a per-file
 exception. Chapter 22's rule for a large change: past a few hundred
-edits, write the tool that makes the edit (the tick-helper rename was
-one), and add a check so the old form cannot come back. Chapters 11 to
+edits, write the tool that makes the edit, and add a check so the old
+form cannot come back. Chapters 11 to
 14 give the test rules above: test behaviors through the public surface,
 keep tests obvious and unchanging, prefer real implementations, and use
 A/B diffs across a migration (a differential review is chapter 14's).

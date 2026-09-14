@@ -1,0 +1,31 @@
+# The data-movement study, the boundary folded into the unit's memory.
+#
+# The one setting this changes is `weak_decoder.boundary_fold`: in_place
+# XORs the window's boundary mask into the unit's own copy of the rounds
+# rather than into a duplicate of it, so the masked view is never made.
+# That is the hardware decoder, which writes its on-chip storage
+# directly: AFS's processing elements "can directly access the data
+# stored on-chip" (2001.06598 lines 528-531) and Helios keeps its shared
+# memory single-writer in registers (2301.08419 lines 632-640). It is
+# the other value of the research note's section 5 row
+# `decoders.<tier>.input`'s neighbour, `boundary_fold`.
+#
+# The pair in_place input with in_place fold is not named here: the
+# rewrite refuses it, because folding into the unit's memory needs the
+# unit's own copy of the rounds and a tier that reads its input in place
+# has none (reference.yaml's boundary_fold, windows/decode_requests.py).
+#
+# Every key is documented in reference.yaml.
+
+extends: data_movement.yaml
+
+weak_decoder:
+  kind: 1.0
+  units: 1
+  input: copy
+  boundary_fold: in_place
+  unit_memory_rounds: null
+  engine:
+    clock: fridge
+    fetch_cycles_per_round: 1
+    release_cycles_per_job: 10

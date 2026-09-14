@@ -1,0 +1,161 @@
+"""The transmitter: a stored round leaves on its route at the write.
+
+A window-input round rides controller_to_weak_buffer, whose sending end
+this is; Buffer 0's own incoming port handles the landing, which is
+where the round is published. A feedback-memory round rides
+weak_buffer_to_weak_decoder, whose sending end is Buffer 0, so the
+store's own outgoing port sends it and frees the slot, and the decoders'
+own end takes its landing; this transmitter only asks and counts. The
+sender never waits for a round to land before sending the next: the DAQs
+of Yang et al. (2605.04892) and Google's control electronics
+(2408.13687) stream every round, Caune et al. (2410.05202) publish each
+classified result as it is produced, gem5's DmaPort queues the next
+request behind the front of transmitList (src/dev/dma_device.cc) and
+ns-3's point-to-point device starts the next packet at TransmitComplete
+(point-to-point-net-device.cc); the FIFO channel keeps delivery order.
+in_flight counts the rounds from their send until the windows have heard
+of them; the packing stage's bound reads it (RoundsInFlight).
+"""
+
+import dataclasses
+import functools
+
+import decsim.records.rounds as round_records
+import decsim.records.transfers as transfer_records
+import decsim.trace_source as trace_source
+
+
+class RoundTransmitter:
+    """Sends a stored round on its route and counts it until it lands.
+
+    Trace source: round_event(RoundEvent) with kinds CWB_SENT and
+    FEEDBACK_MEMORY_DELIVERED.
+    """
+
+    def __init__(self, engine, link, memory_arrivals, store_input) -> None:
+        self.engine = engine
+        self.link = link
+        # the decoders' end of the memory route, which hears its landing
+        self.memory_arrivals = memory_arrivals
+        # Buffer 0's port toward the controller: it handles what lands
+        # there and asks the store to send what leaves it
+        self.store_input = store_input
+        self.in_flight = 0
+        self.trace = _TraceSources()
+
+    def send(self, packed: round_records.PackedRound) -> None:
+        """Send the round on its route at this tick.
+
+        The departure is its own event, so the writer's own step (the
+        store, the trace line, the strong write) completes before the
+        windows hear of the round; rounds sent at one tick depart in
+        completion order, each at its own send, as gem5's DmaPort queues
+        each request on transmitList and ns-3's device on its FIFO, with
+        no arbitration between the routes.
+        """
+        self.in_flight += 1
+        depart = functools.partial(self._depart, packed)
+        self.engine.schedule(0, depart, label="round transmission")
+
+    def _depart(self, packed: round_records.PackedRound) -> None:
+        window_input = round_records.SyndromePacketRouteKind.WINDOW_INPUT
+        if packed.route.kind is window_input:
+            self._send_window_input(packed)
+            return
+        self._send_feedback_memory(packed)
+
+    def check_settled(self) -> None:
+        """At the end of a run no round may still be on its route."""
+        if self.in_flight:
+            raise RuntimeError(
+                f"run ended with {self.in_flight} rounds in flight on their "
+                f"route"
+            )
+
+    def _send_window_input(self, packed: round_records.PackedRound) -> None:
+        self._fire("CWB_SENT", packed)
+        publish = functools.partial(self._publish, packed)
+        self._send(
+            transfer_records.LinkPath.CONTROLLER_TO_WEAK_BUFFER, packed, publish
+        )
+
+    def _publish(self, packed: round_records.PackedRound) -> None:
+        """The round reached Buffer 0: that end handles the landing.
+
+        Everything the landing does to Buffer 0's record and to whoever
+        waits on it is Buffer 0's (syndrome_buffer/round_input.py); this
+        sender hears the landing for its in_flight count alone, as gem5's
+        requesting port hands the packet to the peer's own receive method
+        (tmp/resources/gem5/src/mem/port.hh:603-614, whose
+        src/mem/protocol/timing.cc:49-53 calls peer->recvTimingReq).
+        """
+        self.store_input.receive_round(packed)
+        self._leave_after_publication()
+
+    def _leave_after_publication(self) -> None:
+        """The round leaves in the event after its publication.
+
+        A round is in flight until its publication has completed, so a
+        fragment landing at the publication tick still counts it.
+        """
+        self.engine.schedule(0, self._leave, label="round publication complete")
+
+    def _leave(self) -> None:
+        self.in_flight -= 1
+
+    def _send_feedback_memory(self, packed: round_records.PackedRound) -> None:
+        """Ask the store to send it; the controller is at neither end.
+
+        The round leaves Buffer 0 for the weak decoder, so the store's
+        own outgoing port executes the send and frees the slot; this
+        transmitter only asks and hears the landing.
+        """
+        deliver = functools.partial(self._deliver_feedback_memory, packed)
+        self.store_input.send_memory_round(packed, deliver)
+
+    def _deliver_feedback_memory(
+        self, packed: round_records.PackedRound
+    ) -> None:
+        """The memory round reached the decoder side: that end takes it.
+
+        Its Buffer 0 slot was freed by the store that sent it; what is
+        left for this asker is its count of the rounds on their route.
+        """
+        source_operation_id = packed.route.source_operation_id
+        self.memory_arrivals.receive_memory_round(source_operation_id)
+        self._fire("FEEDBACK_MEMORY_DELIVERED", packed)
+        self._leave()
+
+    def _fire(self, kind: str, packed: round_records.PackedRound) -> None:
+        operation_id, round_index = packed.round_key
+        event = round_records.RoundEvent.of(
+            kind, self.engine.now, operation_id, round_index, packed.route
+        )
+        self.trace.round_event.fire(event)
+
+    def _send(
+        self, path: transfer_records.LinkPath, packed, on_delivered
+    ) -> None:
+        attribution = transfer_records.TransferAttribution.for_packet(
+            packed.packet
+        )
+
+        def delivered(_transfer) -> None:
+            on_delivered()
+
+        self.link.send(
+            path, packed.wire_bits, self.engine.now, attribution, delivered
+        )
+
+
+@dataclasses.dataclass(frozen=True)
+class _TraceSources:
+    """Every event the round transmitter reports, as one member.
+
+    gem5 groups a component's statistics into one nested Group member
+    (tmp/resources/gem5/src/base/stats/group.hh:60-92) rather than one
+    member per counter; a component's events are the same shape, so a
+    listener reaches all of them through one name.
+    """
+
+    round_event: trace_source.TraceSource = trace_source.new_source()

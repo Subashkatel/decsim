@@ -1,0 +1,17 @@
+# My first sweep: three distances at one physical error rate.
+extends: weak_decoder_baseline.yaml
+
+weak_decoder:
+  kind: pymatching
+  units: 1
+  unit_memory_rounds: null
+  engine:
+    clock: fridge
+    fetch_cycles_per_round: 1
+    release_cycles_per_job: 10
+
+sweep:
+  - physical_error_probability: [0.003]
+    distance: [3, 5, 7]
+    round_period_us: [1.0]
+    shots: 400

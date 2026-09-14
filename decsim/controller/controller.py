@@ -1,272 +1,93 @@
-"""The controller: admitted operations become QPU commands, QPU readouts
-become controller-side binary handed to syndrome packing, and conditional
-releases from the Pauli frame travel OC then CQ back to the QPU. The QEC cycle itself is the
-QPU's; execution admission is the ExecutionRuntime's; stream bookkeeping and
-protected regions are FeedbackStreams'."""
+"""The controller's intake: a QPU readout becomes a fragment for the assembler.
 
-from __future__ import annotations
+The model carries no analog waveform. A readout's classified bits cross
+qpu_to_controller, pay the readout-to-bits cost (40 ns in-FPGA
+discrimination, Fermilab 2406.18807; 20 ns to a syndrome, Yang
+2605.04892), and reach the round assembler as one fragment. The rest of
+the controller is its own components: the issuer (operation_issue.py)
+turns admitted operations into commands, the output
+(instruction_output.py) carries commands and decisions to the QPU, the
+idle accounting (idle_rounds.py) routes and charges idle rounds, and the
+feedback streams (feedback_streams.py) keep the protected regions.
+"""
 
-from dataclasses import dataclass, replace
-from types import MappingProxyType
-from typing import Callable
+import dataclasses
 
-from ..links.links import LinkPath, TrafficAttribution
-from ..message import (Decision, Operation, QPUReadout, RunOperationBody,
-                       SyndromePacketRoute, SyndromePayload, normalize_binary_bits)
-
-
-@dataclass(frozen=True)
-class ControllerOutputEvent:
-    """One auditable transition on the controller's digital-to-QPU path.
-
-    ``payload`` is the actual immutable decision or QPU command crossing the
-    boundary, so tests and ledgers can prove that timing was not modeled with
-    a detached token while different data reached the QPU.
-    """
-
-    kind: str
-    tick: int
-    operation_id: object
-    payload: object
+import decsim.controller.settings as controller_settings
+import decsim.records.rounds as round_records
+import decsim.records.transfers as transfer_records
+import decsim.trace_source as trace_source
 
 
 class Controller:
-    def __init__(self, engine, *, qpu, window_manager, syndrome_packing=None,
-                 measurement_signal_to_classical_bits_ticks: int = 0,
-                 instruction_or_decision_to_analog_control_pulse_ticks: int = 0,
-                 links=None, resolved_operations, resolved_patches, idle_policy,
-                 feedback_streams):
+    """The readout intake; implements the ReadoutReceiver port.
+
+    Trace source: copy_made(round_key, bits, "readout", "controller
+    intake") for the intake's copy of the bits (data_path.md hop 1). The
+    instant the readout left is the QPU's own event (qpu/cycle_clock.py).
+    """
+
+    def __init__(
+        self,
+        engine,
+        link,
+        settings: controller_settings.ControllerSettings,
+        assembler,
+    ) -> None:
         self.engine = engine
-        self.qpu = qpu
-        self.window_manager = window_manager
-        self.syndrome_packing = syndrome_packing
-        if measurement_signal_to_classical_bits_ticks < 0:
-            raise ValueError("measurement_signal_to_classical_bits_ticks must be nonnegative")
-        if instruction_or_decision_to_analog_control_pulse_ticks < 0:
-            raise ValueError(
-                "instruction_or_decision_to_analog_control_pulse_ticks must be nonnegative")
-        self.measurement_signal_to_classical_bits_ticks = \
-            measurement_signal_to_classical_bits_ticks
-        self.instruction_or_decision_to_analog_control_pulse_ticks = \
-            instruction_or_decision_to_analog_control_pulse_ticks
-        self.links = links
-        self.runtime = None
-        self.idle_policy = idle_policy
-        self.streams = feedback_streams
-        self._resolved_operations = MappingProxyType({
-            operation.operation_id: operation for operation in resolved_operations})
-        self._resolved_patches = MappingProxyType({
-            patch.patch_identity: patch for patch in resolved_patches})
-        self.idle_rounds_emitted = 0
-        self.output_events: list[ControllerOutputEvent] = []
+        self.link = link
+        self.settings = settings
+        self.assembler = assembler
+        self.trace = _TraceSources()
 
-    def round_ticks_for(self, operation: Operation) -> int:
-        """The resolved QEC cycle length of one operation, in ticks."""
-        return self._resolved_operations[operation.id].round_ticks
+    def accept_qpu_readout(
+        self,
+        readout: round_records.QPUReadout,
+        route: round_records.SyndromePacketRoute,
+    ) -> None:
+        """One readout crosses qpu_to_controller to the assembler.
 
-    def round_count_for(self, operation: Operation) -> int:
-        """The resolved round count of one operation."""
-        return self._resolved_operations[operation.id].round_count
-
-    def connect_runtime(self, runtime) -> None:
-        """Bind the execution runtime that owns readiness and completion."""
-        self.runtime = runtime
-
-    def load_program(self, program) -> None:
-        """Load one immutable program: streams first, then every operation
-        is registered with the window manager, then the runtime starts roots."""
-        self.streams.load(program)
-        for operation in program.operations:
-            self.window_manager.register_op(operation)
-        self.runtime.load_program(program)
-
-    # ---- operations
-
-    def can_start(self, operation: Operation) -> bool:
-        """False while a protected feedback stream holds the operation for its cycle boundary."""
-        return not self.streams.blocks_start(operation)
-
-    def issue_operation(self, operation: Operation, idle_rounds: int) -> int:
-        """Prepare one real QPU command and return its physical start boundary.
-
-        Program roots and ordinary DAG successors are time-tagged/preloaded;
-        their online controller preparation occurred before the simulated
-        interval.  A feedback-blocked operation is dynamic: its actual
-        ``RunOperationBody`` pays controller output processing and CQ before
-        it can enter the QPU.
+        The fragment reaches the assembler after the readout delay.
         """
-        self.streams.begin(operation)
-        if idle_rounds:
-            self.window_manager.prepend_idle_rounds(operation.id, idle_rounds)
-        self._log_start(operation)
-        binding = self.streams.binding_for(operation.id)
-        if binding is None:
-            issued_operation = operation
-            source_operation_id = operation.id
-        else:
-            issued_operation = replace(operation, stream_id=binding.stream_id,
-                                       stream_offset=binding.stream_offset)
-            source_operation_id = binding.stream_id
-        source_round_count = self._resolved_operations[source_operation_id].round_count
-        command = RunOperationBody(
-            operation=issued_operation,
-            round_ticks=self.round_ticks_for(operation),
-            round_count=self.round_count_for(operation),
-            source_round_count=source_round_count,
-            emits_detector_data=operation.emits_detector_data,
-            finalizes_stream_round=operation.finalizes_stream_round,
+        fragment = round_records.RetainedSyndromeFragment.from_readout(readout)
+        fragment_count = readout.fragment_count
+        round_key = (fragment.operation_id, fragment.round_index)
+        self.trace.copy_made.fire(
+            round_key, readout.size_bits, "readout", "controller intake"
         )
-        if operation.blocked_by is None:
-            self.output_events.append(ControllerOutputEvent(
-                "PRELOADED_COMMAND", self.engine.now, operation.id, command))
-            self.qpu.issue(command)
-            return self.qpu.next_boundary()
-        return self._dispatch_dynamic_command(command)
-
-    def _dispatch_dynamic_command(self, command: RunOperationBody) -> int:
-        """Carry the feedback-selected command through pulse generation and CQ."""
-        arrival_tick = self._send_controller_output(
-            payload=command, operation_id=command.operation.id,
-            event_kind="CONTROL_PULSE_COMMAND_ISSUED",
-            deliver=self.qpu.issue)
-        return self.qpu.boundary_at_or_after(arrival_tick)
-
-    def _send_controller_output(self, *, payload, operation_id,
-                                event_kind: str, deliver: Callable) -> int:
-        """Process one output payload, reserve CQ, and schedule its delivery."""
-        output_tick = (self.engine.now +
-                       self.instruction_or_decision_to_analog_control_pulse_ticks)
-        attribution = TrafficAttribution(
-            operation_id=operation_id, patch_ids=(), window_id=None,
-            round_lo=None, round_hi=None)
-        if self.links is None:
-            arrival_tick = output_tick
-        else:
-            reservation = self.links.reserve(
-                LinkPath.CQ, payload_bits=None, now_ticks=output_tick,
-                attribution=attribution)
-            arrival_tick = output_tick + reservation.total_delay_ticks
-
-        def output_ready():
-            self.output_events.append(ControllerOutputEvent(
-                event_kind, self.engine.now, operation_id, payload))
-
-        self.engine.schedule(output_tick - self.engine.now, output_ready,
-                             label="controller-output-ready")
-        self.engine.schedule(arrival_tick - self.engine.now,
-                             lambda: deliver(payload), label="controller->qpu")
-        return arrival_tick
-
-    def _log_start(self, operation: Operation) -> None:
-        kind = "Clifford" if operation.clifford else "non-Clifford"
-        release_note = ""
-        if operation.blocked_by is not None:
-            release_note = f" [unblocked by op#{operation.blocked_by}]"
-        self.engine.log("Controller", f"START {operation.name}  ({kind}, qubits "
-                                      f"{operation.qubits}){release_note}")
-
-    def stream_binding_for(self, operation_id):
-        """(stream_id, stream_offset) an operation was bound to, or None."""
-        return self.streams.binding_for(operation_id)
-
-    def _body_done(self, operation: Operation) -> None:
-        self.runtime.body_done(operation)
-
-    def before_successor_release(self, operation: Operation) -> None:
-        """A body finished: ask its protected regions to close on the boundary."""
-        self.streams.request_closes(operation)
-
-    def after_successor_release(self, operation: Operation) -> None:
-        """Successors released: close feedback boundaries, seal finished streams, stop the QPU when done."""
-        self.streams.close_feedback_boundary(
-            operation, self.runtime.waiting_blocked_successor(operation.id))
-        if self.runtime.workload_complete:
-            self.streams.seal_finished_streams()
-            self.qpu.finish()
-
-    # ---- idle rounds
-
-    def emit_idle_round(self, op_id: int, patch, round_index: int) -> None:
-        """One idle cycle of a patch nobody is operating on: syndrome extraction
-        never stops, so the round is produced, transmitted and accounted; the
-        idle policy decides how it travels and whether it costs decode work.
-        Patches on a live protected stream emit through that stream."""
-        if self.streams.is_live_protected_patch(patch):
-            return
-        operation = self.runtime.operations[op_id]
-        self.idle_policy.relay(self, operation, patch, round_index)
-        self.runtime.record_idle_round(patch)
-        self.idle_rounds_emitted += 1
-
-    def emit_memory_round(self, operation: Operation, patch, round_index: int) -> None:
-        """An idle round travels as an ordinary feedback-memory round of the operation."""
-        self.qpu.emit_feedback_memory_round(operation.id, patch, round_index)
-
-    def extend_live_stream(self, operation: Operation, patch) -> bool:
-        """An idle round becomes the next round of the operation's live stream, if it has one."""
-        return self.streams.extend_live_stream(operation, patch)
-
-    def submit_idle_decode_if_due(self, operation: Operation, patch,
-                                  round_index: int) -> None:
-        """Every commit region of idle rounds costs one load-only decode job."""
-        patch_record = self._resolved_patches[patch]
-        geometry = patch_record.code_geometry
-        if round_index % geometry.commit_round_count == 0:
-            self.window_manager.accept_idle_decode_demand(
-                rounds=geometry.commit_round_count + geometry.buffer_round_count,
-                code=geometry.code_name,
-                spatial_nodes=patch_record.spatial_node_count,
-                label=f"mem({operation.name},r{round_index})")
-
-    # ---- readouts and instructions
-
-    def accept_qpu_readout(self, readout: QPUReadout, route: SyndromePacketRoute) -> None:
-        """Turn one QPU readout into controller binary and hand it to packing."""
-        payload = SyndromePayload(
-            operation_id=readout.operation_id,
-            patch_id=readout.patch_id,
-            round_index=readout.round_index,
-            bits=normalize_binary_bits(readout.bits),
-            code=readout.code,
-            n_fragments=readout.n_fragments,
-            fragment_index=readout.fragment_index,
-            size_bits=readout.size_bits,
+        attribution = transfer_records.TransferAttribution.for_round(
+            fragment.operation_id, (fragment.patch_id,), fragment.round_index
         )
-        self.syndrome_packing.relay_qpu_readout(
-            payload, route,
-            processing_ticks=self.measurement_signal_to_classical_bits_ticks)
+        readout_ticks = self.settings.readout_to_bits_ticks()
 
-    def relay_instruction(self, decision: Decision,
-                          deliver: Callable[[Decision], None]) -> None:
-        """Carry a Pauli-frame decision over OC to the controller.
+        def receive():
+            self.assembler.add(fragment, fragment_count, route)
 
-        A release is consumed at the controller; the resulting real operation
-        command subsequently traverses pulse generation and CQ in ``issue_operation``.
-        A result-return without an operation still traverses those stages
-        before it is reported as available at the QPU.
-        """
-        attribution = TrafficAttribution(
-            operation_id=decision.target_operation_id, patch_ids=(),
-            window_id=None, round_lo=None, round_hi=None)
+        def at_controller(_transfer):
+            if readout_ticks == 0:
+                receive()
+                return
+            self.engine.schedule(
+                readout_ticks, receive, label="controller-binary-availability"
+            )
 
-        def at_controller():
-            self.output_events.append(ControllerOutputEvent(
-                "DECISION_AVAILABLE", self.engine.now,
-                decision.target_operation_id, decision))
-            if decision.releases_operation:
-                deliver(decision)
-            else:
-                self._send_controller_output(
-                    payload=decision,
-                    operation_id=decision.target_operation_id,
-                    event_kind="CONTROL_DECISION_ISSUED",
-                    deliver=deliver)
+        self.link.send(
+            transfer_records.LinkPath.QPU_TO_CONTROLLER,
+            readout.size_bits,
+            self.engine.now,
+            attribution,
+            at_controller,
+        )
 
-        oc_delay = (0 if self.links is None else
-                    self._instruction_delay(LinkPath.OC, attribution))
-        self.engine.schedule(oc_delay, at_controller, label="pauli frame->controller")
 
-    def _instruction_delay(self, path: LinkPath, attribution: TrafficAttribution) -> int:
-        reservation = self.links.reserve(path, payload_bits=None, now_ticks=self.engine.now,
-                                         attribution=attribution)
-        return reservation.total_delay_ticks
+@dataclasses.dataclass(frozen=True)
+class _TraceSources:
+    """Every event the controller reports, as one member.
+
+    gem5 groups a component's statistics into one nested Group member
+    (tmp/resources/gem5/src/base/stats/group.hh:60-92) rather than one
+    member per counter; a component's events are the same shape, so a
+    listener reaches all of them through one name.
+    """
+
+    copy_made: trace_source.TraceSource = trace_source.new_source()

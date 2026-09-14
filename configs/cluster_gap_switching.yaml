@@ -1,0 +1,25 @@
+# The cluster-gap switching point: a union find weak tier whose own
+# growth is walked for the confidence signal (Meister et al. 2405.07433
+# Algorithm 2), escalating below the paper's 20 dB threshold. The walk
+# is priced as a card, 12.0 us on the weak unit that produced the
+# evidence (decision D8), so the confidence step is a number a reader
+# can point at rather than one the host clock decides. Otherwise
+# two_tiers.yaml's fabric and strong tier. Every key is documented in
+# reference.yaml.
+extends: two_tiers.yaml
+
+escalation:
+  kind: switching
+  confidence: cluster_gap
+  confidence_walk_microseconds: 12.0
+  gap_threshold_db: 20.0
+  strong_window: two_sided_context
+
+weak_decoder:
+  kind: union_find
+  units: 1
+  unit_memory_rounds: null
+  engine:
+    clock: fridge
+    fetch_cycles_per_round: 1
+    release_cycles_per_job: 10

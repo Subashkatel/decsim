@@ -1,0 +1,16 @@
+# Pair 2, the strong tier alone: Relay-BP (the relay-bp wheel, Rust).
+# Every other key is base.yaml's.
+
+extends: base.yaml
+
+escalation:
+  kind: strong_only
+
+strong_decoder:
+  kind: relay_bp
+  units: 1
+  unit_memory_rounds: null
+  engine:
+    clock: room
+    fetch_cycles_per_round: 1
+    release_cycles_per_job: 10

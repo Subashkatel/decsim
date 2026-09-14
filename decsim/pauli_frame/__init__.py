@@ -1,5 +1,7 @@
-"""The Pauli frame and the feedback it closes: final corrections per window
-with priced writes and the folded logical frame of a stream (pauli_frame),
-and the release of the operations conditioned on a final result, over OC
-then CQ (conditional_release). Together with frontends/ this is the
-orchestrator of Khalid et al. Fig. 2."""
+"""One final correction per window, folded into a stream's logical frame.
+
+pauli_frame.py holds the frame itself, one correction per window at the
+price of one write. decision_dispatch.py is the frame side's end of
+frame_to_controller: the decision a final result releases leaves by it
+and lands at the controller.
+"""

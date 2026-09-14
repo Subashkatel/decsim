@@ -1,0 +1,30 @@
+# pymatching_belief_matching_switching, distance 7 alone: one Slurm array of the campaign
+# (PLAN.md). Every other key is pymatching_belief_matching_switching.yaml's.
+
+extends: pymatching_belief_matching_switching.yaml
+
+sweep:
+  - physical_error_probability: [0.001]
+    distance: [7]
+    round_period_us: [1.0]
+    shots: 200000
+  - physical_error_probability: [0.002]
+    distance: [7]
+    round_period_us: [1.0]
+    shots: 73529
+  - physical_error_probability: [0.003]
+    distance: [7]
+    round_period_us: [1.0]
+    shots: 12987
+  - physical_error_probability: [0.005]
+    distance: [7]
+    round_period_us: [1.0]
+    shots: 1930
+  - physical_error_probability: [0.007]
+    distance: [7]
+    round_period_us: [1.0]
+    shots: 543
+  - physical_error_probability: [0.01]
+    distance: [7]
+    round_period_us: [1.0]
+    shots: 400

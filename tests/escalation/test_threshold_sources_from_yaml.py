@@ -1,0 +1,415 @@
+"""The switching threshold's three sources: fixed, table, online.
+
+fixed uses the card's gap_threshold_db as given (the paper's constant
+gth). table computes nothing at run time: it looks the sweep point up
+in an offline calibration csv (calibrate_threshold.py's shape) and
+refuses a point the table does not certify. online starts at
+gap_threshold_db and adapts it across the point's shots with the
+two-loop controller (rate tracker + audit lane); one calibrator per
+point, shared by every shot, so the controller learns over the point's
+whole window stream.
+"""
+
+import math
+
+import pytest
+
+import decsim.build.escalation as escalation_build
+import decsim.escalation.settings as escalation_settings
+from decsim.front.collect_command import run_sweep
+from decsim.front.experiment import load_experiment
+from tests.escalation.test_switching_mode import (
+    NEAR_THRESHOLD_P,
+    switching_config,
+)
+
+NATS_TO_DB = 10.0 / math.log(10.0)
+
+
+def resolve_gap_threshold_nats(config, *, physical_error_probability, distance):
+    return config.settings.escalation.threshold_nats_for(
+        physical_error_probability, distance
+    )
+
+
+def online_threshold_calibrator(
+    config, *, physical_error_probability, distance
+):
+    task = config.point_task(
+        physical_error_probability=physical_error_probability,
+        distance=distance,
+        round_period_us=1.0,
+        shots=1,
+    )
+    return task.online_threshold
+
+
+def source_config(tmp_path, switching_card: dict, shots: int = 1):
+    config_path = switching_config(tmp_path, 20.0)
+    import yaml
+
+    config_text = config_path.read_text()
+    raw = yaml.safe_load(config_text)
+    raw["escalation"] = {"kind": "switching", **switching_card}
+    raw["sweep"][0]["shots"] = shots
+    edited_text = yaml.safe_dump(raw)
+    config_path.write_text(edited_text)
+    return config_path
+
+
+def calibration_table(tmp_path) -> str:
+    table_path = tmp_path / "calibration_table.csv"
+    table_path.write_text(
+        "distance,p,gth_brute_force,gth_eq4,gth_eq4_wilson\n"
+        f"3,{NEAR_THRESHOLD_P},2.5,18.0,19.5\n"
+        "5,0.005,10.0,20.1,21.4\n"
+        f"7,{NEAR_THRESHOLD_P},,20.0,\n"
+    )
+    return table_path.name
+
+
+def test_fixed_is_the_default_source(tmp_path):
+    config_path = switching_config(tmp_path, 20.0)
+    config = load_experiment(config_path)
+    assert config.settings.escalation.threshold_source == "fixed"
+    resolved = resolve_gap_threshold_nats(
+        config, physical_error_probability=NEAR_THRESHOLD_P, distance=3
+    )
+    assert resolved == config.settings.escalation.gap_threshold_nats
+    assert (
+        online_threshold_calibrator(
+            config, physical_error_probability=NEAR_THRESHOLD_P, distance=3
+        )
+        is None
+    )
+
+
+def test_table_source_resolves_the_sweep_point_and_refuses_others(tmp_path):
+    table = calibration_table(tmp_path)
+    wilson_card = {"threshold_source": "table", "threshold_table": table}
+    wilson_path = source_config(tmp_path, wilson_card)
+    config = load_experiment(wilson_path)
+    assert config.settings.escalation.gap_threshold_decibels is None
+    assert config.settings.escalation.threshold_column == "gth_eq4_wilson"
+
+    resolved = resolve_gap_threshold_nats(
+        config, physical_error_probability=NEAR_THRESHOLD_P, distance=3
+    )
+    resolved_decibels = resolved * NATS_TO_DB
+    assert math.isclose(resolved_decibels, 19.5)
+
+    with pytest.raises(ValueError, match="no row for d=3 p=0.002"):
+        resolve_gap_threshold_nats(
+            config, physical_error_probability=0.002, distance=3
+        )
+    with pytest.raises(ValueError, match="entry is empty"):
+        resolve_gap_threshold_nats(
+            config, physical_error_probability=NEAR_THRESHOLD_P, distance=7
+        )
+
+    brute_card = {
+        "threshold_source": "table",
+        "threshold_table": table,
+        "threshold_column": "gth_brute_force",
+    }
+    brute_path = source_config(tmp_path, brute_card)
+    brute = load_experiment(brute_path)
+    resolved = resolve_gap_threshold_nats(
+        brute, physical_error_probability=NEAR_THRESHOLD_P, distance=3
+    )
+    resolved_decibels = resolved * NATS_TO_DB
+    assert math.isclose(resolved_decibels, 2.5)
+
+
+def test_table_source_key_guards(tmp_path):
+    table = calibration_table(tmp_path)
+    both_sources_card = {
+        "threshold_source": "table",
+        "threshold_table": table,
+        "gap_threshold_db": 20.0,
+    }
+    both_sources_path = source_config(tmp_path, both_sources_card)
+    with pytest.raises(ValueError, match="drop gap_threshold_db"):
+        load_experiment(both_sources_path)
+    no_table_card = {"threshold_source": "table"}
+    no_table_path = source_config(tmp_path, no_table_card)
+    with pytest.raises(ValueError, match="needs threshold_table"):
+        load_experiment(no_table_path)
+    fixed_with_table_card = {
+        "gap_threshold_db": 20.0,
+        "threshold_table": table,
+    }
+    fixed_with_table_path = source_config(tmp_path, fixed_with_table_card)
+    with pytest.raises(ValueError, match="belong to"):
+        load_experiment(fixed_with_table_path)
+    missing_table_card = {
+        "threshold_source": "table",
+        "threshold_table": "missing.csv",
+    }
+    missing_table_path = source_config(tmp_path, missing_table_card)
+    missing_table = load_experiment(missing_table_path)
+    with pytest.raises(ValueError, match="does not exist"):
+        resolve_gap_threshold_nats(
+            missing_table,
+            physical_error_probability=NEAR_THRESHOLD_P,
+            distance=3,
+        )
+
+
+def test_online_card_guards(tmp_path):
+    forward_window_card = {
+        "threshold_source": "online",
+        "gap_threshold_db": 20.0,
+        "strong_window": "forward",
+    }
+    forward_window_path = source_config(tmp_path, forward_window_card)
+    with pytest.raises(ValueError, match="serial-only"):
+        load_experiment(forward_window_path)
+    fixed_with_online_card = {
+        "gap_threshold_db": 20.0,
+        "online": {"audit_rate": 0.1},
+    }
+    fixed_with_online_path = source_config(tmp_path, fixed_with_online_card)
+    with pytest.raises(ValueError, match="online card belongs"):
+        load_experiment(fixed_with_online_path)
+    unknown_key_card = {
+        "threshold_source": "online",
+        "gap_threshold_db": 20.0,
+        "online": {"audit_probability": 0.1},
+    }
+    unknown_key_path = source_config(tmp_path, unknown_key_card)
+    with pytest.raises(ValueError, match="does not know"):
+        load_experiment(unknown_key_path)
+    high_audit_rate_card = {
+        "threshold_source": "online",
+        "gap_threshold_db": 20.0,
+        "online": {"audit_rate": 1.5},
+    }
+    high_audit_rate_path = source_config(tmp_path, high_audit_rate_card)
+    with pytest.raises(ValueError, match="audit_rate"):
+        load_experiment(high_audit_rate_path)
+
+
+def test_online_source_learns_across_a_point_and_records_the_path(tmp_path):
+    """One calibrator serves every shot of the point.
+
+    Its window count spans all shots, every audit resolves, and the
+    trajectory csv lands in the run dir.
+    """
+    online_card = {
+        "threshold_source": "online",
+        "gap_threshold_db": 15.0,
+        "online": {
+            "audit_rate": 0.3,
+            "target_escalation_rate": 0.2,
+            "max_escalation_rate": 0.5,
+        },
+    }
+    config_path = source_config(tmp_path, online_card, shots=2)
+    config = load_experiment(config_path)
+    run_dir = tmp_path / "results"
+    run_dir.mkdir()
+
+    measurements = run_sweep(config, run_dir)
+
+    assert len(measurements) == 2
+    windows_per_shot = measurements[0].windows
+    calibrator = online_threshold_calibrator(
+        config, physical_error_probability=NEAR_THRESHOLD_P, distance=3
+    )
+    summary = calibrator.summary()
+    assert summary["windows"] == 0  # a fresh one is fresh
+    trajectory_paths = run_dir.glob("online_threshold_*.csv")
+    trajectory_files = list(trajectory_paths)
+    assert len(trajectory_files) == 1
+    trajectory_text = trajectory_files[0].read_text()
+    trajectory_rows = trajectory_text.splitlines()
+    header, first_row = trajectory_rows[:2]
+    assert header == "window_count,threshold_db,event"
+    assert first_row == "0,15.0,start"
+    last_row = trajectory_rows[-1]
+    last_fields = last_row.split(",")
+    last_window_count = int(last_fields[0])
+    assert last_window_count > windows_per_shot  # learned across shots
+
+
+def test_online_source_reproduces_its_decisions(tmp_path):
+    """The calibrator's random stream is seeded by the point identity.
+
+    Rerunning the point reruns the same audits.
+    """
+    online_card = {
+        "threshold_source": "online",
+        "gap_threshold_db": 15.0,
+        "online": {
+            "audit_rate": 0.3,
+            "target_escalation_rate": 0.2,
+            "max_escalation_rate": 0.5,
+        },
+    }
+    config_path = source_config(tmp_path, online_card, shots=2)
+    config = load_experiment(config_path)
+
+    first = run_sweep(config, None)
+    second = run_sweep(config, None)
+
+    first_links = [
+        measurement.link_totals["weak_decoder_to_strong_decoder"]["transfers"]
+        for measurement in first
+    ]
+    second_links = [
+        measurement.link_totals["weak_decoder_to_strong_decoder"]["transfers"]
+        for measurement in second
+    ]
+    assert first_links == second_links
+    assert [m.logical_failure for m in first] == [
+        m.logical_failure for m in second
+    ]
+
+
+# ---- a threshold row written outside decsim
+
+
+class _OutsideCalibratedThreshold:
+    """A threshold row written outside decsim whose number comes from a csv.
+
+    It subclasses no shipped row: the three facts the yaml boundary reads
+    are declared here and the decision is a constant, exactly as the
+    shipped rows behave once the front has resolved the point.
+    """
+
+    audits_by_escalating = False
+    reads_a_calibration_table = True
+    built_per_sweep_point = False
+
+    def __init__(self, threshold_nats: float) -> None:
+        self.threshold_nats = threshold_nats
+
+    def decide_keep(self, job, result) -> bool:
+        """The gap against the threshold, both in nats."""
+        del job
+        return result.soft_output.gap >= self.threshold_nats
+
+    def learn_from_strong_result(self, window_key, result) -> None:
+        """A constant learns nothing."""
+        del window_key
+        del result
+
+
+class _OutsideLearningThreshold(_OutsideCalibratedThreshold):
+    """A threshold row from outside that builds its own per-point source.
+
+    for_sweep_point is what built_per_sweep_point promises. This row
+    starts at the point's threshold in nats and learns nothing, which is
+    all the law needs: what the front installs is an instance of the row
+    the table names.
+    """
+
+    reads_a_calibration_table = False
+    built_per_sweep_point = True
+
+    @classmethod
+    def for_sweep_point(
+        cls,
+        online,
+        threshold_nats: float,
+        physical_error_probability: float,
+        distance: int,
+    ) -> "_OutsideLearningThreshold":
+        """One instance of this row for the point."""
+        del online
+        del physical_error_probability
+        del distance
+        return cls(threshold_nats)
+
+
+def test_an_outside_row_that_reads_a_table_gets_the_column_and_no_card(
+    tmp_path, monkeypatch
+):
+    """The table keys follow reads_a_calibration_table, not the row's name."""
+    monkeypatch.setitem(
+        escalation_settings.THRESHOLD_SOURCES,
+        "outside_calibrated",
+        _OutsideCalibratedThreshold,
+    )
+    table = calibration_table(tmp_path)
+    table_card = {
+        "threshold_source": "outside_calibrated",
+        "threshold_table": table,
+        "threshold_column": "gth_eq4",
+    }
+    table_path = source_config(tmp_path, table_card)
+    config = load_experiment(table_path)
+    assert config.settings.escalation.threshold_column == "gth_eq4"
+    with_card = {
+        "threshold_source": "outside_calibrated",
+        "threshold_table": table,
+        "gap_threshold_db": 20.0,
+    }
+    with_card_path = source_config(tmp_path, with_card)
+
+    with pytest.raises(ValueError, match="drop gap_threshold_db"):
+        load_experiment(with_card_path)
+
+
+def test_an_outside_row_built_per_point_gets_the_online_card(
+    tmp_path, monkeypatch
+):
+    """The online card follows built_per_sweep_point, not the row's name."""
+    monkeypatch.setitem(
+        escalation_settings.THRESHOLD_SOURCES,
+        "outside_learning",
+        _OutsideLearningThreshold,
+    )
+    learning_card = {
+        "threshold_source": "outside_learning",
+        "gap_threshold_db": 20.0,
+        "online": {"audit_rate": 0.3},
+    }
+    config_path = source_config(tmp_path, learning_card)
+
+    config = load_experiment(config_path)
+
+    assert config.settings.escalation.online.audit_rate == 0.3
+
+
+def test_an_outside_row_built_per_point_is_the_source_the_front_installs(
+    tmp_path, monkeypatch
+):
+    """The row builds its own per-point source, and that is what runs.
+
+    online_threshold_for used to construct
+    threshold_sources.OnlineThreshold by direct class reference, so a row
+    that declared built_per_sweep_point had its card read and then got
+    the shipped calibrator instead of itself. The instance the front puts
+    on the point's task is now the row's own, and it reaches the policy
+    the root builds for the shot (build/escalation.py _threshold_source,
+    which reads the same declaration).
+    """
+    monkeypatch.setitem(
+        escalation_settings.THRESHOLD_SOURCES,
+        "outside_learning",
+        _OutsideLearningThreshold,
+    )
+    learning_card = {
+        "threshold_source": "outside_learning",
+        "gap_threshold_db": 20.0,
+        "online": {"audit_rate": 0.3},
+    }
+    config_path = source_config(tmp_path, learning_card)
+    config = load_experiment(config_path)
+    task = config.point_task(
+        physical_error_probability=NEAR_THRESHOLD_P,
+        distance=3,
+        round_period_us=1.0,
+        shots=1,
+    )
+
+    installed = task.online_threshold
+
+    assert type(installed) is _OutsideLearningThreshold
+    expected_nats = config.settings.escalation.gap_threshold_nats
+    assert installed.threshold_nats == expected_nats
+    shot_settings = task.shot_settings()
+    policy = escalation_build.build_escalation_policy(shot_settings.escalation)
+    assert policy.threshold is installed

@@ -14,6 +14,15 @@ classified 5 us later (2 us on the qpu path, 3 us of readout
 classification), packing is declared free, and from there the
 weak-buffer path publishes it 4 us on while the strong-buffer path
 lands it in the room-side store 7 us on.
+
+The window trace walk at the end of the file reads one shot of
+configs/weak_decoder_baseline.yaml as well, because the four events a
+latency claim rests on are read off a shipped config's own run. IBM
+arXiv 2510.21600 lines 517-519 name them on the hardware: the decoder
+FPGA's trace observes when the decoders start and stop, when the
+syndromes and codewords arrive, and when the logical Pauli frame is
+produced. gem5 src/sim/probe/probe.hh lines 122 and 272 give the shape
+the ledger takes here, a listener attached to a named probe point.
 """
 
 import random
@@ -21,11 +30,14 @@ import types
 
 import pytest
 
+import decsim.collect as collect
 import decsim.engine as engine_module
+import decsim.experiments.experiment as experiment
 import decsim.observe.flight_recorder as flight_recorder_module
 import decsim.observe.round_events as round_events_module
 import decsim.records.rounds as round_records
 import tests.declared_run as declared_run
+import tests.experiments.yaml_configs as yaml_configs
 from decsim.config import microseconds_to_ticks
 
 
@@ -586,3 +598,151 @@ def test_an_idle_feedback_memory_round_reaches_one_terminal_state():
     kinds = terminal_kinds_of_operation(ledger, idle_stream)
     assert kinds
     assert set(kinds) == {"FEEDBACK_MEMORY_DELIVERED"}
+
+
+# the four events a window's latency claim is read from: the window
+# complete in its store, the decode started on a unit, the decode done,
+# and the correction written into the frame
+WINDOW_TRACE_KINDS = (
+    "WINDOW_DATA_COMPLETE",
+    "DECODE_STARTED",
+    "DECODE_DONE",
+    "FRAME_COMMITTED",
+)
+
+
+def window_keys(ledger):
+    """(op, window) of every window the ledger carries, in a fixed order."""
+    keys = set()
+    for event in ledger.events:
+        if event.window is None:
+            continue
+        keys.add((event.op, event.window))
+    return sorted(keys, key=repr)
+
+
+def trace_ticks_of_window(ledger, operation_id, window_id):
+    """The tick of each of one window's trace events, by kind."""
+    ticks = {}
+    for event in ledger.events:
+        if event.op != operation_id:
+            continue
+        if event.window != window_id:
+            continue
+        if event.kind not in WINDOW_TRACE_KINDS:
+            continue
+        ticks[event.kind] = event.tick
+    return ticks
+
+
+def missing_trace_kinds(ticks):
+    """The trace kinds one window has no event of, in pipeline order."""
+    missing = []
+    for kind in WINDOW_TRACE_KINDS:
+        if kind not in ticks:
+            missing.append(kind)
+    return missing
+
+
+def trace_problem_of_window(ledger, operation_id, window_id):
+    """What is wrong with one window's four trace events, or None.
+
+    A kind the window has no event of, or a tick earlier than the tick
+    of the kind before it, names the window it was found on.
+    """
+    ticks = trace_ticks_of_window(ledger, operation_id, window_id)
+    missing = missing_trace_kinds(ticks)
+    named = f"window {window_id} of operation {operation_id}"
+    if missing:
+        listed = ", ".join(missing)
+        return f"{named} has no {listed}"
+    walked = []
+    for kind in WINDOW_TRACE_KINDS:
+        tick = ticks[kind]
+        walked.append(tick)
+    forwards = sorted(walked)
+    if walked != forwards:
+        return f"{named} traces {walked} backwards"
+    return None
+
+
+def windows_with_a_broken_trace(ledger):
+    """Every window of the ledger whose four trace events do not hold."""
+    problems = []
+    for operation_id, window_id in window_keys(ledger):
+        problem = trace_problem_of_window(ledger, operation_id, window_id)
+        if problem is None:
+            continue
+        problems.append(problem)
+    return problems
+
+
+def ledger_without(ledger, kind, window_id):
+    """The same ledger with one window's event of that kind removed."""
+    kept = []
+    for event in ledger.events:
+        if event.kind == kind and event.window == window_id:
+            continue
+        kept.append(event)
+    return flight_recorder_module.RunLedgerView(events=tuple(kept))
+
+
+def test_every_window_of_a_shipped_run_records_its_four_trace_events():
+    """The shipped weak baseline, window by window, in pipeline order.
+
+    One shot of configs/weak_decoder_baseline.yaml at p = 0.001,
+    distance 3 and a 10 us round period decodes nine sliding windows,
+    and each carries the four events a latency claim is read from, with
+    non-decreasing ticks: the window complete in Buffer 0, its decode
+    started on a unit, its decode done, and its correction written into
+    the frame. Those are the four the hardware trace of a decoder FPGA
+    reports (IBM arXiv 2510.21600 lines 517-519: when the decoders start
+    and stop, when the syndromes and codewords arrive, and when the
+    logical Pauli frame is produced), each one a named probe point a
+    listener reads here (gem5 src/sim/probe/probe.hh lines 122 and 272).
+    """
+    config_path = yaml_configs.CONFIGS_DIR / "weak_decoder_baseline.yaml"
+    config = experiment.load_experiment(config_path)
+    task = config.point_task(
+        physical_error_probability=0.001,
+        distance=3,
+        round_period_us=10.0,
+        shots=1,
+    )
+    shot = collect.run_shot(task, 0)
+    ledger = shot.machine.observation.flight_recorder.ledger
+
+    problems = windows_with_a_broken_trace(ledger)
+
+    assert problems == []
+    keys = window_keys(ledger)
+    assert keys == [
+        (1, 0),
+        (1, 1),
+        (1, 2),
+        (1, 3),
+        (1, 4),
+        (1, 5),
+        (1, 6),
+        (1, 7),
+        (1, 8),
+    ]
+
+
+def test_a_window_whose_frame_write_is_missing_fails_the_trace_walk():
+    """The walk has teeth, on the declared fabric where every tick is known.
+
+    A window decoded and never written into the frame is a correction
+    that vanished, so the walk names that window rather than reading as
+    a complete run. The other five windows of the run still hold their
+    four events, which is what makes the failure point at one window.
+    """
+    machine = declared_run.weak_only_run(rounds=6)
+    ledger = machine.observation.flight_recorder.ledger
+    intact = windows_with_a_broken_trace(ledger)
+    broken = ledger_without(ledger, "FRAME_COMMITTED", 0)
+
+    problems = windows_with_a_broken_trace(broken)
+
+    assert intact == []
+    assert problems == ["window 0 of operation 1 has no FRAME_COMMITTED"]

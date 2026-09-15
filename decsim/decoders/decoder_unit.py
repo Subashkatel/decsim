@@ -123,7 +123,9 @@ class DecoderUnit:
         A first resident is always admitted, so a genuinely oversized
         window still stops loudly at its deposit. A job whose rounds
         this unit already holds needs no memory of its own: it is one
-        more reader of the copy that is here.
+        more reader of the copy that is here. A resident whose input
+        has landed carries its rounds in the memory rather than in its
+        payloads, so the memory's own occupancy answers for it.
         """
         if len(self.residents) >= resident_capacity:
             return False
@@ -135,8 +137,10 @@ class DecoderUnit:
         capacity = self.memory.capacity_rounds
         if capacity is None:
             return True
-        demand = 0
+        demand = self.memory.occupied_rounds
         for resident in live:
+            if self.memory.holds(resident):
+                continue
             demand += memory_demand_of(resident)
         demand += memory_demand_of(job)
         return demand <= capacity

@@ -14,6 +14,7 @@ the controller, the stores, the windows and the frame produced.
 """
 
 import dataclasses
+import functools
 import pathlib
 import re
 
@@ -55,6 +56,7 @@ import decsim.settings as machine_settings
 import decsim.syndrome_buffer.round_store as round_store_module
 import decsim.syndrome_buffer.settings as round_store_settings
 import decsim.windows.boundary_policies as boundary_policies
+import decsim.windows.built_window_models as built_window_models
 import decsim.windows.settings as window_settings
 import tests.declared_run as declared_run
 import tests.experiments.yaml_configs as yaml_configs
@@ -1441,3 +1443,234 @@ def test_a_landing_after_its_operations_close_costs_the_result_nothing(
     priced_result = priced.result.operation_results[0]
     free_result = free.result.operation_results[0]
     assert priced_result.logical_observables == free_result.logical_observables
+
+
+# IBM's verification rule on the 2026-09 campaign families: the priced,
+# windowed, timed run's correction beside an untimed software model's,
+# window by window.
+
+CAMPAIGN_DIRECTORY = yaml_configs.CONFIGS_DIR / "experiments_2026_09"
+CAMPAIGN_DISTANCE = 3
+CAMPAIGN_ROUND_COUNT = 30  # base.yaml's rounds_per_shot, 10d at d = 3
+CAMPAIGN_PHYSICAL_ERROR = 0.001  # the smallest p of every family's sweep
+CAMPAIGN_ROUND_PERIOD_US = 1.0
+CAMPAIGN_SHOT_COUNT = 8
+CAMPAIGN_WINDOW_COUNT = 10  # 30 rounds committed 3 at a time
+SINGLE_TIER_FAMILIES = (
+    "pymatching_weak",
+    "pymatching_strong",
+    "union_find_weak",
+    "union_find_strong",
+    "bposd_weak",
+    "bposd_strong",
+    "belief_matching_strong",
+    "relay_bp_weak",
+    "relay_bp_strong",
+)
+SWITCHING_FAMILIES = (
+    "pymatching_bposd_switching",
+    "pymatching_belief_matching_switching",
+    "pymatching_relay_bp_switching",
+    "union_find_bposd_switching",
+    "union_find_belief_matching_switching",
+    "union_find_pymatching_switching",
+    "union_find_relay_bp_switching",
+)
+MATCHING_FAMILIES = ("pymatching_weak", "pymatching_strong")
+KEPT_WEAK_REQUEST = (
+    decoding_records.RequestProcessingOutcome.PRIMARY_FORWARDED_FOR_DELIVERY
+)
+ESCALATED_WEAK_REQUEST = (
+    decoding_records.RequestProcessingOutcome.WEAK_AWAITED_STRONG
+)
+
+
+def campaign_point_task(family):
+    """The distance-3 point of one shipped 2026-09 family, at its smallest p."""
+    config_path = CAMPAIGN_DIRECTORY / f"{family}_d3.yaml"
+    config = experiment.load_experiment(config_path)
+    return config.point_task(
+        physical_error_probability=CAMPAIGN_PHYSICAL_ERROR,
+        distance=CAMPAIGN_DISTANCE,
+        round_period_us=CAMPAIGN_ROUND_PERIOD_US,
+        shots=CAMPAIGN_SHOT_COUNT,
+    )
+
+
+def record_one_decode(decodes, reference, job, result, outcome, ended_ticks):
+    """The run's answer on one request beside the untimed model's answer."""
+    del ended_ticks
+    reference_result = reference.decode(job)
+    run_correction = tuple(result.correction)
+    model_correction = tuple(reference_result.correction)
+    decodes.append((outcome, job.window_id, run_correction, model_correction))
+
+
+def timed_and_untimed_decodes(family):
+    """Every request of the family's shots, beside the untimed model's answer.
+
+    The software model is a second Machine built from the same settings
+    and the same seed and never run: its decoder is the same table row
+    carrying the same run-derived state, so a row that draws from the
+    run seed (relay_bp's gamma table, window_decoder.py `_gamma_seed`)
+    reads the table the priced run read.
+    """
+    task = campaign_point_task(family)
+    models = built_window_models.BuiltWindowModels()
+    decodes = []
+    for seed in range(CAMPAIGN_SHOT_COUNT):
+        settings = task.shot_settings(models)
+        machine = machine_module.Machine.build(settings, seed)
+        untimed = machine_module.Machine.build(settings, seed)
+        reference = untimed.active_decoder.decoder
+        listener = functools.partial(record_one_decode, decodes, reference)
+        machine.decoder_manager.outcomes.trace.request_ended.connect(listener)
+        machine.run()
+    return decodes
+
+
+def corrections_that_differ(decodes):
+    """Every recorded decode the untimed model did not answer bit for bit."""
+    differing = []
+    for outcome, window_id, run_correction, model_correction in decodes:
+        if run_correction == model_correction:
+            continue
+        differing.append((outcome, window_id))
+    return differing
+
+
+def decodes_with_outcome(decodes, outcome):
+    """The recorded decodes that ended in one processing outcome."""
+    selected = []
+    for decode in decodes:
+        if decode[0] is not outcome:
+            continue
+        selected.append(decode)
+    return selected
+
+
+@pytest.mark.parametrize("family", SINGLE_TIER_FAMILIES)
+def test_a_single_tier_family_commits_what_the_untimed_model_decodes(family):
+    """IBM's rule for their gross-code FPGA decoder, on every window.
+
+    "The approach to validate the Relay-BP and the surrounding sliding
+    window decoder is to make sure that hardware results match exactly
+    the software emulation model", checked on the estimated error vector
+    of each window (IBM arXiv 2510.21600 lines 488-495). decsim's
+    hardware is the priced run: the links, the syndrome buffers, the
+    decoder pool and the staged unit all sit between the sampled shot
+    and the correction. Its software model is the same decoder row
+    called directly on the same window error model and the same landed
+    syndrome, which is PyMatching's own untimed entry point
+    (decode_detection_events, src/pymatching/sparse_blossom/driver/
+    mwpm_decoding.h lines 55-79 at PyMatching commit 6f63b2b9). Every
+    window of eight shots at p = 0.001 and d = 3, ten windows a shot,
+    agrees bit for bit, so no change to timing, buffers, links or pools
+    can move a correction without this failing.
+    """
+    decodes = timed_and_untimed_decodes(family)
+
+    differing = corrections_that_differ(decodes)
+
+    expected_count = CAMPAIGN_SHOT_COUNT * CAMPAIGN_WINDOW_COUNT
+    assert len(decodes) == expected_count
+    assert differing == []
+
+
+@pytest.mark.parametrize("family", SWITCHING_FAMILIES)
+def test_a_switching_familys_kept_windows_match_the_untimed_weak_model(family):
+    """The same rule where the weak tier's answer stands.
+
+    A switching family escalates a low-confidence window to the strong
+    tier (Toshio et al. 2510.25222 Sec. III A), so only the windows the
+    weak verdict kept are the weak model's to answer; the escalated ones
+    are counted and left to the strong tier. Eight shots at p = 0.001
+    and d = 3 escalate one or two of their eighty windows, and every
+    window the verdict kept carries the correction the untimed weak row
+    decodes from the same window error model and the same syndrome
+    (IBM arXiv 2510.21600 lines 488-495).
+    """
+    decodes = timed_and_untimed_decodes(family)
+    kept = decodes_with_outcome(decodes, KEPT_WEAK_REQUEST)
+    escalated = decodes_with_outcome(decodes, ESCALATED_WEAK_REQUEST)
+
+    differing = corrections_that_differ(kept)
+
+    assert differing == []
+    assert len(escalated) > 0
+
+
+def qldpc_campaign_predictions(circuit, shot_events):
+    """What qLDPC's sliding-window decoder predicts for the same shots."""
+    qldpc_decoders = pytest.importorskip("qldpc.decoders")
+    round_of_detector = detector_chronology.resolve_detector_rounds(
+        circuit, None, CAMPAIGN_ROUND_COUNT
+    )
+
+    def time_of_detector(detector):
+        return int(round_of_detector[detector])
+
+    window_size = 2 * CAMPAIGN_DISTANCE
+    reference = qldpc_decoders.SlidingWindowDecoder(
+        window_size=window_size,
+        stride=CAMPAIGN_DISTANCE,
+        detector_to_time=time_of_detector,
+        decompose_errors=True,
+        with_MWPM=True,
+        merge_strategy="independent",
+    )
+    model = circuit.detector_error_model(decompose_errors=True)
+    compiled = reference.compile_decoder_for_dem(model)
+    detection_events = numpy.array(shot_events, dtype=numpy.uint8)
+    decoded = compiled.decode_shots(detection_events)
+    predictions = []
+    for row in decoded:
+        bits = as_bits(row)
+        predictions.append(bits)
+    return predictions
+
+
+def campaign_predictions_and_events(family):
+    """The family's own prediction per shot, the circuit, and the events."""
+    task = campaign_point_task(family)
+    models = built_window_models.BuiltWindowModels()
+    predictions = []
+    shot_events = []
+    sampled = None
+    for seed in range(CAMPAIGN_SHOT_COUNT):
+        settings = task.shot_settings(models)
+        machine = machine_module.Machine.build(settings, seed)
+        result = machine.run()
+        sampled = machine.observation.sampled_shots.shots_by_operation[1]
+        shot_events.append(sampled.detection_events)
+        operation_result = result.operation_results[0]
+        predictions.append(operation_result.logical_observables)
+    return predictions, sampled.circuit, shot_events
+
+
+@pytest.mark.parametrize("family", MATCHING_FAMILIES)
+def test_a_matching_family_predicts_what_qldpcs_sliding_windows_predict(
+    family,
+):
+    """The priced campaign run beside an outside sliding-window decoder.
+
+    qLDPC's SlidingWindowDecoder (qldpc/decoders/sinter.py, class
+    SlidingWindowDecoder) decodes the same sampled shots untimed, with
+    window of commit plus buffer, stride of commit, and parallel faults
+    merged as independent errors, as
+    test_the_sliding_windows_predict_what_qldpcs_decoder_predicts above
+    reads it. The two window plans are not the same at the tail: the
+    campaign's `terminal_policy: lookahead` lays ten windows over thirty
+    rounds where qLDPC's stride lays nine, so the comparison is at the
+    run's final observable rather than per window. The eight shots at
+    p = 0.001 agree exactly; a difference would have to be a
+    minimum-weight matching tie, the only kind of disagreement ever
+    seen against this reference, and this test refuses one rather than
+    allowing it.
+    """
+    predictions, circuit, shot_events = campaign_predictions_and_events(family)
+
+    reference_predictions = qldpc_campaign_predictions(circuit, shot_events)
+
+    assert len(predictions) == CAMPAIGN_SHOT_COUNT
+    assert predictions == reference_predictions

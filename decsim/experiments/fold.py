@@ -1,8 +1,8 @@
 """Many run folders' additive rows folded into one, none of them held.
 
 A run folder records only facts that add up, so folding folders is
-reading their rows and adding them. The rows are what a campaign has
-most of: the 500 shard folders of the 2026-09-09 weak_ler sweep hold
+reading their rows and adding them. The rows are what an experiment
+has most of: the 500 shard folders of the 2026-09-09 weak_ler sweep hold
 115 million link rows and 10.5 million shot rows, and one row as a dict
 of typed Python values costs about a kilobyte, so reading them into
 lists costs a hundred gigabytes. This module holds what the fold needs
@@ -161,8 +161,9 @@ class ExactSum:
     no caller can trigger.
 
     `total` rounds that list once, so it is the sum math.fsum returns
-    for the same values in any order, and a mean folded over a campaign's
-    shards is the mean one process would have computed, to the last bit.
+    for the same values in any order, and a mean folded over an
+    experiment's shards is the mean one process would have computed, to
+    the last bit.
     A plain running float sum would not be: it would move the last bits
     of every mean column with the order the shards came in.
     """
@@ -174,11 +175,11 @@ class ExactSum:
         """One more value, the sum still exact.
 
         A zero leaves an exact sum as it was and is skipped, which is
-        three quarters of a campaign's link fields: it changes no
+        three quarters of an experiment's link fields: it changes no
         partial, and it takes no sign with it either, because math.fsum
         of zeros is 0.0 and not -0.0 (tests/experiments/test_fold.py). The
         partials loop stays in this one function because a fold of the
-        500-folder campaign adds four hundred million values and each
+        500-folder experiment adds four hundred million values and each
         call of it walks the whole partials list: measured over a
         million calls on 2026-09-12, 0.43 us for a value whose
         magnitude is the ones before it (two partials), 1.86 us across a
@@ -215,7 +216,7 @@ class RowTotals:
     many rows there are, how many hold a field true, a field's sum, a
     field's largest value, and a field's mean. Nothing here grows with
     the rows, so the totals of ten shots and of ten million are the same
-    size, which is what lets a fold stream a campaign. It is the shape
+    size, which is what lets a fold stream an experiment. It is the shape
     of sinter's TaskStats, which holds shots, errors, discards, seconds
     and a counter table and folds by adding them
     (sinter/_data/_task_stats.py:117-150).

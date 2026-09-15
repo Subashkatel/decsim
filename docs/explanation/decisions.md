@@ -483,8 +483,9 @@ detectors.
 
 **Why.** decsim's timing comes from the latency card and never from how
 long a decoder runs, so a faster decoder must move the bill and no
-result. The bill is the reason: the campaigns in
-`configs/campaigns_2026_09` run union find at distances up to 15, where
+result. The bill is the reason: the experiments in
+`configs/experiments_2026_09` run union find at distances up to 15,
+where
 the Python row cost 48 seconds a shot. Identity is held by a property
 test rather than by review: the Python growth, forest and peeling live
 on as the oracle at `tests/decoders/union_find_oracle.py`, and
@@ -572,22 +573,29 @@ header, `cluster_gap` and `cluster_gap_entry_point` in
 `tests/confidence/test_compiled_cluster_gap.py`, whose corpus test is
 the identity claim.
 
-## D19. The package is named for what it is for, not where it sits
+## D19. A thing is named for what it is, and the name is experiment
 
 **Decided.** The package that holds the yaml experiment, the sweep, the
 collected rows, the figures, the trace viewer and the `decsim` command
-is `decsim/experiments`, and its tests are `tests/experiments`. Nothing
-inside it moved: every module, class and function keeps its name, and a
-run charges exactly what it charged before.
+is `decsim/experiments`, its tests are `tests/experiments`, the sixteen
+decoder runs of 2026-09 are `configs/experiments_2026_09`, and the
+Slurm array script is `slurm/experiment_run.sh`. Nothing inside any of
+them moved: every module, class and function keeps its name, every yaml
+key and every number is what it was, and a run charges exactly what it
+charged before.
 
-**Why.** The name should say what the folder is for. `front` said only
+**Why.** A name should say what the thing is for. `front` said only
 where the package sat in the uses order, and it collided with
 `decsim/frontends`, the program readers and the planner, which is a
-different thing at a different level.
+different thing at a different level. The 2026-09 folder and its Slurm
+script carried a second word for what the tree already calls an
+experiment, one yaml and the shards it is cut into, and two words for
+one thing make a reader ask what the difference is when there is none.
 
 **Where to see it.** `decsim/experiments/`, `tests/experiments/`, level
-9 of the uses order in `decsim/machine.py`, and the generated
-[The module map](../reference/map.md).
+9 of the uses order in `decsim/machine.py`, the generated
+[The module map](../reference/map.md),
+`configs/experiments_2026_09/PLAN.md` and `slurm/experiment_run.sh`.
 
 ## What is not modelled yet
 

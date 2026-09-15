@@ -20,8 +20,9 @@ max and an exact mean per sweep point, and none of those grows with the
 shots, so the rows reach them one at a time: the accumulators, the row
 streams and the merge that orders them are in experiments/fold.py, and
 this module says which field plays which role. A single run feeds the
-rows it measured through the same accumulators a fold feeds a
-campaign's folders through, so one code path produces both summaries.
+rows it measured through the same accumulators a fold feeds an
+experiment's shard folders through, so one code path produces both
+summaries.
 
 The per-value counts file stays small because every sample is a whole
 number of ticks divided by the ticks in a microsecond
@@ -471,12 +472,13 @@ def combine(run_dirs: list, out_dir: Path) -> list:
     `combine a b` writes. What two folders may not share is a shot: one
     seeded run in both of them would be counted twice.
 
-    A campaign's folders hold more rows than a process can: 500 shards
-    of a million-shot sweep are 115 million link rows. So the folders
-    are read in a stream, one row of each folder at a time, and what
-    stands between reading and writing is the totals of experiments/fold.py
-    and not a list of the rows (`decsim combine` over those 500 folders
-    was killed at 17 GB and then OOM-killed at 120 GB before this).
+    An experiment's shard folders hold more rows than a process can:
+    500 shards of a million-shot sweep are 115 million link rows. So
+    the folders are read in a stream, one row of each folder at a time,
+    and what stands between reading and writing is the totals of
+    experiments/fold.py and not a list of the rows (`decsim combine`
+    over those 500 folders was killed at 17 GB and then OOM-killed at
+    120 GB before this).
 
     The combined folder is itself a run folder: the additive files and a
     manifest recording the sweep every folded folder shares, so a shard
@@ -676,7 +678,8 @@ def _folded_counts(folders: list) -> dict:
 
     This is the one additive file a fold does hold, and it is the small
     one: its length follows the spread of a point's sample values and
-    not the shot count, so a campaign's counts are a few thousand rows.
+    not the shot count, so an experiment's counts are a few thousand
+    rows.
     """
     counts = {}
     for run_dir in folders:
@@ -717,7 +720,7 @@ def _points_held(fields) -> list:
 
     A run folder is read by the columns it holds and not by the columns
     the reading tree would write: the 500 shard folders of the
-    2026-09-09 campaign hold the sixteen latency points that tree
+    2026-09-09 experiment hold the sixteen latency points that tree
     measured, and this tree measures twenty-two, so a summary that asked
     for its own could not read those folders at all. It is the rule that
     lets a fold read a folder an older tree wrote, which is the same
@@ -995,7 +998,7 @@ def _refuse_a_point_this_tree_cannot_place(run_dirs: list) -> None:
     ValueError out of a sort with sweep.csv and shots.csv already
     written. It is checked here, at the boundary, before out_dir
     exists, the way the folded files' columns are, and it costs one
-    pass over the small file: a campaign shard's window_samples.csv is
+    pass over the small file: a shard's window_samples.csv is
     188 rows and 9 KB.
 
     Only the names are checked, not that the folders name the same set.
@@ -1105,7 +1108,7 @@ def _refuse_a_repeated_shot(run_dirs: list, order) -> None:
     the same point is the same run. The folders' shots.csv rows arrive
     merged, one row per shot, so a point's rows come in seed order and
     the check holds the last seed of each point rather than every shot
-    of the campaign. It runs before anything is written, so a refused
+    of the experiment. It runs before anything is written, so a refused
     fold leaves no folder behind.
     """
     paths = _folder_files(run_dirs, "shots.csv")

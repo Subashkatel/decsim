@@ -6,8 +6,8 @@ is math.fsum of the values it was given, what a fold holds does not grow
 with the shots the folders hold, and a summary reports the latency
 points its folders' rows hold. The third is the reason the module
 exists: `decsim combine` over the 500 shard folders of the 2026-09-09
-weak_ler campaign was OOM-killed at 120 GB while reading their 115
-million link rows into lists. The fourth is why that campaign can be
+weak_ler experiment was OOM-killed at 120 GB while reading their 115
+million link rows into lists. The fourth is why that experiment can be
 folded at all: its shards hold the sixteen latency points that tree
 measured, and this tree measures twenty-two.
 """
@@ -353,7 +353,8 @@ def test_a_fold_holds_one_row_of_each_folder_however_many_shots_they_hold(
     Three folders are folded twice: once holding one shot each and once
     holding three. The most rows alive at any moment is the same both
     times and is the folder count and the row being folded, not a
-    folder's rows, so a campaign's folders cost what a smoke test's do.
+    folder's rows, so an experiment's shard folders cost what a smoke
+    test's do.
     """
     shards = 3
     peaks = {}
@@ -410,7 +411,7 @@ def _with_a_renamed_point(run_dir, name, renamed):
 def test_a_fold_reports_the_latency_points_the_folders_rows_hold(tmp_path):
     """A newer tree folds the folders an older tree wrote.
 
-    The 500 shard folders of the 2026-09-09 campaign hold sixteen
+    The 500 shard folders of the 2026-09-09 experiment hold sixteen
     latency points and this tree measures twenty-two, so a summary that
     asked for its own columns could not read those folders at all. Here
     two folders lose one point's columns, as an older tree's folders

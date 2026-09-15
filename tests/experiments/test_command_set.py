@@ -599,7 +599,7 @@ def test_both_manifests_of_a_run_name_the_tree_it_started_on(
 ):
     """A run writes its manifest twice and both name one reading.
 
-    The campaign of 2026-09-09 left 500 shard folders naming 18
+    The experiment of 2026-09-09 left 500 shard folders naming 18
     different commits, four of which did not exist when those tasks
     started: the tree was being committed to while the array ran, and
     each task read it again as it finished. Here git answers one commit
@@ -635,7 +635,7 @@ def test_a_combined_folders_manifest_names_the_tree_the_fold_ran_on(
 ):
     """A fold writes one manifest, at the end, and it names the start.
 
-    The fold of the 2026-09-09 campaign's 500 shard folders took 71
+    The fold of the 2026-09-09 experiment's 500 shard folders took 71
     minutes and a commit landed five minutes into it, so the combined
     folder named a tree whose code no part of the fold read. Here git
     answers one commit until the first folder is opened and another

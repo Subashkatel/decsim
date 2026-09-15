@@ -8,11 +8,11 @@ more than one distance.
 
 import pytest
 
-import decsim.front.plots as plots
-import decsim.front.refusal as refusal
-from decsim.front.experiment import load_experiment
-from decsim.front.plots import latency_samples_by_distance
-from tests.front.yaml_configs import (
+import decsim.experiments.plots as plots
+import decsim.experiments.refusal as refusal
+from decsim.experiments.experiment import load_experiment
+from decsim.experiments.plots import latency_samples_by_distance
+from tests.experiments.yaml_configs import (
     MINIMAL_CONFIG,
     measure_point_shot,
     strong_unit,
@@ -83,7 +83,7 @@ def test_latency_samples_pool_over_shots_per_distance(tmp_path):
 def test_latency_figure_written_only_for_wall_clock_multi_distance(
     tmp_path, monkeypatch
 ):
-    from decsim.front.collect_command import run_experiment
+    from decsim.experiments.collect_command import run_experiment
 
     monkeypatch.chdir(tmp_path)
 
@@ -114,8 +114,8 @@ def test_latency_figure_written_only_for_wall_clock_multi_distance(
 
 def test_combined_figure_reads_two_runs_sample_files(tmp_path, monkeypatch):
     """The cross-tier figure: two runs' latency_samples.csv on one axes."""
-    from decsim.front.collect_command import run_experiment
-    from decsim.front.plots import combined_latency_plot
+    from decsim.experiments.collect_command import run_experiment
+    from decsim.experiments.plots import combined_latency_plot
 
     monkeypatch.chdir(tmp_path)
 

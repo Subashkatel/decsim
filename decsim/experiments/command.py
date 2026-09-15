@@ -13,14 +13,15 @@ loads Stim. The console script and `python -m decsim` both land here.
     decsim plot <run_dir>... [--figure NAME] [--out PATH] [--probability P]
     decsim trace follow <file> --round k:n | --window k:n [--html PATH]
 
-What the front refuses reaches the user as one sentence and exit 1
-(decsim/front/refusal.py); anything else keeps its traceback.
+What the experiments layer refuses reaches the user as one sentence and
+exit 1 (decsim/experiments/refusal.py); anything else keeps its
+traceback.
 """
 
 import sys
 from typing import Optional
 
-import decsim.front.refusal as refusal
+import decsim.experiments.refusal as refusal
 
 VERBS = ("run", "collect", "combine", "show", "plot", "trace")
 HELP_WORDS = ("help", "-h", "--help")
@@ -67,7 +68,7 @@ def _verb(verb: Optional[str], rest: list) -> None:
 
 def _run(argv: list) -> None:
     """One seeded shot of one yaml."""
-    import decsim.front.run_command as run_command
+    import decsim.experiments.run_command as run_command
 
     run_command.main(argv)
 
@@ -76,8 +77,8 @@ def _collect(argv: list) -> None:
     """The whole sweep of one yaml into a run folder."""
     import argparse
 
-    import decsim.front.collect_command as collect_command
-    import decsim.front.report as report
+    import decsim.experiments.collect_command as collect_command
+    import decsim.experiments.report as report
 
     parser = argparse.ArgumentParser(prog="decsim collect")
     parser.add_argument("config", help="the experiment yaml to sweep")
@@ -120,8 +121,8 @@ def _combine(argv: list) -> None:
     """Several run folders' rows folded into one report."""
     import argparse
 
-    import decsim.front.report as report
-    import decsim.front.run_folder as run_folder
+    import decsim.experiments.report as report
+    import decsim.experiments.run_folder as run_folder
 
     parser = argparse.ArgumentParser(prog="decsim combine")
     parser.add_argument("run_dirs", nargs="+", help="the folders to fold")
@@ -141,7 +142,7 @@ def _show(argv: list) -> None:
     """What one yaml resolves to, before anything runs."""
     import argparse
 
-    import decsim.front.experiment as experiment
+    import decsim.experiments.experiment as experiment
 
     parser = argparse.ArgumentParser(prog="decsim show")
     parser.add_argument("config", help="the experiment yaml to resolve")
@@ -156,7 +157,7 @@ def _plot(argv: list) -> None:
     """One figure, drawn from run folders' csv and trace files."""
     import argparse
 
-    import decsim.front.plots as plots
+    import decsim.experiments.plots as plots
 
     parser = argparse.ArgumentParser(prog="decsim plot")
     parser.add_argument("run_dirs", nargs="+", help="the folders to read")
@@ -179,7 +180,7 @@ def _plot(argv: list) -> None:
 
 def _trace(argv: list) -> None:
     """One round's or one window's path through one shot's trace file."""
-    import decsim.front.trace_follow as trace_follow
+    import decsim.experiments.trace_follow as trace_follow
 
     trace_follow.main(argv)
 

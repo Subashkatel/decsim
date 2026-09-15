@@ -19,12 +19,12 @@ from pathlib import Path
 from typing import Optional
 
 import decsim.collect as collect
-import decsim.front.experiment as experiment
-import decsim.front.measure as measure
-import decsim.front.plots as plots
-import decsim.front.report as report
-import decsim.front.residence as residence
-import decsim.front.run_folder as run_folder
+import decsim.experiments.experiment as experiment
+import decsim.experiments.measure as measure
+import decsim.experiments.plots as plots
+import decsim.experiments.report as report
+import decsim.experiments.residence as residence
+import decsim.experiments.run_folder as run_folder
 
 NATS_TO_DECIBELS = 10.0 / math.log(10.0)
 

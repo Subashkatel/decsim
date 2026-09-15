@@ -1,4 +1,4 @@
-"""The rules a fold of many run folders keeps (decsim/front/fold.py).
+"""The rules a fold of many run folders keeps (decsim/experiments/fold.py).
 
 Four of them, each pinned here against the thing it claims to equal:
 the merged order is the stable sort of the folders' rows, a streamed sum
@@ -20,12 +20,12 @@ import statistics
 
 import pytest
 
-import decsim.front.command as command
-import decsim.front.fold as fold
-import decsim.front.refusal as refusal
-import decsim.front.report as report
-import decsim.front.run_folder as run_folder
-import tests.front.yaml_configs as yaml_configs
+import decsim.experiments.command as command
+import decsim.experiments.fold as fold
+import decsim.experiments.refusal as refusal
+import decsim.experiments.report as report
+import decsim.experiments.run_folder as run_folder
+import tests.experiments.yaml_configs as yaml_configs
 
 CANCELLING = (1e100, 1.0, -1e100, 1.0)
 

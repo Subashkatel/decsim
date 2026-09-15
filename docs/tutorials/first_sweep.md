@@ -108,9 +108,9 @@ a better logical qubit.
 
 `mismatches vs direct PyMatching: 0` is a correctness check that runs on
 every shot. decsim decodes the shot in windows, through the whole
-machine, while the front decodes the same shot's detection events in one
-piece with PyMatching outside the machine, and the two predictions are
-compared.
+machine, while the experiments layer decodes the same shot's detection
+events in one piece with PyMatching outside the machine, and the two
+predictions are compared.
 
 Do not read zero as a promise. A sliding window commits its correction
 without the rounds the whole-circuit decode can see, so windowed
@@ -145,7 +145,7 @@ different seeds. The two Wilson columns say how differently.
 A **Wilson interval** is a range of true failure probabilities that
 would plausibly produce the count you saw. decsim computes it at
 `z = 1.96`, which is the conventional 95 percent (`wilson_interval` in
-`decsim/front/report.py`). Read the distance 3 row as: the true rate is
+`decsim/experiments/report.py`). Read the distance 3 row as: the true rate is
 somewhere between about 4.5 percent and about 9.4 percent, and 6.5
 percent is the middle of the evidence.
 

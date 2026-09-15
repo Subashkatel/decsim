@@ -1,13 +1,13 @@
 """The listeners of one run, by name.
 
 The Machine builds each listener the observation section asks for,
-connects it to the sources it hears, and keeps it here so the front,
-the gate and the experiments read a run's numbers from its listeners
-and never from a component. The log writer, the window ledger, the
-flight recorder, the runtime stamps, the queue depth, the controller
-counters, the command events, the frame's corrections, the referee's
-audit and the sampled shots are always there; the ones a study asks for
-are None when the section did not ask.
+connects it to the sources it hears, and keeps it here so
+decsim.experiments, the gate and the experiments read a run's numbers
+from its listeners and never from a component. The log writer, the
+window ledger, the flight recorder, the runtime stamps, the queue
+depth, the controller counters, the command events, the frame's
+corrections, the referee's audit and the sampled shots are always
+there; the ones a study asks for are None when the section did not ask.
 """
 
 import dataclasses

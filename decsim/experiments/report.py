@@ -18,10 +18,10 @@ link_rows.
 What a summary needs off those rows is a count, a true count, a sum, a
 max and an exact mean per sweep point, and none of those grows with the
 shots, so the rows reach them one at a time: the accumulators, the row
-streams and the merge that orders them are in front/fold.py, and this
-module says which field plays which role. A single run feeds the rows it
-measured through the same accumulators a fold feeds a campaign's folders
-through, so one code path produces both summaries.
+streams and the merge that orders them are in experiments/fold.py, and
+this module says which field plays which role. A single run feeds the
+rows it measured through the same accumulators a fold feeds a
+campaign's folders through, so one code path produces both summaries.
 
 The per-value counts file stays small because every sample is a whole
 number of ticks divided by the ticks in a microsecond
@@ -45,11 +45,11 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-import decsim.front.experiment as experiment
-import decsim.front.fold as fold
-import decsim.front.measure as measure
-import decsim.front.refusal as refusal
-import decsim.front.run_folder as run_folder
+import decsim.experiments.experiment as experiment
+import decsim.experiments.fold as fold
+import decsim.experiments.measure as measure
+import decsim.experiments.refusal as refusal
+import decsim.experiments.run_folder as run_folder
 import decsim.observe.data_movement as data_movement
 
 # the measurement's fields that are not columns of shots.csv: the
@@ -474,7 +474,7 @@ def combine(run_dirs: list, out_dir: Path) -> list:
     A campaign's folders hold more rows than a process can: 500 shards
     of a million-shot sweep are 115 million link rows. So the folders
     are read in a stream, one row of each folder at a time, and what
-    stands between reading and writing is the totals of front/fold.py
+    stands between reading and writing is the totals of experiments/fold.py
     and not a list of the rows (`decsim combine` over those 500 folders
     was killed at 17 GB and then OOM-killed at 120 GB before this).
 

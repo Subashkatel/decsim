@@ -33,8 +33,8 @@ from pathlib import Path
 from typing import Optional
 
 import decsim.config as config_module
-import decsim.front.refusal as refusal
-import decsim.front.trace_file as trace_file
+import decsim.experiments.refusal as refusal
+import decsim.experiments.trace_file as trace_file
 
 WINDOW_COLORS = (
     "tab:blue",
@@ -132,7 +132,7 @@ def first_trace_file(run_dir) -> Optional[Path]:
     """The first trace file of a run folder, None when nothing traced.
 
     A sweep writes one file per traced shot under trace/, named after the
-    point (front/measure.py); the first in name order is the first
+    point (experiments/measure.py); the first in name order is the first
     point's, which is the shot the timeline draws.
     """
     trace_dir = Path(run_dir) / TRACE_DIR
@@ -217,7 +217,7 @@ def ler_vs_distance_plot(
     a zero-failure point cannot sit on a log axis, so its curve simply
     ends at the last distance that saw failures.
 
-        python -m decsim.front.plots ler_vs_d <run_dir> <run_dir> <p>
+        python -m decsim.experiments.plots ler_vs_d <run_dir> <run_dir> <p>
         <out.png>
     """
     import matplotlib
@@ -306,7 +306,7 @@ def stage_breakdown_plot(run_dir, path: Path) -> None:
 
     From syndrome arrival in the buffer to the Pauli-frame commit.
 
-        python -m decsim.front.plots stage_breakdown <run_dir> <out.png>
+        python -m decsim.experiments.plots stage_breakdown <run_dir> <out.png>
     """
     import matplotlib
 
@@ -396,7 +396,7 @@ def combined_latency_plot(sample_files: list, path: Path) -> None:
     legible: the tiers sit decades apart, which is itself the figure's
     message.
 
-        python -m decsim.front.plots latency <run_dir> <run_dir> <out.png>
+        python -m decsim.experiments.plots latency <run_dir> <run_dir> <out.png>
     """
     import matplotlib
 

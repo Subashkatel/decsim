@@ -7,8 +7,8 @@ shots with two loops: a rate tracker that pins the escalation fraction
 at a target, and an audit lane that strong-decodes a random sample of
 kept windows to learn whether the target is safe; it is one instance
 per sweep point, shared by every shot. The yaml's third source, table,
-is resolved by the front to a fixed threshold per sweep point
-(decoders/settings.py, threshold_nats_for), so at run time it is
+is resolved by the experiments layer to a fixed threshold per sweep
+point (decoders/settings.py, threshold_nats_for), so at run time it is
 FixedThreshold. Both rows fill the ThresholdSource port
 (decsim/ports.py). Thresholds and gaps are natural-log weight (nats),
 the unit the decoder compares in; the yaml converts the paper's
@@ -66,8 +66,9 @@ class TableThreshold(FixedThreshold):
     """The calibration table's g_th for this sweep point.
 
     calibrate_threshold.py writes one row per (distance, p) of
-    calibration_table.csv with the threshold in decibels; the front
-    looks the point up and converts it before the machine is built
+    calibration_table.csv with the threshold in decibels; the
+    experiments layer looks the point up and converts it before the
+    machine is built
     (EscalationSettings.threshold_nats_for), so at run time this row
     decides on a constant exactly as FixedThreshold does. What it
     declares that the fixed row does not is where its number came from,
@@ -285,12 +286,12 @@ class OnlineThreshold:
         """The one instance a sweep point's shots share, seeded by the point.
 
         A row that declares built_per_sweep_point builds its own
-        instance, so what the front installs is the row the table names
-        and nothing else. Both loops are assembled here, where they are
-        read: the rate tracker starting at the point's threshold in nats,
-        the audit lane, and the target adjustment. The random stream is
-        seeded from the point's identity alone, so a rerun of the point
-        draws the same audits.
+        instance, so what the experiments layer installs is the row the
+        table names and nothing else. Both loops are assembled here,
+        where they are read: the rate tracker starting at the point's
+        threshold in nats, the audit lane, and the target adjustment.
+        The random stream is seeded from the point's identity alone, so
+        a rerun of the point draws the same audits.
 
         online is the escalation section's card, typed where it is
         declared (escalation/settings.py OnlineThresholdSettings); that

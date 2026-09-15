@@ -14,7 +14,7 @@ set of updated checks (2303.04846 lines 784-786), one index per flip.
 import dataclasses
 import pathlib
 
-import decsim.front.experiment as experiment
+import decsim.experiments.experiment as experiment
 import decsim.machine as machine_module
 import decsim.ports as ports
 import decsim.records.windows as window_records

@@ -20,8 +20,8 @@ import html
 from typing import Optional
 
 import decsim.config as config
-import decsim.front.refusal as refusal
-import decsim.front.trace_file as trace_file
+import decsim.experiments.refusal as refusal
+import decsim.experiments.trace_file as trace_file
 
 ROUND = "round"
 WINDOW = "window"

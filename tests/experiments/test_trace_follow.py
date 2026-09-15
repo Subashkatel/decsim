@@ -11,8 +11,8 @@ the note's, at the hops that exist today.
 
 import pytest
 
-import decsim.front.trace_file as trace_file
-import decsim.front.trace_follow as trace_follow
+import decsim.experiments.trace_file as trace_file
+import decsim.experiments.trace_follow as trace_follow
 import decsim.machine as machine_module
 import tests.observe.gate_point as gate_point
 
@@ -223,7 +223,7 @@ def test_the_page_draws_one_lane_per_component(traced):
 
 
 def test_the_command_prints_the_table_and_writes_the_page(trace_path, tmp_path):
-    import decsim.front.command as command
+    import decsim.experiments.command as command
 
     page_path = tmp_path / "one.html"
 

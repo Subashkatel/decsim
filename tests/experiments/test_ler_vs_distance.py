@@ -16,10 +16,10 @@ import csv
 
 import pytest
 
-import decsim.front.refusal as refusal
-from decsim.front.plots import ler_vs_distance_plot
+import decsim.experiments.refusal as refusal
+from decsim.experiments.plots import ler_vs_distance_plot
 
-# The first ten columns of sweep.csv (decsim/front/report.py
+# The first ten columns of sweep.csv (decsim/experiments/report.py
 # summarize_point), which is all the figure reads.
 SWEEP_FIELDS = [
     "distance",

@@ -49,7 +49,7 @@ import math
 import operator
 from pathlib import Path
 
-import decsim.front.refusal as refusal
+import decsim.experiments.refusal as refusal
 
 # a keyed row is (the row's place in the run's order, the row); the merge
 # compares the place alone, so two rows are never compared
@@ -176,7 +176,7 @@ class ExactSum:
         A zero leaves an exact sum as it was and is skipped, which is
         three quarters of a campaign's link fields: it changes no
         partial, and it takes no sign with it either, because math.fsum
-        of zeros is 0.0 and not -0.0 (tests/front/test_fold.py). The
+        of zeros is 0.0 and not -0.0 (tests/experiments/test_fold.py). The
         partials loop stays in this one function because a fold of the
         500-folder campaign adds four hundred million values and each
         call of it walks the whole partials list: measured over a

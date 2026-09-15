@@ -36,8 +36,8 @@ ENDS_OF_PATH = {
 
 # the components on the reaction path; the root wires the paths onto the
 # ports (build, machine), the fabric carries them (links) and the
-# reporting side reads them (observe, front, collect), so none of those
-# is a sender and none is walked
+# reporting side reads them (observe, experiments, collect), so none of
+# those is a sender and none is walked
 COMPONENT_PACKAGES = (
     "qpu",
     "controller",

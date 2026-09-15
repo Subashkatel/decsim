@@ -11,11 +11,11 @@ import dataclasses
 
 import matplotlib
 
-import decsim.front.experiment as experiment
-import decsim.front.plots as plots
-import decsim.front.trace_file as trace_file
+import decsim.experiments.experiment as experiment
+import decsim.experiments.plots as plots
+import decsim.experiments.trace_file as trace_file
 import decsim.machine as machine_module
-import tests.front.yaml_configs as yaml_configs
+import tests.experiments.yaml_configs as yaml_configs
 import tests.observe.gate_point as gate_point
 
 matplotlib.use("Agg")

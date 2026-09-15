@@ -16,7 +16,7 @@ import yaml
 import decsim.build.escalation as escalation_build
 import decsim.collect as collect
 import decsim.decoders.settings as decoder_settings
-import decsim.front.refusal as refusal
+import decsim.experiments.refusal as refusal
 import decsim.settings as machine_settings
 
 _THIS_FILE = Path(__file__)
@@ -184,7 +184,7 @@ def task_positions(recorded_sweep: list) -> dict:
     """Each sweep point's place in the task order of a recorded sweep.
 
     A run folder's manifest records the resolved config
-    (decsim/front/run_folder.py write_manifest), so the sweep's own task
+    (decsim/experiments/run_folder.py write_manifest), so the sweep's own task
     order is recoverable from the folder alone, without the yaml and
     whatever order the folders are named in. It is the order tasks()
     makes: the blocks in order, each block its cross product, a point
@@ -234,8 +234,9 @@ def _settings_of(
     """The machine's settings records, one per section of the file.
 
     A settings record checks its own section and raises ValueError
-    (STYLE.md rule 4); the file is the front's input, so a refused key
-    reaches the user as one sentence naming the file it is in.
+    (STYLE.md rule 4); the file is the experiments layer's input, so a
+    refused key reaches the user as one sentence naming the file it is
+    in.
     """
     try:
         return machine_settings.MachineSettings.from_mapping(

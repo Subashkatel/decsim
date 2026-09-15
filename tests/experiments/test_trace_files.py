@@ -1,13 +1,13 @@
 """One traced shot, one file: the seed joins the path when several trace.
 
-observation.trace names either a word (chrome, and the front names the
-file after the point) or a path of the study's own. A path plus
+observation.trace names either a word (chrome, and the experiments
+layer names the file after the point) or a path of the study's own. A path plus
 trace_shots of more than one seed would have every traced shot write the
 same file, so the seed goes into the name before its suffixes
 (one file per traced shot).
 """
 
-from decsim.front.measure import trace_path_for_shot
+from decsim.experiments.measure import trace_path_for_shot
 
 
 def test_one_traced_shot_keeps_the_path_the_yaml_gave():

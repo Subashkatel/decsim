@@ -1,4 +1,4 @@
-"""The front against its referents: sinter's collect, and a recorded sweep.
+"""The experiments layer's referents: sinter's collect, and a recorded sweep.
 
 Referent one is a sweep of reference.yaml recorded before decsim.collect
 existed, its sweep.csv and links.csv kept in data/. Ten of its numbers
@@ -39,13 +39,13 @@ import decsim.collect as collect
 import decsim.decoders.settings as decoder_settings
 import decsim.escalation.policies as escalation_policies
 import decsim.escalation.settings as escalation_settings
-import decsim.front.collect_command as run
-import decsim.front.experiment as experiment
-import decsim.front.measure as measure_shot
-import decsim.front.report as sweep_report
+import decsim.experiments.collect_command as run
+import decsim.experiments.experiment as experiment
+import decsim.experiments.measure as measure_shot
+import decsim.experiments.report as sweep_report
 import decsim.records.windows as window_records
 import decsim.windows.built_window_models as built_window_models
-import tests.front.yaml_configs as yaml_configs
+import tests.experiments.yaml_configs as yaml_configs
 
 THIS_FILE = pathlib.Path(__file__)
 DATA = THIS_FILE.parent / "data"
@@ -381,10 +381,10 @@ def test_the_summary_off_the_written_files_is_the_summary_of_the_shots(
 class _OutsideEscalation:
     """An escalation row written outside decsim, delegating to Baseline.
 
-    It subclasses no shipped row: every fact the front and the machine
-    read off a row is declared here and every call is forwarded, which is
-    the shape the P8 plug-in probe used. What the front reads to measure
-    a shot is primary_tier.
+    It subclasses no shipped row: every fact the experiments layer and
+    the machine read off a row is declared here and every call is
+    forwarded, which is the shape the P8 plug-in probe used. What the
+    experiments layer reads to measure a shot is primary_tier.
     """
 
     decides_on_a_confidence = False
@@ -425,11 +425,11 @@ def _measured_shot(tmp_path, escalation_kind: str):
 def test_an_outside_escalation_row_is_measured_over_its_tiers_links(
     tmp_path, monkeypatch
 ):
-    """The front reads the row's tier, so a row off the table measures.
+    """The tier is read off the row, so a row off the table measures.
 
-    The front used to index its link tables by the escalation's name, so
-    `decsim collect` raised KeyError on any name but the three shipped
-    ones while the machine ran the row fine.
+    The experiments layer used to index its link tables by the
+    escalation's name, so `decsim collect` raised KeyError on any name
+    but the three shipped ones while the machine ran the row fine.
     """
     shipped_directory = tmp_path / "shipped"
     shipped_directory.mkdir()

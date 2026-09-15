@@ -37,7 +37,7 @@ def test_a_run_with_every_listener_connected_has_the_same_ticks_as_a_bare_one():
     import pathlib
 
     import decsim.machine as machine_module
-    from decsim.front.experiment import load_experiment
+    from decsim.experiments.experiment import load_experiment
 
     here = pathlib.Path(__file__)
     repository = here.resolve()

@@ -40,9 +40,9 @@ class ObservationSettings:
 
     log is the engine narrator: print shows it live, file writes each
     shot's full line record next to the results, both does both. trace
-    is the Chrome trace of the data path: off, chrome (the front names
-    the file next to the results), or a path of its own; the front
-    writes it for the shots trace_shots names.
+    is the Chrome trace of the data path: off, chrome (the experiments
+    layer names the file next to the results), or a path of its own;
+    the experiments layer writes it for the shots trace_shots names.
     log_component_io adds component I/O lines (what each store and unit
     received, holds and emitted). check_windows_with tesseract re-decodes
     every window with the Tesseract referee and counts disagreements,
@@ -104,7 +104,7 @@ class ObservationSettings:
 
     @property
     def writes_log(self) -> bool:
-        """Whether the front writes each shot's log next to the results."""
+        """Whether the experiments layer writes each shot's log."""
         return self.log in ("file", "both")
 
     @property
@@ -114,7 +114,7 @@ class ObservationSettings:
 
     @property
     def trace_path(self) -> Optional[str]:
-        """The path the trace names, None when the front names it."""
+        """The path the trace names, None when decsim.experiments names it."""
         if self.trace in ("off", CHROME_TRACE):
             return None
         return self.trace

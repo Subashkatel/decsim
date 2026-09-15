@@ -9,10 +9,10 @@ and a run writes its manifest and its per-shot records.
 import pytest
 
 import decsim.controller.settings as controller_settings
-import decsim.front.collect_command as collect_command
-import decsim.front.experiment as experiment
-import decsim.front.report as report
-from tests.front.yaml_configs import (
+import decsim.experiments.collect_command as collect_command
+import decsim.experiments.experiment as experiment
+import decsim.experiments.report as report
+from tests.experiments.yaml_configs import (
     CONFIGS_DIR,
     MINIMAL_CONFIG,
     SHIPPED_CONFIGS,

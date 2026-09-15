@@ -10,8 +10,8 @@ import csv
 
 import pytest
 
-import decsim.front.refusal as refusal
-from decsim.front.plots import (
+import decsim.experiments.refusal as refusal
+from decsim.experiments.plots import (
     STAGE_BREAKDOWN_STAGES,
     _median_stage_us_by_distance,
     stage_breakdown_plot,

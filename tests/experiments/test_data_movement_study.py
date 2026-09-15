@@ -10,8 +10,8 @@ carries no setting axis, so each combination is its own yaml through
 
 import pytest
 
-import decsim.front.experiment as experiment
-from tests.front.yaml_configs import CONFIGS_DIR
+import decsim.experiments.experiment as experiment
+from tests.experiments.yaml_configs import CONFIGS_DIR
 
 BASE = "data_movement.yaml"
 INPUT_IN_PLACE = "data_movement_input_in_place.yaml"
@@ -120,7 +120,7 @@ def _both_in_place_config(tmp_path):
     """The study's base yaml with both in-place settings named at once."""
     import yaml
 
-    from tests.front.yaml_configs import MINIMAL_CONFIG
+    from tests.experiments.yaml_configs import MINIMAL_CONFIG
 
     weak = dict(MINIMAL_CONFIG["weak_decoder"])
     weak["input"] = "in_place"

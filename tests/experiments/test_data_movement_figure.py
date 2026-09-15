@@ -11,10 +11,10 @@ copies no bits (observe/data_movement.py).
 
 import pytest
 
-import decsim.front.plots as plots
-import decsim.front.refusal as refusal
-from decsim.front.collect_command import run_experiment
-from tests.front.yaml_configs import write_config
+import decsim.experiments.plots as plots
+import decsim.experiments.refusal as refusal
+from decsim.experiments.collect_command import run_experiment
+from tests.experiments.yaml_configs import write_config
 
 COUNTING_SWEEP = {
     "observation": {"data_movement": True},

@@ -59,8 +59,8 @@ weak_decoder:
 
 Then add it to `configs/reference.yaml` in the same commit. That file is
 the documentation of the yaml surface, and
-`tests/front/test_yaml_surface.py` fails when the file and the readers
-drift apart.
+`tests/experiments/test_yaml_surface.py` fails when the file and the
+readers drift apart.
 
 ## What a typo gets
 

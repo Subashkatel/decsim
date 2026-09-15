@@ -3,8 +3,8 @@
 A listener on every routed decoder's stage_recorded source. The decoder
 fires one DecoderStageRecord as each stage's end becomes known and keeps
 nothing itself, so a run with no ledger connected holds no stage history
-at all; the front's per-window measurement and the latency plot read the
-ledger. The stage vocabulary is the decoder row's own
+at all; the experiments layer's per-window measurement and the latency
+plot read the ledger. The stage vocabulary is the decoder row's own
 (decoders/staged_decoder.py), so an ASIC or GPU model fires its own
 stage names through the same source.
 """

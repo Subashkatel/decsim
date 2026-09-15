@@ -12,11 +12,11 @@ and an accelerator's access costs what the memory it reads costs (Dally,
 CACM 2020 lines 231-234), so the classes are not summed into one count.
 """
 
-import decsim.front.command as command
-import decsim.front.report as sweep_report
-from decsim.front.collect_command import run_experiment
-from decsim.front.experiment import load_experiment
-from tests.front.yaml_configs import measure_point_shot, write_config
+import decsim.experiments.command as command
+import decsim.experiments.report as sweep_report
+from decsim.experiments.collect_command import run_experiment
+from decsim.experiments.experiment import load_experiment
+from tests.experiments.yaml_configs import measure_point_shot, write_config
 
 COUNTING_SWEEP = {
     "observation": {"data_movement": True},

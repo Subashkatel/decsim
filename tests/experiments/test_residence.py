@@ -5,16 +5,16 @@ before the reader runs: a structure's row is the residences the trace
 records on that structure's lane, in microseconds off `args.tick` and
 the event's own duration, and a link path's row is the queue waits its
 moves carry. The file is the Chrome Trace Event Format the writer emits
-(docs/how-to/read_a_trace.md), read through front/trace_file.py, the reader
-`decsim trace follow` uses.
+(docs/how-to/read_a_trace.md), read through experiments/trace_file.py,
+the reader `decsim trace follow` uses.
 """
 
 import json
 
 import decsim.config as config
-import decsim.front.report as report
-import decsim.front.residence as residence
-import decsim.front.trace_file as trace_file
+import decsim.experiments.report as report
+import decsim.experiments.residence as residence
+import decsim.experiments.trace_file as trace_file
 
 STORE_LANE = 1
 UNIT_LANE = 2
@@ -216,8 +216,8 @@ def test_a_shot_that_was_not_traced_writes_no_row(tmp_path):
 
 def test_a_traced_run_writes_the_table_beside_its_rows(tmp_path, monkeypatch):
     """The run folder's own file, off the trace the run already wrote."""
-    from decsim.front.collect_command import run_experiment
-    from tests.front.yaml_configs import write_config
+    from decsim.experiments.collect_command import run_experiment
+    from tests.experiments.yaml_configs import write_config
 
     monkeypatch.chdir(tmp_path)
     config_path = write_config(

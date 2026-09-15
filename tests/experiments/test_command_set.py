@@ -12,13 +12,13 @@ import pathlib
 
 import pytest
 
-import decsim.front.command as command
-import decsim.front.experiment as experiment
-import decsim.front.fold as fold
-import decsim.front.run_command as run_command
-import decsim.front.run_folder as run_folder
+import decsim.experiments.command as command
+import decsim.experiments.experiment as experiment
+import decsim.experiments.fold as fold
+import decsim.experiments.run_command as run_command
+import decsim.experiments.run_folder as run_folder
 import decsim.machine as machine_module
-import tests.front.yaml_configs as yaml_configs
+import tests.experiments.yaml_configs as yaml_configs
 import tests.observe.gate_point as gate_point
 
 CONFIGS_DIR = yaml_configs.CONFIGS_DIR

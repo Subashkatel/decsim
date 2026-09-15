@@ -1162,10 +1162,11 @@ class ThresholdSource(Protocol):
     reads_a_calibration_table says the point's number comes from
     calibrate_threshold.py's csv rather than from the section's card, so
     the settings demand threshold_table. built_per_sweep_point says the
-    row builds one instance of itself for a whole sweep point, which the
-    front hands to every shot, because the row learns across the point's
-    windows; every other row is built by the root from the point's
-    threshold in nats, which is its one constructor argument.
+    row builds one instance of itself for a whole sweep point, which
+    the experiments layer hands to every shot, because the row learns
+    across the point's windows; every other row is built by the root
+    from the point's threshold in nats, which is its one constructor
+    argument.
     """
 
     audits_by_escalating: bool

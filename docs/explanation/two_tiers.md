@@ -85,7 +85,7 @@ against comes from.
 | Row | Where the threshold comes from |
 | --- | --- |
 | `fixed` | one constant, the paper's `g_th` (Toshio Sec. III A, step 3) |
-| `table` | a table of values, resolved by the front to a fixed threshold per sweep point, so at run time it is the fixed row |
+| `table` | a table of values, resolved by the experiments layer to a fixed threshold per sweep point, so at run time it is the fixed row |
 | `online` | it starts at the fixed value and adapts across a sweep point's shots |
 
 The `online` row is the interesting one. It runs two loops: a rate

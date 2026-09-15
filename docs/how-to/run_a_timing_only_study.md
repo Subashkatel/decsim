@@ -99,10 +99,11 @@ why `mismatches vs direct PyMatching: 0` is still meaningful above.
 
 If you want a run with no syndrome data at all, `qpu.kind: timing_only`
 emits payloads without bits. It builds and runs as a machine, but
-`decsim collect` currently raises `KeyError` on it, because the front's
-per-shot measurement always compares the loop's prediction against
-PyMatching on the device's sampled shot, and a timing-only device
-samples none. Use a priced card on a real device instead.
+`decsim collect` currently raises `KeyError` on it, because the
+experiments layer's per-shot measurement always compares the loop's
+prediction against PyMatching on the device's sampled shot, and a
+timing-only device samples none. Use a priced card on a real device
+instead.
 
 ## Read next
 

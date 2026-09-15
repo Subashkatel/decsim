@@ -226,7 +226,7 @@ class EscalationSettings:
     jobs of the weak pool, so weak_decoder.units alone decides whether
     they overlap. A Python-built policy is used as it is. The
     threshold in nats and the online threshold source are set per sweep
-    point by the front; base_directory resolves a relative
+    point by the experiments layer; base_directory resolves a relative
     threshold_table.
     """
 
@@ -314,8 +314,9 @@ class EscalationSettings:
     ) -> Optional[ports.ThresholdSource]:
         """The row's own source for this sweep point, when it builds one.
 
-        A row that declares built_per_sweep_point builds it, so what the
-        front installs on the point's task is the row the table names.
+        A row that declares built_per_sweep_point builds it, so what
+        the experiments layer installs on the point's task is the row
+        the table names.
         Every other row answers None: the root builds those from the
         point's threshold in nats instead. The instance is shared by
         every shot of the point, so the source learns over the point's
@@ -487,7 +488,7 @@ def _calibrated_threshold(
 def _online_settings(
     section: Mapping, threshold_source: str, threshold_row
 ) -> Optional[OnlineThresholdSettings]:
-    """The online card, read by a row the front builds per sweep point."""
+    """The online card, read by a row the experiments layer builds."""
     learns_across_a_point = threshold_row.built_per_sweep_point
     if "online" in section and not learns_across_a_point:
         raise ValueError(

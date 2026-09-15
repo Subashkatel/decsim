@@ -8,7 +8,7 @@
 # One section per component; a pluggable component's section carries a
 # `kind` key naming a row of a table in that package's settings module,
 # and each section is read by the package it configures (its
-# settings.py). Kept honest by tests/front/test_yaml_surface.py:
+# settings.py). Kept honest by tests/experiments/test_yaml_surface.py:
 # the test fails if this file and the readers drift apart. Knobs the yaml
 # cannot reach are Python objects on the settings records: multi-op
 # workloads, dynamic streams, routers, escalation families, schedulers,

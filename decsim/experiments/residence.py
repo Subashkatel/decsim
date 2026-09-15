@@ -13,7 +13,7 @@ observation section says what a trace costs). A point whose shots were
 not traced writes no row here, the way a point that traced nothing draws
 no timeline.
 
-The trace is read with `front/trace_file.py`, the reader
+The trace is read with `experiments/trace_file.py`, the reader
 `decsim trace follow` reads it with, so one parser reads every trace and
 `args.tick` is the only clock either of them trusts.
 """
@@ -22,8 +22,8 @@ import statistics
 from pathlib import Path
 
 import decsim.config as config
-import decsim.front.report as report
-import decsim.front.trace_file as trace_file
+import decsim.experiments.report as report
+import decsim.experiments.trace_file as trace_file
 
 # what a row counts: a structure's residences, or a link path's moves
 RESIDENCE = "residence"

@@ -13,7 +13,7 @@ from pathlib import Path
 import yaml
 
 import decsim.collect as collect
-import decsim.front.measure as measure
+import decsim.experiments.measure as measure
 
 _THIS_FILE = Path(__file__)
 _TEST_FILE = _THIS_FILE.resolve()

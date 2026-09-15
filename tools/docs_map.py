@@ -9,7 +9,7 @@ four mirror it by being generated from it:
     map.md     every package and every module, in the uses order
     ports.md   every port of decsim/ports.py, in pipeline order
     tables.md  every plug-in table and its rows
-    cli.md     every command of the front and its flags
+    cli.md     every command of decsim.experiments and its flags
 
 Run from the checkout with no argument to write all four. The uses order
 is read from tools/check_uses_graph.py, so the map and the checker can
@@ -869,11 +869,11 @@ def _command_section(entry: tuple) -> list:
 
 
 def cli_page(checkout: pathlib.Path) -> str:
-    """docs/reference/cli.md: every command of the front and its arguments."""
-    front = checkout / "decsim" / "front"
-    command = front / "command.py"
+    """docs/reference/cli.md: every decsim command and its arguments."""
+    experiments = checkout / "decsim" / "experiments"
+    command = experiments / "command.py"
     lines = _cli_header(command)
-    globbed = front.glob("*.py")
+    globbed = experiments.glob("*.py")
     paths = sorted(globbed)
     entries = []
     for path in paths:

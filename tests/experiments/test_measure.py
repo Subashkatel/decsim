@@ -32,8 +32,8 @@ import yaml
 import decsim.collect as collect
 import decsim.config as config_module
 import decsim.decoders.settings as decoder_settings
-import decsim.front.experiment as experiment
-import decsim.front.measure as measure
+import decsim.experiments.experiment as experiment
+import decsim.experiments.measure as measure
 import decsim.frontends.settings as workload_settings
 import decsim.links.link_profiles as link_profiles
 import decsim.pauli_frame.pauli_frame as pauli_frame_module
@@ -43,7 +43,7 @@ import decsim.qpu.stim_device as stim_device
 import decsim.records.program as program_records
 import decsim.settings as machine_settings
 import decsim.windows.settings as window_settings
-from tests.front.yaml_configs import (
+from tests.experiments.yaml_configs import (
     CONFIGS_DIR,
     MINIMAL_CONFIG,
     measure_point_shot,

@@ -4,35 +4,35 @@
 
 Every `decsim collect` writes one folder under `results/`, named for the
 UTC time it started and the config it ran, and never reused
-(`decsim/front/run_folder.py`, `new_run_dir`). `results/` is output, not
-code, and git does not track it, which is gem5's `m5out/`.
+(`decsim/experiments/run_folder.py`, `new_run_dir`). `results/` is
+output, not code, and git does not track it, which is gem5's `m5out/`.
 
 A run folder holds facts that add up and nothing else. No summary is
 stored: `sweep.csv` and `links.csv` are computed from the additive files
 when they are written, and `decsim combine` recomputes them over several
 folders, so a sweep may be cut into shards and folded back together
-without any number changing (`decsim/front/report.py`).
+without any number changing (`decsim/experiments/report.py`).
 
 ## What a folder holds
 
 | Name | Written by | What it is |
 | --- | --- | --- |
-| `shots.csv` | `decsim/front/report.py`, `shot_rows` | one row per shot |
-| `shot_links.csv` | `decsim/front/report.py`, `shot_link_rows` | one row per shot per link |
-| `window_samples.csv` | `decsim/front/report.py`, `window_sample_rows` | one row per sweep point, latency point and distinct microsecond value |
-| `latency_samples.csv` | `decsim/front/report.py`, `latency_sample_rows` | one row per decoded window of a wall-clock decoder |
-| `sweep.csv` | `decsim/front/report.py`, `summarize` | one row per sweep point, summarized from `shots.csv` and `window_samples.csv` |
-| `links.csv` | `decsim/front/report.py`, `link_rows` | one row per sweep point per link, averaged over that point's shots |
-| `shot_data_movement.csv` | `decsim/front/report.py`, `shot_data_movement_rows` | one row per shot per path: that shot's copy and move counters and the memory class the path crosses, written only when `observation.data_movement` is on |
-| `data_movement.csv` | `decsim/front/report.py`, `data_movement_rows` | one row per sweep point per path, then per memory class, averaged over the point's shots |
-| `residence.csv` | `decsim/front/residence.py`, `write_residence` | one row per traced shot per structure, then per link path: how long a round or window sat there, and how long a move waited on the wire |
-| `manifest.json` | `decsim/front/run_folder.py`, `write_manifest` | one object: what ran, where, and with which library versions |
-| `config/` | `decsim/front/run_folder.py`, `snapshot_code_state` | a verbatim copy of every yaml file in the config chain |
-| `code_state.patch` | `decsim/front/run_folder.py`, `snapshot_code_state` | `git diff HEAD`, written only when the checkout was dirty |
+| `shots.csv` | `decsim/experiments/report.py`, `shot_rows` | one row per shot |
+| `shot_links.csv` | `decsim/experiments/report.py`, `shot_link_rows` | one row per shot per link |
+| `window_samples.csv` | `decsim/experiments/report.py`, `window_sample_rows` | one row per sweep point, latency point and distinct microsecond value |
+| `latency_samples.csv` | `decsim/experiments/report.py`, `latency_sample_rows` | one row per decoded window of a wall-clock decoder |
+| `sweep.csv` | `decsim/experiments/report.py`, `summarize` | one row per sweep point, summarized from `shots.csv` and `window_samples.csv` |
+| `links.csv` | `decsim/experiments/report.py`, `link_rows` | one row per sweep point per link, averaged over that point's shots |
+| `shot_data_movement.csv` | `decsim/experiments/report.py`, `shot_data_movement_rows` | one row per shot per path: that shot's copy and move counters and the memory class the path crosses, written only when `observation.data_movement` is on |
+| `data_movement.csv` | `decsim/experiments/report.py`, `data_movement_rows` | one row per sweep point per path, then per memory class, averaged over the point's shots |
+| `residence.csv` | `decsim/experiments/residence.py`, `write_residence` | one row per traced shot per structure, then per link path: how long a round or window sat there, and how long a move waited on the wire |
+| `manifest.json` | `decsim/experiments/run_folder.py`, `write_manifest` | one object: what ran, where, and with which library versions |
+| `config/` | `decsim/experiments/run_folder.py`, `snapshot_code_state` | a verbatim copy of every yaml file in the config chain |
+| `code_state.patch` | `decsim/experiments/run_folder.py`, `snapshot_code_state` | `git diff HEAD`, written only when the checkout was dirty |
 | `trace/<shot>.trace.json` | `decsim/observe/trace_writer.py` | one Chrome trace per traced shot |
-| `log/<shot>.log` | `decsim/front/measure.py`, and `decsim/front/run_command.py` for one shot | the engine narrator's lines, written when the `observation` section asks for a log |
-| `timeline.png`, `ler.png`, `latency.png` | `decsim/front/plots.py`, `plots` | the figures `decsim collect` draws itself, each one when its input is there: a timeline when a shot was traced, an error-rate figure when the sweep has more than one physical error rate, and a latency figure when a wall-clock decoder ran at more than one distance |
-| `timeline.png`, `stage_breakdown.png`, `latency_combined.png`, `ler_vs_distance.png`, `data_movement.png` | `decsim/front/plots.py`, `FIGURES` | one figure per `decsim plot --figure` name, written beside the first run folder given |
+| `log/<shot>.log` | `decsim/experiments/measure.py`, and `decsim/experiments/run_command.py` for one shot | the engine narrator's lines, written when the `observation` section asks for a log |
+| `timeline.png`, `ler.png`, `latency.png` | `decsim/experiments/plots.py`, `plots` | the figures `decsim collect` draws itself, each one when its input is there: a timeline when a shot was traced, an error-rate figure when the sweep has more than one physical error rate, and a latency figure when a wall-clock decoder ran at more than one distance |
+| `timeline.png`, `stage_breakdown.png`, `latency_combined.png`, `ler_vs_distance.png`, `data_movement.png` | `decsim/experiments/plots.py`, `FIGURES` | one figure per `decsim plot --figure` name, written beside the first run folder given |
 
 The manifest, the config copy and the patch together are the whole
 experiment: the commit plus the patch is the code, and the config chain
@@ -61,7 +61,7 @@ its maximum.
 | `sim_wall_seconds` | how long the simulation itself took to run, on the host |
 | `<point>_mean_us`, `<point>_max_us` | one pair per latency point below |
 
-The latency points are the tuple `POINTS` in `decsim/front/measure.py`,
+The latency points are the tuple `POINTS` in `decsim/experiments/measure.py`,
 and they are the same names in `shots.csv`, `window_samples.csv` and
 `sweep.csv`:
 
@@ -129,7 +129,7 @@ the verdict, and runs to the tick that input was readable.
 One run is outside that sum, and knowingly: under
 `escalation.run_both_at_once` the weak attempt and the strong decode
 overlap rather than follow each other, so adding both would count the
-same wall time twice. `tests/front/test_measure.py` asserts the
+same wall time twice. `tests/experiments/test_measure.py` asserts the
 identity window by window on `configs/weak_decoder_baseline.yaml`,
 `configs/two_tiers.yaml`, `configs/seam_pinned_switching.yaml` and
 `configs/cluster_gap_switching.yaml`, which are a run with no signal to
@@ -186,7 +186,7 @@ number produces no rows here.
 ### `sweep.csv`
 
 One row per sweep point, summarized from `shots.csv` and
-`window_samples.csv` by `summarize_point` in `decsim/front/report.py`.
+`window_samples.csv` by `summarize_point` in `decsim/experiments/report.py`.
 The nineteen scalars come first, then four columns for every latency
 point the run held:
 
@@ -226,7 +226,7 @@ One row per sweep point per link path, averaged over that point's shots.
 ### `manifest.json`
 
 One object. Its keys, from `write_manifest` in
-`decsim/front/run_folder.py`:
+`decsim/experiments/run_folder.py`:
 
 | Key | What it is |
 | --- | --- |

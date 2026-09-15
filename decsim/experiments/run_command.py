@@ -14,9 +14,9 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-import decsim.front.experiment as experiment
-import decsim.front.measure as measure
-import decsim.front.run_folder as run_folder
+import decsim.experiments.experiment as experiment
+import decsim.experiments.measure as measure
+import decsim.experiments.run_folder as run_folder
 import decsim.machine as machine_module
 import decsim.records.results as result_records
 import decsim.settings as machine_settings

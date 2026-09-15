@@ -1563,11 +1563,10 @@ def test_a_single_tier_family_commits_what_the_untimed_model_decodes(family):
     called directly on the same window error model and the same landed
     syndrome, which is PyMatching's own untimed entry point
     (decode_detection_events, src/pymatching/sparse_blossom/driver/
-    mwpm_decoding.h lines 55-79 at commit 6f63b2b9, in the sandbox at
-    tmp/reference-decoders/PyMatching). Every window of eight shots at
-    p = 0.001 and d = 3, ten windows a shot, agrees bit for bit, so no
-    change to timing, buffers, links or pools can move a correction
-    without this failing.
+    mwpm_decoding.h lines 55-79 at PyMatching commit 6f63b2b9). Every
+    window of eight shots at p = 0.001 and d = 3, ten windows a shot,
+    agrees bit for bit, so no change to timing, buffers, links or pools
+    can move a correction without this failing.
     """
     decodes = timed_and_untimed_decodes(family)
 
@@ -1665,10 +1664,8 @@ def test_a_matching_family_predicts_what_qldpcs_sliding_windows_predict(
     rounds where qLDPC's stride lays nine, so the comparison is at the
     run's final observable rather than per window. The eight shots at
     p = 0.001 agree exactly; a difference would have to be a
-    minimum-weight matching tie, which the 2026-08-22 harness record
-    (archive/2026-09-09-window-harness/harness/VALIDATION.md lines
-    24-26, in the sandbox) found to be the only kind that ever arose
-    against this reference, and this test refuses one rather than
+    minimum-weight matching tie, the only kind of disagreement ever
+    seen against this reference, and this test refuses one rather than
     allowing it.
     """
     predictions, circuit, shot_events = campaign_predictions_and_events(family)

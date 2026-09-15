@@ -1,4 +1,4 @@
-"""The front: tasks, and the shots collected from them.
+"""The experiments layer: tasks, and the shots collected from them.
 
 sinter's shape (sinter/_data/_task.py Task, sinter/_collection/
 _collection.py collect, sinter/_data/_task_stats.py the rows) adapted
@@ -176,7 +176,7 @@ def shard_of(units: list, shard: Optional[tuple]) -> list:
     """The units of one shard: position modulo count equals index.
 
     The command checks i and n where it reads them
-    (decsim/front/command.py _shard_of), before a run folder exists.
+    (decsim/experiments/command.py _shard_of), before a run folder exists.
     """
     if shard is None:
         return units

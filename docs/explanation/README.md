@@ -31,7 +31,7 @@ the rule.
 
 ## Why it is shaped this way
 
-- [The design decisions](decisions.md): the eighteen modelling decisions,
+- [The design decisions](decisions.md): the nineteen decisions,
   each with what was decided, why, and its source, and the open rows.
 - [The principles behind the shape](principles.md): the eleven ideas
   the tree is built on, each quoted from its source, and what each

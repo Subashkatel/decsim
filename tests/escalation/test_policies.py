@@ -22,7 +22,7 @@ import decsim.decoders.settings as decoder_settings
 import decsim.escalation.policies as policies
 import decsim.escalation.settings as escalation_settings
 import decsim.escalation.threshold_sources as threshold_sources
-import decsim.front.experiment as experiment
+import decsim.experiments.experiment as experiment
 import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
 import decsim.observe.settings as observe_settings
@@ -38,7 +38,7 @@ import decsim.windows.boundary_policies as boundary_policies
 import decsim.windows.schemes.sliding as sliding_scheme
 import decsim.windows.settings as window_settings
 import tests.escalation.declared_fabric as fabric
-import tests.front.yaml_configs as yaml_configs
+import tests.experiments.yaml_configs as yaml_configs
 
 SOURCE = decoding_records.SoftOutputSource(
     method="matching-gap",

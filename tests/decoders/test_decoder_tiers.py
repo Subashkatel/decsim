@@ -6,8 +6,8 @@ decode a d=3 memory shot. Toshio arXiv 2510.25222: lightweight decoders
 decode constantly, a separate accurate decoder is invoked on demand.
 """
 
-import decsim.front.experiment as experiment
-from tests.front.yaml_configs import (
+import decsim.experiments.experiment as experiment
+from tests.experiments.yaml_configs import (
     MINIMAL_CONFIG,
     measure_point_shot,
     strong_unit,

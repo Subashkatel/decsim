@@ -16,8 +16,8 @@ import pytest
 
 import decsim.build.escalation as escalation_build
 import decsim.escalation.settings as escalation_settings
-from decsim.front.collect_command import run_sweep
-from decsim.front.experiment import load_experiment
+from decsim.experiments.collect_command import run_sweep
+from decsim.experiments.experiment import load_experiment
 from tests.escalation.test_switching_mode import (
     NEAR_THRESHOLD_P,
     switching_config,
@@ -275,7 +275,8 @@ class _OutsideCalibratedThreshold:
 
     It subclasses no shipped row: the three facts the yaml boundary reads
     are declared here and the decision is a constant, exactly as the
-    shipped rows behave once the front has resolved the point.
+    shipped rows behave once the experiments layer has resolved the
+    point.
     """
 
     audits_by_escalating = False
@@ -301,8 +302,8 @@ class _OutsideLearningThreshold(_OutsideCalibratedThreshold):
 
     for_sweep_point is what built_per_sweep_point promises. This row
     starts at the point's threshold in nats and learns nothing, which is
-    all the law needs: what the front installs is an instance of the row
-    the table names.
+    all the law needs: what the experiments layer installs is an
+    instance of the row the table names.
     """
 
     reads_a_calibration_table = False
@@ -373,7 +374,7 @@ def test_an_outside_row_built_per_point_gets_the_online_card(
     assert config.settings.escalation.online.audit_rate == 0.3
 
 
-def test_an_outside_row_built_per_point_is_the_source_the_front_installs(
+def test_an_outside_row_built_per_point_is_the_source_the_experiments_layer_installs(
     tmp_path, monkeypatch
 ):
     """The row builds its own per-point source, and that is what runs.
@@ -381,8 +382,9 @@ def test_an_outside_row_built_per_point_is_the_source_the_front_installs(
     online_threshold_for used to construct
     threshold_sources.OnlineThreshold by direct class reference, so a row
     that declared built_per_sweep_point had its card read and then got
-    the shipped calibrator instead of itself. The instance the front puts
-    on the point's task is now the row's own, and it reaches the policy
+    the shipped calibrator instead of itself. The instance the
+    experiments layer puts on the point's task is now the row's own, and
+    it reaches the policy
     the root builds for the shot (build/escalation.py _threshold_source,
     which reads the same declaration).
     """

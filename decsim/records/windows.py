@@ -122,7 +122,7 @@ class Window:
     # weak answer arrived. A reader that needs one decode's own ticks
     # reads the stage records, which carry the run ordinals they served
     # and the tick a unit took that decode (decoders/staged_decoder.py);
-    # the latency points do (front/measure.py).
+    # the latency points do (experiments/measure.py).
     t_dispatch: Optional[int] = None  # tick a decoder unit took the job
     # tick the unit began computing the job it took: the input had
     # landed in the unit's memory and the window owed no boundary

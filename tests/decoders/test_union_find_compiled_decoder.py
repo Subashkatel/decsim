@@ -10,7 +10,7 @@ same selected faults, the same intervals, the same contacts in the same
 order, the same forest, the same unmatched detectors.
 
 The corpus is Stim's rotated surface code memory circuits, which is what
-a campaign decodes, and random small graphs, which reach the shapes a
+an experiment decodes, and random small graphs, which reach the shapes a
 surface code never produces: a boundary to boundary column, a column
 with no detector at all, a prior of exactly one half, priors above one
 half, duplicate columns and ties in edge length.
@@ -47,7 +47,7 @@ CORPUS_PROBABILITIES = (0.001, 0.005, 0.01)
 CORPUS_SHOTS = 300
 CIRCUIT_SEED = 5
 
-# the two distances above that, at the rate the campaign's largest
+# the two distances above that, at the rate the experiment's largest
 # points run, with fewer shots because the oracle costs a second a
 # decode there
 LARGE_DISTANCES = (11, 13)

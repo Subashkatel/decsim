@@ -42,7 +42,7 @@ what tools/check_uses_graph.py prints and check.sh enforces:
     6  build
     7  machine (this file)
     8  collect
-    9  front
+    9  experiments
     10 __main__
 
 Level 3 and below decode a window on a store with no window manager,

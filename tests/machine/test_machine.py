@@ -35,7 +35,7 @@ import decsim.detector_error_model.detector_chronology as detector_chronology
 import decsim.engine as engine_module
 import decsim.escalation.policies as escalation_policies
 import decsim.escalation.settings as escalation_settings
-import decsim.front.experiment as experiment
+import decsim.experiments.experiment as experiment
 import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
 import decsim.observe.settings as observe_settings
@@ -57,7 +57,7 @@ import decsim.syndrome_buffer.settings as round_store_settings
 import decsim.windows.boundary_policies as boundary_policies
 import decsim.windows.settings as window_settings
 import tests.declared_run as declared_run
-import tests.front.yaml_configs as yaml_configs
+import tests.experiments.yaml_configs as yaml_configs
 
 THIS_FILE = pathlib.Path(__file__)
 TESTS_DIRECTORY = THIS_FILE.parents[1]

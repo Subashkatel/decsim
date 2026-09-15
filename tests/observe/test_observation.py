@@ -1,7 +1,7 @@
 """The listeners of one run, by name.
 
-The front, the gate and the experiments read a run's numbers from this
-record and never from a component, which is the rule that keeps
+decsim.experiments, the gate and the experiments read a run's numbers
+from this record and never from a component, which is the rule that keeps
 observation observation: a component fires a source and knows no
 listener. The record's own promise is which listeners are always there
 and which are None when the section did not ask for them.

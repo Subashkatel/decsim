@@ -17,13 +17,13 @@ import re
 import pytest
 
 import decsim.config as config
-import decsim.front.experiment as experiment
+import decsim.experiments.experiment as experiment
 import decsim.links.fabric as fabric_module
 import decsim.links.link_profiles as link_profiles
 import decsim.machine as machine
 import decsim.records.transfers as transfer_records
 import decsim.settings as machine_settings
-import tests.front.yaml_configs as yaml_configs
+import tests.experiments.yaml_configs as yaml_configs
 
 TESTS_FILE = pathlib.Path(__file__)
 TESTS_PATH = TESTS_FILE.resolve()

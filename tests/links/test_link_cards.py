@@ -8,7 +8,7 @@ import pytest
 
 import decsim.machine as machine_module
 from decsim.config import microseconds_to_ticks
-from decsim.front.experiment import load_experiment
+from decsim.experiments.experiment import load_experiment
 
 CARD_YAML = (
     "qpu: {kind: stim_device}\n"

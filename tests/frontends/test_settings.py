@@ -9,12 +9,12 @@ pin the sentence each Python-only shipped row refuses a yaml with.
 
 import pytest
 
-import decsim.front.experiment as experiment
+import decsim.experiments.experiment as experiment
 import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
 import decsim.qpu.round_policies as round_policies
 import decsim.records.program as program_records
-import tests.front.yaml_configs as yaml_configs
+import tests.experiments.yaml_configs as yaml_configs
 
 
 class TwoPatchMemory:

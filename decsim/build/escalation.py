@@ -20,9 +20,10 @@ def primary_tier(settings: escalation_settings.EscalationSettings) -> str:
     of last resort. sinter resolves the caller's own decoders before its
     built-in table (sinter/_collection/_mux_sampler.py:33-40) and gem5
     reads a built object's own params rather than its class table
-    (src/python/m5/SimObject.py:204-205). The front asks this rather than
-    building the policy, because a switching policy's threshold is
-    resolved per sweep point and a config may reach here without one.
+    (src/python/m5/SimObject.py:204-205). The experiments layer asks
+    this rather than building the policy, because a switching policy's
+    threshold is resolved per sweep point and a config may reach here
+    without one.
     """
     row = escalation_row(settings)
     return row.primary_tier.value
@@ -106,12 +107,12 @@ def _collaborators(
 def _threshold_source(settings: escalation_settings.EscalationSettings):
     """The row escalation.threshold_source names, for this sweep point.
 
-    A row the front builds once per point (it learns across the point's
-    shots) arrives already built; every other row is built here from the
-    point's threshold in nats, its one constructor argument. The table
-    source is resolved to a number per sweep point by the front
-    (ExperimentConfig.point_settings), so a table run reaches the root
-    with its threshold in nats or not at all.
+    A row the experiments layer builds once per point (it learns across
+    the point's shots) arrives already built; every other row is built
+    here from the point's threshold in nats, its one constructor
+    argument. The table source is resolved to a number per sweep point
+    by the experiments layer (ExperimentConfig.point_settings), so a
+    table run reaches the root with its threshold in nats or not at all.
     """
     row = tables.row(
         escalation_settings.THRESHOLD_SOURCES,
@@ -122,20 +123,22 @@ def _threshold_source(settings: escalation_settings.EscalationSettings):
         return _sweep_point_source(settings)
     if settings.gap_threshold_nats is None:
         raise ValueError(
-            "escalation.threshold_source table resolves the threshold per "
-            "sweep point in the front (ExperimentConfig.point_settings); "
-            "build the machine through it, or give gap_threshold_db"
+            "escalation.threshold_source table resolves the threshold "
+            "per sweep point in the experiments layer "
+            "(ExperimentConfig.point_settings); build the machine "
+            "through it, or give gap_threshold_db"
         )
     return row(settings.gap_threshold_nats)
 
 
 def _sweep_point_source(settings: escalation_settings.EscalationSettings):
-    """The source the front built for this point, which every shot shares."""
+    """The source the experiments layer built, shared by every shot."""
     if settings.online_threshold is None:
         raise ValueError(
             "escalation.threshold_source online is built once per sweep "
-            "point by the front (ExperimentConfig.point_settings), which "
-            "seeds it and shares it across the point's shots; build the "
-            "machine through it"
+            "point by the experiments layer "
+            "(ExperimentConfig.point_settings), which seeds it and "
+            "shares it across the point's shots; build the machine "
+            "through it"
         )
     return settings.online_threshold

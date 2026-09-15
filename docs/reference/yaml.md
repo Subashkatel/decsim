@@ -51,9 +51,9 @@ Three conventions are worth knowing before you read:
   reference file for that reason, with the comment saying which config
   runs them.
 - The file is the documentation of the yaml surface, and
-  `tests/front/test_yaml_surface.py` fails when the file and the readers
-  drift apart. Any commit that changes the config surface changes this
-  file in the same commit.
+  `tests/experiments/test_yaml_surface.py` fails when the file and the
+  readers drift apart. Any commit that changes the config surface
+  changes this file in the same commit.
 
 ## Starting from another file
 
@@ -62,11 +62,11 @@ extends: weak_decoder_baseline.yaml
 ```
 
 `extends` reads the named file from the same folder first, then applies
-this file's keys over it (`decsim/front/experiment.py`). A section this
-file names replaces the base's section whole, so a `sweep` written here
-replaces the base's sweep rather than adding to it. `manifest.json`
-records the whole chain, nearest first, and `config/` in the run folder
-holds a verbatim copy of every file in it.
+this file's keys over it (`decsim/experiments/experiment.py`). A
+section this file names replaces the base's section whole, so a `sweep`
+written here replaces the base's sweep rather than adding to it.
+`manifest.json` records the whole chain, nearest first, and `config/`
+in the run folder holds a verbatim copy of every file in it.
 
 ## Seeing what a file resolves to
 
@@ -99,7 +99,7 @@ an `extends` chain says what you meant.
 | `configs/data_movement_input_in_place.yaml` | the same with the weak input referenced in place instead of copied |
 | `configs/data_movement_fold_in_place.yaml` | the same with the boundary folded in place |
 | `configs/data_movement_switching.yaml` | the same under the switching escalation |
-| `configs/campaigns_2026_09/` | the sixteen 2026-09 decoder campaigns: one shared base, sixteen campaign files that differ only in their decoder rows, one file per campaign and distance for the Slurm arrays, and `configs/campaigns_2026_09/PLAN.md` with the shot table, the costs and the submit lines |
+| `configs/experiments_2026_09/` | the sixteen 2026-09 decoder experiments: one shared base, sixteen experiment files that differ only in their decoder rows, one file per experiment and distance for the Slurm arrays, and `configs/experiments_2026_09/PLAN.md` with the shot table, the costs and the submit lines |
 
 ## Read next
 

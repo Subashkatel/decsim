@@ -2,11 +2,11 @@
 
 # The design decisions
 
-Eighteen decisions shape what decsim charges and where it charges it. Each is
-recorded here with what was decided, why, and the source the answer came
-from, because a modelling question is answered by reading the referent
-rather than by choosing (`STYLE.md` rule 8). The last section says what
-is not modelled yet.
+Nineteen decisions shape what decsim charges, where it charges it, and
+where a reader finds a thing. Each is recorded here with what was
+decided, why, and the source the answer came from, because a modelling
+question is answered by reading the referent rather than by choosing
+(`STYLE.md` rule 8). The last section says what is not modelled yet.
 
 ## D1. Whoever executes a send is an end of that hop
 
@@ -415,12 +415,12 @@ from `time_blocked` (`ciw/data_record.py:3-21`), so the whole
 pre-service wait is a sum of named parts and never one number.
 
 **Where to see it.** `POINTS` and `window_points_us` in
-`decsim/front/measure.py`, the ready tick stamped in
+`decsim/experiments/measure.py`, the ready tick stamped in
 `decsim/decoders/decode_service.py` (`mark_startable`, and the landing
 itself when no boundary is owed), carried on `decsim/records/decoding.py`
 and on the stage record in `decsim/decoders/staged_decoder.py`, the two
 rows in [The run folder](../reference/run_folder.md), and
-`tests/front/test_measure.py`, which holds the one-unit run where the
+`tests/experiments/test_measure.py`, which holds the one-unit run where the
 whole park is dependency and the forced-class pair where the two trade
 places.
 
@@ -462,10 +462,10 @@ that produced the evidence, which is why the same span is the unit's
 occupancy in `load`.
 
 **Where to see it.** `POINTS`, `window_points_us` and `chain_load` in
-`decsim/front/measure.py`, the row in
+`decsim/experiments/measure.py`, the row in
 [The run folder](../reference/run_folder.md),
 `configs/cluster_gap_switching.yaml`, and the four shipped-config
-identity tests in `tests/front/test_measure.py`.
+identity tests in `tests/experiments/test_measure.py`.
 
 ## D17. The Union-Find growth, forest and peeling run in C
 
@@ -483,8 +483,9 @@ detectors.
 
 **Why.** decsim's timing comes from the latency card and never from how
 long a decoder runs, so a faster decoder must move the bill and no
-result. The bill is the reason: the campaigns in
-`configs/campaigns_2026_09` run union find at distances up to 15, where
+result. The bill is the reason: the experiments in
+`configs/experiments_2026_09` run union find at distances up to 15,
+where
 the Python row cost 48 seconds a shot. Identity is held by a property
 test rather than by review: the Python growth, forest and peeling live
 on as the oracle at `tests/decoders/union_find_oracle.py`, and
@@ -572,6 +573,30 @@ header, `cluster_gap` and `cluster_gap_entry_point` in
 `tests/confidence/test_compiled_cluster_gap.py`, whose corpus test is
 the identity claim.
 
+## D19. A thing is named for what it is, and the name is experiment
+
+**Decided.** The package that holds the yaml experiment, the sweep, the
+collected rows, the figures, the trace viewer and the `decsim` command
+is `decsim/experiments`, its tests are `tests/experiments`, the sixteen
+decoder runs of 2026-09 are `configs/experiments_2026_09`, and the
+Slurm array script is `slurm/experiment_run.sh`. Nothing inside any of
+them moved: every module, class and function keeps its name, every yaml
+key and every number is what it was, and a run charges exactly what it
+charged before.
+
+**Why.** A name should say what the thing is for. `front` said only
+where the package sat in the uses order, and it collided with
+`decsim/frontends`, the program readers and the planner, which is a
+different thing at a different level. The 2026-09 folder and its Slurm
+script carried a second word for what the tree already calls an
+experiment, one yaml and the shards it is cut into, and two words for
+one thing make a reader ask what the difference is when there is none.
+
+**Where to see it.** `decsim/experiments/`, `tests/experiments/`, level
+9 of the uses order in `decsim/machine.py`, the generated
+[The module map](../reference/map.md),
+`configs/experiments_2026_09/PLAN.md` and `slurm/experiment_run.sh`.
+
 ## What is not modelled yet
 
 These are open, recorded rather than hidden, so that a reader does not
@@ -599,11 +624,11 @@ mistake a gap for a result.
   also how LILLIPUT's block and Yang's stage run: on the stream, not on
   the window.
 - **O8. `decsim collect` refuses a `timing_only` device.** The device
-  builds and runs as a machine, but the front's per-shot measurement
-  compares the loop's prediction against PyMatching on the sampled shot,
-  and a timing-only device samples none, so `collect` raises `KeyError`.
-  A priced card on a real device is the way to a host-independent run
-  today.
+  builds and runs as a machine, but the experiments layer's per-shot
+  measurement compares the loop's prediction against PyMatching on the
+  sampled shot, and a timing-only device samples none, so `collect`
+  raises `KeyError`. A priced card on a real device is the way to a
+  host-independent run today.
 - **O9. A decoder section ignores a key it does not know.** The
   `weak_decoder` and `strong_decoder` sections do not yet refuse an
   unknown key by name the way `decoder_manager` does, so a misspelt key

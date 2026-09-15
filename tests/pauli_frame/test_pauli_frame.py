@@ -13,10 +13,10 @@ import enum
 
 import pytest
 
-import decsim.front.experiment as experiment
+import decsim.experiments.experiment as experiment
 import decsim.machine as machine_module
 import decsim.pauli_frame.pauli_frame as pauli_frame_module
-import tests.front.yaml_configs as yaml_configs
+import tests.experiments.yaml_configs as yaml_configs
 from decsim.engine import Engine
 from decsim.pauli_frame.pauli_frame import PauliFrame, PauliFrameConfig
 

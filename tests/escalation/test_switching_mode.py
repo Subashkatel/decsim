@@ -26,8 +26,8 @@ import pytest
 import decsim.config as decsim_config
 import tests.declared_run as declared_run
 import tests.escalation.declared_fabric as fabric
-from decsim.front.experiment import load_experiment
-from tests.front.yaml_configs import (
+from decsim.experiments.experiment import load_experiment
+from tests.experiments.yaml_configs import (
     MINIMAL_CONFIG,
     measure_point_shot,
     strong_unit,

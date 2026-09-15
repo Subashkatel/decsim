@@ -55,8 +55,8 @@ value came from a paper or a reference implementation, which one. A key
 that is not in that file is a key nobody can find.
 
 This is not optional and it is not a convention:
-`tests/front/test_yaml_surface.py` fails when the file and the readers
-drift apart, and it names the drift. Read its
+`tests/experiments/test_yaml_surface.py` fails when the file and the
+readers drift apart, and it names the drift. Read its
 `test_unknown_algorithms_and_stale_keys_fail_loudly` to see the shape.
 
 ## 4. Run the checks

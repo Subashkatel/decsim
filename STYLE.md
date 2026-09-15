@@ -190,10 +190,10 @@ does not already say it. Review checks this; no tool can.
 
 A check is necessary in exactly two places.
 
-Where input enters decsim: a yaml file, a call on the front, a Stim
-circuit, a QLX program, a data file, a device reading. That input is
-checked once, at that boundary, loudly, with a message that reads as a
-sentence, and raises ValueError.
+Where input enters decsim: a yaml file, a call on the experiments
+layer, a Stim circuit, a QLX program, a data file, a device reading.
+That input is checked once, at that boundary, loudly, with a message
+that reads as a sentence, and raises ValueError.
 
 Where a silent wrong answer would corrupt a result: a component refuses a
 call that breaks its own contract (a negative delay, a second correction
@@ -210,9 +210,9 @@ never application logic both apply.
 
 Everything else is not necessary and is deleted, with its test. Inside
 the machine a function trusts what its callers send: a check that no
-yaml, no front call and no runtime path can trigger goes, together with
-the test that forced the state by hand. Asking for such a check is out
-of scope, not a defect.
+yaml, no experiments-layer call and no runtime path can trigger goes,
+together with the test that forced the state by hand. Asking for such
+a check is out of scope, not a defect.
 
 ## Rule 5. No compatibility layer
 
@@ -458,6 +458,6 @@ keep tests obvious and unchanging, prefer real implementations, and use
 A/B diffs across a migration (a differential review is chapter 14's).
 Google's code-review guidance holds: solve the problem that needs
 solving now, not one the developer speculates might come. The component
-shape is gem5's (src/sim/sim_object.hh and the Python params), the front
-is sinter's, the engine is SimPy's.
+shape is gem5's (src/sim/sim_object.hh and the Python params), the
+experiments layer is sinter's, the engine is SimPy's.
 

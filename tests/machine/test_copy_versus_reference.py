@@ -19,7 +19,7 @@ import pathlib
 import pytest
 
 import decsim.build.decoders as decoder_build
-import decsim.front.experiment as experiment
+import decsim.experiments.experiment as experiment
 import decsim.machine as machine_module
 import decsim.records.transfers as transfer_records
 

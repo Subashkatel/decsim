@@ -152,7 +152,7 @@ class RoundTracker:
         """Mark a live stream round as a measurement-closed boundary.
 
         A finite real-syndrome stream cannot close a boundary inside its
-        registered circuit: that is a front call's mistake.
+        registered circuit: that is a decsim.experiments call's mistake.
         """
         stream = self.stream_by_id[stream_id]
         stream.refuse_boundary_inside_finite_source(stream_round_count)

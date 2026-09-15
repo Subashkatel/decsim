@@ -198,6 +198,6 @@ Design*, and Liskov and Zilles 1974.
 ## Read next
 
 - `STYLE.md`: these eleven as rules, with the tools that check them.
-- [The design decisions](decisions.md): the eighteen modelling decisions made
+- [The design decisions](decisions.md): the nineteen decisions made
   under them.
 - [Architecture](architecture.md): the shape they produced.

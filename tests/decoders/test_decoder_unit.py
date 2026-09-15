@@ -94,8 +94,9 @@ def test_the_residents_describe_their_phase():
 
 
 def test_a_memory_config_with_a_zero_capacity_is_refused_at_construction():
-    # A front-built memory config is a boundary: a unit that holds zero
-    # rounds can serve nothing, so the mistake is caught before a run
+    # A memory config from the experiments layer is a boundary: a unit
+    # that holds zero rounds can serve nothing, so the mistake is caught
+    # before a run
     # rather than at the first deposit.
 
     with pytest.raises(

@@ -162,7 +162,7 @@ def test_an_online_threshold_audits_kept_windows_and_learns_from_the_strong():
     assert controller.audit.audited_count == 2
 
 
-def test_an_online_threshold_records_its_trajectory_for_the_front():
+def test_an_online_threshold_records_its_trajectory_for_the_experiments_layer():
     controller = _controller(target=0.0, threshold=10.0, step=0.0)
     draws = random.Random(0)
     online = threshold_sources.OnlineThreshold(controller, draws)

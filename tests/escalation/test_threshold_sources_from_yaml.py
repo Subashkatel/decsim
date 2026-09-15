@@ -374,7 +374,7 @@ def test_an_outside_row_built_per_point_gets_the_online_card(
     assert config.settings.escalation.online.audit_rate == 0.3
 
 
-def test_an_outside_row_built_per_point_is_the_source_the_front_installs(
+def test_an_outside_row_built_per_point_is_the_source_the_experiments_layer_installs(
     tmp_path, monkeypatch
 ):
     """The row builds its own per-point source, and that is what runs.

@@ -80,7 +80,7 @@ def test_a_row_that_decides_on_a_confidence_gets_the_three_fields():
     assert policy.run_both_at_once is False
 
 
-def test_a_table_threshold_with_no_number_from_the_front_is_refused():
+def test_a_table_threshold_with_no_number_from_the_experiment_is_refused():
     """The table row is resolved per sweep point, before the root builds."""
     settings = escalation_settings.EscalationSettings(
         kind="switching",

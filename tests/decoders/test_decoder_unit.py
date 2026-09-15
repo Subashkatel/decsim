@@ -11,6 +11,7 @@ import pytest
 import decsim.decoders.decoder_memory as decoder_memory
 import decsim.decoders.decoder_unit as decoder_unit
 import decsim.records.decoding as decoding_records
+import decsim.records.rounds as round_records
 
 
 def _unit(capacity_rounds=None):
@@ -26,6 +27,31 @@ def _job(label, rounds=1):
 
 def _demand(job):
     return job.round_count
+
+
+def _payload_demand(job):
+    return decoding_records.distinct_round_count(job.payloads)
+
+
+def _carrying_job(label, rounds):
+    payloads = []
+    for round_index in range(rounds):
+        fragment = round_records.RetainedSyndromeFragment(
+            operation_id=1,
+            patch_id="patch-0",
+            round_index=round_index,
+            bits=(0, 1),
+            size_bits=2,
+            fragment_index=0,
+        )
+        payloads.append(fragment)
+    return decoding_records.DecodeJob(
+        operation_id=1,
+        window_id=0,
+        round_count=rounds,
+        payloads=payloads,
+        label=label,
+    )
 
 
 def test_a_unit_holds_two_inputs_and_one_compute():
@@ -50,6 +76,26 @@ def test_a_second_resident_joins_only_when_both_inputs_fit_the_memory():
     assert unit.has_room(small, 2, _demand) is True
     large = _job("large", rounds=3)
     assert unit.has_room(large, 2, _demand) is False
+
+
+def test_a_second_window_waits_while_a_landed_one_fills_the_memory():
+    """A full memory refuses the next window instead of raising later.
+
+    gem5 src/mem/cache/base.hh lines 121, 266 and 271 at commit cbc94c1:
+    with no miss-status register free the cache sets Blocked_NoMSHRs and
+    the response port refuses the request until one frees; nothing is
+    raised.
+    """
+    memory = decoder_memory.DecoderMemory("default", 0, capacity_rounds=3)
+    unit = decoder_unit.DecoderUnit("default", 0, memory)
+    landed = _carrying_job("landed", 3)
+    unit.admit(landed)
+    landed.decoder_input = memory.deposit(landed)
+    landed.payloads = []
+
+    second = _carrying_job("second", 3)
+
+    assert unit.has_room(second, 2, _payload_demand) is False
 
 
 def test_the_compute_goes_to_the_oldest_landed_resident_not_parked():

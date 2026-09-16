@@ -384,6 +384,33 @@ would be the defect. And `decsim/ports.py`
 is the slowest layer of all: a port method added, renamed or removed
 needs a design note saying why, the way a golden move does.
 
+## Rule 11. Branches are a liability
+
+A function decides at most five times: `if`, `elif`, a loop, an `and`
+or `or` in a condition, an `except`, each count one, and a function with
+six or more is split before it lands. Savoia and Evans (the CRAP metric,
+2007) fit this on real code: the risk of a method grows with the square
+of its branch count and falls with the cube of its test coverage, and a
+method with many branches and few tests is the one nobody dares to
+change. decsim keeps the branch count low so that few tests are needed,
+not the other way round.
+
+The shape that keeps a function under the line is the guard clause: the
+case that ends early returns early, at the top, and the body that
+follows reads straight down without an `else`. A ladder of `if` and
+`else` is rewritten as guards; a conditional expression never nests
+another. When a function is hard to test without a large fixture, that
+is the same fault seen from the test side: the function is split into
+small helpers with no state of their own, and the helpers are tested
+plainly.
+
+Every function that branches has a test that reaches each branch through
+the public surface, or a gate point that does. A branch no test and no
+gate point reaches is either removed under rule 4 or given its test in
+the same commit. `tools/check.sh` reports every function over the line
+(ruff's mccabe rule at five); the count was 91 when the rule landed and goes down,
+never up.
+
 ## Tests
 
 The best test of a component is its output beside a referent's output on
@@ -445,6 +472,52 @@ A hot path may keep a dense line when the measured cost says so in a
 comment; that is Google's "concede to practicalities", and it is the
 only exception to rule 1.
 
+## Review
+
+Every change is read the way Google's reviewer guide reads it
+(eng-practices, "What to look for in a code review"), before it lands,
+by the person who did not write it, and by the writer once more as if
+they had not. The twelve looks, in order:
+
+1. Design. Do the pieces talk to each other the way the machine's data
+   path does, and does this belong in the component it is in.
+2. Functionality. Does it do what the commit message says, for the
+   person who runs it and for the person who reads it next.
+3. Complexity. Could a reader understand it quickly. "Too complex"
+   means a reader cannot, and will break it when they change it. Solve
+   the problem known now, not one the writer guesses at; that
+   over-engineering is refused even when it works.
+4. Tests. Are the tests correct, sensible and useful. Tests do not test
+   themselves; a person checks that a test would fail if the law broke
+   and would not start failing when the code beneath it changes and the
+   law does not. A test is code that is maintained, so complexity is
+   refused there as in the package.
+5. Naming. Does every name say what the thing is, in full words, without
+   being a sentence (rule 2).
+6. Comments. Do they say why, not what (rule 3); a comment that
+   explains what the code does is a sign the code should be simpler.
+7. Style. STYLE.md and the Google Python guide; a suggestion that is not
+   a rule is marked "Nit:" and does not block. A reformatting goes in
+   its own commit, never mixed with a change of behaviour.
+8. Consistency. The existing code's way wins over taste, and a rule here
+   wins over the existing code.
+9. Documentation. reference.yaml, docs/reference and STYLE.md move in the
+   same commit as the surface they describe.
+10. Every line. Every line asked for is read, not skimmed; a line the
+    reviewer cannot follow is a finding, because the next reader will
+    not follow it either.
+11. Context. The whole file and the machine around it, not the diff
+    alone: four new lines may sit in a function that now needs
+    splitting. Does the change leave the code healthier than it found
+    it; systems grow complex by many small changes, so a small one is
+    refused too.
+12. Good things. What was done well is said too, so the writer keeps
+    doing it.
+
+Every line, the context, the health of the code, and the good things:
+that is the guide's own summary, and it is the order a review here is
+written in.
+
 ## Where these rules come from
 
 Google's own rules for rules (Software Engineering at Google, chapter
@@ -459,8 +532,11 @@ form cannot come back. Chapters 11 to
 14 give the test rules above: test behaviors through the public surface,
 keep tests obvious and unchanging, prefer real implementations, and use
 A/B diffs across a migration (a differential review is chapter 14's).
-Google's code-review guidance holds: solve the problem that needs
-solving now, not one the developer speculates might come. The component
+Google's code-review guidance (eng-practices, the reviewer's
+"looking for" page) gives the Review section and its rule: solve the
+problem that needs solving now, not one the developer speculates
+might come. Rule 11 is Savoia's CRAP metric (Google Testing Blog, February
+2011): branches squared against coverage cubed. The component
 shape is gem5's (src/sim/sim_object.hh and the Python params), the
 experiments layer is sinter's, the engine is SimPy's.
 

@@ -64,6 +64,7 @@ import decsim.build.controller_side as controller_side
 import decsim.build.decoders as decoder_build
 import decsim.build.escalation as escalation_build
 import decsim.build.listeners as listener_build
+import decsim.build.parts as build_parts
 import decsim.build.plan as plan_build
 import decsim.build.stores as store_build
 import decsim.controller.conditional_release as conditional_release_module
@@ -72,8 +73,8 @@ import decsim.controller.idle_rounds as idle_rounds_module
 import decsim.controller.instruction_output as instruction_output_module
 import decsim.controller.operation_issue as operation_issue
 import decsim.controller.round_assembly as round_assembly
-import decsim.controller.round_sender as round_sender
 import decsim.controller.round_transmission as round_transmission
+import decsim.controller.syndrome_round_sender as syndrome_round_sender
 import decsim.decoders.decoder_manager as decoder_manager_module
 import decsim.engine as engine_module
 import decsim.frontends.execution_runtime as execution_runtime_module
@@ -86,10 +87,14 @@ import decsim.qpu.cycle_clock as cycle_clock
 import decsim.records.results as result_records
 import decsim.seeding as seeding
 import decsim.settings as machine_settings
-import decsim.syndrome_buffer.round_input as round_input_module
-import decsim.syndrome_buffer.strong_round_receiver as strong_receiver_module
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 import decsim.windows.window_manager as window_manager_module
+from decsim.syndrome_buffer import (
+    strong_syndrome_round_receiver as strong_syndrome_round_receiver_module,
+)
+from decsim.syndrome_buffer import (
+    weak_syndrome_round_receiver as weak_syndrome_round_receiver_module,
+)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -108,13 +113,17 @@ class Machine:
     links: fabric.LinkFabric
     conditional_release: conditional_release_module.ConditionalRelease
     weak_syndrome_buffer: syndrome_buffer_module.SyndromeBuffer
-    store_input: round_input_module.SyndromeBufferInput
+    weak_syndrome_round_receiver: (
+        weak_syndrome_round_receiver_module.WeakSyndromeRoundReceiver
+    )
     strong_syndrome_buffer: Optional[syndrome_buffer_module.SyndromeBuffer]
-    strong_round_receiver: Optional[strong_receiver_module.StrongRoundReceiver]
+    strong_syndrome_round_receiver: Optional[
+        strong_syndrome_round_receiver_module.StrongSyndromeRoundReceiver
+    ]
     pauli_frame: Optional[pauli_frame_module.PauliFrame]
     window_manager: window_manager_module.WindowManager
     assembler: round_assembly.RoundAssembler
-    round_sender: round_sender.RoundSender
+    syndrome_round_sender: syndrome_round_sender.SyndromeRoundSender
     transmitter: round_transmission.RoundTransmitter
     decoder_manager: decoder_manager_module.DecoderManager
     active_decoder: Optional[Any]
@@ -152,7 +161,7 @@ class Machine:
         store_build.check_readout_cost_is_priced(settings)
         store_build.check_store_kinds(settings)
         controller_side.check_strong_route(escalation_policy, pool.router)
-        parts = assembly.Parts(
+        parts = build_parts.Parts(
             settings=settings,
             engine=engine,
             plan=plan,
@@ -168,7 +177,9 @@ class Machine:
         seeding.bind_run_seed(root_seed, seed_roots)
         listeners = _observe(settings, parts, seats, seed)
         strong_syndrome_buffer = seats.get("strong_syndrome_buffer")
-        strong_round_receiver = seats.get("strong_round_receiver")
+        strong_syndrome_round_receiver = seats.get(
+            "strong_syndrome_round_receiver"
+        )
         pauli_frame = seats.get("pauli_frame")
         listener_build.load_program(
             plan,
@@ -185,13 +196,13 @@ class Machine:
             links=seats["links"],
             conditional_release=seats["conditional_release"],
             weak_syndrome_buffer=seats["weak_syndrome_buffer"],
-            store_input=seats["store_input"],
+            weak_syndrome_round_receiver=seats["weak_syndrome_round_receiver"],
             strong_syndrome_buffer=strong_syndrome_buffer,
-            strong_round_receiver=strong_round_receiver,
+            strong_syndrome_round_receiver=strong_syndrome_round_receiver,
             pauli_frame=pauli_frame,
             window_manager=seats["window_manager"],
             assembler=seats["assembler"],
-            round_sender=seats["round_sender"],
+            syndrome_round_sender=seats["syndrome_round_sender"],
             transmitter=seats["transmitter"],
             decoder_manager=seats["decoder_manager"],
             active_decoder=pool.active,
@@ -233,17 +244,17 @@ class Machine:
         self.decoder_manager.check_decode_work_settled()
         self.window_manager.check_settled()
         self.assembler.check_settled()
-        self.round_sender.check_settled()
+        self.syndrome_round_sender.check_settled()
         self.transmitter.check_settled()
-        self.store_input.check_settled()
-        if self.strong_round_receiver is not None:
-            self.strong_round_receiver.check_settled()
+        self.weak_syndrome_round_receiver.check_settled()
+        if self.strong_syndrome_round_receiver is not None:
+            self.strong_syndrome_round_receiver.check_settled()
         return _capture_result(self)
 
 
 def _observe(
     settings: machine_settings.MachineSettings,
-    parts: "assembly.Parts",
+    parts: build_parts.Parts,
     seats: dict,
     seed: Optional[int],
 ) -> observation_module.Observation:

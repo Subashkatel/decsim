@@ -4,7 +4,7 @@ On the way in, controller.py takes every readout the QPU emits,
 round_assembly.py makes the fragments of one round into one packed
 round (the DETECTION_EVENT_FORMATION row in settings.py says whether
 the detection events are formed before that round leaves),
-round_sender.py writes the finished round into every store that must
+syndrome_round_sender.py writes the finished round into every store that must
 hold it and holds it back while a store has no room, and
 round_transmission.py tells the window side what landed.
 

@@ -5,20 +5,26 @@ seat; which seats a run has and what each is wired to is the assembly
 file's (decsim/assembly.py).
 """
 
-import decsim.controller.round_sender as round_sender
+import decsim.build.parts as build_parts
+import decsim.controller.syndrome_round_sender as syndrome_round_sender
 import decsim.links.link_profiles as link_profiles
 import decsim.links.window_transfers as window_transfers
+import decsim.ports as ports
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 import decsim.settings as machine_settings
-import decsim.syndrome_buffer.round_input as round_input
 import decsim.syndrome_buffer.round_output as round_output
-import decsim.syndrome_buffer.strong_round_receiver as strong_receiver_module
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 import decsim.tables as tables
+from decsim.syndrome_buffer import (
+    strong_syndrome_round_receiver as strong_syndrome_round_receiver_module,
+)
+from decsim.syndrome_buffer import (
+    weak_syndrome_round_receiver as weak_syndrome_round_receiver,
+)
 
 
-def build_links(parts):
+def build_links(parts: build_parts.Parts) -> ports.Link:
     """The link fabric of the run's kind, carded by the links section."""
     row = tables.row(
         link_profiles.LINK_FABRICS, "links.kind", parts.settings.links.kind
@@ -26,14 +32,18 @@ def build_links(parts):
     return row.build(parts.settings.links, parts.engine)
 
 
-def build_held_rounds(parts):
+def build_held_rounds(
+    parts: build_parts.Parts,
+) -> syndrome_round_sender.HeldRounds:
     """The waiting line in front of the stores, and what a full store does."""
-    return round_sender.HeldRounds(
+    return syndrome_round_sender.HeldRounds(
         parts.engine, parts.settings.controller.packing_overflow
     )
 
 
-def build_weak_syndrome_buffer(parts):
+def build_weak_syndrome_buffer(
+    parts: build_parts.Parts,
+) -> ports.SyndromeBuffer:
     """The weak syndrome buffer, where every finished round is published."""
     settings = parts.settings.weak_syndrome_buffer
     row = tables.row(
@@ -44,7 +54,9 @@ def build_weak_syndrome_buffer(parts):
     return row(settings)
 
 
-def build_strong_syndrome_buffer(parts):
+def build_strong_syndrome_buffer(
+    parts: build_parts.Parts,
+) -> ports.SyndromeBuffer:
     """The strong syndrome buffer."""
     settings = parts.settings.strong_syndrome_buffer
     row = tables.row(
@@ -74,12 +86,16 @@ def check_store_kinds(settings: machine_settings.MachineSettings) -> None:
     )
 
 
-def build_store_transfers(parts):
+def build_store_transfers(
+    parts: build_parts.Parts,
+) -> window_transfers.WindowTransfers:
     """The buffer side's transfers, which execute its sends."""
     return window_transfers.WindowTransfers(parts.engine)
 
 
-def build_weak_output(parts):
+def build_weak_output(
+    parts: build_parts.Parts,
+) -> round_output.SyndromeBufferOutput:
     """The weak syndrome buffer's outgoing end, which executes every send."""
     del parts
     return round_output.SyndromeBufferOutput(
@@ -88,7 +104,9 @@ def build_weak_output(parts):
     )
 
 
-def build_strong_output(parts):
+def build_strong_output(
+    parts: build_parts.Parts,
+) -> round_output.SyndromeBufferOutput:
     """The strong syndrome buffer's outgoing end."""
     del parts
     return round_output.SyndromeBufferOutput(
@@ -97,7 +115,9 @@ def build_strong_output(parts):
     )
 
 
-def build_primary_output(parts):
+def build_primary_output(
+    parts: build_parts.Parts,
+) -> round_output.SyndromeBufferOutput:
     """The outgoing end the tier that decodes the plan's windows reads.
 
     A weak-primary plan reads the weak syndrome buffer and a strong-primary
@@ -109,19 +129,25 @@ def build_primary_output(parts):
     return parts.seats["weak_output"]
 
 
-def build_strong_round_receiver(parts):
+def build_strong_syndrome_round_receiver(
+    parts: build_parts.Parts,
+) -> strong_syndrome_round_receiver_module.StrongSyndromeRoundReceiver:
     """The room-side end of the crossing out of the fridge."""
-    return strong_receiver_module.StrongRoundReceiver(parts.engine)
+    return strong_syndrome_round_receiver_module.StrongSyndromeRoundReceiver(
+        parts.engine
+    )
 
 
-def build_store_input(parts):
+def build_weak_syndrome_round_receiver(
+    parts: build_parts.Parts,
+) -> weak_syndrome_round_receiver.WeakSyndromeRoundReceiver:
     """The weak syndrome buffer's room and landing."""
-    return round_input.SyndromeBufferInput(
+    return weak_syndrome_round_receiver.WeakSyndromeRoundReceiver(
         parts.engine, parts.settings.weak_syndrome_buffer
     )
 
 
-def build_pauli_frame(parts):
+def build_pauli_frame(parts: build_parts.Parts) -> ports.Frame:
     """The Pauli frame the run commits into."""
     return parts.settings.pauli_frame.resolve(parts.engine)
 

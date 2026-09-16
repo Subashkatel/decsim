@@ -230,8 +230,8 @@ its own latency source: Caune arXiv:2410.05202 Fig. 1a stage D for hop
 2, and Toshio arXiv:2510.25222 line 1248 for what the strong syndrome buffer is
 assigned.
 
-**Where to see it.** `decsim/syndrome_buffer/round_input.py`, the
-`SyndromeBufferInput` port in `decsim/ports.py`, and `tests/test_send_ends.py`,
+**Where to see it.** `decsim/syndrome_buffer/weak_syndrome_round_receiver.py`, the
+`WeakSyndromeRoundReceiver` port in `decsim/ports.py`, and `tests/test_send_ends.py`,
 whose receive-end law reads every delivery callback out of the tree. The
 same rule decides who writes a structure at a handoff off the wire: a
 window's boundary mask is computed by the window side and written into
@@ -284,8 +284,8 @@ package, and it is readable at that same instant: the store and the
 publication are one call at one tick. The sender still refuses before it
 sends, by asking that same end for room against the rounds it holds plus
 the writes it has in flight, and reserving one before the round leaves.
-`SyndromeBufferInput` owns the weak syndrome buffer's room, its slot, its intake line and
-its announcement, the shape `StrongRoundReceiver` has, and the publication
+`WeakSyndromeRoundReceiver` owns the weak syndrome buffer's room, its slot, its intake line and
+its announcement, the shape `StrongSyndromeRoundReceiver` has, and the publication
 tick is the `controller_to_weak_buffer` landing.
 
 **Why.** The tempting alternative, "book the slot when the sender
@@ -323,9 +323,9 @@ refusal being the receiver's answer (`src/mem/port.hh:244-255`); and
 Ruby's `areNSlotsAvailable`, which sums the queue and the stalled
 messages (`MessageBuffer.cc:181`, the two sizes read at `:155-158`).
 
-**Where to see it.** `decsim/syndrome_buffer/round_input.py`, the
-`SyndromeBuffer` and `SyndromeBufferInput` ports in `decsim/ports.py`,
-`tests/syndrome_buffer/test_round_input.py`, and hop 2 of
+**Where to see it.** `decsim/syndrome_buffer/weak_syndrome_round_receiver.py`, the
+`SyndromeBuffer` and `WeakSyndromeRoundReceiver` ports in `decsim/ports.py`,
+`tests/syndrome_buffer/test_weak_syndrome_round_receiver.py`, and hop 2 of
 [The data path, hop by hop](data_path.md).
 
 ## D14. The strong tier's off-board path can be priced by a measured round trip

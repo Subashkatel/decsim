@@ -14,7 +14,8 @@ and this port executes the move, so the link a store's rounds ride is
 the store's own fact and not the window side's. And a timing-only
 feedback-memory round, which the controller packs and asks for: the
 store sends it and frees its own slot at the delivery. What lands in
-the store is the incoming port's (round_input.py); this one sends.
+the store is the round receiver's (weak_syndrome_round_receiver.py); this
+one sends.
 """
 
 import functools

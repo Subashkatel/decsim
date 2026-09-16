@@ -141,7 +141,7 @@ class IdleRoundReceiver(Protocol):
 
 @runtime_checkable
 class SyndromeBuffer(Protocol):
-    """The weak syndrome buffer, as its own incoming port sees it.
+    """The weak syndrome buffer, as its own round receiver sees it.
 
     Table row: syndrome_buffer. A round occupies a slot when its bits are
     in the store, which is at the landing of the hop that carried them, and
@@ -234,7 +234,7 @@ class RetainedRounds(Protocol):
 
         A round still crossing a priced link when its operation closes
         never enters the store: no hold can name a closed operation, so
-        the round has no reader and its writer drops it at the landing.
+        the round has no reader and the receiver drops it at the landing.
         """
 
     def has_live_operation_reference(self, operation_id) -> bool:
@@ -245,8 +245,23 @@ class RetainedRounds(Protocol):
 
 
 @runtime_checkable
-class StrongSyndromeBufferInput(Protocol):
-    """The strong syndrome buffer, as syndrome packing sees it.
+class SyndromeRoundSender(Protocol):
+    """The syndrome round sender, as the assembler sees it.
+
+    The one end a packed round leaves the assembler by. The sender
+    reserves room in every syndrome buffer the round must reach and
+    sends it on; a round that finds no room goes to the waiting line,
+    which holds it for a retry or drops it as the controller's overflow
+    setting says.
+    """
+
+    def admit(self, packed: round_records.PackedRound) -> bool:
+        """Write the round where it belongs; False when it found no room."""
+
+
+@runtime_checkable
+class StrongSyndromeRoundReceiver(Protocol):
+    """The strong syndrome round receiver, as the syndrome round sender sees it.
 
     The store counts the rounds still crossing toward it as room taken:
     the controller reserves that room before a round leaves and the
@@ -268,11 +283,11 @@ class StrongSyndromeBufferInput(Protocol):
 
 
 @runtime_checkable
-class SyndromeBufferInput(Protocol):
-    """A syndrome buffer's incoming port, as the controller sees it.
+class WeakSyndromeRoundReceiver(Protocol):
+    """The weak syndrome round receiver, as the controller sees it.
 
     This end owns the store's room and its landing. It answers has_room
-    against the rounds stored and the writes still in flight, the writer
+    against the rounds stored and the writes still in flight, the sender
     reserves that room before the round leaves, and the transfer that
     carries the round lands here: this end stores it, which is the tick
     it becomes readable, and announces it to whoever waits on it. The
@@ -357,7 +372,7 @@ class HeldRounds(Protocol):
     """The waiting line in front of a store, as the store sees it.
 
     A store that is full holds nothing back itself: the round waits at
-    the writer, and the store tells the line when a slot frees so the
+    the sender, and the store tells the line when a slot frees so the
     head can try again. Ruby's MessageBuffer counts that wait as the
     buffer's own statistic
     (tmp/resources/gem5/src/mem/ruby/network/MessageBuffer.cc:76-82), and
@@ -383,7 +398,7 @@ class WindowInput(Protocol):
     plan follows. Both stay one-way; the window manager answers nothing
     back except whether it knows a stream at all, and which store the
     tier that decodes the plan's windows reads from, which decides where
-    the writer publishes a round.
+    the sender publishes a round.
     """
 
     def accept_window_input(

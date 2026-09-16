@@ -5,8 +5,9 @@ seat; which seats a run has and what each is wired to is the assembly
 file's (decsim/assembly.py).
 """
 
-from typing import Optional
+from typing import Optional, Union
 
+import decsim.build.parts as build_parts
 import decsim.config as config
 import decsim.controller.conditional_release as conditional_release_module
 import decsim.controller.controller as controller_module
@@ -15,9 +16,9 @@ import decsim.controller.idle_rounds as idle_rounds_module
 import decsim.controller.instruction_output as instruction_output_module
 import decsim.controller.operation_issue as operation_issue
 import decsim.controller.round_assembly as round_assembly
-import decsim.controller.round_sender as round_sender
 import decsim.controller.round_transmission as round_transmission
 import decsim.controller.settings as controller_settings
+import decsim.controller.syndrome_round_sender as syndrome_round_sender
 import decsim.decoders.decoder_manager as decoder_manager_module
 import decsim.frontends.execution_runtime as execution_runtime_module
 import decsim.pauli_frame.decision_dispatch as decision_dispatch_module
@@ -30,12 +31,16 @@ import decsim.settings as machine_settings
 import decsim.tables as tables
 
 
-def build_conditional_release(parts):
+def build_conditional_release(
+    parts: build_parts.Parts,
+) -> conditional_release_module.ConditionalRelease:
     """The gate a conditional operation's release waits at."""
     return conditional_release_module.ConditionalRelease(parts.engine)
 
 
-def build_decoder_manager(parts):
+def build_decoder_manager(
+    parts: build_parts.Parts,
+) -> decoder_manager_module.DecoderManager:
     """The decoder side's manager: the pool's router, scheduler and units."""
     pool = parts.pool
     settings = parts.settings.decoder_manager
@@ -81,7 +86,7 @@ def build_detection_events(
     return row(former, detection_event_formation_cycles)
 
 
-def build_factory(parts):
+def build_factory(parts: build_parts.Parts) -> ports.MagicStateFactory:
     """The factory of the kind, from the one collaborators record.
 
     A distillation row decodes its corrections on the run's decoder
@@ -106,31 +111,37 @@ def build_factory(parts):
     return row(collaborators)
 
 
-def build_transmitter(parts):
+def build_transmitter(
+    parts: build_parts.Parts,
+) -> round_transmission.RoundTransmitter:
     """The controller's end of the route a written round travels."""
     return round_transmission.RoundTransmitter(parts.engine)
 
 
-def build_round_sender(parts):
+def build_syndrome_round_sender(
+    parts: build_parts.Parts,
+) -> syndrome_round_sender.SyndromeRoundSender:
     """The writer that puts a finished round into every store it reaches."""
-    return round_sender.RoundSender(parts.engine)
+    return syndrome_round_sender.SyndromeRoundSender(parts.engine)
 
 
-def build_rounds_in_flight(parts):
+def build_rounds_in_flight(
+    parts: build_parts.Parts,
+) -> round_assembly.RoundsInFlight:
     """The packing stage's bound on the rounds it has in flight."""
     return round_assembly.RoundsInFlight(
         parts.settings.controller.packing_rounds_in_flight
     )
 
 
-def build_assembler(parts):
+def build_assembler(parts: build_parts.Parts) -> round_assembly.RoundAssembler:
     """The packing stage: fragments in, one packed round out."""
     return round_assembly.RoundAssembler(
         parts.engine, parts.settings.controller
     )
 
 
-def build_qpu(parts):
+def build_qpu(parts: build_parts.Parts) -> cycle_clock.QPUDevice:
     """The device on its cycle clock, one QEC round per cycle."""
     cycle_clock_domain = config.Clock(parts.plan.round_ticks)
     return cycle_clock.QPUDevice(
@@ -138,7 +149,9 @@ def build_qpu(parts):
     )
 
 
-def build_instruction_output(parts):
+def build_instruction_output(
+    parts: build_parts.Parts,
+) -> instruction_output_module.InstructionOutput:
     """The controller's output path to the QPU."""
     settings = parts.settings.controller
     return instruction_output_module.InstructionOutput(
@@ -146,7 +159,11 @@ def build_instruction_output(parts):
     )
 
 
-def build_feedback_streams(parts):
+def build_feedback_streams(
+    parts: build_parts.Parts,
+) -> Union[
+    feedback_streams.NoFeedbackStreams, feedback_streams.FeedbackStreams
+]:
     """The stream bookkeeping, only when the workload has feedback."""
     if not has_feedback(parts.plan):
         return feedback_streams.NoFeedbackStreams()
@@ -159,7 +176,9 @@ def build_feedback_streams(parts):
     )
 
 
-def build_idle_rounds(parts):
+def build_idle_rounds(
+    parts: build_parts.Parts,
+) -> idle_rounds_module.IdleRoundAccounting:
     """The idle accounting, over the resolved patches it charges."""
     patch_by_identity = resolved_patches_by_identity(parts.plan)
     return idle_rounds_module.IdleRoundAccounting(
@@ -167,25 +186,29 @@ def build_idle_rounds(parts):
     )
 
 
-def build_issuer(parts):
+def build_issuer(parts: build_parts.Parts) -> operation_issue.OperationIssuer:
     """The issuer that turns one admitted operation into a command."""
     resolved_operations = parts.plan.run_plan.resolved_operations
     return operation_issue.OperationIssuer(parts.engine, resolved_operations)
 
 
-def build_controller(parts):
+def build_controller(parts: build_parts.Parts) -> controller_module.Controller:
     """The controller's readout intake."""
     return controller_module.Controller(parts.engine, parts.settings.controller)
 
 
-def build_execution_runtime(parts):
+def build_execution_runtime(
+    parts: build_parts.Parts,
+) -> execution_runtime_module.ExecutionRuntime:
     """The runtime that drives every operation's lifecycle."""
     return execution_runtime_module.ExecutionRuntime(
         parts.engine, parts.plan.resource_claims
     )
 
 
-def build_decision_dispatch(parts):
+def build_decision_dispatch(
+    parts: build_parts.Parts,
+) -> decision_dispatch_module.DecisionDispatch:
     """The frame's end of the path a decision takes to the controller."""
     return decision_dispatch_module.DecisionDispatch(parts.engine)
 

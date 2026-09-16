@@ -107,11 +107,11 @@ docstring.
 
 - `decsim/syndrome_buffer/__init__.py`: The syndrome buffers: a finished round kept until its last reader is done.
 - `decsim/syndrome_buffer/round_holds.py`: Which consumer keeps which rounds alive in a syndrome buffer.
-- `decsim/syndrome_buffer/round_input.py`: The weak syndrome buffer's incoming port: room, and the slot a landing takes.
 - `decsim/syndrome_buffer/round_output.py`: A syndrome buffer's outgoing port: it sends the rounds that leave the store.
 - `decsim/syndrome_buffer/settings.py`: A syndrome buffer's capacity and access costs on its named clock.
-- `decsim/syndrome_buffer/strong_round_receiver.py`: The room-side end of controller_to_strong_buffer: room, then landing.
+- `decsim/syndrome_buffer/strong_syndrome_round_receiver.py`: The room-side end of controller_to_strong_buffer: room, then landing.
 - `decsim/syndrome_buffer/syndrome_buffer.py`: A syndrome buffer: finished rounds held until their last hold releases.
+- `decsim/syndrome_buffer/weak_syndrome_round_receiver.py`: The weak syndrome round receiver: room, and the slot a landing takes.
 
 ### windows
 
@@ -151,9 +151,9 @@ docstring.
 - `decsim/controller/operation_issue.py`: The issuer: an admitted operation becomes one QPU command.
 - `decsim/controller/policies.py`: How an idle round of a waiting patch travels: the idle policy rows.
 - `decsim/controller/round_assembly.py`: The assembler: raw measurement fragments become one packed round.
-- `decsim/controller/round_sender.py`: The sender: a finished round into every store it must reach, or held.
 - `decsim/controller/round_transmission.py`: The transmitter: a stored round leaves on its route at the write.
 - `decsim/controller/settings.py`: The controller's settings, and the idle policy it relays through.
+- `decsim/controller/syndrome_round_sender.py`: The sender: a finished round into every store it must reach, or held.
 
 ### decoders
 
@@ -269,6 +269,7 @@ docstring.
 - `decsim/build/decoders.py`: Build the decoder units of both tiers and the pool the manager schedules.
 - `decsim/build/escalation.py`: Build the escalation policy the yaml names, and what it decides on.
 - `decsim/build/listeners.py`: Register the workload with every component, and name every seed root.
+- `decsim/build/parts.py`: What a seat's builder reads: the run's fixtures, and the seats so far.
 - `decsim/build/plan.py`: Build the run's plan: the code, the workload's operations, the windows.
 - `decsim/build/stores.py`: Build one buffer-side seat each, from the run's settings.
 - `decsim/build/window_side.py`: Build one window-side seat each, from the run's settings.

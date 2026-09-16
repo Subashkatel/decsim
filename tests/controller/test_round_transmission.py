@@ -30,10 +30,12 @@ import decsim.observe.link_traffic as link_traffic
 import decsim.observe.round_events as round_events
 import decsim.records.rounds as round_records
 import decsim.records.transfers as transfer_records
-import decsim.syndrome_buffer.round_input as round_input
 import decsim.syndrome_buffer.round_output as round_output
 import decsim.syndrome_buffer.settings as syndrome_buffer_settings
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
+from decsim.syndrome_buffer import (
+    weak_syndrome_round_receiver as weak_syndrome_round_receiver,
+)
 
 CWB_TICKS = config.microseconds_to_ticks(0.25)
 WBD_TICKS = config.microseconds_to_ticks(5.0)
@@ -156,16 +158,18 @@ def transmitter_with(engine, profile, windows=None):
     )
     store_output.transfers = transfers
     store_output.store = store
-    store_input = round_input.SyndromeBufferInput(engine, settings)
-    store_input.store = store
-    store_input.output = store_output
-    store_input.windows = windows
+    weak_receiver = weak_syndrome_round_receiver.WeakSyndromeRoundReceiver(
+        engine, settings
+    )
+    weak_receiver.store = store
+    weak_receiver.output = store_output
+    weak_receiver.windows = windows
     transmitter = round_transmission.RoundTransmitter(engine)
     transmitter.link = links
     transmitter.memory_arrivals = windows
-    transmitter.store_input = store_input
+    transmitter.weak_receiver = weak_receiver
     transmitter.trace.round_event.connect(recorder.record)
-    store_input.trace.round_event.connect(recorder.record)
+    weak_receiver.trace.round_event.connect(recorder.record)
     return transmitter, store, windows, recorder, ledger
 
 

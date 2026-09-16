@@ -38,7 +38,7 @@ class RoundTransmitter:
     memory_arrivals = ports.Port(ports.MemoryRoundArrivals)
     # The weak syndrome buffer's port toward the controller: it handles what
     # lands there and asks the store to send what leaves it
-    store_input = ports.Port(ports.SyndromeBufferInput)
+    weak_receiver = ports.Port(ports.WeakSyndromeRoundReceiver)
 
     def __init__(self, engine) -> None:
         self.engine = engine
@@ -85,14 +85,14 @@ class RoundTransmitter:
         """The weak syndrome buffer took the round and handles the landing.
 
         Everything the landing does to the weak syndrome buffer's record and to
-        whoever waits on it is the weak syndrome buffer's
-        (syndrome_buffer/round_input.py); this sender hears the landing for its
-        in_flight count alone, as gem5's requesting port hands the packet to
-        the peer's own receive method
+        whoever waits on it is the weak syndrome round receiver's
+        (syndrome_buffer/weak_syndrome_round_receiver.py); this sender
+        hears the landing for its in_flight count alone, as gem5's
+        requesting port hands the packet to the peer's own receive method
         (tmp/resources/gem5/src/mem/port.hh:603-614, whose
         src/mem/protocol/timing.cc:49-53 calls peer->recvTimingReq).
         """
-        self.store_input.receive_round(packed)
+        self.weak_receiver.receive_round(packed)
         self._leave_after_publication()
 
     def _leave_after_publication(self) -> None:
@@ -114,7 +114,7 @@ class RoundTransmitter:
         transmitter only asks and hears the landing.
         """
         deliver = functools.partial(self._deliver_feedback_memory, packed)
-        self.store_input.send_memory_round(packed, deliver)
+        self.weak_receiver.send_memory_round(packed, deliver)
 
     def _deliver_feedback_memory(
         self, packed: round_records.PackedRound

@@ -25,7 +25,7 @@ import decsim.records.rounds as round_records
 import decsim.trace_source as trace_source
 
 
-class StrongRoundReceiver:
+class StrongSyndromeRoundReceiver:
     """The room, the writes in flight, and the landing into the store.
 
     Trace source: copy_made(round_key, bits, "controller assembler",
@@ -33,7 +33,7 @@ class StrongRoundReceiver:
     (data_path.md hop 3).
     """
 
-    # a writer built with no window side stores its rounds for a reader
+    # a receiver built with no window side stores its rounds for a reader
     # that never asks
     windows = ports.Port(ports.WindowInput, optional=True)
     store = ports.Port(ports.SyndromeBuffer)
@@ -155,7 +155,7 @@ class StrongRoundReceiver:
 
 @dataclasses.dataclass(frozen=True)
 class _TraceSources:
-    """Every event the strong round sender reports, as one member.
+    """Every event the strong syndrome round receiver reports, as one member.
 
     gem5 groups a component's statistics into one nested Group member
     (tmp/resources/gem5/src/base/stats/group.hh:60-92) rather than one

@@ -93,11 +93,11 @@ The packed round into the weak syndrome buffer. Ends: `controller` to
 `syndrome_buffer`; the send is executed by the controller's transmitter
 (`decsim/controller/round_transmission.py`), and the landing is handled
 by the weak syndrome buffer's own incoming port
-(`decsim/syndrome_buffer/round_input.py`), which stores the round with
+(`decsim/syndrome_buffer/weak_syndrome_round_receiver.py`), which stores the round with
 the landing tick as its publication tick, narrates the copy and the
 intake, and announces the published round to the window manager. That
 end also answers for the room, counting the rounds it holds and the
-writes still in flight, and the controller's writer reserves that room
+writes still in flight, and the controller's sender reserves that room
 before the round leaves. The transmitter hears the landing for its count
 of the rounds on their route and for nothing else.
 
@@ -121,9 +121,9 @@ is the right one.
 
 The same packed round into the strong syndrome buffer, in parallel. Ends:
 `controller` to `syndrome_buffer`; the send is executed by the
-controller's round sender (`decsim/controller/round_sender.py`), and the
+controller's round sender (`decsim/controller/syndrome_round_sender.py`), and the
 landing is handled by the room side
-(`decsim/syndrome_buffer/strong_round_receiver.py`), which reserves the
+(`decsim/syndrome_buffer/strong_syndrome_round_receiver.py`), which reserves the
 room the round will take before it leaves and then stores it with the
 landing tick, or drops it at the door when its operation closed while it
 crossed.

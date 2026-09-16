@@ -24,18 +24,22 @@ profile.
 """
 
 import decsim.config as config
-import decsim.controller.round_sender as round_sender
 import decsim.controller.settings as controller_settings
+import decsim.controller.syndrome_round_sender as syndrome_round_sender
 import decsim.engine as engine_module
 import decsim.links.fabric as fabric_module
 import decsim.links.link_profiles as link_profiles
 import decsim.observe.round_events as round_events
 import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
-import decsim.syndrome_buffer.round_input as round_input
 import decsim.syndrome_buffer.settings as syndrome_buffer_settings
-import decsim.syndrome_buffer.strong_round_receiver as strong_round_receiver
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
+from decsim.syndrome_buffer import (
+    strong_syndrome_round_receiver as strong_syndrome_round_receiver,
+)
+from decsim.syndrome_buffer import (
+    weak_syndrome_round_receiver as weak_syndrome_round_receiver,
+)
 
 STALL = controller_settings.PackingOverflowPolicy.STALL
 DROP = controller_settings.PackingOverflowPolicy.DROP_ROUND
@@ -74,7 +78,7 @@ class RecordingWindows:
         self.published.append(packet.round_index)
 
 
-class RecordingStrongWriter:
+class RecordingStrongReceiver:
     """The room side of the crossing, recording what reaches it."""
 
     def __init__(self, room=True):
@@ -101,7 +105,7 @@ def sender_with(
     on_full=STALL,
 ):
     recorder = round_events.RoundEventRecorder(engine)
-    held = round_sender.HeldRounds(engine, on_full)
+    held = syndrome_round_sender.HeldRounds(engine, on_full)
     held.trace.round_event.connect(recorder.record)
     settings = syndrome_buffer_settings.SyndromeBufferSettings(
         rounds=weak_rounds
@@ -112,19 +116,21 @@ def sender_with(
     profile = link_profiles.logical_reference_profile()
     links = fabric_module.LinkFabric(profile, engine)
     windows = RecordingWindows()
-    weak_input = round_input.SyndromeBufferInput(engine, settings)
-    weak_input.store = weak_store
-    weak_input.windows = windows
-    sender = round_sender.RoundSender(engine)
+    weak_receiver = weak_syndrome_round_receiver.WeakSyndromeRoundReceiver(
+        engine, settings
+    )
+    weak_receiver.store = weak_store
+    weak_receiver.windows = windows
+    sender = syndrome_round_sender.SyndromeRoundSender(engine)
     sender.link = links
-    sender.weak_input = weak_input
+    sender.weak_receiver = weak_receiver
     sender.weak_store = weak_store
     if strong_receiver is not None:
         sender.strong_receiver = strong_receiver
     sender.held_rounds = held
     sender.transmitter = transmitter
     sender.publishes_from_strong_store = publishes_from_strong_store
-    return sender, weak_input, transmitter, recorder
+    return sender, weak_receiver, transmitter, recorder
 
 
 def test_a_round_with_no_room_is_held_and_written_in_order_when_a_slot_frees():
@@ -137,7 +143,7 @@ def test_a_round_with_no_room_is_held_and_written_in_order_when_a_slot_frees():
     waiting line enters.
     """
     engine = engine_module.Engine()
-    sender, weak_input, transmitter, recorder = sender_with(
+    sender, weak_receiver, transmitter, recorder = sender_with(
         engine, weak_rounds=1
     )
     first = packed(1)
@@ -146,9 +152,9 @@ def test_a_round_with_no_room_is_held_and_written_in_order_when_a_slot_frees():
     first_admitted = sender.admit(first)
     second_admitted = sender.admit(second)
     held_while_in_flight = sender.held_rounds.count
-    weak_input.receive_round(first)
+    weak_receiver.receive_round(first)
     held_after_the_landing = sender.held_rounds.count
-    weak_input.store.release_round((1, 1))
+    weak_receiver.store.release_round((1, 1))
 
     assert first_admitted is True
     assert second_admitted is False
@@ -166,8 +172,8 @@ def test_a_round_with_no_room_is_held_and_written_in_order_when_a_slot_frees():
 
 def test_a_strong_primary_window_round_takes_one_hop_into_the_strong_store():
     engine = engine_module.Engine()
-    strong_receiver = RecordingStrongWriter()
-    sender, weak_input, transmitter, _recorder = sender_with(
+    strong_receiver = RecordingStrongReceiver()
+    sender, weak_receiver, transmitter, _recorder = sender_with(
         engine,
         strong_receiver=strong_receiver,
         publishes_from_strong_store=True,
@@ -180,7 +186,7 @@ def test_a_strong_primary_window_round_takes_one_hop_into_the_strong_store():
     engine.run()
 
     assert strong_receiver.written == [1, 2]
-    assert weak_input.writes_in_flight == 1
+    assert weak_receiver.writes_in_flight == 1
     assert transmitter.sent == [2]
 
 
@@ -197,7 +203,9 @@ def test_the_controller_carries_the_round_to_the_room_side_and_lands_it():
     strong_store = syndrome_buffer_module.SyndromeBuffer(store_settings)
     reads = decoding_records.WindowReads((1, 0))
     strong_store.register_hold(reads, [(1, 1)])
-    room_side = strong_round_receiver.StrongRoundReceiver(engine)
+    room_side = strong_syndrome_round_receiver.StrongSyndromeRoundReceiver(
+        engine
+    )
     room_side.store = strong_store
     sender, _weak_store, _transmitter, _recorder = sender_with(
         engine, strong_receiver=room_side
@@ -219,8 +227,8 @@ def test_the_controller_carries_the_round_to_the_room_side_and_lands_it():
 
 def test_a_full_strong_store_holds_the_round_too():
     engine = engine_module.Engine()
-    strong_receiver = RecordingStrongWriter(room=False)
-    sender, weak_input, transmitter, _recorder = sender_with(
+    strong_receiver = RecordingStrongReceiver(room=False)
+    sender, weak_receiver, transmitter, _recorder = sender_with(
         engine, strong_receiver=strong_receiver
     )
     first = packed(1)
@@ -228,8 +236,8 @@ def test_a_full_strong_store_holds_the_round_too():
     admitted = sender.admit(first)
 
     assert admitted is False
-    assert weak_input.store.occupancy == 0
-    assert weak_input.writes_in_flight == 0
+    assert weak_receiver.store.occupancy == 0
+    assert weak_receiver.writes_in_flight == 0
     assert transmitter.sent == []
     assert sender.held_rounds.count == 1
 

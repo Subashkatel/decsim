@@ -30,7 +30,7 @@ The idle accounting, as the QPU sees it: it takes every idle round.
 
 ### `SyndromeBuffer`
 
-The weak syndrome buffer, as its own incoming port sees it.
+The weak syndrome buffer, as its own round receiver sees it.
 
 | Method | What it does |
 | --- | --- |
@@ -62,9 +62,9 @@ The same store, as the window side that reads and holds it sees it.
 | `has_live_operation_reference` | Whether a hold or a stored round still names this operation. |
 | `capacity_rounds` | The slots this store is bounded to, or None for unbounded. |
 
-### `StrongSyndromeBufferInput`
+### `StrongSyndromeRoundReceiver`
 
-The strong syndrome buffer, as syndrome packing sees it.
+The strong syndrome round receiver, as the syndrome round sender sees it.
 
 | Method | What it does |
 | --- | --- |
@@ -72,9 +72,9 @@ The strong syndrome buffer, as syndrome packing sees it.
 | `reserve_write` | Take the room one crossing round will need, before it leaves. |
 | `receive_round` | Take one round that landed here and keep it on arrival. |
 
-### `SyndromeBufferInput`
+### `WeakSyndromeRoundReceiver`
 
-A syndrome buffer's incoming port, as the controller sees it.
+The weak syndrome round receiver, as the controller sees it.
 
 | Method | What it does |
 | --- | --- |

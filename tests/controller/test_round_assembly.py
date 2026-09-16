@@ -64,7 +64,7 @@ def assembler_with(engine, packed, recorder, **settings_fields):
     assembler = round_assembly.RoundAssembler(engine, settings)
     assembler.detection_events = events
     assembler.rounds_in_flight = bound
-    assembler.round_sender = types.SimpleNamespace(admit=packed.append)
+    assembler.syndrome_round_sender = types.SimpleNamespace(admit=packed.append)
     if recorder is not None:
         assembler.trace.round_event.connect(recorder.record)
     return assembler
@@ -79,7 +79,9 @@ def test_the_assembler_hands_a_packed_round_to_its_round_sender():
     assembler.detection_events = events
     assembler.rounds_in_flight = unbounded
     admitted = []
-    assembler.round_sender = types.SimpleNamespace(admit=admitted.append)
+    assembler.syndrome_round_sender = types.SimpleNamespace(
+        admit=admitted.append
+    )
 
     only_fragment = fragment(1)
 
@@ -160,7 +162,7 @@ def test_the_bound_counts_rounds_held_and_on_their_route():
     assembler = round_assembly.RoundAssembler(engine, settings)
     assembler.detection_events = events
     assembler.rounds_in_flight = full
-    assembler.round_sender = types.SimpleNamespace(admit=packed.append)
+    assembler.syndrome_round_sender = types.SimpleNamespace(admit=packed.append)
     first = fragment(1)
 
     with pytest.raises(RuntimeError, match="held for store room: 1, on"):
@@ -211,7 +213,7 @@ def test_detection_events_are_formed_once_from_the_merged_bits():
     assembler = round_assembly.RoundAssembler(engine, settings)
     assembler.detection_events = events
     assembler.rounds_in_flight = unbounded
-    assembler.round_sender = types.SimpleNamespace(admit=packed.append)
+    assembler.syndrome_round_sender = types.SimpleNamespace(admit=packed.append)
     first = fragment(1, fragment_index=0, bits=(1, 0))
     second = fragment(1, fragment_index=1, bits=(0, 1))
 
@@ -240,7 +242,7 @@ def test_events_formed_at_the_decoder_keep_the_raw_measurement_width():
     assembler = round_assembly.RoundAssembler(engine, settings)
     assembler.detection_events = events
     assembler.rounds_in_flight = unbounded
-    assembler.round_sender = types.SimpleNamespace(admit=packed.append)
+    assembler.syndrome_round_sender = types.SimpleNamespace(admit=packed.append)
     first = fragment(1, fragment_index=0, bits=(1, 0))
     second = fragment(1, fragment_index=1, bits=(0, 1))
 
@@ -268,7 +270,9 @@ def test_the_controller_row_delays_the_round_by_its_formation_time():
     assembler = round_assembly.RoundAssembler(engine, settings)
     assembler.detection_events = events
     assembler.rounds_in_flight = unbounded
-    assembler.round_sender = types.SimpleNamespace(admit=departures.record)
+    assembler.syndrome_round_sender = types.SimpleNamespace(
+        admit=departures.record
+    )
 
     only_fragment = fragment(1, bits=(1, 0))
 
@@ -290,7 +294,9 @@ def test_an_uncharged_controller_row_hands_the_round_on_at_once():
     assembler = round_assembly.RoundAssembler(engine, settings)
     assembler.detection_events = events
     assembler.rounds_in_flight = unbounded
-    assembler.round_sender = types.SimpleNamespace(admit=departures.record)
+    assembler.syndrome_round_sender = types.SimpleNamespace(
+        admit=departures.record
+    )
     only_fragment = fragment(1, bits=(1, 0))
 
     assembler.add(only_fragment, 1, round_records.WINDOW_INPUT_ROUTE)

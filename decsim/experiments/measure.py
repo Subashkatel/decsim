@@ -291,8 +291,8 @@ def round_stall_ticks(round_events: list) -> dict:
 
     The wait is the waiting line's own two events: the refusal that held
     the round and the freed slot that admitted it
-    (controller/round_sender.py, HeldRounds). A round that found room is
-    not in here at all.
+    (controller/syndrome_round_sender.py, HeldRounds). A round that found
+    room is not in here at all.
     """
     held_at = {}
     waits = {}

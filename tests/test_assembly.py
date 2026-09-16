@@ -22,28 +22,30 @@ import decsim.build.decoders as decoder_build
 import decsim.build.escalation as escalation_build
 import decsim.build.plan as plan_build
 import decsim.controller.controller as controller_module
-import decsim.controller.round_sender as round_sender
+import decsim.controller.syndrome_round_sender as syndrome_round_sender
 import decsim.decoders.decoder_manager as decoder_manager_module
 import decsim.engine as engine_module
 import decsim.escalation.strong_redecode as strong_redecode_module
 import decsim.frontends.execution_runtime as execution_runtime_module
 import decsim.qpu.cycle_clock as cycle_clock
-import decsim.syndrome_buffer.strong_round_receiver as strong_receiver_module
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 import decsim.windows.window_manager as window_manager_module
 import tests.declared_run as declared_run
+from decsim.syndrome_buffer import (
+    strong_syndrome_round_receiver as strong_syndrome_round_receiver_module,
+)
 
 # nine seats of a switching run, in the order the root builds them
 EXPECTED_SEATS = (
-    ("held_rounds", round_sender.HeldRounds),
+    ("held_rounds", syndrome_round_sender.HeldRounds),
     ("weak_syndrome_buffer", syndrome_buffer_module.SyndromeBuffer),
     ("decoder_manager", decoder_manager_module.DecoderManager),
     ("window_manager", window_manager_module.WindowManager),
     (
-        "strong_round_receiver",
-        strong_receiver_module.StrongRoundReceiver,
+        "strong_syndrome_round_receiver",
+        strong_syndrome_round_receiver_module.StrongSyndromeRoundReceiver,
     ),
-    ("round_sender", round_sender.RoundSender),
+    ("syndrome_round_sender", syndrome_round_sender.SyndromeRoundSender),
     ("qpu", cycle_clock.QPUDevice),
     ("controller", controller_module.Controller),
     ("execution_runtime", execution_runtime_module.ExecutionRuntime),
@@ -71,7 +73,7 @@ def test_a_run_that_never_escalates_has_no_room_side_rows():
     parts = _parts_of(settings)
     names = _seat_names(parts)
     assert "strong_syndrome_buffer" not in names
-    assert "strong_round_receiver" not in names
+    assert "strong_syndrome_round_receiver" not in names
     assert "strong_output" not in names
     assert "strong_redecode" not in names
     assert "weak_syndrome_buffer" in names
@@ -90,9 +92,12 @@ def test_an_escalating_run_builds_the_room_side():
     settings = _switching_settings()
     parts = _parts_of(settings)
     seats = assembly.build_seats(parts)
-    writer = seats["strong_round_receiver"]
+    writer = seats["strong_syndrome_round_receiver"]
     redecode = seats["strong_redecode"]
-    assert isinstance(writer, strong_receiver_module.StrongRoundReceiver)
+    assert isinstance(
+        writer,
+        strong_syndrome_round_receiver_module.StrongSyndromeRoundReceiver,
+    )
     assert isinstance(redecode, strong_redecode_module.StrongRedecode)
 
 

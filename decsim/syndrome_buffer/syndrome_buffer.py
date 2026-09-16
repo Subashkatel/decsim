@@ -1,6 +1,6 @@
 """A syndrome buffer: finished rounds held until their last hold releases.
 
-Table row syndrome_buffer. The store's own incoming port writes each round
+Table row syndrome_buffer. The store's own round receiver writes each round
 once at its landing (accept_packed_round) after asking has_room, the
 window side keeps it alive with holds (RoundHolds), and the slot is
 freed when the last hold releases; the waiting line then hears it, so a
@@ -118,9 +118,9 @@ class SyndromeBuffer:
     def capacity_rounds(self) -> Optional[int]:
         """The slots this store is bounded to, or None for unbounded.
 
-        The plan check, the trace lane and the strong round receiver ask this
-        instead of reading the settings record, so a row bounded some
-        other way answers for itself.
+        The plan check, the trace lane and the strong syndrome round
+        receiver ask this instead of reading the settings record, so a
+        row bounded some other way answers for itself.
         """
         return self.settings.rounds
 

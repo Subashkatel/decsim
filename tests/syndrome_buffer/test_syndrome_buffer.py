@@ -24,8 +24,8 @@ import random
 import pytest
 
 import decsim.config as config
-import decsim.controller.round_sender as round_sender
 import decsim.controller.settings as controller_settings
+import decsim.controller.syndrome_round_sender as syndrome_round_sender
 import decsim.engine as engine_module
 import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
@@ -59,9 +59,9 @@ def packed(round_index: int) -> round_records.PackedRound:
     )
 
 
-def held_rounds() -> round_sender.HeldRounds:
+def held_rounds() -> syndrome_round_sender.HeldRounds:
     engine = engine_module.Engine()
-    return round_sender.HeldRounds(engine, STALL)
+    return syndrome_round_sender.HeldRounds(engine, STALL)
 
 
 def store(rounds=None, waiting_line=None, listener=None):
@@ -265,7 +265,8 @@ def test_a_round_is_readable_at_the_tick_it_is_stored_and_not_before():
     """One call, one tick: the bits and the publication arrive together.
 
     A round with no publication tick is a timing-only round, which no
-    window reads (syndrome_buffer/round_input.py send_memory_round).
+    window reads (syndrome_buffer/weak_syndrome_round_receiver.py,
+    send_memory_round).
     """
     the_store = store()
     reads = decoding_records.WindowReads((1, 0))

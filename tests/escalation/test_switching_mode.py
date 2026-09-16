@@ -576,7 +576,7 @@ def test_every_strong_request_is_cancelled_when_the_weak_tier_is_confident():
     assert tiers == [((1, 0), "weak"), ((1, 1), "weak"), ((1, 2), "weak")]
     assert counts.cancelled == 3
     assert counts.needed == 0
-    machine.strong_round_receiver.check_settled()
+    machine.strong_syndrome_round_receiver.check_settled()
 
 
 def test_every_window_takes_the_strong_result_when_the_weak_tier_is_not():

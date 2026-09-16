@@ -69,7 +69,7 @@ both are built. The papers' figures call them the weak syndrome buffer and the s
 | decsim | The papers | What it is for |
 | --- | --- | --- |
 | weak syndrome buffer, `SyndromeBuffer` in `decsim/syndrome_buffer/syndrome_buffer.py` | the weak syndrome buffer, the streamed decoder buffer | what the weak tier reads, round by round, as it arrives |
-| strong syndrome buffer, the `StrongSyndromeBufferInput` port in `decsim/ports.py`, written by `StrongRoundReceiver` in `decsim/syndrome_buffer/strong_round_receiver.py` | the strong syndrome buffer, the strong side's copy of the rounds | what a strong re-decode reads, in bulk, once its boundaries are known |
+| strong syndrome buffer, a `SyndromeBuffer`; its receiving end is `StrongSyndromeRoundReceiver` in `decsim/syndrome_buffer/strong_syndrome_round_receiver.py`, seen by the sender through the port of that name in `decsim/ports.py` | the strong syndrome buffer, the strong side's copy of the rounds | what a strong re-decode reads, in bulk, once its boundaries are known |
 | hold, `DecoderInputHold`, `PotentialStrong`, `PotentialRestart` | the reason a round may not be dropped yet | one token per consumer that still needs the round |
 
 ## The link paths

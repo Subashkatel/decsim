@@ -132,11 +132,17 @@ SEATS = (
     ("shape", window_side.build_strong_window_shape),
     ("strong_redecode", window_side.build_strong_redecode),
     ("window_manager", window_side.build_window_manager),
-    ("strong_round_receiver", store_build.build_strong_round_receiver),
-    ("store_input", store_build.build_store_input),
+    (
+        "strong_syndrome_round_receiver",
+        store_build.build_strong_syndrome_round_receiver,
+    ),
+    (
+        "weak_syndrome_round_receiver",
+        store_build.build_weak_syndrome_round_receiver,
+    ),
     ("memory_arrivals", decoder_build.build_memory_round_arrivals),
     ("transmitter", controller_side.build_transmitter),
-    ("round_sender", controller_side.build_round_sender),
+    ("syndrome_round_sender", controller_side.build_syndrome_round_sender),
     ("rounds_in_flight", controller_side.build_rounds_in_flight),
     ("assembler", controller_side.build_assembler),
     ("qpu", controller_side.build_qpu),
@@ -154,7 +160,7 @@ WIRES = (
     ("store_transfers.link", "links"),
     ("window_transfers.link", "links"),
     ("transmitter.link", "links"),
-    ("round_sender.link", "links"),
+    ("syndrome_round_sender.link", "links"),
     ("controller.link", "links"),
     ("instruction_output.link", "links"),
     ("decision_dispatch.link", "links"),
@@ -165,11 +171,11 @@ WIRES = (
     ("weak_output.store", "weak_syndrome_buffer"),
     ("strong_output.transfers", "store_transfers"),
     ("strong_output.store", "strong_syndrome_buffer"),
-    ("store_input.store", "weak_syndrome_buffer"),
-    ("store_input.output", "weak_output"),
-    ("store_input.windows", "window_manager"),
-    ("strong_round_receiver.store", "strong_syndrome_buffer"),
-    ("strong_round_receiver.windows", "window_manager"),
+    ("weak_syndrome_round_receiver.store", "weak_syndrome_buffer"),
+    ("weak_syndrome_round_receiver.output", "weak_output"),
+    ("weak_syndrome_round_receiver.windows", "window_manager"),
+    ("strong_syndrome_round_receiver.store", "strong_syndrome_buffer"),
+    ("strong_syndrome_round_receiver.windows", "window_manager"),
     # the window side
     ("models.provider", "error_model_provider"),
     ("models.router", "router"),
@@ -249,18 +255,18 @@ WIRES = (
     # the readout path back through the controller
     ("memory_arrivals.windows", "window_manager"),
     ("transmitter.memory_arrivals", "memory_arrivals"),
-    ("transmitter.store_input", "store_input"),
-    ("round_sender.weak_input", "store_input"),
-    ("round_sender.weak_store", "weak_syndrome_buffer"),
-    ("round_sender.strong_receiver", "strong_round_receiver"),
-    ("round_sender.held_rounds", "held_rounds"),
-    ("round_sender.transmitter", "transmitter"),
-    ("round_sender.windows", "window_manager"),
+    ("transmitter.weak_receiver", "weak_syndrome_round_receiver"),
+    ("syndrome_round_sender.weak_receiver", "weak_syndrome_round_receiver"),
+    ("syndrome_round_sender.weak_store", "weak_syndrome_buffer"),
+    ("syndrome_round_sender.strong_receiver", "strong_syndrome_round_receiver"),
+    ("syndrome_round_sender.held_rounds", "held_rounds"),
+    ("syndrome_round_sender.transmitter", "transmitter"),
+    ("syndrome_round_sender.windows", "window_manager"),
     ("rounds_in_flight.held_rounds", "held_rounds"),
     ("rounds_in_flight.transmitter", "transmitter"),
     ("assembler.detection_events", "detection_events"),
     ("assembler.rounds_in_flight", "rounds_in_flight"),
-    ("assembler.round_sender", "round_sender"),
+    ("assembler.syndrome_round_sender", "syndrome_round_sender"),
     ("controller.assembler", "assembler"),
     # the QPU and the control loop
     ("qpu.readout_receiver", "controller"),
@@ -288,7 +294,7 @@ WIRES = (
 # wired, which is gem5's init; the factory and the execution runtime
 # queue the run's first events instead and start when the run does,
 # which is gem5's startup (sim_object.hh lines 194 and 280).
-STARTS_WHEN_WIRED = ("planner", "window_manager", "round_sender")
+STARTS_WHEN_WIRED = ("planner", "window_manager", "syndrome_round_sender")
 
 # The seed path of every stochastic owner, in the order the run seed
 # hashes them: a seat by name, what one of a seat's readers answers, or
@@ -399,7 +405,11 @@ def _absent_strong_seats(escalation_policy) -> set:
     absent = set()
     if not store_build.uses_strong_store(escalation_policy):
         absent.update(
-            ("strong_syndrome_buffer", "strong_output", "strong_round_receiver")
+            (
+                "strong_syndrome_buffer",
+                "strong_output",
+                "strong_syndrome_round_receiver",
+            )
         )
     if not escalation_policy.requires_strong_context:
         absent.update(("regions", "shape", "strong_redecode"))

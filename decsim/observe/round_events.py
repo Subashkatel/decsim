@@ -1,8 +1,8 @@
 """The flight recorder of the readout path: what happened to every round.
 
 A listener on the round_event source of the QPU's cycle clock, the
-assembler, the held rounds, the transmitter and the weak syndrome buffer's
-incoming port, on the instruction output's output_event, and on the strong
+assembler, the held rounds, the transmitter and the weak syndrome round
+receiver, on the instruction output's output_event, and on the strong
 store's round_stored; the components never read it. The rows are append-only
 and passive; recording never schedules or decides. A finished run's
 terminal states are PUBLISHED, DROPPED or FEEDBACK_MEMORY_DELIVERED;

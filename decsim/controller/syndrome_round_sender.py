@@ -126,13 +126,14 @@ class HeldRounds:
         return False
 
 
-class RoundSender:
+class SyndromeRoundSender:
     """Sends a finished round to both syndrome buffers, or holds it.
 
     It reserves the room each store's own end answers for and hands the
     round to the sends; the slot, the copy and the intake line are the
     receiving end's, at the round's landing there
-    (syndrome_buffer/round_input.py, syndrome_buffer/strong_round_receiver.py).
+    (syndrome_buffer/weak_syndrome_round_receiver.py and
+    syndrome_buffer/strong_syndrome_round_receiver.py).
     """
 
     # the controller's own fabric: it executes the crossing to the strong
@@ -140,12 +141,14 @@ class RoundSender:
     link = ports.Port(ports.Link)
     # The weak syndrome buffer's own end: its room, and the landing that takes
     # the slot
-    weak_input = ports.Port(ports.SyndromeBufferInput)
+    weak_receiver = ports.Port(ports.WeakSyndromeRoundReceiver)
     # The weak syndrome buffer itself, which the window side either reads its
     # windows from or does not
     weak_store = ports.Port(ports.SyndromeBuffer)
     # the room side's end; absent on a run that never reads from it
-    strong_receiver = ports.Port(ports.StrongSyndromeBufferInput, optional=True)
+    strong_receiver = ports.Port(
+        ports.StrongSyndromeRoundReceiver, optional=True
+    )
     held_rounds = ports.Port(ports.HeldRounds)
     transmitter = ports.Port(round_transmission.RoundTransmitter)
     windows = ports.Port(ports.WindowInput)
@@ -174,14 +177,14 @@ class RoundSender:
                 return self.held_rounds.refuse(packed, self.admit)
             self._write_strong(packed)
             return True
-        if not self.weak_input.has_room():
+        if not self.weak_receiver.has_room():
             return self.held_rounds.refuse(packed, self.admit)
         if not self._strong_has_room():
             return self.held_rounds.refuse(packed, self.admit)
         # the round takes its weak syndrome buffer slot when its bits are
         # there: the room is reserved here, and the landing stores and
         # publishes it
-        self.weak_input.reserve_write()
+        self.weak_receiver.reserve_write()
         if self.strong_receiver is not None:
             # the dual write: the same round leaves for the room side in
             # parallel with its weak syndrome buffer publication

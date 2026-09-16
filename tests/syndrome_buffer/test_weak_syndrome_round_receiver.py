@@ -24,10 +24,12 @@ import decsim.engine as engine_module
 import decsim.observe.log_writers as log_writers
 import decsim.ports as ports
 import decsim.records.rounds as round_records
-import decsim.syndrome_buffer.round_input as round_input
 import decsim.syndrome_buffer.settings as syndrome_buffer_settings
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 import tests.declared_run as declared_run
+from decsim.syndrome_buffer import (
+    weak_syndrome_round_receiver as weak_syndrome_round_receiver,
+)
 
 LANDING_TICKS = 40_000
 MEMORY_ROUTE = round_records.SyndromePacketRoute.feedback_memory_round(9)
@@ -78,31 +80,34 @@ def _store(rounds=None) -> syndrome_buffer_module.SyndromeBuffer:
     return syndrome_buffer_module.SyndromeBuffer(settings)
 
 
-def _input_with(engine, store, output=None):
+def _receiver_with(engine, store, output=None):
     windows = _Windows(engine, store)
-    store_input = round_input.SyndromeBufferInput(engine, store.settings)
-    store_input.store = store
-    store_input.windows = windows
+    receiver = weak_syndrome_round_receiver.WeakSyndromeRoundReceiver(
+        engine, store.settings
+    )
+    receiver.store = store
+    receiver.windows = windows
     if output is not None:
-        store_input.output = output
-    return store_input, windows
+        receiver.output = output
+    return receiver, windows
 
 
-def _cross(store_input, packed, landing_ticks=LANDING_TICKS):
+def _cross(receiver, packed, landing_ticks=LANDING_TICKS):
     """One crossing: the room is taken at the send, the slot at the landing."""
-    store_input.reserve_write()
-    store_input.engine.schedule(
-        landing_ticks, lambda: store_input.receive_round(packed)
+    receiver.reserve_write()
+    receiver.engine.schedule(
+        landing_ticks,
+        lambda: receiver.receive_round(packed),
     )
 
 
 def test_a_crossing_round_holds_no_slot_until_it_lands():
     engine = engine_module.Engine()
     store = _store()
-    store_input, _windows = _input_with(engine, store)
+    receiver, _windows = _receiver_with(engine, store)
     packed = _packed(1)
 
-    _cross(store_input, packed)
+    _cross(receiver, packed)
     occupancy_while_crossing = store.occupancy
     readable_while_crossing = store.retained_fragments((1, 1))
     engine.run()
@@ -116,27 +121,27 @@ def test_a_crossing_round_holds_no_slot_until_it_lands():
 def test_the_room_counts_the_write_in_flight_against_the_capacity():
     engine = engine_module.Engine()
     store = _store(rounds=1)
-    store_input, _windows = _input_with(engine, store)
+    receiver, _windows = _receiver_with(engine, store)
     packed = _packed(1)
-    room_before = store_input.has_room()
+    room_before = receiver.has_room()
 
-    _cross(store_input, packed)
-    room_while_crossing = store_input.has_room()
+    _cross(receiver, packed)
+    room_while_crossing = receiver.has_room()
     engine.run()
 
     assert room_before is True
     assert room_while_crossing is False
-    assert store_input.has_room() is False
-    assert store_input.writes_in_flight == 0
+    assert receiver.has_room() is False
+    assert receiver.writes_in_flight == 0
 
 
 def test_the_landing_stamps_the_publication_tick_of_the_end_it_reached():
     engine = engine_module.Engine()
     store = _store()
-    store_input, _windows = _input_with(engine, store)
+    receiver, _windows = _receiver_with(engine, store)
     packed = _packed(1)
 
-    _cross(store_input, packed)
+    _cross(receiver, packed)
     engine.run()
 
     assert store.publication_tick((1, 1)) == LANDING_TICKS
@@ -145,10 +150,10 @@ def test_the_landing_stamps_the_publication_tick_of_the_end_it_reached():
 def test_the_windows_hear_a_landed_round_only_once_it_is_published():
     engine = engine_module.Engine()
     store = _store()
-    store_input, windows = _input_with(engine, store)
+    receiver, windows = _receiver_with(engine, store)
     packed = _packed(1)
 
-    _cross(store_input, packed)
+    _cross(receiver, packed)
     engine.run()
 
     assert windows.published == [(LANDING_TICKS, (1, 1), LANDING_TICKS)]
@@ -157,12 +162,12 @@ def test_the_windows_hear_a_landed_round_only_once_it_is_published():
 def test_the_published_event_is_the_incoming_ports_own():
     engine = engine_module.Engine()
     store = _store()
-    store_input, _windows = _input_with(engine, store)
+    receiver, _windows = _receiver_with(engine, store)
     events = []
-    store_input.trace.round_event.connect(events.append)
+    receiver.trace.round_event.connect(events.append)
     packed = _packed(1)
 
-    _cross(store_input, packed)
+    _cross(receiver, packed)
     engine.run()
 
     kinds_and_ticks = [(event.kind, event.tick) for event in events]
@@ -172,17 +177,17 @@ def test_the_published_event_is_the_incoming_ports_own():
 def test_the_intake_copy_is_made_at_the_landing_by_this_end():
     engine = engine_module.Engine()
     store = _store()
-    store_input, _windows = _input_with(engine, store)
+    receiver, _windows = _receiver_with(engine, store)
     copies = []
 
     def copy_made(round_key, bits, source, destination) -> None:
         made_at = engine.now
         copies.append((made_at, round_key, bits, source, destination))
 
-    store_input.trace.copy_made.connect(copy_made)
+    receiver.trace.copy_made.connect(copy_made)
     packed = _packed(1)
 
-    _cross(store_input, packed)
+    _cross(receiver, packed)
     engine.run()
 
     assert copies == [
@@ -201,16 +206,18 @@ def test_the_buffer_0_line_names_the_hop_the_round_arrived_by():
     log = log_writers.LogWriter()
     engine.io_line.connect(log.write)
     store = _store()
-    store_input, _windows = _input_with(engine, store)
+    receiver, _windows = _receiver_with(engine, store)
     silent_engine = engine_module.Engine()
     silent_log = log_writers.LogWriter()
     silent_engine.line.connect(silent_log.write)
     silent_store = _store()
-    silent_input, _silent_windows = _input_with(silent_engine, silent_store)
+    silent_receiver, _silent_windows = _receiver_with(
+        silent_engine, silent_store
+    )
 
     landed = _packed(1)
-    _cross(store_input, landed)
-    _cross(silent_input, landed)
+    _cross(receiver, landed)
+    _cross(silent_receiver, landed)
     engine.run()
     silent_engine.run()
 
@@ -227,12 +234,12 @@ def test_a_timing_only_round_takes_its_slot_here_and_is_never_published():
     engine = engine_module.Engine()
     store = _store()
     output = _Output()
-    store_input, windows = _input_with(engine, store, output)
+    receiver, windows = _receiver_with(engine, store, output)
     packed = _packed(2, route=MEMORY_ROUTE)
     delivered = []
 
-    store_input.reserve_write()
-    store_input.send_memory_round(packed, lambda: delivered.append(True))
+    receiver.reserve_write()
+    receiver.send_memory_round(packed, lambda: delivered.append(True))
 
     assert output.sent == [(1, 2)]
     assert delivered == [True]
@@ -244,12 +251,12 @@ def test_a_timing_only_round_takes_its_slot_here_and_is_never_published():
 def test_a_write_still_in_flight_at_the_end_of_a_run_is_a_failure():
     engine = engine_module.Engine()
     store = _store()
-    store_input, _windows = _input_with(engine, store)
+    receiver, _windows = _receiver_with(engine, store)
 
-    store_input.reserve_write()
+    receiver.reserve_write()
 
     try:
-        store_input.check_settled()
+        receiver.check_settled()
     except RuntimeError as error:
         assert "1 controller_to_weak_buffer writes in flight" in str(error)
     else:
@@ -259,9 +266,9 @@ def test_a_write_still_in_flight_at_the_end_of_a_run_is_a_failure():
 def test_the_incoming_port_fills_the_declared_port():
     engine = engine_module.Engine()
     store = _store()
-    store_input, _windows = _input_with(engine, store)
+    receiver, _windows = _receiver_with(engine, store)
 
-    assert isinstance(store_input, ports.SyndromeBufferInput)
+    assert isinstance(receiver, ports.WeakSyndromeRoundReceiver)
 
 
 def test_write_cycles_move_every_reaction_point_by_the_store_periods():
@@ -288,17 +295,17 @@ def test_a_priced_write_keeps_its_reservation_until_the_write_edge():
         rounds=1, clock=clock, write_cycles=3
     )
     store = syndrome_buffer_module.SyndromeBuffer(settings)
-    store_input, windows = _input_with(engine, store)
+    receiver, windows = _receiver_with(engine, store)
     packed = _packed(1)
-    store_input.reserve_write()
-    store_input.receive_round(packed)
+    receiver.reserve_write()
+    receiver.receive_round(packed)
     assert store.occupancy == 0
-    assert store_input.writes_in_flight == 1
-    assert store_input.has_room() is False
+    assert receiver.writes_in_flight == 1
+    assert receiver.has_room() is False
     assert windows.published == []
 
     engine.run()
 
-    assert store_input.writes_in_flight == 0
+    assert receiver.writes_in_flight == 0
     assert store.occupancy == 1
     assert windows.published == [(40, (1, 1), 40)]

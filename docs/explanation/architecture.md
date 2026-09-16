@@ -55,9 +55,9 @@ graph TD
     %% Dispatch = pauli_frame
     Qpu["QPU device"] -->|"ReadoutReceiver.accept_qpu_readout"| Controller
     Controller -->|"DetectionEventPlacement.form_before_departure"| Formation["Detection event formation"]
-    Controller -->|"SyndromeBufferInput.has_room"| WeakBuffer["Weak syndrome buffer"]
-    Controller -->|"SyndromeBufferInput.receive_round"| WeakBuffer
-    Controller -->|"StrongSyndromeBufferInput.receive_round"| StrongBuffer["Strong syndrome buffer"]
+    Controller -->|"WeakSyndromeRoundReceiver.has_room"| WeakBuffer["Weak syndrome buffer"]
+    Controller -->|"WeakSyndromeRoundReceiver.receive_round"| WeakBuffer
+    Controller -->|"StrongSyndromeRoundReceiver.receive_round"| StrongBuffer["Strong syndrome buffer"]
     WeakBuffer -->|"WindowInput.accept_window_input"| Windows["Window manager"]
     Windows -->|"WindowModelSource.window_models_for_operation"| Models["Window fault models"]
     Windows -->|"DecodeQueue.enqueue"| Decoders["Decoder manager"]

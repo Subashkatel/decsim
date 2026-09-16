@@ -64,7 +64,7 @@ def observe(
     rather than seats, so they arrive on their own.
     """
     strong_syndrome_buffer = seats.get("strong_syndrome_buffer")
-    strong_round_receiver = seats.get("strong_round_receiver")
+    strong_syndrome_round_receiver = seats.get("strong_syndrome_round_receiver")
     pauli_frame = seats.get("pauli_frame")
     log = _connect_log(observation, engine)
     links = seats["links"]
@@ -75,7 +75,7 @@ def observe(
         assembler=seats["assembler"],
         held_rounds=seats["held_rounds"],
         transmitter=seats["transmitter"],
-        store_input=seats["store_input"],
+        weak_syndrome_round_receiver=seats["weak_syndrome_round_receiver"],
         instruction_output=seats["instruction_output"],
         strong_syndrome_buffer=strong_syndrome_buffer,
     )
@@ -104,10 +104,10 @@ def observe(
         controller=seats["controller"],
         assembler=seats["assembler"],
         held_rounds=seats["held_rounds"],
-        store_input=seats["store_input"],
+        weak_syndrome_round_receiver=seats["weak_syndrome_round_receiver"],
         weak_syndrome_buffer=seats["weak_syndrome_buffer"],
         strong_syndrome_buffer=strong_syndrome_buffer,
-        strong_round_receiver=strong_round_receiver,
+        strong_syndrome_round_receiver=strong_syndrome_round_receiver,
         decoder_manager=seats["decoder_manager"],
         window_manager=seats["window_manager"],
         pauli_frame=pauli_frame,
@@ -227,10 +227,10 @@ def _connect_data_path(
     controller,
     assembler,
     held_rounds,
-    store_input,
+    weak_syndrome_round_receiver,
     weak_syndrome_buffer,
     strong_syndrome_buffer,
-    strong_round_receiver,
+    strong_syndrome_round_receiver,
     decoder_manager,
     window_manager,
     pauli_frame,
@@ -253,8 +253,8 @@ def _connect_data_path(
         for source in _copy_sources(
             controller,
             assembler,
-            store_input,
-            strong_round_receiver,
+            weak_syndrome_round_receiver,
+            strong_syndrome_round_receiver,
             decoder_manager,
             window_manager,
         ):
@@ -267,8 +267,8 @@ def _connect_data_path(
     for source in _copy_sources(
         controller,
         assembler,
-        store_input,
-        strong_round_receiver,
+        weak_syndrome_round_receiver,
+        strong_syndrome_round_receiver,
         decoder_manager,
         window_manager,
     ):
@@ -309,8 +309,8 @@ def _connect_store_counts(
 def _copy_sources(
     controller,
     assembler,
-    store_input,
-    strong_round_receiver,
+    weak_syndrome_round_receiver,
+    strong_syndrome_round_receiver,
     decoder_manager,
     window_manager,
 ) -> list:
@@ -318,10 +318,10 @@ def _copy_sources(
     sources = [
         controller.trace.copy_made,
         assembler.trace.copy_made,
-        store_input.trace.copy_made,
+        weak_syndrome_round_receiver.trace.copy_made,
     ]
-    if strong_round_receiver is not None:
-        sources.append(strong_round_receiver.trace.copy_made)
+    if strong_syndrome_round_receiver is not None:
+        sources.append(strong_syndrome_round_receiver.trace.copy_made)
     for source in decoder_manager.copy_sources():
         sources.append(source)
     for source in window_manager.copy_sources():
@@ -439,13 +439,19 @@ def _connect_round_events(
     assembler,
     held_rounds,
     transmitter,
-    store_input,
+    weak_syndrome_round_receiver,
     instruction_output,
     strong_syndrome_buffer,
 ) -> round_events_module.RoundEventRecorder:
     """The recorder hears every round event, output and strong landing."""
     round_events = round_events_module.RoundEventRecorder(engine)
-    components = (qpu, assembler, held_rounds, transmitter, store_input)
+    components = (
+        qpu,
+        assembler,
+        held_rounds,
+        transmitter,
+        weak_syndrome_round_receiver,
+    )
     for component in components:
         component.trace.round_event.connect(round_events.record)
     instruction_output.trace.output_event.connect(round_events.output)

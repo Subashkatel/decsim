@@ -5,7 +5,7 @@ are allocated (gem5 src/mem/cache/queue.hh:150-153, isFull over
 allocated plus reserve); this end counts a round crossing toward it the
 same way, reserved by the controller before the round leaves. The
 crossing itself is the controller's send and is tested where it is
-executed (tests/controller/test_round_sender.py).
+executed (tests/controller/test_syndrome_round_sender.py).
 
 The whole-run law at the end of the file places that landing in the
 pipeline: under a strong-primary policy the landing is what makes a
@@ -19,9 +19,11 @@ import decsim.engine as engine_module
 import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
 import decsim.syndrome_buffer.settings as syndrome_buffer_settings
-import decsim.syndrome_buffer.strong_round_receiver as strong_round_receiver
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 import tests.declared_run as declared_run
+from decsim.syndrome_buffer import (
+    strong_syndrome_round_receiver as strong_syndrome_round_receiver,
+)
 
 LANDING_TICKS = config.microseconds_to_ticks(0.5)
 
@@ -68,101 +70,104 @@ def room_side(engine, rounds=None, listener=None, windows=None):
     if listener is not None:
         store.trace.round_stored.connect(listener.round_stored)
         store.trace.round_released.connect(listener.round_released)
-    writer = strong_round_receiver.StrongRoundReceiver(engine)
-    writer.store = store
+    receiver = strong_syndrome_round_receiver.StrongSyndromeRoundReceiver(
+        engine
+    )
+    receiver.store = store
     if windows is not None:
-        writer.windows = windows
-    return writer
+        receiver.windows = windows
+    return receiver
 
 
-def cross(engine, writer, round_index: int) -> None:
+def cross(engine, receiver, round_index: int) -> None:
     """One round on its way over the crossing, landing after 0.5 us.
 
     The controller reserves the room and sends; the send itself is the
-    controller's and is tested at tests/controller/test_round_sender.py,
-    so this file stands the round up at the landing tick instead.
+    controller's and is tested at
+    tests/controller/test_syndrome_round_sender.py, so this file stands
+    the round up at the landing tick instead.
     """
-    writer.reserve_write()
+    receiver.reserve_write()
     landing = packet(round_index)
-    engine.schedule(LANDING_TICKS, lambda: writer.receive_round(landing, 3))
+    engine.schedule(LANDING_TICKS, lambda: receiver.receive_round(landing, 3))
 
 
 def test_a_write_lands_after_the_crossing_and_the_listener_hears_it_once():
     engine = engine_module.Engine()
     listener = RecordingListener()
     windows = RecordingWindows()
-    writer = room_side(engine, listener=listener, windows=windows)
+    receiver = room_side(engine, listener=listener, windows=windows)
     reads = decoding_records.WindowReads((1, 0))
-    writer.store.register_hold(reads, [(1, 1)])
+    receiver.store.register_hold(reads, [(1, 1)])
 
-    cross(engine, writer, 1)
-    in_flight = writer.store.retained_fragments((1, 1))
+    cross(engine, receiver, 1)
+    in_flight = receiver.store.retained_fragments((1, 1))
     engine.run()
 
     assert in_flight is None
-    assert writer.store.publication_tick((1, 1)) == LANDING_TICKS
+    assert receiver.store.publication_tick((1, 1)) == LANDING_TICKS
     assert listener.stored == [(1, 1)]
     assert windows.room_rounds == [(1, 1)]
 
 
-def test_the_writer_counts_a_write_in_flight_as_room_taken():
+def test_the_receiver_counts_a_write_in_flight_as_room_taken():
     engine = engine_module.Engine()
-    writer = room_side(engine, rounds=1)
+    receiver = room_side(engine, rounds=1)
     reads = decoding_records.WindowReads((1, 0))
-    writer.store.register_hold(reads, [(1, 1)])
+    receiver.store.register_hold(reads, [(1, 1)])
 
-    cross(engine, writer, 1)
-    room_while_crossing = writer.has_room()
+    cross(engine, receiver, 1)
+    room_while_crossing = receiver.has_room()
     engine.run()
 
     assert room_while_crossing is False
-    assert writer.writes_in_flight == 0
-    assert writer.has_room() is False
-    assert writer.store.occupancy == 1
+    assert receiver.writes_in_flight == 0
+    assert receiver.has_room() is False
+    assert receiver.store.occupancy == 1
 
 
 def test_a_round_whose_readers_resolved_while_crossing_is_dropped_at_landing():
     engine = engine_module.Engine()
-    writer = room_side(engine)
+    receiver = room_side(engine)
     reads = decoding_records.WindowReads((1, 0))
-    writer.store.register_hold(reads, [(1, 1)])
+    receiver.store.register_hold(reads, [(1, 1)])
 
-    cross(engine, writer, 1)
-    writer.store.release_hold(reads)
+    cross(engine, receiver, 1)
+    receiver.store.release_hold(reads)
     engine.run()
 
-    assert writer.store.retained_fragments((1, 1)) is None
-    writer.check_settled()
+    assert receiver.store.retained_fragments((1, 1)) is None
+    receiver.check_settled()
 
 
 def test_a_round_that_lands_after_its_operation_closed_is_dropped():
     engine = engine_module.Engine()
-    writer = room_side(engine, rounds=1)
-    writer.store.open_operation(1)
-    room_before = writer.has_room()
+    receiver = room_side(engine, rounds=1)
+    receiver.store.open_operation(1)
+    room_before = receiver.has_room()
 
-    cross(engine, writer, 1)
-    writer.store.close_operation(1)
+    cross(engine, receiver, 1)
+    receiver.store.close_operation(1)
     engine.run()
 
     assert room_before is True
-    assert writer.store.retained_fragments((1, 1)) is None
-    assert writer.store.occupancy == 0
-    assert writer.store.has_operation(1) is False
-    assert writer.writes_in_flight == 0
-    assert writer.has_room() is True
-    writer.check_settled()
+    assert receiver.store.retained_fragments((1, 1)) is None
+    assert receiver.store.occupancy == 0
+    assert receiver.store.has_operation(1) is False
+    assert receiver.writes_in_flight == 0
+    assert receiver.has_room() is True
+    receiver.check_settled()
 
 
 def test_settlement_reports_a_write_still_in_flight():
     engine = engine_module.Engine()
-    writer = room_side(engine)
+    receiver = room_side(engine)
     reads = decoding_records.WindowReads((1, 0))
-    writer.store.register_hold(reads, [(1, 1)])
-    cross(engine, writer, 1)
+    receiver.store.register_hold(reads, [(1, 1)])
+    cross(engine, receiver, 1)
 
     with pytest.raises(RuntimeError, match="1 controller_to_strong_buffer"):
-        writer.check_settled()
+        receiver.check_settled()
 
 
 # ---- the landing in the whole pipeline

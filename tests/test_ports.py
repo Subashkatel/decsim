@@ -192,15 +192,15 @@ def test_the_memory_round_port_declares_what_the_transmitter_calls():
     assert _undeclared(called, ("MemoryRoundArrivals",)) == {}
 
 
-def test_the_store_input_port_declares_what_the_controller_calls():
+def test_the_weak_receiver_port_declares_what_the_controller_calls():
     """The controller holds the weak syndrome buffer's port only as this port.
 
     Both of the controller's references to it: the transmitter's, which
-    sends and hears the landing, and the writer's, which asks that end
+    sends and hears the landing, and the sender's, which asks that end
     for room and reserves it before the round leaves.
     """
-    called = _called_on(("store_input", "weak_input"), ("controller",))
-    assert _undeclared(called, ("SyndromeBufferInput",)) == {}
+    called = _called_on(("weak_receiver", "weak_receiver"), ("controller",))
+    assert _undeclared(called, ("WeakSyndromeRoundReceiver",)) == {}
 
 
 def _decsim_modules() -> list:

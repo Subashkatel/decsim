@@ -20,9 +20,9 @@ import dataclasses
 import functools
 from typing import Optional
 
-import decsim.controller.round_sender as round_sender
 import decsim.controller.round_transmission as round_transmission
 import decsim.controller.settings as controller_settings
+import decsim.controller.syndrome_round_sender as syndrome_round_sender
 import decsim.ports as ports
 import decsim.records.identity as identity_records
 import decsim.records.rounds as round_records
@@ -76,7 +76,9 @@ class RoundAssembler:
     """
 
     # the one end a packed round leaves by, so the port names the class
-    round_sender = ports.Port(round_sender.RoundSender)
+    syndrome_round_sender = ports.Port(
+        syndrome_round_sender.SyndromeRoundSender
+    )
     detection_events = ports.Port(ports.DetectionEventPlacement)
     rounds_in_flight = ports.Port(RoundsInFlight)
 
@@ -215,10 +217,10 @@ class RoundAssembler:
             self.detection_events.detection_event_formation_cycles
         )
         if detection_event_formation_cycles == 0:
-            self.round_sender.admit(packed)
+            self.syndrome_round_sender.admit(packed)
             return
         delay = self._delay(detection_event_formation_cycles)
-        hand_on = functools.partial(self.round_sender.admit, packed)
+        hand_on = functools.partial(self.syndrome_round_sender.admit, packed)
         self.engine.schedule(
             delay, hand_on, label="controller form detection events"
         )

@@ -1,4 +1,4 @@
-"""The weak syndrome buffer's incoming port: room, and the slot a landing takes.
+"""The weak syndrome round receiver: room, and the slot a landing takes.
 
 A round occupies a slot when its write completes, and is readable then.
 The link landing starts that write; a zero write cost completes at the
@@ -43,7 +43,7 @@ must wait for a recvReqRetry"); and Ruby sums the same two counts
 (`tmp/resources/gem5/src/mem/ruby/network/MessageBuffer.cc:181`
 "if (current_size + current_stall_size + n <= m_max_size)", the two sizes
 read at `:155-158`). This is the shape strong syndrome buffer already has
-(strong_round_receiver.py:48-53), so both stores now answer the same
+(strong_syndrome_round_receiver.py:48-53), so both stores now answer the same
 question by the same shape of object.
 
 Two calls of the controller arrive here, both about the weak syndrome buffer. A
@@ -68,8 +68,8 @@ import decsim.syndrome_buffer.settings as syndrome_buffer_settings
 import decsim.trace_source as trace_source
 
 
-class SyndromeBufferInput:
-    """The weak syndrome buffer's port toward the controller, bound by the root.
+class WeakSyndromeRoundReceiver:
+    """The weak syndrome buffer's receiving end: room, in flight, landing.
 
     Trace sources: round_event(RoundEvent) with kind PUBLISHED, and
     copy_made(round_key, bits, "controller assembler", "weak syndrome buffer")
@@ -113,7 +113,8 @@ class SyndromeBufferInput:
         (validation buffer_contract.md, the weak syndrome buffer).
 
         A round whose operation closed while it crossed is dropped at the
-        door on the strong side (strong_round_receiver.py _drop_landing).
+        door on the strong side (strong_syndrome_round_receiver.py,
+        _drop_landing).
         It cannot reach this door: the window manager refuses a round of
         an operation whose store closed by raising
         (windows/window_manager.py _refuse_unplanned_round), that being
@@ -209,7 +210,7 @@ class SyndromeBufferInput:
 
 @dataclasses.dataclass(frozen=True)
 class _TraceSources:
-    """Every event the store's incoming port reports, as one member.
+    """Every event the receiver reports, as one member.
 
     gem5 groups a component's statistics into one nested Group member
     (tmp/resources/gem5/src/base/stats/group.hh:60-92) rather than one

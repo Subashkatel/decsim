@@ -1147,7 +1147,7 @@ def test_both_stores_settle_empty_at_the_end_of_an_escalating_run():
 
     assert machine.weak_syndrome_buffer.occupancy == 0
     assert machine.strong_syndrome_buffer.occupancy == 0
-    assert machine.strong_round_receiver.writes_in_flight == 0
+    assert machine.strong_syndrome_round_receiver.writes_in_flight == 0
 
 
 def test_the_execution_and_the_decoding_views_agree_on_the_workload():
@@ -1472,7 +1472,7 @@ def test_a_landing_after_its_operations_close_costs_the_result_nothing(
     free = late_landing_shot(free_directory, free_links)
 
     assert priced.result.terminal_status == "complete"
-    assert priced.machine.strong_round_receiver.store.occupancy == 0
+    assert priced.machine.strong_syndrome_round_receiver.store.occupancy == 0
     assert frame_commit_ticks(priced.machine) == frame_commit_ticks(
         free.machine
     )

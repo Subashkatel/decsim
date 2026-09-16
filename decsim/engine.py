@@ -5,7 +5,8 @@ Time is a count of ticks; one microsecond is one million ticks
 actions are due at the same tick, the one with the lower priority number
 runs first; when they share a priority, the one scheduled first runs
 first. That is SimPy's ordering (simpy.core.Environment): time, then
-priority, then arrival.
+priority, then arrival. A caller names the priority it wants out of
+Priority below rather than passing a number.
 
 The engine reports through three trace sources (trace_source.py)
 and holds no observer: line carries each narrated line's text, io_line
@@ -18,6 +19,7 @@ DPRINTF), so the narrator's listeners write the text they are given.
 """
 
 import dataclasses
+import enum
 import heapq
 import itertools
 from typing import Callable
@@ -26,6 +28,26 @@ import decsim.config as config
 import decsim.trace_source as trace_source
 
 Action = Callable[[], None]
+
+
+class Priority(enum.IntEnum):
+    """The order two actions due at the same tick run in; lower first.
+
+    gem5 names each priority beside the reason for it rather than
+    passing a number at the call
+    (tmp/resources/gem5/src/sim/eventq.hh lines 138-244), where
+    Default_Pri is zero and every other name orders one kind of event
+    against the rest of the tick's work. DEFAULT is every event whose
+    tick alone fixes its place. The other two order one protected
+    cycle inside its boundary tick: the boundary opens and the
+    operations held for it may start, then the stream's round is
+    emitted, then a region whose close was requested is sealed
+    (controller/feedback_streams.py).
+    """
+
+    DEFAULT = 0
+    PROTECTED_ROUND = 1
+    PROTECTED_SEAL = 2
 
 
 @dataclasses.dataclass(order=True)
@@ -51,7 +73,11 @@ class Engine:
         self._sequence_numbers = itertools.count()
 
     def schedule(
-        self, delay: int, action: Action, label: str = "", priority: int = 0
+        self,
+        delay: int,
+        action: Action,
+        label: str = "",
+        priority: Priority = Priority.DEFAULT,
     ) -> None:
         """Queue an action to run `delay` ticks from now."""
         if delay < 0:

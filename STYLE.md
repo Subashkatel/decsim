@@ -250,9 +250,12 @@ says so.
 This is the shape of every component. The ownership and the name table
 are gem5's (a SimObject's Python class is its params; `allClasses` maps
 a name to a class); the table plus one abstract class per pluggable part
-is sinter's (`BUILT_IN_DECODERS` and `Decoder`); the wiring is by
-constructor, not gem5's late port bind, because Python needs no second
-step. It applies to every component.
+is sinter's (`BUILT_IN_DECODERS` and `Decoder`); the wiring is gem5's
+late port bind: a component declares each neighbour as a `ports.Port`
+class attribute, its constructor takes settings only, and the root binds
+every wire by attribute assignment after every component is built, then
+calls `start` on each in build order. A port bound twice or left unbound
+is refused by name. It applies to every component.
 
 A port is a small Protocol in `decsim/ports.py` with the
 methods one component needs from another, named for what they do:

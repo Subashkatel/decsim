@@ -408,7 +408,7 @@ Every function that branches has a test that reaches each branch through
 the public surface, or a gate point that does. A branch no test and no
 gate point reaches is either removed under rule 4 or given its test in
 the same commit. `tools/check.sh` reports every function over the line
-(ruff's mccabe rule at five); the count is 91 on 2026-09-16 and goes down,
+(ruff's mccabe rule at five); the count was 91 when the rule landed and goes down,
 never up.
 
 ## Tests

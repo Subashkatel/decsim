@@ -39,7 +39,7 @@ context it reads rather than the r_strong rounds it commits, so its
 decode cost is conservative against Theorem 1 rather than optimistic.
 
 The restart window's weak decode may read back into the strong region
-from Buffer 0 (escalation.restart_reread_buffer_regions buffer
+from the weak syndrome buffer (escalation.restart_reread_buffer_regions buffer
 regions), so those rounds, the last absorbed window's commit rounds,
 must still be stored when the plan lands, whether the absorbed
 windows' inputs are in flight or already landed in a unit. Every
@@ -175,9 +175,9 @@ class ContextWindow(StrongWindowPorts):
     past face, and a buffer of raw context is the standard answer to an
     open face (Skoric 2209.08552 line 388; Tan 2209.09219 line 1021).
 
-    The job is built as soon as its context is stored in syndrome
-    buffer 1, and priced for the context rounds that exist: a window at
-    the operation's edge has a shorter context than commit + 2 buffer.
+    The job is built as soon as its context is stored in the strong
+    syndrome buffer, and priced for the context rounds that exist: a
+    window at the operation's edge has a shorter context than commit + 2 buffer.
     A context round still crossing controller_to_strong_buffer holds the
     job instead, because Step 1 feeds both decoders the same data and a
     model that prices transport starts the strong decoder when its copy
@@ -213,7 +213,7 @@ class ContextWindow(StrongWindowPorts):
     def release_conditions(
         self, assignment: StrongAssignment
     ) -> pending_strong_windows.ReleaseConditions:
-        """The rounds of its own context, stored in syndrome buffer 1."""
+        """The rounds of its own context, held in the strong syndrome buffer."""
         return _stored_rounds_conditions(assignment.held_plan)
 
     def held_job(
@@ -253,8 +253,8 @@ class NearSeamWindow(StrongWindowPorts):
     first round layer, closed by the initialisation.
 
     The job waits for what the two-sided context row waits for, its own
-    rounds stored in syndrome buffer 1, and absorbs nothing, so the weak
-    chain runs on untouched and there is no restart window.
+    rounds stored in the strong syndrome buffer, and absorbs nothing, so the
+    weak chain runs on untouched and there is no restart window.
     """
 
     absorbs_weak_windows = False
@@ -280,7 +280,7 @@ class NearSeamWindow(StrongWindowPorts):
     def release_conditions(
         self, assignment: StrongAssignment
     ) -> pending_strong_windows.ReleaseConditions:
-        """The rounds it reads, stored in syndrome buffer 1."""
+        """The rounds it reads, stored in the strong syndrome buffer."""
         return _stored_rounds_conditions(assignment.held_plan)
 
     def held_job(
@@ -472,8 +472,8 @@ class ForwardWindow(StrongWindowPorts):
         An absorbed window's request, and the restart window's request
         built on its old shape: early-shipped at data-complete, parked
         on the escalated window's boundary, which never arrives. Their
-        Buffer 0 holds end with them, in flight or landed; the restart
-        window's potential restart hold keeps every round its re-sliced
+        the weak syndrome buffer holds end with them, in flight or landed; the
+        restart window's potential restart hold keeps every round its re-sliced
         decode reads, the re-read range among them, until the plan ends.
         """
         stale_keys = list(resolved_region.absorbed_window_keys)
@@ -755,11 +755,11 @@ def _assignment_of(
 def _stored_rounds_conditions(
     held: "_HeldStrongRedo",
 ) -> pending_strong_windows.ReleaseConditions:
-    """The rounds the row reads, stored in syndrome buffer 1."""
+    """The rounds the row reads, stored in the strong syndrome buffer."""
     return pending_strong_windows.ReleaseConditions(
         stored_data_of_operation=held.key[0],
         name="context_stored",
-        released_description="strong context stored in syndrome buffer 1",
+        released_description="strong context stored in strong syndrome buffer",
     )
 
 
@@ -784,7 +784,7 @@ def _log_hold(
     shape.engine.log(
         log_sources.DECODER_MANAGER,
         f"{held.label}: strong start deferred until the context "
-        f"rounds {list(crossing)} are stored in syndrome buffer 1",
+        f"rounds {list(crossing)} are stored in strong syndrome buffer",
     )
 
 

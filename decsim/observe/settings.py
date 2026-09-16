@@ -24,7 +24,7 @@ OBSERVATION_KEYS = (
     "log_component_io",
     "check_windows_with",
     "record_switching_windows",
-    "round_store_occupancy",
+    "syndrome_buffer_occupancy",
     "backlog_trace",
     "decoder_utilization",
     "decoder_memory_occupancy",
@@ -47,9 +47,9 @@ class ObservationSettings:
     received, holds and emitted). check_windows_with tesseract re-decodes
     every window with the Tesseract referee and counts disagreements,
     never priced. record_switching_windows keeps every request and
-    service record for the switching views; round_store_occupancy builds
-    the L5 listener on Buffer 0; backlog_trace builds the decode backlog
-    sampler the D7 harness reads; decoder_utilization and
+    service record for the switching views; syndrome_buffer_occupancy builds
+    the L5 listener on the weak syndrome buffer; backlog_trace builds the
+    decode backlog sampler the D7 harness reads; decoder_utilization and
     decoder_memory_occupancy build the unit-count and memory sweeps'
     samplers; data_movement builds the copy, reference and move counters
     the RunResult carries.
@@ -59,7 +59,7 @@ class ObservationSettings:
     log_component_io: bool = False
     check_windows_with: str = "none"
     record_switching_windows: bool = False
-    round_store_occupancy: bool = False
+    syndrome_buffer_occupancy: bool = False
     backlog_trace: bool = False
     decoder_utilization: bool = False
     decoder_memory_occupancy: bool = False
@@ -78,7 +78,9 @@ class ObservationSettings:
         check_windows_with = _window_check(section)
         log_component_io = _boolean(section, "log_component_io")
         record_switching_windows = _boolean(section, "record_switching_windows")
-        round_store_occupancy = _boolean(section, "round_store_occupancy")
+        syndrome_buffer_occupancy = _boolean(
+            section, "syndrome_buffer_occupancy"
+        )
         backlog_trace = _boolean(section, "backlog_trace")
         decoder_utilization = _boolean(section, "decoder_utilization")
         decoder_memory_occupancy = _boolean(section, "decoder_memory_occupancy")
@@ -90,7 +92,7 @@ class ObservationSettings:
             log_component_io=log_component_io,
             check_windows_with=check_windows_with,
             record_switching_windows=record_switching_windows,
-            round_store_occupancy=round_store_occupancy,
+            syndrome_buffer_occupancy=syndrome_buffer_occupancy,
             backlog_trace=backlog_trace,
             decoder_utilization=decoder_utilization,
             decoder_memory_occupancy=decoder_memory_occupancy,

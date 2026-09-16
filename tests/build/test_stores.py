@@ -1,6 +1,6 @@
-"""Building the two round stores, the strong writer and the frame.
+"""Building the two syndrome buffers, the strong receiver and the frame.
 
-The room-side store exists only when a tier reads from it, and a
+The strong syndrome buffer exists only when a tier reads from it, and a
 separate controller readout cost needs a link card that leaves that cost
 out, which is the finding I7 Part 1 slice 4(d) moved onto the one card
 it is about.
@@ -15,8 +15,8 @@ import decsim.build.stores as store_build
 import decsim.engine as engine_module
 import decsim.records.windows as window_records
 import decsim.settings as machine_settings
-import decsim.syndrome_buffer.round_store as round_store_module
 import decsim.syndrome_buffer.settings as store_settings
+import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 import tests.declared_run as declared_run
 
 
@@ -45,31 +45,31 @@ def test_buffer_zero_is_built_from_the_kind_the_section_names():
     settings = _machine_settings()
 
     parts = _parts(settings)
-    store = store_build.build_round_store(parts)
+    store = store_build.build_weak_syndrome_buffer(parts)
 
-    kind = settings.round_store.kind
-    assert isinstance(store, round_store_module.ROUND_STORES[kind])
+    kind = settings.weak_syndrome_buffer.kind
+    assert isinstance(store, syndrome_buffer_module.SYNDROME_BUFFERS[kind])
 
 
-def test_a_round_store_kind_that_names_no_row_is_refused():
-    round_store = store_settings.RoundStoreSettings(kind="tape")
-    settings = _machine_settings(round_store=round_store)
+def test_a_syndrome_buffer_kind_that_names_no_row_is_refused():
+    weak_syndrome_buffer = store_settings.SyndromeBufferSettings(kind="tape")
+    settings = _machine_settings(weak_syndrome_buffer=weak_syndrome_buffer)
 
     with pytest.raises(ValueError) as refusal:
         store_build.check_store_kinds(settings)
 
-    assert "round_store.kind" in str(refusal.value)
+    assert "weak_syndrome_buffer.kind" in str(refusal.value)
 
 
 def test_a_room_side_kind_that_names_no_row_is_refused_though_unused():
-    """A weak-only run builds no room-side store; its yaml is read anyway."""
-    strong_round_store = store_settings.RoundStoreSettings(kind="tape")
-    settings = _machine_settings(strong_round_store=strong_round_store)
+    """A weak-only run builds no strong syndrome buffer but reads its yaml."""
+    strong_syndrome_buffer = store_settings.SyndromeBufferSettings(kind="tape")
+    settings = _machine_settings(strong_syndrome_buffer=strong_syndrome_buffer)
 
     with pytest.raises(ValueError) as refusal:
         store_build.check_store_kinds(settings)
 
-    assert "strong_round_store.kind" in str(refusal.value)
+    assert "strong_syndrome_buffer.kind" in str(refusal.value)
 
 
 def test_a_weak_only_run_reads_nothing_from_the_room_side():

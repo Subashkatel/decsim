@@ -1,6 +1,6 @@
-"""A round store: finished rounds held until their last hold releases.
+"""A syndrome buffer: finished rounds held until their last hold releases.
 
-Table row round_store. The store's own incoming port writes each round
+Table row syndrome_buffer. The store's own incoming port writes each round
 once at its landing (accept_packed_round) after asking has_room, the
 window side keeps it alive with holds (RoundHolds), and the slot is
 freed when the last hold releases; the waiting line then hears it, so a
@@ -25,7 +25,7 @@ import decsim.ports as ports
 import decsim.records.identity as identity_records
 import decsim.records.rounds as round_records
 import decsim.syndrome_buffer.round_holds as round_holds
-import decsim.syndrome_buffer.settings as round_store_settings
+import decsim.syndrome_buffer.settings as syndrome_buffer_settings
 import decsim.trace_source as trace_source
 
 
@@ -55,7 +55,7 @@ class _StoredRound:
         self.publication_tick: Optional[int] = None
 
 
-class RoundStore:
+class SyndromeBuffer:
     """The store: rounds by key, their holds, and the operations it serves.
 
     Its state is the settings, the rounds, the holds, the operations and
@@ -68,7 +68,7 @@ class RoundStore:
 
     def __init__(
         self,
-        settings: round_store_settings.RoundStoreSettings,
+        settings: syndrome_buffer_settings.SyndromeBufferSettings,
     ) -> None:
         self.settings = settings
         self.round_by_key: dict = {}
@@ -118,7 +118,7 @@ class RoundStore:
     def capacity_rounds(self) -> Optional[int]:
         """The slots this store is bounded to, or None for unbounded.
 
-        The plan check, the trace lane and the room-side writer ask this
+        The plan check, the trace lane and the strong round receiver ask this
         instead of reading the settings record, so a row bounded some
         other way answers for itself.
         """
@@ -243,12 +243,12 @@ class RoundStore:
         if self.round_by_key:
             held = list(self.round_by_key)
             raise RuntimeError(
-                f"the round store still holds rounds {held} at the end"
+                f"the syndrome buffer still holds rounds {held} at the end"
             )
         held_keys = self.holds.held_round_keys()
         if held_keys:
             raise RuntimeError(
-                f"the round store has unresolved holds on {held_keys} "
+                f"the syndrome buffer has unresolved holds on {held_keys} "
                 f"(rounds expected but never written, or holders never "
                 f"released)"
             )
@@ -329,9 +329,9 @@ def _range_text(low: int, high: int) -> str:
     return f"{low}..{high}"
 
 
-# round_store.kind and strong_round_store.kind name one of these rows.
-# The table sits beside the class rather than in the package's
-# settings.py, which this module imports for RoundStoreSettings.
-ROUND_STORES = {
-    "round_store": RoundStore,
+# weak_syndrome_buffer.kind and strong_syndrome_buffer.kind name one of these
+# rows. The table sits beside the class rather than in the package's
+# settings.py, which this module imports for SyndromeBufferSettings.
+SYNDROME_BUFFERS = {
+    "syndrome_buffer": SyndromeBuffer,
 }

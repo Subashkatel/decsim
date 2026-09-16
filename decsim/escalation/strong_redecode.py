@@ -35,10 +35,10 @@ class StrongRedecode:
 
     shape = ports.Port(strong_window_shapes.StrongWindowShape)
     # the two ends that execute this tier's sends: the weak decoder's
-    # selection leaves by the decoder output, and syndrome buffer 1
+    # selection leaves by the decoder output, and the strong syndrome buffer
     # sends the strong input
     decoder_output = ports.Port(ports.DecoderOutput)
-    strong_output = ports.Port(ports.RoundStoreOutput)
+    strong_output = ports.Port(ports.SyndromeBufferOutput)
     decode_queue = ports.Port(ports.DecodeQueue)
     # the strong job's return path
     verdict = ports.Port(ports.WindowVerdict)
@@ -231,7 +231,7 @@ class StrongRedecode:
     ) -> int:
         """Send the input at dispatch; returns the delay the pool expects.
 
-        The unit is assigned first, then syndrome buffer 1 moves the
+        The unit is assigned first, then strong syndrome buffer moves the
         input into that unit's memory; a job selected at
         the verdict also waits for its selection to arrive, and the
         pool's estimate is the later of the two.

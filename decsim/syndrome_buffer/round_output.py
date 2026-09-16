@@ -1,4 +1,4 @@
-"""A round store's outgoing port: it sends the rounds that leave the store.
+"""A syndrome buffer's outgoing port: it sends the rounds that leave the store.
 
 Whoever executes a send is an end of that hop, and the end a round
 leaves from is the store that holds it. OMNeT++ enforces the rule at
@@ -26,11 +26,11 @@ import decsim.records.rounds as round_records
 import decsim.records.transfers as transfer_records
 
 
-class RoundStoreOutput:
+class SyndromeBufferOutput:
     """One store's link to the decoders it feeds, bound once by the root."""
 
     transfers = ports.Port(ports.WindowTransfers)
-    store = ports.Port(ports.RoundStore)
+    store = ports.Port(ports.SyndromeBuffer)
 
     def __init__(
         self,

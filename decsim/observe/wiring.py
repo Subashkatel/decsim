@@ -35,11 +35,11 @@ import decsim.observe.queue_depth as queue_depth_module
 import decsim.observe.referee_audit as referee_audit_module
 import decsim.observe.result_ledger as result_ledger_module
 import decsim.observe.round_events as round_events_module
-import decsim.observe.round_store_occupancy as round_store_occupancy_module
 import decsim.observe.runtime_stamps as runtime_stamps_module
 import decsim.observe.sampled_shots as sampled_shots_module
 import decsim.observe.settings as observe_settings
 import decsim.observe.stage_records as stage_records_module
+import decsim.observe.syndrome_buffer_occupancy as occupancy_module
 import decsim.observe.trace_writer as trace_writer_module
 import decsim.observe.window_ledger as window_ledger_module
 
@@ -63,8 +63,8 @@ def observe(
     source, the decoder pool and the operations are the run's fixtures
     rather than seats, so they arrive on their own.
     """
-    strong_round_store = seats.get("strong_round_store")
-    strong_round_writer = seats.get("strong_round_writer")
+    strong_syndrome_buffer = seats.get("strong_syndrome_buffer")
+    strong_round_receiver = seats.get("strong_round_receiver")
     pauli_frame = seats.get("pauli_frame")
     log = _connect_log(observation, engine)
     links = seats["links"]
@@ -77,10 +77,10 @@ def observe(
         transmitter=seats["transmitter"],
         store_input=seats["store_input"],
         instruction_output=seats["instruction_output"],
-        strong_round_store=strong_round_store,
+        strong_syndrome_buffer=strong_syndrome_buffer,
     )
-    round_store_occupancy = _round_store_occupancy(
-        observation, engine, seats["round_store"]
+    syndrome_buffer_occupancy = _syndrome_buffer_occupancy(
+        observation, engine, seats["weak_syndrome_buffer"]
     )
     window_ledger = _connect_window_ledger(seats["window_manager"])
     result_ledger = _connect_result_ledger(seats["window_manager"])
@@ -105,9 +105,9 @@ def observe(
         assembler=seats["assembler"],
         held_rounds=seats["held_rounds"],
         store_input=seats["store_input"],
-        round_store=seats["round_store"],
-        strong_round_store=strong_round_store,
-        strong_round_writer=strong_round_writer,
+        weak_syndrome_buffer=seats["weak_syndrome_buffer"],
+        strong_syndrome_buffer=strong_syndrome_buffer,
+        strong_round_receiver=strong_round_receiver,
         decoder_manager=seats["decoder_manager"],
         window_manager=seats["window_manager"],
         pauli_frame=pauli_frame,
@@ -131,7 +131,7 @@ def observe(
         referee_audit=referee_audit,
         sampled_shots=sampled_shots,
         round_events=round_events,
-        round_store_occupancy=round_store_occupancy,
+        syndrome_buffer_occupancy=syndrome_buffer_occupancy,
         pauli_frame=pauli_frame,
         operations=operations,
         trace_writer=trace_writer,
@@ -184,17 +184,17 @@ def _connect_command_events(qpu) -> command_events_module.CommandEvents:
     return events
 
 
-def _round_store_occupancy(
+def _syndrome_buffer_occupancy(
     observation: observe_settings.ObservationSettings,
     engine: engine_module.Engine,
-    round_store,
+    weak_syndrome_buffer,
 ):
-    """The L5 listener on Buffer 0, only when the observation asks."""
-    if not observation.round_store_occupancy:
+    """The L5 listener on the weak syndrome buffer, only when asked for."""
+    if not observation.syndrome_buffer_occupancy:
         return None
-    occupancy = round_store_occupancy_module.RoundStoreOccupancy(engine)
-    round_store.trace.round_stored.connect(occupancy.round_stored)
-    round_store.trace.round_released.connect(occupancy.round_released)
+    occupancy = occupancy_module.SyndromeBufferOccupancy(engine)
+    weak_syndrome_buffer.trace.round_stored.connect(occupancy.round_stored)
+    weak_syndrome_buffer.trace.round_released.connect(occupancy.round_released)
     return occupancy
 
 
@@ -228,9 +228,9 @@ def _connect_data_path(
     assembler,
     held_rounds,
     store_input,
-    round_store,
-    strong_round_store,
-    strong_round_writer,
+    weak_syndrome_buffer,
+    strong_syndrome_buffer,
+    strong_round_receiver,
     decoder_manager,
     window_manager,
     pauli_frame,
@@ -245,16 +245,16 @@ def _connect_data_path(
     if data_movement is not None:
         qpu.trace.round_emitted.connect(data_movement.round_emitted)
         links.trace.transfer_delivered.connect(data_movement.transfer_delivered)
-        _connect_store_counts(data_movement, round_store)
-        if strong_round_store is not None:
-            _connect_store_counts(data_movement, strong_round_store)
+        _connect_store_counts(data_movement, weak_syndrome_buffer)
+        if strong_syndrome_buffer is not None:
+            _connect_store_counts(data_movement, strong_syndrome_buffer)
         for source in decoder_manager.reference_sources():
             source.connect(data_movement.hold_registered)
         for source in _copy_sources(
             controller,
             assembler,
             store_input,
-            strong_round_writer,
+            strong_round_receiver,
             decoder_manager,
             window_manager,
         ):
@@ -268,7 +268,7 @@ def _connect_data_path(
         controller,
         assembler,
         store_input,
-        strong_round_writer,
+        strong_round_receiver,
         decoder_manager,
         window_manager,
     ):
@@ -279,9 +279,13 @@ def _connect_data_path(
     )
     assembler.trace.round_event.connect(in_assembly)
     held_rounds.trace.round_event.connect(trace_writer.round_held_for_room)
-    _connect_store_trace(trace_writer, round_store, "Buffer 0")
-    if strong_round_store is not None:
-        _connect_store_trace(trace_writer, strong_round_store, "Buffer 1")
+    _connect_store_trace(
+        trace_writer, weak_syndrome_buffer, "weak syndrome buffer"
+    )
+    if strong_syndrome_buffer is not None:
+        _connect_store_trace(
+            trace_writer, strong_syndrome_buffer, "strong syndrome buffer"
+        )
     _connect_decoder_trace(trace_writer, decoder_manager, pool)
     _connect_window_trace(trace_writer, window_manager, decoder_manager)
     if pauli_frame is not None:
@@ -306,7 +310,7 @@ def _copy_sources(
     controller,
     assembler,
     store_input,
-    strong_round_writer,
+    strong_round_receiver,
     decoder_manager,
     window_manager,
 ) -> list:
@@ -316,8 +320,8 @@ def _copy_sources(
         assembler.trace.copy_made,
         store_input.trace.copy_made,
     ]
-    if strong_round_writer is not None:
-        sources.append(strong_round_writer.trace.copy_made)
+    if strong_round_receiver is not None:
+        sources.append(strong_round_receiver.trace.copy_made)
     for source in decoder_manager.copy_sources():
         sources.append(source)
     for source in window_manager.copy_sources():
@@ -437,7 +441,7 @@ def _connect_round_events(
     transmitter,
     store_input,
     instruction_output,
-    strong_round_store,
+    strong_syndrome_buffer,
 ) -> round_events_module.RoundEventRecorder:
     """The recorder hears every round event, output and strong landing."""
     round_events = round_events_module.RoundEventRecorder(engine)
@@ -445,8 +449,10 @@ def _connect_round_events(
     for component in components:
         component.trace.round_event.connect(round_events.record)
     instruction_output.trace.output_event.connect(round_events.output)
-    if strong_round_store is not None:
-        strong_round_store.trace.round_stored.connect(round_events.round_stored)
+    if strong_syndrome_buffer is not None:
+        strong_syndrome_buffer.trace.round_stored.connect(
+            round_events.round_stored
+        )
     return round_events
 
 
@@ -564,7 +570,7 @@ def _assembled(
     referee_audit: referee_audit_module.RefereeAudit,
     sampled_shots: sampled_shots_module.SampledShots,
     round_events,
-    round_store_occupancy,
+    syndrome_buffer_occupancy,
     pauli_frame,
     operations: tuple,
     trace_writer: Optional[trace_writer_module.TraceWriter],
@@ -617,5 +623,5 @@ def _assembled(
         decoder_utilization=decoder_utilization,
         decoder_memory_occupancy=decoder_memory_occupancy,
         round_events=round_events,
-        round_store_occupancy=round_store_occupancy,
+        syndrome_buffer_occupancy=syndrome_buffer_occupancy,
     )

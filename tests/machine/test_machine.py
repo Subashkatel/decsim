@@ -53,8 +53,8 @@ import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 import decsim.seeding as seeding
 import decsim.settings as machine_settings
-import decsim.syndrome_buffer.round_store as round_store_module
-import decsim.syndrome_buffer.settings as round_store_settings
+import decsim.syndrome_buffer.settings as syndrome_buffer_settings
+import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 import decsim.windows.boundary_policies as boundary_policies
 import decsim.windows.built_window_models as built_window_models
 import decsim.windows.settings as window_settings
@@ -224,16 +224,16 @@ def test_a_decoder_kind_off_the_table_is_refused_naming_the_rows():
 def test_a_strong_store_kind_off_the_table_is_refused_even_when_unused():
     # The weak baseline never reads the strong store, but the yaml still
     # names its kind, and a kind off the table is a mistake in the yaml.
-    strong_round_store = round_store_settings.RoundStoreSettings(
+    strong_syndrome_buffer = syndrome_buffer_settings.SyndromeBufferSettings(
         kind="off_table"
     )
     settings = machine_settings.MachineSettings(
-        strong_round_store=strong_round_store
+        strong_syndrome_buffer=strong_syndrome_buffer
     )
     with pytest.raises(
         ValueError,
-        match="strong_round_store.kind 'off_table' is not a row of its "
-        r"table; the rows are \['round_store'\]",
+        match="strong_syndrome_buffer.kind 'off_table' is not a row of its "
+        r"table; the rows are \['syndrome_buffer'\]",
     ):
         machine_module.Machine.build(settings)
 
@@ -533,41 +533,43 @@ def test_the_cluster_gap_is_not_a_tier_kind_under_any_escalation(
         machine_module.Machine.build(settings, 0)
 
 
-class CountingRoundStore(round_store_module.RoundStore):
+class CountingSyndromeBuffer(syndrome_buffer_module.SyndromeBuffer):
     """A table row for the plug-in test: the store, counting its writes."""
 
     def __init__(self, settings):
-        round_store_module.RoundStore.__init__(self, settings)
+        syndrome_buffer_module.SyndromeBuffer.__init__(self, settings)
         self.stored_count = 0
 
     def accept_packed_round(self, packet, *, publication_tick):
         self.stored_count += 1
-        round_store_module.RoundStore.accept_packed_round(
+        syndrome_buffer_module.SyndromeBuffer.accept_packed_round(
             self, packet, publication_tick=publication_tick
         )
 
 
-def test_a_new_round_store_is_one_class_and_one_table_row():
+def test_a_new_syndrome_buffer_is_one_class_and_one_table_row():
     """Gate point 1's settings run to completion on a store added as a row."""
     config_path = CONFIGS / "weak_decoder_baseline.yaml"
     config = experiment.load_experiment(config_path)
     settings = config.point_settings(
         physical_error_probability=0.003, distance=3, round_period_us=1.0
     )
-    round_store = dataclasses.replace(settings.round_store, kind="counting")
-    settings = dataclasses.replace(settings, round_store=round_store)
-    round_store_module.ROUND_STORES["counting"] = CountingRoundStore
+    counting = dataclasses.replace(
+        settings.weak_syndrome_buffer, kind="counting"
+    )
+    settings = dataclasses.replace(settings, weak_syndrome_buffer=counting)
+    syndrome_buffer_module.SYNDROME_BUFFERS["counting"] = CountingSyndromeBuffer
     try:
         machine = machine_module.Machine.build(settings, 0)
         result = machine.run()
     finally:
-        del round_store_module.ROUND_STORES["counting"]
+        del syndrome_buffer_module.SYNDROME_BUFFERS["counting"]
     assert result.terminal_status == "complete"
-    assert type(machine.round_store) is CountingRoundStore
+    assert type(machine.weak_syndrome_buffer) is CountingSyndromeBuffer
     fired = [
         line for line in machine.observation.log.lines if "fires round" in line
     ]
-    assert machine.round_store.stored_count == len(fired)
+    assert machine.weak_syndrome_buffer.stored_count == len(fired)
     assert fired
 
 
@@ -1097,7 +1099,7 @@ def publication_ticks(published):
     return ticks
 
 
-def test_a_full_round_store_stalls_the_controller_instead_of_dropping():
+def test_a_full_syndrome_buffer_stalls_the_controller_instead_of_dropping():
     """A round with no slot waits upstream and is published in order.
 
     A real-time decoder backpressures its source rather than discarding
@@ -1111,8 +1113,10 @@ def test_a_full_round_store_stalls_the_controller_instead_of_dropping():
     seven at 16 us and round 8 waits past 17 us for the first window's
     input to land instead of being dropped.
     """
-    seven_rounds = round_store_settings.RoundStoreSettings(rounds=7)
-    machine = declared_run.weak_only_run(rounds=12, round_store=seven_rounds)
+    seven_rounds = syndrome_buffer_settings.SyndromeBufferSettings(rounds=7)
+    machine = declared_run.weak_only_run(
+        rounds=12, weak_syndrome_buffer=seven_rounds
+    )
     published = published_rounds(machine)
     ticks = publication_ticks(published)
     publication_tick_by_round = dict(published)
@@ -1133,7 +1137,7 @@ def test_both_stores_settle_empty_at_the_end_of_an_escalating_run():
     """The last commit releases every hold either store placed.
 
     A store keeps a round while any holder still needs it and frees it
-    on the last release (decsim/syndrome_buffer/round_store.py), so a
+    on the last release (decsim/syndrome_buffer/syndrome_buffer.py), so a
     round left behind is a leak that grows over a sweep of shots
     without ever failing a run. Escalating every window places the
     longest-lived holds the machine has: the room-side context of a
@@ -1141,9 +1145,9 @@ def test_both_stores_settle_empty_at_the_end_of_an_escalating_run():
     """
     machine = declared_run.switching_run(escalation_probability=1.0, rounds=9)
 
-    assert machine.round_store.occupancy == 0
-    assert machine.strong_round_store.occupancy == 0
-    assert machine.strong_round_writer.writes_in_flight == 0
+    assert machine.weak_syndrome_buffer.occupancy == 0
+    assert machine.strong_syndrome_buffer.occupancy == 0
+    assert machine.strong_round_receiver.writes_in_flight == 0
 
 
 def test_the_execution_and_the_decoding_views_agree_on_the_workload():
@@ -1291,7 +1295,7 @@ def test_the_controller_writes_every_round_into_buffer_0_over_a_priced_hop():
 
     Toshio et al. 2510.25222 price the syndrome data of each round
     between the system controller and the weak decoder as T_comm^weak
-    (Table I), so the write into syndrome buffer 0 is a transfer like
+    (Table I), so the write into the weak syndrome buffer is a transfer like
     every other hop rather than a free store: reference.yaml at d = 3
     puts its fifteen rounds on controller_to_weak_buffer. The two hops
     carry different widths, because the card's row forms the detection
@@ -1310,12 +1314,12 @@ def test_the_controller_writes_every_round_into_buffer_0_over_a_priced_hop():
 
 
 def test_a_strong_only_run_writes_every_round_into_buffer_1_over_a_priced_hop():
-    """The same law on the room-side store, the only one it fills.
+    """The same law on the strong syndrome buffer, the only one it fills.
 
     T_comm^strong is Toshio's symbol for the same transport to the
     strong decoder, and a strong-primary plan reads its windows from
-    syndrome buffer 1, so every round takes controller_to_strong_buffer
-    once, at the width it leaves the controller, and syndrome buffer 0
+    strong syndrome buffer, so every round takes controller_to_strong_buffer
+    once, at the width it leaves the controller, and the weak syndrome buffer
     sees none of them.
     """
     machine = reference_run("strong_only")
@@ -1468,7 +1472,7 @@ def test_a_landing_after_its_operations_close_costs_the_result_nothing(
     free = late_landing_shot(free_directory, free_links)
 
     assert priced.result.terminal_status == "complete"
-    assert priced.machine.strong_round_writer.store.occupancy == 0
+    assert priced.machine.strong_round_receiver.store.occupancy == 0
     assert frame_commit_ticks(priced.machine) == frame_commit_ticks(
         free.machine
     )

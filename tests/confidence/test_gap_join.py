@@ -2,10 +2,10 @@
 
 Design audit note 12 sections 4.1 to 4.4: the window side submits both
 forced-class jobs at one instant, both queue in the weak pool, each unit
-is fed from Buffer 0, and weak_decoder.units alone decides whether the
-pair overlaps. The rule the data-movement study rests on is one copy per
-unit that reads the window: one unit moves the window's bits once and is
-busy for the sum of the two solves, two units move them twice and
+is fed from the weak syndrome buffer, and weak_decoder.units alone decides
+whether the pair overlaps. The rule the data-movement study rests on is one
+copy per unit that reads the window: one unit moves the window's bits once and
+is busy for the sum of the two solves, two units move them twice and
 overlap, and the committed corrections are the same either way.
 """
 

@@ -36,7 +36,7 @@ escalation:
                                    # forwarding cycles
   kind: weak_baseline              # weak_baseline | strong_only | switching.
                                    # strong_only wakes windows from syndrome
-                                   # buffer 1, moves inputs on
+                                   # strong syndrome buffer, moves inputs on
                                    # strong_buffer_to_strong_decoder, results
                                    # on strong_decoder_to_frame. switching adds
                                    # the keys below (refused for any other
@@ -179,7 +179,7 @@ escalation:
 #                                  # 1 re-reads one buffer region of the strong
 #                                  # region as the restart window's far
 #                                  # boundary, and the strong region keeps the
-#                                  # crossing faults; it costs Buffer 0 one
+#                                  # crossing faults; it costs the weak syndrome buffer one
 #                                  # more buffer region per bounded window
 #                                  # The complementary gap is two solves of
 #                                  # one window, each pinned to one logical
@@ -296,7 +296,7 @@ controller:                        # controller work per round, in cycles of its
   packing_rounds_in_flight: null   # packing assembly workspace: rounds in flight
                                    # through the packing stage. null = unbounded
   packing_overflow: stall          # stall | drop_round: what the controller does
-                                   # with a finished round Buffer 0 (or the packing
+                                   # with a finished round the weak syndrome buffer (or the packing
                                    # workspace) cannot take. stall holds it upstream
                                    # and writes it in order once a slot frees, the
                                    # backpressure real-time stacks apply to their
@@ -314,7 +314,7 @@ controller:                        # controller work per round, in cycles of its
                                    # measurement outcomes become detection
                                    # events. controller forms them in the
                                    # assembler and sends the events on, so
-                                   # Buffer 0 and the tier's input link carry the
+                                   # the weak syndrome buffer and the tier's input link carry the
                                    # narrower round: "inside the workstation,
                                    # measurements are converted into detections
                                    # and then streamed to the real-time decoding
@@ -401,24 +401,24 @@ links:                             # a kind, then one card per path; null = the
   qpu_to_controller: {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
                                    # QPU -> controller, one readout
   controller_to_weak_buffer: {latency_cycles: 1, clock: fridge, bits_per_cycle: 1.0, channels: 8}
-                                   # controller -> syndrome buffer 0 (the weak
+                                   # controller -> weak syndrome buffer (the weak
                                    # buffer), one round
   controller_to_strong_buffer: null
-                                   # controller -> syndrome buffer 1 (the strong
+                                   # controller -> strong syndrome buffer (the strong
                                    # buffer), one round. Parallel switching
                                    # (escalation.run_both_at_once) builds the strong
                                    # job at weak readiness, so this hop must not lag
-                                   # the buffer 0 publication path
+                                   # the weak syndrome buffer publication path
                                    # (controller_to_weak_buffer); a slower one
                                    # refuses loudly at strong-job build
                                    # ("controller_to_strong_buffer lag beyond
                                    # the escalation margin")
   weak_buffer_to_weak_decoder: {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
-                                   # buffer 0 -> weak decoder, one window
+                                   # weak syndrome buffer -> weak decoder, one window
   weak_decoder_to_strong_decoder: null
                                    # weak -> strong escalation decision
   strong_buffer_to_strong_decoder: null
-                                   # syndrome buffer 1 -> strong decoder, one window
+                                   # strong syndrome buffer -> strong decoder, one window
   decoder_to_decoder: {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
                                    # decoder -> decoder boundary handoff
   weak_decoder_to_frame: {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
@@ -427,7 +427,7 @@ links:                             # a kind, then one card per path; null = the
   frame_to_controller: null        # Pauli frame -> controller, a release
   controller_to_qpu: null          # controller -> QPU, an instruction
 
-round_store:                       # Buffer 0, the upstream round store
+weak_syndrome_buffer:            # the weak syndrome buffer, on the decoder chip
   clock: fridge                    # a clocks domain; absent uses controller.clock
   write_cycles: 0                  # per-round write before storage/publication
   read_cycles: 0                   # one bulk read per primary window, before
@@ -438,7 +438,7 @@ round_store:                       # Buffer 0, the upstream round store
                                    # 2510.21600 lines 500-509; separate stage
                                    # cycles: gem5 src/mem/XBar.py frontend_latency
                                    # and forward_latency
-  kind: round_store                # the one row today
+  kind: syndrome_buffer            # the one row today
   rounds: null                     # capacity in rounds. When it is full the
                                    # controller holds the finished round and
                                    # publishes it in order once a slot frees,
@@ -446,12 +446,12 @@ round_store:                       # Buffer 0, the upstream round store
                                    # source; controller.packing_overflow chooses
                                    # that hold or a drop. null = unbounded
 
-strong_round_store:                # syndrome buffer 1, the strong-side store
+strong_syndrome_buffer:          # the strong syndrome buffer, on the strong host
                                    # (exists only when the escalation uses it)
-  kind: round_store
+  kind: syndrome_buffer
   rounds: null                     # capacity in rounds. When it is full the
                                    # controller holds the finished round, the
-                                   # same waiting line Buffer 0 uses, and it
+                                   # same waiting line the weak syndrome buffer uses, and it
                                    # enters once a slot frees. null = unbounded
 
 # The two decoder tiers are two distinct units (Toshio 2510.25222:
@@ -582,7 +582,7 @@ strong_decoder:                    # the accurate tier: slow, lower LER
     release_cycles_per_job: 1
     detection_event_latency_cycles: 5
                                    # as above, on this tier's own clock: the
-                                   # strong tier reads Buffer 1, so it forms the
+                                   # strong tier reads the strong syndrome buffer, so it forms the
                                    # rounds it reads itself
     detection_event_cycles_per_round: 1
                                    # as above: one round a clock through the
@@ -682,7 +682,7 @@ observation:                       # what a run records beyond its results
                                    # of 2000 shots writes one file, not 2000
   record_switching_windows: false  # true keeps every decode request and service record
                                    # for the switching study's per-window rows
-  round_store_occupancy: false     # true samples Buffer 0's held-round count at every
+  syndrome_buffer_occupancy: false     # true samples the weak syndrome buffer's held-round count at every
                                    # change, the occupancy the L5 harness reads
   backlog_trace: false             # true samples the undecoded-round backlog after
                                    # every action, the step function the D7 harness reads

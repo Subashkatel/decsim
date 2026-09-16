@@ -621,12 +621,12 @@ def _timeline_lanes(document) -> _TimelineLanes:
     """The links this shot moved data on, and the store it filled."""
     channels = document.channels()
     store_path = "controller_to_weak_buffer"
-    store_name = "buffer 0"
+    store_name = "weak syndrome buffer"
     input_path = "weak_buffer_to_weak_decoder"
     output_path = "weak_decoder_to_frame"
     if store_path not in channels:
         store_path = "controller_to_strong_buffer"
-        store_name = "syndrome buffer 1"
+        store_name = "strong syndrome buffer"
     if input_path not in channels:
         input_path = "strong_buffer_to_strong_decoder"
     if output_path not in channels:

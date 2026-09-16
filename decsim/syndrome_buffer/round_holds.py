@@ -1,4 +1,4 @@
-"""Which consumer keeps which rounds alive in a round store.
+"""Which consumer keeps which rounds alive in a syndrome buffer.
 
 A hold is a token (a window key, a request key) that names the rounds it
 reads. A round stays in its store while any live hold names it; the store

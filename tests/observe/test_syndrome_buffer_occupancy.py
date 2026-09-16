@@ -4,7 +4,7 @@ Referent: the sample-path form of Little's law (Stidham 1974, "A last
 word on L = lambda W"): over a window in which every arrival departs,
 the integral of the number in the system equals the sum of the times
 each one spent there. The listener hears round_stored and round_released
-from a RoundStore and needs nothing else; here a random trace of stores
+from a SyndromeBuffer and needs nothing else; here a random trace of stores
 and releases drives a real store.
 """
 
@@ -12,10 +12,10 @@ import functools
 import random
 
 import decsim.engine as engine_module
-import decsim.observe.round_store_occupancy as round_store_occupancy
+import decsim.observe.syndrome_buffer_occupancy as syndrome_buffer_occupancy
 import decsim.records.rounds as round_records
-import decsim.syndrome_buffer.round_store as round_store_module
-import decsim.syndrome_buffer.settings as round_store_settings
+import decsim.syndrome_buffer.settings as syndrome_buffer_settings
+import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 
 
 def packet(round_index: int) -> round_records.SyndromeRoundPacket:
@@ -34,9 +34,9 @@ def run_random_trace(seed: int):
     """Stores at random ticks, each released a random time later."""
     generator = random.Random(seed)
     engine = engine_module.Engine()
-    listener = round_store_occupancy.RoundStoreOccupancy(engine)
-    settings = round_store_settings.RoundStoreSettings()
-    store = round_store_module.RoundStore(settings)
+    listener = syndrome_buffer_occupancy.SyndromeBufferOccupancy(engine)
+    settings = syndrome_buffer_settings.SyndromeBufferSettings()
+    store = syndrome_buffer_module.SyndromeBuffer(settings)
     store.trace.round_stored.connect(listener.round_stored)
     store.trace.round_released.connect(listener.round_released)
     residences = []
@@ -67,9 +67,9 @@ def test_the_occupancy_integral_equals_the_residence_sum_over_random_traces():
 
 def test_the_peak_is_the_most_rounds_stored_at_once():
     engine = engine_module.Engine()
-    listener = round_store_occupancy.RoundStoreOccupancy(engine)
-    settings = round_store_settings.RoundStoreSettings()
-    store = round_store_module.RoundStore(settings)
+    listener = syndrome_buffer_occupancy.SyndromeBufferOccupancy(engine)
+    settings = syndrome_buffer_settings.SyndromeBufferSettings()
+    store = syndrome_buffer_module.SyndromeBuffer(settings)
     store.trace.round_stored.connect(listener.round_stored)
     store.trace.round_released.connect(listener.round_released)
     first = packet(1)
@@ -87,9 +87,9 @@ def test_the_peak_is_the_most_rounds_stored_at_once():
 
 def test_the_time_average_is_the_integral_over_the_span():
     engine = engine_module.Engine()
-    listener = round_store_occupancy.RoundStoreOccupancy(engine)
-    settings = round_store_settings.RoundStoreSettings()
-    store = round_store_module.RoundStore(settings)
+    listener = syndrome_buffer_occupancy.SyndromeBufferOccupancy(engine)
+    settings = syndrome_buffer_settings.SyndromeBufferSettings()
+    store = syndrome_buffer_module.SyndromeBuffer(settings)
     store.trace.round_stored.connect(listener.round_stored)
     store.trace.round_released.connect(listener.round_released)
     first = packet(1)

@@ -72,8 +72,8 @@ import decsim.controller.idle_rounds as idle_rounds_module
 import decsim.controller.instruction_output as instruction_output_module
 import decsim.controller.operation_issue as operation_issue
 import decsim.controller.round_assembly as round_assembly
+import decsim.controller.round_sender as round_sender
 import decsim.controller.round_transmission as round_transmission
-import decsim.controller.round_writes as round_writes
 import decsim.decoders.decoder_manager as decoder_manager_module
 import decsim.engine as engine_module
 import decsim.frontends.execution_runtime as execution_runtime_module
@@ -87,8 +87,8 @@ import decsim.records.results as result_records
 import decsim.seeding as seeding
 import decsim.settings as machine_settings
 import decsim.syndrome_buffer.round_input as round_input_module
-import decsim.syndrome_buffer.round_store as round_store_module
-import decsim.syndrome_buffer.strong_round_writer as strong_round_writer_module
+import decsim.syndrome_buffer.strong_round_receiver as strong_receiver_module
+import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 import decsim.windows.window_manager as window_manager_module
 
 
@@ -107,14 +107,14 @@ class Machine:
     observation: observation_module.Observation
     links: fabric.LinkFabric
     conditional_release: conditional_release_module.ConditionalRelease
-    round_store: round_store_module.RoundStore
-    store_input: round_input_module.RoundStoreInput
-    strong_round_store: Optional[round_store_module.RoundStore]
-    strong_round_writer: Optional[strong_round_writer_module.StrongRoundWriter]
+    weak_syndrome_buffer: syndrome_buffer_module.SyndromeBuffer
+    store_input: round_input_module.SyndromeBufferInput
+    strong_syndrome_buffer: Optional[syndrome_buffer_module.SyndromeBuffer]
+    strong_round_receiver: Optional[strong_receiver_module.StrongRoundReceiver]
     pauli_frame: Optional[pauli_frame_module.PauliFrame]
     window_manager: window_manager_module.WindowManager
     assembler: round_assembly.RoundAssembler
-    round_writer: round_writes.RoundWriter
+    round_sender: round_sender.RoundSender
     transmitter: round_transmission.RoundTransmitter
     decoder_manager: decoder_manager_module.DecoderManager
     active_decoder: Optional[Any]
@@ -167,8 +167,8 @@ class Machine:
         seed_roots = assembly.seed_roots(parts, seats)
         seeding.bind_run_seed(root_seed, seed_roots)
         listeners = _observe(settings, parts, seats, seed)
-        strong_round_store = seats.get("strong_round_store")
-        strong_round_writer = seats.get("strong_round_writer")
+        strong_syndrome_buffer = seats.get("strong_syndrome_buffer")
+        strong_round_receiver = seats.get("strong_round_receiver")
         pauli_frame = seats.get("pauli_frame")
         listener_build.load_program(
             plan,
@@ -184,14 +184,14 @@ class Machine:
             observation=listeners,
             links=seats["links"],
             conditional_release=seats["conditional_release"],
-            round_store=seats["round_store"],
+            weak_syndrome_buffer=seats["weak_syndrome_buffer"],
             store_input=seats["store_input"],
-            strong_round_store=strong_round_store,
-            strong_round_writer=strong_round_writer,
+            strong_syndrome_buffer=strong_syndrome_buffer,
+            strong_round_receiver=strong_round_receiver,
             pauli_frame=pauli_frame,
             window_manager=seats["window_manager"],
             assembler=seats["assembler"],
-            round_writer=seats["round_writer"],
+            round_sender=seats["round_sender"],
             transmitter=seats["transmitter"],
             decoder_manager=seats["decoder_manager"],
             active_decoder=pool.active,
@@ -233,11 +233,11 @@ class Machine:
         self.decoder_manager.check_decode_work_settled()
         self.window_manager.check_settled()
         self.assembler.check_settled()
-        self.round_writer.check_settled()
+        self.round_sender.check_settled()
         self.transmitter.check_settled()
         self.store_input.check_settled()
-        if self.strong_round_writer is not None:
-            self.strong_round_writer.check_settled()
+        if self.strong_round_receiver is not None:
+            self.strong_round_receiver.check_settled()
         return _capture_result(self)
 
 

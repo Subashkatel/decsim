@@ -15,7 +15,7 @@ import tests.observe.gate_point as gate_point
 
 STUDY_KNOBS = (
     "record_switching_windows",
-    "round_store_occupancy",
+    "syndrome_buffer_occupancy",
     "backlog_trace",
     "decoder_utilization",
     "decoder_memory_occupancy",
@@ -122,7 +122,7 @@ def test_every_study_knob_is_read_from_the_section():
     settings = observe_settings.ObservationSettings.from_yaml(section)
 
     assert settings.record_switching_windows is True
-    assert settings.round_store_occupancy is True
+    assert settings.syndrome_buffer_occupancy is True
     assert settings.backlog_trace is True
     assert settings.decoder_utilization is True
     assert settings.decoder_memory_occupancy is True

@@ -1,4 +1,4 @@
-"""The hold bookkeeping of a round store: a round lives while a hold names it.
+"""A syndrome buffer's hold bookkeeping: a round lives while a hold names it.
 
 The laws are the store's own (decsim/syndrome_buffer/round_holds.py): a
 round loses its last holder exactly once, a hold moves without freeing

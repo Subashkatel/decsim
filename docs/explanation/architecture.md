@@ -42,8 +42,8 @@ graph TD
     %% Qpu = qpu
     %% Controller = controller
     %% Formation = detector_error_model
-    %% Buffer0 = syndrome_buffer
-    %% Buffer1 = syndrome_buffer
+    %% WeakBuffer = syndrome_buffer
+    %% StrongBuffer = syndrome_buffer
     %% Windows = windows
     %% Models = qpu
     %% Decoders = decoders
@@ -55,19 +55,19 @@ graph TD
     %% Dispatch = pauli_frame
     Qpu["QPU device"] -->|"ReadoutReceiver.accept_qpu_readout"| Controller
     Controller -->|"DetectionEventPlacement.form_before_departure"| Formation["Detection event formation"]
-    Controller -->|"RoundStoreInput.has_room"| Buffer0["Syndrome buffer 0"]
-    Controller -->|"RoundStoreInput.receive_round"| Buffer0
-    Controller -->|"StrongRoundStore.receive_round"| Buffer1["Syndrome buffer 1"]
-    Buffer0 -->|"WindowInput.accept_window_input"| Windows["Window manager"]
+    Controller -->|"SyndromeBufferInput.has_room"| WeakBuffer["Weak syndrome buffer"]
+    Controller -->|"SyndromeBufferInput.receive_round"| WeakBuffer
+    Controller -->|"StrongSyndromeBufferInput.receive_round"| StrongBuffer["Strong syndrome buffer"]
+    WeakBuffer -->|"WindowInput.accept_window_input"| Windows["Window manager"]
     Windows -->|"WindowModelSource.window_models_for_operation"| Models["Window fault models"]
     Windows -->|"DecodeQueue.enqueue"| Decoders["Decoder manager"]
-    Buffer0 -->|"WindowTransfers.send_for_job"| Decoders
+    WeakBuffer -->|"WindowTransfers.send_for_job"| Decoders
     Decoders -->|"WindowInputGate.may_stage"| Windows
     Decoders -->|"Decoder.start"| Unit["Decoder unit"]
     Windows -->|"EscalationPolicy.verdict_for_weak_result"| Escalation["Escalation policy"]
     Escalation -->|"DecodeQueue.await_strong_result"| Decoders
     Escalation -->|"BoundaryCourier.pin_strong_face"| Courier["Boundary courier"]
-    Buffer1 -->|"WindowTransfers.send_for_job"| Decoders
+    StrongBuffer -->|"WindowTransfers.send_for_job"| Decoders
     Decoders -->|"Frame.commit_correction"| Frame["Pauli frame"]
     Windows -->|"ReleaseReceiver.release_waiters"| Release["Conditional release"]
     Release -->|"DecisionDispatch.dispatch_decision"| Dispatch["Frame dispatch"]
@@ -89,8 +89,8 @@ An arrow nobody makes fails the suite.
 | QPU device | `qpu/` | one operation body per patch | one readout per round, on a cycle boundary of its clock |
 | Detection event formation | `detector_error_model/` | one round's raw measurement fragments | the same round as detection events, when the `controller` row is chosen |
 | Controller | `controller/` | readouts | one packed round per round, written to every store that must hold it |
-| Syndrome buffer 0 | `syndrome_buffer/` | packed rounds | the rounds a weak window reads, kept until every hold releases |
-| Syndrome buffer 1 | `syndrome_buffer/` | the same packed rounds, in parallel | the rounds a strong window reads |
+| The weak syndrome buffer | `syndrome_buffer/` | packed rounds | the rounds a weak window reads, kept until every hold releases |
+| The strong syndrome buffer | `syndrome_buffer/` | the same packed rounds, in parallel | the rounds a strong window reads |
 | Window manager | `windows/` | published rounds | one decode job per complete window, and each window's boundary to the next |
 | Window fault models | `qpu/`, built by `detector_error_model/` | the circuit's whole-circuit error model | one fault model per window |
 | Decoder manager | `decoders/` | decode jobs | one result per request, once its input landed and its unit computed |

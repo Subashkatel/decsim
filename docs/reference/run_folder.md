@@ -67,9 +67,9 @@ and they are the same names in `shots.csv`, `window_samples.csv` and
 
 | Point | From, to |
 | --- | --- |
-| `cwb_per_round` | the controller to Buffer 0, one round: latency, serialization and queue |
-| `cwb_stall_per_round` | the packed round finding Buffer 0 full, to the freed slot that admitted it: the store's back-pressure on the controller, zero for a round that found room |
-| `csb_stall_per_round` | the same wait in front of Buffer 1, one sample per round that reached it |
+| `cwb_per_round` | the controller to the weak syndrome buffer, one round: latency, serialization and queue |
+| `cwb_stall_per_round` | the packed round finding the weak syndrome buffer full, to the freed slot that admitted it: the store's back-pressure on the controller, zero for a round that found room |
+| `csb_stall_per_round` | the same wait in front of the strong syndrome buffer, one sample per round that reached it |
 | `buffer_fill` | the first round of a window arriving, to the last: the wait on the QPU |
 | `dep_block` | the input landing in the unit's memory, to the first tick the decode may compute: the dependency wait, for the predecessor's boundary and for the escalation message, and zero when nothing was owed at the landing |
 | `compute_wait` | that first startable tick, to the compute starting: the wait for the unit's own compute, busy with another decode |
@@ -85,15 +85,15 @@ and they are the same names in `shots.csv`, `window_samples.csv` and
 | `dd_per_window` | one decoder to the next: the boundary handoff |
 | `output_link_per_window` | the decoder to the Pauli frame |
 | `frame_commit` | the frame accepting a correction, to it being committed |
-| `buffer0_ready_to_frame` | the window complete in Buffer 0, to the frame |
-| `buffer0_first_round_to_frame` | the window's first round in Buffer 0, to the frame |
+| `buffer0_ready_to_frame` | the window complete in the weak syndrome buffer, to the frame |
+| `buffer0_first_round_to_frame` | the window's first round in the weak syndrome buffer, to the frame |
 | `qpu_last_round_to_frame` | the last round the window needs leaving the QPU, to the frame |
 | `qpu_first_round_to_frame` | the window's first round leaving the QPU, to the frame |
 
 The two `buffer0` totals start the clock where the decoder could first
 have started. The two `qpu` totals start it where the physics did, so
 they also carry the link out of the fridge, the controller's own work
-and the write into Buffer 0.
+and the write into the weak syndrome buffer.
 
 Every point of a window describes the decode whose result the frame
 committed, which the frame's own record names by tier and by request

@@ -84,7 +84,7 @@ ONE_TIER_LINKS = {
 }
 
 # the points that lie end to end between a window's data being complete
-# in Buffer 0 and its correction being committed in the frame
+# in the weak syndrome buffer and its correction being committed in the frame
 CHAIN = (
     "queue_wait",
     "weak_attempt",
@@ -217,7 +217,7 @@ def switching_shot(
 
 
 def bounded_store_shot(tmp_path):
-    """One shot whose Buffer 0 holds six rounds and whose unit is slow.
+    """One shot whose weak syndrome buffer holds six rounds, with a slow unit.
 
     Thirty rounds arrive a microsecond apart into a store of six, and
     the 5.0 us unit frees three slots per window it reads, so the
@@ -228,7 +228,7 @@ def bounded_store_shot(tmp_path):
     workload["rounds_per_shot"] = 30
     raw["workload"] = workload
     raw["links"] = ONE_TIER_LINKS
-    raw["round_store"] = {"rounds": 6}
+    raw["weak_syndrome_buffer"] = {"rounds": 6}
     raw["weak_decoder"] = {
         "kind": 5.0,
         "units": 1,
@@ -328,8 +328,8 @@ def test_one_windows_points_sum_to_its_reaction_time(tmp_path):
     """Queue wait, input link, park, service, output link and commit.
 
     Those six are the whole path from the window's data being complete
-    in Buffer 0 to its correction committed in the frame, so they add up
-    to buffer0_ready_to_frame on every window to the tick.
+    in the weak syndrome buffer to its correction committed in the frame, so
+    they add up to buffer0_ready_to_frame on every window to the tick.
     """
     measurement = slow_unit_shot(tmp_path, 1)
 
@@ -548,7 +548,8 @@ def test_the_shipped_weak_baseline_sums_to_its_reaction_time():
     configs/weak_decoder_baseline.yaml decodes each of its nine windows
     once and answers on that decode, so its confidence step is zero and
     every window's points are its whole path from its data being
-    complete in Buffer 0 to its correction committed in the frame.
+    complete in the weak syndrome buffer to its correction committed in the
+    frame.
     """
     shot = shipped_shot("weak_decoder_baseline.yaml")
 

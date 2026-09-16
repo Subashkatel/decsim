@@ -54,7 +54,7 @@ def _job_with_rounds() -> decoding_records.DecodeJob:
         payloads=payloads,
         label="job(41, 7)",
     )
-    job.input_source_name = "Buffer 0"
+    job.input_source_name = "weak syndrome buffer"
     return job
 
 

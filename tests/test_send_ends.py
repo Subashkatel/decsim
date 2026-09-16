@@ -132,7 +132,7 @@ DELIVERY_CALLBACKS = {
     ("controller/round_transmission.py", "CONTROLLER_TO_WEAK_BUFFER"): (
         "_publish",
     ),
-    ("controller/round_writes.py", "CONTROLLER_TO_STRONG_BUFFER"): (
+    ("controller/round_sender.py", "CONTROLLER_TO_STRONG_BUFFER"): (
         "_land_in_strong_store",
     ),
     ("decoders/decoder_output.py", "WEAK_DECODER_TO_STRONG_DECODER"): (None,),

@@ -1,8 +1,8 @@
 """The decoder side's end for a timing-only round that lands here.
 
 A feedback-memory round carries no syndrome a decoder reads: it is an
-idle patch's round travelling so that Buffer 0's slot, the link and the
-decoder's own stream stage are charged for it
+idle patch's round travelling so that weak syndrome buffer's slot, the link
+and the decoder's own stream stage are charged for it
 (controller/idle_rounds.py). The stage is real in both stream decoders
 read for it, which take every round of the stream as it arrives, idle or
 not: LILLIPUT decodes on a block of rounds as the stream fills it

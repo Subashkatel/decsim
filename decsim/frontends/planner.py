@@ -387,7 +387,7 @@ def _hold_window(
     absorbs_weak_windows: bool,
     restart_reread_buffer_regions: int,
 ) -> None:
-    """The window's Buffer 0 holds: its weak read, its potential restart read.
+    """The window's weak syndrome buffer holds: the weak read, the restart read.
 
     The weak decode reads the window from its start to its buffer.
     """
@@ -421,8 +421,8 @@ def _hold_restart_reads(
     restart window, whose weak decode re-reads
     restart_reread_buffer_regions buffer regions of the strong region
     (Toshio 2510.25222 Sec. III C). The hold covers exactly what that
-    decode reads, and its rounds stay in Buffer 0 past this window's own
-    request and landing, until the window before it commits
+    decode reads, and its rounds stay in the weak syndrome buffer past this
+    window's own request and landing, until the window before it commits
     (round_retention.release_restart_reads).
     """
     if not absorbs_weak_windows:

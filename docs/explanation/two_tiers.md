@@ -138,8 +138,8 @@ somewhere, and where it resumes is the **restart window**
 weak decode reads is `restart_reread_buffer_regions`, which defaults to
 the paper's value.
 
-This is also why the two stores exist. Buffer 0 streams to the weak
-tier round by round as the rounds arrive. Buffer 1 keeps the same rounds
+This is also why the two stores exist. The weak syndrome buffer streams to the weak
+tier round by round as the rounds arrive. The strong syndrome buffer keeps the same rounds
 for a strong re-decode that may be asked for later, in bulk, once its
 boundaries are known. A round may not be dropped from either store while
 any consumer still holds it, and `PotentialStrong` and
@@ -155,7 +155,7 @@ Everything above has a price, and decsim's point is to charge all of it:
   the evidence;
 - the escalation's own hop, `weak_decoder_to_strong_decoder`, which
   carries only the selection;
-- the strong region's transfer out of Buffer 1;
+- the strong region's transfer out of the strong syndrome buffer;
 - the store capacity the holds occupy while a re-decode might still be
   asked for;
 - and the strong decode itself.

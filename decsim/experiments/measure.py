@@ -35,12 +35,13 @@ import decsim.settings as machine_settings
 # Every point is one span, and its comment names the two ticks it runs
 # between.
 POINTS = (
-    # per round: the controller's send -> the round readable in Buffer 0
+    # per round: the controller's send -> the round readable in the weak
+    # syndrome buffer
     "cwb_per_round",
-    # per round: the round found Buffer 0 full -> the slot that freed
-    # admitted it, zero for a round that found room
+    # per round: the round found the weak syndrome buffer full -> the slot that
+    # freed admitted it, zero for a round that found room
     "cwb_stall_per_round",
-    # per round: the same wait in front of Buffer 1
+    # per round: the same wait in front of the strong syndrome buffer
     "csb_stall_per_round",
     # the window's first round readable -> its last (waiting on the QPU)
     "buffer_fill",
@@ -89,11 +90,11 @@ POINTS = (
     # the decode's end -> the correction at the Pauli frame
     "output_link_per_window",
     "frame_commit",  # the frame accepted the correction -> committed
-    # Totals. The buffer0 pair starts the clock at Buffer 0 publication;
-    # the qpu pair starts it when the round leaves the QPU (the QC send),
-    # so it includes QC, controller processing, packing and CWB.
-    "buffer0_ready_to_frame",  # window complete in Buffer 0 -> frame
-    "buffer0_first_round_to_frame",  # first round in Buffer 0 -> frame
+    # Totals. The buffer0 pair starts the clock at the weak syndrome buffer
+    # publication; the qpu pair starts it when the round leaves the QPU (the QC
+    # send), so it includes QC, controller processing, packing and CWB.
+    "buffer0_ready_to_frame",  # window complete in the weak buffer -> frame
+    "buffer0_first_round_to_frame",  # first round in the weak buffer -> frame
     "qpu_last_round_to_frame",  # last required round off QPU -> frame
     "qpu_first_round_to_frame",  # first required round off QPU -> frame
 )
@@ -290,7 +291,7 @@ def round_stall_ticks(round_events: list) -> dict:
 
     The wait is the waiting line's own two events: the refusal that held
     the round and the freed slot that admitted it
-    (controller/round_writes.py, HeldRounds). A round that found room is
+    (controller/round_sender.py, HeldRounds). A round that found room is
     not in here at all.
     """
     held_at = {}
@@ -321,7 +322,7 @@ def round_stall_delays_us(round_keys: list, waits: dict) -> list:
 
 
 def weak_store_round_keys(round_events: list) -> list:
-    """Every round that left for Buffer 0, in the order they left."""
+    """Every round that left for the weak syndrome buffer, in leaving order."""
     keys = []
     for event in round_events:
         if event.kind != "CWB_SENT":
@@ -332,7 +333,7 @@ def weak_store_round_keys(round_events: list) -> list:
 
 
 def strong_store_round_keys(stored_rounds: list) -> list:
-    """Every round that landed in Buffer 1, in the order they landed."""
+    """Every round landed in the strong syndrome buffer, in landing order."""
     keys = []
     for _tick, operation_id, round_index in stored_rounds:
         key = (operation_id, round_index)

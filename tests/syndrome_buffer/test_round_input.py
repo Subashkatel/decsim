@@ -1,4 +1,4 @@
-"""Buffer 0's incoming port: its room, and the slot a landing takes.
+"""The weak syndrome buffer's incoming port: room, and the slot a landing takes.
 
 A round occupies a slot when its bits are in the store, at the landing
 of the hop that carried them, and it is readable at that same instant:
@@ -25,8 +25,8 @@ import decsim.observe.log_writers as log_writers
 import decsim.ports as ports
 import decsim.records.rounds as round_records
 import decsim.syndrome_buffer.round_input as round_input
-import decsim.syndrome_buffer.round_store as round_store_module
-import decsim.syndrome_buffer.settings as round_store_settings
+import decsim.syndrome_buffer.settings as syndrome_buffer_settings
+import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 import tests.declared_run as declared_run
 
 LANDING_TICKS = 40_000
@@ -73,14 +73,14 @@ def _packed(
     return round_records.PackedRound(packet, route, 2)
 
 
-def _store(rounds=None) -> round_store_module.RoundStore:
-    settings = round_store_settings.RoundStoreSettings(rounds=rounds)
-    return round_store_module.RoundStore(settings)
+def _store(rounds=None) -> syndrome_buffer_module.SyndromeBuffer:
+    settings = syndrome_buffer_settings.SyndromeBufferSettings(rounds=rounds)
+    return syndrome_buffer_module.SyndromeBuffer(settings)
 
 
 def _input_with(engine, store, output=None):
     windows = _Windows(engine, store)
-    store_input = round_input.RoundStoreInput(engine, store.settings)
+    store_input = round_input.SyndromeBufferInput(engine, store.settings)
     store_input.store = store
     store_input.windows = windows
     if output is not None:
@@ -186,7 +186,13 @@ def test_the_intake_copy_is_made_at_the_landing_by_this_end():
     engine.run()
 
     assert copies == [
-        (LANDING_TICKS, (1, 1), 2, "controller assembler", "Buffer 0")
+        (
+            LANDING_TICKS,
+            (1, 1),
+            2,
+            "controller assembler",
+            "weak syndrome buffer",
+        )
     ]
 
 
@@ -211,8 +217,8 @@ def test_the_buffer_0_line_names_the_hop_the_round_arrived_by():
     assert silent_log.lines == []
     (line,) = log.lines
     assert line.endswith(
-        "Buffer 0: received round 1 of op 1 from controller_to_weak_buffer; "
-        "defects {0}; holds op 1 rounds 1 (1)"
+        "weak syndrome buffer: received round 1 of op 1 from "
+        "controller_to_weak_buffer; defects {0}; holds op 1 rounds 1 (1)"
     )
 
 
@@ -255,17 +261,17 @@ def test_the_incoming_port_fills_the_declared_port():
     store = _store()
     store_input, _windows = _input_with(engine, store)
 
-    assert isinstance(store_input, ports.RoundStoreInput)
+    assert isinstance(store_input, ports.SyndromeBufferInput)
 
 
 def test_write_cycles_move_every_reaction_point_by_the_store_periods():
     clocks = config.ClockSettings.from_yaml({"storage": 1.0})
     section = {"clock": "storage", "write_cycles": 3}
-    settings = round_store_settings.RoundStoreSettings.from_yaml(
+    settings = syndrome_buffer_settings.SyndromeBufferSettings.from_yaml(
         section, clocks
     )
     free = declared_run.weak_only_run()
-    charged = declared_run.weak_only_run(round_store=settings)
+    charged = declared_run.weak_only_run(weak_syndrome_buffer=settings)
     free_ticks = declared_run.reaction_ticks(free)
     charged_ticks = declared_run.reaction_ticks(charged)
     paired = zip(charged_ticks, free_ticks)
@@ -278,10 +284,10 @@ def test_a_priced_write_keeps_its_reservation_until_the_write_edge():
     engine = engine_module.Engine()
     engine.now = 1
     clock = config.Clock(10)
-    settings = round_store_settings.RoundStoreSettings(
+    settings = syndrome_buffer_settings.SyndromeBufferSettings(
         rounds=1, clock=clock, write_cycles=3
     )
-    store = round_store_module.RoundStore(settings)
+    store = syndrome_buffer_module.SyndromeBuffer(settings)
     store_input, windows = _input_with(engine, store)
     packed = _packed(1)
     store_input.reserve_write()

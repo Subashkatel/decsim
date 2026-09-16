@@ -99,7 +99,7 @@ MEMORY_CLASS_BY_STRUCTURE = {
     "controller assembler": MemoryClass.ON_CHIP,
     "masked view": MemoryClass.ON_CHIP,
 }
-_STORE_PREFIX = "Buffer "
+_STORE_SUFFIX = "syndrome buffer"
 _UNIT_PREFIX = "unit "
 # a copy's path names where the bits came from and where they landed,
 # which no link path is; the report keeps the two apart by this word
@@ -109,13 +109,13 @@ PATH_SEPARATOR = " -> "
 def memory_class_of_structure(name: str) -> MemoryClass:
     """The class of the structure a copy landed in, by its reported name.
 
-    A name no row and no prefix names is unclassified rather than
+    A name no row, no suffix and no prefix names is unclassified rather than
     guessed, so the grouped rows still sum to the run's total.
     """
     named = MEMORY_CLASS_BY_STRUCTURE.get(name)
     if named is not None:
         return named
-    if name.startswith(_STORE_PREFIX):
+    if name.endswith(_STORE_SUFFIX):
         return MemoryClass.ON_BOARD
     if name.startswith(_UNIT_PREFIX):
         return MemoryClass.ON_CHIP

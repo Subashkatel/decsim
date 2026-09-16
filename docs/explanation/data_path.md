@@ -89,10 +89,10 @@ a syndrome, Yang arXiv:2605.04892).
 
 ### 2. `controller_to_weak_buffer`
 
-The packed round into syndrome buffer 0. Ends: `controller` to
+The packed round into the weak syndrome buffer. Ends: `controller` to
 `syndrome_buffer`; the send is executed by the controller's transmitter
 (`decsim/controller/round_transmission.py`), and the landing is handled
-by Buffer 0's own incoming port
+by the weak syndrome buffer's own incoming port
 (`decsim/syndrome_buffer/round_input.py`), which stores the round with
 the landing tick as its publication tick, narrates the copy and the
 intake, and announces the published round to the window manager. That
@@ -108,29 +108,29 @@ controller. The bit count is `PackedRound.wire_bits`, computed in
 narrower than the raw outcomes; under the `decoder` row it is the raw
 outcomes and each tier forms its own events.
 
-Move, on board, with a copy into Buffer 0's record at the landing. The
+Move, on board, with a copy into the weak syndrome buffer's record at the landing. The
 round occupies a slot when its bits are in the store, and it is readable
 at that same instant; the room it will need is reserved before the wire
 is used, so the store can still refuse a round before it leaves the
 controller. Default latency 0.04 microseconds, taken from Caune arXiv:2410.05202 Fig. 1a
 stage D, "result message handled and prepared for broadcast", 40
-nanoseconds. Buffer 0 sits with the controller, which is why that stage
+nanoseconds. The weak syndrome buffer sits with the controller, which is why that stage
 is the right one.
 
 ### 3. `controller_to_strong_buffer`
 
-The same packed round into syndrome buffer 1, in parallel. Ends:
+The same packed round into the strong syndrome buffer, in parallel. Ends:
 `controller` to `syndrome_buffer`; the send is executed by the
-controller's round writer (`decsim/controller/round_writes.py`), and the
+controller's round sender (`decsim/controller/round_sender.py`), and the
 landing is handled by the room side
-(`decsim/syndrome_buffer/strong_round_writer.py`), which reserves the
+(`decsim/syndrome_buffer/strong_round_receiver.py`), which reserves the
 room the round will take before it leaves and then stores it with the
 landing tick, or drops it at the door when its operation closed while it
 crossed.
 
 What crosses: the same round, the same bit count.
 
-Move, off board, with a copy into Buffer 1 at the landing. Default
+Move, off board, with a copy into the strong syndrome buffer at the landing. Default
 latency 0.26 microseconds, from Caune Fig. 1a stage F, the inter-node
 broadcast between control system chassis, 240 to 260 nanoseconds at the
 stated worst case. It is off board because the strong tier is a separate
@@ -149,7 +149,7 @@ A window's rounds into a weak unit's memory. Ends: `syndrome_buffer` to
 What crosses: the whole input of one decode job, every payload round of
 the window at once. The bit count is `job.payload_bits()`
 (`decsim/records/decoding.py`). The same path also carries a
-timing-only feedback-memory round, which is sent by Buffer 0 on the
+timing-only feedback-memory round, which is sent by the weak syndrome buffer on the
 controller's ask and lands at the decoders' own end for it
 (`decsim/decoders/memory_rounds.py`): nothing is deposited in a unit's
 memory, and what the end does is count the round its stream stage was
@@ -188,7 +188,7 @@ takes its data from the store rather than from the weak decoder.
 
 The strong region into the strong unit. Ends: `syndrome_buffer` to
 `decoders`; the same store output port as hop 4, bound to this path for
-Buffer 1 (`decsim/build/stores.py`).
+the strong syndrome buffer (`decsim/build/stores.py`).
 
 What crosses: the strong window's assigned rounds, `r_com + 2 r_buf` of
 them under Toshio's assumption, in one transfer. The bit count is again
@@ -196,7 +196,7 @@ them under Toshio's assumption, in one transfer. The bit count is again
 
 Move, on board, with the same copy into the unit's memory. Default
 latency 2.0 microseconds. It is on board rather than off board because
-the write into Buffer 1 already crossed boards at hop 3: Buffer 1 sits
+the write into the strong syndrome buffer already crossed boards at hop 3: the strong syndrome buffer sits
 beside the strong decoder.
 
 ### 7. `decoder_to_decoder`

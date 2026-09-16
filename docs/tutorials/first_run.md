@@ -228,15 +228,15 @@ decsim trace follow \
 round 1:1 of decsim weak_baseline d3 p0.001 seed0
 
 tick (us)  where                        what                                                                 dur (us)  transfer   bits
-0.000      Buffer 0                     hold registered                                                                reference
+0.000      the weak syndrome buffer                     hold registered                                                                reference
 1.000      QPU                          emitted round 1                                                                           8
 1.000      qpu_to_controller            move                                                                 0.004     move       8
 1.000      Controller                   controller intake copy                                                         copy       8
 1.004      Controller                   controller assembler copy                                                      copy       8
 1.004      Controller                   residence, unbounded, freed at packed                                0.000     copy       8
 1.004      controller_to_weak_buffer    move                                                                 0.006     move       4
-1.010      Buffer 0                     Buffer 0 copy                                                                  copy       4
-1.010      Buffer 0                     residence, unbounded, data ready 1.010, freed at last hold released  5.006     copy       4
+1.010      the weak syndrome buffer                     the weak syndrome buffer copy                                                                  copy       4
+1.010      the weak syndrome buffer                     residence, unbounded, data ready 1.010, freed at last hold released  5.006     copy       4
 6.012      Window planner               W0 ready
 6.012      weak_buffer_to_weak_decoder  move, with W0 rounds 1..6                                            0.004     move       44
 6.016      Decoder unit default#0       unit default#0 memory copy                                                     copy       44
@@ -256,7 +256,7 @@ rather than eight, because in the first round of a memory experiment
 only half the checks have a value to compare against
 (`decsim/detector_error_model/detection_event_formation.py`,
 `form_before_departure`, which the controller's assembler calls). That
-round moved into Buffer 0, the store the decoder reads from, and sat
+round moved into the weak syndrome buffer, the store the decoder reads from, and sat
 there 5 microseconds waiting for the rest of its window. At 6.012 microseconds window 0 had all six of its rounds, so
 all 44 bits moved together into the decoder unit's memory, and the
 decode held that unit for the wall clock PyMatching took, 16.9

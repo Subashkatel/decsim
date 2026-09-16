@@ -87,7 +87,7 @@ class _DecoderOutput:
 
 
 class _StrongOutput:
-    """Syndrome buffer 1's end of the strong input hop."""
+    """The strong syndrome buffer's end of the strong input hop."""
 
     def __init__(self) -> None:
         self.inputs = []

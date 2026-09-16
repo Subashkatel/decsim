@@ -53,9 +53,10 @@ class _Transfers:
         self.sends.append((path, payload_bits))
 
 
-def _output(transfers, store=None) -> round_output.RoundStoreOutput:
-    output = round_output.RoundStoreOutput(
-        transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER, "Buffer 0"
+def _output(transfers, store=None) -> round_output.SyndromeBufferOutput:
+    output = round_output.SyndromeBufferOutput(
+        transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER,
+        "weak syndrome buffer",
     )
     output.transfers = transfers
     if store is not None:
@@ -83,7 +84,7 @@ def test_a_moved_input_leaves_by_this_stores_own_path():
     delay = output.send_input(job, lambda: landed.append(True))
     assert delay == 3
     assert landed == [True]
-    assert job.input_source_name == "Buffer 0"
+    assert job.input_source_name == "weak syndrome buffer"
     assert transfers.sends == [
         (transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER, 0)
     ]
@@ -101,7 +102,7 @@ def test_a_held_input_rides_no_link_and_lands_now():
     assert delay == 0
     assert landed == [0]
     assert transfers.sends == []
-    assert job.input_source_name == "Buffer 0"
+    assert job.input_source_name == "weak syndrome buffer"
 
 
 def test_a_store_names_itself_when_the_job_is_bound_and_not_when_it_sends():
@@ -118,5 +119,5 @@ def test_a_store_names_itself_when_the_job_is_bound_and_not_when_it_sends():
 
     output.input_send_for(job, False)
 
-    assert job.input_source_name == "Buffer 0"
+    assert job.input_source_name == "weak syndrome buffer"
     assert transfers.sends == []

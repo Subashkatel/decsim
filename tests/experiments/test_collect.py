@@ -4,16 +4,16 @@ Referent one is a sweep of reference.yaml recorded before decsim.collect
 existed, its sweep.csv and links.csv kept in data/. Ten of its numbers
 were amended when the controller-to-store hop stopped being priced at
 the raw readout width: the recorded run's own buffer fill, its
-per-round store hop and that hop's link row. Eight zero columns were
+per-syndrome buffer hop and that hop's link row. Eight zero columns were
 added to it when the escalation points were added, the weak attempt
 that did not commit and the escalation hop, which a weak-only sweep
 never reaches, and eight more when the two per-round back-pressure
-points were added, the wait a full Buffer 0 or a full Buffer 1 puts on
-the writer, which a sweep with room in both stores never sees, and four
-more when the park was split by cause: this sweep's one unit is always
-free by the time a window's boundary is in, so its compute_wait is zero
-on every window of both recorded runs. Four more came with the
-confidence step, which a weak-baseline sweep answers on its decode and
+points were added, the wait a full the weak syndrome buffer or a full the
+strong syndrome buffer puts on the writer, which a sweep with room in both
+stores never sees, and four more when the park was split by cause: this sweep's
+one unit is always free by the time a window's boundary is in, so its
+compute_wait is zero on every window of both recorded runs. Four more came with
+the confidence step, which a weak-baseline sweep answers on its decode and
 never spends. The weak
 decoder of
 reference.yaml is pymatching, which prices its measured wall clock, so the

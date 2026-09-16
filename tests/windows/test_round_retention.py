@@ -1,4 +1,4 @@
-"""The round retention's laws on a real round store.
+"""The round retention's laws on a real syndrome buffer.
 
 A window holds [start_round, buffer_hi] plus the successor overflow
 (Skoric et al. 2209.08552: the buffer region is re-read by the next
@@ -18,14 +18,14 @@ import pytest
 import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
-import decsim.syndrome_buffer.round_store as round_store_module
-import decsim.syndrome_buffer.settings as round_store_settings
+import decsim.syndrome_buffer.settings as syndrome_buffer_settings
+import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 import decsim.windows.round_retention as round_retention
 
 
-def _store() -> round_store_module.RoundStore:
-    settings = round_store_settings.RoundStoreSettings()
-    return round_store_module.RoundStore(settings)
+def _store() -> syndrome_buffer_module.SyndromeBuffer:
+    settings = syndrome_buffer_settings.SyndromeBufferSettings()
+    return syndrome_buffer_module.SyndromeBuffer(settings)
 
 
 def _retention(store, round_counts: dict, successors: dict):
@@ -64,7 +64,7 @@ def _packet(operation_id, round_index) -> round_records.SyndromeRoundPacket:
 
 
 def _strong_retention(strong_store, rounds_arrived: int):
-    """A retention whose room-side store is the one under test."""
+    """A retention whose strong syndrome buffer is the one under test."""
     planner = types.SimpleNamespace(successors_by_operation={1: []})
     tracker = types.SimpleNamespace(
         effective_round_count_for_window=lambda _operation_id, _window: 9,
@@ -89,8 +89,8 @@ def test_a_context_round_still_crossing_is_told_apart_from_one_released():
     A round with a live hold and no fragments is on
     controller_to_strong_buffer and the strong window waits for it, the
     way a gem5 port waits for its retry rather than failing
-    (src/mem/port.hh:244-255). A round that arrived at Buffer 0 with
-    neither fragments nor a hold was released while a reader still
+    (src/mem/port.hh:244-255). A round that arrived at the weak syndrome buffer
+    with neither fragments nor a hold was released while a reader still
     needs it, which is the mistake the check was written to catch.
     """
     store = _store()
@@ -106,7 +106,7 @@ def test_a_context_round_still_crossing_is_told_apart_from_one_released():
 
 
 def test_a_context_round_the_qpu_has_not_produced_is_not_awaited():
-    """A round that has not arrived at Buffer 0 is not late anywhere."""
+    """A round not yet at the weak syndrome buffer is not late anywhere."""
     store = _store()
     retention = _strong_retention(store, rounds_arrived=2)
     crossing = retention.context_rounds_in_flight((1, 0), ((1, 5),))

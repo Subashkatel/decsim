@@ -4,12 +4,12 @@
 # one escalates, which opens the last two hops of data_path.md's table:
 # hop 8, the weak result to the escalation, which is a verdict and no
 # data (Toshio 2510.25222 lines 605-622, the discarded weak outcome), and
-# hop 9, Buffer 1 to the strong decoder, which is the assigned region
+# hop 9, the strong syndrome buffer to the strong decoder, which is the assigned region
 # copied over a link, "processed all at once, after the boundary
 # conditions at both ends have been determined" (2510.25222 lines
 # 1248-1250) and a PCIe or network traversal on a separate host (Chen
 # 2605.30765 lines 1609-1611). It also opens the controller's second
-# write, hop 4, since Buffer 1 is written in parallel.
+# write, hop 4, since the strong syndrome buffer is written in parallel.
 #
 # The strong tier's own `input` stays copy, the research note's section 5
 # default for `decoders.<tier>.input` on this row (2510.25222 lines

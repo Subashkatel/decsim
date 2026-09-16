@@ -1,7 +1,7 @@
 # The data-movement study, the weak unit reading its input in place.
 #
 # The one setting this changes is `weak_decoder.input`: in_place reads
-# the rounds where Buffer 0 keeps them, so the tier's input link moves
+# the rounds where the weak syndrome buffer keeps them, so the tier's input link moves
 # nothing, the unit deposits nothing, and the store's hold stays for the
 # whole decode. That is the software decoder on the controller host,
 # which Google runs: the detections are "streamed to the real-time

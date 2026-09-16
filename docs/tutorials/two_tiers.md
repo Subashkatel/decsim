@@ -119,8 +119,8 @@ config: configs/two_tiers.yaml <- configs/weak_decoder_baseline.yaml
 qpu: kind stim_device
 idle_policy: kind separate_decode_jobs
 links: kind logical_reference
-round_store: kind round_store
-strong_round_store: kind round_store
+weak_syndrome_buffer: kind weak_syndrome_buffer
+strong_syndrome_buffer: kind weak_syndrome_buffer
 windows: kind sliding
 weak_decoder: kind 1.0
 strong_decoder: kind 10.0
@@ -134,8 +134,8 @@ log: off
 trace: off
 ```
 
-Two round stores, not one: `round_store` streams to the weak tier and
-`strong_round_store` keeps the same rounds in case a strong re-decode
+Two syndrome buffers, not one: `weak_syndrome_buffer` streams to the weak tier and
+`strong_syndrome_buffer` keeps the same rounds in case a strong re-decode
 asks for them later.
 
 ## Step 2. Run the sweep
@@ -330,7 +330,7 @@ six things happen that did not happen for window 0.
 - **`queued, dispatched to strong#0`.** A third decode job, on the other
   pool's unit.
 - **`strong_buffer_to_strong_decoder`, 72 bits.** The strong decoder's
-  input comes from the strong round store, which has been keeping these
+  input comes from the strong syndrome buffer, which has been keeping these
   rounds all along, and not from the weak decoder. It is nine rounds,
   `7..15`, where the weak window read six: the escalated window's commit
   region plus one buffer region of raw context on each side, which is
@@ -366,7 +366,7 @@ To price the strong tier's off-board hops with a measured cable instead
 of the one-cycle room-clock cards above, set `links.kind` to
 `roce_v2_cpu` or `roce_v2_gpu` and delete the four strong-side cards, so
 the row's numbers stand: half of Backline's measured round trip on the
-write into syndrome buffer 1, on the escalation and on the reply, and
+write into the strong syndrome buffer, on the escalation and on the reply, and
 zero on the strong store's own read
 ([D14](../explanation/decisions.md#d14-the-strong-tiers-off-board-path-can-be-priced-by-a-measured-round-trip)).
 

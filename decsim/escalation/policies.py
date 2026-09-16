@@ -100,11 +100,11 @@ class Baseline(EscalationPolicyBase):
 class StrongOnly(EscalationPolicyBase):
     """The strong tier decodes the plan's windows directly.
 
-    No weak decode, no escalation. The machine is data-woken: syndrome
-    buffer 1 stores a round and its signal drives window readiness, the
-    shape of LILLIPUT's FIFO-fed decoder and Google's streaming decoder.
-    Every window job carries tier STRONG, reads its rounds from syndrome
-    buffer 1 over strong_buffer_to_strong_decoder, and rides
+    No weak decode, no escalation. The machine is data-woken: the
+    strong syndrome buffer stores a round and its signal drives window
+    readiness, the shape of LILLIPUT's FIFO-fed decoder and Google's streaming
+    decoder. Every window job carries tier STRONG, reads its rounds from the
+    strong syndrome buffer over strong_buffer_to_strong_decoder, and rides
     strong_decoder_to_frame home; the escalation machinery (the
     selection link, the ledger, the context windows, the strong windows)
     is never engaged.
@@ -119,7 +119,7 @@ class StrongOnly(EscalationPolicyBase):
             raise ValueError(
                 "strong-only runs support static plans; dynamic streams "
                 "re-point live window reads and are not wired to the "
-                "room-side store yet"
+                "strong syndrome buffer yet"
             )
 
     def verdict_for_weak_result(self, job, result) -> decoding_records.Verdict:

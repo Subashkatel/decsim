@@ -1,4 +1,4 @@
-"""The writer: a finished round into every store it must reach, or held.
+"""The sender: a finished round into every store it must reach, or held.
 
 The backpressure law of the readout path: each store's own end answers
 has_room before any round leaves for it, counting the rounds it holds
@@ -38,7 +38,7 @@ class HeldRounds:
     Trace source: round_event(RoundEvent) with kind STALLED when a round
     is held for room, RELEASED when a freed slot admits it, DROPPED when
     the policy drops it. The two ends are the wait itself, which is the
-    back-pressure a full store applies to its writer and is measured
+    back-pressure a full store applies to its sender and is measured
     nowhere else: the round waits here, before the wire is asked for, so
     its transfer carries none of it. Ruby's MessageBuffer counts that
     wait as the buffer's own statistic, the ticks a message was stalled
@@ -126,24 +126,26 @@ class HeldRounds:
         return False
 
 
-class RoundWriter:
-    """Sends a finished round to Buffer 0 and the strong store, or holds it.
+class RoundSender:
+    """Sends a finished round to both syndrome buffers, or holds it.
 
     It reserves the room each store's own end answers for and hands the
     round to the sends; the slot, the copy and the intake line are the
     receiving end's, at the round's landing there
-    (syndrome_buffer/round_input.py, syndrome_buffer/strong_round_writer.py).
+    (syndrome_buffer/round_input.py, syndrome_buffer/strong_round_receiver.py).
     """
 
-    # the controller's own fabric: it executes the crossing to Buffer 1
+    # the controller's own fabric: it executes the crossing to the strong
+    # syndrome buffer
     link = ports.Port(ports.Link)
-    # Buffer 0's own end: its room, and the landing that takes the slot
-    weak_input = ports.Port(ports.RoundStoreInput)
-    # Buffer 0 itself, which the window side either reads its windows
-    # from or does not
-    weak_store = ports.Port(ports.RoundStore)
+    # The weak syndrome buffer's own end: its room, and the landing that takes
+    # the slot
+    weak_input = ports.Port(ports.SyndromeBufferInput)
+    # The weak syndrome buffer itself, which the window side either reads its
+    # windows from or does not
+    weak_store = ports.Port(ports.SyndromeBuffer)
     # the room side's end; absent on a run that never reads from it
-    strong_writer = ports.Port(ports.StrongRoundStore, optional=True)
+    strong_receiver = ports.Port(ports.StrongSyndromeBufferInput, optional=True)
     held_rounds = ports.Port(ports.HeldRounds)
     transmitter = ports.Port(round_transmission.RoundTransmitter)
     windows = ports.Port(ports.WindowInput)
@@ -156,9 +158,9 @@ class RoundWriter:
 
         A strong-primary plan reads its windows from the room side, so a
         window-input round takes one hop, into the strong store; a
-        feedback-memory round still crosses Buffer 0. The window side
-        settles that when the root wires it and never moves it again, so
-        the writer reads it here rather than at every admit.
+        feedback-memory round still crosses the weak syndrome buffer. The
+        window side settles that when the root wires it and never moves it
+        again, so the sender reads it here rather than at every admit.
         """
         reads_from_buffer_zero = self.windows.reads_windows_from(
             self.weak_store
@@ -168,7 +170,7 @@ class RoundWriter:
     def admit(self, packed: round_records.PackedRound) -> bool:
         """Write the round where it belongs; False when it had to wait."""
         if self._takes_the_strong_hop_only(packed):
-            if not self.strong_writer.has_room():
+            if not self.strong_receiver.has_room():
                 return self.held_rounds.refuse(packed, self.admit)
             self._write_strong(packed)
             return True
@@ -176,12 +178,13 @@ class RoundWriter:
             return self.held_rounds.refuse(packed, self.admit)
         if not self._strong_has_room():
             return self.held_rounds.refuse(packed, self.admit)
-        # the round takes its Buffer 0 slot when its bits are there: the
-        # room is reserved here, and the landing stores and publishes it
+        # the round takes its weak syndrome buffer slot when its bits are
+        # there: the room is reserved here, and the landing stores and
+        # publishes it
         self.weak_input.reserve_write()
-        if self.strong_writer is not None:
+        if self.strong_receiver is not None:
             # the dual write: the same round leaves for the room side in
-            # parallel with its Buffer 0 publication
+            # parallel with its weak syndrome buffer publication
             self._write_strong(packed)
         self.transmitter.send(packed)
         return True
@@ -202,12 +205,12 @@ class RoundWriter:
         return on_window_route and self.publishes_from_strong_store
 
     def _strong_has_room(self) -> bool:
-        if self.strong_writer is None:
+        if self.strong_receiver is None:
             return True
-        return self.strong_writer.has_room()
+        return self.strong_receiver.has_room()
 
     def _write_strong(self, packed: round_records.PackedRound) -> None:
-        """Carry the round over controller_to_strong_buffer to Buffer 1.
+        """Carry the round over its link to the strong syndrome buffer.
 
         The controller is the end this round leaves by, so it executes
         the send (OMNeT++ refuses a module that sends a message it does
@@ -220,7 +223,7 @@ class RoundWriter:
         attribution = transfer_records.TransferAttribution.for_packet(
             packed.packet
         )
-        self.strong_writer.reserve_write()
+        self.strong_receiver.reserve_write()
         landed = functools.partial(self._land_in_strong_store, packed)
         self.link.send(
             transfer_records.LinkPath.CONTROLLER_TO_STRONG_BUFFER,
@@ -233,8 +236,8 @@ class RoundWriter:
     def _land_in_strong_store(
         self, packed: round_records.PackedRound, _transfer
     ) -> None:
-        """The round reached Buffer 1: that end handles the landing."""
-        self.strong_writer.receive_round(packed.packet, packed.wire_bits)
+        """The strong syndrome buffer took the round and handles the landing."""
+        self.strong_receiver.receive_round(packed.packet, packed.wire_bits)
 
 
 @dataclasses.dataclass(frozen=True)

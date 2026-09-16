@@ -34,10 +34,10 @@ def test_the_console_printer_prints_each_line_as_it_is_fired(capsys):
 def test_an_io_line_is_described_only_when_someone_listens():
     silent = engine_module.Engine()
     described = []
-    silent.log_io("Buffer 0", lambda: described.append("walked"))
+    silent.log_io("weak syndrome buffer", lambda: described.append("walked"))
     heard = engine_module.Engine()
     log = log_writers.LogWriter()
     heard.io_line.connect(log.write)
-    heard.log_io("Buffer 0", lambda: "holds 1 round")
+    heard.log_io("weak syndrome buffer", lambda: "holds 1 round")
     assert described == []
-    assert log.lines == ["[  0.000 us] Buffer 0: holds 1 round"]
+    assert log.lines == ["[  0.000 us] weak syndrome buffer: holds 1 round"]

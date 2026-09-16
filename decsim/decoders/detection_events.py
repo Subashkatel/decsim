@@ -12,10 +12,10 @@ latency of the preprocessing stage for syndrome calculation ... at 20 ns
 (5 FPGA clock cycles)", counted inside their decoder subtotal
 (2605.04892 lines 1273-1275, Table I lines 1049-1052).
 
-Each tier has its own: the weak tier reads Buffer 0 and the strong tier
-reads Buffer 1, two copies of the same raw rounds in two stores, each
-with its own logic in front of its own decoder core. So a round two
-windows of one tier read is formed once and charged once, and a round
+Each tier has its own: the weak tier reads the weak syndrome buffer and the
+strong tier reads the strong syndrome buffer, two copies of the same raw rounds
+in two stores, each with its own logic in front of its own decoder core. So a
+round two windows of one tier read is formed once and charged once, and a round
 both tiers read is charged twice, once on each tier's engine clock. The
 value is the former's (detector_error_model/detection_event_formation.py
 RememberedDetectionEvents); the rounds this tier is charged for are the

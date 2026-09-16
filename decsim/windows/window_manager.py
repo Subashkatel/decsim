@@ -4,7 +4,7 @@ Which windows exist is the WindowPlanner's, which rounds arrived and
 whether a window has its data is the RoundTracker's, which rounds each
 window holds is the RoundRetention's, a decode is asked for by the
 DecodeRequester from a job the DecodeRequestBuilder builds, its input
-is sent by the store's own RoundStoreOutput, a result commits its
+is sent by the store's own SyndromeBufferOutput, a result commits its
 window through the WindowCommitter and leaves for the frame through the
 decoder side's DecoderOutput, boundaries between windows are the
 BoundaryCourier's, ownership of
@@ -218,7 +218,8 @@ class WindowManager:
         """True for a stream whose windows are planned at runtime."""
         return self.planner.has_stream(stream_id)
 
-    # ---- arrivals: the WindowInput port and the room-side store's signal
+    # ---- arrivals: the WindowInput port and the strong syndrome buffer's
+    # signal
 
     def accept_window_input(
         self, packet: round_records.SyndromeRoundPacket
@@ -232,15 +233,16 @@ class WindowManager:
         operation = self.tracker.operation_by_id[packet.operation_id]
         self._refuse_unplanned_round(packet, operation)
         if self.retention.primary_tier is not window_records.DecoderTier.STRONG:
-            # Buffer 0 publication is the readiness authority for the weak lane
+            # The weak syndrome buffer publication is the readiness authority
+            # for the weak lane
             self._count_arrival(operation, packet.round_index)
             self._update_stream(operation.id)
             self._wake_strong_tier(operation.id)
             self._wake_windows(operation)
         # a round whose every consumer already resolved (an absorbed window's
-        # tail, or every round of a strong-primary plan) frees its Buffer 0
-        # slot on arrival, the same drop-on-arrival rule syndrome buffer 1
-        # applies
+        # tail, or every round of a strong-primary plan) frees its the weak
+        # syndrome buffer slot on arrival, the same drop-on-arrival rule strong
+        # syndrome buffer applies
         round_key = (packet.operation_id, packet.round_index)
         self.retention.release_round_if_unheld(round_key)
 
@@ -275,7 +277,7 @@ class WindowManager:
         self.check_windows_for_operation(source_operation_id)
 
     def accept_room_round(self, operation_id, round_index: int) -> None:
-        """Syndrome buffer 1 stored a round.
+        """The strong syndrome buffer stored a round.
 
         Wake the strong tier's listeners, and drive readiness when the
         strong tier is primary.

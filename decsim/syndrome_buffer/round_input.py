@@ -1,4 +1,4 @@
-"""Buffer 0's incoming port: its room, and the landing that takes a slot.
+"""The weak syndrome buffer's incoming port: room, and the slot a landing takes.
 
 A round occupies a slot when its write completes, and is readable then.
 The link landing starts that write; a zero write cost completes at the
@@ -42,17 +42,17 @@ it drains), a refusal being the receiver's answer to the sender
 must wait for a recvReqRetry"); and Ruby sums the same two counts
 (`tmp/resources/gem5/src/mem/ruby/network/MessageBuffer.cc:181`
 "if (current_size + current_stall_size + n <= m_max_size)", the two sizes
-read at `:155-158`). This is the shape syndrome buffer 1 already has
-(strong_round_writer.py:48-53), so both stores now answer the same
+read at `:155-158`). This is the shape strong syndrome buffer already has
+(strong_round_receiver.py:48-53), so both stores now answer the same
 question by the same shape of object.
 
-Two calls of the controller arrive here, both about Buffer 0. A packed
-round lands over controller_to_weak_buffer: this end stores it, narrates
+Two calls of the controller arrive here, both about the weak syndrome buffer. A
+packed round lands over controller_to_weak_buffer: this end stores it, narrates
 the copy and the intake, and announces the published round to the window
 manager. And a timing-only feedback-memory round is handed over to be
-sent: it takes its slot here, because Buffer 0 is where it waits, and it
-leaves by the store's own outgoing port (round_output.py), which frees
-the slot at the delivery. A timing-only round is never published: no
+sent: it takes its slot here, because the weak syndrome buffer is where it
+waits, and it leaves by the store's own outgoing port (round_output.py), which
+frees the slot at the delivery. A timing-only round is never published: no
 window reads it.
 """
 
@@ -64,27 +64,27 @@ import decsim.engine as engine_module
 import decsim.ports as ports
 import decsim.records.log_sources as log_sources
 import decsim.records.rounds as round_records
-import decsim.syndrome_buffer.settings as round_store_settings
+import decsim.syndrome_buffer.settings as syndrome_buffer_settings
 import decsim.trace_source as trace_source
 
 
-class RoundStoreInput:
-    """Buffer 0's port toward the controller, bound once by the root.
+class SyndromeBufferInput:
+    """The weak syndrome buffer's port toward the controller, bound by the root.
 
     Trace sources: round_event(RoundEvent) with kind PUBLISHED, and
-    copy_made(round_key, bits, "controller assembler", "Buffer 0") at
-    every intake, the write's copy (data_path.md hop 2).
+    copy_made(round_key, bits, "controller assembler", "weak syndrome buffer")
+    at every intake, the write's copy (data_path.md hop 2).
     """
 
-    store = ports.Port(ports.RoundStore)
+    store = ports.Port(ports.SyndromeBuffer)
     # the store's outgoing port, which sends what leaves the store
-    output = ports.Port(ports.RoundStoreOutput)
+    output = ports.Port(ports.SyndromeBufferOutput)
     windows = ports.Port(ports.WindowInput)
 
     def __init__(
         self,
         engine: engine_module.Engine,
-        settings: round_store_settings.RoundStoreSettings,
+        settings: syndrome_buffer_settings.SyndromeBufferSettings,
     ) -> None:
         self.engine = engine
         self.settings = settings
@@ -110,10 +110,10 @@ class RoundStoreInput:
         the bits become readable when they are here and not before, and
         the announcement follows the record, so the window manager never
         hears of a round the store does not yet call readable
-        (validation buffer_contract.md, Buffer 0).
+        (validation buffer_contract.md, the weak syndrome buffer).
 
         A round whose operation closed while it crossed is dropped at the
-        door on the strong side (strong_round_writer.py _drop_landing).
+        door on the strong side (strong_round_receiver.py _drop_landing).
         It cannot reach this door: the window manager refuses a round of
         an operation whose store closed by raising
         (windows/window_manager.py _refuse_unplanned_round), that being
@@ -127,7 +127,7 @@ class RoundStoreInput:
         edge = self.settings.clock.edge(cycles, self.engine.now)
         delay = edge - self.engine.now
         finish = functools.partial(self._finish_write, packed)
-        self.engine.schedule(delay, finish, label="round store write")
+        self.engine.schedule(delay, finish, label="syndrome buffer write")
 
     def send_memory_round(
         self,
@@ -136,8 +136,8 @@ class RoundStoreInput:
     ) -> None:
         """Take one timing-only round and send it to the store's decoder.
 
-        The round waits in Buffer 0 until the wire takes it, so it takes
-        its slot here, where the store has it; the outgoing port frees
+        The round waits in the weak syndrome buffer until the wire takes it, so
+        it takes its slot here, where the store has it; the outgoing port frees
         that slot at the delivery. It is not published: no window reads
         a timing-only round, so nothing may be told it is readable.
         """
@@ -154,7 +154,7 @@ class RoundStoreInput:
         """
         if self.writes_in_flight:
             raise RuntimeError(
-                f"syndrome buffer 0 ended with {self.writes_in_flight} "
+                f"weak syndrome buffer ended with {self.writes_in_flight} "
                 f"controller_to_weak_buffer writes in flight"
             )
 

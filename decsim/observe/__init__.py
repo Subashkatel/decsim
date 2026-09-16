@@ -11,7 +11,7 @@ window_ledger every window's record, stage_records the decoders' stage
 rows, referee_audit what a checking decoder re-decoded, decode_records
 the switching study's per-request and per-service rows, link_traffic
 what each link carried, data_movement how often bits were copied or
-referenced, round_store_occupancy a store's occupancy and residence,
+referenced, syndrome_buffer_occupancy a store's occupancy and residence,
 queue_depth the decode queue over time, controller_counters the idle
 rounds, metrics the integrated step functions, command_events and
 runtime_stamps the ticks of each operation's life, round_events the

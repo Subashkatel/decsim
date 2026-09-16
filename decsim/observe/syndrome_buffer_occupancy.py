@@ -1,4 +1,4 @@
-"""The L5 numbers of one round store: occupancy over time, residence per round.
+"""One syndrome buffer's L5 numbers: occupancy over time, residence per round.
 
 A listener on the store's round_stored and round_released events. It
 integrates the occupancy as a step function of time and sums the
@@ -13,7 +13,7 @@ when the observation section asks; the store runs without it.
 from typing import Optional
 
 
-class RoundStoreOccupancy:
+class SyndromeBufferOccupancy:
     """Occupancy integral, peak, residence sum and arrivals of one store."""
 
     def __init__(self, engine) -> None:

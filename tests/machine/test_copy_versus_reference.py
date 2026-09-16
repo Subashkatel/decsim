@@ -158,10 +158,10 @@ def _formed_round_keys(machine) -> list:
 
 
 def _store_copy_bits(machine) -> int:
-    """The bits the assembler copied into Buffer 0 over the run."""
+    """The bits the assembler copied into the weak syndrome buffer per run."""
     copies = machine.observation.data_movement.copies.by_path
     for path, counts in copies.items():
-        if path == "controller assembler -> Buffer 0":
+        if path == "controller assembler -> weak syndrome buffer":
             return counts.bits
     return 0
 
@@ -350,7 +350,7 @@ def test_the_same_events_are_decoded_wherever_they_were_formed():
 
 
 def test_the_widths_the_two_rows_send_are_the_events_and_the_outcomes():
-    """d=3: 240 bits of events into Buffer 0, 249 bits of outcomes."""
+    """d=3: 240 event bits into the weak syndrome buffer, 249 outcome bits."""
     at_the_controller = _machine_formed_at("controller")
     at_the_controller.run()
     at_the_decoder = _machine_formed_at("decoder")
@@ -389,7 +389,7 @@ def test_one_tier_forms_and_charges_each_round_it_reads_once():
 
 
 def test_the_second_tier_forms_the_rounds_it_reads_out_of_its_own_store():
-    """Buffer 0 and Buffer 1 hold the raw rounds, so both tiers pay."""
+    """Both syndrome buffers hold the raw rounds, so both tiers pay."""
     switching = _switching_machine_formed_at("decoder")
     switching.run()
     charged = _formed_round_keys(switching)
@@ -402,8 +402,8 @@ def test_no_round_a_tier_read_goes_uncharged_on_that_tier():
 
     The forward shape withdraws weak decodes when the strong region
     absorbs their windows, and the strong tier then reads the same
-    rounds out of Buffer 1; every round a started decode read is charged
-    once on the tier that read it.
+    rounds out of the strong syndrome buffer; every round a started decode read
+    is charged once on the tier that read it.
     """
     forward = _forward_switching_at_the_decoder()
     read = _rounds_read_by_tier(forward)

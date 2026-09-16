@@ -138,7 +138,7 @@ def test_the_timeline_reads_the_lanes_and_the_period_off_the_file(tmp_path):
     lanes = plots._timeline_lanes(document)
     shot = plots._timeline_shot(document)
     assert lanes.store_path == "controller_to_weak_buffer"
-    assert lanes.store_name == "buffer 0"
+    assert lanes.store_name == "weak syndrome buffer"
     assert lanes.input_path == "weak_buffer_to_weak_decoder"
     assert lanes.output_path == "weak_decoder_to_frame"
     assert shot.round_period_us == 1.0

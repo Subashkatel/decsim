@@ -5,7 +5,7 @@ are allocated (gem5 src/mem/cache/queue.hh:150-153, isFull over
 allocated plus reserve); this end counts a round crossing toward it the
 same way, reserved by the controller before the round leaves. The
 crossing itself is the controller's send and is tested where it is
-executed (tests/controller/test_round_writes.py).
+executed (tests/controller/test_round_sender.py).
 
 The whole-run law at the end of the file places that landing in the
 pipeline: under a strong-primary policy the landing is what makes a
@@ -18,9 +18,9 @@ import decsim.config as config
 import decsim.engine as engine_module
 import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
-import decsim.syndrome_buffer.round_store as round_store_module
-import decsim.syndrome_buffer.settings as round_store_settings
-import decsim.syndrome_buffer.strong_round_writer as strong_round_writer
+import decsim.syndrome_buffer.settings as syndrome_buffer_settings
+import decsim.syndrome_buffer.strong_round_receiver as strong_round_receiver
+import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 import tests.declared_run as declared_run
 
 LANDING_TICKS = config.microseconds_to_ticks(0.5)
@@ -61,12 +61,14 @@ class RecordingListener:
 
 
 def room_side(engine, rounds=None, listener=None, windows=None):
-    store_settings = round_store_settings.RoundStoreSettings(rounds=rounds)
-    store = round_store_module.RoundStore(store_settings)
+    store_settings = syndrome_buffer_settings.SyndromeBufferSettings(
+        rounds=rounds
+    )
+    store = syndrome_buffer_module.SyndromeBuffer(store_settings)
     if listener is not None:
         store.trace.round_stored.connect(listener.round_stored)
         store.trace.round_released.connect(listener.round_released)
-    writer = strong_round_writer.StrongRoundWriter(engine)
+    writer = strong_round_receiver.StrongRoundReceiver(engine)
     writer.store = store
     if windows is not None:
         writer.windows = windows
@@ -77,7 +79,7 @@ def cross(engine, writer, round_index: int) -> None:
     """One round on its way over the crossing, landing after 0.5 us.
 
     The controller reserves the room and sends; the send itself is the
-    controller's and is tested at tests/controller/test_round_writes.py,
+    controller's and is tested at tests/controller/test_round_sender.py,
     so this file stands the round up at the landing tick instead.
     """
     writer.reserve_write()

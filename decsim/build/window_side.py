@@ -133,11 +133,11 @@ def build_gap_join(parts):
 def build_requester(parts):
     """The requester, whose read cost is the store its tier reads from."""
     settings = parts.settings
-    read_cycles = settings.round_store.read_cycles
+    read_cycles = settings.weak_syndrome_buffer.read_cycles
     if _reads_from_the_room_side(parts.escalation_policy):
         read_cycles = 0
     return decode_requests.DecodeRequester(
-        read_clock=settings.round_store.clock,
+        read_clock=settings.weak_syndrome_buffer.clock,
         read_cycles=read_cycles,
         clock=settings.windows.clock,
         decision_cycles=settings.windows.decision_cycles,
@@ -189,7 +189,7 @@ def decides_on_a_confidence(
 
 
 def _reads_from_the_room_side(escalation_policy) -> bool:
-    """Whether the tier that decodes the plan's windows reads Buffer 1."""
+    """Whether the plan's decoding tier reads the strong syndrome buffer."""
     strong = window_records.DecoderTier.STRONG
     return escalation_policy.primary_tier is strong
 

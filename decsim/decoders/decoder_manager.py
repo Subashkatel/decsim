@@ -158,7 +158,7 @@ class DecoderManager:
     def enqueue(
         self, job: decoding_records.DecodeJob, send_input=None, on_decoded=None
     ) -> None:
-        """Admit once and queue the request; its rounds stay in Buffer 0.
+        """Admit once and queue; the rounds stay in the weak syndrome buffer.
 
         ``send_input(on_landed)`` is called at dispatch, after a unit is
         assigned, to send the input over its link; it calls ``on_landed``

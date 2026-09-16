@@ -199,16 +199,16 @@ Everything the receiver owns, its record, its publication tick, its
 announcement to whoever waits on it, happens inside that call, in the
 receiving package. On `controller_to_weak_buffer` the controller's
 transmitter sends and hears the landing for its count of the rounds on
-their route; Buffer 0's own incoming port stamps the publication tick on
+their route; the weak syndrome buffer's own incoming port stamps the publication tick on
 the store's record and tells the window manager. On
-`controller_to_strong_buffer` the strong writer is the receiving end and
+`controller_to_strong_buffer` the strong receiver is the receiving end and
 stores each round at its landing. What a store does with a round is the
 store's, at its own door. D13 settles when that door takes a slot.
 
 **Why.** The tempting alternative, "the sender that arranged the
 transfer finishes the job", puts one component's state in another
-component's callback: a controller that stamps Buffer 0's record and
-wakes the window manager leaves a reader of Buffer 0 unable to see when
+component's callback: a controller that stamps the weak syndrome buffer's record and
+wakes the window manager leaves a reader of the weak syndrome buffer unable to see when
 its own rounds become readable, and lets the two ends of one hop drift
 apart without either file changing.
 
@@ -227,11 +227,11 @@ is the destination device's own method
 (`point-to-point-net-device.cc:324`). That the publication never precedes
 the store is a law of the store, and its tests hold it. Each hop keeps
 its own latency source: Caune arXiv:2410.05202 Fig. 1a stage D for hop
-2, and Toshio arXiv:2510.25222 line 1248 for what Buffer 1 is
+2, and Toshio arXiv:2510.25222 line 1248 for what the strong syndrome buffer is
 assigned.
 
 **Where to see it.** `decsim/syndrome_buffer/round_input.py`, the
-`RoundStoreInput` port in `decsim/ports.py`, and `tests/test_send_ends.py`,
+`SyndromeBufferInput` port in `decsim/ports.py`, and `tests/test_send_ends.py`,
 whose receive-end law reads every delivery callback out of the tree. The
 same rule decides who writes a structure at a handoff off the wire: a
 window's boundary mask is computed by the window side and written into
@@ -284,8 +284,8 @@ package, and it is readable at that same instant: the store and the
 publication are one call at one tick. The sender still refuses before it
 sends, by asking that same end for room against the rounds it holds plus
 the writes it has in flight, and reserving one before the round leaves.
-`RoundStoreInput` owns Buffer 0's room, its slot, its intake line and
-its announcement, the shape `StrongRoundWriter` has, and the publication
+`SyndromeBufferInput` owns the weak syndrome buffer's room, its slot, its intake line and
+its announcement, the shape `StrongRoundReceiver` has, and the publication
 tick is the `controller_to_weak_buffer` landing.
 
 **Why.** The tempting alternative, "book the slot when the sender
@@ -324,7 +324,7 @@ Ruby's `areNSlotsAvailable`, which sums the queue and the stalled
 messages (`MessageBuffer.cc:181`, the two sizes read at `:155-158`).
 
 **Where to see it.** `decsim/syndrome_buffer/round_input.py`, the
-`RoundStore` and `RoundStoreInput` ports in `decsim/ports.py`,
+`SyndromeBuffer` and `SyndromeBufferInput` ports in `decsim/ports.py`,
 `tests/syndrome_buffer/test_round_input.py`, and hop 2 of
 [The data path, hop by hop](data_path.md).
 
@@ -334,9 +334,9 @@ messages (`MessageBuffer.cc:181`, the two sizes read at `:155-158`).
 are the default card with four hops repriced from one measurement:
 Backline's steady-state round trip from an FPGA controller to a CPU
 coprocessor over RoCE v2, 2.305 microseconds in the median, and to a GPU
-coprocessor, 4.5 microseconds. The controller's write into syndrome
-buffer 1 (hop 3), the escalation request (hop 5) and the strong decoder's
-reply to the frame (hop 9) are each half of the round trip; the strong
+coprocessor, 4.5 microseconds. The controller's write into the strong
+syndrome buffer (hop 3), the escalation request (hop 5) and the strong
+decoder's reply to the frame (hop 9) are each half of the round trip; the strong
 store's read into the strong decoder (hop 6) is zero, because the
 coprocessor polls a slot in its own memory. On either row the escalation
 round trip, hops 5, 6 and 9, is the measured median exactly. Every other

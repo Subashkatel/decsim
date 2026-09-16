@@ -3,7 +3,7 @@
 The controller's packing stage merges the fragments of a round in
 fragment order, charges the packing time once per complete round, asks
 the run's detection event placement for the round that leaves, and hands
-it on (on_packed) once that placement's own time is charged
+it to the writer once that placement's own time is charged
 (detector_error_model/detection_event_formation.py, named by
 controller.detection_events_formed_at). Caune et al. 2410.05202 measure
 250 to 370 FPGA cycles for packetization, bus transfer, result return
@@ -18,8 +18,9 @@ fragment.
 
 import dataclasses
 import functools
-from typing import Callable, Optional
+from typing import Optional
 
+import decsim.controller.round_writes as round_writes
 import decsim.controller.settings as controller_settings
 import decsim.ports as ports
 import decsim.records.identity as identity_records
@@ -35,20 +36,21 @@ class RoundAssembler:
     "controller assembler") for the merged round (data_path.md hop 2).
     """
 
+    # the one end a packed round leaves by, so the port names the class
+    round_writer = ports.Port(round_writes.RoundWriter)
+
     def __init__(
         self,
         engine,
         settings: controller_settings.ControllerSettings,
         *,
         detection_events: ports.DetectionEventPlacement,
-        on_packed: Callable[[round_records.PackedRound], None],
         rounds_in_flight: "RoundsInFlight",
     ) -> None:
         self.engine = engine
         self.settings = settings
         self.detection_events = detection_events
         self.workspace = _Workspace(rounds_in_flight, settings.packing_overflow)
-        self.on_packed = on_packed
         self.trace = _TraceSources()
 
     def add(
@@ -174,10 +176,10 @@ class RoundAssembler:
             self.detection_events.detection_event_formation_cycles
         )
         if detection_event_formation_cycles == 0:
-            self.on_packed(packed)
+            self.round_writer.admit(packed)
             return
         delay = self._delay(detection_event_formation_cycles)
-        hand_on = functools.partial(self.on_packed, packed)
+        hand_on = functools.partial(self.round_writer.admit, packed)
         self.engine.schedule(
             delay, hand_on, label="controller form detection events"
         )

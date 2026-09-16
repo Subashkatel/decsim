@@ -108,11 +108,6 @@ stays short; past eight names the rule is wrong, not the list.
   package's strong re-decode it wakes and the workload's feedback mode.
   A caller asks the facade for what it wants (`window_sources`,
   `planned_windows`) rather than for a component of it.
-- `FeedbackStreams` (`decsim/controller/feedback_streams.py`): one
-  protected cycle, which spans the QPU it releases, the windows it hears
-  from, the table the program declares the cycle with, its own live and
-  binding indexes, and the issuer's callback it wakes when a stream
-  frees a patch.
 - `StrongRedecode` (`decsim/escalation/strong_redecode.py`): one strong
   re-decode of a window, which crosses both send ends, the decode queue
   and the committer's return path in a single flow.

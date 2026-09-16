@@ -132,8 +132,6 @@ def build_feedback_streams(
     plan: plan_build.Plan,
     qpu,
     window_manager,
-    *,
-    retry_ready_operations,
 ):
     """The stream bookkeeping, only when the workload has feedback."""
     uses_streams = bool(plan.protected_regions)
@@ -150,7 +148,6 @@ def build_feedback_streams(
         regions=plan.protected_regions,
         resolved_operations=run_plan.resolved_operations,
         resolved_patches=run_plan.resolved_patches,
-        retry_ready_operations=retry_ready_operations,
     )
 
 

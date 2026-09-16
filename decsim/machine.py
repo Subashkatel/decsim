@@ -246,9 +246,9 @@ class Machine:
             engine,
             settings.controller,
             detection_events=detection_events,
-            on_packed=round_writer.admit,
             rounds_in_flight=rounds_in_flight,
         )
+        assembler.round_writer = round_writer
         factory = controller_side.build_factory(
             settings.magic_state_factory, engine, decoder_manager, plan
         )
@@ -262,13 +262,7 @@ class Machine:
             settings.controller.decision_to_pulse_cycles,
         )
         streams = controller_side.build_feedback_streams(
-            engine,
-            plan,
-            qpu,
-            window_manager,
-            retry_ready_operations=lambda: (
-                execution_runtime.retry_ready_operations()
-            ),
+            engine, plan, qpu, window_manager
         )
         patch_by_identity = controller_side.resolved_patches_by_identity(plan)
         idle_rounds = idle_rounds_module.IdleRoundAccounting(
@@ -291,10 +285,12 @@ class Machine:
             factory=factory,
             resource_claims_by_operation_id=plan.resource_claims,
         )
-        # The QPU's three output ends are bound once they are built.
+        # The QPU's three output ends and the streams' runtime are bound
+        # once the runtime they name is built.
         qpu.readout_receiver = controller
         qpu.runtime = execution_runtime
         qpu.idle_rounds = idle_rounds
+        streams.runtime = execution_runtime
         input_transport = decoder_manager.input_transport()
         seed_roots = listener_build.build_seed_roots(
             code=plan.code,

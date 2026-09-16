@@ -21,12 +21,16 @@ import functools
 from typing import Optional
 
 import decsim.engine as engine_module
+import decsim.ports as ports
 import decsim.records.identity as identity_records
 import decsim.records.program as program_records
 
 
 class NoFeedbackStreams:
     """A run whose operations share no streams and declare no regions."""
+
+    # the row takes the wire the other row does: a seat has one shape
+    runtime = ports.Port(ports.OperationRuntime)
 
     def load(self, program) -> None:
         """Nothing to index."""
@@ -88,6 +92,9 @@ class _LiveStream:
 class FeedbackStreams:
     """The stream bindings, the live streams and the protected cycle."""
 
+    # a cadence change frees an operation the runtime is holding
+    runtime = ports.Port(ports.OperationRuntime)
+
     def __init__(
         self,
         engine,
@@ -97,7 +104,6 @@ class FeedbackStreams:
         regions,
         resolved_operations,
         resolved_patches,
-        retry_ready_operations,
     ):
         self.engine = engine
         self.qpu = qpu
@@ -108,7 +114,6 @@ class FeedbackStreams:
         self.live_by_stream_id: dict = {}
         # operation id -> StreamBinding
         self.bindings: dict = {}
-        self.retry_ready_operations = retry_ready_operations
 
     # ---- program load
 
@@ -407,7 +412,7 @@ class FeedbackStreams:
             f"protected stream {stream_id} boundary already open"
         )
         live.is_boundary_open = True
-        self.retry_ready_operations()
+        self.runtime.retry_ready_operations()
         next_round = live.next_round + 1
         emit_round = functools.partial(self._emit_protected_round, stream_id)
         self.engine.schedule(
@@ -467,7 +472,7 @@ class FeedbackStreams:
         live.region = None
         live.is_close_requested = False
         live.last_emission_tick = None
-        self.retry_ready_operations()
+        self.runtime.retry_ready_operations()
 
     def _check_region_ends_on_boundary(self, region) -> None:
         stream_id = region.stream_id

@@ -23,6 +23,17 @@ qpu:
                                    # period
 
 escalation:
+  clock: fridge                    # a clocks domain; absent uses controller.clock
+  threshold_cycles: 0              # confidence comparison before forming a
+                                   # verdict, only for a policy that uses a
+                                   # confidence and a result that carries one
+  switch_cycles: 0                 # escalation control before issuing or
+                                   # selecting the strong request; a kept result
+                                   # pays none. Both costs default to zero and
+                                   # then run without edge rounding. Positive
+                                   # costs finish on this clock's edge, as gem5
+                                   # src/mem/XBar.py separates its frontend and
+                                   # forwarding cycles
   kind: weak_baseline              # weak_baseline | strong_only | switching.
                                    # strong_only wakes windows from syndrome
                                    # buffer 1, moves inputs on
@@ -192,6 +203,14 @@ workload:
                                    # Toshio 2510.25222 Fig. 4)
 
 windows:
+  clock: fridge                    # a clocks domain; absent uses controller.clock
+  decision_cycles: 0               # per-submission readiness decision before
+                                   # the decode queue admits the job. Zero is
+                                   # synchronous, without edge rounding; positive
+                                   # costs end on this domain's clock edge.
+                                   # gem5 src/mem/XBar.py frontend_latency;
+                                   # RISC-Q 2603.16203 lines 893-904 times
+                                   # aggregation and distribution separately
   kind: sliding                    # sliding | parallel | sandwich | naive_online
   commit_rounds: null              # rounds committed per window; null = d
   buffer_rounds: null              # look-ahead rounds per window; null = d
@@ -409,6 +428,16 @@ links:                             # a kind, then one card per path; null = the
   controller_to_qpu: null          # controller -> QPU, an instruction
 
 round_store:                       # Buffer 0, the upstream round store
+  clock: fridge                    # a clocks domain; absent uses controller.clock
+  write_cycles: 0                  # per-round write before storage/publication
+  read_cycles: 0                   # one bulk read per primary window, before
+                                   # assembling its input for copy or in_place.
+                                   # Both default to zero, with no edge rounding.
+                                   # Positive costs finish on this clock's edge.
+                                   # FIFO intake and window trigger: IBM
+                                   # 2510.21600 lines 500-509; separate stage
+                                   # cycles: gem5 src/mem/XBar.py frontend_latency
+                                   # and forward_latency
   kind: round_store                # the one row today
   rounds: null                     # capacity in rounds. When it is full the
                                    # controller holds the finished round and

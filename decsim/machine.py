@@ -212,7 +212,11 @@ class Machine:
             engine, strong_round_store, window_manager
         )
         store_input = store_build.build_round_store_input(
-            engine, round_store, weak_output, window_manager
+            engine,
+            round_store,
+            weak_output,
+            window_manager,
+            settings.round_store,
         )
         memory_arrivals = decoder_build.build_memory_round_arrivals(
             engine, window_manager

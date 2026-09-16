@@ -45,8 +45,8 @@ class DecoderStage:
     cycles_per_round: int = 0
 
     def __post_init__(self) -> None:
-        if self.cycles_per_job < 0 or self.cycles_per_round < 0:
-            raise ValueError(f"stage {self.name!r} cycles must be nonnegative")
+        config.check_cycles("cycles_per_job", self.cycles_per_job)
+        config.check_cycles("cycles_per_round", self.cycles_per_round)
 
     def cycles_for(self, job: decoding_records.DecodeJob) -> int:
         """The stage's cycles for one job: per job plus per round."""

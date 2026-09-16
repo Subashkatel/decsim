@@ -1,7 +1,7 @@
 """The window commits: a result rides home and commits its window once.
 
 The boundary is decoder state (the residual defects at the commit edge),
-so it leaves for the dependent windows at decode done, the way Skoric's
+so it leaves for dependent windows once the verdict is ready, as Skoric's
 blocks pass their artificial defects on: the corrections crossing out of
 the commit region become artificial defects (2209.08552 lines 268-269),
 and the next window decodes them with the buffer region's unresolved
@@ -20,8 +20,10 @@ executes the send that carries it to the frame
 
 import dataclasses
 import functools
-from typing import Callable
+from typing import Callable, Optional
 
+import decsim.config as config
+import decsim.engine as engine_module
 import decsim.records.decoding as decoding_records
 import decsim.records.log_sources as log_sources
 import decsim.records.program as program_records
@@ -39,17 +41,28 @@ class WindowVerdict:
     escalated result before its provisional commit and every weak commit
     after it, and the committer stamps the window with the tick the
     decode answered and performs whichever commit the verdict asks for.
+    The engine and the cycle costs price this handoff's threshold and
+    switch logic on its own clock, like gem5's frontend and forward
+    latencies (src/mem/XBar.py). Zero costs keep the handoff synchronous.
     """
 
     def __init__(
         self,
+        engine: engine_module.Engine,
         planner,
         tracker,
         escalation_policy,
         strong_redecode,
         decode_queue,
         committer: "WindowCommitter",
+        clock: Optional[config.Clock] = None,
+        threshold_cycles: int = 0,
+        switch_cycles: int = 0,
     ) -> None:
+        self.engine = engine
+        self.clock = clock
+        self.threshold_cycles = threshold_cycles
+        self.switch_cycles = switch_cycles
         self.planner = planner
         self.tracker = tracker
         self.escalation_policy = escalation_policy
@@ -68,25 +81,23 @@ class WindowVerdict:
         applied here (Toshio et al. 2510.25222 Sec. III A, step 3): a
         kept result rides its output link to the frame and commits as
         final; a result below the threshold asks the strong tier for
-        the window first (its selection, and a serial strong job, leave
-        now), then commits provisionally, its boundary leaving with the
-        commit.
+        the window first after the switch cost, then commits
+        provisionally, its boundary leaving with the commit.
         """
         key = (job.operation_id, job.window_id)
         window = self.planner.windows_by_key[key]
         self.committer.note_decode_finished(window)
-        operation = self.tracker.operation_by_id[job.operation_id]
-        verdict = self.escalation_policy.verdict_for_weak_result(job, result)
-        is_final = verdict is decoding_records.Verdict.KEEP
-        if not is_final:
-            self.strong_redecode.escalate(job)
-        elif self.strong_redecode is not None:
-            self.strong_redecode.cancel_held_sibling(key)
-        self.decode_queue.resolve_weak_request(job, result, verdict)
-        read_result = functools.partial(self.decode_queue.read_result, job)
-        self.committer.commit_or_publish(
-            window, operation, result, job.request_key, is_final, read_result
-        )
+        cycles = self.threshold_cycles
+        if cycles == 0 or result.soft_output is None:
+            self._form_verdict(job, result)
+            return
+        if not self.escalation_policy.decides_on_a_confidence:
+            self._form_verdict(job, result)
+            return
+        edge = self.clock.edge(cycles, self.engine.now)
+        delay = edge - self.engine.now
+        decide = functools.partial(self._form_verdict, job, result)
+        self.engine.schedule(delay, decide, label="escalation threshold")
 
     def accept_strong_result(
         self,
@@ -99,6 +110,40 @@ class WindowVerdict:
         operation = self.tracker.operation_by_id[window.operation_id]
         self.committer.publish_strong(
             window, operation, result, job.request_key
+        )
+
+    def _form_verdict(
+        self,
+        job: decoding_records.DecodeJob,
+        result: decoding_records.DecodeResult,
+    ) -> None:
+        verdict = self.escalation_policy.verdict_for_weak_result(job, result)
+        if verdict is decoding_records.Verdict.KEEP or self.switch_cycles == 0:
+            self._apply_verdict(job, result, verdict)
+            return
+        edge = self.clock.edge(self.switch_cycles, self.engine.now)
+        delay = edge - self.engine.now
+        apply = functools.partial(self._apply_verdict, job, result, verdict)
+        self.engine.schedule(delay, apply, label="escalation switch")
+
+    def _apply_verdict(
+        self,
+        job: decoding_records.DecodeJob,
+        result: decoding_records.DecodeResult,
+        verdict: decoding_records.Verdict,
+    ) -> None:
+        key = (job.operation_id, job.window_id)
+        window = self.planner.windows_by_key[key]
+        operation = self.tracker.operation_by_id[job.operation_id]
+        is_final = verdict is decoding_records.Verdict.KEEP
+        if not is_final:
+            self.strong_redecode.escalate(job)
+        elif self.strong_redecode is not None:
+            self.strong_redecode.cancel_held_sibling(key)
+        self.decode_queue.resolve_weak_request(job, result, verdict)
+        read_result = functools.partial(self.decode_queue.read_result, job)
+        self.committer.commit_or_publish(
+            window, operation, result, job.request_key, is_final, read_result
         )
 
 

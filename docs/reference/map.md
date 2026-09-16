@@ -110,7 +110,7 @@ docstring.
 - `decsim/syndrome_buffer/round_input.py`: Buffer 0's incoming port: its room, and the landing that takes a slot.
 - `decsim/syndrome_buffer/round_output.py`: A round store's outgoing port: it sends the rounds that leave the store.
 - `decsim/syndrome_buffer/round_store.py`: A round store: finished rounds held until their last hold releases.
-- `decsim/syndrome_buffer/settings.py`: The settings of a round store: its capacity in rounds.
+- `decsim/syndrome_buffer/settings.py`: A round store's capacity and access costs on its named clock.
 - `decsim/syndrome_buffer/strong_round_writer.py`: The room-side end of controller_to_strong_buffer: room, then landing.
 
 ### windows
@@ -131,7 +131,7 @@ docstring.
 - `decsim/windows/schemes/sandwich.py`: The sandwich row: Tan et al.'s zero-seam sandwich decoder.
 - `decsim/windows/schemes/sliding.py`: The sliding row: serial commit windows with a look-ahead buffer.
 - `decsim/windows/schemes/window_data.py`: When a window has the rounds it reads.
-- `decsim/windows/settings.py`: The window settings: the scheme and its commit and buffer sizes.
+- `decsim/windows/settings.py`: The window scheme, its sizes, and its decision cost on a named clock.
 - `decsim/windows/window_boundaries.py`: The boundary courier: residual defects travel to dependent windows.
 - `decsim/windows/window_commits.py`: The window commits: a result rides home and commits its window once.
 - `decsim/windows/window_interactions.py`: The window interaction: how adjacent or replaced windows relate.

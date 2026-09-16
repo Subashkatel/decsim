@@ -8,13 +8,18 @@ prediction; a window awaiting strong is not final.
 
 import types
 
+import pytest
+
+import decsim.config as config
 import decsim.decoders.decoder_output as decoder_output_module
+import decsim.decoders.decoders as decoders
 import decsim.engine as engine_module
 import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 import decsim.windows.window_commits as window_commits
+import tests.declared_run as declared_run
 
 
 class _RecordingCourier:
@@ -83,7 +88,13 @@ class _Transfers:
 
 
 class _Fixture:
-    def __init__(self, frame_ticks: int = 3) -> None:
+    def __init__(
+        self,
+        frame_ticks: int = 3,
+        clock=None,
+        threshold_cycles=0,
+        switch_cycles=0,
+    ) -> None:
         self.engine = engine_module.Engine()
         self.window = window_records.Window(
             operation_id=4,
@@ -108,8 +119,10 @@ class _Fixture:
         self.kept = []
         self.resolved = []
         self.verdicts = {}
+        self.verdict_ticks = []
         self.policy = types.SimpleNamespace(
-            verdict_for_weak_result=self._verdict_for
+            verdict_for_weak_result=self._verdict_for,
+            decides_on_a_confidence=True,
         )
         self.reads = []
         self.decode_queue = types.SimpleNamespace(
@@ -129,12 +142,16 @@ class _Fixture:
         )
         self.committer = committer
         self.verdict = window_commits.WindowVerdict(
+            self.engine,
             planner,
             tracker,
             self.policy,
             self.escalation,
             self.decode_queue,
             committer,
+            clock=clock,
+            threshold_cycles=threshold_cycles,
+            switch_cycles=switch_cycles,
         )
 
     def job(self, tier, sequence, awaiting=False) -> decoding_records.DecodeJob:
@@ -146,6 +163,7 @@ class _Fixture:
         return job
 
     def _verdict_for(self, job, _result) -> decoding_records.Verdict:
+        self.verdict_ticks.append(self.engine.now)
         if self.verdicts[job.request_key]:
             return decoding_records.Verdict.ESCALATE
         return decoding_records.Verdict.KEEP
@@ -247,3 +265,103 @@ def test_a_frameless_run_commits_at_the_delivery():
     )
     fixture.engine.run()
     assert committed == [4]
+
+
+@pytest.mark.parametrize("probability", [0.0, 1.0])
+def test_threshold_cycles_delay_kept_and_escalated_frame_points(probability):
+    clocks = config.ClockSettings.from_yaml({"decisions": 1.0})
+    clock = clocks.clock("decisions")
+    free = declared_run.switching_run(
+        rounds=3, escalation_probability=probability
+    )
+    charged = declared_run.switching_run(
+        rounds=3,
+        escalation_probability=probability,
+        clock=clock,
+        threshold_cycles=3,
+    )
+    free_ticks = declared_run.reaction_ticks(free)
+    charged_ticks = declared_run.reaction_ticks(charged)
+    paired = zip(charged_ticks, free_ticks)
+    shifts = [charged_tick - free_tick for charged_tick, free_tick in paired]
+    expected = 3 * clock.period_ticks
+    assert shifts == [0, 0, 0, 0, expected, expected]
+
+
+def test_switch_cycles_delay_the_strong_request_and_frame_points():
+    clocks = config.ClockSettings.from_yaml({"decisions": 1.0})
+    clock = clocks.clock("decisions")
+    free = declared_run.switching_run(
+        rounds=3, escalation_probability=1.0, record=True
+    )
+    charged = declared_run.switching_run(
+        rounds=3,
+        escalation_probability=1.0,
+        clock=clock,
+        switch_cycles=3,
+        record=True,
+    )
+    free_ticks = declared_run.reaction_ticks(free)
+    charged_ticks = declared_run.reaction_ticks(charged)
+    paired = zip(charged_ticks, free_ticks)
+    shifts = [charged_tick - free_tick for charged_tick, free_tick in paired]
+    expected = 3 * clock.period_ticks
+    assert shifts == [0, 0, 0, 0, expected, expected]
+    free_requests = free.observation.decode_records.requests
+    charged_requests = charged.observation.decode_records.requests
+    strong = window_records.DecoderTier.STRONG
+    free_admissions = [
+        row.admitted_ticks
+        for row in free_requests
+        if row.request_key.tier is strong
+    ]
+    charged_admissions = [
+        row.admitted_ticks
+        for row in charged_requests
+        if row.request_key.tier is strong
+    ]
+    assert len(free_admissions) == 1
+    assert charged_admissions == [free_admissions[0] + expected]
+
+
+def test_a_kept_verdict_pays_no_switch_cycles():
+    clock = config.Clock(1_000_000)
+    free = declared_run.switching_run(rounds=3, escalation_probability=0.0)
+    charged = declared_run.switching_run(
+        rounds=3,
+        escalation_probability=0.0,
+        clock=clock,
+        switch_cycles=3,
+    )
+    assert declared_run.reaction_ticks(charged) == declared_run.reaction_ticks(
+        free
+    )
+
+
+def test_a_verdict_without_confidence_pays_no_threshold_cycles():
+    clock = config.Clock(10)
+    fixture = _Fixture(clock=clock, threshold_cycles=3)
+    fixture.engine.now = 1
+    job = fixture.job(window_records.DecoderTier.WEAK, 0, awaiting=True)
+    result = decoding_records.DecodeResult(4, 1)
+
+    fixture.verdict.accept_result(job, result)
+
+    assert fixture.engine.idle
+    assert fixture.reads == [(1, job.request_key)]
+
+
+def test_threshold_and_switch_cycles_are_charged_in_sequence():
+    clock = config.Clock(10)
+    fixture = _Fixture(clock=clock, threshold_cycles=2, switch_cycles=3)
+    fixture.engine.now = 1
+    job = fixture.job(window_records.DecoderTier.WEAK, 0, awaiting=True)
+    source = decoders.SAMPLED_CONFIDENCE_SOURCE
+    soft_output = decoding_records.SoftOutput(0.0, source)
+    result = decoding_records.DecodeResult(4, 1, soft_output=soft_output)
+
+    fixture.verdict.accept_result(job, result)
+    fixture.engine.run()
+
+    assert fixture.verdict_ticks == [30]
+    assert fixture.reads == [(60, job.request_key)]

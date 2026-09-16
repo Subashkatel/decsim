@@ -754,3 +754,16 @@ def test_a_continuous_row_queues_nothing_until_it_is_started():
     assert engine.idle is False
     engine.run()
     assert factory.stored_state_count == 1
+
+
+@pytest.mark.parametrize("cycles", [True, 0.5, float("nan"), float("inf")])
+def test_factory_level_cycles_require_integers_by_key(cycles):
+    engine = decsim.engine.Engine()
+    level = magic_state_factories.DistillLevel(
+        unit_count=1, distance=3, logical_cycles_per_round=cycles
+    )
+    sentence = (
+        r"levels\[0\].logical_cycles_per_round must be a nonnegative integer"
+    )
+    with pytest.raises(ValueError, match=sentence):
+        chain(engine, [level])

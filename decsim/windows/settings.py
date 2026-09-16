@@ -1,9 +1,10 @@
-"""The window settings: the scheme and its commit and buffer sizes."""
+"""The window scheme, its sizes, and its decision cost on a named clock."""
 
 import dataclasses
 from collections.abc import Mapping
 from typing import Optional
 
+import decsim.config as config
 import decsim.ports as ports
 import decsim.records.windows as window_records
 import decsim.tables as tables
@@ -64,6 +65,8 @@ class WindowSettings:
     the default interaction.
     """
 
+    clock: Optional[config.Clock] = None
+    decision_cycles: int = 0
     kind: str = "sliding"
     commit_rounds: Optional[int] = None
     buffer_rounds: Optional[int] = None
@@ -74,8 +77,18 @@ class WindowSettings:
     boundary_policy: Optional[ports.BoundaryPolicy] = None
     window_interaction: Optional[window_interactions.WindowInteraction] = None
 
+    def __post_init__(self) -> None:
+        config.check_cycles("windows.decision_cycles", self.decision_cycles)
+        if self.decision_cycles > 0 and self.clock is None:
+            raise ValueError("windows.decision_cycles needs a clock")
+
     @classmethod
-    def from_yaml(cls, section: Mapping) -> "WindowSettings":
+    def from_yaml(
+        cls,
+        section: Mapping,
+        clocks: config.ClockSettings,
+        default_clock: Optional[config.Clock] = None,
+    ) -> "WindowSettings":
         """The `windows` section: a kind of the table, two sizes, the wire."""
         boundary_payload = section.get("boundary_payload", "dense_seam_mask")
         terminal_policy = section.get("terminal_policy")
@@ -83,7 +96,13 @@ class WindowSettings:
         boundaries = section.get("boundaries")
         if boundaries is not None:
             tables.row(BOUNDARY_POLICIES, "windows.boundaries", boundaries)
+        clock = default_clock
+        if "clock" in section:
+            clock = clocks.clock(section["clock"])
+        decision_cycles = section.get("decision_cycles", 0)
         return cls(
+            clock=clock,
+            decision_cycles=decision_cycles,
             kind=section["kind"],
             commit_rounds=section["commit_rounds"],
             buffer_rounds=section["buffer_rounds"],

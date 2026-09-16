@@ -1,7 +1,7 @@
 """The decode requests: a job per complete window, asked for once.
 
-A window's raw rounds ship as soon as its data is complete; a window
-that still owes a boundary is masked at the decoder when its decode
+A complete window pays its store read and readiness decision before
+submission; a window that still owes a boundary is masked when its decode
 starts (qLDPC folds the net error into the syndrome of the next window,
 qldpc/decoders/sinter.py decode_shots_to_error; cudaq-x keeps raw
 rounds and applies syndrome_mods at assembly). WindowInputGate is what
@@ -17,8 +17,10 @@ input has no submission to make here.
 """
 
 import dataclasses
+import functools
 from typing import Callable, Optional
 
+import decsim.config as config
 import decsim.records.decoding as decoding_records
 import decsim.records.identity as identity_records
 import decsim.records.log_sources as log_sources
@@ -400,6 +402,10 @@ class DecodeRequester:
         verdict,
         store_output,
         gap_join=None,
+        read_clock: Optional[config.Clock] = None,
+        read_cycles: int = 0,
+        clock: Optional[config.Clock] = None,
+        decision_cycles: int = 0,
     ) -> None:
         self.tracker = tracker
         self.retention = retention
@@ -410,6 +416,12 @@ class DecodeRequester:
         # the primary store's outgoing port; it executes the input send
         self.store_output = store_output
         self.gap_join = gap_join
+        self.read_clock = read_clock
+        self.read_cycles = read_cycles
+        self.pending_reads: dict = {}
+        self.clock = clock
+        self.decision_cycles = decision_cycles
+        self.pending_submissions: dict = {}
 
     def request_ready_windows(self, windows, strong_redecode) -> None:
         """Request each window that has its data, in the given order.
@@ -455,31 +467,25 @@ class DecodeRequester:
         policy names too gets its sibling from the strong redecode (the
         paper's Step 1, both decoders started on the same window).
         """
-        store = self.retention.primary_store
-        self.builder.stamp_first_round(window, store)
-        window.t_queued = self.builder.engine.now
-        primary_tier = self.retention.primary_tier
-        forced_classes = self._forced_logical_classes()
-        first_class = _first_forced_class(forced_classes)
-        job = self.builder.build(
-            window, operation, primary_tier, store, first_class
-        )
+        if self.read_cycles == 0:
+            self._request_from_store(window, operation, strong_redecode)
+            return
         window.queued = True
-        tiers = self.escalation_policy.tiers_for_ready_window(window)
-        primary_jobs = self._primary_jobs(job, forced_classes)
-        window_reads = decoding_records.WindowReads(window.key)
-        is_input_held = self._bind_input_hold(primary_jobs, window_reads)
-        submissions = []
-        for tier in tiers:
-            if tier is primary_tier:
-                primary = self._primary_submissions(primary_jobs, is_input_held)
-                submissions.extend(primary)
-            else:
-                sibling = strong_redecode.parallel_strong_submission(job)
-                started = _sibling_submissions(sibling)
-                submissions.extend(started)
-        for submission in submissions:
-            self.enqueue(submission)
+        action = functools.partial(
+            self._request_from_store, window, operation, strong_redecode
+        )
+        read = _PendingRead(action)
+        keys = self.retention.read_keys_for_bounds(
+            window.operation_id, window.start_round, window.buffer_hi, window
+        )
+        store = self.retention.primary_store
+        store.register_hold(read, keys)
+        self.pending_reads[window.key] = read
+        engine = self.builder.engine
+        edge = self.read_clock.edge(self.read_cycles, engine.now)
+        delay = edge - engine.now
+        finish = functools.partial(self._finish_read, window.key, read)
+        engine.schedule(delay, finish, label="round store read")
 
     def _primary_submissions(
         self, primary_jobs: list, is_input_held: bool
@@ -554,13 +560,16 @@ class DecodeRequester:
         result commits it, through the confidence join when the window's
         answer takes both forced-class solves.
         """
+        if self.decision_cycles == 0:
+            self._admit(submission)
+            return
         job = submission.job
-        on_decoded = self.verdict.accept_result
-        if job.strong_decode_for is not None:
-            on_decoded = self.verdict.accept_strong_result
-        elif self.gap_join is not None:
-            on_decoded = self.gap_join.accept_result
-        self.decode_queue.enqueue(job, submission.send_input, on_decoded)
+        self.pending_submissions[job.request_key] = submission
+        engine = self.builder.engine
+        edge = self.clock.edge(self.decision_cycles, engine.now)
+        delay = edge - engine.now
+        admit = functools.partial(self._admit, submission)
+        engine.schedule(delay, admit, label="window decision")
 
     def check_settled(self) -> None:
         """At the end of a run no window may still hold an unjoined solve."""
@@ -581,7 +590,13 @@ class DecodeRequester:
         (a strong window that absorbs the window owns its rounds from then
         on).
         """
-        self.decode_queue.withdraw_window(window.key)
+        pending = self.pending_reads.pop(window.key, None)
+        if pending is not None:
+            store = self.retention.primary_store
+            store.release_hold(pending)
+        cancelled = self._withdraw_submissions(window.key)
+        if pending is None and not cancelled:
+            self.decode_queue.withdraw_window(window.key)
         window.queued = False
         window.blocked_logged = False
         window.t_queued = None
@@ -591,6 +606,90 @@ class DecodeRequester:
     def release_parked(self, window_key: tuple) -> None:
         """The window's last boundary arrived: its parked decode may start."""
         self.decode_queue.release_parked(window_key)
+
+    def _admit(self, submission: decoding_records.Submission) -> None:
+        job = submission.job
+        if job.cancelled:
+            return
+        self.pending_submissions.pop(job.request_key, None)
+        if job.strong_decode_for is None:
+            job.window.t_queued = self.builder.engine.now
+        on_decoded = self.verdict.accept_result
+        if job.strong_decode_for is not None:
+            on_decoded = self.verdict.accept_strong_result
+        elif self.gap_join is not None:
+            on_decoded = self.gap_join.accept_result
+        self.decode_queue.enqueue(job, submission.send_input, on_decoded)
+
+    def _withdraw_submissions(self, window_key: tuple) -> bool:
+        """Release requests still waiting for this window's decision edge."""
+        submissions = self.pending_submissions.values()
+        pending = tuple(submissions)
+        cancelled = False
+        for submission in pending:
+            job = submission.job
+            key = (job.operation_id, job.window_id)
+            if key != window_key:
+                continue
+            del self.pending_submissions[job.request_key]
+            job.cancelled = True
+            hold = job.input_hold
+            if hold is not None:
+                hold()
+                job.input_hold = None
+            cancelled = True
+        return cancelled
+
+    def _finish_read(self, window_key: tuple, read: "_PendingRead") -> None:
+        if self.pending_reads.get(window_key) is not read:
+            return
+        del self.pending_reads[window_key]
+        read.action()
+        store = self.retention.primary_store
+        store.release_hold(read)
+
+    def _request_from_store(
+        self,
+        window: window_records.Window,
+        operation: program_records.Operation,
+        strong_redecode,
+    ) -> None:
+        """Read the primary window's rounds and submit its requested tiers."""
+        store = self.retention.primary_store
+        self.builder.stamp_first_round(window, store)
+        primary_tier = self.retention.primary_tier
+        forced_classes = self._forced_logical_classes()
+        first_class = _first_forced_class(forced_classes)
+        job = self.builder.build(
+            window, operation, primary_tier, store, first_class
+        )
+        window.queued = True
+        tiers = self.escalation_policy.tiers_for_ready_window(window)
+        primary_jobs = self._primary_jobs(job, forced_classes)
+        window_reads = decoding_records.WindowReads(window.key)
+        is_input_held = self._bind_input_hold(primary_jobs, window_reads)
+        submissions = []
+        for tier in tiers:
+            if tier is primary_tier:
+                primary = self._primary_submissions(primary_jobs, is_input_held)
+                submissions.extend(primary)
+            else:
+                sibling = strong_redecode.parallel_strong_submission(job)
+                started = _sibling_submissions(sibling)
+                submissions.extend(started)
+        for submission in submissions:
+            self.enqueue(submission)
+
+
+@dataclasses.dataclass(frozen=True)
+class _PendingRead:
+    """One scheduled read holding its rounds until input ownership passes."""
+
+    action: Callable[[], None]
+
+    def referenced_operation_ids(self) -> tuple:
+        """The held rounds already name every operation the read keeps open."""
+        return ()
 
 
 class _SharedInputHold:

@@ -9,8 +9,11 @@ one raises at the yaml boundary is what a user meets first.
 
 import pytest
 
+import decsim.config as config
 import decsim.records.windows as window_records
 import decsim.windows.settings as window_settings
+
+CLOCKS = config.ClockSettings({"decisions": 250.0})
 
 
 def _section(**overrides) -> dict:
@@ -34,7 +37,7 @@ def test_a_terminal_policy_that_is_not_one_of_the_two_words_is_refused():
     section = _section(terminal_policy="drain")
 
     with pytest.raises(ValueError) as refusal:
-        window_settings.WindowSettings.from_yaml(section)
+        window_settings.WindowSettings.from_yaml(section, CLOCKS)
 
     sentence = str(refusal.value)
     assert "windows.terminal_policy is one of" in sentence
@@ -44,7 +47,7 @@ def test_a_terminal_policy_that_is_not_one_of_the_two_words_is_refused():
 def test_both_terminal_policies_of_the_record_are_accepted():
     for policy in window_records.TERMINAL_POLICIES:
         section = _section(terminal_policy=policy)
-        settings = window_settings.WindowSettings.from_yaml(section)
+        settings = window_settings.WindowSettings.from_yaml(section, CLOCKS)
 
         assert settings.terminal_policy == policy
 
@@ -53,7 +56,7 @@ def test_a_boundaries_key_that_names_no_row_is_refused():
     section = _section(boundaries="lazy")
 
     with pytest.raises(ValueError) as refusal:
-        window_settings.WindowSettings.from_yaml(section)
+        window_settings.WindowSettings.from_yaml(section, CLOCKS)
 
     sentence = str(refusal.value)
     assert "windows.boundaries" in sentence
@@ -63,7 +66,7 @@ def test_a_boundaries_key_that_names_no_row_is_refused():
 def test_both_boundary_policy_rows_are_reachable_by_name():
     for name in window_settings.BOUNDARY_POLICIES:
         section = _section(boundaries=name)
-        settings = window_settings.WindowSettings.from_yaml(section)
+        settings = window_settings.WindowSettings.from_yaml(section, CLOCKS)
 
         assert settings.boundaries == name
 
@@ -71,7 +74,14 @@ def test_both_boundary_policy_rows_are_reachable_by_name():
 def test_both_keys_default_to_null_so_the_plan_decides_them():
     """Null is not a policy: the escalation row's declared fact picks one."""
     section = _section()
-    settings = window_settings.WindowSettings.from_yaml(section)
+    settings = window_settings.WindowSettings.from_yaml(section, CLOCKS)
 
     assert settings.terminal_policy is None
     assert settings.boundaries is None
+
+
+def test_a_charged_window_decision_needs_its_clock():
+    with pytest.raises(
+        ValueError, match="windows.decision_cycles needs a clock"
+    ):
+        window_settings.WindowSettings(decision_cycles=1)

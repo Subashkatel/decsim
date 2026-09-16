@@ -98,6 +98,7 @@ def switching_machine(
     escalation=None,
     trace_path=None,
     scheme=None,
+    round_store=None,
 ) -> machine_module.Machine:
     """One d=3 memory operation, weak-primary switching on declared ticks.
 
@@ -179,6 +180,8 @@ def switching_machine(
         pauli_frame=pauli_frame,
         observation=observation,
     )
+    if round_store is not None:
+        settings = dataclasses.replace(settings, round_store=round_store)
     return machine_module.Machine.build(settings, 0)
 
 

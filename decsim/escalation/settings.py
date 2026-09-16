@@ -20,6 +20,7 @@ from collections.abc import Mapping
 from numbers import Real
 from typing import Optional
 
+import decsim.config as config
 import decsim.escalation.policies as escalation_policies
 import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.escalation.threshold_sources as threshold_sources
@@ -59,6 +60,9 @@ THRESHOLD_SOURCES = {
 RESTART_REREAD_BUFFER_REGIONS = (0, 1)
 ESCALATION_KEYS = (
     "kind",
+    "clock",
+    "threshold_cycles",
+    "switch_cycles",
     "confidence",
     "confidence_walk_microseconds",
     "gap_threshold_db",
@@ -230,6 +234,9 @@ class EscalationSettings:
     threshold_table.
     """
 
+    clock: Optional[config.Clock] = None
+    threshold_cycles: int = 0
+    switch_cycles: int = 0
     kind: str = "weak_baseline"
     confidence: str = "complementary_gap"
     confidence_walk_microseconds: Optional[float] = None
@@ -246,11 +253,28 @@ class EscalationSettings:
     online_threshold: Optional[ports.ThresholdSource] = None
     base_directory: Optional[pathlib.Path] = None
 
+    def __post_init__(self) -> None:
+        config.check_cycles(
+            "escalation.threshold_cycles", self.threshold_cycles
+        )
+        config.check_cycles("escalation.switch_cycles", self.switch_cycles)
+        charged = self.threshold_cycles + self.switch_cycles
+        if charged > 0 and self.clock is None:
+            raise ValueError("charged escalation costs need a clock")
+
     @classmethod
     def from_yaml(
-        cls, section: Mapping, base_directory: Optional[pathlib.Path] = None
+        cls,
+        section: Mapping,
+        clocks: config.ClockSettings,
+        base_directory: Optional[pathlib.Path] = None,
+        default_clock: Optional[config.Clock] = None,
     ) -> "EscalationSettings":
-        """The `escalation` section: a kind, and the switching knobs."""
+        """The common timing card and the policy's confidence knobs.
+
+        Both are checked at this boundary so a row without confidence
+        can accept timing keys while still refusing confidence knobs.
+        """
         kind = section.get("kind", "weak_baseline")
         unknown = set(section) - set(ESCALATION_KEYS)
         if unknown:
@@ -260,7 +284,15 @@ class EscalationSettings:
                 f"escalation does not know {listed}; its keys are {known}"
             )
         row = tables.row(ESCALATIONS, "escalation.kind", kind)
-        confidence_keys = set(section) - {"kind"}
+        clock = default_clock
+        if "clock" in section:
+            clock = clocks.clock(section["clock"])
+        confidence_keys = set(section) - {
+            "kind",
+            "clock",
+            "threshold_cycles",
+            "switch_cycles",
+        }
         if not row.decides_on_a_confidence:
             if confidence_keys:
                 listed = sorted(confidence_keys)
@@ -268,8 +300,15 @@ class EscalationSettings:
                     f"escalation.kind {kind} decides on no confidence; "
                     f"drop {listed}"
                 )
-            return cls(kind=kind)
-        return _switching_settings(kind, section, base_directory)
+            threshold_cycles = section.get("threshold_cycles", 0)
+            switch_cycles = section.get("switch_cycles", 0)
+            return cls(
+                kind=kind,
+                clock=clock,
+                threshold_cycles=threshold_cycles,
+                switch_cycles=switch_cycles,
+            )
+        return _switching_settings(kind, section, base_directory, clock)
 
     def threshold_nats_for(
         self, physical_error_probability: float, distance: int
@@ -370,7 +409,10 @@ def decibels_to_nats(decibels: float) -> float:
 
 
 def _switching_settings(
-    kind: str, section: Mapping, base_directory: Optional[pathlib.Path]
+    kind: str,
+    section: Mapping,
+    base_directory: Optional[pathlib.Path],
+    clock: Optional[config.Clock],
 ) -> EscalationSettings:
     """The confidence knobs of an escalating kind, every rule checked once.
 
@@ -404,7 +446,12 @@ def _switching_settings(
     reread_regions = _restart_reread_buffer_regions(section)
     _check_far_pin_reread(strong_window, reread_regions)
     threshold_table = section.get("threshold_table")
+    threshold_cycles = section.get("threshold_cycles", 0)
+    switch_cycles = section.get("switch_cycles", 0)
     return EscalationSettings(
+        clock=clock,
+        threshold_cycles=threshold_cycles,
+        switch_cycles=switch_cycles,
         kind=kind,
         confidence=confidence,
         confidence_walk_microseconds=walk_microseconds,

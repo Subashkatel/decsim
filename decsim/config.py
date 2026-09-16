@@ -42,6 +42,16 @@ def check_duration(name: str, value: float) -> None:
         raise ValueError(f"{name} is positive but rounds to zero ticks")
 
 
+def check_cycles(name: str, cycles: int) -> None:
+    """A cycle count is a nonnegative integer, excluding booleans."""
+    if not isinstance(cycles, int) or isinstance(cycles, bool):
+        raise ValueError(f"{name} must be a nonnegative integer")
+    if cycles < 0:
+        raise ValueError(
+            f"{name} must not be negative: cycles must be nonnegative"
+        )
+
+
 @dataclasses.dataclass(frozen=True)
 class Clock:
     """One clock domain's period, and the edges its component charges on.

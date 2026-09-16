@@ -110,3 +110,41 @@ def test_a_clock_that_is_not_a_positive_frequency_is_refused():
         match="clock fridge must be a positive frequency in megahertz, got 0",
     ):
         config.ClockSettings.from_yaml({"fridge": 0})
+
+
+@pytest.mark.parametrize(
+    "cycles",
+    [
+        True,
+        False,
+        0.5,
+        1.0,
+        float("nan"),
+        float("inf"),
+        float("-inf"),
+        "3",
+        None,
+    ],
+    ids=[
+        "true",
+        "false",
+        "fraction",
+        "float",
+        "nan",
+        "infinity",
+        "negative_infinity",
+        "string",
+        "null",
+    ],
+)
+def test_a_cycle_count_requires_a_nonnegative_integer_by_name(cycles):
+    with pytest.raises(
+        ValueError, match="packing_cycles must be a nonnegative integer"
+    ):
+        config.check_cycles("packing_cycles", cycles)
+
+
+def test_a_negative_cycle_count_is_refused_by_name():
+    sentence = "packing_cycles must not be negative: cycles must be nonnegative"
+    with pytest.raises(ValueError, match=sentence):
+        config.check_cycles("packing_cycles", -1)

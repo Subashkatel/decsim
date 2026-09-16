@@ -140,19 +140,21 @@ class MachineSettings:
         )
         links = link_profiles.from_yaml(sections["links"], clocks, name)
         round_store = round_store_settings.RoundStoreSettings.from_yaml(
-            sections["round_store"]
+            sections["round_store"], clocks, controller.clock
         )
         strong_round_store = round_store_settings.RoundStoreSettings.from_yaml(
-            sections["strong_round_store"]
+            sections["strong_round_store"], clocks
         )
-        windows = window_settings.WindowSettings.from_yaml(sections["windows"])
+        windows = window_settings.WindowSettings.from_yaml(
+            sections["windows"], clocks, controller.clock
+        )
         weak_decoder = _tier_settings(sections, "weak_decoder", clocks)
         strong_decoder = _tier_settings(sections, "strong_decoder", clocks)
         decoder_manager = decoder_settings.DecoderManagerSettings.from_yaml(
             decoder_manager_section, clocks
         )
         escalation = escalation_settings.EscalationSettings.from_yaml(
-            escalation_section, base_directory
+            escalation_section, clocks, base_directory, controller.clock
         )
         pauli_frame = pauli_frame_module.PauliFrameConfig.from_yaml(
             sections["pauli_frame"], clocks

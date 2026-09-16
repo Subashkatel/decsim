@@ -2,7 +2,8 @@
 # The style checks of STYLE.md rule 9 (and rule 1, which the one-action
 # check enforces), on the paths given or on the whole tree, then rule
 # 10's partial order and its no-class-recognition rule over the whole
-# package.
+# package. Rule 11's branch count is a report, not a failure, until the
+# count reaches zero.
 #
 # The interpreter and the dependency folder default to the checkout's
 # own .venv and .pydeps. A git worktree has neither, so point the two
@@ -28,4 +29,7 @@ PYTHONPATH=$pydeps "$python" -m ruff check "${targets[@]}" || status=1
 "$python" tools/check_one_action.py "${targets[@]}" || status=1
 "$python" tools/check_uses_graph.py decsim || status=1
 "$python" tools/check_row_recognition.py decsim || status=1
+PYTHONPATH=$pydeps "$python" -m ruff check --select C901 \
+  --config "lint.mccabe.max-complexity=5" --output-format concise \
+  "${targets[@]}" | sed 's/^/over five branches: /' | grep -v "Found "
 exit $status

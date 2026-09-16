@@ -1,8 +1,9 @@
 """One decoder unit's occupancy: slots, memory, compute claim, flights.
 
 The unit is Smith's decoupled access-execute machine with two input slots
-(Smith 1982; TI EDMA ping-pong, SPRAAN4A Example D; gem5-Aladdin ready
-bits at whole-buffer granularity, Shao et al. MICRO 2016 Sec. IV-B-2):
+(Smith 1982; TI EDMA ping-pong, SPRAAN4A Example D; gem5-Aladdin's
+full/empty bits, tracked per cache line or per half array for double
+buffering, Shao et al. MICRO 2016 Sec. IV-B-2):
 the next window's transfer lands in the second slot while the current
 decode computes. Compute is claimed apart from the slots (Tomasulo's
 rule: an instruction whose operands are not ready waits in its

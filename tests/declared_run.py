@@ -204,7 +204,11 @@ def weak_only_run(
     observation=None,
     probes=(),
 ):
-    """The weak-only baseline: one tier, readiness on Buffer 0."""
+    """The weak-only baseline: one tier, readiness on Buffer 0.
+
+    One complete machine keeps every path fixed while a test replaces
+    only the component card whose reaction-time shift it measures.
+    """
     workload = declared_workload(operations, rounds)
     decoder = decoders.PresetLatencyDecoder(DECLARED_MICROSECONDS["weak"])
     weak_decoder = decoder_settings.DecoderSettings(
@@ -291,6 +295,9 @@ def switching_run(
     round_microseconds=ROUND_MICROSECONDS,
     bulk_strong=False,
     probes=(),
+    clock=None,
+    threshold_cycles=0,
+    switch_cycles=0,
 ):
     """Weak-primary switching on the declared fabric.
 
@@ -331,7 +338,11 @@ def switching_run(
         bulk_strong=bulk_strong,
     )
     escalation = escalation_settings.EscalationSettings(
-        policy=policy, strong_window=strong_window
+        policy=policy,
+        strong_window=strong_window,
+        clock=clock,
+        threshold_cycles=threshold_cycles,
+        switch_cycles=switch_cycles,
     )
     links = declared_profile(
         strong_buffer_microseconds=strong_buffer_microseconds

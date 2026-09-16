@@ -115,12 +115,16 @@ def build_window_manager(
         engine, courier, decoder_output, results, committer_redecode
     )
     verdict = window_commits.WindowVerdict(
+        engine,
         planner,
         tracker,
         escalation_policy,
         committer_redecode,
         decode_queue,
         committer,
+        clock=settings.escalation.clock,
+        threshold_cycles=settings.escalation.threshold_cycles,
+        switch_cycles=settings.escalation.switch_cycles,
     )
     gap_join = _window_gap_join(settings, engine, verdict, decode_queue)
     read_cycles = settings.round_store.read_cycles

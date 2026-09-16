@@ -23,6 +23,17 @@ qpu:
                                    # period
 
 escalation:
+  clock: fridge                    # a clocks domain; absent uses controller.clock
+  threshold_cycles: 0              # confidence comparison before forming a
+                                   # verdict, only for a policy that uses a
+                                   # confidence and a result that carries one
+  switch_cycles: 0                 # escalation control before issuing or
+                                   # selecting the strong request; a kept result
+                                   # pays none. Both costs default to zero and
+                                   # then run without edge rounding. Positive
+                                   # costs finish on this clock's edge, as gem5
+                                   # src/mem/XBar.py separates its frontend and
+                                   # forwarding cycles
   kind: weak_baseline              # weak_baseline | strong_only | switching.
                                    # strong_only wakes windows from syndrome
                                    # buffer 1, moves inputs on

@@ -29,6 +29,7 @@ import pathlib
 
 import pytest
 
+import decsim.config as config
 import decsim.escalation.settings as escalation_settings
 import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.machine as machine_module
@@ -1012,6 +1013,7 @@ def test_a_pinned_far_face_refuses_a_re_reading_restart_window():
     the paper's value (Toshio 2510.25222 Sec. III C, Fig. 12), and the
     section refuses the pairing at load rather than reconciling it.
     """
+    clocks = config.ClockSettings({})
     section = {
         "kind": "switching",
         "gap_threshold_db": 20.0,
@@ -1019,10 +1021,10 @@ def test_a_pinned_far_face_refuses_a_re_reading_restart_window():
         "restart_reread_buffer_regions": 1,
     }
     with pytest.raises(ValueError) as refusal:
-        escalation_settings.EscalationSettings.from_yaml(section)
+        escalation_settings.EscalationSettings.from_yaml(section, clocks)
     assert "restart_reread_buffer_regions must be 0" in str(refusal.value)
     section["strong_window"] = "forward"
-    kept = escalation_settings.EscalationSettings.from_yaml(section)
+    kept = escalation_settings.EscalationSettings.from_yaml(section, clocks)
     assert kept.restart_reread_buffer_regions == 1
 
 

@@ -154,7 +154,7 @@ class MachineSettings:
             decoder_manager_section, clocks
         )
         escalation = escalation_settings.EscalationSettings.from_yaml(
-            escalation_section, base_directory
+            escalation_section, clocks, base_directory, controller.clock
         )
         pauli_frame = pauli_frame_module.PauliFrameConfig.from_yaml(
             sections["pauli_frame"], clocks

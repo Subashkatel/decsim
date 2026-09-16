@@ -35,6 +35,7 @@ import decsim.settings as machine_settings
 MEGAHERTZ = 250.0
 CYCLE_MICROSECONDS = 1 / MEGAHERTZ
 CYCLE_TICKS = config.microseconds_to_ticks(CYCLE_MICROSECONDS)
+CLOCK = config.Clock(CYCLE_TICKS)
 MEMORY_ROUNDS = 6
 MEMORY_DISTANCE = 3
 MEMORY_ERROR_PROBABILITY = 0.005
@@ -88,7 +89,7 @@ def fetch_and_release_timing():
     """One cycle of fetch per round, one cycle of release per job."""
     before = (FETCH_STAGE,)
     after = (RELEASE_STAGE,)
-    return staged_decoder.UnitTiming(before, after, MEGAHERTZ)
+    return staged_decoder.UnitTiming(before, after, CLOCK)
 
 
 def decode_job(window_id=0, round_count=3):
@@ -196,7 +197,7 @@ def test_the_wrapper_adds_no_time_when_it_has_no_hardware_stages():
     leaves the wrapped decoder's own service time untouched.
     """
     inner = decoders.PerRoundDecoder(tau_us=0.5)
-    timing = staged_decoder.UnitTiming((), (), MEGAHERTZ)
+    timing = staged_decoder.UnitTiming((), (), CLOCK)
     decoder = staged_decoder.StagedDecoder(inner, timing)
     job = decode_job(round_count=4)
     inner_ticks = inner.latency(job)
@@ -218,7 +219,7 @@ def test_the_hardware_stages_run_in_order_with_their_names_and_cycles():
     output = staged_decoder.DecoderStage("correction_output", cycles_per_job=4)
     before = (ingest, predecode)
     after = (output,)
-    timing = staged_decoder.UnitTiming(before, after, MEGAHERTZ)
+    timing = staged_decoder.UnitTiming(before, after, CLOCK)
     inner = RecordingInner(engine, latency_microseconds=0.0)
     decoder = staged_decoder.StagedDecoder(inner, timing)
     ledger = ledger_hearing(decoder)
@@ -338,20 +339,21 @@ def test_a_hardware_stage_may_not_be_named_algorithm():
     )
     before = (stage,)
     with pytest.raises(ValueError, match="names the decoder itself"):
-        staged_decoder.UnitTiming(before, (), MEGAHERTZ)
+        staged_decoder.UnitTiming(before, (), CLOCK)
 
 
-def test_a_negative_stage_cost_and_a_zero_frequency_are_refused():
+def test_a_negative_stage_cost_and_a_zero_period_are_refused():
     """A card that cannot be a unit is refused where the card is built.
 
-    Negative cycles and a zero clock have no reading as time, and a card
-    reaches decsim from a yaml section, so both raise at construction
-    (staged_decoder.py, DecoderStage and UnitTiming).
+    Negative cycles and a clock with no period have no reading as time,
+    and a card reaches decsim from a yaml section, so both raise at
+    construction (staged_decoder.py, DecoderStage and UnitTiming).
     """
     with pytest.raises(ValueError, match="cycles must be nonnegative"):
         staged_decoder.DecoderStage("fetch", cycles_per_job=-1)
-    with pytest.raises(ValueError, match="must be finite and positive"):
-        staged_decoder.UnitTiming((), (), 0.0)
+    with pytest.raises(ValueError, match="period must be at least a tick"):
+        no_period = config.Clock(0)
+        staged_decoder.UnitTiming((), (), no_period)
 
 
 def test_the_unpipelined_unit_holds_its_compute_for_the_whole_decode():
@@ -383,7 +385,7 @@ def test_a_pipelined_unit_frees_its_intake_after_the_initiation_interval():
     is a shallower unit than the full pipeline and wins over it.
     """
     timing = staged_decoder.UnitTiming(
-        (), (), MEGAHERTZ, initiation_interval_us=0.5
+        (), (), CLOCK, initiation_interval_us=0.5
     )
     inner = decoders.PresetLatencyDecoder(4.0)
     decoder = staged_decoder.StagedDecoder(inner, timing)
@@ -391,7 +393,7 @@ def test_a_pipelined_unit_frees_its_intake_after_the_initiation_interval():
     assert decoder.occupancy(job) == config.microseconds_to_ticks(0.5)
     assert decoder.pipeline_depth(job) == 8
     declared_timing = staged_decoder.UnitTiming(
-        (), (), MEGAHERTZ, initiation_interval_us=0.5, pipeline_depth=3
+        (), (), CLOCK, initiation_interval_us=0.5, pipeline_depth=3
     )
     declared_unit = staged_decoder.StagedDecoder(inner, declared_timing)
     assert declared_unit.pipeline_depth(job) == 3
@@ -400,23 +402,24 @@ def test_a_pipelined_unit_frees_its_intake_after_the_initiation_interval():
 def test_the_stage_partition_does_not_change_the_whole_job_time():
     """Two cycles are two cycles, in one stage or in two.
 
-    The stages are cut from the cumulative cycle count
-    (staged_decoder.py, UnitTiming.stage_ticks), so a finer stage list
-    describes the same unit rather than a slower one, and no partition
-    accumulates a rounding error at the clock.
+    Every stage is a whole number of periods (staged_decoder.py,
+    UnitTiming.stage_ticks), so a finer stage list describes the same
+    unit rather than a slower one, and no partition accumulates a
+    rounding error at the clock.
     """
     job = decode_job(round_count=3)
+    # a 300 MHz domain, whose period is not a whole microsecond
+    clock = config.Clock(3333)
     whole = staged_decoder.DecoderStage("whole", cycles_per_job=2)
     first = staged_decoder.DecoderStage("first", cycles_per_job=1)
     second = staged_decoder.DecoderStage("second", cycles_per_job=1)
-    one_stage = staged_decoder.UnitTiming((whole,), (), 300.0)
-    two_stages = staged_decoder.UnitTiming((first, second), (), 300.0)
+    one_stage = staged_decoder.UnitTiming((whole,), (), clock)
+    two_stages = staged_decoder.UnitTiming((first, second), (), clock)
     one_stage_ticks = one_stage.stage_ticks(job)
     two_stage_ticks = two_stages.stage_ticks(job)
     one_stage_values = one_stage_ticks.values()
     two_stage_values = two_stage_ticks.values()
-    two_cycles_microseconds = 2 / 300.0
-    expected_ticks = config.microseconds_to_ticks(two_cycles_microseconds)
+    expected_ticks = 2 * 3333
     assert sum(one_stage_values) == expected_ticks
     assert sum(two_stage_values) == expected_ticks
 
@@ -468,18 +471,16 @@ def test_the_pipeline_parameters_are_refused_where_the_card_is_built():
     whole decode (staged_decoder.py, _check_pipeline).
     """
     with pytest.raises(ValueError, match="positive"):
-        staged_decoder.UnitTiming((), (), MEGAHERTZ, initiation_interval_us=0.0)
+        staged_decoder.UnitTiming((), (), CLOCK, initiation_interval_us=0.0)
     with pytest.raises(ValueError, match="rounds to zero"):
-        staged_decoder.UnitTiming(
-            (), (), MEGAHERTZ, initiation_interval_us=1e-9
-        )
+        staged_decoder.UnitTiming((), (), CLOCK, initiation_interval_us=1e-9)
     with pytest.raises(ValueError, match="at least 1"):
         staged_decoder.UnitTiming(
             (),
             (),
-            MEGAHERTZ,
+            CLOCK,
             initiation_interval_us=1.0,
             pipeline_depth=0,
         )
     with pytest.raises(ValueError, match="needs an initiation_interval_us"):
-        staged_decoder.UnitTiming((), (), MEGAHERTZ, pipeline_depth=2)
+        staged_decoder.UnitTiming((), (), CLOCK, pipeline_depth=2)

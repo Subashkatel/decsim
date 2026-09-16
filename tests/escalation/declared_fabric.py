@@ -49,6 +49,18 @@ DECLARED_MICROSECONDS = {
     "frame_to_controller": 2.0,
     "controller_to_qpu": 2.0,
 }
+# the controller and the frame price their cycles on a 2 MHz clock, so
+# every declared microsecond above is a whole number of its cycles and
+# every declared instant lands on one of its edges
+DECLARED_CLOCK = config.Clock(500_000)
+
+
+def declared_cycles(name):
+    """One declared stage's microseconds, as cycles of the declared clock."""
+    ticks = config.microseconds_to_ticks(DECLARED_MICROSECONDS[name])
+    return ticks // DECLARED_CLOCK.period_ticks
+
+
 DECLARED_EDGE_NAMES = (
     "qpu_to_controller",
     "controller_to_weak_buffer",
@@ -138,12 +150,15 @@ def switching_machine(
             policy=policy, strong_window=strong_window
         )
     links = declared_profile(strong_buffer_microseconds)
+    readout_cycles = declared_cycles("readout_to_bits")
     controller = controller_settings.ControllerSettings(
-        readout_to_bits_microseconds=DECLARED_MICROSECONDS["readout_to_bits"],
-        packing_microseconds_per_round=0.0,
+        clock=DECLARED_CLOCK,
+        readout_to_bits_cycles=readout_cycles,
+        packing_cycles_per_round=0,
     )
+    write_cycles = declared_cycles("frame")
     pauli_frame = pauli_frame_module.PauliFrameConfig(
-        commit_microseconds=DECLARED_MICROSECONDS["frame"]
+        write_cycles=write_cycles, clock=DECLARED_CLOCK
     )
     trace = "off"
     if trace_path is not None:

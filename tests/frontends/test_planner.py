@@ -30,7 +30,7 @@ def test_the_run_period_is_used_when_the_card_declares_none():
     qpu = qpu_settings.QpuSettings(round_period_microseconds=0.75)
     settings = machine_settings.MachineSettings(qpu=qpu)
     machine = machine_module.Machine.build(settings)
-    assert machine.qpu.cycle_ticks == 750_000
+    assert machine.qpu.clock.period_ticks == 750_000
 
 
 def test_the_card_period_wins_over_the_run_period():
@@ -38,7 +38,7 @@ def test_the_card_period_wins_over_the_run_period():
     qpu = qpu_settings.QpuSettings(round_period_microseconds=1.25, code=card)
     settings = machine_settings.MachineSettings(qpu=qpu)
     machine = machine_module.Machine.build(settings)
-    assert machine.qpu.cycle_ticks == 2_000_000
+    assert machine.qpu.clock.period_ticks == 2_000_000
 
 
 def test_a_period_shorter_than_one_tick_is_refused():
@@ -55,7 +55,7 @@ def test_a_card_period_saves_a_run_period_shorter_than_one_tick():
     qpu = qpu_settings.QpuSettings(round_period_microseconds=0.0, code=card)
     settings = machine_settings.MachineSettings(qpu=qpu)
     machine = machine_module.Machine.build(settings)
-    assert machine.qpu.cycle_ticks == 2_000_000
+    assert machine.qpu.clock.period_ticks == 2_000_000
 
 
 def test_a_cadence_that_is_not_a_finite_number_is_refused():

@@ -316,7 +316,7 @@ Where the machine forms a round's detection events.
 
 | Member | Type |
 | --- | --- |
-| `departure_ticks` | `int` |
+| `detection_event_formation_cycles` | `int` |
 
 | Method | What it does |
 | --- | --- |

@@ -29,13 +29,8 @@ def test_reference_config_defines_both_tiers_and_the_mode_picks_weak():
     assert settings.strong_decoder.kind == "belief_matching"
     assert config.active_decoder is settings.weak_decoder
     # engine cycles price on a named domain, resolved once like the links
-    assert settings.weak_decoder.engine_megahertz == settings.clocks.megahertz(
-        "fridge"
-    )
-    assert (
-        settings.strong_decoder.engine_megahertz
-        == settings.clocks.megahertz("room")
-    )
+    assert settings.weak_decoder.engine_clock == settings.clocks.clock("fridge")
+    assert settings.strong_decoder.engine_clock == settings.clocks.clock("room")
 
 
 def test_every_shipped_config_loads():
@@ -68,20 +63,20 @@ def test_controller_cycle_card_reaches_both_runtime_paths(tmp_path):
         },
     )
     config = experiment.load_experiment(config_path)
-    assert config.settings.controller.readout_to_bits_microseconds == 0.054
-    assert config.settings.controller.decision_to_pulse_microseconds == 0.016
+    controller = config.settings.controller
+    assert controller.readout_to_bits_cycles == 27
+    assert controller.decision_to_pulse_cycles == 8
+    assert controller.clock.period_ticks == 2000
 
     settings = config.point_settings(
         physical_error_probability=0.001, distance=3, round_period_us=1.0
     )
     completed = Machine.build(settings, 0)
-    assert (
-        completed.controller.settings.readout_to_bits_ticks()
-        == microseconds_to_ticks(0.054)
-    )
-    assert completed.instruction_output.pulse_ticks == microseconds_to_ticks(
-        0.016
-    )
+    built = completed.controller.settings
+    assert built.clock.edge(27, 0) == microseconds_to_ticks(0.054)
+    output = completed.instruction_output
+    assert output.pulse_cycles == 8
+    assert output.clock.edge(8, 0) == microseconds_to_ticks(0.016)
 
 
 def test_the_packing_overflow_word_reaches_the_controller(tmp_path):

@@ -10,6 +10,7 @@ issue are prepended for the windows.
 
 import types
 
+import decsim.config as config
 import decsim.controller.feedback_streams as feedback_streams
 import decsim.controller.instruction_output as instruction_output
 import decsim.controller.operation_issue as operation_issue
@@ -19,6 +20,9 @@ import decsim.observe.round_events as round_events
 import decsim.records.program as program_records
 
 BOUNDARY_TICK = 3000
+# a one-tick period, so the pulse cost is its cycles and every tick is
+# an edge (tests/controller/test_instruction_output.py holds the law)
+CLOCK = config.Clock(1)
 PULSE_TICKS = 17
 
 
@@ -68,7 +72,7 @@ def resolved(operation_id, round_ticks=1000, round_count=6):
 
 def issuer_with(engine, qpu, idle_rounds, windows, recorder, link=None):
     output = instruction_output.InstructionOutput(
-        engine, link, qpu, PULSE_TICKS
+        engine, link, qpu, CLOCK, PULSE_TICKS
     )
     if recorder is not None:
         output.trace.output_event.connect(recorder.output)

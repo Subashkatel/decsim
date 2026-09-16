@@ -28,8 +28,8 @@ import decsim.records.rounds as round_records
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 import decsim.syndrome_buffer.round_output as round_output
-import decsim.syndrome_buffer.round_store as round_store_module
-import decsim.syndrome_buffer.settings as round_store_settings
+import decsim.syndrome_buffer.settings as syndrome_buffer_settings
+import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 import decsim.windows.boundary_payloads as boundary_payloads
 import decsim.windows.decode_requests as decode_requests
 import decsim.windows.round_retention as round_retention
@@ -100,8 +100,8 @@ class _Fixture:
             buffer_hi=5,
             round_count=5,
         )
-        settings = round_store_settings.RoundStoreSettings()
-        self.store = round_store_module.RoundStore(settings)
+        settings = syndrome_buffer_settings.SyndromeBufferSettings()
+        self.store = syndrome_buffer_module.SyndromeBuffer(settings)
         self.arrived = 0
         geometry = types.SimpleNamespace(code_name="surface")
         no_models = types.SimpleNamespace(model_by_window={})
@@ -133,8 +133,9 @@ class _Fixture:
         link = _Link()
         transfers = window_transfers.WindowTransfers(self.engine)
         transfers.link = link
-        store_output = round_output.RoundStoreOutput(
-            transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER, "Buffer 0"
+        store_output = round_output.SyndromeBufferOutput(
+            transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER,
+            "weak syndrome buffer",
         )
         store_output.transfers = transfers
         store_output.store = self.store
@@ -561,12 +562,12 @@ def _fold_outcome(config, probability: float, seed: int) -> tuple:
 def test_read_cycles_delay_submission_and_later_reaction_points(decoder_input):
     clocks = config.ClockSettings.from_yaml({"storage": 1.0})
     section = {"clock": "storage", "read_cycles": 3}
-    settings = round_store_settings.RoundStoreSettings.from_yaml(
+    settings = syndrome_buffer_settings.SyndromeBufferSettings.from_yaml(
         section, clocks
     )
     free = declared_run.weak_only_run(decoder_input=decoder_input)
     charged = declared_run.weak_only_run(
-        round_store=settings, decoder_input=decoder_input
+        weak_syndrome_buffer=settings, decoder_input=decoder_input
     )
     free_ticks = declared_run.reaction_ticks(free)
     charged_ticks = declared_run.reaction_ticks(charged)
@@ -637,14 +638,14 @@ def test_withdrawal_cancels_a_pending_decision_and_releases_its_input():
 
 def test_a_delayed_restart_read_keeps_all_its_input_rounds():
     clock = config.Clock(1_000_000)
-    settings = round_store_settings.RoundStoreSettings(
+    settings = syndrome_buffer_settings.SyndromeBufferSettings(
         clock=clock, read_cycles=3
     )
     machine = declared_fabric.switching_machine(
         rounds=15,
         escalated_windows={0},
         strong_window="forward",
-        round_store=settings,
+        weak_syndrome_buffer=settings,
         record=True,
     )
 

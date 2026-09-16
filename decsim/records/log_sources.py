@@ -14,8 +14,8 @@ in a commit that regenerates that hash and says so.
 
 QPU = "QPU"
 CONTROLLER = "Controller"
-WEAK_BUFFER = "Buffer 0"
-STRONG_BUFFER = "SyndromeBuffer1"
+WEAK_BUFFER = "weak syndrome buffer"
+STRONG_BUFFER = "strong syndrome buffer"
 DECODER_MANAGER = "Decoder manager"
 DECODER_UNIT = "Decoder unit"
 PAULI_FRAME = "PauliFrame"

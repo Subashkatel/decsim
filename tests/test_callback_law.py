@@ -92,7 +92,7 @@ def weak_settings(**changes):
 
 
 def strong_settings():
-    """The strong-primary run, whose rounds land in the room-side store."""
+    """The strong-primary run: its rounds land in the strong syndrome buffer."""
     decoder = decoders.PresetLatencyDecoder(STRONG_MICROSECONDS)
     operation = declared_run.memory_operation(1)
     workload = declared_run.declared_workload([operation], 6)
@@ -145,7 +145,7 @@ def test_without_the_qpus_completion_callback_the_run_never_settles(
         run_bounded(machine)
 
 
-def test_without_the_strong_writers_landing_callback_the_room_side_deadlocks(
+def test_without_the_strong_receivers_landing_callback_the_room_side_deadlocks(
     monkeypatch,
 ):
     """The cycle: the writer lands a round, the window manager waits for it.

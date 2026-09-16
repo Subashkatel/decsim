@@ -37,9 +37,9 @@ THREAD_ORDER = (
     "qpu_to_controller",
     "Controller",
     "controller_to_weak_buffer",
-    "Buffer 0",
+    "weak syndrome buffer",
     "controller_to_strong_buffer",
-    "Buffer 1",
+    "strong syndrome buffer",
     "Window planner",
     "Strong tier",
     "weak_buffer_to_weak_decoder",
@@ -885,7 +885,7 @@ def _open_for(path: str):
 
 def _copy_thread(target_name: str) -> str:
     """The thread a copy into this structure belongs on."""
-    if target_name.startswith("Buffer"):
+    if target_name.endswith("syndrome buffer"):
         return target_name
     if target_name in ("controller intake", "controller assembler"):
         return "Controller"

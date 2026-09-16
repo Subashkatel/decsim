@@ -113,8 +113,9 @@ class LedgerEvent:
 class RunLedgerView:
     """The assembled cycle/event ledger of one completed run.
 
-    Sources are the owners' own records (packing round events, syndrome
-    buffer 1's stored log, window stamps, frame records, release times);
+    Sources are the owners' own records (packing round events, the
+    strong syndrome buffer's stored log, window stamps, frame records,
+    release times);
     the ledger derives nothing a component did not record, so it can be
     used as evidence. ``check()`` proves the accounting: every emitted
     window-input round reaches exactly one terminal state and every
@@ -311,12 +312,12 @@ def _round_chains(rows: _LedgerRows, events) -> _RoundChains:
 def _store_landings(
     rows: _LedgerRows, stored_rounds, chains: _RoundChains
 ) -> dict:
-    """The landing of every round in syndrome buffer 1, by round key.
+    """The landing of every round in the strong syndrome buffer, by round key.
 
     Its cause is the PACKED round, because the strong write leaves
-    packing in parallel with the Buffer 0 publication and a fast
+    packing in parallel with the weak syndrome buffer publication and a fast
     crossing legitimately lands first. A round never published to
-    Buffer 0 (the strong tier is primary) ends its journey here.
+    the weak syndrome buffer (the strong tier is primary) ends its journey here.
     """
     stored_of_round = {}
     for tick, operation_id, round_index in stored_rounds:

@@ -1,10 +1,10 @@
 """The transmitter: a stored round leaves on its route at the write.
 
 A window-input round rides controller_to_weak_buffer, whose sending end
-this is; Buffer 0's own incoming port handles the landing, which is
-where the round is published. A feedback-memory round rides
-weak_buffer_to_weak_decoder, whose sending end is Buffer 0, so the
-store's own outgoing port sends it and frees the slot, and the decoders'
+this is; the weak syndrome buffer's own incoming port handles the landing,
+which is where the round is published. A feedback-memory round rides
+weak_buffer_to_weak_decoder, whose sending end is the weak syndrome buffer, so
+the store's own outgoing port sends it and frees the slot, and the decoders'
 own end takes its landing; this transmitter only asks and counts. The
 sender never waits for a round to land before sending the next: the DAQs
 of Yang et al. (2605.04892) and Google's control electronics
@@ -36,9 +36,9 @@ class RoundTransmitter:
     link = ports.Port(ports.Link)
     # the decoders' end of the memory route, which hears its landing
     memory_arrivals = ports.Port(ports.MemoryRoundArrivals)
-    # Buffer 0's port toward the controller: it handles what lands there
-    # and asks the store to send what leaves it
-    store_input = ports.Port(ports.RoundStoreInput)
+    # The weak syndrome buffer's port toward the controller: it handles what
+    # lands there and asks the store to send what leaves it
+    store_input = ports.Port(ports.SyndromeBufferInput)
 
     def __init__(self, engine) -> None:
         self.engine = engine
@@ -82,12 +82,13 @@ class RoundTransmitter:
         )
 
     def _publish(self, packed: round_records.PackedRound) -> None:
-        """The round reached Buffer 0: that end handles the landing.
+        """The weak syndrome buffer took the round and handles the landing.
 
-        Everything the landing does to Buffer 0's record and to whoever
-        waits on it is Buffer 0's (syndrome_buffer/round_input.py); this
-        sender hears the landing for its in_flight count alone, as gem5's
-        requesting port hands the packet to the peer's own receive method
+        Everything the landing does to the weak syndrome buffer's record and to
+        whoever waits on it is the weak syndrome buffer's
+        (syndrome_buffer/round_input.py); this sender hears the landing for its
+        in_flight count alone, as gem5's requesting port hands the packet to
+        the peer's own receive method
         (tmp/resources/gem5/src/mem/port.hh:603-614, whose
         src/mem/protocol/timing.cc:49-53 calls peer->recvTimingReq).
         """
@@ -108,8 +109,8 @@ class RoundTransmitter:
     def _send_feedback_memory(self, packed: round_records.PackedRound) -> None:
         """Ask the store to send it; the controller is at neither end.
 
-        The round leaves Buffer 0 for the weak decoder, so the store's
-        own outgoing port executes the send and frees the slot; this
+        The round leaves the weak syndrome buffer for the weak decoder, so the
+        store's own outgoing port executes the send and frees the slot; this
         transmitter only asks and hears the landing.
         """
         deliver = functools.partial(self._deliver_feedback_memory, packed)
@@ -120,8 +121,8 @@ class RoundTransmitter:
     ) -> None:
         """The memory round reached the decoder side: that end takes it.
 
-        Its Buffer 0 slot was freed by the store that sent it; what is
-        left for this asker is its count of the rounds on their route.
+        Its weak syndrome buffer slot was freed by the store that sent it;
+        what is left for this asker is its count of the rounds on their route.
         """
         source_operation_id = packed.route.source_operation_id
         self.memory_arrivals.receive_memory_round(source_operation_id)

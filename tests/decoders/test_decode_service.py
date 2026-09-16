@@ -203,7 +203,7 @@ def strong_primary_run(decoder):
     """One three-round patch decoded by this row alone, on declared ticks.
 
     StrongOnly makes the single row the primary tier, so its window
-    reads Buffer 1 and rides the strong-buffer path.
+    reads the strong syndrome buffer and rides the strong-buffer path.
     """
     operation = declared_run.memory_operation(1)
     workload = declared_run.declared_workload([operation], 3)
@@ -440,8 +440,8 @@ def test_a_pipelined_unit_serves_a_strong_primary_window():
     a strong-primary run decodes each window once, like the weak tier,
     so its window is priced by its own arithmetic on declared_run's
     fabric. Three rounds end at 3, readout classification and the wire
-    publish Buffer 1 at 15, the 6 us strong-buffer transfer lands the
-    input at 21, and the 100 us row returns at 121.
+    publish the strong syndrome buffer at 15, the 6 us strong-buffer transfer
+    lands the input at 21, and the 100 us row returns at 121.
     """
     timing = staged_decoder.UnitTiming(
         (), (), UNIT_CLOCK, initiation_interval_us=1.0

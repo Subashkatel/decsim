@@ -61,9 +61,9 @@ links:
   frame_to_controller:  null
   controller_to_qpu:  null
 
-round_store:
+weak_syndrome_buffer:
   rounds: null
-strong_round_store:
+strong_syndrome_buffer:
   rounds: null
 
 strong_decoder:

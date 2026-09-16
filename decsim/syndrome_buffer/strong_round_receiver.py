@@ -1,8 +1,8 @@
 """The room-side end of controller_to_strong_buffer: room, then landing.
 
 Every packed round is carried out of the fridge exactly once and stored
-on the room side in parallel with its Buffer 0 publication, so the
-strong tier's context lives at room temperature. The controller
+on the room side in parallel with its weak syndrome buffer publication, so
+the strong tier's context lives at room temperature. The controller
 executes that crossing, being the end the round leaves by (OMNeT++
 refuses a module that sends a message it does not own,
 tmp/resources/omnetpp/src/sim/csimplemodule.cc:333-334; gem5 bills a
@@ -11,7 +11,7 @@ room and the landing: it answers has_room counting the writes still in
 flight, reserves one before the crossing starts, gem5's queue counting
 its reserved entries as taken (src/mem/cache/queue.hh:150-152 isFull,
 src/mem/cache/base.cc allocateWriteBuffer), and stores each round at its
-landing; the store's holds and lifetime are RoundStore's. A landing
+landing; the store's holds and lifetime are SyndromeBuffer's. A landing
 whose operation closed while the round crossed is dropped at the door
 instead of stored, since no reader can ever name it (_drop_landing).
 """
@@ -25,18 +25,18 @@ import decsim.records.rounds as round_records
 import decsim.trace_source as trace_source
 
 
-class StrongRoundWriter:
+class StrongRoundReceiver:
     """The room, the writes in flight, and the landing into the store.
 
     Trace source: copy_made(round_key, bits, "controller assembler",
-    "Buffer 1") at every landing, the dual write's copy (data_path.md
-    hop 3).
+    "strong syndrome buffer") at every landing, the dual write's copy
+    (data_path.md hop 3).
     """
 
     # a writer built with no window side stores its rounds for a reader
     # that never asks
     windows = ports.Port(ports.WindowInput, optional=True)
-    store = ports.Port(ports.RoundStore)
+    store = ports.Port(ports.SyndromeBuffer)
 
     def __init__(self, engine) -> None:
         self.engine = engine
@@ -86,7 +86,10 @@ class StrongRoundWriter:
         # is dropped at the door: nobody can ever read it
         self.store.release_round_if_unheld(round_key)
         self.trace.copy_made.fire(
-            round_key, packet_bits, "controller assembler", "Buffer 1"
+            round_key,
+            packet_bits,
+            "controller assembler",
+            "strong syndrome buffer",
         )
         self.engine.log_io(
             log_sources.STRONG_BUFFER, lambda: self._received_text(packet)
@@ -105,7 +108,7 @@ class StrongRoundWriter:
 
         The same rule as the unheld landing above, one step later. A
         store closes an operation only when no hold and no stored round
-        names it (round_store.py close_operation), and a hold on a closed
+        names it (syndrome_buffer.py close_operation), and a hold on a closed
         operation cannot be registered afterwards, so a round of a closed
         operation provably has no reader ever and must not enter the
         store. The copy still fires: the bits did cross
@@ -115,7 +118,10 @@ class StrongRoundWriter:
         """
         round_key = (packet.operation_id, packet.round_index)
         self.trace.copy_made.fire(
-            round_key, packet_bits, "controller assembler", "Buffer 1"
+            round_key,
+            packet_bits,
+            "controller assembler",
+            "strong syndrome buffer",
         )
         self.engine.log_io(
             log_sources.STRONG_BUFFER, lambda: self._dropped_text(packet)
@@ -141,7 +147,7 @@ class StrongRoundWriter:
         """At the end of a run nothing may be in flight or held."""
         if self.writes_in_flight:
             raise RuntimeError(
-                f"syndrome buffer 1 ended with {self.writes_in_flight} "
+                f"strong syndrome buffer ended with {self.writes_in_flight} "
                 f"controller_to_strong_buffer writes in flight"
             )
         self.store.check_settled()
@@ -149,7 +155,7 @@ class StrongRoundWriter:
 
 @dataclasses.dataclass(frozen=True)
 class _TraceSources:
-    """Every event the strong round writer reports, as one member.
+    """Every event the strong round sender reports, as one member.
 
     gem5 groups a component's statistics into one nested Group member
     (tmp/resources/gem5/src/base/stats/group.hh:60-92) rather than one

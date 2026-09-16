@@ -1,1 +1,1 @@
-"""Tests of the round store component."""
+"""Tests of the syndrome buffer component."""

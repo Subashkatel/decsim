@@ -13,8 +13,8 @@ rounds and buffers 3, so r_strong = r_com + 2 r_buf is 9 rounds
 
 The restart window's weak decode re-reads
 escalation.restart_reread_buffer_regions buffer regions of the strong
-region from Buffer 0 (Sec. III C: the weak decoder resumes past the
-strong region once its rounds are stored), so at width 1 the last
+region from the weak syndrome buffer (Sec. III C: the weak decoder resumes past
+the strong region once its rounds are stored), so at width 1 the last
 absorbed window's commit rounds must still be stored when the plan
 lands, in a backlog regime where the absorbed windows' inputs are in
 flight or have already landed in a unit. At width 0 the restart begins
@@ -74,8 +74,8 @@ GATE_SWITCHING_CARD = {
         "frame_to_controller": None,
         "controller_to_qpu": None,
     },
-    "round_store": {"rounds": None},
-    "strong_round_store": {"rounds": None},
+    "weak_syndrome_buffer": {"rounds": None},
+    "strong_syndrome_buffer": {"rounds": None},
     "windows": {
         "kind": "sliding",
         "commit_rounds": None,
@@ -236,7 +236,7 @@ def test_a_second_escalation_of_one_window_is_refused():
         shape.plan(again)
 
 
-# ---- the restart window's Buffer 0 claim under a backlog
+# ---- the restart window's the weak syndrome buffer claim under a backlog
 
 
 def _gate_forward_window_machine(
@@ -324,8 +324,8 @@ def test_the_restart_window_keeps_its_re_read_rounds_across_the_withdrawals():
 
     W3 escalates at 166 us with W4's input landed and W5's in flight;
     the strong window 10-18 absorbs W4 and W5, and the restart W6
-    re-reads 16-18, W5's commit rounds, whose last Buffer 0 holder was
-    W5's request. The run used to die there with the retention
+    re-reads 16-18, W5's commit rounds, whose last the weak syndrome buffer
+    holder was W5's request. The run used to die there with the retention
     sentence; now W6's own claim carries the rounds across W5's
     withdrawal and W6's stale request is withdrawn and rebuilt.
     """
@@ -372,8 +372,8 @@ def test_the_re_read_rounds_survive_the_absorbed_inputs_landing_first():
     """Four weak units: the absorbed W5 and the restart W6 land first.
 
     Both inputs are in unit memory before W3's verdict. A landed
-    input's Buffer 0 request hold ends at the landing, so with one
-    holder the re-read rounds 16-18 and W6's own 19-21 would be gone
+    input's the weak syndrome buffer request hold ends at the landing, so with
+    one holder the re-read rounds 16-18 and W6's own 19-21 would be gone
     before the plan runs; W6's claim keeps them past both landings.
     Four units hold two windows at once, since a window's confidence
     is two forced-class solves and each takes a unit.

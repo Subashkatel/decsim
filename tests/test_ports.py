@@ -127,10 +127,10 @@ def test_the_store_ports_declare_what_a_caller_outside_the_buffer_calls():
         "weak_store",
         "strong_store",
         "primary_store",
-        "round_store",
+        "weak_syndrome_buffer",
     )
     called = _called_on(references, callers)
-    ports = ("RoundStore", "RetainedRounds")
+    ports = ("SyndromeBuffer", "RetainedRounds")
     assert _undeclared(called, ports, exempt=("trace",)) == {}
 
 
@@ -180,7 +180,7 @@ def test_the_former_port_declares_what_every_row_that_forms_calls():
 
 
 def test_the_window_input_port_declares_what_its_two_callers_call():
-    """The controller and Buffer 0's incoming port hold the manager."""
+    """The controller and the weak syndrome buffer's port hold the manager."""
     callers = ("controller", "syndrome_buffer")
     called = _called_on(("windows",), callers)
     assert _undeclared(called, ("WindowInput",)) == {}
@@ -193,14 +193,14 @@ def test_the_memory_round_port_declares_what_the_transmitter_calls():
 
 
 def test_the_store_input_port_declares_what_the_controller_calls():
-    """The controller holds Buffer 0's incoming port only as this port.
+    """The controller holds the weak syndrome buffer's port only as this port.
 
     Both of the controller's references to it: the transmitter's, which
     sends and hears the landing, and the writer's, which asks that end
     for room and reserves it before the round leaves.
     """
     called = _called_on(("store_input", "weak_input"), ("controller",))
-    assert _undeclared(called, ("RoundStoreInput",)) == {}
+    assert _undeclared(called, ("SyndromeBufferInput",)) == {}
 
 
 def _decsim_modules() -> list:

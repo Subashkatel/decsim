@@ -11,7 +11,7 @@ schedules a decode, the decoder returns a result, the frame commits the
 correction, the frame releases the controller, the controller instructs
 the QPU, and every hop between components rides a link.
 
-The pluggable parts (SyndromeSource, RoundStore, Decoder, Link,
+The pluggable parts (SyndromeSource, SyndromeBuffer, Decoder, Link,
 EscalationPolicy, ThresholdSource, ConfidenceSignal, WindowingScheme,
 IdlePolicy, Workload) have their abstract class here, sinter's Decoder shape
 (sinter/_decoding/_decoding_decoder_class.py, one class with the methods
@@ -140,11 +140,11 @@ class IdleRoundReceiver(Protocol):
 
 
 @runtime_checkable
-class RoundStore(Protocol):
-    """The upstream round store (Buffer 0), as its own incoming port sees it.
+class SyndromeBuffer(Protocol):
+    """The weak syndrome buffer, as its own incoming port sees it.
 
-    Table row: round_store. A round occupies a slot when its bits are in
-    the store, which is at the landing of the hop that carried them, and
+    Table row: syndrome_buffer. A round occupies a slot when its bits are
+    in the store, which is at the landing of the hop that carried them, and
     it is readable at that same instant: the store and the publication
     are one call at one tick. The end that takes the landing asks
     has_room first, counting the writes it has in flight (gem5's queue
@@ -186,7 +186,7 @@ class RetainedRounds(Protocol):
     """The same store, as the window side that reads and holds it sees it.
 
     Two neighbours cross a store on two different handoffs: syndrome
-    packing writes rounds through RoundStore, and the window side keeps
+    packing writes rounds through SyndromeBuffer, and the window side keeps
     the rounds one decode reads alive through this port. A hold names
     the rounds its holder will read from the moment it is placed, so the
     store may hold a round it has not received yet; the holder is any
@@ -245,8 +245,8 @@ class RetainedRounds(Protocol):
 
 
 @runtime_checkable
-class StrongRoundStore(Protocol):
-    """The room-side store (syndrome buffer 1), as syndrome packing sees it.
+class StrongSyndromeBufferInput(Protocol):
+    """The strong syndrome buffer, as syndrome packing sees it.
 
     The store counts the rounds still crossing toward it as room taken:
     the controller reserves that room before a round leaves and the
@@ -268,8 +268,8 @@ class StrongRoundStore(Protocol):
 
 
 @runtime_checkable
-class RoundStoreInput(Protocol):
-    """A round store's incoming port, as the controller sees it.
+class SyndromeBufferInput(Protocol):
+    """A syndrome buffer's incoming port, as the controller sees it.
 
     This end owns the store's room and its landing. It answers has_room
     against the rounds stored and the writes still in flight, the writer
@@ -298,8 +298,8 @@ class RoundStoreInput(Protocol):
 
 
 @runtime_checkable
-class RoundStoreOutput(Protocol):
-    """A round store's outgoing port, as whoever asks for a round sees it.
+class SyndromeBufferOutput(Protocol):
+    """A syndrome buffer's outgoing port, as whoever asks for a round sees it.
 
     A round leaves by the end that holds it, so this end executes every
     send and frees the slot the round held. Two kinds leave: a decode
@@ -417,7 +417,7 @@ class WindowInput(Protocol):
         """Note the stream round a protected segment's result waits for."""
 
     def accept_room_round(self, operation_id, round_index: int) -> None:
-        """Record one round that landed in the room-side store instead."""
+        """Record a round that landed in the strong syndrome buffer instead."""
 
     def accept_boundary(self, window_key: tuple, is_unblocked: bool) -> None:
         """A boundary landed in the window; True when it owed no other."""
@@ -501,7 +501,7 @@ class WindowRetention(Protocol):
         """The window's potential strong read becomes the request's hold."""
 
     def context_rounds_in_flight(self, key: tuple, read_keys) -> tuple:
-        """The context rounds that reached the upstream store and are late."""
+        """The context rounds that reached the weak syndrome buffer late."""
 
     def guard_restart_reads(
         self,
@@ -553,7 +553,7 @@ class WindowRetention(Protocol):
         """Refuse a new consumer if an already-arrived round was released."""
 
     def require_strong_retained(self, round_keys, purpose: str) -> None:
-        """The same, on the room-side store."""
+        """The same, on the strong syndrome buffer."""
 
 
 @runtime_checkable
@@ -562,7 +562,7 @@ class WindowRounds(Protocol):
 
     A strong region is laid over an operation whose rounds are still
     arriving, so the row asks how long the operation is, how many rounds
-    one of its windows reads and how far the room-side store has been
+    one of its windows reads and how far the strong syndrome buffer has been
     filled. Which windows are ready and what commits stay the window
     side's.
     """
@@ -576,7 +576,7 @@ class WindowRounds(Protocol):
         """The rounds the window reads of its operation."""
 
     def strong_rounds_arrived(self, operation_id) -> int:
-        """The rounds of the operation stored in the room-side store."""
+        """The rounds of the operation stored in the strong syndrome buffer."""
 
 
 @runtime_checkable
@@ -1487,7 +1487,7 @@ class EscalationPolicy(Protocol):
     # link) follows from this one declaration.
     primary_tier: window_records.DecoderTier
     # Whether the policy may escalate a window, so the run keeps the
-    # room-side store, one buffer of context on each side of every
+    # strong syndrome buffer, one buffer of context on each side of every
     # window, and the strong tier's window side.
     requires_strong_context: bool
     # Whether the policy reads a confidence to decide keep, so the

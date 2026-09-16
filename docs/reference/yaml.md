@@ -17,8 +17,8 @@ The file has one section per component, and the section is read by the
 package that owns that component (`decsim/settings.py`, `SECTIONS`). The
 sections, in the order the root reads them:
 
-`clocks`, `qpu`, `controller`, `idle_policy`, `links`, `round_store`,
-`strong_round_store`, `windows`, `weak_decoder`, `strong_decoder`,
+`clocks`, `qpu`, `controller`, `idle_policy`, `links`, `weak_syndrome_buffer`,
+`strong_syndrome_buffer`, `windows`, `weak_decoder`, `strong_decoder`,
 `decoder_manager`, `escalation`, `pauli_frame`, `workload`,
 `observation`.
 

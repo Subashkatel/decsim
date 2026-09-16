@@ -21,8 +21,8 @@ def test_a_named_structure_takes_the_class_its_row_gives_it():
     assert on_chip is data_movement.MemoryClass.ON_CHIP
 
 
-def test_a_store_is_on_board_and_a_unit_is_on_chip_by_their_prefix():
-    store = data_movement.memory_class_of_structure("Buffer 0")
+def test_a_store_is_on_board_and_a_unit_is_on_chip_by_their_names():
+    store = data_movement.memory_class_of_structure("weak syndrome buffer")
     unit = data_movement.memory_class_of_structure("unit 0")
 
     assert store is data_movement.MemoryClass.ON_BOARD
@@ -63,7 +63,9 @@ def test_a_run_that_moved_nothing_counts_nothing():
 def test_one_copy_of_one_round_is_one_event_and_one_round():
     movement = data_movement.DataMovement()
 
-    movement.copy_made(("op", 1), 249, "controller intake", "Buffer 0")
+    movement.copy_made(
+        ("op", 1), 249, "controller intake", "weak syndrome buffer"
+    )
     counted = movement.json_value()
 
     assert counted["copies"] == 1
@@ -76,7 +78,7 @@ def test_one_copy_of_a_whole_job_input_is_one_event_and_its_rounds():
     movement = data_movement.DataMovement()
     six_round_job = _JobKey(6)
 
-    movement.copy_made(six_round_job, 1494, "Buffer 0", "unit 0")
+    movement.copy_made(six_round_job, 1494, "weak syndrome buffer", "unit 0")
     counted = movement.json_value()
 
     assert counted["copies"] == 1
@@ -86,8 +88,10 @@ def test_one_copy_of_a_whole_job_input_is_one_event_and_its_rounds():
 def test_copies_are_grouped_by_the_class_they_landed_in():
     movement = data_movement.DataMovement()
 
-    movement.copy_made(("op", 1), 8, "controller intake", "Buffer 0")
-    movement.copy_made(("op", 1), 8, "Buffer 0", "unit 0")
+    movement.copy_made(
+        ("op", 1), 8, "controller intake", "weak syndrome buffer"
+    )
+    movement.copy_made(("op", 1), 8, "weak syndrome buffer", "unit 0")
     counted = movement.json_value()
     rows = counted["copies_by_memory_class"]
 
@@ -98,9 +102,11 @@ def test_copies_are_grouped_by_the_class_they_landed_in():
 def test_the_classes_are_listed_cheapest_first():
     movement = data_movement.DataMovement()
 
-    movement.copy_made(("op", 1), 8, "Buffer 0", "a new cache")
-    movement.copy_made(("op", 1), 8, "Buffer 0", "unit 0")
-    movement.copy_made(("op", 1), 8, "controller intake", "Buffer 0")
+    movement.copy_made(("op", 1), 8, "weak syndrome buffer", "a new cache")
+    movement.copy_made(("op", 1), 8, "weak syndrome buffer", "unit 0")
+    movement.copy_made(
+        ("op", 1), 8, "controller intake", "weak syndrome buffer"
+    )
     counted = movement.json_value()
     rows = counted["copies_by_memory_class"]
     listed = list(rows)
@@ -140,7 +146,9 @@ def test_copies_per_round_has_the_rounds_the_qpu_emitted_as_denominator():
 
     movement.round_emitted(first)
     movement.round_emitted(second)
-    movement.copy_made(("op", 1), 8, "controller intake", "Buffer 0")
+    movement.copy_made(
+        ("op", 1), 8, "controller intake", "weak syndrome buffer"
+    )
 
     assert movement.rounds == 2
     assert movement.copies_per_round == 0.5

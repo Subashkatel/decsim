@@ -126,7 +126,8 @@ def test_each_rows_memory_class_is_the_one_the_counters_placed(tmp_path):
     assert class_by_path["qpu_to_controller"] == "off_board"
     assert class_by_path["controller_to_weak_buffer"] == "on_board"
     assert class_by_path["readout -> controller intake"] == "on_chip"
-    assert class_by_path["controller assembler -> Buffer 0"] == "on_board"
+    path = "controller assembler -> weak syndrome buffer"
+    assert class_by_path[path] == "on_board"
 
 
 def test_a_memory_class_row_is_that_classs_paths_over_the_shots(tmp_path):

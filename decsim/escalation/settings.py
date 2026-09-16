@@ -196,7 +196,7 @@ class EscalationSettings:
 
     Table rows (ESCALATIONS, above): weak_baseline (every window on the
     weak tier, final), strong_only (every window decoded once on the
-    strong tier, woken from syndrome buffer 1), switching (weak first,
+    strong tier, woken from the strong syndrome buffer), switching (weak first,
     escalate serially on a small complementary gap, Toshio 2510.25222
     Sec. III A without the parallel head start). The switching knobs:
     keep the weak result when its gap is at or above the threshold in

@@ -197,14 +197,14 @@ def weak_only_run(
     operations=None,
     seed=0,
     io_trace=False,
-    round_store=None,
+    weak_syndrome_buffer=None,
     decoder_input="copy",
     windows=None,
     controller=None,
     observation=None,
     probes=(),
 ):
-    """The weak-only baseline: one tier, readiness on Buffer 0.
+    """The weak-only baseline: one tier, readiness on the weak syndrome buffer.
 
     One complete machine keeps every path fixed while a test replaces
     only the component card whose reaction-time shift it measures.
@@ -234,15 +234,17 @@ def weak_only_run(
     )
     if windows is not None:
         settings = dataclasses.replace(settings, windows=windows)
-    if round_store is not None:
-        settings = dataclasses.replace(settings, round_store=round_store)
+    if weak_syndrome_buffer is not None:
+        settings = dataclasses.replace(
+            settings, weak_syndrome_buffer=weak_syndrome_buffer
+        )
     return run_machine(settings, seed, probes)
 
 
 def strong_only_run(
     *, rounds=6, operations=None, seed=0, io_trace=False, record=False
 ):
-    """The strong-primary baseline: readiness listens to Buffer 1."""
+    """The strong-primary baseline listens to the strong syndrome buffer."""
     workload = declared_workload(operations, rounds)
     decoder = decoders.PresetLatencyDecoder(DECLARED_MICROSECONDS["strong"])
     strong_decoder = decoder_settings.DecoderSettings(decoder=decoder)

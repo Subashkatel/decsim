@@ -517,9 +517,9 @@ def test_a_windows_hold_reaches_into_the_successors_it_overflows_into():
 
     The window reads through buffer_hi, and rounds past the operation's
     last round arrive on the successor's stream (Skoric 2209.08552: the
-    buffer region is the next window's context), so Buffer 0 must hold
-    the successors' first rounds too, once each however many successors
-    share them.
+    buffer region is the next window's context), so the weak syndrome buffer
+    must hold the successors' first rounds too, once each however many
+    successors share them.
     """
     execution = overlapping_successor_plan()
 
@@ -642,11 +642,12 @@ def one_window_with_a_successor():
 
 
 def test_a_strong_context_hold_is_one_buffer_region_on_each_side():
-    """Buffer 1 keeps the rounds an escalation of this window would read.
+    """The strong syndrome buffer keeps the rounds an escalation would read.
 
     Toshio 2510.25222 Sec. III C: the strong decoder is given the
     committed region with a buffer region on each side, so the plan
-    places that hold on Buffer 1 whether or not the window escalates.
+    places that hold on the strong syndrome buffer whether or not the window
+    escalates.
     """
     execution = one_window_with_a_successor()
 

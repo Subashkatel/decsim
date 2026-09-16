@@ -35,7 +35,7 @@ The file is the Chrome Trace Event Format. Open
 one lane per component and one per wired link path, in pipeline order,
 so the lanes read top to bottom the way the data flows: the QPU,
 `qpu_to_controller`, the controller, `controller_to_weak_buffer`, Buffer
-0, `controller_to_strong_buffer`, Buffer 1, the window planner, the
+0, `controller_to_strong_buffer`, the strong syndrome buffer, the window planner, the
 decoder links, one lane per decoder unit, the frame, and the two paths
 back to the QPU. Perfetto gives zoom, nested slices, counter tracks, the
 flow arrows of a selected slice, an argument pane, and SQL over the
@@ -55,15 +55,15 @@ decsim trace follow \
 round 1:1 of decsim weak_baseline d3 p0.001 seed0
 
 tick (us)  where                        what                                                                 dur (us)  transfer   bits
-0.000      Buffer 0                     hold registered                                                                reference
+0.000      the weak syndrome buffer                     hold registered                                                                reference
 1.000      QPU                          emitted round 1                                                                           8
 1.000      qpu_to_controller            move                                                                 0.004     move       8
 1.000      Controller                   controller intake copy                                                         copy       8
 1.004      Controller                   controller assembler copy                                                      copy       8
 1.004      Controller                   residence, unbounded, freed at packed                                0.000     copy       8
 1.004      controller_to_weak_buffer    move                                                                 0.006     move       4
-1.010      Buffer 0                     Buffer 0 copy                                                                  copy       4
-1.010      Buffer 0                     residence, unbounded, data ready 1.010, freed at last hold released  5.006     copy       4
+1.010      the weak syndrome buffer                     the weak syndrome buffer copy                                                                  copy       4
+1.010      the weak syndrome buffer                     residence, unbounded, data ready 1.010, freed at last hold released  5.006     copy       4
 6.012      Window planner               W0 ready
 6.012      weak_buffer_to_weak_decoder  move, with W0 rounds 1..6                                            0.004     move       44
 6.016      Decoder unit default#0       unit default#0 memory copy                                                     copy       44
@@ -138,7 +138,7 @@ component.
 | a complete event (`X`) on a component's lane | a residence or a service: a round in a store, a job in a unit, a decode on a unit's compute. Its arguments carry the capacity, when the slot was taken, when the data was ready, and why it was freed |
 | a complete event on a link path's lane | a move, from its send tick to its delivery tick, with the bits it carried and the request it served |
 | an instant event (`i`) | something with no duration: a hold registered, transferred or released, a verdict, a selection, a copy made |
-| a counter event (`C`) | an occupancy at every change: Buffer 0's rounds, Buffer 1's rounds, a unit's memory rounds, the ready queue's depth |
+| a counter event (`C`) | an occupancy at every change: the weak syndrome buffer's rounds, the strong syndrome buffer's rounds, a unit's memory rounds, the ready queue's depth |
 | flow events (`s`, `t`, `f`) | one round's hops joined into a chain, and one window's chain from queue to frame |
 
 Every event carries `args.tick`, the exact integer tick. The `ts` field

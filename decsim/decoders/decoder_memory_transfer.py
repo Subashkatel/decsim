@@ -1,4 +1,4 @@
-"""Moves a job's rounds from Buffer 0 into the assigned unit's memory.
+"""Moves a job's rounds from the weak syndrome buffer into the unit's memory.
 
 The transport (the job's input link, made cancellable), the landing into
 DecoderMemory, the release, the cancel. DecoderInputStaging is the sole
@@ -101,8 +101,8 @@ class DecoderInputStaging:
     ) -> None:
         """Send the input over its link, then land it in the unit's memory.
 
-        At the landing the rounds are deposited, the Buffer 0 hold is
-        dropped and the landing is reported. Until the landing,
+        At the landing the rounds are deposited, the weak syndrome buffer hold
+        is dropped and the landing is reported. Until the landing,
         input_landing_ticks is the tick the link expects. A job whose
         rounds this unit already holds becomes one more reader of them
         and moves nothing. A tier that reads its input in place deposits
@@ -135,7 +135,7 @@ class DecoderInputStaging:
                 source_name = job.input_source_name
                 self.trace.copy_made.fire(job, bits, source_name, memory.name)
             hold = job.input_hold
-            if hold is not None:  # Buffer 0 may drop the rounds now
+            if hold is not None:  # the weak buffer may drop the rounds now
                 hold()
                 job.input_hold = None
             self._land_joined(landing_key, memory)

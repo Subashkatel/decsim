@@ -1,4 +1,4 @@
-"""A round store answers room, keeps rounds while held, and frees in order.
+"""A syndrome buffer answers room, keeps rounds while held, and frees in order.
 
 Referents: the closed form of a store of K slots with Type I blocking,
 round k enters at max(arrival k, the (k minus K)-th smallest exit among
@@ -24,13 +24,13 @@ import random
 import pytest
 
 import decsim.config as config
-import decsim.controller.round_writes as round_writes
+import decsim.controller.round_sender as round_sender
 import decsim.controller.settings as controller_settings
 import decsim.engine as engine_module
 import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
-import decsim.syndrome_buffer.round_store as round_store_module
-import decsim.syndrome_buffer.settings as round_store_settings
+import decsim.syndrome_buffer.settings as syndrome_buffer_settings
+import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 import tests.declared_run as declared_run
 
 STALL = controller_settings.PackingOverflowPolicy.STALL
@@ -59,14 +59,14 @@ def packed(round_index: int) -> round_records.PackedRound:
     )
 
 
-def held_rounds() -> round_writes.HeldRounds:
+def held_rounds() -> round_sender.HeldRounds:
     engine = engine_module.Engine()
-    return round_writes.HeldRounds(engine, STALL)
+    return round_sender.HeldRounds(engine, STALL)
 
 
 def store(rounds=None, waiting_line=None, listener=None):
-    settings = round_store_settings.RoundStoreSettings(rounds=rounds)
-    the_store = round_store_module.RoundStore(settings)
+    settings = syndrome_buffer_settings.SyndromeBufferSettings(rounds=rounds)
+    the_store = syndrome_buffer_module.SyndromeBuffer(settings)
     if waiting_line is not None:
         the_store.held_rounds = waiting_line
     if listener is not None:
@@ -381,11 +381,11 @@ def test_a_weak_window_is_ready_on_this_store_not_the_room_side_landing():
     """Readiness listens to the store the weak decoder actually reads.
 
     Toshio arXiv:2510.25222 Sec. III A: the weak tier reads the
-    fridge-side store, and syndrome buffer 1 only holds the context an
+    fridge-side store, and the strong syndrome buffer only holds the context an
     escalation would need. On the declared card the room-side hop is
-    7 us against this store's 4 us, so the same round lands in syndrome
-    buffer 1 three microseconds after this store published it; a
-    readiness rule that waited for the slower path would delay every
+    7 us against this store's 4 us, so the same round lands in the
+    strong syndrome buffer three microseconds after this store published
+    it; a readiness rule that waited for the slower path would delay every
     weak window by that lag.
     """
     machine = declared_run.switching_run(rounds=9, io_trace=True)

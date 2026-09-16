@@ -105,13 +105,13 @@ docstring.
 
 ### syndrome_buffer
 
-- `decsim/syndrome_buffer/__init__.py`: The round stores: a finished round kept until its last reader is done.
-- `decsim/syndrome_buffer/round_holds.py`: Which consumer keeps which rounds alive in a round store.
-- `decsim/syndrome_buffer/round_input.py`: Buffer 0's incoming port: its room, and the landing that takes a slot.
-- `decsim/syndrome_buffer/round_output.py`: A round store's outgoing port: it sends the rounds that leave the store.
-- `decsim/syndrome_buffer/round_store.py`: A round store: finished rounds held until their last hold releases.
-- `decsim/syndrome_buffer/settings.py`: A round store's capacity and access costs on its named clock.
-- `decsim/syndrome_buffer/strong_round_writer.py`: The room-side end of controller_to_strong_buffer: room, then landing.
+- `decsim/syndrome_buffer/__init__.py`: The syndrome buffers: a finished round kept until its last reader is done.
+- `decsim/syndrome_buffer/round_holds.py`: Which consumer keeps which rounds alive in a syndrome buffer.
+- `decsim/syndrome_buffer/round_input.py`: The weak syndrome buffer's incoming port: room, and the slot a landing takes.
+- `decsim/syndrome_buffer/round_output.py`: A syndrome buffer's outgoing port: it sends the rounds that leave the store.
+- `decsim/syndrome_buffer/settings.py`: A syndrome buffer's capacity and access costs on its named clock.
+- `decsim/syndrome_buffer/strong_round_receiver.py`: The room-side end of controller_to_strong_buffer: room, then landing.
+- `decsim/syndrome_buffer/syndrome_buffer.py`: A syndrome buffer: finished rounds held until their last hold releases.
 
 ### windows
 
@@ -151,8 +151,8 @@ docstring.
 - `decsim/controller/operation_issue.py`: The issuer: an admitted operation becomes one QPU command.
 - `decsim/controller/policies.py`: How an idle round of a waiting patch travels: the idle policy rows.
 - `decsim/controller/round_assembly.py`: The assembler: raw measurement fragments become one packed round.
+- `decsim/controller/round_sender.py`: The sender: a finished round into every store it must reach, or held.
 - `decsim/controller/round_transmission.py`: The transmitter: a stored round leaves on its route at the write.
-- `decsim/controller/round_writes.py`: The writer: a finished round into every store it must reach, or held.
 - `decsim/controller/settings.py`: The controller's settings, and the idle policy it relays through.
 
 ### decoders
@@ -170,7 +170,7 @@ docstring.
 - `decsim/decoders/decoder.py`: The Decoder port's defaults, and the template every window decoder shares.
 - `decsim/decoders/decoder_manager.py`: The decoder manager: the facade that gives ready windows a decoder unit.
 - `decsim/decoders/decoder_memory.py`: The memory inside one decoder unit.
-- `decsim/decoders/decoder_memory_transfer.py`: Moves a job's rounds from Buffer 0 into the assigned unit's memory.
+- `decsim/decoders/decoder_memory_transfer.py`: Moves a job's rounds from the weak syndrome buffer into the unit's memory.
 - `decsim/decoders/decoder_output.py`: The decoder side's outgoing sends: the frame, the strong tier, a peer.
 - `decsim/decoders/decoder_pool.py`: The decoder pools: their units, the free ones, the unit a job is offered.
 - `decsim/decoders/decoder_unit.py`: One decoder unit's occupancy: slots, memory, compute claim, flights.
@@ -243,12 +243,12 @@ docstring.
 - `decsim/observe/referee_audit.py`: The window referee's audit: what it re-decoded and where it disagreed.
 - `decsim/observe/result_ledger.py`: The logical observables each operation delivered.
 - `decsim/observe/round_events.py`: The flight recorder of the readout path: what happened to every round.
-- `decsim/observe/round_store_occupancy.py`: The L5 numbers of one round store: occupancy over time, residence per round.
 - `decsim/observe/run_views.py`: Frozen views of a run's state.
 - `decsim/observe/runtime_stamps.py`: The ticks of every operation's life, heard from the execution runtime.
 - `decsim/observe/sampled_shots.py`: The shots the syndrome source sampled, by the operation that asked.
 - `decsim/observe/settings.py`: The observation settings: what a run records beyond its results.
 - `decsim/observe/stage_records.py`: One run's decoder stage records, kept per operation and window.
+- `decsim/observe/syndrome_buffer_occupancy.py`: One syndrome buffer's L5 numbers: occupancy over time, residence per round.
 - `decsim/observe/trace_writer.py`: One shot's Chrome trace: where every round and window sat and moved.
 - `decsim/observe/window_ledger.py`: The window ledger: every window's record, what owns it, what absorbed it.
 - `decsim/observe/wiring.py`: Every listener of one run, built from the observation section and wired.

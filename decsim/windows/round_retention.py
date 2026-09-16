@@ -3,7 +3,7 @@
 A window holds [start_round, buffer_hi] plus the successor overflow in
 the store its tier reads; when the strong tier may re-decode it, the
 same rounds plus one buffer of context on each side are held in the
-room-side store as a potential strong read (Skoric et al. 2209.08552:
+strong syndrome buffer as a potential strong read (Skoric et al. 2209.08552:
 the buffer region is re-read by the next window). At admission the
 window's hold becomes the request's and is released once the input
 lands in the unit's memory. Under the forward strong window a window
@@ -54,15 +54,15 @@ class RoundRetention:
     def primary_store(self):
         """The store the primary tier reads.
 
-        Buffer 0 for the weak lane, syndrome buffer 1 for a strong-primary
-        plan.
+        The weak syndrome buffer for the weak lane, strong syndrome buffer for
+        a strong-primary plan.
         """
         if self.primary_tier is window_records.DecoderTier.STRONG:
             return self.strong_store
         return self.weak_store
 
     def store_for(self, store):
-        """The given store, or Buffer 0 when none is named."""
+        """The given store, or the weak syndrome buffer when none is named."""
         if store is None:
             return self.weak_store
         return store
@@ -76,7 +76,7 @@ class RoundRetention:
             self.strong_store.register_hold(owner, identities)
 
     def release_round_if_unheld(self, round_key: tuple) -> None:
-        """Free a Buffer 0 round whose every consumer already resolved."""
+        """Free a weak syndrome buffer round whose every consumer resolved."""
         self.weak_store.release_round_if_unheld(round_key)
 
     # ---- a window's reads
@@ -203,7 +203,7 @@ class RoundRetention:
         return self.transfer_hold(potential, pending, self.strong_store)
 
     def holds_input(self, job: decoding_records.DecodeJob) -> bool:
-        """Whether the job's input hold is already live in Buffer 0."""
+        """Whether the job's hold already lives in the weak syndrome buffer."""
         if job.request_key is None:
             return False
         owner = decoding_records.DecoderInputHold(job.request_key)
@@ -225,7 +225,7 @@ class RoundRetention:
         job.input_hold = functools.partial(store.release_hold, owner)
 
     def hold_strong_input(self, job: decoding_records.DecodeJob) -> None:
-        """The strong job's context becomes its input hold in syndrome buffer 1.
+        """A strong job's context is its hold on the strong syndrome buffer.
 
         The window's potential strong read or the request's pending
         hold, whichever is live, moves to the input in flight; a job
@@ -265,12 +265,12 @@ class RoundRetention:
         return builder.assemble_payloads(window, self.strong_store)
 
     def context_rounds_in_flight(self, key: tuple, read_keys) -> tuple:
-        """The context rounds that arrived at Buffer 0 and are still crossing.
+        """Context rounds at the weak syndrome buffer that are still crossing.
 
         A round the QPU has not produced yet is not late. A round that
-        reached Buffer 0 and is not in the room-side store is either
-        still crossing controller_to_strong_buffer, which its own live
-        hold says, or was released while a reader still needs it, which
+        reached the weak syndrome buffer and is not in the strong syndrome
+        buffer is either still crossing controller_to_strong_buffer, which its
+        own live hold says, or was released while a reader still needs it, which
         is the run's mistake to report loudly. A caller waits for the
         first and never for the second.
         """
@@ -289,8 +289,9 @@ class RoundRetention:
             released.append(round_key)
         if released:
             raise RuntimeError(
-                f"strong context for {key} arrived at Buffer 0 and is "
-                f"neither stored in syndrome buffer 1 nor expected there: "
+                f"strong context for {key} arrived at the weak syndrome buffer "
+                f"and is neither stored in the strong syndrome buffer nor "
+                f"expected there: "
                 f"{released} (the rounds were released while a strong "
                 f"window still reads them)"
             )
@@ -315,11 +316,11 @@ class RoundRetention:
     ) -> Optional[decoding_records.RephaseGuard]:
         """Hold the restart window's strong context while a plan lands.
 
-        Syndrome buffer 1 loses the absorbed windows' potential strong
+        The strong syndrome buffer loses the absorbed windows' potential strong
         holds as the plan lands; the guard keeps the restart window's
         context until its re-sliced potential strong hold names it. Its
-        Buffer 0 reads need no guard: its potential restart hold is live
-        until the weak chain restarts.
+        the weak syndrome buffer reads need no guard: its potential restart
+        hold is live until the weak chain restarts.
         """
         if restart_key is None:
             return None
@@ -416,7 +417,7 @@ class RoundRetention:
         return guarded
 
     def require_strong_retained(self, round_keys, purpose: str) -> None:
-        """Every listed round must still sit in the room-side store."""
+        """Every listed round must still sit in the strong syndrome buffer."""
         self.require_retained(round_keys, purpose, self.strong_store)
 
     def require_retained(
@@ -457,13 +458,13 @@ class RoundRetention:
         strong_capacity = self.strong_store.capacity_rounds()
         strong_minimum = buffering_plan.sb1_minimum_live_rounds
         if strong_is_primary:
-            # the plan's window reads live on the room-side store
+            # the plan's window reads live on the strong syndrome buffer
             strong_minimum = buffering_plan.minimum_live_rounds
         if strong_capacity is not None and strong_capacity < len(
             strong_minimum
         ):
             raise ValueError(
-                f"syndrome buffer 1 needs {len(strong_minimum)} packet "
+                f"strong syndrome buffer needs {len(strong_minimum)} packet "
                 f"slots, got {strong_capacity}"
             )
 

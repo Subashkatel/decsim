@@ -405,7 +405,7 @@ class DecodeRequester:
     escalation_policy = ports.Port(ports.EscalationPolicy)
     verdict = ports.Port(window_commits.WindowVerdict)
     # the primary store's outgoing port; it executes the input send
-    store_output = ports.Port(ports.RoundStoreOutput)
+    store_output = ports.Port(ports.SyndromeBufferOutput)
     # a run whose weak decoder reports its own soft output has no join
     gap_join = ports.Port(ports.WindowGapJoin, optional=True)
 
@@ -485,7 +485,7 @@ class DecodeRequester:
         edge = self.read_clock.edge(self.read_cycles, engine.now)
         delay = edge - engine.now
         finish = functools.partial(self._finish_read, window.key, read)
-        engine.schedule(delay, finish, label="round store read")
+        engine.schedule(delay, finish, label="syndrome buffer read")
 
     def _primary_submissions(
         self, primary_jobs: list, is_input_held: bool
@@ -536,8 +536,8 @@ class DecodeRequester:
         """Move the window's hold to the attempt; whether it was held already.
 
         The jobs of one attempt read the same rounds, so they share one
-        hold and Buffer 0 may drop the rounds when the last of them has
-        its input; a job whose rounds this side already holds keeps
+        hold and the weak syndrome buffer may drop the rounds when the last of
+        them has its input; a job whose rounds this side already holds keeps
         them and moves nothing.
         """
         first = primary_jobs[0]
@@ -696,8 +696,8 @@ class _SharedInputHold:
     """One store hold released when the last job that reads it has landed.
 
     The forced-class solves of one window read the same rounds, so
-    Buffer 0 keeps them until every one of them has its input, the
-    lifetime a zero-copy send owes its source (the kernel's dmaengine
+    the weak syndrome buffer keeps them until every one of them has its input,
+    the lifetime a zero-copy send owes its source (the kernel's dmaengine
     client rule that a mapping lives until the transfer completes).
     """
 

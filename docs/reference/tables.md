@@ -112,14 +112,6 @@ In `decsim/qpu/settings.py`. A yaml names a row of it under `magic_state_factory
 | `distillation` | `DistillationFactory` in `decsim/qpu/magic_state_factories.py` | One 15-to-1 distillation stage with optional continuous production. |
 | `multi_level` | `MultiLevelDistillationFactory` in `decsim/qpu/magic_state_factories.py` | A pull-driven chain of distillation levels feeding one store. |
 
-## `ROUND_STORES`
-
-In `decsim/syndrome_buffer/round_store.py`. A yaml names a row of it under `round_store.kind` and `strong_round_store.kind`.
-
-| Row | Class | What it is |
-| --- | --- | --- |
-| `round_store` | `RoundStore` in `decsim/syndrome_buffer/round_store.py` | The store: rounds by key, their holds, and the operations it serves. |
-
 ## `STRONG_WINDOW_SHAPES`
 
 In `decsim/escalation/settings.py`. A yaml names a row of it under `escalation.strong_window`.
@@ -130,6 +122,14 @@ In `decsim/escalation/settings.py`. A yaml names a row of it under `escalation.s
 | `forward` | `ForwardWindow` in `decsim/escalation/strong_window_shapes.py` | Sec. III C, Fig. 12: a strong window that absorbs what it covers. |
 | `near_seam_pinned` | `NearSeamWindow` in `decsim/escalation/strong_window_shapes.py` | The commit region with its past face pinned and one open buffer. |
 | `forward_seam_pinned` | `ForwardSeamWindow` in `decsim/escalation/strong_window_shapes.py` | Sec. III C, Fig. 12 read as the paper states it: both faces pinned. |
+
+## `SYNDROME_BUFFERS`
+
+In `decsim/syndrome_buffer/syndrome_buffer.py`. A yaml names a row of it under `weak_syndrome_buffer.kind` and `strong_syndrome_buffer.kind`.
+
+| Row | Class | What it is |
+| --- | --- | --- |
+| `syndrome_buffer` | `SyndromeBuffer` in `decsim/syndrome_buffer/syndrome_buffer.py` | The store: rounds by key, their holds, and the operations it serves. |
 
 ## `SYNDROME_SOURCES`
 

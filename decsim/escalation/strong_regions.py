@@ -273,7 +273,7 @@ class StrongRegions:
         return self.tracker.round_count_for_window(operation_id, window)
 
     def strong_rounds_stored(self, operation_id) -> int:
-        """How far the room-side store has been filled for the operation."""
+        """How far the strong syndrome buffer is filled for the operation."""
         return self.tracker.strong_rounds_arrived(operation_id)
 
     def _plan_region(
@@ -316,10 +316,10 @@ class StrongRegions:
     ) -> None:
         """Both sides' rounds must still be stored before the plan lands.
 
-        The strong window's context lives in syndrome buffer 1; the
+        The strong window's context lives in the strong syndrome buffer; the
         restart window's weak reads, the re-read range among them, sit
-        in Buffer 0 under its potential restart hold (planned with the
-        window, live until the weak chain restarts).
+        in the weak syndrome buffer under its potential restart hold (planned
+        with the window, live until the weak chain restarts).
         """
         purpose = f"strong-region plan for {key}"
         self.retention.require_strong_retained(context_keys, purpose)

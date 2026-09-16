@@ -7,9 +7,9 @@ decode loop asks each planned window for its detectors
 buffer that overflows the operation's end is satisfied by a successor's
 rounds, memory rounds or a closed tail (Skoric et al. 2209.08552, the
 artificial defects at the commit edge carry into the next window). The
-room-side store's stored-through round per operation is counted here
-too: the strong tier's readiness reads it, never Buffer 0's counter.
-A stream's length knowledge (its source limit, its sealed length, its
+strong syndrome buffer's stored-through round per operation is counted here
+too: the strong tier's readiness reads it, never the weak syndrome buffer's
+counter. A stream's length knowledge (its source limit, its sealed length, its
 closed feedback boundaries) lives here; its geometry is the planner's.
 """
 
@@ -75,7 +75,7 @@ class RoundTracker:
         return arrivals.memory_rounds
 
     def note_room_round(self, operation_id, round_index: int) -> None:
-        """Syndrome buffer 1 stored a round of the operation."""
+        """The strong syndrome buffer stored a round of the operation."""
         if operation_id not in self.arrivals_by_operation:
             self.arrivals_by_operation[operation_id] = _Arrivals()
         arrivals = self.arrivals_by_operation[operation_id]
@@ -97,7 +97,7 @@ class RoundTracker:
         return self.arrivals_by_operation[operation_id].memory_rounds
 
     def strong_rounds_arrived(self, operation_id) -> int:
-        """The room-side store's stored-through round of the operation."""
+        """The operation's round stored through the strong syndrome buffer."""
         arrivals = self.arrivals_by_operation.get(operation_id)
         if arrivals is None:
             return 0

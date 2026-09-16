@@ -351,9 +351,9 @@ def test_the_setup_cost_lands_on_the_two_decoder_input_paths():
 def test_the_reference_card_prices_the_two_controller_to_buffer_hops():
     """Caune's per-hop stages: the intra-unit write, and the crossing.
 
-    Syndrome buffer 0 sits with the controller, so its write is Fig. 1a
+    The weak syndrome buffer sits with the controller, so its write is Fig. 1a
     stage D, the 40 ns the control system takes to handle a result
-    message and prepare it for broadcast; syndrome buffer 1 sits at room
+    message and prepare it for broadcast; strong syndrome buffer sits at room
     temperature, so its write leaves the chassis on stage F, the 240 to
     260 ns inter-node broadcast, taken at the caption's stated worst
     case (arXiv:2410.05202, Fig. 1a).
@@ -532,7 +532,8 @@ def test_the_khalid_latencies_name_the_table_row_they_are_read_from():
 
 
 # The hops the measured RoCE v2 rows reprice: the write into syndrome
-# buffer 1, the escalation, the strong window's input, and the reply.
+# strong syndrome buffer, the escalation, the strong window's input, and the
+# reply.
 STRONG_SIDE_PATHS = (
     "controller_to_strong_buffer",
     "weak_decoder_to_strong_decoder",
@@ -575,7 +576,7 @@ def _cites_backline(source: str) -> bool:
 def test_the_cpu_row_charges_half_the_measured_round_trip_on_each_leg():
     """Backline times one round trip; decsim needs a number per hop.
 
-    The controller's one-sided write into syndrome buffer 1, the
+    The controller's one-sided write into the strong syndrome buffer, the
     escalation request and the reply to the frame are each half of the
     2.305 us median (2609.09270 Table III, CPU echo); the strong store's
     read into the strong decoder is free, because the coprocessor polls

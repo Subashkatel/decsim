@@ -92,10 +92,10 @@ BOUNDARY_PAYLOAD_SOURCE = "DependencyResidual seam-layer detectors"
 # The controller's write into a syndrome buffer is a hop of the control
 # system, and Caune et al., arXiv:2410.05202, Fig. 1a is the referent that
 # measures such hops one by one, with worst-case values where measured.
-# Syndrome buffer 0 sits with the controller, so its write is stage D,
+# The weak syndrome buffer sits with the controller, so its write is stage D,
 # "time required to handle result message and prepare for broadcast"
-# (40 ns). Syndrome buffer 1 sits at room temperature, so its write leaves
-# the chassis: stage F, "inter-node delay time for broadcasting between
+# (40 ns). The strong syndrome buffer sits at room temperature, so its write
+# leaves the chassis: stage F, "inter-node delay time for broadcasting between
 # control system chassis" (240 to 260 ns), taken at the stated worst case.
 # Google, arXiv:2408.13687, gives the same topology without a per-hop
 # number: bits go to a workstation over low-latency Ethernet and are then
@@ -427,7 +427,7 @@ def roce_v2_measured_profile(coprocessor: str) -> settings.FabricSettings:
     round trip in its own clock. The paper gives no per-direction
     number, and neither does the published code, so the split below is
     decsim's rule rather than a measurement: the controller's write into
-    syndrome buffer 1, the escalation request and the strong decoder's
+    strong syndrome buffer, the escalation request and the strong decoder's
     reply to the frame are each one half of the round trip, and the
     strong store's read into the strong decoder is zero because the
     coprocessor polls a slot in its own memory. The escalation round

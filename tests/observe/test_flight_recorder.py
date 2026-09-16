@@ -2,7 +2,7 @@
 
 `FlightRecorder.ledger` assembles the run's causal record out of the
 owners' own records, named in the module's docstring: the packing
-stage's round events, the room-side store's landings, the window
+stage's round events, the strong syndrome buffer's landings, the window
 stamps, the frame's corrections and the runtime's release times. Its
 `check()` is the accounting proof that makes the ledger evidence: every
 emitted window-input round reaches exactly one terminal state, and no
@@ -13,7 +13,7 @@ arithmetic is exact. Round r leaves the qpu at r us, its bits are
 classified 5 us later (2 us on the qpu path, 3 us of readout
 classification), packing is declared free, and from there the
 weak-buffer path publishes it 4 us on while the strong-buffer path
-lands it in the room-side store 7 us on.
+lands it in the strong syndrome buffer 7 us on.
 
 The window trace walk at the end of the file reads one shot of
 configs/weak_decoder_baseline.yaml as well, because the four events a
@@ -143,8 +143,8 @@ def test_a_rounds_chain_is_exact_and_each_event_names_its_cause():
 
     Round 3 is emitted at 3 us, its bits are available at 8, packing is
     free so it is packed and sent at 8, and the weak-buffer path
-    publishes it in Buffer 0 at 12. Each row's cause is the row before
-    it, which is what lets a reader follow one readout through the
+    publishes it in the weak syndrome buffer at 12. Each row's cause is the row
+    before it, which is what lets a reader follow one readout through the
     machine (flight_recorder.py's _round_chains).
     """
     machine = declared_run.weak_only_run(rounds=6)
@@ -221,7 +221,7 @@ def test_every_emitted_round_reaches_exactly_one_terminal_state():
 def test_a_strong_primary_run_records_the_room_side_landing():
     """A strong-primary round travels once, and its journey ends there.
 
-    Readiness listens to the room-side store, so nothing crosses the
+    Readiness listens to the strong syndrome buffer, so nothing crosses the
     weak-buffer path: the round is packed at 8 us and lands at 15, and
     that landing is its terminal state rather than a publication
     (flight_recorder.py's _store_landings). The window then waits the
@@ -353,7 +353,7 @@ def test_the_check_refuses_a_round_that_disappeared():
 
 
 def test_a_round_dropped_for_want_of_store_room_ends_in_dropped():
-    """A loss at Buffer 0 admission is accounted, not silent.
+    """A loss at the weak syndrome buffer admission is accounted, not silent.
 
     DROPPED is one of the round terminals, so the round that the writer
     refused closes its chain there and the conservation check still
@@ -421,7 +421,7 @@ def weak_blocked_mode(_generator, rounds):
 
 
 def strong_mode(_generator, rounds):
-    """Strong primary: readiness listens to the room-side store."""
+    """Strong primary: readiness listens to the strong syndrome buffer."""
     return declared_run.strong_only_run(rounds=rounds)
 
 
@@ -693,8 +693,8 @@ def test_every_window_of_a_shipped_run_records_its_four_trace_events():
     One shot of configs/weak_decoder_baseline.yaml at p = 0.001,
     distance 3 and a 10 us round period decodes nine sliding windows,
     and each carries the four events a latency claim is read from, with
-    non-decreasing ticks: the window complete in Buffer 0, its decode
-    started on a unit, its decode done, and its correction written into
+    non-decreasing ticks: the window complete in the weak syndrome buffer, its
+    decode started on a unit, its decode done, and its correction written into
     the frame. Those are the four the hardware trace of a decoder FPGA
     reports (IBM arXiv 2510.21600 lines 517-519: when the decoders start
     and stop, when the syndromes and codewords arrive, and when the

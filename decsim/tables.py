@@ -1,7 +1,7 @@
 """The plug-in tables' lookup: a name, a row, or a refusal that lists them.
 
 Every package owns a table of the classes its yaml section can name
-(DECODERS, ROUND_STORES, WINDOWING_SCHEMES and the rest, each in its own
+(DECODERS, SYNDROME_BUFFERS, WINDOWING_SCHEMES and the rest, each in its own
 package's settings module). One function reads them all, so a kind that
 is not a row is refused the same way everywhere, with the rows printed.
 The table is the last resort, not the authority: sinter resolves a

@@ -1,13 +1,14 @@
 """The memory inside one decoder unit.
 
 Each unit holds the input of the jobs it is decoding: the manager assigns
-a unit, the window's rounds move from Buffer 0 into that unit's memory
-as one immutable DecoderInput, the engine reads them, and the memory is
+a unit, the window's rounds move from the weak syndrome buffer into that unit's
+memory as one immutable DecoderInput, the engine reads them, and the memory is
 freed when the decode completes. Capacity is rounds per unit; a window
 larger than the unit's memory cannot be decoded by that unit and stops
 the run. There is no shared store, no credits and no waiting: a job
-waits in Buffer 0 for a unit, never for memory. Precedent: XQsim's error
-decode unit holds one syndrome input at a time in its own registers.
+waits in the weak syndrome buffer for a unit, never for memory. Precedent:
+XQsim's error decode unit holds one syndrome input at a time in its own
+registers.
 
 An input is held per input, not per job, with its readers recorded, so
 two jobs that read the same rounds on one unit are one copy and one

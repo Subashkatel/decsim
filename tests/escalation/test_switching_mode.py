@@ -4,7 +4,7 @@ Every window commits once. The contract under test is the paper's
 protocol (Toshio 2510.25222 Sec. III A, serial variant): every window
 decodes weak first and carries a gap; a gap at or above the threshold
 keeps the weak result; below it, the window crosses WSD, the strong
-decoder re-decodes the strong-window extent from syndrome buffer 1 over
+decoder re-decodes the strong-window extent from the strong syndrome buffer over
 SBD, and the strong result is the window's only Pauli-frame write,
 riding DO home. The threshold's two
 edges pin the plumbing: at 0 dB nothing escalates and the run is the
@@ -165,9 +165,10 @@ def _parallel_variant_card(run_both_at_once) -> dict:
     """The switching card with Sec. III A's Step 1 asked for, or not.
 
     Step 1 builds the strong job at weak readiness, so the room-side
-    write must not lag the Buffer 0 publication path; the card wires the
-    two store hops at one cycle each. On the reference numbers Buffer 1
-    is 0.26 us behind Buffer 0 at 0.04 us and the build refuses.
+    write must not lag the weak syndrome buffer publication path; the card
+    wires the two store hops at one cycle each. On the reference numbers the
+    strong syndrome buffer is 0.26 us behind the weak syndrome buffer at 0.04
+    us and the build refuses.
     """
     escalation = {
         "kind": "switching",
@@ -417,10 +418,10 @@ def test_the_parallel_sibling_waits_for_the_context_it_reads():
     T_comm^weak (lines 1109-1114; Table I is a notation table and prices
     nothing), so in a model that prices transport Step 1 means
     the strong decoder starts when its copy has arrived. On the
-    declared card the room-side hop is 7 us against Buffer 0's 4 us, so
-    the first window's context is still crossing when the window
+    declared card the room-side hop is 7 us against the weak syndrome buffer's
+    4 us, so the first window's context is still crossing when the window
     becomes ready: the sibling is held, and it is submitted at the tick
-    its last context round is stored in syndrome buffer 1.
+    its last context round is stored in the strong syndrome buffer.
     """
     machine = fabric.switching_machine(
         rounds=9,
@@ -434,11 +435,11 @@ def test_the_parallel_sibling_waits_for_the_context_it_reads():
         log_lines, "strong(mem1 W0): strong start deferred"
     )
     last_context_round = declared_run.log_tick(
-        log_lines, "SyndromeBuffer1: received round 6 of op 1"
+        log_lines, "strong syndrome buffer: received round 6 of op 1"
     )
     submitted = declared_run.log_tick(
         log_lines,
-        "strong(mem1 W0): strong context stored in syndrome buffer 1",
+        "strong(mem1 W0): strong context stored in strong syndrome buffer",
     )
     started = declared_run.log_tick(log_lines, "START DECODE strong(mem1 W0)")
     deferred_lines = fabric.log_lines_containing(
@@ -485,7 +486,7 @@ def test_a_deferred_strong_job_is_traced_from_its_hold_to_its_release(
     assert lanes[slice_row["tid"]] == "Strong tier"
     assert args["request"] == "1:0:strong:1"
     assert args["waits_for"] == "stored rounds of operation 1"
-    assert args["outcome"] == "strong context stored in syndrome buffer 1"
+    assert args["outcome"] == "strong context stored in strong syndrome buffer"
     assert args["rounds"] == 6
     assert args["tick"] == expected_held
     assert slice_row["dur"] == pytest.approx(3.0)
@@ -559,7 +560,7 @@ def test_every_strong_request_is_cancelled_when_the_weak_tier_is_confident():
     Toshio arXiv:2510.25222 Sec. III A, Step 1: the parallel strong
     decode is speculative, so a confident weak result cancels it and no
     window commits from the strong tier. The cancel also owns the
-    room-side hold the request took, and syndrome buffer 1 would report
+    room-side hold the request took, and the strong syndrome buffer would report
     an unresolved hold at the end of the run if it did not release it.
     """
     machine = fabric.switching_machine(
@@ -575,7 +576,7 @@ def test_every_strong_request_is_cancelled_when_the_weak_tier_is_confident():
     assert tiers == [((1, 0), "weak"), ((1, 1), "weak"), ((1, 2), "weak")]
     assert counts.cancelled == 3
     assert counts.needed == 0
-    machine.strong_round_writer.check_settled()
+    machine.strong_round_receiver.check_settled()
 
 
 def test_every_window_takes_the_strong_result_when_the_weak_tier_is_not():
@@ -612,7 +613,7 @@ def first_decrease_tick(timeline):
 
 
 def test_the_strong_context_lives_until_the_escalated_window_commits():
-    """Syndrome buffer 1 frees a context after the commit, not the read.
+    """The strong syndrome buffer frees a context at the commit, not the read.
 
     Toshio arXiv:2510.25222 Sec. III A: the strong decoder re-decodes
     the escalated window's whole context, and its result is the

@@ -20,8 +20,8 @@ import dataclasses
 import functools
 from typing import Optional
 
+import decsim.controller.round_sender as round_sender
 import decsim.controller.round_transmission as round_transmission
-import decsim.controller.round_writes as round_writes
 import decsim.controller.settings as controller_settings
 import decsim.ports as ports
 import decsim.records.identity as identity_records
@@ -39,7 +39,7 @@ class RoundsInFlight:
     (RoundTransmitter), and each place keeps its own count for its own
     settlement check; the stage's count is their sum, read when a first
     fragment asks for room, so no exit can forget a release. A round the
-    strong writer carries alone leaves at its write and a dropped round
+    strong receiver carries alone leaves at its write and a dropped round
     at its drop: neither is held nor sent.
     """
 
@@ -76,7 +76,7 @@ class RoundAssembler:
     """
 
     # the one end a packed round leaves by, so the port names the class
-    round_writer = ports.Port(round_writes.RoundWriter)
+    round_sender = ports.Port(round_sender.RoundSender)
     detection_events = ports.Port(ports.DetectionEventPlacement)
     rounds_in_flight = ports.Port(RoundsInFlight)
 
@@ -215,10 +215,10 @@ class RoundAssembler:
             self.detection_events.detection_event_formation_cycles
         )
         if detection_event_formation_cycles == 0:
-            self.round_writer.admit(packed)
+            self.round_sender.admit(packed)
             return
         delay = self._delay(detection_event_formation_cycles)
-        hand_on = functools.partial(self.round_writer.admit, packed)
+        hand_on = functools.partial(self.round_sender.admit, packed)
         self.engine.schedule(
             delay, hand_on, label="controller form detection events"
         )

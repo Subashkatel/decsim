@@ -28,9 +28,9 @@ The idle accounting, as the QPU sees it: it takes every idle round.
 
 ## the store holds the packed round
 
-### `RoundStore`
+### `SyndromeBuffer`
 
-The upstream round store (Buffer 0), as its own incoming port sees it.
+The weak syndrome buffer, as its own incoming port sees it.
 
 | Method | What it does |
 | --- | --- |
@@ -62,9 +62,9 @@ The same store, as the window side that reads and holds it sees it.
 | `has_live_operation_reference` | Whether a hold or a stored round still names this operation. |
 | `capacity_rounds` | The slots this store is bounded to, or None for unbounded. |
 
-### `StrongRoundStore`
+### `StrongSyndromeBufferInput`
 
-The room-side store (syndrome buffer 1), as syndrome packing sees it.
+The strong syndrome buffer, as syndrome packing sees it.
 
 | Method | What it does |
 | --- | --- |
@@ -72,9 +72,9 @@ The room-side store (syndrome buffer 1), as syndrome packing sees it.
 | `reserve_write` | Take the room one crossing round will need, before it leaves. |
 | `receive_round` | Take one round that landed here and keep it on arrival. |
 
-### `RoundStoreInput`
+### `SyndromeBufferInput`
 
-A round store's incoming port, as the controller sees it.
+A syndrome buffer's incoming port, as the controller sees it.
 
 | Method | What it does |
 | --- | --- |
@@ -83,9 +83,9 @@ A round store's incoming port, as the controller sees it.
 | `receive_round` | Take one round that landed here: store it, then announce it. |
 | `send_memory_round` | Send one timing-only round to the decoder side the store feeds. |
 
-### `RoundStoreOutput`
+### `SyndromeBufferOutput`
 
-A round store's outgoing port, as whoever asks for a round sees it.
+A syndrome buffer's outgoing port, as whoever asks for a round sees it.
 
 | Method | What it does |
 | --- | --- |
@@ -127,7 +127,7 @@ The window manager, as the controller side sees it.
 | `seal_stream` | Close a dynamic stream once its full length has arrived. |
 | `bind_stream_operation` | Note which stream and offset a segment's rounds fold into. |
 | `bind_required_stream_end` | Note the stream round a protected segment's result waits for. |
-| `accept_room_round` | Record one round that landed in the room-side store instead. |
+| `accept_room_round` | Record a round that landed in the strong syndrome buffer instead. |
 | `accept_boundary` | A boundary landed in the window; True when it owed no other. |
 | `reads_windows_from` | Whether the primary tier's window reads come from this store. |
 
@@ -154,7 +154,7 @@ The rounds a window may still read, as the escalation side sees it.
 | `hold_strong_input` | The strong job's context becomes its input hold. |
 | `strong_window_input` | The room-side payloads of a strong window, first round stamped. |
 | `hold_strong_context` | The window's potential strong read becomes the request's hold. |
-| `context_rounds_in_flight` | The context rounds that reached the upstream store and are late. |
+| `context_rounds_in_flight` | The context rounds that reached the weak syndrome buffer late. |
 | `guard_restart_reads` | Hold the restart window's strong context while a plan lands. |
 | `replace_window_reads` | Re-point the window's live holds at its reads. |
 | `release_restart_reads` | No earlier escalation can re-slice the window: its claim ends. |
@@ -164,7 +164,7 @@ The rounds a window may still read, as the escalation side sees it.
 | `require_rounds_retained` | A strong window starts only once every round it reads is held. |
 | `read_keys_for_bounds` | The retained round keys of a possibly cross-operation range. |
 | `require_retained` | Refuse a new consumer if an already-arrived round was released. |
-| `require_strong_retained` | The same, on the room-side store. |
+| `require_strong_retained` | The same, on the strong syndrome buffer. |
 
 ### `WindowRounds`
 
@@ -174,7 +174,7 @@ The arrivals per operation, as the escalation side reads them.
 | --- | --- |
 | `operation` | The operation of that id. |
 | `round_count_for_window` | The rounds the window reads of its operation. |
-| `strong_rounds_arrived` | The rounds of the operation stored in the room-side store. |
+| `strong_rounds_arrived` | The rounds of the operation stored in the strong syndrome buffer. |
 
 ### `WindowJobBuilder`
 

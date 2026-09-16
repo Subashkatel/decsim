@@ -106,7 +106,7 @@ stays short; past eight names the rule is wrong, not the list.
 The list is empty. A neighbour arrives as a port the root binds rather
 than as a constructor argument the class keeps, so a component with many
 collaborators sets few attributes, and the two classes that were listed
-here, the idle round accounting and the round writer, set five and one.
+here, the idle round accounting and the round sender, set five and one.
 
 ## Rule 2. Names are full words that say what the thing is
 

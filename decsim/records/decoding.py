@@ -53,7 +53,7 @@ class SoftOutputComputation:
     ticks: int = 0
 
 
-# ---- consumer hold tokens: who keeps rounds in a round store and why
+# ---- consumer hold tokens: who keeps rounds in a syndrome buffer and why
 #
 # Every token answers referenced_operation_ids: the operations it keeps
 # open beyond the ones the rounds it names belong to. A store asks the
@@ -85,7 +85,7 @@ class PotentialStrong:
 
 @dataclass(frozen=True)
 class PotentialRestart:
-    """A hold: a window's reads and one buffer before them, in Buffer 0.
+    """A hold in the weak syndrome buffer: a window's reads and one before them.
 
     Under the forward strong window an earlier escalation may re-slice
     this window as its restart window, whose weak decode re-reads one
@@ -213,8 +213,8 @@ class DecodeJob:
 
     The window's rounds, its detector error model, its identity in the
     decoder queues, and the timestamps of its life. ``payloads`` is the
-    Buffer 0 view of the rounds until the transfer lands them in a
-    unit's memory (``decoder_input``); a decoder reads only its unit's
+    the weak syndrome buffer view of the rounds until the transfer lands them
+    in a unit's memory (``decoder_input``); a decoder reads only its unit's
     memory.
     """
 

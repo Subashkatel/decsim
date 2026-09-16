@@ -64,12 +64,12 @@ code's own docstrings cite.
 ## The two stores
 
 The controller writes every packed round to both stores at once, when
-both are built. The papers' figures call them Buffer 0 and Buffer 1.
+both are built. The papers' figures call them the weak syndrome buffer and the strong syndrome buffer.
 
 | decsim | The papers | What it is for |
 | --- | --- | --- |
-| syndrome buffer 0, `RoundStore` in `decsim/syndrome_buffer/round_store.py` | Buffer 0, the streamed decoder buffer | what the weak tier reads, round by round, as it arrives |
-| syndrome buffer 1, the `StrongRoundStore` port in `decsim/ports.py`, written by `StrongRoundWriter` in `decsim/syndrome_buffer/strong_round_writer.py` | Buffer 1, the room-side store | what a strong re-decode reads, in bulk, once its boundaries are known |
+| weak syndrome buffer, `SyndromeBuffer` in `decsim/syndrome_buffer/syndrome_buffer.py` | the weak syndrome buffer, the streamed decoder buffer | what the weak tier reads, round by round, as it arrives |
+| strong syndrome buffer, the `StrongSyndromeBufferInput` port in `decsim/ports.py`, written by `StrongRoundReceiver` in `decsim/syndrome_buffer/strong_round_receiver.py` | the strong syndrome buffer, the strong side's copy of the rounds | what a strong re-decode reads, in bulk, once its boundaries are known |
 | hold, `DecoderInputHold`, `PotentialStrong`, `PotentialRestart` | the reason a round may not be dropped yet | one token per consumer that still needs the round |
 
 ## The link paths
@@ -81,8 +81,8 @@ them in order; this is the name list.
 | decsim | The hop |
 | --- | --- |
 | `qpu_to_controller` | the readout electronics to the control workstation |
-| `controller_to_weak_buffer` | the packed round into Buffer 0 |
-| `controller_to_strong_buffer` | the same round into Buffer 1 |
+| `controller_to_weak_buffer` | the packed round into the weak syndrome buffer |
+| `controller_to_strong_buffer` | the same round into the strong syndrome buffer |
 | `weak_buffer_to_weak_decoder` | a window's rounds into a weak unit's memory |
 | `strong_buffer_to_strong_decoder` | the strong region into the strong unit |
 | `weak_decoder_to_strong_decoder` | the escalation's selection, and no payload |

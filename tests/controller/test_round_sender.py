@@ -1,4 +1,4 @@
-"""The writer: a finished round leaves for every store it reaches, or waits.
+"""The sender: a finished round leaves for every store it reaches, or waits.
 
 The backpressure law: each store's own end answers has_room before any
 round leaves for it, counting the rounds it holds and the writes it has
@@ -13,7 +13,7 @@ tmp/resources/l5_buffers/Ciw/ciw/node.py:470-473
 release_blocked_individual), or is dropped under the drop knob (ns-3
 point-to-point-net-device.cc Send: Enqueue false, packet dropped). A
 strong-primary plan takes one hop, into the strong store; a
-feedback-memory round still takes a Buffer 0 slot.
+feedback-memory round still takes a weak syndrome buffer slot.
 
 The controller is also the end the room-side round leaves by, so it
 executes the controller_to_strong_buffer send and the room side handles
@@ -24,7 +24,7 @@ profile.
 """
 
 import decsim.config as config
-import decsim.controller.round_writes as round_writes
+import decsim.controller.round_sender as round_sender
 import decsim.controller.settings as controller_settings
 import decsim.engine as engine_module
 import decsim.links.fabric as fabric_module
@@ -33,9 +33,9 @@ import decsim.observe.round_events as round_events
 import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
 import decsim.syndrome_buffer.round_input as round_input
-import decsim.syndrome_buffer.round_store as round_store_module
-import decsim.syndrome_buffer.settings as round_store_settings
-import decsim.syndrome_buffer.strong_round_writer as strong_round_writer
+import decsim.syndrome_buffer.settings as syndrome_buffer_settings
+import decsim.syndrome_buffer.strong_round_receiver as strong_round_receiver
+import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 
 STALL = controller_settings.PackingOverflowPolicy.STALL
 DROP = controller_settings.PackingOverflowPolicy.DROP_ROUND
@@ -65,7 +65,7 @@ class RecordingTransmitter:
 
 
 class RecordingWindows:
-    """The window side, which hears a round once Buffer 0 publishes it."""
+    """The window side hears each round the weak syndrome buffer publishes."""
 
     def __init__(self):
         self.published = []
@@ -93,59 +93,61 @@ class RecordingStrongWriter:
         self.written.append(packet.round_index)
 
 
-def writer_with(
+def sender_with(
     engine,
     weak_rounds=None,
-    strong_writer=None,
+    strong_receiver=None,
     publishes_from_strong_store=False,
     on_full=STALL,
 ):
     recorder = round_events.RoundEventRecorder(engine)
-    held = round_writes.HeldRounds(engine, on_full)
+    held = round_sender.HeldRounds(engine, on_full)
     held.trace.round_event.connect(recorder.record)
-    settings = round_store_settings.RoundStoreSettings(rounds=weak_rounds)
-    weak_store = round_store_module.RoundStore(settings)
+    settings = syndrome_buffer_settings.SyndromeBufferSettings(
+        rounds=weak_rounds
+    )
+    weak_store = syndrome_buffer_module.SyndromeBuffer(settings)
     weak_store.held_rounds = held
     transmitter = RecordingTransmitter(engine)
     profile = link_profiles.logical_reference_profile()
     links = fabric_module.LinkFabric(profile, engine)
     windows = RecordingWindows()
-    weak_input = round_input.RoundStoreInput(engine, settings)
+    weak_input = round_input.SyndromeBufferInput(engine, settings)
     weak_input.store = weak_store
     weak_input.windows = windows
-    writer = round_writes.RoundWriter(engine)
-    writer.link = links
-    writer.weak_input = weak_input
-    writer.weak_store = weak_store
-    if strong_writer is not None:
-        writer.strong_writer = strong_writer
-    writer.held_rounds = held
-    writer.transmitter = transmitter
-    writer.publishes_from_strong_store = publishes_from_strong_store
-    return writer, weak_input, transmitter, recorder
+    sender = round_sender.RoundSender(engine)
+    sender.link = links
+    sender.weak_input = weak_input
+    sender.weak_store = weak_store
+    if strong_receiver is not None:
+        sender.strong_receiver = strong_receiver
+    sender.held_rounds = held
+    sender.transmitter = transmitter
+    sender.publishes_from_strong_store = publishes_from_strong_store
+    return sender, weak_input, transmitter, recorder
 
 
 def test_a_round_with_no_room_is_held_and_written_in_order_when_a_slot_frees():
     """One slot, taken by a round in flight: the next waits for it to free.
 
     The room a crossing round will need is spent the moment it leaves,
-    so a Buffer 0 of one slot refuses the second round while the first
-    is still on controller_to_weak_buffer, and still refuses it once the
+    so a weak syndrome buffer of one slot refuses the second round while the
+    first is still on controller_to_weak_buffer, and still refuses it once the
     first lands and holds the slot. The slot frees, and the head of the
     waiting line enters.
     """
     engine = engine_module.Engine()
-    writer, weak_input, transmitter, recorder = writer_with(
+    sender, weak_input, transmitter, recorder = sender_with(
         engine, weak_rounds=1
     )
     first = packed(1)
     second = packed(2)
 
-    first_admitted = writer.admit(first)
-    second_admitted = writer.admit(second)
-    held_while_in_flight = writer.held_rounds.count
+    first_admitted = sender.admit(first)
+    second_admitted = sender.admit(second)
+    held_while_in_flight = sender.held_rounds.count
     weak_input.receive_round(first)
-    held_after_the_landing = writer.held_rounds.count
+    held_after_the_landing = sender.held_rounds.count
     weak_input.store.release_round((1, 1))
 
     assert first_admitted is True
@@ -153,7 +155,7 @@ def test_a_round_with_no_room_is_held_and_written_in_order_when_a_slot_frees():
     assert held_while_in_flight == 1
     assert held_after_the_landing == 1
     assert transmitter.sent == [1, 2]
-    assert writer.held_rounds.count == 0
+    assert sender.held_rounds.count == 0
     stalled = [
         event.round_index
         for event in recorder.events
@@ -164,18 +166,20 @@ def test_a_round_with_no_room_is_held_and_written_in_order_when_a_slot_frees():
 
 def test_a_strong_primary_window_round_takes_one_hop_into_the_strong_store():
     engine = engine_module.Engine()
-    strong_writer = RecordingStrongWriter()
-    writer, weak_input, transmitter, _recorder = writer_with(
-        engine, strong_writer=strong_writer, publishes_from_strong_store=True
+    strong_receiver = RecordingStrongWriter()
+    sender, weak_input, transmitter, _recorder = sender_with(
+        engine,
+        strong_receiver=strong_receiver,
+        publishes_from_strong_store=True,
     )
     window_round = packed(1)
     memory_round = packed(2, route=MEMORY_ROUTE)
 
-    writer.admit(window_round)
-    writer.admit(memory_round)
+    sender.admit(window_round)
+    sender.admit(memory_round)
     engine.run()
 
-    assert strong_writer.written == [1, 2]
+    assert strong_receiver.written == [1, 2]
     assert weak_input.writes_in_flight == 1
     assert transmitter.sent == [2]
 
@@ -189,18 +193,18 @@ def test_the_controller_carries_the_round_to_the_room_side_and_lands_it():
     the room side's own method.
     """
     engine = engine_module.Engine()
-    store_settings = round_store_settings.RoundStoreSettings()
-    strong_store = round_store_module.RoundStore(store_settings)
+    store_settings = syndrome_buffer_settings.SyndromeBufferSettings()
+    strong_store = syndrome_buffer_module.SyndromeBuffer(store_settings)
     reads = decoding_records.WindowReads((1, 0))
     strong_store.register_hold(reads, [(1, 1)])
-    room_side = strong_round_writer.StrongRoundWriter(engine)
+    room_side = strong_round_receiver.StrongRoundReceiver(engine)
     room_side.store = strong_store
-    writer, _weak_store, _transmitter, _recorder = writer_with(
-        engine, strong_writer=room_side
+    sender, _weak_store, _transmitter, _recorder = sender_with(
+        engine, strong_receiver=room_side
     )
     first = packed(1)
 
-    writer.admit(first)
+    sender.admit(first)
     reserved_while_crossing = room_side.writes_in_flight
     stored_at_the_write = strong_store.occupancy
     engine.run()
@@ -215,32 +219,32 @@ def test_the_controller_carries_the_round_to_the_room_side_and_lands_it():
 
 def test_a_full_strong_store_holds_the_round_too():
     engine = engine_module.Engine()
-    strong_writer = RecordingStrongWriter(room=False)
-    writer, weak_input, transmitter, _recorder = writer_with(
-        engine, strong_writer=strong_writer
+    strong_receiver = RecordingStrongWriter(room=False)
+    sender, weak_input, transmitter, _recorder = sender_with(
+        engine, strong_receiver=strong_receiver
     )
     first = packed(1)
 
-    admitted = writer.admit(first)
+    admitted = sender.admit(first)
 
     assert admitted is False
     assert weak_input.store.occupancy == 0
     assert weak_input.writes_in_flight == 0
     assert transmitter.sent == []
-    assert writer.held_rounds.count == 1
+    assert sender.held_rounds.count == 1
 
 
 def test_the_drop_knob_drops_a_round_that_found_no_room():
     engine = engine_module.Engine()
-    writer, _weak_input, transmitter, recorder = writer_with(
+    sender, _weak_input, transmitter, recorder = sender_with(
         engine, weak_rounds=1, on_full=DROP
     )
     first = packed(1)
     second = packed(2)
 
-    writer.admit(first)
-    writer.admit(second)
+    sender.admit(first)
+    sender.admit(second)
 
     assert transmitter.sent == [1]
     assert recorder.packing_drops == 1
-    assert writer.held_rounds.count == 0
+    assert sender.held_rounds.count == 0

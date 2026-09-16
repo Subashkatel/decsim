@@ -23,7 +23,7 @@ import decsim.links.settings as link_settings
 import decsim.observe.settings as observe_settings
 import decsim.pauli_frame.pauli_frame as pauli_frame_module
 import decsim.qpu.settings as qpu_settings
-import decsim.syndrome_buffer.settings as round_store_settings
+import decsim.syndrome_buffer.settings as syndrome_buffer_settings
 import decsim.windows.settings as window_settings
 
 # The yaml sections, in the order MachineSettings reads them. Each
@@ -36,8 +36,8 @@ SECTIONS = (
     "controller",
     "idle_policy",
     "links",
-    "round_store",
-    "strong_round_store",
+    "weak_syndrome_buffer",
+    "strong_syndrome_buffer",
     "windows",
     "weak_decoder",
     "strong_decoder",
@@ -70,11 +70,11 @@ class MachineSettings:
     links: link_settings.FabricSettings = (
         link_profiles.logical_reference_profile()
     )
-    round_store: round_store_settings.RoundStoreSettings = (
-        round_store_settings.RoundStoreSettings()
+    weak_syndrome_buffer: syndrome_buffer_settings.SyndromeBufferSettings = (
+        syndrome_buffer_settings.SyndromeBufferSettings()
     )
-    strong_round_store: round_store_settings.RoundStoreSettings = (
-        round_store_settings.RoundStoreSettings()
+    strong_syndrome_buffer: syndrome_buffer_settings.SyndromeBufferSettings = (
+        syndrome_buffer_settings.SyndromeBufferSettings()
     )
     windows: window_settings.WindowSettings = window_settings.WindowSettings()
     weak_decoder: decoder_settings.DecoderSettings = (
@@ -139,11 +139,12 @@ class MachineSettings:
             sections["controller"], clocks
         )
         links = link_profiles.from_yaml(sections["links"], clocks, name)
-        round_store = round_store_settings.RoundStoreSettings.from_yaml(
-            sections["round_store"], clocks, controller.clock
+        buffer_settings = syndrome_buffer_settings.SyndromeBufferSettings
+        weak_syndrome_buffer = buffer_settings.from_yaml(
+            sections["weak_syndrome_buffer"], clocks, controller.clock
         )
-        strong_round_store = round_store_settings.RoundStoreSettings.from_yaml(
-            sections["strong_round_store"], clocks
+        strong_syndrome_buffer = buffer_settings.from_yaml(
+            sections["strong_syndrome_buffer"], clocks
         )
         windows = window_settings.WindowSettings.from_yaml(
             sections["windows"], clocks, controller.clock
@@ -171,8 +172,8 @@ class MachineSettings:
             controller=controller,
             idle_policy=idle_policy,
             links=links,
-            round_store=round_store,
-            strong_round_store=strong_round_store,
+            weak_syndrome_buffer=weak_syndrome_buffer,
+            strong_syndrome_buffer=strong_syndrome_buffer,
             windows=windows,
             weak_decoder=weak_decoder,
             strong_decoder=strong_decoder,

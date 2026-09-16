@@ -20,7 +20,7 @@ STORE_LANE = 1
 UNIT_LANE = 2
 LINK_LANE = 3
 LANE_NAMES = {
-    STORE_LANE: "Buffer 0",
+    STORE_LANE: "weak syndrome buffer",
     UNIT_LANE: "Decoder unit default#0",
     LINK_LANE: "controller_to_weak_buffer",
 }
@@ -102,7 +102,9 @@ def one_shots_trace(tmp_path):
         {"window": "1:0"},
     )
     rows.append(unit_input)
-    copy = instant_event(STORE_LANE, "Buffer 0 copy", "copy", 1_000_000)
+    copy = instant_event(
+        STORE_LANE, "weak syndrome buffer copy", "copy", 1_000_000
+    )
     rows.append(copy)
     first_move = complete_event(
         LINK_LANE,
@@ -146,7 +148,7 @@ def test_a_structures_residences_are_its_lanes_complete_events(tmp_path):
 
     held = residence.residence_ticks_by_structure(document)
 
-    assert held["Buffer 0"] == [3_000_000, 5_000_000]
+    assert held["weak syndrome buffer"] == [3_000_000, 5_000_000]
     assert held["Decoder unit default#0"] == [2_000_000]
 
 
@@ -156,7 +158,7 @@ def test_an_instant_is_not_a_residence_because_it_has_no_length(tmp_path):
 
     held = residence.residence_ticks_by_structure(document)
 
-    assert len(held["Buffer 0"]) == 2
+    assert len(held["weak syndrome buffer"]) == 2
 
 
 def test_a_link_paths_waits_are_the_queue_wait_its_moves_carry(tmp_path):
@@ -177,7 +179,7 @@ def test_a_rows_mean_and_longest_are_the_samples_in_microseconds(tmp_path):
     for row in rows:
         by_name[row["name"]] = row
 
-    store = by_name["Buffer 0"]
+    store = by_name["weak syndrome buffer"]
     assert store["counting"] == "residence"
     assert store["samples"] == 2
     assert store["mean_us"] == 4.0
@@ -245,5 +247,5 @@ def test_a_traced_run_writes_the_table_beside_its_rows(tmp_path, monkeypatch):
 
     assert written.exists()
     assert seeds == {0}
-    assert "Buffer 0" in names
+    assert "weak syndrome buffer" in names
     assert "controller_to_weak_buffer" in names

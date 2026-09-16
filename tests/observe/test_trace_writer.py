@@ -183,8 +183,8 @@ def test_round_ones_first_hops_are_the_notes_worked_example(traced):
     # this card's row formed there
     assert [row["args"]["bits"] for row in moves] == [8, 4]
 
-    # the round takes its Buffer 0 slot where its bits are, at the
-    # landing of the hop that carried them, which is also when it
+    # the round takes its weak syndrome buffer slot where its bits are, at
+    # the landing of the hop that carried them, which is also when it
     # becomes readable
     residence = _one(document, "X", "round 1")
     assert residence["cat"] == "round,residence"
@@ -273,8 +273,8 @@ def test_the_data_movement_counts_are_the_hop_tables(traced):
     """data_path.md sections 3 and 4, counted per round as the table does.
 
     Predicted before the run: 30 rounds each copied at the controller's
-    intake, at its assembler and into Buffer 0 (hops 1 to 3), one
-    unit-memory copy per window of the six rounds it reads (hop 5, nine
+    intake, at its assembler and into the weak syndrome buffer (hops 1 to 3),
+    one unit-memory copy per window of the six rounds it reads (hop 5, nine
     windows of six), and the masked view each window past the first
     folds its predecessor's boundary into (eight of six): 30 x 3 + 54 +
     48 = 192 copied rounds. The nine window input holds reference 54
@@ -293,8 +293,10 @@ def test_the_data_movement_counts_are_the_hop_tables(traced):
     by_path = counts["copies_by_path"]
     assert by_path["readout -> controller intake"]["rounds"] == 30
     assert by_path["controller intake -> controller assembler"]["rounds"] == 30
-    assert by_path["controller assembler -> Buffer 0"]["rounds"] == 30
-    assert by_path["Buffer 0 -> unit default#0 memory"]["rounds"] == 54
+    intake = by_path["controller assembler -> weak syndrome buffer"]
+    to_unit = by_path["weak syndrome buffer -> unit default#0 memory"]
+    assert intake["rounds"] == 30
+    assert to_unit["rounds"] == 54
     assert by_path["unit default#0 memory -> masked view"]["rounds"] == 48
 
 
@@ -306,7 +308,8 @@ def test_the_movement_counts_group_by_the_memory_class_they_cross(traced):
     readout's own hop is the only off-board move, the write into Buffer
     0, the window's read out of it and the correction to the frame are
     on board, and the boundary handoff stays on chip; every copy but the
-    write into Buffer 0 lands in a register or a unit's own memory.
+    write into the weak syndrome buffer lands in a register or a unit's own
+    memory.
     """
     machine, _result, _document = traced
     counts = machine.observation.data_movement.json_value()

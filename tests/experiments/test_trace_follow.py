@@ -4,7 +4,7 @@ The reader prints one round's and
 one window's path from gate point 1's own trace (weak_decoder_baseline
 d 3 p 0.003 seed 0), and its corrections fix two of the example's
 statements against the code: the controller's intake copy is at 1.000,
-the send tick, and Buffer 0 holds detection events, so round 1's
+the send tick, and the weak syndrome buffer holds detection events, so round 1's
 residence there carries 4 bits and not the link's 8. The rows below are
 the note's, at the hops that exist today.
 """
@@ -65,7 +65,7 @@ def test_round_ones_hops_are_the_notes_table(traced):
 def test_round_one_sits_in_buffer_zero_as_detection_events(traced):
     followed = trace_follow.follow(traced, "round", "1:1")
 
-    residence = _row_of(followed, "Buffer 0", "residence")
+    residence = _row_of(followed, "weak syndrome buffer", "residence")
     # the slot is taken where the bits are, at the landing of
     # controller_to_weak_buffer, which is also when the round is readable
     assert residence.tick == 1_008_000
@@ -98,7 +98,7 @@ def test_round_ones_counts_are_the_notes_counts(traced):
     assert counts.job_references == 1
     assert counts.holds == 1
     assert counts.moves == 3
-    assert counts.longest_residence.where == "Buffer 0"
+    assert counts.longest_residence.where == "weak syndrome buffer"
     assert counts.longest_residence.duration_ticks == 5_004_000
 
 

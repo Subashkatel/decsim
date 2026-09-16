@@ -32,8 +32,8 @@ import decsim.records.rounds as round_records
 import decsim.records.transfers as transfer_records
 import decsim.syndrome_buffer.round_input as round_input
 import decsim.syndrome_buffer.round_output as round_output
-import decsim.syndrome_buffer.round_store as round_store_module
-import decsim.syndrome_buffer.settings as round_store_settings
+import decsim.syndrome_buffer.settings as syndrome_buffer_settings
+import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 
 CWB_TICKS = config.microseconds_to_ticks(0.25)
 WBD_TICKS = config.microseconds_to_ticks(5.0)
@@ -141,8 +141,8 @@ def transmitter_with(engine, profile, windows=None):
     ledger = link_traffic.TrafficLedger(profile)
     links = fabric_module.LinkFabric(profile, engine)
     links.trace.transfer_delivered.connect(ledger.on_transfer)
-    settings = round_store_settings.RoundStoreSettings()
-    store = round_store_module.RoundStore(settings)
+    settings = syndrome_buffer_settings.SyndromeBufferSettings()
+    store = syndrome_buffer_module.SyndromeBuffer(settings)
     if windows is None:
         windows = RecordingWindows(engine)
     else:
@@ -150,12 +150,13 @@ def transmitter_with(engine, profile, windows=None):
     recorder = round_events.RoundEventRecorder(engine)
     transfers = window_transfers.WindowTransfers(engine)
     transfers.link = links
-    store_output = round_output.RoundStoreOutput(
-        transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER, "Buffer 0"
+    store_output = round_output.SyndromeBufferOutput(
+        transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER,
+        "weak syndrome buffer",
     )
     store_output.transfers = transfers
     store_output.store = store
-    store_input = round_input.RoundStoreInput(engine, settings)
+    store_input = round_input.SyndromeBufferInput(engine, settings)
     store_input.store = store
     store_input.output = store_output
     store_input.windows = windows
@@ -240,8 +241,8 @@ def test_two_routes_take_one_wire_in_the_order_they_reach_it(
     A memory round and a decode input share a bandwidth-bounded
     weak_buffer_to_weak_decoder (5 us, 1000 bits per microsecond,
     64-bit rounds, so 0.064 us on the wire). The window round crosses
-    controller_to_weak_buffer into Buffer 0 first, so the decode input
-    the windows send at its publication reaches the shared wire one
+    controller_to_weak_buffer into the weak syndrome buffer first, so the
+    decode input the windows send at its publication reaches the shared wire one
     store hop after the round was sent: a memory round sent with the
     window round is ahead of it, and one sent at the publication tick
     is behind it. gem5's DmaPort queues at the request

@@ -34,7 +34,7 @@ ASKED_FOR_BY_A_STUDY = (
     "decode_backlog",
     "decoder_utilization",
     "decoder_memory_occupancy",
-    "round_store_occupancy",
+    "syndrome_buffer_occupancy",
 )
 
 

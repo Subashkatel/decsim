@@ -5,7 +5,7 @@ seat; which seats a run has and what each is wired to is the assembly
 file's (decsim/assembly.py).
 """
 
-import decsim.controller.round_writes as round_writes
+import decsim.controller.round_sender as round_sender
 import decsim.links.link_profiles as link_profiles
 import decsim.links.window_transfers as window_transfers
 import decsim.records.transfers as transfer_records
@@ -13,8 +13,8 @@ import decsim.records.windows as window_records
 import decsim.settings as machine_settings
 import decsim.syndrome_buffer.round_input as round_input
 import decsim.syndrome_buffer.round_output as round_output
-import decsim.syndrome_buffer.round_store as round_store_module
-import decsim.syndrome_buffer.strong_round_writer as strong_round_writer_module
+import decsim.syndrome_buffer.strong_round_receiver as strong_receiver_module
+import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 import decsim.tables as tables
 
 
@@ -28,26 +28,28 @@ def build_links(parts):
 
 def build_held_rounds(parts):
     """The waiting line in front of the stores, and what a full store does."""
-    return round_writes.HeldRounds(
+    return round_sender.HeldRounds(
         parts.engine, parts.settings.controller.packing_overflow
     )
 
 
-def build_round_store(parts):
-    """Buffer 0, the store every finished round is published into."""
-    settings = parts.settings.round_store
+def build_weak_syndrome_buffer(parts):
+    """The weak syndrome buffer, where every finished round is published."""
+    settings = parts.settings.weak_syndrome_buffer
     row = tables.row(
-        round_store_module.ROUND_STORES, "round_store.kind", settings.kind
+        syndrome_buffer_module.SYNDROME_BUFFERS,
+        "weak_syndrome_buffer.kind",
+        settings.kind,
     )
     return row(settings)
 
 
-def build_strong_round_store(parts):
-    """The room-side store, Buffer 1."""
-    settings = parts.settings.strong_round_store
+def build_strong_syndrome_buffer(parts):
+    """The strong syndrome buffer."""
+    settings = parts.settings.strong_syndrome_buffer
     row = tables.row(
-        round_store_module.ROUND_STORES,
-        "strong_round_store.kind",
+        syndrome_buffer_module.SYNDROME_BUFFERS,
+        "strong_syndrome_buffer.kind",
         settings.kind,
     )
     return row(settings)
@@ -61,14 +63,14 @@ def check_store_kinds(settings: machine_settings.MachineSettings) -> None:
     is a mistake in the file either way.
     """
     tables.row(
-        round_store_module.ROUND_STORES,
-        "round_store.kind",
-        settings.round_store.kind,
+        syndrome_buffer_module.SYNDROME_BUFFERS,
+        "weak_syndrome_buffer.kind",
+        settings.weak_syndrome_buffer.kind,
     )
     tables.row(
-        round_store_module.ROUND_STORES,
-        "strong_round_store.kind",
-        settings.strong_round_store.kind,
+        syndrome_buffer_module.SYNDROME_BUFFERS,
+        "strong_syndrome_buffer.kind",
+        settings.strong_syndrome_buffer.kind,
     )
 
 
@@ -78,41 +80,45 @@ def build_store_transfers(parts):
 
 
 def build_weak_output(parts):
-    """Buffer 0's outgoing end, which executes every send of its rounds."""
+    """The weak syndrome buffer's outgoing end, which executes every send."""
     del parts
-    return round_output.RoundStoreOutput(
-        transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER, "Buffer 0"
+    return round_output.SyndromeBufferOutput(
+        transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER,
+        "weak syndrome buffer",
     )
 
 
 def build_strong_output(parts):
-    """Buffer 1's outgoing end."""
+    """The strong syndrome buffer's outgoing end."""
     del parts
-    return round_output.RoundStoreOutput(
-        transfer_records.LinkPath.STRONG_BUFFER_TO_STRONG_DECODER, "Buffer 1"
+    return round_output.SyndromeBufferOutput(
+        transfer_records.LinkPath.STRONG_BUFFER_TO_STRONG_DECODER,
+        "strong syndrome buffer",
     )
 
 
 def build_primary_output(parts):
     """The outgoing end the tier that decodes the plan's windows reads.
 
-    A weak-primary plan reads Buffer 0 and a strong-primary plan reads
-    Buffer 1, so this row names a seat another row built rather than
-    building a second end onto the same store.
+    A weak-primary plan reads the weak syndrome buffer and a strong-primary
+    plan reads the strong syndrome buffer, so this row names a seat another row
+    built rather than building a second end onto the same store.
     """
     if uses_the_room_side(parts.escalation_policy):
         return parts.seats["strong_output"]
     return parts.seats["weak_output"]
 
 
-def build_strong_round_writer(parts):
+def build_strong_round_receiver(parts):
     """The room-side end of the crossing out of the fridge."""
-    return strong_round_writer_module.StrongRoundWriter(parts.engine)
+    return strong_receiver_module.StrongRoundReceiver(parts.engine)
 
 
 def build_store_input(parts):
-    """Buffer 0's room and landing."""
-    return round_input.RoundStoreInput(parts.engine, parts.settings.round_store)
+    """The weak syndrome buffer's room and landing."""
+    return round_input.SyndromeBufferInput(
+        parts.engine, parts.settings.weak_syndrome_buffer
+    )
 
 
 def build_pauli_frame(parts):
@@ -128,7 +134,7 @@ def uses_strong_store(escalation_policy) -> bool:
 
 
 def uses_the_room_side(escalation_policy) -> bool:
-    """Whether the tier that decodes the plan's windows reads Buffer 1."""
+    """Whether the plan's decoding tier reads the strong syndrome buffer."""
     strong = window_records.DecoderTier.STRONG
     return escalation_policy.primary_tier is strong
 

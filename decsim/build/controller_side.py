@@ -15,8 +15,8 @@ import decsim.controller.idle_rounds as idle_rounds_module
 import decsim.controller.instruction_output as instruction_output_module
 import decsim.controller.operation_issue as operation_issue
 import decsim.controller.round_assembly as round_assembly
+import decsim.controller.round_sender as round_sender
 import decsim.controller.round_transmission as round_transmission
-import decsim.controller.round_writes as round_writes
 import decsim.controller.settings as controller_settings
 import decsim.decoders.decoder_manager as decoder_manager_module
 import decsim.frontends.execution_runtime as execution_runtime_module
@@ -111,9 +111,9 @@ def build_transmitter(parts):
     return round_transmission.RoundTransmitter(parts.engine)
 
 
-def build_round_writer(parts):
+def build_round_sender(parts):
     """The writer that puts a finished round into every store it reaches."""
-    return round_writes.RoundWriter(parts.engine)
+    return round_sender.RoundSender(parts.engine)
 
 
 def build_rounds_in_flight(parts):

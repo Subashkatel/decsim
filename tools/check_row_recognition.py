@@ -56,11 +56,15 @@ RECORD_TYPES = frozenset(
 
 # Ports: a runtime_checkable Protocol is a question about what an object
 # answers, not about which class it is, which is the opposite of
-# recognising a row.
+# recognising a row. `ports.Port` is the declaration a class makes, which
+# the assembly file asks for before it fills a named port, and
+# `port.protocol` is the Protocol that declaration carries.
 PORTS = frozenset(
     {
         "ports.Decoder",
         "ports.DetectionEventFormer",
+        "ports.Port",
+        "port.protocol",
         "RunSeedComposite",
         "RunSeedConsumer",
         "seeding.RunSeedComposite",

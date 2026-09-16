@@ -381,7 +381,9 @@ class WindowInput(Protocol):
     stream's shape changes: the controller learns a dynamic stream's
     boundary, its length, or which segment folds into it, and the window
     plan follows. Both stay one-way; the window manager answers nothing
-    back except whether it knows a stream at all.
+    back except whether it knows a stream at all, and which store the
+    tier that decodes the plan's windows reads from, which decides where
+    the writer publishes a round.
     """
 
     def accept_window_input(
@@ -419,6 +421,9 @@ class WindowInput(Protocol):
 
     def accept_boundary(self, window_key: tuple, is_unblocked: bool) -> None:
         """A boundary landed in the window; True when it owed no other."""
+
+    def reads_windows_from(self, store) -> bool:
+        """Whether the primary tier's window reads come from this store."""
 
 
 @runtime_checkable
@@ -1582,6 +1587,25 @@ class ConfidenceSignal(Protocol):
         it took, measured on the host clock the way a measured decoder
         is or declared as a card number (decision D8).
         """
+
+
+@runtime_checkable
+class RegionProposer(Protocol):
+    """The window interaction, as the strong regions see it.
+
+    The escalation package plans a strong region over a weak window it
+    is escalating, and that is the one thing it asks of the interaction;
+    the rest of WindowInteraction is the windows package's own seam, so
+    this port declares the one call and nothing else.
+    """
+
+    def plan_strong_region(
+        self,
+        weak_window: window_records.WindowInfo,
+        later_windows: list,
+        operation_round_count: int,
+    ) -> Optional[window_records.StrongRegionPlan]:
+        """The strong window that replaces a weak window, or None."""
 
 
 @runtime_checkable

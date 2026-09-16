@@ -16,6 +16,7 @@ import functools
 from typing import Callable
 
 import decsim.config as config
+import decsim.ports as ports
 import decsim.records.program as program_records
 import decsim.records.rounds as round_records
 import decsim.records.transfers as transfer_records
@@ -30,12 +31,12 @@ class InstructionOutput:
     CONTROL_PULSE_COMMAND_ISSUED, each carrying its payload.
     """
 
-    def __init__(
-        self, engine, link, qpu, clock: config.Clock, pulse_cycles: int
-    ) -> None:
+    # an output built with no fabric hands the payload straight over
+    link = ports.Port(ports.Link, optional=True)
+    qpu = ports.Port(ports.Qpu)
+
+    def __init__(self, engine, clock: config.Clock, pulse_cycles: int) -> None:
         self.engine = engine
-        self.link = link
-        self.qpu = qpu
         self.clock = clock
         self.pulse_cycles = pulse_cycles
         self.trace = _TraceSources()

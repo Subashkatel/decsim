@@ -108,12 +108,9 @@ def runtime_over(operations, claims=None, round_ticks=1):
     factory = RecordingFactory(engine)
     if claims is None:
         claims = no_claims_for(operations)
-    runtime = execution_runtime.ExecutionRuntime(
-        engine,
-        issuer=issuer,
-        factory=factory,
-        resource_claims_by_operation_id=claims,
-    )
+    runtime = execution_runtime.ExecutionRuntime(engine, claims)
+    runtime.issuer = issuer
+    runtime.factory = factory
     stamps = runtime_stamps_module.RuntimeStamps()
     runtime.trace.operation_issued.connect(stamps.operation_issued)
     runtime.trace.operation_started.connect(stamps.operation_started)

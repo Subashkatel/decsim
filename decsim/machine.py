@@ -11,23 +11,18 @@ settings record per yaml section, each built by its own package's
 pluggable part. A new component is one class that fills its port in
 decsim/ports.py and one row in its package's table.
 
-A component that declares ports (decsim/ports.py, Port) is wired by
-assignment once it is built, which is gem5's script binding one port to
-another (configs/learning_gem5/part1/simple.py:68); every other
-component is still wired by constructor. Where two components refer to
-each other the per-job callback law breaks the cycle (SimPy's callback
-on the event, simpy/core.py step()): the submitting side carries the return
-path with the job, so the decoder manager is built first and the
-window side takes it as its DecodeQueue; the strong redecode asks it
-to await and accept a strong selection over the same port. The
-controller's issuer carries the start callback with the issue, the
-QPU names the runtime whose body_done it calls as a port, and the
-runtime tells the issuer what it knows at each release. The stores name the
-waiting line and the window side as ports: each store retries the held
-rounds when a slot frees, and the strong writer tells the window manager
-what landed. The window side is wired the same way: the courier names
-the facade, and the committer and the verdict name the strong redecode
-built after them.
+What the machine is made of and what is wired to what is one file of
+two tables, decsim/assembly.py; this file reads them. The root compiles
+the run's settings into the plan, the decoder pool and the escalation
+policy, builds every seat from its settings, binds every wire by
+assignment, which is gem5's script binding one port to another
+(configs/learning_gem5/part1/simple.py:68), and only then lets a seat do
+work. Where two components refer to each other the per-job callback law
+breaks the cycle (SimPy's callback on the event, simpy/core.py step()):
+the submitting side carries the return path with the job, so the window
+side names the decoder manager as its DecodeQueue and the strong
+redecode asks it to await and accept a strong selection over the same
+port.
 
 The packages import each other in one direction only, so the top can be
 cut off and what is left still runs (Parnas 1972 lines 505-529;
@@ -42,10 +37,11 @@ what tools/check_uses_graph.py prints and check.sh enforces:
     4  confidence, frontends, observe
     5  settings
     6  build
-    7  machine (this file)
-    8  collect
-    9  experiments
-    10 __main__
+    7  assembly
+    8  machine (this file)
+    9  collect
+    10 experiments
+    11 __main__
 
 Level 3 and below decode a window on a store with no window manager,
 which is what the decoders' own tests run.
@@ -63,14 +59,13 @@ knob would be a modeling change, not a parameter.
 import dataclasses
 from typing import Any, Optional
 
+import decsim.assembly as assembly
 import decsim.build.controller_side as controller_side
 import decsim.build.decoders as decoder_build
 import decsim.build.escalation as escalation_build
 import decsim.build.listeners as listener_build
 import decsim.build.plan as plan_build
 import decsim.build.stores as store_build
-import decsim.build.window_side as window_side
-import decsim.config as config
 import decsim.controller.conditional_release as conditional_release_module
 import decsim.controller.controller as controller_module
 import decsim.controller.idle_rounds as idle_rounds_module
@@ -83,11 +78,9 @@ import decsim.decoders.decoder_manager as decoder_manager_module
 import decsim.engine as engine_module
 import decsim.frontends.execution_runtime as execution_runtime_module
 import decsim.links.fabric as fabric
-import decsim.links.link_profiles as link_profiles
 import decsim.observe.link_traffic as link_traffic
 import decsim.observe.observation as observation_module
 import decsim.observe.wiring as wiring
-import decsim.pauli_frame.decision_dispatch as decision_dispatch_module
 import decsim.pauli_frame.pauli_frame as pauli_frame_module
 import decsim.qpu.cycle_clock as cycle_clock
 import decsim.records.results as result_records
@@ -96,7 +89,6 @@ import decsim.settings as machine_settings
 import decsim.syndrome_buffer.round_input as round_input_module
 import decsim.syndrome_buffer.round_store as round_store_module
 import decsim.syndrome_buffer.strong_round_writer as strong_round_writer_module
-import decsim.tables as tables
 import decsim.windows.window_manager as window_manager_module
 
 
@@ -140,14 +132,12 @@ class Machine:
     def build(
         cls, settings: machine_settings.MachineSettings, seed: Optional[int] = 0
     ) -> "Machine":
-        """Build every component in pipeline order and wire it.
+        """Build every seat of the assembly file, wire it, and start it.
 
-        The order is the one a readout travels, so a reader follows the
-        wiring by reading down. The seed is the run's root; every
-        stochastic component derives its own from it and its path.
+        The seed is the run's root; every stochastic component derives
+        its own from it and its path.
         """
         root_seed = _root_seed(seed)
-        observation = settings.observation
         engine = engine_module.Engine()
         escalation_policy = escalation_build.build_escalation_policy(
             settings.escalation
@@ -160,231 +150,59 @@ class Machine:
             settings, plan, escalation_policy, detection_events
         )
         store_build.check_readout_cost_is_priced(settings)
-        conditional_release = conditional_release_module.ConditionalRelease(
-            engine
-        )
-        traffic_ledger = link_traffic.TrafficLedger(settings.links)
-        fabric_row = tables.row(
-            link_profiles.LINK_FABRICS, "links.kind", settings.links.kind
-        )
-        links = fabric_row.build(settings.links, engine)
-        held_rounds = round_writes.HeldRounds(
-            engine, settings.controller.packing_overflow
-        )
-        round_store = store_build.build_round_store(
-            settings.round_store, held_rounds
-        )
-        strong_round_store = store_build.build_strong_round_store(
-            settings.strong_round_store, escalation_policy, held_rounds
-        )
-        weak_output, strong_output = store_build.build_store_outputs(
-            engine, links, round_store, strong_round_store
-        )
-        pauli_frame = store_build.build_pauli_frame(
-            settings.pauli_frame, engine
-        )
-        # The decoder manager is built first, so the requester and the
-        # strong redecode name it as their decode queue and every job
-        # carries its return path.
+        store_build.check_store_kinds(settings)
         controller_side.check_strong_route(escalation_policy, pool.router)
-        decoder_manager = controller_side.build_decoder_manager(
-            engine, settings, escalation_policy, pool
-        )
-        input_fold = decoder_manager.input_fold()
-        # the factory is built before the window side, whose last result
-        # stops it producing; it queues its own first event in start()
-        factory = controller_side.build_factory(
-            settings.magic_state_factory, engine, decoder_manager, plan
-        )
-        window_manager = window_side.build_window_manager(
-            engine,
-            settings,
-            escalation_policy,
-            plan,
-            links=links,
-            conditional_release=conditional_release,
-            router=pool.router,
-            input_fold=input_fold,
-            round_store=round_store,
-            strong_round_store=strong_round_store,
-            weak_output=weak_output,
-            strong_output=strong_output,
-            pauli_frame=pauli_frame,
-            decode_queue=decoder_manager,
-            factory=factory,
-        )
-        strong_round_writer = store_build.build_strong_round_writer(
-            engine, strong_round_store, window_manager
-        )
-        store_input = store_build.build_round_store_input(
-            engine,
-            round_store,
-            weak_output,
-            window_manager,
-            settings.round_store,
-        )
-        memory_arrivals = decoder_build.build_memory_round_arrivals(
-            engine, window_manager
-        )
-        transmitter = round_transmission.RoundTransmitter(engine)
-        transmitter.link = links
-        transmitter.memory_arrivals = memory_arrivals
-        transmitter.store_input = store_input
-        publishes_from_strong_store = not window_manager.reads_windows_from(
-            round_store
-        )
-        round_writer = round_writes.RoundWriter(
-            engine,
-            links,
-            store_input,
-            strong_round_writer,
-            publishes_from_strong_store=publishes_from_strong_store,
-            held_rounds=held_rounds,
-            transmitter=transmitter,
-        )
-        rounds_in_flight = round_assembly.RoundsInFlight(
-            settings.controller.packing_rounds_in_flight,
-            held_rounds,
-            transmitter,
-        )
-        assembler = round_assembly.RoundAssembler(
-            engine,
-            settings.controller,
-            detection_events=detection_events,
-            rounds_in_flight=rounds_in_flight,
-        )
-        assembler.round_writer = round_writer
-        cycle_clock_domain = config.Clock(plan.round_ticks)
-        qpu = cycle_clock.QPUDevice(engine, plan.device, cycle_clock_domain)
-        instruction_output = instruction_output_module.InstructionOutput(
-            engine,
-            links,
-            qpu,
-            settings.controller.clock,
-            settings.controller.decision_to_pulse_cycles,
-        )
-        streams = controller_side.build_feedback_streams(
-            engine, plan, qpu, window_manager
-        )
-        patch_by_identity = controller_side.resolved_patches_by_identity(plan)
-        idle_rounds = idle_rounds_module.IdleRoundAccounting(
-            plan.idle_policy, decoder_manager, patch_by_identity, streams, qpu
-        )
-        issuer = operation_issue.OperationIssuer(
-            engine,
-            streams,
-            idle_rounds,
-            window_manager,
-            plan.run_plan.resolved_operations,
-            instruction_output,
-        )
-        controller = controller_module.Controller(
-            engine, links, settings.controller, assembler
-        )
-        execution_runtime = execution_runtime_module.ExecutionRuntime(
-            engine,
-            issuer=issuer,
-            factory=factory,
-            resource_claims_by_operation_id=plan.resource_claims,
-        )
-        # The QPU's three output ends and the streams' runtime are bound
-        # once the runtime they name is built.
-        qpu.readout_receiver = controller
-        qpu.runtime = execution_runtime
-        qpu.idle_rounds = idle_rounds
-        streams.runtime = execution_runtime
-        input_transport = decoder_manager.input_transport()
-        seed_roots = listener_build.build_seed_roots(
-            code=plan.code,
-            scheme=plan.scheme,
-            device=plan.device,
-            error_model_provider=plan.error_model_provider,
-            decoder_router=pool.router,
-            factory=factory,
+        parts = assembly.Parts(
+            settings=settings,
+            engine=engine,
+            plan=plan,
             escalation_policy=escalation_policy,
-            scheduler=pool.scheduler,
-            decoder_memory_transfer=input_transport,
-            boundary_policy=plan.boundary_policy,
-            window_interaction=plan.window_interaction,
-            idle_policy=plan.idle_policy,
-            conditional_release=conditional_release,
-            # the packing stage is four components now; its seed path
-            # segment is a result (seeding hashes the segment names) and
-            # stays, as memory_model's does
-            syndrome_packing=None,
-            controller=controller,
-            qpu=qpu,
-            execution_runtime=execution_runtime,
-            pauli_frame=pauli_frame,
-            # the retained-storage observer is gone; its seed path segment
-            # is a result (seeding hashes the segment names) and stays
-            memory_model=None,
-        )
-        seeding.bind_run_seed(root_seed, seed_roots)
-        decision_dispatch = decision_dispatch_module.DecisionDispatch(engine)
-        decision_dispatch.link = links
-        decision_dispatch.instruction_output = instruction_output
-        conditional_release.dispatch = decision_dispatch
-        conditional_release.runtime = execution_runtime
-        process_name = controller_side.process_name(settings, seed)
-        listeners = wiring.observe(
-            observation,
-            engine,
-            process_name=process_name,
-            operations=plan.operations,
-            traffic_ledger=traffic_ledger,
-            links=links,
-            qpu=qpu,
-            syndrome_source=plan.device,
-            controller=controller,
-            idle_rounds=idle_rounds,
-            assembler=assembler,
-            held_rounds=held_rounds,
-            transmitter=transmitter,
-            store_input=store_input,
-            instruction_output=instruction_output,
-            round_store=round_store,
-            strong_round_store=strong_round_store,
-            strong_round_writer=strong_round_writer,
-            execution_runtime=execution_runtime,
-            pauli_frame=pauli_frame,
-            decoder_manager=decoder_manager,
-            window_manager=window_manager,
             pool=pool,
+            detection_events=detection_events,
         )
+        seats = assembly.build_seats(parts)
+        wires = assembly.wires_for(parts)
+        assembly.bind(wires, seats)
+        assembly.start_wired_seats(seats)
+        seed_roots = _seed_roots(parts, seats)
+        seeding.bind_run_seed(root_seed, seed_roots)
+        listeners = _observe(settings, parts, seats, seed)
+        strong_round_store = seats.get("strong_round_store")
+        strong_round_writer = seats.get("strong_round_writer")
+        pauli_frame = seats.get("pauli_frame")
         listener_build.load_program(
             plan,
-            conditional_release,
-            window_manager,
-            streams,
-            idle_rounds,
-            execution_runtime,
+            seats["conditional_release"],
+            seats["window_manager"],
+            seats["streams"],
+            seats["idle_rounds"],
+            seats["execution_runtime"],
         )
         return cls(
             settings=settings,
             engine=engine,
             observation=listeners,
-            links=links,
-            conditional_release=conditional_release,
-            round_store=round_store,
-            store_input=store_input,
+            links=seats["links"],
+            conditional_release=seats["conditional_release"],
+            round_store=seats["round_store"],
+            store_input=seats["store_input"],
             strong_round_store=strong_round_store,
             strong_round_writer=strong_round_writer,
             pauli_frame=pauli_frame,
-            window_manager=window_manager,
-            assembler=assembler,
-            round_writer=round_writer,
-            transmitter=transmitter,
-            decoder_manager=decoder_manager,
+            window_manager=seats["window_manager"],
+            assembler=seats["assembler"],
+            round_writer=seats["round_writer"],
+            transmitter=seats["transmitter"],
+            decoder_manager=seats["decoder_manager"],
             active_decoder=pool.active,
-            factory=factory,
+            factory=seats["factory"],
             syndrome_source=plan.device,
-            qpu=qpu,
-            controller=controller,
-            issuer=issuer,
-            instruction_output=instruction_output,
-            idle_rounds=idle_rounds,
-            execution_runtime=execution_runtime,
+            qpu=seats["qpu"],
+            controller=seats["controller"],
+            issuer=seats["issuer"],
+            instruction_output=seats["instruction_output"],
+            idle_rounds=seats["idle_rounds"],
+            execution_runtime=seats["execution_runtime"],
             operations=plan.all_operations,
         )
 
@@ -421,6 +239,79 @@ class Machine:
         if self.strong_round_writer is not None:
             self.strong_round_writer.check_settled()
         return _capture_result(self)
+
+
+def _seed_roots(parts: "assembly.Parts", seats: dict) -> tuple:
+    """The seed path of every stochastic owner; the segments are results."""
+    decoder_manager = seats["decoder_manager"]
+    input_transport = decoder_manager.input_transport()
+    plan = parts.plan
+    pauli_frame = seats.get("pauli_frame")
+    return listener_build.build_seed_roots(
+        code=plan.code,
+        scheme=plan.scheme,
+        device=plan.device,
+        error_model_provider=plan.error_model_provider,
+        decoder_router=parts.pool.router,
+        factory=seats["factory"],
+        escalation_policy=parts.escalation_policy,
+        scheduler=parts.pool.scheduler,
+        decoder_memory_transfer=input_transport,
+        boundary_policy=plan.boundary_policy,
+        window_interaction=plan.window_interaction,
+        idle_policy=plan.idle_policy,
+        conditional_release=seats["conditional_release"],
+        # the packing stage is four components now; its seed path
+        # segment is a result (seeding hashes the segment names) and
+        # stays, as memory_model's does
+        syndrome_packing=None,
+        controller=seats["controller"],
+        qpu=seats["qpu"],
+        execution_runtime=seats["execution_runtime"],
+        pauli_frame=pauli_frame,
+        # the retained-storage observer is gone; its seed path segment
+        # is a result (seeding hashes the segment names) and stays
+        memory_model=None,
+    )
+
+
+def _observe(
+    settings: machine_settings.MachineSettings,
+    parts: "assembly.Parts",
+    seats: dict,
+    seed: Optional[int],
+) -> observation_module.Observation:
+    """Connect the run's listeners, before the workload is loaded."""
+    traffic_ledger = link_traffic.TrafficLedger(settings.links)
+    process_name = controller_side.process_name(settings, seed)
+    strong_round_store = seats.get("strong_round_store")
+    strong_round_writer = seats.get("strong_round_writer")
+    pauli_frame = seats.get("pauli_frame")
+    return wiring.observe(
+        settings.observation,
+        parts.engine,
+        process_name=process_name,
+        operations=parts.plan.operations,
+        traffic_ledger=traffic_ledger,
+        links=seats["links"],
+        qpu=seats["qpu"],
+        syndrome_source=parts.plan.device,
+        controller=seats["controller"],
+        idle_rounds=seats["idle_rounds"],
+        assembler=seats["assembler"],
+        held_rounds=seats["held_rounds"],
+        transmitter=seats["transmitter"],
+        store_input=seats["store_input"],
+        instruction_output=seats["instruction_output"],
+        round_store=seats["round_store"],
+        strong_round_store=strong_round_store,
+        strong_round_writer=strong_round_writer,
+        execution_runtime=seats["execution_runtime"],
+        pauli_frame=pauli_frame,
+        decoder_manager=seats["decoder_manager"],
+        window_manager=seats["window_manager"],
+        pool=parts.pool,
+    )
 
 
 def _root_seed(value) -> Optional[int]:

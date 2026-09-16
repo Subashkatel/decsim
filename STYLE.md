@@ -103,17 +103,10 @@ reads this list and reports every other wide class, so the exemptions are
 visible here, beside the rule, rather than buried in the checker. The list
 stays short; past eight names the rule is wrong, not the list.
 
-- `IdleRoundAccounting` (`decsim/controller/idle_rounds.py`): one idle
-  round routed by the `policy`, which needs the `geometry_by_patch` that
-  sizes it, the `streams` and the `qpu` it belongs to, the `decode_queue`
-  it charges, the program's `operation_by_id` and `idle_by_patch` it
-  routes by, and its `trace` sources.
-- `RoundWriter` (`decsim/controller/round_writes.py`): one finished
-  round sent or held, which needs the `engine`, the `weak_input` that
-  owns Buffer 0's room, the `strong_writer` that owns Buffer 1's, the
-  `link` between them, whether it `publishes_from_strong_store`, the
-  `held_rounds` retry of a round the stores refused, and the
-  `transmitter` that sends it on its route.
+The list is empty. A neighbour arrives as a port the root binds rather
+than as a constructor argument the class keeps, so a component with many
+collaborators sets few attributes, and the two classes that were listed
+here, the idle round accounting and the round writer, set five and one.
 
 ## Rule 2. Names are full words that say what the thing is
 

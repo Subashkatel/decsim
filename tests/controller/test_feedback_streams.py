@@ -51,13 +51,15 @@ def _streams(
         resolved = _resolved_operation(operation.id)
         resolved_operations.append(resolved)
     streams = feedback_streams.FeedbackStreams(
-        engine=engine,
-        qpu=qpu,
-        window_manager=window_manager,
+        engine,
         regions=regions,
         resolved_operations=tuple(resolved_operations),
         resolved_patches=patches,
     )
+    if qpu is not None:
+        streams.qpu = qpu
+    if window_manager is not None:
+        streams.windows = window_manager
     streams.load(program)
     return streams
 

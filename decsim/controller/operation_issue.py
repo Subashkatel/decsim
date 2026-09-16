@@ -14,6 +14,9 @@ import dataclasses
 import types
 from typing import Callable, Optional
 
+import decsim.controller.feedback_streams as feedback_streams
+import decsim.controller.idle_rounds as idle_rounds_module
+import decsim.ports as ports
 import decsim.records.log_sources as log_sources
 import decsim.records.program as program_records
 
@@ -21,25 +24,18 @@ import decsim.records.program as program_records
 class OperationIssuer:
     """What the runtime asks of the controller for one operation."""
 
-    def __init__(
-        self,
-        engine,
-        streams,
-        idle_rounds,
-        windows,
-        resolved_operations,
-        output,
-    ) -> None:
+    streams = ports.Port(feedback_streams.Streams)
+    idle_rounds = ports.Port(idle_rounds_module.IdleRoundAccounting)
+    windows = ports.Port(ports.WindowInput)
+    output = ports.Port(ports.InstructionReceiver)
+
+    def __init__(self, engine, resolved_operations) -> None:
         self.engine = engine
-        self.streams = streams
-        self.idle_rounds = idle_rounds
-        self.windows = windows
         operation_by_id = {
             operation.operation_id: operation
             for operation in resolved_operations
         }
         self.resolved_operation_by_id = types.MappingProxyType(operation_by_id)
-        self.output = output
 
     def round_ticks_for(self, operation: program_records.Operation) -> int:
         """The resolved QEC cycle length of one operation, in ticks."""

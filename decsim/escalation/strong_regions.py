@@ -82,11 +82,9 @@ class StrongRegions:
     planner = ports.Port(ports.WindowPlan)
     tracker = ports.Port(ports.WindowRounds)
     retention = ports.Port(ports.WindowRetention)
-
-    def __init__(self, interaction) -> None:
-        # the window interaction, whose Protocol is the windows package's
-        # own seam and so is not a port this package can name
-        self.interaction = interaction
+    # the one call this package makes on the window interaction; the rest
+    # of that class is the windows package's own seam
+    interaction = ports.Port(ports.RegionProposer)
 
     def context_region(self, key: tuple) -> RedoRegion:
         """The escalated window with one buffer of raw context per side."""

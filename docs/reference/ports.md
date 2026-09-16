@@ -129,6 +129,7 @@ The window manager, as the controller side sees it.
 | `bind_required_stream_end` | Note the stream round a protected segment's result waits for. |
 | `accept_room_round` | Record one round that landed in the room-side store instead. |
 | `accept_boundary` | A boundary landed in the window; True when it owed no other. |
+| `reads_windows_from` | Whether the primary tier's window reads come from this store. |
 
 ### `WindowPlan`
 
@@ -532,6 +533,14 @@ The soft output one window's decodes report, as the join sees it.
 | Method | What it does |
 | --- | --- |
 | `compute` | The window's confidence and what computing it cost. |
+
+### `RegionProposer`
+
+The window interaction, as the strong regions see it.
+
+| Method | What it does |
+| --- | --- |
+| `plan_strong_region` | The strong window that replaces a weak window, or None. |
 
 ### `BoundaryPayload`
 

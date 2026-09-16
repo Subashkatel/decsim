@@ -13,7 +13,9 @@ feedback streams (feedback_streams.py) keep the protected regions.
 
 import dataclasses
 
+import decsim.controller.round_assembly as round_assembly
 import decsim.controller.settings as controller_settings
+import decsim.ports as ports
 import decsim.records.rounds as round_records
 import decsim.records.transfers as transfer_records
 import decsim.trace_source as trace_source
@@ -27,17 +29,16 @@ class Controller:
     instant the readout left is the QPU's own event (qpu/cycle_clock.py).
     """
 
+    link = ports.Port(ports.Link)
+    assembler = ports.Port(round_assembly.RoundAssembler)
+
     def __init__(
         self,
         engine,
-        link,
         settings: controller_settings.ControllerSettings,
-        assembler,
     ) -> None:
         self.engine = engine
-        self.link = link
         self.settings = settings
-        self.assembler = assembler
         self.trace = _TraceSources()
 
     def accept_qpu_readout(

@@ -22,7 +22,6 @@ from typing import Optional
 import decsim.ports as ports
 import decsim.records.log_sources as log_sources
 import decsim.records.rounds as round_records
-import decsim.syndrome_buffer.round_store as round_store_module
 import decsim.trace_source as trace_source
 
 
@@ -37,14 +36,10 @@ class StrongRoundWriter:
     # a writer built with no window side stores its rounds for a reader
     # that never asks
     windows = ports.Port(ports.WindowInput, optional=True)
+    store = ports.Port(ports.RoundStore)
 
-    def __init__(
-        self,
-        engine,
-        store: round_store_module.RoundStore,
-    ) -> None:
+    def __init__(self, engine) -> None:
         self.engine = engine
-        self.store = store
         self.writes_in_flight = 0
         self.trace = _TraceSources()
 

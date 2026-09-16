@@ -14,11 +14,15 @@ calls below.
 
 NoFeedbackStreams is what a run without streams gets: every method is a
 no-op with the same interface.
+
+Streams is this package's own seam: the issuer and the idle accounting
+are the only callers and both rows live here, so the controller may
+change it alone (STYLE.md rule 7).
 """
 
 import dataclasses
 import functools
-from typing import Optional
+from typing import Optional, Protocol, runtime_checkable
 
 import decsim.engine as engine_module
 import decsim.ports as ports
@@ -26,11 +30,44 @@ import decsim.records.identity as identity_records
 import decsim.records.program as program_records
 
 
+@runtime_checkable
+class Streams(Protocol):
+    """The stream bookkeeping, as the rest of the controller sees it."""
+
+    def binding_for(self, operation_id):
+        """The stream and offset one operation is bound to, or None."""
+
+    def blocks_start(self, operation) -> bool:
+        """True while a protected region holds this operation's patch."""
+
+    def begin(self, operation) -> None:
+        """Open the region this operation starts, if it starts one."""
+
+    def request_closes(self, operation) -> None:
+        """Ask the region this operation ends to close at its boundary."""
+
+    def close_feedback_boundary(
+        self, operation, waiting_blocked_successor: bool
+    ) -> None:
+        """Close the boundary the operation's last round reached."""
+
+    def seal_finished_streams(self) -> None:
+        """Seal every stream whose final round has been emitted."""
+
+    def is_live_protected_patch(self, patch) -> bool:
+        """True when a live protected region already emits this patch."""
+
+    def extend_live_stream(self, operation, patch) -> bool:
+        """Emit one more round of the live stream on this patch."""
+
+
 class NoFeedbackStreams:
     """A run whose operations share no streams and declare no regions."""
 
-    # the row takes the wire the other row does: a seat has one shape
+    # the row takes the wires the other row does: a seat has one shape
     runtime = ports.Port(ports.OperationRuntime)
+    qpu = ports.Port(ports.Qpu)
+    windows = ports.Port(ports.WindowInput)
 
     def load(self, program) -> None:
         """Nothing to index."""
@@ -94,20 +131,18 @@ class FeedbackStreams:
 
     # a cadence change frees an operation the runtime is holding
     runtime = ports.Port(ports.OperationRuntime)
+    qpu = ports.Port(ports.Qpu)
+    windows = ports.Port(ports.WindowInput)
 
     def __init__(
         self,
         engine,
         *,
-        qpu,
-        window_manager,
         regions,
         resolved_operations,
         resolved_patches,
     ):
         self.engine = engine
-        self.qpu = qpu
-        self.windows = window_manager
         self.table = _StreamTable(
             regions, resolved_operations, resolved_patches
         )

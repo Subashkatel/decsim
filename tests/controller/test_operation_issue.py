@@ -71,16 +71,19 @@ def resolved(operation_id, round_ticks=1000, round_count=6):
 
 
 def issuer_with(engine, qpu, idle_rounds, windows, recorder, link=None):
-    output = instruction_output.InstructionOutput(
-        engine, link, qpu, CLOCK, PULSE_TICKS
-    )
+    output = instruction_output.InstructionOutput(engine, CLOCK, PULSE_TICKS)
+    if link is not None:
+        output.link = link
+    output.qpu = qpu
     if recorder is not None:
         output.trace.output_event.connect(recorder.output)
-    streams = feedback_streams.NoFeedbackStreams()
     resolved_operations = (resolved(1), resolved(2))
-    return operation_issue.OperationIssuer(
-        engine, streams, idle_rounds, windows, resolved_operations, output
-    )
+    issuer = operation_issue.OperationIssuer(engine, resolved_operations)
+    issuer.streams = feedback_streams.NoFeedbackStreams()
+    issuer.idle_rounds = idle_rounds
+    issuer.windows = windows
+    issuer.output = output
+    return issuer
 
 
 def ignore_boundary(boundary) -> None:

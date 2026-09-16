@@ -1,130 +1,136 @@
-"""Build the two round stores, their ports, the strong writer and the frame."""
+"""Build one buffer-side seat each, from the run's settings.
 
-from typing import Optional
+Every function here reads the settings its seat needs and returns the
+seat; which seats a run has and what each is wired to is the assembly
+file's (decsim/assembly.py).
+"""
 
 import decsim.controller.round_writes as round_writes
-import decsim.engine as engine_module
-import decsim.links.fabric as fabric
+import decsim.links.link_profiles as link_profiles
 import decsim.links.window_transfers as window_transfers
-import decsim.pauli_frame.pauli_frame as pauli_frame_module
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 import decsim.settings as machine_settings
 import decsim.syndrome_buffer.round_input as round_input
 import decsim.syndrome_buffer.round_output as round_output
 import decsim.syndrome_buffer.round_store as round_store_module
-import decsim.syndrome_buffer.settings as round_store_settings
 import decsim.syndrome_buffer.strong_round_writer as strong_round_writer_module
 import decsim.tables as tables
 
 
-def build_round_store(
-    settings: round_store_settings.RoundStoreSettings,
-    held_rounds: round_writes.HeldRounds,
-):
-    """Buffer 0; a freed slot retries the rounds held for room."""
+def build_links(parts):
+    """The link fabric of the run's kind, carded by the links section."""
+    row = tables.row(
+        link_profiles.LINK_FABRICS, "links.kind", parts.settings.links.kind
+    )
+    return row.build(parts.settings.links, parts.engine)
+
+
+def build_held_rounds(parts):
+    """The waiting line in front of the stores, and what a full store does."""
+    return round_writes.HeldRounds(
+        parts.engine, parts.settings.controller.packing_overflow
+    )
+
+
+def build_round_store(parts):
+    """Buffer 0, the store every finished round is published into."""
+    settings = parts.settings.round_store
     row = tables.row(
         round_store_module.ROUND_STORES, "round_store.kind", settings.kind
     )
-    store = row(settings)
-    store.held_rounds = held_rounds
-    return store
+    return row(settings)
 
 
-def build_strong_round_store(
-    settings: round_store_settings.RoundStoreSettings,
-    escalation_policy,
-    held_rounds: round_writes.HeldRounds,
-):
-    """The room-side store, only when a tier reads from the room side."""
+def build_strong_round_store(parts):
+    """The room-side store, Buffer 1."""
+    settings = parts.settings.strong_round_store
     row = tables.row(
         round_store_module.ROUND_STORES,
         "strong_round_store.kind",
         settings.kind,
     )
-    uses_strong_store = (
-        escalation_policy.requires_strong_context
-        or escalation_policy.primary_tier is window_records.DecoderTier.STRONG
-    )
-    if not uses_strong_store:
-        return None
-    store = row(settings)
-    store.held_rounds = held_rounds
-    return store
+    return row(settings)
 
 
-def build_strong_round_writer(
-    engine: engine_module.Engine,
-    strong_round_store,
-    window_manager,
-):
-    """The room-side end of the crossing; the window manager hears it."""
-    if strong_round_store is None:
-        return None
-    writer = strong_round_writer_module.StrongRoundWriter(
-        engine, strong_round_store
-    )
-    writer.windows = window_manager
-    return writer
+def check_store_kinds(settings: machine_settings.MachineSettings) -> None:
+    """Both store sections name a row, including the one nothing reads.
 
-
-def build_store_outputs(
-    engine: engine_module.Engine,
-    links: fabric.LinkFabric,
-    round_store,
-    strong_round_store,
-) -> tuple:
-    """Each store's outgoing port, built beside the store it belongs to.
-
-    A round leaves by the end that holds it, so the port that executes
-    the send is the store's and is wired here rather than by whoever
-    asks for the round.
+    A run that never reads the room side builds no store for it, so the
+    kind its yaml names would otherwise go unread; a kind off the table
+    is a mistake in the file either way.
     """
-    transfers = window_transfers.WindowTransfers(engine)
-    transfers.link = links
-    weak_output = round_output.RoundStoreOutput(
+    tables.row(
+        round_store_module.ROUND_STORES,
+        "round_store.kind",
+        settings.round_store.kind,
+    )
+    tables.row(
+        round_store_module.ROUND_STORES,
+        "strong_round_store.kind",
+        settings.strong_round_store.kind,
+    )
+
+
+def build_store_transfers(parts):
+    """The buffer side's transfers, which execute its sends."""
+    return window_transfers.WindowTransfers(parts.engine)
+
+
+def build_weak_output(parts):
+    """Buffer 0's outgoing end, which executes every send of its rounds."""
+    del parts
+    return round_output.RoundStoreOutput(
         transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER, "Buffer 0"
     )
-    weak_output.transfers = transfers
-    weak_output.store = round_store
-    strong_output = round_output.RoundStoreOutput(
+
+
+def build_strong_output(parts):
+    """Buffer 1's outgoing end."""
+    del parts
+    return round_output.RoundStoreOutput(
         transfer_records.LinkPath.STRONG_BUFFER_TO_STRONG_DECODER, "Buffer 1"
     )
-    strong_output.transfers = transfers
-    # a run with no room-side store leaves this unbound: no round of
-    # that store exists to leave by this end
-    if strong_round_store is not None:
-        strong_output.store = strong_round_store
-    return weak_output, strong_output
 
 
-def build_round_store_input(
-    engine: engine_module.Engine,
-    round_store,
-    weak_output: round_output.RoundStoreOutput,
-    window_manager,
-    settings: round_store_settings.RoundStoreSettings,
-) -> round_input.RoundStoreInput:
-    """Buffer 0's room and landing, built after the windows.
+def build_primary_output(parts):
+    """The outgoing end the tier that decodes the plan's windows reads.
 
-    The port announces a published round to the window manager, so it is
-    built once the manager exists, as the strong writer is.
+    A weak-primary plan reads Buffer 0 and a strong-primary plan reads
+    Buffer 1, so this row names a seat another row built rather than
+    building a second end onto the same store.
     """
-    store_input = round_input.RoundStoreInput(engine, settings)
-    store_input.store = round_store
-    store_input.output = weak_output
-    store_input.windows = window_manager
-    return store_input
+    if uses_the_room_side(parts.escalation_policy):
+        return parts.seats["strong_output"]
+    return parts.seats["weak_output"]
 
 
-def build_pauli_frame(
-    settings: Optional[pauli_frame_module.PauliFrameConfig],
-    engine: engine_module.Engine,
-) -> Optional[pauli_frame_module.PauliFrame]:
-    """The Pauli frame the run commits into; None when it has no frame."""
-    if settings is None:
-        return None
-    return settings.resolve(engine)
+def build_strong_round_writer(parts):
+    """The room-side end of the crossing out of the fridge."""
+    return strong_round_writer_module.StrongRoundWriter(parts.engine)
+
+
+def build_store_input(parts):
+    """Buffer 0's room and landing."""
+    return round_input.RoundStoreInput(parts.engine, parts.settings.round_store)
+
+
+def build_pauli_frame(parts):
+    """The Pauli frame the run commits into."""
+    return parts.settings.pauli_frame.resolve(parts.engine)
+
+
+def uses_strong_store(escalation_policy) -> bool:
+    """Whether a tier of this run reads its rounds from the room side."""
+    if escalation_policy.requires_strong_context:
+        return True
+    return uses_the_room_side(escalation_policy)
+
+
+def uses_the_room_side(escalation_policy) -> bool:
+    """Whether the tier that decodes the plan's windows reads Buffer 1."""
+    strong = window_records.DecoderTier.STRONG
+    return escalation_policy.primary_tier is strong
 
 
 def check_readout_cost_is_priced(

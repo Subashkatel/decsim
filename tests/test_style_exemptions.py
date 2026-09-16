@@ -45,8 +45,11 @@ def _class_definition(path: pathlib.Path, class_name: str):
 
 def test_every_exempt_class_exists_where_the_guide_says_it_does():
     checker = _checker()
+    guide = (PACKAGE_ROOT / "STYLE.md").read_text()
+    # the heading the checker reads the list from, so an empty list is
+    # an empty list and not a parse that found nothing
+    assert EXEMPTION_HEADING in guide
     exemptions = checker.wide_state_exemptions()
-    assert exemptions
     for class_name, class_path in exemptions:
         path = PACKAGE_ROOT / class_path
         assert path.exists(), class_path

@@ -397,12 +397,6 @@ def _formation_stage(
     )
 
 
-def build_memory_round_arrivals(engine, window_manager):
-    """The decoders' end of the memory route, built after the windows.
-
-    The end tells the window side what landed, so it is built once the
-    window manager exists, as the room-side writer is.
-    """
-    arrivals = memory_rounds_module.MemoryRoundArrivals(engine)
-    arrivals.windows = window_manager
-    return arrivals
+def build_memory_round_arrivals(parts):
+    """The decoders' end of the memory route."""
+    return memory_rounds_module.MemoryRoundArrivals(parts.engine)

@@ -113,15 +113,15 @@ def writer_with(
     weak_input = round_input.RoundStoreInput(engine, settings)
     weak_input.store = weak_store
     weak_input.windows = windows
-    writer = round_writes.RoundWriter(
-        engine,
-        links,
-        weak_input,
-        strong_writer,
-        publishes_from_strong_store=publishes_from_strong_store,
-        held_rounds=held,
-        transmitter=transmitter,
-    )
+    writer = round_writes.RoundWriter(engine)
+    writer.link = links
+    writer.weak_input = weak_input
+    writer.weak_store = weak_store
+    if strong_writer is not None:
+        writer.strong_writer = strong_writer
+    writer.held_rounds = held
+    writer.transmitter = transmitter
+    writer.publishes_from_strong_store = publishes_from_strong_store
     return writer, weak_input, transmitter, recorder
 
 
@@ -193,7 +193,8 @@ def test_the_controller_carries_the_round_to_the_room_side_and_lands_it():
     strong_store = round_store_module.RoundStore(store_settings)
     reads = decoding_records.WindowReads((1, 0))
     strong_store.register_hold(reads, [(1, 1)])
-    room_side = strong_round_writer.StrongRoundWriter(engine, strong_store)
+    room_side = strong_round_writer.StrongRoundWriter(engine)
+    room_side.store = strong_store
     writer, _weak_store, _transmitter, _recorder = writer_with(
         engine, strong_writer=room_side
     )

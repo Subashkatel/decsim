@@ -13,15 +13,17 @@ count the round it was handed, narrate it on the decoder side's line and
 tell the window side, which keeps its own count for window readiness.
 """
 
+import decsim.ports as ports
 import decsim.records.log_sources as log_sources
 
 
 class MemoryRoundArrivals:
     """The decoders' end of weak_buffer_to_weak_decoder for a memory round."""
 
-    def __init__(self, engine, windows) -> None:
+    windows = ports.Port(ports.WindowInput)
+
+    def __init__(self, engine) -> None:
         self.engine = engine
-        self.windows = windows
         # operation id -> the timing-only rounds of it that landed here
         self.landed_by_operation: dict = {}
 

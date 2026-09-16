@@ -46,17 +46,11 @@ docstring.
 
 - `decsim/trace_source.py`: A trace source: one named event a component fires and listeners hear.
 
-## Level 1: engine, pauli_frame, ports, seeding, syndrome_buffer
+## Level 1: engine, ports, seeding
 
 ### engine
 
 - `decsim/engine.py`: The simulation clock and the queue of actions scheduled on it.
-
-### pauli_frame
-
-- `decsim/pauli_frame/__init__.py`: One final correction per window, folded into a stream's logical frame.
-- `decsim/pauli_frame/decision_dispatch.py`: The frame's end of the frame-to-controller path.
-- `decsim/pauli_frame/pauli_frame.py`: The Pauli frame remembers the corrections the decoders have made.
 
 ### ports
 
@@ -66,17 +60,7 @@ docstring.
 
 - `decsim/seeding.py`: Deterministic seeds for every stochastic component of one run.
 
-### syndrome_buffer
-
-- `decsim/syndrome_buffer/__init__.py`: The round stores: a finished round kept until its last reader is done.
-- `decsim/syndrome_buffer/round_holds.py`: Which consumer keeps which rounds alive in a round store.
-- `decsim/syndrome_buffer/round_input.py`: Buffer 0's incoming port: its room, and the landing that takes a slot.
-- `decsim/syndrome_buffer/round_output.py`: A round store's outgoing port: it sends the rounds that leave the store.
-- `decsim/syndrome_buffer/round_store.py`: A round store: finished rounds held until their last hold releases.
-- `decsim/syndrome_buffer/settings.py`: The settings of a round store: its capacity in rounds.
-- `decsim/syndrome_buffer/strong_round_writer.py`: The room-side end of controller_to_strong_buffer: room, then landing.
-
-## Level 2: detector_error_model, escalation, links, windows
+## Level 2: detector_error_model, escalation, links, pauli_frame, syndrome_buffer, windows
 
 ### detector_error_model
 
@@ -112,6 +96,22 @@ docstring.
 - `decsim/links/link_profiles.py`: The link number cards: the four shipped rows and the yaml's own.
 - `decsim/links/settings.py`: What the yaml and the number cards build for the links: settings only.
 - `decsim/links/window_transfers.py`: The window transfers: sends in a window's name over the links.
+
+### pauli_frame
+
+- `decsim/pauli_frame/__init__.py`: One final correction per window, folded into a stream's logical frame.
+- `decsim/pauli_frame/decision_dispatch.py`: The frame's end of the frame-to-controller path.
+- `decsim/pauli_frame/pauli_frame.py`: The Pauli frame remembers the corrections the decoders have made.
+
+### syndrome_buffer
+
+- `decsim/syndrome_buffer/__init__.py`: The round stores: a finished round kept until its last reader is done.
+- `decsim/syndrome_buffer/round_holds.py`: Which consumer keeps which rounds alive in a round store.
+- `decsim/syndrome_buffer/round_input.py`: Buffer 0's incoming port: its room, and the landing that takes a slot.
+- `decsim/syndrome_buffer/round_output.py`: A round store's outgoing port: it sends the rounds that leave the store.
+- `decsim/syndrome_buffer/round_store.py`: A round store: finished rounds held until their last hold releases.
+- `decsim/syndrome_buffer/settings.py`: The settings of a round store: its capacity in rounds.
+- `decsim/syndrome_buffer/strong_round_writer.py`: The room-side end of controller_to_strong_buffer: room, then landing.
 
 ### windows
 

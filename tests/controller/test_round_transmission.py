@@ -150,17 +150,18 @@ def transmitter_with(engine, profile, windows=None):
     recorder = round_events.RoundEventRecorder(engine)
     transfers = window_transfers.WindowTransfers(engine, links)
     store_output = round_output.RoundStoreOutput(
-        transfers,
-        transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER,
-        "Buffer 0",
-        store,
+        transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER, "Buffer 0"
     )
-    store_input = round_input.RoundStoreInput(
-        engine, store, store_output, windows
-    )
-    transmitter = round_transmission.RoundTransmitter(
-        engine, links, windows, store_input
-    )
+    store_output.transfers = transfers
+    store_output.store = store
+    store_input = round_input.RoundStoreInput(engine)
+    store_input.store = store
+    store_input.output = store_output
+    store_input.windows = windows
+    transmitter = round_transmission.RoundTransmitter(engine)
+    transmitter.link = links
+    transmitter.memory_arrivals = windows
+    transmitter.store_input = store_input
     transmitter.trace.round_event.connect(recorder.record)
     store_input.trace.round_event.connect(recorder.record)
     return transmitter, store, windows, recorder, ledger

@@ -28,7 +28,8 @@ class _Windows:
 def test_a_landed_memory_round_is_counted_and_the_window_side_is_told():
     engine = engine_module.Engine()
     windows = _Windows()
-    arrivals = memory_rounds.MemoryRoundArrivals(engine, windows)
+    arrivals = memory_rounds.MemoryRoundArrivals(engine)
+    arrivals.windows = windows
 
     arrivals.receive_memory_round(7)
     arrivals.receive_memory_round(7)
@@ -43,7 +44,8 @@ def test_the_arrival_is_narrated_on_the_decoder_sides_own_line():
     log = log_writers.LogWriter()
     engine.line.connect(log.write)
     windows = _Windows()
-    arrivals = memory_rounds.MemoryRoundArrivals(engine, windows)
+    arrivals = memory_rounds.MemoryRoundArrivals(engine)
+    arrivals.windows = windows
 
     arrivals.receive_memory_round(7)
     arrivals.receive_memory_round(7)

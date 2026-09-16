@@ -20,6 +20,7 @@ of them; the packing stage's bound reads it (RoundsInFlight).
 import dataclasses
 import functools
 
+import decsim.ports as ports
 import decsim.records.rounds as round_records
 import decsim.records.transfers as transfer_records
 import decsim.trace_source as trace_source
@@ -32,14 +33,15 @@ class RoundTransmitter:
     FEEDBACK_MEMORY_DELIVERED.
     """
 
-    def __init__(self, engine, link, memory_arrivals, store_input) -> None:
+    link = ports.Port(ports.Link)
+    # the decoders' end of the memory route, which hears its landing
+    memory_arrivals = ports.Port(ports.MemoryRoundArrivals)
+    # Buffer 0's port toward the controller: it handles what lands there
+    # and asks the store to send what leaves it
+    store_input = ports.Port(ports.RoundStoreInput)
+
+    def __init__(self, engine) -> None:
         self.engine = engine
-        self.link = link
-        # the decoders' end of the memory route, which hears its landing
-        self.memory_arrivals = memory_arrivals
-        # Buffer 0's port toward the controller: it handles what lands
-        # there and asks the store to send what leaves it
-        self.store_input = store_input
         self.in_flight = 0
         self.trace = _TraceSources()
 

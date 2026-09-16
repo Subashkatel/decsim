@@ -1,8 +1,8 @@
 """Buffer 0's incoming port: its room, and the landing that takes a slot.
 
-A round occupies a slot when its bits are in the store, which is at the
-landing of the hop that carried them, and it is readable at that same
-instant. Every referent that models storage writes it there: ns-3's
+A round occupies a slot when its write completes, and is readable then.
+The link landing starts that write; a zero write cost completes at the
+landing tick. Every referent that models storage writes it there: ns-3's
 channel schedules the destination device's own Receive after the
 transmission and the propagation
 (`tmp/resources/l5_buffers/ns3-point-to-point/point-to-point-channel.cc:88-92`,
@@ -57,11 +57,14 @@ window reads it.
 """
 
 import dataclasses
+import functools
 from typing import Callable, Optional
 
+import decsim.engine as engine_module
 import decsim.ports as ports
 import decsim.records.log_sources as log_sources
 import decsim.records.rounds as round_records
+import decsim.syndrome_buffer.settings as round_store_settings
 import decsim.trace_source as trace_source
 
 
@@ -78,8 +81,13 @@ class RoundStoreInput:
     output = ports.Port(ports.RoundStoreOutput)
     windows = ports.Port(ports.WindowInput)
 
-    def __init__(self, engine) -> None:
+    def __init__(
+        self,
+        engine: engine_module.Engine,
+        settings: round_store_settings.RoundStoreSettings,
+    ) -> None:
         self.engine = engine
+        self.settings = settings
         self.writes_in_flight = 0
         self.trace = _TraceSources()
 
@@ -96,7 +104,7 @@ class RoundStoreInput:
         self.writes_in_flight += 1
 
     def receive_round(self, packed: round_records.PackedRound) -> None:
-        """Take one round that landed here: its room is now its slot.
+        """Start one landed round's write, retaining its reservation until done.
 
         The store and the publication are one call at one tick, because
         the bits become readable when they are here and not before, and
@@ -112,10 +120,14 @@ class RoundStoreInput:
         the device emitting more rounds than the plan expects, so there
         is no drop to make here.
         """
-        self.writes_in_flight -= 1
-        self._take_slot(packed, "controller_to_weak_buffer", self.engine.now)
-        self._fire_published(packed)
-        self.windows.accept_window_input(packed.packet)
+        cycles = self.settings.write_cycles
+        if cycles == 0:
+            self._finish_write(packed)
+            return
+        edge = self.settings.clock.edge(cycles, self.engine.now)
+        delay = edge - self.engine.now
+        finish = functools.partial(self._finish_write, packed)
+        self.engine.schedule(delay, finish, label="round store write")
 
     def send_memory_round(
         self,
@@ -145,6 +157,12 @@ class RoundStoreInput:
                 f"syndrome buffer 0 ended with {self.writes_in_flight} "
                 f"controller_to_weak_buffer writes in flight"
             )
+
+    def _finish_write(self, packed: round_records.PackedRound) -> None:
+        self.writes_in_flight -= 1
+        self._take_slot(packed, "controller_to_weak_buffer", self.engine.now)
+        self._fire_published(packed)
+        self.windows.accept_window_input(packed.packet)
 
     def _take_slot(
         self,

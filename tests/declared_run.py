@@ -198,6 +198,7 @@ def weak_only_run(
     seed=0,
     io_trace=False,
     round_store=None,
+    decoder_input="copy",
     controller=None,
     observation=None,
     probes=(),
@@ -205,7 +206,9 @@ def weak_only_run(
     """The weak-only baseline: one tier, readiness on Buffer 0."""
     workload = declared_workload(operations, rounds)
     decoder = decoders.PresetLatencyDecoder(DECLARED_MICROSECONDS["weak"])
-    weak_decoder = decoder_settings.DecoderSettings(decoder=decoder)
+    weak_decoder = decoder_settings.DecoderSettings(
+        decoder=decoder, input=decoder_input
+    )
     links = declared_profile()
     if controller is None:
         controller = declared_controller()
@@ -431,3 +434,19 @@ class OccupancyProbe:
         last_occupancy = timeline[-1][1]
         if last_occupancy != occupancy:
             timeline.append((tick, occupancy))
+
+
+def reaction_ticks(machine) -> tuple:
+    """One window's readiness, queue, dispatch, decode and frame ticks."""
+    windows = machine.window_manager.planner.windows_by_key.values()
+    (window,) = windows
+    snapshot = machine.pauli_frame.snapshot()
+    (record,) = snapshot.records
+    return (
+        window.t_data_complete,
+        window.t_queued,
+        window.t_dispatch,
+        window.t_done,
+        record.accepted_ticks,
+        record.committed_ticks,
+    )

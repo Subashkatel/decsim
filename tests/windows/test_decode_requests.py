@@ -13,6 +13,7 @@ import types
 import pytest
 
 import decsim.collect as collect
+import decsim.config as config
 import decsim.decoders.decoder_memory as decoder_memory
 import decsim.decoders.decoder_memory_transfer as decoder_memory_transfer
 import decsim.engine as engine_module
@@ -82,7 +83,7 @@ def _fragment(round_index, bits=None) -> round_records.RetainedSyndromeFragment:
 class _Fixture:
     """One six-round operation with one window reading rounds 1 to 5."""
 
-    def __init__(self) -> None:
+    def __init__(self, read_cycles=0, read_clock=None) -> None:
         self.engine = engine_module.Engine()
         self.operation = program_records.Operation(
             1, "memory", (0,), patches=(0,)
@@ -160,6 +161,8 @@ class _Fixture:
             policy,
             verdict,
             store_output,
+            read_cycles=read_cycles,
+            read_clock=read_clock,
         )
         self.retention.register_window((1, 0), self.window)
         self.interaction = interaction
@@ -543,3 +546,57 @@ def _fold_outcome(config, probability: float, seed: int) -> tuple:
         measurement.logical_failure,
         measurement.direct_mismatch,
     )
+
+
+@pytest.mark.parametrize("decoder_input", ["copy", "in_place"])
+def test_read_cycles_delay_submission_and_later_reaction_points(decoder_input):
+    clocks = config.ClockSettings.from_yaml({"storage": 1.0})
+    section = {"clock": "storage", "read_cycles": 3}
+    settings = round_store_settings.RoundStoreSettings.from_yaml(
+        section, clocks
+    )
+    free = declared_run.weak_only_run(decoder_input=decoder_input)
+    charged = declared_run.weak_only_run(
+        round_store=settings, decoder_input=decoder_input
+    )
+    free_ticks = declared_run.reaction_ticks(free)
+    charged_ticks = declared_run.reaction_ticks(charged)
+    paired = zip(charged_ticks, free_ticks)
+    shifts = [charged_tick - free_tick for charged_tick, free_tick in paired]
+    expected = 3 * settings.clock.period_ticks
+    assert shifts == [0, expected, expected, expected, expected, expected]
+
+
+def test_a_withdrawn_read_cannot_submit_the_replacement_window_twice():
+    clock = config.Clock(10)
+    fixture = _Fixture(read_cycles=3, read_clock=clock)
+    fixture.engine.now = 1
+    fixture.arrive(1)
+    fixture.arrive(2)
+    fixture.arrive(3)
+    fixture.arrive(4)
+    fixture.arrive(5)
+    assert fixture.queue.enqueued == []
+    fixture.requester.withdraw(fixture.window)
+    fixture.requester.request_if_ready(fixture.window, None)
+
+    fixture.engine.run()
+
+    assert len(fixture.queue.enqueued) == 1
+    assert fixture.queue.withdrawn == []
+    assert fixture.window.t_queued == 40
+
+
+def test_a_zero_read_cost_submits_mid_cycle_without_scheduling():
+    clock = config.Clock(10)
+    fixture = _Fixture(read_clock=clock)
+    fixture.engine.now = 1
+    fixture.arrive(1)
+    fixture.arrive(2)
+    fixture.arrive(3)
+    fixture.arrive(4)
+    fixture.arrive(5)
+
+    assert fixture.engine.idle
+    assert len(fixture.queue.enqueued) == 1
+    assert fixture.window.t_queued == 1

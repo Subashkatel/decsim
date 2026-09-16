@@ -409,6 +409,16 @@ links:                             # a kind, then one card per path; null = the
   controller_to_qpu: null          # controller -> QPU, an instruction
 
 round_store:                       # Buffer 0, the upstream round store
+  clock: fridge                    # a clocks domain; absent uses controller.clock
+  write_cycles: 0                  # per-round write before storage/publication
+  read_cycles: 0                   # one bulk read per primary window, before
+                                   # assembling its input for copy or in_place.
+                                   # Both default to zero, with no edge rounding.
+                                   # Positive costs finish on this clock's edge.
+                                   # FIFO intake and window trigger: IBM
+                                   # 2510.21600 lines 500-509; separate stage
+                                   # cycles: gem5 src/mem/XBar.py frontend_latency
+                                   # and forward_latency
   kind: round_store                # the one row today
   rounds: null                     # capacity in rounds. When it is full the
                                    # controller holds the finished round and

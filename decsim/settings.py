@@ -140,10 +140,10 @@ class MachineSettings:
         )
         links = link_profiles.from_yaml(sections["links"], clocks, name)
         round_store = round_store_settings.RoundStoreSettings.from_yaml(
-            sections["round_store"]
+            sections["round_store"], clocks, controller.clock
         )
         strong_round_store = round_store_settings.RoundStoreSettings.from_yaml(
-            sections["strong_round_store"]
+            sections["strong_round_store"], clocks
         )
         windows = window_settings.WindowSettings.from_yaml(sections["windows"])
         weak_decoder = _tier_settings(sections, "weak_decoder", clocks)

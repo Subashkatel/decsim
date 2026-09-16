@@ -154,7 +154,7 @@ def transmitter_with(engine, profile, windows=None):
     )
     store_output.transfers = transfers
     store_output.store = store
-    store_input = round_input.RoundStoreInput(engine)
+    store_input = round_input.RoundStoreInput(engine, settings)
     store_input.store = store
     store_input.output = store_output
     store_input.windows = windows

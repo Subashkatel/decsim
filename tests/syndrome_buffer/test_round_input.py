@@ -19,6 +19,7 @@ publication never precedes the store, and the window manager hears of a
 round only once the store's record says it is readable.
 """
 
+import decsim.config as config
 import decsim.engine as engine_module
 import decsim.observe.log_writers as log_writers
 import decsim.ports as ports
@@ -26,6 +27,7 @@ import decsim.records.rounds as round_records
 import decsim.syndrome_buffer.round_input as round_input
 import decsim.syndrome_buffer.round_store as round_store_module
 import decsim.syndrome_buffer.settings as round_store_settings
+import tests.declared_run as declared_run
 
 LANDING_TICKS = 40_000
 MEMORY_ROUTE = round_records.SyndromePacketRoute.feedback_memory_round(9)
@@ -78,7 +80,7 @@ def _store(rounds=None) -> round_store_module.RoundStore:
 
 def _input_with(engine, store, output=None):
     windows = _Windows(engine, store)
-    store_input = round_input.RoundStoreInput(engine)
+    store_input = round_input.RoundStoreInput(engine, store.settings)
     store_input.store = store
     store_input.windows = windows
     if output is not None:
@@ -254,3 +256,59 @@ def test_the_incoming_port_fills_the_declared_port():
     store_input, _windows = _input_with(engine, store)
 
     assert isinstance(store_input, ports.RoundStoreInput)
+
+
+def test_write_cycles_move_every_reaction_point_by_the_store_periods():
+    clocks = config.ClockSettings.from_yaml({"storage": 1.0})
+    section = {"clock": "storage", "write_cycles": 3}
+    settings = round_store_settings.RoundStoreSettings.from_yaml(
+        section, clocks
+    )
+    free = declared_run.weak_only_run()
+    charged = declared_run.weak_only_run(round_store=settings)
+    free_ticks = declared_run.reaction_ticks(free)
+    charged_ticks = declared_run.reaction_ticks(charged)
+    paired = zip(charged_ticks, free_ticks)
+    shifts = [charged_tick - free_tick for charged_tick, free_tick in paired]
+    expected = 3 * settings.clock.period_ticks
+    assert shifts == [expected] * 6
+
+
+def test_a_priced_write_keeps_its_reservation_until_the_write_edge():
+    engine = engine_module.Engine()
+    engine.now = 1
+    clock = config.Clock(10)
+    settings = round_store_settings.RoundStoreSettings(
+        rounds=1, clock=clock, write_cycles=3
+    )
+    store = round_store_module.RoundStore(settings)
+    store_input, windows = _input_with(engine, store)
+    packed = _packed(1)
+    store_input.reserve_write()
+    store_input.receive_round(packed)
+    assert store.occupancy == 0
+    assert store_input.writes_in_flight == 1
+    assert store_input.has_room() is False
+    assert windows.published == []
+
+    engine.run()
+
+    assert store_input.writes_in_flight == 0
+    assert store.occupancy == 1
+    assert windows.published == [(40, (1, 1), 40)]
+
+
+def test_a_zero_write_cost_publishes_mid_cycle_without_scheduling():
+    engine = engine_module.Engine()
+    engine.now = 1
+    clock = config.Clock(10)
+    settings = round_store_settings.RoundStoreSettings(clock=clock)
+    store = round_store_module.RoundStore(settings)
+    store_input, windows = _input_with(engine, store)
+    packed = _packed(1)
+    store_input.reserve_write()
+
+    store_input.receive_round(packed)
+
+    assert engine.idle
+    assert windows.published == [(1, (1, 1), 1)]

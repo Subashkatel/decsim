@@ -98,13 +98,14 @@ def build_round_store_input(
     round_store,
     weak_output: round_output.RoundStoreOutput,
     window_manager,
+    settings: round_store_settings.RoundStoreSettings,
 ) -> round_input.RoundStoreInput:
     """Buffer 0's room and landing, built after the windows.
 
     The port announces a published round to the window manager, so it is
     built once the manager exists, as the strong writer is.
     """
-    store_input = round_input.RoundStoreInput(engine)
+    store_input = round_input.RoundStoreInput(engine, settings)
     store_input.store = round_store
     store_input.output = weak_output
     store_input.windows = window_manager

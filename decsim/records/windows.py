@@ -103,7 +103,7 @@ class Window:
     # the request whose result the window finally published; None until
     # the final one, so a provisional weak commit is still awaiting strong
     published_request_key: Optional[DecoderRequestKey] = None
-    queued: bool = False  # job handed to the decoder cluster
+    queued: bool = False  # a decode request is pending or admitted
     blocked_logged: bool = False  # log-once flag for the "blocked" trace line
     boundary_in: Any = field(default_factory=dict)  # state owned by the
     # configured WindowInteraction

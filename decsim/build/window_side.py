@@ -123,6 +123,9 @@ def build_window_manager(
         committer,
     )
     gap_join = _window_gap_join(settings, engine, verdict, decode_queue)
+    read_cycles = settings.round_store.read_cycles
+    if escalation_policy.primary_tier is window_records.DecoderTier.STRONG:
+        read_cycles = 0
     requester = decode_requests.DecodeRequester(
         tracker,
         retention,
@@ -132,6 +135,8 @@ def build_window_manager(
         verdict,
         primary_output,
         gap_join,
+        read_clock=settings.round_store.clock,
+        read_cycles=read_cycles,
     )
     strong_redecode = _strong_redecode(
         escalation_policy,

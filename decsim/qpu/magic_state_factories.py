@@ -845,10 +845,8 @@ def _checked_levels(levels: list) -> tuple:
         logical_cycles = level.logical_cycles_per_round
         if logical_cycles is None:
             logical_cycles = _paper_logical_cycles(index)
-        _check_count(
-            f"levels[{index}].logical_cycles_per_round",
-            logical_cycles,
-            minimum=0,
+        config.check_cycles(
+            f"levels[{index}].logical_cycles_per_round", logical_cycles
         )
         success_probability = _checked_probability(
             f"levels[{index}].success_probability", level.success_probability
@@ -873,7 +871,7 @@ def _paper_logical_cycles(level_index: int) -> int:
 def _checked_preparation_ticks(
     logical_cycles: int, distance: int, round_ticks: int
 ) -> int:
-    _check_count("preparation_logical_cycles", logical_cycles, minimum=0)
+    config.check_cycles("preparation_logical_cycles", logical_cycles)
     _check_count("preparation_distance", distance, minimum=1)
     _check_count("round_ticks", round_ticks, minimum=0)
     return _round_ticks(logical_cycles, distance, round_ticks)

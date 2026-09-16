@@ -21,8 +21,8 @@ path with the job, so the decoder manager is built first and the
 window side takes it as its DecodeQueue; the strong redecode asks it
 to await and accept a strong selection over the same port. The
 controller's issuer carries the start callback with the issue, the
-QPU's completion receiver is the runtime's body_done, and the runtime
-tells the issuer what it knows at each release. The stores name the
+QPU names the runtime whose body_done it calls as a port, and the
+runtime tells the issuer what it knows at each release. The stores name the
 waiting line and the window side as ports: each store retries the held
 rounds when a slot frees, and the strong writer tells the window manager
 what landed. The one stand-in is _LateWiring inside
@@ -287,10 +287,10 @@ class Machine:
             factory=factory,
             resource_claims_by_operation_id=plan.resource_claims,
         )
-        # The QPU's receivers arrive after the controller is built.
-        qpu.connect_readout_receiver(controller)
-        qpu.connect_completion_receiver(execution_runtime.body_done)
-        qpu.connect_idle_receiver(idle_rounds.emit_idle_round)
+        # The QPU's three output ends are bound once they are built.
+        qpu.readout_receiver = controller
+        qpu.runtime = execution_runtime
+        qpu.idle_rounds = idle_rounds
         input_transport = decoder_manager.input_transport()
         seed_roots = listener_build.build_seed_roots(
             code=plan.code,
@@ -322,9 +322,8 @@ class Machine:
         decision_dispatch = decision_dispatch_module.DecisionDispatch(engine)
         decision_dispatch.link = links
         decision_dispatch.instruction_output = instruction_output
-        conditional_release.connect(
-            decision_dispatch, execution_runtime.on_decision
-        )
+        conditional_release.dispatch = decision_dispatch
+        conditional_release.runtime = execution_runtime
         process_name = controller_side.process_name(settings, seed)
         listeners = wiring.observe(
             observation,

@@ -24,7 +24,7 @@ import decsim.records.rounds as round_records
 
 
 class ReadoutLog:
-    """Keeps every readout, idle round and completion with its tick."""
+    """Every end of the clock at once: readouts, idle rounds, completions."""
 
     def __init__(self, engine):
         self.engine = engine
@@ -46,11 +46,11 @@ class ReadoutLog:
         )
         self.readouts.append((payload, route))
 
-    def note_idle(self, operation_id, patch, round_index):
+    def emit_idle_round(self, operation_id, patch, round_index):
         del operation_id
         self.idle_ticks.append((self.engine.now, patch, round_index))
 
-    def note_completion(self, operation):
+    def body_done(self, operation):
         self.completion_ticks.append((self.engine.now, operation.id))
 
 
@@ -95,14 +95,10 @@ def clocked_qpu(cycle_ticks, source=None):
     if source is None:
         source = syndrome_devices.TimingOnlyDevice()
     clock = config.Clock(cycle_ticks)
-    qpu = cycle_clock.QPUDevice(
-        engine,
-        source,
-        clock,
-        readout_receiver=log,
-        completion_receiver=log.note_completion,
-        idle_receiver=log.note_idle,
-    )
+    qpu = cycle_clock.QPUDevice(engine, source, clock)
+    qpu.readout_receiver = log
+    qpu.runtime = log
+    qpu.idle_rounds = log
     return engine, qpu, log
 
 

@@ -21,33 +21,21 @@ conditional branching on these bits" (lines 1051-1056). So nothing in
 this file reads the result's bits.
 """
 
-from typing import Callable, Optional
-
+import decsim.ports as ports
 import decsim.records.program as program_records
 
 
 class ConditionalRelease:
     """Turns one operation's final result into the decisions it unblocks."""
 
+    dispatch = ports.Port(ports.DecisionDispatch)
+    # the decision is delivered into the runtime at the QPU, one hop
+    # after the dispatch sends it
+    runtime = ports.Port(ports.OperationRuntime)
+
     def __init__(self, engine):
         self.engine = engine
         self.waiting_by_blocker: dict[int, list[int]] = {}
-        self.dispatch = None
-        self.deliver_decision: Optional[Callable] = None
-
-    def connect(self, dispatch, deliver_decision: Callable) -> None:
-        """Wire the return path, after both ends exist.
-
-        The wiring is two-phase because the two ends need each other: a
-        release has no way to reach the QPU except over the frame's
-        dispatch and the controller's instruction output behind it, and
-        that output is built with the execution runtime whose decision
-        callback the release delivers into. One of the two has to be
-        constructed first, so the release is constructed knowing nothing
-        and told its dispatch here, once the root has both.
-        """
-        self.dispatch = dispatch
-        self.deliver_decision = deliver_decision
 
     def register_blocked_operation(
         self, blocked_operation_id: int, blocking_operation_id: int
@@ -58,10 +46,11 @@ class ConditionalRelease:
 
     def release_waiters(self, operation: program_records.Operation) -> None:
         """A final result arrived: send every decision it releases."""
+        deliver = self.runtime.on_decision
         for decision in self.decisions_for(operation):
             # the decision leaves by the frame's end of the
             # frame-to-controller path, which executes that send
-            self.dispatch.dispatch_decision(decision, self.deliver_decision)
+            self.dispatch.dispatch_decision(decision, deliver)
 
     def decisions_for(
         self, operation: program_records.Operation

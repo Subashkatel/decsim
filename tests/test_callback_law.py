@@ -20,12 +20,13 @@ import dataclasses
 import pytest
 
 import decsim.build.stores as store_build
+import decsim.controller.controller as controller_module
 import decsim.decoders.decoders as decoders
 import decsim.decoders.settings as decoder_settings
 import decsim.escalation.policies as escalation_policies
 import decsim.escalation.settings as escalation_settings
+import decsim.frontends.execution_runtime as execution_runtime_module
 import decsim.machine as machine_module
-import decsim.qpu.cycle_clock as cycle_clock
 import decsim.settings as machine_settings
 import decsim.syndrome_buffer.strong_round_writer as strong_round_writer
 import tests.declared_run as declared_run
@@ -132,17 +133,12 @@ def test_without_the_qpus_completion_callback_the_run_never_settles(
 ):
     """The cycle: the QPU ends a body, the runtime owns the operation's life.
 
-    machine.py:252 binds it (`qpu.connect_completion_receiver(
-    execution_runtime.body_done)`); the runtime is built after the QPU,
-    so the QPU cannot take it by constructor.
+    machine.py binds the QPU's runtime port to the execution runtime;
+    a runtime that hears a body end and does nothing with it leaves
+    every operation running.
     """
-
-    def drop_the_receiver(self, receiver) -> None:
-        del receiver
-        self.receivers.completion = _hear_nothing
-
     monkeypatch.setattr(
-        cycle_clock.QPUDevice, "connect_completion_receiver", drop_the_receiver
+        execution_runtime_module.ExecutionRuntime, "body_done", _hear_nothing
     )
     settings = _weak()
     machine = machine_module.Machine.build(settings, 0)
@@ -182,24 +178,17 @@ def test_without_the_qpus_readout_callback_the_run_ends_with_nothing_decoded(
 ):
     """The cycle: the QPU emits a readout, the controller receives it.
 
-    machine.py:251 binds it (`qpu.connect_readout_receiver(controller)`);
-    the controller reaches the window manager through the assembler and
-    the round writer, and the window manager is built from the plan the
-    QPU device came out of, so the QPU cannot take the controller by
-    constructor.  Removing it does not deadlock: the run ends early and
-    silently, with no round on any hop and no window decoded, which is
-    the misordering half of the law.
+    machine.py binds the QPU's readout_receiver port to the controller,
+    which reaches the window manager through the assembler and the round
+    writer.  A controller that hears every readout and tells nobody does
+    not deadlock: the run ends early and silently, with no round on any
+    hop and no window decoded, which is the misordering half of the law.
     """
     wired_settings = _weak()
     wired = machine_module.Machine.build(wired_settings, 0)
     wired_result = run_bounded(wired)
-
-    def drop_the_receiver(self, receiver) -> None:
-        del receiver
-        self.receivers.readout = _SilentReadout()
-
     monkeypatch.setattr(
-        cycle_clock.QPUDevice, "connect_readout_receiver", drop_the_receiver
+        controller_module.Controller, "accept_qpu_readout", _hear_nothing
     )
     broken_settings = _weak()
     broken = machine_module.Machine.build(broken_settings, 0)
@@ -216,13 +205,6 @@ class _SilentWindows:
     """A window side that hears every room-side landing and tells nobody."""
 
     def accept_room_round(self, *values) -> None:
-        del values
-
-
-class _SilentReadout:
-    """A receiver that hears every readout and tells nobody."""
-
-    def accept_qpu_readout(self, *values) -> None:
         del values
 
 

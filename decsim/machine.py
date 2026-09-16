@@ -250,32 +250,14 @@ def _observe(
     """Connect the run's listeners, before the workload is loaded."""
     traffic_ledger = link_traffic.TrafficLedger(settings.links)
     process_name = controller_side.process_name(settings, seed)
-    strong_round_store = seats.get("strong_round_store")
-    strong_round_writer = seats.get("strong_round_writer")
-    pauli_frame = seats.get("pauli_frame")
     return wiring.observe(
         settings.observation,
         parts.engine,
+        seats,
         process_name=process_name,
         operations=parts.plan.operations,
         traffic_ledger=traffic_ledger,
-        links=seats["links"],
-        qpu=seats["qpu"],
         syndrome_source=parts.plan.device,
-        controller=seats["controller"],
-        idle_rounds=seats["idle_rounds"],
-        assembler=seats["assembler"],
-        held_rounds=seats["held_rounds"],
-        transmitter=seats["transmitter"],
-        store_input=seats["store_input"],
-        instruction_output=seats["instruction_output"],
-        round_store=seats["round_store"],
-        strong_round_store=strong_round_store,
-        strong_round_writer=strong_round_writer,
-        execution_runtime=seats["execution_runtime"],
-        pauli_frame=pauli_frame,
-        decoder_manager=seats["decoder_manager"],
-        window_manager=seats["window_manager"],
         pool=parts.pool,
     )
 

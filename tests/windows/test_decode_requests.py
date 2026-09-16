@@ -129,11 +129,10 @@ class _Fixture:
         link = _Link()
         transfers = window_transfers.WindowTransfers(self.engine, link)
         store_output = round_output.RoundStoreOutput(
-            transfers,
-            transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER,
-            "Buffer 0",
-            self.store,
+            transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER, "Buffer 0"
         )
+        store_output.transfers = transfers
+        store_output.store = self.store
         boundary_payload = boundary_payloads.DenseSeamMask()
         interaction = window_interactions.DefaultWindowInteraction(
             0, boundary_payload

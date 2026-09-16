@@ -17,6 +17,7 @@ import stim
 
 import decsim.build.escalation as escalation_build
 import decsim.confidence.cluster as cluster
+import decsim.config as config
 import decsim.decoders.decoders as decoders
 import decsim.decoders.settings as decoder_settings
 import decsim.escalation.policies as policies
@@ -40,6 +41,10 @@ import decsim.windows.settings as window_settings
 import tests.escalation.declared_fabric as fabric
 import tests.experiments.yaml_configs as yaml_configs
 
+# the decoder engines run at 100 MHz, a 10000-tick period
+ENGINE_CLOCK = config.Clock(10_000)
+# the frame writes one cycle of a 250 MHz clock, 4 ns
+FRAME_CLOCK = config.Clock(4000)
 SOURCE = decoding_records.SoftOutputSource(
     method="matching-gap",
     cluster_origin="decoder",
@@ -145,17 +150,19 @@ def test_escalations_equal_gaps_below_the_threshold_equal_strong_frame_writes():
     )
     decoder_manager = decoder_settings.DecoderManagerSettings()
     weak_decoder = decoder_settings.DecoderSettings(
-        kind="pymatching", engine_megahertz=100.0
+        kind="pymatching", engine_clock=ENGINE_CLOCK
     )
     strong_decoder = decoder_settings.DecoderSettings(
-        kind="pymatching", engine_megahertz=100.0
+        kind="pymatching", engine_clock=ENGINE_CLOCK
     )
     escalation = escalation_settings.EscalationSettings(
         kind="switching",
         gap_threshold_decibels=15.0,
         gap_threshold_nats=threshold_nats,
     )
-    pauli_frame = pauli_frame_module.PauliFrameConfig(commit_microseconds=0.004)
+    pauli_frame = pauli_frame_module.PauliFrameConfig(
+        write_cycles=1, clock=FRAME_CLOCK
+    )
     observation = observe_settings.ObservationSettings(
         record_switching_windows=True
     )
@@ -303,10 +310,10 @@ def _forward_window_settings(
         commit_rounds=commit_rounds, buffer_rounds=buffer_rounds
     )
     weak_decoder = decoder_settings.DecoderSettings(
-        kind="pymatching", engine_megahertz=100.0
+        kind="pymatching", engine_clock=ENGINE_CLOCK
     )
     strong_decoder = decoder_settings.DecoderSettings(
-        kind="belief_matching", engine_megahertz=100.0
+        kind="belief_matching", engine_clock=ENGINE_CLOCK
     )
     escalation = escalation_settings.EscalationSettings(
         kind="switching", gap_threshold_nats=1.0, strong_window="forward"

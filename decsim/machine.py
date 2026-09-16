@@ -3,8 +3,7 @@
 A Machine is gem5's shape (src/python/m5/SimObject.py: a SimObject's
 Python class is its params, `allClasses` maps a name to a class; the
 learning_gem5 simple.py script names each component once and assigns
-its ports), with the wiring done by constructor because Python needs
-no second bind step. A MachineSettings (decsim/settings.py) holds one
+its ports). A MachineSettings (decsim/settings.py) holds one
 settings record per yaml section, each built by its own package's
 `from_yaml`, and each package's own settings module maps that section's
 `kind` to the class that fills the port, sinter's `BUILT_IN_DECODERS`
@@ -12,19 +11,21 @@ settings record per yaml section, each built by its own package's
 pluggable part. A new component is one class that fills its port in
 decsim/ports.py and one row in its package's table.
 
-Every component is wired by constructor; nothing is bound to a
-component after it is built. Where two components refer to each other
-the per-job callback law breaks the cycle (SimPy's callback on the
-event, simpy/core.py step()): the submitting side carries the return
+A component that declares ports (decsim/ports.py, Port) is wired by
+assignment once it is built, which is gem5's script binding one port to
+another (configs/learning_gem5/part1/simple.py:68); every other
+component is still wired by constructor. Where two components refer to
+each other the per-job callback law breaks the cycle (SimPy's callback
+on the event, simpy/core.py step()): the submitting side carries the return
 path with the job, so the decoder manager is built first and the
 window side takes it as its DecodeQueue; the strong redecode asks it
 to await and accept a strong selection over the same port. The
 controller's issuer carries the start callback with the issue, the
-QPU's completion receiver is the runtime's body_done, and the runtime
-tells the issuer what it knows at each release. The stores' callbacks
-arrive by constructor: the held rounds are built first, each store
-retries them when a slot frees, and the strong writer tells the window
-manager what landed. The one stand-in is _LateWiring inside
+QPU names the runtime whose body_done it calls as a port, and the
+runtime tells the issuer what it knows at each release. The stores name the
+waiting line and the window side as ports: each store retries the held
+rounds when a slot frees, and the strong writer tells the window manager
+what landed. The one stand-in is _LateWiring inside
 _window_manager, for the courier's and the committer's callbacks to the
 facade and the strong redecode built after them.
 
@@ -34,8 +35,9 @@ Dijkstra's THE, dijkstra_the.txt 52-57). The levels, leaves first, are
 what tools/check_uses_graph.py prints and check.sh enforces:
 
     0  config, records, tables, trace_source
-    1  engine, pauli_frame, ports, seeding, syndrome_buffer
-    2  detector_error_model, escalation, links, windows
+    1  engine, ports, seeding
+    2  detector_error_model, escalation, links, pauli_frame,
+       syndrome_buffer, windows
     3  controller, decoders, qpu
     4  confidence, frontends, observe
     5  settings
@@ -68,6 +70,7 @@ import decsim.build.listeners as listener_build
 import decsim.build.plan as plan_build
 import decsim.build.stores as store_build
 import decsim.build.window_side as window_side
+import decsim.config as config
 import decsim.controller.conditional_release as conditional_release_module
 import decsim.controller.controller as controller_module
 import decsim.controller.idle_rounds as idle_rounds_module
@@ -214,9 +217,10 @@ class Machine:
         memory_arrivals = decoder_build.build_memory_round_arrivals(
             engine, window_manager
         )
-        transmitter = round_transmission.RoundTransmitter(
-            engine, links, memory_arrivals, store_input
-        )
+        transmitter = round_transmission.RoundTransmitter(engine)
+        transmitter.link = links
+        transmitter.memory_arrivals = memory_arrivals
+        transmitter.store_input = store_input
         publishes_from_strong_store = not window_manager.reads_windows_from(
             round_store
         )
@@ -244,10 +248,14 @@ class Machine:
         factory = controller_side.build_factory(
             settings.magic_state_factory, engine, decoder_manager, plan
         )
-        qpu = cycle_clock.QPUDevice(engine, plan.device, plan.round_ticks)
-        pulse_ticks = settings.controller.decision_to_pulse_ticks()
+        cycle_clock_domain = config.Clock(plan.round_ticks)
+        qpu = cycle_clock.QPUDevice(engine, plan.device, cycle_clock_domain)
         instruction_output = instruction_output_module.InstructionOutput(
-            engine, links, qpu, pulse_ticks
+            engine,
+            links,
+            qpu,
+            settings.controller.clock,
+            settings.controller.decision_to_pulse_cycles,
         )
         streams = controller_side.build_feedback_streams(
             engine,
@@ -279,10 +287,10 @@ class Machine:
             factory=factory,
             resource_claims_by_operation_id=plan.resource_claims,
         )
-        # The QPU's receivers arrive after the controller is built.
-        qpu.connect_readout_receiver(controller)
-        qpu.connect_completion_receiver(execution_runtime.body_done)
-        qpu.connect_idle_receiver(idle_rounds.emit_idle_round)
+        # The QPU's three output ends are bound once they are built.
+        qpu.readout_receiver = controller
+        qpu.runtime = execution_runtime
+        qpu.idle_rounds = idle_rounds
         input_transport = decoder_manager.input_transport()
         seed_roots = listener_build.build_seed_roots(
             code=plan.code,
@@ -311,12 +319,11 @@ class Machine:
             memory_model=None,
         )
         seeding.bind_run_seed(root_seed, seed_roots)
-        decision_dispatch = decision_dispatch_module.DecisionDispatch(
-            engine, links, instruction_output
-        )
-        conditional_release.connect(
-            decision_dispatch, execution_runtime.on_decision
-        )
+        decision_dispatch = decision_dispatch_module.DecisionDispatch(engine)
+        decision_dispatch.link = links
+        decision_dispatch.instruction_output = instruction_output
+        conditional_release.dispatch = decision_dispatch
+        conditional_release.runtime = execution_runtime
         process_name = controller_side.process_name(settings, seed)
         listeners = wiring.observe(
             observation,
@@ -379,8 +386,23 @@ class Machine:
             operations=plan.all_operations,
         )
 
+    def start(self) -> None:
+        """Queue the first event of every component that has one.
+
+        Every component is built and wired first and nothing is
+        scheduled while the graph is still being assembled, so the order
+        the root builds in cannot move a tick; each seat with a first
+        event queues it here, in build order. That is gem5's split
+        between the constructor and startup, "the appropriate place to
+        schedule initial event(s)"
+        (tmp/resources/gem5/src/sim/sim_object.hh lines 194 and 280).
+        """
+        self.factory.start()
+        self.execution_runtime.start()
+
     def run(self) -> result_records.RunResult:
-        """Run the engine to quiescence, check settlement, read the result."""
+        """Start every component, run to quiescence, read the result."""
+        self.start()
         self.engine.run()
         strong_redecode = self.window_manager.strong_redecode
         if strong_redecode is not None and strong_redecode.has_pending():

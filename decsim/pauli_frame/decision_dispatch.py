@@ -16,6 +16,7 @@ controller's own decision-to-pulse cost stands.
 
 import functools
 
+import decsim.ports as ports
 import decsim.records.log_sources as log_sources
 import decsim.records.program as program_records
 import decsim.records.transfers as transfer_records
@@ -24,10 +25,13 @@ import decsim.records.transfers as transfer_records
 class DecisionDispatch:
     """Sends one released decision over frame_to_controller."""
 
-    def __init__(self, engine, link, controller) -> None:
+    # a card that prices no path leaves this unbound, and the decision
+    # is at the controller in the same instant
+    link = ports.Port(ports.Link, optional=True)
+    instruction_output = ports.Port(ports.InstructionReceiver)
+
+    def __init__(self, engine) -> None:
         self.engine = engine
-        self.link = link
-        self.controller = controller
 
     def dispatch_decision(self, decision, deliver) -> None:
         """Send one decision to the controller; deliver runs at the QPU."""
@@ -53,7 +57,7 @@ class DecisionDispatch:
 
     def _at_the_controller(self, decision, deliver, _transfer=None) -> None:
         """The decision is at the controller: its output takes it on."""
-        self.controller.relay_instruction(decision, deliver)
+        self.instruction_output.relay_instruction(decision, deliver)
 
     def _log_dispatch(self, decision: program_records.Decision) -> None:
         """Narrate the decision at the end it leaves by."""

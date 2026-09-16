@@ -11,6 +11,7 @@ tests/controller/test_round_assembly.py).
 
 import dataclasses
 
+import decsim.config as config
 import decsim.controller.settings as controller_settings
 import decsim.decoders.decoder_memory as decoder_memory
 import decsim.decoders.decoders as decoders
@@ -53,6 +54,18 @@ DECLARED_MICROSECONDS = {
     "frame_to_controller": 2.0,
     "controller_to_qpu": 2.0,
 }
+# the controller and the frame price their cycles on a 2 MHz clock, so
+# every declared microsecond above is a whole number of its cycles and
+# every declared instant lands on one of its edges
+DECLARED_CLOCK = config.Clock(500_000)
+
+
+def declared_cycles(name):
+    """One declared stage's microseconds, as cycles of the declared clock."""
+    ticks = config.microseconds_to_ticks(DECLARED_MICROSECONDS[name])
+    return ticks // DECLARED_CLOCK.period_ticks
+
+
 ROUND_MICROSECONDS = 1.0
 # every path whose latency the card carries, in the order the reference
 # card declares them; controller_to_strong_buffer is set per run
@@ -116,9 +129,12 @@ def declared_profile(*, strong_buffer_microseconds=None):
 
 def declared_controller(**changes):
     """The controller's declared readout and packing stages."""
+    readout_cycles = declared_cycles("readout_to_bits")
+    packing_cycles = declared_cycles("packing")
     return controller_settings.ControllerSettings(
-        readout_to_bits_microseconds=DECLARED_MICROSECONDS["readout_to_bits"],
-        packing_microseconds_per_round=DECLARED_MICROSECONDS["packing"],
+        clock=DECLARED_CLOCK,
+        readout_to_bits_cycles=readout_cycles,
+        packing_cycles_per_round=packing_cycles,
         **changes,
     )
 
@@ -132,8 +148,10 @@ def declared_qpu(round_microseconds=ROUND_MICROSECONDS):
 
 def declared_frame():
     """The frame's declared write cost."""
-    commit = DECLARED_MICROSECONDS["frame"]
-    return pauli_frame_module.PauliFrameConfig(commit_microseconds=commit)
+    write_cycles = declared_cycles("frame")
+    return pauli_frame_module.PauliFrameConfig(
+        write_cycles=write_cycles, clock=DECLARED_CLOCK
+    )
 
 
 def memory_operation(operation_id=1, **changes):

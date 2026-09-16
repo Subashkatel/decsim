@@ -175,8 +175,12 @@ class ExecutionRuntime:
         return indexed == self.lifecycle.finished_operation_ids
 
     def load_program(self, program: program_records.ExecutionProgram) -> None:
-        """Index the operations, build the dependency graph, start the roots."""
+        """Index the operations and build the program's dependency graph."""
         self.schedule.index(program)
+
+    def start(self) -> None:
+        """Release every scheduled start, then start the program's roots."""
+        program = self.schedule.program
         for operation in program.operations:
             self._release_at_scheduled_start(operation)
         for operation in program.operations:

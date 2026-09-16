@@ -51,9 +51,11 @@ THIS_FILE = pathlib.Path(__file__)
 DATA = THIS_FILE.parent / "data"
 CONFIGS = THIS_FILE.parents[2] / "configs"
 REFERENCE_YAML = CONFIGS / "reference.yaml"
-# The sweep.csv columns that carry the decoder's measured wall clock.
+# The sweep.csv columns that carry the decoder's measured wall clock, and
+# the release stage that starts from it and waits for a clock edge.
 WALL_CLOCK_POINTS = (
     "algorithm",
+    "release",
     "dep_block",
     "queue_wait",
     "service",

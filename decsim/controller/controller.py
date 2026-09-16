@@ -58,17 +58,18 @@ class Controller:
         attribution = transfer_records.TransferAttribution.for_round(
             fragment.operation_id, (fragment.patch_id,), fragment.round_index
         )
-        readout_ticks = self.settings.readout_to_bits_ticks()
+        readout_cycles = self.settings.readout_to_bits_cycles
 
         def receive():
             self.assembler.add(fragment, fragment_count, route)
 
         def at_controller(_transfer):
-            if readout_ticks == 0:
+            if readout_cycles == 0:
                 receive()
                 return
+            delay = self._readout_delay(readout_cycles)
             self.engine.schedule(
-                readout_ticks, receive, label="controller-binary-availability"
+                delay, receive, label="controller-binary-availability"
             )
 
         self.link.send(
@@ -78,6 +79,12 @@ class Controller:
             attribution,
             at_controller,
         )
+
+    def _readout_delay(self, cycles: int) -> int:
+        """The ticks from now to the controller clock edge `cycles` away."""
+        now = self.engine.now
+        edge = self.settings.clock.edge(cycles, now)
+        return edge - now
 
 
 @dataclasses.dataclass(frozen=True)

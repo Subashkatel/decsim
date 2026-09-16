@@ -76,13 +76,13 @@ class UnitTiming:
 
     before: tuple[DecoderStage, ...]
     after: tuple[DecoderStage, ...]
-    frequency_mhz: float
+    clock: config.Clock
     initiation_interval_us: Optional[float] = None
     pipeline_depth: Optional[int] = None
 
     def __post_init__(self) -> None:
-        if not math.isfinite(self.frequency_mhz) or self.frequency_mhz <= 0:
-            raise ValueError("frequency_mhz must be finite and positive")
+        if self.clock.period_ticks < 1:
+            raise ValueError("the unit's clock period must be at least a tick")
         for stage in self.before + self.after:
             if stage.name == ALGORITHM_STAGE:
                 raise ValueError(
@@ -94,18 +94,14 @@ class UnitTiming:
     def stage_ticks(self, job: decoding_records.DecodeJob) -> dict:
         """Ticks per stage, by name.
 
-        Cut from the cumulative cycle count, so the stages sum to exactly
+        A period is a whole number of ticks, so the stages sum to exactly
         the whole job's cycles at the clock, whatever the partition.
         """
         ticks = {}
-        cumulative_cycles = 0
-        previous_end = 0
+        period_ticks = self.clock.period_ticks
         for stage in self.before + self.after:
-            cumulative_cycles += stage.cycles_for(job)
-            cumulative_microseconds = cumulative_cycles / self.frequency_mhz
-            end = config.microseconds_to_ticks(cumulative_microseconds)
-            ticks[stage.name] = end - previous_end
-            previous_end = end
+            cycles = stage.cycles_for(job)
+            ticks[stage.name] = cycles * period_ticks
         return ticks
 
     def initiation_interval_ticks(self) -> Optional[int]:
@@ -265,15 +261,14 @@ class StagedDecoder(decoder_module.DecoderBase):
 
     def _steps(self, job: decoding_records.DecodeJob) -> list:
         """One step per stage; the algorithm's time is its own."""
-        ticks = self.timing.stage_ticks(job)
         steps = []
         for stage in self.timing.before:
-            step = _hardware_step(stage, job, ticks)
+            step = _hardware_step(stage, job)
             steps.append(step)
-        algorithm = _Step(ALGORITHM_STAGE, None, None)
+        algorithm = _Step(ALGORITHM_STAGE, None)
         steps.append(algorithm)
         for stage in self.timing.after:
-            step = _hardware_step(stage, job, ticks)
+            step = _hardware_step(stage, job)
             steps.append(step)
         return steps
 
@@ -295,11 +290,20 @@ class StagedDecoder(decoder_module.DecoderBase):
             self._enter_algorithm(running, engine, steps, index)
             return
         next_index = index + 1
+        delay = self._stage_delay(step, engine)
         engine.schedule(
-            step.ticks,
+            delay,
             lambda: self._leave(running, engine, steps, next_index),
             label=f"{step.name}({job.label})",
         )
+
+    def _stage_delay(self, step: "_Step", engine) -> int:
+        """The ticks to the clock edge the stage's cycles end on."""
+        if step.cycles == 0:
+            return 0
+        now = engine.now
+        edge = self.timing.clock.edge(step.cycles, now)
+        return edge - now
 
     def _leave(self, running, engine, steps: list, index: int) -> None:
         """A hardware stage's time ended: close its record, then go on."""
@@ -360,7 +364,6 @@ class _Step:
     name: str
     # None for the algorithm, whose time is the wrapped decoder's own
     cycles: Optional[int]
-    ticks: Optional[int]
     round_keys: tuple = ()
 
 
@@ -418,11 +421,11 @@ def _key(job: decoding_records.DecodeJob):
 
 
 def _hardware_step(
-    stage: DecoderStage, job: decoding_records.DecodeJob, ticks: dict
+    stage: DecoderStage, job: decoding_records.DecodeJob
 ) -> "_Step":
     cycles = stage.cycles_for(job)
     round_keys = stage.formed_round_keys(job)
-    return _Step(stage.name, cycles, ticks[stage.name], round_keys)
+    return _Step(stage.name, cycles, round_keys)
 
 
 def _stage_text(step: "_Step", job: decoding_records.DecodeJob) -> str:

@@ -25,6 +25,10 @@ import decsim.records.windows as window_records
 import decsim.trace_source as trace_source
 from decsim.decoders.decoder_manager import DecoderManager
 
+# a 1 MHz unit clock; these units declare no stage, so the period only
+# has to be a real one
+UNIT_CLOCK = config.Clock(1_000_000)
+
 
 class FixedRow(decoder_module.DecoderBase):
     """A row for the plug-in law: two microseconds, one fixed observable."""
@@ -205,7 +209,9 @@ def test_an_escalation_routed_to_a_pipelined_unit_is_refused():
     destination window it re-decodes and asks for the strong pool.
     """
     engine = engine_module.Engine()
-    timing = staged_decoder.UnitTiming((), (), 1.0, initiation_interval_us=1.0)
+    timing = staged_decoder.UnitTiming(
+        (), (), UNIT_CLOCK, initiation_interval_us=1.0
+    )
     algorithm = FixedRow()
     strong = staged_decoder.StagedDecoder(algorithm, timing)
     weak = FixedRow()

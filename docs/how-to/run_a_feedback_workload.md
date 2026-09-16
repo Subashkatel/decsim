@@ -34,6 +34,7 @@ run the same Stim memory circuit, on patches of their own.
 ```python
 """The smallest workload with a decision fed back to the QPU."""
 
+import decsim.config as config
 import decsim.decoders.settings as decoder_settings
 import decsim.frontends.settings as workload_settings
 import decsim.links.link_profiles as link_profiles
@@ -59,11 +60,9 @@ workload = workload_settings.WorkloadSettings(
 )
 settings = machine_settings.MachineSettings(
     workload=workload,
-    qpu=qpu_settings.QpuSettings(
-        distance=3, device=stim_device.StimDevice()
-    ),
+    qpu=qpu_settings.QpuSettings(distance=3, device=stim_device.StimDevice()),
     weak_decoder=decoder_settings.DecoderSettings(
-        kind=1.0, engine_megahertz=1000.0
+        kind=1.0, engine_clock=config.Clock(1000)
     ),
     links=link_profiles.logical_reference_profile(),
 )
@@ -80,7 +79,7 @@ every operation, matching the circuit built above.
 **The decoder is priced.** `kind=1.0` charges the decode one microsecond
 from a card instead of the wall clock a real decode took, so the ticks
 below are the same on your machine as on this page. A card needs its
-engine's clock, which is what `engine_megahertz` is;
+engine's clock, which is what `engine_clock` is;
 [how to run a timing study](run_a_timing_only_study.md) is the longer
 version of this choice.
 
@@ -105,8 +104,12 @@ for transfer in result.link_traffic["transfers"]:
             "bits",
         )
 for event in machine.observation.command_events.events:
-    print(event.kind, event.tick / 1000000, "us, operation",
-          event.command.operation.id)
+    print(
+        event.kind,
+        event.tick / 1000000,
+        "us, operation",
+        event.command.operation.id,
+    )
 ```
 
 ```

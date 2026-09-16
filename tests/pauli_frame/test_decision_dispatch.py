@@ -31,10 +31,17 @@ class RecordingController:
 
 
 def dispatch_over(link):
-    """The unit on one fabric, with a recording controller behind it."""
+    """The unit on one fabric, with a recording controller behind it.
+
+    A card that prices no path gives no fabric, and the link port is
+    then left unbound.
+    """
     engine = engine_module.Engine()
     controller = RecordingController(engine)
-    unit = decision_dispatch.DecisionDispatch(engine, link, controller)
+    unit = decision_dispatch.DecisionDispatch(engine)
+    unit.instruction_output = controller
+    if link is not None:
+        unit.link = link
     return engine, unit, controller
 
 
@@ -47,7 +54,9 @@ def test_the_decision_reaches_the_controller_one_crossing_later():
     engine = engine_module.Engine()
     link = priced_fabric(engine)
     controller = RecordingController(engine)
-    unit = decision_dispatch.DecisionDispatch(engine, link, controller)
+    unit = decision_dispatch.DecisionDispatch(engine)
+    unit.instruction_output = controller
+    unit.link = link
     crossing_ticks = link.expected_delay_ticks(
         transfer_records.LinkPath.FRAME_TO_CONTROLLER, None, 0
     )
@@ -66,7 +75,9 @@ def test_the_crossing_is_billed_to_the_frame_to_controller_path():
     engine = engine_module.Engine()
     link = priced_fabric(engine)
     controller = RecordingController(engine)
-    unit = decision_dispatch.DecisionDispatch(engine, link, controller)
+    unit = decision_dispatch.DecisionDispatch(engine)
+    unit.instruction_output = controller
+    unit.link = link
     delivered = []
     link.trace.transfer_delivered.connect(delivered.append)
     decision = program_records.Decision(7, releases_operation=False)

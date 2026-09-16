@@ -28,6 +28,9 @@ import decsim.records.program as program_records
 import decsim.records.transfers as transfer_records
 import tests.declared_run as declared_run
 
+# a one-tick period, so the pulse cost is its cycles and every tick is
+# an edge; the edge law has its own test below
+CLOCK = config.Clock(1)
 PULSE_TICKS = 17
 
 
@@ -38,7 +41,7 @@ def test_a_release_is_consumed_where_it_lands():
     link = fabric_module.LinkFabric(reference, engine)
     recorder = round_events.RoundEventRecorder(engine)
     output = instruction_output.InstructionOutput(
-        engine, link, None, PULSE_TICKS
+        engine, link, None, CLOCK, PULSE_TICKS
     )
     output.trace.output_event.connect(recorder.output)
     release = program_records.Decision(2, releases_operation=True)
@@ -63,7 +66,7 @@ def test_a_result_return_pays_the_pulse_cost_and_the_crossing_to_the_qpu():
     link = fabric_module.LinkFabric(reference, engine)
     recorder = round_events.RoundEventRecorder(engine)
     output = instruction_output.InstructionOutput(
-        engine, link, None, PULSE_TICKS
+        engine, link, None, CLOCK, PULSE_TICKS
     )
     output.trace.output_event.connect(recorder.output)
     to_qpu = link.expected_delay_ticks(
@@ -88,6 +91,34 @@ def test_a_result_return_pays_the_pulse_cost_and_the_crossing_to_the_qpu():
     ]
 
 
+def test_the_pulse_cost_runs_from_the_controller_clocks_next_edge():
+    """The control processor charges whole cycles, edge to edge.
+
+    gem5's clockEdge (tmp/resources/gem5/src/sim/clocked_object.hh lines
+    174-186): a decision that lands mid-cycle waits out that cycle, so
+    on a 100-tick period a decision at tick 10 has its pulse ready two
+    cycles later, at 300.
+    """
+    engine = engine_module.Engine()
+    slow_clock = config.Clock(100)
+    output = instruction_output.InstructionOutput(
+        engine, None, None, slow_clock, 2
+    )
+    result = program_records.Decision(9, releases_operation=False)
+    delivered = []
+
+    def deliver(decision):
+        delivered.append((engine.now, decision))
+
+    def relay_at_tick_ten():
+        output.relay_instruction(result, deliver)
+
+    engine.schedule(10, relay_at_tick_ten)
+    engine.run()
+
+    assert delivered == [(300, result)]
+
+
 def test_a_result_return_with_no_link_still_pays_the_pulse_cost():
     """An unpriced fabric drops the crossing, not the local work.
 
@@ -100,7 +131,7 @@ def test_a_result_return_with_no_link_still_pays_the_pulse_cost():
     engine = engine_module.Engine()
     recorder = round_events.RoundEventRecorder(engine)
     output = instruction_output.InstructionOutput(
-        engine, None, None, PULSE_TICKS
+        engine, None, None, CLOCK, PULSE_TICKS
     )
     output.trace.output_event.connect(recorder.output)
     result = program_records.Decision(9, releases_operation=False)
@@ -188,9 +219,7 @@ def test_the_feedback_chain_is_the_frame_commit_plus_each_stage_once():
     first = declared_run.memory_operation(1)
     successor = declared_run.memory_operation(2, blocked_by=1)
     operations = (first, successor)
-    controller = declared_run.declared_controller(
-        decision_to_pulse_microseconds=3.0
-    )
+    controller = declared_run.declared_controller(decision_to_pulse_cycles=6)
     machine = declared_run.weak_only_run(
         rounds=6, operations=operations, controller=controller
     )

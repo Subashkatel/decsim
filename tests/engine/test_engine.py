@@ -7,10 +7,17 @@ number first; two with the same priority run in the order they were
 scheduled. Validated exact against SimPy on 200 random programs in the
 component matrix (row X1); this test pins the same law with a sorted-list
 oracle so the suite needs no SimPy install.
+
+The priority a component passes is one of the engine's named ones, the
+way gem5's events name theirs (tmp/resources/gem5/src/sim/eventq.hh
+lines 138-244), which the last test below reads the package to check.
 """
 
+import ast
+import pathlib
 import random
 
+import decsim.engine as engine_module
 from decsim.engine import Engine
 
 
@@ -156,3 +163,53 @@ def test_an_action_that_raises_stops_the_run_and_leaves_the_rest_queued():
     assert engine.now == 2
     engine.run()
     assert ran == ["failing", "later"]
+
+
+def test_no_scheduled_action_in_the_package_names_a_bare_priority_number():
+    """A call site says which event it is scheduling, not which number.
+
+    gem5 gives every priority a name beside the reason for it
+    (tmp/resources/gem5/src/sim/eventq.hh lines 138-244); a bare integer
+    at the call says nothing about what must run before what, and two
+    call sites that share a number look unrelated.
+    """
+    engine_path = pathlib.Path(engine_module.__file__)
+    package = engine_path.parent
+    bare = bare_priority_numbers(package)
+    assert bare == []
+
+
+def bare_priority_numbers(package):
+    """Every schedule call in the package that passes a literal priority."""
+    bare = []
+    modules = package.rglob("*.py")
+    for path in sorted(modules):
+        source = path.read_text()
+        tree = ast.parse(source)
+        found = literal_priorities(tree, path)
+        bare.extend(found)
+    return bare
+
+
+def literal_priorities(tree, path):
+    """The `path:line` of every schedule call with a literal priority."""
+    found = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        name = getattr(node.func, "attr", None)
+        if name != "schedule":
+            continue
+        literal = literal_keywords(node, path)
+        found.extend(literal)
+    return found
+
+
+def literal_keywords(call, path):
+    """The `path:line` of the call when its priority is a literal."""
+    for keyword in call.keywords:
+        if keyword.arg != "priority":
+            continue
+        if isinstance(keyword.value, ast.Constant):
+            return [f"{path}:{call.lineno}"]
+    return []

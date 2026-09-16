@@ -338,6 +338,12 @@ clocks:                            # clock domain name -> MHz; a link prices its
                                    # (an mK stage, a 4K SFQ decoder) are one more
                                    # entry here. Both start at LILLIPUT's 250 MHz
                                    # ([d=3,m=2] FPGA clock, 2108.06569 Table 4).
+                                   # A component charges its cycles from the
+                                   # edge at or after the tick it stands on, so
+                                   # work begun mid-cycle waits out that cycle
+                                   # (gem5 clockEdge, src/sim/clocked_object.hh
+                                   # lines 174-186). A cost of zero cycles is
+                                   # uncharged, never rounded to an edge.
   fridge: 250.0
   room: 250.0
 

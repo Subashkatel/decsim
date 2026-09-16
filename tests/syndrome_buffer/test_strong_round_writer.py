@@ -38,6 +38,16 @@ def packet(round_index: int) -> round_records.SyndromeRoundPacket:
     return round_records.SyndromeRoundPacket(1, round_index, (fragment,))
 
 
+class RecordingWindows:
+    """The window side, keeping every room-side round it hears of."""
+
+    def __init__(self):
+        self.room_rounds = []
+
+    def accept_room_round(self, operation_id, round_index):
+        self.room_rounds.append((operation_id, round_index))
+
+
 class RecordingListener:
     def __init__(self):
         self.stored = []
@@ -50,15 +60,16 @@ class RecordingListener:
         self.released.append(round_key)
 
 
-def room_side(engine, rounds=None, listener=None, on_round_stored=None):
+def room_side(engine, rounds=None, listener=None, windows=None):
     store_settings = round_store_settings.RoundStoreSettings(rounds=rounds)
     store = round_store_module.RoundStore(store_settings)
     if listener is not None:
         store.trace.round_stored.connect(listener.round_stored)
         store.trace.round_released.connect(listener.round_released)
-    return strong_round_writer.StrongRoundWriter(
-        engine, store, on_round_stored=on_round_stored
-    )
+    writer = strong_round_writer.StrongRoundWriter(engine, store)
+    if windows is not None:
+        writer.windows = windows
+    return writer
 
 
 def cross(engine, writer, round_index: int) -> None:
@@ -76,12 +87,8 @@ def cross(engine, writer, round_index: int) -> None:
 def test_a_write_lands_after_the_crossing_and_the_listener_hears_it_once():
     engine = engine_module.Engine()
     listener = RecordingListener()
-    stored = []
-    writer = room_side(
-        engine,
-        listener=listener,
-        on_round_stored=lambda *key: stored.append(key),
-    )
+    windows = RecordingWindows()
+    writer = room_side(engine, listener=listener, windows=windows)
     reads = decoding_records.WindowReads((1, 0))
     writer.store.register_hold(reads, [(1, 1)])
 
@@ -92,7 +99,7 @@ def test_a_write_lands_after_the_crossing_and_the_listener_hears_it_once():
     assert in_flight is None
     assert writer.store.publication_tick((1, 1)) == LANDING_TICKS
     assert listener.stored == [(1, 1)]
-    assert stored == [(1, 1)]
+    assert windows.room_rounds == [(1, 1)]
 
 
 def test_the_writer_counts_a_write_in_flight_as_room_taken():

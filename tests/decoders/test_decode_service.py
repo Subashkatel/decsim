@@ -29,6 +29,13 @@ import decsim.settings as machine_settings
 import tests.declared_run as declared_run
 from decsim.decoders.decoder_manager import DecoderManager
 
+# a 1 MHz unit clock; these units declare no stage, so the period only
+# has to be a real one
+UNIT_CLOCK = config.Clock(1_000_000)
+# a one-tick period for the manager, so its dispatch cost is its cycles
+# and every tick is one of its edges
+DISPATCH_CLOCK = config.Clock(1)
+
 
 class _Gate:
     """A gate the test opens by hand."""
@@ -90,7 +97,7 @@ def _send_after(engine, ticks):
     return send
 
 
-def _manager(engine, decoder, dispatch_ticks=0):
+def _manager(engine, decoder, dispatch_cycles=0):
     router = decoders.CodeRouter(decoder)
     scheduler = schedulers.FifoScheduler()
     policy = escalation_policies.Baseline(escalation_policies.NO_CONFIDENCE)
@@ -100,15 +107,16 @@ def _manager(engine, decoder, dispatch_ticks=0):
         scheduler=scheduler,
         num_units=1,
         escalation_policy=policy,
-        dispatch_ticks=dispatch_ticks,
+        clock=DISPATCH_CLOCK,
+        dispatch_cycles=dispatch_cycles,
     )
 
 
-def _input_landing_ticks(dispatch_ticks: int) -> list:
+def _input_landing_ticks(dispatch_cycles: int) -> list:
     """The tick each of two jobs' inputs was asked for, in order."""
     engine = engine_module.Engine()
     decoder = decoders.PresetLatencyDecoder(1.0)
-    manager = _manager(engine, decoder, dispatch_ticks)
+    manager = _manager(engine, decoder, dispatch_cycles)
     asked = []
     for index in (0, 1):
         job = _job(index)
@@ -286,7 +294,9 @@ def test_a_pipelined_unit_issues_at_its_initiation_interval():
     # II = 0.5 us, C = 4 us, full depth: three windows landing at once
     # start 0.5 us apart and each returns 4 us after its start
     engine = engine_module.Engine()
-    timing = staged_decoder.UnitTiming((), (), 1.0, initiation_interval_us=0.5)
+    timing = staged_decoder.UnitTiming(
+        (), (), UNIT_CLOCK, initiation_interval_us=0.5
+    )
     algorithm = decoders.PresetLatencyDecoder(4.0)
     decoder = staged_decoder.StagedDecoder(algorithm, timing)
     manager = _manager(engine, decoder)
@@ -320,7 +330,9 @@ def test_an_initiation_interval_stays_a_lower_bound_below_the_response():
     after the first and not one response.
     """
     engine = engine_module.Engine()
-    timing = staged_decoder.UnitTiming((), (), 1.0, initiation_interval_us=10.0)
+    timing = staged_decoder.UnitTiming(
+        (), (), UNIT_CLOCK, initiation_interval_us=10.0
+    )
     algorithm = decoders.PresetLatencyDecoder(1.0)
     decoder = staged_decoder.StagedDecoder(algorithm, timing)
     manager = _manager(engine, decoder)
@@ -358,7 +370,7 @@ def test_a_declared_pipeline_depth_bounds_the_decodes_in_flight():
     """
     engine = engine_module.Engine()
     timing = staged_decoder.UnitTiming(
-        (), (), 1.0, initiation_interval_us=1.0, pipeline_depth=2
+        (), (), UNIT_CLOCK, initiation_interval_us=1.0, pipeline_depth=2
     )
     algorithm = decoders.PresetLatencyDecoder(100.0)
     decoder = staged_decoder.StagedDecoder(algorithm, timing)
@@ -405,7 +417,9 @@ def test_a_pipelined_unit_refuses_two_in_flight_response_times():
     add_flight refuses loudly instead of reordering the results.
     """
     engine = engine_module.Engine()
-    timing = staged_decoder.UnitTiming((), (), 1.0, initiation_interval_us=1.0)
+    timing = staged_decoder.UnitTiming(
+        (), (), UNIT_CLOCK, initiation_interval_us=1.0
+    )
     algorithm = decoders.FunctionLatencyDecoder(latency_for_window)
     decoder = staged_decoder.StagedDecoder(algorithm, timing)
     manager = _manager(engine, decoder)
@@ -429,7 +443,9 @@ def test_a_pipelined_unit_serves_a_strong_primary_window():
     publish Buffer 1 at 15, the 6 us strong-buffer transfer lands the
     input at 21, and the 100 us row returns at 121.
     """
-    timing = staged_decoder.UnitTiming((), (), 1.0, initiation_interval_us=1.0)
+    timing = staged_decoder.UnitTiming(
+        (), (), UNIT_CLOCK, initiation_interval_us=1.0
+    )
     algorithm = decoders.PresetLatencyDecoder(100.0)
     decoder = staged_decoder.StagedDecoder(algorithm, timing)
     machine = strong_primary_run(decoder)

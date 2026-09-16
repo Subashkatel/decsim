@@ -33,15 +33,26 @@ class DecodeLog:
 
 
 def infinite(engine):
-    """The idealized row, built the way the root builds it."""
+    """The idealized row, built and started the way the root does."""
     collaborators = magic_state_factories.FactoryCollaborators(
         engine=engine, decode_service=None, round_ticks=0
     )
-    return magic_state_factories.InfiniteFactory(collaborators)
+    factory = magic_state_factories.InfiniteFactory(collaborators)
+    factory.start()
+    return factory
 
 
 def distillation(engine, *, decode_service=None, **arguments):
-    """One 15-to-1 row, built the way the root builds it."""
+    """One 15-to-1 row, built and started the way the root does."""
+    factory = unstarted_distillation(
+        engine, decode_service=decode_service, **arguments
+    )
+    factory.start()
+    return factory
+
+
+def unstarted_distillation(engine, *, decode_service=None, **arguments):
+    """The same row, built and not started."""
     collaborators = magic_state_factories.FactoryCollaborators(
         engine=engine,
         decode_service=decode_service,
@@ -52,14 +63,16 @@ def distillation(engine, *, decode_service=None, **arguments):
 
 
 def multi_level(engine, *, round_ticks, decode_service=None, **arguments):
-    """One level chain, built the way the root builds it."""
+    """One level chain, built and started the way the root does."""
     collaborators = magic_state_factories.FactoryCollaborators(
         engine=engine,
         decode_service=decode_service,
         round_ticks=round_ticks,
         arguments=arguments,
     )
-    return magic_state_factories.MultiLevelDistillationFactory(collaborators)
+    factory = magic_state_factories.MultiLevelDistillationFactory(collaborators)
+    factory.start()
+    return factory
 
 
 def single_stage(engine, **settings):
@@ -714,3 +727,30 @@ def test_a_continuous_chain_refuses_an_empty_buffer_capacity():
     level = magic_state_factories.DistillLevel(unit_count=1, distance=3)
     with pytest.raises(ValueError, match="buffer_capacity >= 1"):
         chain(engine, [level], production_mode="continuous", buffer_capacity=0)
+
+
+def test_a_continuous_row_queues_nothing_until_it_is_started():
+    """The constructor wires the row; start queues its first attempt.
+
+    gem5 splits the constructor from startup, "the appropriate place to
+    schedule initial event(s)"
+    (tmp/resources/gem5/src/sim/sim_object.hh lines 194 and 280), so the
+    order the root builds its components in cannot move a tick.
+    """
+    engine = decsim.engine.Engine()
+    factory = unstarted_distillation(
+        engine,
+        unit_count=1,
+        attempt_ticks=100,
+        correction_round_count=0,
+        correction_decode_count=0,
+        production_mode="continuous",
+        buffer_capacity=1,
+    )
+    assert engine.idle is True
+
+    factory.start()
+
+    assert engine.idle is False
+    engine.run()
+    assert factory.stored_state_count == 1

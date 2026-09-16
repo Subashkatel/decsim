@@ -20,6 +20,7 @@ import dataclasses
 import functools
 from typing import Optional
 
+import decsim.engine as engine_module
 import decsim.records.identity as identity_records
 import decsim.records.program as program_records
 
@@ -413,7 +414,7 @@ class FeedbackStreams:
             0,
             emit_round,
             label=f"protected-round({stream_id},{next_round})",
-            priority=1,
+            priority=engine_module.Priority.PROTECTED_ROUND,
         )
 
     def _emit_protected_round(self, stream_id) -> None:
@@ -439,7 +440,10 @@ class FeedbackStreams:
             live.next_boundary_tick = None
             seal = functools.partial(self._seal_protected_region, stream_id)
             self.engine.schedule(
-                0, seal, label=f"protected-seal({stream_id})", priority=2
+                0,
+                seal,
+                label=f"protected-seal({stream_id})",
+                priority=engine_module.Priority.PROTECTED_SEAL,
             )
             return
         next_boundary_round = live.next_round + 1

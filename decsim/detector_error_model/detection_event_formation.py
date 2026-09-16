@@ -33,7 +33,7 @@ class ControllerSideFormation:
     Google 2408.13687 lines 474-476: the workstation converts the
     measurements into detections and streams those to the decoding
     software, so the round crosses the store and the tier's input link
-    at its detection-event width. departure_ticks is what that
+    at its detection-event width. detection_event_formation_cycles is what that
     conversion costs the controller, charged once per round on the
     controller's clock before the round leaves it.
     """
@@ -41,10 +41,10 @@ class ControllerSideFormation:
     def __init__(
         self,
         former: Optional[ports.DetectionEventFormer],
-        departure_ticks: int,
+        detection_event_formation_cycles: int,
     ) -> None:
         self.former = former
-        self.departure_ticks = departure_ticks
+        self.detection_event_formation_cycles = detection_event_formation_cycles
 
     def form_before_departure(self, fragments: tuple) -> tuple:
         """The round's fragments as they leave the controller."""
@@ -79,9 +79,9 @@ class DecoderSideFormation:
     def __init__(
         self,
         former: Optional[ports.DetectionEventFormer],
-        departure_ticks: int,
+        detection_event_formation_cycles: int,
     ) -> None:
-        if departure_ticks > 0:
+        if detection_event_formation_cycles > 0:
             raise ValueError(
                 "controller.detection_event_cycles_per_round charges the "
                 "controller for a conversion this run does at the decoder "
@@ -90,7 +90,7 @@ class DecoderSideFormation:
                 "detection_event_latency_cycles, or write null"
             )
         self.former = _remembered(former)
-        self.departure_ticks = 0
+        self.detection_event_formation_cycles = 0
 
     def form_before_departure(self, fragments: tuple) -> tuple:
         """The round's fragments as they leave the controller: raw."""

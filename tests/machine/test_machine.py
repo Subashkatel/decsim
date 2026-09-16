@@ -65,6 +65,9 @@ THIS_FILE = pathlib.Path(__file__)
 TESTS_DIRECTORY = THIS_FILE.parents[1]
 CONFIGS = TESTS_DIRECTORY.parent / "configs"
 CYCLE_TICKS = config.microseconds_to_ticks(1.0)
+# the decoder engines of these runs: 250 MHz and 100 MHz
+FAST_ENGINE_CLOCK = config.Clock(4000)
+ENGINE_CLOCK = config.Clock(10_000)
 
 
 def tier_rows() -> str:
@@ -89,6 +92,17 @@ class RecordingReceiver:
         self.arrivals.append((self.engine.now, readout.round_index))
 
 
+class FinishingRuntime:
+    """A runtime whose one move is to stop the clock when a body ends."""
+
+    def __init__(self, qpu: cycle_clock.QPUDevice):
+        self.qpu = qpu
+
+    def body_done(self, operation: program_records.Operation) -> None:
+        del operation
+        self.qpu.finish()
+
+
 class FakeWeakDecoder(decoder_module.DecoderBase):
     """A table row for the plug-in test: fixed latency, no correction."""
 
@@ -109,18 +123,11 @@ def test_readouts_reach_the_receiver_in_cycle_order_cycle_ticks_apart():
     engine = engine_module.Engine()
     receiver = RecordingReceiver(engine)
     device = syndrome_devices.TimingOnlyDevice()
-
-    def finish_the_program(operation: program_records.Operation) -> None:
-        del operation
-        qpu.finish()
-
-    qpu = cycle_clock.QPUDevice(
-        engine,
-        device,
-        CYCLE_TICKS,
-        readout_receiver=receiver,
-        completion_receiver=finish_the_program,
-    )
+    cycle_clock_domain = config.Clock(CYCLE_TICKS)
+    qpu = cycle_clock.QPUDevice(engine, device, cycle_clock_domain)
+    runtime = FinishingRuntime(qpu)
+    qpu.readout_receiver = receiver
+    qpu.runtime = runtime
     operation = program_records.Operation(
         id=1, name="memory", qubits=(0,), patches=(0,)
     )
@@ -179,6 +186,30 @@ def test_a_second_table_row_runs_gate_point_one():
     assert result.operation_results[0].logical_observables is not None
 
 
+def test_no_component_queues_an_event_until_the_machine_is_started():
+    """Build wires the graph; start queues the first events.
+
+    gem5 splits the constructor, which takes a component's
+    collaborators, from startup, "the appropriate place to schedule
+    initial event(s)"
+    (tmp/resources/gem5/src/sim/sim_object.hh lines 194 and 280). With
+    that split the order the root builds its components in cannot move a
+    tick, because no component has queued anything while the rest of the
+    machine is still being built.
+    """
+    config_path = CONFIGS / "weak_decoder_baseline.yaml"
+    config = experiment.load_experiment(config_path)
+    settings = config.point_settings(
+        physical_error_probability=0.003, distance=3, round_period_us=1.0
+    )
+    machine = machine_module.Machine.build(settings, 0)
+    assert machine.engine.idle is True
+
+    machine.start()
+
+    assert machine.engine.idle is False
+
+
 def test_a_decoder_kind_off_the_table_is_refused_naming_the_rows():
     weak_decoder = decoder_settings.DecoderSettings(kind="lookup_table")
     settings = machine_settings.MachineSettings(weak_decoder=weak_decoder)
@@ -216,11 +247,11 @@ def test_a_yaml_section_nobody_owns_is_refused_naming_the_sections():
         )
 
 
-def test_the_constructor_wiring_reaches_its_components():
-    """Every cross-reference is made by constructor, none left None."""
+def test_the_wiring_reaches_its_components():
+    """Every cross-reference is bound, by port or by constructor."""
     settings = machine_settings.MachineSettings()
     machine = machine_module.Machine.build(settings)
-    assert machine.qpu.receivers.readout is machine.controller
+    assert machine.qpu.readout_receiver is machine.controller
     assert machine.execution_runtime.issuer is machine.issuer
     manager = machine.decoder_manager
     assert machine.window_manager.requester.decode_queue is manager
@@ -275,7 +306,7 @@ def test_a_load_only_job_on_a_measured_unit_holds_it_for_zero_algorithm_ticks():
     with a model holds the unit for its measured time.
     """
     weak_decoder = decoder_settings.DecoderSettings(
-        kind="pymatching", engine_megahertz=250.0
+        kind="pymatching", engine_clock=FAST_ENGINE_CLOCK
     )
     settings = _two_patch_memory(weak_decoder)
     machine = machine_module.Machine.build(settings, 0)
@@ -311,10 +342,10 @@ def _switching_memory(weak_kind: str, confidence: str):
         gap_threshold_nats=nats,
     )
     weak_decoder = decoder_settings.DecoderSettings(
-        kind=weak_kind, engine_megahertz=100.0
+        kind=weak_kind, engine_clock=ENGINE_CLOCK
     )
     strong_decoder = decoder_settings.DecoderSettings(
-        kind="pymatching", engine_megahertz=100.0
+        kind="pymatching", engine_clock=ENGINE_CLOCK
     )
     operation = program_records.Operation(
         id=1, name="memory", qubits=(0,), patches=(0,), circuit=MEMORY_CIRCUIT
@@ -475,14 +506,14 @@ def test_the_cluster_gap_is_not_a_tier_kind_under_any_escalation(
     """
     tiers = {
         "weak": decoder_settings.DecoderSettings(
-            kind="pymatching", engine_megahertz=100.0
+            kind="pymatching", engine_clock=ENGINE_CLOCK
         ),
         "strong": decoder_settings.DecoderSettings(
-            kind="belief_matching", engine_megahertz=100.0
+            kind="belief_matching", engine_clock=ENGINE_CLOCK
         ),
     }
     tiers[tier] = decoder_settings.DecoderSettings(
-        kind="union_find_cluster_gap", engine_megahertz=100.0
+        kind="union_find_cluster_gap", engine_clock=ENGINE_CLOCK
     )
     escalation = escalation_settings.EscalationSettings(kind=escalation_kind)
     if escalation_kind == "switching":
@@ -505,10 +536,8 @@ def test_the_cluster_gap_is_not_a_tier_kind_under_any_escalation(
 class CountingRoundStore(round_store_module.RoundStore):
     """A table row for the plug-in test: the store, counting its writes."""
 
-    def __init__(self, settings, *, on_slot_freed=None):
-        round_store_module.RoundStore.__init__(
-            self, settings, on_slot_freed=on_slot_freed
-        )
+    def __init__(self, settings):
+        round_store_module.RoundStore.__init__(self, settings)
         self.stored_count = 0
 
     def accept_packed_round(self, packet, *, publication_tick):
@@ -591,6 +620,9 @@ class AlwaysReadyFactory:
     def __init__(self, collaborators):
         self.engine = collaborators.engine
         self.requests = []
+
+    def start(self):
+        """Nothing is made ahead of a request, so nothing is queued."""
 
     def request(self, operation_id, callback):
         """Deliver at once and remember who asked."""

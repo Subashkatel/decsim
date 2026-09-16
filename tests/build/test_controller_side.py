@@ -10,7 +10,6 @@ from unittest import mock
 import pytest
 
 import decsim.build.controller_side as controller_side
-import decsim.config as config
 import decsim.controller.settings as controller_settings
 import decsim.decoders.decoders as decoders
 import decsim.ports as ports
@@ -76,16 +75,15 @@ def test_each_row_is_built_with_the_runs_former_and_the_controllers_cost():
 def test_the_controllers_formation_cost_reaches_the_row_that_charges_it():
     forms_here = _settings(
         detection_events_formed_at="controller",
-        detection_event_microseconds_per_round=0.02,
+        detection_event_cycles_per_round=5,
     )
     device = _DeviceThatForms()
-    charged_ticks = config.microseconds_to_ticks(0.02)
 
     at_the_controller = controller_side.build_detection_events(
         forms_here, device
     )
 
-    assert at_the_controller.departure_ticks == charged_ticks
+    assert at_the_controller.detection_event_formation_cycles == 5
 
 
 def test_a_placement_written_outside_decsim_plugs_in_as_one_row():
@@ -218,9 +216,9 @@ def test_the_process_name_says_which_point_a_trace_is_of():
 class _PlacementOfMyOwn:
     """A placement row written outside decsim: it forms nothing at all."""
 
-    def __init__(self, former, departure_ticks):
+    def __init__(self, former, detection_event_formation_cycles):
         self.former = former
-        self.departure_ticks = departure_ticks
+        self.detection_event_formation_cycles = detection_event_formation_cycles
 
     def form_before_departure(self, fragments):
         """The round's fragments as they leave the controller."""

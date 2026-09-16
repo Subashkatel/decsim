@@ -104,14 +104,15 @@ def writer_with(
     held = round_writes.HeldRounds(engine, on_full)
     held.trace.round_event.connect(recorder.record)
     settings = round_store_settings.RoundStoreSettings(rounds=weak_rounds)
-    weak_store = round_store_module.RoundStore(
-        settings, on_slot_freed=held.retry
-    )
+    weak_store = round_store_module.RoundStore(settings)
+    weak_store.held_rounds = held
     transmitter = RecordingTransmitter(engine)
     profile = link_profiles.logical_reference_profile()
     links = fabric_module.LinkFabric(profile, engine)
     windows = RecordingWindows()
-    weak_input = round_input.RoundStoreInput(engine, weak_store, None, windows)
+    weak_input = round_input.RoundStoreInput(engine)
+    weak_input.store = weak_store
+    weak_input.windows = windows
     writer = round_writes.RoundWriter(
         engine,
         links,

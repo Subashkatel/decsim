@@ -15,6 +15,7 @@ import dataclasses
 import functools
 from typing import Callable
 
+import decsim.config as config
 import decsim.records.program as program_records
 import decsim.records.rounds as round_records
 import decsim.records.transfers as transfer_records
@@ -29,11 +30,14 @@ class InstructionOutput:
     CONTROL_PULSE_COMMAND_ISSUED, each carrying its payload.
     """
 
-    def __init__(self, engine, link, qpu, pulse_ticks: int) -> None:
+    def __init__(
+        self, engine, link, qpu, clock: config.Clock, pulse_cycles: int
+    ) -> None:
         self.engine = engine
         self.link = link
         self.qpu = qpu
-        self.pulse_ticks = pulse_ticks
+        self.clock = clock
+        self.pulse_cycles = pulse_cycles
         self.trace = _TraceSources()
 
     def start_preloaded(
@@ -132,9 +136,18 @@ class InstructionOutput:
                 delivered,
             )
 
+        delay = self._pulse_delay()
         self.engine.schedule(
-            self.pulse_ticks, output_ready, label="controller-output-ready"
+            delay, output_ready, label="controller-output-ready"
         )
+
+    def _pulse_delay(self) -> int:
+        """The ticks to the edge the pulse processing ends on; zero is free."""
+        if self.pulse_cycles == 0:
+            return 0
+        now = self.engine.now
+        edge = self.clock.edge(self.pulse_cycles, now)
+        return edge - now
 
     def _fire(self, kind: str, operation_id, payload) -> None:
         event = round_records.ControllerOutputEvent(

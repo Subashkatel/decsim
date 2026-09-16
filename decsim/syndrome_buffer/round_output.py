@@ -20,6 +20,7 @@ the store is the incoming port's (round_input.py); this one sends.
 import functools
 from typing import Callable
 
+import decsim.ports as ports
 import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
 import decsim.records.transfers as transfer_records
@@ -28,18 +29,17 @@ import decsim.records.transfers as transfer_records
 class RoundStoreOutput:
     """One store's link to the decoders it feeds, bound once by the root."""
 
+    transfers = ports.Port(ports.WindowTransfers)
+    store = ports.Port(ports.RoundStore)
+
     def __init__(
         self,
-        transfers,
         path: transfer_records.LinkPath,
         name: str,
-        store,
     ) -> None:
-        self.transfers = transfers
         self.path = path
         # the store this port belongs to, as the data path names it
         self.name = name
-        self.store = store
 
     def send_input(
         self,

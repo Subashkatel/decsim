@@ -5,8 +5,9 @@ The frame stores that correction and refuses a second one for the same
 window. A stream's total correction is all of its window corrections
 XORed together.
 
-Every write costs a fixed number of ticks. The caller is called back only
-after that time has passed, so anything waiting on the write waits too.
+Every write costs a fixed number of cycles of the frame unit's clock.
+The caller is called back only when that write lands on a clock edge, so
+anything waiting on the write waits too.
 
 The XOR fold follows PECOS's Pauli frame accumulator. Applying a
 correction exactly once follows Riesebos, "Pauli Frames for Quantum
@@ -18,7 +19,6 @@ et al. 2605.04892).
 """
 
 import dataclasses
-import math
 from collections.abc import Mapping
 from typing import Callable, Optional
 
@@ -46,21 +46,17 @@ class PauliFrameConfig:
     """
 
     kind: str = "logical_register"
-    commit_microseconds: float = 0.0
+    write_cycles: int = 0
+    clock: Optional[config.Clock] = None
     zero_commit_cost_justification: Optional[str] = None
 
     def __post_init__(self) -> None:
-        cost = self.commit_microseconds
-        if not math.isfinite(cost) or cost < 0:
-            raise ValueError(
-                "commit_microseconds must be finite and not negative"
-            )
-        ticks = config.microseconds_to_ticks(cost)
-        if cost > 0 and ticks == 0:
-            raise ValueError(
-                "commit_microseconds is positive but rounds to zero ticks"
-            )
-        is_free = cost == 0
+        cycles = self.write_cycles
+        if cycles < 0:
+            raise ValueError("write_cycles must not be negative")
+        is_free = cycles == 0
+        if not is_free and self.clock is None:
+            raise ValueError("a charged write needs the clock it is priced on")
         has_justification = bool(self.zero_commit_cost_justification)
         if is_free and not has_justification:
             raise ValueError(
@@ -78,20 +74,14 @@ class PauliFrameConfig:
         """The `pauli_frame` section: a kind, and write_cycles on its clock."""
         kind = section.get("kind", "logical_register")
         tables.row(FRAMES, "pauli_frame.kind", kind)
-        clock = section["clock"]
+        clock = clocks.clock(section["clock"])
         write_cycles = section["write_cycles"]
-        commit_microseconds = clocks.microseconds(write_cycles, clock)
-        return cls(kind=kind, commit_microseconds=commit_microseconds)
-
-    def commit_ticks(self) -> int:
-        """The write cost in ticks."""
-        return config.microseconds_to_ticks(self.commit_microseconds)
+        return cls(kind=kind, write_cycles=write_cycles, clock=clock)
 
     def resolve(self, engine):
         """Build the row these settings name, on the run's engine."""
         row = tables.row(FRAMES, "pauli_frame.kind", self.kind)
-        commit_ticks = self.commit_ticks()
-        return row(engine, commit_ticks=commit_ticks)
+        return row(engine, clock=self.clock, write_cycles=self.write_cycles)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -129,9 +119,12 @@ class PauliFrame:
     PauliFrameCommitRecord.
     """
 
-    def __init__(self, engine, *, commit_ticks: int) -> None:
+    def __init__(
+        self, engine, *, clock: Optional[config.Clock], write_cycles: int
+    ) -> None:
         self.engine = engine
-        self.commit_ticks = commit_ticks
+        self.clock = clock
+        self.write_cycles = write_cycles
         self._state = _FrameState()
         self.trace = _TraceSources()
 
@@ -150,7 +143,7 @@ class PauliFrame:
         tier = request_key.tier.value
         self._log_received(tier, window_key, observables)
         accepted_ticks = self.engine.now
-        committed_ticks = accepted_ticks + self.commit_ticks
+        committed_ticks = self._write_edge(accepted_ticks)
         record = PauliFrameCommitRecord(
             window_key=window_key,
             tier=tier,
@@ -205,9 +198,10 @@ class PauliFrame:
         if commit_ticks:
             first_commit_ticks = commit_ticks[0]
             last_commit_ticks = commit_ticks[-1]
-        charged_ticks = commit_count * self.commit_ticks
+        write_ticks = self._write_ticks()
+        charged_ticks = commit_count * write_ticks
         return PauliFrameSnapshot(
-            configured_commit_ticks=self.commit_ticks,
+            configured_commit_ticks=write_ticks,
             commit_count=commit_count,
             pending_write_count=len(self._state.pending_by_window),
             charged_ticks=charged_ticks,
@@ -227,14 +221,29 @@ class PauliFrame:
         )
 
     def _charge_write(self, window_key) -> None:
-        if self.commit_ticks == 0:
+        if self.write_cycles == 0:
             self._finish_write(window_key)
             return
+        now = self.engine.now
+        edge = self._write_edge(now)
+        delay = edge - now
         self.engine.schedule(
-            self.commit_ticks,
+            delay,
             lambda: self._finish_write(window_key),
             label=f"pauli frame commit {window_key}",
         )
+
+    def _write_edge(self, now: int) -> int:
+        """The clock edge the write started at `now` lands on."""
+        if self.write_cycles == 0:
+            return now
+        return self.clock.edge(self.write_cycles, now)
+
+    def _write_ticks(self) -> int:
+        """One write's cost in ticks, the cost the snapshot reports."""
+        if self.write_cycles == 0:
+            return 0
+        return self.clock.period_ticks * self.write_cycles
 
     def _has_accepted(self, window_key) -> bool:
         is_pending = window_key in self._state.pending_by_window

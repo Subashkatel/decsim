@@ -111,7 +111,9 @@ def writer_with(
     profile = link_profiles.logical_reference_profile()
     links = fabric_module.LinkFabric(profile, engine)
     windows = RecordingWindows()
-    weak_input = round_input.RoundStoreInput(engine, weak_store, None, windows)
+    weak_input = round_input.RoundStoreInput(engine)
+    weak_input.store = weak_store
+    weak_input.windows = windows
     writer = round_writes.RoundWriter(
         engine,
         links,

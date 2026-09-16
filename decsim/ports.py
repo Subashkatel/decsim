@@ -19,6 +19,9 @@ a row of the table must offer), written as a Protocol because the
 implementations fill it without inheriting. Observation (metrics, the
 traffic ledger, the trace) reaches a component through callbacks it
 fires, never through a port, so every component runs with no observer.
+
+A component names its neighbours by declaring a Port (below) for each
+one, and the root binds them by assignment once every component exists.
 """
 
 from collections.abc import Sequence
@@ -29,6 +32,80 @@ import decsim.records.program as program_records
 import decsim.records.rounds as round_records
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
+
+
+class Port:
+    """One neighbour a component talks to, named on the class, bound once.
+
+    A component declares a port as a class attribute and reads it as an
+    ordinary attribute; the root binds it by assignment once every
+    component exists, which is gem5's script assigning one port to
+    another (tmp/resources/gem5/configs/learning_gem5/part1/simple.py:68).
+    The port carries the Protocol its peer answers, so a class points at
+    this file rather than the other way about.
+
+    Two refusals, both gem5's. A second bind names the port, the peer it
+    holds and the peer offered, as PortRef.connect does
+    (tmp/resources/gem5/src/python/m5/params/port_params.py:109-114). A
+    required port read before it is bound raises, as gem5's default peer
+    throws UnboundPortException
+    (tmp/resources/gem5/src/mem/port.cc:62-65); an optional port reads as
+    None instead, which is the neighbour a run does not have.
+
+    Whether the peer answers the Protocol is not asked here. Every bind
+    site is decsim's own build code, so no yaml and no call on the
+    experiments layer can offer a stranger, and one that a change offered
+    would raise at its first call naming the method it lacks. The
+    question belongs where the wiring becomes input, which is the root
+    reading a table of wires, and it is asked of the protocol this port
+    carries.
+
+    The name arrives at class creation rather than at construction,
+    because a descriptor learns what it was called only once the class
+    body has run; gem5 fills it the same way, from its metaclass
+    (tmp/resources/gem5/src/python/m5/SimObject.py:353-357).
+    """
+
+    def __init__(self, protocol, optional: bool = False) -> None:
+        self.protocol = protocol
+        self.optional = optional
+        self.name = ""
+
+    def __set_name__(self, owner, name: str) -> None:
+        """Take the name the class body gave this port."""
+        del owner
+        self.name = name
+
+    def __get__(self, instance, owner=None):
+        """The bound peer; None for an unbound optional port."""
+        if instance is None:
+            return self
+        peer = instance.__dict__.get(self.name)
+        if peer is not None:
+            return peer
+        if self.optional:
+            return None
+        full_name = self._full_name(instance)
+        raise RuntimeError(f"{full_name} was read before it was bound")
+
+    def __set__(self, instance, peer) -> None:
+        """Bind one peer, and only one."""
+        bound = instance.__dict__.get(self.name)
+        if bound is not None:
+            full_name = self._full_name(instance)
+            held = type(bound)
+            offered = type(peer)
+            raise ValueError(
+                f"{full_name} is already bound to {held.__name__}, "
+                f"cannot bind {offered.__name__}"
+            )
+        instance.__dict__[self.name] = peer
+
+    def _full_name(self, instance) -> str:
+        """The port as a refusal names it: the class, then the port."""
+        owner = type(instance)
+        return f"{owner.__name__}.{self.name}"
+
 
 # ------------------------------------------------ the QPU emits a readout
 
@@ -204,6 +281,48 @@ class RoundStoreInput(Protocol):
         on_delivered: Callable[[], None],
     ) -> None:
         """Send one timing-only round to the decoder side the store feeds."""
+
+
+@runtime_checkable
+class RoundStoreOutput(Protocol):
+    """A round store's outgoing port, as whoever asks for a round sees it.
+
+    A round leaves by the end that holds it, so this end executes every
+    send and frees the slot the round held. Two kinds leave: a decode
+    job's input, asked for by the window side or by the strong
+    re-decode, and a timing-only round the controller packed. Each send
+    answers the ticks the link expects, so the asker charges nothing of
+    its own.
+    """
+
+    def send_input(
+        self,
+        job: decoding_records.DecodeJob,
+        on_landed: Callable[[], None],
+    ) -> int:
+        """Move one job's rounds to its unit; the delay the link expects."""
+
+    def land_held_input(
+        self,
+        job: decoding_records.DecodeJob,
+        on_landed: Callable[[], None],
+    ) -> int:
+        """Land a resubmitted job whose rounds never left: no delay."""
+
+    def send_memory_round(
+        self,
+        packed: round_records.PackedRound,
+        on_delivered: Callable[[], None],
+    ) -> None:
+        """Send one timing-only round and free its slot at the delivery."""
+
+    def input_send_for(
+        self, job: decoding_records.DecodeJob, is_input_held: bool
+    ) -> Callable[[Callable[[], None]], int]:
+        """The send the decoder manager calls at dispatch, bound to a job."""
+
+    def name_this_store(self, job: decoding_records.DecodeJob) -> None:
+        """Stamp the job with the name of the store its rounds sit in."""
 
 
 @runtime_checkable

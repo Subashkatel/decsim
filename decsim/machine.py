@@ -3,8 +3,7 @@
 A Machine is gem5's shape (src/python/m5/SimObject.py: a SimObject's
 Python class is its params, `allClasses` maps a name to a class; the
 learning_gem5 simple.py script names each component once and assigns
-its ports), with the wiring done by constructor because Python needs
-no second bind step. A MachineSettings (decsim/settings.py) holds one
+its ports). A MachineSettings (decsim/settings.py) holds one
 settings record per yaml section, each built by its own package's
 `from_yaml`, and each package's own settings module maps that section's
 `kind` to the class that fills the port, sinter's `BUILT_IN_DECODERS`
@@ -12,10 +11,12 @@ settings record per yaml section, each built by its own package's
 pluggable part. A new component is one class that fills its port in
 decsim/ports.py and one row in its package's table.
 
-Every component is wired by constructor; nothing is bound to a
-component after it is built. Where two components refer to each other
-the per-job callback law breaks the cycle (SimPy's callback on the
-event, simpy/core.py step()): the submitting side carries the return
+A component that declares ports (decsim/ports.py, Port) is wired by
+assignment once it is built, which is gem5's script binding one port to
+another (configs/learning_gem5/part1/simple.py:68); every other
+component is still wired by constructor. Where two components refer to
+each other the per-job callback law breaks the cycle (SimPy's callback
+on the event, simpy/core.py step()): the submitting side carries the return
 path with the job, so the decoder manager is built first and the
 window side takes it as its DecodeQueue; the strong redecode asks it
 to await and accept a strong selection over the same port. The
@@ -34,8 +35,9 @@ Dijkstra's THE, dijkstra_the.txt 52-57). The levels, leaves first, are
 what tools/check_uses_graph.py prints and check.sh enforces:
 
     0  config, records, tables, trace_source
-    1  engine, pauli_frame, ports, seeding, syndrome_buffer
-    2  detector_error_model, escalation, links, windows
+    1  engine, ports, seeding
+    2  detector_error_model, escalation, links, pauli_frame,
+       syndrome_buffer, windows
     3  controller, decoders, qpu
     4  confidence, frontends, observe
     5  settings
@@ -214,9 +216,10 @@ class Machine:
         memory_arrivals = decoder_build.build_memory_round_arrivals(
             engine, window_manager
         )
-        transmitter = round_transmission.RoundTransmitter(
-            engine, links, memory_arrivals, store_input
-        )
+        transmitter = round_transmission.RoundTransmitter(engine)
+        transmitter.link = links
+        transmitter.memory_arrivals = memory_arrivals
+        transmitter.store_input = store_input
         publishes_from_strong_store = not window_manager.reads_windows_from(
             round_store
         )
@@ -311,9 +314,9 @@ class Machine:
             memory_model=None,
         )
         seeding.bind_run_seed(root_seed, seed_roots)
-        decision_dispatch = decision_dispatch_module.DecisionDispatch(
-            engine, links, instruction_output
-        )
+        decision_dispatch = decision_dispatch_module.DecisionDispatch(engine)
+        decision_dispatch.link = links
+        decision_dispatch.instruction_output = instruction_output
         conditional_release.connect(
             decision_dispatch, execution_runtime.on_decision
         )

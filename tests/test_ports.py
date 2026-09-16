@@ -1,14 +1,27 @@
-"""Every port declares what a caller outside the owning package calls.
+"""Every port declares what a caller calls, and binds once when it is set.
 
 Lampson: an interface is the set of assumptions two programs make about
 each other, so a row written from the port alone must answer every call
 the shipped callers make (note 17 P4). The law is read out of the tree
 with ast: the Protocol bodies of decsim/ports.py against the attribute
 names the callers reach for through their collaborator reference.
+
+The Port declaration carries the second law. Its three rules are gem5's:
+a port assigned twice is refused naming the port, the peer it holds and
+the peer offered, as PortRef.connect does
+(tmp/resources/gem5/src/python/m5/params/port_params.py:109-114); a
+required port read before it is bound raises, as gem5's default peer
+throws UnboundPortException on any call
+(tmp/resources/gem5/src/mem/port.cc:62-65, 86-101); and an optional port
+reads as None, which is the peer a run does not have.
 """
 
 import ast
 import pathlib
+
+import pytest
+
+import decsim.ports as ports
 
 TESTS_FILE = pathlib.Path(__file__)
 TESTS_PATH = TESTS_FILE.resolve()
@@ -274,3 +287,80 @@ def test_every_protocol_outside_the_port_file_is_one_packages_seam():
         if sites:
             crossing[name] = sites
     assert crossing == {}
+
+
+class _Sender:
+    """A component with one required port and one optional one."""
+
+    link = ports.Port(ports.Link)
+    spare = ports.Port(ports.Link, optional=True)
+
+
+class _Fabric:
+    """A peer that answers the Link port."""
+
+    def expected_delay_ticks(self, path, payload_bits, now_ticks) -> int:
+        del path, payload_bits, now_ticks
+        return 0
+
+    def send(self, path, payload_bits, now_ticks, attribution, on_delivered):
+        del path, payload_bits, now_ticks, attribution
+        on_delivered(None)
+
+
+def test_a_bound_port_reads_back_as_the_peer():
+    sender = _Sender()
+    fabric = _Fabric()
+
+    sender.link = fabric
+
+    assert sender.link is fabric
+
+
+def test_two_components_bind_one_declared_port_to_their_own_peers():
+    """The peer lives on the instance, so one class serves every seat."""
+    first = _Sender()
+    second = _Sender()
+    one = _Fabric()
+    another = _Fabric()
+
+    first.link = one
+    second.link = another
+
+    assert first.link is one
+    assert second.link is another
+
+
+def test_a_second_bind_names_the_port_the_peer_held_and_the_peer_offered():
+    sender = _Sender()
+    sender.link = _Fabric()
+
+    with pytest.raises(ValueError) as refusal:
+        sender.link = _Sender()
+
+    assert str(refusal.value) == (
+        "_Sender.link is already bound to _Fabric, cannot bind _Sender"
+    )
+
+
+def test_a_required_port_read_before_it_is_bound_is_refused():
+    sender = _Sender()
+
+    with pytest.raises(RuntimeError) as refusal:
+        sender.link.send(None, None, 0, None, None)
+
+    assert str(refusal.value) == "_Sender.link was read before it was bound"
+
+
+def test_an_optional_port_read_before_it_is_bound_is_none():
+    sender = _Sender()
+
+    assert sender.spare is None
+
+
+def test_a_port_names_the_protocol_its_peer_answers():
+    """The declaration is what makes the port file the map it claims to be."""
+    port = _Sender.link
+
+    assert port.protocol is ports.Link
+    assert port.name == "link"

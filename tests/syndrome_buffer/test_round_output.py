@@ -54,12 +54,13 @@ class _Transfers:
 
 
 def _output(transfers, store=None) -> round_output.RoundStoreOutput:
-    return round_output.RoundStoreOutput(
-        transfers,
-        transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER,
-        "Buffer 0",
-        store,
+    output = round_output.RoundStoreOutput(
+        transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER, "Buffer 0"
     )
+    output.transfers = transfers
+    if store is not None:
+        output.store = store
+    return output
 
 
 def _job() -> decoding_records.DecodeJob:

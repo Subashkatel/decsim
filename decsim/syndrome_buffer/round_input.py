@@ -59,6 +59,7 @@ window reads it.
 import dataclasses
 from typing import Callable, Optional
 
+import decsim.ports as ports
 import decsim.records.log_sources as log_sources
 import decsim.records.rounds as round_records
 import decsim.trace_source as trace_source
@@ -72,12 +73,13 @@ class RoundStoreInput:
     every intake, the write's copy (data_path.md hop 2).
     """
 
-    def __init__(self, engine, store, output, windows) -> None:
+    store = ports.Port(ports.RoundStore)
+    # the store's outgoing port, which sends what leaves the store
+    output = ports.Port(ports.RoundStoreOutput)
+    windows = ports.Port(ports.WindowInput)
+
+    def __init__(self, engine) -> None:
         self.engine = engine
-        self.store = store
-        # the store's outgoing port, which sends what leaves the store
-        self.output = output
-        self.windows = windows
         self.writes_in_flight = 0
         self.trace = _TraceSources()
 

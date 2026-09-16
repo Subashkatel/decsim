@@ -75,6 +75,18 @@ A round store's incoming port, as the controller sees it.
 | `receive_round` | Take one round that landed here: store it, then announce it. |
 | `send_memory_round` | Send one timing-only round to the decoder side the store feeds. |
 
+### `RoundStoreOutput`
+
+A round store's outgoing port, as whoever asks for a round sees it.
+
+| Method | What it does |
+| --- | --- |
+| `send_input` | Move one job's rounds to its unit; the delay the link expects. |
+| `land_held_input` | Land a resubmitted job whose rounds never left: no delay. |
+| `send_memory_round` | Send one timing-only round and free its slot at the delivery. |
+| `input_send_for` | The send the decoder manager calls at dispatch, bound to a job. |
+| `name_this_store` | Stamp the job with the name of the store its rounds sit in. |
+
 ### `MemoryRoundArrivals`
 
 The decoders' end for a timing-only round, as the controller sees it.

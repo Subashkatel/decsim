@@ -78,17 +78,18 @@ def build_store_outputs(
     """
     transfers = window_transfers.WindowTransfers(engine, links)
     weak_output = round_output.RoundStoreOutput(
-        transfers,
-        transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER,
-        "Buffer 0",
-        round_store,
+        transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER, "Buffer 0"
     )
+    weak_output.transfers = transfers
+    weak_output.store = round_store
     strong_output = round_output.RoundStoreOutput(
-        transfers,
-        transfer_records.LinkPath.STRONG_BUFFER_TO_STRONG_DECODER,
-        "Buffer 1",
-        strong_round_store,
+        transfer_records.LinkPath.STRONG_BUFFER_TO_STRONG_DECODER, "Buffer 1"
     )
+    strong_output.transfers = transfers
+    # a run with no room-side store leaves this unbound: no round of
+    # that store exists to leave by this end
+    if strong_round_store is not None:
+        strong_output.store = strong_round_store
     return weak_output, strong_output
 
 
@@ -103,9 +104,11 @@ def build_round_store_input(
     The port announces a published round to the window manager, so it is
     built once the manager exists, as the strong writer is.
     """
-    return round_input.RoundStoreInput(
-        engine, round_store, weak_output, window_manager
-    )
+    store_input = round_input.RoundStoreInput(engine)
+    store_input.store = round_store
+    store_input.output = weak_output
+    store_input.windows = window_manager
+    return store_input
 
 
 def build_pauli_frame(

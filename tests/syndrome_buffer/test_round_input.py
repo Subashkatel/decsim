@@ -78,7 +78,12 @@ def _store(rounds=None) -> round_store_module.RoundStore:
 
 def _input_with(engine, store, output=None):
     windows = _Windows(engine, store)
-    return round_input.RoundStoreInput(engine, store, output, windows), windows
+    store_input = round_input.RoundStoreInput(engine)
+    store_input.store = store
+    store_input.windows = windows
+    if output is not None:
+        store_input.output = output
+    return store_input, windows
 
 
 def _cross(store_input, packed, landing_ticks=LANDING_TICKS):

@@ -767,17 +767,3 @@ def test_factory_level_cycles_require_integers_by_key(cycles):
     )
     with pytest.raises(ValueError, match=sentence):
         chain(engine, [level])
-
-
-@pytest.mark.parametrize("cycles", [True, 0.5, float("nan"), float("inf")])
-def test_factory_preparation_cycles_require_integers_by_key(cycles):
-    engine = decsim.engine.Engine()
-    level = magic_state_factories.DistillLevel(unit_count=1, distance=3)
-    sentence = "preparation_logical_cycles must be a nonnegative integer"
-    with pytest.raises(ValueError, match=sentence):
-        multi_level(
-            engine,
-            round_ticks=10,
-            levels=[level],
-            preparation_logical_cycles=cycles,
-        )

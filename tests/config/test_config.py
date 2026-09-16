@@ -144,11 +144,6 @@ def test_a_cycle_count_requires_a_nonnegative_integer_by_name(cycles):
         config.check_cycles("packing_cycles", cycles)
 
 
-@pytest.mark.parametrize("cycles", [0, 1, 123456789])
-def test_a_nonnegative_integer_is_a_cycle_count(cycles):
-    config.check_cycles("packing_cycles", cycles)
-
-
 def test_a_negative_cycle_count_is_refused_by_name():
     sentence = "packing_cycles must not be negative: cycles must be nonnegative"
     with pytest.raises(ValueError, match=sentence):

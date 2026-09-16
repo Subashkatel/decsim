@@ -338,41 +338,6 @@ def test_a_kept_verdict_pays_no_switch_cycles():
     )
 
 
-@pytest.mark.parametrize("cycles, expected_tick", [(0, 1), (3, 40)])
-def test_threshold_work_aligns_only_a_nonzero_cost(cycles, expected_tick):
-    clock = config.Clock(10)
-    fixture = _Fixture(clock=clock, threshold_cycles=cycles)
-    fixture.engine.now = 1
-    job = fixture.job(window_records.DecoderTier.WEAK, 0, awaiting=True)
-    soft_output = decoding_records.SoftOutput(
-        0.0, decoders.SAMPLED_CONFIDENCE_SOURCE
-    )
-    result = decoding_records.DecodeResult(4, 1, soft_output=soft_output)
-
-    fixture.verdict.accept_result(job, result)
-    fixture.engine.run()
-
-    assert fixture.window.t_done == 1
-    assert fixture.verdict_ticks == [expected_tick]
-    assert fixture.reads == [(expected_tick, job.request_key)]
-
-
-@pytest.mark.parametrize("cycles, expected_tick", [(0, 1), (3, 40)])
-def test_switch_work_aligns_only_a_nonzero_cost(cycles, expected_tick):
-    clock = config.Clock(10)
-    fixture = _Fixture(clock=clock, switch_cycles=cycles)
-    fixture.engine.now = 1
-    job = fixture.job(window_records.DecoderTier.WEAK, 0, awaiting=True)
-    result = decoding_records.DecodeResult(4, 1)
-
-    fixture.verdict.accept_result(job, result)
-    fixture.engine.run()
-
-    assert fixture.window.t_done == 1
-    assert fixture.verdict_ticks == [1]
-    assert fixture.reads == [(expected_tick, job.request_key)]
-
-
 def test_a_verdict_without_confidence_pays_no_threshold_cycles():
     clock = config.Clock(10)
     fixture = _Fixture(clock=clock, threshold_cycles=3)

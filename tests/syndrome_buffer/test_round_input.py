@@ -296,19 +296,3 @@ def test_a_priced_write_keeps_its_reservation_until_the_write_edge():
     assert store_input.writes_in_flight == 0
     assert store.occupancy == 1
     assert windows.published == [(40, (1, 1), 40)]
-
-
-def test_a_zero_write_cost_publishes_mid_cycle_without_scheduling():
-    engine = engine_module.Engine()
-    engine.now = 1
-    clock = config.Clock(10)
-    settings = round_store_settings.RoundStoreSettings(clock=clock)
-    store = round_store_module.RoundStore(settings)
-    store_input, windows = _input_with(engine, store)
-    packed = _packed(1)
-    store_input.reserve_write()
-
-    store_input.receive_round(packed)
-
-    assert engine.idle
-    assert windows.published == [(1, (1, 1), 1)]

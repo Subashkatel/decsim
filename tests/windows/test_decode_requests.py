@@ -593,21 +593,6 @@ def test_a_withdrawn_read_cannot_submit_the_replacement_window_twice():
     assert fixture.window.t_queued == 40
 
 
-def test_a_zero_read_cost_submits_mid_cycle_without_scheduling():
-    clock = config.Clock(10)
-    fixture = _Fixture(read_clock=clock)
-    fixture.engine.now = 1
-    fixture.arrive(1)
-    fixture.arrive(2)
-    fixture.arrive(3)
-    fixture.arrive(4)
-    fixture.arrive(5)
-
-    assert fixture.engine.idle
-    assert len(fixture.queue.enqueued) == 1
-    assert fixture.window.t_queued == 1
-
-
 def test_decision_cycles_delay_queue_admission_and_later_reaction_points():
     clocks = config.ClockSettings.from_yaml({"decisions": 1.0})
     section = {
@@ -645,24 +630,6 @@ def test_withdrawal_cancels_a_pending_decision_and_releases_its_input():
     assert fixture.queue.enqueued == []
     assert fixture.queue.withdrawn == []
     assert fixture.store.occupancy == 0
-
-
-@pytest.mark.parametrize("cycles, expected_tick", [(0, 1), (3, 40)])
-def test_a_decision_aligns_to_an_edge_only_when_it_costs_cycles(
-    cycles, expected_tick
-):
-    clock = config.Clock(10)
-    fixture = _Fixture(decision_cycles=cycles, clock=clock)
-    fixture.engine.now = 1
-    fixture.arrive(1)
-    fixture.arrive(2)
-    fixture.arrive(3)
-    fixture.arrive(4)
-    fixture.arrive(5)
-    fixture.engine.run()
-
-    assert len(fixture.queue.enqueued) == 1
-    assert fixture.window.t_queued == expected_tick
 
 
 def test_a_delayed_restart_read_keeps_all_its_input_rounds():

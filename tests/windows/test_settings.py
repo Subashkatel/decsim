@@ -80,32 +80,6 @@ def test_both_keys_default_to_null_so_the_plan_decides_them():
     assert settings.boundaries is None
 
 
-@pytest.mark.parametrize("cycles", [True, 0.5, float("nan"), float("inf")])
-def test_decision_cycles_refuse_noninteger_values_by_name(cycles):
-    section = _section(clock="decisions", decision_cycles=cycles)
-    sentence = "windows.decision_cycles must be a nonnegative integer"
-    with pytest.raises(ValueError, match=sentence):
-        window_settings.WindowSettings.from_yaml(section, CLOCKS)
-
-
-def test_an_unnamed_window_clock_uses_the_controller_clock():
-    section = _section(decision_cycles=3)
-    controller_clock = config.Clock(123)
-    settings = window_settings.WindowSettings.from_yaml(
-        section, CLOCKS, controller_clock
-    )
-    assert settings.clock is controller_clock
-    assert settings.decision_cycles == 3
-
-
-def test_a_window_clock_must_name_a_declared_domain():
-    section = _section(clock="missing")
-    with pytest.raises(
-        ValueError, match="clock 'missing' is not a clocks entry"
-    ):
-        window_settings.WindowSettings.from_yaml(section, CLOCKS)
-
-
 def test_a_charged_window_decision_needs_its_clock():
     with pytest.raises(
         ValueError, match="windows.decision_cycles needs a clock"

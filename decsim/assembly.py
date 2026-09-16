@@ -11,9 +11,10 @@ still being assembled, so the order the rows sit in cannot move a tick
 (tmp/resources/gem5/src/sim/sim_object.hh lines 194 and 280).
 
 SEED_ROOTS names every owner of randomness as the segment the run seed
-hashes beside the seat that owns it. A segment whose owner a run does
-not build keeps its row and takes None, because the run seed hashes the
-segment names and dropping one moves every seed after it.
+hashes beside the seat that owns it. A component's seed is derived from
+its framed path, so the segment a row names is part of that component's
+result and nothing else's; a row whose seat this run does not build
+takes None and binds nothing.
 
 A run the machine has no use for a seat in has no SEATS row for it and
 no WIRES row either, so no port is ever bound to None; seats_for reads
@@ -306,17 +307,10 @@ SEED_ROOTS = (
     ("window_interaction", "window_interaction"),
     ("idle_policy", "plan.idle_policy"),
     ("conditional_release", "conditional_release"),
-    # the packing stage is four components now; its seed path
-    # segment is a result (seeding hashes the segment names) and
-    # stays, as memory_model's does
-    ("syndrome_packing", None),
     ("controller", "controller"),
     ("qpu", "qpu"),
     ("execution_runtime", "execution_runtime"),
     ("pauli_frame", "pauli_frame"),
-    # the retained-storage observer is gone; its seed path segment
-    # is a result (seeding hashes the segment names) and stays
-    ("memory_model", None),
 )
 
 
@@ -384,8 +378,6 @@ def seed_roots(parts: Parts, seats: dict) -> tuple:
 
 def _seed_owner(target, parts: Parts, seats: dict):
     """What one seed root names, or None when this run has no such owner."""
-    if target is None:
-        return None
     if target.endswith("()"):
         return _peer(target, seats, target)
     if "." not in target:

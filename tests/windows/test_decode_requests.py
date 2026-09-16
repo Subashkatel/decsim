@@ -36,6 +36,7 @@ import decsim.windows.round_retention as round_retention
 import decsim.windows.settings as window_settings
 import decsim.windows.window_interactions as window_interactions
 import tests.declared_run as declared_run
+import tests.escalation.declared_fabric as declared_fabric
 import tests.experiments.yaml_configs as yaml_configs
 
 
@@ -662,3 +663,33 @@ def test_a_decision_aligns_to_an_edge_only_when_it_costs_cycles(
 
     assert len(fixture.queue.enqueued) == 1
     assert fixture.window.t_queued == expected_tick
+
+
+def test_a_delayed_restart_read_keeps_all_its_input_rounds():
+    clock = config.Clock(1_000_000)
+    settings = round_store_settings.RoundStoreSettings(
+        clock=clock, read_cycles=3
+    )
+    machine = declared_fabric.switching_machine(
+        rounds=15,
+        escalated_windows={0},
+        strong_window="forward",
+        round_store=settings,
+        record=True,
+    )
+
+    result = machine.run()
+
+    records = machine.observation.decode_records.requests
+    weak = window_records.DecoderTier.WEAK
+    outcomes = decoding_records.RequestProcessingOutcome
+    completed = outcomes.PRIMARY_FORWARDED_FOR_DELIVERY
+    restarted = [
+        row
+        for row in records
+        if row.request_key.window_id == 3 and row.request_key.tier is weak
+        if row.terminal_processing_outcome is completed
+    ]
+    (restart,) = restarted
+    assert result.terminal_status == "complete"
+    assert restart.input_round_count == 6

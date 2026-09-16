@@ -471,9 +471,15 @@ class DecodeRequester:
             self._request_from_store(window, operation, strong_redecode)
             return
         window.queued = True
-        read = functools.partial(
+        action = functools.partial(
             self._request_from_store, window, operation, strong_redecode
         )
+        read = _PendingRead(action)
+        keys = self.retention.read_keys_for_bounds(
+            window.operation_id, window.start_round, window.buffer_hi, window
+        )
+        store = self.retention.primary_store
+        store.register_hold(read, keys)
         self.pending_reads[window.key] = read
         engine = self.builder.engine
         edge = self.read_clock.edge(self.read_cycles, engine.now)
@@ -585,6 +591,9 @@ class DecodeRequester:
         on).
         """
         pending = self.pending_reads.pop(window.key, None)
+        if pending is not None:
+            store = self.retention.primary_store
+            store.release_hold(pending)
         cancelled = self._withdraw_submissions(window.key)
         if pending is None and not cancelled:
             self.decode_queue.withdraw_window(window.key)
@@ -631,11 +640,13 @@ class DecodeRequester:
             cancelled = True
         return cancelled
 
-    def _finish_read(self, window_key: tuple, read: Callable[[], None]) -> None:
+    def _finish_read(self, window_key: tuple, read: "_PendingRead") -> None:
         if self.pending_reads.get(window_key) is not read:
             return
         del self.pending_reads[window_key]
-        read()
+        read.action()
+        store = self.retention.primary_store
+        store.release_hold(read)
 
     def _request_from_store(
         self,
@@ -668,6 +679,17 @@ class DecodeRequester:
                 submissions.extend(started)
         for submission in submissions:
             self.enqueue(submission)
+
+
+@dataclasses.dataclass(frozen=True)
+class _PendingRead:
+    """One scheduled read holding its rounds until input ownership passes."""
+
+    action: Callable[[], None]
+
+    def referenced_operation_ids(self) -> tuple:
+        """The held rounds already name every operation the read keeps open."""
+        return ()
 
 
 class _SharedInputHold:

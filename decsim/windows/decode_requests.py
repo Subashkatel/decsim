@@ -21,12 +21,18 @@ import functools
 from typing import Callable, Optional
 
 import decsim.config as config
+import decsim.ports as ports
 import decsim.records.decoding as decoding_records
 import decsim.records.identity as identity_records
 import decsim.records.log_sources as log_sources
 import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.trace_source as trace_source
+import decsim.windows.round_retention as round_retention_module
+import decsim.windows.round_tracker as round_tracker_module
+import decsim.windows.window_commits as window_commits
+import decsim.windows.window_interactions as window_interactions
+import decsim.windows.window_planner as window_planner
 
 
 class WindowInputGate:
@@ -44,13 +50,12 @@ class WindowInputGate:
     decoders/decoder_memory_transfer.py).
     """
 
-    def __init__(
-        self, planner, interaction, input_fold, copies_the_fold: bool = True
-    ):
-        self.planner = planner
-        self.interaction = interaction
-        # the decoder side's input, which installs what this hands it
-        self.input_fold = input_fold
+    planner = ports.Port(window_planner.WindowPlanner)
+    interaction = ports.Port(window_interactions.WindowInteraction)
+    # the decoder side's input, which installs what this hands it
+    input_fold = ports.Port(ports.DecoderInputFold)
+
+    def __init__(self, copies_the_fold: bool = True):
         # weak_decoder.boundary_fold: copy duplicates the landed input,
         # in_place XORs the mask into the unit's own memory
         self.copies_the_fold = copies_the_fold
@@ -165,12 +170,13 @@ class DecodeRequestBuilder:
     be requested.
     """
 
-    def __init__(self, engine, planner, tracker, interaction, gate) -> None:
+    planner = ports.Port(window_planner.WindowPlanner)
+    tracker = ports.Port(round_tracker_module.RoundTracker)
+    interaction = ports.Port(window_interactions.WindowInteraction)
+    gate = ports.Port(WindowInputGate)
+
+    def __init__(self, engine) -> None:
         self.engine = engine
-        self.planner = planner
-        self.tracker = tracker
-        self.interaction = interaction
-        self.gate = gate
         self.next_request_sequence = 0
         self.trace = _TraceSources()
 
@@ -392,30 +398,24 @@ class DecodeRequester:
     run's weak decoder reports its own soft output from one decode.
     """
 
+    tracker = ports.Port(round_tracker_module.RoundTracker)
+    retention = ports.Port(round_retention_module.RoundRetention)
+    builder = ports.Port(DecodeRequestBuilder)
+    decode_queue = ports.Port(ports.DecodeQueue)
+    escalation_policy = ports.Port(ports.EscalationPolicy)
+    verdict = ports.Port(window_commits.WindowVerdict)
+    # the primary store's outgoing port; it executes the input send
+    store_output = ports.Port(ports.RoundStoreOutput)
+    # a run whose weak decoder reports its own soft output has no join
+    gap_join = ports.Port(ports.WindowGapJoin, optional=True)
+
     def __init__(
         self,
-        tracker,
-        retention,
-        builder: DecodeRequestBuilder,
-        decode_queue,
-        escalation_policy,
-        verdict,
-        store_output,
-        gap_join=None,
         read_clock: Optional[config.Clock] = None,
         read_cycles: int = 0,
         clock: Optional[config.Clock] = None,
         decision_cycles: int = 0,
     ) -> None:
-        self.tracker = tracker
-        self.retention = retention
-        self.builder = builder
-        self.decode_queue = decode_queue
-        self.escalation_policy = escalation_policy
-        self.verdict = verdict
-        # the primary store's outgoing port; it executes the input send
-        self.store_output = store_output
-        self.gap_join = gap_join
         self.read_clock = read_clock
         self.read_cycles = read_cycles
         self.pending_reads: dict = {}

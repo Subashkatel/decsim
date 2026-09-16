@@ -25,9 +25,9 @@ QPU names the runtime whose body_done it calls as a port, and the
 runtime tells the issuer what it knows at each release. The stores name the
 waiting line and the window side as ports: each store retries the held
 rounds when a slot frees, and the strong writer tells the window manager
-what landed. The one stand-in is _LateWiring inside
-_window_manager, for the courier's and the committer's callbacks to the
-facade and the strong redecode built after them.
+what landed. The window side is wired the same way: the courier names
+the facade, and the committer and the verdict name the strong redecode
+built after them.
 
 The packages import each other in one direction only, so the top can be
 cut off and what is left still runs (Parnas 1972 lines 505-529;
@@ -184,13 +184,18 @@ class Machine:
             settings.pauli_frame, engine
         )
         # The decoder manager is built first, so the requester and the
-        # strong redecode take the decode queue by constructor and every
-        # job carries its return path.
+        # strong redecode name it as their decode queue and every job
+        # carries its return path.
         controller_side.check_strong_route(escalation_policy, pool.router)
         decoder_manager = controller_side.build_decoder_manager(
             engine, settings, escalation_policy, pool
         )
         input_fold = decoder_manager.input_fold()
+        # the factory is built before the window side, whose last result
+        # stops it producing; it queues its own first event in start()
+        factory = controller_side.build_factory(
+            settings.magic_state_factory, engine, decoder_manager, plan
+        )
         window_manager = window_side.build_window_manager(
             engine,
             settings,
@@ -198,7 +203,7 @@ class Machine:
             plan,
             links=links,
             conditional_release=conditional_release,
-            fault_model_requirement_for=pool.router.fault_model_requirement_for,
+            router=pool.router,
             input_fold=input_fold,
             round_store=round_store,
             strong_round_store=strong_round_store,
@@ -206,7 +211,7 @@ class Machine:
             strong_output=strong_output,
             pauli_frame=pauli_frame,
             decode_queue=decoder_manager,
-            on_workload_complete=lambda: factory.shutdown(),
+            factory=factory,
         )
         strong_round_writer = store_build.build_strong_round_writer(
             engine, strong_round_store, window_manager
@@ -249,9 +254,6 @@ class Machine:
             rounds_in_flight=rounds_in_flight,
         )
         assembler.round_writer = round_writer
-        factory = controller_side.build_factory(
-            settings.magic_state_factory, engine, decoder_manager, plan
-        )
         cycle_clock_domain = config.Clock(plan.round_ticks)
         qpu = cycle_clock.QPUDevice(engine, plan.device, cycle_clock_domain)
         instruction_output = instruction_output_module.InstructionOutput(

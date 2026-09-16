@@ -103,6 +103,15 @@ class _FiniteSource:
         return None
 
 
+class _Router:
+    """The routing table, as the models ask it for a code's requirement."""
+
+    def fault_model_requirement_for(self, code):
+        """No unit of this table asks a window model for anything."""
+        del code
+        return None
+
+
 def test_the_packages_own_test_provider_fills_the_window_model_port():
     """A provider the planner accepts is one the port describes whole."""
     source = _FiniteSource(9)
@@ -111,13 +120,18 @@ def test_the_packages_own_test_provider_fills_the_window_model_port():
 
 def _planner(source=None) -> window_planner.WindowPlanner:
     built = built_window_models.BuiltWindowModels()
-    models = window_planner.WindowModels(source, lambda _code_name: None, built)
+    models = window_planner.WindowModels(built)
+    if source is not None:
+        models.provider = source
+    models.router = _Router()
     scheme = sliding_scheme.SlidingWindowScheme()
     resolved = [_resolved("stream", 9)]
     plan = _empty_plan()
-    return window_planner.WindowPlanner(
-        scheme, resolved, plan, models, planned_operations=()
-    )
+    planner = window_planner.WindowPlanner(resolved, plan, ())
+    planner.scheme = scheme
+    planner.models = models
+    planner.start()
+    return planner
 
 
 def test_sliding_window_k_commits_ncom_rounds_and_reads_nbuf_past_them():
@@ -270,12 +284,14 @@ def test_idle_rounds_fold_only_into_a_batch_style_operation():
     plan.windows[(7, 0)] = window
     plan.batch_preceding_idle_rounds_by_operation[7] = True
     built = built_window_models.BuiltWindowModels()
-    models = window_planner.WindowModels(None, lambda _code_name: None, built)
+    models = window_planner.WindowModels(built)
+    models.router = _Router()
     scheme = naive_online_scheme.NaiveOnlineScheme()
     resolved = [_resolved(7, 6)]
-    planner = window_planner.WindowPlanner(
-        scheme, resolved, plan, models, planned_operations=()
-    )
+    planner = window_planner.WindowPlanner(resolved, plan, ())
+    planner.scheme = scheme
+    planner.models = models
+    planner.start()
     planner.prepend_idle_rounds(7, 4)
     planner.prepend_idle_rounds(7, 0)
     assert window.batched_preceding_idle_round_count == 4

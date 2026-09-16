@@ -453,36 +453,26 @@ def test_the_forward_window_lands_in_the_declared_backlog_regime():
 # ---- a shape row added from outside decsim
 
 
-class RecordingContextWindow:
+class RecordingContextWindow(strong_window_shapes.ContextWindow):
     """A shape row a study adds: the context window, with its plans noted.
 
-    It fills the StrongWindowShape port by holding a ContextWindow and
-    passing every call to it, which is what a new row does: one class,
-    one table entry, one yaml name, and nothing else changes.
+    It fills the StrongWindowShape port on the context window's own
+    layout and ports, which is what a new row does: one class, one table
+    entry, one yaml name, and nothing else changes.
     """
 
-    absorbs_weak_windows = False
-    window_absorbed = trace_source.SILENT
-
-    def __init__(self, collaborators) -> None:
-        self.inner = strong_window_shapes.ContextWindow(collaborators)
+    def __init__(self, engine) -> None:
+        self.engine = engine
         self.planned_windows = []
         self.assignments = []
 
     def plan(self, weak_job):
         """Note the window, then plan it as the context window does."""
         self.planned_windows.append(weak_job.window_id)
-        assignment = self.inner.plan(weak_job)
+        context = strong_window_shapes.ContextWindow
+        assignment = context.plan(self, weak_job)
         self.assignments.append(assignment)
         return assignment
-
-    def release_conditions(self, assignment):
-        """What releases a held job, as the context window declares it."""
-        return self.inner.release_conditions(assignment)
-
-    def held_job(self, assignment):
-        """The held job, once its rounds are there."""
-        return self.inner.held_job(assignment)
 
 
 def test_a_shape_row_added_from_outside_runs_by_its_yaml_name():
@@ -516,34 +506,24 @@ def test_a_shape_row_added_from_outside_runs_by_its_yaml_name():
     ]
 
 
-class RecordingForwardWindow:
+class RecordingForwardWindow(strong_window_shapes.ForwardWindow):
     """A shape row a study adds that absorbs the windows it covers.
 
-    It takes the same one collaborator record the shipped rows take,
-    although its layout reads the planner, the requester and the ledger
-    that the context window never touches.
+    It takes the same one constructor and the same ports the shipped
+    rows take, although its layout reads the planner, the requester and
+    the ledger that the context window never touches.
     """
 
-    absorbs_weak_windows = True
-    default_boundary_policy = "eager"
-
-    def __init__(self, collaborators) -> None:
-        self.inner = strong_window_shapes.ForwardWindow(collaborators)
-        self.window_absorbed = self.inner.window_absorbed
+    def __init__(self, engine) -> None:
+        self.engine = engine
+        self.window_absorbed = trace_source.TraceSource()
         self.planned_windows = []
 
     def plan(self, weak_job):
         """Note the window, then plan it as the forward window does."""
         self.planned_windows.append(weak_job.window_id)
-        return self.inner.plan(weak_job)
-
-    def release_conditions(self, assignment):
-        """What releases a held job, as the forward window declares it."""
-        return self.inner.release_conditions(assignment)
-
-    def held_job(self, assignment):
-        """The held job, once its rounds are there."""
-        return self.inner.held_job(assignment)
+        forward = strong_window_shapes.ForwardWindow
+        return forward.plan(self, weak_job)
 
 
 def test_an_absorbing_row_added_from_outside_builds_through_the_same_call():
@@ -552,7 +532,7 @@ def test_an_absorbing_row_added_from_outside_builds_through_the_same_call():
     The two shipped rows read different components: the context window
     reads the regions, the retention and the builder; the forward window
     also re-slices on the planner, withdraws on the requester and
-    rewrites the ledger. Both take one StrongWindowCollaborators record,
+    rewrites the ledger. Both take the engine alone and the same ports,
     so the root builds a row without branching on its geometry.
     """
     table = escalation_settings.STRONG_WINDOW_SHAPES
@@ -572,21 +552,21 @@ def test_an_absorbing_row_added_from_outside_builds_through_the_same_call():
     assert fabric.frame_tiers(machine) == [((1, 0), "strong")]
 
 
-def test_the_shipped_collaborators_fill_the_six_window_side_ports():
+def test_the_shipped_components_fill_the_shapes_six_window_side_ports():
     """A row written outside decsim programs against the ports, not classes.
 
-    StrongWindowCollaborators types its six window-side fields as
-    Protocols in decsim/ports.py, so the promise only means something if
-    the classes the root puts there answer the whole port.
+    StrongWindowPorts types its six window-side ports as Protocols in
+    decsim/ports.py, so the promise only means something if the classes
+    the root binds there answer the whole port.
     """
     machine = fabric.switching_machine(rounds=9, escalated_windows=set())
-    collaborators = machine.window_manager.strong_redecode.shape.collaborators
-    assert isinstance(collaborators.planner, ports.WindowPlan)
-    assert isinstance(collaborators.retention, ports.WindowRetention)
-    assert isinstance(collaborators.builder, ports.WindowJobBuilder)
-    assert isinstance(collaborators.requester, ports.WindowRequests)
-    assert isinstance(collaborators.ledger, ports.LogicalLedger)
-    assert isinstance(collaborators.courier, ports.BoundaryCourier)
+    shape = machine.window_manager.strong_redecode.shape
+    assert isinstance(shape.planner, ports.WindowPlan)
+    assert isinstance(shape.retention, ports.WindowRetention)
+    assert isinstance(shape.builder, ports.WindowJobBuilder)
+    assert isinstance(shape.requester, ports.WindowRequests)
+    assert isinstance(shape.ledger, ports.LogicalLedger)
+    assert isinstance(shape.courier, ports.BoundaryCourier)
 
 
 def test_a_courier_that_only_pins_a_face_fills_the_courier_port():
@@ -1068,18 +1048,21 @@ class _RecordingCourier:
         )
 
 
-def _folding_collaborators(retention, courier):
-    """The one collaborator record, with only the fold's two components."""
-    return strong_window_shapes.StrongWindowCollaborators(
-        engine=None,
-        regions=None,
-        planner=None,
-        retention=retention,
-        builder=None,
-        requester=None,
-        ledger=None,
-        courier=courier,
-    )
+def _folding_shape(retention, courier):
+    """A shape with only the ports the fold reads bound.
+
+    The builder is the one this retention hands back untouched, so the
+    fold's own two components are all the test binds for real.
+    """
+    shape = strong_window_shapes.ContextWindow(None)
+    shape.retention = retention
+    shape.courier = courier
+    shape.builder = _UnusedBuilder()
+    return shape
+
+
+class _UnusedBuilder:
+    """The job builder this retention stub never asks anything of."""
 
 
 def test_a_row_that_pins_a_face_folds_the_boundary_it_declares():
@@ -1094,13 +1077,13 @@ def test_a_row_that_pins_a_face_folds_the_boundary_it_declares():
     """
     retention = _StoredRounds()
     courier = _RecordingCourier()
-    collaborators = _folding_collaborators(retention, courier)
+    shape = _folding_shape(retention, courier)
     window = object()
     model = object()
     operation = object()
     request_key = object()
     payloads = strong_window_shapes.strong_job_payloads(
-        collaborators,
+        shape,
         window,
         model,
         operation,
@@ -1110,7 +1093,7 @@ def test_a_row_that_pins_a_face_folds_the_boundary_it_declares():
     assert payloads == ("the stored rounds",)
     assert courier.pinned == []
     payloads = strong_window_shapes.strong_job_payloads(
-        collaborators, window, model, operation, request_key, ((1, 1),)
+        shape, window, model, operation, request_key, ((1, 1),)
     )
     assert payloads == ("the stored rounds",)
     assert courier.pinned == [((1, 1), window, model, operation, request_key)]

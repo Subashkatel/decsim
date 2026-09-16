@@ -23,12 +23,15 @@ the way a weak window's does.
 import copy
 import dataclasses
 import functools
-from typing import Callable, Optional
+from typing import Optional
 
+import decsim.ports as ports
 import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
+import decsim.windows.window_interactions as window_interactions
+import decsim.windows.window_planner as window_planner
 
 
 @dataclasses.dataclass(frozen=True)
@@ -43,22 +46,16 @@ class HeldBoundary:
 class BoundaryCourier:
     """Delivers committed boundaries, versioned, held until final."""
 
-    def __init__(
-        self,
-        planner,
-        transfers,
-        interaction,
-        boundary_policy,
-        on_boundary_received: Callable[[tuple, bool], None],
-    ) -> None:
-        self.planner = planner
-        # the boundary is this component's record, so it sends it itself
-        self.transfers = transfers
-        self.interaction = interaction
-        self.boundary_policy = boundary_policy
-        # (source window key, is_unblocked): a delivery landed in a window;
-        # True when it was the last boundary a shipped window owed
-        self.on_boundary_received = on_boundary_received
+    planner = ports.Port(window_planner.WindowPlanner)
+    # the boundary is this component's record, so it sends it itself
+    transfers = ports.Port(ports.WindowTransfers)
+    interaction = ports.Port(window_interactions.WindowInteraction)
+    boundary_policy = ports.Port(ports.BoundaryPolicy)
+    # the facade hears every delivery that landed in a window, and
+    # whether it was the last boundary a shipped window owed
+    windows = ports.Port(ports.WindowInput)
+
+    def __init__(self) -> None:
         self.record_by_window: dict = {}
 
     # ---- what the committer asks
@@ -352,7 +349,7 @@ class BoundaryCourier:
         window's is (_receive_boundary).
         """
         destination.deps_remaining -= 1
-        self.on_boundary_received(destination.key, True)
+        self.windows.accept_boundary(destination.key, True)
 
     # ---- private
 
@@ -490,7 +487,7 @@ class BoundaryCourier:
                 record.released_dependents.add(key)
                 window.deps_remaining -= 1
         is_unblocked = self._is_unblocked_now(window)
-        self.on_boundary_received(key, is_unblocked)
+        self.windows.accept_boundary(key, is_unblocked)
 
     @staticmethod
     def _is_unblocked_now(window: window_records.Window) -> bool:

@@ -103,18 +103,6 @@ reads this list and reports every other wide class, so the exemptions are
 visible here, beside the rule, rather than buried in the checker. The list
 stays short; past eight names the rule is wrong, not the list.
 
-- `WindowManager` (`decsim/windows/window_manager.py`): the windows
-  package's facade over that package's components, plus the escalation
-  package's strong re-decode it wakes and the workload's feedback mode.
-  A caller asks the facade for what it wants (`window_sources`,
-  `planned_windows`) rather than for a component of it.
-- `StrongRedecode` (`decsim/escalation/strong_redecode.py`): one strong
-  re-decode of a window, which crosses both send ends, the decode queue
-  and the committer's return path in a single flow.
-- `DecodeRequester` (`decsim/windows/decode_requests.py`): one request
-  per complete window, which needs what says the window has its rounds,
-  what shapes the job, where the job is placed, and what says which
-  solves to ask for.
 - `IdleRoundAccounting` (`decsim/controller/idle_rounds.py`): one idle
   round routed by the `policy`, which needs the geometry that sizes it,
   the stream and the QPU it belongs to, and the decode queue it charges.
@@ -122,12 +110,6 @@ stays short; past eight names the rule is wrong, not the list.
   round sent or held, which needs the end that owns Buffer 0's room, the
   end that owns Buffer 1's, the link between them, the retry of a round
   the stores refused, and the transmitter that sends it on its route.
-- `OperationResults` (`decsim/windows/operation_results.py`): one final
-  result per operation, which reads the planner, the tracker, the
-  retention and the ledger before it releases a conditional operation.
-- `DecodeRequestBuilder` (`decsim/windows/decode_requests.py`): one
-  decode job built from a window, stamped with the gate and the run-wide
-  request ordinal off the engine clock.
 
 ## Rule 2. Names are full words that say what the thing is
 

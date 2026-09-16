@@ -23,27 +23,28 @@ that allocates a miss buffer and the queue that holds the entry
 import functools
 from typing import Optional
 
+import decsim.ports as ports
 import decsim.records.decoding as decoding_records
 import decsim.records.windows as window_records
+import decsim.windows.round_tracker as round_tracker
+import decsim.windows.window_planner as window_planner
 
 
 class RoundRetention:
     """Which rounds each window and request keeps alive, and where."""
 
+    weak_store = ports.Port(ports.RetainedRounds)
+    # a run that reads no rounds from the room side has no store there
+    strong_store = ports.Port(ports.RetainedRounds, optional=True)
+    planner = ports.Port(window_planner.WindowPlanner)
+    tracker = ports.Port(round_tracker.RoundTracker)
+
     def __init__(
         self,
-        weak_store,
-        strong_store,
-        planner,
-        tracker,
         *,
         is_strong_context_retained: bool,
         primary_tier: window_records.DecoderTier,
     ) -> None:
-        self.weak_store = weak_store
-        self.strong_store = strong_store
-        self.planner = planner
-        self.tracker = tracker
         self.is_strong_context_retained = is_strong_context_retained
         self.primary_tier = primary_tier
 

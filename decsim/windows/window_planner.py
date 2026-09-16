@@ -31,14 +31,14 @@ class WindowModels:
     every question answers None or nothing.
     """
 
+    # a timing-only device supplies no models at all
+    provider = ports.Port(ports.WindowModelSource, optional=True)
+    # the routing table answers what a model must offer for a code
+    router = ports.Port(ports.DecoderRouter)
+
     def __init__(
-        self,
-        error_model_provider: Optional[ports.WindowModelSource],
-        fault_model_requirement_for,
-        built_models: built_window_models.BuiltWindowModels,
+        self, built_models: built_window_models.BuiltWindowModels
     ) -> None:
-        self.provider = error_model_provider
-        self.fault_model_requirement_for = fault_model_requirement_for
         self.built_models = built_models
         # the model each planned or grown window was laid with; the
         # models object builds them, so it is where they live
@@ -51,7 +51,7 @@ class WindowModels:
     def requirement_for(self, resolved_operation):
         """The decoder views for the operation's frozen code."""
         code_name = resolved_operation.code_geometry.code_name
-        return self.fault_model_requirement_for(code_name)
+        return self.router.fault_model_requirement_for(code_name)
 
     def models_for_operation(
         self, operation, resolved_operation, windows: list, protocol
@@ -190,24 +190,33 @@ class WindowPlanner:
     after build; the plan's own windows exist before anyone listens.
     """
 
+    scheme = ports.Port(ports.WindowingScheme)
+    models = ports.Port(WindowModels)
+
     def __init__(
         self,
-        scheme,
         resolved_operations,
         plan: window_records.WindowPlan,
-        models: WindowModels,
         planned_operations,
     ) -> None:
-        self.scheme = scheme
         resolved_by_id = {
             resolved.operation_id: resolved for resolved in resolved_operations
         }
         self.resolved_operation_by_id = types.MappingProxyType(resolved_by_id)
         self.plan = plan
-        self.models = models
+        self.planned_operations = planned_operations
         self.growth_by_stream: dict = {}
         self.trace = _TraceSources()
-        for operation in planned_operations:
+
+    def start(self) -> None:
+        """Build the model of every window the plan laid.
+
+        The models come from the port, so they are built once the root
+        has bound it, which is gem5's split between the constructor and
+        startup (tmp/resources/gem5/src/sim/sim_object.hh lines 194 and
+        280).
+        """
+        for operation in self.planned_operations:
             self._build_operation_models(operation)
 
     # ---- the plan's tables

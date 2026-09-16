@@ -1,9 +1,10 @@
 """Build the window manager and everything behind its facade.
 
-The facade's nine components are wired by constructor here, in the order
-a window meets them; the courier's and the committer's callbacks to
-components built after them arrive through one stand-in, _LateWiring,
-which is the only late bind in decsim.
+Each component is built from its own settings and then bound to its
+neighbours by assignment, in the order a window meets them, which is
+gem5's script naming a component once and assigning its ports
+(tmp/resources/gem5/configs/learning_gem5/part1/simple.py:68). A seat
+the run does not need is not built, and no port of it is bound.
 """
 
 import decsim.build.escalation as escalation_build
@@ -15,9 +16,7 @@ import decsim.engine as engine_module
 import decsim.escalation.settings as escalation_settings
 import decsim.escalation.strong_redecode as strong_redecode_module
 import decsim.escalation.strong_regions as strong_regions
-import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.links.window_transfers as window_transfers_module
-import decsim.records.decoding as decoding_records
 import decsim.records.windows as window_records
 import decsim.settings as machine_settings
 import decsim.tables as tables
@@ -41,7 +40,7 @@ def build_window_manager(
     *,
     links,
     conditional_release,
-    fault_model_requirement_for,
+    router,
     input_fold,
     round_store,
     strong_round_store,
@@ -49,101 +48,103 @@ def build_window_manager(
     strong_output,
     pauli_frame,
     decode_queue,
-    on_workload_complete,
+    factory,
 ) -> window_manager_module.WindowManager:
-    """The windows facade over its six components, wired by constructor."""
+    """The windows facade over its components, each bound to the next."""
     run_plan = plan.run_plan
     built_models = settings.workload.built_models
     if built_models is None:
         built_models = built_window_models.BuiltWindowModels()
-    models = window_planner_module.WindowModels(
-        plan.error_model_provider, fault_model_requirement_for, built_models
-    )
+    models = window_planner_module.WindowModels(built_models)
+    if plan.error_model_provider is not None:
+        models.provider = plan.error_model_provider
+    models.router = router
     planner = window_planner_module.WindowPlanner(
-        plan.scheme,
         run_plan.resolved_operations,
         run_plan.execution,
-        models,
         plan.planned_operations,
     )
-    tracker = round_tracker_module.RoundTracker(plan.scheme, planner)
+    planner.scheme = plan.scheme
+    planner.models = models
+    planner.start()
+    tracker = round_tracker_module.RoundTracker()
+    tracker.scheme = plan.scheme
+    tracker.planner = planner
     retention = round_retention_module.RoundRetention(
-        round_store,
-        strong_round_store,
-        planner,
-        tracker,
         is_strong_context_retained=escalation_policy.requires_strong_context,
         primary_tier=escalation_policy.primary_tier,
     )
-    transfers = window_transfers_module.WindowTransfers(engine, links)
-    decoder_output = decoder_output_module.DecoderOutput(transfers, pauli_frame)
+    retention.weak_store = round_store
+    if strong_round_store is not None:
+        retention.strong_store = strong_round_store
+    retention.planner = planner
+    retention.tracker = tracker
+    transfers = window_transfers_module.WindowTransfers(engine)
+    transfers.link = links
+    decoder_output = decoder_output_module.DecoderOutput()
+    decoder_output.transfers = transfers
+    if pauli_frame is not None:
+        decoder_output.frame = pauli_frame
     primary_output = weak_output
     if escalation_policy.primary_tier is window_records.DecoderTier.STRONG:
         primary_output = strong_output
     copies_the_fold = _copies_the_boundary_fold(settings, escalation_policy)
-    gate = decode_requests.WindowInputGate(
-        planner, plan.window_interaction, input_fold, copies_the_fold
-    )
-    builder = decode_requests.DecodeRequestBuilder(
-        engine, planner, tracker, plan.window_interaction, gate
-    )
+    gate = decode_requests.WindowInputGate(copies_the_fold)
+    gate.planner = planner
+    gate.interaction = plan.window_interaction
+    gate.input_fold = input_fold
+    builder = decode_requests.DecodeRequestBuilder(engine)
+    builder.planner = planner
+    builder.tracker = tracker
+    builder.interaction = plan.window_interaction
+    builder.gate = gate
     ledger = committed_rounds.LogicalLedger()
-    results = operation_results.OperationResults(
-        planner,
-        tracker,
-        retention,
-        ledger,
-        conditional_release,
-        on_workload_complete,
-    )
-    # the courier's landing callback reaches the facade and the
-    # committer's two hooks reach the strong redecode, both built after
-    # them; this stands in at wiring time, and a run that never
-    # escalates gives the committer no redecode at all
-    late = _LateWiring()
-    committer_redecode = None
-    if escalation_policy.requires_strong_context:
-        committer_redecode = late
-    courier = window_boundaries.BoundaryCourier(
-        planner,
-        transfers,
-        plan.window_interaction,
-        plan.boundary_policy,
-        late.accept_boundary,
-    )
-    committer = window_commits.WindowCommitter(
-        engine, courier, decoder_output, results, committer_redecode
-    )
+    results = operation_results.OperationResults()
+    results.planner = planner
+    results.tracker = tracker
+    results.retention = retention
+    results.ledger = ledger
+    results.conditional_release = conditional_release
+    results.factory = factory
+    courier = window_boundaries.BoundaryCourier()
+    courier.planner = planner
+    courier.transfers = transfers
+    courier.interaction = plan.window_interaction
+    courier.boundary_policy = plan.boundary_policy
+    committer = window_commits.WindowCommitter(engine)
+    committer.courier = courier
+    committer.decoder_output = decoder_output
+    committer.results = results
     verdict = window_commits.WindowVerdict(
         engine,
-        planner,
-        tracker,
-        escalation_policy,
-        committer_redecode,
-        decode_queue,
-        committer,
         clock=settings.escalation.clock,
         threshold_cycles=settings.escalation.threshold_cycles,
         switch_cycles=settings.escalation.switch_cycles,
     )
+    verdict.planner = planner
+    verdict.tracker = tracker
+    verdict.escalation_policy = escalation_policy
+    verdict.decode_queue = decode_queue
+    verdict.committer = committer
     gap_join = _window_gap_join(settings, engine, verdict, decode_queue)
     read_cycles = settings.round_store.read_cycles
     if escalation_policy.primary_tier is window_records.DecoderTier.STRONG:
         read_cycles = 0
     requester = decode_requests.DecodeRequester(
-        tracker,
-        retention,
-        builder,
-        decode_queue,
-        escalation_policy,
-        verdict,
-        primary_output,
-        gap_join,
         read_clock=settings.round_store.clock,
         read_cycles=read_cycles,
         clock=settings.windows.clock,
         decision_cycles=settings.windows.decision_cycles,
     )
+    requester.tracker = tracker
+    requester.retention = retention
+    requester.builder = builder
+    requester.decode_queue = decode_queue
+    requester.escalation_policy = escalation_policy
+    requester.verdict = verdict
+    requester.store_output = primary_output
+    if gap_join is not None:
+        requester.gap_join = gap_join
     strong_redecode = _strong_redecode(
         escalation_policy,
         settings.escalation,
@@ -159,22 +160,26 @@ def build_window_manager(
         courier,
         plan.window_interaction,
         decode_queue,
-        verdict.accept_strong_result,
+        verdict,
     )
-    late.strong_redecode = strong_redecode
+    if strong_redecode is not None:
+        committer.strong_redecode = strong_redecode
+        verdict.strong_redecode = strong_redecode
     window_manager = window_manager_module.WindowManager(
         engine,
-        planner=planner,
-        tracker=tracker,
-        retention=retention,
-        requester=requester,
-        courier=courier,
-        results=results,
-        strong_redecode=strong_redecode,
-        window_interaction=plan.window_interaction,
         feedback_boundary_mode=settings.workload.feedback_boundary_mode,
     )
-    late.window_manager = window_manager
+    window_manager.planner = planner
+    window_manager.tracker = tracker
+    window_manager.retention = retention
+    window_manager.requester = requester
+    window_manager.courier = courier
+    window_manager.results = results
+    if strong_redecode is not None:
+        window_manager.strong_redecode = strong_redecode
+    window_manager.window_interaction = plan.window_interaction
+    courier.windows = window_manager
+    window_manager.start()
     return window_manager
 
 
@@ -209,8 +214,11 @@ def _window_gap_join(
     row = escalation_build.escalation_row(settings.escalation)
     if not row.decides_on_a_confidence:
         return None
-    signal = escalation_build.confidence_signal(settings.escalation)
-    return gap_join_module.WindowGapJoin(engine, signal, verdict, decode_queue)
+    gap_join = gap_join_module.WindowGapJoin(engine)
+    gap_join.signal = escalation_build.confidence_signal(settings.escalation)
+    gap_join.verdict = verdict
+    gap_join.decode_queue = decode_queue
+    return gap_join
 
 
 def _strong_redecode(
@@ -228,7 +236,7 @@ def _strong_redecode(
     courier,
     interaction,
     decode_queue,
-    on_strong_decoded,
+    verdict,
 ):
     """The window side of the strong tier, or None when never escalating.
 
@@ -238,50 +246,22 @@ def _strong_redecode(
     if not escalation_policy.requires_strong_context:
         return None
     row = escalation_build.strong_window_row(escalation)
-    regions = strong_regions.StrongRegions(
-        planner, tracker, retention, interaction
-    )
-    collaborators = strong_window_shapes.StrongWindowCollaborators(
-        engine=engine,
-        regions=regions,
-        planner=planner,
-        retention=retention,
-        builder=builder,
-        requester=requester,
-        ledger=ledger,
-        courier=courier,
-    )
-    shape = row(collaborators)
-    return strong_redecode_module.StrongRedecode(
-        engine,
-        shape,
-        decoder_output,
-        strong_output,
-        decode_queue,
-        on_strong_decoded,
-    )
-
-
-class _LateWiring:
-    """The facade and the strong redecode, for the components built first.
-
-    The courier tells the facade when a boundary landed; the committer
-    tells the strong redecode which weak result to escalate and when a
-    weak window committed.
-    """
-
-    def __init__(self) -> None:
-        self.window_manager = None
-        self.strong_redecode = None
-
-    def accept_boundary(self, key: tuple, is_unblocked: bool) -> None:
-        self.window_manager.accept_boundary(key, is_unblocked)
-
-    def escalate(self, job: decoding_records.DecodeJob) -> None:
-        self.strong_redecode.escalate(job)
-
-    def submit_if_commit_releases(self, key: tuple) -> None:
-        self.strong_redecode.submit_if_commit_releases(key)
-
-    def cancel_held_sibling(self, key: tuple) -> None:
-        self.strong_redecode.cancel_held_sibling(key)
+    regions = strong_regions.StrongRegions(interaction)
+    regions.planner = planner
+    regions.tracker = tracker
+    regions.retention = retention
+    shape = row(engine)
+    shape.regions = regions
+    shape.planner = planner
+    shape.retention = retention
+    shape.builder = builder
+    shape.requester = requester
+    shape.ledger = ledger
+    shape.courier = courier
+    strong_redecode = strong_redecode_module.StrongRedecode(engine)
+    strong_redecode.shape = shape
+    strong_redecode.decoder_output = decoder_output
+    strong_redecode.strong_output = strong_output
+    strong_redecode.decode_queue = decode_queue
+    strong_redecode.verdict = verdict
+    return strong_redecode

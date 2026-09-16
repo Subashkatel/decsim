@@ -74,9 +74,15 @@ def test_a_stale_delivery_is_ignored_and_the_edge_releases_once():
     interaction = window_interactions.DefaultWindowInteraction(
         0, boundary_payload
     )
-    transfers = window_transfers.WindowTransfers(engine, links)
-    courier = window_boundaries.BoundaryCourier(
-        planner, transfers, interaction, _EAGER, on_boundary_received
+    transfers = window_transfers.WindowTransfers(engine)
+    transfers.link = links
+    courier = window_boundaries.BoundaryCourier()
+    courier.planner = planner
+    courier.transfers = transfers
+    courier.interaction = interaction
+    courier.boundary_policy = _EAGER
+    courier.windows = types.SimpleNamespace(
+        accept_boundary=on_boundary_received
     )
     key = window_records.DecoderRequestKey(
         1, 0, window_records.DecoderTier.WEAK, 0
@@ -122,6 +128,13 @@ class _RecordingTransfers:
         )
 
 
+class _NoWindows:
+    """The facade a courier test does not look at."""
+
+    def accept_boundary(self, window_key: tuple, is_unblocked: bool) -> None:
+        """One boundary landed."""
+
+
 def _pinned_courier():
     """A courier whose window (1,0) has committed, and its strong reader.
 
@@ -165,11 +178,15 @@ def _pinned_courier():
     interaction = window_interactions.DefaultWindowInteraction(
         0, boundary_payload
     )
-    transfers = window_transfers.WindowTransfers(engine, links)
+    transfers = window_transfers.WindowTransfers(engine)
+    transfers.link = links
     recording = _RecordingTransfers(transfers)
-    courier = window_boundaries.BoundaryCourier(
-        planner, recording, interaction, _EAGER, lambda _key, _ready: None
-    )
+    courier = window_boundaries.BoundaryCourier()
+    courier.planner = planner
+    courier.transfers = recording
+    courier.interaction = interaction
+    courier.boundary_policy = _EAGER
+    courier.windows = _NoWindows()
     return engine, operation, source, courier, recording
 
 

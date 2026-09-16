@@ -49,6 +49,17 @@ def _window(operation_id, index, commit_lo, commit_hi) -> window_records.Window:
     )
 
 
+class _Factory:
+    """The factory the last result of the workload stops."""
+
+    def __init__(self, completions: list) -> None:
+        self.completions = completions
+
+    def shutdown(self) -> None:
+        """The workload is complete."""
+        self.completions.append("done")
+
+
 class _Fixture:
     """One six-round operation in two windows, committed by hand."""
 
@@ -82,14 +93,14 @@ class _Fixture:
         self.release = _Release()
         self.completions = []
         self.ledger = committed_rounds.LogicalLedger()
-        self.results = operation_results.OperationResults(
-            plan,
-            tracker,
-            retention,
-            self.ledger,
-            self.release,
-            lambda: self.completions.append("done"),
-        )
+        self.factory = _Factory(self.completions)
+        self.results = operation_results.OperationResults()
+        self.results.planner = plan
+        self.results.tracker = tracker
+        self.results.retention = retention
+        self.results.ledger = self.ledger
+        self.results.conditional_release = self.release
+        self.results.factory = self.factory
         self.delivered = result_ledger.ResultLedger()
         self.results.trace.operation_result_delivered.connect(
             self.delivered.operation_result_delivered

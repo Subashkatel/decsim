@@ -26,6 +26,7 @@ to arrive is the one whose service has not closed yet.
 
 import dataclasses
 
+import decsim.ports as ports
 import decsim.records.decoding as decoding_records
 import decsim.records.log_sources as log_sources
 import decsim.trace_source as trace_source
@@ -46,11 +47,12 @@ class WindowGapJoin:
     window's others, so the trace shows the held solve and the join.
     """
 
-    def __init__(self, engine, signal, verdict, decode_queue) -> None:
+    signal = ports.Port(ports.ConfidenceSignal)
+    verdict = ports.Port(ports.WindowVerdict)
+    decode_queue = ports.Port(ports.DecodeQueue)
+
+    def __init__(self, engine) -> None:
         self.engine = engine
-        self.signal = signal
-        self.verdict = verdict
-        self.decode_queue = decode_queue
         # window key -> the solves of that window that have finished
         self.held_by_window: dict[tuple, list] = {}
         self.trace = _TraceSources()

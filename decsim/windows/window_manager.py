@@ -17,20 +17,28 @@ same components; a run that never escalates has none. One round reads
 as accept_window_input, requester.request_if_ready, job.on_decoded
 (verdict.accept_result), results.deliver_if_final.
 
-Wide state recorded: ten attributes, the seven components a round
-crosses, the strong redecode the arrivals wake, the interaction that
-gives a new window its first boundary and the workload's feedback mode.
+The seven components a round crosses, the strong redecode the arrivals
+wake and the interaction that gives a new window its first boundary are
+ports; the engine and the workload's feedback mode are its own state.
 """
 
 import dataclasses
 from typing import Any, Optional
 
+import decsim.ports as ports
 import decsim.records.identity as identity_records
 import decsim.records.log_sources as log_sources
 import decsim.records.program as program_records
 import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
 import decsim.trace_source as trace_source
+import decsim.windows.decode_requests as decode_requests
+import decsim.windows.operation_results as operation_results
+import decsim.windows.round_retention as round_retention_module
+import decsim.windows.round_tracker as round_tracker_module
+import decsim.windows.window_boundaries as window_boundaries
+import decsim.windows.window_interactions as window_interactions
+import decsim.windows.window_planner as window_planner
 
 
 @dataclasses.dataclass(frozen=True)
@@ -56,31 +64,28 @@ class WindowTraceSources:
 class WindowManager:
     """The windows facade: receives rounds, closes windows, commits results."""
 
-    def __init__(
-        self,
-        engine,
-        *,
-        planner,
-        tracker,
-        retention,
-        requester,
-        courier,
-        results,
-        strong_redecode,
-        window_interaction,
-        feedback_boundary_mode: str = "trailing_buffer",
-    ):
+    planner = ports.Port(window_planner.WindowPlanner)
+    tracker = ports.Port(round_tracker_module.RoundTracker)
+    retention = ports.Port(round_retention_module.RoundRetention)
+    requester = ports.Port(decode_requests.DecodeRequester)
+    courier = ports.Port(window_boundaries.BoundaryCourier)
+    results = ports.Port(operation_results.OperationResults)
+    # the strong tier's window side; None when the run never escalates
+    strong_redecode = ports.Port(ports.StrongRedecode, optional=True)
+    window_interaction = ports.Port(window_interactions.WindowInteraction)
+
+    def __init__(self, engine, feedback_boundary_mode: str = "trailing_buffer"):
         self.engine = engine
-        self.planner = planner
-        self.tracker = tracker
-        self.retention = retention
-        self.requester = requester
-        self.courier = courier
-        self.results = results
-        # the strong tier's window side; None when the run never escalates
-        self.strong_redecode = strong_redecode
-        self.window_interaction = window_interaction
         self.feedback_boundary_mode = feedback_boundary_mode
+
+    def start(self) -> None:
+        """Give every window the plan laid its first boundary.
+
+        The plan and the interaction come from ports, so the first
+        boundaries are written once the root has bound them, which is
+        gem5's split between the constructor and startup
+        (tmp/resources/gem5/src/sim/sim_object.hh lines 194 and 280).
+        """
         for window in self.planner.windows_by_key.values():
             window_info = window_records.WindowInfo.from_window(window)
             window.boundary_in = self.window_interaction.initial_boundary_state(

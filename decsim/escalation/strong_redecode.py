@@ -22,6 +22,8 @@ import functools
 from typing import Callable, Optional
 
 import decsim.escalation.pending_strong_windows as pending_strong_windows
+import decsim.escalation.strong_window_shapes as strong_window_shapes
+import decsim.ports as ports
 import decsim.records.decoding as decoding_records
 import decsim.records.log_sources as log_sources
 import decsim.records.windows as window_records
@@ -31,27 +33,18 @@ import decsim.trace_source as trace_source
 class StrongRedecode:
     """Selects, submits and lands the strong tier's re-decode of a window."""
 
-    def __init__(
-        self,
-        engine,
-        shape,
-        decoder_output,
-        strong_output,
-        decode_queue,
-        on_strong_decoded: Callable[
-            [decoding_records.DecodeJob, decoding_records.DecodeResult], None
-        ],
-    ) -> None:
+    shape = ports.Port(strong_window_shapes.StrongWindowShape)
+    # the two ends that execute this tier's sends: the weak decoder's
+    # selection leaves by the decoder output, and syndrome buffer 1
+    # sends the strong input
+    decoder_output = ports.Port(ports.DecoderOutput)
+    strong_output = ports.Port(ports.RoundStoreOutput)
+    decode_queue = ports.Port(ports.DecodeQueue)
+    # the strong job's return path
+    verdict = ports.Port(ports.WindowVerdict)
+
+    def __init__(self, engine) -> None:
         self.engine = engine
-        self.shape = shape
-        # the two ends that execute this tier's sends: the weak
-        # decoder's selection leaves by the decoder output, and syndrome
-        # buffer 1 sends the strong input
-        self.decoder_output = decoder_output
-        self.strong_output = strong_output
-        self.decode_queue = decode_queue
-        # the strong job's return path, the committer's accept_strong_result
-        self.on_strong_decoded = on_strong_decoded
         self.selections = _StrongSelections()
         self.pending = pending_strong_windows.PendingStrongWindows()
         # trace sources: the wait a held strong window sits in, from the
@@ -217,7 +210,7 @@ class StrongRedecode:
             strong_job, selection_arrival_ticks
         )
         self.decode_queue.enqueue(
-            strong_job, send_input, self.on_strong_decoded
+            strong_job, send_input, self.verdict.accept_strong_result
         )
 
     def _strong_input_send(

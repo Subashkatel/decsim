@@ -417,6 +417,9 @@ class WindowInput(Protocol):
     def accept_room_round(self, operation_id, round_index: int) -> None:
         """Record one round that landed in the room-side store instead."""
 
+    def accept_boundary(self, window_key: tuple, is_unblocked: bool) -> None:
+        """A boundary landed in the window; True when it owed no other."""
+
 
 @runtime_checkable
 class WindowPlan(Protocol):
@@ -549,6 +552,29 @@ class WindowRetention(Protocol):
 
 
 @runtime_checkable
+class WindowRounds(Protocol):
+    """The arrivals per operation, as the escalation side reads them.
+
+    A strong region is laid over an operation whose rounds are still
+    arriving, so the row asks how long the operation is, how many rounds
+    one of its windows reads and how far the room-side store has been
+    filled. Which windows are ready and what commits stay the window
+    side's.
+    """
+
+    def operation(self, operation_id) -> program_records.Operation:
+        """The operation of that id."""
+
+    def round_count_for_window(
+        self, operation_id, window: window_records.Window
+    ) -> int:
+        """The rounds the window reads of its operation."""
+
+    def strong_rounds_arrived(self, operation_id) -> int:
+        """The rounds of the operation stored in the room-side store."""
+
+
+@runtime_checkable
 class WindowJobBuilder(Protocol):
     """Where a strong window shape gets a job's identity and its gate."""
 
@@ -640,15 +666,27 @@ class StrongRedecode(Protocol):
     def cancel_held_sibling(self, window_key: tuple) -> None:
         """A kept weak result: its held sibling never decodes."""
 
+    def submit_if_stored_data_releases(self, operation_id) -> None:
+        """A round was stored: a window waiting for its tail leaves."""
+
 
 @runtime_checkable
 class WindowVerdict(Protocol):
-    """The window side, as the strong re-decode returns a result to it.
+    """The window side, as a finished decode returns its result to it.
 
-    The return path of one escalation: the re-decode finishes and the
-    side that owns the window publishes the correction and finalizes
-    the window, so the decision and its outcome stay in one place.
+    The return path of one window: a solve of the primary tier, joined
+    with the window's others when the run's confidence reads several,
+    and the strong re-decode of an escalated window. Either way the side
+    that owns the window publishes the correction and finalizes it, so
+    the decision and its outcome stay in one place.
     """
+
+    def accept_result(
+        self,
+        job: decoding_records.DecodeJob,
+        result: decoding_records.DecodeResult,
+    ) -> None:
+        """The window's answer: apply the threshold, publish or escalate."""
 
     def accept_strong_result(
         self,
@@ -700,6 +738,59 @@ class WindowInputGate(Protocol):
 
     def mask_input(self, job: decoding_records.DecodeJob) -> None:
         """Fold the window's boundary into the landed input, once."""
+
+
+@runtime_checkable
+class DecoderOutput(Protocol):
+    """The decoder side's outgoing sends, as the window side asks them.
+
+    A result leaves the decoder that produced it, so the window side
+    asks for the send and never executes it: the correction rides its
+    tier's output link to the frame, and an escalated window's selection
+    rides the link to the strong decoder.
+    """
+
+    def publish(
+        self,
+        window: window_records.Window,
+        operation: program_records.Operation,
+        result: decoding_records.DecodeResult,
+        request_key: window_records.DecoderRequestKey,
+        on_committed: Callable[[], None],
+    ) -> None:
+        """Send the result on its tier's output link; commit it at delivery."""
+
+    def send_selection(
+        self,
+        weak_job: decoding_records.DecodeJob,
+        strong_request_key: window_records.DecoderRequestKey,
+        on_delivered: Callable[[], None],
+    ) -> int:
+        """Send one window's escalation; returns the delay the link expects."""
+
+
+@runtime_checkable
+class WindowGapJoin(Protocol):
+    """The confidence join, as the requester that admits a solve sees it.
+
+    A run whose confidence reads several forced-class solves joins them
+    here rather than in the verdict: every solve of the window returns
+    to accept_result, and the join calls the verdict once the window's
+    solves are all in. A run whose weak decoder reports its own soft
+    output from one decode has no join at all.
+    """
+
+    signal: "ConfidenceSignal"
+
+    def accept_result(
+        self,
+        job: decoding_records.DecodeJob,
+        result: decoding_records.DecodeResult,
+    ) -> None:
+        """One solve finished: hold it, or join the window's solves."""
+
+    def unresolved_windows(self) -> tuple:
+        """The windows whose solves are still waiting for each other."""
 
 
 @runtime_checkable
@@ -1302,8 +1393,8 @@ class WindowTransfers(Protocol):
     One step below Link: the sender says what it moves (this window's
     boundary, this job's rounds) and the adapter builds the transfer's
     attribution and calls Link.send. The decoder output ports and a
-    store's output port hold it by constructor, so it is a port and not
-    a class they import. Every method here sends; an input that rides no
+    store's output port name it as a port rather than importing the
+    class that fills it. Every method here sends; an input that rides no
     link never reaches this port, because whether an input moves at all
     is the sending store's own decision.
     """

@@ -12,6 +12,7 @@ store's own business and never reaches this module.
 import functools
 from typing import Callable, Optional
 
+import decsim.ports as ports
 import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
 import decsim.records.rounds as round_records
@@ -22,9 +23,10 @@ import decsim.records.windows as window_records
 class WindowTransfers:
     """Sends in a window's or a job's name over the link fabric."""
 
-    def __init__(self, engine, link) -> None:
+    link = ports.Port(ports.Link)
+
+    def __init__(self, engine) -> None:
         self.engine = engine
-        self.link = link
 
     def send_for_window(
         self,

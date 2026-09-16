@@ -39,14 +39,14 @@ def _retention(store, round_counts: dict, successors: dict):
         rounds_arrived=lambda _operation_id: 0,
         strong_rounds_arrived=lambda _operation_id: 0,
     )
-    return round_retention.RoundRetention(
-        store,
-        None,
-        planner,
-        tracker,
+    retention = round_retention.RoundRetention(
         is_strong_context_retained=False,
         primary_tier=window_records.DecoderTier.WEAK,
     )
+    retention.weak_store = store
+    retention.planner = planner
+    retention.tracker = tracker
+    return retention
 
 
 def _packet(operation_id, round_index) -> round_records.SyndromeRoundPacket:
@@ -72,14 +72,15 @@ def _strong_retention(strong_store, rounds_arrived: int):
         strong_rounds_arrived=lambda _operation_id: 0,
     )
     weak_store = _store()
-    return round_retention.RoundRetention(
-        weak_store,
-        strong_store,
-        planner,
-        tracker,
+    retention = round_retention.RoundRetention(
         is_strong_context_retained=True,
         primary_tier=window_records.DecoderTier.WEAK,
     )
+    retention.weak_store = weak_store
+    retention.strong_store = strong_store
+    retention.planner = planner
+    retention.tracker = tracker
+    return retention
 
 
 def test_a_context_round_still_crossing_is_told_apart_from_one_released():

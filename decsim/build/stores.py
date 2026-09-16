@@ -80,7 +80,8 @@ def build_store_outputs(
     the send is the store's and is wired here rather than by whoever
     asks for the round.
     """
-    transfers = window_transfers.WindowTransfers(engine, links)
+    transfers = window_transfers.WindowTransfers(engine)
+    transfers.link = links
     weak_output = round_output.RoundStoreOutput(
         transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER, "Buffer 0"
     )

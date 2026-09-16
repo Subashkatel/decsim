@@ -40,6 +40,21 @@ class Closed:
 
 
 @dataclasses.dataclass(frozen=True)
+class GrowthStep:
+    """One growth step's cycle count inputs: its work and its critical path.
+
+    edge_count is the boundary edges the step advanced. hop_count is the
+    deepest flood over closed edges from the root of any cluster the step
+    fused, the stages a cluster identifier and its parity take to cross
+    the cluster (Helios 2301.08419 lines 623-629); zero when the step
+    fused nothing.
+    """
+
+    edge_count: int
+    hop_count: int
+
+
+@dataclasses.dataclass(frozen=True)
 class UnionFindEdge:
     """One graphlike residual fault column in the weighted graph."""
 
@@ -82,6 +97,8 @@ class UnionFindHardEvidence:
     # cluster that ran out of edges before reaching another defect or the
     # boundary
     unmatched_detectors: tuple[int, ...] = ()
+    # one GrowthStep per growth step, in order, for the cycle count
+    growth_steps: tuple[GrowthStep, ...] = ()
 
 
 def normalized_weight_step(weight_step) -> float:

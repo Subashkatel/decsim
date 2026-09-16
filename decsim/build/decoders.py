@@ -76,7 +76,7 @@ def build_decoder_unit(
         return tier_settings.decoder
     if tier_settings.kind is None:
         return None
-    algorithm = _algorithm(tier_settings.kind, tier)
+    algorithm = _algorithm(tier_settings, tier)
     is_active = tier == policy.primary_tier.value
     decides_on_a_confidence = policy.decides_on_a_confidence
     if is_active and decides_on_a_confidence:
@@ -283,15 +283,26 @@ def _decoder_memory(
     )
 
 
-def _algorithm(kind, tier: str):
-    """A tier's algorithm: a table row, or a fixed latency on MWPM."""
-    if isinstance(kind, str):
-        row = tables.row(
-            decoder_settings.DECODERS, f"{tier}_decoder.kind", kind
+def _algorithm(tier_settings: decoder_settings.DecoderSettings, tier: str):
+    """A tier's algorithm: a table row, or a fixed latency on MWPM.
+
+    A cycle_count block is the union_find row's own timing; on any other
+    kind it is refused by name.
+    """
+    kind = tier_settings.kind
+    cycle_count = tier_settings.cycle_count
+    if cycle_count is not None and kind != "union_find":
+        raise ValueError(
+            f"{tier}_decoder.cycle_count is the union_find row's own "
+            f"timing; kind {kind!r} has no cycle count"
         )
+    if not isinstance(kind, str):
+        latency_model = decoders.PresetLatencyDecoder(kind)
+        return minimum_weight_perfect_matching.PyMatchingDecoder(latency_model)
+    row = tables.row(decoder_settings.DECODERS, f"{tier}_decoder.kind", kind)
+    if cycle_count is None:
         return row(latency_model=None)
-    latency_model = decoders.PresetLatencyDecoder(kind)
-    return minimum_weight_perfect_matching.PyMatchingDecoder(latency_model)
+    return row(latency_model=None, cycle_count=cycle_count)
 
 
 def _check_serves_the_confidence(

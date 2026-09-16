@@ -175,13 +175,13 @@ process to reach the same numbers.
 ### `latency_samples.csv`
 
 One row per decoded window, written only for a decoder named by a table
-row, because only those measure a real wall clock. A decoder priced by a
-number produces no rows here.
+row: the time that held the unit, its measured wall clock or its own
+cycle count. A decoder priced by a number produces no rows here.
 
 | Column | What it is |
 | --- | --- |
 | `distance`, `physical_error_probability`, `round_period_us`, `algorithm`, `seed` | the shot |
-| `algorithm_us` | the wall clock that one decode took |
+| `algorithm_us` | the time the algorithm stage held the unit for one decode: its wall clock, or its cycle count |
 
 ### `sweep.csv`
 

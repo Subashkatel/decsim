@@ -40,12 +40,22 @@ enum union_find_status {
  *
  * The caller sizes residual_syndrome at detector_count, selected_edges,
  * interval_is_closed, interval_lower_tick, interval_upper_tick,
- * contact_edges and forest_edges at edge_count, and contact_count and
- * forest_count at one. selected_edges carries one flag per edge; the
- * three interval arrays carry the open bounds of every edge the growth
- * did not close; contact_edges carries the edges that fused two
- * clusters, in the order they closed; forest_edges carries the forest,
- * in the order Kruskal took it.
+ * contact_edges, forest_edges, step_edge_counts and step_hop_counts at
+ * edge_count, and contact_count, forest_count and step_count at one.
+ * selected_edges carries one flag per edge; the three interval arrays
+ * carry the open bounds of every edge the growth did not close;
+ * contact_edges carries the edges that fused two clusters, in the
+ * order they closed; forest_edges carries the forest, in the order
+ * Kruskal took it.
+ *
+ * step_edge_counts and step_hop_counts are the growth's cycle count per
+ * step, one entry per growth step: the boundary edges the step advanced, which
+ * is its work, and the deepest flood over closed edges from the root
+ * of any cluster the step fused, which is its critical path in hops
+ * (Helios 2301.08419 lines 623-629: propagating a cluster identifier
+ * and its parity takes as many stages as the cluster is deep). A step
+ * that fused nothing has zero hops. The growth takes at most one step
+ * per edge, so edge_count entries always suffice.
  */
 int32_t union_find_decode(
     int32_t detector_count, int32_t edge_count, const int32_t *endpoint_a,
@@ -53,6 +63,7 @@ int32_t union_find_decode(
     const uint8_t *residual_syndrome, uint8_t *selected_edges,
     uint8_t *interval_is_closed, int64_t *interval_lower_tick,
     int64_t *interval_upper_tick, int32_t *contact_edges,
-    int32_t *contact_count, int32_t *forest_edges, int32_t *forest_count);
+    int32_t *contact_count, int32_t *forest_edges, int32_t *forest_count,
+    int32_t *step_edge_counts, int32_t *step_hop_counts, int32_t *step_count);
 
 #endif

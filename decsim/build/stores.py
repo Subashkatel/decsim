@@ -26,7 +26,9 @@ def build_round_store(
     row = tables.row(
         round_store_module.ROUND_STORES, "round_store.kind", settings.kind
     )
-    return row(settings, on_slot_freed=held_rounds.retry)
+    store = row(settings)
+    store.held_rounds = held_rounds
+    return store
 
 
 def build_strong_round_store(
@@ -46,7 +48,9 @@ def build_strong_round_store(
     )
     if not uses_strong_store:
         return None
-    return row(settings, on_slot_freed=held_rounds.retry)
+    store = row(settings)
+    store.held_rounds = held_rounds
+    return store
 
 
 def build_strong_round_writer(
@@ -57,11 +61,11 @@ def build_strong_round_writer(
     """The room-side end of the crossing; the window manager hears it."""
     if strong_round_store is None:
         return None
-    return strong_round_writer_module.StrongRoundWriter(
-        engine,
-        strong_round_store,
-        on_round_stored=window_manager.accept_room_round,
+    writer = strong_round_writer_module.StrongRoundWriter(
+        engine, strong_round_store
     )
+    writer.windows = window_manager
+    return writer
 
 
 def build_store_outputs(

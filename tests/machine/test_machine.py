@@ -92,6 +92,17 @@ class RecordingReceiver:
         self.arrivals.append((self.engine.now, readout.round_index))
 
 
+class FinishingRuntime:
+    """A runtime whose one move is to stop the clock when a body ends."""
+
+    def __init__(self, qpu: cycle_clock.QPUDevice):
+        self.qpu = qpu
+
+    def body_done(self, operation: program_records.Operation) -> None:
+        del operation
+        self.qpu.finish()
+
+
 class FakeWeakDecoder(decoder_module.DecoderBase):
     """A table row for the plug-in test: fixed latency, no correction."""
 
@@ -112,19 +123,11 @@ def test_readouts_reach_the_receiver_in_cycle_order_cycle_ticks_apart():
     engine = engine_module.Engine()
     receiver = RecordingReceiver(engine)
     device = syndrome_devices.TimingOnlyDevice()
-
-    def finish_the_program(operation: program_records.Operation) -> None:
-        del operation
-        qpu.finish()
-
     cycle_clock_domain = config.Clock(CYCLE_TICKS)
-    qpu = cycle_clock.QPUDevice(
-        engine,
-        device,
-        cycle_clock_domain,
-        readout_receiver=receiver,
-        completion_receiver=finish_the_program,
-    )
+    qpu = cycle_clock.QPUDevice(engine, device, cycle_clock_domain)
+    runtime = FinishingRuntime(qpu)
+    qpu.readout_receiver = receiver
+    qpu.runtime = runtime
     operation = program_records.Operation(
         id=1, name="memory", qubits=(0,), patches=(0,)
     )
@@ -244,11 +247,11 @@ def test_a_yaml_section_nobody_owns_is_refused_naming_the_sections():
         )
 
 
-def test_the_constructor_wiring_reaches_its_components():
-    """Every cross-reference is made by constructor, none left None."""
+def test_the_wiring_reaches_its_components():
+    """Every cross-reference is bound, by port or by constructor."""
     settings = machine_settings.MachineSettings()
     machine = machine_module.Machine.build(settings)
-    assert machine.qpu.receivers.readout is machine.controller
+    assert machine.qpu.readout_receiver is machine.controller
     assert machine.execution_runtime.issuer is machine.issuer
     manager = machine.decoder_manager
     assert machine.window_manager.requester.decode_queue is manager
@@ -533,10 +536,8 @@ def test_the_cluster_gap_is_not_a_tier_kind_under_any_escalation(
 class CountingRoundStore(round_store_module.RoundStore):
     """A table row for the plug-in test: the store, counting its writes."""
 
-    def __init__(self, settings, *, on_slot_freed=None):
-        round_store_module.RoundStore.__init__(
-            self, settings, on_slot_freed=on_slot_freed
-        )
+    def __init__(self, settings):
+        round_store_module.RoundStore.__init__(self, settings)
         self.stored_count = 0
 
     def accept_packed_round(self, packet, *, publication_tick):

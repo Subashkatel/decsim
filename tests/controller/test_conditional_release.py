@@ -39,6 +39,16 @@ class RecordingDispatch:
         self.dispatched.append((decision.target_operation_id, deliver_decision))
 
 
+class RecordingRuntime:
+    """The runtime the decision is delivered into at the QPU."""
+
+    def __init__(self):
+        self.decisions = []
+
+    def on_decision(self, decision):
+        self.decisions.append(decision)
+
+
 def operation(operation_id, name="decode", requires_return=False):
     return types.SimpleNamespace(
         id=operation_id,
@@ -48,19 +58,20 @@ def operation(operation_id, name="decode", requires_return=False):
 
 
 def bare_release():
-    """The unit with no dispatch wired: only its decisions are read."""
+    """The unit with no dispatch bound: only its decisions are read."""
     engine = RecordingEngine()
     return conditional_release.ConditionalRelease(engine)
 
 
 def connected_release():
-    """The unit wired to a recording dispatch and one delivery path."""
+    """The unit bound to a recording dispatch and one runtime."""
     engine = RecordingEngine(now=13)
     dispatch = RecordingDispatch()
-    deliver_decision = object()
+    runtime = RecordingRuntime()
     unit = conditional_release.ConditionalRelease(engine)
-    unit.connect(dispatch, deliver_decision)
-    return unit, dispatch, deliver_decision
+    unit.dispatch = dispatch
+    unit.runtime = runtime
+    return unit, dispatch, runtime
 
 
 def test_every_waiting_operation_is_registered_once_per_edge():
@@ -119,7 +130,7 @@ def test_a_result_nobody_waits_for_and_the_qpu_ignores_releases_nothing():
 
 
 def test_every_decision_leaves_by_the_frames_end_with_its_delivery():
-    unit, dispatch, deliver_decision = connected_release()
+    unit, dispatch, runtime = connected_release()
     unit.register_blocked_operation(12, 7)
     unit.register_blocked_operation(4, 7)
     source = operation(7)
@@ -129,12 +140,12 @@ def test_every_decision_leaves_by_the_frames_end_with_its_delivery():
     sent = [operation_id for operation_id, _sink in dispatch.dispatched]
     sinks = [sink for _operation_id, sink in dispatch.dispatched]
     assert sent == [12, 4]
-    assert sinks == [deliver_decision, deliver_decision]
+    assert sinks == [runtime.on_decision, runtime.on_decision]
 
 
 def test_a_result_return_leaves_by_the_same_end():
     """Nothing waits, but the QPU needs the outcome: one return goes out."""
-    unit, dispatch, _deliver = connected_release()
+    unit, dispatch, _runtime = connected_release()
 
     source = operation(9, requires_return=True)
     unit.release_waiters(source)

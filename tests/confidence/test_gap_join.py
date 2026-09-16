@@ -235,7 +235,10 @@ def _join_with(signal_ticks: int):
     signal = _CostingSignal(signal_ticks)
     verdict = _RecordingVerdict(engine)
     queue = _RecordingQueue()
-    join = gap_join_module.WindowGapJoin(engine, signal, verdict, queue)
+    join = gap_join_module.WindowGapJoin(engine)
+    join.signal = signal
+    join.verdict = verdict
+    join.decode_queue = queue
     return engine, join, verdict, queue
 
 

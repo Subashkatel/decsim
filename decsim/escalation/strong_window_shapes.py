@@ -51,9 +51,9 @@ the restart window, requests its weak decode afresh and only then ends
 the claim (Sec. III C: the weak decoder resumes past the strong region
 once its rounds are stored).
 
-Every row is built with one StrongWindowCollaborators record, so the
-root wires a shape without knowing which geometry it is and a row reads
-only the components its own layout needs.
+Every row declares the same ports (StrongWindowPorts), so the root
+wires a shape without knowing which geometry it is and a row reads only
+the components its own layout needs.
 """
 
 import dataclasses
@@ -92,28 +92,30 @@ class StrongAssignment:
     folded_boundaries: tuple = ()
 
 
-@dataclasses.dataclass(frozen=True)
-class StrongWindowCollaborators:
+class StrongWindowPorts:
     """The window components every strong window shape is built on.
 
-    One record so every row of STRONG_WINDOW_SHAPES has one constructor
-    signature and the root builds a row without asking which geometry it
-    is; a row reads the components its own layout needs and ignores the
-    rest. This is gem5's params object, where a SimObject's collaborators
-    arrive as one structure rather than as a signature per subclass
+    One base so every row of STRONG_WINDOW_SHAPES has one constructor
+    signature and the same wires, and the root builds and binds a row
+    without asking which geometry it is; a row reads the components its
+    own layout needs and ignores the rest. This is gem5's params object,
+    where a SimObject's collaborators arrive as one structure rather
+    than as a signature per subclass
     (tmp/resources/gem5/src/python/m5/SimObject.py:204-205). The courier
     is what a row with a pinned face reads: the committed boundary of
     the neighbour it pins on, and the hop that carries it.
     """
 
-    engine: engine_module.Engine
-    regions: strong_regions.StrongRegions
-    planner: ports.WindowPlan
-    retention: ports.WindowRetention
-    builder: ports.WindowJobBuilder
-    requester: ports.WindowRequests
-    ledger: ports.LogicalLedger
-    courier: ports.BoundaryCourier
+    regions = ports.Port(strong_regions.StrongRegions)
+    planner = ports.Port(ports.WindowPlan)
+    retention = ports.Port(ports.WindowRetention)
+    builder = ports.Port(ports.WindowJobBuilder)
+    requester = ports.Port(ports.WindowRequests)
+    ledger = ports.Port(ports.LogicalLedger)
+    courier = ports.Port(ports.BoundaryCourier)
+
+    def __init__(self, engine: engine_module.Engine) -> None:
+        self.engine = engine
 
 
 @runtime_checkable
@@ -160,7 +162,7 @@ class StrongWindowShape(Protocol):
         """The held job, once its rounds are there; None while they are not."""
 
 
-class ContextWindow:
+class ContextWindow(StrongWindowPorts):
     """The commit region and one buffer of raw context on each side.
 
     The geometry is decsim's own. Toshio et al. 2510.25222 Sec. III A
@@ -195,21 +197,18 @@ class ContextWindow:
     default_boundary_policy = "held"
     window_absorbed = trace_source.SILENT
 
-    def __init__(self, collaborators: StrongWindowCollaborators) -> None:
-        self.collaborators = collaborators
-
     def plan(self, weak_job: decoding_records.DecodeJob) -> StrongAssignment:
         """The two-sided context job, built now or held for its context."""
         key = (weak_job.operation_id, weak_job.window_id)
-        region = self.collaborators.regions.context_region(key)
+        region = self.regions.context_region(key)
         held = _held_redo(
-            self.collaborators,
+            self,
             weak_job,
             region.window,
             region.context_read_keys,
             FOLDS_NO_BOUNDARY,
         )
-        return _assignment_of(self.collaborators, held)
+        return _assignment_of(self, held)
 
     def release_conditions(
         self, assignment: StrongAssignment
@@ -221,10 +220,10 @@ class ContextWindow:
         self, assignment: StrongAssignment
     ) -> Optional[decoding_records.DecodeJob]:
         """The job, once every context round that arrived is stored."""
-        return _job_once_stored(self.collaborators, assignment.held_plan)
+        return _job_once_stored(self, assignment.held_plan)
 
 
-class NearSeamWindow:
+class NearSeamWindow(StrongWindowPorts):
     """The commit region with its past face pinned and one open buffer.
 
     The escalated window's commit region is re-decoded on an input
@@ -263,23 +262,20 @@ class NearSeamWindow:
     default_boundary_policy = "held"
     window_absorbed = trace_source.SILENT
 
-    def __init__(self, collaborators: StrongWindowCollaborators) -> None:
-        self.collaborators = collaborators
-
     def plan(self, weak_job: decoding_records.DecodeJob) -> StrongAssignment:
         """The near-pinned job, built now or held for its own rounds."""
         key = (weak_job.operation_id, weak_job.window_id)
-        region = self.collaborators.regions.near_seam_region(key)
-        pinned_source_key = self.collaborators.regions.near_seam_source(key)
+        region = self.regions.near_seam_region(key)
+        pinned_source_key = self.regions.near_seam_source(key)
         folded_boundaries = _declared_faces(pinned_source_key)
         held = _held_redo(
-            self.collaborators,
+            self,
             weak_job,
             region.window,
             region.context_read_keys,
             folded_boundaries,
         )
-        return _assignment_of(self.collaborators, held)
+        return _assignment_of(self, held)
 
     def release_conditions(
         self, assignment: StrongAssignment
@@ -291,10 +287,10 @@ class NearSeamWindow:
         self, assignment: StrongAssignment
     ) -> Optional[decoding_records.DecodeJob]:
         """The job, once every round it reads is stored."""
-        return _job_once_stored(self.collaborators, assignment.held_plan)
+        return _job_once_stored(self, assignment.held_plan)
 
 
-class ForwardWindow:
+class ForwardWindow(StrongWindowPorts):
     """Sec. III C, Fig. 12: a strong window that absorbs what it covers.
 
     The window starts at the escalated commit and extends forward by
@@ -312,8 +308,8 @@ class ForwardWindow:
     pins_the_far_face = False
     default_boundary_policy = "eager"
 
-    def __init__(self, collaborators: StrongWindowCollaborators) -> None:
-        self.collaborators = collaborators
+    def __init__(self, engine: engine_module.Engine) -> None:
+        self.engine = engine
         self.window_absorbed = trace_source.TraceSource()
 
     # ---- the shape
@@ -329,12 +325,12 @@ class ForwardWindow:
         """
         key = (weak_job.operation_id, weak_job.window_id)
         self._refuse_second_escalation(key)
-        strong_request_key = self.collaborators.builder.new_request_key(
+        strong_request_key = self.builder.new_request_key(
             weak_job.operation_id,
             weak_job.window_id,
             window_records.DecoderTier.STRONG,
         )
-        strong_request_created_ticks = self.collaborators.engine.now
+        strong_request_created_ticks = self.engine.now
         resolved_region = self._resolved_region(key)
         folded_boundaries = self._declared_faces(key, resolved_region)
         plan = resolved_region.plan
@@ -342,7 +338,7 @@ class ForwardWindow:
         strong_window = resolved_region.strong_window
         strong_model = resolved_region.strong_model
         restart_model = resolved_region.restart_model
-        guard = self.collaborators.retention.guard_restart_reads(
+        guard = self.retention.guard_restart_reads(
             key,
             restart_key,
             resolved_region.proposed_restart_window,
@@ -350,7 +346,7 @@ class ForwardWindow:
             resolved_region.context_round_keys,
             resolved_region.restart_read_keys,
         )
-        operation = self.collaborators.regions.operation(weak_job.operation_id)
+        operation = self.regions.operation(weak_job.operation_id)
         held = _HeldForwardWindow(
             key=key,
             weak_job=weak_job,
@@ -364,13 +360,13 @@ class ForwardWindow:
             folded_boundaries=folded_boundaries,
         )
         try:
-            self.collaborators.ledger.replace_contributions(
+            self.ledger.replace_contributions(
                 key,
                 plan.commit_lo,
                 plan.commit_hi,
                 resolved_region.absorbed_window_keys,
             )
-            self.collaborators.retention.hold_strong_context(
+            self.retention.hold_strong_context(
                 key,
                 strong_request_key,
                 resolved_region.context_round_keys,
@@ -392,7 +388,7 @@ class ForwardWindow:
             )
         finally:
             if guard is not None:
-                self.collaborators.retention.release_strong_hold_if_live(guard)
+                self.retention.release_strong_hold_if_live(guard)
 
     def release_conditions(
         self, assignment: StrongAssignment
@@ -430,9 +426,7 @@ class ForwardWindow:
         """
         held = assignment.held_plan
         if held.resolved_region.restart_window_key is None:
-            stored_through = self.collaborators.regions.strong_rounds_stored(
-                held.key[0]
-            )
+            stored_through = self.regions.strong_rounds_stored(held.key[0])
             if stored_through < held.resolved_region.plan.context_hi:
                 return None
         return self._build_strong_job(held)
@@ -441,7 +435,7 @@ class ForwardWindow:
 
     def _resolved_region(self, key: tuple) -> strong_regions.ForwardRegion:
         """The extent, read with one buffer of raw context per face."""
-        return self.collaborators.regions.forward_region(key)
+        return self.regions.forward_region(key)
 
     def _declared_faces(
         self, key: tuple, resolved_region: strong_regions.ForwardRegion
@@ -462,7 +456,7 @@ class ForwardWindow:
         # the plan claims the extent in the ledger before it holds
         # anything, so an escalation of a window already claimed is the
         # second one, held or committed
-        if self.collaborators.ledger.owns_strong_window(key):
+        if self.ledger.owns_strong_window(key):
             raise RuntimeError(
                 f"duplicate strong escalation for window {key}: one "
                 f"switching event creates exactly one strong job"
@@ -486,9 +480,9 @@ class ForwardWindow:
         if resolved_region.restart_window_key is not None:
             stale_keys.append(resolved_region.restart_window_key)
         for window_key in stale_keys:
-            window = self.collaborators.planner.window_at(window_key)
+            window = self.planner.window_at(window_key)
             if window.queued:
-                self.collaborators.requester.withdraw(window)
+                self.requester.withdraw(window)
 
     def _absorb_window(
         self, key: tuple, restart_key: Optional[tuple], replacement
@@ -499,14 +493,14 @@ class ForwardWindow:
         window no longer waits for it, and its rounds are the strong
         request's.
         """
-        self.collaborators.planner.absorb_window(key, restart_key)
+        self.planner.absorb_window(key, restart_key)
         reads = decoding_records.WindowReads(key)
-        self.collaborators.retention.release_hold_if_live(reads)
-        self.collaborators.retention.release_restart_reads(key)
-        self.collaborators.retention.release_absorbed_strong_hold(
+        self.retention.release_hold_if_live(reads)
+        self.retention.release_restart_reads(key)
+        self.retention.release_absorbed_strong_hold(
             key, restart_key, replacement
         )
-        self.collaborators.engine.log(
+        self.engine.log(
             log_sources.DECODER_MANAGER,
             f"window {key} absorbed into the strong window "
             f"(weak chain skips it)",
@@ -522,7 +516,7 @@ class ForwardWindow:
         if resolved_region.restart_window_key is None:
             readiness_description = "terminal data"
         absorbed_count = len(resolved_region.absorbed_window_keys)
-        self.collaborators.engine.log(
+        self.engine.log(
             log_sources.DECODER_MANAGER,
             f"{held.label}: strong window rounds {plan.commit_lo}-"
             f"{plan.commit_hi} assigned; weak chain skips "
@@ -546,11 +540,11 @@ class ForwardWindow:
             plan.commit_hi,
             plan.restart_seam_fault_owner,
         )
-        restart = self.collaborators.planner.window_at(restart_key)
+        restart = self.planner.window_at(restart_key)
         # its absorbed dependency is gone; no strong sibling in the
         # forward scheme
-        self.collaborators.requester.request_if_ready(restart, None)
-        self.collaborators.retention.release_restart_reads(restart_key)
+        self.requester.request_if_ready(restart, None)
+        self.retention.release_restart_reads(restart_key)
 
     def _reslice_restart_window(
         self,
@@ -561,12 +555,10 @@ class ForwardWindow:
         seam_owner: window_records.SeamFaultOwner,
     ) -> None:
         """Install the restart window's re-sliced reads and their model."""
-        restart = self.collaborators.planner.reslice_window(
-            restart_key, buffer_lo, model
-        )
-        self.collaborators.retention.replace_window_reads(restart_key, restart)
+        restart = self.planner.reslice_window(restart_key, buffer_lo, model)
+        self.retention.replace_window_reads(restart_key, restart)
         seam_owner_name = seam_owner.name.lower()
-        self.collaborators.engine.log(
+        self.engine.log(
             log_sources.DECODER_MANAGER,
             f"restart window {restart_key} re-sliced across strong window "
             f"edge {strong_window_hi} (reads rounds {restart.buffer_lo}-"
@@ -589,7 +581,7 @@ class ForwardWindow:
         weak_job = held.weak_job
         strong_window = held.strong_window
         payloads = strong_job_payloads(
-            self.collaborators,
+            self,
             strong_window,
             held.strong_model,
             held.operation,
@@ -597,7 +589,7 @@ class ForwardWindow:
             held.folded_boundaries,
         )
         plan = held.resolved_region.plan
-        self.collaborators.retention.require_rounds_retained(
+        self.retention.require_rounds_retained(
             held.label, payloads, plan.context_lo, plan.context_hi
         )
         payload_round_count = decoding_records.distinct_round_count(payloads)
@@ -605,7 +597,7 @@ class ForwardWindow:
             operation_id=key[0],
             window_id=key[1],
             round_count=payload_round_count,
-            ready_time=self.collaborators.engine.now,
+            ready_time=self.engine.now,
             label=held.label,
             kind=decoding_records.DecodeJobKind.STRONG_REDECODE,
             spatial_nodes=weak_job.spatial_nodes,
@@ -617,9 +609,9 @@ class ForwardWindow:
             strong_decode_for=key,
             request_key=held.strong_request_key,
             request_created_ticks=held.strong_request_created_ticks,
-            gate=self.collaborators.builder.gate,
+            gate=self.builder.gate,
         )
-        self.collaborators.retention.hold_strong_input(job)
+        self.retention.hold_strong_input(job)
         return job
 
 
@@ -671,8 +663,8 @@ class ForwardSeamWindow(ForwardWindow):
 
     def _resolved_region(self, key: tuple) -> strong_regions.ForwardRegion:
         """The extent, read with no context on the faces it pins."""
-        near_source_key = self.collaborators.regions.near_seam_source(key)
-        return self.collaborators.regions.forward_seam_region(
+        near_source_key = self.regions.near_seam_source(key)
+        return self.regions.forward_seam_region(
             key, near_source_key=near_source_key
         )
 
@@ -685,7 +677,7 @@ class ForwardSeamWindow(ForwardWindow):
         al. 2510.25222 lines 1253-1259); a terminal region has no
         restart window and no far pin.
         """
-        near_source_key = self.collaborators.regions.near_seam_source(key)
+        near_source_key = self.regions.near_seam_source(key)
         faces = _declared_faces(near_source_key)
         restart_key = resolved_region.restart_window_key
         if restart_key is None:
@@ -706,7 +698,7 @@ def _declared_faces(pinned_source_key: Optional[tuple]) -> tuple:
 
 
 def _held_redo(
-    collaborators: StrongWindowCollaborators,
+    shape: StrongWindowPorts,
     weak_job: decoding_records.DecodeJob,
     strong_window: window_records.Window,
     read_keys: tuple,
@@ -714,15 +706,13 @@ def _held_redo(
 ) -> "_HeldStrongRedo":
     """What a row keeps from its plan: its window, its reads, its faces."""
     key = (weak_job.operation_id, weak_job.window_id)
-    model = collaborators.regions.redecode_model(
-        key, strong_window, folded_boundaries
-    )
-    request_key = collaborators.builder.new_request_key(
+    model = shape.regions.redecode_model(key, strong_window, folded_boundaries)
+    request_key = shape.builder.new_request_key(
         weak_job.operation_id,
         weak_job.window_id,
         window_records.DecoderTier.STRONG,
     )
-    operation = collaborators.regions.operation(weak_job.operation_id)
+    operation = shape.regions.operation(weak_job.operation_id)
     return _HeldStrongRedo(
         key=key,
         weak_job=weak_job,
@@ -732,20 +722,20 @@ def _held_redo(
         model=model,
         operation=operation,
         request_key=request_key,
-        request_created_ticks=collaborators.engine.now,
+        request_created_ticks=shape.engine.now,
         folded_boundaries=folded_boundaries,
     )
 
 
 def _assignment_of(
-    collaborators: StrongWindowCollaborators, held: "_HeldStrongRedo"
+    shape: StrongWindowPorts, held: "_HeldStrongRedo"
 ) -> StrongAssignment:
     """The job now, or the assignment held until its rounds are stored."""
-    crossing = collaborators.retention.context_rounds_in_flight(
+    crossing = shape.retention.context_rounds_in_flight(
         held.key, held.read_keys
     )
     if crossing:
-        _log_hold(collaborators, held, crossing)
+        _log_hold(shape, held, crossing)
         return StrongAssignment(
             held.request_key,
             None,
@@ -753,7 +743,7 @@ def _assignment_of(
             round_count=held.strong_window.round_count,
             folded_boundaries=held.folded_boundaries,
         )
-    job = _strong_job_of(collaborators, held)
+    job = _strong_job_of(shape, held)
     return StrongAssignment(
         held.request_key,
         job,
@@ -774,24 +764,24 @@ def _stored_rounds_conditions(
 
 
 def _job_once_stored(
-    collaborators: StrongWindowCollaborators, held: "_HeldStrongRedo"
+    shape: StrongWindowPorts, held: "_HeldStrongRedo"
 ) -> Optional[decoding_records.DecodeJob]:
     """The job, once every round the window reads is stored."""
-    crossing = collaborators.retention.context_rounds_in_flight(
+    crossing = shape.retention.context_rounds_in_flight(
         held.key, held.read_keys
     )
     if crossing:
         return None
-    return _strong_job_of(collaborators, held)
+    return _strong_job_of(shape, held)
 
 
 def _log_hold(
-    collaborators: StrongWindowCollaborators,
+    shape: StrongWindowPorts,
     held: "_HeldStrongRedo",
     crossing: tuple,
 ) -> None:
     """The rounds the window reads are still on controller_to_strong_buffer."""
-    collaborators.engine.log(
+    shape.engine.log(
         log_sources.DECODER_MANAGER,
         f"{held.label}: strong start deferred until the context "
         f"rounds {list(crossing)} are stored in syndrome buffer 1",
@@ -799,12 +789,12 @@ def _log_hold(
 
 
 def _strong_job_of(
-    collaborators: StrongWindowCollaborators, held: "_HeldStrongRedo"
+    shape: StrongWindowPorts, held: "_HeldStrongRedo"
 ) -> decoding_records.DecodeJob:
     """The row's job: the rounds its store holds, the faces it pins."""
     weak_job = held.weak_job
     payloads = strong_job_payloads(
-        collaborators,
+        shape,
         held.strong_window,
         held.model,
         held.operation,
@@ -816,7 +806,7 @@ def _strong_job_of(
         operation_id=held.key[0],
         window_id=held.key[1],
         round_count=payload_round_count,
-        ready_time=collaborators.engine.now,
+        ready_time=shape.engine.now,
         label=held.label,
         kind=decoding_records.DecodeJobKind.STRONG_REDECODE,
         spatial_nodes=weak_job.spatial_nodes,
@@ -828,9 +818,9 @@ def _strong_job_of(
         strong_decode_for=held.key,
         request_key=held.request_key,
         request_created_ticks=held.request_created_ticks,
-        gate=collaborators.builder.gate,
+        gate=shape.builder.gate,
     )
-    collaborators.retention.hold_strong_input(job)
+    shape.retention.hold_strong_input(job)
     return job
 
 
@@ -873,7 +863,7 @@ class _HeldForwardWindow:
 
 
 def strong_job_payloads(
-    collaborators: StrongWindowCollaborators,
+    shape: StrongWindowPorts,
     strong_window: window_records.Window,
     model,
     operation: program_records.Operation,
@@ -894,9 +884,7 @@ def strong_job_payloads(
     which is the path the weak side's boundaries already take.
     """
     for source_key in folded_boundaries:
-        collaborators.courier.pin_strong_face(
+        shape.courier.pin_strong_face(
             source_key, strong_window, model, operation, request_key
         )
-    return collaborators.retention.strong_window_input(
-        collaborators.builder, strong_window
-    )
+    return shape.retention.strong_window_input(shape.builder, strong_window)

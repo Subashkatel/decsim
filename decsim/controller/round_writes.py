@@ -24,7 +24,9 @@ import dataclasses
 import functools
 from typing import Callable
 
+import decsim.controller.round_transmission as round_transmission
 import decsim.controller.settings as controller_settings
+import decsim.ports as ports
 import decsim.records.rounds as round_records
 import decsim.records.transfers as transfer_records
 import decsim.trace_source as trace_source
@@ -133,29 +135,35 @@ class RoundWriter:
     (syndrome_buffer/round_input.py, syndrome_buffer/strong_round_writer.py).
     """
 
-    def __init__(
-        self,
-        engine,
-        link,
-        weak_input,
-        strong_writer,
-        *,
-        publishes_from_strong_store: bool,
-        held_rounds: HeldRounds,
-        transmitter,
-    ) -> None:
+    # the controller's own fabric: it executes the crossing to Buffer 1
+    link = ports.Port(ports.Link)
+    # Buffer 0's own end: its room, and the landing that takes the slot
+    weak_input = ports.Port(ports.RoundStoreInput)
+    # Buffer 0 itself, which the window side either reads its windows
+    # from or does not
+    weak_store = ports.Port(ports.RoundStore)
+    # the room side's end; absent on a run that never reads from it
+    strong_writer = ports.Port(ports.StrongRoundStore, optional=True)
+    held_rounds = ports.Port(ports.HeldRounds)
+    transmitter = ports.Port(round_transmission.RoundTransmitter)
+    windows = ports.Port(ports.WindowInput)
+
+    def __init__(self, engine) -> None:
         self.engine = engine
-        # the controller's own fabric: it executes the crossing to Buffer 1
-        self.link = link
-        # Buffer 0's own end: its room, and the landing that takes the slot
-        self.weak_input = weak_input
-        self.strong_writer = strong_writer
-        # a strong-primary plan reads its windows from the room side, so a
-        # window-input round takes one hop, into the strong store; a
-        # feedback-memory round still crosses Buffer 0
-        self.publishes_from_strong_store = publishes_from_strong_store
-        self.held_rounds = held_rounds
-        self.transmitter = transmitter
+
+    def start(self) -> None:
+        """Read which store the plan's windows come from, once.
+
+        A strong-primary plan reads its windows from the room side, so a
+        window-input round takes one hop, into the strong store; a
+        feedback-memory round still crosses Buffer 0. The window side
+        settles that when the root wires it and never moves it again, so
+        the writer reads it here rather than at every admit.
+        """
+        reads_from_buffer_zero = self.windows.reads_windows_from(
+            self.weak_store
+        )
+        self.publishes_from_strong_store = not reads_from_buffer_zero
 
     def admit(self, packed: round_records.PackedRound) -> bool:
         """Write the round where it belongs; False when it had to wait."""

@@ -40,9 +40,8 @@ def test_a_release_is_consumed_where_it_lands():
     reference = link_profiles.logical_reference_profile()
     link = fabric_module.LinkFabric(reference, engine)
     recorder = round_events.RoundEventRecorder(engine)
-    output = instruction_output.InstructionOutput(
-        engine, link, None, CLOCK, PULSE_TICKS
-    )
+    output = instruction_output.InstructionOutput(engine, CLOCK, PULSE_TICKS)
+    output.link = link
     output.trace.output_event.connect(recorder.output)
     release = program_records.Decision(2, releases_operation=True)
     delivered = []
@@ -65,9 +64,8 @@ def test_a_result_return_pays_the_pulse_cost_and_the_crossing_to_the_qpu():
     reference = link_profiles.logical_reference_profile()
     link = fabric_module.LinkFabric(reference, engine)
     recorder = round_events.RoundEventRecorder(engine)
-    output = instruction_output.InstructionOutput(
-        engine, link, None, CLOCK, PULSE_TICKS
-    )
+    output = instruction_output.InstructionOutput(engine, CLOCK, PULSE_TICKS)
+    output.link = link
     output.trace.output_event.connect(recorder.output)
     to_qpu = link.expected_delay_ticks(
         transfer_records.LinkPath.CONTROLLER_TO_QPU, None, 0
@@ -101,9 +99,7 @@ def test_the_pulse_cost_runs_from_the_controller_clocks_next_edge():
     """
     engine = engine_module.Engine()
     slow_clock = config.Clock(100)
-    output = instruction_output.InstructionOutput(
-        engine, None, None, slow_clock, 2
-    )
+    output = instruction_output.InstructionOutput(engine, slow_clock, 2)
     result = program_records.Decision(9, releases_operation=False)
     delivered = []
 
@@ -130,9 +126,7 @@ def test_a_result_return_with_no_link_still_pays_the_pulse_cost():
     """
     engine = engine_module.Engine()
     recorder = round_events.RoundEventRecorder(engine)
-    output = instruction_output.InstructionOutput(
-        engine, None, None, CLOCK, PULSE_TICKS
-    )
+    output = instruction_output.InstructionOutput(engine, CLOCK, PULSE_TICKS)
     output.trace.output_event.connect(recorder.output)
     result = program_records.Decision(9, releases_operation=False)
     delivered = []

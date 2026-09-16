@@ -119,16 +119,25 @@ def _redecode(shape):
     decoder_output = _DecoderOutput()
     strong_output = _StrongOutput()
     queue = _DecodeQueue()
-    on_strong_decoded = object()  # opaque: the committer's return path
-    redecode = strong_redecode_module.StrongRedecode(
-        engine,
-        shape,
-        decoder_output,
-        strong_output,
-        queue,
-        on_strong_decoded,
-    )
-    return redecode, decoder_output, strong_output, queue, on_strong_decoded
+    verdict = _Verdict()
+    redecode = strong_redecode_module.StrongRedecode(engine)
+    redecode.shape = shape
+    redecode.decoder_output = decoder_output
+    redecode.strong_output = strong_output
+    redecode.decode_queue = queue
+    redecode.verdict = verdict
+    return redecode, decoder_output, strong_output, queue, verdict
+
+
+class _Verdict:
+    """The window side a strong result returns to."""
+
+    def __init__(self) -> None:
+        self.results = []
+
+    def accept_strong_result(self, job, result) -> None:
+        """One strong decode finished."""
+        self.results.append((job, result))
 
 
 def _call_names(queue) -> list:
@@ -141,7 +150,7 @@ def _call_names(queue) -> list:
 def test_a_job_built_now_is_queued_behind_its_selection():
     strong_job = _strong_job(5)
     shape = _Shape(strong_job, is_held=False)
-    redecode, output, _strong, queue, on_strong_decoded = _redecode(shape)
+    redecode, output, _strong, queue, verdict = _redecode(shape)
     weak_job = _weak_job()
     redecode.escalate(weak_job)
     assert len(output.selections) == 1
@@ -149,7 +158,7 @@ def test_a_job_built_now_is_queued_behind_its_selection():
     assert _call_names(queue) == ["enqueue", "await"]
     _kind, queued, _send_input, return_path = queue.calls[0]
     assert queued is strong_job
-    assert return_path is on_strong_decoded
+    assert return_path == verdict.accept_strong_result
     assert queue.calls[1] == ("await", WINDOW_KEY, strong_job.request_key)
 
 

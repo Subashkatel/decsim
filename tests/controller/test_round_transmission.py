@@ -148,7 +148,8 @@ def transmitter_with(engine, profile, windows=None):
     else:
         windows = windows(engine, links)
     recorder = round_events.RoundEventRecorder(engine)
-    transfers = window_transfers.WindowTransfers(engine, links)
+    transfers = window_transfers.WindowTransfers(engine)
+    transfers.link = links
     store_output = round_output.RoundStoreOutput(
         transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER, "Buffer 0"
     )

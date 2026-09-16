@@ -22,6 +22,7 @@ is the window side's record and leaves by the object that holds it
 import functools
 from typing import Callable, Optional
 
+import decsim.ports as ports
 import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
 import decsim.records.transfers as transfer_records
@@ -41,9 +42,9 @@ FRAME_PATH_BY_TIER = {
 class DecoderOutput:
     """Sends one decoder's answers where they go, and charges the frame."""
 
-    def __init__(self, transfers, frame) -> None:
-        self.transfers = transfers
-        self.frame = frame
+    transfers = ports.Port(ports.WindowTransfers)
+    # a run with no frame commits its corrections nowhere
+    frame = ports.Port(ports.Frame, optional=True)
 
     def publish(
         self,

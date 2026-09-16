@@ -102,9 +102,10 @@ def test_a_streams_later_window_waits_on_the_previous_ones_boundary():
     )
     manager.planner = _stream_planner()
     manager.tracker = types.SimpleNamespace(is_sealed=lambda _stream_id: False)
-    manager.courier = window_boundaries.BoundaryCourier(
-        manager.planner, None, manager.window_interaction, None, _no_boundary
-    )
+    courier = window_boundaries.BoundaryCourier()
+    courier.planner = manager.planner
+    courier.interaction = manager.window_interaction
+    manager.courier = courier
     manager.retention = types.SimpleNamespace(
         register_window=lambda _key, _window: None
     )
@@ -119,10 +120,6 @@ def test_a_streams_later_window_waits_on_the_previous_ones_boundary():
     assert second.deps == [("stream", 0)]
     assert second.deps_remaining == 1
     assert first.dependents == [("stream", 1)]
-
-
-def _no_boundary(_key, _is_unblocked) -> None:
-    """No delivery lands in this test."""
 
 
 def _stream_planner() -> window_planner.WindowPlanner:
@@ -147,12 +144,24 @@ def _stream_planner() -> window_planner.WindowPlanner:
         round_count=9,
         spatial_node_count=17,
     )
-    built = built_window_models.BuiltWindowModels()
-    models = window_planner.WindowModels(None, lambda _code_name: None, built)
+    cache = built_window_models.BuiltWindowModels()
+    built = window_planner.WindowModels(cache)
+    built.router = _Router()
     scheme = sliding_scheme.SlidingWindowScheme()
-    return window_planner.WindowPlanner(
-        scheme, [resolved], plan, models, planned_operations=()
-    )
+    planner = window_planner.WindowPlanner([resolved], plan, ())
+    planner.scheme = scheme
+    planner.models = built
+    planner.start()
+    return planner
+
+
+class _Router:
+    """The routing table, as the models ask it for a code's requirement."""
+
+    def fault_model_requirement_for(self, code):
+        """No unit of this table asks a window model for anything."""
+        del code
+        return None
 
 
 def _tan_memory_circuit():

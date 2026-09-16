@@ -5,10 +5,12 @@ and each is checked here rather than inside the running machine, which
 is where a yaml's mistake belongs (STYLE.md rule 4).
 """
 
+import dataclasses
 from unittest import mock
 
 import pytest
 
+import decsim.assembly as assembly
 import decsim.build.controller_side as controller_side
 import decsim.controller.settings as controller_settings
 import decsim.decoders.decoders as decoders
@@ -167,10 +169,10 @@ def test_two_rows_with_different_cards_are_built_by_the_one_call():
         },
     )
 
-    always_in_stock = controller_side.build_factory(no_card, None, None, plan)
-    fifteen_to_one = controller_side.build_factory(
-        with_a_card, None, None, plan
-    )
+    without_a_card = _parts(no_card, plan)
+    from_a_card = _parts(with_a_card, plan)
+    always_in_stock = controller_side.build_factory(without_a_card)
+    fifteen_to_one = controller_side.build_factory(from_a_card)
 
     assert isinstance(always_in_stock, magic_state_factories.InfiniteFactory)
     assert isinstance(fifteen_to_one, magic_state_factories.DistillationFactory)
@@ -180,8 +182,10 @@ def test_a_factory_kind_that_names_no_row_is_refused():
     plan = _PlanWithRoundTicks(1000)
     settings = qpu_settings.FactorySettings(kind="teleported")
 
+    parts = _parts(settings, plan)
+
     with pytest.raises(ValueError) as refusal:
-        controller_side.build_factory(settings, None, None, plan)
+        controller_side.build_factory(parts)
 
     assert "magic_state_factory.kind" in str(refusal.value)
 
@@ -237,6 +241,24 @@ class _EscalatingPolicy:
 
 class _WeakOnlyPolicy:
     requires_strong_context = False
+
+
+def _parts(factory_settings, plan):
+    """The fixtures the factory's builder reads: its section and the plan."""
+    settings = _settings()
+    settings = dataclasses.replace(
+        settings, magic_state_factory=factory_settings
+    )
+    parts = assembly.Parts(
+        settings=settings,
+        engine=None,
+        plan=plan,
+        escalation_policy=None,
+        pool=None,
+        detection_events=None,
+    )
+    parts.seats["decoder_manager"] = None
+    return parts
 
 
 class _PlanWithRoundTicks:

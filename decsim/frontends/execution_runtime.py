@@ -150,17 +150,15 @@ class ExecutionRuntime:
     classes. The ticks are fired, not kept.
     """
 
+    issuer = ports.Port(ports.OperationIssuer)
+    factory = ports.Port(ports.MagicStateFactory)
+
     def __init__(
         self,
         engine: decsim.engine.Engine,
-        *,
-        issuer,
-        factory: ports.MagicStateFactory,
         resource_claims_by_operation_id,
     ):
         self.engine = engine
-        self.issuer = issuer
-        self.factory = factory
         self.schedule = OperationSchedule()
         resources = ResourceLedger(resource_claims_by_operation_id)
         self.lifecycle = _OperationLifecycle(resources)

@@ -1,23 +1,19 @@
-"""Build the window manager and everything behind its facade.
+"""Build one window-side seat each, from the run's settings.
 
-The facade's nine components are wired by constructor here, in the order
-a window meets them; the courier's and the committer's callbacks to
-components built after them arrive through one stand-in, _LateWiring,
-which is the only late bind in decsim.
+Every function here reads the settings its seat needs and returns the
+seat; which seats a run has and what each is wired to is the assembly
+file's (decsim/assembly.py), which is gem5's script naming a component
+once and assigning its ports
+(tmp/resources/gem5/configs/learning_gem5/part1/simple.py:68).
 """
 
 import decsim.build.escalation as escalation_build
-import decsim.build.plan as plan_build
 import decsim.confidence.gap_join as gap_join_module
 import decsim.decoders.decoder_output as decoder_output_module
 import decsim.decoders.settings as decoder_settings
-import decsim.engine as engine_module
-import decsim.escalation.settings as escalation_settings
 import decsim.escalation.strong_redecode as strong_redecode_module
 import decsim.escalation.strong_regions as strong_regions
-import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.links.window_transfers as window_transfers_module
-import decsim.records.decoding as decoding_records
 import decsim.records.windows as window_records
 import decsim.settings as machine_settings
 import decsim.tables as tables
@@ -33,149 +29,169 @@ import decsim.windows.window_manager as window_manager_module
 import decsim.windows.window_planner as window_planner_module
 
 
-def build_window_manager(
-    engine: engine_module.Engine,
-    settings: machine_settings.MachineSettings,
-    escalation_policy,
-    plan: plan_build.Plan,
-    *,
-    links,
-    conditional_release,
-    fault_model_requirement_for,
-    input_fold,
-    round_store,
-    strong_round_store,
-    weak_output,
-    strong_output,
-    pauli_frame,
-    decode_queue,
-    on_workload_complete,
-) -> window_manager_module.WindowManager:
-    """The windows facade over its six components, wired by constructor."""
-    run_plan = plan.run_plan
-    built_models = settings.workload.built_models
+def build_models(parts):
+    """The window models, warm-started from the workload's built ones."""
+    built_models = parts.settings.workload.built_models
     if built_models is None:
         built_models = built_window_models.BuiltWindowModels()
-    models = window_planner_module.WindowModels(
-        plan.error_model_provider, fault_model_requirement_for, built_models
-    )
-    planner = window_planner_module.WindowPlanner(
-        plan.scheme,
+    return window_planner_module.WindowModels(built_models)
+
+
+def build_planner(parts):
+    """Which windows exist: the plan's, and a stream's as it grows."""
+    run_plan = parts.plan.run_plan
+    return window_planner_module.WindowPlanner(
         run_plan.resolved_operations,
         run_plan.execution,
-        models,
-        plan.planned_operations,
+        parts.plan.planned_operations,
     )
-    tracker = round_tracker_module.RoundTracker(plan.scheme, planner)
-    retention = round_retention_module.RoundRetention(
-        round_store,
-        strong_round_store,
-        planner,
-        tracker,
-        is_strong_context_retained=escalation_policy.requires_strong_context,
-        primary_tier=escalation_policy.primary_tier,
+
+
+def build_tracker(parts):
+    """Which rounds of a window have arrived."""
+    del parts
+    return round_tracker_module.RoundTracker()
+
+
+def build_retention(parts):
+    """Which store holds a window's rounds, and for how long."""
+    policy = parts.escalation_policy
+    return round_retention_module.RoundRetention(
+        is_strong_context_retained=policy.requires_strong_context,
+        primary_tier=policy.primary_tier,
     )
-    transfers = window_transfers_module.WindowTransfers(engine, links)
-    decoder_output = decoder_output_module.DecoderOutput(transfers, pauli_frame)
-    primary_output = weak_output
-    if escalation_policy.primary_tier is window_records.DecoderTier.STRONG:
-        primary_output = strong_output
-    copies_the_fold = _copies_the_boundary_fold(settings, escalation_policy)
-    gate = decode_requests.WindowInputGate(
-        planner, plan.window_interaction, input_fold, copies_the_fold
+
+
+def build_window_transfers(parts):
+    """The window side's transfers, which execute its sends."""
+    return window_transfers_module.WindowTransfers(parts.engine)
+
+
+def build_decoder_output(parts):
+    """Where a finished decode's correction goes."""
+    del parts
+    return decoder_output_module.DecoderOutput()
+
+
+def build_gate(parts):
+    """The window input gate, which knows whether its tier folds a copy."""
+    copies_the_fold = _copies_the_boundary_fold(
+        parts.settings, parts.escalation_policy
     )
-    builder = decode_requests.DecodeRequestBuilder(
-        engine, planner, tracker, plan.window_interaction, gate
+    return decode_requests.WindowInputGate(copies_the_fold)
+
+
+def build_request_builder(parts):
+    """The builder that stamps every decode job with its ordinal."""
+    return decode_requests.DecodeRequestBuilder(parts.engine)
+
+
+def build_ledger(parts):
+    """Which owner committed which rounds."""
+    del parts
+    return committed_rounds.LogicalLedger()
+
+
+def build_results(parts):
+    """One operation's results, gathered as its windows commit."""
+    del parts
+    return operation_results.OperationResults()
+
+
+def build_courier(parts):
+    """The courier that carries a boundary from window to window."""
+    del parts
+    return window_boundaries.BoundaryCourier()
+
+
+def build_committer(parts):
+    """The commit of one decoded window."""
+    return window_commits.WindowCommitter(parts.engine)
+
+
+def build_verdict(parts):
+    """Whether a decoded window is accepted or escalated."""
+    escalation = parts.settings.escalation
+    return window_commits.WindowVerdict(
+        parts.engine,
+        clock=escalation.clock,
+        threshold_cycles=escalation.threshold_cycles,
+        switch_cycles=escalation.switch_cycles,
     )
-    ledger = committed_rounds.LogicalLedger()
-    results = operation_results.OperationResults(
-        planner,
-        tracker,
-        retention,
-        ledger,
-        conditional_release,
-        on_workload_complete,
-    )
-    # the courier's landing callback reaches the facade and the
-    # committer's two hooks reach the strong redecode, both built after
-    # them; this stands in at wiring time, and a run that never
-    # escalates gives the committer no redecode at all
-    late = _LateWiring()
-    committer_redecode = None
-    if escalation_policy.requires_strong_context:
-        committer_redecode = late
-    courier = window_boundaries.BoundaryCourier(
-        planner,
-        transfers,
-        plan.window_interaction,
-        plan.boundary_policy,
-        late.accept_boundary,
-    )
-    committer = window_commits.WindowCommitter(
-        engine, courier, decoder_output, results, committer_redecode
-    )
-    verdict = window_commits.WindowVerdict(
-        engine,
-        planner,
-        tracker,
-        escalation_policy,
-        committer_redecode,
-        decode_queue,
-        committer,
-        clock=settings.escalation.clock,
-        threshold_cycles=settings.escalation.threshold_cycles,
-        switch_cycles=settings.escalation.switch_cycles,
-    )
-    gap_join = _window_gap_join(settings, engine, verdict, decode_queue)
+
+
+def build_confidence_signal(parts):
+    """The row the escalation's confidence is read from."""
+    return escalation_build.confidence_signal(parts.settings.escalation)
+
+
+def build_gap_join(parts):
+    """The join of every solve of a window into one confidence."""
+    return gap_join_module.WindowGapJoin(parts.engine)
+
+
+def build_requester(parts):
+    """The requester, whose read cost is the store its tier reads from."""
+    settings = parts.settings
     read_cycles = settings.round_store.read_cycles
-    if escalation_policy.primary_tier is window_records.DecoderTier.STRONG:
+    if _reads_from_the_room_side(parts.escalation_policy):
         read_cycles = 0
-    requester = decode_requests.DecodeRequester(
-        tracker,
-        retention,
-        builder,
-        decode_queue,
-        escalation_policy,
-        verdict,
-        primary_output,
-        gap_join,
+    return decode_requests.DecodeRequester(
         read_clock=settings.round_store.clock,
         read_cycles=read_cycles,
         clock=settings.windows.clock,
         decision_cycles=settings.windows.decision_cycles,
     )
-    strong_redecode = _strong_redecode(
-        escalation_policy,
-        settings.escalation,
-        engine,
-        planner,
-        tracker,
-        retention,
-        builder,
-        decoder_output,
-        strong_output,
-        requester,
-        ledger,
-        courier,
-        plan.window_interaction,
-        decode_queue,
-        verdict.accept_strong_result,
+
+
+def build_regions(parts):
+    """The strong region of an escalated window."""
+    del parts
+    return strong_regions.StrongRegions()
+
+
+def build_strong_window_shape(parts):
+    """The strong window of the escalation's row: forward, or two-sided.
+
+    escalation.strong_window names the row: the forward window of Toshio
+    Sec. III C, or decsim's own two-sided context.
+    """
+    row = escalation_build.strong_window_row(parts.settings.escalation)
+    return row(parts.engine)
+
+
+def build_strong_redecode(parts):
+    """The window side of the strong tier."""
+    return strong_redecode_module.StrongRedecode(parts.engine)
+
+
+def build_window_manager(parts):
+    """The windows facade the controller side talks to."""
+    mode = parts.settings.workload.feedback_boundary_mode
+    return window_manager_module.WindowManager(
+        parts.engine, feedback_boundary_mode=mode
     )
-    late.strong_redecode = strong_redecode
-    window_manager = window_manager_module.WindowManager(
-        engine,
-        planner=planner,
-        tracker=tracker,
-        retention=retention,
-        requester=requester,
-        courier=courier,
-        results=results,
-        strong_redecode=strong_redecode,
-        window_interaction=plan.window_interaction,
-        feedback_boundary_mode=settings.workload.feedback_boundary_mode,
-    )
-    late.window_manager = window_manager
-    return window_manager
+
+
+def decides_on_a_confidence(
+    settings: machine_settings.MachineSettings,
+) -> bool:
+    """Whether the run joins the confidence of every solve of a window.
+
+    False when the row decides on no confidence, and false for a
+    Python-built policy, which brings its own decoder and reports its
+    own soft output from one decode.
+    """
+    if settings.escalation.policy is not None:
+        return False
+    row = escalation_build.escalation_row(settings.escalation)
+    return row.decides_on_a_confidence
+
+
+def _reads_from_the_room_side(escalation_policy) -> bool:
+    """Whether the tier that decodes the plan's windows reads Buffer 1."""
+    strong = window_records.DecoderTier.STRONG
+    return escalation_policy.primary_tier is strong
 
 
 def _copies_the_boundary_fold(
@@ -193,95 +209,3 @@ def _copies_the_boundary_fold(
         f"{tier}_decoder.boundary_fold",
         tier_settings.boundary_fold,
     )
-
-
-def _window_gap_join(
-    settings: machine_settings.MachineSettings, engine, verdict, decode_queue
-):
-    """The confidence join of an escalating run: every solve's on_decoded.
-
-    None when the row decides on no confidence, and none for a
-    Python-built policy, which brings its own decoder and reports its
-    own soft output from one decode.
-    """
-    if settings.escalation.policy is not None:
-        return None
-    row = escalation_build.escalation_row(settings.escalation)
-    if not row.decides_on_a_confidence:
-        return None
-    signal = escalation_build.confidence_signal(settings.escalation)
-    return gap_join_module.WindowGapJoin(engine, signal, verdict, decode_queue)
-
-
-def _strong_redecode(
-    escalation_policy,
-    escalation: escalation_settings.EscalationSettings,
-    engine,
-    planner,
-    tracker,
-    retention,
-    builder,
-    decoder_output,
-    strong_output,
-    requester,
-    ledger,
-    courier,
-    interaction,
-    decode_queue,
-    on_strong_decoded,
-):
-    """The window side of the strong tier, or None when never escalating.
-
-    escalation.strong_window names the row: the forward window of Toshio
-    Sec. III C, or decsim's own two-sided context.
-    """
-    if not escalation_policy.requires_strong_context:
-        return None
-    row = escalation_build.strong_window_row(escalation)
-    regions = strong_regions.StrongRegions(
-        planner, tracker, retention, interaction
-    )
-    collaborators = strong_window_shapes.StrongWindowCollaborators(
-        engine=engine,
-        regions=regions,
-        planner=planner,
-        retention=retention,
-        builder=builder,
-        requester=requester,
-        ledger=ledger,
-        courier=courier,
-    )
-    shape = row(collaborators)
-    return strong_redecode_module.StrongRedecode(
-        engine,
-        shape,
-        decoder_output,
-        strong_output,
-        decode_queue,
-        on_strong_decoded,
-    )
-
-
-class _LateWiring:
-    """The facade and the strong redecode, for the components built first.
-
-    The courier tells the facade when a boundary landed; the committer
-    tells the strong redecode which weak result to escalate and when a
-    weak window committed.
-    """
-
-    def __init__(self) -> None:
-        self.window_manager = None
-        self.strong_redecode = None
-
-    def accept_boundary(self, key: tuple, is_unblocked: bool) -> None:
-        self.window_manager.accept_boundary(key, is_unblocked)
-
-    def escalate(self, job: decoding_records.DecodeJob) -> None:
-        self.strong_redecode.escalate(job)
-
-    def submit_if_commit_releases(self, key: tuple) -> None:
-        self.strong_redecode.submit_if_commit_releases(key)
-
-    def cancel_held_sibling(self, key: tuple) -> None:
-        self.strong_redecode.cancel_held_sibling(key)

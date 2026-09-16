@@ -1,82 +1,39 @@
-"""The windows facade and everything behind it, wired by constructor.
+"""The windows facade and everything behind it, bound by assignment.
 
-STYLE.md rule 7: one root object builds every component and wires them
-by constructor, so nothing is bound to a component after it is built.
-The one exception in decsim is _LateWiring, the stand-in the courier and
-the committer take for the facade and the strong redecode, which are
-built after them; this file pins that it is the only one, that it
-forwards each call to the component it stands in for, and that a run
-that never escalates gives the committer no redecode at all.
+STYLE.md rule 7: a component declares each neighbour as a port, its
+constructor takes settings only, and the root binds every wire by
+assignment once every component exists. This file pins the three binds
+the window side could only make late: the courier names the facade it
+tells of a landing, and the committer and the verdict name the strong
+redecode built after them, which a run that never escalates leaves
+unbound.
 """
 
-import decsim.build.window_side as window_side
+import tests.declared_run as declared_run
+import tests.escalation.declared_fabric as fabric
 
 
-def test_the_stand_in_is_empty_until_the_root_fills_it():
-    late = window_side._LateWiring()
+def test_the_courier_names_the_facade_it_tells_a_landing():
+    machine = declared_run.weak_only_run(rounds=6)
+    courier = machine.window_manager.courier
 
-    assert late.window_manager is None
-    assert late.strong_redecode is None
-
-
-def test_it_forwards_the_couriers_landing_to_the_facade():
-    late = window_side._LateWiring()
-    facade = _Recorder()
-    late.window_manager = facade
-
-    late.accept_boundary(("op", 1), True)
-
-    assert facade.calls == [("accept_boundary", (("op", 1), True))]
+    assert courier.windows is machine.window_manager
 
 
-def test_it_forwards_the_committers_three_hooks_to_the_strong_redecode():
-    late = window_side._LateWiring()
-    redecode = _Recorder()
-    late.strong_redecode = redecode
+def test_the_committer_and_the_verdict_name_the_strong_redecode():
+    machine = fabric.switching_machine(rounds=9, escalated_windows={1})
+    redecode = machine.window_manager.strong_redecode
+    verdict = machine.window_manager.requester.verdict
 
-    late.escalate("a job")
-    late.submit_if_commit_releases(("op", 1))
-    late.cancel_held_sibling(("op", 1))
-
-    assert redecode.calls == [
-        ("escalate", ("a job",)),
-        ("submit_if_commit_releases", (("op", 1),)),
-        ("cancel_held_sibling", (("op", 1),)),
-    ]
+    assert verdict.strong_redecode is redecode
+    assert verdict.committer.strong_redecode is redecode
 
 
-def test_the_stand_in_carries_exactly_the_calls_the_two_owners_receive():
-    """It stands in for two components and promises nothing else."""
-    late = window_side._LateWiring()
-    forwarded = []
-    for name in dir(late):
-        if not name.startswith("_"):
-            forwarded.append(name)
+def test_a_run_that_never_escalates_leaves_the_redecode_unbound():
+    """An optional port nobody binds reads as None; nothing binds None."""
+    machine = declared_run.weak_only_run(rounds=6)
+    verdict = machine.window_manager.requester.verdict
 
-    assert sorted(forwarded) == [
-        "accept_boundary",
-        "cancel_held_sibling",
-        "escalate",
-        "strong_redecode",
-        "submit_if_commit_releases",
-        "window_manager",
-    ]
-
-
-class _Recorder:
-    """Records the calls made on it, by name and arguments."""
-
-    def __init__(self) -> None:
-        self.calls = []
-
-    def accept_boundary(self, key, is_unblocked) -> None:
-        self.calls.append(("accept_boundary", (key, is_unblocked)))
-
-    def escalate(self, job) -> None:
-        self.calls.append(("escalate", (job,)))
-
-    def submit_if_commit_releases(self, key) -> None:
-        self.calls.append(("submit_if_commit_releases", (key,)))
-
-    def cancel_held_sibling(self, key) -> None:
-        self.calls.append(("cancel_held_sibling", (key,)))
+    assert machine.window_manager.strong_redecode is None
+    assert verdict.strong_redecode is None
+    assert verdict.committer.strong_redecode is None

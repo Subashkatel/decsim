@@ -3,7 +3,7 @@
 The controller's packing stage merges the fragments of a round in
 fragment order, charges the packing time once per complete round, asks
 the run's detection event placement for the round that leaves, and hands
-it on (on_packed) once that placement's own time is charged
+it to the writer once that placement's own time is charged
 (detector_error_model/detection_event_formation.py, named by
 controller.detection_events_formed_at). Caune et al. 2410.05202 measure
 250 to 370 FPGA cycles for packetization, bus transfer, result return
@@ -18,13 +18,53 @@ fragment.
 
 import dataclasses
 import functools
-from typing import Callable, Optional
+from typing import Optional
 
+import decsim.controller.round_transmission as round_transmission
+import decsim.controller.round_writes as round_writes
 import decsim.controller.settings as controller_settings
 import decsim.ports as ports
 import decsim.records.identity as identity_records
 import decsim.records.rounds as round_records
 import decsim.trace_source as trace_source
+
+
+class RoundsInFlight:
+    """The rounds in flight through the packing stage, against the bound.
+
+    A round is in flight from its first fragment until the windows hear
+    of it: its publication on the window route, its delivery on the
+    memory route. Until then it is in one of three places, in assembly
+    here, held for store room (HeldRounds) or on its route
+    (RoundTransmitter), and each place keeps its own count for its own
+    settlement check; the stage's count is their sum, read when a first
+    fragment asks for room, so no exit can forget a release. A round the
+    strong writer carries alone leaves at its write and a dropped round
+    at its drop: neither is held nor sent.
+    """
+
+    held_rounds = ports.Port(ports.HeldRounds)
+    transmitter = ports.Port(round_transmission.RoundTransmitter)
+
+    def __init__(self, capacity: Optional[int]):
+        self.capacity = capacity
+
+    def has_room(self, in_assembly: int) -> bool:
+        """One more round may enter, given how many are in assembly."""
+        if self.capacity is None:
+            return True
+        return self.count(in_assembly) < self.capacity
+
+    def count(self, in_assembly: int) -> int:
+        """The rounds in flight now, given how many are in assembly."""
+        return in_assembly + self.held_rounds.count + self.transmitter.in_flight
+
+    def downstream_text(self) -> str:
+        """The rounds in flight past assembly, for the refusal sentence."""
+        return (
+            f"held for store room: {self.held_rounds.count}, on their "
+            f"route: {self.transmitter.in_flight}"
+        )
 
 
 class RoundAssembler:
@@ -35,20 +75,19 @@ class RoundAssembler:
     "controller assembler") for the merged round (data_path.md hop 2).
     """
 
+    # the one end a packed round leaves by, so the port names the class
+    round_writer = ports.Port(round_writes.RoundWriter)
+    detection_events = ports.Port(ports.DetectionEventPlacement)
+    rounds_in_flight = ports.Port(RoundsInFlight)
+
     def __init__(
         self,
         engine,
         settings: controller_settings.ControllerSettings,
-        *,
-        detection_events: ports.DetectionEventPlacement,
-        on_packed: Callable[[round_records.PackedRound], None],
-        rounds_in_flight: "RoundsInFlight",
     ) -> None:
         self.engine = engine
         self.settings = settings
-        self.detection_events = detection_events
-        self.workspace = _Workspace(rounds_in_flight, settings.packing_overflow)
-        self.on_packed = on_packed
+        self.workspace = _Workspace(settings.packing_overflow)
         self.trace = _TraceSources()
 
     def add(
@@ -108,11 +147,13 @@ class RoundAssembler:
         context = self.workspace.context_by_identity.get(identity)
         if context is not None:
             return context
-        if self.workspace.has_room():
+        if self.workspace.has_room(self.rounds_in_flight):
             return self._open_context(
                 identity, round_key, route, fragment_count
             )
-        dropped = self.workspace.refuse(round_key, self.engine.now)
+        dropped = self.workspace.refuse(
+            self.rounds_in_flight, round_key, self.engine.now
+        )
         if dropped:
             drop = round_records.RoundEvent.of(
                 "DROPPED",
@@ -174,10 +215,10 @@ class RoundAssembler:
             self.detection_events.detection_event_formation_cycles
         )
         if detection_event_formation_cycles == 0:
-            self.on_packed(packed)
+            self.round_writer.admit(packed)
             return
         delay = self._delay(detection_event_formation_cycles)
-        hand_on = functools.partial(self.on_packed, packed)
+        hand_on = functools.partial(self.round_writer.admit, packed)
         self.engine.schedule(
             delay, hand_on, label="controller form detection events"
         )
@@ -200,74 +241,37 @@ class _PackingContext:
     fragments: list = dataclasses.field(default_factory=list)
 
 
-class RoundsInFlight:
-    """The rounds in flight through the packing stage, against the bound.
-
-    A round is in flight from its first fragment until the windows hear
-    of it: its publication on the window route, its delivery on the
-    memory route. Until then it is in one of three places, in assembly
-    here, held for store room (HeldRounds) or on its route
-    (RoundTransmitter), and each place keeps its own count for its own
-    settlement check; the stage's count is their sum, read when a first
-    fragment asks for room, so no exit can forget a release. A round the
-    strong writer carries alone leaves at its write and a dropped round
-    at its drop: neither is held nor sent.
-    """
-
-    def __init__(self, capacity: Optional[int], held_rounds, transmitter):
-        self.capacity = capacity
-        self.held_rounds = held_rounds
-        self.transmitter = transmitter
-
-    def has_room(self, in_assembly: int) -> bool:
-        """One more round may enter, given how many are in assembly."""
-        if self.capacity is None:
-            return True
-        return self.count(in_assembly) < self.capacity
-
-    def count(self, in_assembly: int) -> int:
-        """The rounds in flight now, given how many are in assembly."""
-        return in_assembly + self.held_rounds.count + self.transmitter.in_flight
-
-    def downstream_text(self) -> str:
-        """The rounds in flight past assembly, for the refusal sentence."""
-        return (
-            f"held for store room: {self.held_rounds.count}, on their "
-            f"route: {self.transmitter.in_flight}"
-        )
-
-
 class _Workspace:
     """The rounds in assembly, admitted against the stage's bound."""
 
     def __init__(
         self,
-        rounds_in_flight: RoundsInFlight,
         overflow: controller_settings.PackingOverflowPolicy,
     ) -> None:
-        self.rounds_in_flight = rounds_in_flight
         self.overflow = overflow
         self.context_by_identity: dict = {}
         # rounds refused for want of a context; their later fragments
         # are ignored
         self.dropped_round_keys: set = set()
 
-    def has_room(self) -> bool:
+    def has_room(self, rounds_in_flight: RoundsInFlight) -> bool:
         in_assembly = len(self.context_by_identity)
-        return self.rounds_in_flight.has_room(in_assembly)
+        return rounds_in_flight.has_room(in_assembly)
 
     def is_dropped(self, round_key) -> bool:
         return round_key in self.dropped_round_keys
 
-    def refuse(self, round_key, tick: int) -> bool:
+    def refuse(
+        self, rounds_in_flight: RoundsInFlight, round_key, tick: int
+    ) -> bool:
         """A round that found no context: dropped, or the run stops."""
         drop = controller_settings.PackingOverflowPolicy.DROP_ROUND
         if self.overflow is drop:
             self.dropped_round_keys.add(round_key)
             return True
-        capacity = self.rounds_in_flight.capacity
+        capacity = rounds_in_flight.capacity
         in_assembly = sorted(self.context_by_identity, key=repr)
-        downstream = self.rounds_in_flight.downstream_text()
+        downstream = rounds_in_flight.downstream_text()
         raise RuntimeError(
             f"the packing workspace is full at tick {tick}: round "
             f"{round_key!r} arrived while {capacity} rounds were in "

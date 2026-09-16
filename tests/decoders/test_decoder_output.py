@@ -71,7 +71,9 @@ def test_each_tier_publishes_over_its_own_output_link():
     engine = engine_module.Engine()
     transfers = _Transfers(engine, 4)
     frame = _Frame(engine, 3)
-    output = decoder_output_module.DecoderOutput(transfers, frame)
+    output = decoder_output_module.DecoderOutput()
+    output.transfers = transfers
+    output.frame = frame
     window = _window()
     operation = _operation(1)
     result = decoding_records.DecodeResult(4, 1, logical_observables=(1,))
@@ -104,7 +106,9 @@ def test_the_frames_write_gates_the_commit_and_a_frameless_run_does_not():
     engine = engine_module.Engine()
     transfers = _Transfers(engine, 4)
     frame = _Frame(engine, 3)
-    output = decoder_output_module.DecoderOutput(transfers, frame)
+    output = decoder_output_module.DecoderOutput()
+    output.transfers = transfers
+    output.frame = frame
     committed = []
     result = decoding_records.DecodeResult(4, 1, logical_observables=(1,))
     key = _request_key(window_records.DecoderTier.WEAK)
@@ -115,7 +119,8 @@ def test_the_frames_write_gates_the_commit_and_a_frameless_run_does_not():
     engine.run()
     assert frame.commits == [(4, (4, 1), (1,))]
     assert committed == [7]
-    frameless = decoder_output_module.DecoderOutput(transfers, None)
+    frameless = decoder_output_module.DecoderOutput()
+    frameless.transfers = transfers
     later = []
     on_later = functools.partial(_note, later, engine)
     frameless.publish(window, operation, result, key, on_later)

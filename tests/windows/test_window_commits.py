@@ -130,29 +130,27 @@ class _Fixture:
         )
         self.transfers = _Transfers(self.engine, 4)
         self.frame = _Frame(self.engine, frame_ticks)
-        decoder_output = decoder_output_module.DecoderOutput(
-            self.transfers, self.frame
-        )
-        committer = window_commits.WindowCommitter(
-            self.engine,
-            self.courier,
-            decoder_output,
-            self.results,
-            self.escalation,
-        )
+        decoder_output = decoder_output_module.DecoderOutput()
+        decoder_output.transfers = self.transfers
+        decoder_output.frame = self.frame
+        committer = window_commits.WindowCommitter(self.engine)
+        committer.courier = self.courier
+        committer.decoder_output = decoder_output
+        committer.results = self.results
+        committer.strong_redecode = self.escalation
         self.committer = committer
         self.verdict = window_commits.WindowVerdict(
             self.engine,
-            planner,
-            tracker,
-            self.policy,
-            self.escalation,
-            self.decode_queue,
-            committer,
             clock=clock,
             threshold_cycles=threshold_cycles,
             switch_cycles=switch_cycles,
         )
+        self.verdict.planner = planner
+        self.verdict.tracker = tracker
+        self.verdict.escalation_policy = self.policy
+        self.verdict.strong_redecode = self.escalation
+        self.verdict.decode_queue = self.decode_queue
+        self.verdict.committer = committer
 
     def job(self, tier, sequence, awaiting=False) -> decoding_records.DecodeJob:
         request_key = window_records.DecoderRequestKey(4, 1, tier, sequence)
@@ -246,9 +244,8 @@ def test_a_strong_result_replaces_the_weak_prediction_and_ships_the_held():
 
 def test_a_frameless_run_commits_at_the_delivery():
     fixture = _Fixture()
-    decoder_output = decoder_output_module.DecoderOutput(
-        fixture.transfers, None
-    )
+    decoder_output = decoder_output_module.DecoderOutput()
+    decoder_output.transfers = fixture.transfers
     committed = []
     window = fixture.window
     operation = program_records.Operation(4, "logical", (0,), patches=(0,))

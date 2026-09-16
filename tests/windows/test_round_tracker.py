@@ -54,7 +54,10 @@ def _tracker(
 ) -> round_tracker.RoundTracker:
     planner = _Planner(round_counts, successors)
     scheme = sliding_scheme.SlidingWindowScheme()
-    return round_tracker.RoundTracker(scheme, planner)
+    tracker = round_tracker.RoundTracker()
+    tracker.scheme = scheme
+    tracker.planner = planner
+    return tracker
 
 
 def test_a_window_is_complete_exactly_when_rounds_through_buffer_hi_arrived():

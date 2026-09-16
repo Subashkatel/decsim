@@ -46,7 +46,10 @@ class RecordingAssembler:
 
 
 def controller_with(engine, links, assembler, settings=SETTINGS):
-    return controller_module.Controller(engine, links, settings, assembler)
+    controller = controller_module.Controller(engine, settings)
+    controller.link = links
+    controller.assembler = assembler
+    return controller
 
 
 def test_a_readout_reaches_the_assembler_after_the_crossing_and_the_delay():

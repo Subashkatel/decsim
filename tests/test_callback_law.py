@@ -19,7 +19,6 @@ import dataclasses
 
 import pytest
 
-import decsim.build.stores as store_build
 import decsim.controller.controller as controller_module
 import decsim.decoders.decoders as decoders
 import decsim.decoders.settings as decoder_settings
@@ -28,7 +27,7 @@ import decsim.escalation.settings as escalation_settings
 import decsim.frontends.execution_runtime as execution_runtime_module
 import decsim.machine as machine_module
 import decsim.settings as machine_settings
-import decsim.syndrome_buffer.strong_round_writer as strong_round_writer
+import decsim.windows.window_manager as window_manager_module
 import tests.declared_run as declared_run
 
 WEAK_MICROSECONDS = declared_run.DECLARED_MICROSECONDS["weak"]
@@ -151,19 +150,12 @@ def test_without_the_strong_writers_landing_callback_the_room_side_deadlocks(
 ):
     """The cycle: the writer lands a round, the window manager waits for it.
 
-    build/stores.py binds the writer's windows port to the window
-    manager; a writer whose port holds a window side that hears nothing
-    lands every round in silence.
+    The assembly file binds the writer's windows port to the window
+    manager; a window side that hears every landing and tells nobody
+    leaves every room-side round unread.
     """
-
-    def writer_that_tells_nobody(engine, store, window_manager):
-        del window_manager
-        writer = strong_round_writer.StrongRoundWriter(engine, store)
-        writer.windows = _SilentWindows()
-        return writer
-
     monkeypatch.setattr(
-        store_build, "build_strong_round_writer", writer_that_tells_nobody
+        window_manager_module.WindowManager, "accept_room_round", _hear_nothing
     )
     settings = _strong()
     machine = machine_module.Machine.build(settings, 0)
@@ -199,13 +191,6 @@ def test_without_the_qpus_readout_callback_the_run_ends_with_nothing_decoded(
     assert broken.observation.windows.contribution_by_key == {}
     assert _transfers(wired_result, "qpu_to_controller") == 6
     assert _transfers(broken_result, "qpu_to_controller") == 0
-
-
-class _SilentWindows:
-    """A window side that hears every room-side landing and tells nobody."""
-
-    def accept_room_round(self, *values) -> None:
-        del values
 
 
 def test_the_bounded_run_of_the_wired_weak_machine_needs_far_fewer_actions():

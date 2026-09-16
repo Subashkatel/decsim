@@ -128,6 +128,8 @@ The window manager, as the controller side sees it.
 | `bind_stream_operation` | Note which stream and offset a segment's rounds fold into. |
 | `bind_required_stream_end` | Note the stream round a protected segment's result waits for. |
 | `accept_room_round` | Record one round that landed in the room-side store instead. |
+| `accept_boundary` | A boundary landed in the window; True when it owed no other. |
+| `reads_windows_from` | Whether the primary tier's window reads come from this store. |
 
 ### `WindowPlan`
 
@@ -163,6 +165,16 @@ The rounds a window may still read, as the escalation side sees it.
 | `read_keys_for_bounds` | The retained round keys of a possibly cross-operation range. |
 | `require_retained` | Refuse a new consumer if an already-arrived round was released. |
 | `require_strong_retained` | The same, on the room-side store. |
+
+### `WindowRounds`
+
+The arrivals per operation, as the escalation side reads them.
+
+| Method | What it does |
+| --- | --- |
+| `operation` | The operation of that id. |
+| `round_count_for_window` | The rounds the window reads of its operation. |
+| `strong_rounds_arrived` | The rounds of the operation stored in the room-side store. |
 
 ### `WindowJobBuilder`
 
@@ -211,13 +223,15 @@ The strong tier's window side, as the committer and verdict see it.
 | `escalate` | Ask the strong tier to re-decode the weak job's window. |
 | `submit_if_commit_releases` | A weak window committed: a strong window waiting on it leaves. |
 | `cancel_held_sibling` | A kept weak result: its held sibling never decodes. |
+| `submit_if_stored_data_releases` | A round was stored: a window waiting for its tail leaves. |
 
 ### `WindowVerdict`
 
-The window side, as the strong re-decode returns a result to it.
+The window side, as a finished decode returns its result to it.
 
 | Method | What it does |
 | --- | --- |
+| `accept_result` | The window's answer: apply the threshold, publish or escalate. |
 | `accept_strong_result` | A strong decode finished: publish it, then finalize the window. |
 
 ## the decoder manager schedules a decode
@@ -240,6 +254,28 @@ The window side's say over a job's input, carried on the job.
 | `may_stage` | Whether a blocked job may occupy an input slot yet. |
 | `may_start` | Whether the landed job owes no boundary and may decode. |
 | `mask_input` | Fold the window's boundary into the landed input, once. |
+
+### `DecoderOutput`
+
+The decoder side's outgoing sends, as the window side asks them.
+
+| Method | What it does |
+| --- | --- |
+| `publish` | Send the result on its tier's output link; commit it at delivery. |
+| `send_selection` | Send one window's escalation; returns the delay the link expects. |
+
+### `WindowGapJoin`
+
+The confidence join, as the requester that admits a solve sees it.
+
+| Member | Type |
+| --- | --- |
+| `signal` | `'ConfidenceSignal'` |
+
+| Method | What it does |
+| --- | --- |
+| `accept_result` | One solve finished: hold it, or join the window's solves. |
+| `unresolved_windows` | The windows whose solves are still waiting for each other. |
 
 ### `DecodeQueue`
 
@@ -497,6 +533,14 @@ The soft output one window's decodes report, as the join sees it.
 | Method | What it does |
 | --- | --- |
 | `compute` | The window's confidence and what computing it cost. |
+
+### `RegionProposer`
+
+The window interaction, as the strong regions see it.
+
+| Method | What it does |
+| --- | --- |
+| `plan_strong_region` | The strong window that replaces a weak window, or None. |
 
 ### `BoundaryPayload`
 

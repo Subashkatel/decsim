@@ -10,12 +10,17 @@ window is final.
 """
 
 import dataclasses
-from typing import Callable, Optional
+from typing import Optional
 
+import decsim.ports as ports
 import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.trace_source as trace_source
+import decsim.windows.committed_rounds as committed_rounds
+import decsim.windows.round_retention as round_retention_module
+import decsim.windows.round_tracker as round_tracker_module
+import decsim.windows.window_planner as window_planner
 
 
 class OperationResults:
@@ -26,21 +31,16 @@ class OperationResults:
     delivery is withdrawn; the result ledger listens.
     """
 
-    def __init__(
-        self,
-        planner,
-        tracker,
-        retention,
-        ledger,
-        conditional_release,
-        on_workload_complete: Optional[Callable[[], None]],
-    ) -> None:
-        self.planner = planner
-        self.tracker = tracker
-        self.retention = retention
-        self.ledger = ledger
-        self.conditional_release = conditional_release
-        self.deliveries = _Deliveries(on_workload_complete)
+    planner = ports.Port(window_planner.WindowPlanner)
+    tracker = ports.Port(round_tracker_module.RoundTracker)
+    retention = ports.Port(round_retention_module.RoundRetention)
+    ledger = ports.Port(committed_rounds.LogicalLedger)
+    conditional_release = ports.Port(ports.ReleaseReceiver)
+    # the last result of the workload stops the factory producing
+    factory = ports.Port(ports.MagicStateFactory)
+
+    def __init__(self) -> None:
+        self.deliveries = _Deliveries()
         self.trace = _TraceSources()
 
     # ---- what the committer tells
@@ -116,7 +116,7 @@ class OperationResults:
 
     def finish_workload_if_ready(self) -> None:
         """Tell the root once every window of the workload is final."""
-        if self.deliveries.workload_done.is_done:
+        if self.deliveries.is_workload_done:
             return
         if self._committed_window_count() != self.planner.total_windows:
             return
@@ -124,7 +124,8 @@ class OperationResults:
             return
         if self.tracker.has_unsealed_streams():
             return
-        self.deliveries.workload_done.run()
+        self.deliveries.is_workload_done = True
+        self.factory.shutdown()
 
     def release_committed_segments(self, stream_id) -> None:
         """Deliver the segments the stream's committed prefix covers."""
@@ -320,28 +321,14 @@ def is_awaiting_strong(window: window_records.Window) -> bool:
 
 
 class _Deliveries:
-    """What has been delivered so far, and the one workload callback."""
+    """What has been delivered so far, and whether the workload is done."""
 
-    def __init__(self, on_workload_complete) -> None:
-        self.workload_done = _Once(on_workload_complete)
+    def __init__(self) -> None:
+        self.is_workload_done = False
         self.finished_operation_ids: set = set()
         self.segment_results_sent: set = set()
         self.committed_round_count_by_stream: dict = {}
         self.segment_by_operation: dict = {}
-
-
-class _Once:
-    """A callback that runs at most once; None runs nothing."""
-
-    def __init__(self, callback) -> None:
-        self.callback = callback
-        self.is_done = False
-
-    def run(self) -> None:
-        if self.callback is None:
-            return
-        self.is_done = True
-        self.callback()
 
 
 class _Segment:

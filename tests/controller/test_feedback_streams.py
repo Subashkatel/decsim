@@ -11,15 +11,23 @@ executed.
 
 NoFeedbackStreams is the row a run without streams gets, so its surface
 is checked against the real one: a caller must not learn which it holds.
+The protected cycle's one outward call is pinned here too: the boundary
+and the seal are cadence changes, and the runtime that holds operations
+for them hears each one.
 """
+
+import functools
 
 import pytest
 
 import decsim.controller.feedback_streams as feedback_streams
+import decsim.engine as engine_module
 import decsim.records.program as program_records
 
 
-def _operation(operation_id: int, *, patches, blocked_by=None):
+def _operation(
+    operation_id: int, *, patches, blocked_by=None, emits_detector_data=True
+):
     """One executable operation on the given patches."""
     return program_records.Operation(
         id=operation_id,
@@ -30,24 +38,28 @@ def _operation(operation_id: int, *, patches, blocked_by=None):
         consumes_magic_state=False,
         patches=tuple(patches),
         blocked_by=blocked_by,
+        emits_detector_data=emits_detector_data,
     )
 
 
-def _streams(program, *, regions):
+def _streams(
+    program, *, regions, engine=None, qpu=None, window_manager=None, patches=()
+):
     """A FeedbackStreams over the program, already loaded."""
     resolved_operations = []
     for operation in program.operations:
         resolved = _resolved_operation(operation.id)
         resolved_operations.append(resolved)
     streams = feedback_streams.FeedbackStreams(
-        engine=None,
-        qpu=None,
-        window_manager=None,
+        engine,
         regions=regions,
         resolved_operations=tuple(resolved_operations),
-        resolved_patches=(),
-        retry_ready_operations=None,
+        resolved_patches=patches,
     )
+    if qpu is not None:
+        streams.qpu = qpu
+    if window_manager is not None:
+        streams.windows = window_manager
     streams.load(program)
     return streams
 
@@ -205,6 +217,40 @@ def test_a_well_formed_region_is_indexed_at_both_of_its_endpoints():
     assert streams.table.owner_of(7) is owner
 
 
+def test_every_cadence_change_of_a_protected_region_reaches_the_runtime():
+    """The boundary and the seal each retry the operations held for them."""
+    owner = _operation(7, patches=("p0",))
+    # the region's own stream emits the patch's rounds, so its endpoints
+    # emit none of their own
+    first = _operation(1, patches=("p0",), emits_detector_data=False)
+    second = _operation(2, patches=("p0",), emits_detector_data=False)
+    program = program_records.ExecutionProgram(
+        operations=(first, second), dynamic_streams=(owner,)
+    )
+    region = _region(7, "p0", 1, 2)
+    engine = engine_module.Engine()
+    patch = _resolved_patch("p0")
+    qpu = _Qpu()
+    windows = _Windows()
+    streams = _streams(
+        program,
+        regions=(region,),
+        engine=engine,
+        qpu=qpu,
+        window_manager=windows,
+        patches=(patch,),
+    )
+    runtime = _Runtime()
+    streams.runtime = runtime
+
+    streams.begin(first)
+    close = functools.partial(streams.request_closes, second)
+    engine.schedule(patch.round_ticks, close)
+    engine.run()
+
+    assert runtime.retries == 2
+
+
 def test_the_empty_row_answers_every_call_the_real_one_does():
     """A run with no streams must not tell a caller which row it holds."""
     real_names = _public_names(feedback_streams.FeedbackStreams)
@@ -225,6 +271,53 @@ def test_the_empty_row_holds_no_operation_and_seals_nothing():
     assert empty.blocks_start(operation) is False
     assert empty.is_live_protected_patch("p0") is False
     assert empty.extend_live_stream(operation, "p0") is False
+
+
+def _resolved_patch(patch_identity):
+    """The cadence facts the protected region reads for one patch."""
+    geometry = program_records.ResolvedCodeGeometry(
+        code_name="rotated surface code (d=3)",
+        distance=3,
+        commit_round_count=3,
+        buffer_round_count=3,
+        minimum_leading_buffer_round_count=3,
+        minimum_trailing_buffer_round_count=3,
+        one_patch_spatial_node_count=9,
+        window_floor_justification=None,
+    )
+    return program_records.ResolvedPatchPlanning(
+        patch_identity=patch_identity,
+        code_geometry=geometry,
+        round_ticks=1000,
+        spatial_node_count=9,
+    )
+
+
+class _Runtime:
+    """The runtime as the streams reach it: it counts every retry."""
+
+    def __init__(self) -> None:
+        self.retries = 0
+
+    def retry_ready_operations(self) -> None:
+        """One cadence change."""
+        self.retries += 1
+
+
+class _Qpu:
+    """The QPU the protected round is emitted on."""
+
+    def emit_idle_stream_round(
+        self, operation, stream_id, stream_round, patch
+    ) -> None:
+        """One protected round."""
+
+
+class _Windows:
+    """The window side the seal reaches."""
+
+    def seal_stream(self, stream_id, stream_round_count: int) -> None:
+        """One sealed stream."""
 
 
 def _public_names(row) -> set:

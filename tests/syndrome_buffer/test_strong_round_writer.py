@@ -66,7 +66,8 @@ def room_side(engine, rounds=None, listener=None, windows=None):
     if listener is not None:
         store.trace.round_stored.connect(listener.round_stored)
         store.trace.round_released.connect(listener.round_released)
-    writer = strong_round_writer.StrongRoundWriter(engine, store)
+    writer = strong_round_writer.StrongRoundWriter(engine)
+    writer.store = store
     if windows is not None:
         writer.windows = windows
     return writer

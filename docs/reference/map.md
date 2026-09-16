@@ -264,27 +264,33 @@ docstring.
 ### build
 
 - `decsim/build/__init__.py`: The build script of the machine: one module per pipeline stage.
-- `decsim/build/controller_side.py`: Build the decoder manager, the factory and the controller's streams.
+- `decsim/build/controller_side.py`: Build one controller-side seat each, from the run's settings.
 - `decsim/build/decoders.py`: Build the decoder units of both tiers and the pool the manager schedules.
 - `decsim/build/escalation.py`: Build the escalation policy the yaml names, and what it decides on.
 - `decsim/build/listeners.py`: Register the workload with every component, and name every seed root.
 - `decsim/build/plan.py`: Build the run's plan: the code, the workload's operations, the windows.
-- `decsim/build/stores.py`: Build the two round stores, their ports, the strong writer and the frame.
-- `decsim/build/window_side.py`: Build the window manager and everything behind its facade.
+- `decsim/build/stores.py`: Build one buffer-side seat each, from the run's settings.
+- `decsim/build/window_side.py`: Build one window-side seat each, from the run's settings.
 
-## Level 7: machine
+## Level 7: assembly
+
+### assembly
+
+- `decsim/assembly.py`: What the machine is made of, and what is wired to what.
+
+## Level 8: machine
 
 ### machine
 
 - `decsim/machine.py`: The root: one object that builds every component and wires them.
 
-## Level 8: collect
+## Level 9: collect
 
 ### collect
 
 - `decsim/collect.py`: The experiments layer: tasks, and the shots collected from them.
 
-## Level 9: experiments
+## Level 10: experiments
 
 ### experiments
 
@@ -303,7 +309,7 @@ docstring.
 - `decsim/experiments/trace_file.py`: One shot's Chrome trace, read back from disk and indexed.
 - `decsim/experiments/trace_follow.py`: `decsim trace follow`: one round's or one window's path, hop by hop.
 
-## Level 10: __main__
+## Level 11: __main__
 
 ### __main__
 

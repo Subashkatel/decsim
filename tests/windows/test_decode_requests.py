@@ -124,15 +124,15 @@ class _Fixture:
             is_buffer_filled_by_memory=lambda _window: False,
         )
         self.retention = round_retention.RoundRetention(
-            self.store,
-            None,
-            self.planner,
-            self.tracker,
             is_strong_context_retained=False,
             primary_tier=window_records.DecoderTier.WEAK,
         )
+        self.retention.weak_store = self.store
+        self.retention.planner = self.planner
+        self.retention.tracker = self.tracker
         link = _Link()
-        transfers = window_transfers.WindowTransfers(self.engine, link)
+        transfers = window_transfers.WindowTransfers(self.engine)
+        transfers.link = link
         store_output = round_output.RoundStoreOutput(
             transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER, "Buffer 0"
         )
@@ -145,31 +145,34 @@ class _Fixture:
         input_fold = decoder_memory_transfer.DecoderInputStaging(
             None, self.engine
         )
-        gate = decode_requests.WindowInputGate(
-            self.planner, interaction, input_fold
-        )
+        gate = decode_requests.WindowInputGate()
+        gate.planner = self.planner
+        gate.interaction = interaction
+        gate.input_fold = input_fold
         self.gate = gate
-        self.builder = decode_requests.DecodeRequestBuilder(
-            self.engine, self.planner, self.tracker, interaction, gate
-        )
+        self.builder = decode_requests.DecodeRequestBuilder(self.engine)
+        self.builder.planner = self.planner
+        self.builder.tracker = self.tracker
+        self.builder.interaction = interaction
+        self.builder.gate = gate
         self.queue = _RecordingQueue()
         policy = escalation_policies.Baseline(escalation_policies.NO_CONFIDENCE)
         verdict = types.SimpleNamespace(
             accept_result=_ignore_result, accept_strong_result=_ignore_result
         )
         self.requester = decode_requests.DecodeRequester(
-            self.tracker,
-            self.retention,
-            self.builder,
-            self.queue,
-            policy,
-            verdict,
-            store_output,
             read_cycles=read_cycles,
             read_clock=read_clock,
             decision_cycles=decision_cycles,
             clock=clock,
         )
+        self.requester.tracker = self.tracker
+        self.requester.retention = self.retention
+        self.requester.builder = self.builder
+        self.requester.decode_queue = self.queue
+        self.requester.escalation_policy = policy
+        self.requester.verdict = verdict
+        self.requester.store_output = store_output
         self.retention.register_window((1, 0), self.window)
         self.interaction = interaction
 

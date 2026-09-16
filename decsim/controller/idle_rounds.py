@@ -15,6 +15,8 @@ Battistel et al. 2303.00054 line 144).
 
 import dataclasses
 
+import decsim.controller.feedback_streams as feedback_streams
+import decsim.ports as ports
 import decsim.trace_source as trace_source
 
 
@@ -34,12 +36,13 @@ class IdleRoundAccounting:
     for every idle round the policy relayed.
     """
 
-    def __init__(self, policy, decode_queue, geometry_by_patch, streams, qpu):
+    decode_queue = ports.Port(ports.DecodeQueue)
+    streams = ports.Port(feedback_streams.Streams)
+    qpu = ports.Port(ports.Qpu)
+
+    def __init__(self, policy, geometry_by_patch):
         self.policy = policy
-        self.decode_queue = decode_queue
         self.geometry_by_patch = geometry_by_patch
-        self.streams = streams
-        self.qpu = qpu
         self.operation_by_id: dict = {}
         self.idle_by_patch: dict = {}
         self.trace = _TraceSources()

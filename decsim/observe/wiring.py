@@ -16,7 +16,8 @@ afterwards would miss them.
 """
 
 import functools
-from typing import Optional
+from collections.abc import Mapping
+from typing import Any, Optional
 
 import decsim.decoders.decoder_manager as decoder_manager_module
 import decsim.decoders.decoder_pool as decoder_pool
@@ -46,73 +47,69 @@ import decsim.observe.window_ledger as window_ledger_module
 def observe(
     observation: observe_settings.ObservationSettings,
     engine: engine_module.Engine,
+    seats: Mapping[str, Any],
     *,
     process_name: str,
     operations: tuple,
     traffic_ledger: link_traffic.TrafficLedger,
-    links,
-    qpu,
     syndrome_source,
-    controller,
-    idle_rounds,
-    assembler,
-    held_rounds,
-    transmitter,
-    store_input,
-    instruction_output,
-    round_store,
-    strong_round_store,
-    strong_round_writer,
-    execution_runtime,
-    pauli_frame,
-    decoder_manager,
-    window_manager,
     pool,
 ) -> observation_module.Observation:
-    """Every listener of the run, built and connected to what it hears."""
+    """Every listener of the run, built and connected to what it hears.
+
+    A listener names the component it hears by the name the assembly
+    file gave that seat. The three seats a run may have none of are read
+    with get, and the listeners that hear them take None. The syndrome
+    source, the decoder pool and the operations are the run's fixtures
+    rather than seats, so they arrive on their own.
+    """
+    strong_round_store = seats.get("strong_round_store")
+    strong_round_writer = seats.get("strong_round_writer")
+    pauli_frame = seats.get("pauli_frame")
     log = _connect_log(observation, engine)
+    links = seats["links"]
     links.trace.transfer_delivered.connect(traffic_ledger.on_transfer)
     round_events = _connect_round_events(
         engine,
-        qpu=qpu,
-        assembler=assembler,
-        held_rounds=held_rounds,
-        transmitter=transmitter,
-        store_input=store_input,
-        instruction_output=instruction_output,
+        qpu=seats["qpu"],
+        assembler=seats["assembler"],
+        held_rounds=seats["held_rounds"],
+        transmitter=seats["transmitter"],
+        store_input=seats["store_input"],
+        instruction_output=seats["instruction_output"],
         strong_round_store=strong_round_store,
     )
     round_store_occupancy = _round_store_occupancy(
-        observation, engine, round_store
+        observation, engine, seats["round_store"]
     )
-    window_ledger = _connect_window_ledger(window_manager)
-    result_ledger = _connect_result_ledger(window_manager)
+    window_ledger = _connect_window_ledger(seats["window_manager"])
+    result_ledger = _connect_result_ledger(seats["window_manager"])
     runtime_stamps = runtime_stamps_module.RuntimeStamps()
-    _connect_runtime_stamps(execution_runtime, runtime_stamps)
-    queue_depth = _connect_queue_depth(decoder_manager)
-    controller_counters = _connect_controller_counters(idle_rounds)
-    command_events = _connect_command_events(qpu)
+    _connect_runtime_stamps(seats["execution_runtime"], runtime_stamps)
+    queue_depth = _connect_queue_depth(seats["decoder_manager"])
+    controller_counters = _connect_controller_counters(seats["idle_rounds"])
+    command_events = _connect_command_events(seats["qpu"])
     stages = _connect_stage_records(pool)
     referee_audit = _connect_referee_audit(pool)
     sampled_shots = _connect_sampled_shots(syndrome_source)
     decode_records = _decode_records(observation)
-    _connect_decode_records(decoder_manager, decode_records)
+    _connect_decode_records(seats["decoder_manager"], decode_records)
     trace_writer = _trace_writer(observation, engine, process_name)
     data_movement = _data_movement(observation)
     _connect_data_path(
         trace_writer,
         data_movement,
         links=links,
-        qpu=qpu,
-        controller=controller,
-        assembler=assembler,
-        held_rounds=held_rounds,
-        store_input=store_input,
-        round_store=round_store,
+        qpu=seats["qpu"],
+        controller=seats["controller"],
+        assembler=seats["assembler"],
+        held_rounds=seats["held_rounds"],
+        store_input=seats["store_input"],
+        round_store=seats["round_store"],
         strong_round_store=strong_round_store,
         strong_round_writer=strong_round_writer,
-        decoder_manager=decoder_manager,
-        window_manager=window_manager,
+        decoder_manager=seats["decoder_manager"],
+        window_manager=seats["window_manager"],
         pauli_frame=pauli_frame,
         pool=pool,
     )
@@ -120,8 +117,8 @@ def observe(
         observation,
         engine,
         log,
-        window_manager,
-        decoder_manager,
+        seats["window_manager"],
+        seats["decoder_manager"],
         window_ledger=window_ledger,
         result_ledger=result_ledger,
         traffic_ledger=traffic_ledger,

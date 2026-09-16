@@ -79,17 +79,12 @@ class ForwardRegion:
 class StrongRegions:
     """The strong region of a window, planned, checked and modelled."""
 
-    def __init__(
-        self,
-        planner: ports.WindowPlan,
-        tracker,
-        retention: ports.WindowRetention,
-        interaction,
-    ) -> None:
-        self.planner = planner
-        self.tracker = tracker
-        self.retention = retention
-        self.interaction = interaction
+    planner = ports.Port(ports.WindowPlan)
+    tracker = ports.Port(ports.WindowRounds)
+    retention = ports.Port(ports.WindowRetention)
+    # the one call this package makes on the window interaction; the rest
+    # of that class is the windows package's own seam
+    interaction = ports.Port(ports.RegionProposer)
 
     def context_region(self, key: tuple) -> RedoRegion:
         """The escalated window with one buffer of raw context per side."""

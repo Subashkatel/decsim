@@ -15,18 +15,21 @@ closed feedback boundaries) lives here; its geometry is the planner's.
 
 from typing import Optional
 
+import decsim.ports as ports
 import decsim.records.identity as identity_records
 import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.windows.schemes.window_data as window_data
+import decsim.windows.window_planner as window_planner
 
 
 class RoundTracker:
     """The arrivals per operation, and each window's readiness."""
 
-    def __init__(self, scheme, planner) -> None:
-        self.scheme = scheme
-        self.planner = planner
+    scheme = ports.Port(ports.WindowingScheme)
+    planner = ports.Port(window_planner.WindowPlanner)
+
+    def __init__(self) -> None:
         self.operation_by_id: dict = {}
         self.arrivals_by_operation: dict = {}
         self.stream_by_id: dict = {}

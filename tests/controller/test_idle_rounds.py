@@ -71,8 +71,11 @@ def accounting_with(policy, streams=None):
     demand = RecordingDecodeQueue()
     geometry_by_patch = {"patch-a": patch_record(), "patch-b": patch_record()}
     accounting = idle_rounds_module.IdleRoundAccounting(
-        policy, demand, geometry_by_patch, streams, qpu
+        policy, geometry_by_patch
     )
+    accounting.decode_queue = demand
+    accounting.streams = streams
+    accounting.qpu = qpu
     memory = program_records.Operation(
         7, "memory", ("patch-a",), patches=("patch-a",)
     )

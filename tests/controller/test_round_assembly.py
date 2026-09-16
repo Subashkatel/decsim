@@ -44,9 +44,10 @@ def fragment(round_index, fragment_index=0, bits=(1, 0)):
 
 def rounds_in_flight(capacity, held=0, on_route=0):
     """The bound over `held` held rounds and `on_route` on their route."""
-    held_rounds = types.SimpleNamespace(count=held)
-    transmitter = types.SimpleNamespace(in_flight=on_route)
-    return round_assembly.RoundsInFlight(capacity, held_rounds, transmitter)
+    bound = round_assembly.RoundsInFlight(capacity)
+    bound.held_rounds = types.SimpleNamespace(count=held)
+    bound.transmitter = types.SimpleNamespace(in_flight=on_route)
+    return bound
 
 
 def formation(former, detection_event_formation_cycles=0):
@@ -60,16 +61,31 @@ def assembler_with(engine, packed, recorder, **settings_fields):
     settings = controller_settings.ControllerSettings(**settings_fields)
     bound = rounds_in_flight(settings.packing_rounds_in_flight)
     events = formation(None)
-    assembler = round_assembly.RoundAssembler(
-        engine,
-        settings,
-        detection_events=events,
-        on_packed=packed.append,
-        rounds_in_flight=bound,
-    )
+    assembler = round_assembly.RoundAssembler(engine, settings)
+    assembler.detection_events = events
+    assembler.rounds_in_flight = bound
+    assembler.round_writer = types.SimpleNamespace(admit=packed.append)
     if recorder is not None:
         assembler.trace.round_event.connect(recorder.record)
     return assembler
+
+
+def test_the_assembler_hands_a_packed_round_to_its_round_writer():
+    engine = engine_module.Engine()
+    settings = controller_settings.ControllerSettings()
+    events = formation(None)
+    unbounded = rounds_in_flight(None)
+    assembler = round_assembly.RoundAssembler(engine, settings)
+    assembler.detection_events = events
+    assembler.rounds_in_flight = unbounded
+    admitted = []
+    assembler.round_writer = types.SimpleNamespace(admit=admitted.append)
+
+    only_fragment = fragment(1)
+
+    assembler.add(only_fragment, 1, round_records.WINDOW_INPUT_ROUTE)
+
+    assert [round.packet.round_index for round in admitted] == [1]
 
 
 def test_packing_starts_at_the_edge_after_the_last_fragment_arrives():
@@ -141,21 +157,17 @@ def test_the_bound_counts_rounds_held_and_on_their_route():
     full = rounds_in_flight(2, held=1, on_route=1)
     packed = []
     events = formation(None)
-    assembler = round_assembly.RoundAssembler(
-        engine,
-        settings,
-        detection_events=events,
-        on_packed=packed.append,
-        rounds_in_flight=full,
-    )
+    assembler = round_assembly.RoundAssembler(engine, settings)
+    assembler.detection_events = events
+    assembler.rounds_in_flight = full
+    assembler.round_writer = types.SimpleNamespace(admit=packed.append)
     first = fragment(1)
 
     with pytest.raises(RuntimeError, match="held for store room: 1, on"):
         assembler.add(first, 1, round_records.WINDOW_INPUT_ROUTE)
     assert full.count(0) == 2
 
-    room_for_one = rounds_in_flight(3, held=1, on_route=1)
-    assembler.workspace.rounds_in_flight = room_for_one
+    full.capacity = 3
     assembler.add(first, 1, round_records.WINDOW_INPUT_ROUTE)
     assert [round.packet.round_index for round in packed] == [1]
 
@@ -196,13 +208,10 @@ def test_detection_events_are_formed_once_from_the_merged_bits():
     settings = controller_settings.ControllerSettings()
     unbounded = rounds_in_flight(None)
     events = formation(former)
-    assembler = round_assembly.RoundAssembler(
-        engine,
-        settings,
-        detection_events=events,
-        on_packed=packed.append,
-        rounds_in_flight=unbounded,
-    )
+    assembler = round_assembly.RoundAssembler(engine, settings)
+    assembler.detection_events = events
+    assembler.rounds_in_flight = unbounded
+    assembler.round_writer = types.SimpleNamespace(admit=packed.append)
     first = fragment(1, fragment_index=0, bits=(1, 0))
     second = fragment(1, fragment_index=1, bits=(0, 1))
 
@@ -228,13 +237,10 @@ def test_events_formed_at_the_decoder_keep_the_raw_measurement_width():
     settings = controller_settings.ControllerSettings()
     events = detection_event_formation.DecoderSideFormation(former, 0)
     unbounded = rounds_in_flight(None)
-    assembler = round_assembly.RoundAssembler(
-        engine,
-        settings,
-        detection_events=events,
-        on_packed=packed.append,
-        rounds_in_flight=unbounded,
-    )
+    assembler = round_assembly.RoundAssembler(engine, settings)
+    assembler.detection_events = events
+    assembler.rounds_in_flight = unbounded
+    assembler.round_writer = types.SimpleNamespace(admit=packed.append)
     first = fragment(1, fragment_index=0, bits=(1, 0))
     second = fragment(1, fragment_index=1, bits=(0, 1))
 
@@ -259,13 +265,10 @@ def test_the_controller_row_delays_the_round_by_its_formation_time():
     former = _Former((0, 1, 1))
     events = formation(former, detection_event_formation_cycles=1)
     unbounded = rounds_in_flight(None)
-    assembler = round_assembly.RoundAssembler(
-        engine,
-        settings,
-        detection_events=events,
-        on_packed=departures.record,
-        rounds_in_flight=unbounded,
-    )
+    assembler = round_assembly.RoundAssembler(engine, settings)
+    assembler.detection_events = events
+    assembler.rounds_in_flight = unbounded
+    assembler.round_writer = types.SimpleNamespace(admit=departures.record)
 
     only_fragment = fragment(1, bits=(1, 0))
 
@@ -284,13 +287,10 @@ def test_an_uncharged_controller_row_hands_the_round_on_at_once():
     former = _Former((0, 1, 1))
     events = formation(former)
     unbounded = rounds_in_flight(None)
-    assembler = round_assembly.RoundAssembler(
-        engine,
-        settings,
-        detection_events=events,
-        on_packed=departures.record,
-        rounds_in_flight=unbounded,
-    )
+    assembler = round_assembly.RoundAssembler(engine, settings)
+    assembler.detection_events = events
+    assembler.rounds_in_flight = unbounded
+    assembler.round_writer = types.SimpleNamespace(admit=departures.record)
     only_fragment = fragment(1, bits=(1, 0))
 
     assembler.add(only_fragment, 1, round_records.WINDOW_INPUT_ROUTE)

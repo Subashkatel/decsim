@@ -122,21 +122,15 @@ def _commit_of_this_tree():
     Walked up from this file rather than from the module under test, so
     a manifest that named some other tree would fail here. The container
     the suite runs in has no git binary, which is why the git files are
-    read directly.
+    read directly; the reader knows a worktree's .git file and the refs
+    it shares with the repo.
     """
     this_file = pathlib.Path(__file__)
     here = this_file.resolve()
     checkout = here
     while not (checkout / ".git").exists():
         checkout = checkout.parent
-    git_dir = checkout / ".git"
-    head_text = (git_dir / "HEAD").read_text()
-    head = head_text.strip()
-    if not head.startswith("ref: "):
-        return head
-    reference = head[len("ref: ") :]
-    reference_text = (git_dir / reference).read_text()
-    return reference_text.strip()
+    return run_folder._commit_from_git_files(checkout)
 
 
 def _seeds_of_every_shot(run_dir):

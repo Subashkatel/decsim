@@ -71,6 +71,9 @@ _DECODE_ARGUMENT_TYPES = [
     _INDEX_ARRAY,
     _INDEX_ARRAY,
     _INDEX_ARRAY,
+    _INDEX_ARRAY,
+    _INDEX_ARRAY,
+    _INDEX_ARRAY,
 ]
 _CLUSTER_GAP_ARGUMENT_TYPES = [
     ctypes.c_int32,
@@ -96,6 +99,8 @@ class GrowthOutcome:
     edge_intervals: tuple
     contact_edges: tuple
     forest_edges: tuple
+    # one GrowthStep per growth step, the cycle count's input
+    growth_steps: tuple
 
 
 def decode(graph: evidence_records.UnionFindGraph, residual_syndrome):
@@ -110,6 +115,9 @@ def decode(graph: evidence_records.UnionFindGraph, residual_syndrome):
     contact_count = numpy.zeros(1, dtype=numpy.int32)
     forest = numpy.zeros(edge_count, dtype=numpy.int32)
     forest_count = numpy.zeros(1, dtype=numpy.int32)
+    step_edge_counts = numpy.zeros(edge_count, dtype=numpy.int32)
+    step_hop_counts = numpy.zeros(edge_count, dtype=numpy.int32)
+    step_count = numpy.zeros(1, dtype=numpy.int32)
     decode_window = entry_point()
     status = decode_window(
         graph.detector_count,
@@ -126,17 +134,22 @@ def decode(graph: evidence_records.UnionFindGraph, residual_syndrome):
         contact_count,
         forest,
         forest_count,
+        step_edge_counts,
+        step_hop_counts,
+        step_count,
     )
     _refuse_failure(status)
     selected_edges = _selected_edges(selected)
     edge_intervals = _intervals(is_closed, lower_tick, upper_tick)
     contact_edges = _prefix(contacts, contact_count)
     forest_edges = _prefix(forest, forest_count)
+    growth_steps = _growth_steps(step_edge_counts, step_hop_counts, step_count)
     return GrowthOutcome(
         selected_edges=selected_edges,
         edge_intervals=edge_intervals,
         contact_edges=contact_edges,
         forest_edges=forest_edges,
+        growth_steps=growth_steps,
     )
 
 
@@ -317,6 +330,16 @@ def _open_bounds(interval, is_closed: bool) -> tuple:
     if is_closed:
         return 0, 0
     return interval.lower_tick, interval.upper_tick
+
+
+def _growth_steps(step_edge_counts, step_hop_counts, step_count) -> tuple:
+    edge_counts = _prefix(step_edge_counts, step_count)
+    hop_counts = _prefix(step_hop_counts, step_count)
+    steps = []
+    for edge_count, hop_count in zip(edge_counts, hop_counts):
+        step = evidence_records.GrowthStep(edge_count, hop_count)
+        steps.append(step)
+    return tuple(steps)
 
 
 def _prefix(values, count) -> tuple:

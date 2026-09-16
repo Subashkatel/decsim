@@ -126,7 +126,6 @@ static void release_workspace(struct workspace *workspace) {
  * by the same call that releases a whole workspace. */
 static int32_t take_workspace(struct workspace *workspace, int32_t node_count,
                               int32_t edge_count) {
-  int32_t slot_count = 2 * node_count;
   int32_t entry_count = 2 * edge_count;
   int32_t taken = 1;
   memset(workspace, 0, sizeof(*workspace));
@@ -168,9 +167,9 @@ static int32_t take_workspace(struct workspace *workspace, int32_t node_count,
   workspace->adjacency_cursor =
       allocate_array(node_count, sizeof(int32_t), &taken);
   workspace->adjacency_neighbor =
-      allocate_array(slot_count, sizeof(int32_t), &taken);
+      allocate_array(entry_count, sizeof(int32_t), &taken);
   workspace->adjacency_edge =
-      allocate_array(slot_count, sizeof(int32_t), &taken);
+      allocate_array(entry_count, sizeof(int32_t), &taken);
   workspace->node_stack = allocate_array(node_count, sizeof(int32_t), &taken);
   workspace->tree_order = allocate_array(node_count, sizeof(int32_t), &taken);
   workspace->parent_node = allocate_array(node_count, sizeof(int32_t), &taken);
@@ -662,6 +661,195 @@ static void sort_edges(edge_order orders_before,
   }
 }
 
+static void place_neighbor(struct workspace *workspace, int32_t node,
+                           int32_t neighbor, int32_t edge) {
+  int32_t slot = workspace->adjacency_cursor[node];
+  workspace->adjacency_neighbor[slot] = neighbor;
+  workspace->adjacency_edge[slot] = edge;
+  workspace->adjacency_cursor[node] = slot + 1;
+}
+
+/* Each node's closed-edge degree, counted into adjacency_start. */
+static void count_closed_neighbors(struct workspace *workspace,
+                                   const struct graph_arrays *graph,
+                                   const uint8_t *interval_is_closed) {
+  for (int32_t edge = 0; edge < graph->edge_count; ++edge) {
+    if (!interval_is_closed[edge]) {
+      continue;
+    }
+    int32_t node_a =
+        endpoint_node(graph->endpoint_a[edge], graph->detector_count);
+    int32_t node_b =
+        endpoint_node(graph->endpoint_b[edge], graph->detector_count);
+    if (node_a == node_b) {
+      continue;
+    }
+    workspace->adjacency_start[node_a + 1] += 1;
+    workspace->adjacency_start[node_b + 1] += 1;
+  }
+}
+
+static void place_closed_neighbors(struct workspace *workspace,
+                                   const struct graph_arrays *graph,
+                                   const uint8_t *interval_is_closed) {
+  for (int32_t edge = 0; edge < graph->edge_count; ++edge) {
+    if (!interval_is_closed[edge]) {
+      continue;
+    }
+    int32_t node_a =
+        endpoint_node(graph->endpoint_a[edge], graph->detector_count);
+    int32_t node_b =
+        endpoint_node(graph->endpoint_b[edge], graph->detector_count);
+    if (node_a == node_b) {
+      continue;
+    }
+    place_neighbor(workspace, node_a, node_b, edge);
+    place_neighbor(workspace, node_b, node_a, edge);
+  }
+}
+
+/* Each node's neighbours across the edges the growth has closed, laid
+ * in the forest's adjacency arrays, which nothing reads until the
+ * growth ends. A cluster identifier floods across exactly these edges,
+ * one per stage (Helios 2301.08419 lines 623-629). */
+static void build_closed_adjacency(struct workspace *workspace,
+                                   const struct graph_arrays *graph,
+                                   const uint8_t *interval_is_closed) {
+  int32_t node_count = graph->detector_count + 1;
+  for (int32_t node = 0; node <= node_count; ++node) {
+    workspace->adjacency_start[node] = 0;
+  }
+  count_closed_neighbors(workspace, graph, interval_is_closed);
+  for (int32_t node = 0; node < node_count; ++node) {
+    workspace->adjacency_start[node + 1] += workspace->adjacency_start[node];
+    workspace->adjacency_cursor[node] = workspace->adjacency_start[node];
+  }
+  place_closed_neighbors(workspace, graph, interval_is_closed);
+}
+
+/* Queue every unvisited closed-edge neighbour of node behind tail. */
+static int32_t queue_closed_neighbors(struct workspace *workspace,
+                                      int32_t node, int32_t depth,
+                                      int32_t tail) {
+  int32_t end = workspace->adjacency_start[node + 1];
+  for (int32_t slot = workspace->adjacency_start[node]; slot < end; ++slot) {
+    int32_t neighbor = workspace->adjacency_neighbor[slot];
+    if (workspace->is_visited[neighbor]) {
+      continue;
+    }
+    workspace->is_visited[neighbor] = 1;
+    workspace->tree_order[neighbor] = depth + 1;
+    workspace->node_stack[tail] = neighbor;
+    tail += 1;
+  }
+  return tail;
+}
+
+/* The component of detectors reachable from start over closed edges,
+ * appended to component_nodes from position count, and its lowest
+ * node. The boundary node is every cluster's neighbour and no
+ * cluster's member, so the walk stops at it. */
+static int32_t collect_flood_component(struct workspace *workspace,
+                                       int32_t start, int32_t boundary_node,
+                                       int32_t *count) {
+  int32_t head = 0;
+  int32_t tail = 0;
+  workspace->node_stack[tail] = start;
+  tail += 1;
+  workspace->is_visited[start] = 1;
+  int32_t lowest = start;
+  while (head < tail) {
+    int32_t node = workspace->node_stack[head];
+    head += 1;
+    if (node == boundary_node) {
+      continue;
+    }
+    workspace->component_nodes[*count] = node;
+    *count += 1;
+    if (node < lowest) {
+      lowest = node;
+    }
+    tail = queue_closed_neighbors(workspace, node, 0, tail);
+  }
+  return lowest;
+}
+
+/* Hops from a cluster's lowest node, the identifier Helios floods from,
+ * to its furthest member over closed edges. */
+static int32_t flood_hops_from(struct workspace *workspace, int32_t root,
+                               int32_t boundary_node) {
+  int32_t head = 0;
+  int32_t tail = 0;
+  workspace->node_stack[tail] = root;
+  tail += 1;
+  workspace->is_visited[root] = 1;
+  workspace->tree_order[root] = 0;
+  int32_t deepest = 0;
+  while (head < tail) {
+    int32_t node = workspace->node_stack[head];
+    head += 1;
+    if (node == boundary_node) {
+      continue;
+    }
+    int32_t depth = workspace->tree_order[node];
+    if (depth > deepest) {
+      deepest = depth;
+    }
+    tail = queue_closed_neighbors(workspace, node, depth, tail);
+  }
+  for (int32_t position = 0; position < tail; ++position) {
+    workspace->is_visited[workspace->node_stack[position]] = 0;
+  }
+  return deepest;
+}
+
+/* Unmark the component members from position first, and the boundary. */
+static void clear_visited(struct workspace *workspace, int32_t first,
+                          int32_t end, int32_t boundary_node) {
+  for (int32_t member = first; member < end; ++member) {
+    workspace->is_visited[workspace->component_nodes[member]] = 0;
+  }
+  workspace->is_visited[boundary_node] = 0;
+}
+
+/* The deepest flood among the clusters one step's contacts fused. Each
+ * component of detectors is flooded once, from its lowest node; the
+ * boundary node joins clusters in the union-find without joining their
+ * floods. */
+static int32_t fused_flood_hops(struct workspace *workspace,
+                                const struct graph_arrays *graph,
+                                const uint8_t *interval_is_closed,
+                                const int32_t *contact_edges, int32_t start,
+                                int32_t end) {
+  build_closed_adjacency(workspace, graph, interval_is_closed);
+  int32_t boundary_node = graph->detector_count;
+  int32_t member_count = 0;
+  int32_t deepest = 0;
+  for (int32_t position = start; position < end; ++position) {
+    int32_t edge = contact_edges[position];
+    int32_t node = endpoint_node(graph->endpoint_a[edge], boundary_node);
+    if (node == boundary_node) {
+      node = endpoint_node(graph->endpoint_b[edge], boundary_node);
+    }
+    if (node == boundary_node || workspace->is_visited[node]) {
+      continue;
+    }
+    int32_t first_member = member_count;
+    int32_t lowest = collect_flood_component(
+        workspace, node, boundary_node, &member_count);
+    clear_visited(workspace, first_member, member_count, boundary_node);
+    int32_t hops = flood_hops_from(workspace, lowest, boundary_node);
+    for (int32_t member = 0; member < member_count; ++member) {
+      workspace->is_visited[workspace->component_nodes[member]] = 1;
+    }
+    if (hops > deepest) {
+      deepest = hops;
+    }
+  }
+  clear_visited(workspace, 0, member_count, boundary_node);
+  return deepest;
+}
+
 /* Grow until no cluster is odd or no odd cluster has an edge left to
  * grow along. The second end is best effort: PECOS and ldpc peel what
  * there is rather than refuse. */
@@ -670,7 +858,9 @@ static int32_t grow_clusters(struct workspace *workspace,
                              uint8_t *interval_is_closed,
                              int64_t *interval_lower_tick,
                              int64_t *interval_upper_tick,
-                             int32_t *contact_edges, int32_t *contact_count) {
+                             int32_t *contact_edges, int32_t *contact_count,
+                             int32_t *step_edge_counts,
+                             int32_t *step_hop_counts, int32_t *step_count) {
   link_edge_entries(workspace, graph);
   *contact_count =
       collect_closed_contacts(graph, interval_is_closed, contact_edges);
@@ -712,6 +902,11 @@ static int32_t grow_clusters(struct workspace *workspace,
     if (event_count > graph->edge_count) {
       return union_find_growth_bound_exceeded;
     }
+    step_edge_counts[event_count - 1] = working_count;
+    step_hop_counts[event_count - 1] =
+        fused_flood_hops(workspace, graph, interval_is_closed, contact_edges,
+                         batch_start, *contact_count);
+    *step_count = event_count;
     active_count =
         refresh_active_roots(workspace, active_count, event_count + 1);
   }
@@ -746,14 +941,6 @@ static int32_t contact_forest(struct workspace *workspace,
     forest_count += 1;
   }
   return forest_count;
-}
-
-static void place_neighbor(struct workspace *workspace, int32_t node,
-                           int32_t neighbor, int32_t edge) {
-  int32_t slot = workspace->adjacency_cursor[node];
-  workspace->adjacency_neighbor[slot] = neighbor;
-  workspace->adjacency_edge[slot] = edge;
-  workspace->adjacency_cursor[node] = slot + 1;
 }
 
 /* Each node's forest neighbours, in edge order, which is fault order. */
@@ -941,7 +1128,8 @@ int32_t union_find_decode(
     const uint8_t *residual_syndrome, uint8_t *selected_edges,
     uint8_t *interval_is_closed, int64_t *interval_lower_tick,
     int64_t *interval_upper_tick, int32_t *contact_edges,
-    int32_t *contact_count, int32_t *forest_edges, int32_t *forest_count) {
+    int32_t *contact_count, int32_t *forest_edges, int32_t *forest_count,
+    int32_t *step_edge_counts, int32_t *step_hop_counts, int32_t *step_count) {
   struct graph_arrays graph;
   graph.detector_count = detector_count;
   graph.edge_count = edge_count;
@@ -950,6 +1138,7 @@ int32_t union_find_decode(
   graph.length_half_ticks = length_half_ticks;
   *contact_count = 0;
   *forest_count = 0;
+  *step_count = 0;
   struct workspace workspace;
   if (!take_workspace(&workspace, detector_count + 1, edge_count)) {
     release_workspace(&workspace);
@@ -959,10 +1148,10 @@ int32_t union_find_decode(
   initial_intervals(&graph, interval_is_closed, interval_lower_tick,
                     interval_upper_tick);
   reset_clusters(&workspace, detector_count, residual_syndrome);
-  int32_t status =
-      grow_clusters(&workspace, &graph, interval_is_closed,
-                    interval_lower_tick, interval_upper_tick, contact_edges,
-                    contact_count);
+  int32_t status = grow_clusters(
+      &workspace, &graph, interval_is_closed, interval_lower_tick,
+      interval_upper_tick, contact_edges, contact_count, step_edge_counts,
+      step_hop_counts, step_count);
   if (status != union_find_ok) {
     release_workspace(&workspace);
     return status;

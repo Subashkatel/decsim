@@ -14,6 +14,13 @@ an experiment decodes, and random small graphs, which reach the shapes a
 surface code never produces: a boundary to boundary column, a column
 with no detector at all, a prior of exactly one half, priors above one
 half, duplicate columns and ties in edge length.
+
+The growth steps the C reports beside its decisions, one per step with
+the boundary edges the step advanced and the deepest flood over grown
+edges from a fused cluster's root, not through the boundary (Helios
+2301.08419 lines 623-629), are checked by hand on the twelve-detector
+graph of test_union_find_decoder.py: a chain with a boundary edge at
+each end and two four-cycles.
 """
 
 import ctypes.util
@@ -30,6 +37,8 @@ import pytest
 import decsim.decoders.union_find.compiled_decoder as compiled_decoder
 import decsim.decoders.union_find.window_decoder as window_decoder
 import decsim.detector_error_model.fault_model_contracts as fault_models
+import decsim.records.decoder_evidence as evidence_records
+import tests.decoders.test_union_find_decoder as hand_graph
 import tests.decoders.union_find_oracle as union_find_oracle
 import tests.decoders.windows as windows
 
@@ -222,6 +231,58 @@ def test_the_property_corpus_of_the_two_largest_distances_matches_the_oracle():
 def test_the_property_corpus_of_random_small_graphs_matches_the_oracle():
     """Two hundred random graphs, one syndrome each, decode for decode."""
     compare_random_graphs(RANDOM_GRAPH_COUNT, RANDOM_GRAPH_SEED)
+
+
+def hand_graph_of():
+    model = hand_graph._model()
+    faults = model.require_faults(hand_graph.GRAPHLIKE)
+    return window_decoder.graph_from_model(
+        faults, location="test", weight_step=WEIGHT_STEP
+    )
+
+
+def steps_of(defect_rows) -> tuple:
+    syndrome = numpy.zeros(hand_graph.DETECTOR_COUNT, dtype=numpy.uint8)
+    syndrome[list(defect_rows)] = 1
+    placed = hand_graph_of()
+    evidence = window_decoder.decode_graph(placed, syndrome)
+    return evidence.growth_steps
+
+
+def test_two_adjacent_defects_take_one_step_over_three_edges_one_hop():
+    """Rows 8 and 9 each grow along two edges, sharing the one between."""
+    step = evidence_records.GrowthStep(edge_count=3, hop_count=1)
+    assert steps_of([8, 9]) == (step,)
+
+
+def test_a_lone_defect_grows_twice_and_its_flood_deepens_each_step():
+    """Row 10 reaches rows 9 and 11, then row 8 and the boundary.
+
+    The second flood runs from row 8, the cluster's root, to row 11,
+    three hops; the boundary is one hop further and is not counted.
+    """
+    first = evidence_records.GrowthStep(edge_count=2, hop_count=2)
+    second = evidence_records.GrowthStep(edge_count=2, hop_count=3)
+    assert steps_of([10]) == (first, second)
+
+
+def test_the_flood_does_not_pass_through_the_boundary():
+    """Rows 8 and 11 both reach the boundary in one step.
+
+    They fuse into one cluster through the boundary node, and the
+    flood from row 8 stops there, so the deepest hop is one.
+    """
+    step = evidence_records.GrowthStep(edge_count=4, hop_count=1)
+    assert steps_of([8, 11]) == (step,)
+
+
+def test_opposite_corners_of_a_four_cycle_fuse_at_depth_two():
+    step = evidence_records.GrowthStep(edge_count=4, hop_count=2)
+    assert steps_of([0, 2]) == (step,)
+
+
+def test_an_empty_syndrome_takes_no_step():
+    assert steps_of([]) == ()
 
 
 def test_the_graph_emits_its_edges_in_increasing_fault_order():

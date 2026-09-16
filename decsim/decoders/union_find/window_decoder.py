@@ -101,6 +101,7 @@ def decode_graph(
         erasure_forest_faults=erasure_forest_faults,
         logical_observables=logical_observables,
         unmatched_detectors=unmatched_detectors,
+        growth_steps=outcome.growth_steps,
     )
 
 

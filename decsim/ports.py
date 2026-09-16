@@ -245,6 +245,21 @@ class RetainedRounds(Protocol):
 
 
 @runtime_checkable
+class SyndromeRoundSender(Protocol):
+    """The syndrome round sender, as the assembler sees it.
+
+    The one end a packed round leaves the assembler by. The sender
+    reserves room in every syndrome buffer the round must reach and
+    sends it on; a round that finds no room goes to the waiting line,
+    which holds it for a retry or drops it as the controller's overflow
+    setting says.
+    """
+
+    def admit(self, packed: round_records.PackedRound) -> bool:
+        """Write the round where it belongs; False when it found no room."""
+
+
+@runtime_checkable
 class StrongSyndromeRoundReceiver(Protocol):
     """The strong syndrome round receiver, as the syndrome round sender sees it.
 

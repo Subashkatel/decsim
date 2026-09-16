@@ -171,7 +171,7 @@ class SyndromeRoundSender:
         self.publishes_from_strong_store = not reads_from_buffer_zero
 
     def admit(self, packed: round_records.PackedRound) -> bool:
-        """Write the round where it belongs; False when it had to wait."""
+        """Write the round where it belongs; False when it found no room."""
         if self._takes_the_strong_hop_only(packed):
             if not self.strong_receiver.has_room():
                 return self.held_rounds.refuse(packed, self.admit)

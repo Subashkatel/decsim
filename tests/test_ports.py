@@ -192,6 +192,12 @@ def test_the_memory_round_port_declares_what_the_transmitter_calls():
     assert _undeclared(called, ("MemoryRoundArrivals",)) == {}
 
 
+def test_the_sender_port_declares_what_the_assembler_calls():
+    """The assembler holds the sender only as this port."""
+    called = _called_on(("syndrome_round_sender",), ("controller",))
+    assert _undeclared(called, ("SyndromeRoundSender",)) == {}
+
+
 def test_the_weak_receiver_port_declares_what_the_controller_calls():
     """The controller holds the weak syndrome buffer's port only as this port.
 

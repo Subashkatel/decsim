@@ -62,6 +62,14 @@ The same store, as the window side that reads and holds it sees it.
 | `has_live_operation_reference` | Whether a hold or a stored round still names this operation. |
 | `capacity_rounds` | The slots this store is bounded to, or None for unbounded. |
 
+### `SyndromeRoundSender`
+
+The syndrome round sender, as the assembler sees it.
+
+| Method | What it does |
+| --- | --- |
+| `admit` | Write the round where it belongs; False when it found no room. |
+
 ### `StrongSyndromeRoundReceiver`
 
 The strong syndrome round receiver, as the syndrome round sender sees it.

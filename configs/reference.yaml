@@ -532,6 +532,52 @@ weak_decoder:                      # the lightweight tier: fast, higher LER
                                    # Each unit holds two windows when they fit
                                    # (transfer overlaps compute); a unit sized
                                    # for one window falls back to serial residency
+  cycle_count: null                # the union_find row's own timing, in place of
+                                   # its host wall clock: the decoder's cycle
+                                   # count per growth step, on a named clock.
+                                   # null = the wall clock. Refused on any other
+                                   # kind. The count is
+                                   #   setup_cycles
+                                   #   + setup_cycles_per_vertex x detectors
+                                   #   + setup_cycles_per_edge x edges
+                                   #   + sum over growth steps of
+                                   #       max(cycles_per_step
+                                   #             + cycles_per_hop x hops,
+                                   #           ceil(cycles_per_edge x edges))
+                                   #   + drain_cycles,
+                                   # ending on the clock's edge as the stages
+                                   # do. A step's edges are the boundary edges
+                                   # it advanced; its hops are the deepest
+                                   # flood over grown edges among the clusters
+                                   # it fused (Helios 2301.08419 lines 623-629,
+                                   # merging takes as many stages as the
+                                   # cluster is deep). Absent fields are 0.
+                                   # Helios's row (2301.08419): a processing
+                                   # element per vertex, so a step's work runs
+                                   # inside its critical path,
+                                   #   cycle_count:
+                                   #     clock: helios         # 100 MHz, line 688
+                                   #     cycles_per_step: 4    # grow 1 (lines
+                                   #                           # 694-699), wait 2
+                                   #                           # (line 921), decide
+                                   #                           # 1 (lines 923-929)
+                                   #     cycles_per_hop: 3     # three floods per
+                                   #                           # unit of depth
+                                   #                           # (Algorithm 7,
+                                   #                           # lines 876-889)
+                                   #     setup_cycles: 11      # load and readout,
+                                   #                           # fitted, not in
+                                   #                           # the paper
+                                   # A unit that walks its edges through a
+                                   # memory port sets cycles_per_edge to what
+                                   # one boundary edge costs it, the reads the
+                                   # edge takes in its layout times the read's
+                                   # latency (AFS 2001.06598 lines 536 and
+                                   # 1110: four cycles a 32-bit read).
+                                   # The setup terms are the floor a decode
+                                   # pays before its first step, the vertices
+                                   # reset and the edge intervals laid; the
+                                   # rounds loaded are the fetch stage below
   engine:
     clock: fridge                  # cycle-priced stages on this clock domain
     fetch_cycles_per_round: 1      # read one round out of decoder memory per
@@ -576,6 +622,7 @@ strong_decoder:                    # the accurate tier: slow, lower LER
                                    # (Toshio 2510.25222 lines 1248-1250), which
                                    # is the copy row
   unit_memory_rounds: null
+  cycle_count: null                # as above; the union_find row's own
   engine:
     clock: room                    # the strong unit lives room-side
     fetch_cycles_per_round: 1

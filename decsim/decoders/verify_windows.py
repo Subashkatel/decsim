@@ -62,6 +62,15 @@ class TesseractCheckedDecoder(decoder_module.DecoderBase):
         """The inner decoder's occupancy; None when it is measured."""
         return self.inner.occupancy(job)
 
+    def ticks_after_decode(
+        self,
+        result: Optional[decoding_records.DecodeResult],
+        elapsed_nanoseconds: int,
+        now: int,
+    ) -> int:
+        """The inner decoder's ticks: its own count, or the host's time."""
+        return self.inner.ticks_after_decode(result, elapsed_nanoseconds, now)
+
     def pipeline_depth(self, job: decoding_records.DecodeJob) -> int:
         """The inner decoder's pipeline depth."""
         return self.inner.pipeline_depth(job)

@@ -47,9 +47,10 @@ class DecoderBase(abc.ABC):
     """A row of the decoder table: decode and latency, timing from those.
 
     start prices the job with latency and decodes when that time ends;
-    a decoder whose occupancy is None is measured on the host clock
-    instead: decode_timed runs now and the result is delivered after
-    the measured ticks. cancel does nothing, occupancy is latency, and
+    a decoder whose occupancy is None is measured instead: decode_timed
+    runs now and the result is delivered after the ticks the decode
+    says, the host clock's by default (ticks_after_decode), or a row's
+    own cycle count of it. cancel does nothing, occupancy is latency, and
     the pipeline depth is one: the unit holds compute for the whole
     decode. stage_recorded is the port's stage source (data_path.md
     section 5's data-side callback): a row with internal stages replaces
@@ -130,16 +131,29 @@ class DecoderBase(abc.ABC):
             result = self.decode(job)
         on_result(result)
 
+    def ticks_after_decode(
+        self,
+        result: Optional[decoding_records.DecodeResult],
+        elapsed_nanoseconds: int,
+        now: int,
+    ) -> int:
+        """Ticks the unit is held after a decode run now: the host's time."""
+        del result
+        del now
+        elapsed_microseconds = elapsed_nanoseconds / 1000.0
+        return config.microseconds_to_ticks(elapsed_microseconds)
+
     def _start_measured(
         self, job: decoding_records.DecodeJob, engine, on_result: OnResult
     ) -> None:
-        """Run the real call now; hold the unit for as long as it took."""
+        """Run the real call now; hold the unit for what the decode says."""
         result = None
-        elapsed_ns = 0
+        ticks = 0
         if not job.cancelled:
-            result, elapsed_ns = self.decode_timed(job)
-        elapsed_microseconds = elapsed_ns / 1000.0
-        ticks = config.microseconds_to_ticks(elapsed_microseconds)
+            result, elapsed_nanoseconds = self.decode_timed(job)
+            ticks = self.ticks_after_decode(
+                result, elapsed_nanoseconds, engine.now
+            )
         engine.schedule(
             ticks, lambda: on_result(result), label=f"decode_done({job.label})"
         )
@@ -203,8 +217,8 @@ class WindowDecoderBase(DecoderBase):
         """The latency model's time; a measured decoder has none in advance."""
         if self.latency_model is None:
             raise NotImplementedError(
-                "a decoder measured on the host clock has no latency before "
-                "its call; the unit holds it for the measured time"
+                "a decoder measured by its own call has no latency before "
+                "that call; the unit holds it for the time the call says"
             )
         return self.latency_model.latency(job)
 

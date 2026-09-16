@@ -88,3 +88,31 @@ def test_the_engine_card_reads_both_formation_keys():
 
     assert settings.detection_event_latency_cycles == 9
     assert settings.detection_event_cycles_per_round == 2
+
+
+def test_the_cycle_count_block_is_read_and_absent_is_none():
+    clocks = config.ClockSettings({"decoder": 250.0, "helios": 100.0})
+    section = {
+        "kind": "union_find",
+        "units": 1,
+        "unit_memory_rounds": None,
+        "cycle_count": {"clock": "helios", "setup_cycles": 11},
+        "engine": {
+            "clock": "decoder",
+            "fetch_cycles_per_round": 1,
+            "release_cycles_per_job": 1,
+        },
+    }
+
+    settings = decoder_settings.DecoderSettings.from_yaml(
+        section, clocks, "weak_decoder"
+    )
+    without = dict(section)
+    del without["cycle_count"]
+    plain = decoder_settings.DecoderSettings.from_yaml(
+        without, clocks, "weak_decoder"
+    )
+
+    assert settings.cycle_count.setup_cycles == 11
+    assert settings.cycle_count.clock == clocks.clock("helios")
+    assert plain.cycle_count is None

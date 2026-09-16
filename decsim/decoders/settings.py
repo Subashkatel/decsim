@@ -16,6 +16,7 @@ import decsim.decoders.belief_matching.decoder as belief_matching
 import decsim.decoders.belief_propagation_osd.decoder as belief_propagation_osd
 import decsim.decoders.decoder_memory as decoder_memory_module
 import decsim.decoders.tesseract.decoder as tesseract
+import decsim.decoders.union_find.cycle_count as cycle_count_module
 import decsim.decoders.union_find.decoder as union_find
 import decsim.ports as ports
 from decsim.decoders.minimum_weight_perfect_matching import (
@@ -123,12 +124,17 @@ class DecoderSettings:
     20 ns (5 FPGA clock cycles)", which is the latency default; the rate
     default is one round a clock. A null latency is uncharged and the
     rate is then read by nobody.
+    cycle_count is the union_find row's own timing: its decode's growth
+    steps priced in cycles of a named clock (union_find/cycle_count.py),
+    in place of the host wall clock; the build refuses it on any other
+    kind.
     kind None is no decoder at all, right for a run that plans no
     windows. A Python-built decoder is routed as it is, with no engine
     stages around it.
     """
 
     kind: Union[str, float, None] = None
+    cycle_count: Optional[cycle_count_module.CycleCount] = None
     units: int = 1
     input: str = "copy"
     boundary_fold: str = "copy"
@@ -182,8 +188,11 @@ class DecoderSettings:
         formation_rate = _formation_cycles_per_round(engine)
         result_blocks_unit = section.get("result_blocks_unit", False)
         _check_boolean(section_name, "result_blocks_unit", result_blocks_unit)
+        cycle_count_block = section.get("cycle_count")
+        cycle_count = _cycle_count(cycle_count_block, clocks)
         return cls(
             kind=section["kind"],
+            cycle_count=cycle_count,
             units=section["units"],
             input=input_kind,
             boundary_fold=boundary_fold,
@@ -294,3 +303,11 @@ def _check_boolean(section_name: str, key: str, value) -> None:
     raise ValueError(
         f"{section_name}.{key} {value!r} is not a boolean; write true or false"
     )
+
+
+def _cycle_count(
+    block: Optional[Mapping], clocks: config.ClockSettings
+) -> Optional[cycle_count_module.CycleCount]:
+    if block is None:
+        return None
+    return cycle_count_module.CycleCount.from_yaml(block, clocks)

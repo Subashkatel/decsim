@@ -224,6 +224,29 @@ def test_unknown_algorithms_and_stale_keys_fail_loudly(tmp_path):
         experiment.load_experiment(fixed_distance_key)
 
 
+def test_a_cycle_count_on_a_kind_that_is_not_union_find_is_refused(tmp_path):
+    from decsim.machine import Machine
+
+    counted_matching = write_config(
+        tmp_path,
+        {
+            "weak_decoder": {
+                **MINIMAL_CONFIG["weak_decoder"],
+                "kind": "pymatching",
+                "cycle_count": {"clock": "fridge", "setup_cycles": 11},
+            }
+        },
+    )
+    config = experiment.load_experiment(counted_matching)
+    settings = config.point_settings(
+        physical_error_probability=0.001, distance=3, round_period_us=1.0
+    )
+    with pytest.raises(
+        ValueError, match="weak_decoder.cycle_count is the union_find row's"
+    ):
+        Machine.build(settings)
+
+
 def test_engine_clock_must_name_a_clock_domain(tmp_path):
     config_path = write_config(
         tmp_path,

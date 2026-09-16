@@ -8,6 +8,7 @@ The growth evidence it returns on every result feeds the cluster gap
 from typing import Optional
 
 import decsim.decoders.decoder as decoder_module
+import decsim.decoders.union_find.cycle_count as cycle_count_module
 import decsim.decoders.union_find.window_decoder as window_decoder
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.records.decoder_evidence as evidence_records
@@ -24,6 +25,11 @@ class UnionFindDecoder(decoder_module.WindowDecoderBase):
     observable row is kept in the hard result. Host runtime is not
     simulated service latency, and this Python implementation does not
     claim the paper's complexity bound.
+
+    The row is priced one of three ways: a latency model, as any window
+    decoder; its own cycle count (cycle_count.py), which reads the
+    growth steps of the decode just run and holds the unit for their
+    cycles on the count's clock; or, with neither, the host clock.
     """
 
     fault_model_requirement = fault_models.GRAPHLIKE_FAULT_MODEL_REQUIRED
@@ -34,10 +40,25 @@ class UnionFindDecoder(decoder_module.WindowDecoderBase):
         self,
         latency_model: Optional[decoder_module.DecoderBase] = None,
         weight_step=evidence_records.DEFAULT_WEIGHT_STEP,
+        cycle_count: Optional[cycle_count_module.CycleCount] = None,
     ) -> None:
         decoder_module.WindowDecoderBase.__init__(self, latency_model)
         # absolute natural-log units represented by one weight tick
         self.weight_step = evidence_records.normalized_weight_step(weight_step)
+        self.cycle_count = cycle_count
+
+    def ticks_after_decode(
+        self,
+        result: Optional[decoding_records.DecodeResult],
+        elapsed_nanoseconds: int,
+        now: int,
+    ) -> int:
+        """The cycle count's ticks to its clock edge, or the host's time."""
+        if self.cycle_count is None:
+            return decoder_module.WindowDecoderBase.ticks_after_decode(
+                self, result, elapsed_nanoseconds, now
+            )
+        return self.cycle_count.ticks(result.cluster_evidence, now)
 
     def compile(self, faults, model=None) -> evidence_records.UnionFindGraph:
         """The immutable weighted graph of one placed model."""

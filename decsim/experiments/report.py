@@ -396,10 +396,12 @@ def window_sample_rows(measurements: list) -> list:
 
 
 def latency_sample_rows(measurements: list) -> list:
-    """One row per decoded window: the measured algorithm wall clock.
+    """One row per decoded window: the algorithm stage's time.
 
-    Only wall-clock algorithms (a name, not a latency card) produce
-    rows; this is the latency figure's raw data, persisted so the
+    Only algorithms named by a table row produce rows, and the time is
+    what held the unit: the measured wall clock, or the row's own cycle
+    count. A number instead of a name is a fixed latency and produces
+    none. This is the latency figure's raw data, persisted so the
     figure, including the cross-tier combined one, rebuilds from run
     folders alone.
     """

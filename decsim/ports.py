@@ -122,6 +122,20 @@ class ReadoutReceiver(Protocol):
         """Take one readout on its route (window input or feedback memory)."""
 
 
+@runtime_checkable
+class IdleRoundReceiver(Protocol):
+    """The idle accounting, as the QPU sees it: it takes every idle round.
+
+    A patch nobody is operating on still emits a round every cycle, and
+    the cycle hands it here rather than to the readout end, because what
+    happens to it is a decision the policy makes and not a readout on
+    its route.
+    """
+
+    def emit_idle_round(self, operation_id, patch, round_index: int) -> None:
+        """Take one idle cycle of a patch nobody is operating on."""
+
+
 # --------------------------------------- the store holds the packed round
 
 
@@ -338,6 +352,23 @@ class MemoryRoundArrivals(Protocol):
         """Take one timing-only round that landed at the decoder side."""
 
 
+@runtime_checkable
+class HeldRounds(Protocol):
+    """The waiting line in front of a store, as the store sees it.
+
+    A store that is full holds nothing back itself: the round waits at
+    the writer, and the store tells the line when a slot frees so the
+    head can try again. Ruby's MessageBuffer counts that wait as the
+    buffer's own statistic
+    (tmp/resources/gem5/src/mem/ruby/network/MessageBuffer.cc:76-82), and
+    ns-3's queue disc stamps the packet at the enqueue
+    (tmp/resources/l5_buffers/ns3-traffic-control/queue-disc.cc:851).
+    """
+
+    def retry(self) -> None:
+        """A slot freed: admit from the head, stop at the first refused."""
+
+
 # ------------------------------------------- the window manager closes a window
 
 
@@ -382,6 +413,9 @@ class WindowInput(Protocol):
         self, operation_id: int, required_stream_end: int
     ) -> None:
         """Note the stream round a protected segment's result waits for."""
+
+    def accept_room_round(self, operation_id, round_index: int) -> None:
+        """Record one round that landed in the room-side store instead."""
 
 
 @runtime_checkable
@@ -585,6 +619,45 @@ class BoundaryCourier(Protocol):
         """Ship a committed boundary to a strong window and fold it in."""
 
 
+@runtime_checkable
+class StrongRedecode(Protocol):
+    """The strong tier's window side, as the committer and verdict see it.
+
+    Both ends of one escalation cross a package boundary: the window
+    that decided sits in windows, the re-decode that carries it out sits
+    in escalation. A weak verdict that escalates hands over the job, a
+    weak window that commits releases the strong window waiting on it,
+    and a weak result that is kept cancels the sibling it made
+    speculative (Toshio et al. 2510.25222).
+    """
+
+    def escalate(self, weak_job: decoding_records.DecodeJob) -> None:
+        """Ask the strong tier to re-decode the weak job's window."""
+
+    def submit_if_commit_releases(self, window_key: tuple) -> None:
+        """A weak window committed: a strong window waiting on it leaves."""
+
+    def cancel_held_sibling(self, window_key: tuple) -> None:
+        """A kept weak result: its held sibling never decodes."""
+
+
+@runtime_checkable
+class WindowVerdict(Protocol):
+    """The window side, as the strong re-decode returns a result to it.
+
+    The return path of one escalation: the re-decode finishes and the
+    side that owns the window publishes the correction and finalizes
+    the window, so the decision and its outcome stay in one place.
+    """
+
+    def accept_strong_result(
+        self,
+        job: decoding_records.DecodeJob,
+        result: decoding_records.DecodeResult,
+    ) -> None:
+        """A strong decode finished: publish it, then finalize the window."""
+
+
 # ----------------------------------- the decoder manager schedules a decode
 
 
@@ -729,6 +802,24 @@ class DecodeQueue(Protocol):
         it, so the losing solve is closed from there, not by the
         manager's own schedule.
         """
+
+
+@runtime_checkable
+class DecoderRouter(Protocol):
+    """The routing table over the tiers' units, as a caller outside sees it.
+
+    A job goes to one unit and the caller never learns which class that
+    is, which is the port API's promise (arXiv 2007.03152 lines 489-491).
+    The window side asks the second question rather than the first: what
+    a window model must offer for whichever unit would take that code,
+    which the planner needs before any job exists.
+    """
+
+    def route(self, job: decoding_records.DecodeJob):
+        """The decoder this job goes to."""
+
+    def fault_model_requirement_for(self, code: Optional[str]):
+        """What a window model must offer for the unit that takes this code."""
 
 
 # ------------------------------------------- the decoder returns a result
@@ -885,6 +976,68 @@ class InstructionReceiver(Protocol):
         deliver: Callable[[program_records.Decision], None],
     ) -> None:
         """Take one decision at the landing; deliver runs at the QPU."""
+
+
+@runtime_checkable
+class OperationRuntime(Protocol):
+    """What drives an operation's life, as the three that reach it see it.
+
+    An operation is started, its body ends, and a decision releases it,
+    and the three events arrive from three different places: the QPU
+    when the cycle clock reaches the body's last round, the frame's
+    release path when a decision lands, and the protected streams when a
+    cadence change frees an operation that was waiting. gem5 keeps the
+    same split between the workload's graph and the object that runs it
+    (tmp/resources/gem5/configs/deprecated/example/se.py builds the
+    process list, the system runs it).
+    """
+
+    def body_done(self, operation: program_records.Operation) -> None:
+        """A body finished: record it, free resources, release successors."""
+
+    def on_decision(self, decision: program_records.Decision) -> None:
+        """A decision reached the controller: a release starts its operation."""
+
+    def retry_ready_operations(self) -> None:
+        """Retry every state-ready operation after a cadence change."""
+
+
+@runtime_checkable
+class OperationIssuer(Protocol):
+    """The controller, as the runtime that drives the operations asks it.
+
+    The runtime owns when an operation may go; what going means is the
+    controller's: the streams it begins, the idle rounds it claims, the
+    command it prepares, and the boundaries it closes afterwards. The
+    start callback rides with the issue, so the return path is the job's
+    and neither side holds the other.
+    """
+
+    def round_ticks_for(self, operation: program_records.Operation) -> int:
+        """The resolved QEC cycle length of one operation, in ticks."""
+
+    def can_start(self, operation: program_records.Operation) -> bool:
+        """False while a protected stream holds the operation."""
+
+    def issue_operation(
+        self,
+        operation: program_records.Operation,
+        on_started: Callable[[int], None],
+    ) -> None:
+        """Prepare one QPU command; on_started hears its start boundary."""
+
+    def before_successor_release(
+        self, operation: program_records.Operation
+    ) -> None:
+        """A body finished: its protected regions close on the boundary."""
+
+    def after_successor_release(
+        self,
+        operation: program_records.Operation,
+        waits_for_blocked: bool,
+        is_workload_complete: bool,
+    ) -> None:
+        """Successors released: close boundaries, seal streams, stop the QPU."""
 
 
 # ------------------------------------------ the controller instructs the QPU

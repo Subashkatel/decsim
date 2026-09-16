@@ -18,6 +18,14 @@ The controller, as the QPU sees it: it takes every readout.
 | --- | --- |
 | `accept_qpu_readout` | Take one readout on its route (window input or feedback memory). |
 
+### `IdleRoundReceiver`
+
+The idle accounting, as the QPU sees it: it takes every idle round.
+
+| Method | What it does |
+| --- | --- |
+| `emit_idle_round` | Take one idle cycle of a patch nobody is operating on. |
+
 ## the store holds the packed round
 
 ### `RoundStore`
@@ -95,6 +103,14 @@ The decoders' end for a timing-only round, as the controller sees it.
 | --- | --- |
 | `receive_memory_round` | Take one timing-only round that landed at the decoder side. |
 
+### `HeldRounds`
+
+The waiting line in front of a store, as the store sees it.
+
+| Method | What it does |
+| --- | --- |
+| `retry` | A slot freed: admit from the head, stop at the first refused. |
+
 ## the window manager closes a window
 
 ### `WindowInput`
@@ -111,6 +127,7 @@ The window manager, as the controller side sees it.
 | `seal_stream` | Close a dynamic stream once its full length has arrived. |
 | `bind_stream_operation` | Note which stream and offset a segment's rounds fold into. |
 | `bind_required_stream_end` | Note the stream round a protected segment's result waits for. |
+| `accept_room_round` | Record one round that landed in the room-side store instead. |
 
 ### `WindowPlan`
 
@@ -185,6 +202,24 @@ The committed boundaries a strong window pins a face on.
 | --- | --- |
 | `pin_strong_face` | Ship a committed boundary to a strong window and fold it in. |
 
+### `StrongRedecode`
+
+The strong tier's window side, as the committer and verdict see it.
+
+| Method | What it does |
+| --- | --- |
+| `escalate` | Ask the strong tier to re-decode the weak job's window. |
+| `submit_if_commit_releases` | A weak window committed: a strong window waiting on it leaves. |
+| `cancel_held_sibling` | A kept weak result: its held sibling never decodes. |
+
+### `WindowVerdict`
+
+The window side, as the strong re-decode returns a result to it.
+
+| Method | What it does |
+| --- | --- |
+| `accept_strong_result` | A strong decode finished: publish it, then finalize the window. |
+
 ## the decoder manager schedules a decode
 
 ### `DecoderInputFold`
@@ -222,6 +257,15 @@ The decoder manager, as the window manager sees it.
 | `resolve_weak_request` | The window side decided this weak request; close its attempt. |
 | `read_result` | The window side has this job's result in hand. |
 | `close_companion_request` | This forced solve lost; its window is answered by the other. |
+
+### `DecoderRouter`
+
+The routing table over the tiers' units, as a caller outside sees it.
+
+| Method | What it does |
+| --- | --- |
+| `route` | The decoder this job goes to. |
+| `fault_model_requirement_for` | What a window model must offer for the unit that takes this code. |
 
 ## the decoder returns a result
 
@@ -282,6 +326,28 @@ The controller, as the frame's dispatch sees it.
 | Method | What it does |
 | --- | --- |
 | `relay_instruction` | Take one decision at the landing; deliver runs at the QPU. |
+
+### `OperationRuntime`
+
+What drives an operation's life, as the three that reach it see it.
+
+| Method | What it does |
+| --- | --- |
+| `body_done` | A body finished: record it, free resources, release successors. |
+| `on_decision` | A decision reached the controller: a release starts its operation. |
+| `retry_ready_operations` | Retry every state-ready operation after a cadence change. |
+
+### `OperationIssuer`
+
+The controller, as the runtime that drives the operations asks it.
+
+| Method | What it does |
+| --- | --- |
+| `round_ticks_for` | The resolved QEC cycle length of one operation, in ticks. |
+| `can_start` | False while a protected stream holds the operation. |
+| `issue_operation` | Prepare one QPU command; on_started hears its start boundary. |
+| `before_successor_release` | A body finished: its protected regions close on the boundary. |
+| `after_successor_release` | Successors released: close boundaries, seal streams, stop the QPU. |
 
 ## the controller instructs the QPU
 

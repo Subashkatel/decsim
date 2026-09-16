@@ -10,7 +10,7 @@ import dataclasses
 
 import pytest
 
-import decsim.assembly as assembly
+import decsim.build.parts as build_parts
 import decsim.build.stores as store_build
 import decsim.engine as engine_module
 import decsim.records.windows as window_records
@@ -31,7 +31,7 @@ class _Policy:
 def _parts(settings):
     """The fixtures a store seat's builder reads, and nothing else."""
     engine = engine_module.Engine()
-    return assembly.Parts(
+    return build_parts.Parts(
         settings=settings,
         engine=engine,
         plan=None,

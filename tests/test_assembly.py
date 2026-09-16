@@ -20,6 +20,7 @@ import decsim.assembly as assembly
 import decsim.build.controller_side as controller_side
 import decsim.build.decoders as decoder_build
 import decsim.build.escalation as escalation_build
+import decsim.build.parts as build_parts
 import decsim.build.plan as plan_build
 import decsim.controller.controller as controller_module
 import decsim.controller.syndrome_round_sender as syndrome_round_sender
@@ -140,7 +141,7 @@ def _weak_settings():
     return machine.settings
 
 
-def _seat_names(parts: assembly.Parts) -> list:
+def _seat_names(parts: build_parts.Parts) -> list:
     """The names of the rows one run builds, in order."""
     names = []
     for name, _build in assembly.seats_for(parts):
@@ -148,7 +149,7 @@ def _seat_names(parts: assembly.Parts) -> list:
     return names
 
 
-def _parts_of(settings) -> assembly.Parts:
+def _parts_of(settings) -> build_parts.Parts:
     """The fixtures one run compiles before any seat, as the root does."""
     engine = engine_module.Engine()
     escalation_policy = escalation_build.build_escalation_policy(
@@ -161,7 +162,7 @@ def _parts_of(settings) -> assembly.Parts:
     pool = decoder_build.build_decoder_pool(
         settings, plan, escalation_policy, detection_events
     )
-    return assembly.Parts(
+    return build_parts.Parts(
         settings=settings,
         engine=engine,
         plan=plan,

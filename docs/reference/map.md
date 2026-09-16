@@ -268,6 +268,7 @@ docstring.
 - `decsim/build/decoders.py`: Build the decoder units of both tiers and the pool the manager schedules.
 - `decsim/build/escalation.py`: Build the escalation policy the yaml names, and what it decides on.
 - `decsim/build/listeners.py`: Register the workload with every component, and name every seed root.
+- `decsim/build/parts.py`: What a seat's builder reads: the run's fixtures, and the seats so far.
 - `decsim/build/plan.py`: Build the run's plan: the code, the workload's operations, the windows.
 - `decsim/build/stores.py`: Build one buffer-side seat each, from the run's settings.
 - `decsim/build/window_side.py`: Build one window-side seat each, from the run's settings.

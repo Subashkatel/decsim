@@ -64,6 +64,7 @@ import decsim.build.controller_side as controller_side
 import decsim.build.decoders as decoder_build
 import decsim.build.escalation as escalation_build
 import decsim.build.listeners as listener_build
+import decsim.build.parts as build_parts
 import decsim.build.plan as plan_build
 import decsim.build.stores as store_build
 import decsim.controller.conditional_release as conditional_release_module
@@ -160,7 +161,7 @@ class Machine:
         store_build.check_readout_cost_is_priced(settings)
         store_build.check_store_kinds(settings)
         controller_side.check_strong_route(escalation_policy, pool.router)
-        parts = assembly.Parts(
+        parts = build_parts.Parts(
             settings=settings,
             engine=engine,
             plan=plan,
@@ -253,7 +254,7 @@ class Machine:
 
 def _observe(
     settings: machine_settings.MachineSettings,
-    parts: "assembly.Parts",
+    parts: build_parts.Parts,
     seats: dict,
     seed: Optional[int],
 ) -> observation_module.Observation:

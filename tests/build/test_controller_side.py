@@ -10,8 +10,8 @@ from unittest import mock
 
 import pytest
 
-import decsim.assembly as assembly
 import decsim.build.controller_side as controller_side
+import decsim.build.parts as build_parts
 import decsim.controller.settings as controller_settings
 import decsim.decoders.decoders as decoders
 import decsim.ports as ports
@@ -249,7 +249,7 @@ def _parts(factory_settings, plan):
     settings = dataclasses.replace(
         settings, magic_state_factory=factory_settings
     )
-    parts = assembly.Parts(
+    parts = build_parts.Parts(
         settings=settings,
         engine=None,
         plan=plan,

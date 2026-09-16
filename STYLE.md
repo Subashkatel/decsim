@@ -488,21 +488,29 @@ they had not. The twelve looks, in order:
    the problem known now, not one the writer guesses at; that
    over-engineering is refused even when it works.
 4. Tests. Are the tests correct, sensible and useful. Tests do not test
-   themselves; a person checks that a test would fail if the law broke.
+   themselves; a person checks that a test would fail if the law broke
+   and would not start failing when the code beneath it changes and the
+   law does not. A test is code that is maintained, so complexity is
+   refused there as in the package.
 5. Naming. Does every name say what the thing is, in full words, without
    being a sentence (rule 2).
 6. Comments. Do they say why, not what (rule 3); a comment that
    explains what the code does is a sign the code should be simpler.
 7. Style. STYLE.md and the Google Python guide; a suggestion that is not
-   a rule is marked "Nit:" and does not block.
+   a rule is marked "Nit:" and does not block. A reformatting goes in
+   its own commit, never mixed with a change of behaviour.
 8. Consistency. The existing code's way wins over taste, and a rule here
    wins over the existing code.
 9. Documentation. reference.yaml, docs/reference and STYLE.md move in the
    same commit as the surface they describe.
 10. Every line. Every line asked for is read, not skimmed; a line the
-    reviewer cannot follow is a finding.
+    reviewer cannot follow is a finding, because the next reader will
+    not follow it either.
 11. Context. The whole file and the machine around it, not the diff
-    alone: does the change leave the code healthier than it found it.
+    alone: four new lines may sit in a function that now needs
+    splitting. Does the change leave the code healthier than it found
+    it; systems grow complex by many small changes, so a small one is
+    refused too.
 12. Good things. What was done well is said too, so the writer keeps
     doing it.
 

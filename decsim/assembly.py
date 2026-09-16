@@ -1,7 +1,7 @@
 """What the machine is made of, and what is wired to what.
 
-Two tables. SEATS names every component of a run, in the order the root
-builds them, beside the function that builds that one seat from the
+Three tables. SEATS names every component of a run, in the order the
+root builds them, beside the function that builds that one seat from the
 run's settings. WIRES names every edge between two seats as the port it
 fills and the seat that fills it, which is gem5's script assigning one
 component's port to another's
@@ -9,6 +9,11 @@ component's port to another's
 builds, then binds, then starts: nothing is scheduled while the graph is
 still being assembled, so the order the rows sit in cannot move a tick
 (tmp/resources/gem5/src/sim/sim_object.hh lines 194 and 280).
+
+SEED_ROOTS names every owner of randomness as the segment the run seed
+hashes beside the seat that owns it. A segment whose owner a run does
+not build keeps its row and takes None, because the run seed hashes the
+segment names and dropping one moves every seed after it.
 
 A run the machine has no use for a seat in has no SEATS row for it and
 no WIRES row either, so no port is ever bound to None; seats_for reads
@@ -29,6 +34,7 @@ from typing import Any
 
 import decsim.build.controller_side as controller_side
 import decsim.build.decoders as decoder_build
+import decsim.build.listeners as listener_build
 import decsim.build.plan as plan_build
 import decsim.build.stores as store_build
 import decsim.build.window_side as window_side
@@ -283,6 +289,36 @@ WIRES = (
 # which is gem5's startup (sim_object.hh lines 194 and 280).
 STARTS_WHEN_WIRED = ("planner", "window_manager", "round_writer")
 
+# The seed path of every stochastic owner, in the order the run seed
+# hashes them: a seat by name, what one of a seat's readers answers, or
+# a fixture the root compiled the seats from.
+SEED_ROOTS = (
+    ("code", "plan.code"),
+    ("scheme", "scheme"),
+    ("device", "plan.device"),
+    ("error_model_provider", "error_model_provider"),
+    ("decoder_router", "router"),
+    ("factory", "factory"),
+    ("escalation_policy", "escalation_policy"),
+    ("scheduler", "pool.scheduler"),
+    ("decoder_memory_transfer", "decoder_manager.input_transport()"),
+    ("boundary_policy", "boundary_policy"),
+    ("window_interaction", "window_interaction"),
+    ("idle_policy", "plan.idle_policy"),
+    ("conditional_release", "conditional_release"),
+    # the packing stage is four components now; its seed path
+    # segment is a result (seeding hashes the segment names) and
+    # stays, as memory_model's does
+    ("syndrome_packing", None),
+    ("controller", "controller"),
+    ("qpu", "qpu"),
+    ("execution_runtime", "execution_runtime"),
+    ("pauli_frame", "pauli_frame"),
+    # the retained-storage observer is gone; its seed path segment
+    # is a result (seeding hashes the segment names) and stays
+    ("memory_model", None),
+)
+
 
 def build_seats(parts: Parts) -> dict:
     """Every seat of this run, built from its settings, in SEATS order."""
@@ -336,6 +372,27 @@ def start_wired_seats(seats: dict) -> None:
     """Let every seat whose first work needs its ports do that work."""
     for name in STARTS_WHEN_WIRED:
         seats[name].start()
+
+
+def seed_roots(parts: Parts, seats: dict) -> tuple:
+    """The seed path of every stochastic owner; the segments are results."""
+    owners = {}
+    for name, target in SEED_ROOTS:
+        owners[name] = _seed_owner(target, parts, seats)
+    return listener_build.build_seed_roots(**owners)
+
+
+def _seed_owner(target, parts: Parts, seats: dict):
+    """What one seed root names, or None when this run has no such owner."""
+    if target is None:
+        return None
+    if target.endswith("()"):
+        return _peer(target, seats, target)
+    if "." not in target:
+        return seats.get(target)
+    fixture_name, member_name = target.split(".")
+    fixture = getattr(parts, fixture_name)
+    return getattr(fixture, member_name)
 
 
 def _absent_seats(parts: Parts) -> frozenset:

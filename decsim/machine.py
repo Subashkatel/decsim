@@ -164,7 +164,7 @@ class Machine:
         wires = assembly.wires_for(parts)
         assembly.bind(wires, seats)
         assembly.start_wired_seats(seats)
-        seed_roots = _seed_roots(parts, seats)
+        seed_roots = assembly.seed_roots(parts, seats)
         seeding.bind_run_seed(root_seed, seed_roots)
         listeners = _observe(settings, parts, seats, seed)
         strong_round_store = seats.get("strong_round_store")
@@ -239,40 +239,6 @@ class Machine:
         if self.strong_round_writer is not None:
             self.strong_round_writer.check_settled()
         return _capture_result(self)
-
-
-def _seed_roots(parts: "assembly.Parts", seats: dict) -> tuple:
-    """The seed path of every stochastic owner; the segments are results."""
-    decoder_manager = seats["decoder_manager"]
-    input_transport = decoder_manager.input_transport()
-    plan = parts.plan
-    pauli_frame = seats.get("pauli_frame")
-    return listener_build.build_seed_roots(
-        code=plan.code,
-        scheme=plan.scheme,
-        device=plan.device,
-        error_model_provider=plan.error_model_provider,
-        decoder_router=parts.pool.router,
-        factory=seats["factory"],
-        escalation_policy=parts.escalation_policy,
-        scheduler=parts.pool.scheduler,
-        decoder_memory_transfer=input_transport,
-        boundary_policy=plan.boundary_policy,
-        window_interaction=plan.window_interaction,
-        idle_policy=plan.idle_policy,
-        conditional_release=seats["conditional_release"],
-        # the packing stage is four components now; its seed path
-        # segment is a result (seeding hashes the segment names) and
-        # stays, as memory_model's does
-        syndrome_packing=None,
-        controller=seats["controller"],
-        qpu=seats["qpu"],
-        execution_runtime=seats["execution_runtime"],
-        pauli_frame=pauli_frame,
-        # the retained-storage observer is gone; its seed path segment
-        # is a result (seeding hashes the segment names) and stays
-        memory_model=None,
-    )
 
 
 def _observe(

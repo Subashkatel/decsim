@@ -65,6 +65,9 @@ THIS_FILE = pathlib.Path(__file__)
 TESTS_DIRECTORY = THIS_FILE.parents[1]
 CONFIGS = TESTS_DIRECTORY.parent / "configs"
 CYCLE_TICKS = config.microseconds_to_ticks(1.0)
+# the decoder engines of these runs: 250 MHz and 100 MHz
+FAST_ENGINE_CLOCK = config.Clock(4000)
+ENGINE_CLOCK = config.Clock(10_000)
 
 
 def tier_rows() -> str:
@@ -114,10 +117,11 @@ def test_readouts_reach_the_receiver_in_cycle_order_cycle_ticks_apart():
         del operation
         qpu.finish()
 
+    cycle_clock_domain = config.Clock(CYCLE_TICKS)
     qpu = cycle_clock.QPUDevice(
         engine,
         device,
-        CYCLE_TICKS,
+        cycle_clock_domain,
         readout_receiver=receiver,
         completion_receiver=finish_the_program,
     )
@@ -299,7 +303,7 @@ def test_a_load_only_job_on_a_measured_unit_holds_it_for_zero_algorithm_ticks():
     with a model holds the unit for its measured time.
     """
     weak_decoder = decoder_settings.DecoderSettings(
-        kind="pymatching", engine_megahertz=250.0
+        kind="pymatching", engine_clock=FAST_ENGINE_CLOCK
     )
     settings = _two_patch_memory(weak_decoder)
     machine = machine_module.Machine.build(settings, 0)
@@ -335,10 +339,10 @@ def _switching_memory(weak_kind: str, confidence: str):
         gap_threshold_nats=nats,
     )
     weak_decoder = decoder_settings.DecoderSettings(
-        kind=weak_kind, engine_megahertz=100.0
+        kind=weak_kind, engine_clock=ENGINE_CLOCK
     )
     strong_decoder = decoder_settings.DecoderSettings(
-        kind="pymatching", engine_megahertz=100.0
+        kind="pymatching", engine_clock=ENGINE_CLOCK
     )
     operation = program_records.Operation(
         id=1, name="memory", qubits=(0,), patches=(0,), circuit=MEMORY_CIRCUIT
@@ -499,14 +503,14 @@ def test_the_cluster_gap_is_not_a_tier_kind_under_any_escalation(
     """
     tiers = {
         "weak": decoder_settings.DecoderSettings(
-            kind="pymatching", engine_megahertz=100.0
+            kind="pymatching", engine_clock=ENGINE_CLOCK
         ),
         "strong": decoder_settings.DecoderSettings(
-            kind="belief_matching", engine_megahertz=100.0
+            kind="belief_matching", engine_clock=ENGINE_CLOCK
         ),
     }
     tiers[tier] = decoder_settings.DecoderSettings(
-        kind="union_find_cluster_gap", engine_megahertz=100.0
+        kind="union_find_cluster_gap", engine_clock=ENGINE_CLOCK
     )
     escalation = escalation_settings.EscalationSettings(kind=escalation_kind)
     if escalation_kind == "switching":

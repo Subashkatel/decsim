@@ -831,14 +831,21 @@ def seam_streams_shot(stream_count: int):
     qpu = qpu_settings.QpuSettings(
         distance=3, device=device, round_period_microseconds=1.0
     )
+    engine_clock = config_module.Clock(1000)
     weak_decoder = decoder_settings.DecoderSettings(
-        kind=1.0, units=8, engine_megahertz=1000.0
+        kind=1.0, units=8, engine_clock=engine_clock
     )
-    manager = decoder_settings.DecoderManagerSettings(dispatch_microseconds=0.0)
+    manager = decoder_settings.DecoderManagerSettings(dispatch_cycles=0)
     windows = window_settings.WindowSettings(
         kind="sliding", terminal_policy="flush"
     )
-    frame = pauli_frame_module.PauliFrameConfig(commit_microseconds=0.004)
+    # a 1 GHz frame beside the 1 GHz decoder engine, so one write is the
+    # 4 ns of Yang et al. 2605.04892 Fig. 1 and every correction reaches
+    # the frame on one of its edges
+    frame_clock = config_module.Clock(1000)
+    frame = pauli_frame_module.PauliFrameConfig(
+        write_cycles=4, clock=frame_clock
+    )
     settings = machine_settings.MachineSettings(
         workload=workload,
         qpu=qpu,

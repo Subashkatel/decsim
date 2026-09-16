@@ -10,7 +10,11 @@ drift upwards.
 
 The clock section follows XQsim's shape: domain labels with frequencies
 over one tick core. Both shipped domains start at LILLIPUT's 250 MHz
-(2108.06569 Table 4).
+(2108.06569 Table 4), so a period is 4000 ticks. A domain hands out a
+Clock, whose two methods are gem5's clockEdge and ticksToCycles
+(tmp/resources/gem5/src/sim/clocked_object.hh lines 174-186 and
+224-227): a cost of n cycles is charged from the edge at or after the
+current tick, and a span of ticks is rounded up to whole cycles.
 """
 
 import decimal
@@ -69,11 +73,35 @@ def test_a_positive_duration_that_rounds_to_no_ticks_is_refused():
         config.check_duration("round_period", a_quarter_tick)
 
 
-def test_cycles_of_a_named_domain_are_microseconds_at_its_frequency():
+def test_a_named_domains_clock_has_that_frequencys_period_in_ticks():
     clocks = config.ClockSettings.from_yaml({"fridge": 250.0, "room": 500})
     assert clocks.megahertz("fridge") == 250.0
-    assert clocks.microseconds(25, "fridge") == 0.1
-    assert clocks.microseconds(8, "room") == 0.016
+    fridge = clocks.clock("fridge")
+    room = clocks.clock("room")
+    assert fridge.period_ticks == 4000
+    assert room.period_ticks == 2000
+
+
+def test_a_cost_charged_on_an_edge_is_that_many_whole_periods():
+    clock = config.Clock(4000)
+    assert clock.edge(3, 0) == 12000
+    assert clock.edge(3, 4000) == 16000
+    assert clock.edge(0, 8000) == 8000
+
+
+def test_a_cost_charged_mid_cycle_runs_from_the_next_edge():
+    clock = config.Clock(4000)
+    assert clock.edge(3, 1) == 16000
+    assert clock.edge(3, 3999) == 16000
+    assert clock.edge(0, 1) == 4000
+
+
+def test_a_span_of_ticks_is_rounded_up_to_whole_cycles():
+    clock = config.Clock(4000)
+    assert clock.cycles_for(0) == 0
+    assert clock.cycles_for(1) == 1
+    assert clock.cycles_for(4000) == 1
+    assert clock.cycles_for(4001) == 2
 
 
 def test_a_clock_that_is_not_a_positive_frequency_is_refused():

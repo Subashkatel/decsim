@@ -97,7 +97,7 @@ class DecoderSettings:
     charged their measured wall clock), or a number, a fixed core
     latency in microseconds on the MWPM path. The card prices the
     algorithm stage only; the fetch and release stages are cycles of the
-    engine's clock, resolved to a frequency once at load.
+    engine's clock, resolved to that domain's Clock once at load.
     unit_memory_rounds is the input SRAM per unit (None is unbounded); a
     unit overlaps input transfer with compute only when two windows fit.
     input names a row of DECODER_INPUTS (above): whether this tier's
@@ -140,7 +140,7 @@ class DecoderSettings:
         DETECTION_EVENT_LATENCY_CYCLES
     )
     detection_event_cycles_per_round: int = DETECTION_EVENT_CYCLES_PER_ROUND
-    engine_megahertz: Optional[float] = None
+    engine_clock: Optional[config.Clock] = None
     decoder: Optional[ports.Decoder] = None
 
     @classmethod
@@ -152,7 +152,7 @@ class DecoderSettings:
     ) -> "DecoderSettings":
         """A tier section: kind, units, unit memory and the engine card."""
         engine = section["engine"]
-        engine_megahertz = clocks.megahertz(engine["clock"])
+        engine_clock = clocks.clock(engine["clock"])
         unit_memory_rounds = section["unit_memory_rounds"]
         if unit_memory_rounds is not None and unit_memory_rounds < 1:
             raise ValueError(
@@ -176,7 +176,7 @@ class DecoderSettings:
             release_cycles_per_job=engine["release_cycles_per_job"],
             detection_event_latency_cycles=formation_latency,
             detection_event_cycles_per_round=formation_rate,
-            engine_megahertz=engine_megahertz,
+            engine_clock=engine_clock,
         )
 
 
@@ -207,7 +207,8 @@ class DecoderManagerSettings:
     unit_pools: Optional[Mapping[str, int]] = None
     decoder_memory: Optional[decoder_memory_module.DecoderMemoryConfig] = None
     bulk_strong: bool = False
-    dispatch_microseconds: float = 0.0
+    dispatch_cycles: int = 0
+    clock: Optional[config.Clock] = None
 
     @classmethod
     def from_yaml(
@@ -227,31 +228,27 @@ class DecoderManagerSettings:
                 "decoder_manager.bulk_strong must be true or false, got "
                 f"{bulk_strong!r}"
             )
-        dispatch_microseconds = _dispatch_microseconds(section, clocks)
+        dispatch_cycles = section.get("dispatch_cycles", 0)
+        clock = _dispatch_clock(section, clocks, dispatch_cycles)
         return cls(
             bulk_strong=bulk_strong,
-            dispatch_microseconds=dispatch_microseconds,
+            dispatch_cycles=dispatch_cycles,
+            clock=clock,
         )
 
-    def dispatch_ticks(self) -> int:
-        """The manager's per-dispatch cost in ticks."""
-        return config.microseconds_to_ticks(self.dispatch_microseconds)
 
-
-def _dispatch_microseconds(
-    section: Mapping, clocks: config.ClockSettings
-) -> float:
-    """dispatch_cycles on the section's clock; zero when it names none."""
-    cycles = section.get("dispatch_cycles", 0)
-    if cycles == 0:
-        return 0.0
+def _dispatch_clock(
+    section: Mapping, clocks: config.ClockSettings, dispatch_cycles: int
+) -> Optional[config.Clock]:
+    """The clock dispatch_cycles are counted on; None when none are charged."""
+    if dispatch_cycles == 0:
+        return None
     if "clock" not in section:
         raise ValueError(
             "decoder_manager.dispatch_cycles needs a clock: name the "
             "domain its cycles are counted in"
         )
-    clock = section["clock"]
-    return clocks.microseconds(cycles, clock)
+    return clocks.clock(section["clock"])
 
 
 def _formation_latency_cycles(engine: Mapping) -> Optional[int]:

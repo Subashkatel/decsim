@@ -101,7 +101,7 @@ def test_no_room_side_store_means_no_strong_writer():
 def test_a_readout_cost_on_the_controller_needs_a_card_that_excludes_it():
     """Otherwise the reference latency charges the same work twice."""
     settings = _settings_with_readout_cost(
-        readout_to_bits_microseconds=3.0, card_excludes_it=False
+        readout_to_bits_cycles=6, card_excludes_it=False
     )
 
     with pytest.raises(ValueError) as refusal:
@@ -114,7 +114,7 @@ def test_a_readout_cost_on_the_controller_needs_a_card_that_excludes_it():
 
 def test_a_readout_cost_beside_a_card_that_excludes_it_is_allowed():
     settings = _settings_with_readout_cost(
-        readout_to_bits_microseconds=3.0, card_excludes_it=True
+        readout_to_bits_cycles=6, card_excludes_it=True
     )
 
     store_build.check_readout_cost_is_priced(settings)
@@ -122,20 +122,17 @@ def test_a_readout_cost_beside_a_card_that_excludes_it_is_allowed():
 
 def test_no_readout_cost_asks_nothing_of_the_card():
     settings = _settings_with_readout_cost(
-        readout_to_bits_microseconds=0.0, card_excludes_it=False
+        readout_to_bits_cycles=0, card_excludes_it=False
     )
 
     store_build.check_readout_cost_is_priced(settings)
 
 
-def _settings_with_readout_cost(
-    *, readout_to_bits_microseconds, card_excludes_it
-):
+def _settings_with_readout_cost(*, readout_to_bits_cycles, card_excludes_it):
     """A machine whose controller readout cost and card are set by hand."""
     controller = declared_run.declared_controller()
     controller = dataclasses.replace(
-        controller,
-        readout_to_bits_microseconds=readout_to_bits_microseconds,
+        controller, readout_to_bits_cycles=readout_to_bits_cycles
     )
     links = declared_run.declared_profile()
     card = links.qpu_to_controller

@@ -56,7 +56,7 @@ class PackingOverflowPolicy(enum.Enum):
 
 @dataclasses.dataclass(frozen=True)
 class ControllerSettings:
-    """The yaml's `controller` section, in microseconds.
+    """The yaml's `controller` section, in cycles of the clock it names.
 
     The three costs are charged per round on the way in (readout to bits,
     packing) and per decision on the way out (decision to pulse); zero
@@ -74,80 +74,70 @@ class ControllerSettings:
     detection_events_formed_at names a row of
     DETECTION_EVENT_FORMATION: where the round's outcomes become its
     detection events, and so which width the store and the tier's input
-    link carry. detection_event_microseconds_per_round is what that
+    link carry. detection_event_cycles_per_round is what that
     conversion costs the controller, charged once per round before the
     round leaves it and read by the controller row alone; no paper
-    publishes a controller-side figure, so it is zero by default.
+    publishes a controller-side figure, so it is zero by default. clock
+    is the domain all four cycle counts are charged on; a cost of zero
+    cycles is uncharged rather than rounded up to the next edge.
     """
 
-    readout_to_bits_microseconds: float = 0.0
-    packing_microseconds_per_round: float = 0.0
-    decision_to_pulse_microseconds: float = 0.0
-    detection_event_microseconds_per_round: float = 0.0
+    clock: Optional[config.Clock] = None
+    readout_to_bits_cycles: int = 0
+    packing_cycles_per_round: int = 0
+    decision_to_pulse_cycles: int = 0
+    detection_event_cycles_per_round: int = 0
     packing_rounds_in_flight: Optional[int] = None
     packing_overflow: PackingOverflowPolicy = PackingOverflowPolicy.STALL
     detection_events_formed_at: str = "controller"
 
     def __post_init__(self) -> None:
-        config.check_duration(
-            "readout_to_bits_microseconds", self.readout_to_bits_microseconds
+        _check_cycles("readout_to_bits_cycles", self.readout_to_bits_cycles)
+        _check_cycles("packing_cycles_per_round", self.packing_cycles_per_round)
+        _check_cycles("decision_to_pulse_cycles", self.decision_to_pulse_cycles)
+        _check_cycles(
+            "detection_event_cycles_per_round",
+            self.detection_event_cycles_per_round,
         )
-        config.check_duration(
-            "packing_microseconds_per_round",
-            self.packing_microseconds_per_round,
-        )
-        config.check_duration(
-            "decision_to_pulse_microseconds",
-            self.decision_to_pulse_microseconds,
-        )
-        config.check_duration(
-            "detection_event_microseconds_per_round",
-            self.detection_event_microseconds_per_round,
-        )
+        self._check_clock()
 
     @classmethod
     def from_yaml(
         cls, section: Mapping, clocks: config.ClockSettings
     ) -> "ControllerSettings":
-        """The `controller` section: cycles of its clock, resolved once."""
-        clock = section["clock"]
+        """The `controller` section: its cycle counts, and its clock."""
+        clock = clocks.clock(section["clock"])
         readout_cycles = section["readout_to_bits_cycles"]
         packing_cycles = section["packing_cycles_per_round"]
         decision_cycles = section["decision_to_pulse_cycles"]
-        readout_microseconds = clocks.microseconds(readout_cycles, clock)
-        packing_microseconds = clocks.microseconds(packing_cycles, clock)
-        decision_microseconds = clocks.microseconds(decision_cycles, clock)
-        formation_microseconds = _formation_microseconds(section, clocks)
+        formation_cycles = _formation_cycles(section)
         packing_rounds_in_flight = section.get("packing_rounds_in_flight")
         packing_overflow = _packing_overflow(section)
         formed_at = section.get("detection_events_formed_at", "controller")
         return cls(
-            readout_to_bits_microseconds=readout_microseconds,
-            packing_microseconds_per_round=packing_microseconds,
-            decision_to_pulse_microseconds=decision_microseconds,
-            detection_event_microseconds_per_round=formation_microseconds,
+            clock=clock,
+            readout_to_bits_cycles=readout_cycles,
+            packing_cycles_per_round=packing_cycles,
+            decision_to_pulse_cycles=decision_cycles,
+            detection_event_cycles_per_round=formation_cycles,
             packing_rounds_in_flight=packing_rounds_in_flight,
             packing_overflow=packing_overflow,
             detection_events_formed_at=formed_at,
         )
 
-    def readout_to_bits_ticks(self) -> int:
-        """The readout classification cost in ticks."""
-        return config.microseconds_to_ticks(self.readout_to_bits_microseconds)
-
-    def packing_ticks(self) -> int:
-        """The packet assembly cost per round in ticks."""
-        return config.microseconds_to_ticks(self.packing_microseconds_per_round)
-
-    def decision_to_pulse_ticks(self) -> int:
-        """The decision to pulse cost in ticks."""
-        return config.microseconds_to_ticks(self.decision_to_pulse_microseconds)
-
-    def detection_event_ticks(self) -> int:
-        """The controller's own formation cost per round in ticks."""
-        return config.microseconds_to_ticks(
-            self.detection_event_microseconds_per_round
-        )
+    def _check_clock(self) -> None:
+        """A charged cost names the clock domain its cycles are counted on."""
+        if self.clock is not None:
+            return
+        charged = self.readout_to_bits_cycles
+        charged += self.packing_cycles_per_round
+        charged += self.decision_to_pulse_cycles
+        charged += self.detection_event_cycles_per_round
+        if charged > 0:
+            raise ValueError(
+                "a charged controller cost needs the clock domain its "
+                "cycles are counted on"
+            )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -168,10 +158,14 @@ class IdlePolicySettings:
     policy: Optional[ports.IdlePolicy] = None
 
 
-def _formation_microseconds(
-    section: Mapping, clocks: config.ClockSettings
-) -> float:
-    """detection_event_cycles_per_round on the controller's clock.
+def _check_cycles(name: str, cycles: int) -> None:
+    """Refuse a cycle count no yaml and no experiments call can mean."""
+    if cycles < 0:
+        raise ValueError(f"{name} must not be negative")
+
+
+def _formation_cycles(section: Mapping) -> int:
+    """detection_event_cycles_per_round, the controller's own formation cost.
 
     null is the default and means the controller charges nothing for the
     conversion: Google's workstation converts measurements into
@@ -179,9 +173,8 @@ def _formation_microseconds(
     """
     cycles = section.get("detection_event_cycles_per_round")
     if cycles is None:
-        return 0.0
-    clock = section["clock"]
-    return clocks.microseconds(cycles, clock)
+        return 0
+    return cycles
 
 
 def _packing_overflow(section: Mapping) -> PackingOverflowPolicy:

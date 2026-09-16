@@ -76,10 +76,11 @@ class RoundAssembler:
         context.fragments.append(fragment)
         if len(context.fragments) != context.fragment_count:
             return
-        packing_ticks = self.settings.packing_ticks()
-        if packing_ticks > 0:
+        packing_cycles = self.settings.packing_cycles_per_round
+        if packing_cycles > 0:
+            delay = self._delay(packing_cycles)
             finish = functools.partial(self._finish_packing, context)
-            self.engine.schedule(packing_ticks, finish, label="controller pack")
+            self.engine.schedule(delay, finish, label="controller pack")
             return
         self._finish_packing(context)
 
@@ -169,14 +170,23 @@ class RoundAssembler:
         (controller.detection_event_cycles_per_round); the decoder row
         pays nothing at the controller, so the round leaves at once.
         """
-        departure_ticks = self.detection_events.departure_ticks
-        if departure_ticks == 0:
+        detection_event_formation_cycles = (
+            self.detection_events.detection_event_formation_cycles
+        )
+        if detection_event_formation_cycles == 0:
             self.on_packed(packed)
             return
+        delay = self._delay(detection_event_formation_cycles)
         hand_on = functools.partial(self.on_packed, packed)
         self.engine.schedule(
-            departure_ticks, hand_on, label="controller form detection events"
+            delay, hand_on, label="controller form detection events"
         )
+
+    def _delay(self, cycles: int) -> int:
+        """The ticks from now to the controller clock edge `cycles` away."""
+        now = self.engine.now
+        edge = self.settings.clock.edge(cycles, now)
+        return edge - now
 
 
 @dataclasses.dataclass

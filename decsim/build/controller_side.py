@@ -23,7 +23,6 @@ def build_decoder_manager(
     pool: decoder_build.DecoderPool,
 ) -> decoder_manager_module.DecoderManager:
     """The decoder side's manager: the pool's router, scheduler and units."""
-    dispatch_ticks = settings.decoder_manager.dispatch_ticks()
     return decoder_manager_module.DecoderManager(
         engine,
         router=pool.router,
@@ -32,7 +31,8 @@ def build_decoder_manager(
         bulk_strong=settings.decoder_manager.bulk_strong,
         decoder_memory=pool.decoder_memory,
         escalation_policy=escalation_policy,
-        dispatch_ticks=dispatch_ticks,
+        clock=settings.decoder_manager.clock,
+        dispatch_cycles=settings.decoder_manager.dispatch_cycles,
         copies_input_by_pool=pool.copies_input_by_pool,
         blocks_unit_by_pool=pool.blocks_unit_by_pool,
         formation_by_pool=pool.formation_by_pool,
@@ -47,7 +47,7 @@ def build_detection_events(
     controller.detection_events_formed_at names the row; a value that is
     not one is refused here, before the first round is packed. Both rows
     are built the same way, with the run's former and the controller's
-    own formation cost. A source that does not answer the
+    own formation cost in cycles. A source that does not answer the
     DetectionEventFormer port forms nothing either way.
     """
     former = None
@@ -58,8 +58,10 @@ def build_detection_events(
         "controller.detection_events_formed_at",
         settings.controller.detection_events_formed_at,
     )
-    departure_ticks = settings.controller.detection_event_ticks()
-    return row(former, departure_ticks)
+    detection_event_formation_cycles = (
+        settings.controller.detection_event_cycles_per_round
+    )
+    return row(former, detection_event_formation_cycles)
 
 
 def process_name(

@@ -30,6 +30,7 @@ import dataclasses
 
 import pytest
 
+import decsim.config as config
 import decsim.decoders.settings as decoder_settings
 import decsim.escalation.settings as escalation_settings
 import decsim.frontends.settings as workload_settings
@@ -45,7 +46,8 @@ ROUNDS = 15
 PROBABILITY = 0.008
 SEED = 0
 CODE_TASK = "surface_code:rotated_memory_z"
-ENGINE_MEGAHERTZ = 250.0
+# the decoder engines run at 250 MHz, a 4000-tick period
+ENGINE_CLOCK = config.Clock(4000)
 # every window escalates at this threshold, so the strong tier's traffic
 # is the plan rather than a sample of the weak decoder's confidence
 UNREACHABLE_GAP_DECIBELS = 1000.0
@@ -197,10 +199,10 @@ def machine_settings(shape: str, distance: int):
     qpu = qpu_settings.QpuSettings(distance=distance, device=device)
     links = link_profiles.logical_reference_profile()
     weak = decoder_settings.DecoderSettings(
-        kind="pymatching", engine_megahertz=ENGINE_MEGAHERTZ
+        kind="pymatching", engine_clock=ENGINE_CLOCK
     )
     strong = decoder_settings.DecoderSettings(
-        kind="pymatching", engine_megahertz=ENGINE_MEGAHERTZ
+        kind="pymatching", engine_clock=ENGINE_CLOCK
     )
     if shape == "weak":
         escalation = escalation_settings.EscalationSettings(
@@ -438,7 +440,7 @@ def test_the_feedback_hops_fire_when_an_operation_waits_on_a_result():
     device = stim_device.StimDevice()
     qpu = qpu_settings.QpuSettings(distance=distance, device=device)
     weak = decoder_settings.DecoderSettings(
-        kind="pymatching", engine_megahertz=ENGINE_MEGAHERTZ
+        kind="pymatching", engine_clock=ENGINE_CLOCK
     )
     links = link_profiles.logical_reference_profile()
     settings = machine_settings_module.MachineSettings(

@@ -12,6 +12,7 @@ import random
 
 import pytest
 
+import decsim.config as config
 import decsim.engine
 import decsim.observe.command_events as command_events_module
 import decsim.observe.log_writers as log_writers
@@ -93,10 +94,11 @@ def clocked_qpu(cycle_ticks, source=None):
     log = ReadoutLog(engine)
     if source is None:
         source = syndrome_devices.TimingOnlyDevice()
+    clock = config.Clock(cycle_ticks)
     qpu = cycle_clock.QPUDevice(
         engine,
         source,
-        cycle_ticks,
+        clock,
         readout_receiver=log,
         completion_receiver=log.note_completion,
         idle_receiver=log.note_idle,

@@ -131,9 +131,9 @@ def check_readout_cost_is_priced(
     covers the controller turning the readout into bits, so a second
     charge for that work would count it twice.
     """
-    readout_ticks = settings.controller.readout_to_bits_ticks()
+    readout_cycles = settings.controller.readout_to_bits_cycles
     readout_hop = settings.links.qpu_to_controller
-    if readout_ticks > 0 and not readout_hop.excludes_receiver_processing:
+    if readout_cycles > 0 and not readout_hop.excludes_receiver_processing:
         raise ValueError(
             "a separate controller readout cost requires a "
             "qpu_to_controller card whose latency excludes that cost"

@@ -17,7 +17,7 @@ rowD4).
 
 import dataclasses
 import functools
-from typing import Callable
+from typing import Callable, Optional
 
 import numpy
 
@@ -64,13 +64,16 @@ class DecodeService:
         strong_requests: strong_requests_module.StrongRequests,
         on_completed: Callable[[decoding_records.DecodeJob, object], None],
         dispatch: Callable[[], None],
-        dispatch_ticks: int = 0,
+        clock: Optional[config.Clock] = None,
+        dispatch_cycles: int = 0,
     ) -> None:
         self.engine = engine
         self.pool = pool
         self.staging = staging
         self.strong_requests = strong_requests
-        self.manager = _ManagerSide(on_completed, dispatch, dispatch_ticks)
+        self.manager = _ManagerSide(
+            on_completed, dispatch, clock, dispatch_cycles
+        )
         self.trace = _TraceSources()
 
     # ------------------------------------------ what the dispatcher asks
@@ -154,12 +157,16 @@ class DecodeService:
         decode's arrival and its dispatch;
         decoder_manager.dispatch_cycles prices that, zero by default.
         """
-        if self.manager.dispatch_ticks == 0:
+        cycles = self.manager.dispatch_cycles
+        if cycles == 0:
             self._ask_for_input(job, unit, claim_compute)
             return
+        now = self.engine.now
+        edge = self.manager.clock.edge(cycles, now)
+        delay = edge - now
         ask = functools.partial(self._ask_for_input, job, unit, claim_compute)
         label = f"dispatch_cost({job.label})"
-        self.engine.schedule(self.manager.dispatch_ticks, ask, label=label)
+        self.engine.schedule(delay, ask, label=label)
 
     def _ask_for_input(
         self,
@@ -768,11 +775,12 @@ class _ManagerSide:
 
     on_completed(job, result) at every decode's end; dispatch() wherever
     compute frees inside an engine event, so the non-reentrant dispatch
-    loop runs from the same points it always did; dispatch_ticks is the
-    manager's own work per dispatch, charged before the input is asked
-    for (decoder_manager.dispatch_cycles).
+    loop runs from the same points it always did; dispatch_cycles is the
+    manager's own work per dispatch, charged on clock before the input is
+    asked for (decoder_manager.dispatch_cycles).
     """
 
     on_completed: Callable
     dispatch: Callable
-    dispatch_ticks: int
+    clock: Optional[config.Clock]
+    dispatch_cycles: int

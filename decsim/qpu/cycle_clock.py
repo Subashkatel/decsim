@@ -17,6 +17,7 @@ only; program dependencies, windows and decoder state live elsewhere.
 import dataclasses
 from typing import Any, Callable, Optional
 
+import decsim.config as config
 import decsim.engine
 import decsim.ports as ports
 import decsim.records.log_sources as log_sources
@@ -56,7 +57,7 @@ class QPUDevice:
         self,
         engine: decsim.engine.Engine,
         syndrome_source: ports.SyndromeSource,
-        cycle_ticks: int,
+        clock: config.Clock,
         readout_receiver: Optional[ports.ReadoutReceiver] = None,
         completion_receiver: Optional[
             Callable[[program_records.Operation], None]
@@ -65,7 +66,7 @@ class QPUDevice:
     ):
         self.engine = engine
         self.syndrome_source = syndrome_source
-        self.cycle_ticks = cycle_ticks
+        self.clock = clock
         self.receivers = _Receivers(
             readout_receiver, completion_receiver, idle_receiver
         )
@@ -90,7 +91,7 @@ class QPUDevice:
 
     def issue(self, command: program_records.RunOperationBody) -> None:
         """Queue one operation body; it starts on the next cycle boundary."""
-        if command.round_ticks != self.cycle_ticks:
+        if command.round_ticks != self.clock.period_ticks:
             raise ValueError("operation cadence must equal the QPU cycle")
         is_instant = command.round_count == 0
         emits_without_finalizing = (
@@ -119,10 +120,7 @@ class QPUDevice:
         """The first cycle boundary not earlier than the tick."""
         if tick < 0:
             raise ValueError("QPU boundary query tick must be nonnegative")
-        if tick % self.cycle_ticks == 0:
-            return tick
-        whole_cycle_count = tick // self.cycle_ticks
-        return (whole_cycle_count + 1) * self.cycle_ticks
+        return self.clock.edge(0, tick)
 
     def emit_idle_stream_round(
         self,
@@ -154,7 +152,7 @@ class QPUDevice:
             return
         self._live.scheduled_boundaries.add(boundary)
         delay = boundary - self.engine.now
-        cycle_number = boundary // self.cycle_ticks
+        cycle_number = boundary // self.clock.period_ticks
         self.engine.schedule(
             delay, self._cross_boundary, label=f"qpu-cycle({cycle_number})"
         )
@@ -175,7 +173,7 @@ class QPUDevice:
         has_waiting = bool(self._live.commands_waiting)
         is_live = has_running or has_idle
         if is_live or has_waiting:
-            next_boundary = now + self.cycle_ticks
+            next_boundary = self.clock.edge(1, now)
             self._schedule_boundary(next_boundary)
 
     def _emit_idle_rounds(self) -> None:

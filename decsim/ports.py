@@ -1163,16 +1163,17 @@ class DetectionEventPlacement(Protocol):
     the same either way, so a row moves the width the round carries, the
     clock its formation is charged on, and nothing else. Every row is
     built with the run's DetectionEventFormer and the controller's own
-    formation ticks.
+    formation cycles.
 
     The controller's assembler asks form_before_departure for the round
-    that leaves it and waits departure_ticks before handing it on; the
-    root asks decoder_side_former for the former each decoder tier reads
+    that leaves it and waits detection_event_formation_cycles of the
+    controller's clock before handing it on; the root asks
+    decoder_side_former for the former each decoder tier reads
     its rounds through, which is None for a row that has already formed
     them.
     """
 
-    departure_ticks: int
+    detection_event_formation_cycles: int
 
     def form_before_departure(self, fragments: tuple) -> tuple:
         """The round's fragments as they leave the controller."""

@@ -70,6 +70,7 @@ import decsim.build.listeners as listener_build
 import decsim.build.plan as plan_build
 import decsim.build.stores as store_build
 import decsim.build.window_side as window_side
+import decsim.config as config
 import decsim.controller.conditional_release as conditional_release_module
 import decsim.controller.controller as controller_module
 import decsim.controller.idle_rounds as idle_rounds_module
@@ -247,10 +248,14 @@ class Machine:
         factory = controller_side.build_factory(
             settings.magic_state_factory, engine, decoder_manager, plan
         )
-        qpu = cycle_clock.QPUDevice(engine, plan.device, plan.round_ticks)
-        pulse_ticks = settings.controller.decision_to_pulse_ticks()
+        cycle_clock_domain = config.Clock(plan.round_ticks)
+        qpu = cycle_clock.QPUDevice(engine, plan.device, cycle_clock_domain)
         instruction_output = instruction_output_module.InstructionOutput(
-            engine, links, qpu, pulse_ticks
+            engine,
+            links,
+            qpu,
+            settings.controller.clock,
+            settings.controller.decision_to_pulse_cycles,
         )
         streams = controller_side.build_feedback_streams(
             engine,

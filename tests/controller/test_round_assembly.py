@@ -26,6 +26,8 @@ import decsim.records.rounds as round_records
 from decsim.detector_error_model import detection_event_formation
 
 PACKING_TICKS = config.microseconds_to_ticks(1.0)
+# a 1 MHz controller, so one packing cycle is the packing time above
+PACKING_CLOCK = config.Clock(PACKING_TICKS)
 DROP = controller_settings.PackingOverflowPolicy.DROP_ROUND
 
 
@@ -47,10 +49,10 @@ def rounds_in_flight(capacity, held=0, on_route=0):
     return round_assembly.RoundsInFlight(capacity, held_rounds, transmitter)
 
 
-def formation(former, departure_ticks=0):
+def formation(former, detection_event_formation_cycles=0):
     """The controller row: this assembler forms the round before it leaves."""
     return detection_event_formation.ControllerSideFormation(
-        former, departure_ticks
+        former, detection_event_formation_cycles
     )
 
 
@@ -75,7 +77,11 @@ def test_a_two_fragment_round_is_packed_once_after_the_packing_time():
     packed = []
     recorder = round_events.RoundEventRecorder(engine)
     assembler = assembler_with(
-        engine, packed, recorder, packing_microseconds_per_round=1.0
+        engine,
+        packed,
+        recorder,
+        clock=PACKING_CLOCK,
+        packing_cycles_per_round=1,
     )
     first = fragment(1, fragment_index=0, bits=(1, 0))
     second = fragment(1, fragment_index=1, bits=(1, 1))
@@ -99,7 +105,9 @@ def test_a_two_fragment_round_is_packed_once_after_the_packing_time():
     packed_events = [
         event for event in recorder.events if event.kind == "PACKED"
     ]
-    assert [event.tick for event in packed_events] == [5 + PACKING_TICKS]
+    # the round completes at tick 5, inside the first cycle, so its
+    # packing cycle is the one that starts at the next edge
+    assert [event.tick for event in packed_events] == [2 * PACKING_TICKS]
 
 
 def test_a_full_workspace_stops_the_run_naming_the_setting():
@@ -247,9 +255,10 @@ def test_the_controller_row_delays_the_round_by_its_formation_time():
     engine = engine_module.Engine()
     departures = _Departures(engine)
     formation_ticks = config.microseconds_to_ticks(0.02)
-    settings = controller_settings.ControllerSettings()
+    formation_clock = config.Clock(formation_ticks)
+    settings = controller_settings.ControllerSettings(clock=formation_clock)
     former = _Former((0, 1, 1))
-    events = formation(former, departure_ticks=formation_ticks)
+    events = formation(former, detection_event_formation_cycles=1)
     unbounded = rounds_in_flight(None)
     assembler = round_assembly.RoundAssembler(
         engine,

@@ -20,6 +20,7 @@ outcomes.deliver_weak, job.on_decoded.
 
 from typing import Callable, Optional
 
+import decsim.config as config
 import decsim.decoders.decode_dispatch as decode_dispatch
 import decsim.decoders.decode_outcomes as decode_outcomes
 import decsim.decoders.decode_queue as decode_queue
@@ -53,7 +54,8 @@ class DecoderManager:
             decoder_memory_module.DecoderMemoryConfig
         ] = None,
         escalation_policy,
-        dispatch_ticks: int = 0,
+        clock: Optional[config.Clock] = None,
+        dispatch_cycles: int = 0,
         copies_input_by_pool: Optional[dict] = None,
         blocks_unit_by_pool: Optional[dict] = None,
         formation_by_pool: Optional[dict] = None,
@@ -83,7 +85,8 @@ class DecoderManager:
             self.strong_requests,
             on_completed=self.decode_completed,
             dispatch=self.dispatch,
-            dispatch_ticks=dispatch_ticks,
+            clock=clock,
+            dispatch_cycles=dispatch_cycles,
         )
         self.dispatcher = decode_dispatch.DecodeDispatcher(
             self.queue, pool, self.service

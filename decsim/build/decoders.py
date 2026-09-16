@@ -364,7 +364,7 @@ def _staged_unit(
     timing = staged_decoder.UnitTiming(
         before=tuple(before),
         after=(release,),
-        frequency_mhz=tier_settings.engine_megahertz,
+        clock=tier_settings.engine_clock,
     )
     return staged_decoder.StagedDecoder(algorithm, timing)
 

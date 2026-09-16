@@ -5,7 +5,9 @@ corrections; folding is non-destructive); Riesebos, "Pauli Frames for
 Quantum Computer Architectures", TU Delft MSc thesis CE-MS-2016,
 Sec. 3.2 Table 3.1 (a flush applies a Pauli record's gates once and
 resets the record to I); Yang et al. 2605.04892 Fig. 1 (one frame update
-costs one cycle, 4 ns at 250 MHz, and the loop waits for it).
+costs one cycle, 4 ns at 250 MHz, and the loop waits for it). The write
+is charged from the frame clock's next edge, gem5's clockEdge
+(tmp/resources/gem5/src/sim/clocked_object.hh lines 174-186).
 """
 
 import dataclasses
@@ -13,6 +15,7 @@ import enum
 
 import pytest
 
+import decsim.config as config
 import decsim.experiments.experiment as experiment
 import decsim.machine as machine_module
 import decsim.pauli_frame.pauli_frame as pauli_frame_module
@@ -37,8 +40,14 @@ def do_nothing():
 
 
 def frame_with_commit_ticks(commit_ticks):
+    """A frame on a one-tick period, so its write costs its ticks.
+
+    Every tick is an edge on that clock, which keeps these tests about
+    the fold and the refusals; the edge law has its own test below.
+    """
     engine = Engine()
-    frame = PauliFrame(engine, commit_ticks=commit_ticks)
+    clock = config.Clock(1)
+    frame = PauliFrame(engine, clock=clock, write_cycles=commit_ticks)
     return engine, frame
 
 
@@ -106,9 +115,35 @@ def test_a_correction_without_observables_makes_the_fold_unknown():
 
 def test_the_settings_refuse_a_free_write_without_a_reason():
     with pytest.raises(ValueError, match="justification"):
-        PauliFrameConfig(commit_microseconds=0.0)
-    settings = PauliFrameConfig(commit_microseconds=0.004)
-    assert settings.commit_ticks() == 4000
+        PauliFrameConfig(write_cycles=0)
+    clock = config.Clock(4000)
+    settings = PauliFrameConfig(write_cycles=1, clock=clock)
+    assert settings.write_cycles == 1
+    assert settings.clock.period_ticks == 4000
+
+
+def test_a_write_arriving_mid_cycle_lands_on_the_frame_clocks_next_edge():
+    """One write is one cycle of the frame unit, charged edge to edge.
+
+    Yang et al. 2605.04892 Fig. 1 price the update at one cycle, 4 ns at
+    250 MHz, so on a 4000-tick period a correction that arrives at tick
+    10 is written over the cycle that starts at 4000 and lands at 8000.
+    """
+    engine = Engine()
+    clock = config.Clock(4000)
+    frame = PauliFrame(engine, clock=clock, write_cycles=1)
+    continued_at = []
+
+    def note_continuation():
+        continued_at.append(engine.now)
+
+    def commit_at_tick_ten():
+        commit(frame, ("stream", 0), (1,), on_committed=note_continuation)
+
+    engine.schedule(10, commit_at_tick_ten)
+    engine.run()
+
+    assert continued_at == [8000]
 
 
 def test_a_stream_whose_corrections_change_width_is_refused_when_read():
@@ -162,42 +197,45 @@ def test_a_snapshot_does_not_change_when_the_frame_does():
     assert after.commit_count == 2
 
 
-def test_a_write_cost_that_is_not_a_duration_is_refused():
-    with pytest.raises(ValueError, match="finite and not negative"):
-        PauliFrameConfig(commit_microseconds=-1.0)
+def test_a_write_cost_that_is_not_a_cycle_count_is_refused():
+    with pytest.raises(ValueError, match="must not be negative"):
+        PauliFrameConfig(write_cycles=-1)
 
 
-def test_a_write_cost_that_rounds_to_no_ticks_is_refused():
-    with pytest.raises(ValueError, match="rounds to zero ticks"):
-        PauliFrameConfig(commit_microseconds=1e-12)
+def test_a_charged_write_without_a_clock_is_refused():
+    with pytest.raises(ValueError, match="needs the clock"):
+        PauliFrameConfig(write_cycles=1)
 
 
 def test_a_justification_beside_a_priced_write_is_refused_as_stale():
     with pytest.raises(ValueError, match="needs a free write"):
+        clock = config.Clock(4000)
         PauliFrameConfig(
-            commit_microseconds=1.0,
+            write_cycles=1,
+            clock=clock,
             zero_commit_cost_justification="an idealized register write",
         )
 
 
 def test_a_free_write_with_a_reason_is_accepted_and_charges_nothing():
     settings = PauliFrameConfig(
-        commit_microseconds=0.0,
+        write_cycles=0,
         zero_commit_cost_justification="an idealized register write",
     )
-    assert settings.commit_ticks() == 0
+    assert settings.write_cycles == 0
 
 
 class CountingFrame(pauli_frame_module.PauliFrame):
     """A frame row written outside decsim: it counts what it committed.
 
     Its constructor is the port's, the engine and the write cost in
-    ticks, which is what the root gives every row of FRAMES.
+    cycles of its clock, which is what the root gives every row of
+    FRAMES.
     """
 
-    def __init__(self, engine, *, commit_ticks: int) -> None:
+    def __init__(self, engine, *, clock, write_cycles: int) -> None:
         reference = super()
-        reference.__init__(engine, commit_ticks=commit_ticks)
+        reference.__init__(engine, clock=clock, write_cycles=write_cycles)
         self.committed_windows = []
 
     def commit_correction(

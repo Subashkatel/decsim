@@ -92,10 +92,16 @@ class ControllerSettings:
     detection_events_formed_at: str = "controller"
 
     def __post_init__(self) -> None:
-        _check_cycles("readout_to_bits_cycles", self.readout_to_bits_cycles)
-        _check_cycles("packing_cycles_per_round", self.packing_cycles_per_round)
-        _check_cycles("decision_to_pulse_cycles", self.decision_to_pulse_cycles)
-        _check_cycles(
+        config.check_cycles(
+            "readout_to_bits_cycles", self.readout_to_bits_cycles
+        )
+        config.check_cycles(
+            "packing_cycles_per_round", self.packing_cycles_per_round
+        )
+        config.check_cycles(
+            "decision_to_pulse_cycles", self.decision_to_pulse_cycles
+        )
+        config.check_cycles(
             "detection_event_cycles_per_round",
             self.detection_event_cycles_per_round,
         )
@@ -156,12 +162,6 @@ class IdlePolicySettings:
 
     kind: str = "separate_decode_jobs"
     policy: Optional[ports.IdlePolicy] = None
-
-
-def _check_cycles(name: str, cycles: int) -> None:
-    """Refuse a cycle count no yaml and no experiments call can mean."""
-    if cycles < 0:
-        raise ValueError(f"{name} must not be negative")
 
 
 def _formation_cycles(section: Mapping) -> int:

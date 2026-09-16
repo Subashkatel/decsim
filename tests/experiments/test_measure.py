@@ -805,7 +805,7 @@ def seam_only_fabric():
     """
     clocks = config_module.ClockSettings({"fridge": 250.0, "room": 250.0})
     seam_card = {
-        "latency_cycles": 125.0,
+        "latency_cycles": 125,
         "clock": "fridge",
         "bits_per_cycle": None,
     }

@@ -72,7 +72,7 @@ def assembler_with(engine, packed, recorder, **settings_fields):
     return assembler
 
 
-def test_a_two_fragment_round_is_packed_once_after_the_packing_time():
+def test_packing_starts_at_the_edge_after_the_last_fragment_arrives():
     engine = engine_module.Engine()
     packed = []
     recorder = round_events.RoundEventRecorder(engine)
@@ -81,7 +81,7 @@ def test_a_two_fragment_round_is_packed_once_after_the_packing_time():
         packed,
         recorder,
         clock=PACKING_CLOCK,
-        packing_cycles_per_round=1,
+        packing_cycles_per_round=3,
     )
     first = fragment(1, fragment_index=0, bits=(1, 0))
     second = fragment(1, fragment_index=1, bits=(1, 1))
@@ -105,9 +105,8 @@ def test_a_two_fragment_round_is_packed_once_after_the_packing_time():
     packed_events = [
         event for event in recorder.events if event.kind == "PACKED"
     ]
-    # the round completes at tick 5, inside the first cycle, so its
-    # packing cycle is the one that starts at the next edge
-    assert [event.tick for event in packed_events] == [2 * PACKING_TICKS]
+    expected_tick = 4 * PACKING_TICKS
+    assert [event.tick for event in packed_events] == [expected_tick]
 
 
 def test_a_full_workspace_stops_the_run_naming_the_setting():

@@ -399,29 +399,33 @@ def test_a_pipelined_unit_frees_its_intake_after_the_initiation_interval():
     assert declared_unit.pipeline_depth(job) == 3
 
 
-def test_the_stage_partition_does_not_change_the_whole_job_time():
-    """Two cycles are two cycles, in one stage or in two.
-
-    Every stage is a whole number of periods (staged_decoder.py,
-    UnitTiming.stage_ticks), so a finer stage list describes the same
-    unit rather than a slower one, and no partition accumulates a
-    rounding error at the clock.
-    """
+@pytest.mark.parametrize("start_tick", [0, 1, 3333])
+def test_partitioned_stages_finish_on_the_same_edge(start_tick):
+    """gem5 clockEdge: align once, then add each stage's whole periods."""
     job = decode_job(round_count=3)
-    # a 300 MHz domain, whose period is not a whole microsecond
     clock = config.Clock(3333)
     whole = staged_decoder.DecoderStage("whole", cycles_per_job=2)
     first = staged_decoder.DecoderStage("first", cycles_per_job=1)
     second = staged_decoder.DecoderStage("second", cycles_per_job=1)
     one_stage = staged_decoder.UnitTiming((whole,), (), clock)
     two_stages = staged_decoder.UnitTiming((first, second), (), clock)
-    one_stage_ticks = one_stage.stage_ticks(job)
-    two_stage_ticks = two_stages.stage_ticks(job)
-    one_stage_values = one_stage_ticks.values()
-    two_stage_values = two_stage_ticks.values()
-    expected_ticks = 2 * 3333
-    assert sum(one_stage_values) == expected_ticks
-    assert sum(two_stage_values) == expected_ticks
+    first_engine = engine_module.Engine()
+    second_engine = engine_module.Engine()
+    first_engine.now = start_tick
+    second_engine.now = start_tick
+    first_inner = RecordingInner(first_engine, latency_microseconds=0)
+    second_inner = RecordingInner(second_engine, latency_microseconds=0)
+    whole_unit = staged_decoder.StagedDecoder(first_inner, one_stage)
+    partitioned_unit = staged_decoder.StagedDecoder(second_inner, two_stages)
+
+    whole_results = run_to_completion(whole_unit, first_engine, job)
+    partitioned_results = run_to_completion(
+        partitioned_unit, second_engine, job
+    )
+
+    expected_tick = clock.edge(2, start_tick)
+    assert [tick for tick, _result in whole_results] == [expected_tick]
+    assert [tick for tick, _result in partitioned_results] == [expected_tick]
 
 
 def test_every_measured_algorithm_holds_the_unit_for_its_own_wall_clock():

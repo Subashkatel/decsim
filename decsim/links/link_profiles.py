@@ -699,7 +699,9 @@ def _roce_v2_strong_paths(
 def _card_microseconds(card: Mapping, clocks: config.ClockSettings) -> tuple:
     """(latency, aggregate rate, setup) of one card in microseconds."""
     megahertz = clocks.megahertz(card["clock"])
-    latency_microseconds = card["latency_cycles"] / megahertz
+    latency_cycles = card["latency_cycles"]
+    config.check_cycles("latency_cycles", latency_cycles)
+    latency_microseconds = latency_cycles / megahertz
     bits_per_cycle = card["bits_per_cycle"]
     lane_count = card.get("channels", 1)
     bits_per_microsecond = None
@@ -708,6 +710,7 @@ def _card_microseconds(card: Mapping, clocks: config.ClockSettings) -> tuple:
     setup_cycles = card.get("setup_cycles_per_transfer")
     setup_microseconds = None
     if setup_cycles is not None:
+        config.check_cycles("setup_cycles_per_transfer", setup_cycles)
         setup_microseconds = setup_cycles / megahertz
     return latency_microseconds, bits_per_microsecond, setup_microseconds
 

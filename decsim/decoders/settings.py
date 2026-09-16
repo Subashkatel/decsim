@@ -143,6 +143,23 @@ class DecoderSettings:
     engine_clock: Optional[config.Clock] = None
     decoder: Optional[ports.Decoder] = None
 
+    def __post_init__(self) -> None:
+        config.check_cycles(
+            "fetch_cycles_per_round", self.fetch_cycles_per_round
+        )
+        config.check_cycles(
+            "release_cycles_per_job", self.release_cycles_per_job
+        )
+        if self.detection_event_latency_cycles is not None:
+            config.check_cycles(
+                "detection_event_latency_cycles",
+                self.detection_event_latency_cycles,
+            )
+        config.check_cycles(
+            "detection_event_cycles_per_round",
+            self.detection_event_cycles_per_round,
+        )
+
     @classmethod
     def from_yaml(
         cls,
@@ -209,6 +226,11 @@ class DecoderManagerSettings:
     bulk_strong: bool = False
     dispatch_cycles: int = 0
     clock: Optional[config.Clock] = None
+
+    def __post_init__(self) -> None:
+        config.check_cycles(
+            "decoder_manager.dispatch_cycles", self.dispatch_cycles
+        )
 
     @classmethod
     def from_yaml(

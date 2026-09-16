@@ -384,6 +384,33 @@ would be the defect. And `decsim/ports.py`
 is the slowest layer of all: a port method added, renamed or removed
 needs a design note saying why, the way a golden move does.
 
+## Rule 11. Branches are a liability
+
+A function decides at most five times: `if`, `elif`, a loop, an `and`
+or `or` in a condition, an `except`, each count one, and a function with
+six or more is split before it lands. Savoia and Evans (the CRAP metric,
+2007) fit this on real code: the risk of a method grows with the square
+of its branch count and falls with the cube of its test coverage, and a
+method with many branches and few tests is the one nobody dares to
+change. decsim keeps the branch count low so that few tests are needed,
+not the other way round.
+
+The shape that keeps a function under the line is the guard clause: the
+case that ends early returns early, at the top, and the body that
+follows reads straight down without an `else`. A ladder of `if` and
+`else` is rewritten as guards; a conditional expression never nests
+another. When a function is hard to test without a large fixture, that
+is the same fault seen from the test side: the function is split into
+small helpers with no state of their own, and the helpers are tested
+plainly.
+
+Every function that branches has a test that reaches each branch through
+the public surface, or a gate point that does. A branch no test and no
+gate point reaches is either removed under rule 4 or given its test in
+the same commit. `tools/check.sh` reports every function over the line
+(ruff's mccabe rule at five); the count is 91 on 2026-09-16 and goes down,
+never up.
+
 ## Tests
 
 The best test of a component is its output beside a referent's output on
@@ -460,7 +487,8 @@ form cannot come back. Chapters 11 to
 keep tests obvious and unchanging, prefer real implementations, and use
 A/B diffs across a migration (a differential review is chapter 14's).
 Google's code-review guidance holds: solve the problem that needs
-solving now, not one the developer speculates might come. The component
+solving now, not one the developer speculates might come. Rule 11 is Savoia's CRAP metric (Google Testing Blog, February
+2011): branches squared against coverage cubed. The component
 shape is gem5's (src/sim/sim_object.hh and the Python params), the
 experiments layer is sinter's, the engine is SimPy's.
 

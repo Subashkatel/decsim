@@ -3,8 +3,8 @@
 Table row round_store. The store's own incoming port writes each round
 once at its landing (accept_packed_round) after asking has_room, the
 window side keeps it alive with holds (RoundHolds), and the slot is
-freed when the last hold releases; on_slot_freed then tells the writer,
-so a round held for room enters in order. That is gem5's cache queue
+freed when the last hold releases; the waiting line then hears it, so a
+round held for room enters in order. That is gem5's cache queue
 (src/mem/cache/queue.hh isFull, then allocate) and its blocked port
 (src/mem/cache/base.cc clearBlocked schedules the retry): the store
 never refuses a write, it answers room first. A round's status (its
@@ -19,8 +19,9 @@ new_holder) and hold_released(holder) for the consumers' tokens.
 """
 
 import dataclasses
-from typing import Callable, Optional
+from typing import Optional
 
+import decsim.ports as ports
 import decsim.records.identity as identity_records
 import decsim.records.rounds as round_records
 import decsim.syndrome_buffer.round_holds as round_holds
@@ -57,15 +58,17 @@ class _StoredRound:
 class RoundStore:
     """The store: rounds by key, their holds, and the operations it serves.
 
-    Its state is the settings, the rounds, the holds, the operations,
-    the slot-freed callback and its events (trace).
+    Its state is the settings, the rounds, the holds, the operations and
+    its events (trace).
     """
+
+    # a store built with no waiting line in front of it frees its slots
+    # with nobody to tell
+    held_rounds = ports.Port(ports.HeldRounds, optional=True)
 
     def __init__(
         self,
         settings: round_store_settings.RoundStoreSettings,
-        *,
-        on_slot_freed: Optional[Callable[[], None]] = None,
     ) -> None:
         self.settings = settings
         self.round_by_key: dict = {}
@@ -73,7 +76,6 @@ class RoundStore:
         # operation id -> True while it may receive rounds, False once
         # closed; a closed identity never reopens
         self.operations: dict = {}
-        self.on_slot_freed = on_slot_freed
         self.trace = _TraceSources()
 
     # ---- the port
@@ -302,8 +304,8 @@ class RoundStore:
     def _free_round(self, round_key) -> None:
         del self.round_by_key[round_key]
         self.trace.round_released.fire(round_key)
-        if self.on_slot_freed is not None:
-            self.on_slot_freed()
+        if self.held_rounds is not None:
+            self.held_rounds.retry()
 
 
 def _round_ranges_text(sorted_round_indices: list) -> str:

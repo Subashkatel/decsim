@@ -22,10 +22,10 @@ window side takes it as its DecodeQueue; the strong redecode asks it
 to await and accept a strong selection over the same port. The
 controller's issuer carries the start callback with the issue, the
 QPU's completion receiver is the runtime's body_done, and the runtime
-tells the issuer what it knows at each release. The stores' callbacks
-arrive by constructor: the held rounds are built first, each store
-retries them when a slot frees, and the strong writer tells the window
-manager what landed. The one stand-in is _LateWiring inside
+tells the issuer what it knows at each release. The stores name the
+waiting line and the window side as ports: each store retries the held
+rounds when a slot frees, and the strong writer tells the window manager
+what landed. The one stand-in is _LateWiring inside
 _window_manager, for the courier's and the committer's callbacks to the
 facade and the strong redecode built after them.
 

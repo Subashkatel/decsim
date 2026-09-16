@@ -64,15 +64,25 @@ def held_rounds() -> round_writes.HeldRounds:
     return round_writes.HeldRounds(engine, STALL)
 
 
-def store(rounds=None, on_slot_freed=None, listener=None):
+def store(rounds=None, waiting_line=None, listener=None):
     settings = round_store_settings.RoundStoreSettings(rounds=rounds)
-    the_store = round_store_module.RoundStore(
-        settings, on_slot_freed=on_slot_freed
-    )
+    the_store = round_store_module.RoundStore(settings)
+    if waiting_line is not None:
+        the_store.held_rounds = waiting_line
     if listener is not None:
         the_store.trace.round_stored.connect(listener.round_stored)
         the_store.trace.round_released.connect(listener.round_released)
     return the_store
+
+
+class RecordingWaitingLine:
+    """A waiting line that counts the slots the store frees."""
+
+    def __init__(self):
+        self.freed_count = 0
+
+    def retry(self):
+        self.freed_count += 1
 
 
 class RecordingListener:
@@ -107,7 +117,7 @@ def run_trace(arrivals, holds, capacity):
     """The trace through the store: enter ticks, in round order."""
     engine = engine_module.Engine()
     held = held_rounds()
-    the_store = store(rounds=capacity, on_slot_freed=held.retry)
+    the_store = store(rounds=capacity, waiting_line=held)
     enters = {}
 
     def admit(round: round_records.PackedRound) -> bool:
@@ -193,7 +203,7 @@ def test_a_full_store_answers_no_room_and_is_unchanged():
 
 def test_a_held_round_enters_when_a_slot_frees_in_completion_order():
     held = held_rounds()
-    the_store = store(rounds=1, on_slot_freed=held.retry)
+    the_store = store(rounds=1, waiting_line=held)
     entered = []
 
     def admit(round: round_records.PackedRound) -> bool:
@@ -219,11 +229,9 @@ def test_a_held_round_enters_when_a_slot_frees_in_completion_order():
 
 
 def test_a_stored_round_is_released_when_its_last_hold_releases():
-    freed = []
+    waiting_line = RecordingWaitingLine()
     listener = RecordingListener()
-    the_store = store(
-        on_slot_freed=lambda: freed.append(True), listener=listener
-    )
+    the_store = store(waiting_line=waiting_line, listener=listener)
     weak_reads = decoding_records.WindowReads((1, 0))
     strong_reads = decoding_records.PotentialStrong((1, 0))
     the_store.register_hold(weak_reads, [(1, 1)])
@@ -238,7 +246,7 @@ def test_a_stored_round_is_released_when_its_last_hold_releases():
     assert held_after_first is True
     assert the_store.retained_fragments((1, 1)) is None
     assert listener.released == [(1, 1)]
-    assert freed == [True]
+    assert waiting_line.freed_count == 1
 
 
 def test_the_listener_hears_a_stored_round_once():

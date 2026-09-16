@@ -17,8 +17,9 @@ instead of stored, since no reader can ever name it (_drop_landing).
 """
 
 import dataclasses
-from typing import Callable, Optional
+from typing import Optional
 
+import decsim.ports as ports
 import decsim.records.log_sources as log_sources
 import decsim.records.rounds as round_records
 import decsim.syndrome_buffer.round_store as round_store_module
@@ -33,18 +34,18 @@ class StrongRoundWriter:
     hop 3).
     """
 
+    # a writer built with no window side stores its rounds for a reader
+    # that never asks
+    windows = ports.Port(ports.WindowInput, optional=True)
+
     def __init__(
         self,
         engine,
         store: round_store_module.RoundStore,
-        *,
-        on_round_stored: Optional[Callable] = None,
     ) -> None:
         self.engine = engine
         self.store = store
         self.writes_in_flight = 0
-        # hears (operation_id, round_index) once a round is stored
-        self.on_round_stored = on_round_stored
         self.trace = _TraceSources()
 
     def has_room(self) -> bool:
@@ -95,8 +96,10 @@ class StrongRoundWriter:
         self.engine.log_io(
             log_sources.STRONG_BUFFER, lambda: self._received_text(packet)
         )
-        if self.on_round_stored is not None:
-            self.on_round_stored(packet.operation_id, packet.round_index)
+        if self.windows is not None:
+            self.windows.accept_room_round(
+                packet.operation_id, packet.round_index
+            )
 
     def _drop_landing(
         self,

@@ -15,7 +15,7 @@ only; program dependencies, windows and decoder state live elsewhere.
 """
 
 import dataclasses
-from typing import Any, Callable, Optional
+from typing import Any
 
 import decsim.config as config
 import decsim.engine
@@ -43,7 +43,7 @@ class QPUDevice:
     """Runs issued operation bodies on one QEC cycle clock.
 
     Every cycle emits one syndrome round per running operation and per
-    idle patch. The receivers may arrive later through connect_*. Trace
+    idle patch, and the three ends that output reaches are ports. Trace
     sources: command_event(QPUCommandEvent) when a command arrives and
     when it starts; round_emitted(readout) for every readout a round
     hands to the controller, and round_event(RoundEvent) with kind
@@ -53,41 +53,25 @@ class QPUDevice:
     (tmp/resources/gem5/src/base/stats/group.hh:60-92).
     """
 
+    readout_receiver = ports.Port(ports.ReadoutReceiver)
+    # the end that owns an operation's life: it hears the body's last
+    # round on this clock
+    runtime = ports.Port(ports.OperationRuntime)
+    # a patch nobody is operating on still emits a round every cycle,
+    # and what that round costs is the idle policy's question
+    idle_rounds = ports.Port(ports.IdleRoundReceiver)
+
     def __init__(
         self,
         engine: decsim.engine.Engine,
         syndrome_source: ports.SyndromeSource,
         clock: config.Clock,
-        readout_receiver: Optional[ports.ReadoutReceiver] = None,
-        completion_receiver: Optional[
-            Callable[[program_records.Operation], None]
-        ] = None,
-        idle_receiver: Optional[Callable[[Any, Any, int], None]] = None,
     ):
         self.engine = engine
         self.syndrome_source = syndrome_source
         self.clock = clock
-        self.receivers = _Receivers(
-            readout_receiver, completion_receiver, idle_receiver
-        )
         self.trace = _TraceSources()
         self._live = _LiveOperations()
-
-    def connect_readout_receiver(self, receiver: ports.ReadoutReceiver) -> None:
-        """Wire the component that accepts every readout."""
-        self.receivers.readout = receiver
-
-    def connect_completion_receiver(
-        self, receiver: Callable[[program_records.Operation], None]
-    ) -> None:
-        """Wire the callback for a completed operation body."""
-        self.receivers.completion = receiver
-
-    def connect_idle_receiver(
-        self, receiver: Callable[[Any, Any, int], None]
-    ) -> None:
-        """Wire the callback for an idle patch's round."""
-        self.receivers.idle = receiver
 
     def issue(self, command: program_records.RunOperationBody) -> None:
         """Queue one operation body; it starts on the next cycle boundary."""
@@ -180,7 +164,7 @@ class QPUDevice:
         idle_patches = self._live.idle_by_patch.items()
         for patch, idle in list(idle_patches):
             idle.emitted_round_count += 1
-            self.receivers.idle(
+            self.idle_rounds.emit_idle_round(
                 idle.operation_id, patch, idle.emitted_round_count
             )
 
@@ -245,7 +229,7 @@ class QPUDevice:
         for patch in program_records.patches_of(operation):
             idle = _IdlePatch(operation.id, 0)
             self._live.idle_by_patch.setdefault(patch, idle)
-        self.receivers.completion(operation)
+        self.runtime.body_done(operation)
 
     def _deliver(
         self,
@@ -293,7 +277,7 @@ class QPUDevice:
             readout.patch_id,
         )
         self.trace.round_event.fire(emitted)
-        self.receivers.readout.accept_qpu_readout(readout, route)
+        self.readout_receiver.accept_qpu_readout(readout, route)
 
 
 @dataclasses.dataclass
@@ -346,18 +330,3 @@ class _LiveOperations:
     scheduled_boundaries: set = dataclasses.field(default_factory=set)
     last_emitted_boundary: int = 0
     is_finished: bool = False
-
-
-@dataclasses.dataclass
-class _Receivers:
-    """The three components a cycle hands its output to.
-
-    readout takes every syndrome round, completion hears an operation's
-    body end, idle hears a round of a patch that is running nothing.
-    Each may arrive after the clock is built, through connect_*, because
-    the controller and the runtime are built after the QPU.
-    """
-
-    readout: Optional[ports.ReadoutReceiver] = None
-    completion: Optional[Callable] = None
-    idle: Optional[Callable] = None

@@ -137,6 +137,8 @@ def build_window_manager(
         gap_join,
         read_clock=settings.round_store.clock,
         read_cycles=read_cycles,
+        clock=settings.windows.clock,
+        decision_cycles=settings.windows.decision_cycles,
     )
     strong_redecode = _strong_redecode(
         escalation_policy,

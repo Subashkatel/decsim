@@ -145,7 +145,9 @@ class MachineSettings:
         strong_round_store = round_store_settings.RoundStoreSettings.from_yaml(
             sections["strong_round_store"], clocks
         )
-        windows = window_settings.WindowSettings.from_yaml(sections["windows"])
+        windows = window_settings.WindowSettings.from_yaml(
+            sections["windows"], clocks, controller.clock
+        )
         weak_decoder = _tier_settings(sections, "weak_decoder", clocks)
         strong_decoder = _tier_settings(sections, "strong_decoder", clocks)
         decoder_manager = decoder_settings.DecoderManagerSettings.from_yaml(

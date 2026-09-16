@@ -192,6 +192,14 @@ workload:
                                    # Toshio 2510.25222 Fig. 4)
 
 windows:
+  clock: fridge                    # a clocks domain; absent uses controller.clock
+  decision_cycles: 0               # per-submission readiness decision before
+                                   # the decode queue admits the job. Zero is
+                                   # synchronous, without edge rounding; positive
+                                   # costs end on this domain's clock edge.
+                                   # gem5 src/mem/XBar.py frontend_latency;
+                                   # RISC-Q 2603.16203 lines 893-904 times
+                                   # aggregation and distribution separately
   kind: sliding                    # sliding | parallel | sandwich | naive_online
   commit_rounds: null              # rounds committed per window; null = d
   buffer_rounds: null              # look-ahead rounds per window; null = d

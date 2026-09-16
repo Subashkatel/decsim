@@ -199,6 +199,7 @@ def weak_only_run(
     io_trace=False,
     round_store=None,
     decoder_input="copy",
+    windows=None,
     controller=None,
     observation=None,
     probes=(),
@@ -227,6 +228,8 @@ def weak_only_run(
         pauli_frame=frame,
         observation=observation,
     )
+    if windows is not None:
+        settings = dataclasses.replace(settings, windows=windows)
     if round_store is not None:
         settings = dataclasses.replace(settings, round_store=round_store)
     return run_machine(settings, seed, probes)

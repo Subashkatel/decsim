@@ -33,6 +33,7 @@ import decsim.syndrome_buffer.settings as round_store_settings
 import decsim.windows.boundary_payloads as boundary_payloads
 import decsim.windows.decode_requests as decode_requests
 import decsim.windows.round_retention as round_retention
+import decsim.windows.settings as window_settings
 import decsim.windows.window_interactions as window_interactions
 import tests.declared_run as declared_run
 import tests.experiments.yaml_configs as yaml_configs
@@ -83,7 +84,9 @@ def _fragment(round_index, bits=None) -> round_records.RetainedSyndromeFragment:
 class _Fixture:
     """One six-round operation with one window reading rounds 1 to 5."""
 
-    def __init__(self, read_cycles=0, read_clock=None) -> None:
+    def __init__(
+        self, read_cycles=0, read_clock=None, decision_cycles=0, clock=None
+    ) -> None:
         self.engine = engine_module.Engine()
         self.operation = program_records.Operation(
             1, "memory", (0,), patches=(0,)
@@ -163,6 +166,8 @@ class _Fixture:
             store_output,
             read_cycles=read_cycles,
             read_clock=read_clock,
+            decision_cycles=decision_cycles,
+            clock=clock,
         )
         self.retention.register_window((1, 0), self.window)
         self.interaction = interaction
@@ -600,3 +605,60 @@ def test_a_zero_read_cost_submits_mid_cycle_without_scheduling():
     assert fixture.engine.idle
     assert len(fixture.queue.enqueued) == 1
     assert fixture.window.t_queued == 1
+
+
+def test_decision_cycles_delay_queue_admission_and_later_reaction_points():
+    clocks = config.ClockSettings.from_yaml({"decisions": 1.0})
+    section = {
+        "kind": "sliding",
+        "commit_rounds": None,
+        "buffer_rounds": None,
+        "clock": "decisions",
+        "decision_cycles": 3,
+    }
+    settings = window_settings.WindowSettings.from_yaml(section, clocks)
+    free = declared_run.weak_only_run()
+    charged = declared_run.weak_only_run(windows=settings)
+    free_ticks = declared_run.reaction_ticks(free)
+    charged_ticks = declared_run.reaction_ticks(charged)
+    paired = zip(charged_ticks, free_ticks)
+    shifts = [charged_tick - free_tick for charged_tick, free_tick in paired]
+    expected = 3 * settings.clock.period_ticks
+    assert shifts == [0, expected, expected, expected, expected, expected]
+
+
+def test_withdrawal_cancels_a_pending_decision_and_releases_its_input():
+    clock = config.Clock(10)
+    fixture = _Fixture(decision_cycles=3, clock=clock)
+    fixture.arrive(1)
+    fixture.arrive(2)
+    fixture.arrive(3)
+    fixture.arrive(4)
+    fixture.arrive(5)
+    assert fixture.queue.enqueued == []
+    assert fixture.window.t_queued is None
+
+    fixture.requester.withdraw(fixture.window)
+    fixture.engine.run()
+
+    assert fixture.queue.enqueued == []
+    assert fixture.queue.withdrawn == []
+    assert fixture.store.occupancy == 0
+
+
+@pytest.mark.parametrize("cycles, expected_tick", [(0, 1), (3, 40)])
+def test_a_decision_aligns_to_an_edge_only_when_it_costs_cycles(
+    cycles, expected_tick
+):
+    clock = config.Clock(10)
+    fixture = _Fixture(decision_cycles=cycles, clock=clock)
+    fixture.engine.now = 1
+    fixture.arrive(1)
+    fixture.arrive(2)
+    fixture.arrive(3)
+    fixture.arrive(4)
+    fixture.arrive(5)
+    fixture.engine.run()
+
+    assert len(fixture.queue.enqueued) == 1
+    assert fixture.window.t_queued == expected_tick

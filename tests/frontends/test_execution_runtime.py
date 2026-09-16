@@ -137,6 +137,7 @@ def test_a_program_with_no_operations_is_complete_at_once():
     runtime, _engine, _issuer, _factory, _stamps = runtime_over(())
     program = program_records.ExecutionProgram(())
     runtime.load_program(program)
+    runtime.start()
     assert runtime.workload_complete is True
 
 
@@ -149,6 +150,7 @@ def test_a_successor_waits_for_every_dependency_edge_it_declares():
     program = program_records.ExecutionProgram(operations)
 
     runtime.load_program(program)
+    runtime.start()
     assert runtime.schedule.dependencies_remaining == {1: 0, 2: 2}
     assert issuer.issued == [1]
 
@@ -170,6 +172,7 @@ def test_an_operation_with_a_scheduled_start_round_waits_for_that_round():
     program = program_records.ExecutionProgram(operations)
 
     runtime.load_program(program)
+    runtime.start()
 
     assert issuer.issued == [1]
     assert engine.scheduled == [
@@ -185,6 +188,7 @@ def test_a_scheduled_release_that_fires_twice_issues_the_operation_once():
     )
     program = program_records.ExecutionProgram(operations)
     runtime.load_program(program)
+    runtime.start()
     release = engine.scheduled[0][1]
 
     release()
@@ -208,6 +212,7 @@ def test_a_magic_state_operation_claims_its_qubits_then_waits_for_one():
     program = program_records.ExecutionProgram(operations)
 
     runtime.load_program(program)
+    runtime.start()
     assert runtime.lifecycle.resources.holder_by_resource == {
         ("qubit", "data"): 1
     }
@@ -229,6 +234,7 @@ def test_a_blocked_operation_starts_when_both_of_its_gates_are_open():
     issuer.allowed_by_operation_id[1] = False
     program = program_records.ExecutionProgram(operations)
     runtime.load_program(program)
+    runtime.start()
 
     engine.now = 3
     release = program_records.Decision(1, releases_operation=True)
@@ -296,6 +302,7 @@ def test_a_body_frees_its_resources_before_its_successor_is_issued():
     )
     program = program_records.ExecutionProgram(operations)
     runtime.load_program(program)
+    runtime.start()
     engine.calls.clear()
 
     engine.now = 11
@@ -323,6 +330,7 @@ def test_the_ready_retry_offers_the_waiting_operations_in_identity_order():
     runtime, engine, issuer, _factory, _stamps = runtime_over(operations)
     program = program_records.ExecutionProgram(operations)
     runtime.load_program(program)
+    runtime.start()
     runtime.lifecycle.released_operation_ids.update({9, 24})
     engine.calls.clear()
 
@@ -338,6 +346,7 @@ def test_a_retry_starts_nothing_that_no_release_has_reached():
     runtime, engine, issuer, _factory, _stamps = runtime_over(operations)
     program = program_records.ExecutionProgram(operations)
     runtime.load_program(program)
+    runtime.start()
     engine.calls.clear()
 
     runtime.retry_ready_operations()
@@ -353,6 +362,7 @@ def test_a_release_and_a_result_return_are_stamped_apart():
     runtime, engine, _issuer, factory, stamps = runtime_over(operations)
     program = program_records.ExecutionProgram(operations)
     runtime.load_program(program)
+    runtime.start()
 
     engine.now = 2
     release = program_records.Decision(1, releases_operation=True)

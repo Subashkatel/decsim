@@ -179,6 +179,30 @@ def test_a_second_table_row_runs_gate_point_one():
     assert result.operation_results[0].logical_observables is not None
 
 
+def test_no_component_queues_an_event_until_the_machine_is_started():
+    """Build wires the graph; start queues the first events.
+
+    gem5 splits the constructor, which takes a component's
+    collaborators, from startup, "the appropriate place to schedule
+    initial event(s)"
+    (tmp/resources/gem5/src/sim/sim_object.hh lines 194 and 280). With
+    that split the order the root builds its components in cannot move a
+    tick, because no component has queued anything while the rest of the
+    machine is still being built.
+    """
+    config_path = CONFIGS / "weak_decoder_baseline.yaml"
+    config = experiment.load_experiment(config_path)
+    settings = config.point_settings(
+        physical_error_probability=0.003, distance=3, round_period_us=1.0
+    )
+    machine = machine_module.Machine.build(settings, 0)
+    assert machine.engine.idle is True
+
+    machine.start()
+
+    assert machine.engine.idle is False
+
+
 def test_a_decoder_kind_off_the_table_is_refused_naming_the_rows():
     weak_decoder = decoder_settings.DecoderSettings(kind="lookup_table")
     settings = machine_settings.MachineSettings(weak_decoder=weak_decoder)
@@ -591,6 +615,9 @@ class AlwaysReadyFactory:
     def __init__(self, collaborators):
         self.engine = collaborators.engine
         self.requests = []
+
+    def start(self):
+        """Nothing is made ahead of a request, so nothing is queued."""
 
     def request(self, operation_id, callback):
         """Deliver at once and remember who asked."""

@@ -462,6 +462,7 @@ Where a non-Clifford operation gets its magic state.
 
 | Method | What it does |
 | --- | --- |
+| `start` | Queue whatever the factory does before the first request. |
 | `request` | Ask for one state; callback runs once it is ready. |
 | `shutdown` | Stop producing; the workload is complete. |
 

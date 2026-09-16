@@ -92,6 +92,9 @@ class InfiniteFactory:
     def __init__(self, collaborators: FactoryCollaborators):
         self.engine = collaborators.engine
 
+    def start(self) -> None:
+        """Nothing is made ahead of a request, so nothing is queued."""
+
     def request(
         self, operation_id: int, callback: Callable[[], None]
     ) -> Ticket:
@@ -122,6 +125,12 @@ class DistillationFactory(seeding._RandomSeedConsumer):
         self.engine = collaborators.engine
         self.decode_service = collaborators.decode_service
         self._read_card(**collaborators.arguments)
+
+    def start(self) -> None:
+        """Continuous production fills the pipeline before any request."""
+        if self.card.production_mode != "continuous":
+            return
+        self.engine.schedule(0, self._start_attempts, label="factory_start")
 
     def request(
         self, operation_id: int, callback: Callable[[], None]
@@ -194,8 +203,6 @@ class DistillationFactory(seeding._RandomSeedConsumer):
         self._check_settings(initial_store)
         self._initialize_run_seed_state(seed)
         self._reset_state(initial_store)
-        if production_mode == "continuous":
-            self.engine.schedule(0, self._start_attempts, label="factory_start")
 
     def _check_settings(self, initial_store: int) -> None:
         _check_production_mode(
@@ -409,6 +416,12 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
         self.decode_service = collaborators.decode_service
         self._read_card(collaborators.round_ticks, **collaborators.arguments)
 
+    def start(self) -> None:
+        """Continuous production fills the top buffer before any request."""
+        if self.card.production_mode != "continuous":
+            return
+        self.engine.schedule(0, self._start_work, label="factory_start")
+
     def request(
         self, operation_id: int, callback: Callable[[], None]
     ) -> Ticket:
@@ -484,7 +497,6 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
         self._check_settings()
         self._initialize_run_seed_state(seed)
         self._reset_state(round_ticks)
-        self._schedule_continuous_start()
 
     def _check_settings(self) -> None:
         _check_production_mode(
@@ -507,10 +519,6 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
             self.card.correction_round_count,
             minimum=0,
         )
-
-    def _schedule_continuous_start(self) -> None:
-        if self.card.production_mode == "continuous":
-            self.engine.schedule(0, self._start_work, label="factory_start")
 
     def _reset_state(self, round_ticks: int) -> None:
         self.round_ticks_by_level = {}

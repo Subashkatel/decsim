@@ -379,8 +379,23 @@ class Machine:
             operations=plan.all_operations,
         )
 
+    def start(self) -> None:
+        """Queue the first event of every component that has one.
+
+        Every component is built and wired first and nothing is
+        scheduled while the graph is still being assembled, so the order
+        the root builds in cannot move a tick; each seat with a first
+        event queues it here, in build order. That is gem5's split
+        between the constructor and startup, "the appropriate place to
+        schedule initial event(s)"
+        (tmp/resources/gem5/src/sim/sim_object.hh lines 194 and 280).
+        """
+        self.factory.start()
+        self.execution_runtime.start()
+
     def run(self) -> result_records.RunResult:
-        """Run the engine to quiescence, check settlement, read the result."""
+        """Start every component, run to quiescence, read the result."""
+        self.start()
         self.engine.run()
         strong_redecode = self.window_manager.strong_redecode
         if strong_redecode is not None and strong_redecode.has_pending():

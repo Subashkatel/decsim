@@ -1308,10 +1308,17 @@ class MagicStateFactory(Protocol):
     Table rows: infinite, distillation, multi_level
     (MAGIC_STATE_FACTORIES, qpu/settings.py), each built from one
     FactoryCollaborators record. The runtime asks and is called back; a
-    factory that produces on demand answers at once.
+    factory that produces on demand answers at once. A row that produces
+    ahead of demand queues its first attempt in start, never in its
+    constructor, so the order the root builds its components in cannot
+    move a tick (gem5's startup, the place to schedule initial events,
+    tmp/resources/gem5/src/sim/sim_object.hh lines 194 and 280).
     """
 
     engine: Any
+
+    def start(self) -> None:
+        """Queue whatever the factory does before the first request."""
 
     def request(self, operation_id: int, callback: Callable[[], None]):
         """Ask for one state; callback runs once it is ready."""

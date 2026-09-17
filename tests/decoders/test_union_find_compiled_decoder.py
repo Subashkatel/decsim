@@ -271,7 +271,7 @@ def test_two_adjacent_defects_take_one_step_over_three_edges_one_hop():
         edge_count=3,
         hop_count=1,
         growth_ticks=BOTH_ENDS_TICKS,
-        odd_fusion=True,
+        fusion="parity",
     )
     assert steps_of([8, 9]) == (step,)
 
@@ -282,19 +282,21 @@ def test_a_lone_defect_grows_twice_and_its_flood_deepens_each_step():
     The second flood runs from row 8, the cluster's root, to row 11,
     three hops; the boundary is one hop further and is not counted.
     Every edge grows from its one odd end, so each step spans the whole
-    edge length, and the quiet neighbours it takes in are even.
+    edge length. The smaller row survives every union, so the odd row is
+    absorbed each time and its parity climbs to the new root: both steps
+    are parity fusions.
     """
     first = evidence_records.GrowthStep(
         edge_count=2,
         hop_count=2,
         growth_ticks=EDGE_HALF_TICKS,
-        odd_fusion=False,
+        fusion="parity",
     )
     second = evidence_records.GrowthStep(
         edge_count=2,
         hop_count=3,
         growth_ticks=EDGE_HALF_TICKS,
-        odd_fusion=False,
+        fusion="parity",
     )
     assert steps_of([10]) == (first, second)
 
@@ -303,13 +305,14 @@ def test_the_flood_does_not_pass_through_the_boundary():
     """Rows 8 and 11 both reach the boundary in one step.
 
     They fuse into one cluster through the boundary node, and the
-    flood from row 8 stops there, so the deepest hop is one.
+    flood from row 8 stops there, so the deepest hop is one. Row 11 is
+    absorbed odd, so the surviving root's parity moves.
     """
     step = evidence_records.GrowthStep(
         edge_count=4,
         hop_count=1,
         growth_ticks=EDGE_HALF_TICKS,
-        odd_fusion=True,
+        fusion="parity",
     )
     assert steps_of([8, 11]) == (step,)
 
@@ -319,9 +322,24 @@ def test_opposite_corners_of_a_four_cycle_fuse_at_depth_two():
         edge_count=4,
         hop_count=2,
         growth_ticks=EDGE_HALF_TICKS,
-        odd_fusion=True,
+        fusion="parity",
     )
     assert steps_of([0, 2]) == (step,)
+
+
+def test_a_defect_that_takes_in_even_clusters_moves_roots_and_no_parity():
+    """Row 8 reaches the boundary and row 9 in one step.
+
+    Both are absorbed even, so the surviving root keeps its parity and
+    the step moves roots and the touching-boundary flag alone.
+    """
+    step = evidence_records.GrowthStep(
+        edge_count=2,
+        hop_count=1,
+        growth_ticks=EDGE_HALF_TICKS,
+        fusion="roots",
+    )
+    assert steps_of([8]) == (step,)
 
 
 def test_an_empty_syndrome_takes_no_step_and_peels_no_tree():

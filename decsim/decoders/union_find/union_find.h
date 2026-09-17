@@ -41,7 +41,7 @@ enum union_find_status {
  * The caller sizes residual_syndrome at detector_count, selected_edges,
  * interval_is_closed, interval_lower_tick, interval_upper_tick,
  * contact_edges, forest_edges, step_edge_counts, step_hop_counts,
- * step_growth_ticks and step_odd_fusions at edge_count, and
+ * step_growth_ticks and step_fusion_kinds at edge_count, and
  * contact_count, forest_count, step_count and forest_depth at one.
  * selected_edges carries one flag per edge; the three interval arrays
  * carry the open bounds of every edge the growth did not close;
@@ -57,10 +57,14 @@ enum union_find_status {
  * parity takes as many stages as the cluster is deep); the ticks the
  * step spanned, which is how many one-unit growth iterations a unit
  * that grows one unit of weight at a time spends on it (Helios lines
- * 1053-1063); and whether any fusion of the step joined two odd
- * clusters, the fusion whose parity has to cross the fused cluster. A
- * step that fused nothing has zero hops. The growth takes at most one
- * step per edge, so edge_count entries always suffice.
+ * 1053-1063); and what the strongest of the step's fusions changed, 0
+ * when its closing edges united no two clusters, 1 when clusters united
+ * and only roots and the touching flag moved, 2 when the survivor's
+ * parity took an odd absorbed root's. A step that fused nothing has
+ * zero hops. An edge of length zero is closed before the first step and
+ * is fused there, so it belongs to no step and is charged in none. The
+ * growth takes at most one step per edge, so edge_count entries always
+ * suffice.
  *
  * forest_depth is the deepest parent chain of the trees the peel walks,
  * a root at zero, which is how many levels the peel's flags and
@@ -77,7 +81,7 @@ int32_t union_find_decode(
     int64_t *interval_upper_tick, int32_t *contact_edges,
     int32_t *contact_count, int32_t *forest_edges, int32_t *forest_count,
     int32_t *step_edge_counts, int32_t *step_hop_counts,
-    int64_t *step_growth_ticks, uint8_t *step_odd_fusions,
+    int64_t *step_growth_ticks, uint8_t *step_fusion_kinds,
     int32_t *step_count, int32_t *forest_depth);
 
 #endif

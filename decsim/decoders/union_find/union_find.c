@@ -26,6 +26,17 @@
 
 enum { boundary_detector = -1 };
 
+/* What one fusion changed. A step carries the strongest of its own
+ * fusions: nothing when the closing edge stood inside one cluster,
+ * roots and the touching flag when the absorbed cluster was even, and a
+ * parity when it was odd, since the survivor's parity takes the
+ * absorbed root's. */
+enum fusion_kind {
+  fusion_none = 0,
+  fusion_roots = 1,
+  fusion_parity = 2
+};
+
 /* One graph, as the caller laid it out. */
 struct graph_arrays {
   int32_t detector_count;
@@ -281,21 +292,20 @@ static void splice_edge_list(struct workspace *workspace, int32_t survivor,
   workspace->cluster_edge_tail[absorbed] = -1;
 }
 
-/* One is returned when the two clusters were both odd, which is the
- * fusion whose parity has to cross the fused cluster. */
+/* The fusion's kind. union_nodes leaves the absorbed root's own parity
+ * where it was, so the bit read here is the one the survivor took. */
 static int32_t fuse_clusters(struct workspace *workspace, int32_t left,
                              int32_t right) {
-  int32_t left_root = find_root(workspace->parent, left);
-  int32_t right_root = find_root(workspace->parent, right);
-  int32_t joins_two_odd = workspace->parity[left_root];
-  joins_two_odd &= workspace->parity[right_root];
   int32_t absorbed = union_nodes(workspace, left, right);
   if (absorbed < 0) {
-    return 0;
+    return fusion_none;
   }
   int32_t survivor = find_root(workspace->parent, absorbed);
   splice_edge_list(workspace, survivor, absorbed);
-  return joins_two_odd;
+  if (workspace->parity[absorbed] == 1) {
+    return fusion_parity;
+  }
+  return fusion_roots;
 }
 
 /* Every node alone in its own cluster; the boundary node carries no
@@ -591,21 +601,24 @@ static int32_t collect_closing_batch(const struct workspace *workspace,
   return contact_count;
 }
 
-/* One is returned when any fusion of the batch joined two odd clusters. */
+/* The strongest kind among the batch's fusions. */
 static int32_t fuse_contact_batch(struct workspace *workspace,
                                   const struct graph_arrays *graph,
                                   const int32_t *contact_edges, int32_t start,
                                   int32_t end) {
-  int32_t joins_two_odd = 0;
+  int32_t strongest = fusion_none;
   for (int32_t position = start; position < end; ++position) {
     int32_t edge = contact_edges[position];
     int32_t node_a =
         endpoint_node(graph->endpoint_a[edge], graph->detector_count);
     int32_t node_b =
         endpoint_node(graph->endpoint_b[edge], graph->detector_count);
-    joins_two_odd |= fuse_clusters(workspace, node_a, node_b);
+    int32_t fused = fuse_clusters(workspace, node_a, node_b);
+    if (fused > strongest) {
+      strongest = fused;
+    }
   }
-  return joins_two_odd;
+  return strongest;
 }
 
 static int32_t orders_by_length(const int64_t *length_half_ticks, int32_t left,
@@ -875,7 +888,7 @@ static int32_t grow_clusters(struct workspace *workspace,
                              int32_t *step_edge_counts,
                              int32_t *step_hop_counts,
                              int64_t *step_growth_ticks,
-                             uint8_t *step_odd_fusions, int32_t *step_count) {
+                             uint8_t *step_fusion_kinds, int32_t *step_count) {
   link_edge_entries(workspace, graph);
   *contact_count =
       collect_closed_contacts(graph, interval_is_closed, contact_edges);
@@ -911,7 +924,7 @@ static int32_t grow_clusters(struct workspace *workspace,
     *contact_count = collect_closing_batch(workspace, working_count,
                                            elapsed_ticks, contact_edges,
                                            batch_start);
-    int32_t joins_two_odd = fuse_contact_batch(
+    int32_t fusion_kind = fuse_contact_batch(
         workspace, graph, contact_edges, batch_start, *contact_count);
     event_count += 1;
     if (event_count > graph->edge_count) {
@@ -919,7 +932,7 @@ static int32_t grow_clusters(struct workspace *workspace,
     }
     step_edge_counts[event_count - 1] = working_count;
     step_growth_ticks[event_count - 1] = elapsed_ticks;
-    step_odd_fusions[event_count - 1] = (uint8_t)joins_two_odd;
+    step_fusion_kinds[event_count - 1] = (uint8_t)fusion_kind;
     step_hop_counts[event_count - 1] =
         fused_flood_hops(workspace, graph, interval_is_closed, contact_edges,
                          batch_start, *contact_count);
@@ -1182,7 +1195,7 @@ int32_t union_find_decode(
     int64_t *interval_upper_tick, int32_t *contact_edges,
     int32_t *contact_count, int32_t *forest_edges, int32_t *forest_count,
     int32_t *step_edge_counts, int32_t *step_hop_counts,
-    int64_t *step_growth_ticks, uint8_t *step_odd_fusions,
+    int64_t *step_growth_ticks, uint8_t *step_fusion_kinds,
     int32_t *step_count, int32_t *forest_depth) {
   struct graph_arrays graph;
   graph.detector_count = detector_count;
@@ -1206,7 +1219,7 @@ int32_t union_find_decode(
   int32_t status = grow_clusters(
       &workspace, &graph, interval_is_closed, interval_lower_tick,
       interval_upper_tick, contact_edges, contact_count, step_edge_counts,
-      step_hop_counts, step_growth_ticks, step_odd_fusions, step_count);
+      step_hop_counts, step_growth_ticks, step_fusion_kinds, step_count);
   if (status != union_find_ok) {
     release_workspace(&workspace);
     return status;

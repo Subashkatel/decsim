@@ -128,7 +128,7 @@ def test_two_adjacent_defects_cost_sixteen_cycles():
     step is one growth tick: 1 + (2 + 3) + 3 x 1 + (3 + 2 + 2).
     """
     step = evidence_records.GrowthStep(
-        edge_count=3, hop_count=1, growth_ticks=1, odd_fusion=True
+        edge_count=3, hop_count=1, growth_ticks=1, fusion="parity"
     )
     evidence = evidence_with([step], forest_depth=1)
     assert HELIOS.cycles(evidence) == 16
@@ -162,7 +162,7 @@ def test_a_unit_that_walks_its_edges_pays_its_port_instead_of_its_changes():
     twelve, past the three cycles the fusion's parity takes.
     """
     step = evidence_records.GrowthStep(
-        edge_count=3, hop_count=1, growth_ticks=1, odd_fusion=True
+        edge_count=3, hop_count=1, growth_ticks=1, fusion="parity"
     )
     evidence = evidence_with([step], forest_depth=1)
     memory_bound = cycle_count_module.CycleCount(
@@ -192,7 +192,7 @@ def test_the_count_ends_on_the_edge_of_its_own_clock():
     stage does (config.Clock.edge, after gem5's clockEdge).
     """
     one_step = evidence_records.GrowthStep(
-        edge_count=3, hop_count=1, growth_ticks=1, odd_fusion=True
+        edge_count=3, hop_count=1, growth_ticks=1, fusion="parity"
     )
     evidence = evidence_with([one_step], forest_depth=1)
     no_step = evidence_with([])

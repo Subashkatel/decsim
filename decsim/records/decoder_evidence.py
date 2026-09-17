@@ -25,6 +25,12 @@ from typing import Union
 # one tick of an edge length is this many natural-log units of weight
 DEFAULT_WEIGHT_STEP = 0.1
 
+# what the strongest fusion of one growth step changed
+FUSION_NONE = "none"
+FUSION_ROOTS = "roots"
+FUSION_PARITY = "parity"
+FUSION_KINDS = (FUSION_NONE, FUSION_ROOTS, FUSION_PARITY)
+
 
 @dataclasses.dataclass(frozen=True)
 class Open:
@@ -50,15 +56,17 @@ class GrowthStep:
     fused nothing. growth_ticks is the ticks the step spanned, which is
     the one-unit growth iterations a unit that grows one unit of weight
     at a time spends on it (lines 1053-1063, latency growing with the
-    weight resolution). odd_fusion is true when a fusion of the step
-    joined two odd clusters, the fusion whose parity has to cross the
-    cluster it fused.
+    weight resolution). fusion is the strongest kind among the step's
+    own fusions, one of FUSION_KINDS: none when the closing edges united
+    no two clusters, roots when clusters united and only roots and the
+    touching-boundary flag moved, parity when the survivor's parity took
+    an odd absorbed root's and has to cross the cluster it fused.
     """
 
     edge_count: int
     hop_count: int
     growth_ticks: int
-    odd_fusion: bool
+    fusion: str
 
 
 @dataclasses.dataclass(frozen=True)

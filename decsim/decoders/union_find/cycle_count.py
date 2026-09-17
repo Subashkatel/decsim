@@ -164,7 +164,7 @@ class CycleCount:
     def _step_merge_cycles(self, step: evidence_records.GrowthStep) -> int:
         """The larger of one step's rippling changes and its spread work."""
         cycles_per_level = 1
-        if step.odd_fusion:
+        if step.fusion == evidence_records.FUSION_PARITY:
             cycles_per_level = self.cycles_per_hop
         levels = cycles_per_level * step.hop_count
         changes = max(1, levels)

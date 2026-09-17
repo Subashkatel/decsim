@@ -123,7 +123,7 @@ def decode(graph: evidence_records.UnionFindGraph, residual_syndrome):
     step_edge_counts = numpy.zeros(edge_count, dtype=numpy.int32)
     step_hop_counts = numpy.zeros(edge_count, dtype=numpy.int32)
     step_growth_ticks = numpy.zeros(edge_count, dtype=numpy.int64)
-    step_odd_fusions = numpy.zeros(edge_count, dtype=numpy.uint8)
+    step_fusion_kinds = numpy.zeros(edge_count, dtype=numpy.uint8)
     step_count = numpy.zeros(1, dtype=numpy.int32)
     forest_depth = numpy.zeros(1, dtype=numpy.int32)
     decode_window = entry_point()
@@ -145,7 +145,7 @@ def decode(graph: evidence_records.UnionFindGraph, residual_syndrome):
         step_edge_counts,
         step_hop_counts,
         step_growth_ticks,
-        step_odd_fusions,
+        step_fusion_kinds,
         step_count,
         forest_depth,
     )
@@ -158,7 +158,7 @@ def decode(graph: evidence_records.UnionFindGraph, residual_syndrome):
         step_edge_counts,
         step_hop_counts,
         step_growth_ticks,
-        step_odd_fusions,
+        step_fusion_kinds,
         step_count,
     )
     depth = int(forest_depth[0])
@@ -355,19 +355,18 @@ def _growth_steps(
     step_edge_counts,
     step_hop_counts,
     step_growth_ticks,
-    step_odd_fusions,
+    step_fusion_kinds,
     step_count,
 ) -> tuple:
     edge_counts = _prefix(step_edge_counts, step_count)
     hop_counts = _prefix(step_hop_counts, step_count)
     growth_ticks = _prefix(step_growth_ticks, step_count)
-    odd_fusions = _prefix(step_odd_fusions, step_count)
-    rows = zip(edge_counts, hop_counts, growth_ticks, odd_fusions)
+    fusion_kinds = _prefix(step_fusion_kinds, step_count)
+    rows = zip(edge_counts, hop_counts, growth_ticks, fusion_kinds)
     steps = []
-    for edge_count, hop_count, ticks, odd_fusion in rows:
-        step = evidence_records.GrowthStep(
-            edge_count, hop_count, ticks, bool(odd_fusion)
-        )
+    for edge_count, hop_count, ticks, kind in rows:
+        fusion = evidence_records.FUSION_KINDS[kind]
+        step = evidence_records.GrowthStep(edge_count, hop_count, ticks, fusion)
         steps.append(step)
     return tuple(steps)
 

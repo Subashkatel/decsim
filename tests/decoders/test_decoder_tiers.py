@@ -75,11 +75,7 @@ def test_a_union_find_tier_with_a_cycle_count_is_held_by_the_count(tmp_path):
             "weak_decoder": {
                 **MINIMAL_CONFIG["weak_decoder"],
                 "kind": "union_find",
-                "cycle_count": {
-                    "clock": "helios",
-                    "delay_cycles": 3,
-                    "cycles_per_hop": 3,
-                },
+                "cycle_count": {"clock": "helios", "delay_cycles": 3},
             },
         },
     )

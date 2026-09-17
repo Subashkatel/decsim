@@ -562,11 +562,18 @@ weak_decoder:                      # the lightweight tier: fast, higher LER
                                    # one quiet iteration runs even for an empty
                                    # syndrome. A step's changes are what its
                                    # fusions ripple through the cluster they
-                                   # fused: cycles_per_hop a level of its
-                                   # deepest flood when a fusion joins two odd
-                                   # clusters and a parity has to cross them,
-                                   # one a level when only roots move, at least
-                                   # one for the touching-boundary flag. The
+                                   # fused, a level a cycle: nothing when its
+                                   # closing edges united no two clusters, its
+                                   # deepest flood when only roots and the
+                                   # touching flag move, and one for the root
+                                   # plus two a level when a parity moves, the
+                                   # parity climbing while the odd flag
+                                   # descends. A step's hop count is the
+                                   # deepest flood among the clusters it fused
+                                   # and its fusion the strongest of them, so
+                                   # a step that joins a deep even cluster and
+                                   # flips a parity in a shallow one is
+                                   # charged at that ceiling. The
                                    # peel pays the delay, a decide cycle, a
                                    # cycle in which every element reports busy
                                    # until its parity flag is set, and two a
@@ -584,10 +591,6 @@ weak_decoder:                      # the lightweight tier: fast, higher LER
                                    #                           # between an
                                    #                           # element and the
                                    #                           # controller
-                                   #     cycles_per_hop: 3     # root down,
-                                   #                           # parity up, odd
-                                   #                           # down, one level
-                                   #                           # per cycle
                                    # A unit that walks its edges through a
                                    # memory port sets cycles_per_edge to what
                                    # one boundary edge costs it, the reads the

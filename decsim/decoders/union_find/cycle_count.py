@@ -31,7 +31,6 @@ CYCLE_FIELDS = (
     "setup_cycles_per_vertex",
     "setup_cycles_per_edge",
     "delay_cycles",
-    "cycles_per_hop",
 )
 
 # the cycle the counter starts at, the loading cycle in which the
@@ -69,13 +68,17 @@ class CycleCount:
     an empty syndrome.
 
     A step's changes are what its fusions ripple through the cluster
-    they fused: when a parity moves, cycles_per_hop a level (the root
-    descends, the parity climbs, the odd flag descends), one a level
-    when only roots move, and at least one for the touching-boundary
-    flag. cycles_per_edge is zero for a unit with a processing element
-    per vertex, where the whole step's work runs in its critical path,
-    and the cycles per boundary edge for a unit that walks its edges
-    through a memory port; the step then costs the larger of the two.
+    they fused, a level a cycle: nothing when its closing edges united
+    no two clusters, its deepest flood when only roots and the touching
+    flag move, and one for the root plus two a level when a parity moves
+    (the parity climbs while the odd flag descends). A step's hop count
+    is the deepest flood among the clusters it fused and its fusion the
+    strongest of them, so a step that joins a deep even cluster and
+    flips a parity in a shallow one is charged at that ceiling.
+    cycles_per_edge is zero for a unit with a processing element per
+    vertex, where the whole step's work runs in its critical path, and
+    the cycles per boundary edge for a unit that walks its edges through
+    a memory port; the step then costs the larger of the two.
 
     The peel pays the same delay, a cycle for the controller's decision
     and a cycle in which every element reports busy until its parity
@@ -90,7 +93,6 @@ class CycleCount:
 
     clock: config.Clock
     delay_cycles: int = 0
-    cycles_per_hop: int = 0
     cycles_per_edge: float = 0.0
     setup_cycles: int = 0
     setup_cycles_per_vertex: int = 0
@@ -163,11 +165,7 @@ class CycleCount:
 
     def _step_merge_cycles(self, step: evidence_records.GrowthStep) -> int:
         """The larger of one step's rippling changes and its spread work."""
-        cycles_per_level = 1
-        if step.fusion == evidence_records.FUSION_PARITY:
-            cycles_per_level = self.cycles_per_hop
-        levels = cycles_per_level * step.hop_count
-        changes = max(1, levels)
+        changes = _fusion_changes(step)
         edge_work = self.cycles_per_edge * step.edge_count
         spread = edge_work * step.growth_ticks
         work = math.ceil(spread)
@@ -177,6 +175,23 @@ class CycleCount:
         level_cycles = PEEL_CYCLES_PER_LEVEL * forest_depth
         floor = self.delay_cycles + PEEL_BUSY_AND_DECIDE_CYCLES
         return floor + level_cycles
+
+
+def _fusion_changes(step: evidence_records.GrowthStep) -> int:
+    """The cycles one step's fusions ripple through the cluster they fused.
+
+    A fusion that moves no parity settles a root and the touching flag a
+    level a cycle. One that moves a parity moves the root once and then
+    climbs the parity and descends the odd flag a level a cycle, and
+    those two floods overlap the root's own descent, so a chain of depth
+    D settles in 1 + 2 D changes.
+    """
+    if step.fusion == evidence_records.FUSION_NONE:
+        return 0
+    if step.fusion == evidence_records.FUSION_ROOTS:
+        return max(1, step.hop_count)
+    climbs = 2 * step.hop_count
+    return 1 + climbs
 
 
 def _check_keys(section: Mapping) -> None:

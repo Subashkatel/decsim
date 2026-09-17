@@ -33,9 +33,8 @@ CYCLE_TICKS = config.microseconds_to_ticks(PERIOD_MICROSECONDS)
 CLOCK = config.Clock(CYCLE_TICKS)
 WEIGHT_STEP = 0.1
 # Helios's row: three registers between an element's change and the
-# controller's check (Helios_single_FPGA_core.v line 76), and three
-# cycles a level when a fusion moves a parity
-HELIOS = cycle_count_module.CycleCount(CLOCK, delay_cycles=3, cycles_per_hop=3)
+# controller's check (Helios_single_FPGA_core.v line 76)
+HELIOS = cycle_count_module.CycleCount(CLOCK, delay_cycles=3)
 # every edge of the twelve-detector graph is this long in half ticks,
 # and both ends of the one between two defects grow
 HAND_GRAPH_TICKS = 22
@@ -155,6 +154,33 @@ def test_a_lone_defect_beside_the_boundary_costs_nineteen_cycles():
     assert HELIOS.cycles(evidence) == 19
 
 
+def test_a_steps_changes_are_its_fusion_kind_over_its_deepest_flood():
+    """Nothing, a flood of roots, or a root and two cycles a level.
+
+    A step that unites nothing changes nothing; one that only moves
+    roots and the touching flag settles a level a cycle; one that moves
+    a parity moves the root once and then climbs the parity while the
+    odd flag descends, 1 + 2 x the flood's depth.
+    """
+    quiet = evidence_records.GrowthStep(
+        edge_count=1, hop_count=4, growth_ticks=1, fusion="none"
+    )
+    roots = evidence_records.GrowthStep(
+        edge_count=1, hop_count=4, growth_ticks=1, fusion="roots"
+    )
+    parity = evidence_records.GrowthStep(
+        edge_count=1, hop_count=4, growth_ticks=1, fusion="parity"
+    )
+    floor = 1 + 5 + 5
+    quiet_evidence = evidence_with([quiet])
+    roots_evidence = evidence_with([roots])
+    parity_evidence = evidence_with([parity])
+
+    assert HELIOS.cycles(quiet_evidence) == floor
+    assert HELIOS.cycles(roots_evidence) == floor + 4
+    assert HELIOS.cycles(parity_evidence) == floor + 9
+
+
 def test_a_unit_that_walks_its_edges_pays_its_port_instead_of_its_changes():
     """The step costs the larger of its changes and its work per edge.
 
@@ -166,7 +192,7 @@ def test_a_unit_that_walks_its_edges_pays_its_port_instead_of_its_changes():
     )
     evidence = evidence_with([step], forest_depth=1)
     memory_bound = cycle_count_module.CycleCount(
-        CLOCK, delay_cycles=3, cycles_per_hop=3, cycles_per_edge=4
+        CLOCK, delay_cycles=3, cycles_per_edge=4
     )
     assert memory_bound.cycles(evidence) == 1 + 5 + 12 + 7
 
@@ -236,8 +262,8 @@ def test_a_counted_unit_is_held_for_the_counted_cycles():
 
 
 def test_a_negative_field_is_refused_by_name():
-    with pytest.raises(ValueError, match="cycle_count.cycles_per_hop"):
-        cycle_count_module.CycleCount(CLOCK, cycles_per_hop=-1)
+    with pytest.raises(ValueError, match="cycle_count.setup_cycles"):
+        cycle_count_module.CycleCount(CLOCK, setup_cycles=-1)
     with pytest.raises(ValueError, match="cycle_count.delay_cycles"):
         cycle_count_module.CycleCount(CLOCK, delay_cycles=-1)
     with pytest.raises(ValueError, match="cycles_per_edge"):
@@ -255,11 +281,11 @@ def test_a_key_the_block_does_not_have_is_refused_by_name():
 
 def test_the_yaml_block_resolves_its_clock_and_defaults_the_rest_to_zero():
     clocks = config.ClockSettings({"helios": MEGAHERTZ})
-    block = {"clock": "helios", "delay_cycles": 3, "cycles_per_hop": 3}
+    block = {"clock": "helios", "delay_cycles": 3, "setup_cycles": 4}
     count = cycle_count_module.CycleCount.from_yaml(block, clocks)
     assert count.clock == CLOCK
     assert count.delay_cycles == 3
-    assert count.cycles_per_hop == 3
-    assert count.setup_cycles == 0
+    assert count.setup_cycles == 4
+    assert count.setup_cycles_per_edge == 0
     assert count.cycles_per_edge == 0.0
     assert count.setup_cycles_per_vertex == 0

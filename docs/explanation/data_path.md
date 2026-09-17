@@ -253,7 +253,16 @@ is a different card.
 
 Both are moves. The weak one is on board, because the frame is the
 controller's; the strong one is off board, because the strong decoder is
-not. Default latency 1.0 microseconds each.
+not. Default latency 1.0 microseconds each. The strong answer's way home
+runs through the chip's window side before it leaves: the decoder
+manager returns the result to the verdict (`accept_strong_result` in
+`decsim/windows/window_commits.py`), the committer publishes it, and
+the chip's decoder output executes the send; the one card prices the
+whole way from the strong decoder to the frame. An escalated window's
+weak answer never reaches the frame (the verdict escalates instead of
+publishing, `_apply_verdict` in the same file), so the frame takes one
+correction per window and no difference between the two answers is
+formed.
 
 ### 10. `frame_to_controller`
 
@@ -278,10 +287,12 @@ by `decsim/controller/instruction_output.py`.
 What crosses: one instruction, no data payload. The card charges one
 128-bit control-processor instruction word, which is QubiC's width
 (Fruitwala arXiv:2404.15260, Sec. III and IV). The decision-to-pulse
-cost is charged separately (`decision_to_pulse_cycles`, which
-`decsim/controller/instruction_output.py` sources to QICK's 42
-nanosecond conditional jump and 52 nanosecond next pulse,
-arXiv:2110.00557 Table II). Move, off board, default latency 0.15 microseconds.
+cost is charged separately (`decision_to_pulse_cycles`): the control
+processor's issue pipeline from the decision at the core to the pulse
+trigger, 8 cycles traced on QubiC's core in `configs/reference.yaml`,
+against QICK's measured 16 clocks for the conditional evaluation and
+the jump and 20 for the next pulse (arXiv:2110.00557 lines 893-900).
+Move, off board, default latency 0.15 microseconds.
 
 ## Why the copies are where they are
 

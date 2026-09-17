@@ -3,11 +3,13 @@
 A release is consumed at the controller the instant it lands from
 frame_to_controller, whose crossing the frame side executes and prices
 (tests/pauli_frame/test_decision_dispatch.py); a result return without
-an operation pays the decision-to-pulse cost (17 ticks here; QubiC's 8
-clocks at 500 MHz are 16 ns, 2110.00557) and the controller_to_qpu
-crossing before it is available at the QPU. The link law is the
-channel's (tests/links/test_channel.py); here the reference card prices
-the output hop.
+an operation pays the decision-to-pulse cost (17 ticks here; the
+reference card's 8 cycles are the issue pipeline traced on QubiC's
+core, Fruitwala 2404.15260, where QICK measures 16 clocks for the
+conditional evaluation and the jump, 2110.00557) and the
+controller_to_qpu crossing before it is available at the QPU. The link
+law is the channel's (tests/links/test_channel.py); here the reference
+card prices the output hop.
 
 The pulse cost is the control processor's own work and stands even with
 no fabric at all (QubiC holds the conditional jump and the pulse on the

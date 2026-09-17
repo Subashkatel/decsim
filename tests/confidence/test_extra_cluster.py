@@ -161,30 +161,36 @@ def test_the_chain_decode_takes_one_step_and_leaves_the_ends_open():
     assert intervals[3].upper_tick - intervals[3].lower_tick == 6
 
 
-def test_the_chain_joins_at_tick_three_over_three_events():
-    """The chain tick by tick: e2, then e0, then e3 closes the walk."""
+def test_the_chain_joins_at_tick_four_over_two_events():
+    """The chain tick by tick: e0 and e2 close together, then e3 the walk.
+
+    Detector 2 holds no defect, so it grows only once the cluster's
+    front has crossed e2 to it (Kishi 2602.03336 lines 430 to 434, the
+    decode's clusters are what grow); e3 then closes from both ends
+    and the join is at w_max(P_c), the sum of e2 and e3 uncovered
+    (Definition 3, lines 500 to 507).
+    """
     evidence = chain_evidence()
 
     outcome = grown(evidence, CHAIN_LIMIT_TICKS)
 
-    assert outcome.joined_at_tick == 3
+    assert outcome.joined_at_tick == 4
     assert outcome.growth_steps == (
-        evidence_records.GrowthStep(3, 2, 1, "roots"),
-        evidence_records.GrowthStep(2, 2, 1, "roots"),
-        evidence_records.GrowthStep(1, 0, 1, "none"),
+        evidence_records.GrowthStep(3, 2, 2, "roots"),
+        evidence_records.GrowthStep(1, 0, 2, "none"),
     )
 
 
-def test_the_chain_costs_twenty_two_cycles_on_helios_row():
-    """(2 + 3 + 1) a tick for three ticks, plus two root floods two deep."""
+def test_the_chain_costs_twenty_six_cycles_on_helios_row():
+    """(2 + 3 + 1) a tick for four ticks, plus one root flood two deep."""
     count = cycle_count_module.CycleCount(
         CLOCK, delay_cycles=HELIOS_DELAY_CYCLES
     )
     evidence = chain_evidence()
     outcome = grown(evidence, CHAIN_LIMIT_TICKS)
 
-    assert count.extra_growth_cycles(outcome.growth_steps) == 22
-    assert count.extra_growth_ticks(outcome.growth_steps) == 220
+    assert count.extra_growth_cycles(outcome.growth_steps) == 26
+    assert count.extra_growth_ticks(outcome.growth_steps) == 260
 
 
 def test_a_growth_of_no_ticks_pays_one_join_test():
@@ -193,8 +199,8 @@ def test_a_growth_of_no_ticks_pays_one_join_test():
     assert count.extra_growth_cycles(()) == cycle_count_module.JOIN_TEST_CYCLES
 
 
-def test_the_chain_gap_is_three_steps_under_the_cluster_gap_of_six():
-    """Theorem 1 on the chain: g_ec = w_max(P_c) = 3 < g_c = 6."""
+def test_the_chain_gap_is_four_steps_under_the_cluster_gap_of_six():
+    """Theorem 1 on the chain: g_ec = w_max(P_c) = 4 < g_c = 6."""
     signal = extra_cluster.ExtraClusterGap(
         CHAIN_LIMIT_NATS, weight_step=CHAIN_WEIGHT_STEP
     )
@@ -202,7 +208,7 @@ def test_the_chain_gap_is_three_steps_under_the_cluster_gap_of_six():
 
     computation = signal.compute((result,))
 
-    assert computation.soft_output.gap == 3.0
+    assert computation.soft_output.gap == 4.0
     evidence = result.cluster_evidence
     half_ticks = compiled_decoder.cluster_gap(
         evidence.graph, evidence.edge_intervals
@@ -223,15 +229,15 @@ def test_a_limit_below_the_join_leaves_the_gap_infinite():
 
 
 def test_the_limit_event_closes_nothing_and_is_charged_as_a_step():
-    """Two ticks of a three-tick join: the last event stops at the limit."""
+    """Three ticks of a four-tick join: the last event stops at the limit."""
     evidence = chain_evidence()
 
-    outcome = grown(evidence, 2)
+    outcome = grown(evidence, 3)
 
     assert outcome.joined_at_tick is None
     assert outcome.growth_steps == (
-        evidence_records.GrowthStep(3, 2, 1, "roots"),
-        evidence_records.GrowthStep(2, 2, 1, "roots"),
+        evidence_records.GrowthStep(3, 2, 2, "roots"),
+        evidence_records.GrowthStep(1, 0, 1, "none"),
     )
 
 
@@ -248,7 +254,7 @@ def test_the_cycle_count_prices_the_growth_on_the_unit():
 
     computation = signal.compute((result,))
 
-    assert computation.ticks == 220
+    assert computation.ticks == 260
 
 
 def test_a_card_prices_the_growth_instead():
@@ -324,7 +330,10 @@ def compare_random_graphs(count: int, seed: int) -> int:
         evidence = window_decoder.decode_graph(graph, syndrome)
         outcome = grown(evidence, RANDOM_GRAPH_LIMIT_TICKS)
         expected = independent_extra_growth.joined_at_tick(
-            graph, evidence.edge_intervals, RANDOM_GRAPH_LIMIT_TICKS
+            graph,
+            evidence.edge_intervals,
+            evidence.residual_syndrome,
+            RANDOM_GRAPH_LIMIT_TICKS,
         )
         assert outcome.joined_at_tick == expected, graph
         if expected is not None:
@@ -421,7 +430,10 @@ def _check_theorems(gap, cluster_gap, limit_nats, step) -> None:
 
 def _check_the_paper_reading(evidence, signal, gap, step) -> None:
     expected = independent_extra_growth.joined_at_tick(
-        evidence.graph, evidence.edge_intervals, signal.growth_limit_ticks
+        evidence.graph,
+        evidence.edge_intervals,
+        evidence.residual_syndrome,
+        signal.growth_limit_ticks,
     )
     if expected is None:
         assert gap == math.inf

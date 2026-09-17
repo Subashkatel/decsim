@@ -4,15 +4,22 @@ Written from the paper text (lines 478 to 491 of the arXiv text) and
 not from decsim's code: "Increase the radii of all clusters
 and boundary nodes by delta_epsilon / 2", "Merge colliding clusters",
 "if a single cluster connects boundaries b1 and b2 then return
-epsilon". A tick grows every front one half tick, the graph's own unit
-(Meister 2405.07433 Algorithm 1 line 6, "r_i <- r_i + w/2"), so an edge
-loses two half ticks a tick whichever cluster each end is in, and the
-boundaries are joined when the closed edges hold a closed walk of odd
-logical parity, which is what a path from b1 to b2 is once the boundary
-is split (Kishi lines 244-258).
+epsilon". The clusters are the ones the decode left (lines 430 to 434,
+"the resulting clusters are grown additionally"), so a front advances
+only from a node that stands in a cluster holding a defect, or in the
+boundary's; a node no defect reached is passed over once a front
+covers the edge to it, and grows from then on. That is what makes
+Definition 3 (lines 500 to 507) sum the edges between two consecutive
+clusters: the ball rolls over the bare nodes between them. A tick grows
+every such front one half tick, the graph's own unit (Meister
+2405.07433 Algorithm 1 line 6, "r_i <- r_i + w/2"), and the boundaries
+are joined when the closed edges hold a closed walk of odd logical
+parity, which is what a path from b1 to b2 is once the boundary is
+split (Kishi lines 244-258).
 
 The join test here is a breadth-first two-colouring of the closed-edge
-graph, re-run from scratch after every tick, which is a different
+graph, re-run from scratch after every tick, and the cluster
+membership a flood over the closed edges, which is a different
 algorithm from decsim's union-find with walk parities: that is the
 point, the two must agree on the tick.
 """
@@ -25,37 +32,78 @@ import decsim.records.decoder_evidence as evidence_records
 
 
 def joined_at_tick(
-    graph, edge_intervals: tuple, growth_limit_ticks: int
+    graph, edge_intervals: tuple, residual_syndrome, growth_limit_ticks: int
 ) -> Optional[int]:
     """The tick the boundaries join at, None when the limit comes first."""
-    uncovered = _uncovered_half_ticks(edge_intervals)
-    tick_count = growth_limit_ticks + 1
-    for tick in range(tick_count):
-        closed = _closed_edges(uncovered, tick)
+    boundary = graph.detector_count
+    fronts = _fronts(edge_intervals)
+    seeds = {boundary}
+    for detector, bit in enumerate(residual_syndrome):
+        if bit:
+            seeds.add(detector)
+    for tick in range(growth_limit_ticks + 1):
+        closed = _closed_edges(fronts)
         if _holds_an_odd_closed_walk(graph, closed):
             return tick
+        if tick == growth_limit_ticks:
+            break
+        growing = _nodes_in_growing_clusters(graph, closed, seeds)
+        _advance(graph, fronts, growing)
     return None
 
 
-def _uncovered_half_ticks(edge_intervals: tuple) -> list:
-    """What is left of every edge when the decode stopped."""
-    uncovered = []
+def _fronts(edge_intervals: tuple) -> list:
+    """[lower, upper] of every edge when the decode stopped; None is closed."""
+    fronts = []
     for interval in edge_intervals:
         if isinstance(interval, evidence_records.Closed):
-            uncovered.append(0)
+            fronts.append(None)
             continue
-        left = interval.upper_tick - interval.lower_tick
-        uncovered.append(left)
-    return uncovered
+        fronts.append([interval.lower_tick, interval.upper_tick])
+    return fronts
 
 
-def _closed_edges(uncovered: list, tick: int) -> list:
-    """Every edge whose two fronts have met after this many ticks."""
+def _closed_edges(fronts: list) -> list:
+    """Every edge whose two fronts have met."""
     closed = []
-    for edge_index, left in enumerate(uncovered):
-        if left <= 2 * tick:
+    for edge_index, front in enumerate(fronts):
+        if front is None or front[0] >= front[1]:
             closed.append(edge_index)
     return closed
+
+
+def _nodes_in_growing_clusters(graph, closed: list, seeds: set) -> set:
+    """Every node a closed-edge walk joins to a defect or to the boundary."""
+    boundary = graph.detector_count
+    neighbours = collections.defaultdict(list)
+    for edge_index in closed:
+        edge = graph.edges[edge_index]
+        node_a = _node(edge.detector_a, boundary)
+        node_b = _node(edge.detector_b, boundary)
+        neighbours[node_a].append(node_b)
+        neighbours[node_b].append(node_a)
+    growing = set()
+    queue = collections.deque(seeds)
+    while queue:
+        node = queue.popleft()
+        if node in growing:
+            continue
+        growing.add(node)
+        queue.extend(neighbours[node])
+    return growing
+
+
+def _advance(graph, fronts: list, growing: set) -> None:
+    """One tick: every front on a growing node moves one half tick."""
+    boundary = graph.detector_count
+    for edge_index, front in enumerate(fronts):
+        if front is None or front[0] >= front[1]:
+            continue
+        edge = graph.edges[edge_index]
+        if _node(edge.detector_a, boundary) in growing:
+            front[0] += 1
+        if _node(edge.detector_b, boundary) in growing:
+            front[1] -= 1
 
 
 def _holds_an_odd_closed_walk(graph, closed: list) -> bool:

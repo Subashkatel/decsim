@@ -14,7 +14,8 @@
  * tick, so a likelier fault is crossed sooner.
  *
  * A second call grows on from where a decode stopped, every cluster
- * and the boundary, until the two boundaries join or a growth limit is
+ * the decode left and the boundary (a bare node grows once a front
+ * reaches it), until the two boundaries join or a growth limit is
  * reached: Kishi et al. arXiv:2602.03336 Algorithm 1, the extra-cluster
  * gap, with the join read as an edge closing a walk of odd logical
  * parity, the quotient reading of Meister et al. arXiv:2405.07433

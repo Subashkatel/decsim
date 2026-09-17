@@ -67,6 +67,9 @@ struct workspace {
   /* the logical parity of a node's walk to its parent */
   uint8_t *walk_parity;
   uint8_t *touches_boundary;
+  /* whether a cluster holds a defect: the extra growth grows the
+   * clusters the decode left and the boundary, never a bare node */
+  uint8_t *holds_defect;
   int32_t *cluster_edge_head;
   int32_t *cluster_edge_tail;
   int32_t *cluster_edge_next;
@@ -119,6 +122,7 @@ static void release_workspace(struct workspace *workspace) {
   free(workspace->parity);
   free(workspace->walk_parity);
   free(workspace->touches_boundary);
+  free(workspace->holds_defect);
   free(workspace->cluster_edge_head);
   free(workspace->cluster_edge_tail);
   free(workspace->cluster_edge_next);
@@ -162,6 +166,8 @@ static int32_t take_workspace(struct workspace *workspace, int32_t node_count,
   workspace->walk_parity =
       allocate_array(node_count, sizeof(uint8_t), &taken);
   workspace->touches_boundary =
+      allocate_array(node_count, sizeof(uint8_t), &taken);
+  workspace->holds_defect =
       allocate_array(node_count, sizeof(uint8_t), &taken);
   workspace->cluster_edge_head =
       allocate_array(node_count, sizeof(int32_t), &taken);
@@ -254,10 +260,14 @@ static uint8_t parity_to_root(const struct workspace *workspace,
 }
 
 /* An odd cluster that does not touch the boundary keeps growing; under
- * the extra growth every cluster does. */
+ * the extra growth every cluster the decode left does, and the
+ * boundary (Kishi et al. arXiv:2602.03336 Algorithm 1 line 2), while a
+ * bare node grows only once a front has reached it and fused it in,
+ * which is what lets Definition 3 sum the edges between two
+ * consecutive clusters. */
 static int32_t cluster_grows(const struct workspace *workspace, int32_t root) {
   if (workspace->every_cluster_grows) {
-    return 1;
+    return workspace->holds_defect[root] || workspace->touches_boundary[root];
   }
   if (workspace->touches_boundary[root]) {
     return 0;
@@ -295,6 +305,9 @@ static int32_t union_nodes(struct workspace *workspace, int32_t left,
   workspace->parity[survivor] ^= workspace->parity[absorbed];
   if (workspace->touches_boundary[absorbed]) {
     workspace->touches_boundary[survivor] = 1;
+  }
+  if (workspace->holds_defect[absorbed]) {
+    workspace->holds_defect[survivor] = 1;
   }
   return absorbed;
 }
@@ -368,17 +381,20 @@ static void reset_clusters(struct workspace *workspace, int32_t detector_count,
     workspace->parity[node] = 0;
     workspace->walk_parity[node] = 0;
     workspace->touches_boundary[node] = 0;
+    workspace->holds_defect[node] = 0;
   }
   workspace->parent[detector_count] = detector_count;
   workspace->parity[detector_count] = 0;
   workspace->walk_parity[detector_count] = 0;
   workspace->touches_boundary[detector_count] = 1;
+  workspace->holds_defect[detector_count] = 0;
   workspace->found_odd_walk = 0;
   if (defects == NULL) {
     return;
   }
   for (int32_t node = 0; node < detector_count; ++node) {
     workspace->parity[node] = defects[node];
+    workspace->holds_defect[node] = defects[node];
   }
 }
 

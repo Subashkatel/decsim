@@ -829,8 +829,6 @@ observation:                       # what a run records beyond its results
                                    # change, the occupancy the L5 harness reads
   backlog_trace: false             # true samples the undecoded-round backlog after
                                    # every action, the step function the D7 harness reads
-  decoder_utilization: false       # true integrates each decoder unit's busy time,
-                                   # thrust 2's sweep over unit count
   decoder_memory_occupancy: false  # true samples each unit memory's held-round count,
                                    # thrust 2's sweep over unit memory
   data_movement: false             # true counts the copies, references and moves of

@@ -140,6 +140,10 @@ class DecoderStageRecord:
     # window owed no boundary. What it waited for after this tick is the
     # unit's compute, which is a wait of a different kind
     ready_ticks: Optional[int] = None
+    # the rounds the decode read, the job's own count: a strong decode's
+    # r_strong is what Toshio's backlog bound divides by (2510.25222
+    # lines 1270-1300), and the window record keeps only the last decode
+    round_count: int = 0
 
 
 class StagedDecoder(decoder_module.DecoderBase):
@@ -332,6 +336,7 @@ class StagedDecoder(decoder_module.DecoderBase):
             cancelled,
             job.dispatch_ticks,
             job.ready_ticks,
+            round_count=job.round_count,
         )
         self.stage_recorded.fire(record)
 

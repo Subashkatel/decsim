@@ -67,6 +67,12 @@ WALL_CLOCK_POINTS = (
 WALL_CLOCK_COLUMNS = (
     "load",
     "max_queued_windows",
+    "weak_queue_max",
+    "strong_queue_max",
+    "weak_busy_fraction",
+    "strong_busy_fraction",
+    "strong_service_mean_us",
+    "parallel_processes_needed",
     "sim_wall_seconds_per_shot",
     "throughput_rounds_per_us",
     "throughput_windows_per_us",

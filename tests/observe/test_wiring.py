@@ -17,6 +17,7 @@ import decsim.observe.command_events as command_events_module
 import decsim.observe.controller_counters as controller_counters_module
 import decsim.observe.flight_recorder as flight_recorder_module
 import decsim.observe.log_writers as log_writers
+import decsim.observe.metrics as metrics
 import decsim.observe.observation as observation_module
 import decsim.observe.queue_depth as queue_depth_module
 import decsim.observe.referee_audit as referee_audit_module
@@ -38,7 +39,6 @@ EVERY_KNOB = {
     "record_switching_windows": True,
     "syndrome_buffer_occupancy": True,
     "backlog_trace": True,
-    "decoder_utilization": True,
     "decoder_memory_occupancy": True,
     "data_movement": True,
     "trace": "chrome",
@@ -191,7 +191,7 @@ def test_every_listener_the_section_asks_for_is_built_and_heard():
     assert silent.observation.decode_records is None
     assert silent.observation.syndrome_buffer_occupancy is None
     assert silent.observation.decode_backlog is None
-    assert silent.observation.decoder_utilization is None
+    assert silent.observation.decoder_utilization is not None
     assert silent.observation.decoder_memory_occupancy is None
 
 
@@ -339,6 +339,7 @@ def _bare_observation(
     rounds = round_events_module.RoundEventRecorder(engine)
     audit = referee_audit_module.RefereeAudit()
     shots = sampled_shots_module.SampledShots()
+    utilization = metrics.DecoderUtilization(engine, {})
     return observation_module.Observation(
         log=log,
         windows=windows,
@@ -355,7 +356,7 @@ def _bare_observation(
         command_events=commands,
         stages=stages,
         decode_backlog=None,
-        decoder_utilization=None,
+        decoder_utilization=utilization,
         decoder_memory_occupancy=None,
         round_events=rounds,
         syndrome_buffer_occupancy=None,

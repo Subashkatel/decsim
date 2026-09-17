@@ -88,9 +88,23 @@ SHOT_MEANS = (
     "throughput_rounds_per_us",
     "load",
     "sim_wall_seconds",
+    "weak_busy_fraction",
+    "strong_busy_fraction",
+    "strong_service_mean_us",
 )
-SHOT_MAXES = ("max_queued_windows",)
-SHOT_SUMS = ("tesseract_windows_checked", "tesseract_window_disagreements")
+SHOT_MAXES = (
+    "max_queued_windows",
+    "weak_queue_max",
+    "strong_queue_max",
+    "parallel_processes_needed",
+)
+SHOT_SUMS = (
+    "tesseract_windows_checked",
+    "tesseract_window_disagreements",
+    "windows",
+    "escalated_windows",
+    "strong_decoded_rounds",
+)
 SHOT_TRUE_COUNTS = ("logical_failure", "direct_failure", "direct_mismatch")
 # the files a fold reads row by row and writes back out, which one
 # header each: the folders of one fold hold the same columns in them
@@ -234,6 +248,7 @@ def summarize_point(point: tuple, totals, counts: dict) -> dict:
         "load": totals.mean("load"),
         "sim_wall_seconds_per_shot": totals.mean("sim_wall_seconds"),
     }
+    _add_pool_columns(row, totals, distance, round_period_us)
     for name in _points_held(totals.means):
         multiset = counts.get((point, name), {})
         _addpoint_columns(row, totals, name, multiset)
@@ -702,19 +717,73 @@ def _folder_files(folders: list, name: str) -> list:
     return paths
 
 
+def _add_pool_columns(
+    row: dict, totals, distance: int, round_period_us: float
+) -> None:
+    """The pool columns and Toshio's bound, when the shots hold them.
+
+    A folder an older tree wrote holds no pool columns, and the rule of
+    _points_held applies: it gets none rather than a column of zeros.
+    """
+    if "strong_decoded_rounds" not in totals.sums:
+        return
+    row["weak_queue_max"] = totals.maxes["weak_queue_max"]
+    row["strong_queue_max"] = totals.maxes["strong_queue_max"]
+    row["weak_busy_fraction"] = totals.mean("weak_busy_fraction")
+    row["strong_busy_fraction"] = totals.mean("strong_busy_fraction")
+    row["escalated_windows"] = totals.sums["escalated_windows"]
+    row["strong_service_mean_us"] = totals.mean("strong_service_mean_us")
+    row["strong_service_bound_us"] = strong_service_bound_us(
+        totals, distance, round_period_us
+    )
+    row["parallel_processes_needed"] = totals.maxes["parallel_processes_needed"]
+
+
+def strong_service_bound_us(
+    totals, distance: int, round_period_us: float
+) -> float:
+    """Toshio's Theorem 1 bound on the strong decode time, per point.
+
+    tau_strong <= (1 / gamma_switch)(d / r_strong) tau_gen (2510.25222
+    lines 1270-1300), with gamma_switch the escalated share of the
+    point's windows and r_strong the mean rounds a strong decode read,
+    so the bound is tau_gen d windows / strong rounds; infinite when
+    nothing escalated. It is read beside strong_service_mean_us.
+    """
+    strong_rounds = totals.sums["strong_decoded_rounds"]
+    if strong_rounds == 0:
+        return math.inf
+    windows = totals.sums["windows"]
+    return round_period_us * distance * windows / strong_rounds
+
+
 def _shot_totals(row: dict) -> fold.RowTotals:
-    """What one sweep point's shot rows add up to, role by role."""
-    means = list(SHOT_MEANS)
-    maxes = list(SHOT_MAXES)
+    """What one sweep point's shot rows add up to, role by role.
+
+    A role's column is totalled only when the row holds it, the rule of
+    _points_held, so a folder an older tree wrote still folds.
+    """
+    means = _held_by(row, SHOT_MEANS)
+    maxes = _held_by(row, SHOT_MAXES)
+    sums = _held_by(row, SHOT_SUMS)
     for name in _points_held(row):
         means.append(f"{name}_mean_us")
         maxes.append(f"{name}_max_us")
     return fold.RowTotals(
         means=means,
         maxes=maxes,
-        sums=SHOT_SUMS,
+        sums=sums,
         true_counts=SHOT_TRUE_COUNTS,
     )
+
+
+def _held_by(row: dict, columns: tuple) -> list:
+    """The columns of one role the row holds, in the role's order."""
+    held = []
+    for column in columns:
+        if column in row:
+            held.append(column)
+    return held
 
 
 def _points_held(fields) -> list:

@@ -164,7 +164,9 @@ def _connect_result_ledger(window_manager) -> result_ledger_module.ResultLedger:
 def _connect_queue_depth(decoder_manager) -> queue_depth_module.QueueDepthLog:
     """The waiting jobs, sampled at every change of the queue's depth."""
     depth_log = queue_depth_module.QueueDepthLog()
-    decoder_manager.queue.trace.depth_changed.connect(depth_log.depth_changed)
+    queue_trace = decoder_manager.queue.trace
+    queue_trace.depth_changed.connect(depth_log.depth_changed)
+    queue_trace.pool_depth_changed.connect(depth_log.pool_depth_changed)
     return depth_log
 
 
@@ -585,15 +587,15 @@ def _assembled(
     """Every listener of the run: the connected ones, and the sampled ones.
 
     The sampled metrics the section asks for connect to action_done
-    here; the rest are already connected to the sources they hear.
+    here; the rest are already connected to the sources they hear. The
+    decoder utilization is always built, since every run's pool columns
+    read each tier's busy fraction off it.
     """
     decode_backlog = None
     if observation.backlog_trace:
         decode_backlog = metrics.DecodeBacklog(window_manager, decoder_manager)
         engine.action_done.connect(decode_backlog.observe)
-    decoder_utilization = None
-    if observation.decoder_utilization:
-        decoder_utilization = _decoder_utilization(engine, decoder_manager)
+    decoder_utilization = _decoder_utilization(engine, decoder_manager)
     decoder_memory_occupancy = None
     if observation.decoder_memory_occupancy:
         decoder_memory_occupancy = _decoder_memory_occupancy(

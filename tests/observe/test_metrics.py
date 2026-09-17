@@ -35,9 +35,7 @@ def test_the_busy_integral_equals_the_services_own_spans():
     decode records report for the point's nine services, which the
     listener never sees.
     """
-    machine, _result = gate_point.run(
-        decoder_utilization=True, record_switching_windows=True
-    )
+    machine, _result = gate_point.run(record_switching_windows=True)
 
     utilization = machine.observation.decoder_utilization.result()
     services = machine.observation.decode_records.services

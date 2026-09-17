@@ -132,9 +132,13 @@ class WaitingJobs:
         return total
 
     def sample_depth(self) -> None:
-        """Report the total depth now."""
+        """Report the total depth now, and each pool's own."""
+        now = self.engine.now
         depth = self.total()
-        self.trace.depth_changed.fire(self.engine.now, depth)
+        self.trace.depth_changed.fire(now, depth)
+        for pool, queue in self.waiting_by_pool.items():
+            pool_depth = len(queue)
+            self.trace.pool_depth_changed.fire(now, pool, pool_depth)
 
     def drain_in_scheduler_order(self, pool: str) -> list:
         """Empty the pool's queue into a list, next job first."""
@@ -274,3 +278,7 @@ class _TraceSources:
 
     job_enqueued: trace_source.TraceSource = trace_source.new_source()
     depth_changed: trace_source.TraceSource = trace_source.new_source()
+    # (tick, pool, jobs waiting in that pool): a pool sweep reads each
+    # tier's own backlog, the way DART-Q reports a max backlog per
+    # decoder instance (2605.09142 lines 1101-1109)
+    pool_depth_changed: trace_source.TraceSource = trace_source.new_source()

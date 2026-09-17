@@ -12,6 +12,7 @@ other.
 """
 
 import dataclasses
+import math
 import pathlib
 import statistics
 from typing import Optional
@@ -23,6 +24,7 @@ import stim
 import decsim.build.escalation as escalation_build
 import decsim.collect as collect
 import decsim.config as config_module
+import decsim.decoders.decode_queue as decode_queue
 import decsim.decoders.decoder_output as decoder_output
 import decsim.observe.observation as observation_module
 import decsim.records.identity as identity_records
@@ -137,6 +139,25 @@ class ShotMeasurement:
     throughput_windows_per_us: float
     throughput_rounds_per_us: float
     max_queued_windows: int
+    # the deepest each tier's own ready queue got, in jobs: the max
+    # backlog per decoder instance DART-Q reports (2605.09142 lines
+    # 1101-1109); zero for a tier the run does not have
+    weak_queue_max: int
+    strong_queue_max: int
+    # each tier's time-weighted fraction of busy units, Triage's
+    # utilization rate (2605.04459 lines 1024-1031)
+    weak_busy_fraction: float
+    strong_busy_fraction: float
+    # the windows the strong tier committed, the rounds its decodes read
+    # and their mean service: the report forms Toshio's Theorem 1 bound
+    # on that service per sweep point from the first two (2510.25222
+    # lines 1270-1300)
+    escalated_windows: int
+    strong_decoded_rounds: int
+    strong_service_mean_us: float
+    # Skoric's least count of parallel decoding processes, ceil(2 tau_W
+    # / ((n_com + n_W) tau_rd)) (2209.08552 lines 429-438)
+    parallel_processes_needed: int
     tesseract_windows_checked: int  # referee re-decodes (0 = referee off)
     # referee reached a different owned observable contribution
     tesseract_window_disagreements: int
@@ -668,7 +689,12 @@ def _measurement(
     wall_seconds: float,
     trace_path: Optional[str],
 ) -> ShotMeasurement:
-    """Read every number of one completed shot off its records."""
+    """Read every number of one completed shot off its records.
+
+    It stays whole past the size prompt: each number is read once, named,
+    and placed in the record, top to bottom, and a split would put the
+    reading and the placing of one number in two places.
+    """
     samples = collect_samples(observation, result)
     verdicts = _logical_verdicts(observation, result)
     throughput = _throughput_per_microsecond(
@@ -679,6 +705,11 @@ def _measurement(
     load = chain_load(samples, settings, distance, round_period_us)
     algorithm = active_decoder_kind(settings)
     queued = _max_queued_windows(observation)
+    pools = _pool_measures(observation)
+    strong = _strong_decodes(observation)
+    processes = parallel_processes_needed(
+        samples, settings, distance, round_period_us
+    )
     totals = link_totals(result.link_traffic)
     means = _means(samples)
     maxes = _maxes(samples)
@@ -699,6 +730,14 @@ def _measurement(
         throughput_windows_per_us=throughput.windows_per_microsecond,
         throughput_rounds_per_us=throughput.rounds_per_microsecond,
         max_queued_windows=queued,
+        weak_queue_max=pools.weak_queue_max,
+        strong_queue_max=pools.strong_queue_max,
+        weak_busy_fraction=pools.weak_busy_fraction,
+        strong_busy_fraction=pools.strong_busy_fraction,
+        escalated_windows=strong.windows,
+        strong_decoded_rounds=strong.rounds,
+        strong_service_mean_us=strong.service_mean_us,
+        parallel_processes_needed=processes,
         tesseract_windows_checked=referee.windows_checked,
         tesseract_window_disagreements=referee.window_disagreements,
         link_totals=totals,
@@ -727,6 +766,7 @@ class _CommittedDecode:
     dispatch_ticks: int  # a unit took this decode
     ready_ticks: Optional[int]  # it first may compute, whatever the unit did
     run_sequence: int  # the run ordinal of the request it committed
+    round_count: int  # the rounds it read, its job's own count
 
 
 @dataclasses.dataclass(frozen=True)
@@ -752,6 +792,25 @@ class _RefereeCounts:
 
     windows_checked: int
     window_disagreements: int
+
+
+@dataclasses.dataclass(frozen=True)
+class _PoolMeasures:
+    """Each tier's deepest ready queue and busy fraction over the shot."""
+
+    weak_queue_max: int
+    strong_queue_max: int
+    weak_busy_fraction: float
+    strong_busy_fraction: float
+
+
+@dataclasses.dataclass(frozen=True)
+class _StrongDecodes:
+    """What the strong tier committed over the shot."""
+
+    windows: int
+    rounds: int
+    service_mean_us: float
 
 
 def _logical_verdicts(
@@ -814,6 +873,86 @@ def _max_queued_windows(
     return max(depths, default=0)
 
 
+def _pool_measures(
+    observation: observation_module.Observation,
+) -> _PoolMeasures:
+    """Each pool's own queue peak and busy fraction, by the tier's name.
+
+    The weak tier queues in the default pool and the strong tier in the
+    strong pool (decode_queue.POOL_BY_JOB_KIND); a run without a pool
+    reads zero for it.
+    """
+    peaks = observation.queue_depth.peak_by_pool
+    utilization = observation.decoder_utilization.result()
+    busy = utilization["per_pool_busy_fraction"]
+    weak_queue_max = peaks.get(decode_queue.DEFAULT_POOL, 0)
+    strong_queue_max = peaks.get(decode_queue.STRONG_POOL, 0)
+    weak_busy_fraction = busy.get(decode_queue.DEFAULT_POOL, 0.0)
+    strong_busy_fraction = busy.get(decode_queue.STRONG_POOL, 0.0)
+    return _PoolMeasures(
+        weak_queue_max=weak_queue_max,
+        strong_queue_max=strong_queue_max,
+        weak_busy_fraction=weak_busy_fraction,
+        strong_busy_fraction=strong_busy_fraction,
+    )
+
+
+def _strong_decodes(
+    observation: observation_module.Observation,
+) -> _StrongDecodes:
+    """The windows the strong tier committed, their rounds, their service.
+
+    Toshio's Theorem 1 bounds the strong decode time by the round time
+    times d over r_strong over the switching rate (2510.25222 lines
+    1270-1300); the report forms that bound per sweep point from these
+    two sums, and the mean service here is the time it bounds.
+    """
+    stages = observation.stages
+    windows = 0
+    rounds = 0
+    services = []
+    for frame_record in observation.frame_corrections.committed:
+        tier = window_records.DecoderTier(frame_record.tier)
+        if tier is not window_records.DecoderTier.STRONG:
+            continue
+        decode = _committed_decode(stages, frame_record)
+        windows += 1
+        rounds += decode.round_count
+        service = _span_microseconds(
+            decode.done_ticks, decode.compute_start_ticks
+        )
+        services.append(service)
+    service_mean_us = _mean_or_zero(services)
+    return _StrongDecodes(windows, rounds, service_mean_us)
+
+
+def parallel_processes_needed(
+    samples: dict,
+    settings: machine_settings.MachineSettings,
+    distance: int,
+    round_period_us: float,
+) -> int:
+    """Skoric's least count of parallel decoding processes for no backlog.
+
+    N_par >= 2 tau_W / ((n_com + n_W) tau_rd): a window's decoding time
+    twice, over the rounds its two layers acquire (2209.08552 lines
+    429-438; NVQLink states the same as its equation 2, 2510.25213
+    lines 1625-1631). tau_W is this shot's mean service and the sizes
+    are the window scheme's, d when null. It is the count the parallel
+    window scheme needs; the serial chain's own condition is chain_load.
+    """
+    service_us = _mean_or_zero(samples["service"])
+    commit_rounds = settings.windows.commit_rounds
+    if commit_rounds is None:
+        commit_rounds = distance
+    buffer_rounds = settings.windows.buffer_rounds
+    if buffer_rounds is None:
+        buffer_rounds = distance
+    acquire_us = (commit_rounds + buffer_rounds) * round_period_us
+    processes = 2 * service_us / acquire_us
+    return math.ceil(processes)
+
+
 def _span_microseconds(end_ticks: int, start_ticks: int) -> float:
     span_ticks = end_ticks - start_ticks
     return ticks_to_microseconds(span_ticks)
@@ -850,7 +989,18 @@ def _committed_decode(stages, frame_record) -> _CommittedDecode:
     dispatch = _dispatch_ticks(records, first)
     ready = _ready_ticks(records)
     run_sequence = frame_record.run_sequence
-    return _CommittedDecode(tier, first, last, dispatch, ready, run_sequence)
+    rounds = _rounds_read(records)
+    return _CommittedDecode(
+        tier, first, last, dispatch, ready, run_sequence, rounds
+    )
+
+
+def _rounds_read(records: list) -> int:
+    """The rounds this decode read, as every one of its stages carries."""
+    counts = []
+    for record in records:
+        counts.append(record.round_count)
+    return max(counts, default=0)
 
 
 def _dispatch_ticks(records: list, fallback: int) -> int:

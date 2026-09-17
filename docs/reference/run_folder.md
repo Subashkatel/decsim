@@ -57,6 +57,10 @@ its maximum.
 | `direct_failure`, `direct_mismatch` | the same shot decoded straight through PyMatching outside the machine, and whether the machine disagreed with it |
 | `throughput_windows_per_us`, `throughput_rounds_per_us` | what the machine got through |
 | `max_queued_windows` | the deepest the ready queue ever got |
+| `weak_queue_max`, `strong_queue_max` | the deepest each tier's own ready queue got, in jobs; zero for a tier the run lacks |
+| `weak_busy_fraction`, `strong_busy_fraction` | the time-weighted fraction of each tier's units whose compute was busy |
+| `escalated_windows`, `strong_decoded_rounds`, `strong_service_mean_us` | the windows the strong tier committed, the rounds its decodes read, and their mean service |
+| `parallel_processes_needed` | Skoric's least count of parallel decoding processes for no backlog, ceil(2 tau_W / ((n_com + n_W) tau_rd)) from this shot's mean service (2209.08552 lines 429-438) |
 | `tesseract_windows_checked`, `tesseract_window_disagreements` | the referee's count, when `observation.check_windows_with` asked for one |
 | `sim_wall_seconds` | how long the simulation itself took to run, on the host |
 | `<point>_mean_us`, `<point>_max_us` | one pair per latency point below |
@@ -204,6 +208,11 @@ point the run held:
 | `direct_pymatching_failures`, `prediction_mismatches_vs_direct` | the same shots decoded outside the machine, and the disagreements |
 | `throughput_windows_per_us`, `throughput_rounds_per_us` | the means |
 | `max_queued_windows` | the deepest queue over the point |
+| `weak_queue_max`, `strong_queue_max` | the deepest each tier's own queue over the point |
+| `weak_busy_fraction`, `strong_busy_fraction` | the mean busy fractions |
+| `escalated_windows`, `strong_service_mean_us` | the strong tier's windows over the point and their mean service |
+| `strong_service_bound_us` | Toshio's Theorem 1 bound on that service, tau_gen d windows / strong rounds over the point (2510.25222 lines 1270-1300); infinite when nothing escalated |
+| `parallel_processes_needed` | the largest over the point's shots |
 | `tesseract_windows_checked`, `tesseract_window_disagreements` | the referee's totals |
 | `load` | the mean load |
 | `sim_wall_seconds_per_shot` | what the simulation cost to run |

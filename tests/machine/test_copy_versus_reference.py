@@ -174,9 +174,7 @@ def _machine(**weak_changes):
         physical_error_probability=0.001, distance=3, round_period_us=1.0
     )
     weak = dataclasses.replace(settings.weak_decoder, **weak_changes)
-    observation = dataclasses.replace(
-        settings.observation, data_movement=True, decoder_utilization=True
-    )
+    observation = dataclasses.replace(settings.observation, data_movement=True)
     settings = dataclasses.replace(
         settings, weak_decoder=weak, observation=observation
     )

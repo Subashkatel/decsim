@@ -34,6 +34,7 @@ import decsim.config as config_module
 import decsim.decoders.settings as decoder_settings
 import decsim.experiments.experiment as experiment
 import decsim.experiments.measure as measure
+import decsim.experiments.report as report
 import decsim.frontends.settings as workload_settings
 import decsim.links.link_profiles as link_profiles
 import decsim.pauli_frame.pauli_frame as pauli_frame_module
@@ -409,6 +410,66 @@ def test_a_second_unit_moves_the_wait_and_leaves_service_alone(tmp_path):
         14.476,
         15.204,
     ]
+
+
+def test_the_pool_columns_read_each_tiers_own_queue_and_units(tmp_path):
+    """A weak-only run's pool columns are the default pool's, the strong zero.
+
+    The deepest the weak tier's own queue got is the deepest the ready
+    queue got, since only that pool exists; a second unit halves the
+    busy fraction exactly, because the same nine decodes of 5.064 us
+    each run on two units over the same span
+    (test_a_second_unit_moves_the_wait_and_leaves_service_alone), which
+    is Triage's utilization rate read per tier (2605.04459 lines
+    1024-1031).
+    """
+    one_unit = slow_unit_shot(tmp_path, 1)
+    two_units = slow_unit_shot(tmp_path, 2)
+
+    assert one_unit.weak_queue_max == one_unit.max_queued_windows == 3
+    assert two_units.weak_queue_max == 1
+    assert one_unit.strong_queue_max == 0
+    assert one_unit.strong_busy_fraction == 0.0
+    assert one_unit.escalated_windows == 0
+    assert one_unit.strong_decoded_rounds == 0
+    assert two_units.weak_busy_fraction == one_unit.weak_busy_fraction / 2
+
+
+def test_skorics_process_count_is_two_services_over_the_window_period(
+    tmp_path,
+):
+    """N_par is ceil(2 tau_W / ((n_com + n_W) tau_rd)).
+
+    A 5.064 us decode twice over the six one-microsecond rounds two
+    layers acquire is 1.688 processes, so two (2209.08552 lines
+    429-438).
+    """
+    measurement = slow_unit_shot(tmp_path, 1)
+
+    assert measurement.parallel_processes_needed == 2
+
+
+def test_toshios_bound_is_the_round_time_d_windows_over_the_strong_rounds(
+    tmp_path,
+):
+    """Theorem 1 read off a point where every window escalated.
+
+    Ten windows escalated and their strong decodes read 84 rounds in
+    all, so gamma_switch is 1 and r_strong is 8.4, and the bound
+    (1 / gamma)(d / r_strong) tau_gen is 3 / 8.4 microseconds
+    (2510.25222 lines 1270-1300). The strong service it bounds is the
+    10.0 us card plus its fetch and release, which is above it, as a
+    card ten times the round time must be.
+    """
+    measurement = switching_shot(tmp_path, 1000000.0)
+    record = report.record_of([measurement])
+    rows = report.summarize(record.shots, record.window_samples)
+
+    assert measurement.escalated_windows == 10
+    assert measurement.strong_decoded_rounds == 84
+    assert measurement.strong_service_mean_us == 10.0736
+    assert rows[0]["strong_service_bound_us"] == 3 * 10 / 84
+    assert rows[0]["escalated_windows"] == 10
 
 
 def test_an_escalated_window_is_measured_on_the_strong_tiers_own_hops(

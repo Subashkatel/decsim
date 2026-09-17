@@ -5,9 +5,11 @@ and a time average come out exact. DecoderUtilization and
 DecoderMemoryOccupancy step where the quantity changes, on the decoder
 pool's and the unit memories' own sources; DecodeBacklog is the one that
 still samples, after every action, because the rounds waiting to be
-decoded are spread over the window manager and the queues. They are
-built only when the observation section asks; the D7 harness reads
-DecodeBacklog, the unit-count and memory sweeps read the other two.
+decoded are spread over the window manager and the queues.
+DecoderUtilization is always built, since every run's pool columns read
+each tier's busy fraction off it; the other two are built only when the
+observation section asks, the D7 harness reading DecodeBacklog and the
+memory sweep DecoderMemoryOccupancy.
 """
 
 from collections.abc import Mapping
@@ -22,8 +24,8 @@ class DecoderUtilization:
     A listener on the pool's unit_busy and unit_freed sources: a unit is
     busy from the tick its compute leaves the pool's free list until the
     tick it goes back, so the integral steps exactly where the occupancy
-    changes and no state is sampled. thrust 2 sweeps the unit count over
-    this number.
+    changes and no state is sampled. The pool sweep reads each tier's
+    fraction, Triage's utilization rate (2605.04459 lines 1024-1031).
     """
 
     def __init__(self, engine, units_by_pool: Mapping[str, int]) -> None:

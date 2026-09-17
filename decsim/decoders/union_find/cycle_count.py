@@ -90,8 +90,8 @@ class CycleCount:
     registers, does not pay; the rounds loaded are the unit's fetch
     stage and not counted here.
 
-    The law lands within eight percent of Helios's four published points
-    with nothing fitted (the check is outside the repo).
+    The law is checked against Helios's published points outside the
+    repo, with nothing fitted.
     """
 
     clock: config.Clock

@@ -6,8 +6,9 @@ the window's selection over weak_decoder_to_strong_decoder, tells the
 decoder side to await the request's result (the DecodeQueue port), and
 submits the job now or when the conditions the shape declared fire: the
 commits of the weak windows it named, or the stored rounds of an
-operation (pending_strong_windows.py). The redecode holds that index,
-so a new shape row names its own condition rather than adding a hook.
+operation. The ledger of held windows is its own seat, the pending
+strong windows (pending_strong_windows.py), reached through a port, so
+a new shape row names its own condition rather than adding a hook.
 The rounds a strong window reads go up with the escalation: Toshio et
 al. 2510.25222 lines 1247 to 1250 assign the syndrome data of r_strong
 rounds to the strong decoder at the switch, "after the boundary
@@ -45,6 +46,8 @@ class StrongRedecode:
     """Selects, submits and lands the strong tier's re-decode of a window."""
 
     shape = ports.Port(strong_window_shapes.StrongWindowShape)
+    # the ledger of held strong windows and what releases each
+    pending = ports.Port(pending_strong_windows.PendingStrongWindows)
     # where the rounds a strong window reads sit on the chip
     retention = ports.Port(ports.WindowRetention)
     # the ends that execute this tier's sends: the weak decoder's selection
@@ -61,7 +64,6 @@ class StrongRedecode:
     def __init__(self, engine) -> None:
         self.engine = engine
         self.selections = _StrongSelections()
-        self.pending = pending_strong_windows.PendingStrongWindows()
         # the rounds sent up and not landed yet, so a wake-up while a
         # region crosses does not carry them twice
         self.carried_round_keys: set = set()

@@ -105,6 +105,7 @@ SEATS = (
     ("requester", window_side.build_requester),
     ("regions", window_side.build_regions),
     ("shape", window_side.build_strong_window_shape),
+    ("pending_strong_windows", window_side.build_pending_strong_windows),
     ("strong_redecode", window_side.build_strong_redecode),
     ("window_manager", window_side.build_window_manager),
     (
@@ -215,6 +216,7 @@ WIRES = (
     ("shape.ledger", "ledger"),
     ("shape.courier", "courier"),
     ("strong_redecode.shape", "shape"),
+    ("strong_redecode.pending", "pending_strong_windows"),
     ("strong_redecode.retention", "retention"),
     ("strong_redecode.decoder_output", "decoder_output"),
     ("strong_redecode.strong_receiver", "strong_syndrome_round_receiver"),
@@ -389,7 +391,9 @@ def _absent_strong_seats(escalation_policy) -> set:
             )
         )
     if not escalation_policy.requires_strong_context:
-        absent.update(("regions", "shape", "strong_redecode"))
+        absent.update(
+            ("regions", "shape", "pending_strong_windows", "strong_redecode")
+        )
     return absent
 
 

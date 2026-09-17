@@ -11,6 +11,7 @@ import decsim.build.escalation as escalation_build
 import decsim.confidence.gap_join as gap_join_module
 import decsim.decoders.decoder_output as decoder_output_module
 import decsim.decoders.settings as decoder_settings
+import decsim.escalation.pending_strong_windows as pending_strong_windows
 import decsim.escalation.strong_redecode as strong_redecode_module
 import decsim.escalation.strong_regions as strong_regions
 import decsim.links.window_transfers as window_transfers_module
@@ -161,6 +162,12 @@ def build_strong_window_shape(parts):
     """
     row = escalation_build.strong_window_row(parts.settings.escalation)
     return row(parts.engine)
+
+
+def build_pending_strong_windows(parts):
+    """The ledger of strong windows held for the conditions their row named."""
+    del parts
+    return pending_strong_windows.PendingStrongWindows()
 
 
 def build_strong_redecode(parts):

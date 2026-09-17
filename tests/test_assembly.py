@@ -26,6 +26,7 @@ import decsim.controller.controller as controller_module
 import decsim.controller.syndrome_round_sender as syndrome_round_sender
 import decsim.decoders.decoder_manager as decoder_manager_module
 import decsim.engine as engine_module
+import decsim.escalation.pending_strong_windows as pending_strong_windows
 import decsim.escalation.strong_redecode as strong_redecode_module
 import decsim.frontends.execution_runtime as execution_runtime_module
 import decsim.qpu.cycle_clock as cycle_clock
@@ -36,11 +37,12 @@ from decsim.syndrome_buffer import (
     strong_syndrome_round_receiver as strong_syndrome_round_receiver_module,
 )
 
-# nine seats of a switching run, in the order the root builds them
+# ten seats of a switching run, in the order the root builds them
 EXPECTED_SEATS = (
     ("held_rounds", syndrome_round_sender.HeldRounds),
     ("weak_syndrome_buffer", syndrome_buffer_module.SyndromeBuffer),
     ("decoder_manager", decoder_manager_module.DecoderManager),
+    ("pending_strong_windows", pending_strong_windows.PendingStrongWindows),
     ("window_manager", window_manager_module.WindowManager),
     (
         "strong_syndrome_round_receiver",
@@ -76,6 +78,7 @@ def test_a_run_that_never_escalates_has_no_room_side_rows():
     assert "strong_syndrome_buffer" not in names
     assert "strong_syndrome_round_receiver" not in names
     assert "strong_output" not in names
+    assert "pending_strong_windows" not in names
     assert "strong_redecode" not in names
     assert "weak_syndrome_buffer" in names
 

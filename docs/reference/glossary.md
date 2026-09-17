@@ -75,6 +75,19 @@ buffer. The papers' figures call them the weak syndrome buffer and the strong sy
 | strong syndrome buffer, a `SyndromeBuffer`; its receiving end is `StrongSyndromeRoundReceiver` in `decsim/syndrome_buffer/strong_syndrome_round_receiver.py`, seen by the sender through the port of that name in `decsim/ports.py` | the strong syndrome buffer, the strong side's copy of the rounds | what a strong re-decode reads, in bulk, once its boundaries are known |
 | hold, `DecoderInputHold`, `PotentialStrong`, `PotentialRestart` | the reason a round may not be dropped yet | one token per consumer that still needs the round |
 
+## The strong side's parts
+
+The rack drawing names the strong side by its jobs; each is a seat of
+`decsim/assembly.py` or a pool inside one.
+
+| The drawing | decsim | What it does |
+| --- | --- | --- |
+| strong syndrome buffer | the `strong_syndrome_buffer` seat, a `SyndromeBuffer`, with `strong_syndrome_round_receiver` as its landing and `strong_output` as its read | holds the rounds an escalation carried up until the strong decode has read them |
+| ledger of pending regions | the `pending_strong_windows` seat, `PendingStrongWindows` in `decsim/escalation/pending_strong_windows.py`, reached by the strong redecode's `pending` port | which held strong windows wait on which weak commits and stored rounds; a window leaves when its conditions fire |
+| strong window manager | the `shape` seat, one row of `STRONG_WINDOW_SHAPES` in `decsim/escalation/strong_window_shapes.py`, with the `regions` seat as its geometry and `strong_redecode` as the side that submits | cuts an escalated window's strong region, names what releases it, builds its job |
+| strong decoder manager | the strong pool of the one `decoder_manager` seat: its own ready queue, units and input rule under the pool name `strong` (`decsim/decoders/decode_queue.py`) | gives each strong job a free strong unit and returns its result |
+| the strong decoders, G of them | the `strong_decoder` row's units, a `Decoder` behind the port of that name | decode a window accurately and slowly |
+
 ## The link paths
 
 Every hop is booked under one path name, the `LinkPath` values in

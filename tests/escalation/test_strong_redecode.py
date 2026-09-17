@@ -186,6 +186,7 @@ def _redecode(shape):
     verdict = _Verdict()
     redecode = strong_redecode_module.StrongRedecode(engine)
     redecode.shape = shape
+    redecode.pending = pending_module.PendingStrongWindows()
     redecode.retention = _Retention()
     redecode.decoder_output = decoder_output
     redecode.strong_receiver = _StrongReceiver()

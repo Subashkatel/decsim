@@ -89,6 +89,9 @@ class CycleCount:
     graph out before it grows, which Helios, holding its graph in
     registers, does not pay; the rounds loaded are the unit's fetch
     stage and not counted here.
+
+    The law lands within eight percent of Helios's four published points
+    with nothing fitted (the check is outside the repo).
     """
 
     clock: config.Clock

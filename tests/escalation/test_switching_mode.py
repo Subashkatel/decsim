@@ -23,6 +23,7 @@ import math
 
 import pytest
 
+import decsim.collect as collect
 import decsim.config as decsim_config
 import decsim.records.decoding as decoding_records
 import tests.declared_run as declared_run
@@ -38,7 +39,9 @@ from tests.experiments.yaml_configs import (
 NEAR_THRESHOLD_P = 0.008
 
 
-def switching_config(tmp_path, gap_threshold_db: float, rounds: int = 30):
+def switching_config(
+    tmp_path, gap_threshold_db: float, rounds: int = 30, observation=None
+):
     escalation = {"kind": "switching", "gap_threshold_db": gap_threshold_db}
     weak_unit = {
         "weak_decoder": {
@@ -69,6 +72,8 @@ def switching_config(tmp_path, gap_threshold_db: float, rounds: int = 30):
         **strong_decoder,
         "sweep": [sweep_point],
     }
+    if observation is not None:
+        card["observation"] = observation
     return write_config(tmp_path, card)
 
 
@@ -825,3 +830,39 @@ def test_a_windows_commit_instant_says_whether_its_result_is_provisional(
     assert escalated["args"]["result"] == "provisional"
     assert kept["args"]["result"] == "final"
 
+
+def test_one_landed_input_is_one_residence_however_many_solves_read_it(
+    tmp_path,
+):
+    """The forced-class solves of a window share one landed input.
+
+    Decision D2 (decoder_memory.DecoderMemory.rewrite): the two solves
+    read one resident input and the memory frees it when the last
+    reader takes it. The trace's residence of that input is therefore
+    one record per window, closed when the rounds are freed; a record
+    per solve left the first one open to the end of the run.
+    """
+    trace_path = tmp_path / "gap.trace.json"
+    observation = {"trace": str(trace_path)}
+    config_path = switching_config(tmp_path, 0.0, 9, observation)
+    config = load_experiment(config_path)
+    task = config.point_task(
+        physical_error_probability=NEAR_THRESHOLD_P,
+        distance=3,
+        round_period_us=1.0,
+        shots=1,
+    )
+    shot = collect.run_shot(task, 0)
+    shot.machine.observation.trace_writer.write(str(trace_path))
+    text = trace_path.read_text()
+    document = json.loads(text)
+    residences = [
+        row
+        for row in document
+        if row["ph"] == "X" and row["name"].endswith(" input in memory")
+    ]
+    windows = shot.machine.observation.windows.final_rows()
+
+    assert len(residences) == len(windows)
+    for row in residences:
+        assert row["args"]["freed_reason"] == "decode done"

@@ -458,9 +458,11 @@ class TraceWriter:
             "data_ready": self.engine.now,
         }
         name = f"W{job.window_id} input in memory"
-        self._begin_residence(
-            thread, job.request_key, name, "window,residence", args
-        )
+        key = _input_key(job)
+        if (thread, key) not in self._open.open_residence:
+            self._begin_residence(
+                thread, key, name, "window,residence", args
+            )
         self._end_flow(thread, job)
         self._step_window_flow(thread, window_key, self.engine.now)
 
@@ -530,7 +532,8 @@ class TraceWriter:
         unit_name = _unit_of_memory(memory_name)
         thread = _unit_thread(unit_name)
         closing = {"freed": self.engine.now, "freed_reason": "decode done"}
-        self._end_residence(thread, job.request_key, closing)
+        key = _input_key(job)
+        self._end_residence(thread, key, closing)
         counter = f"{memory_name} rounds"
         rounds = len(decoder_input.rounds)
         self._count(thread, counter, -rounds)
@@ -908,6 +911,20 @@ def _copy_thread(target_name: str) -> str:
         return "Window planner"
     unit_name = _unit_of_memory(target_name)
     return _unit_thread(unit_name)
+
+
+def _input_key(job: decoding_records.DecodeJob):
+    """The identity of the rounds a job reads, as the unit's memory keys them.
+
+    The forced-class solves of one window share one landed input
+    (DecoderMemory.rewrite), so the input's residence is one record
+    keyed by the request whose transfer landed it, the job's own
+    request otherwise; the memory frees it when the last reader takes
+    it and that is when the record closes.
+    """
+    if job.input_key is not None:
+        return job.input_key
+    return job.request_key
 
 
 def _unit_of_memory(memory_name: str) -> str:

@@ -140,18 +140,23 @@ class StrongRedecode:
         released = self.pending.released_by_stored_data(operation_id)
         self._submit_released(released)
 
-    def cancel_held_sibling(self, window_key: tuple) -> None:
-        """A kept weak result: its held sibling never decodes.
+    def cancel_strong_request(self, window_key: tuple) -> None:
+        """A kept weak result: its strong request ends, held or submitted.
 
         The parallel sibling is speculative (Toshio et al. 2510.25222
-        Sec. III A, Step 1), so a confident weak result ends it. One
-        already enqueued is cancelled on the decoder side; one still
-        held for its input is dropped here, before the window's final
-        commit frees the rounds it would have read.
+        Sec. III A, Step 1), so a confident weak result halts it (Step
+        3, lines 606-614). One still held for its input is dropped here,
+        before the window's final commit frees the rounds it would have
+        read; one already submitted is cancelled by the strong side's
+        manager wherever it is, and a window with no request there is
+        left alone.
         """
         held = self.pending.held_for(window_key)
-        if held is None:
-            return
+        if held is not None:
+            self._drop_held(window_key, held)
+        self.decode_queue.cancel_strong(window_key)
+
+    def _drop_held(self, window_key: tuple, held) -> None:
         self.pending.take(held)
         self.selections.forget_sibling(window_key)
         self.trace.strong_window_left.fire(

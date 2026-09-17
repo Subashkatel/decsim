@@ -27,6 +27,7 @@ import decsim.decoders.decoder_memory as decoder_memory
 import decsim.decoders.decoders as decoders
 import decsim.decoders.schedulers as schedulers
 import decsim.decoders.settings as decoder_settings
+import decsim.decoders.strong_requests as strong_requests_module
 import decsim.engine as engine_module
 import decsim.escalation.policies as escalation_policies
 import decsim.frontends.settings as workload_settings
@@ -244,10 +245,12 @@ def window_completion_ticks(
         {"default": capacity_rounds}
     )
     policy = escalation_policies.Baseline(escalation_policies.NO_CONFIDENCE)
+    strong_requests = strong_requests_module.StrongRequests()
     manager = decoder_manager_module.DecoderManager(
         engine,
         router=router,
         scheduler=scheduler,
+        strong_requests=strong_requests,
         num_units=1,
         decoder_memory=memory_config,
         escalation_policy=policy,

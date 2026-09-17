@@ -159,12 +159,13 @@ def _earliest_freeing(units: list) -> decoder_unit_module.DecoderUnit:
 
 
 def _check_unit_pools(unit_pools: dict) -> None:
-    """A pool map names the default pool and gives every pool a unit."""
-    if DEFAULT_POOL not in unit_pools:
-        pools = sorted(unit_pools)
-        raise ValueError(
-            f'unit_pools must include a "default" pool (got {pools})'
-        )
+    """A pool map names at least one pool and gives every pool a unit.
+
+    Which pools a manager holds is the assembly's: the chip's manager
+    holds the default pool, the host's the strong one.
+    """
+    if not unit_pools:
+        raise ValueError("unit_pools names no pool")
     for pool_name, units in unit_pools.items():
         if units < 1:
             raise ValueError(

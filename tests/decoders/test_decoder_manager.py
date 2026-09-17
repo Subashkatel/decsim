@@ -16,6 +16,7 @@ import decsim.decoders.decoders as decoders
 import decsim.decoders.detection_events as detection_events
 import decsim.decoders.schedulers as schedulers
 import decsim.decoders.staged_decoder as staged_decoder
+import decsim.decoders.strong_requests as strong_requests_module
 import decsim.engine as engine_module
 import decsim.escalation.policies as escalation_policies
 import decsim.observe.log_writers as log_writers
@@ -56,10 +57,12 @@ def _manager(engine, row, formation_by_pool=None):
     router = decoders.CodeRouter(row)
     scheduler = schedulers.FifoScheduler()
     policy = escalation_policies.Baseline(escalation_policies.NO_CONFIDENCE)
+    strong_requests = strong_requests_module.StrongRequests()
     return DecoderManager(
         engine,
         router=router,
         scheduler=scheduler,
+        strong_requests=strong_requests,
         num_units=1,
         escalation_policy=policy,
         formation_by_pool=formation_by_pool,
@@ -218,10 +221,12 @@ def test_an_escalation_routed_to_a_pipelined_unit_is_refused():
     router = decoders.SwitchingRouter(weak=weak, strong=strong)
     scheduler = schedulers.FifoScheduler()
     policy = escalation_policies.Baseline(escalation_policies.NO_CONFIDENCE)
+    strong_requests = strong_requests_module.StrongRequests()
     manager = DecoderManager(
         engine,
         router=router,
         scheduler=scheduler,
+        strong_requests=strong_requests,
         unit_pools={"default": 1, "strong": 1},
         escalation_policy=policy,
     )
@@ -291,10 +296,12 @@ def _blocking_manager(engine, row, *, blocks_unit: bool):
     router = decoders.CodeRouter(row)
     scheduler = schedulers.FifoScheduler()
     policy = escalation_policies.Baseline(escalation_policies.NO_CONFIDENCE)
+    strong_requests = strong_requests_module.StrongRequests()
     return DecoderManager(
         engine,
         router=router,
         scheduler=scheduler,
+        strong_requests=strong_requests,
         num_units=1,
         escalation_policy=policy,
         blocks_unit_by_pool={"default": blocks_unit},
@@ -442,10 +449,12 @@ def _staging_manager(engine, row, *, copies_input: bool):
     router = decoders.CodeRouter(row)
     scheduler = schedulers.FifoScheduler()
     policy = escalation_policies.Baseline(escalation_policies.NO_CONFIDENCE)
+    strong_requests = strong_requests_module.StrongRequests()
     return DecoderManager(
         engine,
         router=router,
         scheduler=scheduler,
+        strong_requests=strong_requests,
         num_units=1,
         escalation_policy=policy,
         copies_input_by_pool={"default": copies_input},

@@ -19,6 +19,7 @@ import decsim.decoders.decoders as decoders
 import decsim.decoders.schedulers as schedulers
 import decsim.decoders.settings as decoder_settings
 import decsim.decoders.staged_decoder as staged_decoder
+import decsim.decoders.strong_requests as strong_requests_module
 import decsim.engine as engine_module
 import decsim.escalation.policies as escalation_policies
 import decsim.escalation.settings as escalation_settings
@@ -101,10 +102,12 @@ def _manager(engine, decoder, dispatch_cycles=0):
     router = decoders.CodeRouter(decoder)
     scheduler = schedulers.FifoScheduler()
     policy = escalation_policies.Baseline(escalation_policies.NO_CONFIDENCE)
+    strong_requests = strong_requests_module.StrongRequests()
     return DecoderManager(
         engine,
         router=router,
         scheduler=scheduler,
+        strong_requests=strong_requests,
         num_units=1,
         escalation_policy=policy,
         clock=DISPATCH_CLOCK,

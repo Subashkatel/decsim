@@ -151,9 +151,9 @@ class DecodeBacklog:
     action; the trace keeps one row per change of value.
     """
 
-    def __init__(self, window_manager, decoder_manager) -> None:
+    def __init__(self, window_manager, decoder_managers) -> None:
         self.window_manager = window_manager
-        self.decoder_manager = decoder_manager
+        self.decoder_managers = decoder_managers
         self._integral = _StepIntegral()
         self.peak = 0
         self.trace: list = []
@@ -161,7 +161,9 @@ class DecodeBacklog:
 
     def observe(self, tick: int) -> None:
         """Sample the backlog and update the peak, the average, the trace."""
-        view = run_views.backlog_view(self.window_manager, self.decoder_manager)
+        view = run_views.backlog_view(
+            self.window_manager, self.decoder_managers
+        )
         self._integral.observe(tick, view.total_rounds)
         self.peak = max(self.peak, view.total_rounds)
         is_first = not self.trace

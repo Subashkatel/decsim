@@ -287,7 +287,7 @@ class WindowVerdict:
         if not is_final:
             self.strong_redecode.escalate(job)
         elif self.strong_redecode is not None:
-            self.strong_redecode.cancel_held_sibling(key)
+            self.strong_redecode.cancel_strong_request(key)
         self.decode_queue.resolve_weak_request(job, result, verdict)
         read_result = functools.partial(self.decode_queue.read_result, job)
         self.committer.commit_or_publish(

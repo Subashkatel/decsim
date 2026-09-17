@@ -20,11 +20,13 @@ A run the machine has no use for a seat in has no SEATS row for it and
 no WIRES row either, so no port is ever bound to None; seats_for reads
 the five conditions that decide that, once.
 
-Two rows name a seat another row built, because the class takes that
+Three rows name a seat another row built, because the class takes that
 neighbour at construction and cannot take it as a port: the magic state
-factory, whose card refuses an ambiguous decode service as it reads it,
-and the primary store output, which is one of the two store ends rather
-than a third one. Both rows therefore sit after the rows they read.
+factory, whose card refuses an ambiguous decode service as it reads it;
+the primary store output, which is one of the two store ends rather
+than a third one; and the two decoder managers, which share the ledger
+of strong requests that the chip's side opens and the host's side
+serves. Each such row therefore sits after the rows it reads.
 
 The member readers come before the tables because a tuple is built when
 the module loads and every row names its builder.
@@ -85,7 +87,9 @@ SEATS = (
     ("strong_output", store_build.build_strong_output),
     ("primary_output", store_build.build_primary_output),
     ("pauli_frame", store_build.build_pauli_frame),
+    ("strong_requests", controller_side.build_strong_requests),
     ("decoder_manager", controller_side.build_decoder_manager),
+    ("strong_decoder_manager", controller_side.build_strong_decoder_manager),
     ("factory", controller_side.build_factory),
     ("models", window_side.build_models),
     ("planner", window_side.build_planner),
@@ -200,6 +204,7 @@ WIRES = (
     ("requester.retention", "retention"),
     ("requester.builder", "builder"),
     ("requester.decode_queue", "decoder_manager"),
+    ("requester.strong_decode_queue", "strong_decoder_manager"),
     ("requester.escalation_policy", "escalation_policy"),
     ("requester.verdict", "verdict"),
     ("requester.store_output", "primary_output"),
@@ -221,7 +226,7 @@ WIRES = (
     ("strong_redecode.decoder_output", "decoder_output"),
     ("strong_redecode.strong_receiver", "strong_syndrome_round_receiver"),
     ("strong_redecode.strong_output", "strong_output"),
-    ("strong_redecode.decode_queue", "decoder_manager"),
+    ("strong_redecode.decode_queue", "strong_decoder_manager"),
     ("strong_redecode.verdict", "verdict"),
     ("window_manager.planner", "planner"),
     ("window_manager.tracker", "tracker"),
@@ -392,7 +397,13 @@ def _absent_strong_seats(escalation_policy) -> set:
         )
     if not escalation_policy.requires_strong_context:
         absent.update(
-            ("regions", "shape", "pending_strong_windows", "strong_redecode")
+            (
+                "regions",
+                "shape",
+                "pending_strong_windows",
+                "strong_redecode",
+                "strong_decoder_manager",
+            )
         )
     return absent
 

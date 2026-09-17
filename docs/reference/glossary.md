@@ -85,7 +85,7 @@ The rack drawing names the strong side by its jobs; each is a seat of
 | strong syndrome buffer | the `strong_syndrome_buffer` seat, a `SyndromeBuffer`, with `strong_syndrome_round_receiver` as its landing and `strong_output` as its read | holds the rounds an escalation carried up until the strong decode has read them |
 | ledger of pending regions | the `pending_strong_windows` seat, `PendingStrongWindows` in `decsim/escalation/pending_strong_windows.py`, reached by the strong redecode's `pending` port | which held strong windows wait on which weak commits and stored rounds; a window leaves when its conditions fire |
 | strong window manager | the `shape` seat, one row of `STRONG_WINDOW_SHAPES` in `decsim/escalation/strong_window_shapes.py`, with the `regions` seat as its geometry and `strong_redecode` as the side that submits | cuts an escalated window's strong region, names what releases it, builds its job |
-| strong decoder manager | the strong pool of the one `decoder_manager` seat: its own ready queue, units and input rule under the pool name `strong` (`decsim/decoders/decode_queue.py`) | gives each strong job a free strong unit and returns its result |
+| strong decoder manager | the `strong_decoder_manager` seat, a second `DecoderManager` over the strong pool alone, with its own ready queue, staging and outcomes; the `strong_requests` seat is the ledger it shares with the chip's `decoder_manager` | gives each strong job a free strong unit and returns its result; halts a request the weak result made unnecessary |
 | the strong decoders, G of them | the `strong_decoder` row's units, a `Decoder` behind the port of that name | decode a window accurately and slowly |
 
 ## The link paths

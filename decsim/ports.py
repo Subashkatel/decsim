@@ -685,8 +685,9 @@ class StrongRedecode(Protocol):
     that decided sits in windows, the re-decode that carries it out sits
     in escalation. A weak verdict that escalates hands over the job, a
     weak window that commits releases the strong window waiting on it,
-    and a weak result that is kept cancels the sibling it made
-    speculative (Toshio et al. 2510.25222).
+    and a weak result that is kept halts the strong request it made
+    unnecessary, held here or on the strong side's manager (Toshio et
+    al. 2510.25222 lines 606-614).
     """
 
     def escalate(self, weak_job: decoding_records.DecodeJob) -> None:
@@ -695,8 +696,8 @@ class StrongRedecode(Protocol):
     def submit_if_commit_releases(self, window_key: tuple) -> None:
         """A weak window committed: a strong window waiting on it leaves."""
 
-    def cancel_held_sibling(self, window_key: tuple) -> None:
-        """A kept weak result: its held sibling never decodes."""
+    def cancel_strong_request(self, window_key: tuple) -> None:
+        """A kept weak result: its strong request ends, held or submitted."""
 
     def submit_if_stored_data_releases(self, operation_id) -> None:
         """A round was stored: a window waiting for its tail leaves."""
@@ -919,6 +920,13 @@ class DecodeQueue(Protocol):
 
         A tier whose result blocks its unit gets the unit back here; a
         tier that gave it back at the decode's end has nothing to give.
+        """
+
+    def cancel_strong(self, window_key: tuple) -> None:
+        """A kept weak result: the window's strong request ends where it is.
+
+        Queued, crossing the link, running, or done and waiting in the
+        unit that produced it; nothing when none is live or done.
         """
 
     def close_companion_request(

@@ -241,7 +241,7 @@ docstring.
 - `decsim/observe/log_writers.py`: The two listeners of the engine's narrator: the record and the console.
 - `decsim/observe/metrics.py`: The integrated metrics: step functions of time over one run.
 - `decsim/observe/observation.py`: The listeners of one run, by name.
-- `decsim/observe/queue_depth.py`: The decode queue's depth over time, one sample per change.
+- `decsim/observe/queue_depth.py`: The decode queues' depth over time, one sample per change.
 - `decsim/observe/referee_audit.py`: The window referee's audit: what it re-decoded and where it disagreed.
 - `decsim/observe/result_ledger.py`: The logical observables each operation delivered.
 - `decsim/observe/round_events.py`: The flight recorder of the readout path: what happened to every round.

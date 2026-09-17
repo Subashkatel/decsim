@@ -112,7 +112,7 @@ class _Fixture:
         self.escalation = types.SimpleNamespace(
             escalate=lambda job: self.escalated.append(job),
             submit_if_commit_releases=lambda key: self.after_weak.append(key),
-            cancel_held_sibling=lambda key: self.kept.append(key),
+            cancel_strong_request=lambda key: self.kept.append(key),
         )
         self.escalated = []
         self.after_weak = []

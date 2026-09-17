@@ -233,7 +233,7 @@ The strong tier's window side, as the committer and verdict see it.
 | --- | --- |
 | `escalate` | Ask the strong tier to re-decode the weak job's window. |
 | `submit_if_commit_releases` | A weak window committed: a strong window waiting on it leaves. |
-| `cancel_held_sibling` | A kept weak result: its held sibling never decodes. |
+| `cancel_strong_request` | A kept weak result: its strong request ends, held or submitted. |
 | `submit_if_stored_data_releases` | A round was stored: a window waiting for its tail leaves. |
 
 ### `WindowVerdict`
@@ -304,6 +304,7 @@ The decoder manager, as the window manager sees it.
 | `charge_soft_output` | Charge the confidence's own computation on the job's unit. |
 | `resolve_weak_request` | The window side decided this weak request; close its attempt. |
 | `read_result` | The window side has this job's result in hand. |
+| `cancel_strong` | A kept weak result: the window's strong request ends where it is. |
 | `close_companion_request` | This forced solve lost; its window is answered by the other. |
 
 ### `DecoderRouter`

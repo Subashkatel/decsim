@@ -71,22 +71,36 @@ compatible beyond the MWPM decoder.
 **Where to see it.** `CONFIDENCE_SIGNALS` in
 `decsim/confidence/signals.py`.
 
-## D4. One decoder manager over both pools, and its work is not free
+## D4. One decoder manager per side, and its work is not free
 
-**Decided.** A single decoder manager schedules over both the weak and
-the strong pool. Its own work is charged: `decoder_manager.dispatch_cycles`
-on a named clock, defaulting to zero.
+**Decided.** Two instances of one decoder manager class: the chip's
+over the weak pool, and, in a run whose windows may escalate, the
+host's over the strong pool. The escalation side and a window's strong
+sibling submit to the host's; the ledger of strong requests is one seat
+both take, since the chip's side opens a request and the host's serves
+it; a kept weak result halts its request through the escalation side.
+Each manager's own work is charged: `decoder_manager.dispatch_cycles`
+on a named clock, defaulting to zero, the one card both read.
 
-**Why.** Every classical referent read runs one scheduler over many
-workers rather than one scheduler per class of worker. And a component
-that costs nothing is inconsistent with a simulator that prices every
-other component: a zero was a defect, not a modelling choice.
+**Why.** The systems that put a fast decoder beside the control
+electronics and a slow one on a host give each side its own scheduling:
+LATTE's local decoder on the control FPGA has no scheduler of its own
+and the host's Global Dynamic Scheduler owns the decode queue and the
+thread pool (2509.03954 lines 24-25 and 705-720). The rack drawing puts
+the strong decoder manager on the host, and the tree shows what the
+drawing shows. A component that costs nothing is inconsistent with a
+simulator that prices every other component: a zero was a defect, not a
+modelling choice. Until this decision one manager served both pools
+(every single-place referent runs one scheduler over many workers).
 
-**Sources.** Skoric's parallel-decoder condition, StarPU's scheduling
-handbook, and Caune's measured 250 to 370 cycles of dispatch work.
+**Sources.** LATTE 2509.03954; Toshio 2510.25222 lines 606-614 (the
+strong computation halted on a confident weak result); Skoric's
+parallel-decoder condition, StarPU's scheduling handbook, and Caune's
+measured 250 to 370 cycles of dispatch work.
 
-**Where to see it.** `configs/reference.yaml`, the `decoder_manager`
-section.
+**Where to see it.** `decsim/assembly.py`, the `decoder_manager` and
+`strong_decoder_manager` rows; `configs/reference.yaml`, the
+`decoder_manager` section.
 
 ## D5. The strong buffer hop is a priced link like every other
 

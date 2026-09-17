@@ -1,6 +1,7 @@
-"""The decode queue's depth over time, one sample per change.
+"""The decode queues' depth over time, one sample per change.
 
-A listener on the queue's depth_changed(tick, depth); the samples are
+A listener on each manager's depth_changed(tick, depth), one manager
+per side, so a sample is the jobs waiting over both; the samples are
 what the gate pins as queue_log and what the switching study reads as
 the ready-queue's peak. It also hears pool_depth_changed(tick, pool,
 depth) and keeps each pool's peak alone, the max backlog per decoder
@@ -10,15 +11,19 @@ sweep reads per tier.
 
 
 class QueueDepthLog:
-    """(tick, jobs waiting over every pool) at every change."""
+    """(tick, jobs waiting over every pool of every manager) at every change."""
 
     def __init__(self) -> None:
         self.samples: list = []
+        self.depth_by_manager: dict = {}
         self.peak_by_pool: dict = {}
 
-    def depth_changed(self, tick: int, depth: int) -> None:
-        """One more sample."""
-        self.samples.append((tick, depth))
+    def depth_changed(self, manager, tick: int, depth: int) -> None:
+        """One manager's depth now; the sample is the sum over managers."""
+        self.depth_by_manager[manager] = depth
+        depths = self.depth_by_manager.values()
+        total = sum(depths)
+        self.samples.append((tick, total))
 
     def pool_depth_changed(self, tick: int, pool: str, depth: int) -> None:
         """One pool's depth now; only its peak is kept."""

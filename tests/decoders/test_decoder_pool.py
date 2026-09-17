@@ -91,6 +91,13 @@ def test_a_released_unit_is_offered_after_the_ones_freed_before_it():
     assert unit is second
 
 
-def test_a_pool_map_without_a_default_pool_is_refused():
-    with pytest.raises(ValueError, match='must include a "default" pool'):
-        decoder_pool.DecoderPool(None, {"strong": 1})
+def test_a_pool_map_that_names_no_pool_is_refused():
+    with pytest.raises(ValueError, match="names no pool"):
+        decoder_pool.DecoderPool(None, {})
+
+
+def test_a_pool_map_of_the_strong_pool_alone_is_the_hosts_managers():
+    pool = decoder_pool.DecoderPool(None, {"strong": 2})
+
+    assert sorted(pool.units_by_pool) == ["strong"]
+    assert len(pool.units_by_pool["strong"]) == 2

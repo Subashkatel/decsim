@@ -402,6 +402,9 @@ class DecodeRequester:
     retention = ports.Port(round_retention_module.RoundRetention)
     builder = ports.Port(DecodeRequestBuilder)
     decode_queue = ports.Port(ports.DecodeQueue)
+    # the strong side's manager, which serves the sibling a window
+    # submits beside its weak job; a run that never escalates has none
+    strong_decode_queue = ports.Port(ports.DecodeQueue, optional=True)
     escalation_policy = ports.Port(ports.EscalationPolicy)
     verdict = ports.Port(window_commits.WindowVerdict)
     # the primary store's outgoing port; it executes the input send
@@ -604,8 +607,14 @@ class DecodeRequester:
         window.service_began = False
 
     def release_parked(self, window_key: tuple) -> None:
-        """The window's last boundary arrived: its parked decode may start."""
+        """The window's last boundary arrived: its parked decodes may start.
+
+        The window's weak decode parks on the chip's manager; a strong
+        sibling or re-decode of the same window parks on the host's.
+        """
         self.decode_queue.release_parked(window_key)
+        if self.strong_decode_queue is not None:
+            self.strong_decode_queue.release_parked(window_key)
 
     def _admit(self, submission: decoding_records.Submission) -> None:
         job = submission.job
@@ -614,12 +623,16 @@ class DecodeRequester:
         self.pending_submissions.pop(job.request_key, None)
         if job.strong_decode_for is None:
             job.window.t_queued = self.builder.engine.now
+        queue = self.decode_queue
         on_decoded = self.verdict.accept_result
         if job.strong_decode_for is not None:
+            # the strong sibling started with the weak job (Toshio
+            # 2510.25222 lines 598-601) is the strong side's to serve
+            queue = self.strong_decode_queue
             on_decoded = self.verdict.accept_strong_result
         elif self.gap_join is not None:
             on_decoded = self.gap_join.accept_result
-        self.decode_queue.enqueue(job, submission.send_input, on_decoded)
+        queue.enqueue(job, submission.send_input, on_decoded)
 
     def _withdraw_submissions(self, window_key: tuple) -> bool:
         """Release requests still waiting for this window's decision edge."""

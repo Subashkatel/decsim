@@ -539,8 +539,9 @@ def test_a_fourth_escalation_row_gets_the_boundaries_router_and_join(
     boundary_policy = machine.window_manager.courier.boundary_policy
     assert isinstance(boundary_policy, boundary_policies.Held)
     assert machine.window_manager.requester.gap_join is not None
-    pool = machine.decoder_manager.pool
-    assert sorted(pool.units_by_pool) == ["default", "strong"]
+    assert sorted(machine.decoder_manager.pool.units_by_pool) == ["default"]
+    strong_pool = machine.strong_decoder_manager.pool
+    assert sorted(strong_pool.units_by_pool) == ["strong"]
     strong_probe = decoding_records.DecodeJob(
         operation_id=-1,
         window_id=0,
@@ -550,7 +551,7 @@ def test_a_fourth_escalation_row_gets_the_boundaries_router_and_join(
     weak_probe = decoding_records.DecodeJob(
         operation_id=-1, window_id=0, round_count=0
     )
-    router = pool.router
+    router = machine.decoder_manager.pool.router
     assert router.route(strong_probe) is not router.route(weak_probe)
     assert machine.window_manager.planner.scheme.has_trailing_tail_context
     result = machine.run()

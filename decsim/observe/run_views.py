@@ -37,14 +37,15 @@ class SwitchingRecordsView:
 
 
 def backlog_view(
-    window_manager, decoder_manager, include_rounds: bool = True
+    window_manager, decoder_managers, include_rounds: bool = True
 ) -> BacklogView:
     """Snapshot the job queues and the per-op, per-patch, system backlog.
 
+    The queues are every pool's over both sides' managers.
     include_rounds=False skips the rounds scan for an observer that only
     needs the queue depths.
     """
-    waiting_by_pool = decoder_manager.queue.waiting_by_pool
+    waiting_by_pool = _waiting_by_pool(decoder_managers)
     ready_jobs = len(waiting_by_pool["default"])
     per_lane = [("", ready_jobs)]
     pool_items = waiting_by_pool.items()
@@ -85,6 +86,14 @@ def switching_records_view(
     requests = tuple(records.requests)
     services = tuple(records.services)
     return SwitchingRecordsView(final_rows, requests, services)
+
+
+def _waiting_by_pool(decoder_managers) -> dict:
+    """Every pool's ready queue, over both sides' managers."""
+    waiting_by_pool = {}
+    for manager in decoder_managers:
+        waiting_by_pool.update(manager.queue.waiting_by_pool)
+    return waiting_by_pool
 
 
 def _first_identity_order(item) -> tuple:

@@ -84,6 +84,14 @@ def _forward_switching_at_the_decoder():
     return machine_module.Machine.build(settings, 0)
 
 
+def _services(machine) -> list:
+    """The decode service of each side's manager, the chip's then the host's."""
+    services = [machine.decoder_manager.service]
+    if machine.strong_decoder_manager is not None:
+        services.append(machine.strong_decoder_manager.service)
+    return services
+
+
 def _rounds_read_by_tier(machine) -> dict:
     """Per tier, every round a decode that started read."""
     read = {}
@@ -97,7 +105,8 @@ def _rounds_read_by_tier(machine) -> dict:
         for round_input in decoder_input.rounds:
             keys.add((round_input.operation_id, round_input.round_index))
 
-    machine.decoder_manager.service.trace.job_started.connect(record)
+    for service in _services(machine):
+        service.trace.job_started.connect(record)
     return read
 
 
@@ -113,7 +122,8 @@ def _rounds_charged_by_tier(machine) -> dict:
         keys = charged.setdefault(job.pool, set())
         keys.update(claimed)
 
-    machine.decoder_manager.service.trace.job_finished.connect(record)
+    for service in _services(machine):
+        service.trace.job_finished.connect(record)
     return charged
 
 
@@ -132,7 +142,8 @@ def _decoder_inputs(machine) -> list:
             )
         inputs.append((job.label, tuple(rounds)))
 
-    machine.decoder_manager.service.trace.job_started.connect(record)
+    for service in _services(machine):
+        service.trace.job_started.connect(record)
     return inputs
 
 

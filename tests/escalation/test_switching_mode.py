@@ -24,6 +24,7 @@ import math
 import pytest
 
 import decsim.config as decsim_config
+import decsim.records.decoding as decoding_records
 import tests.declared_run as declared_run
 import tests.escalation.declared_fabric as fabric
 from decsim.experiments.experiment import load_experiment
@@ -608,6 +609,39 @@ def test_every_window_takes_the_strong_result_when_the_weak_tier_is_not():
     assert tiers == [((1, 0), "strong"), ((1, 1), "strong"), ((1, 2), "strong")]
     assert counts.needed == 3
     assert counts.cancelled == 0
+
+
+def test_the_chips_manager_serves_no_strong_job_and_the_hosts_no_weak_one():
+    """Each side's manager serves its own jobs and never the other's.
+
+    LATTE 2509.03954 lines 705-720: the host's scheduler owns the strong
+    queue and pool, and the local decoder beside the control electronics
+    has no part in it.
+    """
+    machine = fabric.switching_machine(
+        rounds=9,
+        escalated_windows={0, 1, 2},
+        run_both_at_once=False,
+        strong_buffer_microseconds=2.0,
+    )
+    chip_kinds = set()
+    host_kinds = set()
+
+    def ended_on_chip(job, _result, _outcome, _ticks):
+        chip_kinds.add(job.kind)
+
+    def ended_on_host(job, _result, _outcome, _ticks):
+        host_kinds.add(job.kind)
+
+    chip = machine.decoder_manager
+    host = machine.strong_decoder_manager
+    chip.outcomes.trace.request_ended.connect(ended_on_chip)
+    host.outcomes.trace.request_ended.connect(ended_on_host)
+    machine.run()
+
+    assert chip_kinds == {decoding_records.DecodeJobKind.WINDOW}
+    assert host_kinds == {decoding_records.DecodeJobKind.STRONG_REDECODE}
+    assert host.strong_requests.counts.needed == 3
 
 
 def first_decrease_tick(timeline):

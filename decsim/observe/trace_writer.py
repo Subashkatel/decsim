@@ -94,6 +94,8 @@ class TraceWriter:
         self.engine = engine
         self.process_name = process_name
         self.events: list[dict] = []
+        # each manager's waiting jobs, so the counter is the run's total
+        self.queue_depth_by_manager: dict = {}
         self._open = _OpenSlices()
 
     # ---- the file
@@ -334,9 +336,12 @@ class TraceWriter:
         )
         self._start_window_flow("Window planner", window_key)
 
-    def depth_changed(self, tick: int, depth: int) -> None:
-        """The jobs waiting over every pool changed."""
-        values = {"jobs": depth}
+    def depth_changed(self, manager, tick: int, depth: int) -> None:
+        """One manager's waiting jobs changed; the counter is the sum."""
+        self.queue_depth_by_manager[manager] = depth
+        depths = self.queue_depth_by_manager.values()
+        total = sum(depths)
+        values = {"jobs": total}
         self._counter("Window planner", "ready queue depth", values, tick)
 
     def verdict_given(self, window_key, request_key, verdict) -> None:

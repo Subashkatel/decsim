@@ -796,3 +796,32 @@ def test_a_confidence_walk_that_is_not_a_number_is_refused_by_name(tmp_path):
         match="escalation.confidence_walk_microseconds must be a number",
     ):
         load_experiment(config_path)
+
+
+def test_a_windows_commit_instant_says_whether_its_result_is_provisional(
+    tmp_path,
+):
+    """An escalated window commits its weak result provisionally at the verdict.
+
+    The strong result replaces that result later (WindowCommitter
+    .finish_strong) and the frame's own committed instant marks the
+    answer landing, so the planner's instant says which of the two it
+    is; without the word a reader takes the verdict for the answer,
+    which Toshio's chain puts a strong decode later (2510.25222 lines
+    1247 to 1250, the strong decode starts once the boundaries are
+    determined).
+    """
+    trace_path = tmp_path / "serial.trace.json"
+    machine = fabric.switching_machine(
+        rounds=9, escalated_windows={0}, trace_path=trace_path
+    )
+    machine.run()
+    machine.observation.trace_writer.write(str(trace_path))
+    text = trace_path.read_text()
+    document = json.loads(text)
+    (escalated,) = _events_named(document, "i", "W0 committed")
+    (kept,) = _events_named(document, "i", "W1 committed")
+
+    assert escalated["args"]["result"] == "provisional"
+    assert kept["args"]["result"] == "final"
+

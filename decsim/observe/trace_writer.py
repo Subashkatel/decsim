@@ -356,14 +356,24 @@ class TraceWriter:
     def window_committed(
         self, window: window_records.Window, contribution
     ) -> None:
-        """A window committed under the contribution that owns its rounds."""
+        """A window committed under the contribution that owns its rounds.
+
+        An escalated window commits its weak result provisionally at the
+        verdict and the strong result finalizes it later, on the frame's
+        own committed instant (WindowCommitter.finish_strong), so the
+        instant says which of the two it marks.
+        """
         commit_lo = contribution.commit_lo
         commit_hi = contribution.commit_hi
+        result = "provisional"
+        if window.published_request_key is not None:
+            result = "final"
         args = {
             "window": window_text(window.key),
             "owner": window_text(contribution.owner_key),
             "commit": f"{commit_lo}..{commit_hi}",
             "ownership": contribution.ownership_kind,
+            "result": result,
         }
         name = f"W{window.window_index} committed"
         self._instant("Window planner", name, "window", args)

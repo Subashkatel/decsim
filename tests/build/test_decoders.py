@@ -13,11 +13,13 @@ import pytest
 import decsim.build.decoders as decoder_build
 import decsim.build.escalation as escalation_build
 import decsim.build.plan as plan_build
+import decsim.config as config
 import decsim.decoders.decode_queue as decode_queue
 import decsim.decoders.decoders as decoders
 import decsim.decoders.settings as decoder_settings
 import decsim.detector_error_model.detection_event_formation as event_formation
 import decsim.escalation.settings as escalation_settings
+import decsim.records.decoding as decoding_records
 import decsim.settings as machine_settings
 import tests.declared_run as declared_run
 
@@ -58,6 +60,36 @@ def _pool(settings):
 def _preset(microseconds: float):
     preset = decoders.PresetLatencyDecoder(microseconds)
     return decoder_settings.DecoderSettings(decoder=preset)
+
+
+def test_the_units_two_stages_carry_all_four_of_the_engines_cycle_keys():
+    """Each stage is priced once a job and once a round, on its clock.
+
+    A swap or a drop in the wiring moves a job of several rounds: the
+    fetch and the release read different keys and the per-job and the
+    per-round cycles are different numbers.
+    """
+    period_ticks = config.microseconds_to_ticks(0.01)
+    clock = config.Clock(period_ticks)
+    weak = decoder_settings.DecoderSettings(
+        kind="pymatching",
+        fetch_cycles_per_job=2,
+        fetch_cycles_per_round=3,
+        release_cycles_per_job=5,
+        release_cycles_per_round=7,
+        engine_clock=clock,
+    )
+    settings = _settings(weak=weak)
+    policy = escalation_build.build_escalation_policy(settings.escalation)
+    unit = decoder_build.build_decoder_unit(settings, "weak", policy)
+    job = decoding_records.DecodeJob(operation_id=1, window_id=0, round_count=4)
+
+    ticks = unit.timing.stage_ticks(job)
+
+    fetch_cycles = 2 + 3 * 4
+    release_cycles = 5 + 7 * 4
+    assert ticks["fetch"] == fetch_cycles * period_ticks
+    assert ticks["release"] == release_cycles * period_ticks
 
 
 def test_a_python_built_decoder_is_returned_as_it_is():

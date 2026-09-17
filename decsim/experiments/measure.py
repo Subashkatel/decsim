@@ -705,7 +705,8 @@ def _measurement(
     load = chain_load(samples, settings, distance, round_period_us)
     algorithm = active_decoder_kind(settings)
     queued = _max_queued_windows(observation)
-    pools = _pool_measures(observation)
+    primary_tier = escalation_build.primary_tier(settings.escalation)
+    pools = _pool_measures(observation, primary_tier)
     strong = _strong_decodes(observation)
     processes = parallel_processes_needed(
         samples, settings, distance, round_period_us
@@ -874,20 +875,31 @@ def _max_queued_windows(
 
 
 def _pool_measures(
-    observation: observation_module.Observation,
+    observation: observation_module.Observation, primary_tier: str
 ) -> _PoolMeasures:
     """Each pool's own queue peak and busy fraction, by the tier's name.
 
-    The weak tier queues in the default pool and the strong tier in the
-    strong pool (decode_queue.POOL_BY_JOB_KIND); a run without a pool
-    reads zero for it.
+    The plan's windows queue in the default pool and a strong re-decode
+    in the strong pool (decode_queue.POOL_BY_JOB_KIND), so the default
+    pool's numbers are the primary tier's: the weak tier's on a
+    weak-primary run, the strong tier's under strong_only, where the
+    weak columns read zero; a run without a pool reads zero for it.
     """
     peaks = observation.queue_depth.peak_by_pool
     utilization = observation.decoder_utilization.result()
     busy = utilization["per_pool_busy_fraction"]
-    weak_queue_max = peaks.get(decode_queue.DEFAULT_POOL, 0)
+    default_queue_max = peaks.get(decode_queue.DEFAULT_POOL, 0)
+    default_busy_fraction = busy.get(decode_queue.DEFAULT_POOL, 0.0)
+    if primary_tier == window_records.DecoderTier.STRONG.value:
+        return _PoolMeasures(
+            weak_queue_max=0,
+            strong_queue_max=default_queue_max,
+            weak_busy_fraction=0.0,
+            strong_busy_fraction=default_busy_fraction,
+        )
+    weak_queue_max = default_queue_max
     strong_queue_max = peaks.get(decode_queue.STRONG_POOL, 0)
-    weak_busy_fraction = busy.get(decode_queue.DEFAULT_POOL, 0.0)
+    weak_busy_fraction = default_busy_fraction
     strong_busy_fraction = busy.get(decode_queue.STRONG_POOL, 0.0)
     return _PoolMeasures(
         weak_queue_max=weak_queue_max,

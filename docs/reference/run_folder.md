@@ -57,7 +57,7 @@ its maximum.
 | `direct_failure`, `direct_mismatch` | the same shot decoded straight through PyMatching outside the machine, and whether the machine disagreed with it |
 | `throughput_windows_per_us`, `throughput_rounds_per_us` | what the machine got through |
 | `max_queued_windows` | the deepest the ready queue ever got |
-| `weak_queue_max`, `strong_queue_max` | the deepest each tier's own ready queue got, in jobs; zero for a tier the run lacks |
+| `weak_queue_max`, `strong_queue_max` | the deepest each tier's own ready queue got, in jobs; the tier that decodes the plan's windows owns the default pool's number, so under strong_only it is the strong column; zero for a tier the run lacks |
 | `weak_busy_fraction`, `strong_busy_fraction` | the time-weighted fraction of each tier's units whose compute was busy |
 | `escalated_windows`, `strong_decoded_rounds`, `strong_service_mean_us` | the windows the strong tier committed, the rounds its decodes read, and their mean service |
 | `parallel_processes_needed` | Skoric's least count of parallel decoding processes for no backlog, ceil(2 tau_W / ((n_com + n_W) tau_rd)) from this shot's mean service (2209.08552 lines 429-438) |

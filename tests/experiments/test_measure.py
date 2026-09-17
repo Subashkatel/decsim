@@ -435,6 +435,24 @@ def test_the_pool_columns_read_each_tiers_own_queue_and_units(tmp_path):
     assert two_units.weak_busy_fraction == one_unit.weak_busy_fraction / 2
 
 
+def test_a_strong_primary_runs_pool_columns_are_the_strong_tiers():
+    """Under strong_only the default pool's numbers are the strong tier's.
+
+    The plan's windows queue in the default pool whichever tier decodes
+    them (decode_queue.POOL_BY_JOB_KIND), and under strong_only that
+    tier is the strong one, so its queue peak and busy fraction belong
+    in the strong columns and the weak columns read zero, the mirror of
+    test_the_pool_columns_read_each_tiers_own_queue_and_units.
+    """
+    shot = shipped_shot("strong_decoder_baseline.yaml")
+    measurement = measure.measure_shot(shot)
+
+    assert measurement.weak_queue_max == 0
+    assert measurement.weak_busy_fraction == 0.0
+    assert measurement.strong_queue_max == measurement.max_queued_windows
+    assert measurement.strong_busy_fraction > 0.0
+
+
 def test_skorics_process_count_is_two_services_over_the_window_period(
     tmp_path,
 ):

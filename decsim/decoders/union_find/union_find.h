@@ -65,7 +65,9 @@ enum union_find_status {
  * forest_depth is the deepest parent chain of the trees the peel walks,
  * a root at zero, which is how many levels the peel's flags and
  * completions cross (Helios processing_unit_single_FPGA_v2.v lines
- * 236-266).
+ * 236-266). The boundary is a flag an element carries rather than an
+ * element, so a tree the peel roots at the boundary node counts from
+ * the elements below it.
  */
 int32_t union_find_decode(
     int32_t detector_count, int32_t edge_count, const int32_t *endpoint_a,

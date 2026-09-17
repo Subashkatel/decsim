@@ -21,6 +21,8 @@ import decsim.config as config
 import decsim.decoders.staged_decoder as staged_decoder
 import decsim.decoders.union_find.cycle_count as cycle_count_module
 import decsim.decoders.union_find.decoder as union_find
+import decsim.decoders.union_find.window_decoder as window_decoder
+import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.engine as engine_module
 import decsim.records.decoder_evidence as evidence_records
 import tests.decoders.test_union_find_decoder as hand_graph
@@ -37,6 +39,41 @@ HELIOS = cycle_count_module.CycleCount(CLOCK, delay_cycles=3, cycles_per_hop=3)
 # every edge of the twelve-detector graph is this long in half ticks,
 # and both ends of the one between two defects grow
 HAND_GRAPH_TICKS = 22
+
+GRAPHLIKE = fault_models.FaultRepresentation.GRAPHLIKE
+# detector 0 carries the defect; faults 0 and 1 reach the quiet
+# detectors 1 and 2, fault 2 is the boundary edge
+QUIET_NEIGHBOUR_CHECK = ((1, 1, 1), (1, 0, 0), (0, 1, 0))
+QUIET_NEIGHBOUR_PRIORS = (0.1, 0.1, 0.1)
+# the log-odds of that prior, so round(weight / weight_step) is one
+ONE_TICK_WEIGHT_STEP = 2.0
+
+
+def lone_defect_graph() -> evidence_records.UnionFindGraph:
+    """Detector 0 with two quiet neighbours and a boundary edge.
+
+    Every prior is the same, and the weight step is that prior's
+    log-odds, so every edge is one weight tick, two half ticks, which is
+    the weight Helios gives every edge of its grid
+    (single_FPGA_FIFO_verification_test_rsc.sv, WEIGHT_X and WEIGHT_Z).
+    """
+    check = numpy.asarray(QUIET_NEIGHBOUR_CHECK, dtype=numpy.uint8)
+    priors = numpy.asarray(QUIET_NEIGHBOUR_PRIORS, dtype=float)
+    fault_count = len(QUIET_NEIGHBOUR_PRIORS)
+    observables = numpy.zeros((1, fault_count), dtype=numpy.uint8)
+    owned = numpy.ones(fault_count, dtype=bool)
+    placed = fault_models.PlacedFaultModel(
+        representation=GRAPHLIKE,
+        check=check,
+        priors=priors,
+        observables=observables,
+        owned=owned,
+        source_fault_ids=tuple(range(fault_count)),
+        boundary_flips={},
+    )
+    return window_decoder.graph_from_model(
+        placed, location="one defect", weight_step=ONE_TICK_WEIGHT_STEP
+    )
 
 
 def evidence_with(steps, detector_count=5, edge_count=4, forest_depth=0):
@@ -98,17 +135,23 @@ def test_two_adjacent_defects_cost_sixteen_cycles():
 
 
 def test_a_lone_defect_beside_the_boundary_costs_nineteen_cycles():
-    """Two growth ticks, a fusion that moves no parity, a peel of depth one.
+    """The third traced machine, decoded: two ticks, a quiet join, a peel.
 
-    The defect's edges are two half ticks and grow from its end alone,
-    so the step spans two iterations, and the quiet neighbours and the
-    boundary it takes in move roots and the touching flag only:
-    1 + 2 x (2 + 3) + 1 + (3 + 2 + 2).
+    One defect with two quiet neighbours and a boundary edge, every edge
+    two half ticks. The edges grow from the defect's end alone, so the
+    step spans two iterations; the neighbours and the boundary it takes
+    in move roots and the touching flag only; the peel walks the one
+    level below the boundary: 1 + 2 x (2 + 3) + 1 + (3 + 2 + 2).
     """
-    step = evidence_records.GrowthStep(
-        edge_count=3, hop_count=1, growth_ticks=2, odd_fusion=False
-    )
-    evidence = evidence_with([step], forest_depth=1)
+    graph = lone_defect_graph()
+    syndrome = numpy.asarray([1, 0, 0], dtype=numpy.uint8)
+    evidence = window_decoder.decode_graph(graph, syndrome)
+
+    lengths = set()
+    for edge in graph.edges:
+        lengths.add(edge.length_half_ticks)
+    assert lengths == {2}
+    assert evidence.forest_depth == 1
     assert HELIOS.cycles(evidence) == 19
 
 

@@ -1060,14 +1060,20 @@ static int32_t walk_tree(struct workspace *workspace, int32_t root) {
 
 /* Each node's level below the root of its tree, the root at zero, and
  * the deepest of them returned. walk_tree leaves a parent before its
- * children in tree_order, so one pass over that order fills them. */
-static int32_t tree_depth(struct workspace *workspace, int32_t order_count) {
+ * children in tree_order, so one pass over that order fills them.
+ *
+ * The boundary is a flag an element carries, not an element of its own,
+ * so it is no level of the tree: the nodes the peel roots at the
+ * boundary node stand at level zero beside the roots of every other
+ * tree. */
+static int32_t tree_depth(struct workspace *workspace, int32_t order_count,
+                          int32_t boundary_node) {
   int32_t deepest = 0;
   for (int32_t position = 0; position < order_count; ++position) {
     int32_t node = workspace->tree_order[position];
     int32_t parent = workspace->parent_node[node];
     int32_t level = 0;
-    if (parent >= 0) {
+    if (parent >= 0 && parent != boundary_node) {
       level = workspace->node_level[parent] + 1;
     }
     workspace->node_level[node] = level;
@@ -1102,7 +1108,7 @@ static int32_t peel_tree(struct workspace *workspace,
     selected_edges[workspace->parent_edge[node]] = 1;
     workspace->residual_defect[workspace->parent_node[node]] ^= 1;
   }
-  return tree_depth(workspace, order_count);
+  return tree_depth(workspace, order_count, boundary_node);
 }
 
 static int32_t component_carries_a_defect(const struct workspace *workspace,

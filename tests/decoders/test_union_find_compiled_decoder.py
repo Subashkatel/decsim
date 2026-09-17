@@ -341,6 +341,17 @@ def test_the_peel_depth_is_the_deepest_chain_of_the_trees_it_walks():
     assert evidence.forest_depth == 3
 
 
+def test_the_boundary_is_no_level_of_the_tree_the_peel_walks():
+    """Rows 8 and 11 leave a forest the peel roots at the boundary node.
+
+    The boundary is a flag an element carries rather than an element, so
+    rows 8 and 11 stand at the root's level and rows 9 and 10 one below.
+    """
+    evidence = evidence_of([8, 11])
+    assert evidence.erasure_forest_faults == (8, 9, 11, 12)
+    assert evidence.forest_depth == 1
+
+
 def test_the_graph_emits_its_edges_in_increasing_fault_order():
     """The contract union_find.h states: an edge index is a fault order.
 

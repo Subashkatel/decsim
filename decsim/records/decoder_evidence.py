@@ -47,11 +47,18 @@ class GrowthStep:
     deepest flood over closed edges from the root of any cluster the step
     fused, the stages a cluster identifier and its parity take to cross
     the cluster (Helios 2301.08419 lines 623-629); zero when the step
-    fused nothing.
+    fused nothing. growth_ticks is the ticks the step spanned, which is
+    the one-unit growth iterations a unit that grows one unit of weight
+    at a time spends on it (lines 1053-1063, latency growing with the
+    weight resolution). odd_fusion is true when a fusion of the step
+    joined two odd clusters, the fusion whose parity has to cross the
+    cluster it fused.
     """
 
     edge_count: int
     hop_count: int
+    growth_ticks: int
+    odd_fusion: bool
 
 
 @dataclasses.dataclass(frozen=True)
@@ -99,6 +106,9 @@ class UnionFindHardEvidence:
     unmatched_detectors: tuple[int, ...] = ()
     # one GrowthStep per growth step, in order, for the cycle count
     growth_steps: tuple[GrowthStep, ...] = ()
+    # the deepest parent chain of the trees the peel walked, a root at
+    # zero: the levels the peel's flags and completions cross
+    forest_depth: int = 0
 
 
 def normalized_weight_step(weight_step) -> float:

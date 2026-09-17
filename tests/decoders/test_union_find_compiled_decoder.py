@@ -16,11 +16,13 @@ with no detector at all, a prior of exactly one half, priors above one
 half, duplicate columns and ties in edge length.
 
 The growth steps the C reports beside its decisions, one per step with
-the boundary edges the step advanced and the deepest flood over grown
+the boundary edges the step advanced, the deepest flood over grown
 edges from a fused cluster's root, not through the boundary (Helios
-2301.08419 lines 623-629), are checked by hand on the twelve-detector
-graph of test_union_find_decoder.py: a chain with a boundary edge at
-each end and two four-cycles.
+2301.08419 lines 623-629), the ticks the step spanned and whether it
+fused two odd clusters, and the depth of the forest the peel walked,
+are checked by hand on the twelve-detector graph of
+test_union_find_decoder.py: a chain with a boundary edge at each end
+and two four-cycles.
 """
 
 import ctypes.util
@@ -62,6 +64,12 @@ CIRCUIT_SEED = 5
 LARGE_DISTANCES = (11, 13)
 LARGE_PROBABILITY = 0.005
 LARGE_SHOTS = 30
+
+# every prior of the hand graph is 0.1, so every edge is this long; a
+# front covers one half tick per tick, so an edge with one growing end
+# closes in this many ticks and one with two in half as many
+EDGE_HALF_TICKS = 44
+BOTH_ENDS_TICKS = EDGE_HALF_TICKS // 2
 
 RANDOM_GRAPH_COUNT = 200
 RANDOM_GRAPH_SEED = 11
@@ -241,17 +249,30 @@ def hand_graph_of():
     )
 
 
-def steps_of(defect_rows) -> tuple:
+def evidence_of(defect_rows):
     syndrome = numpy.zeros(hand_graph.DETECTOR_COUNT, dtype=numpy.uint8)
     syndrome[list(defect_rows)] = 1
     placed = hand_graph_of()
-    evidence = window_decoder.decode_graph(placed, syndrome)
+    return window_decoder.decode_graph(placed, syndrome)
+
+
+def steps_of(defect_rows) -> tuple:
+    evidence = evidence_of(defect_rows)
     return evidence.growth_steps
 
 
 def test_two_adjacent_defects_take_one_step_over_three_edges_one_hop():
-    """Rows 8 and 9 each grow along two edges, sharing the one between."""
-    step = evidence_records.GrowthStep(edge_count=3, hop_count=1)
+    """Rows 8 and 9 each grow along two edges, sharing the one between.
+
+    Both ends of the shared edge grow, so it closes in half its length
+    in ticks, and the two odd clusters fuse.
+    """
+    step = evidence_records.GrowthStep(
+        edge_count=3,
+        hop_count=1,
+        growth_ticks=BOTH_ENDS_TICKS,
+        odd_fusion=True,
+    )
     assert steps_of([8, 9]) == (step,)
 
 
@@ -260,9 +281,21 @@ def test_a_lone_defect_grows_twice_and_its_flood_deepens_each_step():
 
     The second flood runs from row 8, the cluster's root, to row 11,
     three hops; the boundary is one hop further and is not counted.
+    Every edge grows from its one odd end, so each step spans the whole
+    edge length, and the quiet neighbours it takes in are even.
     """
-    first = evidence_records.GrowthStep(edge_count=2, hop_count=2)
-    second = evidence_records.GrowthStep(edge_count=2, hop_count=3)
+    first = evidence_records.GrowthStep(
+        edge_count=2,
+        hop_count=2,
+        growth_ticks=EDGE_HALF_TICKS,
+        odd_fusion=False,
+    )
+    second = evidence_records.GrowthStep(
+        edge_count=2,
+        hop_count=3,
+        growth_ticks=EDGE_HALF_TICKS,
+        odd_fusion=False,
+    )
     assert steps_of([10]) == (first, second)
 
 
@@ -272,17 +305,40 @@ def test_the_flood_does_not_pass_through_the_boundary():
     They fuse into one cluster through the boundary node, and the
     flood from row 8 stops there, so the deepest hop is one.
     """
-    step = evidence_records.GrowthStep(edge_count=4, hop_count=1)
+    step = evidence_records.GrowthStep(
+        edge_count=4,
+        hop_count=1,
+        growth_ticks=EDGE_HALF_TICKS,
+        odd_fusion=True,
+    )
     assert steps_of([8, 11]) == (step,)
 
 
 def test_opposite_corners_of_a_four_cycle_fuse_at_depth_two():
-    step = evidence_records.GrowthStep(edge_count=4, hop_count=2)
+    step = evidence_records.GrowthStep(
+        edge_count=4,
+        hop_count=2,
+        growth_ticks=EDGE_HALF_TICKS,
+        odd_fusion=True,
+    )
     assert steps_of([0, 2]) == (step,)
 
 
-def test_an_empty_syndrome_takes_no_step():
-    assert steps_of([]) == ()
+def test_an_empty_syndrome_takes_no_step_and_peels_no_tree():
+    evidence = evidence_of([])
+    assert evidence.growth_steps == ()
+    assert evidence.forest_depth == 0
+
+
+def test_the_peel_depth_is_the_deepest_chain_of_the_trees_it_walks():
+    """Rows 0 and 2 leave the four-cycle's forest as one path of four.
+
+    Kruskal drops the fourth edge of the cycle, so the tree is row 0 at
+    the root with rows 1, 2 and 3 below it, three levels deep.
+    """
+    evidence = evidence_of([0, 2])
+    assert evidence.erasure_forest_faults == (0, 1, 2)
+    assert evidence.forest_depth == 3
 
 
 def test_the_graph_emits_its_edges_in_increasing_fault_order():

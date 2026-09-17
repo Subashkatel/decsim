@@ -72,8 +72,12 @@ def evidence_with(steps, detector_count=5, edge_count=4):
 def test_the_count_is_setup_plus_the_steps_plus_the_drain():
     """Each step is the larger of its critical path and its spread work."""
     steps = [
-        evidence_records.GrowthStep(edge_count=3, hop_count=1),
-        evidence_records.GrowthStep(edge_count=10, hop_count=2),
+        evidence_records.GrowthStep(
+            edge_count=3, hop_count=1, growth_ticks=1, odd_fusion=True
+        ),
+        evidence_records.GrowthStep(
+            edge_count=10, hop_count=2, growth_ticks=1, odd_fusion=True
+        ),
     ]
     evidence = evidence_with(steps, detector_count=5, edge_count=4)
     assert HELIOS.cycles(evidence) == 11 + (4 + 3) + (4 + 6)
@@ -102,7 +106,9 @@ def test_the_count_ends_on_the_edge_of_its_own_clock():
     A unit standing mid-cycle first reaches the next edge, as every
     stage does (config.Clock.edge, after gem5's clockEdge).
     """
-    one_step = evidence_records.GrowthStep(edge_count=3, hop_count=1)
+    one_step = evidence_records.GrowthStep(
+        edge_count=3, hop_count=1, growth_ticks=1, odd_fusion=True
+    )
     evidence = evidence_with([one_step])
     no_step = evidence_with([])
     assert HELIOS.ticks(evidence, 0) == 18 * CYCLE_TICKS

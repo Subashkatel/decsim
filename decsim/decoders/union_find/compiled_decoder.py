@@ -73,6 +73,9 @@ _DECODE_ARGUMENT_TYPES = [
     _INDEX_ARRAY,
     _INDEX_ARRAY,
     _INDEX_ARRAY,
+    _TICK_ARRAY,
+    _BIT_ARRAY,
+    _INDEX_ARRAY,
     _INDEX_ARRAY,
 ]
 _CLUSTER_GAP_ARGUMENT_TYPES = [
@@ -101,6 +104,8 @@ class GrowthOutcome:
     forest_edges: tuple
     # one GrowthStep per growth step, the cycle count's input
     growth_steps: tuple
+    # the deepest parent chain of the trees the peel walked
+    forest_depth: int
 
 
 def decode(graph: evidence_records.UnionFindGraph, residual_syndrome):
@@ -117,7 +122,10 @@ def decode(graph: evidence_records.UnionFindGraph, residual_syndrome):
     forest_count = numpy.zeros(1, dtype=numpy.int32)
     step_edge_counts = numpy.zeros(edge_count, dtype=numpy.int32)
     step_hop_counts = numpy.zeros(edge_count, dtype=numpy.int32)
+    step_growth_ticks = numpy.zeros(edge_count, dtype=numpy.int64)
+    step_odd_fusions = numpy.zeros(edge_count, dtype=numpy.uint8)
     step_count = numpy.zeros(1, dtype=numpy.int32)
+    forest_depth = numpy.zeros(1, dtype=numpy.int32)
     decode_window = entry_point()
     status = decode_window(
         graph.detector_count,
@@ -136,20 +144,31 @@ def decode(graph: evidence_records.UnionFindGraph, residual_syndrome):
         forest_count,
         step_edge_counts,
         step_hop_counts,
+        step_growth_ticks,
+        step_odd_fusions,
         step_count,
+        forest_depth,
     )
     _refuse_failure(status)
     selected_edges = _selected_edges(selected)
     edge_intervals = _intervals(is_closed, lower_tick, upper_tick)
     contact_edges = _prefix(contacts, contact_count)
     forest_edges = _prefix(forest, forest_count)
-    growth_steps = _growth_steps(step_edge_counts, step_hop_counts, step_count)
+    growth_steps = _growth_steps(
+        step_edge_counts,
+        step_hop_counts,
+        step_growth_ticks,
+        step_odd_fusions,
+        step_count,
+    )
+    depth = int(forest_depth[0])
     return GrowthOutcome(
         selected_edges=selected_edges,
         edge_intervals=edge_intervals,
         contact_edges=contact_edges,
         forest_edges=forest_edges,
         growth_steps=growth_steps,
+        forest_depth=depth,
     )
 
 
@@ -332,12 +351,23 @@ def _open_bounds(interval, is_closed: bool) -> tuple:
     return interval.lower_tick, interval.upper_tick
 
 
-def _growth_steps(step_edge_counts, step_hop_counts, step_count) -> tuple:
+def _growth_steps(
+    step_edge_counts,
+    step_hop_counts,
+    step_growth_ticks,
+    step_odd_fusions,
+    step_count,
+) -> tuple:
     edge_counts = _prefix(step_edge_counts, step_count)
     hop_counts = _prefix(step_hop_counts, step_count)
+    growth_ticks = _prefix(step_growth_ticks, step_count)
+    odd_fusions = _prefix(step_odd_fusions, step_count)
+    rows = zip(edge_counts, hop_counts, growth_ticks, odd_fusions)
     steps = []
-    for edge_count, hop_count in zip(edge_counts, hop_counts):
-        step = evidence_records.GrowthStep(edge_count, hop_count)
+    for edge_count, hop_count, ticks, odd_fusion in rows:
+        step = evidence_records.GrowthStep(
+            edge_count, hop_count, ticks, bool(odd_fusion)
+        )
         steps.append(step)
     return tuple(steps)
 

@@ -70,6 +70,7 @@ struct workspace {
   int32_t *tree_order;
   int32_t *parent_node;
   int32_t *parent_edge;
+  int32_t *node_level;
   uint8_t *has_parent;
   uint8_t *residual_defect;
   uint8_t *is_visited;
@@ -115,6 +116,7 @@ static void release_workspace(struct workspace *workspace) {
   free(workspace->tree_order);
   free(workspace->parent_node);
   free(workspace->parent_edge);
+  free(workspace->node_level);
   free(workspace->has_parent);
   free(workspace->residual_defect);
   free(workspace->is_visited);
@@ -174,6 +176,7 @@ static int32_t take_workspace(struct workspace *workspace, int32_t node_count,
   workspace->tree_order = allocate_array(node_count, sizeof(int32_t), &taken);
   workspace->parent_node = allocate_array(node_count, sizeof(int32_t), &taken);
   workspace->parent_edge = allocate_array(node_count, sizeof(int32_t), &taken);
+  workspace->node_level = allocate_array(node_count, sizeof(int32_t), &taken);
   workspace->has_parent = allocate_array(node_count, sizeof(uint8_t), &taken);
   workspace->residual_defect =
       allocate_array(node_count, sizeof(uint8_t), &taken);
@@ -278,14 +281,21 @@ static void splice_edge_list(struct workspace *workspace, int32_t survivor,
   workspace->cluster_edge_tail[absorbed] = -1;
 }
 
-static void fuse_clusters(struct workspace *workspace, int32_t left,
-                          int32_t right) {
+/* One is returned when the two clusters were both odd, which is the
+ * fusion whose parity has to cross the fused cluster. */
+static int32_t fuse_clusters(struct workspace *workspace, int32_t left,
+                             int32_t right) {
+  int32_t left_root = find_root(workspace->parent, left);
+  int32_t right_root = find_root(workspace->parent, right);
+  int32_t joins_two_odd = workspace->parity[left_root];
+  joins_two_odd &= workspace->parity[right_root];
   int32_t absorbed = union_nodes(workspace, left, right);
   if (absorbed < 0) {
-    return;
+    return 0;
   }
   int32_t survivor = find_root(workspace->parent, absorbed);
   splice_edge_list(workspace, survivor, absorbed);
+  return joins_two_odd;
 }
 
 /* Every node alone in its own cluster; the boundary node carries no
@@ -581,18 +591,21 @@ static int32_t collect_closing_batch(const struct workspace *workspace,
   return contact_count;
 }
 
-static void fuse_contact_batch(struct workspace *workspace,
-                               const struct graph_arrays *graph,
-                               const int32_t *contact_edges, int32_t start,
-                               int32_t end) {
+/* One is returned when any fusion of the batch joined two odd clusters. */
+static int32_t fuse_contact_batch(struct workspace *workspace,
+                                  const struct graph_arrays *graph,
+                                  const int32_t *contact_edges, int32_t start,
+                                  int32_t end) {
+  int32_t joins_two_odd = 0;
   for (int32_t position = start; position < end; ++position) {
     int32_t edge = contact_edges[position];
     int32_t node_a =
         endpoint_node(graph->endpoint_a[edge], graph->detector_count);
     int32_t node_b =
         endpoint_node(graph->endpoint_b[edge], graph->detector_count);
-    fuse_clusters(workspace, node_a, node_b);
+    joins_two_odd |= fuse_clusters(workspace, node_a, node_b);
   }
+  return joins_two_odd;
 }
 
 static int32_t orders_by_length(const int64_t *length_half_ticks, int32_t left,
@@ -860,7 +873,9 @@ static int32_t grow_clusters(struct workspace *workspace,
                              int64_t *interval_upper_tick,
                              int32_t *contact_edges, int32_t *contact_count,
                              int32_t *step_edge_counts,
-                             int32_t *step_hop_counts, int32_t *step_count) {
+                             int32_t *step_hop_counts,
+                             int64_t *step_growth_ticks,
+                             uint8_t *step_odd_fusions, int32_t *step_count) {
   link_edge_entries(workspace, graph);
   *contact_count =
       collect_closed_contacts(graph, interval_is_closed, contact_edges);
@@ -896,13 +911,15 @@ static int32_t grow_clusters(struct workspace *workspace,
     *contact_count = collect_closing_batch(workspace, working_count,
                                            elapsed_ticks, contact_edges,
                                            batch_start);
-    fuse_contact_batch(workspace, graph, contact_edges, batch_start,
-                       *contact_count);
+    int32_t joins_two_odd = fuse_contact_batch(
+        workspace, graph, contact_edges, batch_start, *contact_count);
     event_count += 1;
     if (event_count > graph->edge_count) {
       return union_find_growth_bound_exceeded;
     }
     step_edge_counts[event_count - 1] = working_count;
+    step_growth_ticks[event_count - 1] = elapsed_ticks;
+    step_odd_fusions[event_count - 1] = (uint8_t)joins_two_odd;
     step_hop_counts[event_count - 1] =
         fused_flood_hops(workspace, graph, interval_is_closed, contact_edges,
                          batch_start, *contact_count);
@@ -1041,13 +1058,34 @@ static int32_t walk_tree(struct workspace *workspace, int32_t root) {
   return order_count;
 }
 
+/* Each node's level below the root of its tree, the root at zero, and
+ * the deepest of them returned. walk_tree leaves a parent before its
+ * children in tree_order, so one pass over that order fills them. */
+static int32_t tree_depth(struct workspace *workspace, int32_t order_count) {
+  int32_t deepest = 0;
+  for (int32_t position = 0; position < order_count; ++position) {
+    int32_t node = workspace->tree_order[position];
+    int32_t parent = workspace->parent_node[node];
+    int32_t level = 0;
+    if (parent >= 0) {
+      level = workspace->node_level[parent] + 1;
+    }
+    workspace->node_level[node] = level;
+    if (level > deepest) {
+      deepest = level;
+    }
+  }
+  return deepest;
+}
+
 /* Peel one tree leaf to root: a node that still carries a defect
  * selects its parent edge and flips its parent. An odd component
  * without the boundary leaves its root's defect behind, and the caller
  * reports that detector as unmatched. */
-static void peel_tree(struct workspace *workspace, int32_t component_count,
-                      int32_t root, const uint8_t *residual_syndrome,
-                      int32_t boundary_node, uint8_t *selected_edges) {
+static int32_t peel_tree(struct workspace *workspace,
+                         int32_t component_count, int32_t root,
+                         const uint8_t *residual_syndrome,
+                         int32_t boundary_node, uint8_t *selected_edges) {
   for (int32_t position = 0; position < component_count; ++position) {
     int32_t node = workspace->component_nodes[position];
     workspace->residual_defect[node] = 0;
@@ -1064,6 +1102,7 @@ static void peel_tree(struct workspace *workspace, int32_t component_count,
     selected_edges[workspace->parent_edge[node]] = 1;
     workspace->residual_defect[workspace->parent_node[node]] ^= 1;
   }
+  return tree_depth(workspace, order_count);
 }
 
 static int32_t component_carries_a_defect(const struct workspace *workspace,
@@ -1094,15 +1133,17 @@ static int32_t component_holds_the_boundary(const struct workspace *workspace,
 }
 
 /* Every component is met from its smallest node, which is its root
- * unless the boundary is in it. A component with no defect is skipped. */
-static void peel_forest(struct workspace *workspace,
-                        const struct graph_arrays *graph,
-                        const uint8_t *residual_syndrome,
-                        const int32_t *forest_edges, int32_t forest_count,
-                        uint8_t *selected_edges) {
+ * unless the boundary is in it. A component with no defect is skipped,
+ * and the deepest tree the peel walks is returned. */
+static int32_t peel_forest(struct workspace *workspace,
+                           const struct graph_arrays *graph,
+                           const uint8_t *residual_syndrome,
+                           const int32_t *forest_edges, int32_t forest_count,
+                           uint8_t *selected_edges) {
   build_forest_adjacency(workspace, graph, forest_edges, forest_count);
   int32_t node_count = graph->detector_count + 1;
   int32_t boundary_node = graph->detector_count;
+  int32_t deepest = 0;
   for (int32_t start = 0; start < node_count; ++start) {
     if (workspace->is_visited[start]) {
       continue;
@@ -1117,9 +1158,14 @@ static void peel_forest(struct workspace *workspace,
                                      boundary_node)) {
       root = boundary_node;
     }
-    peel_tree(workspace, component_count, root, residual_syndrome,
-              boundary_node, selected_edges);
+    int32_t depth = peel_tree(workspace, component_count, root,
+                              residual_syndrome, boundary_node,
+                              selected_edges);
+    if (depth > deepest) {
+      deepest = depth;
+    }
   }
+  return deepest;
 }
 
 int32_t union_find_decode(
@@ -1129,7 +1175,9 @@ int32_t union_find_decode(
     uint8_t *interval_is_closed, int64_t *interval_lower_tick,
     int64_t *interval_upper_tick, int32_t *contact_edges,
     int32_t *contact_count, int32_t *forest_edges, int32_t *forest_count,
-    int32_t *step_edge_counts, int32_t *step_hop_counts, int32_t *step_count) {
+    int32_t *step_edge_counts, int32_t *step_hop_counts,
+    int64_t *step_growth_ticks, uint8_t *step_odd_fusions,
+    int32_t *step_count, int32_t *forest_depth) {
   struct graph_arrays graph;
   graph.detector_count = detector_count;
   graph.edge_count = edge_count;
@@ -1139,6 +1187,7 @@ int32_t union_find_decode(
   *contact_count = 0;
   *forest_count = 0;
   *step_count = 0;
+  *forest_depth = 0;
   struct workspace workspace;
   if (!take_workspace(&workspace, detector_count + 1, edge_count)) {
     release_workspace(&workspace);
@@ -1151,15 +1200,15 @@ int32_t union_find_decode(
   int32_t status = grow_clusters(
       &workspace, &graph, interval_is_closed, interval_lower_tick,
       interval_upper_tick, contact_edges, contact_count, step_edge_counts,
-      step_hop_counts, step_count);
+      step_hop_counts, step_growth_ticks, step_odd_fusions, step_count);
   if (status != union_find_ok) {
     release_workspace(&workspace);
     return status;
   }
   *forest_count = contact_forest(&workspace, &graph, contact_edges,
                                  *contact_count, forest_edges);
-  peel_forest(&workspace, &graph, residual_syndrome, forest_edges,
-              *forest_count, selected_edges);
+  *forest_depth = peel_forest(&workspace, &graph, residual_syndrome,
+                              forest_edges, *forest_count, selected_edges);
   release_workspace(&workspace);
   return union_find_ok;
 }

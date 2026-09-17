@@ -138,13 +138,14 @@ somewhere, and where it resumes is the **restart window**
 weak decode reads is `restart_reread_buffer_regions`, which defaults to
 the paper's value.
 
-This is also why the two stores exist. The weak syndrome buffer streams to the weak
-tier round by round as the rounds arrive. The strong syndrome buffer keeps the same rounds
-for a strong re-decode that may be asked for later, in bulk, once its
-boundaries are known. A round may not be dropped from either store while
-any consumer still holds it, and `PotentialStrong` and
-`PotentialRestart` are exactly the tokens that say a re-decode or a
-restart might still need it.
+This is also why the weak syndrome buffer holds rounds past their weak
+decode. It streams to the weak tier round by round as the rounds arrive,
+and it keeps every round a strong re-decode may still ask for, until the
+verdict is in and, on an escalation, until the region has crossed to
+the strong syndrome buffer, which holds only what escalations carried
+up. A round may not be dropped from either store while any consumer
+still holds it, and `PotentialStrong` and `PotentialRestart` are exactly
+the tokens that say a re-decode or a restart might still need it.
 
 ## What it costs
 
@@ -153,8 +154,9 @@ Everything above has a price, and decsim's point is to charge all of it:
 - the second decode, if the confidence signal needs one;
 - the signal's own computation, charged on the weak unit that produced
   the evidence;
-- the escalation's own hop, `weak_decoder_to_strong_decoder`, which
-  carries only the selection;
+- the escalation's own hop, `weak_decoder_to_strong_decoder`, twice:
+  the selection, then the strong region's rounds out of the weak
+  syndrome buffer;
 - the strong region's transfer out of the strong syndrome buffer;
 - the store capacity the holds occupy while a re-decode might still be
   asked for;

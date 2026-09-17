@@ -161,6 +161,9 @@ class StrongWindowShape(Protocol):
     ) -> Optional[decoding_records.DecodeJob]:
         """The held job, once its rounds are there; None while they are not."""
 
+    def rounds_to_carry(self, assignment: StrongAssignment) -> tuple:
+        """The rounds the row reads that the strong side does not have yet."""
+
 
 class ContextWindow(StrongWindowPorts):
     """The commit region and one buffer of raw context on each side.
@@ -178,12 +181,11 @@ class ContextWindow(StrongWindowPorts):
     The job is built as soon as its context is stored in the strong
     syndrome buffer, and priced for the context rounds that exist: a
     window at the operation's edge has a shorter context than commit + 2 buffer.
-    A context round still crossing controller_to_strong_buffer holds the
-    job instead, because Step 1 feeds both decoders the same data and a
-    model that prices transport starts the strong decoder when its copy
-    lands (the paper's Monte-Carlo simulations set T_comm^strong to ten
-    times T_comm^weak, lines 1109-1114; its Table I is a notation table
-    and prices nothing). This shape absorbs no weak window, so its
+    Every context round is measured by the verdict, so the redecode
+    carries them all up with the escalation and the job is held until
+    they land (the paper's Monte-Carlo simulations set T_comm^strong to
+    ten times T_comm^weak, lines 1109-1114; its Table I is a notation
+    table and prices nothing). This shape absorbs no weak window, so its
     window_absorbed source is the silent one.
 
     Both faces are read raw, so the row folds no neighbour boundary
@@ -221,6 +223,10 @@ class ContextWindow(StrongWindowPorts):
     ) -> Optional[decoding_records.DecodeJob]:
         """The job, once every context round that arrived is stored."""
         return _job_once_stored(self, assignment.held_plan)
+
+    def rounds_to_carry(self, assignment: StrongAssignment) -> tuple:
+        """The context rounds the strong syndrome buffer lacks."""
+        return _rounds_not_stored(self, assignment.held_plan)
 
 
 class NearSeamWindow(StrongWindowPorts):
@@ -288,6 +294,10 @@ class NearSeamWindow(StrongWindowPorts):
     ) -> Optional[decoding_records.DecodeJob]:
         """The job, once every round it reads is stored."""
         return _job_once_stored(self, assignment.held_plan)
+
+    def rounds_to_carry(self, assignment: StrongAssignment) -> tuple:
+        """The rounds it reads that the strong syndrome buffer lacks."""
+        return _rounds_not_stored(self, assignment.held_plan)
 
 
 class ForwardWindow(StrongWindowPorts):
@@ -393,12 +403,13 @@ class ForwardWindow(StrongWindowPorts):
     def release_conditions(
         self, assignment: StrongAssignment
     ) -> pending_strong_windows.ReleaseConditions:
-        """The restart window's commit, or the operation's stored tail.
+        """The restart window's commit and then its rounds, or the stored tail.
 
         A strong window bounded by a later weak window waits for that
-        window to commit; one at the end of the stream has no later
-        window, so it waits for the rounds it reads to be stored
-        (Toshio et al. 2510.25222 lines 1248-1250).
+        window to commit, and then for the rounds it reads to be carried
+        up and stored; one at the end of the stream has no later window,
+        so it waits for its stored rounds alone (Toshio et al.
+        2510.25222 lines 1248-1250).
         """
         held = assignment.held_plan
         restart_key = held.resolved_region.restart_window_key
@@ -410,6 +421,7 @@ class ForwardWindow(StrongWindowPorts):
             )
         return pending_strong_windows.ReleaseConditions(
             committed_windows=(restart_key,),
+            stored_data_of_operation=held.key[0],
             name="far_boundary",
             released_description="far-side weak boundary determined",
         )
@@ -417,19 +429,27 @@ class ForwardWindow(StrongWindowPorts):
     def held_job(
         self, assignment: StrongAssignment
     ) -> Optional[decoding_records.DecodeJob]:
-        """The held job, once the rounds it reads are stored.
+        """The held job, once every round it reads is stored.
 
-        A window waiting on a later weak commit reads rounds that were
-        stored long before that commit; a terminal one is released by
-        the stored round itself, so it is the one that can be asked
-        before its tail is there.
+        The rounds the chip has are carried up first; a terminal window's
+        tail is still being measured, so the store must also have been
+        filled through the extent's last round.
         """
         held = assignment.held_plan
-        if held.resolved_region.restart_window_key is None:
-            stored_through = self.regions.strong_rounds_stored(held.key[0])
-            if stored_through < held.resolved_region.plan.context_hi:
-                return None
+        crossing = self.rounds_to_carry(assignment)
+        if crossing:
+            return None
+        stored_through = self.regions.strong_rounds_stored(held.key[0])
+        if stored_through < held.resolved_region.plan.context_hi:
+            return None
         return self._build_strong_job(held)
+
+    def rounds_to_carry(self, assignment: StrongAssignment) -> tuple:
+        """The rounds of its extent that the strong syndrome buffer lacks."""
+        held = assignment.held_plan
+        return self.retention.context_rounds_in_flight(
+            held.key, held.resolved_region.context_round_keys
+        )
 
     # ---- the two facts a row of this geometry declares
 
@@ -767,12 +787,17 @@ def _job_once_stored(
     shape: StrongWindowPorts, held: "_HeldStrongRedo"
 ) -> Optional[decoding_records.DecodeJob]:
     """The job, once every round the window reads is stored."""
-    crossing = shape.retention.context_rounds_in_flight(
-        held.key, held.read_keys
-    )
+    crossing = _rounds_not_stored(shape, held)
     if crossing:
         return None
     return _strong_job_of(shape, held)
+
+
+def _rounds_not_stored(
+    shape: StrongWindowPorts, held: "_HeldStrongRedo"
+) -> tuple:
+    """The rounds the row reads that the strong syndrome buffer lacks."""
+    return shape.retention.context_rounds_in_flight(held.key, held.read_keys)
 
 
 def _log_hold(
@@ -780,7 +805,7 @@ def _log_hold(
     held: "_HeldStrongRedo",
     crossing: tuple,
 ) -> None:
-    """The rounds the window reads are still on controller_to_strong_buffer."""
+    """The rounds the window reads are not on the strong side yet."""
     shape.engine.log(
         log_sources.DECODER_MANAGER,
         f"{held.label}: strong start deferred until the context "

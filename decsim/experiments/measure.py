@@ -45,12 +45,13 @@ POINTS = (
     "csb_stall_per_round",
     # the window's first round readable -> its last (waiting on the QPU)
     "buffer_fill",
-    # the committing decode's input landed in its unit's memory -> the
-    # first tick it may compute: the dependency wait, for the
-    # predecessor's boundary and for the escalation message beside the
-    # input hop, and zero when nothing was owed at the landing. An input
-    # the decode found already there starts this at the tick a unit took
-    # the decode instead
+    # the dependency wait around the committing decode's own hop: from
+    # where its path started, the dispatch or the verdict that escalated
+    # the window, to the first tick it may compute, less the input hop
+    # itself. It is the wait for the escalated rounds to land in the
+    # strong store before the input hop, the predecessor's boundary and
+    # the escalation's selection after it, and zero when nothing was
+    # owed
     "dep_block",
     # that first startable tick -> the compute started: the wait for the
     # unit's own compute, busy with another decode (gem5's fuBusy)
@@ -82,8 +83,12 @@ POINTS = (
     # escalated it: the weak attempt whose result did not commit, zero
     # for a window the first decode committed
     "weak_attempt",
-    # weak decoder -> strong decoder, the escalation hop, zero for a
-    # window that did not escalate
+    # weak decoder -> strong decoder, the escalation hop: from its first
+    # transfer's send to its last transfer's delivery, the selection and
+    # then the rounds the strong store lacked, which the strong input
+    # hop waits for; zero for a window that did not escalate. Under
+    # run_both_at_once the rounds cross at the weak dispatch and the
+    # selection at the verdict, and the span covers both
     "escalation_link_per_window",
     # the decode's end -> the boundary readable in the next window
     "dd_per_window",
@@ -209,10 +214,13 @@ def link_totals(traffic: dict) -> dict:
 
 
 def link_delay_by_window(transfers: list) -> dict:
-    """Ticks from send to delivery by (path, window key), summed per key.
+    """Ticks from the first send to the last delivery by (path, window key).
 
-    A window is named by its operation and its index, never by its index
-    alone: the window record's own key is (operation_id, window_index)
+    A hop's transfers for one window can overlap, as the escalation's
+    selection and its rounds do, so the span is what the window waited
+    on the hop and a sum would count the overlap twice. A window is
+    named by its operation and its index, never by its index alone: the
+    window record's own key is (operation_id, window_index)
     (records/windows.py:79-82 and 144-146), so a workload of several
     streams holds one window 3 per stream and a key without the
     operation would sum every stream's window 3 into one entry. gem5
@@ -224,7 +232,8 @@ def link_delay_by_window(transfers: list) -> dict:
     bucket, commitStats[tid] and thread[tid]->threadStats
     (tmp/resources/gem5/src/cpu/o3/cpu.cc:1156-1174).
     """
-    delay = {}
+    first_send = {}
+    last_delivery = {}
     for row in transfers:
         attribution = row["attribution"]
         recorded_operation = attribution["operation_id"]
@@ -232,8 +241,15 @@ def link_delay_by_window(transfers: list) -> dict:
             recorded_operation
         )
         key = (row["path"], operation_id, attribution["window_id"])
-        transfer_ticks = row["delivery_ticks"] - row["send_ticks"]
-        delay[key] = delay.get(key, 0) + transfer_ticks
+        send = row["send_ticks"]
+        earliest_send = first_send.get(key, send)
+        first_send[key] = min(earliest_send, send)
+        delivery = row["delivery_ticks"]
+        latest_delivery = last_delivery.get(key, delivery)
+        last_delivery[key] = max(latest_delivery, delivery)
+    delay = {}
+    for key, send in first_send.items():
+        delay[key] = last_delivery[key] - send
     return delay
 
 
@@ -381,7 +397,9 @@ def window_points_us(
     The decode's own time and the time it waited are two points, not
     one: a window's service is what its compute took on the unit, and
     the park before that compute is two points by cause. dep_block is
-    the dependency wait, from the input landing in the unit's memory to
+    the dependency wait: from the verdict to the input hop's send, which
+    is a strong decode waiting for its escalated rounds to land in the
+    strong store, and from the input landing in the unit's memory to
     the first tick the decode may start, which is where the
     predecessor's boundary arrived and is the landing itself when
     nothing was owed. compute_wait is the rest, from that tick to the
@@ -413,7 +431,10 @@ def window_points_us(
     attempt_end = _attempt_end_ticks(window, decode, first_dispatch)
     input_key = (input_path, window_id, decode.run_sequence)
     input_ticks, input_landed = input_hop.get(input_key, (0, attempt_end))
+    input_sent = input_landed - input_ticks
     startable = _startable_ticks(decode, input_landed)
+    park = _span_microseconds(startable, input_landed)
+    rounds_wait = _span_microseconds(input_sent, attempt_end)
     confidence_ticks = _confidence_ticks(window, decode)
     last_required_send = qpu_send[last_required_round]
     first_required_send = qpu_send[window.start_round]
@@ -421,7 +442,7 @@ def window_points_us(
         "buffer_fill": _span_microseconds(
             window.t_data_complete, window.t_first_round
         ),
-        "dep_block": _span_microseconds(startable, input_landed),
+        "dep_block": rounds_wait + park,
         "compute_wait": _span_microseconds(
             decode.compute_start_ticks, startable
         ),

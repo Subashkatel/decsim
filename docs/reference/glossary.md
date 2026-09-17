@@ -64,8 +64,10 @@ code's own docstrings cite.
 
 ## The two stores
 
-The controller writes every packed round to both stores at once, when
-both are built. The papers' figures call them the weak syndrome buffer and the strong syndrome buffer.
+The controller writes every packed round into the store its tier reads.
+A switching run's strong syndrome buffer is filled by the escalation,
+which carries the strong window's rounds up from the weak syndrome
+buffer. The papers' figures call them the weak syndrome buffer and the strong syndrome buffer.
 
 | decsim | The papers | What it is for |
 | --- | --- | --- |
@@ -83,10 +85,10 @@ them in order; this is the name list.
 | --- | --- |
 | `qpu_to_controller` | the readout electronics to the control workstation |
 | `controller_to_weak_buffer` | the packed round into the weak syndrome buffer |
-| `controller_to_strong_buffer` | the same round into the strong syndrome buffer |
+| `controller_to_strong_buffer` | a strong-only run's round into the strong syndrome buffer |
 | `weak_buffer_to_weak_decoder` | a window's rounds into a weak unit's memory |
 | `strong_buffer_to_strong_decoder` | the strong region into the strong unit |
-| `weak_decoder_to_strong_decoder` | the escalation's selection, and no payload |
+| `weak_decoder_to_strong_decoder` | the escalation's selection, then the strong window's rounds |
 | `decoder_to_decoder` | one committed window's boundary to the next window |
 | `weak_decoder_to_frame`, `strong_decoder_to_frame` | a correction to the Pauli frame |
 | `frame_to_controller` | the conditional release |

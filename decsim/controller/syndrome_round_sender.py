@@ -127,11 +127,18 @@ class HeldRounds:
 
 
 class SyndromeRoundSender:
-    """Sends a finished round to both syndrome buffers, or holds it.
+    """Sends a finished round to the store its tier reads, or holds it.
 
-    It reserves the room each store's own end answers for and hands the
-    round to the sends; the slot, the copy and the intake line are the
-    receiving end's, at the round's landing there
+    A weak-primary run's round goes into the weak syndrome buffer and
+    stays there: what the strong tier needs of it goes up with the
+    escalation (escalation/strong_redecode.py), never as a second copy
+    (Battistel 2303.00054 lines 342 to 347, a cold first stage exists to
+    keep the rounds off the cryostat I/O). A strong-primary run's window
+    round goes into the strong syndrome buffer over
+    controller_to_strong_buffer, its one transport. The sender reserves
+    the room the store's own end answers for and hands the round to the
+    send; the slot, the copy and the intake line are the receiving
+    end's, at the round's landing there
     (syndrome_buffer/weak_syndrome_round_receiver.py and
     syndrome_buffer/strong_syndrome_round_receiver.py).
     """
@@ -145,7 +152,8 @@ class SyndromeRoundSender:
     # The weak syndrome buffer itself, which the window side either reads its
     # windows from or does not
     weak_store = ports.Port(ports.SyndromeBuffer)
-    # the room side's end; absent on a run that never reads from it
+    # the room side's end, written by a strong-primary run; absent on a run
+    # that never reads from it
     strong_receiver = ports.Port(
         ports.StrongSyndromeRoundReceiver, optional=True
     )
@@ -185,9 +193,9 @@ class SyndromeRoundSender:
         # there: the room is reserved here, and the landing stores and
         # publishes it
         self.weak_receiver.reserve_write()
-        if self.strong_receiver is not None:
-            # the dual write: the same round leaves for the room side in
-            # parallel with its weak syndrome buffer publication
+        if self.publishes_from_strong_store:
+            # a strong-primary run's feedback-memory round: the room side
+            # counts it too, as it counts every round of such a run
             self._write_strong(packed)
         self.transmitter.send(packed)
         return True
@@ -208,7 +216,7 @@ class SyndromeRoundSender:
         return on_window_route and self.publishes_from_strong_store
 
     def _strong_has_room(self) -> bool:
-        if self.strong_receiver is None:
+        if not self.publishes_from_strong_store:
             return True
         return self.strong_receiver.has_room()
 

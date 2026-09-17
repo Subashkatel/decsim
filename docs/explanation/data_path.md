@@ -119,14 +119,17 @@ is the right one.
 
 ### 3. `controller_to_strong_buffer`
 
-The same packed round into the strong syndrome buffer, in parallel. Ends:
-`controller` to `syndrome_buffer`; the send is executed by the
-controller's round sender (`decsim/controller/syndrome_round_sender.py`), and the
-landing is handled by the room side
-(`decsim/syndrome_buffer/strong_syndrome_round_receiver.py`), which reserves the
-room the round will take before it leaves and then stores it with the
-landing tick, or drops it at the door when its operation closed while it
-crossed.
+A strong-only run's packed round into the strong syndrome buffer, its
+one transport. Ends: `controller` to `syndrome_buffer`; the send is
+executed by the controller's round sender
+(`decsim/controller/syndrome_round_sender.py`), and the landing is
+handled by the room side
+(`decsim/syndrome_buffer/strong_syndrome_round_receiver.py`), which
+reserves the room the round will take before it leaves and then stores
+it with the landing tick, or drops it at the door when its operation
+closed while it crossed. A switching run sends nothing on this hop: its
+rounds stay in the weak syndrome buffer, and the strong side gets the
+escalated window's rounds on hop 5.
 
 What crosses: the same round, the same bit count.
 
@@ -170,19 +173,28 @@ access the data stored on-chip"). Default latency 2.0 microseconds.
 
 ### 5. `weak_decoder_to_strong_decoder`
 
-An escalation. Ends: both `decoders`; the send is executed by
-`decsim/decoders/decoder_output.py`, asked for by
-`decsim/escalation/strong_redecode.py`.
+An escalation. Ends: `decoders` to `syndrome_buffer`; the send is
+executed by `decsim/decoders/decoder_output.py`, asked for by
+`decsim/escalation/strong_redecode.py`, and the region's landing is
+handled by the room side
+(`decsim/syndrome_buffer/strong_syndrome_round_receiver.py`).
 
-What crosses: a selection, not data. Which window escalates, and nothing
-else. On the default card the transfer carries no stated payload at all;
-on the bounded card it is charged one bit.
+What crosses: first a selection, which window escalates and nothing
+else, with no payload; then the strong window's rounds, read out of the
+weak syndrome buffer, `r_com + 2 r_buf` of them under Toshio's
+assumption less any the strong side already has, at the width each
+round left the controller (`EscalatedRegion.wire_bits`). A window whose
+rounds are all measured at the verdict carries them with the selection;
+a forward window carries them at the far commit, when its extent is
+known, and a terminal one carries the rest as they arrive (Toshio
+arXiv:2510.25222 lines 1247 to 1250: the syndrome data of `r_strong`
+rounds is assigned to the strong decoder at the switch, after both
+boundaries are determined).
 
-Move, off board. Default latency 0.5 microseconds. This is the one card
-number in the fabric that names no paper: its source string reads
-"repository weak-to-strong model choice". No system read during the
-design work had a weak-to-strong data handoff, because the strong tier
-takes its data from the store rather than from the weak decoder.
+Move, off board, with a copy into the strong syndrome buffer at the
+landing. Default latency 0.5 microseconds. This is the one card number
+in the fabric that names no paper: its source string reads "repository
+weak-to-strong model choice".
 
 ### 6. `strong_buffer_to_strong_decoder`
 
@@ -196,8 +208,9 @@ them under Toshio's assumption, in one transfer. The bit count is again
 
 Move, on board, with the same copy into the unit's memory. Default
 latency 2.0 microseconds. It is on board rather than off board because
-the write into the strong syndrome buffer already crossed boards at hop 3: the strong syndrome buffer sits
-beside the strong decoder.
+the rounds already crossed boards into the strong syndrome buffer, at
+hop 3 or hop 5: the strong syndrome buffer sits beside the strong
+decoder.
 
 ### 7. `decoder_to_decoder`
 

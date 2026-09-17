@@ -60,13 +60,13 @@ INSTRUCTION_WORD_SOURCE = (
 # reports for it (controller/controller.py sends readout.size_bits).
 READOUT_PAYLOAD_SOURCE = "QPUReadout.size_bits"
 
-# The escalation hop carries no bits: the weak decoder names the strong
-# request and the strong input travels on its own hop
-# (decoders/decoder_output.py sends payload_bits=None). The card says so
-# rather than naming a count nothing supplies.
-ESCALATION_PAYLOAD_SOURCE = (
-    "no payload; the escalation names the strong request"
-)
+# The escalation hop carries the strong window's rounds up from the
+# weak syndrome buffer at the width each round left the controller
+# (Toshio et al. 2510.25222 lines 1247 to 1250 assign the region's
+# syndrome data to the strong decoder at the switch; decoders/
+# decoder_output.py send_region). The selection that names the strong
+# request rides the same hop first with no bits.
+ESCALATION_PAYLOAD_SOURCE = "EscalatedRegion.wire_bits"
 
 # The two controller-to-store hops carry the packed round at the width
 # it leaves the controller: the detection events where the controller
@@ -345,9 +345,11 @@ def bandwidth_limited_profile(
     weak_decoder_to_strong_decoder = provisioning.path(
         "weak_decoder_to_strong_decoder",
         0.5,
-        1,
-        one_per_region,
-        "one escalation decision per commit region",
+        strong_window_bits,
+        strong_window_bits_per_microsecond,
+        "one strong window of rcom+2rbuf rounds per commit region "
+        "(Toshio 2510.25222 Sec. III C, "
+        '"In this paper, we assume that rstrong = rcom + 2rbuf.")',
         ESCALATION_PAYLOAD_SOURCE,
     )
     strong_buffer_to_strong_decoder = provisioning.path(

@@ -3,9 +3,13 @@
 Referent: gem5's queue counts its reserved entries as taken before they
 are allocated (gem5 src/mem/cache/queue.hh:150-153, isFull over
 allocated plus reserve); this end counts a round crossing toward it the
-same way, reserved by the controller before the round leaves. The
-crossing itself is the controller's send and is tested where it is
-executed (tests/controller/test_syndrome_round_sender.py).
+same way, reserved by the sender before the round leaves. The crossing
+itself is the sender's and is tested where it is executed: the
+controller's write in tests/controller/test_syndrome_round_sender.py,
+the escalated region's send in tests/escalation/test_strong_redecode.py.
+An escalated region lands whole (Toshio 2510.25222 lines 1247 to 1250
+assign the region's rounds to the strong decoder at the switch) and
+each of its rounds takes its slot and wakes the window side.
 
 The whole-run law at the end of the file places that landing in the
 pipeline: under a strong-primary policy the landing is what makes a
@@ -18,6 +22,7 @@ import decsim.config as config
 import decsim.engine as engine_module
 import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
+import decsim.records.windows as window_records
 import decsim.syndrome_buffer.settings as syndrome_buffer_settings
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 import tests.declared_run as declared_run
@@ -54,12 +59,16 @@ class RecordingListener:
     def __init__(self):
         self.stored = []
         self.released = []
+        self.copies = []
 
     def round_stored(self, round_key, _packet):
         self.stored.append(round_key)
 
     def round_released(self, round_key):
         self.released.append(round_key)
+
+    def copy_made(self, round_key, bits, source_name, target_name):
+        self.copies.append((round_key, bits, source_name, target_name))
 
 
 def room_side(engine, rounds=None, listener=None, windows=None):
@@ -74,9 +83,20 @@ def room_side(engine, rounds=None, listener=None, windows=None):
         engine
     )
     receiver.store = store
+    if listener is not None:
+        receiver.trace.copy_made.connect(listener.copy_made)
     if windows is not None:
         receiver.windows = windows
     return receiver
+
+
+def region(*round_indices) -> round_records.EscalatedRegion:
+    """The escalated region of these rounds, in the strong request's name."""
+    request_key = window_records.DecoderRequestKey(
+        1, 0, window_records.DecoderTier.STRONG, 1
+    )
+    packets = tuple(packet(round_index) for round_index in round_indices)
+    return round_records.EscalatedRegion.of(request_key, packets)
 
 
 def cross(engine, receiver, round_index: int) -> None:
@@ -166,8 +186,48 @@ def test_settlement_reports_a_write_still_in_flight():
     receiver.store.register_hold(reads, [(1, 1)])
     cross(engine, receiver, 1)
 
-    with pytest.raises(RuntimeError, match="1 controller_to_strong_buffer"):
+    with pytest.raises(RuntimeError, match="1 writes in flight"):
         receiver.check_settled()
+
+
+def test_an_escalated_region_lands_whole_and_each_round_wakes_the_windows():
+    engine = engine_module.Engine()
+    listener = RecordingListener()
+    windows = RecordingWindows()
+    receiver = room_side(engine, rounds=3, listener=listener, windows=windows)
+    reads = decoding_records.WindowReads((1, 0))
+    receiver.store.register_hold(reads, [(1, 1), (1, 2)])
+    carried = region(1, 2)
+
+    receiver.reserve_region(2)
+    room_while_crossing = receiver.has_room()
+    engine.schedule(LANDING_TICKS, lambda: receiver.receive_region(carried))
+    engine.run()
+
+    assert carried.wire_bits == 6
+    assert room_while_crossing is True
+    assert receiver.writes_in_flight == 0
+    assert receiver.store.occupancy == 2
+    assert receiver.store.publication_tick((1, 2)) == LANDING_TICKS
+    assert windows.room_rounds == [(1, 1), (1, 2)]
+    assert listener.copies == [
+        ((1, 1), 3, "weak syndrome buffer", "strong syndrome buffer"),
+        ((1, 2), 3, "weak syndrome buffer", "strong syndrome buffer"),
+    ]
+
+
+def test_a_region_the_strong_store_has_no_room_for_stops_the_run():
+    """An escalation cannot wait, so the refusal names the yaml key."""
+    engine = engine_module.Engine()
+    receiver = room_side(engine, rounds=1)
+
+    with pytest.raises(RuntimeError) as refusal:
+        receiver.reserve_region(2)
+
+    sentence = str(refusal.value)
+    assert "no room for the 2 rounds of an escalated region" in sentence
+    assert "strong_syndrome_buffer.rounds 1" in sentence
+    assert receiver.writes_in_flight == 0
 
 
 # ---- the landing in the whole pipeline

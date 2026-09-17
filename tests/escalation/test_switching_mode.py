@@ -251,7 +251,9 @@ def test_threshold_converts_decibels_to_natural_log_weight(tmp_path):
 def test_every_window_commits_once_across_both_output_links(tmp_path):
     """Every window commits exactly once, over one of the output links.
 
-    Escalations ride WSD then SBD then DO; kept windows ride WDO.
+    Escalations ride WSD then SBD then DO; kept windows ride WDO. WSD
+    carries one selection per escalation and at most one region after
+    it, so its transfers lie between one and two per escalation.
     """
     config_path = switching_config(tmp_path, 20.0)
     config = load_experiment(config_path)
@@ -259,10 +261,9 @@ def test_every_window_commits_once_across_both_output_links(tmp_path):
     for seed in range(6):
         measurement = measured_shot(config, seed)
         links = measurement.link_totals
-        escalations = links["weak_decoder_to_strong_decoder"]["transfers"]
-        assert (
-            links["strong_buffer_to_strong_decoder"]["transfers"] == escalations
-        )
+        escalations = links["strong_buffer_to_strong_decoder"]["transfers"]
+        escalation_hops = links["weak_decoder_to_strong_decoder"]["transfers"]
+        assert escalations <= escalation_hops <= 2 * escalations
         assert links["strong_decoder_to_frame"]["transfers"] == escalations
         assert (
             links["weak_decoder_to_frame"]["transfers"] + escalations
@@ -290,11 +291,11 @@ def test_unreachable_threshold_escalates_every_window(tmp_path):
     config = load_experiment(config_path)
     measurement = measured_shot(config, seed=0)
     links = measurement.link_totals
-    assert (
-        links["weak_decoder_to_strong_decoder"]["transfers"]
-        == measurement.windows
-    )
-    assert links["strong_decoder_to_frame"]["transfers"] == measurement.windows
+    windows = measurement.windows
+    escalation_hops = links["weak_decoder_to_strong_decoder"]["transfers"]
+    assert windows <= escalation_hops <= 2 * windows
+    assert links["strong_buffer_to_strong_decoder"]["transfers"] == windows
+    assert links["strong_decoder_to_frame"]["transfers"] == windows
     assert links["weak_decoder_to_frame"]["transfers"] == 0
 
 
@@ -377,12 +378,14 @@ def test_gap_records_decide_the_selected_tier(tmp_path):
 def test_the_serial_escalation_timeline_is_exact():
     """Every hop of one escalation, in the order the serial mode runs them.
 
-    Toshio arXiv:2510.25222 Sec. III A, serial variant: the strong
-    re-decode cannot begin before the weak verdict has crossed
-    weak_decoder_to_strong_decoder and the room-side context has
-    crossed strong_buffer_to_strong_decoder, so its start is the later
-    of the two; and the Held boundary keeps the next window's decode
-    parked until the strong correction has committed, one
+    Toshio arXiv:2510.25222 Sec. III A, serial variant, with the
+    region assigned at the switch (Sec. III C, lines 1247 to 1250): the
+    weak verdict at 30 us sends the selection and the window's six
+    rounds over weak_decoder_to_strong_decoder, 3 us; they land in the
+    strong syndrome buffer at 33 us, the job is built and its input
+    crosses strong_buffer_to_strong_decoder, 6 us, so the strong decode
+    starts at 39 us; and the Held boundary keeps the next window's
+    decode parked until the strong correction has committed, one
     decoder_to_decoder hop away.
     """
     machine = fabric.switching_machine(rounds=9, escalated_windows={0, 1, 2})
@@ -396,10 +399,10 @@ def test_the_serial_escalation_timeline_is_exact():
     snapshot = machine.pauli_frame.snapshot()
     first_record = snapshot.records[0]
     expected_weak_done = decsim_config.microseconds_to_ticks(30.0)
-    expected_strong_start = decsim_config.microseconds_to_ticks(36.0)
-    expected_accepted = decsim_config.microseconds_to_ticks(70.0)
-    expected_committed = decsim_config.microseconds_to_ticks(71.0)
-    expected_parked_start = decsim_config.microseconds_to_ticks(71.5)
+    expected_strong_start = decsim_config.microseconds_to_ticks(39.0)
+    expected_accepted = decsim_config.microseconds_to_ticks(73.0)
+    expected_committed = decsim_config.microseconds_to_ticks(74.0)
+    expected_parked_start = decsim_config.microseconds_to_ticks(74.5)
 
     assert weak_done == expected_weak_done
     assert strong_start == expected_strong_start
@@ -419,17 +422,17 @@ def test_the_parallel_sibling_waits_for_the_context_it_reads():
     III A, and its simulations set T_comm^strong to ten times
     T_comm^weak (lines 1109-1114; Table I is a notation table and prices
     nothing), so in a model that prices transport Step 1 means
-    the strong decoder starts when its copy has arrived. On the
-    declared card the room-side hop is 7 us against the weak syndrome buffer's
-    4 us, so the first window's context is still crossing when the window
-    becomes ready: the sibling is held, and it is submitted at the tick
-    its last context round is stored in the strong syndrome buffer.
+    the strong decoder starts when its copy has arrived. The copy rides
+    weak_decoder_to_strong_decoder at readiness, 3 us on the declared
+    card, so the first window's six context rounds are all still on
+    the chip when the window becomes ready: the sibling is held, and it
+    is submitted at the tick its last context round is stored in the
+    strong syndrome buffer.
     """
     machine = fabric.switching_machine(
         rounds=9,
         escalated_windows=set(),
         run_both_at_once=True,
-        strong_buffer_microseconds=7.0,
     )
     machine.run()
     log_lines = machine.observation.log.lines
@@ -447,7 +450,10 @@ def test_the_parallel_sibling_waits_for_the_context_it_reads():
     deferred_lines = fabric.log_lines_containing(
         machine, "strong start deferred until the context rounds"
     )
-    assert "[(1, 4), (1, 5), (1, 6)]" in deferred_lines[0]
+    assert (
+        "[(1, 1), (1, 2), (1, 3), (1, 4), (1, 5), (1, 6)]"
+        in (deferred_lines[0])
+    )
     assert held < submitted
     assert submitted == last_context_round
     assert started > submitted
@@ -541,7 +547,7 @@ def test_a_sibling_held_for_its_input_is_cancelled_by_a_confident_result():
         rounds=9,
         escalated_windows=set(),
         run_both_at_once=True,
-        strong_buffer_microseconds=40.0,
+        escalation_microseconds=40.0,
     )
     machine.run()
     cancelled = fabric.log_lines_containing(
@@ -624,7 +630,7 @@ def test_the_strong_context_lives_until_the_escalated_window_commits():
     of the operation, and its strong input transfer lands long before
     the commit; a store that freed the rounds at the transfer would
     show a fall before the committed tick. The declared fabric gives
-    the release its exact tick as well, 84.5 us here: 71.0 for the
+    the release its exact tick as well, 87.5 us here: 74.0 for the
     commit and the declared hops back to the store after it.
     """
     machine = fabric.switching_machine(rounds=6, escalated_windows={0})
@@ -637,8 +643,8 @@ def test_the_strong_context_lives_until_the_escalated_window_commits():
     first_fall = first_decrease_tick(timeline)
     snapshot = machine.pauli_frame.snapshot()
     strong_record = snapshot.records[0]
-    expected_committed = decsim_config.microseconds_to_ticks(71.0)
-    expected_released = decsim_config.microseconds_to_ticks(84.5)
+    expected_committed = decsim_config.microseconds_to_ticks(74.0)
+    expected_released = decsim_config.microseconds_to_ticks(87.5)
 
     assert strong_record.window_key == (1, 0)
     assert strong_record.tier == "strong"

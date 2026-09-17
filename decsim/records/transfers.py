@@ -154,6 +154,33 @@ class TransferAttribution:
         )
 
     @classmethod
+    def for_region(
+        cls, region: round_records.EscalatedRegion
+    ) -> "TransferAttribution":
+        """An escalated region's transfer: its rounds, in its request's name.
+
+        The patches are the first packet's, the round range the packets'
+        first and last.
+        """
+        first_packet = region.packets[0]
+        last_packet = region.packets[-1]
+        patch_ids = tuple(
+            fragment.patch_id for fragment in first_packet.fragments
+        )
+        ordered_patch_ids = tuple(
+            sorted(patch_ids, key=identity_records.stable_identity_order_key)
+        )
+        relation = RequestTransferRelation(region.request_key)
+        return cls(
+            operation_id=first_packet.operation_id,
+            patch_ids=ordered_patch_ids,
+            window_id=region.request_key.window_id,
+            first_round=first_packet.round_index,
+            last_round=last_packet.round_index,
+            relation=relation,
+        )
+
+    @classmethod
     def for_packet(
         cls, packet: round_records.SyndromeRoundPacket
     ) -> "TransferAttribution":

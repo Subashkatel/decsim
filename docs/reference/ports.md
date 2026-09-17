@@ -72,13 +72,15 @@ The syndrome round sender, as the assembler sees it.
 
 ### `StrongSyndromeRoundReceiver`
 
-The strong syndrome round receiver, as the syndrome round sender sees it.
+The strong syndrome buffer's receiving end, as its two senders see it.
 
 | Method | What it does |
 | --- | --- |
 | `has_room` | Whether one more write can land. |
 | `reserve_write` | Take the room one crossing round will need, before it leaves. |
 | `receive_round` | Take one round that landed here and keep it on arrival. |
+| `reserve_region` | Take the room an escalated region's rounds will need, or refuse. |
+| `receive_region` | Take an escalated region that landed here: every round its slot. |
 
 ### `WeakSyndromeRoundReceiver`
 
@@ -162,7 +164,8 @@ The rounds a window may still read, as the escalation side sees it.
 | `hold_strong_input` | The strong job's context becomes its input hold. |
 | `strong_window_input` | The room-side payloads of a strong window, first round stamped. |
 | `hold_strong_context` | The window's potential strong read becomes the request's hold. |
-| `context_rounds_in_flight` | The context rounds that reached the weak syndrome buffer late. |
+| `context_rounds_in_flight` | The rounds the strong syndrome buffer lacks that the weak one has. |
+| `escalated_rounds` | The weak syndrome buffer's packets of these rounds, to carry up. |
 | `guard_restart_reads` | Hold the restart window's strong context while a plan lands. |
 | `replace_window_reads` | Re-point the window's live holds at its reads. |
 | `release_restart_reads` | No earlier escalation can re-slice the window: its claim ends. |
@@ -271,6 +274,7 @@ The decoder side's outgoing sends, as the window side asks them.
 | --- | --- |
 | `publish` | Send the result on its tier's output link; commit it at delivery. |
 | `send_selection` | Send one window's escalation; returns the delay the link expects. |
+| `send_region` | Send a strong window's rounds up; the delay the link expects. |
 
 ### `WindowGapJoin`
 
@@ -479,6 +483,7 @@ The link fabric, as a sender that names a window or a job sees it.
 | `send_for_job` | Send in a job's name; returns the delay the link expects. |
 | `send_for_round` | Send in a stored round's name; on_delivered runs at the delivery. |
 | `send_boundary` | Send one boundary on its path, in its attribution's name. |
+| `send_region` | Send an escalated region in its request's name; the delay. |
 
 ## the pluggable policies off the path
 

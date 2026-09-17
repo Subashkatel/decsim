@@ -81,7 +81,7 @@ and they are the same names in `shots.csv`, `window_samples.csv` and
 | `service` | the compute start, to the decode done: the fetch, the algorithm and the release, and nothing the decode waited for |
 | `confidence` | the committing decode's end, to the verdict on the window's answer: the confidence signal's own computation, which is the walk under `cluster_gap` and the sibling forced-class solve's remaining time under `complementary_gap`, and zero for a window that escalated |
 | `weak_attempt` | a unit taking an escalated window's weak job, to the verdict that escalated it: the attempt whose result did not commit, zero when the first decode committed |
-| `escalation_link_per_window` | the weak decoder to the strong decoder: the escalation hop, zero for a window that did not escalate |
+| `escalation_link_per_window` | the weak decoder to the strong decoder: the escalation hop, from the selection's send to the landing of the rounds the strong store lacked, zero for a window that did not escalate |
 | `dd_per_window` | one decoder to the next: the boundary handoff |
 | `output_link_per_window` | the decoder to the Pauli frame |
 | `frame_commit` | the frame accepting a correction, to it being committed |
@@ -116,7 +116,10 @@ The park is two points because it has two causes
 A run whose windows wait on the seam reports the park in `dep_block` and
 zero in `compute_wait`; two decodes of one window sharing a unit, which
 is what a complementary gap's forced-class pair is, report it in the
-second.
+second. A strong decode whose rounds crossed with the escalation waits
+for them before its input hop can start, and that wait is `dep_block`
+too: the point runs from the verdict to the first startable tick, less
+the input hop itself.
 
 `input_link_per_window` is that decode's own hop, so it is zero when the
 decode read an input that was already in its unit's memory: a tier
@@ -137,8 +140,9 @@ compute, a run whose signal is a second forced-class solve, the same on
 a host-clock strong tier, and a run whose signal is a priced walk.
 
 `escalation_link_per_window` is a hop that is measured and not summed,
-like `dd_per_window`: the escalation hop runs beside the strong input
-hop, and what it makes the strong decode wait for is in `dep_block`.
+like `dd_per_window`: one span from the selection's send to the landing
+of the rounds the strong store lacked, the two transfers side by side,
+and what it makes the strong decode wait for is in `dep_block`.
 
 ### `shot_links.csv`
 

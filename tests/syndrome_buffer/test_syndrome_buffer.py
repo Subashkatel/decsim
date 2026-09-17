@@ -378,28 +378,26 @@ def test_the_weak_primary_pipeline_runs_on_the_declared_ticks():
     assert record.committed_ticks == expected_committed
 
 
-def test_a_weak_window_is_ready_on_this_store_not_the_room_side_landing():
+def test_a_weak_window_is_ready_on_this_store_and_nothing_lands_room_side():
     """Readiness listens to the store the weak decoder actually reads.
 
     Toshio arXiv:2510.25222 Sec. III A: the weak tier reads the
-    fridge-side store, and the strong syndrome buffer only holds the context an
-    escalation would need. On the declared card the room-side hop is
-    7 us against this store's 4 us, so the same round lands in the
-    strong syndrome buffer three microseconds after this store published
-    it; a readiness rule that waited for the slower path would delay every
-    weak window by that lag.
+    fridge-side store, and the strong syndrome buffer only holds what an
+    escalation carried up. A switching run whose windows are all kept
+    lands nothing on the room side, so nothing there could delay a weak
+    window: round 6 is published here at 15 us, the declared card's
+    readout, controller and store hops after its 10 us emission.
     """
     machine = declared_run.switching_run(rounds=9, io_trace=True)
     windows = machine.observation.windows.windows
     first_window = windows[(1, 0)]
     log_lines = machine.observation.log.lines
     published = declared_run.log_tick(log_lines, "round 6 of mem1 arrived")
-    landing_line = "received round 6 of op 1 from controller_to_strong_buffer"
-    landed = declared_run.log_tick(log_lines, landing_line)
+    landings = [line for line in log_lines if "received round" in line]
+    room_side_landings = [line for line in landings if "strong" in line]
     expected_data_complete = config.microseconds_to_ticks(15.0)
-    expected_landing = config.microseconds_to_ticks(18.0)
 
     assert first_window.t_data_complete == expected_data_complete
     assert published == expected_data_complete
-    assert landed == expected_landing
-    assert published < landed
+    assert room_side_landings == []
+    assert machine.strong_syndrome_buffer.occupancy == 0

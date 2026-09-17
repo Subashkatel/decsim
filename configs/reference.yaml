@@ -419,18 +419,16 @@ links:                             # a kind, then one card per path; null = the
                                    # buffer), one round
   controller_to_strong_buffer: null
                                    # controller -> strong syndrome buffer (the strong
-                                   # buffer), one round. Parallel switching
-                                   # (escalation.run_both_at_once) builds the strong
-                                   # job at weak readiness, so this hop must not lag
-                                   # the weak syndrome buffer publication path
-                                   # (controller_to_weak_buffer); a slower one
-                                   # refuses loudly at strong-job build
-                                   # ("controller_to_strong_buffer lag beyond
-                                   # the escalation margin")
+                                   # buffer), one round: a strong-only run's one
+                                   # transport. A switching run sends nothing here;
+                                   # its strong side gets the escalated window's
+                                   # rounds over weak_decoder_to_strong_decoder
   weak_buffer_to_weak_decoder: {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
                                    # weak syndrome buffer -> weak decoder, one window
   weak_decoder_to_strong_decoder: null
-                                   # weak -> strong escalation decision
+                                   # weak -> strong: the escalation's selection, then
+                                   # the strong window's rounds, read out of the
+                                   # weak syndrome buffer (rcom + 2 rbuf of them)
   strong_buffer_to_strong_decoder: null
                                    # strong syndrome buffer -> strong decoder, one window
   decoder_to_decoder: {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
@@ -463,10 +461,12 @@ weak_syndrome_buffer:            # the weak syndrome buffer, on the decoder chip
 strong_syndrome_buffer:          # the strong syndrome buffer, on the strong host
                                    # (exists only when the escalation uses it)
   kind: syndrome_buffer
-  rounds: null                     # capacity in rounds. When it is full the
-                                   # controller holds the finished round, the
-                                   # same waiting line the weak syndrome buffer uses, and it
-                                   # enters once a slot frees. null = unbounded
+  rounds: null                     # capacity in rounds. A strong-only run's
+                                   # controller holds a finished round that finds
+                                   # no room, the same waiting line the weak
+                                   # syndrome buffer uses; a switching run's
+                                   # escalated region cannot wait, so a store with
+                                   # no room for it stops the run. null = unbounded
 
 # The two decoder tiers are two distinct units (Toshio 2510.25222:
 # lightweight decoders decode constantly, a separate accurate decoder is

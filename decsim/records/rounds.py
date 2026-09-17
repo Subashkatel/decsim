@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Any, Optional
 
+import decsim.records.windows as window_records
+
 
 class SyndromePacketRouteKind(Enum):
     """Where a completed round goes: into a window, or feedback memory."""
@@ -124,6 +126,51 @@ class SyndromeRoundPacket:
 
 
 @dataclass(frozen=True)
+class EscalatedRegion:
+    """The rounds of a strong window as they leave the chip for the strong side.
+
+    The escalation names the strong request and carries the rounds the
+    strong syndrome buffer lacks, read out of the weak syndrome buffer:
+    Toshio et al. 2510.25222 lines 1247 to 1250 assign the syndrome data
+    of r_strong rounds to the strong decoder at the switch, and CUDA-Q
+    QEC's enqueue_syndromes names the decoder and carries the rounds
+    (cudaqx_realtime_decoding.h lines 27 to 35). wire_bits is the sum of
+    the packets' fragment sizes, the width each round left the controller
+    at (PackedRound.wire_bits), and None when any fragment has no size.
+    """
+
+    request_key: window_records.DecoderRequestKey
+    packets: tuple[SyndromeRoundPacket, ...]
+    wire_bits: Optional[int]
+
+    @classmethod
+    def of(
+        cls,
+        request_key: window_records.DecoderRequestKey,
+        packets: tuple,
+    ) -> "EscalatedRegion":
+        """The region of these packets, its width summed from the fragments."""
+        wire_bits = 0
+        for packet in packets:
+            packet_bits = fragment_wire_bits(packet.fragments)
+            if packet_bits is None:
+                wire_bits = None
+                break
+            wire_bits += packet_bits
+        return cls(
+            request_key=request_key, packets=packets, wire_bits=wire_bits
+        )
+
+    @property
+    def round_keys(self) -> tuple:
+        """(operation_id, round_index) of every round carried, in order."""
+        keys = []
+        for packet in self.packets:
+            keys.append((packet.operation_id, packet.round_index))
+        return tuple(keys)
+
+
+@dataclass(frozen=True)
 class PackedRound:
     """A finished round as it leaves the assembler.
 
@@ -186,3 +233,11 @@ class ControllerOutputEvent:
     tick: int
     operation_id: object
     payload: object
+
+
+def fragment_wire_bits(fragments) -> Optional[int]:
+    """The fragments' wire size, None when any fragment has no known size."""
+    fragment_sizes = [fragment.size_bits for fragment in fragments]
+    if None in fragment_sizes:
+        return None
+    return sum(fragment_sizes)

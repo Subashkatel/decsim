@@ -420,13 +420,20 @@ def test_an_escalated_window_is_measured_on_the_strong_tiers_own_hops(
     (0.008 us) and the strong decoder's hop home (0.012 us), and the
     decode it describes is the 10.0 us one. The weak decode that did not
     commit is the weak_attempt point, and the escalation hop that
-    carried the selection to the strong tier (0.020 us) is its own
-    point: it runs beside the strong input hop, so what it costs the
-    decode is the 0.012 us the input waited for it, which is dep_block.
-    The weak attempt starts where a unit took the window's first decode,
+    carried the selection and then the window's rounds to the strong
+    tier (0.020 us, the two transfers side by side on a latency-only
+    card) is its own point, outside the sum. What it costs the decode
+    is dep_block: the strong input hop starts when the rounds land, so
+    the 0.020 us before it is the wait for the rounds. The last window's
+    rounds were carried up with the window before it, so its input hop
+    starts at the verdict beside the selection and waits 0.012 us for
+    it after landing. The weak attempt starts where a unit took the
+    window's first decode,
     so on window 2, whose complementary gap ran its two forced-class
     solves one after the other, it is both of them: 1.064 us of the
-    first solve on top of the 12.244 us from the second one's dispatch.
+    first solve on top of the 12.252 us from the second one's dispatch,
+    which waits on window 1's held boundary and so on window 1's strong
+    decode, 0.008 us of input hop after its rounds landed.
     """
     measurement = switching_shot(tmp_path, 1000000.0)
 
@@ -434,19 +441,20 @@ def test_an_escalated_window_is_measured_on_the_strong_tiers_own_hops(
     assert samples["input_link_per_window"] == [0.008] * 10
     assert samples["output_link_per_window"] == [0.012] * 10
     assert samples["escalation_link_per_window"] == [0.020] * 10
-    assert samples["dep_block"] == [0.012] * 10
+    assert samples["dep_block"] == [0.020] * 9 + [0.012]
     assert samples["compute_wait"] == [0.0] * 10
     assert samples["algorithm"] == [10.0] * 10
-    assert samples["weak_attempt"][2] == 13.308
+    assert samples["weak_attempt"][2] == 13.316
 
 
 def test_an_escalated_windows_points_sum_to_its_reaction_time(tmp_path):
     """The chain runs weak attempt first, then the strong decode.
 
     Toshio et al. 2510.25222 Sec. III A orders it: the weak decoder
-    answers, the verdict sends the window to the strong decoder, the
-    strong decoder answers and that is what commits. Every point on that
-    order adds up to the window's reaction time to the tick.
+    answers, the verdict sends the window and its rounds to the strong
+    decoder, the strong decoder answers and that is what commits. Every
+    point on that order adds up to the window's reaction time to the
+    tick.
     """
     measurement = switching_shot(tmp_path, 1000000.0)
 

@@ -34,8 +34,9 @@ The file is the Chrome Trace Event Format. Open
 [ui.perfetto.dev](https://ui.perfetto.dev) and drop the file in. You get
 one lane per component and one per wired link path, in pipeline order,
 so the lanes read top to bottom the way the data flows: the QPU,
-`qpu_to_controller`, the controller, `controller_to_weak_buffer`, Buffer
-0, `controller_to_strong_buffer`, the strong syndrome buffer, the window planner, the
+`qpu_to_controller`, the controller, `controller_to_weak_buffer`, the
+weak syndrome buffer, `controller_to_strong_buffer`, the strong syndrome
+buffer, the window planner, the
 decoder links, one lane per decoder unit, the frame, and the two paths
 back to the QPU. Perfetto gives zoom, nested slices, counter tracks, the
 flow arrows of a selected slice, an argument pane, and SQL over the

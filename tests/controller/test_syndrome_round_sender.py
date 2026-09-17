@@ -13,9 +13,13 @@ tmp/resources/l5_buffers/Ciw/ciw/node.py:470-473
 release_blocked_individual), or is dropped under the drop knob (ns-3
 point-to-point-net-device.cc Send: Enqueue false, packet dropped). A
 strong-primary plan takes one hop, into the strong store; a
-feedback-memory round still takes a weak syndrome buffer slot.
+feedback-memory round still takes a weak syndrome buffer slot. A
+weak-primary plan's round goes into the weak syndrome buffer only:
+what the strong tier needs of it rides the escalation (Battistel
+2303.00054 lines 342 to 347, a cold first stage keeps the rounds off
+the cryostat I/O).
 
-The controller is also the end the room-side round leaves by, so it
+The controller is the end a strong-primary run's round leaves by, so it
 executes the controller_to_strong_buffer send and the room side handles
 the landing (OMNeT++ csimplemodule.cc:333-334, a module sends only what
 it owns; gem5 packet.hh:424-431, a transfer is billed to the port it
@@ -194,9 +198,9 @@ def test_the_controller_carries_the_round_to_the_room_side_and_lands_it():
     """The send is the controller's; the landing is the room side's.
 
     The reference card prices controller_to_strong_buffer at 0.26
-    microseconds (Caune 2410.05202 Fig. 1a stage F), so the round is
-    reserved and sent at the write and stored one card delay later, by
-    the room side's own method.
+    microseconds (Caune 2410.05202 Fig. 1a stage F), so a strong-primary
+    run's round is reserved and sent at the write and stored one card
+    delay later, by the room side's own method.
     """
     engine = engine_module.Engine()
     store_settings = syndrome_buffer_settings.SyndromeBufferSettings()
@@ -208,7 +212,7 @@ def test_the_controller_carries_the_round_to_the_room_side_and_lands_it():
     )
     room_side.store = strong_store
     sender, _weak_store, _transmitter, _recorder = sender_with(
-        engine, strong_receiver=room_side
+        engine, strong_receiver=room_side, publishes_from_strong_store=True
     )
     first = packed(1)
 
@@ -225,11 +229,32 @@ def test_the_controller_carries_the_round_to_the_room_side_and_lands_it():
     assert room_side.writes_in_flight == 0
 
 
-def test_a_full_strong_store_holds_the_round_too():
+def test_a_weak_primary_round_never_leaves_for_the_strong_store():
+    """The strong side gets an escalated window's rounds, not every round."""
     engine = engine_module.Engine()
     strong_receiver = RecordingStrongReceiver(room=False)
     sender, weak_receiver, transmitter, _recorder = sender_with(
         engine, strong_receiver=strong_receiver
+    )
+    first = packed(1)
+
+    admitted = sender.admit(first)
+    engine.run()
+
+    assert admitted is True
+    assert strong_receiver.written == []
+    assert strong_receiver.reserved == 0
+    assert weak_receiver.writes_in_flight == 1
+    assert transmitter.sent == [1]
+
+
+def test_a_strong_primary_round_with_no_room_on_the_room_side_is_held():
+    engine = engine_module.Engine()
+    strong_receiver = RecordingStrongReceiver(room=False)
+    sender, weak_receiver, transmitter, _recorder = sender_with(
+        engine,
+        strong_receiver=strong_receiver,
+        publishes_from_strong_store=True,
     )
     first = packed(1)
 

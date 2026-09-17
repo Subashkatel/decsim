@@ -109,7 +109,7 @@ docstring.
 - `decsim/syndrome_buffer/round_holds.py`: Which consumer keeps which rounds alive in a syndrome buffer.
 - `decsim/syndrome_buffer/round_output.py`: A syndrome buffer's outgoing port: it sends the rounds that leave the store.
 - `decsim/syndrome_buffer/settings.py`: A syndrome buffer's capacity and access costs on its named clock.
-- `decsim/syndrome_buffer/strong_syndrome_round_receiver.py`: The room-side end of controller_to_strong_buffer: room, then landing.
+- `decsim/syndrome_buffer/strong_syndrome_round_receiver.py`: The strong syndrome buffer's receiving end: room, then landing.
 - `decsim/syndrome_buffer/syndrome_buffer.py`: A syndrome buffer: finished rounds held until their last hold releases.
 - `decsim/syndrome_buffer/weak_syndrome_round_receiver.py`: The weak syndrome round receiver: room, and the slot a landing takes.
 

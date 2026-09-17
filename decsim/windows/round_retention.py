@@ -2,9 +2,12 @@
 
 A window holds [start_round, buffer_hi] plus the successor overflow in
 the store its tier reads; when the strong tier may re-decode it, the
-same rounds plus one buffer of context on each side are held in the
-strong syndrome buffer as a potential strong read (Skoric et al. 2209.08552:
-the buffer region is re-read by the next window). At admission the
+same rounds plus one buffer of context on each side are held as a
+potential strong read (Skoric et al. 2209.08552: the buffer region is
+re-read by the next window) in both stores: in the weak syndrome
+buffer, because the chip keeps them until the verdict and carries them
+up with the escalation (Toshio 2510.25222 lines 1247 to 1250), and in
+the strong syndrome buffer, where they are expected. At admission the
 window's hold becomes the request's and is released once the input
 lands in the unit's memory. Under the forward strong window a window
 that an earlier window bounds also keeps the rounds its restart would
@@ -25,6 +28,7 @@ from typing import Optional
 
 import decsim.ports as ports
 import decsim.records.decoding as decoding_records
+import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
 import decsim.windows.round_tracker as round_tracker
 import decsim.windows.window_planner as window_planner
@@ -73,7 +77,8 @@ class RoundRetention:
         for owner, identities in buffering_plan.weak_holds:
             self.primary_store.register_hold(owner, identities)
         for owner, identities in buffering_plan.potential_holds:
-            self.strong_store.register_hold(owner, identities)
+            for store in self._strong_context_stores():
+                store.register_hold(owner, identities)
 
     def release_round_if_unheld(self, round_key: tuple) -> None:
         """Free a weak syndrome buffer round whose every consumer resolved."""
@@ -91,10 +96,10 @@ class RoundRetention:
         strong = self.strong_context_read_keys(window, weak)
         reads = decoding_records.WindowReads(key)
         self.weak_store.register_hold(reads, weak)
-        if self.is_strong_context_retained:
-            potential = decoding_records.PotentialStrong(key)
-            held = weak + strong
-            self.strong_store.register_hold(potential, held)
+        potential = decoding_records.PotentialStrong(key)
+        held = weak + strong
+        for store in self._strong_context_stores():
+            store.register_hold(potential, held)
 
     def replace_window_reads(
         self, key: tuple, window: window_records.Window
@@ -112,11 +117,10 @@ class RoundRetention:
         )
         strong = self.strong_context_read_keys(window, weak)
         potential = decoding_records.PotentialStrong(key)
-        if self.strong_store is not None and self.strong_store.has_hold(
-            potential
-        ):
-            held = weak + strong
-            self.strong_store.replace_hold(potential, held)
+        held = weak + strong
+        for store in self._strong_context_stores():
+            if store.has_hold(potential):
+                store.replace_hold(potential, held)
         reads = decoding_records.WindowReads(key)
         if self.weak_store.has_hold(reads):
             self.weak_store.replace_hold(reads, weak)
@@ -200,7 +204,10 @@ class RoundRetention:
         """A window's possible strong read becomes an admitted request's."""
         potential = decoding_records.PotentialStrong(window_key)
         pending = decoding_records.PendingStrong(request_key)
-        return self.transfer_hold(potential, pending, self.strong_store)
+        keys = ()
+        for store in self._strong_context_stores():
+            keys = self.transfer_hold(potential, pending, store)
+        return keys
 
     def holds_input(self, job: decoding_records.DecodeJob) -> bool:
         """Whether the job's hold already lives in the weak syndrome buffer."""
@@ -225,25 +232,20 @@ class RoundRetention:
         job.input_hold = functools.partial(store.release_hold, owner)
 
     def hold_strong_input(self, job: decoding_records.DecodeJob) -> None:
-        """A strong job's context is its hold on the strong syndrome buffer.
+        """A strong job's context is its hold, in both stores that keep it.
 
         The window's potential strong read or the request's pending
         hold, whichever is live, moves to the input in flight; a job
         with neither takes a fresh hold on its payload rounds. The
-        rounds stay stored until the input lands in the unit's memory.
+        rounds stay stored until the input lands in the unit's memory,
+        on the chip too, so the region could be carried up again.
         """
-        strong_store = self.strong_store
         in_flight = decoding_records.StrongInputInFlight(job.request_key)
-        potential = decoding_records.PotentialStrong(job.strong_decode_for)
-        pending = decoding_records.PendingStrong(job.request_key)
-        if strong_store.has_hold(potential):
-            self.transfer_hold(potential, in_flight, strong_store)
-        elif strong_store.has_hold(pending):
-            self.transfer_hold(pending, in_flight, strong_store)
-        else:
-            round_identities = round_identities_of(job.payloads)
-            strong_store.register_hold(in_flight, round_identities)
-        self.bind_input_hold(job, in_flight, strong_store)
+        owner = decoding_records.DecoderInputHold(job.request_key)
+        for store in self._strong_context_stores():
+            self._move_to_in_flight(store, job, in_flight)
+            _move_hold_to_input(store, in_flight, owner, job)
+        job.input_hold = functools.partial(self._release_strong_input, owner)
 
     # ---- what a strong window holds
 
@@ -265,14 +267,15 @@ class RoundRetention:
         return builder.assemble_payloads(window, self.strong_store)
 
     def context_rounds_in_flight(self, key: tuple, read_keys) -> tuple:
-        """Context rounds at the weak syndrome buffer that are still crossing.
+        """The rounds the strong syndrome buffer lacks that the weak one has.
 
         A round the QPU has not produced yet is not late. A round that
         reached the weak syndrome buffer and is not in the strong syndrome
-        buffer is either still crossing controller_to_strong_buffer, which its
-        own live hold says, or was released while a reader still needs it, which
-        is the run's mistake to report loudly. A caller waits for the
-        first and never for the second.
+        buffer is either still to be carried up by the escalation, or
+        crossing on it, which its own live hold says, or was released
+        while a reader still needs it, which is the run's mistake to
+        report loudly. A caller carries or waits for the first and never
+        for the second.
         """
         crossing = []
         released = []
@@ -297,13 +300,33 @@ class RoundRetention:
             )
         return tuple(crossing)
 
+    def escalated_rounds(self, round_keys) -> tuple:
+        """The weak syndrome buffer's packets of these rounds, to carry up.
+
+        The rounds are there: the window's potential strong read keeps
+        them on the chip until its verdict, and the request's hold after.
+        """
+        packets = []
+        for round_key in round_keys:
+            fragments = self.weak_store.retained_fragments(round_key)
+            assert fragments is not None, (
+                f"round {round_key} left the weak syndrome buffer before "
+                f"its escalation carried it"
+            )
+            packet = round_records.SyndromeRoundPacket(
+                round_key[0], round_key[1], fragments
+            )
+            packets.append(packet)
+        return tuple(packets)
+
     def hold_strong_context(
         self, key: tuple, strong_request_key, context_keys
     ) -> None:
         """The window's potential strong read becomes the request's hold."""
         self.transfer_potential_to_pending(key, strong_request_key)
         pending_hold = decoding_records.PendingStrong(strong_request_key)
-        self.strong_store.replace_hold(pending_hold, list(context_keys))
+        for store in self._strong_context_stores():
+            store.replace_hold(pending_hold, list(context_keys))
 
     def guard_restart_reads(
         self,
@@ -329,12 +352,14 @@ class RoundRetention:
         guarded = self._guarded_strong_reads(
             key, restart_key, proposed_restart, context_keys, restart_read_keys
         )
-        self.strong_store.register_hold(guard, guarded)
+        for store in self._strong_context_stores():
+            store.register_hold(guard, guarded)
         return guard
 
     def release_strong_hold_if_live(self, owner) -> None:
-        """Drop a room-side hold when it is still registered."""
-        self.release_hold_if_live(owner, self.strong_store)
+        """Drop a strong context hold, in both stores, when it is registered."""
+        for store in self._strong_context_stores():
+            self.release_hold_if_live(owner, store)
 
     def release_absorbed_strong_hold(
         self, key: tuple, restart_key: Optional[tuple], replacement
@@ -355,7 +380,8 @@ class RoundRetention:
             replacements.update(restart_identities)
         if not needed <= replacements:
             raise RuntimeError("absorption replacement does not cover packets")
-        self.strong_store.release_hold(absorbed)
+        for store in self._strong_context_stores():
+            store.release_hold(absorbed)
 
     def require_rounds_retained(
         self, label: str, payloads: list, first_round: int, last_round: int
@@ -440,12 +466,39 @@ class RoundRetention:
 
     # ---- private
 
+    def _strong_context_stores(self) -> tuple:
+        """The stores that keep a window's strong context: both, or none."""
+        if self.is_strong_context_retained:
+            return (self.weak_store, self.strong_store)
+        return ()
+
+    def _move_to_in_flight(self, store, job, in_flight) -> None:
+        """One store's potential or pending hold becomes the input in flight."""
+        potential = decoding_records.PotentialStrong(job.strong_decode_for)
+        pending = decoding_records.PendingStrong(job.request_key)
+        if store.has_hold(potential):
+            self.transfer_hold(potential, in_flight, store)
+            return
+        if store.has_hold(pending):
+            self.transfer_hold(pending, in_flight, store)
+            return
+        round_identities = round_identities_of(job.payloads)
+        store.register_hold(in_flight, round_identities)
+
+    def _release_strong_input(self, owner) -> None:
+        """The strong input landed in its unit: both stores let it go."""
+        for store in self._strong_context_stores():
+            store.release_hold(owner)
+
     def _check_store_capacities(self, buffering_plan) -> None:
         strong_is_primary = (
             self.primary_tier is window_records.DecoderTier.STRONG
         )
         capacity = self.weak_store.capacity_rounds()
         minimum = buffering_plan.minimum_live_rounds
+        if self.is_strong_context_retained:
+            # the chip keeps the strong context until the verdict
+            minimum = _longer(minimum, buffering_plan.sb1_minimum_live_rounds)
         if strong_is_primary:
             minimum = ()
         if capacity is not None and capacity < len(minimum):
@@ -467,6 +520,13 @@ class RoundRetention:
                 f"strong syndrome buffer needs {len(strong_minimum)} packet "
                 f"slots, got {strong_capacity}"
             )
+
+
+def _longer(first: tuple, second: tuple) -> tuple:
+    """Whichever of two round lists is longer, the first on a tie."""
+    if len(second) > len(first):
+        return second
+    return first
 
 
 def _is_released(store, arrived_for, round_key: tuple) -> bool:

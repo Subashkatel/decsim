@@ -261,11 +261,14 @@ class SyndromeRoundSender(Protocol):
 
 @runtime_checkable
 class StrongSyndromeRoundReceiver(Protocol):
-    """The strong syndrome round receiver, as the syndrome round sender sees it.
+    """The strong syndrome buffer's receiving end, as its two senders see it.
 
-    The store counts the rounds still crossing toward it as room taken:
-    the controller reserves that room before a round leaves and the
-    store keeps the round when it lands.
+    The store counts the rounds still crossing toward it as room taken.
+    A strong-primary run's controller reserves that room before a round
+    leaves and the store keeps the round when it lands; a switching
+    run's strong redecode reserves the room of an escalated region before
+    it leaves the chip and the store keeps every round of it at the
+    landing.
     """
 
     def has_room(self) -> bool:
@@ -280,6 +283,12 @@ class StrongSyndromeRoundReceiver(Protocol):
         packet_bits: Optional[int],
     ) -> None:
         """Take one round that landed here and keep it on arrival."""
+
+    def reserve_region(self, round_count: int) -> None:
+        """Take the room an escalated region's rounds will need, or refuse."""
+
+    def receive_region(self, region: round_records.EscalatedRegion) -> None:
+        """Take an escalated region that landed here: every round its slot."""
 
 
 @runtime_checkable
@@ -516,7 +525,10 @@ class WindowRetention(Protocol):
         """The window's potential strong read becomes the request's hold."""
 
     def context_rounds_in_flight(self, key: tuple, read_keys) -> tuple:
-        """The context rounds that reached the weak syndrome buffer late."""
+        """The rounds the strong syndrome buffer lacks that the weak one has."""
+
+    def escalated_rounds(self, round_keys) -> tuple:
+        """The weak syndrome buffer's packets of these rounds, to carry up."""
 
     def guard_restart_reads(
         self,
@@ -787,6 +799,13 @@ class DecoderOutput(Protocol):
         on_delivered: Callable[[], None],
     ) -> int:
         """Send one window's escalation; returns the delay the link expects."""
+
+    def send_region(
+        self,
+        region: round_records.EscalatedRegion,
+        on_delivered: Callable[[], None],
+    ) -> int:
+        """Send a strong window's rounds up; the delay the link expects."""
 
 
 @runtime_checkable
@@ -1458,6 +1477,14 @@ class WindowTransfers(Protocol):
         on_delivered: Callable[[transfer_records.Transfer], None],
     ) -> None:
         """Send one boundary on its path, in its attribution's name."""
+
+    def send_region(
+        self,
+        path: transfer_records.LinkPath,
+        region: round_records.EscalatedRegion,
+        on_delivered: Callable[[], None],
+    ) -> int:
+        """Send an escalated region in its request's name; the delay."""
 
 
 # ------------------------------------ the pluggable policies off the path

@@ -4,7 +4,10 @@ Toshio et al. 2510.25222 Sec. III A: the selection of the strong
 decoder's result is sent when the weak result is not confident (steps
 3 and 4), and the strong decoder started beside the weak one (Step 1)
 is selected as it is; a strong input landed before its selection waits
-for it. The submission is the DecodeQueue port's enqueue with the
+for it. Sec. III C, lines 1247 to 1250: the region's rounds are
+assigned to the strong decoder at the switch, so a held window whose
+rounds the strong side lacks has them carried up once, and the landing
+releases it. The submission is the DecodeQueue port's enqueue with the
 committer's return path (SimPy's callback on the event).
 """
 
@@ -15,10 +18,12 @@ import decsim.escalation.pending_strong_windows as pending_module
 import decsim.escalation.strong_redecode as strong_redecode_module
 import decsim.escalation.strong_window_shapes as shapes
 import decsim.records.decoding as decoding_records
+import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
 
 WINDOW_KEY = (1, 2)
 FAR_BOUNDARY_KEY = (1, 4)
+REGION_ROUND_KEYS = ((1, 4), (1, 5), (1, 6))
 
 
 def _weak_job() -> decoding_records.DecodeJob:
@@ -45,14 +50,23 @@ def _strong_job(sequence: int) -> decoding_records.DecodeJob:
 
 
 class _Shape:
-    """Assigns one strong job, built now or held for the commits it names."""
+    """Assigns one strong job, built now or held for the commits it names.
+
+    A held row lacks its rounds on the strong side until the test says
+    they are stored; rounds_to_carry names them while they are missing.
+    """
 
     def __init__(
-        self, job, is_held: bool, waits_on=(FAR_BOUNDARY_KEY,)
+        self,
+        job,
+        is_held: bool,
+        waits_on=(FAR_BOUNDARY_KEY,),
+        missing_rounds=(),
     ) -> None:
         self.job = job
         self.is_held = is_held
         self.waits_on = waits_on
+        self.missing_rounds = tuple(missing_rounds)
         self.planned = []
 
     def plan(self, weak_job) -> shapes.StrongAssignment:
@@ -63,27 +77,77 @@ class _Shape:
 
     def release_conditions(self, assignment):
         del assignment
+        stored_data_of_operation = None
+        if self.missing_rounds:
+            stored_data_of_operation = 1
         return pending_module.ReleaseConditions(
             committed_windows=self.waits_on,
+            stored_data_of_operation=stored_data_of_operation,
             name="far_boundary",
             released_description="far-side weak boundary determined",
         )
 
     def held_job(self, assignment):
         del assignment
+        if self.missing_rounds:
+            return None
         self.is_held = False
         return self.job
 
+    def rounds_to_carry(self, assignment):
+        del assignment
+        return self.missing_rounds
+
 
 class _DecoderOutput:
-    """The weak decoder's end of the selection hop; the test delivers it."""
+    """The weak decoder's end of the escalation hop; the test delivers it."""
 
     def __init__(self) -> None:
         self.selections = []
+        self.regions = []
 
     def send_selection(self, weak_job, strong_request_key, on_delivered):
         self.selections.append((weak_job, strong_request_key, on_delivered))
         return 30
+
+    def send_region(self, region, on_delivered):
+        self.regions.append((region, on_delivered))
+        return 30
+
+
+class _Retention:
+    """The weak syndrome buffer's rounds, one three-bit fragment each."""
+
+    def escalated_rounds(self, round_keys):
+        packets = []
+        for operation_id, round_index in round_keys:
+            fragment = round_records.RetainedSyndromeFragment(
+                operation_id=operation_id,
+                patch_id=0,
+                round_index=round_index,
+                bits=(1, 0, 1),
+                size_bits=3,
+                fragment_index=0,
+            )
+            packet = round_records.SyndromeRoundPacket(
+                operation_id, round_index, (fragment,)
+            )
+            packets.append(packet)
+        return tuple(packets)
+
+
+class _StrongReceiver:
+    """The strong syndrome buffer's receiving end, recording the landing."""
+
+    def __init__(self) -> None:
+        self.reserved = 0
+        self.landed = []
+
+    def reserve_region(self, round_count):
+        self.reserved += round_count
+
+    def receive_region(self, region):
+        self.landed.append(region)
 
 
 class _StrongOutput:
@@ -122,7 +186,9 @@ def _redecode(shape):
     verdict = _Verdict()
     redecode = strong_redecode_module.StrongRedecode(engine)
     redecode.shape = shape
+    redecode.retention = _Retention()
     redecode.decoder_output = decoder_output
+    redecode.strong_receiver = _StrongReceiver()
     redecode.strong_output = strong_output
     redecode.decode_queue = queue
     redecode.verdict = verdict
@@ -233,6 +299,38 @@ def test_a_row_that_names_two_windows_waits_for_both():
     redecode.submit_if_commit_releases(FAR_BOUNDARY_KEY)
     assert _call_names(queue) == ["await", "enqueue"]
     assert queue.calls[1][1] is strong_job
+
+
+def test_a_held_windows_missing_rounds_are_carried_up_once_and_land():
+    """The region goes up when the row's commits are in, and only once.
+
+    Two wake-ups while the region crosses send nothing more; at the
+    landing the strong side's receiving end takes the rounds, and the
+    row builds its job on the next wake-up.
+    """
+    strong_job = _strong_job(5)
+    shape = _Shape(
+        strong_job, is_held=True, waits_on=(), missing_rounds=REGION_ROUND_KEYS
+    )
+    redecode, output, _strong, queue, _done = _redecode(shape)
+    weak_job = _weak_job()
+
+    redecode.escalate(weak_job)
+    redecode.submit_if_stored_data_releases(1)
+    region, landed = output.regions[0]
+    landed()
+    shape.missing_rounds = ()
+    redecode.submit_if_stored_data_releases(1)
+
+    assert len(output.regions) == 1
+    assert region.request_key == strong_job.request_key
+    assert region.round_keys == REGION_ROUND_KEYS
+    assert region.wire_bits == 9
+    assert redecode.strong_receiver.reserved == 3
+    assert redecode.strong_receiver.landed == [region]
+    assert redecode.carried_round_keys == set()
+    assert _call_names(queue) == ["await", "enqueue"]
+    assert not redecode.has_pending()
 
 
 def test_a_row_that_holds_its_job_and_names_nothing_is_refused():

@@ -8,13 +8,23 @@ submits the job now or when the conditions the shape declared fire: the
 commits of the weak windows it named, or the stored rounds of an
 operation (pending_strong_windows.py). The redecode holds that index,
 so a new shape row names its own condition rather than adding a hook.
-When the policy
-decodes both tiers at once (Toshio et al. 2510.25222 Sec. III A, Step
-1), it builds the strong sibling the requester enqueues beside the weak
-job and selects it at the verdict. A strong input landed in its unit
-waits for its selection to arrive before it decodes; the submission
-uses the per-job law, decode_queue.enqueue(job, send_input, on_decoded)
-with the committer's accept_strong_result as the return path.
+The rounds a strong window reads go up with the escalation: Toshio et
+al. 2510.25222 lines 1247 to 1250 assign the syndrome data of r_strong
+rounds to the strong decoder at the switch, "after the boundary
+conditions at both ends have been determined by the weak decoder", so
+a held window whose commits have landed and whose rounds the strong
+syndrome buffer lacks has them read out of the weak syndrome buffer
+and carried over the same hop (rounds_to_carry, send_region), in one
+transfer or, for a window whose tail is still being measured, several
+(CUDA-Q QEC's enqueue_syndromes takes the rounds in one call or many,
+realtime_decoding.rst lines 52 to 56); the landing stores them and
+releases the window. When the policy decodes both tiers at once
+(Sec. III A, Step 1), it builds the strong sibling the requester
+enqueues beside the weak job and selects it at the verdict. A strong
+input landed in its unit waits for its selection to arrive before it
+decodes; the submission uses the per-job law,
+decode_queue.enqueue(job, send_input, on_decoded) with the committer's
+accept_strong_result as the return path.
 """
 
 import dataclasses
@@ -26,6 +36,7 @@ import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.ports as ports
 import decsim.records.decoding as decoding_records
 import decsim.records.log_sources as log_sources
+import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
 import decsim.trace_source as trace_source
 
@@ -34,10 +45,14 @@ class StrongRedecode:
     """Selects, submits and lands the strong tier's re-decode of a window."""
 
     shape = ports.Port(strong_window_shapes.StrongWindowShape)
-    # the two ends that execute this tier's sends: the weak decoder's
-    # selection leaves by the decoder output, and the strong syndrome buffer
-    # sends the strong input
+    # where the rounds a strong window reads sit on the chip
+    retention = ports.Port(ports.WindowRetention)
+    # the ends that execute this tier's sends: the weak decoder's selection
+    # and the escalated region leave by the decoder output, and the strong
+    # syndrome buffer sends the strong input
     decoder_output = ports.Port(ports.DecoderOutput)
+    # the strong syndrome buffer's receiving end, where the region lands
+    strong_receiver = ports.Port(ports.StrongSyndromeRoundReceiver)
     strong_output = ports.Port(ports.SyndromeBufferOutput)
     decode_queue = ports.Port(ports.DecodeQueue)
     # the strong job's return path
@@ -47,6 +62,9 @@ class StrongRedecode:
         self.engine = engine
         self.selections = _StrongSelections()
         self.pending = pending_strong_windows.PendingStrongWindows()
+        # the rounds sent up and not landed yet, so a wake-up while a
+        # region crosses does not carry them twice
+        self.carried_round_keys: set = set()
         # trace sources: the wait a held strong window sits in, from the
         # hold to the condition that ends it
         self.trace = _TraceSources()
@@ -179,10 +197,15 @@ class StrongRedecode:
         )
 
     def _submit_released(self, released: tuple) -> None:
-        """Ask each released row for its job; submit the ones it builds."""
+        """Ask each released row for its job; submit the ones it builds.
+
+        A row that has no job yet lacks rounds on the strong side, so
+        the ones the chip has and has not sent go up now.
+        """
         for held in released:
             job = self.shape.held_job(held.assignment)
             if job is None:
+                self._carry_missing_rounds(held.assignment)
                 continue
             self.pending.take(held)
             self.trace.strong_window_left.fire(
@@ -197,6 +220,42 @@ class StrongRedecode:
                 f"{job.label}: {held.conditions.released_description} -> "
                 "strong window submitted",
             )
+
+    # ---- private: carrying the strong window's rounds up
+
+    def _carry_missing_rounds(self, assignment) -> None:
+        """Send the rounds the strong side lacks, once each."""
+        wanted = self.shape.rounds_to_carry(assignment)
+        missing = []
+        for round_key in wanted:
+            if round_key not in self.carried_round_keys:
+                missing.append(round_key)
+        if not missing:
+            return
+        packets = self.retention.escalated_rounds(missing)
+        region = round_records.EscalatedRegion.of(
+            assignment.request_key, packets
+        )
+        self.strong_receiver.reserve_region(len(packets))
+        self.carried_round_keys.update(missing)
+        landed = functools.partial(self._region_landed, region)
+        self.decoder_output.send_region(region, landed)
+        self.engine.log(
+            log_sources.DECODER_MANAGER,
+            f"strong request {assignment.request_key}: rounds "
+            f"{missing[0][1]}-{missing[-1][1]} of op {missing[0][0]} "
+            f"carried up with the escalation ({region.wire_bits} bits)",
+        )
+
+    def _region_landed(self, region: round_records.EscalatedRegion) -> None:
+        """The region reached the strong side: its store takes every round.
+
+        The rounds count as carried until the store has all of them: a
+        landing wakes the held windows round by round, and a wake-up in
+        the middle must not send the rest of the same region again.
+        """
+        self.strong_receiver.receive_region(region)
+        self.carried_round_keys.difference_update(region.round_keys)
 
     # ---- private: submitting a strong job with its input send
 

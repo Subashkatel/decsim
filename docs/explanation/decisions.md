@@ -105,6 +105,14 @@ broadcast (240 to 260 nanoseconds at the stated worst case).
 **Where to see it.** `decsim/links/link_profiles.py`, and
 [The data path, hop by hop](data_path.md) hops 2 and 3.
 
+**Narrowed since.** A switching run sends nothing on this hop: its
+rounds stay in the weak syndrome buffer and the escalation carries the
+strong window's rounds over `weak_decoder_to_strong_decoder` (hop 5),
+the transport Toshio arXiv:2510.25222 lines 1247 to 1250 describe and
+the one a cold weak tier exists for (Battistel arXiv:2303.00054 lines
+342 to 347). The hop stays priced for the strong-only run, whose one
+transport it is.
+
 **Flagged with the decision.** The reference card's weak-side sum
 exceeds Toshio's own communication time for the weak side, because the
 card's six latencies are taken from one source's table rather than
@@ -397,6 +405,14 @@ what it now means exactly; renaming a column that keeps its meaning
 would break every recorded sweep for nothing. `compute_wait` is a new
 name and takes the tree's own word for the resource: the units claim,
 release and free their `compute`.
+
+**Widened since.** An escalated window's rounds cross with the
+escalation and land in the strong store before the strong input hop can
+start, so `dep_block` now runs from the verdict to the first startable
+tick, less the input hop itself; the wait for the rounds is a
+dependency wait by the same reasoning, the windowing's doing and not
+the machine's. Every earlier number is unchanged, because until then
+every input hop started where the decode's path did.
 
 **Sources.** gem5's instruction queue keeps the two waits apart. An
 instruction reaches the ready list only when its operands are there

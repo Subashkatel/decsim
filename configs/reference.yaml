@@ -534,49 +534,71 @@ weak_decoder:                      # the lightweight tier: fast, higher LER
                                    # for one window falls back to serial residency
   cycle_count: null                # the union_find row's own timing, in place of
                                    # its host wall clock: the decoder's cycle
-                                   # count per growth step, on a named clock.
+                                   # count per growth tick, on a named clock.
                                    # null = the wall clock. Refused on any other
                                    # kind. The count is
-                                   #   setup_cycles
+                                   #   1
+                                   #   + setup_cycles
                                    #   + setup_cycles_per_vertex x detectors
                                    #   + setup_cycles_per_edge x edges
+                                   #   + (2 + delay_cycles)
+                                   #       x max(1, the growth ticks of every
+                                   #              step)
                                    #   + sum over growth steps of
-                                   #       max(cycles_per_step
-                                   #             + cycles_per_hop x hops,
-                                   #           ceil(cycles_per_edge x edges))
-                                   #   + drain_cycles,
+                                   #       max(the step's changes,
+                                   #           ceil(cycles_per_edge x its edges
+                                   #                x its growth ticks))
+                                   #   + delay_cycles + 2
+                                   #   + 2 x the depth of the forest it peeled,
                                    # ending on the clock's edge as the stages
-                                   # do. A step's edges are the boundary edges
-                                   # it advanced; its hops are the deepest
-                                   # flood over grown edges among the clusters
-                                   # it fused (Helios 2301.08419 lines 623-629,
-                                   # merging takes as many stages as the
-                                   # cluster is deep). Absent fields are 0.
-                                   # Helios's row (2301.08419): a processing
-                                   # element per vertex, so a step's work runs
-                                   # inside its critical path,
+                                   # do. The leading 1 is the cycle the counter
+                                   # starts at. An iteration of the loop grows
+                                   # every front in one cycle, waits
+                                   # delay_cycles for that change to reach the
+                                   # controller, and decides in one more; a
+                                   # unit grows one unit of weight an
+                                   # iteration, so a step spanning several
+                                   # growth ticks is that many iterations, and
+                                   # one quiet iteration runs even for an empty
+                                   # syndrome. A step's changes are what its
+                                   # fusions ripple through the cluster they
+                                   # fused: cycles_per_hop a level of its
+                                   # deepest flood when a fusion joins two odd
+                                   # clusters and a parity has to cross them,
+                                   # one a level when only roots move, at least
+                                   # one for the touching-boundary flag. The
+                                   # peel pays the delay, a decide cycle, a
+                                   # cycle in which every element reports busy
+                                   # until its parity flag is set, and two a
+                                   # level of the forest it walks. Absent
+                                   # fields are 0.
+                                   # Helios's row, traced through its register
+                                   # transfer level (github.com/yale-paragon/
+                                   # Helios_scalable_QEC at 2dda998, the design
+                                   # behind 2301.08419v2): a processing element
+                                   # per vertex, so a step's work runs inside
+                                   # its critical path, and no constant fitted,
                                    #   cycle_count:
-                                   #     clock: helios         # 100 MHz, line 688
-                                   #     cycles_per_step: 4    # grow 1 (lines
-                                   #                           # 694-699), wait 2
-                                   #                           # (line 921), decide
-                                   #                           # 1 (lines 923-929)
-                                   #     cycles_per_hop: 3     # three floods per
-                                   #                           # unit of depth
-                                   #                           # (Algorithm 7,
-                                   #                           # lines 876-889)
-                                   #     setup_cycles: 11      # load and readout,
-                                   #                           # fitted, not in
-                                   #                           # the paper
+                                   #     clock: helios         # 100 MHz
+                                   #     delay_cycles: 3       # three registers
+                                   #                           # between an
+                                   #                           # element and the
+                                   #                           # controller
+                                   #     cycles_per_hop: 3     # root down,
+                                   #                           # parity up, odd
+                                   #                           # down, one level
+                                   #                           # per cycle
                                    # A unit that walks its edges through a
                                    # memory port sets cycles_per_edge to what
                                    # one boundary edge costs it, the reads the
                                    # edge takes in its layout times the read's
                                    # latency (AFS 2001.06598 lines 536 and
                                    # 1110: four cycles a 32-bit read).
-                                   # The setup terms are the floor a decode
-                                   # pays before its first step, the vertices
-                                   # reset and the edge intervals laid; the
+                                   # The setup terms are the floor a unit that
+                                   # lays its graph out pays before its first
+                                   # step, the vertices reset and the edge
+                                   # intervals laid, which Helios, holding its
+                                   # graph in registers, does not pay; the
                                    # rounds loaded are the fetch stage below
   engine:
     clock: fridge                  # cycle-priced stages on this clock domain

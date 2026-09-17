@@ -28,8 +28,9 @@ class UnionFindDecoder(decoder_module.WindowDecoderBase):
 
     The row is priced one of three ways: a latency model, as any window
     decoder; its own cycle count (cycle_count.py), which reads the
-    growth steps of the decode just run and holds the unit for their
-    cycles on the count's clock; or, with neither, the host clock.
+    growth steps and the peel depth of the decode just run and holds the
+    unit for their cycles on the count's clock; or, with neither, the
+    host clock.
     """
 
     fault_model_requirement = fault_models.GRAPHLIKE_FAULT_MODEL_REQUIRED

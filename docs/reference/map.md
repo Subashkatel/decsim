@@ -192,7 +192,7 @@ docstring.
 - `decsim/decoders/tesseract/window_decoder.py`: Tesseract decoding over one explicitly physical window fault model.
 - `decsim/decoders/union_find/__init__.py`: Prior-weighted graphlike Union-Find hard decoding.
 - `decsim/decoders/union_find/compiled_decoder.py`: The compiled Union-Find row: the binding to its two C sources.
-- `decsim/decoders/union_find/cycle_count.py`: The Union-Find decoder's cycle count per growth step, on one clock.
+- `decsim/decoders/union_find/cycle_count.py`: The Union-Find decoder's cycle count per growth tick, on one clock.
 - `decsim/decoders/union_find/decoder.py`: The Union-Find adapter: decsim's own weighted growth and peeling.
 - `decsim/decoders/union_find/window_decoder.py`: Prior-weighted graphlike Union-Find: the graph and one decode on it.
 - `decsim/decoders/verify_windows.py`: The referee: every window re-decoded by Tesseract and compared.

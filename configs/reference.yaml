@@ -532,6 +532,18 @@ weak_decoder:                      # the lightweight tier: fast, higher LER
                                    # Each unit holds two windows when they fit
                                    # (transfer overlaps compute); a unit sized
                                    # for one window falls back to serial residency
+  weight_step: 0.1                 # the union_find row's growth resolution: the
+                                   # natural-log units of weight one tick of an
+                                   # edge length is (Huang, Newman and Brown
+                                   # 2004.04693, weighted growth). An edge of
+                                   # log-odds weight w is round(w / weight_step)
+                                   # ticks long, at least one, and under the
+                                   # cycle_count below every unit of that length
+                                   # is one growth iteration, so this key sets
+                                   # the engine's cycles directly. Helios's own
+                                   # weights run 2 to 16 (2301.08419 lines
+                                   # 1053-1063, the weight resolution wmax).
+                                   # Read on any kind and used by union_find
   cycle_count: null                # the union_find row's own timing, in place of
                                    # its host wall clock: the decoder's cycle
                                    # count per growth tick, on a named clock.
@@ -663,6 +675,8 @@ strong_decoder:                    # the accurate tier: slow, lower LER
                                    # (Toshio 2510.25222 lines 1248-1250), which
                                    # is the copy row
   unit_memory_rounds: null
+  weight_step: 0.1                 # as above; the union_find row's growth
+                                   # resolution
   cycle_count: null                # as above; the union_find row's own
   engine:
     clock: room                    # the strong unit lives room-side

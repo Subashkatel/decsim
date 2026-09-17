@@ -19,6 +19,7 @@ import decsim.decoders.tesseract.decoder as tesseract
 import decsim.decoders.union_find.cycle_count as cycle_count_module
 import decsim.decoders.union_find.decoder as union_find
 import decsim.ports as ports
+import decsim.records.decoder_evidence as evidence_records
 from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
 )
@@ -141,7 +142,11 @@ class DecoderSettings:
     cycle_count is the union_find row's own timing: its decode's growth
     steps priced in cycles of a named clock (union_find/cycle_count.py),
     in place of the host wall clock; the build refuses it on any other
-    kind.
+    kind. weight_step is the union_find row's growth resolution, the
+    natural-log units of weight one tick of an edge length is (Huang,
+    Newman and Brown 2004.04693): the smaller it is, the longer every
+    edge and the more growth iterations a decode spans, which under a
+    cycle count is the engine's own time.
     kind None is no decoder at all, right for a run that plans no
     windows. A Python-built decoder is routed as it is, with no engine
     stages around it.
@@ -149,6 +154,7 @@ class DecoderSettings:
 
     kind: Union[str, float, None] = None
     cycle_count: Optional[cycle_count_module.CycleCount] = None
+    weight_step: float = evidence_records.DEFAULT_WEIGHT_STEP
     units: int = 1
     input: str = "copy"
     boundary_fold: str = "copy"
@@ -211,9 +217,11 @@ class DecoderSettings:
         _check_boolean(section_name, "result_blocks_unit", result_blocks_unit)
         cycle_count_block = section.get("cycle_count")
         cycle_count = _cycle_count(cycle_count_block, clocks)
+        weight_step = _weight_step(section)
         return cls(
             kind=section["kind"],
             cycle_count=cycle_count,
+            weight_step=weight_step,
             units=section["units"],
             input=input_kind,
             boundary_fold=boundary_fold,
@@ -350,3 +358,10 @@ def _cycle_count(
     if block is None:
         return None
     return cycle_count_module.CycleCount.from_yaml(block, clocks)
+
+
+def _weight_step(section: Mapping) -> float:
+    """The union_find row's growth resolution; absent is the shipped one."""
+    if "weight_step" not in section:
+        return evidence_records.DEFAULT_WEIGHT_STEP
+    return evidence_records.normalized_weight_step(section["weight_step"])

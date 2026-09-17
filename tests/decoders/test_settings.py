@@ -4,6 +4,7 @@ import pytest
 
 import decsim.config as config
 import decsim.decoders.settings as decoder_settings
+import decsim.records.decoder_evidence as evidence_records
 
 
 def test_unit_memory_rounds_below_one_is_refused_with_a_sentence():
@@ -190,6 +191,58 @@ def test_an_engine_card_without_a_stage_key_is_refused_by_name():
         "strong_decoder.engine needs release_cycles_per_job, the release "
         "stage's cost once a job in cycles of its clock"
     )
+
+
+def test_the_weight_step_is_read_and_absent_is_the_shipped_one():
+    """The growth resolution is a yaml key of the union_find row."""
+    clocks = config.ClockSettings({"decoder": 250.0})
+    section = {
+        "kind": "union_find",
+        "units": 1,
+        "unit_memory_rounds": None,
+        "weight_step": 0.5,
+        "engine": {
+            "clock": "decoder",
+            "fetch_cycles_per_round": 1,
+            "fetch_cycles_per_job": 0,
+            "release_cycles_per_job": 1,
+            "release_cycles_per_round": 0,
+        },
+    }
+
+    settings = decoder_settings.DecoderSettings.from_yaml(
+        section, clocks, "weak_decoder"
+    )
+    without = dict(section)
+    del without["weight_step"]
+    plain = decoder_settings.DecoderSettings.from_yaml(
+        without, clocks, "weak_decoder"
+    )
+
+    assert settings.weight_step == 0.5
+    assert plain.weight_step == evidence_records.DEFAULT_WEIGHT_STEP
+
+
+def test_a_weight_step_that_is_not_positive_is_refused_with_a_sentence():
+    clocks = config.ClockSettings({"decoder": 250.0})
+    section = {
+        "kind": "union_find",
+        "units": 1,
+        "unit_memory_rounds": None,
+        "weight_step": 0.0,
+        "engine": {
+            "clock": "decoder",
+            "fetch_cycles_per_round": 1,
+            "fetch_cycles_per_job": 0,
+            "release_cycles_per_job": 1,
+            "release_cycles_per_round": 0,
+        },
+    }
+
+    with pytest.raises(ValueError, match="finite and positive"):
+        decoder_settings.DecoderSettings.from_yaml(
+            section, clocks, "weak_decoder"
+        )
 
 
 def test_the_cycle_count_block_is_read_and_absent_is_none():

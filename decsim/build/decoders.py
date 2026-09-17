@@ -300,9 +300,13 @@ def _algorithm(tier_settings: decoder_settings.DecoderSettings, tier: str):
         latency_model = decoders.PresetLatencyDecoder(kind)
         return minimum_weight_perfect_matching.PyMatchingDecoder(latency_model)
     row = tables.row(decoder_settings.DECODERS, f"{tier}_decoder.kind", kind)
-    if cycle_count is None:
+    if kind != "union_find":
         return row(latency_model=None)
-    return row(latency_model=None, cycle_count=cycle_count)
+    return row(
+        latency_model=None,
+        weight_step=tier_settings.weight_step,
+        cycle_count=cycle_count,
+    )
 
 
 def _check_serves_the_confidence(

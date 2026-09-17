@@ -92,6 +92,21 @@ def test_the_units_two_stages_carry_all_four_of_the_engines_cycle_keys():
     assert ticks["release"] == release_cycles * period_ticks
 
 
+def test_the_union_find_row_is_built_with_the_tiers_weight_step():
+    """The growth resolution the yaml names reaches the row that grows."""
+    period_ticks = config.microseconds_to_ticks(0.01)
+    clock = config.Clock(period_ticks)
+    weak = decoder_settings.DecoderSettings(
+        kind="union_find", weight_step=0.25, engine_clock=clock
+    )
+    settings = _settings(weak=weak)
+    policy = escalation_build.build_escalation_policy(settings.escalation)
+
+    unit = decoder_build.build_decoder_unit(settings, "weak", policy)
+
+    assert unit.decoder.weight_step == 0.25
+
+
 def test_a_python_built_decoder_is_returned_as_it_is():
     built = decoders.PresetLatencyDecoder(10.0)
     weak = decoder_settings.DecoderSettings(decoder=built)

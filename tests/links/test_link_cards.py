@@ -43,7 +43,8 @@ CARD_YAML = (
     "  units: 1\n"
     "  unit_memory_rounds: null\n"
     "  engine: {clock: fridge, fetch_cycles_per_round: 1, "
-    "release_cycles_per_job: 1}\n"
+    "fetch_cycles_per_job: 0, release_cycles_per_job: 1, "
+    "release_cycles_per_round: 0}\n"
     "pauli_frame: {clock: fridge, write_cycles: 1}\n"
 )
 

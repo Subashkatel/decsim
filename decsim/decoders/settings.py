@@ -98,7 +98,12 @@ class DecoderSettings:
     charged their measured wall clock), or a number, a fixed core
     latency in microseconds on the MWPM path. The card prices the
     algorithm stage only; the fetch and release stages are cycles of the
-    engine's clock, resolved to that domain's Clock once at load.
+    engine's clock, resolved to that domain's Clock once at load, each
+    stage priced once a job and once a round, because a unit's load and
+    write-out carry a header of their own beside their per-round bytes
+    (Helios 2301.08419v2's controller takes one header byte and then a
+    round's bytes and a loading cycle, and streams three header bytes
+    and a round's correction bytes back).
     unit_memory_rounds is the input SRAM per unit (None is unbounded); a
     unit overlaps input transfer with compute only when two windows fit.
     input names a row of DECODER_INPUTS (above): whether this tier's
@@ -141,7 +146,9 @@ class DecoderSettings:
     result_blocks_unit: bool = False
     unit_memory_rounds: Optional[int] = None
     fetch_cycles_per_round: int = 1
+    fetch_cycles_per_job: int = 0
     release_cycles_per_job: int = 1
+    release_cycles_per_round: int = 0
     detection_event_latency_cycles: Optional[int] = (
         DETECTION_EVENT_LATENCY_CYCLES
     )
@@ -153,8 +160,12 @@ class DecoderSettings:
         config.check_cycles(
             "fetch_cycles_per_round", self.fetch_cycles_per_round
         )
+        config.check_cycles("fetch_cycles_per_job", self.fetch_cycles_per_job)
         config.check_cycles(
             "release_cycles_per_job", self.release_cycles_per_job
+        )
+        config.check_cycles(
+            "release_cycles_per_round", self.release_cycles_per_round
         )
         if self.detection_event_latency_cycles is not None:
             config.check_cycles(
@@ -199,7 +210,9 @@ class DecoderSettings:
             result_blocks_unit=result_blocks_unit,
             unit_memory_rounds=unit_memory_rounds,
             fetch_cycles_per_round=engine["fetch_cycles_per_round"],
+            fetch_cycles_per_job=engine["fetch_cycles_per_job"],
             release_cycles_per_job=engine["release_cycles_per_job"],
+            release_cycles_per_round=engine["release_cycles_per_round"],
             detection_event_latency_cycles=formation_latency,
             detection_event_cycles_per_round=formation_rate,
             engine_clock=engine_clock,

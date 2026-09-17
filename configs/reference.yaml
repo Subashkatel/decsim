@@ -604,8 +604,24 @@ weak_decoder:                      # the lightweight tier: fast, higher LER
     clock: fridge                  # cycle-priced stages on this clock domain
     fetch_cycles_per_round: 1      # read one round out of decoder memory per
                                    # cycle (LILLIPUT FIFO, sec. 4)
+    fetch_cycles_per_job: 0        # what the fetch costs once a job rather than
+                                   # once a round. Helios's load is one header
+                                   # byte per job, then per round
+                                   # ceil(detectors per round / 8) byte cycles
+                                   # and one loading cycle (2301.08419v2,
+                                   # control_node_single_FPGA.v lines 152-182
+                                   # and 239-243 at 2dda998), so its row is 1
+                                   # here and that sum above
     release_cycles_per_job: 1      # correction write-out per job (the
-                                   # baselines use 10, an experiment card)
+                                   # baselines use 10, an experiment card).
+                                   # Helios streams three header bytes per job
+                                   # (lines 301-323)
+    release_cycles_per_round: 0    # what the write-out costs per round. Helios
+                                   # shifts the correction down one layer a
+                                   # round and streams
+                                   # ceil(correction bits per round / 8) bytes
+                                   # of it (lines 217-224), so its row is that
+                                   # sum here
     detection_event_latency_cycles: 5
                                    # the fixed latency of this tier's own
                                    # event-detection logic, charged only when the
@@ -648,7 +664,9 @@ strong_decoder:                    # the accurate tier: slow, lower LER
   engine:
     clock: room                    # the strong unit lives room-side
     fetch_cycles_per_round: 1
+    fetch_cycles_per_job: 0
     release_cycles_per_job: 1
+    release_cycles_per_round: 0
     detection_event_latency_cycles: 5
                                    # as above, on this tier's own clock: the
                                    # strong tier reads the strong syndrome buffer, so it forms the

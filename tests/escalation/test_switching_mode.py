@@ -47,7 +47,9 @@ def switching_config(tmp_path, gap_threshold_db: float, rounds: int = 30):
             "engine": {
                 "clock": "fridge",
                 "fetch_cycles_per_round": 1,
+                "fetch_cycles_per_job": 0,
                 "release_cycles_per_job": 1,
+                "release_cycles_per_round": 0,
             },
         }
     }
@@ -662,7 +664,9 @@ def _walk_card(microseconds, weak_kind: str, confidence: str) -> dict:
             "engine": {
                 "clock": "fridge",
                 "fetch_cycles_per_round": 1,
+                "fetch_cycles_per_job": 0,
                 "release_cycles_per_job": 1,
+                "release_cycles_per_round": 0,
             },
         }
     }

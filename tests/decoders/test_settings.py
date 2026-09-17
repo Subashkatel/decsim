@@ -15,7 +15,9 @@ def test_unit_memory_rounds_below_one_is_refused_with_a_sentence():
         "engine": {
             "clock": "decoder",
             "fetch_cycles_per_round": 1,
+            "fetch_cycles_per_job": 0,
             "release_cycles_per_job": 1,
+            "release_cycles_per_round": 0,
         },
     }
     with pytest.raises(ValueError, match="at least one round"):
@@ -34,7 +36,9 @@ def test_a_result_blocking_value_that_is_not_a_boolean_is_refused_by_name():
         "engine": {
             "clock": "decoder",
             "fetch_cycles_per_round": 1,
+            "fetch_cycles_per_job": 0,
             "release_cycles_per_job": 1,
+            "release_cycles_per_round": 0,
         },
     }
     with pytest.raises(
@@ -55,7 +59,9 @@ def test_the_formation_keys_default_to_yangs_latency_at_one_round_a_clock():
         "engine": {
             "clock": "decoder",
             "fetch_cycles_per_round": 1,
+            "fetch_cycles_per_job": 0,
             "release_cycles_per_job": 1,
+            "release_cycles_per_round": 0,
         },
     }
 
@@ -76,7 +82,9 @@ def test_the_engine_card_reads_both_formation_keys():
         "engine": {
             "clock": "decoder",
             "fetch_cycles_per_round": 1,
+            "fetch_cycles_per_job": 0,
             "release_cycles_per_job": 1,
+            "release_cycles_per_round": 0,
             "detection_event_latency_cycles": 9,
             "detection_event_cycles_per_round": 2,
         },
@@ -90,6 +98,85 @@ def test_the_engine_card_reads_both_formation_keys():
     assert settings.detection_event_cycles_per_round == 2
 
 
+def test_the_engine_card_reads_the_per_job_and_per_round_stage_cycles():
+    """Each stage is priced once a job and once a round.
+
+    Helios loads a header byte per job and a round's bytes per round,
+    and writes three header bytes per job and a round's correction bytes
+    per round (2301.08419v2, control_node_single_FPGA.v lines 152-182
+    and 217-224 at 2dda998).
+    """
+    clocks = config.ClockSettings({"decoder": 250.0})
+    section = {
+        "kind": "pymatching",
+        "units": 1,
+        "unit_memory_rounds": None,
+        "engine": {
+            "clock": "decoder",
+            "fetch_cycles_per_round": 2,
+            "fetch_cycles_per_job": 1,
+            "release_cycles_per_job": 3,
+            "release_cycles_per_round": 4,
+        },
+    }
+
+    settings = decoder_settings.DecoderSettings.from_yaml(
+        section, clocks, "weak_decoder"
+    )
+
+    assert settings.fetch_cycles_per_job == 1
+    assert settings.release_cycles_per_round == 4
+
+
+def test_a_negative_stage_cycle_count_is_refused_by_name():
+    clocks = config.ClockSettings({"decoder": 250.0})
+    section = {
+        "kind": "pymatching",
+        "units": 1,
+        "unit_memory_rounds": None,
+        "engine": {
+            "clock": "decoder",
+            "fetch_cycles_per_round": 1,
+            "fetch_cycles_per_job": -1,
+            "release_cycles_per_job": 1,
+            "release_cycles_per_round": 0,
+        },
+    }
+
+    with pytest.raises(ValueError, match="fetch_cycles_per_job"):
+        decoder_settings.DecoderSettings.from_yaml(
+            section, clocks, "weak_decoder"
+        )
+
+    section["engine"]["fetch_cycles_per_job"] = 0
+    section["engine"]["release_cycles_per_round"] = -2
+    with pytest.raises(ValueError, match="release_cycles_per_round"):
+        decoder_settings.DecoderSettings.from_yaml(
+            section, clocks, "weak_decoder"
+        )
+
+
+def test_an_engine_card_without_a_stage_key_is_refused_by_name():
+    """Every stage key is written out, as the two older ones are."""
+    clocks = config.ClockSettings({"decoder": 250.0})
+    section = {
+        "kind": "pymatching",
+        "units": 1,
+        "unit_memory_rounds": None,
+        "engine": {
+            "clock": "decoder",
+            "fetch_cycles_per_round": 1,
+            "release_cycles_per_job": 1,
+            "release_cycles_per_round": 0,
+        },
+    }
+
+    with pytest.raises(KeyError, match="fetch_cycles_per_job"):
+        decoder_settings.DecoderSettings.from_yaml(
+            section, clocks, "weak_decoder"
+        )
+
+
 def test_the_cycle_count_block_is_read_and_absent_is_none():
     clocks = config.ClockSettings({"decoder": 250.0, "helios": 100.0})
     section = {
@@ -100,7 +187,9 @@ def test_the_cycle_count_block_is_read_and_absent_is_none():
         "engine": {
             "clock": "decoder",
             "fetch_cycles_per_round": 1,
+            "fetch_cycles_per_job": 0,
             "release_cycles_per_job": 1,
+            "release_cycles_per_round": 0,
         },
     }
 

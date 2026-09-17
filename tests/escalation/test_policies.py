@@ -498,7 +498,9 @@ def _weak_unit() -> dict:
             "engine": {
                 "clock": "fridge",
                 "fetch_cycles_per_round": 1,
+                "fetch_cycles_per_job": 0,
                 "release_cycles_per_job": 1,
+                "release_cycles_per_round": 0,
             },
         }
     }

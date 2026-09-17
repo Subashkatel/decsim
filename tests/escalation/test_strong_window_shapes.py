@@ -88,7 +88,9 @@ GATE_SWITCHING_CARD = {
         "engine": {
             "clock": "fridge",
             "fetch_cycles_per_round": 1,
+            "fetch_cycles_per_job": 0,
             "release_cycles_per_job": 10,
+            "release_cycles_per_round": 0,
         },
     },
     "strong_decoder": {
@@ -98,7 +100,9 @@ GATE_SWITCHING_CARD = {
         "engine": {
             "clock": "room",
             "fetch_cycles_per_round": 1,
+            "fetch_cycles_per_job": 0,
             "release_cycles_per_job": 10,
+            "release_cycles_per_round": 0,
         },
     },
     "escalation": {"kind": "switching", "gap_threshold_db": 20.0},

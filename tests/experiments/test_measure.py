@@ -137,7 +137,9 @@ def slow_unit_shot(tmp_path, units: int):
         "engine": {
             "clock": "fridge",
             "fetch_cycles_per_round": 1,
+            "fetch_cycles_per_job": 0,
             "release_cycles_per_job": 10,
+            "release_cycles_per_round": 0,
         },
     }
     config_path = tmp_path / "slow_unit.yaml"
@@ -182,7 +184,9 @@ def switching_run(
         "engine": {
             "clock": "fridge",
             "fetch_cycles_per_round": 1,
+            "fetch_cycles_per_job": 0,
             "release_cycles_per_job": 10,
+            "release_cycles_per_round": 0,
         },
     }
     raw["strong_decoder"] = {
@@ -192,7 +196,9 @@ def switching_run(
         "engine": {
             "clock": "fridge",
             "fetch_cycles_per_round": 1,
+            "fetch_cycles_per_job": 0,
             "release_cycles_per_job": 10,
+            "release_cycles_per_round": 0,
         },
     }
     config_path = tmp_path / "switching.yaml"
@@ -236,7 +242,9 @@ def bounded_store_shot(tmp_path):
         "engine": {
             "clock": "fridge",
             "fetch_cycles_per_round": 1,
+            "fetch_cycles_per_job": 0,
             "release_cycles_per_job": 10,
+            "release_cycles_per_round": 0,
         },
     }
     config_path = tmp_path / "bounded_store.yaml"

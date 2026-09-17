@@ -105,7 +105,9 @@ MINIMAL_CONFIG = {
         "engine": {
             "clock": "fridge",
             "fetch_cycles_per_round": 1,
+            "fetch_cycles_per_job": 0,
             "release_cycles_per_job": 1,
+            "release_cycles_per_round": 0,
         },
     },
     "pauli_frame": {"clock": "fridge", "write_cycles": 1},
@@ -130,7 +132,9 @@ def strong_unit(algorithm) -> dict:
             "engine": {
                 "clock": "room",
                 "fetch_cycles_per_round": 1,
+                "fetch_cycles_per_job": 0,
                 "release_cycles_per_job": 1,
+                "release_cycles_per_round": 0,
             },
         }
     }

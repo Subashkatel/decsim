@@ -183,7 +183,9 @@ def test_unknown_algorithms_and_stale_keys_fail_loudly(tmp_path):
                 "engine": {
                     "clock": "fridge",
                     "fetch_cycles_per_round": 1,
+                    "fetch_cycles_per_job": 0,
                     "release_cycles_per_job": 1,
+                    "release_cycles_per_round": 0,
                 },
             }
         },
@@ -256,7 +258,9 @@ def test_engine_clock_must_name_a_clock_domain(tmp_path):
                 "engine": {
                     "clock": "sfq",
                     "fetch_cycles_per_round": 1,
+                    "fetch_cycles_per_job": 0,
                     "release_cycles_per_job": 1,
+                    "release_cycles_per_round": 0,
                 },
             }
         },

@@ -31,7 +31,9 @@ weak_decoder:
   engine:
     clock: fridge
     fetch_cycles_per_round: 1
+    fetch_cycles_per_job: 0
     release_cycles_per_job: 10
+    release_cycles_per_round: 0
 
 sweep:
   - physical_error_probability: [0.003]

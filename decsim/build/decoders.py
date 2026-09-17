@@ -358,19 +358,23 @@ def _staged_unit(
     """The algorithm between its stages, on the tier's engine clock.
 
     This tier's event-detection logic first when the rounds reach it raw,
-    then fetch cycles per round, then the algorithm, then release cycles
-    per job.
+    then the fetch stage, then the algorithm, then the release stage,
+    each stage priced once a job and once a round.
     """
     before = []
     formation_stage = _formation_stage(tier_settings, formation)
     if formation_stage is not None:
         before.append(formation_stage)
     fetch = staged_decoder.DecoderStage(
-        "fetch", cycles_per_round=tier_settings.fetch_cycles_per_round
+        "fetch",
+        cycles_per_job=tier_settings.fetch_cycles_per_job,
+        cycles_per_round=tier_settings.fetch_cycles_per_round,
     )
     before.append(fetch)
     release = staged_decoder.DecoderStage(
-        "release", cycles_per_job=tier_settings.release_cycles_per_job
+        "release",
+        cycles_per_job=tier_settings.release_cycles_per_job,
+        cycles_per_round=tier_settings.release_cycles_per_round,
     )
     timing = staged_decoder.UnitTiming(
         before=tuple(before),

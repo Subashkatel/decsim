@@ -485,7 +485,9 @@ SWITCHING_FOLD_SWEEP = {
         "engine": {
             "clock": "fridge",
             "fetch_cycles_per_round": 1,
+            "fetch_cycles_per_job": 0,
             "release_cycles_per_job": 1,
+            "release_cycles_per_round": 0,
         },
     },
     "sweep": [

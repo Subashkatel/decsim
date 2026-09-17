@@ -42,7 +42,9 @@ def _plan(*, escalation=None, windows=None):
         escalation=escalation,
         windows=windows,
     )
-    policy = escalation_build.build_escalation_policy(escalation)
+    policy = escalation_build.build_escalation_policy(
+        escalation, settings.weak_decoder
+    )
     return plan_build.build_plan(settings, policy)
 
 

@@ -58,6 +58,7 @@ code's own docstrings cite.
 | confidence, `SoftOutput` | soft information: an analog number saying how much the decoder trusts its own answer, rather than the answer itself | Toshio Sec. II B, "Soft information in decoding problem" (2510.25222.txt lines 386-396) |
 | `complementary_gap` row of `CONFIDENCE_SIGNALS` | the complementary gap: decode the window twice, each solve pinned to one logical class, and subtract the two weights | Toshio Sec. II B and Fig. 3(a,b) (2510.25222.txt lines 436-457); Gidney, Newman, Brooks and Jones, arXiv:2312.04522, Sec. "Complementary gaps" |
 | `cluster_gap` row of `CONFIDENCE_SIGNALS` | the cluster gap: decode the window once and walk the clustering that decode already did | Toshio Sec. II B and Fig. 3(c,d), which cites it as ref. 47; Meister, arXiv:2405.07433, Algorithm 2 |
+| `extra_cluster_gap` row of `CONFIDENCE_SIGNALS` | the extra-cluster gap: decode the window once, then grow every cluster on until the two boundaries join or the threshold's worth of growth is spent | Kishi, Toshio, Fujisaki, Oshima, Sato and Fujii, arXiv:2602.03336, Algorithm 1 and Theorems 1 and 2 |
 | threshold, `gap_threshold_nats` | `g_th`, the value of the soft output below which a window is escalated | Toshio Sec. III A, step 3 |
 | osd | ordered statistics decoding, the post-processing step after belief propagation in BP-OSD. decsim calls the `ldpc` package's `BpOsdDecoder` | `decsim/decoders/belief_propagation_osd/decoder.py`, which names `ldpc`'s own `osd.hpp` and `stimbposd`'s `bp_osd.py` |
 

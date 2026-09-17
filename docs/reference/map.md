@@ -216,6 +216,7 @@ docstring.
 - `decsim/confidence/__init__.py`: The confidence signals: the soft output a weak decode reports.
 - `decsim/confidence/cluster.py`: The cluster gap: the confidence of one weighted Union-Find window decode.
 - `decsim/confidence/complementary.py`: The complementary gap: the confidence of one window's two forced solves.
+- `decsim/confidence/extra_cluster.py`: The extra-cluster gap: a Union-Find decode's confidence, by growing on.
 - `decsim/confidence/gap_join.py`: One window's solves, joined into its confidence.
 - `decsim/confidence/signals.py`: The soft output rows a switching run's weak decoder can report.
 

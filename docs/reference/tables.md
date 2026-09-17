@@ -39,6 +39,7 @@ In `decsim/confidence/signals.py`. A yaml names a row of it under `escalation.co
 | --- | --- | --- |
 | `complementary_gap` | `ComplementaryGap` in `decsim/confidence/complementary.py` | The signal row: the gap between one window's two forced solves. |
 | `cluster_gap` | `ClusterGap` in `decsim/confidence/cluster.py` | The signal row: the gap of one cluster-based decode's own growth. |
+| `extra_cluster_gap` | `ExtraClusterGap` in `decsim/confidence/extra_cluster.py` | The signal row: the growth spent before the boundaries join. |
 
 ## `DECODERS`
 

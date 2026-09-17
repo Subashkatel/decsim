@@ -7,6 +7,7 @@ table).
 """
 
 import decsim.confidence.signals as confidence_signals
+import decsim.decoders.settings as decoder_settings
 import decsim.escalation.policies as escalation_policies
 import decsim.escalation.settings as escalation_settings
 import decsim.tables as tables
@@ -60,32 +61,51 @@ def escalation_row(settings: escalation_settings.EscalationSettings):
     )
 
 
-def build_escalation_policy(settings: escalation_settings.EscalationSettings):
+def build_escalation_policy(
+    settings: escalation_settings.EscalationSettings,
+    weak_decoder: decoder_settings.DecoderSettings,
+):
     """The policy of the escalation kind, or the Python-built one."""
     if settings.policy is not None:
         return settings.policy
     row = escalation_row(settings)
-    collaborators = _collaborators(row, settings)
+    collaborators = _collaborators(row, settings, weak_decoder)
     return row(collaborators)
 
 
-def confidence_signal(escalation: escalation_settings.EscalationSettings):
-    """The signal row a switching run's weak decoder reports and decides on.
+def confidence_row(escalation: escalation_settings.EscalationSettings):
+    """The signal row escalation.confidence names, as a class.
 
-    Every row takes the same one argument, the card that prices its own
-    computation on the weak unit; None leaves the row on its own cost
-    model.
+    What a row needs from a decode and what it says when refused are
+    the class's, so a build site that only checks the pairing reads
+    them here without building the row.
     """
-    row = tables.row(
+    return tables.row(
         confidence_signals.CONFIDENCE_SIGNALS,
         "escalation.confidence",
         escalation.confidence,
     )
-    return row(walk_microseconds=escalation.confidence_walk_microseconds)
+
+
+def confidence_signal(
+    escalation: escalation_settings.EscalationSettings,
+    weak_decoder: decoder_settings.DecoderSettings,
+):
+    """The signal row a switching run's weak decoder reports and decides on.
+
+    Every row builds itself from the escalation section and the weak
+    decoder's settings: the card that prices its own computation, the
+    decode's weight step, the threshold it grows to, the unit's cycle
+    count; a row reads what it needs and ignores the rest.
+    """
+    row = confidence_row(escalation)
+    return row.from_settings(escalation, weak_decoder)
 
 
 def _collaborators(
-    row, settings: escalation_settings.EscalationSettings
+    row,
+    settings: escalation_settings.EscalationSettings,
+    weak_decoder: decoder_settings.DecoderSettings,
 ) -> escalation_policies.EscalationCollaborators:
     """The one record every escalation row is built from.
 
@@ -96,7 +116,7 @@ def _collaborators(
     if not row.decides_on_a_confidence:
         return escalation_policies.NO_CONFIDENCE
     threshold = _threshold_source(settings)
-    signal = confidence_signal(settings)
+    signal = confidence_signal(settings, weak_decoder)
     return escalation_policies.EscalationCollaborators(
         threshold=threshold,
         expected_source=signal.source,

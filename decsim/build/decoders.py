@@ -322,13 +322,13 @@ def _check_serves_the_confidence(
     is not refused: it prices one decode of one window, and a forced pair
     is two decodes, so the card is charged once per forced solve.
     """
-    signal = escalation_build.confidence_signal(escalation)
+    signal = escalation_build.confidence_row(escalation)
     required = signal.decoder_evidence_requirement
     missing = required - algorithm.decoder_evidence
     if not missing:
         return
     reason = _missing_evidence_reason(algorithm, missing, signal)
-    signal_name = signal.source.method
+    signal_name = escalation.confidence
     raise ValueError(
         f"{tier}_decoder.kind {kind!r} cannot serve the confidence "
         f"{signal_name}: {reason}"

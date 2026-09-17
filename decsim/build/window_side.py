@@ -122,7 +122,10 @@ def build_verdict(parts):
 
 def build_confidence_signal(parts):
     """The row the escalation's confidence is read from."""
-    return escalation_build.confidence_signal(parts.settings.escalation)
+    settings = parts.settings
+    return escalation_build.confidence_signal(
+        settings.escalation, settings.weak_decoder
+    )
 
 
 def build_gap_join(parts):

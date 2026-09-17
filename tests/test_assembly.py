@@ -153,7 +153,7 @@ def _parts_of(settings) -> build_parts.Parts:
     """The fixtures one run compiles before any seat, as the root does."""
     engine = engine_module.Engine()
     escalation_policy = escalation_build.build_escalation_policy(
-        settings.escalation
+        settings.escalation, settings.weak_decoder
     )
     plan = plan_build.build_plan(settings, escalation_policy)
     detection_events = controller_side.build_detection_events(

@@ -1,7 +1,8 @@
 """The compiled Union-Find row: the binding to its two C sources.
 
 The decisions are the C files' (union_find.c grows, takes the contact
-forest and peels; cluster_gap.c walks the quotient graph of a growth);
+forest and peels, and grows on for the extra-cluster gap; cluster_gap.c
+walks the quotient graph of a growth);
 this module lays a graph, a residual syndrome and a growth out as flat
 arrays, makes one call, and reads the outcome back as the records the
 evidence carries. ctypes rather than cffi because ctypes is in the
@@ -16,7 +17,7 @@ import functools
 import math
 import os
 import pathlib
-from typing import Union
+from typing import Optional, Union
 
 import numpy
 
@@ -27,6 +28,7 @@ BUILD_COMMAND = "tools/build_union_find.sh"
 LIBRARY_VARIABLE = "DECSIM_UNION_FIND_LIBRARY"
 _DECODE_SYMBOL = "union_find_decode"
 _CLUSTER_GAP_SYMBOL = "union_find_cluster_gap"
+_EXTRA_GROWTH_SYMBOL = "union_find_extra_growth"
 
 _OK = 0
 _OUT_OF_MEMORY = 1
@@ -90,8 +92,29 @@ _CLUSTER_GAP_ARGUMENT_TYPES = [
     _TICK_ARRAY,
     _TICK_ARRAY,
 ]
+_EXTRA_GROWTH_ARGUMENT_TYPES = [
+    ctypes.c_int32,
+    ctypes.c_int32,
+    _INDEX_ARRAY,
+    _INDEX_ARRAY,
+    _TICK_ARRAY,
+    _BIT_ARRAY,
+    _BIT_ARRAY,
+    ctypes.c_int64,
+    _BIT_ARRAY,
+    _TICK_ARRAY,
+    _TICK_ARRAY,
+    _INDEX_ARRAY,
+    _INDEX_ARRAY,
+    _TICK_ARRAY,
+    _BIT_ARRAY,
+    _INDEX_ARRAY,
+    _TICK_ARRAY,
+]
 # the gap the C writes when the growth admits no odd closed walk
 _UNREACHABLE_GAP = -1
+# the tick the C writes when the extra growth reached its limit first
+_NOT_JOINED = -1
 
 
 @dataclasses.dataclass(frozen=True)
@@ -106,6 +129,19 @@ class GrowthOutcome:
     growth_steps: tuple
     # the deepest parent chain of the trees the peel walked
     forest_depth: int
+
+
+@dataclasses.dataclass(frozen=True)
+class ExtraGrowthOutcome:
+    """What growing one decode's clusters on left behind.
+
+    joined_at_tick is the ticks grown when the two boundaries joined,
+    None when the growth limit came first; growth_steps is one
+    GrowthStep per event of the extra growth, the cycle count's input.
+    """
+
+    joined_at_tick: Optional[int]
+    growth_steps: tuple
 
 
 def decode(graph: evidence_records.UnionFindGraph, residual_syndrome):
@@ -206,6 +242,65 @@ def cluster_gap(
     return half_ticks
 
 
+def extra_growth(
+    graph: evidence_records.UnionFindGraph,
+    edge_intervals: tuple,
+    residual_syndrome,
+    growth_limit_ticks: int,
+) -> ExtraGrowthOutcome:
+    """Grow one decode's clusters on until the boundaries join or the limit.
+
+    Kishi et al. 2602.03336 Algorithm 1 on the intervals a decode left:
+    every cluster and the boundary grow, and the join is an edge
+    closing a walk of odd logical parity (union_find.h).
+    """
+    edge_count = len(graph.edges)
+    _require_one_interval_per_edge(edge_count, edge_intervals)
+    endpoint_a, endpoint_b, lengths = _graph_arrays(graph)
+    parities = _logical_parities(graph)
+    syndrome = numpy.asarray(residual_syndrome, dtype=numpy.uint8)
+    is_closed, lower_tick, upper_tick = _interval_arrays(edge_intervals)
+    step_room = edge_count + 1
+    step_edge_counts = numpy.zeros(step_room, dtype=numpy.int32)
+    step_hop_counts = numpy.zeros(step_room, dtype=numpy.int32)
+    step_growth_ticks = numpy.zeros(step_room, dtype=numpy.int64)
+    step_fusion_kinds = numpy.zeros(step_room, dtype=numpy.uint8)
+    step_count = numpy.zeros(1, dtype=numpy.int32)
+    joined_at_tick = numpy.zeros(1, dtype=numpy.int64)
+    grow_on = extra_growth_entry_point()
+    status = grow_on(
+        graph.detector_count,
+        edge_count,
+        endpoint_a,
+        endpoint_b,
+        lengths,
+        parities,
+        syndrome,
+        growth_limit_ticks,
+        is_closed,
+        lower_tick,
+        upper_tick,
+        step_edge_counts,
+        step_hop_counts,
+        step_growth_ticks,
+        step_fusion_kinds,
+        step_count,
+        joined_at_tick,
+    )
+    _refuse_failure(status)
+    growth_steps = _growth_steps(
+        step_edge_counts,
+        step_hop_counts,
+        step_growth_ticks,
+        step_fusion_kinds,
+        step_count,
+    )
+    joined = int(joined_at_tick[0])
+    if joined == _NOT_JOINED:
+        return ExtraGrowthOutcome(None, growth_steps)
+    return ExtraGrowthOutcome(joined, growth_steps)
+
+
 @functools.cache
 def entry_point():
     """The decode, bound once per process."""
@@ -216,6 +311,12 @@ def entry_point():
 def cluster_gap_entry_point():
     """The cluster gap walk, bound once per process."""
     return _bound(_CLUSTER_GAP_SYMBOL, _CLUSTER_GAP_ARGUMENT_TYPES)
+
+
+@functools.cache
+def extra_growth_entry_point():
+    """The extra growth, bound once per process."""
+    return _bound(_EXTRA_GROWTH_SYMBOL, _EXTRA_GROWTH_ARGUMENT_TYPES)
 
 
 def library_path() -> pathlib.Path:

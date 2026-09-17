@@ -12,6 +12,13 @@
  * Huang, Newman and Brown arXiv:2004.04693 make the growth weighted: an
  * edge carries an integer length and a front covers one half tick per
  * tick, so a likelier fault is crossed sooner.
+ *
+ * A second call grows on from where a decode stopped, every cluster
+ * and the boundary, until the two boundaries join or a growth limit is
+ * reached: Kishi et al. arXiv:2602.03336 Algorithm 1, the extra-cluster
+ * gap, with the join read as an edge closing a walk of odd logical
+ * parity, the quotient reading of Meister et al. arXiv:2405.07433
+ * Definition 9 that cluster_gap.h also takes.
  */
 
 #ifndef DECSIM_DECODERS_UNION_FIND_UNION_FIND_H
@@ -83,5 +90,39 @@ int32_t union_find_decode(
     int32_t *step_edge_counts, int32_t *step_hop_counts,
     int64_t *step_growth_ticks, uint8_t *step_fusion_kinds,
     int32_t *step_count, int32_t *forest_depth);
+
+/* The tick the extra growth reports when the boundaries never join. */
+enum { union_find_not_joined = -1 };
+
+/* Grow one decode's clusters on and report when the boundaries join.
+ *
+ * The graph and the residual syndrome are the decode's; logical_parity
+ * is one bit per edge, the row the walk parities are summed over. The
+ * three interval arrays arrive as the decode left them and are
+ * advanced in place, every end growing one half tick per tick, so an
+ * edge between two clusters loses two half ticks a tick. The growth
+ * stops at growth_limit_ticks. joined_at_tick receives the ticks grown
+ * when an edge first closed a walk of odd logical parity, zero when
+ * the decode's own closed edges already held one, and
+ * union_find_not_joined when the limit came first, which is the
+ * confident case.
+ *
+ * The four step arrays and step_count are the extra growth's cycle
+ * count per event, laid out as union_find_decode's; the caller sizes
+ * them at edge_count + 1, since the last event may stop at the limit
+ * and close nothing. The boundary edges an event advanced count every
+ * open edge of every cluster, because every cluster grows; the hops
+ * are the deepest flood among the clusters the event fused, and an
+ * edge that closed inside one cluster fused nothing.
+ */
+int32_t union_find_extra_growth(
+    int32_t detector_count, int32_t edge_count, const int32_t *endpoint_a,
+    const int32_t *endpoint_b, const int64_t *length_half_ticks,
+    const uint8_t *logical_parity, const uint8_t *residual_syndrome,
+    int64_t growth_limit_ticks, uint8_t *interval_is_closed,
+    int64_t *interval_lower_tick, int64_t *interval_upper_tick,
+    int32_t *step_edge_counts, int32_t *step_hop_counts,
+    int64_t *step_growth_ticks, uint8_t *step_fusion_kinds,
+    int32_t *step_count, int64_t *joined_at_tick);
 
 #endif

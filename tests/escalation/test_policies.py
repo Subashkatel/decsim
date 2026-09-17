@@ -599,7 +599,9 @@ def test_a_threshold_source_written_outside_decsim_runs_from_a_yaml(
     settings = config.point_settings(
         physical_error_probability=0.008, distance=3, round_period_us=1.0
     )
-    policy = escalation_build.build_escalation_policy(settings.escalation)
+    policy = escalation_build.build_escalation_policy(
+        settings.escalation, settings.weak_decoder
+    )
     assert isinstance(policy.threshold, _KeepEverything)
     machine = machine_module.Machine.build(settings, 0)
     result = machine.run()
@@ -842,7 +844,8 @@ def _switching_policy(threshold_nats: float):
         gap_threshold_nats=threshold_nats,
         confidence="complementary_gap",
     )
-    return escalation_build.build_escalation_policy(settings)
+    weak = decoder_settings.DecoderSettings(kind="pymatching")
+    return escalation_build.build_escalation_policy(settings, weak)
 
 
 def test_a_weak_result_with_no_soft_output_escalates_its_window():
@@ -932,7 +935,8 @@ def test_the_policy_instance_is_the_authority_over_its_settings_row():
     )
 
     row = escalation_build.escalation_row(settings)
-    policy = escalation_build.build_escalation_policy(settings)
+    weak = decoder_settings.DecoderSettings(kind="pymatching")
+    policy = escalation_build.build_escalation_policy(settings, weak)
     tier = escalation_build.primary_tier(settings)
 
     assert row is built

@@ -43,6 +43,11 @@ GROW_AND_DECIDE_CYCLES = 2
 PEEL_BUSY_AND_DECIDE_CYCLES = 2
 # the flags descend one level a cycle and completion climbs back
 PEEL_CYCLES_PER_LEVEL = 2
+# the cycle in which the controller asks whether the two boundaries
+# share a root, once an iteration of the extra growth (Kishi
+# 2602.03336 Algorithm 1 tests the join after every iteration); Helios
+# has no such compare, so the one cycle is this design's own
+JOIN_TEST_CYCLES = 1
 
 
 @dataclasses.dataclass(frozen=True)
@@ -89,6 +94,18 @@ class CycleCount:
     graph out before it grows, which Helios, holding its graph in
     registers, does not pay; the rounds loaded are the unit's fetch
     stage and not counted here.
+
+    The extra growth of the extra-cluster gap (Kishi 2602.03336
+    Algorithm 1) runs the same loop on after the
+    decode, so its cycles are the iteration's, with one more cycle a
+    tick for the join test, plus its steps' changes, and no counter
+    start, setup or peel:
+
+    extra growth cycles = (2 + delay_cycles + 1) x the growth ticks
+                        + sum over steps of max(the step's changes,
+                                                its spread work)
+
+    and one join test cycle when no tick was grown at all.
 
     The law is checked against Helios's published points outside the
     repo, with nothing fitted.
@@ -149,6 +166,23 @@ class CycleCount:
             return 0
         edge = self.clock.edge(cycles, now)
         return edge - now
+
+    def extra_growth_cycles(self, steps: tuple) -> int:
+        """The cycles the extra growth's events cost after the decode."""
+        growth_ticks = 0
+        for step in steps:
+            growth_ticks += step.growth_ticks
+        if growth_ticks == 0:
+            return JOIN_TEST_CYCLES
+        iteration = GROW_AND_DECIDE_CYCLES + self.delay_cycles
+        iteration += JOIN_TEST_CYCLES
+        merges = self._merge_cycles(steps)
+        return iteration * growth_ticks + merges
+
+    def extra_growth_ticks(self, steps: tuple) -> int:
+        """The ticks those cycles span from the edge the decode ended on."""
+        cycles = self.extra_growth_cycles(steps)
+        return cycles * self.clock.period_ticks
 
     def _iteration_cycles(self, steps: tuple) -> int:
         """Grow, wait and decide, once per growth tick the decode spans."""

@@ -44,10 +44,11 @@ escalation:
                                    # switching_validation.yaml runs them):
 # escalation:
 #   kind: switching
-#   confidence: complementary_gap  # complementary_gap | cluster_gap: the signal
-#                                  # the weak tier reports and the threshold
-#                                  # decides on, in natural-log weight either
-#                                  # way. complementary_gap decodes the window
+#   confidence: complementary_gap  # complementary_gap | cluster_gap |
+#                                  # extra_cluster_gap: the signal the weak
+#                                  # tier reports and the threshold decides
+#                                  # on, in natural-log weight in every case.
+#                                  # complementary_gap decodes the window
 #                                  # twice, each solve pinned to one logical
 #                                  # class, and subtracts the two weights
 #                                  # (Toshio 2510.25222 Sec. III A), so it needs
@@ -57,7 +58,20 @@ escalation:
 #                                  # decodes the window once and walks the
 #                                  # growth that decode did (Meister 2405.07433
 #                                  # Algorithm 2), so it needs a cluster-based
-#                                  # decoder: union_find today. The pairing is
+#                                  # decoder: union_find today. extra_cluster_gap
+#                                  # decodes the window once and grows every
+#                                  # cluster on, half a weight_step a tick,
+#                                  # until the two boundaries join or the
+#                                  # threshold's worth of growth is spent
+#                                  # (Kishi 2602.03336 Algorithm 1); the gap is
+#                                  # the growth spent, infinite when the limit
+#                                  # came first, and under a union_find
+#                                  # cycle_count its cost is the growth's own
+#                                  # cycles, (2 + delay_cycles + 1) a tick plus
+#                                  # the merges. It needs the threshold as one
+#                                  # number when the machine is built, so
+#                                  # threshold_source online is refused with
+#                                  # it. The pairing is
 #                                  # refused by name at load when the weak row's
 #                                  # decode cannot produce the signal's evidence.
 #                                  # A signal's own computation is charged on

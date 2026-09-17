@@ -49,7 +49,9 @@ def _settings(*, escalation=None, weak=None, strong=None):
 
 
 def _pool(settings):
-    policy = escalation_build.build_escalation_policy(settings.escalation)
+    policy = escalation_build.build_escalation_policy(
+        settings.escalation, settings.weak_decoder
+    )
     plan = plan_build.build_plan(settings, policy)
     formed_at_the_controller = event_formation.ControllerSideFormation(None, 0)
     return decoder_build.build_decoder_pool(
@@ -80,7 +82,9 @@ def test_the_units_two_stages_carry_all_four_of_the_engines_cycle_keys():
         engine_clock=clock,
     )
     settings = _settings(weak=weak)
-    policy = escalation_build.build_escalation_policy(settings.escalation)
+    policy = escalation_build.build_escalation_policy(
+        settings.escalation, settings.weak_decoder
+    )
     unit = decoder_build.build_decoder_unit(settings, "weak", policy)
     job = decoding_records.DecodeJob(operation_id=1, window_id=0, round_count=4)
 
@@ -100,7 +104,9 @@ def test_the_union_find_row_is_built_with_the_tiers_weight_step():
         kind="union_find", weight_step=0.25, engine_clock=clock
     )
     settings = _settings(weak=weak)
-    policy = escalation_build.build_escalation_policy(settings.escalation)
+    policy = escalation_build.build_escalation_policy(
+        settings.escalation, settings.weak_decoder
+    )
 
     unit = decoder_build.build_decoder_unit(settings, "weak", policy)
 
@@ -111,7 +117,9 @@ def test_a_python_built_decoder_is_returned_as_it_is():
     built = decoders.PresetLatencyDecoder(10.0)
     weak = decoder_settings.DecoderSettings(decoder=built)
     settings = _settings(weak=weak)
-    policy = escalation_build.build_escalation_policy(settings.escalation)
+    policy = escalation_build.build_escalation_policy(
+        settings.escalation, settings.weak_decoder
+    )
 
     unit = decoder_build.build_decoder_unit(settings, "weak", policy)
 
@@ -120,7 +128,9 @@ def test_a_python_built_decoder_is_returned_as_it_is():
 
 def test_a_tier_that_names_no_decoder_builds_none():
     settings = _settings()
-    policy = escalation_build.build_escalation_policy(settings.escalation)
+    policy = escalation_build.build_escalation_policy(
+        settings.escalation, settings.weak_decoder
+    )
 
     unit = decoder_build.build_decoder_unit(settings, "strong", policy)
 
@@ -179,7 +189,9 @@ def test_every_pool_declares_whether_its_unit_takes_a_copy():
 def test_a_decoder_kind_that_names_no_row_is_refused():
     weak = decoder_settings.DecoderSettings(kind="oracle")
     settings = _settings(weak=weak)
-    policy = escalation_build.build_escalation_policy(settings.escalation)
+    policy = escalation_build.build_escalation_policy(
+        settings.escalation, settings.weak_decoder
+    )
 
     with pytest.raises(ValueError) as refusal:
         decoder_build.build_decoder_unit(settings, "weak", policy)

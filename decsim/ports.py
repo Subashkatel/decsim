@@ -1574,7 +1574,9 @@ class ThresholdSource(Protocol):
 class ConfidenceSignal(Protocol):
     """The soft output one window's decodes report, as the join sees it.
 
-    Table rows: complementary_gap and cluster_gap (decsim/confidence/).
+    Table rows: complementary_gap, cluster_gap and extra_cluster_gap
+    (decsim/confidence/); each builds itself from the escalation section
+    and the weak decoder's settings (from_settings).
     source names the signal so the switching policy can refuse another
     one's, fault_model_requirement is what a window model must offer,
     decoder_evidence_requirement is what the decode itself must show

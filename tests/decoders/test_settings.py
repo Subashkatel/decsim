@@ -157,7 +157,7 @@ def test_a_negative_stage_cycle_count_is_refused_by_name():
 
 
 def test_an_engine_card_without_a_stage_key_is_refused_by_name():
-    """Every stage key is written out, as the two older ones are."""
+    """Every stage key is written out, and a missing one reads as a sentence."""
     clocks = config.ClockSettings({"decoder": 250.0})
     section = {
         "kind": "pymatching",
@@ -171,10 +171,25 @@ def test_an_engine_card_without_a_stage_key_is_refused_by_name():
         },
     }
 
-    with pytest.raises(KeyError, match="fetch_cycles_per_job"):
+    with pytest.raises(ValueError) as refusal:
         decoder_settings.DecoderSettings.from_yaml(
             section, clocks, "weak_decoder"
         )
+    assert str(refusal.value) == (
+        "weak_decoder.engine needs fetch_cycles_per_job, the fetch "
+        "stage's cost once a job in cycles of its clock"
+    )
+
+    del section["engine"]["release_cycles_per_job"]
+    section["engine"]["fetch_cycles_per_job"] = 0
+    with pytest.raises(ValueError) as older:
+        decoder_settings.DecoderSettings.from_yaml(
+            section, clocks, "strong_decoder"
+        )
+    assert str(older.value) == (
+        "strong_decoder.engine needs release_cycles_per_job, the release "
+        "stage's cost once a job in cycles of its clock"
+    )
 
 
 def test_the_cycle_count_block_is_read_and_absent_is_none():

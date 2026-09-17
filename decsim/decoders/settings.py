@@ -46,6 +46,15 @@ DECODERS = {
 
 DECODER_MANAGER_KEYS = ("bulk_strong", "clock", "dispatch_cycles")
 
+# <tier>_decoder.engine's four stage keys, each with what it prices, so
+# a card that leaves one out is refused by name and by what is missing.
+ENGINE_CYCLE_KEYS = {
+    "fetch_cycles_per_round": "the fetch stage's cost for each round",
+    "fetch_cycles_per_job": "the fetch stage's cost once a job",
+    "release_cycles_per_job": "the release stage's cost once a job",
+    "release_cycles_per_round": "the release stage's cost for each round",
+}
+
 # weak_decoder.input and strong_decoder.input name one of these rows:
 # how a tier's unit gets the rounds it decodes. copy moves them over the
 # tier's input link into the unit's own memory, which is what a hardware
@@ -195,6 +204,7 @@ class DecoderSettings:
             )
         input_kind = section.get("input", "copy")
         boundary_fold = section.get("boundary_fold", "copy")
+        stage_cycles = _engine_stage_cycles(engine, section_name)
         formation_latency = _formation_latency_cycles(engine)
         formation_rate = _formation_cycles_per_round(engine)
         result_blocks_unit = section.get("result_blocks_unit", False)
@@ -209,10 +219,7 @@ class DecoderSettings:
             boundary_fold=boundary_fold,
             result_blocks_unit=result_blocks_unit,
             unit_memory_rounds=unit_memory_rounds,
-            fetch_cycles_per_round=engine["fetch_cycles_per_round"],
-            fetch_cycles_per_job=engine["fetch_cycles_per_job"],
-            release_cycles_per_job=engine["release_cycles_per_job"],
-            release_cycles_per_round=engine["release_cycles_per_round"],
+            **stage_cycles,
             detection_event_latency_cycles=formation_latency,
             detection_event_cycles_per_round=formation_rate,
             engine_clock=engine_clock,
@@ -293,6 +300,25 @@ def _dispatch_clock(
             "domain its cycles are counted in"
         )
     return clocks.clock(section["clock"])
+
+
+def _engine_stage_cycles(engine: Mapping, section_name: str) -> dict:
+    """The engine card's four stage keys, by their own names."""
+    cycles = {}
+    for key in ENGINE_CYCLE_KEYS:
+        cycles[key] = _engine_cycles(engine, section_name, key)
+    return cycles
+
+
+def _engine_cycles(engine: Mapping, section_name: str, key: str) -> int:
+    """One stage key of the engine card; a card that omits it is refused."""
+    if key not in engine:
+        priced = ENGINE_CYCLE_KEYS[key]
+        raise ValueError(
+            f"{section_name}.engine needs {key}, {priced} in cycles of "
+            "its clock"
+        )
+    return engine[key]
 
 
 def _formation_latency_cycles(engine: Mapping) -> Optional[int]:

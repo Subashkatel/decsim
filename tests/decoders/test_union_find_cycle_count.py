@@ -43,22 +43,24 @@ GRAPHLIKE = fault_models.FaultRepresentation.GRAPHLIKE
 # detector 0 carries the defect; faults 0 and 1 reach the quiet
 # detectors 1 and 2, fault 2 is the boundary edge
 QUIET_NEIGHBOUR_CHECK = ((1, 1, 1), (1, 0, 0), (0, 1, 0))
-QUIET_NEIGHBOUR_PRIORS = (0.1, 0.1, 0.1)
+# two defects sharing fault 0, each with a boundary edge of its own
+ADJACENT_PAIR_CHECK = ((1, 1, 0), (1, 0, 1))
+TRACED_PRIOR = 0.1
 # the log-odds of that prior, so round(weight / weight_step) is one
 ONE_TICK_WEIGHT_STEP = 2.0
 
 
-def lone_defect_graph() -> evidence_records.UnionFindGraph:
-    """Detector 0 with two quiet neighbours and a boundary edge.
+def traced_graph(rows) -> evidence_records.UnionFindGraph:
+    """One of the traced machines' graphs, every edge two half ticks long.
 
-    Every prior is the same, and the weight step is that prior's
-    log-odds, so every edge is one weight tick, two half ticks, which is
-    the weight Helios gives every edge of its grid
+    Every prior is the same and the weight step is that prior's
+    log-odds, so every edge is one weight tick, which is the weight
+    Helios gives every edge of its grid
     (single_FPGA_FIFO_verification_test_rsc.sv, WEIGHT_X and WEIGHT_Z).
     """
-    check = numpy.asarray(QUIET_NEIGHBOUR_CHECK, dtype=numpy.uint8)
-    priors = numpy.asarray(QUIET_NEIGHBOUR_PRIORS, dtype=float)
-    fault_count = len(QUIET_NEIGHBOUR_PRIORS)
+    check = numpy.asarray(rows, dtype=numpy.uint8)
+    fault_count = check.shape[1]
+    priors = numpy.full(fault_count, TRACED_PRIOR)
     observables = numpy.zeros((1, fault_count), dtype=numpy.uint8)
     owned = numpy.ones(fault_count, dtype=bool)
     placed = fault_models.PlacedFaultModel(
@@ -71,7 +73,7 @@ def lone_defect_graph() -> evidence_records.UnionFindGraph:
         boundary_flips={},
     )
     return window_decoder.graph_from_model(
-        placed, location="one defect", weight_step=ONE_TICK_WEIGHT_STEP
+        placed, location="traced machine", weight_step=ONE_TICK_WEIGHT_STEP
     )
 
 
@@ -116,20 +118,32 @@ def test_an_empty_syndrome_costs_the_quiet_machines_eleven_cycles():
     1 + (2 + 3) + (3 + 2), the trace of Helios's controller from the
     cycle its counter starts at to the cycle it leaves PEELING.
     """
-    evidence = evidence_with([])
+    graph = traced_graph(ADJACENT_PAIR_CHECK)
+    syndrome = numpy.asarray([0, 0], dtype=numpy.uint8)
+    evidence = window_decoder.decode_graph(graph, syndrome)
+
+    assert evidence.growth_steps == ()
+    assert evidence.forest_depth == 0
     assert HELIOS.cycles(evidence) == 11
 
 
 def test_two_adjacent_defects_cost_sixteen_cycles():
     """One iteration whose fusion moves a parity, then a peel of depth one.
 
-    The edge between them is two half ticks and both ends grow, so the
-    step is one growth tick: 1 + (2 + 3) + 3 x 1 + (3 + 2 + 2).
+    Both ends of the edge between them grow, so it closes in one tick
+    while the boundary edges they also raised close in none; the odd
+    row absorbed carries its parity up to the new root, and the peel
+    walks the one level below it: 1 + (2 + 3) + (1 + 2) + (3 + 2 + 2).
     """
+    graph = traced_graph(ADJACENT_PAIR_CHECK)
+    syndrome = numpy.asarray([1, 1], dtype=numpy.uint8)
+    evidence = window_decoder.decode_graph(graph, syndrome)
+
     step = evidence_records.GrowthStep(
         edge_count=3, hop_count=1, growth_ticks=1, fusion="parity"
     )
-    evidence = evidence_with([step], forest_depth=1)
+    assert evidence.growth_steps == (step,)
+    assert evidence.forest_depth == 1
     assert HELIOS.cycles(evidence) == 16
 
 
@@ -142,7 +156,7 @@ def test_a_lone_defect_beside_the_boundary_costs_nineteen_cycles():
     in move roots and the touching flag only; the peel walks the one
     level below the boundary: 1 + 2 x (2 + 3) + 1 + (3 + 2 + 2).
     """
-    graph = lone_defect_graph()
+    graph = traced_graph(QUIET_NEIGHBOUR_CHECK)
     syndrome = numpy.asarray([1, 0, 0], dtype=numpy.uint8)
     evidence = window_decoder.decode_graph(graph, syndrome)
 

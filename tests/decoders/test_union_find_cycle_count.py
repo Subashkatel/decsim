@@ -197,6 +197,18 @@ def test_a_unit_that_walks_its_edges_pays_its_port_instead_of_its_changes():
     assert memory_bound.cycles(evidence) == 1 + 5 + 12 + 7
 
 
+def test_a_fraction_of_a_cycle_an_edge_is_rounded_up_to_whole_cycles():
+    """Half a cycle over three edges is two cycles of the port, not one."""
+    step = evidence_records.GrowthStep(
+        edge_count=3, hop_count=1, growth_ticks=1, fusion="roots"
+    )
+    evidence = evidence_with([step])
+    half_a_cycle_an_edge = cycle_count_module.CycleCount(
+        CLOCK, delay_cycles=3, cycles_per_edge=0.5
+    )
+    assert half_a_cycle_an_edge.cycles(evidence) == 1 + 5 + 2 + 5
+
+
 def test_a_decode_with_no_steps_pays_its_setup_and_one_quiet_iteration():
     """With no delay: the counter's first cycle, an iteration and a peel."""
     evidence = evidence_with([], detector_count=5, edge_count=4)

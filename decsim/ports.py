@@ -1311,13 +1311,17 @@ class DetectionEventPlacement(Protocol):
     receiving end asks form_before_storage for the round it stores; the
     root asks decoder_side_former for the former each decoder tier reads
     its rounds through, which is None for a row that has already formed
-    them. forms_at_the_weak_syndrome_buffer is the one fact the root
-    needs about a row: whether the run depends on its rounds landing in
-    that buffer.
+    them and for a source that forms nothing. The root reads two facts
+    about a row. forms_at_the_weak_syndrome_buffer: whether the run
+    depends on its rounds landing in that buffer. forms_at_the_decoder:
+    whether each tier has its own event-detection stage in front of its
+    core, which is priced whether or not the source has outcomes to
+    convert.
     """
 
     detection_event_formation_cycles: int
     forms_at_the_weak_syndrome_buffer: bool
+    forms_at_the_decoder: bool
 
     def form_before_departure(self, fragments: tuple) -> tuple:
         """The round's fragments as they leave the controller."""

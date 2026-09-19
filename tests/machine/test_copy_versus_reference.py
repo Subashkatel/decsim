@@ -1,8 +1,8 @@
 """The copy-versus-reference settings: each default is today's behaviour.
 
-Design audit note 14 section 8.2 (recommendation R4-12): every hop of
-this tree copies today, and each of these keys says whether one hop may
-be a reference instead, so the two can be measured against each other.
+Every hop of this tree copies today, and each of these keys says whether
+one hop may be a reference instead, so the two can be measured against
+each other.
 The sources are classical and quantum both: AFS's on-chip access
 (2001.06598 lines 528-531), Collision Clustering's Init unit
 (2309.05558 lines 268-271), Toshio's transfer of the assigned data
@@ -45,6 +45,24 @@ def _machine_formed_at(where: str, distance: int = 3):
         settings, controller=controller, observation=observation
     )
     return machine_module.Machine.build(settings, 0)
+
+
+def _timing_only_machine_formed_at(where: str):
+    """The weak baseline on a source that carries no outcomes to form."""
+    formed_there = _machine_formed_at(where)
+    settings = formed_there.settings
+    qpu = dataclasses.replace(settings.qpu, kind="timing_only")
+    settings = dataclasses.replace(settings, qpu=qpu)
+    return machine_module.Machine.build(settings, 0)
+
+
+def _decode_spans(machine) -> list:
+    """Each window's ticks from its dispatch to its decode's end."""
+    spans = []
+    for window in machine.window_manager.planner.windows_by_key.values():
+        span = window.t_done - window.t_dispatch
+        spans.append(span)
+    return spans
 
 
 def _switching_machine_formed_at(where: str):
@@ -334,6 +352,17 @@ def test_the_formation_default_sends_the_events_from_the_controller():
     assert _weak_input_bits(at_the_controller) == _weak_input_bits(default)
 
 
+def test_a_source_with_no_outcomes_pays_the_tiers_formation_stage():
+    """The stage is the tier's hardware, whatever the source sends it."""
+    with_outcomes = _machine_formed_at("decoder")
+    with_outcomes.run()
+    without_outcomes = _timing_only_machine_formed_at("decoder")
+    without_outcomes.run()
+    spans_without_outcomes = _decode_spans(without_outcomes)
+    spans_with_outcomes = _decode_spans(with_outcomes)
+    assert spans_without_outcomes == spans_with_outcomes
+
+
 def test_events_formed_at_the_decoder_widen_the_tiers_input_link():
     """The store and the input link then carry the raw outcomes."""
     at_the_controller = _machine_formed_at("controller")
@@ -379,10 +408,12 @@ def test_events_formed_on_the_weak_chip_cross_raw_and_leave_its_store_formed():
     on_the_weak_chip = _machine_formed_at("weak_syndrome_buffer")
     chip_inputs = _decoder_inputs(on_the_weak_chip)
     chip_result = on_the_weak_chip.run()
+    chip_observables = _observables(chip_result)
+    controller_observables = _observables(controller_result)
     assert _store_copy_bits(on_the_weak_chip) == 249
     assert _weak_input_bits(on_the_weak_chip) == 432
     assert chip_inputs == controller_inputs
-    assert _observables(chip_result) == _observables(controller_result)
+    assert chip_observables == controller_observables
 
 
 def test_a_region_escalated_from_the_weak_chip_is_formed_by_no_tier():
@@ -393,9 +424,11 @@ def test_a_region_escalated_from_the_weak_chip_is_formed_by_no_tier():
     on_the_weak_chip = _switching_machine_formed_at("weak_syndrome_buffer")
     chip_inputs = _decoder_inputs(on_the_weak_chip)
     chip_result = on_the_weak_chip.run()
+    chip_observables = _observables(chip_result)
+    controller_observables = _observables(controller_result)
     assert _formation_stages(on_the_weak_chip) == []
     assert chip_inputs == controller_inputs
-    assert _observables(chip_result) == _observables(controller_result)
+    assert chip_observables == controller_observables
 
 
 def test_a_tier_pays_yangs_latency_then_one_round_a_clock():

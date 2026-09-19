@@ -119,6 +119,29 @@ def test_one_round_costs_the_stages_latency_and_nothing_more():
     assert cycles == 5
 
 
+def test_a_tier_with_no_former_keeps_the_rounds_as_they_landed():
+    formation = detection_events.TierFormation(None)
+    reading_two_rounds = job([1, 2])
+
+    formed = formation.form(reading_two_rounds.payloads)
+
+    assert formed == reading_two_rounds.payloads
+
+
+def test_a_tier_with_no_former_pays_the_same_stage():
+    """The logic sits in front of the core whatever the source sends."""
+    formation = detection_events.TierFormation(None)
+    formation_stage = stage(formation)
+    reading_six_rounds = job([1, 2, 3, 4, 5, 6])
+    following_round_count = 5
+
+    cycles = formation_stage.cycles_for(reading_six_rounds)
+
+    following_cycles = ONE_ROUND_A_CLOCK * following_round_count
+    expected = YANG_LATENCY_CYCLES + following_cycles
+    assert cycles == expected
+
+
 def test_an_overlapping_window_pays_only_for_the_rounds_it_brings():
     """5 + (r - b - 1): the b rounds it shares are already formed."""
     former = Former()

@@ -41,10 +41,11 @@ class TierFormation:
     the first ask so the stage that prices the formation and the
     dispatcher that predicts the unit's compute read one number. A job
     that is cancelled before its decode starts gives that claim back,
-    since no stage of it ever ran.
+    since no stage of it ever ran. A source with no former leaves the
+    rounds as they landed, and the tier is charged for them all the same.
     """
 
-    def __init__(self, former: ports.DetectionEventFormer) -> None:
+    def __init__(self, former: Optional[ports.DetectionEventFormer]) -> None:
         self.former = former
         self.formed_round_keys: set = set()
 
@@ -91,7 +92,13 @@ class TierFormation:
     def _formed_fragment(
         self, fragment: round_records.RetainedSyndromeFragment
     ) -> round_records.RetainedSyndromeFragment:
-        """One round's fragment carrying its events at their own width."""
+        """One round's fragment carrying its events at their own width.
+
+        The fragment as it landed when there is nothing to form it with
+        or from: no former, or a timing-only round that carries no bits.
+        """
+        if self.former is None:
+            return fragment
         if fragment.bits is None:
             return fragment
         events = self.former.form_round(

@@ -46,6 +46,7 @@ class ControllerSideFormation:
     """
 
     forms_at_the_weak_syndrome_buffer = False
+    forms_at_the_decoder = False
 
     def __init__(
         self,
@@ -87,9 +88,14 @@ class DecoderSideFormation:
     same value of every event, so one former forms each round once, in
     round order, and both tiers read it (RememberedDetectionEvents);
     what each tier is charged is its own (decoders/detection_events.py).
+    The logic sits in front of each tier's core whatever the source
+    sends, so a tier is charged for it under this row even when the
+    source carries no outcomes to convert, as the other two rows charge
+    theirs.
     """
 
     forms_at_the_weak_syndrome_buffer = False
+    forms_at_the_decoder = True
 
     def __init__(
         self,
@@ -116,7 +122,7 @@ class DecoderSideFormation:
         return fragments
 
     def decoder_side_former(self) -> Optional[ports.DetectionEventFormer]:
-        """The former both tiers form the rounds they read through."""
+        """The former both tiers form through; None when the source has none."""
         return self.former
 
 
@@ -142,6 +148,7 @@ class WeakSyndromeBufferSideFormation:
     """
 
     forms_at_the_weak_syndrome_buffer = True
+    forms_at_the_decoder = False
 
     def __init__(
         self,

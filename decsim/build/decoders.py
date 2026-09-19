@@ -156,10 +156,14 @@ def build_decoder_pool(
 def _tier_formation(
     detection_events: ports.DetectionEventPlacement,
 ) -> Optional[detection_events_module.TierFormation]:
-    """This tier's event-detection logic; None when rounds arrive formed."""
-    former = detection_events.decoder_side_former()
-    if former is None:
+    """This tier's event-detection logic; None when rounds arrive formed.
+
+    The placement decides whether the tier has the logic. A source with
+    no former leaves it nothing to convert and the same stage to pay.
+    """
+    if not detection_events.forms_at_the_decoder:
         return None
+    former = detection_events.decoder_side_former()
     return detection_events_module.TierFormation(former)
 
 

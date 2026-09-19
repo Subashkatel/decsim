@@ -721,7 +721,10 @@ weak_decoder:                      # the lightweight tier: fast, higher LER
                                    # the fixed latency of this tier's own
                                    # event-detection logic, charged only when the
                                    # rounds reach it raw (controller.
-                                   # detection_events_formed_at decoder). 5
+                                   # detection_events_formed_at decoder), and
+                                   # then under every qpu.kind: a timing_only
+                                   # source has no outcomes to convert and the
+                                   # same stage to pay. 5
                                    # cycles is Yang et al. 2605.04892 lines
                                    # 1273-1275: "All variables are stored in FPGA
                                    # registers, enabling fully pipelined

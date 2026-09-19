@@ -445,6 +445,7 @@ Where the machine forms a round's detection events.
 | --- | --- |
 | `detection_event_formation_cycles` | `int` |
 | `forms_at_the_weak_syndrome_buffer` | `bool` |
+| `forms_at_the_decoder` | `bool` |
 
 | Method | What it does |
 | --- | --- |

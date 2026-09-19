@@ -221,6 +221,7 @@ class _PlacementOfMyOwn:
     """A placement row written outside decsim: it forms nothing at all."""
 
     forms_at_the_weak_syndrome_buffer = False
+    forms_at_the_decoder = False
 
     def __init__(self, former, detection_event_formation_cycles):
         self.former = former

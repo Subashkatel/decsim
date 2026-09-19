@@ -41,7 +41,8 @@ def joined_at_tick(
     for detector, bit in enumerate(residual_syndrome):
         if bit:
             seeds.add(detector)
-    for tick in range(growth_limit_ticks + 1):
+    tick_count = growth_limit_ticks + 1
+    for tick in range(tick_count):
         closed = _closed_edges(fronts)
         if _holds_an_odd_closed_walk(graph, closed):
             return tick

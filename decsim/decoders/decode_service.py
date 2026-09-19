@@ -98,6 +98,22 @@ class DecodeService:
         demand = self.memory_demand(job)
         return demand > 0
 
+    def input_is_on_the_unit(
+        self,
+        job: decoding_records.DecodeJob,
+        unit: decoder_unit_module.DecoderUnit,
+    ) -> bool:
+        """Whether this job's rounds are in that unit's memory or on their way.
+
+        Either way the job moves nothing: the staging makes it one more
+        reader of the rounds that are here, or one more job joining the
+        landing of the transfer that is bringing them.
+        """
+        memory = unit.memory
+        if memory.holds(job):
+            return True
+        return self.staging.is_landing_into(memory, job)
+
     def memory_demand(self, job: decoding_records.DecodeJob) -> int:
         """The rounds a job's input occupies in unit memory.
 

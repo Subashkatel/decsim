@@ -194,6 +194,21 @@ class DecoderUnit:
             return resident
         return None
 
+    def residents_awaiting_compute_count(self) -> int:
+        """How many residents still need this unit's compute.
+
+        A resident that has not started and is neither cancelled nor
+        completed is work waiting at this unit: it holds an input slot
+        and takes the compute as soon as it may. A decode in flight or
+        finished waits for nothing.
+        """
+        awaiting_count = 0
+        for resident in self.residents:
+            if is_past_start(resident):
+                continue
+            awaiting_count += 1
+        return awaiting_count
+
     def parked_residents(self) -> list:
         """The residents landed with a boundary still owed."""
         parked = []

@@ -4,11 +4,22 @@ gem5's FUPool (src/cpu/o3/fu_pool.hh:64-75): the pool keeps the units and
 knows which are free; the issue logic decides what runs. The router
 names the algorithm each job runs (a Decoder row, ports.py): by code, or
 by tier under switching (decoders.py). A job is offered a free unit
-with a free slot first. When every unit computes, a
-job with input to move is staged on the busy unit with room whose
-compute frees earliest: least work left, the task-assignment rule that
-sends each job to the server whose outstanding work ends soonest. When
-the work is known and deterministic, as a declared decode cost is,
+with a free slot first. Among those, a unit that already holds this job's
+rounds, or is receiving them for another reader, comes first: there the
+job moves nothing and starts at the landing it shares (the staging's
+rule, decoder_memory_transfer.py). Where its rounds are nowhere yet,
+every free unit starts the job at the same tick, so the choice decides
+only whom the job delays, and the unit the fewest jobs already wait on
+is taken. That is a count of the residents that have not started, not
+of their work: it agrees with least work left when the waiting decodes
+cost the same, and is only a tie-break otherwise. gem5's pool takes any
+unit that is not busy (src/cpu/o3/fu_pool.cc:165-190) because its
+functional units hold no staged input; a unit here does. When every
+unit computes, a job with input to move is staged on the busy unit with
+room whose compute frees earliest: least work left, the task-assignment
+rule that sends each job to the server whose outstanding work ends
+soonest. When the work is known and deterministic, as a declared decode
+cost is,
 immediate dispatch by least work left starts every job at the tick a
 central FIFO queue over the pool would, so staging costs nothing in
 start time and buys the input move. That equality is checked here, not
@@ -31,6 +42,11 @@ import decsim.seeding as seeding
 import decsim.trace_source as trace_source
 
 DEFAULT_POOL = "default"
+
+# whether a job's rounds are in that unit's memory or on their way there
+InputIsOnTheUnit = Callable[
+    [decoding_records.DecodeJob, decoder_unit_module.DecoderUnit], bool
+]
 
 
 class DecoderPool:
@@ -106,23 +122,33 @@ class DecoderPool:
         carries_input: bool,
         resident_capacity: int,
         memory_demand_of: Callable[[decoding_records.DecodeJob], int],
+        input_is_on_the_unit: InputIsOnTheUnit,
     ) -> Optional[tuple]:
         """(unit, has free compute) for this job, or None.
 
-        A free unit with room comes first. Otherwise a job carrying
-        input is staged on the busy unit with room that frees earliest.
+        A free unit with room comes first: one that already has this
+        job's rounds, else the one the fewest jobs are already waiting
+        on. Otherwise a job carrying input is staged on the busy unit
+        with room that frees earliest.
         """
-        for unit in self.free_by_pool[pool]:
-            if unit.has_room(job, resident_capacity, memory_demand_of):
-                return unit, True
+        free = self.free_by_pool[pool]
+        free_with_room = _with_room(
+            free, job, resident_capacity, memory_demand_of
+        )
+        unit_holding_input = _unit_holding_input(
+            free_with_room, job, input_is_on_the_unit
+        )
+        if unit_holding_input is not None:
+            return unit_holding_input, True
+        if free_with_room:
+            unit = _fewest_awaiting_compute(free_with_room)
+            return unit, True
         if not carries_input:
             return None
-        busy_with_room = []
-        for unit in self.units_by_pool[pool]:
-            if self.is_free(unit):
-                continue
-            if unit.has_room(job, resident_capacity, memory_demand_of):
-                busy_with_room.append(unit)
+        busy = self._busy_units(pool)
+        busy_with_room = _with_room(
+            busy, job, resident_capacity, memory_demand_of
+        )
         if not busy_with_room:
             return None
         unit = _earliest_freeing(busy_with_room)
@@ -144,6 +170,52 @@ class DecoderPool:
         free = self.free_by_pool[unit.pool]
         free.append(unit)
         self.trace.unit_freed.fire(unit)
+
+    def _busy_units(self, pool: str) -> list:
+        """The units of the pool whose compute a job holds."""
+        busy = []
+        for unit in self.units_by_pool[pool]:
+            if self.is_free(unit):
+                continue
+            busy.append(unit)
+        return busy
+
+
+def _with_room(
+    units: list,
+    job: decoding_records.DecodeJob,
+    resident_capacity: int,
+    memory_demand_of: Callable[[decoding_records.DecodeJob], int],
+) -> list:
+    """The units of that list whose slots and memory hold this job."""
+    with_room = []
+    for unit in units:
+        if unit.has_room(job, resident_capacity, memory_demand_of):
+            with_room.append(unit)
+    return with_room
+
+
+def _unit_holding_input(
+    units: list,
+    job: decoding_records.DecodeJob,
+    input_is_on_the_unit: InputIsOnTheUnit,
+) -> Optional[decoder_unit_module.DecoderUnit]:
+    """The first unit this job's rounds are on or on their way to, or None."""
+    for unit in units:
+        if input_is_on_the_unit(job, unit):
+            return unit
+    return None
+
+
+def _fewest_awaiting_compute(units: list) -> decoder_unit_module.DecoderUnit:
+    chosen = units[0]
+    fewest_count = chosen.residents_awaiting_compute_count()
+    for unit in units[1:]:
+        awaiting_count = unit.residents_awaiting_compute_count()
+        if awaiting_count < fewest_count:
+            fewest_count = awaiting_count
+            chosen = unit
+    return chosen
 
 
 def _earliest_freeing(units: list) -> decoder_unit_module.DecoderUnit:

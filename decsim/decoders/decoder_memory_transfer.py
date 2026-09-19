@@ -148,6 +148,19 @@ class DecoderInputStaging:
         job.input_landing_ticks = landing_ticks
         awaited.expected_landing_ticks = landing_ticks
 
+    def is_landing_into(
+        self,
+        memory: decoder_memory_module.DecoderMemory,
+        job: decoding_records.DecodeJob,
+    ) -> bool:
+        """Whether this job's rounds are already on their way into that memory.
+
+        Such a job joins the landing in flight, so it sends nothing of
+        its own.
+        """
+        landing_key = memory.landing_key(job)
+        return landing_key in self.awaited_by_input
+
     def fold_into_a_copy(
         self, job: decoding_records.DecodeJob, masked_input
     ) -> None:

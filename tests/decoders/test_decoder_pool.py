@@ -1,4 +1,4 @@
-"""The pool's offer: a free unit with room first, else least work left.
+"""The pool's offer: the unit with the rounds, the least loaded, least work.
 
 The law: with known deterministic work, dispatching each job to the
 server with the least work left starts it at the tick a central FIFO
@@ -32,13 +32,18 @@ def _no_demand(_job):
     return 0
 
 
-def _offer(pool, job, carries_input):
+def _input_nowhere(_job, _unit):
+    return False
+
+
+def _offer(pool, job, carries_input, input_is_on_the_unit=_input_nowhere):
     return pool.offer(
         "default",
         job,
         carries_input=carries_input,
         resident_capacity=2,
         memory_demand_of=_no_demand,
+        input_is_on_the_unit=input_is_on_the_unit,
     )
 
 
@@ -49,6 +54,37 @@ def test_a_free_unit_with_room_is_offered_with_its_compute():
     pool.claim(first, busy)
     next_job = _job("next")
     unit, has_free_compute = _offer(pool, next_job, carries_input=True)
+    assert unit is second
+    assert has_free_compute is True
+
+
+def test_the_free_unit_the_fewest_residents_await_is_offered():
+    pool = _pool(2)
+    first, second = pool.units_by_pool["default"]
+    waiting = _job("waiting")
+    first.admit(waiting)
+    next_job = _job("next")
+    unit, has_free_compute = _offer(pool, next_job, carries_input=True)
+    assert unit is second
+    assert has_free_compute is True
+
+
+def test_a_free_unit_that_has_the_jobs_rounds_is_offered_before_an_empty_one():
+    pool = _pool(2)
+    _first, second = pool.units_by_pool["default"]
+    waiting = _job("waiting")
+    second.admit(waiting)
+    next_job = _job("next")
+
+    def input_is_on_the_second_unit(_job, unit):
+        return unit is second
+
+    unit, has_free_compute = _offer(
+        pool,
+        next_job,
+        carries_input=True,
+        input_is_on_the_unit=input_is_on_the_second_unit,
+    )
     assert unit is second
     assert has_free_compute is True
 

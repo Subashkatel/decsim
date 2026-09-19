@@ -384,7 +384,9 @@ def result_from_selected_faults(
 
 
 def _crossing_commit(
-    model, placed_faults, committed
+    model: fault_models.WindowErrorModel,
+    placed_faults: fault_models.PlacedFaultModel,
+    committed: numpy.ndarray,
 ) -> window_records.CrossingCommit:
     """What the decode commits of the faults reaching behind the window.
 
@@ -408,24 +410,19 @@ def _crossing_commit(
     return window_records.CrossingCommit(residual, logical_observables)
 
 
-def _crossing_columns(model, placed_faults, committed):
+def _crossing_columns(
+    model: fault_models.WindowErrorModel,
+    placed_faults: fault_models.PlacedFaultModel,
+    committed: numpy.ndarray,
+) -> numpy.ndarray:
     """The committed columns that flip a detector of an earlier round."""
     crossing = numpy.zeros(committed.shape, dtype=bool)
     nonzero = numpy.nonzero(committed)
     for column_index in nonzero[0]:
         detectors = placed_faults.boundary_flips.get(int(column_index), ())
-        if _reaches_before(model, detectors):
+        if model.reaches_behind(detectors):
             crossing[column_index] = True
     return crossing
-
-
-def _reaches_before(model, detectors: tuple) -> bool:
-    """Whether any of those detectors sits before the commit region."""
-    for detector_id in detectors:
-        position = model.defect_positions[detector_id]
-        if position[0] < model.first_commit_round:
-            return True
-    return False
 
 
 def _detector_ids_from_columns(detector_flips, committed) -> tuple[int, ...]:

@@ -699,7 +699,7 @@ class ForwardSeamWindow(ForwardWindow):
         waits for that commit as it waits for the far one (Toshio et al.
         2510.25222 lines 1248-1250).
         """
-        conditions = ForwardWindow.release_conditions(self, assignment)
+        conditions = super().release_conditions(assignment)
         key = assignment.held_plan.key
         if key not in assignment.folded_boundaries:
             return conditions

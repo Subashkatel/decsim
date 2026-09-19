@@ -221,9 +221,18 @@ class WindowErrorModel:
             if faults is None:
                 continue
             crossing_by_representation[representation] = _crossing_ids(
-                faults, self.defect_positions, self.first_commit_round
+                self, faults
             )
         return crossing_by_representation
+
+    def reaches_behind(self, detectors: tuple) -> bool:
+        """Whether any of those detectors sits before the commit region."""
+        for detector_id in detectors:
+            position = self.defect_positions[detector_id]
+            round_index = position[0]
+            if round_index < self.first_commit_round:
+                return True
+        return False
 
     def _faults_or_none(
         self, representation: FaultRepresentation
@@ -255,28 +264,17 @@ def _owned_ids(faults: PlacedFaultModel) -> frozenset[int]:
 
 
 def _crossing_ids(
-    faults: PlacedFaultModel, defect_positions: dict, first_round: int
+    model: WindowErrorModel, faults: PlacedFaultModel
 ) -> frozenset[int]:
-    """The committed columns that flip a detector of an earlier round."""
+    """The catalog ids of the columns it commits that flip an earlier round."""
     crossing_ids = set()
     for column_index, fault_id in enumerate(faults.source_fault_ids):
         if not faults.owned[column_index]:
             continue
         detectors = faults.boundary_flips[column_index]
-        if _reaches_before(detectors, defect_positions, first_round):
+        if model.reaches_behind(detectors):
             crossing_ids.add(fault_id)
     return frozenset(crossing_ids)
-
-
-def _reaches_before(
-    detectors: tuple, defect_positions: dict, first_round: int
-) -> bool:
-    """Whether any of those detectors sits before the round."""
-    for detector_id in detectors:
-        position = defect_positions[detector_id]
-        if position[0] < first_round:
-            return True
-    return False
 
 
 def _frozen_array(value: object) -> object:

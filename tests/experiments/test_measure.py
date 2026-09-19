@@ -27,6 +27,8 @@ Python through the circuit_list row, on a fabric whose only priced hop
 is the decoder-to-decoder seam.
 """
 
+import math
+
 import yaml
 
 import decsim.collect as collect
@@ -124,15 +126,15 @@ TWO_TIER_LINKS = {
 }
 
 
-def slow_unit_shot(tmp_path, units: int):
-    """One shot of 30 rounds on `units` five-microsecond weak units."""
+def slow_unit_shot(tmp_path, units: int, card_microseconds: float = 5.0):
+    """One shot of 30 rounds on `units` weak units of that card."""
     raw = dict(MINIMAL_CONFIG)
     workload = dict(MINIMAL_CONFIG["workload"])
     workload["rounds_per_shot"] = 30
     raw["workload"] = workload
     raw["links"] = ONE_TIER_LINKS
     raw["weak_decoder"] = {
-        "kind": 5.0,
+        "kind": card_microseconds,
         "units": units,
         "unit_memory_rounds": None,
         "engine": {
@@ -458,13 +460,40 @@ def test_skorics_process_count_is_two_services_over_the_window_period(
 ):
     """N_par is ceil(2 tau_W / ((n_com + n_W) tau_rd)).
 
-    A 5.064 us decode twice over the six one-microsecond rounds two
-    layers acquire is 1.688 processes, so two (2209.08552 lines
-    429-438).
+    Layer A commits n_com = 3 rounds and layer B its whole window,
+    n_W = n_com + 2 n_buf = 9 (2209.08552 lines 388-390). A 5.064 us
+    decode twice over those twelve one-microsecond rounds is 0.844
+    processes, so one (lines 429-438).
     """
     measurement = slow_unit_shot(tmp_path, 1)
 
-    assert measurement.parallel_processes_needed == 2
+    assert measurement.parallel_processes_needed == 1
+
+
+def test_skorics_process_count_is_above_one_when_a_decode_outlasts_the_layers(
+    tmp_path,
+):
+    """The same twelve rounds against a 10 us card ask for two processes.
+
+    N_par is ceil(2 tau_W / ((n_com + n_W) tau_rd)) with tau_W the
+    shot's mean service and n_W = n_com + 2 n_buf (2209.08552 lines
+    388-390 and 429-438). The window scheme's rounds are null here, so
+    both sizes are the distance.
+    """
+    measurement = slow_unit_shot(tmp_path, 1, card_microseconds=10.0)
+
+    commit_round_count = 3
+    buffer_round_count = 3
+    round_period_us = 1.0
+    both_buffers_round_count = 2 * buffer_round_count
+    window_round_count = commit_round_count + both_buffers_round_count
+    committed_round_count = commit_round_count + window_round_count
+    committed_rounds_us = committed_round_count * round_period_us
+    both_layers_service_us = 2 * measurement.means["service"]
+    processes = both_layers_service_us / committed_rounds_us
+    expected = math.ceil(processes)
+    assert expected > 1
+    assert measurement.parallel_processes_needed == expected
 
 
 def test_toshios_bound_is_the_round_time_d_windows_over_the_strong_rounds(

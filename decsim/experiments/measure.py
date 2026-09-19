@@ -947,11 +947,14 @@ def parallel_processes_needed(
     """Skoric's least count of parallel decoding processes for no backlog.
 
     N_par >= 2 tau_W / ((n_com + n_W) tau_rd): a window's decoding time
-    twice, over the rounds its two layers acquire (2209.08552 lines
+    twice, over the rounds its two layers commit (2209.08552 lines
     429-438; NVQLink states the same as its equation 2, 2510.25213
-    lines 1625-1631). tau_W is this shot's mean service and the sizes
-    are the window scheme's, d when null. It is the count the parallel
-    window scheme needs; the serial chain's own condition is chain_load.
+    lines 1625-1631). Layer A commits n_com rounds and layer B its
+    whole window, and n_W is the window with a buffer on each side,
+    n_com + 2 n_buf, "nW = 3w" at the paper's sizes (lines 388-390).
+    tau_W is this shot's mean service and the sizes are the window
+    scheme's, d when null. It is the count the parallel window scheme
+    needs; the serial chain's own condition is chain_load.
     """
     service_us = _mean_or_zero(samples["service"])
     commit_rounds = settings.windows.commit_rounds
@@ -960,8 +963,12 @@ def parallel_processes_needed(
     buffer_rounds = settings.windows.buffer_rounds
     if buffer_rounds is None:
         buffer_rounds = distance
-    acquire_us = (commit_rounds + buffer_rounds) * round_period_us
-    processes = 2 * service_us / acquire_us
+    both_buffers_round_count = 2 * buffer_rounds
+    window_round_count = commit_rounds + both_buffers_round_count
+    committed_round_count = commit_rounds + window_round_count
+    committed_rounds_us = committed_round_count * round_period_us
+    both_layers_service_us = 2 * service_us
+    processes = both_layers_service_us / committed_rounds_us
     return math.ceil(processes)
 
 

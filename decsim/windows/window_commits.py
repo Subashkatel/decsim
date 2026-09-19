@@ -111,7 +111,13 @@ class WindowCommitter:
         result: decoding_records.DecodeResult,
         request_key: window_records.DecoderRequestKey,
     ) -> None:
-        """Send the strong result home; it finalizes the window on landing."""
+        """Send the strong result home; it finalizes the window on landing.
+
+        What the weak decode committed of the faults behind the window
+        joins the result before it leaves, so the frame and the
+        prediction receive the same bits.
+        """
+        result = _with_the_crossing_commit(window, result)
         finish = functools.partial(
             self.finish_strong, window, operation, result, request_key
         )
@@ -174,10 +180,9 @@ class WindowCommitter:
         ships now that it is final, and the operation may complete.
         """
         if result.logical_observables is not None:
-            prediction = _prediction_with_crossing_commit(
-                window, result.logical_observables
+            self.results.replace_prediction(
+                window.key, result.logical_observables
             )
-            self.results.replace_prediction(window.key, prediction)
         # nothing of the operation waits on the window any more
         window.published_request_key = request_key
         self.courier.ship_held(window, result, request_key)
@@ -297,10 +302,10 @@ class WindowVerdict:
         )
 
 
-def _prediction_with_crossing_commit(
-    window: window_records.Window, logical_observables: tuple
-) -> tuple:
-    """The strong prediction, plus the weak commit the region cannot own.
+def _with_the_crossing_commit(
+    window: window_records.Window, result: decoding_records.DecodeResult
+) -> decoding_records.DecodeResult:
+    """The strong result, plus the weak commit the region cannot own.
 
     A strong window owns no fault touching a round before its commit
     region, so what the weak decode committed of those faults stays: at
@@ -309,12 +314,15 @@ def _prediction_with_crossing_commit(
     lines 1248-1250).
     """
     crossing = window.crossing_commit
-    if crossing is None:
-        return logical_observables
-    kept = crossing.logical_observables
-    return tuple(
-        bit ^ kept[index] for index, bit in enumerate(logical_observables)
+    strong_flips = result.logical_observables
+    if crossing is None or strong_flips is None:
+        return result
+    kept_flips = crossing.logical_observables
+    prediction = tuple(
+        strong_flip ^ kept_flip
+        for strong_flip, kept_flip in zip(strong_flips, kept_flips)
     )
+    return dataclasses.replace(result, logical_observables=prediction)
 
 
 @dataclasses.dataclass(frozen=True)

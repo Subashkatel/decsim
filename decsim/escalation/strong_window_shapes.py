@@ -82,7 +82,7 @@ class StrongAssignment:
     views name while the job is held. folded_boundaries names the
     neighbour windows whose committed boundary conditions the row folds
     into the job's input, Bombin et al. 2303.04846's input adaptation
-    (lines 775-788); both shipped rows fold none and read raw rounds.
+    (lines 775-788); a row that reads raw rounds folds none.
     """
 
     request_key: window_records.DecoderRequestKey
@@ -699,7 +699,8 @@ class ForwardSeamWindow(ForwardWindow):
         waits for that commit as it waits for the far one (Toshio et al.
         2510.25222 lines 1248-1250).
         """
-        conditions = super().release_conditions(assignment)
+        forward_window = super()
+        conditions = forward_window.release_conditions(assignment)
         key = assignment.held_plan.key
         if key not in assignment.folded_boundaries:
             return conditions
@@ -732,7 +733,7 @@ class ForwardSeamWindow(ForwardWindow):
         return faces + (restart_key,)
 
 
-# both shipped rows read raw rounds on both faces and fold no committed
+# a row that reads raw rounds on both faces folds no committed
 # neighbour boundary into the strong job's input
 FOLDS_NO_BOUNDARY: tuple = ()
 

@@ -409,7 +409,7 @@ class DecodeResult:
     # CrossingCommit: the part of the correction that commits faults
     # touching a round before the window's commit region, which the
     # residual's XOR cannot be split into afterwards
-    crossing_commit: Optional[Any] = None
+    crossing_commit: Optional[window_records.CrossingCommit] = None
     # BackendDecodeStatus of a best-effort correction (nonconverged, low
     # confidence, does not reproduce the syndrome); None when the decode
     # succeeded. The correction is committed either way and the status travels

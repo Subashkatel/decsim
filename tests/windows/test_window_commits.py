@@ -267,6 +267,26 @@ def test_a_strong_result_keeps_the_weak_commit_of_the_crossing_faults():
     assert fixture.results.replaced == [((4, 1), (1, 1))]
 
 
+def test_the_frame_receives_the_strong_result_with_the_crossing_commit():
+    """The frame and the prediction are one correction, so one set of bits."""
+    fixture = _Fixture()
+    weak = fixture.job(window_records.DecoderTier.WEAK, 0, awaiting=True)
+    residual = window_records.DependencyResidual(detector_ids=(7,))
+    crossing = window_records.CrossingCommit(residual, (1, 0))
+    weak_result = decoding_records.DecodeResult(
+        4, 1, logical_observables=(1, 0), crossing_commit=crossing
+    )
+    fixture.verdict.accept_result(weak, weak_result)
+    strong = fixture.job(window_records.DecoderTier.STRONG, 1)
+    strong_result = decoding_records.DecodeResult(
+        4, 1, logical_observables=(0, 1)
+    )
+    fixture.verdict.accept_strong_result(strong, strong_result)
+    fixture.engine.run()
+    committed_flips = [flips for _tick, _key, flips in fixture.frame.commits]
+    assert committed_flips == [(1, 1)]
+
+
 def test_a_frameless_run_commits_at_the_delivery():
     fixture = _Fixture()
     decoder_output = decoder_output_module.DecoderOutput()

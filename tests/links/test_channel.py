@@ -45,8 +45,10 @@ def send_at(engine, channel, tick, payload_bits, setup_ticks, delivered):
     """Send at the tick; the transfer is appended to delivered."""
     delay = tick - engine.now
 
+    framed = channel_module.FramedPayload(payload_bits)
+
     def send():
-        channel.send(payload_bits, tick, setup_ticks, delivered.append)
+        channel.send(framed, tick, setup_ticks, delivered.append)
 
     engine.schedule(delay, send)
 
@@ -102,6 +104,44 @@ def test_delivery_is_send_plus_serialization_plus_latency():
     assert transfer.delivery_ticks == 8310
     assert transfer.total_delay_ticks == 8300
     assert engine.now == 8310
+
+
+def test_a_header_is_serialized_with_the_payload_and_counted_apart():
+    """ns-3 times the packet with its header (net-device.cc:243 and :528)."""
+    engine = decsim.engine.Engine()
+    rate_bits_per_microsecond = 1000.0
+    channel = bounded_channel(engine, rate_bits_per_microsecond, 300)
+    delivered = []
+    payload_bits = 8
+    header_bits = 24
+    framed = channel_module.FramedPayload(
+        payload_bits=payload_bits, header_bits=header_bits
+    )
+
+    channel.send(framed, 0, 0, delivered.append)
+    engine.run()
+
+    wire_bits = payload_bits + header_bits
+    # the closed form with no propagation is the serialization alone
+    (expected_ticks,) = closed_form(
+        [0], [wire_bits], rate_bits_per_microsecond, 0
+    )
+    transfer = delivered[0]
+    assert transfer.serialization_ticks == expected_ticks
+    assert transfer.payload_bits == payload_bits
+    assert transfer.header_bits == header_bits
+
+
+def test_a_header_costs_an_unbounded_channel_no_time():
+    engine = decsim.engine.Engine()
+    channel = unbounded_channel(engine, 300)
+    delivered = []
+    framed = channel_module.FramedPayload(payload_bits=8, header_bits=24)
+
+    channel.send(framed, 0, 0, delivered.append)
+    engine.run()
+
+    assert delivered[0].delivery_ticks == 300
 
 
 def test_an_unbounded_channel_delivers_at_send_plus_latency():
@@ -357,10 +397,12 @@ def test_the_expected_delay_is_the_delivery_when_nothing_overtakes():
     delivered = []
     expected = []
 
+    framed = channel_module.FramedPayload(8)
+
     def ask_then_send():
-        delay = channel.expected_delay_ticks(8, 10, 5)
+        delay = channel.expected_delay_ticks(framed, 10, 5)
         expected.append(delay)
-        channel.send(8, 10, 5, delivered.append)
+        channel.send(framed, 10, 5, delivered.append)
 
     send_at(engine, channel, 0, 8, 5, delivered)
     engine.schedule(10, ask_then_send)
@@ -373,7 +415,8 @@ def test_the_expected_delay_is_the_delivery_when_nothing_overtakes():
 def test_the_expected_delay_leaves_the_channel_untouched():
     engine = decsim.engine.Engine()
     channel = bounded_channel(engine, 1000.0, 0)
-    channel.expected_delay_ticks(8, 10, 5)
+    framed = channel_module.FramedPayload(8)
+    channel.expected_delay_ticks(framed, 10, 5)
     delivered = []
     send_at(engine, channel, 10, 8, 5, delivered)
     engine.run()

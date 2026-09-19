@@ -206,9 +206,12 @@ class Transfer:
     serializer_start_ticks and let its last bit go at
     serializer_end_ticks; the receiver has it at delivery_ticks, one
     propagation later. total_delay_ticks counts from the request.
+    header_bits is the path's framing, which the wire serialized with
+    the payload and which is no part of it.
     """
 
     payload_bits: Optional[int]
+    header_bits: int
     request_ticks: int
     setup_ticks: int
     send_ticks: int

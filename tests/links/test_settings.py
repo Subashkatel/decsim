@@ -34,9 +34,13 @@ def channel(name="test", latency_ticks=0, capacity_settings=None):
     )
 
 
-def actual_path(channel_settings, setup_ticks=0):
+def actual_path(channel_settings, setup_ticks=0, header_bits=0):
     return link_settings.PathSettings(
-        channel_settings, None, "test payload", setup_ticks
+        channel_settings,
+        None,
+        "test payload",
+        setup_ticks,
+        header_bits=header_bits,
     )
 
 
@@ -143,6 +147,13 @@ def test_an_unset_latency_is_refused_with_the_field_named():
 def test_a_negative_setup_cost_is_refused():
     with pytest.raises(ValueError, match="setup_ticks must be nonnegative"):
         actual_path(FREE_CHANNEL, setup_ticks=-5)
+
+
+def test_a_negative_header_is_refused():
+    with pytest.raises(
+        ValueError, match="header_bits_per_transfer must be nonnegative"
+    ):
+        actual_path(FREE_CHANNEL, header_bits=-8)
 
 
 def test_a_fractional_setup_cost_is_refused():

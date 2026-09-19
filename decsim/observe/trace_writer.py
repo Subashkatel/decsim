@@ -216,6 +216,7 @@ class TraceWriter:
         attribution = record.attribution
         args = {
             "bits": transfer.payload_bits,
+            "header_bits": transfer.header_bits,
             "transfer": "move",
             "channel": record.channel,
             "queue_wait_ticks": transfer.queue_wait_ticks,
@@ -460,9 +461,7 @@ class TraceWriter:
         name = f"W{job.window_id} input in memory"
         key = _input_key(job)
         if (thread, key) not in self._open.open_residence:
-            self._begin_residence(
-                thread, key, name, "window,residence", args
-            )
+            self._begin_residence(thread, key, name, "window,residence", args)
         self._end_flow(thread, job)
         self._step_window_flow(thread, window_key, self.engine.now)
 

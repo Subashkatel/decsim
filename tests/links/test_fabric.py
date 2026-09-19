@@ -13,6 +13,7 @@ round actually crosses when only one decoder tier exists.
 
 import pytest
 
+import decsim.config as config
 import decsim.engine
 import decsim.links.fabric as fabric_module
 import decsim.links.settings as link_settings
@@ -299,6 +300,46 @@ def test_an_actual_payload_is_priced_and_named_by_its_source():
     assert transfer.payload_bits == 7
     assert record.payload_selection is transfer_records.PayloadSelection.ACTUAL
     assert record.payload_source == "test payload"
+
+
+def test_a_paths_header_is_framed_onto_the_transfer_it_sends():
+    """448 bits is CUDA-Q's enqueue framing, 24 plus 32 bytes.
+
+    The 24 byte RPCHeader in front of every request is cudaqx
+    decoder_rpc_wire_format.h lines 41-43, and the 32 bytes of fields in
+    front of an enqueue's syndromes are lines 62-69.
+    """
+    engine = decsim.engine.Engine()
+    rate_bits_per_microsecond = 1000.0
+    capacity = link_settings.CapacitySettings(
+        rate_bits_per_microsecond, AGGREGATE, None, "test"
+    )
+    channel = link_settings.ChannelSettings("framed", 0, capacity, "test")
+    payload_bits = 360
+    header_bits = 448
+    framed_path = link_settings.PathSettings(
+        channel, None, "test payload", header_bits=header_bits
+    )
+    fabric = fabric_with(engine, weak_decoder_to_strong_decoder=framed_path)
+    delivered = []
+    region = operation_attribution()
+    send_on(
+        engine,
+        fabric,
+        PATH.WEAK_DECODER_TO_STRONG_DECODER,
+        payload_bits,
+        0,
+        region,
+        delivered,
+    )
+    engine.run()
+    wire_bits = payload_bits + header_bits
+    wire_microseconds = wire_bits / rate_bits_per_microsecond
+    expected_ticks = config.microseconds_to_ticks(wire_microseconds)
+    transfer = delivered[0]
+    assert transfer.payload_bits == payload_bits
+    assert transfer.header_bits == header_bits
+    assert transfer.serialization_ticks == expected_ticks
 
 
 def test_a_missing_payload_takes_the_cards_default():

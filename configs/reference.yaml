@@ -455,6 +455,20 @@ links:                             # a kind, then one card per path; null = the
                                    #     channels x clock MHz
                                    #   setup_cycles_per_transfer: optional fixed
                                    #     per-transfer DMA setup (setups serialize)
+                                   #   header_bits_per_transfer: optional framing
+                                   #     every transfer of the path carries beside
+                                   #     its payload; the wire serializes both
+                                   #     (ns-3 adds a header to every packet and
+                                   #     times the packet with it,
+                                   #     point-to-point-net-device.cc:528 and :243),
+                                   #     so it costs time on a bounded channel
+                                   #     only. CUDA-Q's real-time messages put a
+                                   #     24 byte RPCHeader and 32 bytes of enqueue
+                                   #     fields in front of the syndromes, 448
+                                   #     bits, and a 24 byte RPCResponse in front
+                                   #     of a reply, 192 bits (cudaqx
+                                   #     decoder_rpc_wire_format.h lines 41-43
+                                   #     and 62-69)
   qpu_to_controller: {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
                                    # QPU -> controller, one readout
   controller_to_weak_buffer: {latency_cycles: 1, clock: fridge, bits_per_cycle: 1.0, channels: 8}

@@ -6,10 +6,13 @@ finite bandwidth: ns-3's point-to-point device, a DataRate and a delay
 components; it rides one channel, carries a payload rule, and may pay a
 per-transfer setup cost, the descriptor and doorbell work a processor
 does before the data mover starts (Shao et al., MICRO 2016, section
-III.C). A fabric is one path setting per hop plus a profile name; two
-paths whose channels carry the same name share one wire and one setup
-engine. The values are checked here, once, because the yaml and the
-number cards are where they enter decsim.
+III.C), and a per-transfer header, the framing the wire serializes with
+the payload (ns-3's device adds a header to every packet it sends,
+point-to-point-net-device.cc:528, and times the packet with it, :243).
+A fabric is one path setting per hop plus a profile name; two paths
+whose channels carry the same name share one wire and one setup engine.
+The values are checked here, once, because the yaml and the number cards
+are where they enter decsim.
 """
 
 import dataclasses
@@ -142,6 +145,13 @@ class PathSettings:
     basis as the channel's capacity, so the two describe the same lanes.
     setup_ticks is paid on the channel's setup engine before every
     transfer of the path; zero means the path programs nothing.
+    header_bits is the framing every transfer of the path carries beside
+    its payload, serialized with it and counted apart from it; zero
+    means the path frames nothing. CUDA-Q's real-time messages are the
+    worked case: a 24 byte RPCHeader in front of every request and a 24
+    byte RPCResponse in front of every reply
+    (cudaqx decoder_rpc_wire_format.h lines 41-43), and 32 bytes of
+    fields in front of the syndromes of an enqueue (lines 62-69).
     excludes_receiver_processing says what the card's latency covers: a
     reference number measured end to end includes the receiver turning
     the arrival into bits, and a card the run's own yaml wrote times the
@@ -153,6 +163,7 @@ class PathSettings:
     default_payload: Optional[PayloadSettings]
     actual_payload_source: Optional[str]
     setup_ticks: int = 0
+    header_bits: int = 0
     # the card times the wire alone, so the receiving component's own
     # processing of what arrives is priced somewhere else
     excludes_receiver_processing: bool = False
@@ -164,18 +175,13 @@ class PathSettings:
             raise ValueError(
                 "a path needs a default payload or an actual payload source"
             )
-        setup_ticks = _as_whole_number(self.setup_ticks, "setup_ticks")
+        setup_ticks = _as_count(self.setup_ticks, "setup_ticks")
         object.__setattr__(self, "setup_ticks", setup_ticks)
-        if self.setup_ticks < 0:
-            raise ValueError("setup_ticks must be nonnegative")
-        capacity = self.channel.capacity
-        default_payload = self.default_payload
-        if capacity is None or default_payload is None:
-            return
-        if capacity.basis is not default_payload.basis:
-            raise ValueError("capacity and payload bases must match")
-        if capacity.lane_count != default_payload.lane_count:
-            raise ValueError("capacity and payload lane counts must match")
+        header_bits = _as_count(self.header_bits, "header_bits_per_transfer")
+        object.__setattr__(self, "header_bits", header_bits)
+        _check_capacity_matches_payload(
+            self.channel.capacity, self.default_payload
+        )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -224,8 +230,21 @@ class FabricSettings:
         return getattr(self, path.value)
 
 
+def _check_capacity_matches_payload(
+    capacity: Optional[CapacitySettings],
+    default_payload: Optional[PayloadSettings],
+) -> None:
+    """A bounded channel and a sized payload share one basis and lane count."""
+    if capacity is None or default_payload is None:
+        return
+    if capacity.basis is not default_payload.basis:
+        raise ValueError("capacity and payload bases must match")
+    if capacity.lane_count != default_payload.lane_count:
+        raise ValueError("capacity and payload lane counts must match")
+
+
 def _as_whole_number(value, name: str) -> int:
-    """A count as an exact int, or a ValueError naming the field.
+    """A value as an exact int, or a ValueError naming the field.
 
     3.0 is fine; 3.5, NaN and None are not.
     """
@@ -235,6 +254,14 @@ def _as_whole_number(value, name: str) -> int:
         raise ValueError(f"{name} must be a finite whole number") from None
     if whole != value:
         raise ValueError(f"{name} must be a finite whole number")
+    return whole
+
+
+def _as_count(value, name: str) -> int:
+    """A whole number that is not negative, or a ValueError naming the field."""
+    whole = _as_whole_number(value, name)
+    if whole < 0:
+        raise ValueError(f"{name} must be nonnegative")
     return whole
 
 

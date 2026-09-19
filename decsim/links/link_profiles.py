@@ -569,8 +569,9 @@ def from_yaml(
     """The yaml's `links` section: a kind, and one card per path over it.
 
     A card prices its path in cycles of a named clock domain: latency,
-    bits per cycle per lane (null is unbounded), the lane count, and an
-    optional per-transfer setup cost. A null card keeps the chosen row's
+    bits per cycle per lane (null is unbounded), the lane count, an
+    optional per-transfer setup cost, and an optional per-transfer
+    header in bits. A null card keeps the chosen row's
     numbers for that path. The config prices readout classification on
     its own line, so its qpu_to_controller card is link propagation only,
     and the fabric says so.
@@ -743,8 +744,12 @@ def _carded_path(
     setup_ticks = 0
     if setup_microseconds:
         setup_ticks = config.microseconds_to_ticks(setup_microseconds)
+    header_bits = card.get("header_bits_per_transfer", 0)
     return dataclasses.replace(
-        path_settings, channel=channel, setup_ticks=setup_ticks
+        path_settings,
+        channel=channel,
+        setup_ticks=setup_ticks,
+        header_bits=header_bits,
     )
 
 

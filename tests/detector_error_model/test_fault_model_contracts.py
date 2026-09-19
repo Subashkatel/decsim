@@ -121,6 +121,7 @@ def test_a_window_hands_out_the_representation_it_holds():
         detector_ids=(0, 1),
         detector_coordinates=None,
         defect_positions={0: (1, 0), 1: (1, 1)},
+        first_commit_round=1,
         graphlike_faults=graphlike,
         physical_faults=physical,
     )
@@ -138,6 +139,7 @@ def test_a_window_refuses_a_representation_it_does_not_hold():
         detector_ids=(0, 1),
         detector_coordinates=None,
         defect_positions={},
+        first_commit_round=1,
         graphlike_faults=placed,
         physical_faults=None,
     )
@@ -151,6 +153,7 @@ def test_a_window_refuses_a_representation_that_is_not_a_member():
         detector_ids=(0, 1),
         detector_coordinates=None,
         defect_positions={},
+        first_commit_round=1,
         graphlike_faults=placed,
         physical_faults=None,
     )
@@ -166,6 +169,7 @@ def test_a_windows_link_projection_is_frozen_too():
         detector_ids=(0, 1),
         detector_coordinates=None,
         defect_positions={},
+        first_commit_round=1,
         graphlike_faults=graphlike,
         physical_faults=physical,
         physical_to_graphlike_detector_projection=projection,
@@ -175,6 +179,38 @@ def test_a_windows_link_projection_is_frozen_too():
     assert frozen.data.flags.writeable is False
     dense = frozen.toarray()
     assert dense.tolist() == [[1, 1], [0, 1]]
+
+
+def test_a_windows_crossing_faults_are_the_ones_reaching_behind_it():
+    """What a window commits of the seam behind its commit region.
+
+    The window that restarts the weak chain after a strong region owns
+    the faults crossing that seam, and its own strong redo is pinned on
+    exactly those and on no other fault of its correction (Toshio et al.
+    2510.25222 lines 1248-1250).
+    """
+    check = scipy.sparse.csc_matrix([[1, 0], [1, 1]], dtype=numpy.uint8)
+    observables = scipy.sparse.csc_matrix([[1, 1]], dtype=numpy.uint8)
+    graphlike = fault_model_contracts.PlacedFaultModel(
+        representation=GRAPHLIKE,
+        check=check,
+        priors=[0.1, 0.2],
+        observables=observables,
+        owned=[True, True],
+        source_fault_ids=[4, 9],
+        boundary_flips={0: [0, 2], 1: [1]},
+    )
+    window = fault_model_contracts.WindowErrorModel(
+        detector_ids=(0, 1),
+        detector_coordinates=None,
+        # detector 2 sits on round 5, the round before the commit region
+        defect_positions={0: (6, 0), 1: (6, 1), 2: (5, 0)},
+        first_commit_round=6,
+        graphlike_faults=graphlike,
+        physical_faults=None,
+    )
+    crossing = window.crossing_fault_ids()
+    assert crossing == {GRAPHLIKE: frozenset({4})}
 
 
 def test_importing_the_contract_alone_loads_no_numeric_library():

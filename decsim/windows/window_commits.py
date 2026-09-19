@@ -133,6 +133,7 @@ class WindowCommitter:
     ) -> None:
         """Commit the window: its contribution, its status, what it wakes."""
         window.committed = True
+        window.crossing_commit = result.crossing_commit
         if window.t_done is None:
             self.note_decode_finished(window)
         status = result.decode_status
@@ -173,9 +174,10 @@ class WindowCommitter:
         ships now that it is final, and the operation may complete.
         """
         if result.logical_observables is not None:
-            self.results.replace_prediction(
-                window.key, result.logical_observables
+            prediction = _prediction_with_crossing_commit(
+                window, result.logical_observables
             )
+            self.results.replace_prediction(window.key, prediction)
         # nothing of the operation waits on the window any more
         window.published_request_key = request_key
         self.courier.ship_held(window, result, request_key)
@@ -293,6 +295,26 @@ class WindowVerdict:
         self.committer.commit_or_publish(
             window, operation, result, job.request_key, is_final, read_result
         )
+
+
+def _prediction_with_crossing_commit(
+    window: window_records.Window, logical_observables: tuple
+) -> tuple:
+    """The strong prediction, plus the weak commit the region cannot own.
+
+    A strong window owns no fault touching a round before its commit
+    region, so what the weak decode committed of those faults stays: at
+    a back-to-back seam that commit is the boundary condition the region
+    before it and this one are both pinned on (Toshio et al. 2510.25222
+    lines 1248-1250).
+    """
+    crossing = window.crossing_commit
+    if crossing is None:
+        return logical_observables
+    kept = crossing.logical_observables
+    return tuple(
+        bit ^ kept[index] for index, bit in enumerate(logical_observables)
+    )
 
 
 @dataclasses.dataclass(frozen=True)

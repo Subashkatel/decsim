@@ -53,9 +53,10 @@ class _PinnedFaces:
     """The faces a forward row pins its input on.
 
     A row that pins nothing passes None instead of this record and
-    reads every face raw. near_source_key is the window before the
-    region, or None when no committed correction closes that face; the
-    far face pins on the restart window whenever the region has one.
+    reads every face raw. near_source_key is the window whose commit
+    closes the near face (forward_near_face), or None at the operation's
+    first round; the far face pins on the restart window whenever the
+    region has one.
     """
 
     near_source_key: Optional[tuple]
@@ -134,6 +135,27 @@ class StrongRegions:
                 return dependency_key
         return None
 
+    def forward_near_face(self, key: tuple) -> Optional[tuple]:
+        """The commit a forward region's near face pins on.
+
+        The window before the region, when one committed the round
+        before it. When none did and the region does not start the
+        operation, the escalated window is the window that restarted the
+        weak chain after an earlier strong region: its own weak decode
+        committed the faults crossing that seam and the region ending
+        there is pinned on them, so this region pins its near face on
+        that same commit (Toshio et al. 2510.25222 lines 1248-1250, both
+        ends determined by the weak decoder). None at the operation's
+        first round, round one, whose face the initialisation closes.
+        """
+        neighbour = self.near_seam_source(key)
+        if neighbour is not None:
+            return neighbour
+        weak_window = self.planner.window_at(key)
+        if weak_window.commit_lo == 1:
+            return None
+        return key
+
     def redecode_model(
         self,
         key: tuple,
@@ -196,9 +218,10 @@ class StrongRegions:
         future face is determined either by the restart window's commit
         or, at the operation's end, by the readout (Tan et al.
         2209.09219 lines 953-955), so the region never reads past its
-        commit region. A near face that no committed correction closes
-        is open, and an open face keeps one buffer region of raw context
-        (Bombin lines 850-852).
+        commit region. The near face is open only at the operation's
+        first round, where the region has no earlier commit to pin on
+        and keeps one buffer region of raw context (Bombin lines
+        850-852).
         """
         proposal = self._proposed_forward_region(key)
         plan = proposal.plan
@@ -358,7 +381,9 @@ class StrongRegions:
                 restart_exclusions,
                 None,
             )
-        prior_faults = self._forward_prior_faults(pinned_faces, restart_model)
+        prior_faults = self._forward_prior_faults(
+            key, pinned_faces, restart_model
+        )
         strong_model = self.planner.strong_window_model(
             operation,
             strong_window,
@@ -379,28 +404,42 @@ class StrongRegions:
         )
 
     def _forward_prior_faults(
-        self, pinned_faces: Optional["_PinnedFaces"], restart_model
+        self,
+        key: tuple,
+        pinned_faces: Optional["_PinnedFaces"],
+        restart_model,
     ):
         """What the faces of a forward region's pins carry.
 
-        The near face pins on the window before the region, whose
-        committed faults the planner holds; the far face pins on the
-        restart window, whose model is the one built just above. A row
-        that pins neither face gets None and keeps every candidate fault
-        as a column.
+        The near face pins on a commit the planner holds the owned
+        faults of; the far face pins on the restart window, whose model
+        is the one built just above. A row that pins neither face gets
+        None and keeps every candidate fault as a column.
         """
         if pinned_faces is None:
             return None
         owned_sets = []
         near_source_key = pinned_faces.near_source_key
         if near_source_key is not None:
-            near_owned = self.planner.owned_faults_of(near_source_key)
+            near_owned = self._near_face_faults(key, near_source_key)
             if near_owned is not None:
                 owned_sets.append(near_owned)
         if restart_model is not None:
             restart_owned = restart_model.owned_fault_ids()
             owned_sets.append(restart_owned)
         return _union_of_owned_faults(owned_sets)
+
+    def _near_face_faults(self, key: tuple, near_source_key: tuple):
+        """The faults the near face's commit takes out of the columns.
+
+        A neighbour has committed its whole extent. A region pinned on
+        the escalated window's own weak commit takes only the faults
+        crossing behind that window's first round, because the rest of
+        that commit is exactly what the region decodes again.
+        """
+        if near_source_key != key:
+            return self.planner.owned_faults_of(near_source_key)
+        return self.planner.crossing_faults_of(key)
 
     def _proposed_restart_window(
         self, restart_key: tuple, plan: window_records.StrongRegionPlan

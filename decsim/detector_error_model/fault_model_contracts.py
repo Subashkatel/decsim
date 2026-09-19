@@ -140,11 +140,14 @@ class WindowErrorModel:
     `detector_coordinates` holds Stim's coordinates for those rows, or None
     when any row has none. `defect_positions` maps every detector the
     window can see or hand off to its (round, position in round).
+    `first_commit_round` is the first round of the window's commit
+    region, which says which of its columns reach behind it.
     """
 
     detector_ids: tuple[int, ...]
     detector_coordinates: Optional[tuple[tuple[float, ...], ...]]
     defect_positions: dict[int, tuple[int, int]]
+    first_commit_round: int
     graphlike_faults: Optional[PlacedFaultModel]
     physical_faults: Optional[PlacedFaultModel]
     physical_to_graphlike_detector_projection: Optional[object] = None
@@ -198,6 +201,30 @@ class WindowErrorModel:
             owned_by_representation[representation] = _owned_ids(faults)
         return owned_by_representation
 
+    def crossing_fault_ids(
+        self,
+    ) -> dict[FaultRepresentation, frozenset[int]]:
+        """The faults it commits that reach behind its commit region.
+
+        A window whose near seam no earlier owner closes commits the
+        faults crossing it: the window that restarts the weak chain
+        after a strong region owns the rounds it reads and the faults
+        touching the region's last round with them
+        (escalation/strong_regions.py, _fault_exclusions). Its own
+        strong redo is pinned on that part of its correction rather than
+        deciding those faults again (Toshio et al. 2510.25222 lines
+        1248-1250).
+        """
+        crossing_by_representation = {}
+        for representation in FaultRepresentation:
+            faults = self._faults_or_none(representation)
+            if faults is None:
+                continue
+            crossing_by_representation[representation] = _crossing_ids(
+                faults, self.defect_positions, self.first_commit_round
+            )
+        return crossing_by_representation
+
     def _faults_or_none(
         self, representation: FaultRepresentation
     ) -> Optional[PlacedFaultModel]:
@@ -225,6 +252,31 @@ def _owned_ids(faults: PlacedFaultModel) -> frozenset[int]:
         if faults.owned[column_index]:
             owned_ids.add(fault_id)
     return frozenset(owned_ids)
+
+
+def _crossing_ids(
+    faults: PlacedFaultModel, defect_positions: dict, first_round: int
+) -> frozenset[int]:
+    """The committed columns that flip a detector of an earlier round."""
+    crossing_ids = set()
+    for column_index, fault_id in enumerate(faults.source_fault_ids):
+        if not faults.owned[column_index]:
+            continue
+        detectors = faults.boundary_flips[column_index]
+        if _reaches_before(detectors, defect_positions, first_round):
+            crossing_ids.add(fault_id)
+    return frozenset(crossing_ids)
+
+
+def _reaches_before(
+    detectors: tuple, defect_positions: dict, first_round: int
+) -> bool:
+    """Whether any of those detectors sits before the round."""
+    for detector_id in detectors:
+        position = defect_positions[detector_id]
+        if position[0] < first_round:
+            return True
+    return False
 
 
 def _frozen_array(value: object) -> object:

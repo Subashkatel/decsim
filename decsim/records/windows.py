@@ -110,6 +110,10 @@ class Window:
     decode_status: Optional[str] = (
         None  # best-effort status of the committed decode, None = succeeded
     )
+    # what its committed decode owns of the faults crossing behind its
+    # commit region; None until it commits, and empty for every window
+    # an earlier owner's commit closes
+    crossing_commit: Optional["CrossingCommit"] = None
     t_first_round: Optional[int] = None  # tick the first round arrived
     t_data_complete: Optional[int] = (
         None  # tick the last buffered round arrived
@@ -248,6 +252,23 @@ class DependencyResidual:
 
     detector_ids: tuple[int, ...] = ()
     defects: Optional[dict] = None
+
+
+@dataclass(frozen=True)
+class CrossingCommit:
+    """What one decode committed of the faults crossing its near seam.
+
+    A window that owns the faults touching the round before its commit
+    region hands that part of its correction on twice: as the boundary
+    condition of the region ending there, and, when it escalates, to its
+    own strong redo, which owns none of those faults. The residual is
+    their complete detector effect, and logical_observables the
+    observables they flip, which stay with the window when the strong
+    result replaces its prediction.
+    """
+
+    residual: DependencyResidual
+    logical_observables: tuple[int, ...]
 
 
 @dataclass(frozen=True)

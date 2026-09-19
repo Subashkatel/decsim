@@ -503,6 +503,16 @@ class WindowPlan(Protocol):
         models.
         """
 
+    def crossing_faults_of(self, key: tuple) -> Optional[dict]:
+        """The faults it commits that reach behind its commit region.
+
+        A region pinned on the escalated window's own weak commit asks
+        for this: that commit stands for the faults crossing the seam
+        behind it and for no others, since the rest of the window's
+        rounds are exactly what the region decodes again. None when the
+        run builds no error models.
+        """
+
 
 @runtime_checkable
 class WindowRetention(Protocol):

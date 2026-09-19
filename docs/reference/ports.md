@@ -154,6 +154,7 @@ The window plan, as the escalation side reads and reshapes it.
 | `check_absorbable` | Every listed window is still undecoded and uncommitted. |
 | `strong_window_model` | The error model of one strong window of that operation. |
 | `owned_faults_of` | The faults the window at that key commits, per representation. |
+| `crossing_faults_of` | The faults it commits that reach behind its commit region. |
 
 ### `WindowRetention`
 

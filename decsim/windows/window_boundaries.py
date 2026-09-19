@@ -208,7 +208,10 @@ class BoundaryCourier:
         operation: program_records.Operation,
         request_key: window_records.DecoderRequestKey,
     ) -> None:
-        """Pin a strong window's face on what its neighbour committed.
+        """Pin a strong window's face on a committed correction.
+
+        Which correction it is, the neighbour's or the window's own, is
+        _pinned_boundary's answer.
 
         Bombin et al. 2303.04846 lines 775-788: the input to a later
         decoding task is the syndrome of the errors plus the corrections
@@ -237,15 +240,46 @@ class BoundaryCourier:
                 f"strong window {destination.key} pins a face on window "
                 f"{source_key}, which has not committed"
             )
+        boundary = self._pinned_boundary(source_key, destination, record)
         positions = _row_positions(model)
         destination_info = window_records.WindowInfo.from_window(
             destination, detector_positions=positions
         )
-        self._fold_pin(source_key, destination, destination_info, record)
+        self._fold_pin(
+            source_key, destination, destination_info, record, boundary
+        )
         destination.deps_remaining += 1
         self._send_pin(
-            source_key, destination, destination_info, operation, request_key
+            source_key,
+            destination,
+            destination_info,
+            operation,
+            request_key,
+            boundary,
         )
+
+    def _pinned_boundary(
+        self,
+        source_key: tuple,
+        destination: window_records.Window,
+        record: "_BoundaryRecord",
+    ) -> Optional[window_records.DependencyResidual]:
+        """What the face pins on: a neighbour's commit, or its own seam.
+
+        A strong window that carries the source's own key is the redo of
+        that window, so the commit it pins on is its own weak one, and
+        of that commit only the faults crossing behind its first round
+        are the boundary condition: the rest of the window's rounds are
+        exactly what it decodes again (Toshio et al. 2510.25222 lines
+        1248-1250).
+        """
+        if source_key != destination.key:
+            return record.committed
+        window = self.planner.windows_by_key[source_key]
+        crossing = window.crossing_commit
+        if crossing is None:
+            return None
+        return crossing.residual
 
     def _fold_pin(
         self,
@@ -253,6 +287,7 @@ class BoundaryCourier:
         destination: window_records.Window,
         destination_info: window_records.WindowInfo,
         record: "_BoundaryRecord",
+        boundary: Optional[window_records.DependencyResidual],
     ) -> None:
         """The committed boundary joins the strong window's boundary state.
 
@@ -273,7 +308,7 @@ class BoundaryCourier:
             latest_delivery_revision=delivery_revision,
             source_operation_round_count=source_round_count,
             dependency_released=True,
-            payload=record.committed,
+            payload=boundary,
         )
         update = self._merged_update(delivery, destination, destination_info)
         if update.accepted:
@@ -286,6 +321,7 @@ class BoundaryCourier:
         destination_info: window_records.WindowInfo,
         operation: program_records.Operation,
         request_key: window_records.DecoderRequestKey,
+        boundary: Optional[window_records.DependencyResidual],
     ) -> None:
         """One pinned face's message, priced on the strong window's seam.
 
@@ -299,7 +335,7 @@ class BoundaryCourier:
         )
         source_info = self._source_info(source_key)
         payload_bits = self.interaction.boundary_payload_bits(
-            record.committed, destination_info, source_info
+            boundary, destination_info, source_info
         )
         delivered = functools.partial(self._pin_delivered, destination)
         self.transfers.send_boundary(

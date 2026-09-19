@@ -2,7 +2,7 @@
 
 # The design decisions
 
-Twenty decisions shape what decsim charges, where it charges it, and
+Twenty-one decisions shape what decsim charges, where it charges it, and
 where a reader finds a thing. Each is recorded here with what was
 decided, why, and the source the answer came from, because a modelling
 question is answered by reading the referent rather than by choosing
@@ -661,6 +661,40 @@ form there. No component recognises a row.
 (`WeakSyndromeBufferSideFormation`),
 `decsim/syndrome_buffer/weak_syndrome_round_receiver.py` (`_as_stored`),
 `decsim/build/stores.py` (`check_weak_syndrome_buffer_formation`).
+
+## D21. A region at a back-to-back seam pins on its own weak commit
+
+**Decided.** When the window a strong region re-decodes is the one that
+restarted the weak chain after an earlier region, no neighbour commits
+the round before it and its own weak decode owns the faults crossing
+that seam. The region pins its near face on that commit: it reads its
+r_strong rounds and nothing behind them, the crossing faults are prior
+faults of its model, their committed detector effect is folded into its
+input, and their observable flips stay with the window when the strong
+result replaces its prediction.
+
+**Why.** The paper's strong decoder "processes all the assigned data at
+once, after the boundary conditions at both ends have been determined by
+the weak decoder" (Toshio et al. 2510.25222 lines 1248-1250), and at
+such a seam the near boundary condition is that weak commit: the region
+ending there is already pinned on it. Reading the rounds behind the seam
+raw instead leaves the crossing faults to no one, since the region before
+the seam excludes them, the weak commit of them is thrown away with the
+prediction, and the region after the seam decides them again with
+context its neighbour never saw.
+
+**What it cost the port file.** `WindowPlan` gained one method,
+`crossing_faults_of`, beside `owned_faults_of`: a face pinned on a
+neighbour takes everything that neighbour owns, and a face pinned on the
+window's own commit takes only the faults crossing behind it, because
+the rest of that commit is exactly what the region decodes again.
+
+**Where to see it.** `decsim/escalation/strong_regions.py`
+(`forward_near_face`), `decsim/escalation/strong_window_shapes.py`
+(`ForwardSeamWindow`), `decsim/windows/window_boundaries.py`
+(`_pinned_boundary`), `decsim/windows/window_commits.py`
+(`_with_the_crossing_commit`), `decsim/decoders/decoder.py`
+(`_crossing_commit`).
 
 ## What is not modelled yet
 

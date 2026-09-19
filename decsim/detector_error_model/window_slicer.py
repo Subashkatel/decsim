@@ -93,7 +93,7 @@ class WindowSlicer:
             placed[representation] = self._place(
                 catalog, context, fault_exclusion_ranges, owned, prior
             )
-        return self._window_model(context.rows, placed)
+        return self._window_model(context, placed)
 
     def _placement_context(
         self,
@@ -159,12 +159,13 @@ class WindowSlicer:
 
     def _window_model(
         self,
-        rows: list[int],
+        context: window_placement.WindowPlacementContext,
         placed: dict[
             fault_model_contracts.FaultRepresentation,
             fault_model_contracts.PlacedFaultModel,
         ],
     ) -> fault_model_contracts.WindowErrorModel:
+        rows = context.rows
         graphlike = placed.get(
             fault_model_contracts.FaultRepresentation.GRAPHLIKE
         )
@@ -184,6 +185,7 @@ class WindowSlicer:
             detector_ids=tuple(rows),
             detector_coordinates=coordinates,
             defect_positions=defect_positions,
+            first_commit_round=context.first_commit_round,
             graphlike_faults=graphlike,
             physical_faults=physical,
             physical_to_graphlike_detector_projection=local_link,

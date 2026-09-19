@@ -406,6 +406,10 @@ class DecodeResult:
     # scenarios)
     boundary_defects: Optional[dict] = None
     boundary_data: Optional[Any] = None  # optional richer interaction payload
+    # CrossingCommit: the part of the correction that commits faults
+    # touching a round before the window's commit region, which the
+    # residual's XOR cannot be split into afterwards
+    crossing_commit: Optional[Any] = None
     # BackendDecodeStatus of a best-effort correction (nonconverged, low
     # confidence, does not reproduce the syndrome); None when the decode
     # succeeded. The correction is committed either way and the status travels

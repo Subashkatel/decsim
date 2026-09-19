@@ -664,12 +664,20 @@ class ForwardSeamWindow(ForwardWindow):
     window (2209.09219 lines 953-955, "both time boundaries of the last
     windows are closed").
 
-    A near face that no committed correction closes is read instead of
-    pinned, with one buffer region of raw context (Bombin lines
-    850-852). That is the window that restarts the weak chain after an
-    earlier strong region: the absorption takes its dependency out of
-    the chain, so nothing hands it the rounds before its own, and its
-    own weak decode reads that face open too.
+    At a back-to-back seam, where the escalated window is the one that
+    restarted the weak chain after an earlier strong region, the near
+    face pins on that window's own weak commit. The absorption takes its
+    dependency out of the chain, so no neighbour commits the round
+    before it and it owns the faults crossing that seam itself; the
+    region ending at the seam is pinned on its choice of them, so this
+    region keeps it: those faults are prior faults of its model, their
+    committed effect is folded into its input, and their observable
+    flips stay with the window when the strong result replaces its
+    prediction.
+
+    Only the region at the operation's first round reads a face open,
+    with one buffer region of raw context (Bombin lines 850-852), since
+    there is no earlier commit to pin on.
 
     The row needs escalation.restart_reread_buffer_regions 0, the
     paper's value: with a re-read the restart window shares rounds with
@@ -681,9 +689,28 @@ class ForwardSeamWindow(ForwardWindow):
 
     pins_the_far_face = True
 
+    def release_conditions(
+        self, assignment: StrongAssignment
+    ) -> pending_strong_windows.ReleaseConditions:
+        """The far boundary, and its own weak commit when it pins on it.
+
+        A region at a back-to-back seam reads its near boundary
+        condition off the escalated window's own weak commit, so it
+        waits for that commit as it waits for the far one (Toshio et al.
+        2510.25222 lines 1248-1250).
+        """
+        conditions = ForwardWindow.release_conditions(self, assignment)
+        key = assignment.held_plan.key
+        if key not in assignment.folded_boundaries:
+            return conditions
+        committed_windows = conditions.committed_windows + (key,)
+        return dataclasses.replace(
+            conditions, committed_windows=committed_windows
+        )
+
     def _resolved_region(self, key: tuple) -> strong_regions.ForwardRegion:
         """The extent, read with no context on the faces it pins."""
-        near_source_key = self.regions.near_seam_source(key)
+        near_source_key = self.regions.forward_near_face(key)
         return self.regions.forward_seam_region(
             key, near_source_key=near_source_key
         )
@@ -691,13 +718,13 @@ class ForwardSeamWindow(ForwardWindow):
     def _declared_faces(
         self, key: tuple, resolved_region: strong_regions.ForwardRegion
     ) -> tuple:
-        """The window before the extent, and the window that restarts after it.
+        """The commit closing the near face, and the window restarting after.
 
         The restart window's weak commit is the far boundary (Toshio et
         al. 2510.25222 lines 1253-1259); a terminal region has no
         restart window and no far pin.
         """
-        near_source_key = self.regions.near_seam_source(key)
+        near_source_key = self.regions.forward_near_face(key)
         faces = _declared_faces(near_source_key)
         restart_key = resolved_region.restart_window_key
         if restart_key is None:

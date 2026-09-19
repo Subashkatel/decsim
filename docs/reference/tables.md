@@ -62,6 +62,7 @@ In `decsim/controller/settings.py`. A yaml names a row of it under `controller.d
 | Row | Class | What it is |
 | --- | --- | --- |
 | `controller` | `ControllerSideFormation` in `decsim/detector_error_model/detection_event_formation.py` | The controller's assembler forms the round before it leaves. |
+| `weak_syndrome_buffer` | `WeakSyndromeBufferSideFormation` in `decsim/detector_error_model/detection_event_formation.py` | The weak decoder chip forms the round once, as it stores it. |
 | `decoder` | `DecoderSideFormation` in `decsim/detector_error_model/detection_event_formation.py` | Each tier forms the rounds it reads. |
 
 ## `ESCALATIONS`

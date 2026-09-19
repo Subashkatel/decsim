@@ -10,7 +10,8 @@ The sources are classical and quantum both: AFS's on-chip access
 (2301.08419 lines 632-640), Chen's non-blocking frame manager
 (2605.30765 lines 1618-1620), Riverlane's polled status register
 (2410.05202 lines 1256-1259) and Google's detections formed at the
-workstation (2408.13687 lines 474-476).
+workstation (2408.13687 lines 474-476), against IBM's detector window
+processing on the decoder's own chip (2510.21600 lines 235-237).
 """
 
 import dataclasses
@@ -368,6 +369,33 @@ def test_the_widths_the_two_rows_send_are_the_events_and_the_outcomes():
     assert _store_copy_bits(at_the_decoder) == 249
     assert _weak_input_bits(at_the_controller) == 432
     assert _weak_input_bits(at_the_decoder) == 441
+
+
+def test_events_formed_on_the_weak_chip_cross_raw_and_leave_its_store_formed():
+    """d=3: 249 outcome bits into the chip, 432 event bits out of its store."""
+    at_the_controller = _machine_formed_at("controller")
+    controller_inputs = _decoder_inputs(at_the_controller)
+    controller_result = at_the_controller.run()
+    on_the_weak_chip = _machine_formed_at("weak_syndrome_buffer")
+    chip_inputs = _decoder_inputs(on_the_weak_chip)
+    chip_result = on_the_weak_chip.run()
+    assert _store_copy_bits(on_the_weak_chip) == 249
+    assert _weak_input_bits(on_the_weak_chip) == 432
+    assert chip_inputs == controller_inputs
+    assert _observables(chip_result) == _observables(controller_result)
+
+
+def test_a_region_escalated_from_the_weak_chip_is_formed_by_no_tier():
+    """The strong side decodes the events the chip stored, bit for bit."""
+    at_the_controller = _switching_machine_formed_at("controller")
+    controller_inputs = _decoder_inputs(at_the_controller)
+    controller_result = at_the_controller.run()
+    on_the_weak_chip = _switching_machine_formed_at("weak_syndrome_buffer")
+    chip_inputs = _decoder_inputs(on_the_weak_chip)
+    chip_result = on_the_weak_chip.run()
+    assert _formation_stages(on_the_weak_chip) == []
+    assert chip_inputs == controller_inputs
+    assert _observables(chip_result) == _observables(controller_result)
 
 
 def test_a_tier_pays_yangs_latency_then_one_round_a_clock():

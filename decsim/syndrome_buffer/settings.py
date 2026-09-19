@@ -19,6 +19,11 @@ class SyndromeBufferSettings:
     The weak syndrome buffer charges write_cycles before publication and
     read_cycles once per primary window before assembling its input. The stages
     follow gem5's frontend and forward latencies (src/mem/XBar.py).
+    detection_event_cycles_per_round is what forming a round's detection
+    events costs the weak decoder chip ahead of that write, read under
+    controller.detection_events_formed_at weak_syndrome_buffer alone;
+    Yang et al. fix their syndrome calculation at 5 FPGA clock cycles
+    (2605.04892 lines 1273-1275).
     A zero cost runs synchronously without clock-edge alignment.
     """
 
@@ -27,6 +32,7 @@ class SyndromeBufferSettings:
     clock: Optional[config.Clock] = None
     write_cycles: int = 0
     read_cycles: int = 0
+    detection_event_cycles_per_round: int = 0
 
     def __post_init__(self) -> None:
         config.check_cycles(
@@ -35,7 +41,12 @@ class SyndromeBufferSettings:
         config.check_cycles(
             "weak_syndrome_buffer.read_cycles", self.read_cycles
         )
+        config.check_cycles(
+            "weak_syndrome_buffer.detection_event_cycles_per_round",
+            self.detection_event_cycles_per_round,
+        )
         charged = self.write_cycles + self.read_cycles
+        charged += self.detection_event_cycles_per_round
         if charged > 0 and self.clock is None:
             raise ValueError("charged weak_syndrome_buffer costs need a clock")
 
@@ -58,10 +69,12 @@ class SyndromeBufferSettings:
             clock = clocks.clock(section["clock"])
         write_cycles = section.get("write_cycles", 0)
         read_cycles = section.get("read_cycles", 0)
+        formation_cycles = section.get("detection_event_cycles_per_round", 0)
         return cls(
             kind=kind,
             rounds=rounds,
             clock=clock,
             write_cycles=write_cycles,
             read_cycles=read_cycles,
+            detection_event_cycles_per_round=formation_cycles,
         )

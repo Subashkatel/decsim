@@ -154,6 +154,7 @@ WIRES = (
     ("weak_syndrome_round_receiver.store", "weak_syndrome_buffer"),
     ("weak_syndrome_round_receiver.output", "weak_output"),
     ("weak_syndrome_round_receiver.windows", "window_manager"),
+    ("weak_syndrome_round_receiver.detection_events", "detection_events"),
     ("strong_syndrome_round_receiver.store", "strong_syndrome_buffer"),
     ("strong_syndrome_round_receiver.windows", "window_manager"),
     # the window side

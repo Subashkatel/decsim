@@ -444,10 +444,12 @@ Where the machine forms a round's detection events.
 | Member | Type |
 | --- | --- |
 | `detection_event_formation_cycles` | `int` |
+| `forms_at_the_weak_syndrome_buffer` | `bool` |
 
 | Method | What it does |
 | --- | --- |
 | `form_before_departure` | The round's fragments as they leave the controller. |
+| `form_before_storage` | The round's fragments as the weak syndrome buffer stores them. |
 | `decoder_side_former` | The former each tier forms through, or None when none does. |
 
 ### `WindowModelSource`

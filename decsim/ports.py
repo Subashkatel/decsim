@@ -1275,7 +1275,8 @@ class DetectionEventFormer(Protocol):
     memoising former the decoder side reads through
     (decsim/detector_error_model/detection_event_formation.py). Where the
     machine calls it is controller.detection_events_formed_at: the
-    controller's assembler before the round leaves, or the tier that
+    controller's assembler before the round leaves, the weak syndrome
+    buffer's receiving end before the round is stored, or the tier that
     reads the round. A former is called once per round, in round order,
     because a detector compares this round's outcomes against the round
     before it (LILLIPUT 2108.06569 lines 499-510) and the formation table
@@ -1292,29 +1293,37 @@ class DetectionEventFormer(Protocol):
 class DetectionEventPlacement(Protocol):
     """Where the machine forms a round's detection events.
 
-    Table rows: controller, decoder
+    Table rows: controller, weak_syndrome_buffer, decoder
     (decsim/controller/settings.py DETECTION_EVENT_FORMATION, built from
-    controller.detection_events_formed_at). The two are published
-    placements of the same conversion, Google's workstation (2408.13687
-    lines 474-476) against the decoder side (Caune 2410.05202 lines
-    1252-1256, LILLIPUT 2108.06569 lines 499-510), and the values are
-    the same either way, so a row moves the width the round carries, the
-    clock its formation is charged on, and nothing else. Every row is
-    built with the run's DetectionEventFormer and the controller's own
-    formation cycles.
+    controller.detection_events_formed_at). They are placements of the
+    same conversion, Google's workstation (2408.13687 lines 474-476),
+    the decoder's own chip ahead of its store (Maurer 2510.21600 lines
+    235-237 for the chip, the order ours), and the decoder side (Caune
+    2410.05202 lines 1252-1256, LILLIPUT 2108.06569 lines 499-510), and
+    the values are the same in every row, so a row moves the width the
+    round carries, the clock its formation is charged on, and nothing
+    else. Every row is built with the run's DetectionEventFormer and the
+    controller's own formation cycles.
 
     The controller's assembler asks form_before_departure for the round
     that leaves it and waits detection_event_formation_cycles of the
-    controller's clock before handing it on; the root asks
-    decoder_side_former for the former each decoder tier reads
+    controller's clock before handing it on; the weak syndrome buffer's
+    receiving end asks form_before_storage for the round it stores; the
+    root asks decoder_side_former for the former each decoder tier reads
     its rounds through, which is None for a row that has already formed
-    them.
+    them. forms_at_the_weak_syndrome_buffer is the one fact the root
+    needs about a row: whether the run depends on its rounds landing in
+    that buffer.
     """
 
     detection_event_formation_cycles: int
+    forms_at_the_weak_syndrome_buffer: bool
 
     def form_before_departure(self, fragments: tuple) -> tuple:
         """The round's fragments as they leave the controller."""
+
+    def form_before_storage(self, fragments: tuple) -> tuple:
+        """The round's fragments as the weak syndrome buffer stores them."""
 
     def decoder_side_former(self) -> Optional[DetectionEventFormer]:
         """The former each tier forms through, or None when none does."""

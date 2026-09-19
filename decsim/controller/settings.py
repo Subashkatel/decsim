@@ -30,6 +30,9 @@ IDLE_POLICIES = {
 # (detector_error_model/detection_event_formation.py).
 DETECTION_EVENT_FORMATION = {
     "controller": detection_event_formation.ControllerSideFormation,
+    "weak_syndrome_buffer": (
+        detection_event_formation.WeakSyndromeBufferSideFormation
+    ),
     "decoder": detection_event_formation.DecoderSideFormation,
 }
 
@@ -84,7 +87,8 @@ class ControllerSettings:
     detection events, and so which width the store and the tier's input
     link carry. detection_event_cycles_per_round is what that
     conversion costs the controller, charged once per round before the
-    round leaves it and read by the controller row alone; no paper
+    round leaves it and read by the controller row alone (the weak
+    syndrome buffer's own charge is in its section); no paper
     publishes a controller-side figure, so it is zero by default. clock
     is the domain all four cycle counts are charged on; a cost of zero
     cycles is uncharged rather than rounded up to the next edge.

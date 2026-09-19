@@ -1,9 +1,10 @@
-"""Where a round's outcomes become events: the two rows and the former.
+"""Where a round's outcomes become events: the three rows and the former.
 
-The rows are the two published placements of one conversion, Google's
-workstation (2408.13687 lines 474-476) against the decoder side (Caune
-et al. 2410.05202 lines 1252-1256, LILLIPUT 2108.06569 lines 499-510),
-and the values are a parity of the raw outcomes either way. The former's
+The rows are placements of one conversion: Google's workstation
+(2408.13687 lines 474-476), the decoder's own chip (Maurer 2510.21600
+lines 235-237) ahead of its store, and the decoder side (Caune et al.
+2410.05202 lines 1252-1256, LILLIPUT 2108.06569 lines 499-510), and the
+values are a parity of the raw outcomes in every row. The former's
 order law is LILLIPUT's: a detector compares a round against the one
 before it, so the rounds of an operation are formed in order.
 """
@@ -59,13 +60,44 @@ def test_the_decoder_row_sends_the_raw_outcomes_at_their_own_width():
     assert leaving.size_bits == 4
 
 
+def test_the_weak_syndrome_buffer_row_sends_raw_and_stores_the_events():
+    table = DeviceTable()
+    row = formation.WeakSyndromeBufferSideFormation(table, 0)
+    raw = fragment(1)
+
+    (leaving,) = row.form_before_departure((raw,))
+    (stored,) = row.form_before_storage((leaving,))
+
+    assert leaving.bits == (1, 0, 1, 1)
+    assert stored.bits == (1, 1, 0)
+    assert stored.size_bits == 3
+
+
+def test_the_controller_and_decoder_rows_store_the_round_as_it_landed():
+    table = DeviceTable()
+    at_the_controller = formation.ControllerSideFormation(table, 0)
+    at_the_decoder = formation.DecoderSideFormation(table, 0)
+    landed = fragment(1)
+
+    (from_the_controller,) = at_the_controller.form_before_storage((landed,))
+    (for_the_decoder,) = at_the_decoder.form_before_storage((landed,))
+
+    assert from_the_controller is landed
+    assert for_the_decoder is landed
+    assert table.asked == []
+
+
 def test_only_the_decoder_row_hands_a_former_to_the_decoder_side():
     table = DeviceTable()
 
     at_the_controller = formation.ControllerSideFormation(table, 0)
     at_the_decoder = formation.DecoderSideFormation(table, 0)
+    at_the_weak_syndrome_buffer = formation.WeakSyndromeBufferSideFormation(
+        table, 0
+    )
 
     assert at_the_controller.decoder_side_former() is None
+    assert at_the_weak_syndrome_buffer.decoder_side_former() is None
     assert at_the_decoder.decoder_side_former() is not None
 
 
@@ -96,6 +128,18 @@ def test_a_timing_only_round_is_handed_on_as_it_is():
     (kept,) = row.form_before_departure((timing_only,))
 
     assert kept is timing_only
+
+
+def test_a_controller_charge_under_the_weak_syndrome_buffer_row_is_refused():
+    """The controller cannot be charged for work the chip does."""
+    table = DeviceTable()
+
+    with pytest.raises(ValueError) as refusal:
+        formation.WeakSyndromeBufferSideFormation(table, 250)
+
+    sentence = str(refusal.value)
+    assert "controller.detection_event_cycles_per_round" in sentence
+    assert "weak_syndrome_buffer.detection_event_cycles_per_round" in sentence
 
 
 def test_a_controller_charge_under_the_decoder_row_is_refused():

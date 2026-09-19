@@ -20,6 +20,7 @@ round only once the store's record says it is readable.
 """
 
 import decsim.config as config
+import decsim.detector_error_model.detection_event_formation as formation
 import decsim.engine as engine_module
 import decsim.observe.log_writers as log_writers
 import decsim.ports as ports
@@ -80,13 +81,17 @@ def _store(rounds=None) -> syndrome_buffer_module.SyndromeBuffer:
     return syndrome_buffer_module.SyndromeBuffer(settings)
 
 
-def _receiver_with(engine, store, output=None):
+def _receiver_with(engine, store, output=None, detection_events=None):
+    """A receiver whose rounds arrive formed, unless a placement is given."""
     windows = _Windows(engine, store)
     receiver = weak_syndrome_round_receiver.WeakSyndromeRoundReceiver(
         engine, store.settings
     )
     receiver.store = store
     receiver.windows = windows
+    if detection_events is None:
+        detection_events = formation.ControllerSideFormation(None, 0)
+    receiver.detection_events = detection_events
     if output is not None:
         receiver.output = output
     return receiver, windows
@@ -309,3 +314,65 @@ def test_a_priced_write_keeps_its_reservation_until_the_write_edge():
     assert receiver.writes_in_flight == 0
     assert store.occupancy == 1
     assert windows.published == [(40, (1, 1), 40)]
+
+
+class _ChipFormer:
+    """A formation table: every round's events are one set bit."""
+
+    def form_round(self, operation_id, round_index, raw_bits):
+        del operation_id, round_index, raw_bits
+        return (1,)
+
+
+def test_the_store_holds_the_events_when_the_chip_forms_them():
+    """The hop's copy is the raw round; the store and the windows get events."""
+    engine = engine_module.Engine()
+    store = _store()
+    former = _ChipFormer()
+    on_the_chip = formation.WeakSyndromeBufferSideFormation(former, 0)
+    receiver, _windows = _receiver_with(
+        engine, store, detection_events=on_the_chip
+    )
+    copied_bits = []
+
+    def copy_made(round_key, bits, source, destination) -> None:
+        del round_key, source, destination
+        copied_bits.append(bits)
+
+    receiver.trace.copy_made.connect(copy_made)
+    packed = _packed(1)
+
+    _cross(receiver, packed)
+    engine.run()
+
+    (stored,) = store.retained_fragments((1, 1))
+    assert stored.bits == (1,)
+    assert stored.size_bits == 1
+    assert copied_bits == [2]
+
+
+def test_the_chips_formation_cycles_are_added_to_the_write_cycles():
+    engine = engine_module.Engine()
+    clock = config.Clock(10)
+    formation_cycles = 5
+    write_cycles = 3
+    settings = syndrome_buffer_settings.SyndromeBufferSettings(
+        clock=clock,
+        write_cycles=write_cycles,
+        detection_event_cycles_per_round=formation_cycles,
+    )
+    store = syndrome_buffer_module.SyndromeBuffer(settings)
+    former = _ChipFormer()
+    on_the_chip = formation.WeakSyndromeBufferSideFormation(former, 0)
+    receiver, windows = _receiver_with(
+        engine, store, detection_events=on_the_chip
+    )
+    packed = _packed(1)
+
+    receiver.reserve_write()
+    receiver.receive_round(packed)
+    engine.run()
+
+    charged_cycles = formation_cycles + write_cycles
+    expected = charged_cycles * clock.period_ticks
+    assert windows.published == [(expected, (1, 1), expected)]

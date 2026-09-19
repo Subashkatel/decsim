@@ -349,34 +349,52 @@ controller:                        # controller work per round, in cycles of its
                                    # value (2108.06569), a storage choice neither
                                    # word models
   detection_events_formed_at: controller
-                                   # controller | decoder: where the round's
-                                   # measurement outcomes become detection
-                                   # events. controller forms them in the
-                                   # assembler and sends the events on, so
-                                   # the weak syndrome buffer and the tier's input link carry the
+                                   # controller | weak_syndrome_buffer |
+                                   # decoder: where the round's measurement
+                                   # outcomes become detection events.
+                                   # controller forms them in the assembler and
+                                   # sends the events on, so the weak syndrome
+                                   # buffer and the tier's input link carry the
                                    # narrower round: "inside the workstation,
                                    # measurements are converted into detections
                                    # and then streamed to the real-time decoding
-                                   # software via a shared memory buffer" (Google
-                                   # 2408.13687 lines 474-476). decoder sends the
-                                   # raw outcomes on instead, so the store and
-                                   # that link carry the wider round, and each
-                                   # tier forms the rounds it reads: the
-                                   # controller writes the outcomes
+                                   # software via a shared memory buffer"
+                                   # (Google 2408.13687 lines 474-476). decoder
+                                   # sends the raw outcomes on instead, so the
+                                   # store and that link carry the wider round,
+                                   # and each tier forms the rounds it reads:
+                                   # the controller writes the outcomes
                                    # "sequentially to the decoder" and "The
                                    # decoder computes the syndrome from
                                    # measurement outcomes and decodes it" (Caune
                                    # et al. 2410.05202 lines 1252-1256), and
                                    # LILLIPUT's Event Detection Logic block sits
                                    # inside the decoder (2108.06569 lines
-                                   # 499-510). The events themselves are the same
-                                   # under both rows, since a detection event is
-                                   # a parity of the raw outcomes; what moves is
-                                   # the width above and the clock the formation
-                                   # is charged on, this section's
+                                   # 499-510). weak_syndrome_buffer sends the
+                                   # raw outcomes to the weak decoder chip,
+                                   # which forms them once as it stores the
+                                   # round, so controller_to_weak_buffer carries
+                                   # the wider round and the store, the weak
+                                   # unit's input link and the escalation hop
+                                   # carry the events, and no tier forms
+                                   # anything. The decoder's own chip forming
+                                   # them is IBM's "detector window processing
+                                   # component" (Maurer 2510.21600 lines
+                                   # 235-237); that it sits ahead of the store
+                                   # is this row's own choice, the papers being
+                                   # silent on the order. Refused on a run whose
+                                   # windows are decoded on the strong tier,
+                                   # whose rounds never reach that buffer. The
+                                   # events themselves are the same under every
+                                   # row, since a detection event is a parity of
+                                   # the raw outcomes; what moves is the width
+                                   # above and the clock the formation is
+                                   # charged on: this section's
                                    # detection_event_cycles_per_round under the
-                                   # first row and each tier's engine card under
-                                   # the second
+                                   # controller row, weak_syndrome_buffer.
+                                   # detection_event_cycles_per_round under the
+                                   # weak_syndrome_buffer row, and each tier's
+                                   # engine card under the decoder row
   detection_event_cycles_per_round: null
                                    # what the conversion above costs the
                                    # controller, charged once per completed round
@@ -388,8 +406,8 @@ controller:                        # controller work per round, in cycles of its
                                    # lines 474-476) and publishes no time for it.
                                    # Read by the controller row of
                                    # detection_events_formed_at, and refused
-                                   # under the decoder row, which charges the
-                                   # tiers instead
+                                   # under the other two rows, which charge the
+                                   # weak decoder chip or the tiers instead
 
 clocks:                            # clock domain name -> MHz; a link prices its
                                    # cycles on the domain it names. More domains
@@ -475,6 +493,15 @@ weak_syndrome_buffer:            # the weak syndrome buffer, on the decoder chip
                                    # 2510.21600 lines 500-509; separate stage
                                    # cycles: gem5 src/mem/XBar.py frontend_latency
                                    # and forward_latency
+  detection_event_cycles_per_round: 0
+                                   # what forming a round's detection events
+                                   # costs the weak decoder chip, charged ahead
+                                   # of write_cycles on this clock. Read under
+                                   # controller.detection_events_formed_at
+                                   # weak_syndrome_buffer and refused when
+                                   # positive under any other row. Yang et al.
+                                   # fix theirs at 5 FPGA clock cycles
+                                   # (2605.04892 lines 1273-1275)
   kind: syndrome_buffer            # the one row today
   rounds: null                     # capacity in rounds. When it is full the
                                    # controller holds the finished round and

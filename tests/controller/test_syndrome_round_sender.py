@@ -30,6 +30,7 @@ profile.
 import decsim.config as config
 import decsim.controller.settings as controller_settings
 import decsim.controller.syndrome_round_sender as syndrome_round_sender
+import decsim.detector_error_model.detection_event_formation as formation
 import decsim.engine as engine_module
 import decsim.links.fabric as fabric_module
 import decsim.links.link_profiles as link_profiles
@@ -125,6 +126,7 @@ def sender_with(
     )
     weak_receiver.store = weak_store
     weak_receiver.windows = windows
+    weak_receiver.detection_events = formation.ControllerSideFormation(None, 0)
     sender = syndrome_round_sender.SyndromeRoundSender(engine)
     sender.link = links
     sender.weak_receiver = weak_receiver

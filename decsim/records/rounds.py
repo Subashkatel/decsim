@@ -176,8 +176,8 @@ class PackedRound:
 
     The packet, its route, and its size on the wire: what leaves the
     controller, which is the detection events where the controller forms
-    them and the raw measurement outcomes where the decoder does
-    (controller.detection_events_formed_at).
+    them and the raw measurement outcomes where the weak syndrome buffer
+    or the decoder does (controller.detection_events_formed_at).
     """
 
     packet: SyndromeRoundPacket

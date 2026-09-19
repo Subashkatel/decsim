@@ -47,9 +47,11 @@ read at `:155-158`). This is the shape strong syndrome buffer already has
 question by the same shape of object.
 
 Two calls of the controller arrive here, both about the weak syndrome buffer. A
-packed round lands over controller_to_weak_buffer: this end stores it, narrates
-the copy and the intake, and announces the published round to the window
-manager. And a timing-only feedback-memory round is handed over to be
+packed round lands over controller_to_weak_buffer: this end stores it as the
+run's detection event placement says the store holds it, the landed outcomes or
+the events formed from them here (controller.detection_events_formed_at),
+narrates the copy and the intake, and announces the published round to the
+window manager. And a timing-only feedback-memory round is handed over to be
 sent: it takes its slot here, because the weak syndrome buffer is where it
 waits, and it leaves by the store's own outgoing port (round_output.py), which
 frees the slot at the delivery. A timing-only round is never published: no
@@ -80,6 +82,8 @@ class WeakSyndromeRoundReceiver:
     # the store's outgoing port, which sends what leaves the store
     output = ports.Port(ports.SyndromeBufferOutput)
     windows = ports.Port(ports.WindowInput)
+    # the run's placement, which says what the store holds of a landed round
+    detection_events = ports.Port(ports.DetectionEventPlacement)
 
     def __init__(
         self,
@@ -110,7 +114,9 @@ class WeakSyndromeRoundReceiver:
         the bits become readable when they are here and not before, and
         the announcement follows the record, so the window manager never
         hears of a round the store does not yet call readable
-        (validation buffer_contract.md, the weak syndrome buffer).
+        (validation buffer_contract.md, the weak syndrome buffer). The
+        delay is the chip's formation cycles and the write cycles on one
+        clock edge: a round is readable once it is formed and written.
 
         A round whose operation closed while it crossed is dropped at the
         door on the strong side (strong_syndrome_round_receiver.py,
@@ -121,7 +127,9 @@ class WeakSyndromeRoundReceiver:
         the device emitting more rounds than the plan expects, so there
         is no drop to make here.
         """
-        cycles = self.settings.write_cycles
+        formation_cycles = self.settings.detection_event_cycles_per_round
+        write_cycles = self.settings.write_cycles
+        cycles = formation_cycles + write_cycles
         if cycles == 0:
             self._finish_write(packed)
             return
@@ -159,11 +167,26 @@ class WeakSyndromeRoundReceiver:
                 f"controller_to_weak_buffer writes in flight"
             )
 
-    def _finish_write(self, packed: round_records.PackedRound) -> None:
+    def _finish_write(self, landed: round_records.PackedRound) -> None:
         self.writes_in_flight -= 1
+        packed = self._as_stored(landed)
         self._take_slot(packed, "controller_to_weak_buffer", self.engine.now)
         self._fire_published(packed)
         self.windows.accept_window_input(packed.packet)
+
+    def _as_stored(
+        self, landed: round_records.PackedRound
+    ) -> round_records.PackedRound:
+        """The landed round with the fragments the store holds of it.
+
+        wire_bits stays what crossed controller_to_weak_buffer, because
+        the intake copy reports the hop's bits, not the store's.
+        """
+        fragments = self.detection_events.form_before_storage(
+            landed.packet.fragments
+        )
+        packet = dataclasses.replace(landed.packet, fragments=fragments)
+        return dataclasses.replace(landed, packet=packet)
 
     def _take_slot(
         self,

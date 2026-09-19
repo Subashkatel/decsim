@@ -159,6 +159,9 @@ class Machine:
         pool = decoder_build.build_decoder_pool(
             settings, plan, escalation_policy, detection_events
         )
+        store_build.check_weak_syndrome_buffer_formation(
+            settings, escalation_policy, detection_events
+        )
         store_build.check_readout_cost_is_priced(settings)
         store_build.check_store_kinds(settings)
         controller_side.check_strong_route(escalation_policy, pool.router)

@@ -2,7 +2,7 @@
 
 # The design decisions
 
-Nineteen decisions shape what decsim charges, where it charges it, and
+Twenty decisions shape what decsim charges, where it charges it, and
 where a reader finds a thing. Each is recorded here with what was
 decided, why, and the source the answer came from, because a modelling
 question is answered by reading the referent rather than by choosing
@@ -626,6 +626,41 @@ one thing make a reader ask what the difference is when there is none.
 9 of the uses order in `decsim/machine.py`, the generated
 [The module map](../reference/map.md),
 `configs/experiments_2026_09/PLAN.md` and `slurm/experiment_run.sh`.
+
+## D20. The weak decoder chip can form the detection events, once
+
+**Decided.** `controller.detection_events_formed_at` has a third row,
+`weak_syndrome_buffer`. The round leaves the controller raw, and the
+weak syndrome buffer's receiving end forms its events as it stores the
+round, so the store, the weak unit's input link and the escalation hop
+carry the events and no tier forms anything. The chip's charge is
+`weak_syndrome_buffer.detection_event_cycles_per_round`, on that
+buffer's clock, ahead of the write.
+
+**Why.** The two rows before it put the conversion at the controller
+or inside each decoder unit. A cold weak decoder chip that receives
+raw bits and escalates a region to a strong host fits neither: formed
+inside the units, each tier forms the rounds it reads, so the strong
+side forms the region a second time and the store and both hops carry
+raw bits; formed at the controller, the chip never sees a raw bit.
+IBM's decoder FPGA forms them on the decoder's own chip (Maurer
+2510.21600 lines 235-237); the papers do not say which side of the
+store, and ahead of it is the one place a round is formed exactly once.
+
+**What it cost the port file.** `DetectionEventPlacement` gained one
+method, `form_before_storage`, which the weak syndrome buffer's
+receiving end asks the way the assembler asks
+`form_before_departure`, and one fact,
+`forms_at_the_weak_syndrome_buffer`, which the root reads to refuse a
+run whose windows are decoded on the strong tier (its rounds never
+reach that buffer) and a chip-side charge under a row that does not
+form there. No component recognises a row.
+
+**Where to see it.**
+`decsim/detector_error_model/detection_event_formation.py`
+(`WeakSyndromeBufferSideFormation`),
+`decsim/syndrome_buffer/weak_syndrome_round_receiver.py` (`_as_stored`),
+`decsim/build/stores.py` (`check_weak_syndrome_buffer_formation`).
 
 ## What is not modelled yet
 

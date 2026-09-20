@@ -125,7 +125,6 @@ docstring.
 - `decsim/windows/round_retention.py`: The round retention: which rounds each window and request holds.
 - `decsim/windows/round_tracker.py`: The round tracker: which rounds arrived, and each window's readiness.
 - `decsim/windows/schemes/__init__.py`: The windowing schemes, one file per table row.
-- `decsim/windows/schemes/buffer_floors.py`: The buffer floor a scheme refuses to run below without a reason.
 - `decsim/windows/schemes/naive_online.py`: The naive_online row: one window over the whole operation.
 - `decsim/windows/schemes/parallel.py`: The parallel row: Skoric block A/B windows.
 - `decsim/windows/schemes/sandwich.py`: The sandwich row: Tan et al.'s zero-seam sandwich decoder.

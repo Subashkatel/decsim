@@ -11,7 +11,6 @@ what is left.
 import math
 
 import decsim.records.windows as window_records
-import decsim.windows.schemes.buffer_floors as buffer_floors
 import decsim.windows.schemes.window_data as window_data
 
 
@@ -85,14 +84,6 @@ class SlidingWindowScheme:
             )
         return _lookahead_window_geometries(
             round_count, commit_round_count, buffer_round_count
-        )
-
-    def validate_buffer(self, geometry) -> None:
-        """Reject a buffer below the trailing floor without a justification."""
-        buffer_floors.require_buffer_floor(
-            geometry,
-            geometry.minimum_trailing_buffer_round_count,
-            "trailing buffering floor",
         )
 
     def data_complete(

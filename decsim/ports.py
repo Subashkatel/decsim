@@ -1702,8 +1702,7 @@ class WindowingScheme(Protocol):
     """How an operation's rounds are cut into windows.
 
     Table rows: sliding, parallel, sandwich, naive_online. The static
-    window graph of an operation, when a window has its data, and the
-    buffer floor the scheme needs.
+    window graph of an operation, and when a window has its data.
 
     Three facts about the layout are declared rather than read off the
     row's class, so a scheme written outside decsim answers the same
@@ -1740,11 +1739,6 @@ class WindowingScheme(Protocol):
         readiness: window_records.WindowReadiness,
     ) -> bool:
         """Whether the window has every round it reads."""
-
-    def validate_buffer(
-        self, geometry: program_records.ResolvedCodeGeometry
-    ) -> None:
-        """Refuse a buffer below the scheme's floor."""
 
 
 @runtime_checkable

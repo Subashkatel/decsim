@@ -7,9 +7,6 @@ windows.terminal_policy is the one key it reads, so both branches are
 pinned here on the row, not through the planner.
 """
 
-import pytest
-
-import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.windows.schemes.sliding as sliding_scheme
 
@@ -84,41 +81,3 @@ def test_every_window_chains_to_the_one_after_it():
     assert plan.entry_window_indices == (0,)
     assert plan.exit_window_indices == (4,)
     assert row.commits_in_one_serial_chain is True
-
-
-def test_this_row_measures_the_buffer_against_the_trailing_floor_alone():
-    """The sliding row reads past its commit only, so only that floor binds."""
-    card = window_records.WindowingSchemeCard(terminal_policy="flush")
-    row = sliding_scheme.SlidingWindowScheme(card)
-    thin_leading_only = _geometry(
-        buffer_round_count=3,
-        leading_floor=5,
-        trailing_floor=3,
-    )
-
-    row.validate_buffer(thin_leading_only)
-
-
-def test_a_buffer_below_the_trailing_floor_is_refused_by_the_row():
-    card = window_records.WindowingSchemeCard(terminal_policy="flush")
-    row = sliding_scheme.SlidingWindowScheme(card)
-    thin = _geometry(buffer_round_count=1, leading_floor=3, trailing_floor=3)
-
-    with pytest.raises(ValueError) as refusal:
-        row.validate_buffer(thin)
-
-    assert "trailing buffering floor 3" in str(refusal.value)
-
-
-def _geometry(*, buffer_round_count, leading_floor, trailing_floor):
-    """A d=3 surface geometry with the buffer width and floors given."""
-    return program_records.ResolvedCodeGeometry(
-        code_name="rotated surface code (d=3)",
-        distance=3,
-        commit_round_count=3,
-        buffer_round_count=buffer_round_count,
-        minimum_leading_buffer_round_count=leading_floor,
-        minimum_trailing_buffer_round_count=trailing_floor,
-        one_patch_spatial_node_count=9,
-        window_floor_justification=None,
-    )

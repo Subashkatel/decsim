@@ -815,11 +815,6 @@ class OutsideCodeCard:
     def buffer_rounds(self):
         return 0
 
-    def buffering_floor(self):
-        return (0, 0)
-
-    window_floor_justification = None
-
     def spatial_nodes(self, num_patches):
         return 4 * num_patches
 

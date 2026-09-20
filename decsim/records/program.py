@@ -20,10 +20,7 @@ class ResolvedCodeGeometry:
     distance: int
     commit_round_count: int
     buffer_round_count: int
-    minimum_leading_buffer_round_count: int
-    minimum_trailing_buffer_round_count: int
     one_patch_spatial_node_count: int
-    window_floor_justification: Optional[str]
 
 
 @dataclass(frozen=True)

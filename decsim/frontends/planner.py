@@ -71,7 +71,6 @@ def plan_execution(
     patch_count_by_id = _patch_count_by_operation_id(operations)
     base_nodes = _base_nodes_by_patch_count(code, patch_count_by_id)
     geometry = _resolve_geometry(code, base_nodes[1])
-    scheme.validate_buffer(geometry)
     resolved = []
     patches_by_key = {}
     for operation in operations:
@@ -223,7 +222,6 @@ def _base_nodes_by_patch_count(code, patch_count_by_id: dict) -> dict:
 
 
 def _resolve_geometry(code, one_patch_node_count: int):
-    leading, trailing = code.buffering_floor()
     commit_round_count = code.commit_rounds()
     buffer_round_count = code.buffer_rounds()
     return program_records.ResolvedCodeGeometry(
@@ -231,10 +229,7 @@ def _resolve_geometry(code, one_patch_node_count: int):
         distance=code.distance,
         commit_round_count=commit_round_count,
         buffer_round_count=buffer_round_count,
-        minimum_leading_buffer_round_count=leading,
-        minimum_trailing_buffer_round_count=trailing,
         one_patch_spatial_node_count=one_patch_node_count,
-        window_floor_justification=code.window_floor_justification,
     )
 
 

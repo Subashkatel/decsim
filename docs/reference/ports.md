@@ -582,7 +582,6 @@ How an operation's rounds are cut into windows.
 | --- | --- |
 | `plan_operation` | The operation's windows and their internal dependencies. |
 | `data_complete` | Whether the window has every round it reads. |
-| `validate_buffer` | Refuse a buffer below the scheme's floor. |
 
 ### `RoundsPolicy`
 

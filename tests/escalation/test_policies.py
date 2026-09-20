@@ -721,10 +721,6 @@ class DelegatingWindowScheme:
         """Whether the window has every round it reads."""
         return self.inner.data_complete(window, readiness=readiness)
 
-    def validate_buffer(self, geometry) -> None:
-        """The sliding scheme's trailing floor."""
-        self.inner.validate_buffer(geometry)
-
 
 class UndeclaredWindowScheme:
     """The same kind of row with the port's declarations left off.

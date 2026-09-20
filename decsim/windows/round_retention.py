@@ -364,12 +364,23 @@ class RoundRetention:
     def release_absorbed_strong_hold(
         self, key: tuple, restart_key: Optional[tuple], replacement
     ) -> None:
-        """Drop the absorbed window's potential read; the request holds it."""
+        """Drop the absorbed window's potential read; the request holds it.
+
+        From the request's first round on, every round the absorbed
+        window's own strong window would have read is the request's or
+        the restart window's. The rounds behind that first round are
+        behind the strong window too, and the absorbed window is never
+        decoded, so no reader of them is left: a potential read reaches
+        one buffer behind its commit region, further back than a near
+        face pinned on the commit before it reads.
+        """
         absorbed = decoding_records.PotentialStrong(key)
-        needed_identities = self.strong_store.hold_round_identities(absorbed)
-        needed = set(needed_identities)
+        absorbed_identities = self.strong_store.hold_round_identities(absorbed)
         replacement_identities = self.strong_store.hold_round_identities(
             replacement
+        )
+        needed = _from_the_first_round_on(
+            absorbed_identities, replacement_identities
         )
         replacements = set(replacement_identities)
         if restart_key is not None:
@@ -378,8 +389,13 @@ class RoundRetention:
                 restart_potential
             )
             replacements.update(restart_identities)
-        if not needed <= replacements:
-            raise RuntimeError("absorption replacement does not cover packets")
+        unheld = needed - replacements
+        if unheld:
+            listed = sorted(unheld)
+            raise RuntimeError(
+                f"absorbing window {key}: rounds {listed} are held by "
+                f"neither the strong request nor the restart window"
+            )
         for store in self._strong_context_stores():
             store.release_hold(absorbed)
 
@@ -527,6 +543,17 @@ def _longer(first: tuple, second: tuple) -> tuple:
     if len(second) > len(first):
         return second
     return first
+
+
+def _from_the_first_round_on(identities: tuple, first_of: tuple) -> set:
+    """The identities at or after the earliest identity of first_of."""
+    first_identity = min(first_of)
+    kept = set()
+    for identity in identities:
+        if identity < first_identity:
+            continue
+        kept.add(identity)
+    return kept
 
 
 def _is_released(store, arrived_for, round_key: tuple) -> bool:

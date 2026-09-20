@@ -34,8 +34,13 @@ class SyndromeBufferingPlan:
     """The holds every window places on the stores, and the store floors.
 
     A hold names the rounds a consumer keeps alive. The minimum is the
-    longest single hold; the sufficient set is the union of every hold,
-    None when an open-ended dynamic stream makes it unbounded.
+    longest set of rounds one operation's planned windows keep at once:
+    a single hold, or a window's arrived rounds beside a window it waits
+    for. A store below it cannot run and is refused at the build. The
+    sufficient set is the union of every hold, None when an open-ended
+    dynamic stream makes it unbounded. Between the two a run may still
+    fill the store, as when several operations share it, and the run
+    then stops and names the work it could not settle.
     """
 
     weak_holds: tuple
@@ -397,6 +402,7 @@ def _hold_window(
     )
     reads = decoding_records.WindowReads(key)
     weak.add(reads, round_keys, round_keys)
+    _require_room_beside_dependencies(execution, operation_id, window, weak)
     _hold_restart_reads(
         execution,
         operation_id,
@@ -405,6 +411,39 @@ def _hold_window(
         absorbs_weak_windows,
         restart_reread_buffer_regions,
     )
+
+
+def _require_room_beside_dependencies(
+    execution, operation_id, window, weak: "_HoldSet"
+) -> None:
+    """A window and a window it waits for are in the buffer together.
+
+    A window takes no slot of a unit before every window it depends on
+    is dispatched (windows/decode_requests.py may_stage), and a window
+    is dispatched once its last round is stored. So while a dependency's
+    rounds arrive, the rounds of this window that arrived before them
+    stay, and a buffer that cannot hold both stops the run with neither
+    able to move. Skoric's layer B window waits for the layer A window
+    after it (2209.08552 lines 416-421), which reads later rounds, so
+    the parallel row needs five widths where its widest window is three.
+    """
+    for dependency_key in window.deps:
+        if dependency_key[0] != operation_id:
+            continue
+        dependency = execution.windows[dependency_key]
+        arrived_hi = min(window.buffer_hi, dependency.buffer_hi)
+        waiting = _read_keys(
+            execution, operation_id, window.start_round, arrived_hi
+        )
+        awaited = _read_keys(
+            execution,
+            operation_id,
+            dependency.start_round,
+            dependency.buffer_hi,
+        )
+        both_reads = waiting + awaited
+        held_together = dict.fromkeys(both_reads)
+        weak.require_live(tuple(held_together))
 
 
 def _hold_restart_reads(
@@ -525,8 +564,12 @@ class _HoldSet:
         """Record a hold; the longest arrived set is the store's floor."""
         self.holds.append((owner, round_keys))
         self._live_rounds.update(round_keys)
-        if len(arrived_keys) > len(self.minimum_live_rounds):
-            self.minimum_live_rounds = arrived_keys
+        self.require_live(arrived_keys)
+
+    def require_live(self, round_keys: tuple) -> None:
+        """Rounds the store holds at once; the longest set is its floor."""
+        if len(round_keys) > len(self.minimum_live_rounds):
+            self.minimum_live_rounds = round_keys
 
     def sufficient_live_rounds(self, is_open_ended: bool) -> Optional[tuple]:
         """Every round any hold names; None when a stream never ends."""

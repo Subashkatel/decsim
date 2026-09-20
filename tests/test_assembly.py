@@ -1,6 +1,6 @@
 """The assembly file describes the machine the root used to build by hand.
 
-Note 36 section 5 item C4 asks one thing of this file: the root builds
+One thing is asked of this file: the root builds
 the same objects in the same order it did when that order was written
 out in machine.py. The order is checked here against a short expected
 list for one declared run, and both golden hashes of the frozen suite

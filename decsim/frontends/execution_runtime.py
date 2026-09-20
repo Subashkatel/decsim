@@ -146,8 +146,7 @@ class ExecutionRuntime:
 
     OperationSchedule owns the program's dependency graph and readiness;
     this class owns what happens to an operation over its life, so the
-    two responsibilities note 14 section 7.4 found in one class are two
-    classes. The ticks are fired, not kept.
+    two responsibilities are two classes. The ticks are fired, not kept.
     """
 
     issuer = ports.Port(ports.OperationIssuer)

@@ -284,7 +284,7 @@ def test_a_strong_input_landed_before_its_selection_waits_for_it():
 def test_a_row_that_names_two_windows_waits_for_both():
     """The general condition: a row waits on every window it named.
 
-    A seam-pinned window is bounded on both faces (note 14 section 1.4),
+    A seam-pinned window is bounded on both faces,
     and a Skoric layer-B window on its two adjacent layer-A commits
     (2209.08552 lines 419-421); the redecode counts the commits down.
     """

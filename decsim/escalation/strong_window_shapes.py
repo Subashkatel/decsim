@@ -9,12 +9,12 @@ context row's commit region with its past face pinned, and
 ForwardSeamWindow is the forward row's extent with both faces pinned. A
 fifth shape, both faces pinned and absorbing nothing, is not a row: it
 waits for the window after it, which waits for its own strong result,
-and the serial sliding chain deadlocks (design audit note 21). What
-would make it a row is a windowing scheme whose windows do not commit in
-one serial chain, the shape Skoric et al. 2209.08552 decode block by
-block (lines 398-401, 1038-1040); the row would read that off a fact the
-scheme declares, the way it reads absorption off itself, and refuse a
-scheme that does not declare it.
+and the serial sliding chain deadlocks. What would make it a row is a
+windowing scheme whose windows do not commit in one serial chain, the
+shape Skoric et al. 2209.08552 decode block by block (lines 398-401,
+1038-1040); the row would read that off a fact the scheme declares, the
+way it reads absorption off itself, and refuse a scheme that does not
+declare it.
 ContextWindow reads the escalated window's
 commit region with one buffer of raw context on each side, built the
 moment it is asked for; that geometry is decsim's own, not the paper's
@@ -654,9 +654,9 @@ class ForwardSeamWindow(ForwardWindow):
     far face on the restart window's weak commit, which is exactly the
     boundary the shipped forward row already waits for, so the wait does
     not change and the circular wait that a non-absorbing both-faces row
-    runs into (design audit note 21) does not arise: this row absorbs the
-    windows it covers, the weak chain keeps committing, and the restart
-    window commits the rounds past the strong region.
+    runs into does not arise: this row absorbs the windows it covers,
+    the weak chain keeps committing, and the restart window commits the
+    rounds past the strong region.
 
     A strong window at the end of the operation has no later window, so
     it has no far pin: its future face is closed by the readout and it

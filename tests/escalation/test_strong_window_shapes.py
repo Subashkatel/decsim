@@ -467,8 +467,8 @@ def test_the_paper_width_restarts_on_the_round_after_the_strong_region():
 def test_the_forward_window_lands_in_the_declared_backlog_regime():
     """1 us rounds against a 10 us weak decode: W1 escalates with W2 landed.
 
-    The stabilization suite pinned this run as a refusal (finding R3);
-    the refusal was the bug.
+    The regime is a declared one, so the run completes; it is not
+    refused.
     """
     machine = fabric.switching_machine(
         rounds=15, escalated_windows={1}, strong_window="forward"
@@ -779,8 +779,8 @@ def test_a_shape_name_off_the_table_is_refused_naming_the_rows():
 
     A strong window that pins both faces and absorbs nothing waits for
     the window after it, which waits for the strong result: the serial
-    sliding chain deadlocks on it (design audit note 21). It is not a
-    row, and a name that is not a row is refused naming the rows.
+    sliding chain deadlocks on it. It is not a row, and a name that is
+    not a row is refused naming the rows.
     """
     with pytest.raises(ValueError) as refusal:
         fabric.switching_machine(
@@ -1066,7 +1066,7 @@ def test_a_yaml_names_the_forward_seam_row_and_it_runs():
 
 
 def test_a_pinned_far_face_refuses_a_re_reading_restart_window():
-    """Q5 of design audit note 20, settled as a refusal.
+    """A far pin and a restart window that re-reads the region are refused.
 
     With escalation.restart_reread_buffer_regions 1 the restart window
     commits rounds inside the strong region, so pinning the far face on

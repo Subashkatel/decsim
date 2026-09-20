@@ -2,8 +2,8 @@
 
 STYLE.md rule 7: a pluggable component's section carries one kind key
 naming a row of the root's table. This section carries four such keys,
-and two of them, terminal_policy and boundaries, arrived in I7 Part 1
-with a null default whose meaning is decided later, so the refusal each
+and two of them, terminal_policy and boundaries, carry
+a null default whose meaning is decided later, so the refusal each
 one raises at the yaml boundary is what a user meets first.
 """
 

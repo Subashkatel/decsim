@@ -1,9 +1,8 @@
 """Build the escalation policy the yaml names, and what it decides on.
 
 The policy instance is the authority over its own tier; the table row is
-only how the yaml names it (design audit note 15 section 3, sinter's
-_mux_sampler.py:33-40, which resolves the caller's object before its own
-table).
+only how the yaml names it (sinter's _mux_sampler.py:33-40, which
+resolves the caller's object before its own table).
 """
 
 import decsim.confidence.signals as confidence_signals

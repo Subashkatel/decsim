@@ -25,8 +25,8 @@ class EscalationCollaborators:
     One record so every row of ESCALATIONS has one constructor signature
     and the root builds a row without asking which policy it is; a row
     that decides on a confidence reads all three fields, a row that
-    decides on none reads nothing. This is I5 slice 1's shape for
-    STRONG_WINDOW_SHAPES and gem5's params object, where a SimObject's
+    decides on none reads nothing. This is the shape the rows of
+    STRONG_WINDOW_SHAPES have, and gem5's params object, where a SimObject's
     collaborators arrive as one structure rather than as a signature per
     subclass (tmp/resources/gem5/src/python/m5/SimObject.py:204-205).
 

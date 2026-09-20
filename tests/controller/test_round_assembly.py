@@ -8,7 +8,7 @@ frontend's shape (decsim/frontends/qlx_frontend.py, the terminal data
 readout as its own fragment). The bound counts every round in flight
 through the stage, in assembly, held for store room or on its route
 (controller.packing_rounds_in_flight); a full stage stops the run with a
-sentence naming the setting (design note, slice 4, ruling 7), or drops
+sentence naming the setting, or drops
 the new round under the drop knob.
 """
 

@@ -42,8 +42,9 @@ class WindowingSchemeCard:
     One record so every row of WINDOWING_SCHEMES has one constructor
     signature and the root builds a row without asking which geometry it
     lays; a row reads the keys its own layout needs and ignores the
-    rest. This is I5 slice 1's shape for STRONG_WINDOW_SHAPES and gem5's
-    params object (tmp/resources/gem5/src/python/m5/SimObject.py:204-205).
+    rest. This is the shape the rows of STRONG_WINDOW_SHAPES have, and
+    gem5's params object
+    (tmp/resources/gem5/src/python/m5/SimObject.py:204-205).
     """
 
     terminal_policy: str = "flush"

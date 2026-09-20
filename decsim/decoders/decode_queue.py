@@ -205,7 +205,7 @@ def _check_pools_bulk_strong_means(waiting_by_pool: dict) -> None:
     A pool is a capability, so the rule that merges one names it. A run
     that defines a pool beyond the default and the strong one is refused
     here rather than having its jobs merged as though they were strong
-    re-decodes (design audit note 12 section 6.6).
+    re-decodes.
     """
     named = set(waiting_by_pool) - {DEFAULT_POOL, STRONG_POOL}
     if not named:

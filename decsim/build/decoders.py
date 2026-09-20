@@ -249,7 +249,7 @@ def _switching_pools(
 
     A window's two forced-class solves are two ordinary jobs of the
     default pool, so weak_decoder.units alone decides whether they
-    overlap (design audit note 12 section 4).
+    overlap.
     """
     if strong is None:
         raise ValueError(

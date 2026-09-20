@@ -188,12 +188,12 @@ def test_the_depth_is_reported_at_every_change():
 def test_bulk_strong_is_refused_beside_a_pool_it_does_not_mean():
     """bulk_strong merges the strong pool, and says which pool that is.
 
-    The rule used to read "not the default pool", so every job of any
-    third pool was merged as though it were a strong re-decode and the
-    batch stamped request keys those jobs do not have (design audit note
-    12 section 6.6). A pool is a capability: a rule that means the
-    strong pool names the strong pool, and a run that defines another
-    one is refused here rather than served by a rule not written for it.
+    A rule that read "not the default pool" would merge every job of a
+    third pool as though it were a strong re-decode, and the batch would
+    stamp request keys those jobs do not have. A pool is a capability: a
+    rule that means the strong pool names the strong pool, and a run
+    that defines another one is refused here rather than served by a
+    rule not written for it.
     """
     engine = engine_module.Engine()
     decoder = decoders.PresetLatencyDecoder(SERVICE_MICROSECONDS)

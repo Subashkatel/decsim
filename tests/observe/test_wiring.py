@@ -390,8 +390,8 @@ def test_the_narrator_log_is_byte_identical_with_and_without_the_observers(
     fires, so a component runs with no observer at all. The log the
     frozen gate hashes is therefore written entirely by components; if an
     observer wrote one line into it, that line would be missing here.
-    I7 Part 1 slice 4(f) moved the last such line, "NO FORCED SOLVE",
-    out of the wiring and into the decoder manager that fires it.
+    "NO FORCED SOLVE" is such a line: the decoder manager fires it, not
+    the wiring.
     """
     wired_machine, _wired_result = gate_point.run()
     wired_lines = list(wired_machine.observation.log.lines)

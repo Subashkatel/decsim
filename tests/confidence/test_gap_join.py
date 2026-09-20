@@ -1,6 +1,6 @@
 """The window's gap as two forced-class jobs, on one unit and on two.
 
-Design audit note 12 sections 4.1 to 4.4: the window side submits both
+The window side submits both
 forced-class jobs at one instant, both queue in the weak pool, each unit
 is fed from the weak syndrome buffer, and weak_decoder.units alone decides
 whether the pair overlaps. The rule the data-movement study rests on is one

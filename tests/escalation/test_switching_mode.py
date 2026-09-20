@@ -471,7 +471,7 @@ def test_a_deferred_strong_job_is_traced_from_its_hold_to_its_release(
 ):
     """The wait is a visible state on the strong tier's own lane.
 
-    Note 14 section 3.4: a slice that opens when the row holds the job
+    It is a slice that opens when the row holds the job
     and closes when the condition fires, labelled with the strong
     request key, carrying the name of what it waits on, and stepping the
     window's flow into the job's dispatch. gem5 exposes a blocked port

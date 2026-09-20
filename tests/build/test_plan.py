@@ -1,8 +1,8 @@
 """The run plan: the rows the yaml names and the defaults the plan derives.
 
-I7 Part 1 slice 2 gave two window keys a null default whose meaning the
-plan derives from the escalation row's declared facts, and slice 1
-replaced every kind-string branch in this module with a declared fact.
+Two window keys carry a null default whose meaning the plan derives
+from the escalation row's declared facts, and the plan branches on a
+declared fact, never on a kind string.
 Both are pinned here through build_plan, on settings shaped as a yaml
 would leave them.
 """

@@ -4,8 +4,8 @@ The oracle is the circuit and the window plan, not the run: a rotated
 surface code memory reads d*d-1 ancilla bits per round and d*d data
 bits on its last round, and its detector layers are (d*d-1)/2 on the
 first round, d*d-1 in the bulk and 3(d*d-1)/2 on the last (Tan et al.
-2209.09219 lines 936-946 for the seam layer; note 14 sections 2.2 and
-5.2 derive the three counts). Every expected number below is that
+2209.09219 lines 936-946 for the seam layer). Every expected number
+below is that
 arithmetic over the extents the plan lays, so a change in the data path
 moves a number a reader can recompute rather than a guess.
 
@@ -412,7 +412,7 @@ def test_the_escalation_carries_the_selection_bare_and_each_round_once(
 def test_the_wire_prices_raw_bits_where_the_store_holds_formed_events(
     distance,
 ):
-    """The subtlety of note 14 section 5.4 item 5, stated as a number.
+    """The wire carries raw bits and the store holds events, as numbers.
 
     wire_bits is computed from the raw fragments before
     _form_detection_events runs (controller/round_assembly.py), so the

@@ -274,7 +274,7 @@ class DecodeRequestBuilder:
         Its own request, so both transfers are priced and recorded
         separately, and the first request's key as its input identity,
         so a unit that already holds the rounds reads them instead of
-        receiving them again (design audit note 12 section 4.5).
+        receiving them again.
         """
         request_key = self.new_request_key(
             job.operation_id, job.window_id, job.request_key.tier

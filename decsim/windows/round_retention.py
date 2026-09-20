@@ -538,6 +538,14 @@ class RoundRetention:
             )
 
 
+def round_identities_of(payloads) -> tuple:
+    """The distinct (operation, round) keys of the payloads, in order."""
+    identities = {}
+    for fragment in payloads:
+        identities[(fragment.operation_id, fragment.round_index)] = None
+    return tuple(identities)
+
+
 def _longer(first: tuple, second: tuple) -> tuple:
     """Whichever of two round lists is longer, the first on a tie."""
     if len(second) > len(first):
@@ -577,11 +585,3 @@ def _move_hold_to_input(
         return
     identities = round_identities_of(job.payloads)
     store.register_hold(owner, identities)
-
-
-def round_identities_of(payloads) -> tuple:
-    """The distinct (operation, round) keys of the payloads, in order."""
-    identities = {}
-    for fragment in payloads:
-        identities[(fragment.operation_id, fragment.round_index)] = None
-    return tuple(identities)

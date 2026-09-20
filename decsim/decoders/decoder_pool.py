@@ -214,6 +214,37 @@ class DecoderPool:
         return occupancy
 
 
+def routed_decoders(router) -> list:
+    """Every decoder row the router can reach, in the order the walk finds.
+
+    A row is anything that answers the runtime-checkable Decoder port,
+    which every row of DECODERS does and a row written outside decsim
+    does too without inheriting decsim's base class; the port declares
+    the sources a row reports on, so the walk asks nothing further about
+    what a row has. The recursion asks the seeding protocol whether a
+    value names children of its own: the routers name the tiers and the
+    per-code rows, and a row that wraps another (the confidence, staged
+    and check wrappers) names its inner decoder the same way.
+    """
+    found = []
+    seen = set()
+    pending = [router]
+    while pending:
+        decoder = pending.pop()
+        identity = id(decoder)
+        if decoder is None or identity in seen:
+            continue
+        seen.add(identity)
+        if isinstance(decoder, ports.Decoder):
+            found.append(decoder)
+        if not isinstance(decoder, seeding.RunSeedComposite):
+            continue
+        children = decoder.run_seed_children()
+        for child in children:
+            pending.append(child.child)
+    return found
+
+
 def _with_room(
     units: list,
     job: decoding_records.DecodeJob,
@@ -294,34 +325,3 @@ class _TraceSources:
 
     unit_busy: trace_source.TraceSource = trace_source.new_source()
     unit_freed: trace_source.TraceSource = trace_source.new_source()
-
-
-def routed_decoders(router) -> list:
-    """Every decoder row the router can reach, in the order the walk finds.
-
-    A row is anything that answers the runtime-checkable Decoder port,
-    which every row of DECODERS does and a row written outside decsim
-    does too without inheriting decsim's base class; the port declares
-    the sources a row reports on, so the walk asks nothing further about
-    what a row has. The recursion asks the seeding protocol whether a
-    value names children of its own: the routers name the tiers and the
-    per-code rows, and a row that wraps another (the confidence, staged
-    and check wrappers) names its inner decoder the same way.
-    """
-    found = []
-    seen = set()
-    pending = [router]
-    while pending:
-        decoder = pending.pop()
-        identity = id(decoder)
-        if decoder is None or identity in seen:
-            continue
-        seen.add(identity)
-        if isinstance(decoder, ports.Decoder):
-            found.append(decoder)
-        if not isinstance(decoder, seeding.RunSeedComposite):
-            continue
-        children = decoder.run_seed_children()
-        for child in children:
-            pending.append(child.child)
-    return found

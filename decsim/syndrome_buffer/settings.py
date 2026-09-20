@@ -78,3 +78,28 @@ class SyndromeBufferSettings:
             read_cycles=read_cycles,
             detection_event_cycles_per_round=formation_cycles,
         )
+
+
+# the costs the weak syndrome buffer charges; the strong one charges none
+_WEAK_BUFFER_COSTS = (
+    "write_cycles",
+    "read_cycles",
+    "detection_event_cycles_per_round",
+)
+
+
+def check_strong_section_charges_nothing(section: Mapping) -> None:
+    """The strong syndrome buffer's section prices no access.
+
+    Its receiving end stores a round at the tick it lands
+    (strong_syndrome_round_receiver.py), so a cost written there would
+    be read and never paid.
+    """
+    for key in _WEAK_BUFFER_COSTS:
+        cycles = section.get(key, 0)
+        if cycles > 0:
+            raise ValueError(
+                f"strong_syndrome_buffer.{key} is a cost of the weak "
+                "syndrome buffer; the strong syndrome buffer stores a "
+                "round as it lands and charges nothing, so leave it out"
+            )

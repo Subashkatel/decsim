@@ -533,6 +533,9 @@ strong_syndrome_buffer:          # the strong syndrome buffer, on the strong hos
                                    # syndrome buffer uses; a switching run's
                                    # escalated region cannot wait, so a store with
                                    # no room for it stops the run. null = unbounded
+                                   # This buffer stores a round as it lands and
+                                   # charges no cycles, so the weak syndrome
+                                   # buffer's cost keys are refused here
 
 # The two decoder tiers are two distinct units (Toshio 2510.25222:
 # lightweight decoders decode constantly, a separate accurate decoder is

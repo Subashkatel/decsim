@@ -143,8 +143,12 @@ class MachineSettings:
         weak_syndrome_buffer = buffer_settings.from_yaml(
             sections["weak_syndrome_buffer"], clocks, controller.clock
         )
+        strong_section = sections["strong_syndrome_buffer"]
+        syndrome_buffer_settings.check_strong_section_charges_nothing(
+            strong_section
+        )
         strong_syndrome_buffer = buffer_settings.from_yaml(
-            sections["strong_syndrome_buffer"], clocks
+            strong_section, clocks
         )
         windows = window_settings.WindowSettings.from_yaml(
             sections["windows"], clocks, controller.clock

@@ -22,3 +22,23 @@ def test_the_chips_formation_charge_is_read_from_the_section():
     )
 
     assert settings.detection_event_cycles_per_round == 5
+
+
+@pytest.mark.parametrize(
+    "cost",
+    ["write_cycles", "read_cycles", "detection_event_cycles_per_round"],
+)
+def test_a_cost_on_the_strong_syndrome_buffer_is_refused(cost):
+    section = {cost: 3}
+
+    with pytest.raises(
+        ValueError,
+        match=f"strong_syndrome_buffer.{cost} is a cost of the weak",
+    ):
+        syndrome_buffer_settings.check_strong_section_charges_nothing(section)
+
+
+def test_a_strong_syndrome_buffer_with_no_cost_is_accepted():
+    section = {"kind": "syndrome_buffer", "rounds": 40}
+
+    syndrome_buffer_settings.check_strong_section_charges_nothing(section)

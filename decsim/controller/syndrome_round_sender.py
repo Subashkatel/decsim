@@ -226,7 +226,8 @@ class SyndromeRoundSender:
         The controller is the end this round leaves by, so it executes
         the send (OMNeT++ refuses a module that sends a message it does
         not own, tmp/resources/omnetpp/src/sim/csimplemodule.cc:333-334;
-        gem5 bills a transfer to the port it left by, packet.hh:424-431).
+        gem5 bills a transfer to the port it left by,
+        coherent_xbar.cc:354-357).
         The room side takes the room before the round leaves, gem5's
         cache reserving its write buffer entry before the send
         (src/mem/cache/queue.hh:150-152), and handles the landing itself.

@@ -12,7 +12,7 @@ the cryostat (Battistel 2303.00054 lines 342 to 347). Either sender
 executes its own crossing, being the end the data leaves by (OMNeT++
 refuses a module that sends a message it does not own,
 tmp/resources/omnetpp/src/sim/csimplemodule.cc:333-334; gem5 bills a
-transfer to the port it left by, packet.hh:424-431). This end owns the
+transfer to the port it left by, coherent_xbar.cc:354-357). This end owns the
 room and the landing: it answers has_room counting the writes still in
 flight, reserves the room before a crossing starts, gem5's queue
 counting its reserved entries as taken (src/mem/cache/queue.hh:150-152

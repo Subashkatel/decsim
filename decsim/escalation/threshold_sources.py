@@ -204,9 +204,11 @@ class OnlineThresholdController:
     budget; only a full clean quota shrinks the target.
 
     The target always stays inside [min_escalation_rate,
-    max_escalation_rate]; the max is the Theorem 1 backlog bound: the
-    strong tier's duty cycle may never exceed what its latency can
-    absorb, whatever accuracy would prefer.
+    max_escalation_rate]; the max is where the yaml writes the backlog
+    bound of Toshio 2510.25222 Theorem 1 (lines 1272-1291): the strong
+    tier's duty cycle may never exceed what its latency can absorb,
+    whatever accuracy would prefer. The number is the yaml's, and
+    nothing here derives it from the theorem's inputs.
     """
 
     def __init__(

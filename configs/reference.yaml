@@ -230,8 +230,8 @@ windows:
   buffer_rounds: null              # look-ahead rounds per window; null = d
   terminal_policy: null            # flush | lookahead: how a finite stream drains
                                    # its last buffered window. flush ends the last
-                                   # window at the stream's last round, Tan's QUITS
-                                   # flush (2209.09219 lines 1029-1030); lookahead
+                                   # window at the stream's last round, Tan's last
+                                   # window (2209.09219 lines 952-955); lookahead
                                    # keeps the regular stride, so the last window
                                    # still reads rounds past its own commit. null,
                                    # the default, leaves the row on flush, and on
@@ -629,7 +629,7 @@ weak_decoder:                      # the lightweight tier: fast, higher LER
                                    # is one growth iteration, so this key sets
                                    # the engine's cycles directly. Helios's own
                                    # weights run 2 to 16 (2301.08419 lines
-                                   # 1053-1063, the weight resolution wmax).
+                                   # 1242-1254, the weight resolution wmax).
                                    # Read on any kind and used by union_find
   cycle_count: null                # the union_find row's own timing, in place of
                                    # its host wall clock: the decoder's cycle
@@ -812,10 +812,11 @@ decoder_manager:                   # the manager that gives ready windows a unit
                                    # on a unit and before that job's input is
                                    # asked for. 0 is the default and models
                                    # none of it. Caune et al. arXiv:2410.05202
-                                   # lines 519-526 and 636-641 measure 250 to
-                                   # 370 control cycles per decode between a
-                                   # decode's arrival and its dispatch, which
-                                   # is the range to price this from
+                                   # lines 519-526 measure 250 to 370 control
+                                   # cycles per decode for collecting the
+                                   # packets, the bus transfer, the result's
+                                   # return and the conditional together, so
+                                   # that range bounds this from above
 
 pauli_frame:
   kind: logical_register           # logical_register (FRAMES,

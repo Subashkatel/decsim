@@ -1,8 +1,9 @@
 """Reduces one fault identity modulo two, where the catalog is built.
 
-A target listed twice in one error cancels, and a fault that flips an
-observable but no detector is undetectable and refused (Stim,
-doc/file_format_dem_detector_error_model.md).
+A target listed twice in one error cancels (Stim,
+doc/file_format_dem_detector_error_model.md). A fault that flips an
+observable but no detector is undetectable; Stim's format allows one
+and the catalog refuses it.
 """
 
 from collections.abc import Iterable

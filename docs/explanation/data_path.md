@@ -76,6 +76,16 @@ For a distance 3 rotated surface code that is 8 bits per round, the
 `d*d - 1` stabilizers of the patch (`decsim/qpu/code_geometry.py`,
 `syndrome_bits_per_round`).
 
+A round's width is not one number over a whole stream. The last round of
+a memory experiment also reads the patch's `d*d` data qubits, so it
+carries `2*d*d - 1` bits: 17 at distance 3, 49 at distance 5. A hop that
+carries detection events instead of raw outcomes sees `(d*d - 1)/2` of
+them on the first round, `d*d - 1` in the bulk and `3*(d*d - 1)/2` on
+the last, since the first round has no round before it to difference
+against and the last closes on the data readout
+(`tests/links/test_data_through.py` derives each count from the circuit).
+A bounded link therefore serializes the last round longer than the rest.
+
 Move, off board, and the landing is also a copy into the controller's
 intake register. Default latency 0.15 microseconds. The hop is modelled
 on measurement signals classified into bits and then sent to a

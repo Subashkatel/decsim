@@ -428,7 +428,7 @@ class DecodeService:
         free_now = self.pool.free_count(pool)
         self.engine.log(
             log_sources.DECODER_MANAGER,
-            f"ASSIGN UNIT {job.label} "
+            f"ASSIGN UNIT {job.decoding_unit_name} to {job.label} "
             f"({slot_note}waited {waited} in queue, "
             f"{pool_tag}units free now {free_now})",
         )

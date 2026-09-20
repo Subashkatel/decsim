@@ -78,6 +78,19 @@ def test_a_second_resident_joins_only_when_both_inputs_fit_the_memory():
     assert unit.has_room(large, 2, _demand) is False
 
 
+def test_a_second_reader_of_rounds_still_arriving_takes_no_memory_of_its_own():
+    unit = _unit(capacity_rounds=3)
+    first = _job("first", rounds=3)
+    first.input_key = "the window's rounds"
+    unit.admit(first)
+    companion = _job("companion", rounds=3)
+    companion.input_key = first.input_key
+    other = _job("other", rounds=3)
+
+    assert unit.has_room(companion, 2, _demand) is True
+    assert unit.has_room(other, 2, _demand) is False
+
+
 def test_a_second_window_waits_while_a_landed_one_fills_the_memory():
     """A full memory refuses the next window instead of raising later.
 

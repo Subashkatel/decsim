@@ -124,9 +124,11 @@ class DecoderUnit:
         A first resident is always admitted, so a genuinely oversized
         window still stops loudly at its deposit. A job whose rounds
         this unit already holds needs no memory of its own: it is one
-        more reader of the copy that is here. A resident whose input
-        has landed carries its rounds in the memory rather than in its
-        payloads, so the memory's own occupancy answers for it.
+        more reader of the copy that is here, and the same holds for
+        rounds still on their way to a resident that reads them, which
+        land as one copy. A resident whose input has landed carries its
+        rounds in the memory rather than in its payloads, so the
+        memory's own occupancy answers for it.
         """
         if len(self.residents) >= resident_capacity:
             return False
@@ -138,12 +140,9 @@ class DecoderUnit:
         capacity = self.memory.capacity_rounds
         if capacity is None:
             return True
-        demand = self.memory.occupied_rounds
-        for resident in live:
-            if self.memory.holds(resident):
-                continue
-            demand += memory_demand_of(resident)
-        demand += memory_demand_of(job)
+        readers = live + [job]
+        arriving_rounds = self._arriving_rounds(readers, memory_demand_of)
+        demand = self.memory.occupied_rounds + arriving_rounds
         return demand <= capacity
 
     def live_residents(self) -> list:
@@ -341,6 +340,21 @@ class DecoderUnit:
         if owner.cancelled or owner.completed:
             return None
         return owner
+
+    def _arriving_rounds(
+        self,
+        readers: list,
+        memory_demand_of: Callable[[decoding_records.DecodeJob], int],
+    ) -> int:
+        """The rounds not yet in the memory, each input counted once."""
+        rounds_by_input = {}
+        for reader in readers:
+            if self.memory.holds(reader):
+                continue
+            input_identity = self.memory.landing_key(reader)
+            rounds_by_input[input_identity] = memory_demand_of(reader)
+        arriving = rounds_by_input.values()
+        return sum(arriving)
 
     def _resident_phase(self, resident: decoding_records.DecodeJob) -> str:
         if self.compute.holder is resident and resident.service_started:

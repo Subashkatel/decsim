@@ -134,9 +134,19 @@ class _TanCores:
 
 
 def _check_step_and_buffer(step: int, buffer: int) -> None:
-    """The paper's schedule needs s >= 2 and overlapping windows, b >= 1."""
+    """This row's layout needs s >= 2 and overlapping windows, b >= 1.
+
+    A step of s rounds is one seam round and s - 1 core rounds, so a
+    step of 1 leaves a core no round to commit. Tan's Fig. S9 runs
+    s = 1 (2209.09219 lines 1306-1316), where a core's own edges are the
+    ones across its single layer; this row does not lay that case.
+    """
     if step < 2:
-        raise ValueError("Tan sandwich decoding requires step size s >= 2")
+        raise ValueError(
+            f"windows.commit_rounds {step}: the sandwich row lays each "
+            "step as one seam round and s - 1 core rounds, so it needs a "
+            "step of at least 2"
+        )
     if buffer < 1:
         raise ValueError(
             "Tan sandwich decoding requires overlapping windows (b >= 1)"

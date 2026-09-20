@@ -78,7 +78,7 @@ def test_a_step_below_two_is_refused():
     with pytest.raises(ValueError) as refusal:
         row.plan_operation(1, 30, commit_round_count=1, buffer_round_count=2)
 
-    assert "step size s >= 2" in str(refusal.value)
+    assert "needs a step of at least 2" in str(refusal.value)
 
 
 def test_a_buffer_below_one_is_refused():

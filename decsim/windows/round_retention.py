@@ -519,8 +519,8 @@ class RoundRetention:
             minimum = ()
         if capacity is not None and capacity < len(minimum):
             raise ValueError(
-                f"upstream syndrome buffer needs {len(minimum)} packet slots, "
-                f"got {capacity}"
+                f"weak_syndrome_buffer.rounds {capacity} is below the "
+                f"{len(minimum)} rounds the plan's windows hold at once"
             )
         if self.strong_store is None:
             return
@@ -533,8 +533,8 @@ class RoundRetention:
             strong_minimum
         ):
             raise ValueError(
-                f"strong syndrome buffer needs {len(strong_minimum)} packet "
-                f"slots, got {strong_capacity}"
+                f"strong_syndrome_buffer.rounds {strong_capacity} is below the "
+                f"{len(strong_minimum)} rounds the plan's windows hold at once"
             )
 
 

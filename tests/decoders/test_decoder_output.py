@@ -31,6 +31,13 @@ class _Transfers:
         self.sent.append((path, window.key, request_key.tier, payload_bits))
         self.engine.schedule(self.delay_ticks, on_delivered)
 
+    def send_for_job(
+        self, path, job, *, payload_bits, request_key, on_delivered
+    ):
+        self.sent.append((path, job.label, request_key.tier, payload_bits))
+        self.engine.schedule(self.delay_ticks, on_delivered)
+        return self.delay_ticks
+
 
 class _Frame:
     def __init__(self, engine, commit_ticks: int) -> None:
@@ -89,6 +96,22 @@ def test_each_tier_publishes_over_its_own_output_link():
         transfer_records.LinkPath.WEAK_DECODER_TO_FRAME,
         transfer_records.LinkPath.STRONG_DECODER_TO_FRAME,
     ]
+
+
+def test_a_selection_is_sent_as_zero_bits_so_a_bounded_hop_can_carry_it():
+    """A size of None is refused by a bounded wire; a selection has a size."""
+    engine = engine_module.Engine()
+    transfers = _Transfers(engine, 4)
+    output = decoder_output_module.DecoderOutput()
+    output.transfers = transfers
+    weak_job = decoding_records.DecodeJob(
+        operation_id=4, window_id=1, round_count=5, label="weak"
+    )
+    strong_key = _request_key(window_records.DecoderTier.STRONG)
+    output.send_selection(weak_job, strong_key, _ignore)
+    escalation_path = transfer_records.LinkPath.WEAK_DECODER_TO_STRONG_DECODER
+    tiers = window_records.DecoderTier
+    assert transfers.sent == [(escalation_path, "weak", tiers.STRONG, 0)]
 
 
 def test_a_result_is_one_bit_per_logical_observable():

@@ -208,6 +208,32 @@ class DecoderUnit:
             awaiting_count += 1
         return awaiting_count
 
+    def work_left_ticks(
+        self, now: int, occupancy_ticks_of: Callable[..., float]
+    ) -> float:
+        """Ticks of compute this unit may still owe the jobs it holds.
+
+        The time to the tick the holder is expected to free the
+        compute, then the declared cost of every other resident that
+        has not started. Nobody knows when a parked resident is
+        released, so its decode is counted whole: that is the most a
+        newcomer can wait behind it, and the least such total over the
+        units bounds the newcomer's worst start. A holder that outlived
+        its prediction, its result not yet read or its pipeline full,
+        is held for a time nobody declared, so the work is unbounded.
+        """
+        work_left = 0.0
+        holder = self.holder
+        if holder is not None:
+            work_left = self.compute.expected_free_ticks - now
+        if work_left < 0:
+            return math.inf
+        for resident in self.residents:
+            if resident is holder or is_past_start(resident):
+                continue
+            work_left += occupancy_ticks_of(resident)
+        return work_left
+
     def parked_residents(self) -> list:
         """The residents landed with a boundary still owed."""
         parked = []
@@ -261,6 +287,7 @@ class DecoderUnit:
     def release_compute(self) -> None:
         """The holder gives the compute back to the pool or a resident."""
         self.compute.holder = None
+        self.compute.expected_free_ticks = math.inf
 
     def expect_compute_free(self, ticks: Optional[float]) -> None:
         """Record when the running decode is expected to free the compute."""

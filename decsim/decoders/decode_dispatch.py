@@ -93,9 +93,10 @@ class DecodeDispatcher:
         reservation station), and only once its gate
         (WindowInputGate.may_stage) says its release is already
         resolving, so parked work can never squat a slot against the
-        decode that must free it. The pool offers a free unit first, the
-        one this job's rounds are already on when there is one, else the
-        busy unit with room that frees earliest (decoder_pool.py).
+        decode that must free it. The pool offers a startable job a free
+        unit first, the one its rounds are already on when there is
+        one; any other job carrying input is staged on the unit with
+        the least work left (decoder_pool.py).
         """
         startable = decoder_unit_module.is_startable(job)
         if not startable and _is_staging_refused(job):
@@ -105,6 +106,7 @@ class DecodeDispatcher:
         placement = self.pool.offer(
             pool,
             job,
+            now=self.service.engine.now,
             carries_input=carries_input,
             resident_capacity=resident_capacity,
             memory_demand_of=self.service.memory_demand,

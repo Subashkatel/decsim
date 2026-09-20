@@ -5,10 +5,12 @@ displaces ready work (src/cpu/o3/inst_queue.hh, scheduleReadyInsts). A
 startable job also leaves the compute a parked job waits for alone while
 another unit is idle, so a window released by its neighbours decodes at
 once (Skoric et al. 2209.08552 lines 416-421: a layer B window starts as
-soon as both adjacent windows have completed), and a job whose rounds a
-unit is already receiving goes to that unit and joins the one transfer
-(the staging's landing rule, gem5's MSHR answering every request for one
-block on a single fill, src/mem/cache/mshr.hh, the TargetList targets).
+soon as both adjacent windows have completed). Two blocked jobs that read
+the same rounds are staged on two units while two have room, so the unit
+count alone decides whether they overlap; on one unit the second joins
+the first one's transfer (the staging's landing rule, gem5's MSHR
+answering every request for one block on a single fill,
+src/mem/cache/mshr.hh, the TargetList targets).
 """
 
 import functools
@@ -24,6 +26,8 @@ import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
 from decsim.decoders.decoder_manager import DecoderManager
 
+DECODE_MICROSECONDS = 4.0
+
 
 class _OpenGate:
     """A gate that lets a blocked job take a slot and start when it can."""
@@ -35,6 +39,24 @@ class _OpenGate:
     def may_start(self, job):
         del job
         return True
+
+    def mask_input(self, job):
+        del job
+
+
+class _ClosedUntilOpenedGate:
+    """A gate the test opens by hand, as a boundary arriving does."""
+
+    def __init__(self):
+        self.is_open = False
+
+    def may_stage(self, job):
+        del job
+        return True
+
+    def may_start(self, job):
+        del job
+        return self.is_open
 
     def mask_input(self, job):
         del job
@@ -76,14 +98,15 @@ def _job(index, label, deps_remaining, gate=None, input_key=None, window=None):
         size_bits=2,
         fragment_index=0,
     )
-    request_key = window_records.DecoderRequestKey(
-        1, index, window_records.DecoderTier.WEAK, index
-    )
     if window is None:
         window = _window(index, deps_remaining)
+    window_id = window.window_index
+    request_key = window_records.DecoderRequestKey(
+        1, window_id, window_records.DecoderTier.WEAK, index
+    )
     return decoding_records.DecodeJob(
         operation_id=1,
-        window_id=index,
+        window_id=window_id,
         round_count=1,
         payloads=[payload],
         label=label,
@@ -96,7 +119,7 @@ def _job(index, label, deps_remaining, gate=None, input_key=None, window=None):
 
 def _manager(engine, unit_count):
     """The manager these tests dispatch on, at that many units."""
-    decoder = decoders.PresetLatencyDecoder(4.0)
+    decoder = decoders.PresetLatencyDecoder(DECODE_MICROSECONDS)
     router = decoders.CodeRouter(decoder)
     scheduler = schedulers.FifoScheduler()
     policy = escalation_policies.Baseline(escalation_policies.NO_CONFIDENCE)
@@ -163,20 +186,31 @@ def test_a_startable_job_takes_an_empty_unit_over_one_holding_a_parked_job():
     assert later_unit_name != parked_unit_name
 
 
-def test_two_blocked_companions_of_one_window_share_one_transfer():
+def _released_companions(unit_count):
+    """(start ticks by label, transfers) of one window's two parked solves.
+
+    The forced-class solves of one window: their own requests, one input
+    identity and one boundary, which arrives after both inputs landed.
+    """
     engine = engine_module.Engine()
-    manager = _manager(engine, unit_count=2)
+    manager = _manager(engine, unit_count)
     transfer_ticks = config.microseconds_to_ticks(10.0)
-    landings = []
+    transfers = []
+    starts = {}
+    original_begin = manager.service.begin
+
+    def recording_begin(job, gated=True):
+        starts[job.label] = engine.now
+        original_begin(job, gated)
+
+    manager.service.begin = recording_begin
 
     def send_input(on_landed):
-        landings.append(on_landed)
+        transfers.append(on_landed)
         engine.schedule(transfer_ticks, on_landed, label="input")
         return transfer_ticks
 
-    # the forced-class solves of one window: their own requests, one
-    # input identity, so the second reads the rounds the first brings
-    gate = _BoundaryPendingGate()
+    gate = _ClosedUntilOpenedGate()
     first = _job(0, "first", deps_remaining=1, gate=gate)
     companion = _job(
         1,
@@ -188,9 +222,27 @@ def test_two_blocked_companions_of_one_window_share_one_transfer():
     )
     manager.enqueue(first, send_input, _ignore)
     manager.enqueue(companion, send_input, _ignore)
+
+    def boundary_arrives():
+        gate.is_open = True
+        first.window.deps_remaining = 0
+        manager.release_parked(first.window.key)
+
+    boundary_ticks = 3 * transfer_ticks
+    engine.schedule(boundary_ticks, boundary_arrives, label="boundary")
     engine.run()
-    first_unit_name = first.decoding_unit_name
-    companion_unit_name = companion.decoding_unit_name
-    assert first_unit_name is not None
-    assert companion_unit_name == first_unit_name
-    assert len(landings) == 1
+    return starts, transfers
+
+
+def test_two_parked_companions_on_one_unit_share_a_transfer_and_queue():
+    starts, transfers = _released_companions(unit_count=1)
+    decode_ticks = config.microseconds_to_ticks(DECODE_MICROSECONDS)
+    assert starts["companion"] - starts["first"] == decode_ticks
+    assert len(transfers) == 1
+
+
+def test_two_parked_companions_overlap_when_two_units_have_room():
+    """The unit count alone decides whether the two solves overlap."""
+    starts, transfers = _released_companions(unit_count=2)
+    assert starts["companion"] == starts["first"]
+    assert len(transfers) == 2

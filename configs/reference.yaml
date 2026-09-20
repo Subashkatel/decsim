@@ -555,7 +555,11 @@ weak_decoder:                      # the lightweight tier: fast, higher LER
                                    # old accuracy-first strong reference card.
                                    # A card prices the algorithm stage ONLY;
                                    # fetch and release cycles are separate
-  units: 1                         # decoder units in this tier's pool
+  units: 1                         # decoder units in this tier's pool. A job that
+                                   # may start takes a free unit; one that must
+                                   # wait, for compute or for a boundary, is
+                                   # staged with its input on the unit with the
+                                   # least work left (decoders/decoder_pool.py)
   input: copy                      # copy | in_place: how this tier's unit gets
                                    # the rounds it decodes. copy moves them over
                                    # the tier's input link into the unit's own

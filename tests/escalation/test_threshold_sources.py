@@ -223,8 +223,7 @@ def test_the_realized_rate_is_pinned_by_the_distance_the_threshold_moved():
     (1/T) sum err_t - alpha = (alpha_1 - alpha_{T+1}) / (T gamma), so the
     realized escalation rate can only stray from the target as far as the
     threshold itself travelled, whatever the gaps did. That is what makes
-    the loop self-correcting under drift, and it holds exactly here since
-    the threshold never reached the floor.
+    the loop self-correcting under drift.
     """
     target = 0.1
     step = 0.05
@@ -237,8 +236,34 @@ def test_the_realized_rate_is_pinned_by_the_distance_the_threshold_moved():
     for _ in range(window_count):
         gap = gap_stream.gauss(9.0, 3.0)
         tracker.observe(gap)
-    assert tracker.threshold > 0.0
     travelled = start - tracker.threshold
     drift = travelled / (window_count * step)
     realized = tracker.escalation_rate()
     assert realized - target == pytest.approx(drift)
+
+
+def test_the_target_rate_holds_when_every_gap_is_tied_at_zero():
+    """Proposition 4.1 assumes nothing of the gaps (2106.00170 lines 300-302).
+
+    A window whose two classes weigh the same has a gap of zero. With
+    every gap at zero the threshold spends nine windows in ten below
+    zero, where nothing escalates, and the distance it travels stays
+    within one step, so the realized rate is within 1/T of the target.
+    """
+    target = 0.1
+    tracker = threshold_sources.EscalationRateTracker(
+        target_escalation_rate=target, threshold=0.0, step=1.0
+    )
+    window_count = 1000
+    tied_gaps = [0.0] * window_count
+
+    _observe_each(tracker, tied_gaps)
+
+    realized = tracker.escalation_rate()
+    strayed = realized - target
+    assert abs(strayed) <= 1.0 / window_count
+
+
+def _observe_each(tracker, gaps: list) -> None:
+    for gap in gaps:
+        tracker.observe(gap)

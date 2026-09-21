@@ -766,18 +766,6 @@ mistake a gap for a result.
   once fills, and the run then stops and says how many rounds were left
   held for store room. The size that is always enough is the union of
   every hold, and an open-ended dynamic stream has none.
-- **O14. A unit memory's room test and its deposit can count two
-  widths.** A waiting job is tested for room at the width its rounds
-  cross the input link. When the tier forms its own detection events
-  (`controller.detection_events_formed_at: decoder`) the rounds are
-  formed as they land, and the memory holds the events at their own
-  width, which a round with fewer detectors than measurements makes
-  narrower. The test then asks for more room than the deposit takes.
-  Every other placement lands the rounds at one width and the two agree.
-  The two ways to close it are to hold the rounds in the unit memory at
-  the width they crossed the link, or to give the former a way to state
-  a round's event width before it forms.
-
 O3, O4, O5 and O10 are closed: the sends name what they carry
 (`QPUReadout.size_bits` on the readout hop, nothing on the escalation
 hop), the backward hand-off of the parallel scheme is priced and tested,
@@ -785,6 +773,21 @@ the boundary fold is written by the decoder side from the gate's mask
 (`decsim/decoders/decoder_memory_transfer.py`, D11), and a timing-only
 round ends in the decoders' own end for it
 (`decsim/decoders/memory_rounds.py`).
+
+O14 is closed by one rule: a memory counts what is written into it.
+Under `controller.detection_events_formed_at: decoder` the tier's logic
+sits between the unit's input memory and its core, so the memory is
+written the raw round and holds it at the size it crossed the input
+link; the room test and the deposit count the same bits. "The decoder
+computes the syndrome from measurement outcomes" (Caune et al.
+2410.05202 lines 1252-1256). Under `weak_syndrome_buffer` the chip's
+logic sits ahead of the store, so the store is written the narrower
+events; the room reserved before the round left is the wire size and the
+landing holds the stored size, which is gem5 PacketFifo's `reserve(len)`
+then `push` of the packet's own length (`src/dev/net/pktfifo.hh` lines
+108-138). Event rounds really are narrower at a window's two ends:
+cudaqx lays a window out as "[B | S | ... | S | B]"
+(`lib/round_layout.h` lines 18-23).
 
 ## Read next
 

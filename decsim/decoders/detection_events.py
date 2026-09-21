@@ -26,7 +26,6 @@ import dataclasses
 from typing import Optional
 
 import decsim.decoders.staged_decoder as staged_decoder
-import decsim.detector_error_model.detection_event_formation as formation
 import decsim.ports as ports
 import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
@@ -92,10 +91,14 @@ class TierFormation:
     def _formed_fragment(
         self, fragment: round_records.RetainedSyndromeFragment
     ) -> round_records.RetainedSyndromeFragment:
-        """One round's fragment carrying its events at their own width.
+        """One round's fragment carrying its events, sized as it landed.
 
-        The fragment as it landed when there is nothing to form it with
-        or from: no former, or a timing-only round that carries no bits.
+        The unit's input memory was written the raw round, and a memory
+        counts what is written into it, so the size stays the landed
+        one: "The decoder computes the syndrome from measurement
+        outcomes" (Caune et al. 2410.05202 lines 1252-1256). The
+        fragment as it landed when there is nothing to form it with or
+        from: no former, or a timing-only round that carries no bits.
         """
         if self.former is None:
             return fragment
@@ -104,8 +107,7 @@ class TierFormation:
         events = self.former.form_round(
             fragment.operation_id, fragment.round_index, fragment.bits
         )
-        replaced = dataclasses.replace(fragment, bits=events)
-        return formation.sized_by_its_bits(replaced)
+        return dataclasses.replace(fragment, bits=events)
 
 
 @dataclasses.dataclass(frozen=True)

@@ -122,10 +122,9 @@ class DecodeService:
         """The bits a job's input occupies in unit memory.
 
         The bits of the payloads that land for it, at the width they
-        cross the input link. None when a payload states no size, which
-        is what a timing-only device emits. A tier that forms its own
-        detection events holds them at their own width once they land,
-        which need not be the width counted here
+        cross the input link. None when a payload states no size. A
+        tier that forms its own detection events forms them after they
+        land, so its memory holds the rounds at this same width
         (controller.detection_events_formed_at decoder).
         """
         demand = 0

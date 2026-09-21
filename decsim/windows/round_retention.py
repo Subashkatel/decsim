@@ -554,7 +554,12 @@ def _longer(first: tuple, second: tuple) -> tuple:
 
 
 def _from_the_first_round_on(identities: tuple, first_of: tuple) -> set:
-    """The identities at or after the earliest identity of first_of."""
+    """The identities at or after the earliest identity of first_of.
+
+    An absorbed strong window's rounds behind the first round of the
+    window that replaces it have no reader left; this keeps the rest,
+    the rounds that still need a holder.
+    """
     first_identity = min(first_of)
     kept = set()
     for identity in identities:

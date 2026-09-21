@@ -562,7 +562,11 @@ class _HoldSet:
         self.require_live(arrived_keys)
 
     def require_live(self, round_keys: tuple) -> None:
-        """Rounds the store holds at once; the longest set is its floor."""
+        """Note a set of rounds the store must hold at the same time.
+
+        The longest set seen is minimum_live_rounds; a store smaller
+        than it cannot run the plan.
+        """
         if len(round_keys) > len(self.minimum_live_rounds):
             self.minimum_live_rounds = round_keys
 

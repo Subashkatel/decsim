@@ -265,5 +265,6 @@ def test_the_target_rate_holds_when_every_gap_is_tied_at_zero():
 
 
 def _observe_each(tracker, gaps: list) -> None:
+    """Feed the tracker one gap per window, so a test body holds no loop."""
     for gap in gaps:
         tracker.observe(gap)

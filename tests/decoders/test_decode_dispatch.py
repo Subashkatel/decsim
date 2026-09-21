@@ -205,6 +205,7 @@ def test_the_placement_line_names_the_unit_the_job_was_given():
 
 
 def _lines_containing(lines, needle):
+    """The log lines that hold the text, to pick out one kind of line."""
     found = []
     for line in lines:
         if needle in line:

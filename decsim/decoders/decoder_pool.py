@@ -151,7 +151,8 @@ class DecoderPool:
         already has its rounds, else the one the fewest jobs are
         already waiting on. A job carrying input that finds none, or
         that may not start yet, is staged on the unit with room that
-        has the least work left.
+        has the least work left. now is the current tick; a unit's
+        work left is counted from it.
         """
         takes_free_compute = decoder_unit_module.is_startable(job)
         if takes_free_compute or not carries_input:
@@ -199,14 +200,22 @@ class DecoderPool:
         input_is_on_the_unit: InputIsOnTheUnit,
         unit: decoder_unit_module.DecoderUnit,
     ) -> tuple:
-        """Least work left, then fewest live jobs, then the rounds in place."""
+        """The order a job that must wait picks its unit by, smallest first.
+
+        Least work left, so the job's worst wait is shortest; then the
+        fewest live jobs; then a unit that already holds its rounds, so
+        nothing is copied. The job stays on the unit it picks.
+        """
         work_left = unit.work_left_ticks(now, self._occupancy_ticks)
         live_residents = unit.live_residents()
         moves_input = not input_is_on_the_unit(job, unit)
         return work_left, len(live_residents), moves_input
 
     def _occupancy_ticks(self, job: decoding_records.DecodeJob) -> float:
-        """Ticks the job's decode holds a unit; unbounded when undeclared."""
+        """Ticks the job's decode holds a unit; unbounded when undeclared.
+
+        The staging rank totals these to find a unit's work left.
+        """
         decoder = self.decoder_for(job)
         occupancy = decoder.occupancy(job)
         if occupancy is None:
@@ -276,7 +285,11 @@ def _free_unit_for(
     job: decoding_records.DecodeJob,
     input_is_on_the_unit: InputIsOnTheUnit,
 ) -> Optional[decoder_unit_module.DecoderUnit]:
-    """The free unit a job that may start takes, or None when none has room."""
+    """The free unit a job that may start takes, or None when none has room.
+
+    The unit that already holds the job's rounds comes first, so no
+    input moves; else the unit the fewest jobs wait on.
+    """
     if not free_with_room:
         return None
     unit_holding_input = _unit_holding_input(

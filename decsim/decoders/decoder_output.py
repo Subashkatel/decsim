@@ -34,7 +34,8 @@ import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 
 # a selection names the strong request and carries nothing else
-# (links/link_profiles.py, ESCALATION_PAYLOAD_SOURCE)
+# (links/link_profiles.py, ESCALATION_PAYLOAD_SOURCE), so the escalation
+# hop charges it the link's latency and no time on the wire
 SELECTION_PAYLOAD_BITS = 0
 
 # which output link a tier's result leaves by

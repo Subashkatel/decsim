@@ -156,6 +156,11 @@ class DecoderSettings:
     (Helios 2301.08419v2's controller takes one header byte and then a
     round's bytes and a loading cycle, and streams three header bytes
     and a round's correction bytes back).
+    units is the count of identical decoding engines inside this tier's
+    one chip, gem5's FUDesc.count ("number of these FU's available",
+    gem5 src/cpu/FuncUnit.py): every unit has its own input memory and
+    all of them share the tier's links. The chip count is one and is not
+    a key.
     unit_memory is the input SRAM of one unit, sized in bits
     (UnitMemorySettings, above); a unit overlaps input transfer with
     compute only when two windows fit.

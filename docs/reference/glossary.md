@@ -60,8 +60,11 @@ These are not from the papers. The pages use them everywhere.
   for one hop. A code card is the numbers the machine needs from a code.
 - **hop**: one priced link between two components; the link paths below
   are the hops' names.
-- **unit**: one decoder unit, a memory that holds a job's rounds plus
-  the compute that decodes them. A tier's units form its pool.
+- **unit**: one decoding engine inside a tier's chip: a memory that
+  holds a job's rounds plus the compute that decodes them. `units` is
+  how many identical engines the chip holds, gem5's `FUDesc.count`. They
+  form the tier's pool and share the tier's links. decsim models one
+  chip a tier, so the chip count is not a key.
 - **unit memory**: the input memory of one decoder unit, sized in bits
   by `<tier>_decoder.unit_memory.bits`. A window's rounds are copied
   into it before the unit decodes them and freed when the decode ends.

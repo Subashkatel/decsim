@@ -570,7 +570,13 @@ weak_decoder:                      # the lightweight tier: fast, higher LER
                                    # (2108.06569 sec. 6.3, Table 4).
                                    # A card prices the algorithm stage ONLY;
                                    # fetch and release cycles are separate
-  units: 1                         # decoder units in this tier's pool. A job
+  units: 1                         # how many identical decoding engines this
+                                   # tier's one chip holds. Each engine has its
+                                   # own input memory, and all of them share
+                                   # the tier's links. It is gem5's
+                                   # FUDesc.count, "number of these FU's
+                                   # available" (gem5 src/cpu/FuncUnit.py). The
+                                   # chip count is one and is not a key. A job
                                    # that may start takes a free unit with room
                                    # for its rounds: the unit that already holds
                                    # them, else the unit the fewest jobs wait

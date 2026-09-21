@@ -31,16 +31,11 @@ class _Policy:
         self.learned.append((window_key, result))
 
 
-def _outcomes(verdict, cancelled):
+def _outcomes(verdict):
     engine = engine_module.Engine()
     requests = strong_requests_module.StrongRequests()
     policy = _Policy(verdict)
-    outcomes = decode_outcomes.DecodeOutcomes(
-        engine,
-        policy,
-        requests,
-        cancel_strong=cancelled.append,
-    )
+    outcomes = decode_outcomes.DecodeOutcomes(engine, policy, requests)
     return outcomes, requests, policy
 
 
@@ -60,11 +55,8 @@ def _weak_job(delivered):
     )
 
 
-def test_a_kept_weak_request_cancels_the_live_strong_request():
-    cancelled = []
-    outcomes, requests, _policy = _outcomes(
-        decoding_records.Verdict.KEEP, cancelled
-    )
+def test_a_kept_weak_request_closes_the_attempt():
+    outcomes, requests, _policy = _outcomes(decoding_records.Verdict.KEEP)
     delivered = []
     job = _weak_job(delivered)
     requests.admit(job, now=0)
@@ -72,14 +64,11 @@ def test_a_kept_weak_request_cancels_the_live_strong_request():
     outcomes.deliver_weak(job, result)
     assert delivered == [(job, result)]
     outcomes.resolve_weak_request(job, result, decoding_records.Verdict.KEEP)
-    assert cancelled == [(1, 0)]
+    assert (1, 0) not in requests.by_window
 
 
-def test_an_escalated_weak_request_closes_the_attempt_and_cancels_nothing():
-    cancelled = []
-    outcomes, requests, _policy = _outcomes(
-        decoding_records.Verdict.ESCALATE, cancelled
-    )
+def test_an_escalated_weak_request_closes_the_attempt():
+    outcomes, requests, _policy = _outcomes(decoding_records.Verdict.ESCALATE)
     delivered = []
     job = _weak_job(delivered)
     requests.admit(job, now=0)
@@ -89,15 +78,11 @@ def test_an_escalated_weak_request_closes_the_attempt_and_cancels_nothing():
     outcomes.resolve_weak_request(
         job, result, decoding_records.Verdict.ESCALATE
     )
-    assert cancelled == []
     assert (1, 0) not in requests.by_window
 
 
 def test_a_strong_result_teaches_the_policy_and_reaches_its_destination_once():
-    cancelled = []
-    outcomes, requests, policy = _outcomes(
-        decoding_records.Verdict.KEEP, cancelled
-    )
+    outcomes, requests, policy = _outcomes(decoding_records.Verdict.KEEP)
     delivered = []
     strong_key = window_records.DecoderRequestKey(
         1, 0, window_records.DecoderTier.STRONG, 5
@@ -128,10 +113,7 @@ def test_a_result_whose_selection_has_not_landed_waits_in_its_unit():
     gem5's sender keeps the packet until the far side accepts it
     (tmp/resources/gem5/src/mem/port.hh:244-255).
     """
-    cancelled = []
-    outcomes, requests, _policy = _outcomes(
-        decoding_records.Verdict.KEEP, cancelled
-    )
+    outcomes, requests, _policy = _outcomes(decoding_records.Verdict.KEEP)
     delivered = []
     strong_key = window_records.DecoderRequestKey(
         1, 0, window_records.DecoderTier.STRONG, 5
@@ -165,10 +147,7 @@ def test_a_result_whose_selection_has_not_landed_waits_in_its_unit():
 
 def test_the_terminal_sources_carry_every_ended_request_and_service():
     """The record ledger connects and hears both; nothing else is needed."""
-    cancelled = []
-    outcomes, requests, _policy = _outcomes(
-        decoding_records.Verdict.KEEP, cancelled
-    )
+    outcomes, requests, _policy = _outcomes(decoding_records.Verdict.KEEP)
     ledger = decode_records.DecodeRecordLedger()
     outcomes.trace.request_ended.connect(ledger.request_ended)
     outcomes.trace.service_ended.connect(ledger.service_ended)
@@ -200,10 +179,7 @@ def test_the_terminal_sources_carry_every_ended_request_and_service():
 
 def test_a_run_with_no_listener_concludes_the_same_way():
     """Rule 7: the outcomes work with nothing connected to their sources."""
-    cancelled = []
-    outcomes, requests, policy = _outcomes(
-        decoding_records.Verdict.KEEP, cancelled
-    )
+    outcomes, requests, policy = _outcomes(decoding_records.Verdict.KEEP)
     delivered = []
     job = _weak_job(delivered)
     requests.admit(job, now=0)
@@ -216,10 +192,7 @@ def test_a_run_with_no_listener_concludes_the_same_way():
 
 def test_the_service_ends_after_the_confidence_its_evidence_fed():
     """D8: the signal's own work is the unit's, so the service carries it."""
-    cancelled = []
-    outcomes, requests, _policy = _outcomes(
-        decoding_records.Verdict.KEEP, cancelled
-    )
+    outcomes, requests, _policy = _outcomes(decoding_records.Verdict.KEEP)
     ledger = decode_records.DecodeRecordLedger()
     outcomes.trace.service_ended.connect(ledger.service_ended)
     delivered = []

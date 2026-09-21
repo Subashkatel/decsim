@@ -19,6 +19,7 @@ import decsim.config as config
 import decsim.decoders.decode_queue as decode_queue
 import decsim.decoders.decoders as decoders
 import decsim.decoders.schedulers as schedulers
+import decsim.decoders.strong_requests as strong_requests_module
 import decsim.engine as engine_module
 import decsim.observe.queue_depth as queue_depth
 import decsim.records.decoding as decoding_records
@@ -47,10 +48,12 @@ def _manager(engine, units, scheduler=None):
         scheduler = schedulers.FifoScheduler()
     decoder = decoders.PresetLatencyDecoder(SERVICE_MICROSECONDS)
     router = decoders.CodeRouter(decoder)
+    strong_requests = strong_requests_module.StrongRequests()
     return DecoderManager(
         engine,
         router=router,
         scheduler=scheduler,
+        strong_requests=strong_requests,
         num_units=units,
         escalation_policy=None,
     )
@@ -168,7 +171,8 @@ def test_the_depth_is_reported_at_every_change():
     engine = engine_module.Engine()
     manager = _manager(engine, 1)
     depth_log = queue_depth.QueueDepthLog()
-    manager.queue.trace.depth_changed.connect(depth_log.depth_changed)
+    depth_changed = functools.partial(depth_log.depth_changed, 0)
+    manager.queue.trace.depth_changed.connect(depth_changed)
     _submit(manager, "a")
     _submit(manager, "b")
     engine.run()
@@ -184,22 +188,24 @@ def test_the_depth_is_reported_at_every_change():
 def test_bulk_strong_is_refused_beside_a_pool_it_does_not_mean():
     """bulk_strong merges the strong pool, and says which pool that is.
 
-    The rule used to read "not the default pool", so every job of any
-    third pool was merged as though it were a strong re-decode and the
-    batch stamped request keys those jobs do not have (design audit note
-    12 section 6.6). A pool is a capability: a rule that means the
-    strong pool names the strong pool, and a run that defines another
-    one is refused here rather than served by a rule not written for it.
+    A rule that read "not the default pool" would merge every job of a
+    third pool as though it were a strong re-decode, and the batch would
+    stamp request keys those jobs do not have. A pool is a capability: a
+    rule that means the strong pool names the strong pool, and a run
+    that defines another one is refused here rather than served by a
+    rule not written for it.
     """
     engine = engine_module.Engine()
     decoder = decoders.PresetLatencyDecoder(SERVICE_MICROSECONDS)
     router = decoders.CodeRouter(decoder)
     scheduler = schedulers.FifoScheduler()
+    strong_requests = strong_requests_module.StrongRequests()
     build = functools.partial(
         DecoderManager,
         engine,
         router=router,
         scheduler=scheduler,
+        strong_requests=strong_requests,
         bulk_strong=True,
         escalation_policy=None,
     )

@@ -17,7 +17,6 @@ STUDY_KNOBS = (
     "record_switching_windows",
     "syndrome_buffer_occupancy",
     "backlog_trace",
-    "decoder_utilization",
     "decoder_memory_occupancy",
     "data_movement",
 )
@@ -113,7 +112,7 @@ def test_a_study_knob_that_is_not_true_or_false_is_refused():
 
 
 def test_every_study_knob_is_read_from_the_section():
-    """The six knobs the Machine builds listeners for are yaml keys."""
+    """The five knobs the Machine builds listeners for are yaml keys."""
     text = "observation:\n"
     for knob in STUDY_KNOBS:
         text += f"  {knob}: true\n"
@@ -124,7 +123,6 @@ def test_every_study_knob_is_read_from_the_section():
     assert settings.record_switching_windows is True
     assert settings.syndrome_buffer_occupancy is True
     assert settings.backlog_trace is True
-    assert settings.decoder_utilization is True
     assert settings.decoder_memory_occupancy is True
     assert settings.data_movement is True
 

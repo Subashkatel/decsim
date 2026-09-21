@@ -30,6 +30,9 @@ IDLE_POLICIES = {
 # (detector_error_model/detection_event_formation.py).
 DETECTION_EVENT_FORMATION = {
     "controller": detection_event_formation.ControllerSideFormation,
+    "weak_syndrome_buffer": (
+        detection_event_formation.WeakSyndromeBufferSideFormation
+    ),
     "decoder": detection_event_formation.DecoderSideFormation,
 }
 
@@ -63,9 +66,17 @@ class ControllerSettings:
     means the work sits inside the round period, as Google's 921 ns cycle
     holds its 500 ns measurement (2207.06431). Points: 40 ns in-FPGA
     discrimination (Fermilab 2406.18807); 20 ns to compute a syndrome
-    from the bit strings (Yang 2605.04892); a 42 ns conditional jump and
-    a 52 ns next pulse on QICK (2110.00557 Table II), 125 ns at USTC
-    (2110.07965), 155 ns root to leaf in Liu et al. (2603.16203).
+    from the bit strings (Yang 2605.04892); 125 ns at USTC (2110.07965),
+    155 ns root to leaf in Liu et al. (2603.16203). decision_to_pulse
+    is the control processor's issue pipeline, the decision at the core
+    to the pulse trigger: 8 cycles traced on QubiC's core (Fruitwala
+    2404.15260 Sec. III and IV) with gem5's MinorCPU stage delays where
+    the paper is silent, the result latched, the compare, the taken
+    jump's redirect, the target fetched, decoded and executed, the pulse
+    register written, the strobe; QICK measures 16 clocks for the
+    conditional evaluation and the jump and 20 for the next pulse on its
+    deeper tProcessor (2110.00557 lines 893-900). The reference yaml
+    carries the trace.
     packing_rounds_in_flight bounds the rounds in flight through the
     packing stage at once, each from its first fragment until the windows
     hear of it (round_assembly.RoundsInFlight); None is unbounded.
@@ -76,7 +87,8 @@ class ControllerSettings:
     detection events, and so which width the store and the tier's input
     link carry. detection_event_cycles_per_round is what that
     conversion costs the controller, charged once per round before the
-    round leaves it and read by the controller row alone; no paper
+    round leaves it and read by the controller row alone (the weak
+    syndrome buffer's own charge is in its section); no paper
     publishes a controller-side figure, so it is zero by default. clock
     is the domain all four cycle counts are charged on; a cost of zero
     cycles is uncharged rather than rounded up to the next edge.

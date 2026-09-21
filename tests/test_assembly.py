@@ -1,6 +1,6 @@
 """The assembly file describes the machine the root used to build by hand.
 
-Note 36 section 5 item C4 asks one thing of this file: the root builds
+One thing is asked of this file: the root builds
 the same objects in the same order it did when that order was written
 out in machine.py. The order is checked here against a short expected
 list for one declared run, and both golden hashes of the frozen suite
@@ -25,7 +25,9 @@ import decsim.build.plan as plan_build
 import decsim.controller.controller as controller_module
 import decsim.controller.syndrome_round_sender as syndrome_round_sender
 import decsim.decoders.decoder_manager as decoder_manager_module
+import decsim.decoders.strong_requests as strong_requests_module
 import decsim.engine as engine_module
+import decsim.escalation.pending_strong_windows as pending_strong_windows
 import decsim.escalation.strong_redecode as strong_redecode_module
 import decsim.frontends.execution_runtime as execution_runtime_module
 import decsim.qpu.cycle_clock as cycle_clock
@@ -36,11 +38,14 @@ from decsim.syndrome_buffer import (
     strong_syndrome_round_receiver as strong_syndrome_round_receiver_module,
 )
 
-# nine seats of a switching run, in the order the root builds them
+# ten seats of a switching run, in the order the root builds them
 EXPECTED_SEATS = (
     ("held_rounds", syndrome_round_sender.HeldRounds),
     ("weak_syndrome_buffer", syndrome_buffer_module.SyndromeBuffer),
+    ("strong_requests", strong_requests_module.StrongRequests),
     ("decoder_manager", decoder_manager_module.DecoderManager),
+    ("strong_decoder_manager", decoder_manager_module.DecoderManager),
+    ("pending_strong_windows", pending_strong_windows.PendingStrongWindows),
     ("window_manager", window_manager_module.WindowManager),
     (
         "strong_syndrome_round_receiver",
@@ -76,7 +81,9 @@ def test_a_run_that_never_escalates_has_no_room_side_rows():
     assert "strong_syndrome_buffer" not in names
     assert "strong_syndrome_round_receiver" not in names
     assert "strong_output" not in names
+    assert "pending_strong_windows" not in names
     assert "strong_redecode" not in names
+    assert "strong_decoder_manager" not in names
     assert "weak_syndrome_buffer" in names
 
 
@@ -100,6 +107,32 @@ def test_an_escalating_run_builds_the_room_side():
         strong_syndrome_round_receiver_module.StrongSyndromeRoundReceiver,
     )
     assert isinstance(redecode, strong_redecode_module.StrongRedecode)
+
+
+def test_each_side_has_its_own_manager_over_its_own_pool_and_one_ledger():
+    settings = _switching_settings()
+    parts = _parts_of(settings)
+    seats = assembly.build_seats(parts)
+    chip = seats["decoder_manager"]
+    host = seats["strong_decoder_manager"]
+    assert sorted(chip.pool.units_by_pool) == ["default"]
+    assert sorted(host.pool.units_by_pool) == ["strong"]
+    assert chip.strong_requests is seats["strong_requests"]
+    assert host.strong_requests is seats["strong_requests"]
+    assert chip.queue is not host.queue
+    assert chip.service.staging is not host.service.staging
+
+
+def test_the_strong_side_submits_to_the_hosts_manager():
+    settings = _switching_settings()
+    parts = _parts_of(settings)
+    seats = assembly.build_seats(parts)
+    wires = assembly.wires_for(parts)
+    assembly.bind(wires, seats)
+    host = seats["strong_decoder_manager"]
+    assert seats["strong_redecode"].decode_queue is host
+    assert seats["requester"].strong_decode_queue is host
+    assert seats["requester"].decode_queue is seats["decoder_manager"]
 
 
 def test_a_wire_that_names_a_seat_the_run_did_not_build_is_refused():
@@ -153,7 +186,7 @@ def _parts_of(settings) -> build_parts.Parts:
     """The fixtures one run compiles before any seat, as the root does."""
     engine = engine_module.Engine()
     escalation_policy = escalation_build.build_escalation_policy(
-        settings.escalation
+        settings.escalation, settings.weak_decoder
     )
     plan = plan_build.build_plan(settings, escalation_policy)
     detection_events = controller_side.build_detection_events(

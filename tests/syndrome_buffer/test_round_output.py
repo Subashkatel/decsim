@@ -52,6 +52,11 @@ class _Transfers:
         del attribution, on_delivered
         self.sends.append((path, payload_bits))
 
+    def send_region(self, path, region, on_delivered) -> int:
+        del on_delivered
+        self.sends.append((path, region.wire_bits))
+        return 3
+
 
 def _output(transfers, store=None) -> round_output.SyndromeBufferOutput:
     output = round_output.SyndromeBufferOutput(

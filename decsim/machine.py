@@ -126,6 +126,7 @@ class Machine:
     syndrome_round_sender: syndrome_round_sender.SyndromeRoundSender
     transmitter: round_transmission.RoundTransmitter
     decoder_manager: decoder_manager_module.DecoderManager
+    strong_decoder_manager: Optional[decoder_manager_module.DecoderManager]
     active_decoder: Optional[Any]
     factory: Any
     syndrome_source: Any
@@ -149,7 +150,7 @@ class Machine:
         root_seed = _root_seed(seed)
         engine = engine_module.Engine()
         escalation_policy = escalation_build.build_escalation_policy(
-            settings.escalation
+            settings.escalation, settings.weak_decoder
         )
         plan = plan_build.build_plan(settings, escalation_policy)
         detection_events = controller_side.build_detection_events(
@@ -157,6 +158,9 @@ class Machine:
         )
         pool = decoder_build.build_decoder_pool(
             settings, plan, escalation_policy, detection_events
+        )
+        store_build.check_weak_syndrome_buffer_formation(
+            settings, escalation_policy, detection_events
         )
         store_build.check_readout_cost_is_priced(settings)
         store_build.check_store_kinds(settings)
@@ -181,6 +185,7 @@ class Machine:
             "strong_syndrome_round_receiver"
         )
         pauli_frame = seats.get("pauli_frame")
+        strong_decoder_manager = seats.get("strong_decoder_manager")
         listener_build.load_program(
             plan,
             seats["conditional_release"],
@@ -205,6 +210,7 @@ class Machine:
             syndrome_round_sender=seats["syndrome_round_sender"],
             transmitter=seats["transmitter"],
             decoder_manager=seats["decoder_manager"],
+            strong_decoder_manager=strong_decoder_manager,
             active_decoder=pool.active,
             factory=seats["factory"],
             syndrome_source=plan.device,
@@ -242,6 +248,8 @@ class Machine:
                 f"the run ended with pending strong escalations: {pending}"
             )
         self.decoder_manager.check_decode_work_settled()
+        if self.strong_decoder_manager is not None:
+            self.strong_decoder_manager.check_decode_work_settled()
         self.window_manager.check_settled()
         self.assembler.check_settled()
         self.syndrome_round_sender.check_settled()

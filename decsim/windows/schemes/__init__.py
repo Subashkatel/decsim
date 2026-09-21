@@ -7,6 +7,5 @@ schedules no decoder work. The rows of WINDOWING_SCHEMES
 way the yaml names them: sliding (Skoric et al. 2209.08552 section I.B),
 parallel (Skoric section I.C, block A/B), sandwich (Tan et al.
 2209.09219, type-1 cores and type-2 seams), naive_online (one window per
-operation). window_data and buffer_floors hold the two rules every row
-shares.
+operation). window_data holds the readiness rule every row shares.
 """

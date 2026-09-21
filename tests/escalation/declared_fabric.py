@@ -9,6 +9,7 @@ the threshold 0.5.
 """
 
 import dataclasses
+from typing import Optional
 
 import decsim.config as config
 import decsim.controller.settings as controller_settings
@@ -94,6 +95,7 @@ def switching_machine(
     run_both_at_once: bool = False,
     round_microseconds: float = 1.0,
     strong_buffer_microseconds: float = 7.0,
+    escalation_microseconds: Optional[float] = None,
     record: bool = False,
     escalation=None,
     trace_path=None,
@@ -150,7 +152,9 @@ def switching_machine(
         escalation = escalation_settings.EscalationSettings(
             policy=policy, strong_window=strong_window
         )
-    links = declared_profile(strong_buffer_microseconds)
+    links = declared_profile(
+        strong_buffer_microseconds, escalation_microseconds
+    )
     readout_cycles = declared_cycles("readout_to_bits")
     controller = controller_settings.ControllerSettings(
         clock=DECLARED_CLOCK,
@@ -187,8 +191,16 @@ def switching_machine(
     return machine_module.Machine.build(settings, 0)
 
 
-def declared_profile(strong_buffer_microseconds: float):
-    """The reference card with every latency replaced by a declared tick."""
+def declared_profile(
+    strong_buffer_microseconds: float,
+    escalation_microseconds: Optional[float] = None,
+):
+    """The reference card with every latency replaced by a declared tick.
+
+    escalation_microseconds replaces the declared 3 us of
+    weak_decoder_to_strong_decoder, the hop an escalated window's
+    rounds ride up on.
+    """
     base = link_profiles.logical_reference_profile()
     declared_edges = {}
     for name in DECLARED_EDGE_NAMES:
@@ -199,6 +211,10 @@ def declared_profile(strong_buffer_microseconds: float):
         base.controller_to_strong_buffer, strong_buffer_microseconds
     )
     declared_edges["controller_to_strong_buffer"] = strong_store
+    if escalation_microseconds is not None:
+        declared_edges["weak_decoder_to_strong_decoder"] = _declared_edge(
+            base.weak_decoder_to_strong_decoder, escalation_microseconds
+        )
     # the declared qpu tick is wire time only; readout classification
     # prices the controller processing separately
     declared_edges["qpu_to_controller"] = dataclasses.replace(

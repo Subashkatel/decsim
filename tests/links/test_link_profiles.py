@@ -143,7 +143,7 @@ def test_the_reference_card_names_the_runtime_quantity_of_each_actual_path():
     )
     assert (
         profile.weak_decoder_to_strong_decoder.actual_payload_source
-        == "no payload; the escalation names the strong request"
+        == "EscalatedRegion.wire_bits"
     )
     assert profile.strong_buffer_to_strong_decoder.actual_payload_source == (
         "DecodeJob.payload_bits()"
@@ -280,7 +280,7 @@ def test_the_bandwidth_card_provisions_each_path_for_one_commit_region():
         "controller_to_weak_buffer": 24.0,
         "controller_to_strong_buffer": 24.0,
         "weak_buffer_to_weak_decoder": 48.0,
-        "weak_decoder_to_strong_decoder": 0.2,
+        "weak_decoder_to_strong_decoder": 72.0,
         "strong_buffer_to_strong_decoder": 72.0,
         "weak_decoder_to_frame": 0.2,
         "decoder_to_decoder": 4.8,
@@ -310,7 +310,7 @@ def test_the_bandwidth_cards_default_payloads_are_one_regions_traffic():
     )
     assert (
         profile.weak_decoder_to_strong_decoder.default_payload.aggregate_bits
-        == 1
+        == 360
     )
     assert profile.decoder_to_decoder.default_payload.aggregate_bits == 24
 

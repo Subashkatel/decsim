@@ -11,7 +11,6 @@ what is left.
 import math
 
 import decsim.records.windows as window_records
-import decsim.windows.schemes.buffer_floors as buffer_floors
 import decsim.windows.schemes.window_data as window_data
 
 
@@ -19,8 +18,8 @@ class SlidingWindowScheme:
     """Serial commit and look-ahead buffer windows.
 
     windows.terminal_policy is the one key this row reads: flush ends the
-    last window at the stream's last round, Tan's QUITS flush
-    (2209.09219 lines 1029-1030), and lookahead keeps the regular stride,
+    last window at the stream's last round, Tan's last window
+    (2209.09219 lines 952-955), and lookahead keeps the regular stride,
     so the last window still reads rounds past its own commit and a
     strong recovery has context to read.
     """
@@ -85,14 +84,6 @@ class SlidingWindowScheme:
             )
         return _lookahead_window_geometries(
             round_count, commit_round_count, buffer_round_count
-        )
-
-    def validate_buffer(self, geometry) -> None:
-        """Reject a buffer below the trailing floor without a justification."""
-        buffer_floors.require_buffer_floor(
-            geometry,
-            geometry.minimum_trailing_buffer_round_count,
-            "trailing buffering floor",
         )
 
     def data_complete(

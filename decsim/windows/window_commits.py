@@ -111,7 +111,13 @@ class WindowCommitter:
         result: decoding_records.DecodeResult,
         request_key: window_records.DecoderRequestKey,
     ) -> None:
-        """Send the strong result home; it finalizes the window on landing."""
+        """Send the strong result home; it finalizes the window on landing.
+
+        What the weak decode committed of the faults behind the window
+        joins the result before it leaves, so the frame and the
+        prediction receive the same bits.
+        """
+        result = _with_the_crossing_commit(window, result)
         finish = functools.partial(
             self.finish_strong, window, operation, result, request_key
         )
@@ -133,6 +139,7 @@ class WindowCommitter:
     ) -> None:
         """Commit the window: its contribution, its status, what it wakes."""
         window.committed = True
+        window.crossing_commit = result.crossing_commit
         if window.t_done is None:
             self.note_decode_finished(window)
         status = result.decode_status
@@ -287,12 +294,35 @@ class WindowVerdict:
         if not is_final:
             self.strong_redecode.escalate(job)
         elif self.strong_redecode is not None:
-            self.strong_redecode.cancel_held_sibling(key)
+            self.strong_redecode.cancel_strong_request(key)
         self.decode_queue.resolve_weak_request(job, result, verdict)
         read_result = functools.partial(self.decode_queue.read_result, job)
         self.committer.commit_or_publish(
             window, operation, result, job.request_key, is_final, read_result
         )
+
+
+def _with_the_crossing_commit(
+    window: window_records.Window, result: decoding_records.DecodeResult
+) -> decoding_records.DecodeResult:
+    """The strong result, plus the weak commit the region cannot own.
+
+    A strong window owns no fault touching a round before its commit
+    region, so what the weak decode committed of those faults stays: at
+    a back-to-back seam that commit is the boundary condition the region
+    before it and this one are both pinned on (Toshio et al. 2510.25222
+    lines 1248-1250).
+    """
+    crossing = window.crossing_commit
+    strong_flips = result.logical_observables
+    if crossing is None or strong_flips is None:
+        return result
+    kept_flips = crossing.logical_observables
+    prediction = tuple(
+        strong_flip ^ kept_flip
+        for strong_flip, kept_flip in zip(strong_flips, kept_flips)
+    )
+    return dataclasses.replace(result, logical_observables=prediction)
 
 
 @dataclasses.dataclass(frozen=True)

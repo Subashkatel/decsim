@@ -32,8 +32,15 @@ neighbour owns is no column of the pinned model at all (lines 775-788,
 task j decodes over its own error generators): the residual a pair
 leaves on a seam layer is H times the columns the strong decoder
 selected and ownership then dropped, and there are none to drop.
-Measured over ten seeds at d 3, 5 and 7 in design audit note 21
-section 4.
+Measured over ten seeds at d 3, 5 and 7.
+
+One face pins on the escalated window's own weak commit: the region at
+a back-to-back seam, where the window that restarts the weak chain
+escalates in turn. That commit stands for the faults crossing behind
+the window's first round and for no other, because the region decodes
+the rest of its rounds again, so every statement above reads that face
+with the crossing part of its commit (Toshio et al. 2510.25222 lines
+1248-1250).
 """
 
 import copy
@@ -238,14 +245,62 @@ def _detector_bits(job, snapshot: tuple) -> dict:
 
 def _external_correction(job, result, flip, column_by_detectors):
     """The committed correction as a vector over the external columns."""
+    detector_sets = _committed_detector_sets(job, result)
+    return _kappa_of(detector_sets, flip, column_by_detectors)
+
+
+def _crossing_correction(job, result, flip, column_by_detectors):
+    """The committed faults reaching behind the window's commit region."""
+    detector_sets = _committed_detector_sets(job, result)
+    crossing = _reaching_behind(job, detector_sets)
+    return _kappa_of(crossing, flip, column_by_detectors)
+
+
+def _face_correction(job, result, destination_key, flip, column_by_detectors):
+    """The part of a face's commit the strong window is pinned on.
+
+    A face pinned on the escalated window's own weak commit carries the
+    faults crossing behind that window's first round and no other,
+    because the region decodes the rest of its rounds again (Toshio et
+    al. 2510.25222 lines 1248-1250); a neighbour's face carries its
+    whole commit.
+    """
+    source_key = (job.operation_id, job.window_id)
+    if source_key != destination_key:
+        return _external_correction(job, result, flip, column_by_detectors)
+    return _crossing_correction(job, result, flip, column_by_detectors)
+
+
+def _committed_detector_sets(job, result) -> list:
+    """The detectors each committed column flips, whole."""
     placed = _placed_faults(job.detector_error_model)
     correction = numpy.asarray(result.correction, dtype=numpy.uint8)
     nonzero = numpy.nonzero(correction)
-    committed = nonzero[0]
+    detector_sets = []
+    for column in nonzero[0]:
+        detectors = placed.boundary_flips[int(column)]
+        frozen = frozenset(detectors)
+        detector_sets.append(frozen)
+    return detector_sets
+
+
+def _reaching_behind(job, detector_sets: list) -> list:
+    """Those of them that flip a detector before the commit region."""
+    positions = job.detector_error_model.defect_positions
+    first_round = job.window.commit_lo
+    reaching = []
+    for detectors in detector_sets:
+        rounds = [positions[detector_id][0] for detector_id in detectors]
+        if min(rounds) < first_round:
+            reaching.append(detectors)
+    return reaching
+
+
+def _kappa_of(detector_sets: list, flip, column_by_detectors):
+    """Those faults as a vector over the external model's columns."""
     column_count = flip.shape[1]
     kappa = numpy.zeros(column_count, dtype=numpy.uint8)
-    for column in committed:
-        detectors = frozenset(placed.boundary_flips[int(column)])
+    for detectors in detector_sets:
         external = column_by_detectors[detectors]
         kappa[external] ^= 1
     return kappa
@@ -290,13 +345,18 @@ def _run_case(monkeypatch, case: tuple, strong_window: str) -> tuple:
     return run
 
 
-def _pinned_flips(sources, flip, column_by_detectors) -> set:
-    """The detectors the pinned neighbours' committed corrections flip."""
+def _pinned_flips(job, sources, flip, column_by_detectors) -> set:
+    """The detectors the pinned faces' committed corrections flip."""
+    destination_key = (job.operation_id, job.window_id)
     flipped = set()
     for _source_key, committed in sources:
         source_job, source_result = committed
-        kappa = _external_correction(
-            source_job, source_result, flip, column_by_detectors
+        kappa = _face_correction(
+            source_job,
+            source_result,
+            destination_key,
+            flip,
+            column_by_detectors,
         )
         flipped |= _flipped_detectors(flip, kappa)
     return flipped
@@ -337,7 +397,7 @@ def test_the_near_pinned_input_is_the_syndrome_bombin_defines(monkeypatch):
         for job, raw_input, masked_input, sources in capture.pinned_jobs():
             raw = _detector_bits(job, raw_input)
             masked = _detector_bits(job, masked_input)
-            flipped = _pinned_flips(sources, flip, columns)
+            flipped = _pinned_flips(job, sources, flip, columns)
             expected = _expected_input(raw, flipped)
             assert masked == expected
             changed = _differing(raw, masked)
@@ -371,7 +431,7 @@ def test_the_forward_pinned_input_differs_on_its_two_seam_layers(monkeypatch):
         for job, raw_input, masked_input, sources in capture.pinned_jobs():
             raw = _detector_bits(job, raw_input)
             masked = _detector_bits(job, masked_input)
-            flipped = _pinned_flips(sources, flip, columns)
+            flipped = _pinned_flips(job, sources, flip, columns)
             expected = _expected_input(raw, flipped)
             assert masked == expected
             changed = _differing(raw, masked)
@@ -406,8 +466,8 @@ def _shared_fault_counts(run: tuple) -> list:
         strong = _strong_kappa(capture, job, flip, columns)
         if strong is None:
             continue
-        neighbour = _neighbour_kappa(sources, flip, columns)
-        both = neighbour & strong
+        pinned = _pinned_kappa(job, sources, flip, columns)
+        both = pinned & strong
         shared = numpy.count_nonzero(both)
         counts.append(int(shared))
     return counts
@@ -443,8 +503,8 @@ def _seam_residuals(run: tuple) -> list:
         strong = _strong_kappa(capture, job, flip, columns)
         if strong is None:
             continue
-        neighbour = _neighbour_kappa(sources, flip, columns)
-        both = (neighbour + strong) % 2
+        pinned = _pinned_kappa(job, sources, flip, columns)
+        both = numpy.bitwise_xor(pinned, strong)
         flipped = _flipped_detectors(flip, both)
         raw = _detector_bits(job, raw_input)
         for layer in _pinned_seam_layers(job, sources):
@@ -470,6 +530,71 @@ def _pinned_seam_layers(job, sources) -> list:
     return layers
 
 
+def test_a_back_to_back_seam_commits_its_crossing_faults_once(monkeypatch):
+    """The escalated window's own weak commit stands at its near seam.
+
+    A region whose near face is its own window's weak commit is pinned
+    on the faults crossing behind its first round, so it carries none of
+    them as a column and cannot decide them again: the weak choice the
+    region ending at that seam was pinned on is the only commit of them
+    (Toshio et al. 2510.25222 lines 1248-1250, Bombin et al. 2303.04846
+    lines 703-704).
+    """
+    counts = _self_pinned_counts_of_the_forward_row(monkeypatch)
+    # at least one of the runs has a region at a back-to-back seam, and
+    # at least one such seam has a crossing fault to commit
+    assert counts
+    crossing_counts = [crossing for crossing, _shared in counts]
+    assert max(crossing_counts)
+    shared_counts = [shared for _crossing, shared in counts]
+    assert set(shared_counts) == {0}
+
+
+def _self_pinned_counts_of_the_forward_row(monkeypatch) -> list:
+    """The self-pinned faces' counts, pooled over the forward row's cases."""
+    counts = []
+    for case in FORWARD_CASES:
+        run = _run_case(monkeypatch, case, "forward_seam_pinned")
+        found = _self_pinned_fault_counts(run)
+        counts.extend(found)
+    return counts
+
+
+def _self_pinned_fault_counts(run: tuple) -> list:
+    """Per self-pinned face, (its crossing faults, the ones also strong)."""
+    capture, flip, columns = run
+    counts = []
+    for job, _raw, _masked, sources in capture.pinned_jobs():
+        found = _self_pinned_face_counts(capture, job, sources, flip, columns)
+        counts.extend(found)
+    return counts
+
+
+def _self_pinned_face_counts(capture, job, sources, flip, columns) -> list:
+    """The counts of the faces this strong window pins on its own commit."""
+    strong = _strong_kappa(capture, job, flip, columns)
+    if strong is None:
+        return []
+    destination_key = (job.operation_id, job.window_id)
+    counts = []
+    for source_key, committed in sources:
+        if source_key != destination_key:
+            continue
+        face = _crossing_counts(committed, strong, flip, columns)
+        counts.append(face)
+    return counts
+
+
+def _crossing_counts(committed: tuple, strong, flip, columns) -> tuple:
+    """(the face's crossing faults, those the strong window commits too)."""
+    source_job, source_result = committed
+    crossing = _crossing_correction(source_job, source_result, flip, columns)
+    both = crossing & strong
+    crossing_count = numpy.count_nonzero(crossing)
+    shared_count = numpy.count_nonzero(both)
+    return int(crossing_count), int(shared_count)
+
+
 def test_a_neighbour_owned_fault_is_no_column_of_the_pinned_model(monkeypatch):
     """Task j decodes over its own error generators (lines 775-788).
 
@@ -478,43 +603,64 @@ def test_a_neighbour_owned_fault_is_no_column_of_the_pinned_model(monkeypatch):
     offer it again as a column the decoder could spend and ownership
     would then drop, leaving the seam detector unexplained.
     """
-    shared = []
-    for case in NEAR_CASES:
-        run = _run_case(monkeypatch, case, "near_seam_pinned")
-        near = _neighbour_owned_columns(run)
-        shared.extend(near)
-    for case in FORWARD_CASES:
-        run = _run_case(monkeypatch, case, "forward_seam_pinned")
-        forward = _neighbour_owned_columns(run)
-        shared.extend(forward)
+    shared = _decided_column_counts(monkeypatch)
     assert shared
     assert set(shared) == {0}
 
 
-def _neighbour_owned_columns(run: tuple) -> list:
-    """Per pinned face, the neighbour-owned faults the model still carries."""
+def _decided_column_counts(monkeypatch) -> list:
+    """The decided faults still offered, pooled over both pinned rows."""
+    counts = []
+    for case in NEAR_CASES:
+        run = _run_case(monkeypatch, case, "near_seam_pinned")
+        near = _decided_columns(run)
+        counts.extend(near)
+    for case in FORWARD_CASES:
+        run = _run_case(monkeypatch, case, "forward_seam_pinned")
+        forward = _decided_columns(run)
+        counts.extend(forward)
+    return counts
+
+
+def _decided_columns(run: tuple) -> list:
+    """Per pinned face, the faults it decided that the model still carries."""
     capture, _flip, _columns = run
     counts = []
     for job, _raw, _masked, sources in capture.pinned_jobs():
         model = job.detector_error_model
+        destination_key = (job.operation_id, job.window_id)
         for _source_key, committed in sources:
             source_job, _result = committed
-            neighbour = source_job.detector_error_model
-            count = _shared_column_count(model, neighbour)
+            decided = _faults_the_face_decided(source_job, destination_key)
+            count = _shared_column_count(model, decided)
             counts.append(count)
     return counts
 
 
-def _shared_column_count(model, neighbour) -> int:
-    """The neighbour's owned faults that are columns of the strong model."""
-    owned_by_representation = neighbour.owned_fault_ids()
+def _faults_the_face_decided(source_job, destination_key: tuple) -> dict:
+    """What the face's commit stands for, per fault representation.
+
+    A neighbour decided its whole extent; the escalated window's own
+    weak commit stands for the faults crossing behind its first round
+    alone, since the region decodes the rest of its rounds again
+    (Toshio et al. 2510.25222 lines 1248-1250).
+    """
+    model = source_job.detector_error_model
+    source_key = (source_job.operation_id, source_job.window_id)
+    if source_key != destination_key:
+        return model.owned_fault_ids()
+    return model.crossing_fault_ids()
+
+
+def _shared_column_count(model, decided: dict) -> int:
+    """The faults the face decided that are columns of the strong model."""
     shared = 0
-    for representation, owned in owned_by_representation.items():
+    for representation, fault_ids in decided.items():
         placed = _placed_view(model, representation)
         if placed is None:
             continue
         columns = set(placed.source_fault_ids)
-        still_offered = columns & owned
+        still_offered = columns & fault_ids
         shared += len(still_offered)
     return shared
 
@@ -538,14 +684,15 @@ def _strong_kappa(capture, job, flip, columns):
     return _external_correction(strong_job, strong_result, flip, columns)
 
 
-def _neighbour_kappa(sources, flip, columns):
-    """The pinned neighbours' committed corrections, together."""
+def _pinned_kappa(job, sources, flip, columns):
+    """The corrections the window's pinned faces stand on, together."""
+    destination_key = (job.operation_id, job.window_id)
     column_count = flip.shape[1]
     kappa = numpy.zeros(column_count, dtype=numpy.uint8)
     for _source_key, committed in sources:
         source_job, source_result = committed
-        contribution = _external_correction(
-            source_job, source_result, flip, columns
+        contribution = _face_correction(
+            source_job, source_result, destination_key, flip, columns
         )
         kappa = (kappa + contribution) % 2
     return kappa

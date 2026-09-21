@@ -70,7 +70,8 @@ def stage(formation):
     )
 
 
-def test_a_formed_round_carries_its_events_at_their_own_width():
+def test_a_formed_round_carries_its_events_at_the_size_it_landed():
+    """The input memory was written four raw bits a round, not two events."""
     former = Former()
     formation = detection_events.TierFormation(former)
     reading_two_rounds = job([1, 2])
@@ -78,7 +79,7 @@ def test_a_formed_round_carries_its_events_at_their_own_width():
     formed = formation.form(reading_two_rounds.payloads)
 
     assert [carried.bits for carried in formed] == [(1, 0), (2, 0)]
-    assert [carried.size_bits for carried in formed] == [2, 2]
+    assert [carried.size_bits for carried in formed] == [4, 4]
 
 
 def test_a_round_two_windows_read_is_formed_once():
@@ -117,6 +118,29 @@ def test_one_round_costs_the_stages_latency_and_nothing_more():
     cycles = formation_stage.cycles_for(reading_one_round)
 
     assert cycles == 5
+
+
+def test_a_tier_with_no_former_keeps_the_rounds_as_they_landed():
+    formation = detection_events.TierFormation(None)
+    reading_two_rounds = job([1, 2])
+
+    formed = formation.form(reading_two_rounds.payloads)
+
+    assert formed == reading_two_rounds.payloads
+
+
+def test_a_tier_with_no_former_pays_the_same_stage():
+    """The logic sits in front of the core whatever the source sends."""
+    formation = detection_events.TierFormation(None)
+    formation_stage = stage(formation)
+    reading_six_rounds = job([1, 2, 3, 4, 5, 6])
+    following_round_count = 5
+
+    cycles = formation_stage.cycles_for(reading_six_rounds)
+
+    following_cycles = ONE_ROUND_A_CLOCK * following_round_count
+    expected = YANG_LATENCY_CYCLES + following_cycles
+    assert cycles == expected
 
 
 def test_an_overlapping_window_pays_only_for_the_rounds_it_brings():

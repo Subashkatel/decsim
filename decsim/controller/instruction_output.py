@@ -4,11 +4,15 @@ A decision from the Pauli frame lands here over frame_to_controller,
 which the frame side executes, and is available at the controller the
 instant it lands; a release starts its operation's command,
 a result return is reported to the QPU. Either payload then pays the
-decision-to-pulse cost (a 42 ns conditional jump and a 52 ns next pulse
-on QICK, 2110.00557 Table II) and crosses controller_to_qpu, and the
-QPU starts a command on its next cycle boundary. A preloaded command
-(a program root, an ordinary successor) skips the output path: its
-controller preparation happened before the simulated interval.
+decision-to-pulse cost, the control processor's issue pipeline from
+the decision at the core to the pulse trigger (traced on QubiC's core,
+Fruitwala 2404.15260 Sec. III and IV, in configs/reference.yaml; QICK
+measures 16 clocks for the conditional evaluation and the jump and 20
+for the next pulse, 2110.00557 lines 893-900) and crosses
+controller_to_qpu, and the QPU starts a command on its next cycle
+boundary. A preloaded command (a program root, an ordinary successor)
+skips the output path: its controller preparation happened before the
+simulated interval.
 """
 
 import dataclasses

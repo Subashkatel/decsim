@@ -135,7 +135,10 @@ DELIVERY_CALLBACKS = {
     ("controller/syndrome_round_sender.py", "CONTROLLER_TO_STRONG_BUFFER"): (
         "_land_in_strong_store",
     ),
-    ("decoders/decoder_output.py", "WEAK_DECODER_TO_STRONG_DECODER"): (None,),
+    ("decoders/decoder_output.py", "WEAK_DECODER_TO_STRONG_DECODER"): (
+        None,
+        None,
+    ),
     ("pauli_frame/decision_dispatch.py", "FRAME_TO_CONTROLLER"): (
         "_at_the_controller",
     ),

@@ -2,11 +2,17 @@
 
 # The design decisions
 
-Nineteen decisions shape what decsim charges, where it charges it, and
+Twenty-one decisions shape what decsim charges, where it charges it, and
 where a reader finds a thing. Each is recorded here with what was
 decided, why, and the source the answer came from, because a modelling
 question is answered by reading the referent rather than by choosing
 (`STYLE.md` rule 8). The last section says what is not modelled yet.
+
+Some decisions carry a short note after them. **Narrowed since** and
+**Widened since** say how later work shrank or grew what the decision
+covers. **Flagged with the decision** names a known weakness recorded
+when the decision was made. **What it cost the port file** lists what
+the decision added to `decsim/ports.py`.
 
 ## D1. Whoever executes a send is an end of that hop
 
@@ -31,7 +37,10 @@ table is the rule, and which walks `decsim/` to enforce it.
 
 ## D2. The complementary gap is two forced-class jobs of one window
 
-**Decided.** The second gap solve is not a job of its own kind. The
+**Decided.** The second gap solve is not a job of its own kind. A
+forced-class job is one decode of the window that is made to return its
+correction in one of the two logical classes; the two jobs' weights are
+subtracted into the gap. The
 window side submits the window's two forced-class jobs at one instant,
 both into the weak pool, and the two weights are subtracted in the
 confidence component rather than in the decoder manager. The base case
@@ -71,22 +80,37 @@ compatible beyond the MWPM decoder.
 **Where to see it.** `CONFIDENCE_SIGNALS` in
 `decsim/confidence/signals.py`.
 
-## D4. One decoder manager over both pools, and its work is not free
+## D4. One decoder manager per side, and its work is not free
 
-**Decided.** A single decoder manager schedules over both the weak and
-the strong pool. Its own work is charged: `decoder_manager.dispatch_cycles`
-on a named clock, defaulting to zero.
+**Decided.** Two instances of one decoder manager class: the chip's
+over the weak pool, and, in a run whose windows may escalate, the
+host's over the strong pool. The escalation side and a window's strong
+sibling submit to the host's; the ledger of strong requests is one seat
+both take (a seat is a named slot in `decsim/assembly.py` that the root
+fills with one built component and wires to its neighbours), since the chip's side opens a request and the host's serves
+it; a kept weak result halts its request through the escalation side.
+Each manager's own work is charged: `decoder_manager.dispatch_cycles`
+on a named clock, defaulting to zero, the one card both read.
 
-**Why.** Every classical referent read runs one scheduler over many
-workers rather than one scheduler per class of worker. And a component
-that costs nothing is inconsistent with a simulator that prices every
-other component: a zero was a defect, not a modelling choice.
+**Why.** The systems that put a fast decoder beside the control
+electronics and a slow one on a host give each side its own scheduling:
+LATTE's local decoder on the control FPGA has no scheduler of its own
+and the host's Global Dynamic Scheduler owns the decode queue and the
+thread pool (2509.03954 lines 24-25 and 705-720). The rack drawing puts
+the strong decoder manager on the host, and the tree shows what the
+drawing shows. A component that costs nothing is inconsistent with a
+simulator that prices every other component: a zero was a defect, not a
+modelling choice. Until this decision one manager served both pools
+(every single-place referent runs one scheduler over many workers).
 
-**Sources.** Skoric's parallel-decoder condition, StarPU's scheduling
-handbook, and Caune's measured 250 to 370 cycles of dispatch work.
+**Sources.** LATTE 2509.03954; Toshio 2510.25222 lines 606-614 (the
+strong computation halted on a confident weak result); Skoric's
+parallel-decoder condition, StarPU's scheduling handbook, and Caune's
+measured 250 to 370 cycles of dispatch work.
 
-**Where to see it.** `configs/reference.yaml`, the `decoder_manager`
-section.
+**Where to see it.** `decsim/assembly.py`, the `decoder_manager` and
+`strong_decoder_manager` rows; `configs/reference.yaml`, the
+`decoder_manager` section.
 
 ## D5. The strong buffer hop is a priced link like every other
 
@@ -105,6 +129,14 @@ broadcast (240 to 260 nanoseconds at the stated worst case).
 **Where to see it.** `decsim/links/link_profiles.py`, and
 [The data path, hop by hop](data_path.md) hops 2 and 3.
 
+**Narrowed since.** A switching run sends nothing on this hop: its
+rounds stay in the weak syndrome buffer and the escalation carries the
+strong window's rounds over `weak_decoder_to_strong_decoder` (hop 5),
+the transport Toshio arXiv:2510.25222 lines 1247 to 1250 describe and
+the one a cold weak tier exists for (Battistel arXiv:2303.00054 lines
+342 to 347). The hop stays priced for the strong-only run, whose one
+transport it is.
+
 **Flagged with the decision.** The reference card's weak-side sum
 exceeds Toshio's own communication time for the weak side, because the
 card's six latencies are taken from one source's table rather than
@@ -114,12 +146,18 @@ from one measured round trip instead, on two rows a config can name.
 
 ## D6. Pair placement is deferred
 
-**Decided.** Whether the two forced-class jobs of a window are kept
-together on one unit or spread across two stays a scheduler row, to be
-added when it matters.
+**Decided.** There is no scheduler row that keeps the two forced-class
+jobs of a window together or spreads them apart. The pool's one staging
+rule answers it: a job that cannot start yet is staged on the unit with
+room that has the least work left, so the two solves of one window land
+on two units and overlap whenever two units have room
+(`decsim/decoders/decoder_pool.py`). A staged job stays on the unit it
+was staged on. A row a config can choose is deferred until a study needs
+to force the pair together.
 
-**Why.** Timing. No referent answers this one, and this page does not
-invent a source.
+**Why.** Timing. No referent answers how the pair should be placed, and
+this page does not invent a source. Least work left is the general
+task-assignment rule, not a rule about pairs.
 
 ## D7. A priced weak card is charged once per forced solve
 
@@ -333,7 +371,8 @@ messages (`MessageBuffer.cc:181`, the two sizes read at `:155-158`).
 **Decided.** Two rows of `LINK_FABRICS`, `roce_v2_cpu` and `roce_v2_gpu`,
 are the default card with four hops repriced from one measurement:
 Backline's steady-state round trip from an FPGA controller to a CPU
-coprocessor over RoCE v2, 2.305 microseconds in the median, and to a GPU
+coprocessor over RoCE v2 (remote direct memory access, RDMA, run over
+ordinary Ethernet), 2.305 microseconds in the median, and to a GPU
 coprocessor, 4.5 microseconds. The controller's write into the strong
 syndrome buffer (hop 3), the escalation request (hop 5) and the strong
 decoder's reply to the frame (hop 9) are each half of the round trip; the strong
@@ -350,14 +389,15 @@ that path than a table row, and a config that asks "strong tier on a CPU
 or on a GPU" needs a card behind each answer. The split is decsim's rule,
 stated in the docstring, because the measurement is one number and
 neither the paper nor its published runtime gives a per-direction
-figure: one hardware timer starts at the controller's doorbell and stops
-when the reply lands. The rows price the median; the first, warm-up
+figure: one hardware timer starts when the controller signals its
+network card to send (its doorbell) and stops when the reply lands. The rows price the median; the first, warm-up
 round trip (4.64 and 9.27 microseconds) and the tails are on the
 docstring and not on the card.
 
 **Sources.** Backline, Lee et al. arXiv:2609.09270, Sec. V-C1 lines 1607
 to 1633 for the measurement (a 16-byte payload with an 8-byte syndrome
-as a one-sided RDMA write, the coprocessor polling its buffer, the reply
+as a one-sided RDMA write, which lands in the far machine's memory with
+no software on that side taking part, the coprocessor polling its buffer, the reply
 as a one-sided write, the GPU signalling a CPU thread that writes back,
 the FPGA timing the round trip in its own clock), Table III lines 1736
 to 1745 for the echo rows the card takes, footnote 3 lines 1629 to 1631
@@ -374,8 +414,9 @@ card, the four Backline citations and both rows running from a yaml.
 
 ## D15. The park before a decode is two points, by what it waited for
 
-**Decided.** `dep_block` keeps its name and means the dependency wait
-only: from the committing decode's input landing in its unit's memory,
+**Decided.** The park is the stretch after a decode's input has landed
+and before its compute starts. `dep_block` keeps its name and means the
+dependency wait only: from the committing decode's input landing in its unit's memory,
 or from the tick a unit took it when the input was already there, to the
 first tick that decode may compute, which is where its window's last
 boundary arrived and is the landing itself when nothing was owed. The
@@ -397,6 +438,14 @@ what it now means exactly; renaming a column that keeps its meaning
 would break every recorded sweep for nothing. `compute_wait` is a new
 name and takes the tree's own word for the resource: the units claim,
 release and free their `compute`.
+
+**Widened since.** An escalated window's rounds cross with the
+escalation and land in the strong store before the strong input hop can
+start, so `dep_block` now runs from the verdict to the first startable
+tick, less the input hop itself; the wait for the rounds is a
+dependency wait by the same reasoning, the windowing's doing and not
+the machine's. Every earlier number is unchanged, because until then
+every input hop started where the decode's path did.
 
 **Sources.** gem5's instruction queue keeps the two waits apart. An
 instruction reaches the ready list only when its operands are there
@@ -433,9 +482,10 @@ under `complementary_gap`, the walk under `cluster_gap`, and zero under
 `weak_baseline`, whose verdict needs no signal. For a window that
 escalated it is zero too: its committing decode is the strong one,
 which answers after the verdict, and `weak_attempt` already runs from
-the window's first dispatch to that verdict. The chain identity closes
-on every window of every config this repository ships, and
-`run_both_at_once` is the only run outside the sum. `chain_load` counts
+the window's first dispatch to that verdict. On every window of every
+config this repository ships, the named spans add up exactly to the
+window's reaction time, and `run_both_at_once` is the only run outside
+the sum. `chain_load` counts
 the step as the unit's occupancy, because it is the unit's time.
 
 **Why.** A span that is on the reaction time and in no column makes a
@@ -597,6 +647,75 @@ one thing make a reader ask what the difference is when there is none.
 [The module map](../reference/map.md),
 `configs/experiments_2026_09/PLAN.md` and `slurm/experiment_run.sh`.
 
+## D20. The weak decoder chip can form the detection events, once
+
+**Decided.** `controller.detection_events_formed_at` has a third row,
+`weak_syndrome_buffer`. The round leaves the controller raw, and the
+weak syndrome buffer's receiving end forms its events as it stores the
+round, so the store, the weak unit's input link and the escalation hop
+carry the events and no tier forms anything. The chip's charge is
+`weak_syndrome_buffer.detection_event_cycles_per_round`, on that
+buffer's clock, ahead of the write.
+
+**Why.** The two rows before it put the conversion at the controller
+or inside each decoder unit. A cold weak decoder chip that receives
+raw bits and escalates a region to a strong host fits neither: formed
+inside the units, each tier forms the rounds it reads, so the strong
+side forms the region a second time and the store and both hops carry
+raw bits; formed at the controller, the chip never sees a raw bit.
+IBM's decoder FPGA forms them on the decoder's own chip (Maurer
+2510.21600 lines 235-237); the papers do not say which side of the
+store, and ahead of it is the one place a round is formed exactly once.
+
+**What it cost the port file.** `DetectionEventPlacement` gained one
+method, `form_before_storage`, which the weak syndrome buffer's
+receiving end asks the way the assembler asks
+`form_before_departure`, and one fact,
+`forms_at_the_weak_syndrome_buffer`, which the root reads to refuse a
+run whose windows are decoded on the strong tier (its rounds never
+reach that buffer) and a chip-side charge under a row that does not
+form there. No component recognises a row.
+
+**Where to see it.**
+`decsim/detector_error_model/detection_event_formation.py`
+(`WeakSyndromeBufferSideFormation`),
+`decsim/syndrome_buffer/weak_syndrome_round_receiver.py` (`_as_stored`),
+`decsim/build/stores.py` (`check_weak_syndrome_buffer_formation`).
+
+## D21. A region at a back-to-back seam pins on its own weak commit
+
+**Decided.** When the window a strong region re-decodes is the one that
+restarted the weak chain after an earlier region, no neighbour commits
+the round before it and its own weak decode owns the faults crossing
+that seam. The region pins its near face on that commit: it reads its
+r_strong rounds and nothing behind them, the crossing faults are prior
+faults of its model, their committed detector effect is folded into its
+input, and their observable flips stay with the window when the strong
+result replaces its prediction.
+
+**Why.** The paper's strong decoder "processes all the assigned data at
+once, after the boundary conditions at both ends have been determined by
+the weak decoder" (Toshio et al. 2510.25222 lines 1248-1250), and at
+such a seam the near boundary condition is that weak commit: the region
+ending there is already pinned on it. Reading the rounds behind the seam
+raw instead leaves the crossing faults to no one, since the region before
+the seam excludes them, the weak commit of them is thrown away with the
+prediction, and the region after the seam decides them again with
+context its neighbour never saw.
+
+**What it cost the port file.** `WindowPlan` gained one method,
+`crossing_faults_of`, beside `owned_faults_of`: a face pinned on a
+neighbour takes everything that neighbour owns, and a face pinned on the
+window's own commit takes only the faults crossing behind it, because
+the rest of that commit is exactly what the region decodes again.
+
+**Where to see it.** `decsim/escalation/strong_regions.py`
+(`forward_near_face`), `decsim/escalation/strong_window_shapes.py`
+(`ForwardSeamWindow`), `decsim/windows/window_boundaries.py`
+(`_pinned_boundary`), `decsim/windows/window_commits.py`
+(`_with_the_crossing_commit`), `decsim/decoders/decoder.py`
+(`_crossing_commit`).
+
 ## What is not modelled yet
 
 These are open, recorded rather than hidden, so that a reader does not
@@ -633,7 +752,20 @@ mistake a gap for a result.
   `weak_decoder` and `strong_decoder` sections do not yet refuse an
   unknown key by name the way `decoder_manager` does, so a misspelt key
   there runs the default in silence.
-
+- **O11. A staged job never moves to another unit.** A job that cannot
+  start is staged with its rounds on one unit (D6) and stays there. If
+  another unit frees first, the job still waits for its own, so it can
+  start later than the pool as a whole allowed.
+- **O12. No yaml key names a noise model.** A yaml run uses the noise of
+  Stim's generated circuit, one physical error rate on its four noise
+  channels. A circuit with any other noise, such as a channel on every
+  idle step, can be handed to the machine from Python and not from a
+  yaml.
+- **O13. No check sizes a store against its plan before the run.** A
+  syndrome buffer too small for the rounds the plan's windows hold at
+  once fills, and the run then stops and says how many rounds were left
+  held for store room. The size that is always enough is the union of
+  every hold, and an open-ended dynamic stream has none.
 O3, O4, O5 and O10 are closed: the sends name what they carry
 (`QPUReadout.size_bits` on the readout hop, nothing on the escalation
 hop), the backward hand-off of the parallel scheme is priced and tested,
@@ -641,6 +773,21 @@ the boundary fold is written by the decoder side from the gate's mask
 (`decsim/decoders/decoder_memory_transfer.py`, D11), and a timing-only
 round ends in the decoders' own end for it
 (`decsim/decoders/memory_rounds.py`).
+
+O14 is closed by one rule: a memory counts what is written into it.
+Under `controller.detection_events_formed_at: decoder` the tier's logic
+sits between the unit's input memory and its core, so the memory is
+written the raw round and holds it at the size it crossed the input
+link; the room test and the deposit count the same bits. "The decoder
+computes the syndrome from measurement outcomes" (Caune et al.
+2410.05202 lines 1252-1256). Under `weak_syndrome_buffer` the chip's
+logic sits ahead of the store, so the store is written the narrower
+events; the room reserved before the round left is the wire size and the
+landing holds the stored size, which is gem5 PacketFifo's `reserve(len)`
+then `push` of the packet's own length (`src/dev/net/pktfifo.hh` lines
+108-138). Event rounds really are narrower at a window's two ends:
+cudaqx lays a window out as "[B | S | ... | S | B]"
+(`lib/round_layout.h` lines 18-23).
 
 ## Read next
 

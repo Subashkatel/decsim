@@ -10,7 +10,6 @@ a tail of at most 3d is a terminal B with only its left A behind it.
 
 import pytest
 
-import decsim.records.program as program_records
 import decsim.windows.schemes.parallel as parallel_scheme
 
 
@@ -101,30 +100,3 @@ def test_unequal_commit_and_buffer_widths_are_refused():
         row.plan_operation(1, 40, commit_round_count=3, buffer_round_count=4)
 
     assert "ncom = nbuf = d" in str(refusal.value)
-
-
-def test_this_row_measures_the_buffer_against_the_wider_of_the_two_floors():
-    """A blocks read on both sides, so the leading floor binds here too."""
-    row = parallel_scheme.ParallelWindowScheme()
-    thin_leading_only = _geometry(
-        buffer_round_count=3, leading_floor=5, trailing_floor=3
-    )
-
-    with pytest.raises(ValueError) as refusal:
-        row.validate_buffer(thin_leading_only)
-
-    assert "two-sided buffering floor 5" in str(refusal.value)
-
-
-def _geometry(*, buffer_round_count, leading_floor, trailing_floor):
-    """A d=3 surface geometry with the buffer width and floors given."""
-    return program_records.ResolvedCodeGeometry(
-        code_name="rotated surface code (d=3)",
-        distance=3,
-        commit_round_count=3,
-        buffer_round_count=buffer_round_count,
-        minimum_leading_buffer_round_count=leading_floor,
-        minimum_trailing_buffer_round_count=trailing_floor,
-        one_patch_spatial_node_count=9,
-        window_floor_justification=None,
-    )

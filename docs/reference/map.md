@@ -109,7 +109,7 @@ docstring.
 - `decsim/syndrome_buffer/round_holds.py`: Which consumer keeps which rounds alive in a syndrome buffer.
 - `decsim/syndrome_buffer/round_output.py`: A syndrome buffer's outgoing port: it sends the rounds that leave the store.
 - `decsim/syndrome_buffer/settings.py`: A syndrome buffer's capacity and access costs on its named clock.
-- `decsim/syndrome_buffer/strong_syndrome_round_receiver.py`: The room-side end of controller_to_strong_buffer: room, then landing.
+- `decsim/syndrome_buffer/strong_syndrome_round_receiver.py`: The strong syndrome buffer's receiving end: room, then landing.
 - `decsim/syndrome_buffer/syndrome_buffer.py`: A syndrome buffer: finished rounds held until their last hold releases.
 - `decsim/syndrome_buffer/weak_syndrome_round_receiver.py`: The weak syndrome round receiver: room, and the slot a landing takes.
 
@@ -125,7 +125,6 @@ docstring.
 - `decsim/windows/round_retention.py`: The round retention: which rounds each window and request holds.
 - `decsim/windows/round_tracker.py`: The round tracker: which rounds arrived, and each window's readiness.
 - `decsim/windows/schemes/__init__.py`: The windowing schemes, one file per table row.
-- `decsim/windows/schemes/buffer_floors.py`: The buffer floor a scheme refuses to run below without a reason.
 - `decsim/windows/schemes/naive_online.py`: The naive_online row: one window over the whole operation.
 - `decsim/windows/schemes/parallel.py`: The parallel row: Skoric block A/B windows.
 - `decsim/windows/schemes/sandwich.py`: The sandwich row: Tan et al.'s zero-seam sandwich decoder.
@@ -192,7 +191,7 @@ docstring.
 - `decsim/decoders/tesseract/window_decoder.py`: Tesseract decoding over one explicitly physical window fault model.
 - `decsim/decoders/union_find/__init__.py`: Prior-weighted graphlike Union-Find hard decoding.
 - `decsim/decoders/union_find/compiled_decoder.py`: The compiled Union-Find row: the binding to its two C sources.
-- `decsim/decoders/union_find/cycle_count.py`: The Union-Find decoder's cycle count per growth step, on one clock.
+- `decsim/decoders/union_find/cycle_count.py`: The Union-Find decoder's cycle count per growth tick, on one clock.
 - `decsim/decoders/union_find/decoder.py`: The Union-Find adapter: decsim's own weighted growth and peeling.
 - `decsim/decoders/union_find/window_decoder.py`: Prior-weighted graphlike Union-Find: the graph and one decode on it.
 - `decsim/decoders/verify_windows.py`: The referee: every window re-decoded by Tesseract and compared.
@@ -216,6 +215,7 @@ docstring.
 - `decsim/confidence/__init__.py`: The confidence signals: the soft output a weak decode reports.
 - `decsim/confidence/cluster.py`: The cluster gap: the confidence of one weighted Union-Find window decode.
 - `decsim/confidence/complementary.py`: The complementary gap: the confidence of one window's two forced solves.
+- `decsim/confidence/extra_cluster.py`: The extra-cluster gap: a Union-Find decode's confidence, by growing on.
 - `decsim/confidence/gap_join.py`: One window's solves, joined into its confidence.
 - `decsim/confidence/signals.py`: The soft output rows a switching run's weak decoder can report.
 
@@ -240,7 +240,7 @@ docstring.
 - `decsim/observe/log_writers.py`: The two listeners of the engine's narrator: the record and the console.
 - `decsim/observe/metrics.py`: The integrated metrics: step functions of time over one run.
 - `decsim/observe/observation.py`: The listeners of one run, by name.
-- `decsim/observe/queue_depth.py`: The decode queue's depth over time, one sample per change.
+- `decsim/observe/queue_depth.py`: The decode queues' depth over time, one sample per change.
 - `decsim/observe/referee_audit.py`: The window referee's audit: what it re-decoded and where it disagreed.
 - `decsim/observe/result_ledger.py`: The logical observables each operation delivered.
 - `decsim/observe/round_events.py`: The flight recorder of the readout path: what happened to every round.
@@ -249,7 +249,7 @@ docstring.
 - `decsim/observe/sampled_shots.py`: The shots the syndrome source sampled, by the operation that asked.
 - `decsim/observe/settings.py`: The observation settings: what a run records beyond its results.
 - `decsim/observe/stage_records.py`: One run's decoder stage records, kept per operation and window.
-- `decsim/observe/syndrome_buffer_occupancy.py`: One syndrome buffer's L5 numbers: occupancy over time, residence per round.
+- `decsim/observe/syndrome_buffer_occupancy.py`: One syndrome buffer's occupancy over time, and how long each round stayed.
 - `decsim/observe/trace_writer.py`: One shot's Chrome trace: where every round and window sat and moved.
 - `decsim/observe/window_ledger.py`: The window ledger: every window's record, what owns it, what absorbed it.
 - `decsim/observe/wiring.py`: Every listener of one run, built from the observation section and wired.

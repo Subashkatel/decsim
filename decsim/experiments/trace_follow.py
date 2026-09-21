@@ -393,12 +393,8 @@ def _what_of(event: dict) -> str:
 
 def _residence_phrase(args: dict) -> str:
     """Where the bits sat: the room, when they were readable, why they left."""
-    words = ["residence"]
-    capacity = args.get("capacity")
-    if capacity is None:
-        words.append("unbounded")
-    else:
-        words.append(f"of {capacity} rounds")
+    room = _room_phrase(args)
+    words = ["residence", room]
     ready = args.get("data_ready")
     if ready is not None:
         span = _microseconds(ready)
@@ -411,6 +407,17 @@ def _residence_phrase(args: dict) -> str:
     if reason is not None:
         words.append(f"freed at {reason}")
     return ", ".join(words)
+
+
+def _room_phrase(args: dict) -> str:
+    """The room's size: a memory states bits, the workspace rounds."""
+    capacity_bits = args.get("capacity_bits")
+    if capacity_bits is not None:
+        return f"of {capacity_bits} bits"
+    capacity = args.get("capacity")
+    if capacity is not None:
+        return f"of {capacity} rounds"
+    return "unbounded"
 
 
 def _move_phrase(args: dict) -> str:

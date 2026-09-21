@@ -52,7 +52,7 @@ class Observation:
     command_events: command_events_module.CommandEvents
     stages: stage_records_module.StageLedger
     decode_backlog: Optional[metrics.DecodeBacklog]
-    decoder_utilization: Optional[metrics.DecoderUtilization]
+    decoder_utilization: metrics.DecoderUtilization
     decoder_memory_occupancy: Optional[metrics.DecoderMemoryOccupancy]
     round_events: round_events_module.RoundEventRecorder
     syndrome_buffer_occupancy: Optional[

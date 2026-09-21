@@ -66,7 +66,7 @@ def test_a_union_find_tier_with_a_cycle_count_is_held_by_the_count(tmp_path):
 
     A tier charged its host wall clock ends on no edge; one under a
     cycle_count block holds its unit for whole cycles of the named
-    clock and never fewer than the setup cycles.
+    clock and never fewer than the eleven the quiet machine costs.
     """
     config_path = write_config(
         tmp_path,
@@ -75,12 +75,7 @@ def test_a_union_find_tier_with_a_cycle_count_is_held_by_the_count(tmp_path):
             "weak_decoder": {
                 **MINIMAL_CONFIG["weak_decoder"],
                 "kind": "union_find",
-                "cycle_count": {
-                    "clock": "helios",
-                    "setup_cycles": 11,
-                    "cycles_per_step": 4,
-                    "cycles_per_hop": 3,
-                },
+                "cycle_count": {"clock": "helios", "delay_cycles": 3},
             },
         },
     )

@@ -154,6 +154,33 @@ class TransferAttribution:
         )
 
     @classmethod
+    def for_region(
+        cls, region: round_records.EscalatedRegion
+    ) -> "TransferAttribution":
+        """An escalated region's transfer: its rounds, in its request's name.
+
+        The patches are the first packet's, the round range the packets'
+        first and last.
+        """
+        first_packet = region.packets[0]
+        last_packet = region.packets[-1]
+        patch_ids = tuple(
+            fragment.patch_id for fragment in first_packet.fragments
+        )
+        ordered_patch_ids = tuple(
+            sorted(patch_ids, key=identity_records.stable_identity_order_key)
+        )
+        relation = RequestTransferRelation(region.request_key)
+        return cls(
+            operation_id=first_packet.operation_id,
+            patch_ids=ordered_patch_ids,
+            window_id=region.request_key.window_id,
+            first_round=first_packet.round_index,
+            last_round=last_packet.round_index,
+            relation=relation,
+        )
+
+    @classmethod
     def for_packet(
         cls, packet: round_records.SyndromeRoundPacket
     ) -> "TransferAttribution":
@@ -179,9 +206,12 @@ class Transfer:
     serializer_start_ticks and let its last bit go at
     serializer_end_ticks; the receiver has it at delivery_ticks, one
     propagation later. total_delay_ticks counts from the request.
+    header_bits is the path's framing, which the wire serialized with
+    the payload and which is no part of it.
     """
 
     payload_bits: Optional[int]
+    header_bits: int
     request_ticks: int
     setup_ticks: int
     send_ticks: int

@@ -57,6 +57,3 @@ class NaiveOnlineScheme:
     ) -> bool:
         """Whether the window has every round it reads."""
         return window_data.sliding_data_complete(window, readiness)
-
-    def validate_buffer(self, geometry) -> None:
-        """A batch decode has no buffer floor."""

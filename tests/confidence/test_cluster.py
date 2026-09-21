@@ -183,9 +183,9 @@ def test_the_half_ticks_of_the_growth_read_back_as_natural_log_weight():
     """Every signal reports in the unit the switching threshold is held in."""
     step = evidence_records.DEFAULT_WEIGHT_STEP
 
-    two_ticks = cluster._gap_half_ticks_to_natural_log_weight(2, step)
-    seven_ticks = cluster._gap_half_ticks_to_natural_log_weight(7, step)
-    unreachable = cluster._gap_half_ticks_to_natural_log_weight(math.inf, step)
+    two_ticks = cluster.gap_half_ticks_to_natural_log_weight(2, step)
+    seven_ticks = cluster.gap_half_ticks_to_natural_log_weight(7, step)
+    unreachable = cluster.gap_half_ticks_to_natural_log_weight(math.inf, step)
 
     assert two_ticks == step
     three_and_a_half_steps = 3.5 * step

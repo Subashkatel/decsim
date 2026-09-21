@@ -322,6 +322,13 @@ class WindowPlanner:
             return None
         return model.owned_fault_ids()
 
+    def crossing_faults_of(self, key: tuple) -> Optional[dict]:
+        """The faults the window at that key commits behind its first round."""
+        model = self.models.model_by_window.get(key)
+        if model is None:
+            return None
+        return model.crossing_fault_ids()
+
     def window_indices_of(self, operation_id) -> list:
         """The operation's window indices in order; none when unplanned."""
         return self.plan.op_windows.get(operation_id, [])

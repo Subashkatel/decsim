@@ -102,6 +102,7 @@ def decode_graph(
         logical_observables=logical_observables,
         unmatched_detectors=unmatched_detectors,
         growth_steps=outcome.growth_steps,
+        forest_depth=outcome.forest_depth,
     )
 
 

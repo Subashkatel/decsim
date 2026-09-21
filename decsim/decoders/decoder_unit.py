@@ -114,7 +114,7 @@ class DecoderUnit:
         self,
         job: decoding_records.DecodeJob,
         resident_capacity: int,
-        memory_demand_of: Callable[[decoding_records.DecodeJob], int],
+        memory_demand_of: Callable[[decoding_records.DecodeJob], Optional[int]],
     ) -> bool:
         """Whether a slot is free and the memory holds the job beside the rest.
 
@@ -124,9 +124,11 @@ class DecoderUnit:
         A first resident is always admitted, so a genuinely oversized
         window still stops loudly at its deposit. A job whose rounds
         this unit already holds needs no memory of its own: it is one
-        more reader of the copy that is here. A resident whose input
-        has landed carries its rounds in the memory rather than in its
-        payloads, so the memory's own occupancy answers for it.
+        more reader of the copy that is here, and the same holds for
+        rounds still on their way to a resident that reads them, which
+        land as one copy. A resident whose input has landed carries its
+        rounds in the memory rather than in its payloads, so the
+        memory's own occupancy answers for it.
         """
         if len(self.residents) >= resident_capacity:
             return False
@@ -135,15 +137,12 @@ class DecoderUnit:
         live = self.live_residents()
         if not live:
             return True
-        capacity = self.memory.capacity_rounds
+        capacity = self.memory.capacity_bits
         if capacity is None:
             return True
-        demand = self.memory.occupied_rounds
-        for resident in live:
-            if self.memory.holds(resident):
-                continue
-            demand += memory_demand_of(resident)
-        demand += memory_demand_of(job)
+        readers = live + [job]
+        arriving_bits = self._arriving_bits(readers, memory_demand_of)
+        demand = self.memory.occupied_bits + arriving_bits
         return demand <= capacity
 
     def live_residents(self) -> list:
@@ -193,6 +192,47 @@ class DecoderUnit:
                 continue
             return resident
         return None
+
+    def residents_awaiting_compute_count(self) -> int:
+        """How many residents still need this unit's compute.
+
+        A resident that has not started and is neither cancelled nor
+        completed is work waiting at this unit: it holds an input slot
+        and takes the compute as soon as it may. A decode in flight or
+        finished waits for nothing.
+        """
+        awaiting_count = 0
+        for resident in self.residents:
+            if is_past_start(resident):
+                continue
+            awaiting_count += 1
+        return awaiting_count
+
+    def work_left_ticks(
+        self, now: int, occupancy_ticks_of: Callable[..., float]
+    ) -> float:
+        """Ticks of compute this unit may still owe the jobs it holds.
+
+        The time to the tick the holder is expected to free the
+        compute, then the declared cost of every other resident that
+        has not started. Nobody knows when a parked resident is
+        released, so its decode is counted whole: that is the most a
+        newcomer can wait behind it, and the least such total over the
+        units bounds the newcomer's worst start. A holder that outlived
+        its prediction, its result not yet read or its pipeline full,
+        is held for a time nobody declared, so the work is unbounded.
+        """
+        work_left = 0.0
+        holder = self.holder
+        if holder is not None:
+            work_left = self.compute.expected_free_ticks - now
+        if work_left < 0:
+            return math.inf
+        for resident in self.residents:
+            if resident is holder or is_past_start(resident):
+                continue
+            work_left += occupancy_ticks_of(resident)
+        return work_left
 
     def parked_residents(self) -> list:
         """The residents landed with a boundary still owed."""
@@ -247,6 +287,7 @@ class DecoderUnit:
     def release_compute(self) -> None:
         """The holder gives the compute back to the pool or a resident."""
         self.compute.holder = None
+        self.compute.expected_free_ticks = math.inf
 
     def expect_compute_free(self, ticks: Optional[float]) -> None:
         """Record when the running decode is expected to free the compute."""
@@ -326,6 +367,23 @@ class DecoderUnit:
         if owner.cancelled or owner.completed:
             return None
         return owner
+
+    def _arriving_bits(
+        self,
+        readers: list,
+        memory_demand_of: Callable[[decoding_records.DecodeJob], Optional[int]],
+    ) -> int:
+        """The bits not yet in the memory, each input counted once."""
+        bits_by_input = {}
+        for reader in readers:
+            if self.memory.holds(reader):
+                continue
+            input_identity = self.memory.landing_key(reader)
+            bits = memory_demand_of(reader)
+            self.memory.check_input_size(reader, bits)
+            bits_by_input[input_identity] = bits
+        arriving = bits_by_input.values()
+        return sum(arriving)
 
     def _resident_phase(self, resident: decoding_records.DecodeJob) -> str:
         if self.compute.holder is resident and resident.service_started:

@@ -119,10 +119,7 @@ def resolved_geometry(name="surface"):
         distance=3,
         commit_round_count=2,
         buffer_round_count=1,
-        minimum_leading_buffer_round_count=0,
-        minimum_trailing_buffer_round_count=0,
         one_patch_spatial_node_count=10,
-        window_floor_justification=None,
     )
 
 
@@ -173,7 +170,6 @@ class RecordingCode:
 
     name = "surface"
     distance = 3
-    window_floor_justification = None
 
     def __init__(self, cadence=1.25):
         self.cadence = cadence
@@ -190,9 +186,6 @@ class RecordingCode:
 
     def buffer_rounds(self):
         return 1
-
-    def buffering_floor(self):
-        return (1, 1)
 
     def spatial_nodes(self, patch_count):
         self.spatial_node_calls.append(patch_count)
@@ -230,11 +223,7 @@ class RecordingScheme:
     """A scheme that plans one window per operation and notes its sizes."""
 
     def __init__(self):
-        self.validated_geometry = None
         self.plan_calls = []
-
-    def validate_buffer(self, geometry):
-        self.validated_geometry = geometry
 
     def plan_operation(
         self,
@@ -321,7 +310,6 @@ def test_the_plan_sizes_every_operation_and_every_patch_through_the_layout():
     assert plan.code_geometry.one_patch_spatial_node_count == 10
     assert operation_nodes == [21, 21]
     assert patch_identities == [1, "1", "q1", "q2"]
-    assert scheme.validated_geometry == plan.code_geometry
     assert scheme.plan_calls == [(10, 4, 2, 1), (20, 4, 2, 1)]
 
 
@@ -541,7 +529,6 @@ def test_a_windows_hold_reaches_into_the_successors_it_overflows_into():
         (2, 1),
         (3, 1),
     )
-    assert buffering.minimum_live_rounds == held_rounds
     assert buffering.potential_holds == ()
 
 

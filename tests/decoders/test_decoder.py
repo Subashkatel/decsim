@@ -4,11 +4,14 @@ sinter's abstract class with defaults is the shape
 (.pydeps/sinter/_decoding/_decoding_decoder_class.py).
 """
 
+import numpy
 import pytest
+import scipy.sparse
 
 import decsim.config as config
 import decsim.decoders.decoder as decoder_module
 import decsim.decoders.decoders as decoders
+import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.engine as engine_module
 import decsim.records.decoding as decoding_records
 
@@ -159,3 +162,42 @@ def test_a_window_row_without_a_model_gives_the_empty_result():
     result = row.decode(job)
     assert result.correction is None
     assert result.logical_observables is None
+
+
+def test_a_committed_fault_reaching_behind_the_window_is_a_crossing_commit():
+    """The seam commit a region ending there and its own redo are pinned on.
+
+    A window that owns the faults crossing behind its commit region
+    carries that part of its correction on its own, because the residual
+    XORs every committed fault's detectors together and the crossing
+    part cannot be taken out of it again (Toshio et al. 2510.25222 lines
+    1248-1250).
+    """
+    check = scipy.sparse.csc_matrix([[1, 0], [1, 1]], dtype=numpy.uint8)
+    observables = scipy.sparse.csc_matrix([[1, 1]], dtype=numpy.uint8)
+    placed = fault_models.PlacedFaultModel(
+        representation=fault_models.FaultRepresentation.GRAPHLIKE,
+        check=check,
+        priors=[0.1, 0.2],
+        observables=observables,
+        owned=[True, True],
+        source_fault_ids=[4, 9],
+        boundary_flips={0: [0, 2], 1: [1]},
+    )
+    model = fault_models.WindowErrorModel(
+        detector_ids=(0, 1),
+        detector_coordinates=None,
+        # detector 2 sits on round 5, the round before the commit region
+        defect_positions={0: (6, 0), 1: (6, 1), 2: (5, 0)},
+        first_commit_round=6,
+        graphlike_faults=placed,
+        physical_faults=None,
+    )
+    job = _job()
+    result = decoder_module.result_from_selected_faults(
+        job, model, placed, [1, 1]
+    )
+    assert result.logical_observables == (0,)
+    assert result.boundary_data.detector_ids == (0, 1, 2)
+    assert result.crossing_commit.residual.detector_ids == (0, 2)
+    assert result.crossing_commit.logical_observables == (1,)

@@ -1,6 +1,6 @@
 """Where a round's measurement outcomes become its detection events.
 
-The placement is a published choice with two rows, and
+The placement is a published choice with three rows, and
 controller.detection_events_formed_at names one of them
 (controller/settings.py DETECTION_EVENT_FORMATION, ports.py
 DetectionEventPlacement). At the controller, "inside the workstation,
@@ -11,7 +11,14 @@ detection-event width. At the decoder, the controller writes the
 outcomes "sequentially to the decoder" and "The decoder computes the
 syndrome from measurement outcomes and decodes it" (Caune et al.
 2410.05202 lines 1252-1256), so the store and the tier's input link
-carry the wider raw round and each tier forms what it reads.
+carry the wider raw round and each tier forms what it reads. At the weak
+syndrome buffer, the round crosses to the weak decoder chip raw and is
+formed once as it is stored, so the store, the weak unit's input link
+and the escalation hop carry the events. That the decoder's own chip
+forms them is published (Maurer 2510.21600 lines 235-237, the decoder
+FPGA's "detector window processing component calculates parities of
+groups of measurements"); that it does so ahead of its store is this
+row's own choice, the papers being silent on the order.
 
 A detection event is a parity of raw measurement outcomes
 (detector_formation.py), so its value is the same wherever it is formed:
@@ -38,6 +45,9 @@ class ControllerSideFormation:
     controller's clock before the round leaves it.
     """
 
+    forms_at_the_weak_syndrome_buffer = False
+    forms_at_the_decoder = False
+
     def __init__(
         self,
         former: Optional[ports.DetectionEventFormer],
@@ -50,6 +60,10 @@ class ControllerSideFormation:
         """The round's fragments as they leave the controller."""
         formed = _formed(self.former, fragments)
         return _at_their_event_width(formed)
+
+    def form_before_storage(self, fragments: tuple) -> tuple:
+        """The round as the weak syndrome buffer stores it: as it landed."""
+        return fragments
 
     def decoder_side_former(self) -> Optional[ports.DetectionEventFormer]:
         """None: the round reaches every tier already formed."""
@@ -74,7 +88,14 @@ class DecoderSideFormation:
     same value of every event, so one former forms each round once, in
     round order, and both tiers read it (RememberedDetectionEvents);
     what each tier is charged is its own (decoders/detection_events.py).
+    The logic sits in front of each tier's core whatever the source
+    sends, so a tier is charged for it under this row even when the
+    source carries no outcomes to convert, as the other two rows charge
+    theirs.
     """
+
+    forms_at_the_weak_syndrome_buffer = False
+    forms_at_the_decoder = True
 
     def __init__(
         self,
@@ -96,9 +117,67 @@ class DecoderSideFormation:
         """The round's fragments as they leave the controller: raw."""
         return fragments
 
+    def form_before_storage(self, fragments: tuple) -> tuple:
+        """The round as the weak syndrome buffer stores it: raw."""
+        return fragments
+
     def decoder_side_former(self) -> Optional[ports.DetectionEventFormer]:
-        """The former both tiers form the rounds they read through."""
+        """The former both tiers form through; None when the source has none."""
         return self.former
+
+
+class WeakSyndromeBufferSideFormation:
+    """The weak decoder chip forms the round once, as it stores it.
+
+    Maurer et al. 2510.21600 lines 504-507 and 235-237: the readouts
+    reach the decoder FPGA over the serial connection, and its detector
+    window processing component calculates the parities in the input
+    path. The paper does not say which side of its syndrome FIFO that
+    component sits on; this row puts it ahead of the store, so a round
+    is formed once however many windows read it. The round leaves the
+    controller raw and crosses controller_to_weak_buffer at its raw
+    measurement width; the weak syndrome buffer holds the events, so
+    every hop after it carries the narrower round: the weak unit's
+    input link, and the escalation hop that carries a region to the
+    strong side. No tier forms anything.
+    The chip's charge is weak_syndrome_buffer.
+    detection_event_cycles_per_round, on that buffer's clock; the
+    controller charges nothing for a conversion it does not do, so a
+    controller-side charge under this row is refused where the yaml
+    names it.
+    """
+
+    forms_at_the_weak_syndrome_buffer = True
+    forms_at_the_decoder = False
+
+    def __init__(
+        self,
+        former: Optional[ports.DetectionEventFormer],
+        detection_event_formation_cycles: int,
+    ) -> None:
+        if detection_event_formation_cycles > 0:
+            raise ValueError(
+                "controller.detection_event_cycles_per_round charges the "
+                "controller for a conversion this run does at the weak "
+                "syndrome buffer (controller.detection_events_formed_at); "
+                "charge the chip with weak_syndrome_buffer."
+                "detection_event_cycles_per_round, or write null"
+            )
+        self.former = former
+        self.detection_event_formation_cycles = 0
+
+    def form_before_departure(self, fragments: tuple) -> tuple:
+        """The round's fragments as they leave the controller: raw."""
+        return fragments
+
+    def form_before_storage(self, fragments: tuple) -> tuple:
+        """The round as the weak syndrome buffer stores it: its events."""
+        formed = _formed(self.former, fragments)
+        return _at_their_event_width(formed)
+
+    def decoder_side_former(self) -> Optional[ports.DetectionEventFormer]:
+        """None: the round reaches every tier already formed."""
+        return None
 
 
 class RememberedDetectionEvents:

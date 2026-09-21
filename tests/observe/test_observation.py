@@ -26,13 +26,13 @@ ALWAYS_PRESENT = (
     "round_events",
     "referee_audit",
     "sampled_shots",
+    "decoder_utilization",
 )
 ASKED_FOR_BY_A_STUDY = (
     "trace_writer",
     "data_movement",
     "decode_records",
     "decode_backlog",
-    "decoder_utilization",
     "decoder_memory_occupancy",
     "syndrome_buffer_occupancy",
 )

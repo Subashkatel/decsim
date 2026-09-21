@@ -8,16 +8,20 @@ strong pool, and every other policy routes every job to the tier that
 decodes the plan's windows.
 """
 
+import dataclasses
+
 import pytest
 
 import decsim.build.decoders as decoder_build
 import decsim.build.escalation as escalation_build
 import decsim.build.plan as plan_build
+import decsim.config as config
 import decsim.decoders.decode_queue as decode_queue
 import decsim.decoders.decoders as decoders
 import decsim.decoders.settings as decoder_settings
 import decsim.detector_error_model.detection_event_formation as event_formation
 import decsim.escalation.settings as escalation_settings
+import decsim.records.decoding as decoding_records
 import decsim.settings as machine_settings
 import tests.declared_run as declared_run
 
@@ -46,12 +50,15 @@ def _settings(*, escalation=None, weak=None, strong=None):
     )
 
 
-def _pool(settings):
-    policy = escalation_build.build_escalation_policy(settings.escalation)
+def _pool(settings, detection_events=None):
+    policy = escalation_build.build_escalation_policy(
+        settings.escalation, settings.weak_decoder
+    )
     plan = plan_build.build_plan(settings, policy)
-    formed_at_the_controller = event_formation.ControllerSideFormation(None, 0)
+    if detection_events is None:
+        detection_events = event_formation.ControllerSideFormation(None, 0)
     return decoder_build.build_decoder_pool(
-        settings, plan, policy, formed_at_the_controller
+        settings, plan, policy, detection_events
     )
 
 
@@ -60,11 +67,62 @@ def _preset(microseconds: float):
     return decoder_settings.DecoderSettings(decoder=preset)
 
 
+def test_the_units_two_stages_carry_all_four_of_the_engines_cycle_keys():
+    """Each stage is priced once a job and once a round, on its clock.
+
+    A swap or a drop in the wiring moves a job of several rounds: the
+    fetch and the release read different keys and the per-job and the
+    per-round cycles are different numbers.
+    """
+    period_ticks = config.microseconds_to_ticks(0.01)
+    clock = config.Clock(period_ticks)
+    weak = decoder_settings.DecoderSettings(
+        kind="pymatching",
+        fetch_cycles_per_job=2,
+        fetch_cycles_per_round=3,
+        release_cycles_per_job=5,
+        release_cycles_per_round=7,
+        engine_clock=clock,
+    )
+    settings = _settings(weak=weak)
+    policy = escalation_build.build_escalation_policy(
+        settings.escalation, settings.weak_decoder
+    )
+    unit = decoder_build.build_decoder_unit(settings, "weak", policy)
+    job = decoding_records.DecodeJob(operation_id=1, window_id=0, round_count=4)
+
+    ticks = unit.timing.stage_ticks(job)
+
+    fetch_cycles = 2 + 3 * 4
+    release_cycles = 5 + 7 * 4
+    assert ticks["fetch"] == fetch_cycles * period_ticks
+    assert ticks["release"] == release_cycles * period_ticks
+
+
+def test_the_union_find_row_is_built_with_the_tiers_weight_step():
+    """The growth resolution the yaml names reaches the row that grows."""
+    period_ticks = config.microseconds_to_ticks(0.01)
+    clock = config.Clock(period_ticks)
+    weak = decoder_settings.DecoderSettings(
+        kind="union_find", weight_step=0.25, engine_clock=clock
+    )
+    settings = _settings(weak=weak)
+    policy = escalation_build.build_escalation_policy(
+        settings.escalation, settings.weak_decoder
+    )
+
+    unit = decoder_build.build_decoder_unit(settings, "weak", policy)
+
+    assert unit.decoder.weight_step == 0.25
+
+
 def test_a_python_built_decoder_is_returned_as_it_is():
     built = decoders.PresetLatencyDecoder(10.0)
     weak = decoder_settings.DecoderSettings(decoder=built)
     settings = _settings(weak=weak)
-    policy = escalation_build.build_escalation_policy(settings.escalation)
+    policy = escalation_build.build_escalation_policy(
+        settings.escalation, settings.weak_decoder
+    )
 
     unit = decoder_build.build_decoder_unit(settings, "weak", policy)
 
@@ -73,7 +131,9 @@ def test_a_python_built_decoder_is_returned_as_it_is():
 
 def test_a_tier_that_names_no_decoder_builds_none():
     settings = _settings()
-    policy = escalation_build.build_escalation_policy(settings.escalation)
+    policy = escalation_build.build_escalation_policy(
+        settings.escalation, settings.weak_decoder
+    )
 
     unit = decoder_build.build_decoder_unit(settings, "strong", policy)
 
@@ -107,6 +167,28 @@ def test_a_run_that_may_escalate_gets_a_strong_pool_behind_one_router():
     assert decode_queue.STRONG_POOL in pool.unit_pools
 
 
+def test_each_tiers_unit_memory_reaches_the_pool_of_its_own_units():
+    escalation = escalation_settings.EscalationSettings(
+        kind="switching",
+        threshold_source="fixed",
+        gap_threshold_nats=2.0,
+        confidence="complementary_gap",
+    )
+    weak_memory = decoder_settings.UnitMemorySettings(bits=12)
+    strong_memory = decoder_settings.UnitMemorySettings(bits=30)
+    weak_preset = _preset(10.0)
+    strong_preset = _preset(30.0)
+    weak = dataclasses.replace(weak_preset, unit_memory=weak_memory)
+    strong = dataclasses.replace(strong_preset, unit_memory=strong_memory)
+    settings = _settings(escalation=escalation, weak=weak, strong=strong)
+
+    pool = _pool(settings)
+
+    memory = pool.decoder_memory
+    assert memory.capacity_for("default") == 12
+    assert memory.capacity_for(decode_queue.STRONG_POOL) == 30
+
+
 def test_a_plan_whose_active_tier_names_no_decoder_is_refused():
     settings = _settings()
 
@@ -129,10 +211,28 @@ def test_every_pool_declares_whether_its_unit_takes_a_copy():
     assert sorted(pool.blocks_unit_by_pool) == sorted(pool.unit_pools)
 
 
+def test_the_decoder_row_gives_each_pool_its_stage_whatever_the_source():
+    """A source with no former has nothing to convert and the stage to pay."""
+    weak = _preset(10.0)
+    settings = _settings(weak=weak)
+    no_former = None
+    at_the_decoder = event_formation.DecoderSideFormation(no_former, 0)
+    at_the_controller = event_formation.ControllerSideFormation(no_former, 0)
+
+    formed_at_the_decoder = _pool(settings, at_the_decoder)
+    formed_at_the_controller = _pool(settings, at_the_controller)
+
+    pools_with_a_stage = set(formed_at_the_decoder.formation_by_pool)
+    assert pools_with_a_stage == set(formed_at_the_decoder.unit_pools)
+    assert formed_at_the_controller.formation_by_pool == {}
+
+
 def test_a_decoder_kind_that_names_no_row_is_refused():
     weak = decoder_settings.DecoderSettings(kind="oracle")
     settings = _settings(weak=weak)
-    policy = escalation_build.build_escalation_policy(settings.escalation)
+    policy = escalation_build.build_escalation_policy(
+        settings.escalation, settings.weak_decoder
+    )
 
     with pytest.raises(ValueError) as refusal:
         decoder_build.build_decoder_unit(settings, "weak", policy)

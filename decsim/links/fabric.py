@@ -2,7 +2,8 @@
 
 LinkFabric is the root of the links and the one object the other
 components hold; it implements the Link port. send(path, ...) selects the
-payload the path is priced with, sends it on the path's channel, and at
+payload the path is priced with, frames it with the path's header, sends
+it on the path's channel, and at
 delivery fires the finished transfer's record on transfer_delivered (the
 traffic ledger and the trace writer listen) before the caller's
 continuation runs. Two paths whose settings name the same channel share
@@ -58,8 +59,11 @@ class LinkFabric:
         selected_bits, _selection, _source = _select_payload(
             path, binding.settings, payload_bits
         )
+        framed = channel_module.FramedPayload(
+            selected_bits, binding.settings.header_bits
+        )
         return binding.channel.expected_delay_ticks(
-            selected_bits, now_ticks, binding.settings.setup_ticks
+            framed, now_ticks, binding.settings.setup_ticks
         )
 
     def send(
@@ -88,8 +92,11 @@ class LinkFabric:
             on_delivered=on_delivered,
         )
         self._send_count += 1
+        framed = channel_module.FramedPayload(
+            selected_bits, binding.settings.header_bits
+        )
         binding.channel.send(
-            selected_bits,
+            framed,
             now_ticks,
             binding.settings.setup_ticks,
             lambda transfer: self._finish(outgoing, transfer),

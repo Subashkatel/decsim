@@ -2,7 +2,10 @@
 
 Sources: the SyndromeSource port in decsim/ports.py; the rotated
 surface code's d*d - 1 stabilizers per round (Stim's generated circuit,
-src/stim/gen/gen_surface_code.cc).
+src/stim/gen/gen_surface_code.cc; Barber et al. 2309.05558 lines
+947-951). A timing-only round states that size and no values, the way
+gem5's packet trace records a size and no data (gem5
+src/proto/packet.proto).
 """
 
 import pytest
@@ -18,22 +21,43 @@ def first_payload(device, operation, round_index):
     return payloads[0]
 
 
-def test_a_timing_only_round_carries_no_bits_and_names_its_patch():
-    device = syndrome_devices.TimingOnlyDevice()
+def test_a_timing_only_round_states_the_codes_width_and_no_values():
+    code = code_geometry.SurfaceCodeModel(distance=3)
+    device = syndrome_devices.TimingOnlyDevice(code)
     operation = program_records.Operation(
         id=4, name="memory", qubits=(2,), patches=(7,)
     )
     payload = first_payload(device, operation, 3)
-    assert payload == round_records.QPUReadout(4, 7, 3)
+    assert payload == round_records.QPUReadout(4, 7, 3, size_bits=8)
+    assert payload.bits is None
+
+
+def test_a_timing_only_round_of_two_patches_is_two_patches_wide():
+    code = code_geometry.SurfaceCodeModel(distance=5)
+    device = syndrome_devices.TimingOnlyDevice(code)
+    operation = program_records.Operation(
+        id=4, name="merge", qubits=(2, 3), patches=(7, 9)
+    )
+    payload = first_payload(device, operation, 1)
+    assert payload.size_bits == 48
+
+
+def test_a_timing_only_idle_round_is_one_patch_wide():
+    code = code_geometry.SurfaceCodeModel(distance=3)
+    device = syndrome_devices.TimingOnlyDevice(code)
+    operation = program_records.Operation(id=4, name="idle", qubits=(2,))
+    (payload,) = device.idle_round_payloads(operation, "s", 5, 7)
+    assert payload == round_records.QPUReadout("s", 7, 5, size_bits=8)
 
 
 def test_a_stream_segment_reports_its_stream_and_global_round():
-    device = syndrome_devices.TimingOnlyDevice()
+    code = code_geometry.SurfaceCodeModel(distance=3)
+    device = syndrome_devices.TimingOnlyDevice(code)
     operation = program_records.Operation(
         id=4, name="tail", qubits=(2,), stream_id="s", stream_offset=6
     )
     payload = first_payload(device, operation, 2)
-    assert payload == round_records.QPUReadout("s", 2, 8)
+    assert payload == round_records.QPUReadout("s", 2, 8, size_bits=8)
 
 
 def test_fake_bits_are_as_wide_as_the_syndrome():
@@ -46,22 +70,14 @@ def test_fake_bits_are_as_wide_as_the_syndrome():
     assert payload.code == "rotated surface code (d=3)"
 
 
-def test_fake_bits_are_capped_at_max_bit_count():
+def test_fake_bits_grow_with_the_codes_distance():
+    """A d = 5 patch reads 24 stabilizers a round, so 24 bits."""
     wide_code = code_geometry.SurfaceCodeModel(distance=5)
-    capped = syndrome_devices.SyndromeBitDevice(
-        wide_code, seed=1, max_bit_count=10
-    )
+    device = syndrome_devices.SyndromeBitDevice(wide_code, seed=1)
     operation = program_records.Operation(id=1, name="memory", qubits=(0,))
-    payload = first_payload(capped, operation, 1)
-    assert len(payload.bits) == 10
-
-
-def test_a_cap_above_the_syndrome_leaves_its_width():
-    code = code_geometry.SurfaceCodeModel(distance=3)
-    roomy = syndrome_devices.SyndromeBitDevice(code, seed=1, max_bit_count=100)
-    operation = program_records.Operation(id=1, name="memory", qubits=(0,))
-    payload = first_payload(roomy, operation, 1)
-    assert len(payload.bits) == 8
+    payload = first_payload(device, operation, 1)
+    assert len(payload.bits) == 24
+    assert payload.size_bits == 24
 
 
 def test_one_payload_per_patch_when_asked():
@@ -82,7 +98,8 @@ def test_one_payload_per_patch_when_asked():
 
 def test_the_timing_only_source_cannot_finalize_a_stream_round():
     operation = program_records.Operation(id=1, name="tail", qubits=(0,))
-    timing_only = syndrome_devices.TimingOnlyDevice()
+    code = code_geometry.SurfaceCodeModel(distance=3)
+    timing_only = syndrome_devices.TimingOnlyDevice(code)
     with pytest.raises(ValueError, match="finalize"):
         timing_only.finalize_stream_round(operation, 3)
 

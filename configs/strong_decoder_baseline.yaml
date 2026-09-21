@@ -62,18 +62,21 @@ links:
   controller_to_qpu:  null
 
 weak_syndrome_buffer:
-  rounds: null
+  bits: null
 strong_syndrome_buffer:
-  rounds: null
+  bits: null
 
 strong_decoder:
   kind: belief_matching
   units: 1
-  unit_memory_rounds: null
+  unit_memory:
+    bits: null
   engine:
     clock: room
     fetch_cycles_per_round: 1
+    fetch_cycles_per_job: 0
     release_cycles_per_job: 10
+    release_cycles_per_round: 0
 
 pauli_frame:
   clock: fridge

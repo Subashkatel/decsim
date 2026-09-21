@@ -14,7 +14,9 @@ import dataclasses
 from typing import Optional
 
 import decsim.config as config
+import decsim.decoders.settings as decoder_settings
 import decsim.detector_error_model.fault_model_contracts as fault_models
+import decsim.escalation.settings as escalation_settings
 import decsim.records.decoding as decoding_records
 
 COMPLEMENTARY_GAP_SOURCE = decoding_records.SoftOutputSource(
@@ -53,6 +55,16 @@ class ComplementaryGap:
         "arXiv:2510.05795 Sec. 2.1.1); use escalation.confidence "
         "cluster_gap, or a matching weak decoder"
     )
+
+    @classmethod
+    def from_settings(
+        cls,
+        escalation: escalation_settings.EscalationSettings,
+        weak_decoder: decoder_settings.DecoderSettings,
+    ) -> "ComplementaryGap":
+        """The row priced by the card; the weak row's settings say nothing."""
+        del weak_decoder
+        return cls(walk_microseconds=escalation.confidence_walk_microseconds)
 
     def compute(self, solves: tuple) -> decoding_records.SoftOutputComputation:
         """The gap between the weights of one window's forced solves.

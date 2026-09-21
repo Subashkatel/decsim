@@ -53,7 +53,6 @@ def test_a_run_with_every_listener_connected_has_the_same_ticks_as_a_bare_one():
         settings.observation,
         syndrome_buffer_occupancy=True,
         backlog_trace=True,
-        decoder_utilization=True,
         decoder_memory_occupancy=True,
     )
     heard_settings = dataclasses.replace(settings, observation=every_listener)

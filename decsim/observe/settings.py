@@ -26,7 +26,6 @@ OBSERVATION_KEYS = (
     "record_switching_windows",
     "syndrome_buffer_occupancy",
     "backlog_trace",
-    "decoder_utilization",
     "decoder_memory_occupancy",
     "trace",
     "trace_shots",
@@ -49,10 +48,10 @@ class ObservationSettings:
     never priced. record_switching_windows keeps every request and
     service record for the switching views; syndrome_buffer_occupancy builds
     the L5 listener on the weak syndrome buffer; backlog_trace builds the
-    decode backlog sampler the D7 harness reads; decoder_utilization and
-    decoder_memory_occupancy build the unit-count and memory sweeps'
-    samplers; data_movement builds the copy, reference and move counters
-    the RunResult carries.
+    decode backlog sampler the D7 harness reads; decoder_memory_occupancy
+    builds the memory sweep's sampler (the decoder utilization is always
+    integrated, every run's pool columns read it); data_movement builds
+    the copy, reference and move counters the RunResult carries.
     """
 
     log: str = "off"
@@ -61,7 +60,6 @@ class ObservationSettings:
     record_switching_windows: bool = False
     syndrome_buffer_occupancy: bool = False
     backlog_trace: bool = False
-    decoder_utilization: bool = False
     decoder_memory_occupancy: bool = False
     trace: str = "off"
     trace_shots: tuple = (0,)
@@ -82,7 +80,6 @@ class ObservationSettings:
             section, "syndrome_buffer_occupancy"
         )
         backlog_trace = _boolean(section, "backlog_trace")
-        decoder_utilization = _boolean(section, "decoder_utilization")
         decoder_memory_occupancy = _boolean(section, "decoder_memory_occupancy")
         data_movement = _boolean(section, "data_movement")
         return cls(
@@ -94,7 +91,6 @@ class ObservationSettings:
             record_switching_windows=record_switching_windows,
             syndrome_buffer_occupancy=syndrome_buffer_occupancy,
             backlog_trace=backlog_trace,
-            decoder_utilization=decoder_utilization,
             decoder_memory_occupancy=decoder_memory_occupancy,
             data_movement=data_movement,
         )

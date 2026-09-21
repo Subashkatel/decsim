@@ -15,6 +15,11 @@
  * boundary. An edge with no growing end cannot move, so leaving it out
  * of the event changes nothing it would have done.
  *
+ * The extra growth (Kishi et al. arXiv:2602.03336 Algorithm 1) runs the
+ * same loop on from where a decode stopped, every cluster and the
+ * boundary growing, until the growth limit or the first closed walk of
+ * odd logical parity, which is the extra-cluster gap.
+ *
  * Nothing here recurses and nothing allocates once a decode has begun:
  * one workspace is taken at the top and released on every path out.
  */
@@ -26,6 +31,17 @@
 
 enum { boundary_detector = -1 };
 
+/* What one fusion changed. A step carries the strongest of its own
+ * fusions: nothing when the closing edge stood inside one cluster,
+ * roots and the touching flag when the absorbed cluster was even, and a
+ * parity when it was odd, since the survivor's parity takes the
+ * absorbed root's. */
+enum fusion_kind {
+  fusion_none = 0,
+  fusion_roots = 1,
+  fusion_parity = 2
+};
+
 /* One graph, as the caller laid it out. */
 struct graph_arrays {
   int32_t detector_count;
@@ -33,6 +49,8 @@ struct graph_arrays {
   const int32_t *endpoint_a;
   const int32_t *endpoint_b;
   const int64_t *length_half_ticks;
+  /* one bit per edge, null for a decode, which reads no parity */
+  const uint8_t *logical_parity;
 };
 
 /* Everything one decode needs beyond the caller's buffers.
@@ -46,7 +64,12 @@ struct graph_arrays {
 struct workspace {
   int32_t *parent;
   uint8_t *parity;
+  /* the logical parity of a node's walk to its parent */
+  uint8_t *walk_parity;
   uint8_t *touches_boundary;
+  /* whether a cluster holds a defect: the extra growth grows the
+   * clusters the decode left and the boundary, never a bare node */
+  uint8_t *holds_defect;
   int32_t *cluster_edge_head;
   int32_t *cluster_edge_tail;
   int32_t *cluster_edge_next;
@@ -70,10 +93,16 @@ struct workspace {
   int32_t *tree_order;
   int32_t *parent_node;
   int32_t *parent_edge;
+  int32_t *node_level;
   uint8_t *has_parent;
   uint8_t *residual_defect;
   uint8_t *is_visited;
   int32_t *component_nodes;
+  /* the extra growth grows every cluster and the boundary; a decode
+   * grows the odd clusters that touch no boundary */
+  int32_t every_cluster_grows;
+  /* set when a closing edge completes a walk of odd logical parity */
+  int32_t found_odd_walk;
 };
 
 static void *allocate_array(int32_t count, size_t size, int32_t *taken) {
@@ -91,7 +120,9 @@ static void *allocate_array(int32_t count, size_t size, int32_t *taken) {
 static void release_workspace(struct workspace *workspace) {
   free(workspace->parent);
   free(workspace->parity);
+  free(workspace->walk_parity);
   free(workspace->touches_boundary);
+  free(workspace->holds_defect);
   free(workspace->cluster_edge_head);
   free(workspace->cluster_edge_tail);
   free(workspace->cluster_edge_next);
@@ -115,6 +146,7 @@ static void release_workspace(struct workspace *workspace) {
   free(workspace->tree_order);
   free(workspace->parent_node);
   free(workspace->parent_edge);
+  free(workspace->node_level);
   free(workspace->has_parent);
   free(workspace->residual_defect);
   free(workspace->is_visited);
@@ -131,7 +163,11 @@ static int32_t take_workspace(struct workspace *workspace, int32_t node_count,
   memset(workspace, 0, sizeof(*workspace));
   workspace->parent = allocate_array(node_count, sizeof(int32_t), &taken);
   workspace->parity = allocate_array(node_count, sizeof(uint8_t), &taken);
+  workspace->walk_parity =
+      allocate_array(node_count, sizeof(uint8_t), &taken);
   workspace->touches_boundary =
+      allocate_array(node_count, sizeof(uint8_t), &taken);
+  workspace->holds_defect =
       allocate_array(node_count, sizeof(uint8_t), &taken);
   workspace->cluster_edge_head =
       allocate_array(node_count, sizeof(int32_t), &taken);
@@ -174,6 +210,7 @@ static int32_t take_workspace(struct workspace *workspace, int32_t node_count,
   workspace->tree_order = allocate_array(node_count, sizeof(int32_t), &taken);
   workspace->parent_node = allocate_array(node_count, sizeof(int32_t), &taken);
   workspace->parent_edge = allocate_array(node_count, sizeof(int32_t), &taken);
+  workspace->node_level = allocate_array(node_count, sizeof(int32_t), &taken);
   workspace->has_parent = allocate_array(node_count, sizeof(uint8_t), &taken);
   workspace->residual_defect =
       allocate_array(node_count, sizeof(uint8_t), &taken);
@@ -190,21 +227,48 @@ static int32_t endpoint_node(int32_t detector, int32_t detector_count) {
   return detector;
 }
 
-static int32_t find_root(int32_t *parent, int32_t node) {
+/* The root of a node's cluster, the path compressed on the way. The
+ * parity of the walk to the root is summed going up and written on
+ * every node hung directly below the root going down, so it stays the
+ * walk's parity through the compression. */
+static int32_t find_root(struct workspace *workspace, int32_t node) {
   int32_t root = node;
-  while (parent[root] != root) {
-    root = parent[root];
+  uint8_t parity = 0;
+  while (workspace->parent[root] != root) {
+    parity ^= workspace->walk_parity[root];
+    root = workspace->parent[root];
   }
-  while (parent[node] != root) {
-    int32_t next = parent[node];
-    parent[node] = root;
+  while (workspace->parent[node] != root) {
+    int32_t next = workspace->parent[node];
+    uint8_t beyond = parity ^ workspace->walk_parity[node];
+    workspace->parent[node] = root;
+    workspace->walk_parity[node] = parity;
+    parity = beyond;
     node = next;
   }
   return root;
 }
 
-/* An odd cluster that does not touch the boundary keeps growing. */
+/* The parity of a node's walk to its root, once find_root has hung the
+ * node directly below it. */
+static uint8_t parity_to_root(const struct workspace *workspace,
+                              int32_t node) {
+  if (workspace->parent[node] == node) {
+    return 0;
+  }
+  return workspace->walk_parity[node];
+}
+
+/* An odd cluster that does not touch the boundary keeps growing; under
+ * the extra growth every cluster the decode left does, and the
+ * boundary (Kishi et al. arXiv:2602.03336 Algorithm 1 line 2), while a
+ * bare node grows only once a front has reached it and fused it in,
+ * which is what lets Definition 3 sum the edges between two
+ * consecutive clusters. */
 static int32_t cluster_grows(const struct workspace *workspace, int32_t root) {
+  if (workspace->every_cluster_grows) {
+    return workspace->holds_defect[root] || workspace->touches_boundary[root];
+  }
   if (workspace->touches_boundary[root]) {
     return 0;
   }
@@ -212,13 +276,22 @@ static int32_t cluster_grows(const struct workspace *workspace, int32_t root) {
 }
 
 /* The smaller root index survives, and parity and the shared boundary
- * pass to it. The survivor's root is returned, and -1 when the two
- * nodes already stood in one cluster. */
+ * pass to it; the absorbed root hangs below the survivor at the parity
+ * of the walk between them through the closing edge. The absorbed root
+ * is returned, and -1 when the two nodes already stood in one cluster,
+ * in which case the edge closes a walk, and a walk of odd logical
+ * parity is the join the extra growth looks for. */
 static int32_t union_nodes(struct workspace *workspace, int32_t left,
-                           int32_t right) {
-  int32_t left_root = find_root(workspace->parent, left);
-  int32_t right_root = find_root(workspace->parent, right);
+                           int32_t right, uint8_t edge_parity) {
+  int32_t left_root = find_root(workspace, left);
+  uint8_t left_parity = parity_to_root(workspace, left);
+  int32_t right_root = find_root(workspace, right);
+  uint8_t right_parity = parity_to_root(workspace, right);
+  uint8_t walk_parity = left_parity ^ right_parity ^ edge_parity;
   if (left_root == right_root) {
+    if (walk_parity) {
+      workspace->found_odd_walk = 1;
+    }
     return -1;
   }
   int32_t survivor = left_root;
@@ -228,9 +301,13 @@ static int32_t union_nodes(struct workspace *workspace, int32_t left,
     absorbed = left_root;
   }
   workspace->parent[absorbed] = survivor;
+  workspace->walk_parity[absorbed] = walk_parity;
   workspace->parity[survivor] ^= workspace->parity[absorbed];
   if (workspace->touches_boundary[absorbed]) {
     workspace->touches_boundary[survivor] = 1;
+  }
+  if (workspace->holds_defect[absorbed]) {
+    workspace->holds_defect[survivor] = 1;
   }
   return absorbed;
 }
@@ -278,14 +355,20 @@ static void splice_edge_list(struct workspace *workspace, int32_t survivor,
   workspace->cluster_edge_tail[absorbed] = -1;
 }
 
-static void fuse_clusters(struct workspace *workspace, int32_t left,
-                          int32_t right) {
-  int32_t absorbed = union_nodes(workspace, left, right);
+/* The fusion's kind. union_nodes leaves the absorbed root's own parity
+ * where it was, so the bit read here is the one the survivor took. */
+static int32_t fuse_clusters(struct workspace *workspace, int32_t left,
+                             int32_t right, uint8_t edge_parity) {
+  int32_t absorbed = union_nodes(workspace, left, right, edge_parity);
   if (absorbed < 0) {
-    return;
+    return fusion_none;
   }
-  int32_t survivor = find_root(workspace->parent, absorbed);
+  int32_t survivor = find_root(workspace, absorbed);
   splice_edge_list(workspace, survivor, absorbed);
+  if (workspace->parity[absorbed] == 1) {
+    return fusion_parity;
+  }
+  return fusion_roots;
 }
 
 /* Every node alone in its own cluster; the boundary node carries no
@@ -296,16 +379,22 @@ static void reset_clusters(struct workspace *workspace, int32_t detector_count,
   for (int32_t node = 0; node < detector_count; ++node) {
     workspace->parent[node] = node;
     workspace->parity[node] = 0;
+    workspace->walk_parity[node] = 0;
     workspace->touches_boundary[node] = 0;
+    workspace->holds_defect[node] = 0;
   }
   workspace->parent[detector_count] = detector_count;
   workspace->parity[detector_count] = 0;
+  workspace->walk_parity[detector_count] = 0;
   workspace->touches_boundary[detector_count] = 1;
+  workspace->holds_defect[detector_count] = 0;
+  workspace->found_odd_walk = 0;
   if (defects == NULL) {
     return;
   }
   for (int32_t node = 0; node < detector_count; ++node) {
     workspace->parity[node] = defects[node];
+    workspace->holds_defect[node] = defects[node];
   }
 }
 
@@ -348,7 +437,7 @@ static int32_t initial_active_roots(struct workspace *workspace,
   int32_t node_count = detector_count + 1;
   int32_t active_count = 0;
   for (int32_t node = 0; node < node_count; ++node) {
-    int32_t root = find_root(workspace->parent, node);
+    int32_t root = find_root(workspace, node);
     if (workspace->active_stamp[root] == stamp) {
       continue;
     }
@@ -370,8 +459,7 @@ static int32_t refresh_active_roots(struct workspace *workspace,
                                     int32_t active_count, int32_t stamp) {
   int32_t next_count = 0;
   for (int32_t position = 0; position < active_count; ++position) {
-    int32_t root =
-        find_root(workspace->parent, workspace->active_roots[position]);
+    int32_t root = find_root(workspace, workspace->active_roots[position]);
     if (workspace->active_stamp[root] == stamp) {
       continue;
     }
@@ -426,14 +514,16 @@ static void freeze_roots(struct workspace *workspace,
         endpoint_node(graph->endpoint_a[edge], graph->detector_count);
     int32_t node_b =
         endpoint_node(graph->endpoint_b[edge], graph->detector_count);
-    workspace->frozen_root_a[edge] = find_root(workspace->parent, node_a);
-    workspace->frozen_root_b[edge] = find_root(workspace->parent, node_b);
+    workspace->frozen_root_a[edge] = find_root(workspace, node_a);
+    workspace->frozen_root_b[edge] = find_root(workspace, node_b);
   }
 }
 
 /* How many edges can still close, and in how few ticks the first of
- * them does. An edge inside one cluster is no candidate: it closes when
- * the cluster's own front meets itself and fuses nothing. */
+ * them does. While only odd clusters grow an edge inside one cluster is
+ * no candidate: it closes when the cluster's own front meets itself and
+ * fuses nothing. Under the extra growth it is one, because the walk it
+ * closes may be odd. */
 static int32_t closing_candidates(struct workspace *workspace,
                                   int32_t working_count,
                                   const int64_t *interval_lower_tick,
@@ -446,7 +536,7 @@ static int32_t closing_candidates(struct workspace *workspace,
     workspace->ticks_until_close[edge] = -1;
     int32_t left = workspace->frozen_root_a[edge];
     int32_t right = workspace->frozen_root_b[edge];
-    if (left == right) {
+    if (left == right && !workspace->every_cluster_grows) {
       continue;
     }
     int64_t rate = cluster_grows(workspace, left);
@@ -581,18 +671,33 @@ static int32_t collect_closing_batch(const struct workspace *workspace,
   return contact_count;
 }
 
-static void fuse_contact_batch(struct workspace *workspace,
-                               const struct graph_arrays *graph,
-                               const int32_t *contact_edges, int32_t start,
-                               int32_t end) {
+/* An edge's logical parity; a decode carries none and fuses at zero. */
+static uint8_t edge_parity(const struct graph_arrays *graph, int32_t edge) {
+  if (graph->logical_parity == NULL) {
+    return 0;
+  }
+  return graph->logical_parity[edge];
+}
+
+/* The strongest kind among the batch's fusions. */
+static int32_t fuse_contact_batch(struct workspace *workspace,
+                                  const struct graph_arrays *graph,
+                                  const int32_t *contact_edges, int32_t start,
+                                  int32_t end) {
+  int32_t strongest = fusion_none;
   for (int32_t position = start; position < end; ++position) {
     int32_t edge = contact_edges[position];
     int32_t node_a =
         endpoint_node(graph->endpoint_a[edge], graph->detector_count);
     int32_t node_b =
         endpoint_node(graph->endpoint_b[edge], graph->detector_count);
-    fuse_clusters(workspace, node_a, node_b);
+    uint8_t parity = edge_parity(graph, edge);
+    int32_t fused = fuse_clusters(workspace, node_a, node_b, parity);
+    if (fused > strongest) {
+      strongest = fused;
+    }
   }
+  return strongest;
 }
 
 static int32_t orders_by_length(const int64_t *length_half_ticks, int32_t left,
@@ -860,7 +965,9 @@ static int32_t grow_clusters(struct workspace *workspace,
                              int64_t *interval_upper_tick,
                              int32_t *contact_edges, int32_t *contact_count,
                              int32_t *step_edge_counts,
-                             int32_t *step_hop_counts, int32_t *step_count) {
+                             int32_t *step_hop_counts,
+                             int64_t *step_growth_ticks,
+                             uint8_t *step_fusion_kinds, int32_t *step_count) {
   link_edge_entries(workspace, graph);
   *contact_count =
       collect_closed_contacts(graph, interval_is_closed, contact_edges);
@@ -896,13 +1003,15 @@ static int32_t grow_clusters(struct workspace *workspace,
     *contact_count = collect_closing_batch(workspace, working_count,
                                            elapsed_ticks, contact_edges,
                                            batch_start);
-    fuse_contact_batch(workspace, graph, contact_edges, batch_start,
-                       *contact_count);
+    int32_t fusion_kind = fuse_contact_batch(
+        workspace, graph, contact_edges, batch_start, *contact_count);
     event_count += 1;
     if (event_count > graph->edge_count) {
       return union_find_growth_bound_exceeded;
     }
     step_edge_counts[event_count - 1] = working_count;
+    step_growth_ticks[event_count - 1] = elapsed_ticks;
+    step_fusion_kinds[event_count - 1] = (uint8_t)fusion_kind;
     step_hop_counts[event_count - 1] =
         fused_flood_hops(workspace, graph, interval_is_closed, contact_edges,
                          batch_start, *contact_count);
@@ -932,11 +1041,10 @@ static int32_t contact_forest(struct workspace *workspace,
         endpoint_node(graph->endpoint_a[edge], graph->detector_count);
     int32_t node_b =
         endpoint_node(graph->endpoint_b[edge], graph->detector_count);
-    if (find_root(workspace->parent, node_a) ==
-        find_root(workspace->parent, node_b)) {
+    if (find_root(workspace, node_a) == find_root(workspace, node_b)) {
       continue;
     }
-    union_nodes(workspace, node_a, node_b);
+    union_nodes(workspace, node_a, node_b, 0);
     forest_edges[forest_count] = edge;
     forest_count += 1;
   }
@@ -1041,13 +1149,40 @@ static int32_t walk_tree(struct workspace *workspace, int32_t root) {
   return order_count;
 }
 
+/* Each node's level below the root of its tree, the root at zero, and
+ * the deepest of them returned. walk_tree leaves a parent before its
+ * children in tree_order, so one pass over that order fills them.
+ *
+ * The boundary is a flag an element carries, not an element of its own,
+ * so it is no level of the tree: the nodes the peel roots at the
+ * boundary node stand at level zero beside the roots of every other
+ * tree. */
+static int32_t tree_depth(struct workspace *workspace, int32_t order_count,
+                          int32_t boundary_node) {
+  int32_t deepest = 0;
+  for (int32_t position = 0; position < order_count; ++position) {
+    int32_t node = workspace->tree_order[position];
+    int32_t parent = workspace->parent_node[node];
+    int32_t level = 0;
+    if (parent >= 0 && parent != boundary_node) {
+      level = workspace->node_level[parent] + 1;
+    }
+    workspace->node_level[node] = level;
+    if (level > deepest) {
+      deepest = level;
+    }
+  }
+  return deepest;
+}
+
 /* Peel one tree leaf to root: a node that still carries a defect
  * selects its parent edge and flips its parent. An odd component
  * without the boundary leaves its root's defect behind, and the caller
  * reports that detector as unmatched. */
-static void peel_tree(struct workspace *workspace, int32_t component_count,
-                      int32_t root, const uint8_t *residual_syndrome,
-                      int32_t boundary_node, uint8_t *selected_edges) {
+static int32_t peel_tree(struct workspace *workspace,
+                         int32_t component_count, int32_t root,
+                         const uint8_t *residual_syndrome,
+                         int32_t boundary_node, uint8_t *selected_edges) {
   for (int32_t position = 0; position < component_count; ++position) {
     int32_t node = workspace->component_nodes[position];
     workspace->residual_defect[node] = 0;
@@ -1064,6 +1199,7 @@ static void peel_tree(struct workspace *workspace, int32_t component_count,
     selected_edges[workspace->parent_edge[node]] = 1;
     workspace->residual_defect[workspace->parent_node[node]] ^= 1;
   }
+  return tree_depth(workspace, order_count, boundary_node);
 }
 
 static int32_t component_carries_a_defect(const struct workspace *workspace,
@@ -1094,15 +1230,17 @@ static int32_t component_holds_the_boundary(const struct workspace *workspace,
 }
 
 /* Every component is met from its smallest node, which is its root
- * unless the boundary is in it. A component with no defect is skipped. */
-static void peel_forest(struct workspace *workspace,
-                        const struct graph_arrays *graph,
-                        const uint8_t *residual_syndrome,
-                        const int32_t *forest_edges, int32_t forest_count,
-                        uint8_t *selected_edges) {
+ * unless the boundary is in it. A component with no defect is skipped,
+ * and the deepest tree the peel walks is returned. */
+static int32_t peel_forest(struct workspace *workspace,
+                           const struct graph_arrays *graph,
+                           const uint8_t *residual_syndrome,
+                           const int32_t *forest_edges, int32_t forest_count,
+                           uint8_t *selected_edges) {
   build_forest_adjacency(workspace, graph, forest_edges, forest_count);
   int32_t node_count = graph->detector_count + 1;
   int32_t boundary_node = graph->detector_count;
+  int32_t deepest = 0;
   for (int32_t start = 0; start < node_count; ++start) {
     if (workspace->is_visited[start]) {
       continue;
@@ -1117,9 +1255,14 @@ static void peel_forest(struct workspace *workspace,
                                      boundary_node)) {
       root = boundary_node;
     }
-    peel_tree(workspace, component_count, root, residual_syndrome,
-              boundary_node, selected_edges);
+    int32_t depth = peel_tree(workspace, component_count, root,
+                              residual_syndrome, boundary_node,
+                              selected_edges);
+    if (depth > deepest) {
+      deepest = depth;
+    }
   }
+  return deepest;
 }
 
 int32_t union_find_decode(
@@ -1129,16 +1272,20 @@ int32_t union_find_decode(
     uint8_t *interval_is_closed, int64_t *interval_lower_tick,
     int64_t *interval_upper_tick, int32_t *contact_edges,
     int32_t *contact_count, int32_t *forest_edges, int32_t *forest_count,
-    int32_t *step_edge_counts, int32_t *step_hop_counts, int32_t *step_count) {
+    int32_t *step_edge_counts, int32_t *step_hop_counts,
+    int64_t *step_growth_ticks, uint8_t *step_fusion_kinds,
+    int32_t *step_count, int32_t *forest_depth) {
   struct graph_arrays graph;
   graph.detector_count = detector_count;
   graph.edge_count = edge_count;
   graph.endpoint_a = endpoint_a;
   graph.endpoint_b = endpoint_b;
   graph.length_half_ticks = length_half_ticks;
+  graph.logical_parity = NULL;
   *contact_count = 0;
   *forest_count = 0;
   *step_count = 0;
+  *forest_depth = 0;
   struct workspace workspace;
   if (!take_workspace(&workspace, detector_count + 1, edge_count)) {
     release_workspace(&workspace);
@@ -1151,15 +1298,192 @@ int32_t union_find_decode(
   int32_t status = grow_clusters(
       &workspace, &graph, interval_is_closed, interval_lower_tick,
       interval_upper_tick, contact_edges, contact_count, step_edge_counts,
-      step_hop_counts, step_count);
+      step_hop_counts, step_growth_ticks, step_fusion_kinds, step_count);
   if (status != union_find_ok) {
     release_workspace(&workspace);
     return status;
   }
   *forest_count = contact_forest(&workspace, &graph, contact_edges,
                                  *contact_count, forest_edges);
-  peel_forest(&workspace, &graph, residual_syndrome, forest_edges,
-              *forest_count, selected_edges);
+  *forest_depth = peel_forest(&workspace, &graph, residual_syndrome,
+                              forest_edges, *forest_count, selected_edges);
   release_workspace(&workspace);
   return union_find_ok;
+}
+
+/* Every edge the decode closed fuses its clusters again at its logical
+ * parity, so the walk parities stand before the growth goes on. A
+ * closed edge that already completes an odd walk is a gap of zero. */
+static void fuse_closed_edges(struct workspace *workspace,
+                              const struct graph_arrays *graph,
+                              const uint8_t *interval_is_closed) {
+  for (int32_t edge = 0; edge < graph->edge_count; ++edge) {
+    if (!interval_is_closed[edge]) {
+      continue;
+    }
+    int32_t node_a =
+        endpoint_node(graph->endpoint_a[edge], graph->detector_count);
+    int32_t node_b =
+        endpoint_node(graph->endpoint_b[edge], graph->detector_count);
+    uint8_t parity = edge_parity(graph, edge);
+    fuse_clusters(workspace, node_a, node_b, parity);
+  }
+}
+
+/* The contacts of one batch that joined two clusters, the ones a
+ * cluster identifier floods across; an edge that closed inside one
+ * cluster moved nothing. */
+static int32_t fused_contacts(const struct workspace *workspace,
+                              int32_t contact_count, int32_t *fused) {
+  int32_t fused_count = 0;
+  for (int32_t position = 0; position < contact_count; ++position) {
+    int32_t edge = workspace->sorted_contacts[position];
+    if (workspace->frozen_root_a[edge] == workspace->frozen_root_b[edge]) {
+      continue;
+    }
+    fused[fused_count] = edge;
+    fused_count += 1;
+  }
+  return fused_count;
+}
+
+/* One event of the extra growth: the next closing, or the growth
+ * limit when that comes first, in which case nothing closes. */
+static int32_t grow_on_once(struct workspace *workspace,
+                            const struct graph_arrays *graph,
+                            int32_t working_count, int64_t elapsed_ticks,
+                            int32_t reaches_a_closing,
+                            uint8_t *interval_is_closed,
+                            int64_t *interval_lower_tick,
+                            int64_t *interval_upper_tick,
+                            int32_t *fusion_kind, int32_t *hops) {
+  int32_t status = advance_intervals(
+      workspace, graph, working_count, elapsed_ticks, interval_is_closed,
+      interval_lower_tick, interval_upper_tick);
+  if (status != union_find_ok) {
+    return status;
+  }
+  int32_t contact_count = 0;
+  if (reaches_a_closing) {
+    contact_count = collect_closing_batch(workspace, working_count,
+                                         elapsed_ticks,
+                                         workspace->sorted_contacts, 0);
+  }
+  *fusion_kind = fuse_contact_batch(workspace, graph,
+                                    workspace->sorted_contacts, 0,
+                                    contact_count);
+  int32_t fused_count =
+      fused_contacts(workspace, contact_count, workspace->merge_scratch);
+  *hops = fused_flood_hops(workspace, graph, interval_is_closed,
+                           workspace->merge_scratch, 0, fused_count);
+  return union_find_ok;
+}
+
+/* Grow every cluster and the boundary on from where the decode stopped,
+ * to the growth limit or the first odd closed walk (Kishi et al.
+ * arXiv:2602.03336 Algorithm 1). The loop is the decode's: an event
+ * jumps to the next closing and is charged as one step. */
+static int32_t grow_on(struct workspace *workspace,
+                       const struct graph_arrays *graph,
+                       int64_t growth_limit_ticks, uint8_t *interval_is_closed,
+                       int64_t *interval_lower_tick,
+                       int64_t *interval_upper_tick,
+                       int32_t *step_edge_counts, int32_t *step_hop_counts,
+                       int64_t *step_growth_ticks, uint8_t *step_fusion_kinds,
+                       int32_t *step_count, int64_t *joined_at_tick) {
+  int64_t grown_ticks = 0;
+  int32_t event_count = 0;
+  int32_t active_count =
+      initial_active_roots(workspace, graph->detector_count, 1);
+  while (active_count > 0 && grown_ticks < growth_limit_ticks) {
+    int32_t stamp = event_count + 1;
+    int32_t working_count = collect_working_edges(
+        workspace, interval_is_closed, active_count, stamp);
+    sort_edges(orders_by_edge, graph->length_half_ticks,
+               workspace->working_edges, workspace->working_scratch,
+               working_count);
+    freeze_roots(workspace, graph, working_count);
+    int64_t elapsed_ticks = 0;
+    int32_t candidate_count =
+        closing_candidates(workspace, working_count, interval_lower_tick,
+                           interval_upper_tick, &elapsed_ticks);
+    if (candidate_count == 0) {
+      return union_find_ok;
+    }
+    if (elapsed_ticks <= 0) {
+      return union_find_no_positive_growth;
+    }
+    int64_t ticks_left = growth_limit_ticks - grown_ticks;
+    int32_t reaches_a_closing = elapsed_ticks <= ticks_left;
+    if (!reaches_a_closing) {
+      elapsed_ticks = ticks_left;
+    }
+    int32_t fusion_kind = fusion_none;
+    int32_t hops = 0;
+    int32_t status = grow_on_once(
+        workspace, graph, working_count, elapsed_ticks, reaches_a_closing,
+        interval_is_closed, interval_lower_tick, interval_upper_tick,
+        &fusion_kind, &hops);
+    if (status != union_find_ok) {
+      return status;
+    }
+    grown_ticks += elapsed_ticks;
+    event_count += 1;
+    if (event_count > graph->edge_count + 1) {
+      return union_find_growth_bound_exceeded;
+    }
+    step_edge_counts[event_count - 1] = working_count;
+    step_growth_ticks[event_count - 1] = elapsed_ticks;
+    step_fusion_kinds[event_count - 1] = (uint8_t)fusion_kind;
+    step_hop_counts[event_count - 1] = hops;
+    *step_count = event_count;
+    if (workspace->found_odd_walk) {
+      *joined_at_tick = grown_ticks;
+      return union_find_ok;
+    }
+    active_count =
+        refresh_active_roots(workspace, active_count, event_count + 1);
+  }
+  return union_find_ok;
+}
+
+int32_t union_find_extra_growth(
+    int32_t detector_count, int32_t edge_count, const int32_t *endpoint_a,
+    const int32_t *endpoint_b, const int64_t *length_half_ticks,
+    const uint8_t *logical_parity, const uint8_t *residual_syndrome,
+    int64_t growth_limit_ticks, uint8_t *interval_is_closed,
+    int64_t *interval_lower_tick, int64_t *interval_upper_tick,
+    int32_t *step_edge_counts, int32_t *step_hop_counts,
+    int64_t *step_growth_ticks, uint8_t *step_fusion_kinds,
+    int32_t *step_count, int64_t *joined_at_tick) {
+  struct graph_arrays graph;
+  graph.detector_count = detector_count;
+  graph.edge_count = edge_count;
+  graph.endpoint_a = endpoint_a;
+  graph.endpoint_b = endpoint_b;
+  graph.length_half_ticks = length_half_ticks;
+  graph.logical_parity = logical_parity;
+  *step_count = 0;
+  *joined_at_tick = union_find_not_joined;
+  struct workspace workspace;
+  if (!take_workspace(&workspace, detector_count + 1, edge_count)) {
+    release_workspace(&workspace);
+    return union_find_out_of_memory;
+  }
+  workspace.every_cluster_grows = 1;
+  reset_clusters(&workspace, detector_count, residual_syndrome);
+  link_edge_entries(&workspace, &graph);
+  fuse_closed_edges(&workspace, &graph, interval_is_closed);
+  int32_t status = union_find_ok;
+  if (workspace.found_odd_walk) {
+    *joined_at_tick = 0;
+  } else {
+    status = grow_on(&workspace, &graph, growth_limit_ticks,
+                     interval_is_closed, interval_lower_tick,
+                     interval_upper_tick, step_edge_counts, step_hop_counts,
+                     step_growth_ticks, step_fusion_kinds, step_count,
+                     joined_at_tick);
+  }
+  release_workspace(&workspace);
+  return status;
 }

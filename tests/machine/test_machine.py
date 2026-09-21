@@ -40,6 +40,7 @@ import decsim.experiments.experiment as experiment
 import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
 import decsim.observe.settings as observe_settings
+import decsim.qpu.code_geometry as code_geometry
 import decsim.qpu.cycle_clock as cycle_clock
 import decsim.qpu.magic_state_factories as magic_state_factories
 import decsim.qpu.round_policies as round_policies
@@ -65,6 +66,8 @@ THIS_FILE = pathlib.Path(__file__)
 TESTS_DIRECTORY = THIS_FILE.parents[1]
 CONFIGS = TESTS_DIRECTORY.parent / "configs"
 CYCLE_TICKS = config.microseconds_to_ticks(1.0)
+# the syndrome bits of one round of a distance-three patch
+BITS_PER_ROUND = 8
 # the decoder engines of these runs: 250 MHz and 100 MHz
 FAST_ENGINE_CLOCK = config.Clock(4000)
 ENGINE_CLOCK = config.Clock(10_000)
@@ -122,7 +125,8 @@ class FakeWeakDecoder(decoder_module.DecoderBase):
 def test_readouts_reach_the_receiver_in_cycle_order_cycle_ticks_apart():
     engine = engine_module.Engine()
     receiver = RecordingReceiver(engine)
-    device = syndrome_devices.TimingOnlyDevice()
+    code = code_geometry.SurfaceCodeModel(distance=3)
+    device = syndrome_devices.TimingOnlyDevice(code)
     cycle_clock_domain = config.Clock(CYCLE_TICKS)
     qpu = cycle_clock.QPUDevice(engine, device, cycle_clock_domain)
     runtime = FinishingRuntime(qpu)
@@ -815,11 +819,6 @@ class OutsideCodeCard:
     def buffer_rounds(self):
         return 0
 
-    def buffering_floor(self):
-        return (0, 0)
-
-    window_floor_justification = None
-
     def spatial_nodes(self, num_patches):
         return 4 * num_patches
 
@@ -1113,7 +1112,10 @@ def test_a_full_syndrome_buffer_stalls_the_controller_instead_of_dropping():
     seven at 16 us and round 8 waits past 17 us for the first window's
     input to land instead of being dropped.
     """
-    seven_rounds = syndrome_buffer_settings.SyndromeBufferSettings(rounds=7)
+    seven_rounds_bits = 7 * BITS_PER_ROUND
+    seven_rounds = syndrome_buffer_settings.SyndromeBufferSettings(
+        bits=seven_rounds_bits
+    )
     machine = declared_run.weak_only_run(
         rounds=12, weak_syndrome_buffer=seven_rounds
     )

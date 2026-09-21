@@ -66,6 +66,7 @@ def window_of(faults, detector_count):
         detector_ids=detector_ids,
         detector_coordinates=None,
         defect_positions=defect_positions,
+        first_commit_round=1,
         graphlike_faults=faults,
         physical_faults=None,
         physical_to_graphlike_detector_projection=None,

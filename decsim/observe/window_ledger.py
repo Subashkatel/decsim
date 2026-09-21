@@ -3,8 +3,8 @@
 A listener on the committer's window_committed(window, contribution) and
 the forward strong window's window_absorbed(key, owner_key); it holds
 the Window records the plan laid out at build, so the stamps a window
-carries (slice 5's status-on-the-record rule) are read here, never from
-the planner. The switching study's final rows (run_views.py) come from
+carries (a window's status lives on its record) are read here, never
+from the planner. The switching study's final rows (run_views.py) come from
 what it heard.
 """
 

@@ -261,6 +261,42 @@ def test_a_pinned_face_carries_the_neighbours_committed_seam():
     assert (attribution.first_round, attribution.last_round) == (4, 9)
 
 
+def test_a_face_pinned_on_its_own_window_folds_only_the_crossing_commit():
+    """At a back-to-back seam the near face is the window's own commit.
+
+    The strong redo decodes that window's rounds again, so the only part
+    of its weak commit it may take is the faults crossing behind its
+    first round; folding the whole commit would count the rounds it
+    decodes again twice (Bombin et al. 2303.04846 lines 775-788, Toshio
+    et al. 2510.25222 lines 1248-1250).
+    """
+    engine, operation, _source, courier, _recording = _pinned_courier()
+    weak_window = courier.planner.windows_by_key[(1, 1)]
+    request_key = window_records.DecoderRequestKey(
+        1, 1, window_records.DecoderTier.WEAK, 0
+    )
+    # the whole commit flips detectors on rounds 4, 5 and 6; of those,
+    # detector 24 comes of a fault that also flips detector 17 on round
+    # 3, the round before the window's first
+    whole = window_records.DependencyResidual(detector_ids=(24, 33, 41))
+    crossing_residual = window_records.DependencyResidual(detector_ids=(17, 24))
+    weak_window.crossing_commit = window_records.CrossingCommit(
+        crossing_residual, (1,)
+    )
+    courier.send(weak_window, operation, whole, source_request_key=request_key)
+    engine.run()
+    strong_window = _strong_window_of_the_pin()
+    model = _strong_model()
+    strong_request_key = window_records.DecoderRequestKey(
+        1, 1, window_records.DecoderTier.STRONG, 3
+    )
+    courier.pin_strong_face(
+        (1, 1), strong_window, model, operation, strong_request_key
+    )
+    engine.run()
+    assert dict(strong_window.boundary_in) == {4: [1]}
+
+
 def test_a_face_pinned_on_a_window_that_has_not_committed_is_refused():
     engine, operation, _source, courier, _recording = _pinned_courier()
     del engine

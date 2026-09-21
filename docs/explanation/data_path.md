@@ -76,6 +76,16 @@ For a distance 3 rotated surface code that is 8 bits per round, the
 `d*d - 1` stabilizers of the patch (`decsim/qpu/code_geometry.py`,
 `syndrome_bits_per_round`).
 
+A round's width is not one number over a whole stream. The last round of
+a memory experiment also reads the patch's `d*d` data qubits, so it
+carries `2*d*d - 1` bits: 17 at distance 3, 49 at distance 5. A hop that
+carries detection events instead of raw outcomes sees `(d*d - 1)/2` of
+them on the first round, `d*d - 1` in the bulk and `3*(d*d - 1)/2` on
+the last, since the first round has no round before it to difference
+against and the last closes on the data readout
+(`tests/links/test_data_through.py` derives each count from the circuit).
+A bounded link therefore serializes the last round longer than the rest.
+
 Move, off board, and the landing is also a copy into the controller's
 intake register. Default latency 0.15 microseconds. The hop is modelled
 on measurement signals classified into bits and then sent to a
@@ -95,11 +105,12 @@ The packed round into the weak syndrome buffer. Ends: `controller` to
 by the weak syndrome buffer's own incoming port
 (`decsim/syndrome_buffer/weak_syndrome_round_receiver.py`), which stores the round with
 the landing tick as its publication tick, narrates the copy and the
-intake, and announces the published round to the window manager. That
-end also answers for the room, counting the rounds it holds and the
-writes still in flight, and the controller's sender reserves that room
-before the round leaves. The transmitter hears the landing for its count
-of the rounds on their route and for nothing else.
+intake, and announces the published round to the window manager. The
+same end decides whether the buffer has space. It counts the bits
+already stored and the bits reserved for the writes still crossing the
+link, and the controller's sender reserves the round's bits before it
+leaves. The transmitter is told when the round lands, and only so that
+it can keep its own count of the rounds in flight.
 
 What crosses: one **packed round**, every fragment that leaves the
 controller. The bit count is `PackedRound.wire_bits`, computed in
@@ -119,14 +130,17 @@ is the right one.
 
 ### 3. `controller_to_strong_buffer`
 
-The same packed round into the strong syndrome buffer, in parallel. Ends:
-`controller` to `syndrome_buffer`; the send is executed by the
-controller's round sender (`decsim/controller/syndrome_round_sender.py`), and the
-landing is handled by the room side
-(`decsim/syndrome_buffer/strong_syndrome_round_receiver.py`), which reserves the
-room the round will take before it leaves and then stores it with the
-landing tick, or drops it at the door when its operation closed while it
-crossed.
+A strong-only run's packed round into the strong syndrome buffer, its
+one transport. Ends: `controller` to `syndrome_buffer`; the send is
+executed by the controller's round sender
+(`decsim/controller/syndrome_round_sender.py`), and the landing is
+handled by the room side
+(`decsim/syndrome_buffer/strong_syndrome_round_receiver.py`), which
+reserves the room the round will take before it leaves and then stores
+it with the landing tick, or drops it at the door when its operation
+closed while it crossed. A switching run sends nothing on this hop: its
+rounds stay in the weak syndrome buffer, and the strong side gets the
+escalated window's rounds on hop 5.
 
 What crosses: the same round, the same bit count.
 
@@ -149,7 +163,10 @@ A window's rounds into a weak unit's memory. Ends: `syndrome_buffer` to
 What crosses: the whole input of one decode job, every payload round of
 the window at once. The bit count is `job.payload_bits()`
 (`decsim/records/decoding.py`). The same path also carries a
-timing-only feedback-memory round, which is sent by the weak syndrome buffer on the
+timing-only feedback-memory round. That is an idle patch's round: it
+carries no syndrome a decoder reads, and it travels so that the buffer's
+slot, the link and the decoder's stream stage are charged for it. It is
+sent by the weak syndrome buffer on the
 controller's ask and lands at the decoders' own end for it
 (`decsim/decoders/memory_rounds.py`): nothing is deposited in a unit's
 memory, and what the end does is count the round its stream stage was
@@ -170,19 +187,29 @@ access the data stored on-chip"). Default latency 2.0 microseconds.
 
 ### 5. `weak_decoder_to_strong_decoder`
 
-An escalation. Ends: both `decoders`; the send is executed by
-`decsim/decoders/decoder_output.py`, asked for by
-`decsim/escalation/strong_redecode.py`.
+An escalation. Ends: `decoders` to `syndrome_buffer`; the send is
+executed by `decsim/decoders/decoder_output.py`, asked for by
+`decsim/escalation/strong_redecode.py`, and the region's landing is
+handled by the room side
+(`decsim/syndrome_buffer/strong_syndrome_round_receiver.py`).
 
-What crosses: a selection, not data. Which window escalates, and nothing
-else. On the default card the transfer carries no stated payload at all;
-on the bounded card it is charged one bit.
+What crosses: first a selection, which window escalates and nothing
+else, with no payload; then the strong window's rounds, read out of the
+weak syndrome buffer, `r_com + 2 r_buf` of them under Toshio's
+assumption less any the strong side already has, at the width each
+round left the controller (`EscalatedRegion.wire_bits`). A window whose
+rounds are all measured at the verdict carries them with the selection;
+a forward window carries them at the far commit, when its extent is
+known, and a terminal one, a window at the end of the stream whose last
+rounds are still being measured, carries the rest as they arrive (Toshio
+arXiv:2510.25222 lines 1247 to 1250: the syndrome data of `r_strong`
+rounds is assigned to the strong decoder at the switch, after both
+boundaries are determined).
 
-Move, off board. Default latency 0.5 microseconds. This is the one card
-number in the fabric that names no paper: its source string reads
-"repository weak-to-strong model choice". No system read during the
-design work had a weak-to-strong data handoff, because the strong tier
-takes its data from the store rather than from the weak decoder.
+Move, off board, with a copy into the strong syndrome buffer at the
+landing. Default latency 0.5 microseconds. This is the one card number
+in the fabric that names no paper: its source string reads "repository
+weak-to-strong model choice".
 
 ### 6. `strong_buffer_to_strong_decoder`
 
@@ -196,8 +223,9 @@ them under Toshio's assumption, in one transfer. The bit count is again
 
 Move, on board, with the same copy into the unit's memory. Default
 latency 2.0 microseconds. It is on board rather than off board because
-the write into the strong syndrome buffer already crossed boards at hop 3: the strong syndrome buffer sits
-beside the strong decoder.
+the rounds already crossed boards into the strong syndrome buffer, at
+hop 3 or hop 5: the strong syndrome buffer sits beside the strong
+decoder.
 
 ### 7. `decoder_to_decoder`
 
@@ -210,7 +238,8 @@ decoders; what the ends name is which package holds the objects at them
 ([The design decisions](decisions.md) D12).
 
 What crosses: the residual defects on the seam layer the two windows
-share. Under the default `dense_seam_mask` row of `BOUNDARY_PAYLOADS`
+share, which are the detection events the committed correction leaves
+unexplained at the window's edge (Skoric's artificial defects). Under the default `dense_seam_mask` row of `BOUNDARY_PAYLOADS`
 the cost is the seam layer's whole detector count, `d*d - 1`, because
 both compiled implementations carry a mask whatever the noise did. Under
 `sparse_seam_list` it is the flipped detectors and their index width,
@@ -240,7 +269,16 @@ is a different card.
 
 Both are moves. The weak one is on board, because the frame is the
 controller's; the strong one is off board, because the strong decoder is
-not. Default latency 1.0 microseconds each.
+not. Default latency 1.0 microseconds each. The strong answer's way home
+runs through the chip's window side before it leaves: the decoder
+manager returns the result to the verdict (`accept_strong_result` in
+`decsim/windows/window_commits.py`), the committer publishes it, and
+the chip's decoder output executes the send; the one card prices the
+whole way from the strong decoder to the frame. An escalated window's
+weak answer never reaches the frame (the verdict escalates instead of
+publishing, `_apply_verdict` in the same file), so the frame takes one
+correction per window and no difference between the two answers is
+formed.
 
 ### 10. `frame_to_controller`
 
@@ -265,10 +303,12 @@ by `decsim/controller/instruction_output.py`.
 What crosses: one instruction, no data payload. The card charges one
 128-bit control-processor instruction word, which is QubiC's width
 (Fruitwala arXiv:2404.15260, Sec. III and IV). The decision-to-pulse
-cost is charged separately (`decision_to_pulse_cycles`, which
-`decsim/controller/instruction_output.py` sources to QICK's 42
-nanosecond conditional jump and 52 nanosecond next pulse,
-arXiv:2110.00557 Table II). Move, off board, default latency 0.15 microseconds.
+cost is charged separately (`decision_to_pulse_cycles`): the control
+processor's issue pipeline from the decision at the core to the pulse
+trigger, 8 cycles traced on QubiC's core in `configs/reference.yaml`,
+against QICK's measured 16 clocks for the conditional evaluation and
+the jump and 20 for the next pulse (arXiv:2110.00557 lines 893-900).
+Move, off board, default latency 0.15 microseconds.
 
 ## Why the copies are where they are
 

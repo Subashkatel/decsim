@@ -12,6 +12,7 @@ other.
 """
 
 import dataclasses
+import math
 import pathlib
 import statistics
 from typing import Optional
@@ -23,6 +24,7 @@ import stim
 import decsim.build.escalation as escalation_build
 import decsim.collect as collect
 import decsim.config as config_module
+import decsim.decoders.decode_queue as decode_queue
 import decsim.decoders.decoder_output as decoder_output
 import decsim.observe.observation as observation_module
 import decsim.records.identity as identity_records
@@ -45,12 +47,13 @@ POINTS = (
     "csb_stall_per_round",
     # the window's first round readable -> its last (waiting on the QPU)
     "buffer_fill",
-    # the committing decode's input landed in its unit's memory -> the
-    # first tick it may compute: the dependency wait, for the
-    # predecessor's boundary and for the escalation message beside the
-    # input hop, and zero when nothing was owed at the landing. An input
-    # the decode found already there starts this at the tick a unit took
-    # the decode instead
+    # the dependency wait around the committing decode's own hop: from
+    # where its path started, the dispatch or the verdict that escalated
+    # the window, to the first tick it may compute, less the input hop
+    # itself. It is the wait for the escalated rounds to land in the
+    # strong store before the input hop, the predecessor's boundary and
+    # the escalation's selection after it, and zero when nothing was
+    # owed
     "dep_block",
     # that first startable tick -> the compute started: the wait for the
     # unit's own compute, busy with another decode (gem5's fuBusy)
@@ -82,8 +85,12 @@ POINTS = (
     # escalated it: the weak attempt whose result did not commit, zero
     # for a window the first decode committed
     "weak_attempt",
-    # weak decoder -> strong decoder, the escalation hop, zero for a
-    # window that did not escalate
+    # weak decoder -> strong decoder, the escalation hop: from its first
+    # transfer's send to its last transfer's delivery, the selection and
+    # then the rounds the strong store lacked, which the strong input
+    # hop waits for; zero for a window that did not escalate. Under
+    # run_both_at_once the rounds cross at the weak dispatch and the
+    # selection at the verdict, and the span covers both
     "escalation_link_per_window",
     # the decode's end -> the boundary readable in the next window
     "dd_per_window",
@@ -132,6 +139,25 @@ class ShotMeasurement:
     throughput_windows_per_us: float
     throughput_rounds_per_us: float
     max_queued_windows: int
+    # the deepest each tier's own ready queue got, in jobs: the max
+    # backlog per decoder instance DART-Q reports (2605.09142 lines
+    # 1101-1109); zero for a tier the run does not have
+    weak_queue_max: int
+    strong_queue_max: int
+    # each tier's time-weighted fraction of busy units, Triage's
+    # utilization rate (2605.04459 lines 1024-1031)
+    weak_busy_fraction: float
+    strong_busy_fraction: float
+    # the windows the strong tier committed, the rounds its decodes read
+    # and their mean service: the report forms Toshio's Theorem 1 bound
+    # on that service per sweep point from the first two (2510.25222
+    # lines 1270-1300)
+    escalated_windows: int
+    strong_decoded_rounds: int
+    strong_service_mean_us: float
+    # Skoric's least count of parallel decoding processes, ceil(2 tau_W
+    # / ((n_com + n_W) tau_rd)) (2209.08552 lines 429-438)
+    parallel_processes_needed: int
     tesseract_windows_checked: int  # referee re-decodes (0 = referee off)
     # referee reached a different owned observable contribution
     tesseract_window_disagreements: int
@@ -209,10 +235,13 @@ def link_totals(traffic: dict) -> dict:
 
 
 def link_delay_by_window(transfers: list) -> dict:
-    """Ticks from send to delivery by (path, window key), summed per key.
+    """Ticks from the first send to the last delivery by (path, window key).
 
-    A window is named by its operation and its index, never by its index
-    alone: the window record's own key is (operation_id, window_index)
+    A hop's transfers for one window can overlap, as the escalation's
+    selection and its rounds do, so the span is what the window waited
+    on the hop and a sum would count the overlap twice. A window is
+    named by its operation and its index, never by its index alone: the
+    window record's own key is (operation_id, window_index)
     (records/windows.py:79-82 and 144-146), so a workload of several
     streams holds one window 3 per stream and a key without the
     operation would sum every stream's window 3 into one entry. gem5
@@ -224,7 +253,8 @@ def link_delay_by_window(transfers: list) -> dict:
     bucket, commitStats[tid] and thread[tid]->threadStats
     (tmp/resources/gem5/src/cpu/o3/cpu.cc:1156-1174).
     """
-    delay = {}
+    first_send = {}
+    last_delivery = {}
     for row in transfers:
         attribution = row["attribution"]
         recorded_operation = attribution["operation_id"]
@@ -232,8 +262,15 @@ def link_delay_by_window(transfers: list) -> dict:
             recorded_operation
         )
         key = (row["path"], operation_id, attribution["window_id"])
-        transfer_ticks = row["delivery_ticks"] - row["send_ticks"]
-        delay[key] = delay.get(key, 0) + transfer_ticks
+        send = row["send_ticks"]
+        earliest_send = first_send.get(key, send)
+        first_send[key] = min(earliest_send, send)
+        delivery = row["delivery_ticks"]
+        latest_delivery = last_delivery.get(key, delivery)
+        last_delivery[key] = max(latest_delivery, delivery)
+    delay = {}
+    for key, send in first_send.items():
+        delay[key] = last_delivery[key] - send
     return delay
 
 
@@ -381,7 +418,9 @@ def window_points_us(
     The decode's own time and the time it waited are two points, not
     one: a window's service is what its compute took on the unit, and
     the park before that compute is two points by cause. dep_block is
-    the dependency wait, from the input landing in the unit's memory to
+    the dependency wait: from the verdict to the input hop's send, which
+    is a strong decode waiting for its escalated rounds to land in the
+    strong store, and from the input landing in the unit's memory to
     the first tick the decode may start, which is where the
     predecessor's boundary arrived and is the landing itself when
     nothing was owed. compute_wait is the rest, from that tick to the
@@ -413,7 +452,10 @@ def window_points_us(
     attempt_end = _attempt_end_ticks(window, decode, first_dispatch)
     input_key = (input_path, window_id, decode.run_sequence)
     input_ticks, input_landed = input_hop.get(input_key, (0, attempt_end))
+    input_sent = input_landed - input_ticks
     startable = _startable_ticks(decode, input_landed)
+    park = _span_microseconds(startable, input_landed)
+    rounds_wait = _span_microseconds(input_sent, attempt_end)
     confidence_ticks = _confidence_ticks(window, decode)
     last_required_send = qpu_send[last_required_round]
     first_required_send = qpu_send[window.start_round]
@@ -421,7 +463,7 @@ def window_points_us(
         "buffer_fill": _span_microseconds(
             window.t_data_complete, window.t_first_round
         ),
-        "dep_block": _span_microseconds(startable, input_landed),
+        "dep_block": rounds_wait + park,
         "compute_wait": _span_microseconds(
             decode.compute_start_ticks, startable
         ),
@@ -647,7 +689,12 @@ def _measurement(
     wall_seconds: float,
     trace_path: Optional[str],
 ) -> ShotMeasurement:
-    """Read every number of one completed shot off its records."""
+    """Read every number of one completed shot off its records.
+
+    It stays whole past the size prompt: each number is read once, named,
+    and placed in the record, top to bottom, and a split would put the
+    reading and the placing of one number in two places.
+    """
     samples = collect_samples(observation, result)
     verdicts = _logical_verdicts(observation, result)
     throughput = _throughput_per_microsecond(
@@ -658,6 +705,12 @@ def _measurement(
     load = chain_load(samples, settings, distance, round_period_us)
     algorithm = active_decoder_kind(settings)
     queued = _max_queued_windows(observation)
+    primary_tier = escalation_build.primary_tier(settings.escalation)
+    pools = _pool_measures(observation, primary_tier)
+    strong = _strong_decodes(observation)
+    processes = parallel_processes_needed(
+        samples, settings, distance, round_period_us
+    )
     totals = link_totals(result.link_traffic)
     means = _means(samples)
     maxes = _maxes(samples)
@@ -678,6 +731,14 @@ def _measurement(
         throughput_windows_per_us=throughput.windows_per_microsecond,
         throughput_rounds_per_us=throughput.rounds_per_microsecond,
         max_queued_windows=queued,
+        weak_queue_max=pools.weak_queue_max,
+        strong_queue_max=pools.strong_queue_max,
+        weak_busy_fraction=pools.weak_busy_fraction,
+        strong_busy_fraction=pools.strong_busy_fraction,
+        escalated_windows=strong.windows,
+        strong_decoded_rounds=strong.rounds,
+        strong_service_mean_us=strong.service_mean_us,
+        parallel_processes_needed=processes,
         tesseract_windows_checked=referee.windows_checked,
         tesseract_window_disagreements=referee.window_disagreements,
         link_totals=totals,
@@ -706,6 +767,7 @@ class _CommittedDecode:
     dispatch_ticks: int  # a unit took this decode
     ready_ticks: Optional[int]  # it first may compute, whatever the unit did
     run_sequence: int  # the run ordinal of the request it committed
+    round_count: int  # the rounds it read, its job's own count
 
 
 @dataclasses.dataclass(frozen=True)
@@ -731,6 +793,25 @@ class _RefereeCounts:
 
     windows_checked: int
     window_disagreements: int
+
+
+@dataclasses.dataclass(frozen=True)
+class _PoolMeasures:
+    """Each tier's deepest ready queue and busy fraction over the shot."""
+
+    weak_queue_max: int
+    strong_queue_max: int
+    weak_busy_fraction: float
+    strong_busy_fraction: float
+
+
+@dataclasses.dataclass(frozen=True)
+class _StrongDecodes:
+    """What the strong tier committed over the shot."""
+
+    windows: int
+    rounds: int
+    service_mean_us: float
 
 
 def _logical_verdicts(
@@ -793,6 +874,104 @@ def _max_queued_windows(
     return max(depths, default=0)
 
 
+def _pool_measures(
+    observation: observation_module.Observation, primary_tier: str
+) -> _PoolMeasures:
+    """Each pool's own queue peak and busy fraction, by the tier's name.
+
+    The plan's windows queue in the default pool and a strong re-decode
+    in the strong pool (decode_queue.POOL_BY_JOB_KIND), so the default
+    pool's numbers are the primary tier's: the weak tier's on a
+    weak-primary run, the strong tier's under strong_only, where the
+    weak columns read zero; a run without a pool reads zero for it.
+    """
+    peaks = observation.queue_depth.peak_by_pool
+    utilization = observation.decoder_utilization.result()
+    busy = utilization["per_pool_busy_fraction"]
+    default_queue_max = peaks.get(decode_queue.DEFAULT_POOL, 0)
+    default_busy_fraction = busy.get(decode_queue.DEFAULT_POOL, 0.0)
+    if primary_tier == window_records.DecoderTier.STRONG.value:
+        return _PoolMeasures(
+            weak_queue_max=0,
+            strong_queue_max=default_queue_max,
+            weak_busy_fraction=0.0,
+            strong_busy_fraction=default_busy_fraction,
+        )
+    weak_queue_max = default_queue_max
+    strong_queue_max = peaks.get(decode_queue.STRONG_POOL, 0)
+    weak_busy_fraction = default_busy_fraction
+    strong_busy_fraction = busy.get(decode_queue.STRONG_POOL, 0.0)
+    return _PoolMeasures(
+        weak_queue_max=weak_queue_max,
+        strong_queue_max=strong_queue_max,
+        weak_busy_fraction=weak_busy_fraction,
+        strong_busy_fraction=strong_busy_fraction,
+    )
+
+
+def _strong_decodes(
+    observation: observation_module.Observation,
+) -> _StrongDecodes:
+    """The windows the strong tier committed, their rounds, their service.
+
+    Toshio's Theorem 1 bounds the strong decode time by the round time
+    times d over r_strong over the switching rate (2510.25222 lines
+    1270-1300); the report forms that bound per sweep point from these
+    two sums, and the mean service here is the time it bounds.
+    """
+    stages = observation.stages
+    windows = 0
+    rounds = 0
+    services = []
+    for frame_record in observation.frame_corrections.committed:
+        tier = window_records.DecoderTier(frame_record.tier)
+        if tier is not window_records.DecoderTier.STRONG:
+            continue
+        decode = _committed_decode(stages, frame_record)
+        windows += 1
+        rounds += decode.round_count
+        service = _span_microseconds(
+            decode.done_ticks, decode.compute_start_ticks
+        )
+        services.append(service)
+    service_mean_us = _mean_or_zero(services)
+    return _StrongDecodes(windows, rounds, service_mean_us)
+
+
+def parallel_processes_needed(
+    samples: dict,
+    settings: machine_settings.MachineSettings,
+    distance: int,
+    round_period_us: float,
+) -> int:
+    """Skoric's least count of parallel decoding processes for no backlog.
+
+    N_par >= 2 tau_W / ((n_com + n_W) tau_rd): a window's decoding time
+    twice, over the rounds its two layers commit (2209.08552 lines
+    429-438; NVQLink states the same as its equation 2, 2510.25213
+    lines 1625-1631). Layer A commits n_com rounds and layer B its
+    whole window, and n_W is the window with a buffer on each side,
+    n_com + 2 n_buf, "nW = 3w" at the paper's sizes (lines 388-390).
+    tau_W is this shot's mean service and the sizes are the window
+    scheme's, d when null. It is the count the parallel window scheme
+    needs; the serial chain's own condition is chain_load.
+    """
+    service_us = _mean_or_zero(samples["service"])
+    commit_rounds = settings.windows.commit_rounds
+    if commit_rounds is None:
+        commit_rounds = distance
+    buffer_rounds = settings.windows.buffer_rounds
+    if buffer_rounds is None:
+        buffer_rounds = distance
+    both_buffers_round_count = 2 * buffer_rounds
+    window_round_count = commit_rounds + both_buffers_round_count
+    committed_round_count = commit_rounds + window_round_count
+    committed_rounds_us = committed_round_count * round_period_us
+    both_layers_service_us = 2 * service_us
+    processes = both_layers_service_us / committed_rounds_us
+    return math.ceil(processes)
+
+
 def _span_microseconds(end_ticks: int, start_ticks: int) -> float:
     span_ticks = end_ticks - start_ticks
     return ticks_to_microseconds(span_ticks)
@@ -829,7 +1008,18 @@ def _committed_decode(stages, frame_record) -> _CommittedDecode:
     dispatch = _dispatch_ticks(records, first)
     ready = _ready_ticks(records)
     run_sequence = frame_record.run_sequence
-    return _CommittedDecode(tier, first, last, dispatch, ready, run_sequence)
+    rounds = _rounds_read(records)
+    return _CommittedDecode(
+        tier, first, last, dispatch, ready, run_sequence, rounds
+    )
+
+
+def _rounds_read(records: list) -> int:
+    """The rounds this decode read, as every one of its stages carries."""
+    counts = []
+    for record in records:
+        counts.append(record.round_count)
+    return max(counts, default=0)
 
 
 def _dispatch_ticks(records: list, fallback: int) -> int:

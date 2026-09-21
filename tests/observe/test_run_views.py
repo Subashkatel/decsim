@@ -33,7 +33,7 @@ class _WindowManager:
 
 
 def test_an_idle_run_has_no_ready_job_and_no_waiting_round():
-    decoders = _DecoderManager({"default": []})
+    decoders = (_DecoderManager({"default": []}),)
     windows = _WindowManager(())
 
     view = run_views.backlog_view(windows, decoders)
@@ -43,8 +43,10 @@ def test_an_idle_run_has_no_ready_job_and_no_waiting_round():
     assert view.total_rounds == 0
 
 
-def test_the_default_pool_is_the_unnamed_lane_and_others_keep_their_name():
-    decoders = _DecoderManager({"default": ["a"], "strong": ["b", "c"]})
+def test_the_default_pool_is_the_unnamed_lane_and_the_hosts_keeps_its_name():
+    chip = _DecoderManager({"default": ["a"]})
+    host = _DecoderManager({"strong": ["b", "c"]})
+    decoders = (chip, host)
     windows = _WindowManager(())
 
     view = run_views.backlog_view(windows, decoders)
@@ -54,7 +56,7 @@ def test_the_default_pool_is_the_unnamed_lane_and_others_keep_their_name():
 
 
 def test_the_rounds_are_summed_per_operation_per_patch_and_over_the_run():
-    decoders = _DecoderManager({"default": []})
+    decoders = (_DecoderManager({"default": []}),)
     windows = _WindowManager(((1, "p0", 4), (2, "p0", 3), (3, "p1", 2)))
 
     view = run_views.backlog_view(windows, decoders)
@@ -65,7 +67,7 @@ def test_the_rounds_are_summed_per_operation_per_patch_and_over_the_run():
 
 
 def test_an_observer_that_only_wants_the_depths_skips_the_rounds_scan():
-    decoders = _DecoderManager({"default": ["a"]})
+    decoders = (_DecoderManager({"default": ["a"]}),)
     windows = _WindowManager(((1, "p0", 4),))
 
     view = run_views.backlog_view(windows, decoders, include_rounds=False)

@@ -27,6 +27,8 @@ Python through the circuit_list row, on a fabric whose only priced hop
 is the decoder-to-decoder seam.
 """
 
+import math
+
 import yaml
 
 import decsim.collect as collect
@@ -34,6 +36,7 @@ import decsim.config as config_module
 import decsim.decoders.settings as decoder_settings
 import decsim.experiments.experiment as experiment
 import decsim.experiments.measure as measure
+import decsim.experiments.report as report
 import decsim.frontends.settings as workload_settings
 import decsim.links.link_profiles as link_profiles
 import decsim.pauli_frame.pauli_frame as pauli_frame_module
@@ -49,6 +52,10 @@ from tests.experiments.yaml_configs import (
     measure_point_shot,
 )
 
+# the detection events of one round of the swept distance-three patch,
+# and of its readout round, which compares the data qubits as well
+BITS_PER_ROUND = 8
+READOUT_ROUND_BITS = 12
 # every hop of the weak-only fabric at one cycle of the fridge clock
 ONE_TIER_LINKS = {
     "qpu_to_controller": {
@@ -123,21 +130,23 @@ TWO_TIER_LINKS = {
 }
 
 
-def slow_unit_shot(tmp_path, units: int):
-    """One shot of 30 rounds on `units` five-microsecond weak units."""
+def slow_unit_shot(tmp_path, units: int, card_microseconds: float = 5.0):
+    """One shot of 30 rounds on `units` weak units of that card."""
     raw = dict(MINIMAL_CONFIG)
     workload = dict(MINIMAL_CONFIG["workload"])
     workload["rounds_per_shot"] = 30
     raw["workload"] = workload
     raw["links"] = ONE_TIER_LINKS
     raw["weak_decoder"] = {
-        "kind": 5.0,
+        "kind": card_microseconds,
         "units": units,
-        "unit_memory_rounds": None,
+        "unit_memory": {"bits": None},
         "engine": {
             "clock": "fridge",
             "fetch_cycles_per_round": 1,
+            "fetch_cycles_per_job": 0,
             "release_cycles_per_job": 10,
+            "release_cycles_per_round": 0,
         },
     }
     config_path = tmp_path / "slow_unit.yaml"
@@ -178,21 +187,25 @@ def switching_run(
     raw["weak_decoder"] = {
         "kind": 1.0,
         "units": 1,
-        "unit_memory_rounds": None,
+        "unit_memory": {"bits": None},
         "engine": {
             "clock": "fridge",
             "fetch_cycles_per_round": 1,
+            "fetch_cycles_per_job": 0,
             "release_cycles_per_job": 10,
+            "release_cycles_per_round": 0,
         },
     }
     raw["strong_decoder"] = {
         "kind": 10.0,
         "units": 1,
-        "unit_memory_rounds": None,
+        "unit_memory": {"bits": None},
         "engine": {
             "clock": "fridge",
             "fetch_cycles_per_round": 1,
+            "fetch_cycles_per_job": 0,
             "release_cycles_per_job": 10,
+            "release_cycles_per_round": 0,
         },
     }
     config_path = tmp_path / "switching.yaml"
@@ -219,24 +232,28 @@ def switching_shot(
 def bounded_store_shot(tmp_path):
     """One shot whose weak syndrome buffer holds six rounds, with a slow unit.
 
-    Thirty rounds arrive a microsecond apart into a store of six, and
-    the 5.0 us unit frees three slots per window it reads, so the
+    Thirty rounds arrive a microsecond apart into a store of six
+    rounds, which is five ordinary rounds and the wider readout round,
+    and the 5.0 us unit frees three slots per window it reads, so the
     controller has to hold rounds it has already packed.
     """
+    six_rounds_bits = 5 * BITS_PER_ROUND + READOUT_ROUND_BITS
     raw = dict(MINIMAL_CONFIG)
     workload = dict(MINIMAL_CONFIG["workload"])
     workload["rounds_per_shot"] = 30
     raw["workload"] = workload
     raw["links"] = ONE_TIER_LINKS
-    raw["weak_syndrome_buffer"] = {"rounds": 6}
+    raw["weak_syndrome_buffer"] = {"bits": six_rounds_bits}
     raw["weak_decoder"] = {
         "kind": 5.0,
         "units": 1,
-        "unit_memory_rounds": None,
+        "unit_memory": {"bits": None},
         "engine": {
             "clock": "fridge",
             "fetch_cycles_per_round": 1,
+            "fetch_cycles_per_job": 0,
             "release_cycles_per_job": 10,
+            "release_cycles_per_round": 0,
         },
     }
     config_path = tmp_path / "bounded_store.yaml"
@@ -403,6 +420,111 @@ def test_a_second_unit_moves_the_wait_and_leaves_service_alone(tmp_path):
     ]
 
 
+def test_the_pool_columns_read_each_tiers_own_queue_and_units(tmp_path):
+    """A weak-only run's pool columns are the default pool's, the strong zero.
+
+    The deepest the weak tier's own queue got is the deepest the ready
+    queue got, since only that pool exists; a second unit halves the
+    busy fraction exactly, because the same nine decodes of 5.064 us
+    each run on two units over the same span
+    (test_a_second_unit_moves_the_wait_and_leaves_service_alone), which
+    is Triage's utilization rate read per tier (2605.04459 lines
+    1024-1031).
+    """
+    one_unit = slow_unit_shot(tmp_path, 1)
+    two_units = slow_unit_shot(tmp_path, 2)
+
+    assert one_unit.weak_queue_max == one_unit.max_queued_windows == 3
+    assert two_units.weak_queue_max == 1
+    assert one_unit.strong_queue_max == 0
+    assert one_unit.strong_busy_fraction == 0.0
+    assert one_unit.escalated_windows == 0
+    assert one_unit.strong_decoded_rounds == 0
+    assert two_units.weak_busy_fraction == one_unit.weak_busy_fraction / 2
+
+
+def test_a_strong_primary_runs_pool_columns_are_the_strong_tiers():
+    """Under strong_only the default pool's numbers are the strong tier's.
+
+    The plan's windows queue in the default pool whichever tier decodes
+    them (decode_queue.POOL_BY_JOB_KIND), and under strong_only that
+    tier is the strong one, so its queue peak and busy fraction belong
+    in the strong columns and the weak columns read zero, the mirror of
+    test_the_pool_columns_read_each_tiers_own_queue_and_units.
+    """
+    shot = shipped_shot("strong_decoder_baseline.yaml")
+    measurement = measure.measure_shot(shot)
+
+    assert measurement.weak_queue_max == 0
+    assert measurement.weak_busy_fraction == 0.0
+    assert measurement.strong_queue_max == measurement.max_queued_windows
+    assert measurement.strong_busy_fraction > 0.0
+
+
+def test_skorics_process_count_is_two_services_over_the_window_period(
+    tmp_path,
+):
+    """N_par is ceil(2 tau_W / ((n_com + n_W) tau_rd)).
+
+    Layer A commits n_com = 3 rounds and layer B its whole window,
+    n_W = n_com + 2 n_buf = 9 (2209.08552 lines 388-390). A 5.064 us
+    decode twice over those twelve one-microsecond rounds is 0.844
+    processes, so one (lines 429-438).
+    """
+    measurement = slow_unit_shot(tmp_path, 1)
+
+    assert measurement.parallel_processes_needed == 1
+
+
+def test_skorics_process_count_is_above_one_when_a_decode_outlasts_the_layers(
+    tmp_path,
+):
+    """The same twelve rounds against a 10 us card ask for two processes.
+
+    N_par is ceil(2 tau_W / ((n_com + n_W) tau_rd)) with tau_W the
+    shot's mean service and n_W = n_com + 2 n_buf (2209.08552 lines
+    388-390 and 429-438). The window scheme's rounds are null here, so
+    both sizes are the distance.
+    """
+    measurement = slow_unit_shot(tmp_path, 1, card_microseconds=10.0)
+
+    commit_round_count = 3
+    buffer_round_count = 3
+    round_period_us = 1.0
+    both_buffers_round_count = 2 * buffer_round_count
+    window_round_count = commit_round_count + both_buffers_round_count
+    committed_round_count = commit_round_count + window_round_count
+    committed_rounds_us = committed_round_count * round_period_us
+    both_layers_service_us = 2 * measurement.means["service"]
+    processes = both_layers_service_us / committed_rounds_us
+    expected = math.ceil(processes)
+    assert expected > 1
+    assert measurement.parallel_processes_needed == expected
+
+
+def test_toshios_bound_is_the_round_time_d_windows_over_the_strong_rounds(
+    tmp_path,
+):
+    """Theorem 1 read off a point where every window escalated.
+
+    Ten windows escalated and their strong decodes read 84 rounds in
+    all, so gamma_switch is 1 and r_strong is 8.4, and the bound
+    (1 / gamma)(d / r_strong) tau_gen is 3 / 8.4 microseconds
+    (2510.25222 lines 1270-1300). The strong service it bounds is the
+    10.0 us card plus its fetch and release, which is above it, as a
+    card ten times the round time must be.
+    """
+    measurement = switching_shot(tmp_path, 1000000.0)
+    record = report.record_of([measurement])
+    rows = report.summarize(record.shots, record.window_samples)
+
+    assert measurement.escalated_windows == 10
+    assert measurement.strong_decoded_rounds == 84
+    assert measurement.strong_service_mean_us == 10.0736
+    assert rows[0]["strong_service_bound_us"] == 3 * 10 / 84
+    assert rows[0]["escalated_windows"] == 10
+
+
 def test_an_escalated_window_is_measured_on_the_strong_tiers_own_hops(
     tmp_path,
 ):
@@ -412,13 +534,20 @@ def test_an_escalated_window_is_measured_on_the_strong_tiers_own_hops(
     (0.008 us) and the strong decoder's hop home (0.012 us), and the
     decode it describes is the 10.0 us one. The weak decode that did not
     commit is the weak_attempt point, and the escalation hop that
-    carried the selection to the strong tier (0.020 us) is its own
-    point: it runs beside the strong input hop, so what it costs the
-    decode is the 0.012 us the input waited for it, which is dep_block.
-    The weak attempt starts where a unit took the window's first decode,
+    carried the selection and then the window's rounds to the strong
+    tier (0.020 us, the two transfers side by side on a latency-only
+    card) is its own point, outside the sum. What it costs the decode
+    is dep_block: the strong input hop starts when the rounds land, so
+    the 0.020 us before it is the wait for the rounds. The last window's
+    rounds were carried up with the window before it, so its input hop
+    starts at the verdict beside the selection and waits 0.012 us for
+    it after landing. The weak attempt starts where a unit took the
+    window's first decode,
     so on window 2, whose complementary gap ran its two forced-class
     solves one after the other, it is both of them: 1.064 us of the
-    first solve on top of the 12.244 us from the second one's dispatch.
+    first solve on top of the 12.252 us from the second one's dispatch,
+    which waits on window 1's held boundary and so on window 1's strong
+    decode, 0.008 us of input hop after its rounds landed.
     """
     measurement = switching_shot(tmp_path, 1000000.0)
 
@@ -426,19 +555,20 @@ def test_an_escalated_window_is_measured_on_the_strong_tiers_own_hops(
     assert samples["input_link_per_window"] == [0.008] * 10
     assert samples["output_link_per_window"] == [0.012] * 10
     assert samples["escalation_link_per_window"] == [0.020] * 10
-    assert samples["dep_block"] == [0.012] * 10
+    assert samples["dep_block"] == [0.020] * 9 + [0.012]
     assert samples["compute_wait"] == [0.0] * 10
     assert samples["algorithm"] == [10.0] * 10
-    assert samples["weak_attempt"][2] == 13.308
+    assert samples["weak_attempt"][2] == 13.316
 
 
 def test_an_escalated_windows_points_sum_to_its_reaction_time(tmp_path):
     """The chain runs weak attempt first, then the strong decode.
 
     Toshio et al. 2510.25222 Sec. III A orders it: the weak decoder
-    answers, the verdict sends the window to the strong decoder, the
-    strong decoder answers and that is what commits. Every point on that
-    order adds up to the window's reaction time to the tick.
+    answers, the verdict sends the window and its rounds to the strong
+    decoder, the strong decoder answers and that is what commits. Every
+    point on that order adds up to the window's reaction time to the
+    tick.
     """
     measurement = switching_shot(tmp_path, 1000000.0)
 

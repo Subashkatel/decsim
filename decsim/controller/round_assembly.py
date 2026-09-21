@@ -175,7 +175,7 @@ class RoundAssembler:
         raw_fragments = _merge_fragments_by_patch(context.fragments)
         # the workspace holds the raw measurement bits the fragments
         # arrived with, whatever width leaves afterwards
-        raw_bits = _fragment_bits(raw_fragments)
+        raw_bits = round_records.fragment_wire_bits(raw_fragments)
         # the merge is what packs the round, so it is reported before the
         # round is packed, and the workspace's residence knows its bits
         self.trace.copy_made.fire(
@@ -192,7 +192,7 @@ class RoundAssembler:
         # the link out of the controller carries what leaves it: the
         # detection events when this row forms them here, the raw
         # outcomes when the decoder forms them
-        wire_bits = _fragment_bits(leaving)
+        wire_bits = round_records.fragment_wire_bits(leaving)
         packet = round_records.SyndromeRoundPacket(
             operation_id=operation_id,
             round_index=round_index,
@@ -283,14 +283,6 @@ class _Workspace:
 
     def partial_identities(self) -> tuple:
         return tuple(self.context_by_identity)
-
-
-def _fragment_bits(fragments) -> Optional[int]:
-    """The fragments' wire size, None when any fragment has no known size."""
-    fragment_sizes = [fragment.size_bits for fragment in fragments]
-    if None in fragment_sizes:
-        return None
-    return sum(fragment_sizes)
 
 
 def _fragment_index(fragment: round_records.RetainedSyndromeFragment) -> int:

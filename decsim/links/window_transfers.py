@@ -87,6 +87,27 @@ class WindowTransfers:
             path, payload_bits, self.engine.now, attribution, delivered
         )
 
+    def send_region(
+        self,
+        path: transfer_records.LinkPath,
+        region: round_records.EscalatedRegion,
+        on_delivered: Callable[[], None],
+    ) -> int:
+        """Send an escalated region in its request's name.
+
+        Returns the delay the link expects, a scheduler's estimate.
+        """
+        attribution = transfer_records.TransferAttribution.for_region(region)
+        now_ticks = self.engine.now
+        expected_delay_ticks = self.link.expected_delay_ticks(
+            path, region.wire_bits, now_ticks
+        )
+        delivered = functools.partial(_run_at_delivery, on_delivered)
+        self.link.send(
+            path, region.wire_bits, now_ticks, attribution, delivered
+        )
+        return expected_delay_ticks
+
     def send_boundary(
         self,
         path: transfer_records.LinkPath,

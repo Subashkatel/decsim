@@ -8,11 +8,12 @@ section III.C) services descriptors one by one while the processor is
 free to do other work. A transfer is ready when its setup ends, or at
 its request when it has no setup; a request with no setup never waits
 for another path's setup. The wire takes ready transfers in the order
-they became ready, one at a time, serializes each at the channel's rate
-and delivers it one propagation later: ns-3's point-to-point device
-(point-to-point-net-device.cc: Send enqueues, TransmitStart runs when
-the transmitter is READY, and the receiver has the packet txTime plus
-the channel delay later). A fractional tick of serialization rounds up,
+they became ready, one at a time, serializes each at the channel's rate,
+its path's header with it, and delivers it one propagation later: ns-3's
+point-to-point device (point-to-point-net-device.cc: Send adds the
+header and enqueues, TransmitStart runs when the transmitter is READY
+and times the whole packet, and the receiver has it txTime plus the
+channel delay later). A fractional tick of serialization rounds up,
 because a transfer never ends before its exact time. An unbounded
 channel serializes nothing and never queues.
 """
@@ -28,6 +29,19 @@ import decsim.links.settings as link_settings
 import decsim.records.transfers as transfer_records
 
 OnDelivered = Callable[[transfer_records.Transfer], None]
+
+
+@dataclasses.dataclass(frozen=True)
+class FramedPayload:
+    """What one transfer puts on the wire: its payload, and its path's header.
+
+    The two are kept apart because the ledger counts the payload a
+    component sent and the wire serializes both. A payload of unknown
+    size rides an unbounded channel only, which serializes nothing.
+    """
+
+    payload_bits: Optional[int]
+    header_bits: int = 0
 
 
 class Channel:
@@ -47,17 +61,18 @@ class Channel:
 
     def send(
         self,
-        payload_bits: Optional[int],
+        framed: FramedPayload,
         now_ticks: int,
         setup_ticks: int,
         on_delivered: OnDelivered,
     ) -> None:
-        """Send one payload; on_delivered(transfer) runs at its delivery.
+        """Send one framed payload; on_delivered(transfer) runs at delivery.
 
         The setup, when the path pays one, is queued on the setup engine
         now and finishes at the ready tick; the wire takes the transfer
         from that tick.
         """
+        payload_bits = framed.payload_bits
         assert payload_bits is None or payload_bits >= 0, (
             "a payload is never negative"
         )
@@ -68,7 +83,7 @@ class Channel:
         ready_ticks = self._ready_ticks(now_ticks, setup_ticks)
         if setup_ticks > 0:
             self._setup_free_ticks = ready_ticks
-        request = _Request(payload_bits, now_ticks, ready_ticks, on_delivered)
+        request = _Request(framed, now_ticks, ready_ticks, on_delivered)
         if ready_ticks == now_ticks:
             self._take_wire(request)
             return
@@ -80,7 +95,7 @@ class Channel:
         )
 
     def expected_delay_ticks(
-        self, payload_bits: Optional[int], now_ticks: int, setup_ticks: int
+        self, framed: FramedPayload, now_ticks: int, setup_ticks: int
     ) -> int:
         """The delay a transfer would pay if nothing else reached the channel.
 
@@ -90,7 +105,7 @@ class Channel:
         """
         ready_ticks = self._ready_ticks(now_ticks, setup_ticks)
         start_ticks, serialization_ticks = self._wire_interval(
-            ready_ticks, payload_bits
+            ready_ticks, framed
         )
         end_ticks = start_ticks + serialization_ticks
         delivery_ticks = end_ticks + self._settings.propagation_latency_ticks
@@ -104,20 +119,21 @@ class Channel:
         return setup_start_ticks + setup_ticks
 
     def _wire_interval(
-        self, ready_ticks: int, payload_bits: Optional[int]
+        self, ready_ticks: int, framed: FramedPayload
     ) -> tuple[int, int]:
-        """The wire's next slot for the payload: its start and its length."""
+        """The wire's next slot for the transfer: its start and its length."""
         capacity = self._settings.capacity
         if capacity is None:
             return ready_ticks, 0
         start_ticks = max(ready_ticks, self._wire_free_ticks)
-        serialization_ticks = _serialization_ticks(payload_bits, capacity)
+        wire_bits = framed.payload_bits + framed.header_bits
+        serialization_ticks = _serialization_ticks(wire_bits, capacity)
         return start_ticks, serialization_ticks
 
     def _take_wire(self, request: "_Request") -> None:
         """At the ready tick: take the wire's next slot, schedule delivery."""
         start_ticks, serialization_ticks = self._wire_interval(
-            request.ready_ticks, request.payload_bits
+            request.ready_ticks, request.framed
         )
         end_ticks = start_ticks + serialization_ticks
         if self._settings.capacity is not None:
@@ -128,7 +144,8 @@ class Channel:
         queue_wait_ticks = start_ticks - request.ready_ticks
         total_delay_ticks = delivery_ticks - request.request_ticks
         transfer = transfer_records.Transfer(
-            payload_bits=request.payload_bits,
+            payload_bits=request.framed.payload_bits,
+            header_bits=request.framed.header_bits,
             request_ticks=request.request_ticks,
             setup_ticks=setup_ticks,
             send_ticks=request.ready_ticks,
@@ -154,23 +171,23 @@ class Channel:
 class _Request:
     """One send waiting for its setup, then for the wire."""
 
-    payload_bits: Optional[int]
+    framed: FramedPayload
     request_ticks: int
     ready_ticks: int
     on_delivered: OnDelivered
 
 
 def _serialization_ticks(
-    payload_bits: int, capacity: link_settings.CapacitySettings
+    wire_bits: int, capacity: link_settings.CapacitySettings
 ) -> int:
-    """Whole ticks to put the payload on the wire at the channel's rate.
+    """Whole ticks to put the bits on the wire at the channel's rate.
 
     A fractional tick rounds up: serialization never ends before the exact
     transmission time. Exact Fraction arithmetic keeps the card's rate
     exact, so a whole-tick duration is never inflated by float error.
     """
     rate = capacity.exact_aggregate_bits_per_microsecond()
-    payload = fractions.Fraction(payload_bits)
-    bits_times_ticks = payload * config.TICKS_PER_MICROSECOND
+    bits = fractions.Fraction(wire_bits)
+    bits_times_ticks = bits * config.TICKS_PER_MICROSECOND
     exact_ticks = bits_times_ticks / rate
     return math.ceil(exact_ticks)

@@ -371,6 +371,7 @@ def result_from_selected_faults(
     boundary_data = window_records.DependencyResidual(
         detector_ids=residual_detector_ids, defects=defects
     )
+    crossing_commit = _crossing_commit(model, placed_faults, committed)
     return decoding_records.DecodeResult(
         job.operation_id,
         job.window_id,
@@ -378,7 +379,50 @@ def result_from_selected_faults(
         logical_observables=logical_observables,
         boundary_data=boundary_data,
         decode_status=decode_status,
+        crossing_commit=crossing_commit,
     )
+
+
+def _crossing_commit(
+    model: fault_models.WindowErrorModel,
+    placed_faults: fault_models.PlacedFaultModel,
+    committed: numpy.ndarray,
+) -> window_records.CrossingCommit:
+    """What the decode commits of the faults reaching behind the window.
+
+    The window that restarts the weak chain after a strong region owns
+    the faults crossing the seam behind it, and both the region ending
+    at that seam and its own strong redo are pinned on that part of its
+    correction (Toshio et al. 2510.25222 lines 1248-1250). It travels on
+    its own because the residual is the XOR of every committed fault's
+    detectors and the crossing part cannot be taken out of it again.
+    """
+    crossing = _crossing_columns(model, placed_faults, committed)
+    detector_ids = _detector_ids_from_columns(
+        placed_faults.boundary_flips, crossing
+    )
+    defects = _defects_from_detector_ids(model, detector_ids)
+    residual = window_records.DependencyResidual(
+        detector_ids=detector_ids, defects=defects
+    )
+    observable_flips = parity_product(placed_faults.observables, crossing)
+    logical_observables = bit_tuple(observable_flips)
+    return window_records.CrossingCommit(residual, logical_observables)
+
+
+def _crossing_columns(
+    model: fault_models.WindowErrorModel,
+    placed_faults: fault_models.PlacedFaultModel,
+    committed: numpy.ndarray,
+) -> numpy.ndarray:
+    """The committed columns that flip a detector of an earlier round."""
+    crossing = numpy.zeros(committed.shape, dtype=bool)
+    nonzero = numpy.nonzero(committed)
+    for column_index in nonzero[0]:
+        detectors = placed_faults.boundary_flips.get(int(column_index), ())
+        if model.reaches_behind(detectors):
+            crossing[column_index] = True
+    return crossing
 
 
 def _detector_ids_from_columns(detector_flips, committed) -> tuple[int, ...]:

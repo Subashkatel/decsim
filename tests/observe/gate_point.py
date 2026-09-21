@@ -24,10 +24,9 @@ POINT = {
     "round_period_us": 1.0,
 }
 SEED = 0
-# the log hash of the point; it moves when a log line changes text, last by
-# the syndrome buffer's name (the results the gate hashes are unchanged; the
-# frozen golden's own log hash is re-recorded by the owner)
-POINT_LOG_SHA256 = "88db643ddc86"
+# the log hash of the point; it moves when a log line changes text, and the
+# results the gate hashes do not move with it
+POINT_LOG_SHA256 = "1f76ae71ab61"
 
 
 def settings(**observation_changes):

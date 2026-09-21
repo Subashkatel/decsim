@@ -26,7 +26,6 @@ class CodeModel(Protocol):
 
     name: str
     distance: int
-    window_floor_justification: Optional[str]
 
     def rounds_per_logical_cycle(self) -> int:
         """Syndrome rounds per logical cycle."""
@@ -40,9 +39,6 @@ class CodeModel(Protocol):
     def buffer_rounds(self) -> int:
         """Look-ahead rounds per decode window."""
 
-    def buffering_floor(self) -> tuple[int, int]:
-        """The leading and trailing buffer rounds the code needs."""
-
     def spatial_nodes(self, num_patches: int) -> int:
         """The per-round graph size a latency model prices this card at."""
 
@@ -52,13 +48,7 @@ class CodeModel(Protocol):
 
 @dataclasses.dataclass(frozen=True)
 class SurfaceCodeModel:
-    """Timing and sizing card of one rotated surface-code patch.
-
-    A buffer below the (d, d) floor degrades windowed accuracy (Skoric et
-    al. 2209.08552; Tan et al., PRX Quantum 4, 040344). Running there on
-    purpose, as a sweep may, needs a written reason in
-    window_floor_justification, the way a free frame write does.
-    """
+    """Timing and sizing card of one rotated surface-code patch."""
 
     distance: int = 3
     # None: the run's cadence.
@@ -66,12 +56,10 @@ class SurfaceCodeModel:
     # None: the distance.
     commit_rounds_override: Optional[int] = None
     buffer_rounds_override: Optional[int] = None
-    window_floor_justification: Optional[str] = None
 
     def __post_init__(self) -> None:
         round_microseconds = _optional_float(self.round_microseconds)
         object.__setattr__(self, "round_microseconds", round_microseconds)
-        _check_justification(self.window_floor_justification)
 
     @property
     def name(self) -> str:
@@ -97,10 +85,6 @@ class SurfaceCodeModel:
         if self.buffer_rounds_override is not None:
             return self.buffer_rounds_override
         return self.distance
-
-    def buffering_floor(self) -> tuple[int, int]:
-        """The smallest leading and trailing buffers: (d, d)."""
-        return (self.distance, self.distance)
 
     def spatial_nodes(self, num_patches: int) -> int:
         """Per-round graph size for a latency model: d*d per patch, plus a seam.
@@ -144,10 +128,8 @@ class BivariateBicycleCodeModel:
     round_microseconds: Optional[float] = None
     commit_rounds_override: Optional[int] = None
     buffer_rounds_override: Optional[int] = None
-    window_floor_justification: Optional[str] = None
 
     def __post_init__(self) -> None:
-        _check_justification(self.window_floor_justification)
         _require_positive_int(self.qubit_count, "qubit_count")
         _require_positive_int(self.logical_qubit_count, "logical_qubit_count")
         _require_positive_int(self.distance, "distance")
@@ -192,10 +174,6 @@ class BivariateBicycleCodeModel:
         """The card's own round period, or None for the run's cadence."""
         return self.round_microseconds
 
-    def buffering_floor(self) -> tuple[int, int]:
-        """No buffering floor: (0, 0)."""
-        return (0, 0)
-
     def commit_rounds(self) -> int:
         """Rounds committed per decode window; the distance by default."""
         if self.commit_rounds_override is None:
@@ -226,13 +204,3 @@ def _optional_float(value) -> Optional[float]:
     if value is None:
         return None
     return float(value)
-
-
-def _check_justification(value) -> None:
-    if value is None:
-        return
-    is_text = isinstance(value, str)
-    if not is_text or not value.strip():
-        raise ValueError(
-            "window_floor_justification must be a non-empty string or None"
-        )

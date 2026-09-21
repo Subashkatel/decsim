@@ -1,5 +1,9 @@
 """The cluster gap: the confidence of one weighted Union-Find window decode.
 
+The extra-cluster gap row (extra_cluster.py) reads the same evidence
+and reports in the same unit, so the three checks and the conversion
+below are shared with it.
+
 Meister et al. 2405.07433 Definition 9 and Algorithm 2 (lines 518-536):
 the weighted edge intervals the hard decode grew are quotiented into a
 graph whose shortest closed walk of odd logical parity is the gap, in
@@ -35,8 +39,10 @@ from fractions import Fraction
 from typing import Optional, Union
 
 import decsim.config as config
+import decsim.decoders.settings as decoder_settings
 import decsim.decoders.union_find.compiled_decoder as compiled_decoder
 import decsim.detector_error_model.fault_model_contracts as fault_models
+import decsim.escalation.settings as escalation_settings
 import decsim.records.decoder_evidence as evidence_records
 import decsim.records.decoding as decoding_records
 
@@ -84,6 +90,18 @@ class ClusterGap:
         # number, or None to measure the call as a measured decoder is
         self.walk_microseconds = walk_microseconds
 
+    @classmethod
+    def from_settings(
+        cls,
+        escalation: escalation_settings.EscalationSettings,
+        weak_decoder: decoder_settings.DecoderSettings,
+    ) -> "ClusterGap":
+        """The row at the weak decoder's weight step, priced by the card."""
+        return cls(
+            weight_step=weak_decoder.weight_step,
+            walk_microseconds=escalation.confidence_walk_microseconds,
+        )
+
     def compute(self, solves: tuple) -> decoding_records.SoftOutputComputation:
         """The gap of the window's one decode, and what the walk cost.
 
@@ -97,8 +115,8 @@ class ClusterGap:
         if evidence is None:
             return decoding_records.SoftOutputComputation(None, 0)
         graph = evidence.graph
-        _require_one_logical_row(graph)
-        _require_weight_step(graph, self.weight_step)
+        require_one_logical_row(graph)
+        require_weight_step(graph, self.weight_step)
         gap, ticks = self._walk(evidence)
         soft_output = decoding_records.SoftOutput(gap=gap, source=self.source)
         return decoding_records.SoftOutputComputation(soft_output, ticks)
@@ -118,7 +136,7 @@ class ClusterGap:
         return gap, ticks
 
 
-def _require_one_logical_row(graph) -> None:
+def require_one_logical_row(graph) -> None:
     """The gap is defined for exactly one nonzero logical-observable row."""
     row_count = graph.logical_observable_count
     if row_count != 1:
@@ -135,7 +153,7 @@ def _require_one_logical_row(graph) -> None:
     )
 
 
-def _require_weight_step(graph, weight_step: float) -> None:
+def require_weight_step(graph, weight_step: float) -> None:
     """The gap is read off the ticks the growth actually used."""
     if graph.weight_step == weight_step:
         return
@@ -152,10 +170,10 @@ def _cluster_gap(
     gap_half_ticks = compiled_decoder.cluster_gap(
         hard_evidence.graph, hard_evidence.edge_intervals
     )
-    return _gap_half_ticks_to_natural_log_weight(gap_half_ticks, weight_step)
+    return gap_half_ticks_to_natural_log_weight(gap_half_ticks, weight_step)
 
 
-def _gap_half_ticks_to_natural_log_weight(
+def gap_half_ticks_to_natural_log_weight(
     gap_half_ticks: Union[int, float], weight_step: float
 ) -> float:
     """Half ticks of the growth as natural-log weight, exactly, rounded once.

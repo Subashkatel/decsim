@@ -67,11 +67,6 @@ def test_the_surface_card_buffers_d_rounds_per_window():
     assert card.buffer_rounds() == 5
 
 
-def test_the_surface_card_window_floor_is_d_by_d():
-    card = code_geometry.SurfaceCodeModel(distance=5)
-    assert card.buffering_floor() == (5, 5)
-
-
 def test_the_surface_card_has_no_cadence_of_its_own_by_default():
     card = code_geometry.SurfaceCodeModel(distance=5)
     assert card.round_period_us() is None
@@ -99,11 +94,6 @@ def test_the_gross_code_card_reads_out_all_144_checks_per_round():
 def test_the_gross_code_card_has_144_decoding_graph_nodes_per_round():
     card = code_geometry.BivariateBicycleCodeModel()
     assert card.spatial_nodes(1) == 144
-
-
-def test_the_bicycle_card_has_no_window_floor():
-    card = code_geometry.BivariateBicycleCodeModel()
-    assert card.buffering_floor() == (0, 0)
 
 
 def test_the_bicycle_card_is_named_by_its_parameters():
@@ -171,10 +161,3 @@ def test_a_negative_buffer_override_is_refused_for_a_bicycle_code():
 def test_an_odd_qubit_count_is_refused_for_a_bicycle_code():
     with pytest.raises(ValueError, match="qubit_count must be even"):
         code_geometry.BivariateBicycleCodeModel(qubit_count=143)
-
-
-def test_a_blank_window_floor_justification_is_refused():
-    with pytest.raises(ValueError, match="non-empty"):
-        code_geometry.SurfaceCodeModel(
-            distance=3, window_floor_justification=" "
-        )

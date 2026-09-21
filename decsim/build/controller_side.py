@@ -19,7 +19,9 @@ import decsim.controller.round_assembly as round_assembly
 import decsim.controller.round_transmission as round_transmission
 import decsim.controller.settings as controller_settings
 import decsim.controller.syndrome_round_sender as syndrome_round_sender
+import decsim.decoders.decode_queue as decode_queue
 import decsim.decoders.decoder_manager as decoder_manager_module
+import decsim.decoders.strong_requests as strong_requests_module
 import decsim.frontends.execution_runtime as execution_runtime_module
 import decsim.pauli_frame.decision_dispatch as decision_dispatch_module
 import decsim.ports as ports
@@ -38,17 +40,56 @@ def build_conditional_release(
     return conditional_release_module.ConditionalRelease(parts.engine)
 
 
+def build_strong_requests(
+    parts: build_parts.Parts,
+) -> strong_requests_module.StrongRequests:
+    """The ledger of strong requests, which both sides' managers take."""
+    del parts
+    return strong_requests_module.StrongRequests()
+
+
 def build_decoder_manager(
     parts: build_parts.Parts,
 ) -> decoder_manager_module.DecoderManager:
-    """The decoder side's manager: the pool's router, scheduler and units."""
+    """The chip's decoder manager: every pool but the strong one.
+
+    The strong pool is the host's manager's, so this one never holds a
+    strong job; the ledger is the seat both take at construction.
+    """
+    unit_pools = {}
+    for name, units in parts.pool.unit_pools.items():
+        if name != decode_queue.STRONG_POOL:
+            unit_pools[name] = units
+    return _decoder_manager(parts, unit_pools)
+
+
+def build_strong_decoder_manager(
+    parts: build_parts.Parts,
+) -> decoder_manager_module.DecoderManager:
+    """The host's decoder manager: the strong pool alone.
+
+    The same class as the chip's, over the strong units, with its own
+    ready queue, staging and outcomes (LATTE 2509.03954 lines 705-720,
+    the host's scheduler owns the decode queue and the thread pool).
+    The escalation side and the requester's strong sibling submit here.
+    """
+    units = parts.pool.unit_pools[decode_queue.STRONG_POOL]
+    unit_pools = {decode_queue.STRONG_POOL: units}
+    return _decoder_manager(parts, unit_pools)
+
+
+def _decoder_manager(
+    parts: build_parts.Parts, unit_pools: dict
+) -> decoder_manager_module.DecoderManager:
+    """One manager over the named pools, on the run's one manager card."""
     pool = parts.pool
     settings = parts.settings.decoder_manager
     return decoder_manager_module.DecoderManager(
         parts.engine,
         router=pool.router,
         scheduler=pool.scheduler,
-        unit_pools=pool.unit_pools,
+        strong_requests=parts.seats["strong_requests"],
+        unit_pools=unit_pools,
         bulk_strong=settings.bulk_strong,
         decoder_memory=pool.decoder_memory,
         escalation_policy=parts.escalation_policy,

@@ -2,8 +2,10 @@
 
 The strong syndrome buffer exists only when a tier reads from it, and a
 separate controller readout cost needs a link card that leaves that cost
-out, which is the finding I7 Part 1 slice 4(d) moved onto the one card
-it is about.
+out, a refusal that sits on the one card
+it is about. A placement that forms the detection events on the weak
+decoder chip needs the run's rounds to land in the weak syndrome buffer,
+and is the one row that may carry that chip's formation charge.
 """
 
 import dataclasses
@@ -12,6 +14,7 @@ import pytest
 
 import decsim.build.parts as build_parts
 import decsim.build.stores as store_build
+import decsim.detector_error_model.detection_event_formation as formation
 import decsim.engine as engine_module
 import decsim.records.windows as window_records
 import decsim.settings as machine_settings
@@ -96,6 +99,60 @@ def test_a_strong_primary_run_reads_the_room_side():
 
     assert store_build.uses_strong_store(strong_primary)
     assert store_build.uses_the_room_side(strong_primary)
+
+
+def test_forming_on_the_weak_chip_is_refused_when_no_round_reaches_it():
+    """A strong-primary run writes its rounds into the strong store only."""
+    settings = _machine_settings()
+    strong_primary = _Policy(
+        may_escalate=False, primary_tier=window_records.DecoderTier.STRONG
+    )
+    on_the_weak_chip = formation.WeakSyndromeBufferSideFormation(None, 0)
+
+    with pytest.raises(ValueError) as refusal:
+        store_build.check_weak_syndrome_buffer_formation(
+            settings, strong_primary, on_the_weak_chip
+        )
+
+    sentence = str(refusal.value)
+    assert "detection_events_formed_at weak_syndrome_buffer" in sentence
+    assert "decoded on the strong tier" in sentence
+
+
+def test_a_weak_chip_formation_charge_is_refused_under_another_row():
+    """A run that forms elsewhere would pay for the conversion twice."""
+    charged = store_settings.SyndromeBufferSettings(
+        clock=declared_run.DECLARED_CLOCK, detection_event_cycles_per_round=5
+    )
+    settings = _machine_settings(weak_syndrome_buffer=charged)
+    weak_primary = _Policy(
+        may_escalate=False, primary_tier=window_records.DecoderTier.WEAK
+    )
+    at_the_controller = formation.ControllerSideFormation(None, 0)
+
+    with pytest.raises(ValueError) as refusal:
+        store_build.check_weak_syndrome_buffer_formation(
+            settings, weak_primary, at_the_controller
+        )
+
+    sentence = str(refusal.value)
+    assert "weak_syndrome_buffer.detection_event_cycles_per_round" in sentence
+    assert "a conversion this run does elsewhere" in sentence
+
+
+def test_a_weak_primary_run_may_form_and_charge_on_the_weak_chip():
+    charged = store_settings.SyndromeBufferSettings(
+        clock=declared_run.DECLARED_CLOCK, detection_event_cycles_per_round=5
+    )
+    settings = _machine_settings(weak_syndrome_buffer=charged)
+    weak_primary = _Policy(
+        may_escalate=False, primary_tier=window_records.DecoderTier.WEAK
+    )
+    on_the_weak_chip = formation.WeakSyndromeBufferSideFormation(None, 0)
+
+    store_build.check_weak_syndrome_buffer_formation(
+        settings, weak_primary, on_the_weak_chip
+    )
 
 
 def test_a_readout_cost_on_the_controller_needs_a_card_that_excludes_it():

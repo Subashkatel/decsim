@@ -42,6 +42,22 @@ def check_duration(name: str, value: float) -> None:
         raise ValueError(f"{name} is positive but rounds to zero ticks")
 
 
+def check_capacity_bits(key: str, value) -> None:
+    """A memory's capacity in bits, checked where the yaml enters.
+
+    One owner for every memory the yaml sizes: a decoder unit's input
+    memory and the two syndrome buffers.
+    """
+    if value is None:
+        return
+    if _is_whole_bit_count(value):
+        return
+    raise ValueError(
+        f"{key} must be at least one bit, or null for an unbounded "
+        f"memory (got {value!r})"
+    )
+
+
 def check_cycles(name: str, cycles: int) -> None:
     """A cycle count is a nonnegative integer, excluding booleans."""
     if not isinstance(cycles, int) or isinstance(cycles, bool):
@@ -131,3 +147,12 @@ class ClockSettings:
                 f"below one tick"
             )
         return Clock(period_ticks)
+
+
+def _is_whole_bit_count(value) -> bool:
+    """A capacity a memory can have: a whole number of bits, never a flag."""
+    if value is True or value is False:
+        return False
+    if not isinstance(value, int):
+        return False
+    return value >= 1

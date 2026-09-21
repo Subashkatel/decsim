@@ -113,9 +113,7 @@ def test_a_correction_without_observables_makes_the_fold_unknown():
     assert frame.frame_for_stream("stream") is None
 
 
-def test_the_settings_refuse_a_free_write_without_a_reason():
-    with pytest.raises(ValueError, match="justification"):
-        PauliFrameConfig(write_cycles=0)
+def test_a_charged_write_keeps_its_cycle_count_and_its_clock():
     clock = config.Clock(4000)
     settings = PauliFrameConfig(write_cycles=1, clock=clock)
     assert settings.write_cycles == 1
@@ -207,22 +205,10 @@ def test_a_charged_write_without_a_clock_is_refused():
         PauliFrameConfig(write_cycles=1)
 
 
-def test_a_justification_beside_a_priced_write_is_refused_as_stale():
-    with pytest.raises(ValueError, match="needs a free write"):
-        clock = config.Clock(4000)
-        PauliFrameConfig(
-            write_cycles=1,
-            clock=clock,
-            zero_commit_cost_justification="an idealized register write",
-        )
-
-
-def test_a_free_write_with_a_reason_is_accepted_and_charges_nothing():
-    settings = PauliFrameConfig(
-        write_cycles=0,
-        zero_commit_cost_justification="an idealized register write",
-    )
+def test_a_free_write_is_accepted_and_needs_no_clock():
+    settings = PauliFrameConfig(write_cycles=0)
     assert settings.write_cycles == 0
+    assert settings.clock is None
 
 
 class CountingFrame(pauli_frame_module.PauliFrame):

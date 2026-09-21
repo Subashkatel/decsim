@@ -132,9 +132,13 @@ class WaitingJobs:
         return total
 
     def sample_depth(self) -> None:
-        """Report the total depth now."""
+        """Report the total depth now, and each pool's own."""
+        now = self.engine.now
         depth = self.total()
-        self.trace.depth_changed.fire(self.engine.now, depth)
+        self.trace.depth_changed.fire(now, depth)
+        for pool, queue in self.waiting_by_pool.items():
+            pool_depth = len(queue)
+            self.trace.pool_depth_changed.fire(now, pool, pool_depth)
 
     def drain_in_scheduler_order(self, pool: str) -> list:
         """Empty the pool's queue into a list, next job first."""
@@ -201,7 +205,7 @@ def _check_pools_bulk_strong_means(waiting_by_pool: dict) -> None:
     A pool is a capability, so the rule that merges one names it. A run
     that defines a pool beyond the default and the strong one is refused
     here rather than having its jobs merged as though they were strong
-    re-decodes (design audit note 12 section 6.6).
+    re-decodes.
     """
     named = set(waiting_by_pool) - {DEFAULT_POOL, STRONG_POOL}
     if not named:
@@ -274,3 +278,7 @@ class _TraceSources:
 
     job_enqueued: trace_source.TraceSource = trace_source.new_source()
     depth_changed: trace_source.TraceSource = trace_source.new_source()
+    # (tick, pool, jobs waiting in that pool): a pool sweep reads each
+    # tier's own backlog, the way DART-Q reports a max backlog per
+    # decoder instance (2605.09142 lines 1101-1109)
+    pool_depth_changed: trace_source.TraceSource = trace_source.new_source()

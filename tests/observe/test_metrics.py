@@ -22,8 +22,8 @@ class _MemoryWatcher:
 
     def changed(self, _job, _decoder_input) -> None:
         """One deposit or take: the listener's count beside the memory's."""
-        counted = self.occupancy.by_unit[self.unit.name].held_rounds
-        held = self.unit.memory.occupied_rounds
+        counted = self.occupancy.by_unit[self.unit.name].held_bits
+        held = self.unit.memory.occupied_bits
         self.samples.append((counted, held))
 
 
@@ -35,9 +35,7 @@ def test_the_busy_integral_equals_the_services_own_spans():
     decode records report for the point's nine services, which the
     listener never sees.
     """
-    machine, _result = gate_point.run(
-        decoder_utilization=True, record_switching_windows=True
-    )
+    machine, _result = gate_point.run(record_switching_windows=True)
 
     utilization = machine.observation.decoder_utilization.result()
     services = machine.observation.decode_records.services
@@ -59,7 +57,7 @@ def test_the_memory_occupancy_is_the_memorys_own_count_at_every_change():
     """The listener's steps and the memory's own dictionary agree.
 
     The point runs one unit, so the watcher connects to the one memory
-    after the listener and reads the memory's occupied_rounds at every
+    after the listener and reads the memory's occupied_bits at every
     deposit and take: nine of each, and no disagreement.
     """
     point = gate_point.settings(decoder_memory_occupancy=True)
@@ -80,9 +78,10 @@ def test_the_memory_occupancy_is_the_memorys_own_count_at_every_change():
     assert rows == [
         {
             "unit": "default#0",
-            "capacity_rounds": snapshot.capacity_rounds,
-            "occupied_rounds": snapshot.occupied_rounds,
-            "peak_occupied_rounds": snapshot.peak_occupied_rounds,
+            "capacity_bits": snapshot.capacity_bits,
+            "occupied_bits": snapshot.occupied_bits,
+            "peak_occupied_bits": snapshot.peak_occupied_bits,
             "admissions": snapshot.admissions,
+            "unsized_admission_count": snapshot.unsized_admission_count,
         }
     ]

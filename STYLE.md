@@ -141,7 +141,7 @@ Link paths and yaml keys are plain words too. The link path names are
 listed in [The link paths](docs/reference/glossary.md#the-link-paths),
 and the config keys read the same way: readout_to_bits_cycles,
 decision_to_pulse_cycles, packing_cycles_per_round,
-packing_rounds_in_flight, unit_memory_rounds, write_cycles,
+packing_rounds_in_flight, result_blocks_unit, write_cycles,
 setup_cycles_per_transfer, log_component_io, check_windows_with.
 
 ## Rule 3. Comments say why, in the present tense
@@ -228,8 +228,10 @@ is sinter's (`BUILT_IN_DECODERS` and `Decoder`); the wiring is gem5's
 late port bind: a component declares each neighbour as a `ports.Port`
 class attribute, its constructor takes settings only, and the root binds
 every wire by attribute assignment after every component is built, then
-calls `start` on each in build order. A port bound twice or left unbound
-is refused by name. It applies to every component.
+calls `start` on each in build order. A port bound twice is refused by
+name, and a required port read before it is bound raises. An optional
+port left unbound reads as None, which is the neighbour a run does not
+have. It applies to every component.
 
 A port is a small Protocol in `decsim/ports.py` with the
 methods one component needs from another, named for what they do:

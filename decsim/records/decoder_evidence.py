@@ -25,6 +25,12 @@ from typing import Union
 # one tick of an edge length is this many natural-log units of weight
 DEFAULT_WEIGHT_STEP = 0.1
 
+# what the strongest fusion of one growth step changed
+FUSION_NONE = "none"
+FUSION_ROOTS = "roots"
+FUSION_PARITY = "parity"
+FUSION_KINDS = (FUSION_NONE, FUSION_ROOTS, FUSION_PARITY)
+
 
 @dataclasses.dataclass(frozen=True)
 class Open:
@@ -47,11 +53,20 @@ class GrowthStep:
     deepest flood over closed edges from the root of any cluster the step
     fused, the stages a cluster identifier and its parity take to cross
     the cluster (Helios 2301.08419 lines 623-629); zero when the step
-    fused nothing.
+    fused nothing. growth_ticks is the ticks the step spanned, which is
+    the one-unit growth iterations a unit that grows one unit of weight
+    at a time spends on it (lines 1242-1254, latency growing with the
+    weight resolution). fusion is the strongest kind among the step's
+    own fusions, one of FUSION_KINDS: none when the closing edges united
+    no two clusters, roots when clusters united and only roots and the
+    touching-boundary flag moved, parity when the survivor's parity took
+    an odd absorbed root's and has to cross the cluster it fused.
     """
 
     edge_count: int
     hop_count: int
+    growth_ticks: int
+    fusion: str
 
 
 @dataclasses.dataclass(frozen=True)
@@ -99,6 +114,9 @@ class UnionFindHardEvidence:
     unmatched_detectors: tuple[int, ...] = ()
     # one GrowthStep per growth step, in order, for the cycle count
     growth_steps: tuple[GrowthStep, ...] = ()
+    # the deepest parent chain of the trees the peel walked, a root at
+    # zero: the levels the peel's flags and completions cross
+    forest_depth: int = 0
 
 
 def normalized_weight_step(weight_step) -> float:

@@ -147,15 +147,20 @@ class SyndromeBuffer(Protocol):
     in the store, which is at the landing of the hop that carried them, and
     it is readable at that same instant: the store and the publication
     are one call at one tick. The end that takes the landing asks
-    has_room first, counting the writes it has in flight (gem5's queue
-    answers isFull with its reserved entries taken,
-    src/mem/cache/queue.hh:150-153, :87-93); a packed round is written
-    once and kept until every consumer releases it. A store never
-    refuses a write: a round that finds no room waits upstream.
+    has_room first with the round's bits, counting the bits it has
+    reserved for the writes in flight (gem5's packet store answers
+    `avail() = _maxsize - _size - _reserved` against the packet's own
+    length, src/dev/net/pktfifo.hh); a packed round is written once and
+    kept until every consumer releases it. A store never refuses a
+    write: a round that finds no room waits upstream.
     """
 
-    def has_room(self) -> bool:
-        """Whether one more round fits now."""
+    def has_room(self, bits: Optional[int], reserved_bits: int = 0) -> bool:
+        """Whether a round of that many bits fits beside what is taken.
+
+        A bounded store raises on a round that states no size: a bound
+        is measured against a size.
+        """
 
     def accept_packed_round(
         self,
@@ -168,13 +173,13 @@ class SyndromeBuffer(Protocol):
     def release_round(self, round_key: tuple) -> None:
         """Free the round; its consumers are done with it."""
 
-    def capacity_rounds(self) -> Optional[int]:
-        """The slots this store is bounded to, or None for unbounded.
+    def capacity_bits(self) -> Optional[int]:
+        """The bits this store is bounded to, or None for unbounded.
 
-        A store bounded some other way than by a slot count answers
-        None and refuses nothing: the callers that size a plan, a trace
-        lane or a room check ask this instead of reading a settings
-        record, so the bound stays the store's own to decide.
+        A store bounded some other way than by a bit capacity answers
+        None and refuses nothing: the callers that size a trace lane or
+        a room check ask this instead of reading a settings record, so
+        the bound stays the store's own to decide.
         """
 
     def held_rounds_description(self) -> str:
@@ -240,9 +245,6 @@ class RetainedRounds(Protocol):
     def has_live_operation_reference(self, operation_id) -> bool:
         """Whether a hold or a stored round still names this operation."""
 
-    def capacity_rounds(self) -> Optional[int]:
-        """The slots this store is bounded to, or None for unbounded."""
-
 
 @runtime_checkable
 class SyndromeRoundSender(Protocol):
@@ -261,18 +263,21 @@ class SyndromeRoundSender(Protocol):
 
 @runtime_checkable
 class StrongSyndromeRoundReceiver(Protocol):
-    """The strong syndrome round receiver, as the syndrome round sender sees it.
+    """The strong syndrome buffer's receiving end, as its two senders see it.
 
-    The store counts the rounds still crossing toward it as room taken:
-    the controller reserves that room before a round leaves and the
-    store keeps the round when it lands.
+    The store counts the bits still crossing toward it as room taken.
+    A strong-primary run's controller reserves that room before a round
+    leaves and the store keeps the round when it lands; a switching
+    run's strong redecode reserves the room of an escalated region before
+    it leaves the chip and the store keeps every round of it at the
+    landing.
     """
 
-    def has_room(self) -> bool:
-        """Whether one more write can land."""
+    def has_room(self, bits: Optional[int]) -> bool:
+        """Whether a write of that many bits can land."""
 
-    def reserve_write(self) -> None:
-        """Take the room one crossing round will need, before it leaves."""
+    def reserve_write(self, bits: Optional[int]) -> None:
+        """Take the bits one crossing round will need, before it leaves."""
 
     def receive_round(
         self,
@@ -281,25 +286,32 @@ class StrongSyndromeRoundReceiver(Protocol):
     ) -> None:
         """Take one round that landed here and keep it on arrival."""
 
+    def reserve_region(self, round_count: int, bits: Optional[int]) -> None:
+        """Take the room an escalated region's rounds will need, or refuse."""
+
+    def receive_region(self, region: round_records.EscalatedRegion) -> None:
+        """Take an escalated region that landed here: every round its slot."""
+
 
 @runtime_checkable
 class WeakSyndromeRoundReceiver(Protocol):
     """The weak syndrome round receiver, as the controller sees it.
 
     This end owns the store's room and its landing. It answers has_room
-    against the rounds stored and the writes still in flight, the sender
-    reserves that room before the round leaves, and the transfer that
-    carries the round lands here: this end stores it, which is the tick
-    it becomes readable, and announces it to whoever waits on it. The
-    same port takes the controller's ask for a timing-only round, which
-    takes its slot here and leaves by the store's own outgoing port.
+    against the bits stored and the bits reserved for the writes still
+    in flight, the sender reserves that room before the round leaves,
+    and the transfer that carries the round lands here: this end stores
+    it, which is the tick it becomes readable, and announces it to
+    whoever waits on it. The same port takes the controller's ask for a
+    timing-only round, which takes its slot here and leaves by the
+    store's own outgoing port.
     """
 
-    def has_room(self) -> bool:
-        """Whether one more round fits: the stored ones and those in flight."""
+    def has_room(self, bits: Optional[int]) -> bool:
+        """Whether that many bits fit: the stored ones and those in flight."""
 
-    def reserve_write(self) -> None:
-        """Take the room one crossing round will need, before it leaves."""
+    def reserve_write(self, bits: Optional[int]) -> None:
+        """Take the bits one crossing round will need, before it leaves."""
 
     def receive_round(self, packed: round_records.PackedRound) -> None:
         """Take one round that landed here: store it, then announce it."""
@@ -494,6 +506,16 @@ class WindowPlan(Protocol):
         models.
         """
 
+    def crossing_faults_of(self, key: tuple) -> Optional[dict]:
+        """The faults it commits that reach behind its commit region.
+
+        A region pinned on the escalated window's own weak commit asks
+        for this: that commit stands for the faults crossing the seam
+        behind it and for no others, since the rest of the window's
+        rounds are exactly what the region decodes again. None when the
+        run builds no error models.
+        """
+
 
 @runtime_checkable
 class WindowRetention(Protocol):
@@ -513,10 +535,16 @@ class WindowRetention(Protocol):
     def hold_strong_context(
         self, key: tuple, strong_request_key, context_keys
     ) -> None:
-        """The window's potential strong read becomes the request's hold."""
+        """The rounds kept in case the window escalates pass to its request.
+
+        The window's potential strong read becomes the request's hold.
+        """
 
     def context_rounds_in_flight(self, key: tuple, read_keys) -> tuple:
-        """The context rounds that reached the weak syndrome buffer late."""
+        """The rounds the strong syndrome buffer lacks that the weak one has."""
+
+    def escalated_rounds(self, round_keys) -> tuple:
+        """The weak syndrome buffer's packets of these rounds, to carry up."""
 
     def guard_restart_reads(
         self,
@@ -546,7 +574,10 @@ class WindowRetention(Protocol):
     def release_absorbed_strong_hold(
         self, key: tuple, restart_key: Optional[tuple], replacement
     ) -> None:
-        """Drop the absorbed window's potential read; the request holds it."""
+        """Drop the rounds an absorbed window kept; the strong request has them.
+
+        A strong window covered this window, so its potential read goes.
+        """
 
     def require_rounds_retained(
         self, label: str, payloads: list, first_round: int, last_round: int
@@ -673,8 +704,9 @@ class StrongRedecode(Protocol):
     that decided sits in windows, the re-decode that carries it out sits
     in escalation. A weak verdict that escalates hands over the job, a
     weak window that commits releases the strong window waiting on it,
-    and a weak result that is kept cancels the sibling it made
-    speculative (Toshio et al. 2510.25222).
+    and a weak result that is kept halts the strong request it made
+    unnecessary, held here or on the strong side's manager (Toshio et
+    al. 2510.25222 lines 606-614).
     """
 
     def escalate(self, weak_job: decoding_records.DecodeJob) -> None:
@@ -683,8 +715,8 @@ class StrongRedecode(Protocol):
     def submit_if_commit_releases(self, window_key: tuple) -> None:
         """A weak window committed: a strong window waiting on it leaves."""
 
-    def cancel_held_sibling(self, window_key: tuple) -> None:
-        """A kept weak result: its held sibling never decodes."""
+    def cancel_strong_request(self, window_key: tuple) -> None:
+        """A kept weak result: its strong request ends, held or submitted."""
 
     def submit_if_stored_data_releases(self, operation_id) -> None:
         """A round was stored: a window waiting for its tail leaves."""
@@ -751,7 +783,7 @@ class WindowInputGate(Protocol):
     """
 
     def may_stage(self, job: decoding_records.DecodeJob) -> bool:
-        """Whether a blocked job may occupy an input slot yet."""
+        """Whether a job that cannot decode yet may take a unit's input slot."""
 
     def may_start(self, job: decoding_records.DecodeJob) -> bool:
         """Whether the landed job owes no boundary and may decode."""
@@ -787,6 +819,13 @@ class DecoderOutput(Protocol):
         on_delivered: Callable[[], None],
     ) -> int:
         """Send one window's escalation; returns the delay the link expects."""
+
+    def send_region(
+        self,
+        region: round_records.EscalatedRegion,
+        on_delivered: Callable[[], None],
+    ) -> int:
+        """Send a strong window's rounds up; the delay the link expects."""
 
 
 @runtime_checkable
@@ -900,6 +939,13 @@ class DecodeQueue(Protocol):
 
         A tier whose result blocks its unit gets the unit back here; a
         tier that gave it back at the decode's end has nothing to give.
+        """
+
+    def cancel_strong(self, window_key: tuple) -> None:
+        """A kept weak result: the window's strong request ends where it is.
+
+        Queued, crossing the link, running, or done and waiting in the
+        unit that produced it; nothing when none is live or done.
         """
 
     def close_companion_request(
@@ -1201,9 +1247,15 @@ class SyndromeSource(Protocol):
     a row that draws a whole shot fires it once per fresh shot, and a row
     that draws nothing carries the silent source, so a listener connects
     to every row by name.
+
+    takes_code_card says whether the row shapes its payloads by the
+    run's code card: such a row is built with the card, so its rounds
+    state the code's syndrome width, and a row that reads its widths
+    off a circuit is built without it.
     """
 
     operation_circuit_scope: str
+    takes_code_card: bool
     shot_sampled: Any
 
     def begin_operation(
@@ -1248,7 +1300,8 @@ class DetectionEventFormer(Protocol):
     memoising former the decoder side reads through
     (decsim/detector_error_model/detection_event_formation.py). Where the
     machine calls it is controller.detection_events_formed_at: the
-    controller's assembler before the round leaves, or the tier that
+    controller's assembler before the round leaves, the weak syndrome
+    buffer's receiving end before the round is stored, or the tier that
     reads the round. A former is called once per round, in round order,
     because a detector compares this round's outcomes against the round
     before it (LILLIPUT 2108.06569 lines 499-510) and the formation table
@@ -1265,29 +1318,41 @@ class DetectionEventFormer(Protocol):
 class DetectionEventPlacement(Protocol):
     """Where the machine forms a round's detection events.
 
-    Table rows: controller, decoder
+    Table rows: controller, weak_syndrome_buffer, decoder
     (decsim/controller/settings.py DETECTION_EVENT_FORMATION, built from
-    controller.detection_events_formed_at). The two are published
-    placements of the same conversion, Google's workstation (2408.13687
-    lines 474-476) against the decoder side (Caune 2410.05202 lines
-    1252-1256, LILLIPUT 2108.06569 lines 499-510), and the values are
-    the same either way, so a row moves the width the round carries, the
-    clock its formation is charged on, and nothing else. Every row is
-    built with the run's DetectionEventFormer and the controller's own
-    formation cycles.
+    controller.detection_events_formed_at). They are placements of the
+    same conversion, Google's workstation (2408.13687 lines 474-476),
+    the decoder's own chip ahead of its store (Maurer 2510.21600 lines
+    235-237 for the chip, the order ours), and the decoder side (Caune
+    2410.05202 lines 1252-1256, LILLIPUT 2108.06569 lines 499-510), and
+    the values are the same in every row, so a row moves the width the
+    round carries, the clock its formation is charged on, and nothing
+    else. Every row is built with the run's DetectionEventFormer and the
+    controller's own formation cycles.
 
     The controller's assembler asks form_before_departure for the round
     that leaves it and waits detection_event_formation_cycles of the
-    controller's clock before handing it on; the root asks
-    decoder_side_former for the former each decoder tier reads
+    controller's clock before handing it on; the weak syndrome buffer's
+    receiving end asks form_before_storage for the round it stores; the
+    root asks decoder_side_former for the former each decoder tier reads
     its rounds through, which is None for a row that has already formed
-    them.
+    them and for a source that forms nothing. The root reads two facts
+    about a row. forms_at_the_weak_syndrome_buffer: whether the run
+    depends on its rounds landing in that buffer. forms_at_the_decoder:
+    whether each tier has its own event-detection stage in front of its
+    core, which is priced whether or not the source has outcomes to
+    convert.
     """
 
     detection_event_formation_cycles: int
+    forms_at_the_weak_syndrome_buffer: bool
+    forms_at_the_decoder: bool
 
     def form_before_departure(self, fragments: tuple) -> tuple:
         """The round's fragments as they leave the controller."""
+
+    def form_before_storage(self, fragments: tuple) -> tuple:
+        """The round's fragments as the weak syndrome buffer stores them."""
 
     def decoder_side_former(self) -> Optional[DetectionEventFormer]:
         """The former each tier forms through, or None when none does."""
@@ -1459,6 +1524,14 @@ class WindowTransfers(Protocol):
     ) -> None:
         """Send one boundary on its path, in its attribution's name."""
 
+    def send_region(
+        self,
+        path: transfer_records.LinkPath,
+        region: round_records.EscalatedRegion,
+        on_delivered: Callable[[], None],
+    ) -> int:
+        """Send an escalated region in its request's name; the delay."""
+
 
 # ------------------------------------ the pluggable policies off the path
 
@@ -1574,7 +1647,9 @@ class ThresholdSource(Protocol):
 class ConfidenceSignal(Protocol):
     """The soft output one window's decodes report, as the join sees it.
 
-    Table rows: complementary_gap and cluster_gap (decsim/confidence/).
+    Table rows: complementary_gap, cluster_gap and extra_cluster_gap
+    (decsim/confidence/); each builds itself from the escalation section
+    and the weak decoder's settings (from_settings).
     source names the signal so the switching policy can refuse another
     one's, fault_model_requirement is what a window model must offer,
     decoder_evidence_requirement is what the decode itself must show
@@ -1642,8 +1717,7 @@ class WindowingScheme(Protocol):
     """How an operation's rounds are cut into windows.
 
     Table rows: sliding, parallel, sandwich, naive_online. The static
-    window graph of an operation, when a window has its data, and the
-    buffer floor the scheme needs.
+    window graph of an operation, and when a window has its data.
 
     Three facts about the layout are declared rather than read off the
     row's class, so a scheme written outside decsim answers the same
@@ -1680,11 +1754,6 @@ class WindowingScheme(Protocol):
         readiness: window_records.WindowReadiness,
     ) -> bool:
         """Whether the window has every round it reads."""
-
-    def validate_buffer(
-        self, geometry: program_records.ResolvedCodeGeometry
-    ) -> None:
-        """Refuse a buffer below the scheme's floor."""
 
 
 @runtime_checkable

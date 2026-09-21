@@ -13,9 +13,13 @@ import decsim.decoders.decoder_unit as decoder_unit
 import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
 
+# one round of a test job: one fragment of two bits, the size
+# _carrying_job stamps and _demand charges
+BITS_PER_ROUND = 2
 
-def _unit(capacity_rounds=None):
-    memory = decoder_memory.DecoderMemory("default", 0, capacity_rounds)
+
+def _unit(capacity_bits=None):
+    memory = decoder_memory.DecoderMemory("default", 0, capacity_bits)
     return decoder_unit.DecoderUnit("default", 0, memory)
 
 
@@ -26,11 +30,11 @@ def _job(label, rounds=1):
 
 
 def _demand(job):
-    return job.round_count
+    return job.round_count * BITS_PER_ROUND
 
 
 def _payload_demand(job):
-    return decoding_records.distinct_round_count(job.payloads)
+    return job.payload_bits()
 
 
 def _carrying_job(label, rounds):
@@ -69,13 +73,28 @@ def test_a_unit_holds_two_inputs_and_one_compute():
 
 
 def test_a_second_resident_joins_only_when_both_inputs_fit_the_memory():
-    unit = _unit(capacity_rounds=5)
+    five_rounds_bits = 5 * BITS_PER_ROUND
+    unit = _unit(capacity_bits=five_rounds_bits)
     first = _job("first", rounds=3)
     unit.admit(first)
     small = _job("small", rounds=2)
     assert unit.has_room(small, 2, _demand) is True
     large = _job("large", rounds=3)
     assert unit.has_room(large, 2, _demand) is False
+
+
+def test_a_second_reader_of_rounds_still_arriving_takes_no_memory_of_its_own():
+    three_rounds_bits = 3 * BITS_PER_ROUND
+    unit = _unit(capacity_bits=three_rounds_bits)
+    first = _job("first", rounds=3)
+    first.input_key = "the window's rounds"
+    unit.admit(first)
+    companion = _job("companion", rounds=3)
+    companion.input_key = first.input_key
+    other = _job("other", rounds=3)
+
+    assert unit.has_room(companion, 2, _demand) is True
+    assert unit.has_room(other, 2, _demand) is False
 
 
 def test_a_second_window_waits_while_a_landed_one_fills_the_memory():
@@ -86,7 +105,8 @@ def test_a_second_window_waits_while_a_landed_one_fills_the_memory():
     the response port refuses the request until one frees; nothing is
     raised.
     """
-    memory = decoder_memory.DecoderMemory("default", 0, capacity_rounds=3)
+    three_rounds_bits = 3 * BITS_PER_ROUND
+    memory = decoder_memory.DecoderMemory("default", 0, three_rounds_bits)
     unit = decoder_unit.DecoderUnit("default", 0, memory)
     landed = _carrying_job("landed", 3)
     unit.admit(landed)
@@ -141,12 +161,12 @@ def test_the_residents_describe_their_phase():
 
 def test_a_memory_config_with_a_zero_capacity_is_refused_at_construction():
     # A memory config from the experiments layer is a boundary: a unit
-    # that holds zero rounds can serve nothing, so the mistake is caught
+    # that holds zero bits can serve nothing, so the mistake is caught
     # before a run
     # rather than at the first deposit.
 
     with pytest.raises(
-        ValueError, match="pool 'default' needs a positive round capacity"
+        ValueError, match="pool 'default' needs a positive bit capacity"
     ):
         decoder_memory.DecoderMemoryConfig({"default": 0})
 

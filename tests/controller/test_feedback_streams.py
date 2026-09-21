@@ -71,10 +71,7 @@ def _resolved_operation(operation_id: int):
         distance=3,
         commit_round_count=3,
         buffer_round_count=3,
-        minimum_leading_buffer_round_count=3,
-        minimum_trailing_buffer_round_count=3,
         one_patch_spatial_node_count=9,
-        window_floor_justification=None,
     )
     return program_records.ResolvedOperationPlanning(
         operation_id=operation_id,
@@ -280,10 +277,7 @@ def _resolved_patch(patch_identity):
         distance=3,
         commit_round_count=3,
         buffer_round_count=3,
-        minimum_leading_buffer_round_count=3,
-        minimum_trailing_buffer_round_count=3,
         one_patch_spatial_node_count=9,
-        window_floor_justification=None,
     )
     return program_records.ResolvedPatchPlanning(
         patch_identity=patch_identity,

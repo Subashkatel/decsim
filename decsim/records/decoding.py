@@ -213,7 +213,7 @@ class DecodeJob:
 
     The window's rounds, its detector error model, its identity in the
     decoder queues, and the timestamps of its life. ``payloads`` is the
-    the weak syndrome buffer view of the rounds until the transfer lands them
+    weak syndrome buffer's view of the rounds until the transfer lands them
     in a unit's memory (``decoder_input``); a decoder reads only its unit's
     memory.
     """
@@ -406,6 +406,10 @@ class DecodeResult:
     # scenarios)
     boundary_defects: Optional[dict] = None
     boundary_data: Optional[Any] = None  # optional richer interaction payload
+    # CrossingCommit: the part of the correction that commits faults
+    # touching a round before the window's commit region, which the
+    # residual's XOR cannot be split into afterwards
+    crossing_commit: Optional[window_records.CrossingCommit] = None
     # BackendDecodeStatus of a best-effort correction (nonconverged, low
     # confidence, does not reproduce the syndrome); None when the decode
     # succeeded. The correction is committed either way and the status travels

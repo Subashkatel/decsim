@@ -94,6 +94,8 @@ class TraceWriter:
         self.engine = engine
         self.process_name = process_name
         self.events: list[dict] = []
+        # each manager's waiting jobs, so the counter is the run's total
+        self.queue_depth_by_manager: dict = {}
         self._open = _OpenSlices()
 
     # ---- the file
@@ -214,6 +216,7 @@ class TraceWriter:
         attribution = record.attribution
         args = {
             "bits": transfer.payload_bits,
+            "header_bits": transfer.header_bits,
             "transfer": "move",
             "channel": record.channel,
             "queue_wait_ticks": transfer.queue_wait_ticks,
@@ -243,14 +246,15 @@ class TraceWriter:
     # ---- the stores
 
     def round_stored(
-        self, store_name: str, capacity, round_key, packet
+        self, store_name: str, capacity_bits, round_key, packet
     ) -> None:
         """A round takes a slot in the store."""
+        bits = _packet_bits(packet)
         args = {
             "round": round_text(round_key),
-            "bits": _packet_bits(packet),
+            "bits": bits,
             "transfer": "copy",
-            "capacity": capacity,
+            "capacity_bits": capacity_bits,
             "slot_taken": self.engine.now,
         }
         _operation_id, round_index = round_key
@@ -261,6 +265,9 @@ class TraceWriter:
         self._step_flow(store_name, round_key)
         counter = f"{store_name} rounds"
         self._count(store_name, counter, 1)
+        held_bits = round_records.stated_bits(bits)
+        bits_counter = f"{store_name} bits"
+        self._count(store_name, bits_counter, held_bits, series="bits")
 
     def round_published(self, store_name: str, round_key, tick: int) -> None:
         """The round's bits are readable in the store."""
@@ -269,6 +276,7 @@ class TraceWriter:
 
     def round_released(self, store_name: str, round_key) -> None:
         """The round's last holder let go; the slot is free."""
+        held_bits = self._residence_bits(store_name, round_key)
         closing = {
             "freed": self.engine.now,
             "freed_reason": "last hold released",
@@ -276,6 +284,8 @@ class TraceWriter:
         self._end_residence(store_name, round_key, closing)
         counter = f"{store_name} rounds"
         self._count(store_name, counter, -1)
+        bits_counter = f"{store_name} bits"
+        self._count(store_name, bits_counter, -held_bits, series="bits")
 
     def hold_registered(self, store_name: str, holder, round_keys) -> None:
         """One consumer token keeps the listed rounds alive."""
@@ -334,9 +344,12 @@ class TraceWriter:
         )
         self._start_window_flow("Window planner", window_key)
 
-    def depth_changed(self, tick: int, depth: int) -> None:
-        """The jobs waiting over every pool changed."""
-        values = {"jobs": depth}
+    def depth_changed(self, manager, tick: int, depth: int) -> None:
+        """One manager's waiting jobs changed; the counter is the sum."""
+        self.queue_depth_by_manager[manager] = depth
+        depths = self.queue_depth_by_manager.values()
+        total = sum(depths)
+        values = {"jobs": total}
         self._counter("Window planner", "ready queue depth", values, tick)
 
     def verdict_given(self, window_key, request_key, verdict) -> None:
@@ -351,14 +364,24 @@ class TraceWriter:
     def window_committed(
         self, window: window_records.Window, contribution
     ) -> None:
-        """A window committed under the contribution that owns its rounds."""
+        """A window committed under the contribution that owns its rounds.
+
+        An escalated window commits its weak result provisionally at the
+        verdict and the strong result finalizes it later, on the frame's
+        own committed instant (WindowCommitter.finish_strong), so the
+        instant says which of the two it marks.
+        """
         commit_lo = contribution.commit_lo
         commit_hi = contribution.commit_hi
+        result = "provisional"
+        if window.published_request_key is not None:
+            result = "final"
         args = {
             "window": window_text(window.key),
             "owner": window_text(contribution.owner_key),
             "commit": f"{commit_lo}..{commit_hi}",
             "ownership": contribution.ownership_kind,
+            "result": result,
         }
         name = f"W{window.window_index} committed"
         self._instant("Window planner", name, "window", args)
@@ -438,14 +461,14 @@ class TraceWriter:
             "rounds": _job_rounds_text(job),
             "bits": _landed_bits(job),
             "transfer": "copy",
-            "capacity": unit.memory.capacity_rounds,
+            "capacity_bits": unit.memory.capacity_bits,
             "slot_taken": _dispatch_tick(job),
             "data_ready": self.engine.now,
         }
         name = f"W{job.window_id} input in memory"
-        self._begin_residence(
-            thread, job.request_key, name, "window,residence", args
-        )
+        key = _input_key(job)
+        if (thread, key) not in self._open.open_residence:
+            self._begin_residence(thread, key, name, "window,residence", args)
         self._end_flow(thread, job)
         self._step_window_flow(thread, window_key, self.engine.now)
 
@@ -504,9 +527,9 @@ class TraceWriter:
         """One job's rounds landed in a unit's memory."""
         unit_name = _unit_of_memory(memory_name)
         thread = _unit_thread(unit_name)
-        counter = f"{memory_name} rounds"
-        rounds = len(decoder_input.rounds)
-        self._count(thread, counter, rounds)
+        counter = f"{memory_name} bits"
+        bits = decoder_input.held_bits()
+        self._count(thread, counter, bits, series="bits")
 
     def memory_taken(
         self, memory_name: str, job: decoding_records.DecodeJob, decoder_input
@@ -515,10 +538,11 @@ class TraceWriter:
         unit_name = _unit_of_memory(memory_name)
         thread = _unit_thread(unit_name)
         closing = {"freed": self.engine.now, "freed_reason": "decode done"}
-        self._end_residence(thread, job.request_key, closing)
-        counter = f"{memory_name} rounds"
-        rounds = len(decoder_input.rounds)
-        self._count(thread, counter, -rounds)
+        key = _input_key(job)
+        self._end_residence(thread, key, closing)
+        counter = f"{memory_name} bits"
+        bits = decoder_input.held_bits()
+        self._count(thread, counter, -bits, series="bits")
 
     # ---- the frame
 
@@ -626,10 +650,13 @@ class TraceWriter:
         }
         self.events.append(row)
 
-    def _count(self, thread: str, name: str, step: int) -> None:
+    def _count(
+        self, thread: str, name: str, step: int, series: str = "rounds"
+    ) -> None:
+        """One step of a counter track; series names what it counts."""
         value = self._open.counter_value.get(name, 0) + step
         self._open.counter_value[name] = value
-        self._counter(thread, name, {"rounds": value}, self.engine.now)
+        self._counter(thread, name, {series: value}, self.engine.now)
 
     def _begin_assembly(self, capacity, round_key, event) -> None:
         """The round's first fragment opens its place in the workspace."""
@@ -714,6 +741,14 @@ class TraceWriter:
         if open_row is None:
             return
         open_row["args"].update(learned)
+
+    def _residence_bits(self, thread: str, key) -> int:
+        """The bits an open residence states; none stated holds none."""
+        open_row = self._open.open_residence.get((thread, key))
+        if open_row is None:
+            return 0
+        bits = open_row["args"]["bits"]
+        return round_records.stated_bits(bits)
 
     def _end_residence(self, thread: str, key, closing: dict) -> None:
         open_row = self._open.open_residence.pop((thread, key), None)
@@ -893,6 +928,20 @@ def _copy_thread(target_name: str) -> str:
         return "Window planner"
     unit_name = _unit_of_memory(target_name)
     return _unit_thread(unit_name)
+
+
+def _input_key(job: decoding_records.DecodeJob):
+    """The identity of the rounds a job reads, as the unit's memory keys them.
+
+    The forced-class solves of one window share one landed input
+    (DecoderMemory.rewrite), so the input's residence is one record
+    keyed by the request whose transfer landed it, the job's own
+    request otherwise; the memory frees it when the last reader takes
+    it and that is when the record closes.
+    """
+    if job.input_key is not None:
+        return job.input_key
+    return job.request_key
 
 
 def _unit_of_memory(memory_name: str) -> str:

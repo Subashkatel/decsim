@@ -96,16 +96,18 @@ MINIMAL_CONFIG = {
             "bits_per_cycle": None,
         }
     },
-    "weak_syndrome_buffer": {"rounds": None},
-    "strong_syndrome_buffer": {"rounds": None},
+    "weak_syndrome_buffer": {"bits": None},
+    "strong_syndrome_buffer": {"bits": None},
     "weak_decoder": {
         "kind": 0.028,
         "units": 1,
-        "unit_memory_rounds": None,
+        "unit_memory": {"bits": None},
         "engine": {
             "clock": "fridge",
             "fetch_cycles_per_round": 1,
+            "fetch_cycles_per_job": 0,
             "release_cycles_per_job": 1,
+            "release_cycles_per_round": 0,
         },
     },
     "pauli_frame": {"clock": "fridge", "write_cycles": 1},
@@ -126,11 +128,13 @@ def strong_unit(algorithm) -> dict:
         "strong_decoder": {
             "kind": algorithm,
             "units": 1,
-            "unit_memory_rounds": None,
+            "unit_memory": {"bits": None},
             "engine": {
                 "clock": "room",
                 "fetch_cycles_per_round": 1,
+                "fetch_cycles_per_job": 0,
                 "release_cycles_per_job": 1,
+                "release_cycles_per_round": 0,
             },
         }
     }

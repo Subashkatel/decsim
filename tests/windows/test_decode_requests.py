@@ -481,11 +481,13 @@ SWITCHING_FOLD_SWEEP = {
     "strong_decoder": {
         "kind": 1.0,
         "units": 1,
-        "unit_memory_rounds": None,
+        "unit_memory": {"bits": None},
         "engine": {
             "clock": "fridge",
             "fetch_cycles_per_round": 1,
+            "fetch_cycles_per_job": 0,
             "release_cycles_per_job": 1,
+            "release_cycles_per_round": 0,
         },
     },
     "sweep": [
@@ -563,7 +565,7 @@ def test_read_cycles_delay_submission_and_later_reaction_points(decoder_input):
     clocks = config.ClockSettings.from_yaml({"storage": 1.0})
     section = {"clock": "storage", "read_cycles": 3}
     settings = syndrome_buffer_settings.SyndromeBufferSettings.from_yaml(
-        section, clocks
+        section, "weak_syndrome_buffer", clocks
     )
     free = declared_run.weak_only_run(decoder_input=decoder_input)
     charged = declared_run.weak_only_run(

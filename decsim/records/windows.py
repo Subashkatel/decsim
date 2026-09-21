@@ -29,8 +29,8 @@ class DecoderTier(Enum):
 
 # windows.terminal_policy names one of these: how a finite serial stream
 # drains its last buffered window. flush ends the last window at the
-# stream's last round, which is Tan's QUITS flush (2209.09219 lines
-# 1029-1030); lookahead keeps the regular stride, so the last window
+# stream's last round, which is Tan's last window (2209.09219 lines
+# 952-955); lookahead keeps the regular stride, so the last window
 # still reads rounds past its own commit.
 TERMINAL_POLICIES = ("flush", "lookahead")
 
@@ -42,8 +42,9 @@ class WindowingSchemeCard:
     One record so every row of WINDOWING_SCHEMES has one constructor
     signature and the root builds a row without asking which geometry it
     lays; a row reads the keys its own layout needs and ignores the
-    rest. This is I5 slice 1's shape for STRONG_WINDOW_SHAPES and gem5's
-    params object (tmp/resources/gem5/src/python/m5/SimObject.py:204-205).
+    rest. This is the shape the rows of STRONG_WINDOW_SHAPES have, and
+    gem5's params object
+    (tmp/resources/gem5/src/python/m5/SimObject.py:204-205).
     """
 
     terminal_policy: str = "flush"
@@ -110,6 +111,10 @@ class Window:
     decode_status: Optional[str] = (
         None  # best-effort status of the committed decode, None = succeeded
     )
+    # what its committed decode owns of the faults crossing behind its
+    # commit region; None until it commits, and empty for every window
+    # an earlier owner's commit closes
+    crossing_commit: Optional["CrossingCommit"] = None
     t_first_round: Optional[int] = None  # tick the first round arrived
     t_data_complete: Optional[int] = (
         None  # tick the last buffered round arrived
@@ -248,6 +253,23 @@ class DependencyResidual:
 
     detector_ids: tuple[int, ...] = ()
     defects: Optional[dict] = None
+
+
+@dataclass(frozen=True)
+class CrossingCommit:
+    """What one decode committed of the faults crossing its near seam.
+
+    A window that owns the faults touching the round before its commit
+    region hands that part of its correction on twice: as the boundary
+    condition of the region ending there, and, when it escalates, to its
+    own strong redo, which owns none of those faults. The residual is
+    their complete detector effect, and logical_observables the
+    observables they flip, which stay with the window when the strong
+    result replaces its prediction.
+    """
+
+    residual: DependencyResidual
+    logical_observables: tuple[int, ...]
 
 
 @dataclass(frozen=True)

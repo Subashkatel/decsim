@@ -34,10 +34,10 @@ The weak syndrome buffer, as its own round receiver sees it.
 
 | Method | What it does |
 | --- | --- |
-| `has_room` | Whether one more round fits now. |
+| `has_room` | Whether a round of that many bits fits beside what is taken. |
 | `accept_packed_round` | Keep one landed round, readable at that tick; None publishes none. |
 | `release_round` | Free the round; its consumers are done with it. |
-| `capacity_rounds` | The slots this store is bounded to, or None for unbounded. |
+| `capacity_bits` | The bits this store is bounded to, or None for unbounded. |
 | `held_rounds_description` | The live holds, in one line, for a refusal a reader must debug. |
 
 ### `RetainedRounds`
@@ -60,7 +60,6 @@ The same store, as the window side that reads and holds it sees it.
 | `has_operation` | Whether the store still serves this operation. |
 | `close_operation` | The operation sends no more rounds; a closed one never reopens. |
 | `has_live_operation_reference` | Whether a hold or a stored round still names this operation. |
-| `capacity_rounds` | The slots this store is bounded to, or None for unbounded. |
 
 ### `SyndromeRoundSender`
 
@@ -72,13 +71,15 @@ The syndrome round sender, as the assembler sees it.
 
 ### `StrongSyndromeRoundReceiver`
 
-The strong syndrome round receiver, as the syndrome round sender sees it.
+The strong syndrome buffer's receiving end, as its two senders see it.
 
 | Method | What it does |
 | --- | --- |
-| `has_room` | Whether one more write can land. |
-| `reserve_write` | Take the room one crossing round will need, before it leaves. |
+| `has_room` | Whether a write of that many bits can land. |
+| `reserve_write` | Take the bits one crossing round will need, before it leaves. |
 | `receive_round` | Take one round that landed here and keep it on arrival. |
+| `reserve_region` | Take the room an escalated region's rounds will need, or refuse. |
+| `receive_region` | Take an escalated region that landed here: every round its slot. |
 
 ### `WeakSyndromeRoundReceiver`
 
@@ -86,8 +87,8 @@ The weak syndrome round receiver, as the controller sees it.
 
 | Method | What it does |
 | --- | --- |
-| `has_room` | Whether one more round fits: the stored ones and those in flight. |
-| `reserve_write` | Take the room one crossing round will need, before it leaves. |
+| `has_room` | Whether that many bits fit: the stored ones and those in flight. |
+| `reserve_write` | Take the bits one crossing round will need, before it leaves. |
 | `receive_round` | Take one round that landed here: store it, then announce it. |
 | `send_memory_round` | Send one timing-only round to the decoder side the store feeds. |
 
@@ -152,6 +153,7 @@ The window plan, as the escalation side reads and reshapes it.
 | `check_absorbable` | Every listed window is still undecoded and uncommitted. |
 | `strong_window_model` | The error model of one strong window of that operation. |
 | `owned_faults_of` | The faults the window at that key commits, per representation. |
+| `crossing_faults_of` | The faults it commits that reach behind its commit region. |
 
 ### `WindowRetention`
 
@@ -161,14 +163,15 @@ The rounds a window may still read, as the escalation side sees it.
 | --- | --- |
 | `hold_strong_input` | The strong job's context becomes its input hold. |
 | `strong_window_input` | The room-side payloads of a strong window, first round stamped. |
-| `hold_strong_context` | The window's potential strong read becomes the request's hold. |
-| `context_rounds_in_flight` | The context rounds that reached the weak syndrome buffer late. |
+| `hold_strong_context` | The rounds kept in case the window escalates pass to its request. |
+| `context_rounds_in_flight` | The rounds the strong syndrome buffer lacks that the weak one has. |
+| `escalated_rounds` | The weak syndrome buffer's packets of these rounds, to carry up. |
 | `guard_restart_reads` | Hold the restart window's strong context while a plan lands. |
 | `replace_window_reads` | Re-point the window's live holds at its reads. |
 | `release_restart_reads` | No earlier escalation can re-slice the window: its claim ends. |
 | `release_hold_if_live` | Drop a hold that is still live; nothing for one already gone. |
 | `release_strong_hold_if_live` | Drop a room-side hold when it is still registered. |
-| `release_absorbed_strong_hold` | Drop the absorbed window's potential read; the request holds it. |
+| `release_absorbed_strong_hold` | Drop the rounds an absorbed window kept; the strong request has them. |
 | `require_rounds_retained` | A strong window starts only once every round it reads is held. |
 | `read_keys_for_bounds` | The retained round keys of a possibly cross-operation range. |
 | `require_retained` | Refuse a new consumer if an already-arrived round was released. |
@@ -230,7 +233,7 @@ The strong tier's window side, as the committer and verdict see it.
 | --- | --- |
 | `escalate` | Ask the strong tier to re-decode the weak job's window. |
 | `submit_if_commit_releases` | A weak window committed: a strong window waiting on it leaves. |
-| `cancel_held_sibling` | A kept weak result: its held sibling never decodes. |
+| `cancel_strong_request` | A kept weak result: its strong request ends, held or submitted. |
 | `submit_if_stored_data_releases` | A round was stored: a window waiting for its tail leaves. |
 
 ### `WindowVerdict`
@@ -259,7 +262,7 @@ The window side's say over a job's input, carried on the job.
 
 | Method | What it does |
 | --- | --- |
-| `may_stage` | Whether a blocked job may occupy an input slot yet. |
+| `may_stage` | Whether a job that cannot decode yet may take a unit's input slot. |
 | `may_start` | Whether the landed job owes no boundary and may decode. |
 | `mask_input` | Fold the window's boundary into the landed input, once. |
 
@@ -271,6 +274,7 @@ The decoder side's outgoing sends, as the window side asks them.
 | --- | --- |
 | `publish` | Send the result on its tier's output link; commit it at delivery. |
 | `send_selection` | Send one window's escalation; returns the delay the link expects. |
+| `send_region` | Send a strong window's rounds up; the delay the link expects. |
 
 ### `WindowGapJoin`
 
@@ -300,6 +304,7 @@ The decoder manager, as the window manager sees it.
 | `charge_soft_output` | Charge the confidence's own computation on the job's unit. |
 | `resolve_weak_request` | The window side decided this weak request; close its attempt. |
 | `read_result` | The window side has this job's result in hand. |
+| `cancel_strong` | A kept weak result: the window's strong request ends where it is. |
 | `close_companion_request` | This forced solve lost; its window is answered by the other. |
 
 ### `DecoderRouter`
@@ -414,6 +419,7 @@ What the QPU reads out each round for an operation.
 | Member | Type |
 | --- | --- |
 | `operation_circuit_scope` | `str` |
+| `takes_code_card` | `bool` |
 | `shot_sampled` | `Any` |
 
 | Method | What it does |
@@ -439,10 +445,13 @@ Where the machine forms a round's detection events.
 | Member | Type |
 | --- | --- |
 | `detection_event_formation_cycles` | `int` |
+| `forms_at_the_weak_syndrome_buffer` | `bool` |
+| `forms_at_the_decoder` | `bool` |
 
 | Method | What it does |
 | --- | --- |
 | `form_before_departure` | The round's fragments as they leave the controller. |
+| `form_before_storage` | The round's fragments as the weak syndrome buffer stores them. |
 | `decoder_side_former` | The former each tier forms through, or None when none does. |
 
 ### `WindowModelSource`
@@ -479,6 +488,7 @@ The link fabric, as a sender that names a window or a job sees it.
 | `send_for_job` | Send in a job's name; returns the delay the link expects. |
 | `send_for_round` | Send in a stored round's name; on_delivered runs at the delivery. |
 | `send_boundary` | Send one boundary on its path, in its attribution's name. |
+| `send_region` | Send an escalated region in its request's name; the delay. |
 
 ## the pluggable policies off the path
 
@@ -572,7 +582,6 @@ How an operation's rounds are cut into windows.
 | --- | --- |
 | `plan_operation` | The operation's windows and their internal dependencies. |
 | `data_complete` | Whether the window has every round it reads. |
-| `validate_buffer` | Refuse a buffer below the scheme's floor. |
 
 ### `RoundsPolicy`
 

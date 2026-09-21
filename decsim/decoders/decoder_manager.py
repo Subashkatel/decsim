@@ -16,6 +16,15 @@ write buffer and tags, each one job, and implements the ports:
 src/mem/cache/base.hh). One job reads as enqueue, dispatcher.run,
 service.dispatch_to, service.begin, decode_completed,
 outcomes.deliver_weak, job.on_decoded.
+
+A run has one manager per side: the chip's over the default pool and,
+when windows may escalate, the host's over the strong pool, two
+instances of this class in the assembly file, which is LATTE's shape
+(2509.03954 lines 24-25 and 705-720: the local decoder on the control
+FPGA has no scheduler, the host's Global Dynamic Scheduler owns the
+decode queue and the thread pool). The StrongRequests ledger is one
+seat both take, since a strong request is opened by the chip side and
+served by the host side.
 """
 
 from typing import Callable, Optional
@@ -38,7 +47,8 @@ class DecoderManager:
     """Admits, cancels, withdraws, releases and settles every decode.
 
     Six attributes: the five one-job components the module docstring
-    names, and the engine it logs and reads the clock on.
+    names, and the engine it logs and reads the clock on. The ledger
+    arrives built, shared with the other side's manager.
     """
 
     def __init__(
@@ -47,6 +57,7 @@ class DecoderManager:
         *,
         router,
         scheduler,
+        strong_requests: strong_requests_module.StrongRequests,
         unit_pools: Optional[dict] = None,
         num_units: int = 1,
         bulk_strong: bool = False,
@@ -66,7 +77,7 @@ class DecoderManager:
         pool = decoder_pool_module.DecoderPool(
             router, unit_pools, decoder_memory, blocks_unit_by_pool
         )
-        self.strong_requests = strong_requests_module.StrongRequests()
+        self.strong_requests = strong_requests
         self.queue = decode_queue.WaitingJobs(
             engine,
             scheduler,
@@ -92,12 +103,13 @@ class DecoderManager:
             self.queue, pool, self.service
         )
         self.outcomes = decode_outcomes.DecodeOutcomes(
-            engine,
-            escalation_policy,
-            self.strong_requests,
-            cancel_strong=self.cancel_strong,
+            engine, escalation_policy, self.strong_requests
         )
-        rows = decoder_pool_module.routed_decoders(router)
+        # the forced solves are the plan's windows', which the default
+        # pool decodes, so its manager narrates a model that pins none
+        rows = ()
+        if decoder_pool_module.DEFAULT_POOL in unit_pools:
+            rows = decoder_pool_module.routed_decoders(router)
         for row in rows:
             row.forced_solve_unavailable.connect(self.report_unpinnable_model)
 
@@ -358,12 +370,14 @@ class DecoderManager:
         """Cancel an unneeded strong re-decode wherever it is.
 
         Queued, crossing the link, running, or finished and waiting in
-        its unit's output slot. A cancel ends one
-        request; it passes no verdict on the destination. A destination
-        that keeps its weak result stops being a consumer because its weak
-        decode has resolved, and a destination still waiting keeps its
-        demand, so the cancelled request can be replaced in either
-        position.
+        its unit's output slot; the window side asks when a weak result
+        is kept (Toshio 2510.25222 lines 606-614, the ongoing strong
+        computation halted), and nothing happens when no request is
+        live or done. A cancel ends one request; it passes no verdict on
+        the destination. A destination that keeps its weak result stops
+        being a consumer because its weak decode has resolved, and a
+        destination still waiting keeps its demand, so the cancelled
+        request can be replaced in either position.
         """
         completion = self.service.take_strong_output(key)
         if completion is not None:

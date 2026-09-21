@@ -1,4 +1,4 @@
-"""One syndrome buffer's L5 numbers: occupancy over time, residence per round.
+"""One syndrome buffer's occupancy over time, and how long each round stayed.
 
 A listener on the store's round_stored and round_released events. It
 integrates the occupancy as a step function of time and sums the

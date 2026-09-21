@@ -12,6 +12,7 @@ record, so a row written outside decsim reaches the root the same way.
 import pytest
 
 import decsim.build.escalation as escalation_build
+import decsim.decoders.settings as decoder_settings
 import decsim.escalation.policies as escalation_policies
 import decsim.escalation.settings as escalation_settings
 import decsim.records.windows as window_records
@@ -34,7 +35,8 @@ def test_a_built_policy_answers_for_itself_and_the_kind_is_ignored():
 
     tier = escalation_build.primary_tier(settings)
     row = escalation_build.escalation_row(settings)
-    policy = escalation_build.build_escalation_policy(settings)
+    weak = decoder_settings.DecoderSettings(kind="pymatching")
+    policy = escalation_build.build_escalation_policy(settings, weak)
 
     assert tier == window_records.DecoderTier.STRONG.value
     assert row is built
@@ -56,8 +58,9 @@ def test_a_row_that_decides_on_no_confidence_is_built_from_an_empty_record():
     """The section carries none of the confidence keys for such a row."""
     settings = escalation_settings.EscalationSettings(kind="weak_baseline")
     row = escalation_build.escalation_row(settings)
+    weak = decoder_settings.DecoderSettings(kind="pymatching")
 
-    policy = escalation_build.build_escalation_policy(settings)
+    policy = escalation_build.build_escalation_policy(settings, weak)
 
     assert row.decides_on_a_confidence is False
     assert isinstance(policy, row)
@@ -71,8 +74,9 @@ def test_a_row_that_decides_on_a_confidence_gets_the_three_fields():
         confidence="complementary_gap",
     )
 
-    signal = escalation_build.confidence_signal(settings)
-    policy = escalation_build.build_escalation_policy(settings)
+    weak = decoder_settings.DecoderSettings(kind="pymatching")
+    signal = escalation_build.confidence_signal(settings, weak)
+    policy = escalation_build.build_escalation_policy(settings, weak)
 
     assert policy.decides_on_a_confidence is True
     assert policy.threshold.threshold_nats == 2.0
@@ -89,8 +93,9 @@ def test_a_table_threshold_with_no_number_from_the_experiment_is_refused():
         confidence="complementary_gap",
     )
 
+    weak = decoder_settings.DecoderSettings(kind="pymatching")
     with pytest.raises(ValueError) as refusal:
-        escalation_build.build_escalation_policy(settings)
+        escalation_build.build_escalation_policy(settings, weak)
 
     assert "resolves the threshold per sweep point" in str(refusal.value)
 
@@ -124,6 +129,8 @@ def test_the_confidence_row_is_built_with_the_sections_walk_card():
         confidence="complementary_gap", confidence_walk_microseconds=0.25
     )
 
-    signal = escalation_build.confidence_signal(settings)
+    weak = decoder_settings.DecoderSettings(kind="pymatching")
+
+    signal = escalation_build.confidence_signal(settings, weak)
 
     assert signal.walk_microseconds == 0.25

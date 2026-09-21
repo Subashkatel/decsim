@@ -494,11 +494,13 @@ def _weak_unit() -> dict:
         "weak_decoder": {
             "kind": "pymatching",
             "units": 1,
-            "unit_memory_rounds": None,
+            "unit_memory": {"bits": None},
             "engine": {
                 "clock": "fridge",
                 "fetch_cycles_per_round": 1,
+                "fetch_cycles_per_job": 0,
                 "release_cycles_per_job": 1,
+                "release_cycles_per_round": 0,
             },
         }
     }
@@ -537,8 +539,9 @@ def test_a_fourth_escalation_row_gets_the_boundaries_router_and_join(
     boundary_policy = machine.window_manager.courier.boundary_policy
     assert isinstance(boundary_policy, boundary_policies.Held)
     assert machine.window_manager.requester.gap_join is not None
-    pool = machine.decoder_manager.pool
-    assert sorted(pool.units_by_pool) == ["default", "strong"]
+    assert sorted(machine.decoder_manager.pool.units_by_pool) == ["default"]
+    strong_pool = machine.strong_decoder_manager.pool
+    assert sorted(strong_pool.units_by_pool) == ["strong"]
     strong_probe = decoding_records.DecodeJob(
         operation_id=-1,
         window_id=0,
@@ -548,7 +551,7 @@ def test_a_fourth_escalation_row_gets_the_boundaries_router_and_join(
     weak_probe = decoding_records.DecodeJob(
         operation_id=-1, window_id=0, round_count=0
     )
-    router = pool.router
+    router = machine.decoder_manager.pool.router
     assert router.route(strong_probe) is not router.route(weak_probe)
     assert machine.window_manager.planner.scheme.has_trailing_tail_context
     result = machine.run()
@@ -597,7 +600,9 @@ def test_a_threshold_source_written_outside_decsim_runs_from_a_yaml(
     settings = config.point_settings(
         physical_error_probability=0.008, distance=3, round_period_us=1.0
     )
-    policy = escalation_build.build_escalation_policy(settings.escalation)
+    policy = escalation_build.build_escalation_policy(
+        settings.escalation, settings.weak_decoder
+    )
     assert isinstance(policy.threshold, _KeepEverything)
     machine = machine_module.Machine.build(settings, 0)
     result = machine.run()
@@ -715,10 +720,6 @@ class DelegatingWindowScheme:
     def data_complete(self, window, *, readiness) -> bool:
         """Whether the window has every round it reads."""
         return self.inner.data_complete(window, readiness=readiness)
-
-    def validate_buffer(self, geometry) -> None:
-        """The sliding scheme's trailing floor."""
-        self.inner.validate_buffer(geometry)
 
 
 class UndeclaredWindowScheme:
@@ -840,7 +841,8 @@ def _switching_policy(threshold_nats: float):
         gap_threshold_nats=threshold_nats,
         confidence="complementary_gap",
     )
-    return escalation_build.build_escalation_policy(settings)
+    weak = decoder_settings.DecoderSettings(kind="pymatching")
+    return escalation_build.build_escalation_policy(settings, weak)
 
 
 def test_a_weak_result_with_no_soft_output_escalates_its_window():
@@ -930,7 +932,8 @@ def test_the_policy_instance_is_the_authority_over_its_settings_row():
     )
 
     row = escalation_build.escalation_row(settings)
-    policy = escalation_build.build_escalation_policy(settings)
+    weak = decoder_settings.DecoderSettings(kind="pymatching")
+    policy = escalation_build.build_escalation_policy(settings, weak)
     tier = escalation_build.primary_tier(settings)
 
     assert row is built

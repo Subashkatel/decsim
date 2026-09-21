@@ -1,8 +1,8 @@
 """The copy-versus-reference settings: each default is today's behaviour.
 
-Design audit note 14 section 8.2 (recommendation R4-12): every hop of
-this tree copies today, and each of these keys says whether one hop may
-be a reference instead, so the two can be measured against each other.
+Every hop of this tree copies today, and each of these keys says whether
+one hop may be a reference instead, so the two can be measured against
+each other.
 The sources are classical and quantum both: AFS's on-chip access
 (2001.06598 lines 528-531), Collision Clustering's Init unit
 (2309.05558 lines 268-271), Toshio's transfer of the assigned data
@@ -10,7 +10,8 @@ The sources are classical and quantum both: AFS's on-chip access
 (2301.08419 lines 632-640), Chen's non-blocking frame manager
 (2605.30765 lines 1618-1620), Riverlane's polled status register
 (2410.05202 lines 1256-1259) and Google's detections formed at the
-workstation (2408.13687 lines 474-476).
+workstation (2408.13687 lines 474-476), against IBM's detector window
+processing on the decoder's own chip (2510.21600 lines 235-237).
 """
 
 import dataclasses
@@ -44,6 +45,24 @@ def _machine_formed_at(where: str, distance: int = 3):
         settings, controller=controller, observation=observation
     )
     return machine_module.Machine.build(settings, 0)
+
+
+def _timing_only_machine_formed_at(where: str):
+    """The weak baseline on a source that carries no outcomes to form."""
+    formed_there = _machine_formed_at(where)
+    settings = formed_there.settings
+    qpu = dataclasses.replace(settings.qpu, kind="timing_only")
+    settings = dataclasses.replace(settings, qpu=qpu)
+    return machine_module.Machine.build(settings, 0)
+
+
+def _decode_spans(machine) -> list:
+    """Each window's ticks from its dispatch to its decode's end."""
+    spans = []
+    for window in machine.window_manager.planner.windows_by_key.values():
+        span = window.t_done - window.t_dispatch
+        spans.append(span)
+    return spans
 
 
 def _switching_machine_formed_at(where: str):
@@ -84,6 +103,14 @@ def _forward_switching_at_the_decoder():
     return machine_module.Machine.build(settings, 0)
 
 
+def _services(machine) -> list:
+    """The decode service of each side's manager, the chip's then the host's."""
+    services = [machine.decoder_manager.service]
+    if machine.strong_decoder_manager is not None:
+        services.append(machine.strong_decoder_manager.service)
+    return services
+
+
 def _rounds_read_by_tier(machine) -> dict:
     """Per tier, every round a decode that started read."""
     read = {}
@@ -97,7 +124,8 @@ def _rounds_read_by_tier(machine) -> dict:
         for round_input in decoder_input.rounds:
             keys.add((round_input.operation_id, round_input.round_index))
 
-    machine.decoder_manager.service.trace.job_started.connect(record)
+    for service in _services(machine):
+        service.trace.job_started.connect(record)
     return read
 
 
@@ -113,7 +141,8 @@ def _rounds_charged_by_tier(machine) -> dict:
         keys = charged.setdefault(job.pool, set())
         keys.update(claimed)
 
-    machine.decoder_manager.service.trace.job_finished.connect(record)
+    for service in _services(machine):
+        service.trace.job_finished.connect(record)
     return charged
 
 
@@ -132,7 +161,8 @@ def _decoder_inputs(machine) -> list:
             )
         inputs.append((job.label, tuple(rounds)))
 
-    machine.decoder_manager.service.trace.job_started.connect(record)
+    for service in _services(machine):
+        service.trace.job_started.connect(record)
     return inputs
 
 
@@ -174,9 +204,7 @@ def _machine(**weak_changes):
         physical_error_probability=0.001, distance=3, round_period_us=1.0
     )
     weak = dataclasses.replace(settings.weak_decoder, **weak_changes)
-    observation = dataclasses.replace(
-        settings.observation, data_movement=True, decoder_utilization=True
-    )
+    observation = dataclasses.replace(settings.observation, data_movement=True)
     settings = dataclasses.replace(
         settings, weak_decoder=weak, observation=observation
     )
@@ -324,6 +352,17 @@ def test_the_formation_default_sends_the_events_from_the_controller():
     assert _weak_input_bits(at_the_controller) == _weak_input_bits(default)
 
 
+def test_a_source_with_no_outcomes_pays_the_tiers_formation_stage():
+    """The stage is the tier's hardware, whatever the source sends it."""
+    with_outcomes = _machine_formed_at("decoder")
+    with_outcomes.run()
+    without_outcomes = _timing_only_machine_formed_at("decoder")
+    without_outcomes.run()
+    spans_without_outcomes = _decode_spans(without_outcomes)
+    spans_with_outcomes = _decode_spans(with_outcomes)
+    assert spans_without_outcomes == spans_with_outcomes
+
+
 def test_events_formed_at_the_decoder_widen_the_tiers_input_link():
     """The store and the input link then carry the raw outcomes."""
     at_the_controller = _machine_formed_at("controller")
@@ -359,6 +398,37 @@ def test_the_widths_the_two_rows_send_are_the_events_and_the_outcomes():
     assert _store_copy_bits(at_the_decoder) == 249
     assert _weak_input_bits(at_the_controller) == 432
     assert _weak_input_bits(at_the_decoder) == 441
+
+
+def test_events_formed_on_the_weak_chip_cross_raw_and_leave_its_store_formed():
+    """d=3: 249 outcome bits into the chip, 432 event bits out of its store."""
+    at_the_controller = _machine_formed_at("controller")
+    controller_inputs = _decoder_inputs(at_the_controller)
+    controller_result = at_the_controller.run()
+    on_the_weak_chip = _machine_formed_at("weak_syndrome_buffer")
+    chip_inputs = _decoder_inputs(on_the_weak_chip)
+    chip_result = on_the_weak_chip.run()
+    chip_observables = _observables(chip_result)
+    controller_observables = _observables(controller_result)
+    assert _store_copy_bits(on_the_weak_chip) == 249
+    assert _weak_input_bits(on_the_weak_chip) == 432
+    assert chip_inputs == controller_inputs
+    assert chip_observables == controller_observables
+
+
+def test_a_region_escalated_from_the_weak_chip_is_formed_by_no_tier():
+    """The strong side decodes the events the chip stored, bit for bit."""
+    at_the_controller = _switching_machine_formed_at("controller")
+    controller_inputs = _decoder_inputs(at_the_controller)
+    controller_result = at_the_controller.run()
+    on_the_weak_chip = _switching_machine_formed_at("weak_syndrome_buffer")
+    chip_inputs = _decoder_inputs(on_the_weak_chip)
+    chip_result = on_the_weak_chip.run()
+    chip_observables = _observables(chip_result)
+    controller_observables = _observables(controller_result)
+    assert _formation_stages(on_the_weak_chip) == []
+    assert chip_inputs == controller_inputs
+    assert chip_observables == controller_observables
 
 
 def test_a_tier_pays_yangs_latency_then_one_round_a_clock():

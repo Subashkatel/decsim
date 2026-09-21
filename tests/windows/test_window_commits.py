@@ -112,7 +112,7 @@ class _Fixture:
         self.escalation = types.SimpleNamespace(
             escalate=lambda job: self.escalated.append(job),
             submit_if_commit_releases=lambda key: self.after_weak.append(key),
-            cancel_held_sibling=lambda key: self.kept.append(key),
+            cancel_strong_request=lambda key: self.kept.append(key),
         )
         self.escalated = []
         self.after_weak = []
@@ -240,6 +240,51 @@ def test_a_strong_result_replaces_the_weak_prediction_and_ships_the_held():
     assert fixture.results.released == [4]
     # once at the provisional commit, once when the strong result lands
     assert fixture.results.delivered == [4, 4]
+
+
+def test_a_strong_result_keeps_the_weak_commit_of_the_crossing_faults():
+    """A strong window owns no fault behind its own commit region.
+
+    At a back-to-back seam the escalated window's weak decode committed
+    those faults, and the region ending at that seam is pinned on that
+    choice, so the strong result replaces the rest of the prediction and
+    leaves them standing (Toshio et al. 2510.25222 lines 1248-1250).
+    """
+    fixture = _Fixture()
+    weak = fixture.job(window_records.DecoderTier.WEAK, 0, awaiting=True)
+    residual = window_records.DependencyResidual(detector_ids=(7,))
+    crossing = window_records.CrossingCommit(residual, (1, 0))
+    weak_result = decoding_records.DecodeResult(
+        4, 1, logical_observables=(1, 0), crossing_commit=crossing
+    )
+    fixture.verdict.accept_result(weak, weak_result)
+    strong = fixture.job(window_records.DecoderTier.STRONG, 1)
+    strong_result = decoding_records.DecodeResult(
+        4, 1, logical_observables=(0, 1)
+    )
+    fixture.verdict.accept_strong_result(strong, strong_result)
+    fixture.engine.run()
+    assert fixture.results.replaced == [((4, 1), (1, 1))]
+
+
+def test_the_frame_receives_the_strong_result_with_the_crossing_commit():
+    """The frame and the prediction are one correction, so one set of bits."""
+    fixture = _Fixture()
+    weak = fixture.job(window_records.DecoderTier.WEAK, 0, awaiting=True)
+    residual = window_records.DependencyResidual(detector_ids=(7,))
+    crossing = window_records.CrossingCommit(residual, (1, 0))
+    weak_result = decoding_records.DecodeResult(
+        4, 1, logical_observables=(1, 0), crossing_commit=crossing
+    )
+    fixture.verdict.accept_result(weak, weak_result)
+    strong = fixture.job(window_records.DecoderTier.STRONG, 1)
+    strong_result = decoding_records.DecodeResult(
+        4, 1, logical_observables=(0, 1)
+    )
+    fixture.verdict.accept_strong_result(strong, strong_result)
+    fixture.engine.run()
+    committed_flips = [flips for _tick, _key, flips in fixture.frame.commits]
+    assert committed_flips == [(1, 1)]
 
 
 def test_a_frameless_run_commits_at_the_delivery():

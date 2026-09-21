@@ -11,11 +11,15 @@ and only once it was successfully sent (`coherent_xbar.cc:354-357`,
 `xbar.hh:400-411`), and it hands its forwarding latency to "the
 neighbouring object that actually makes the packet wait"
 (`packet.hh:424-431`). Two hops leave a decoder: the correction to the
-Pauli frame and the escalation selection to the strong decoder. Both
-carry a result the decoder produced, which is also how the reaction path
-is booked: Yang et al. 2605.04892 Table I counts the frame update inside
-the decoder's own subtotal. A window's boundary does not leave here: it
-is the window side's record and leaves by the object that holds it
+Pauli frame, and the escalation to the strong decoder, which is the
+selection of the strong request and then the rounds of its window,
+read out of the weak syndrome buffer (Toshio et al. 2510.25222 lines
+1247 to 1250 assign the region's syndrome data to the strong decoder
+at the switch). The correction and the selection carry a result the
+decoder produced, which is also how the reaction path is booked: Yang
+et al. 2605.04892 Table I counts the frame update inside the decoder's
+own subtotal. A window's boundary does not leave here: it is the window
+side's record and leaves by the object that holds it
 (windows/window_boundaries.py, decisions.md D12).
 """
 
@@ -25,8 +29,14 @@ from typing import Callable, Optional
 import decsim.ports as ports
 import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
+import decsim.records.rounds as round_records
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
+
+# a selection names the strong request and carries nothing else
+# (links/link_profiles.py, ESCALATION_PAYLOAD_SOURCE), so the escalation
+# hop charges it the link's latency and no time on the wire
+SELECTION_PAYLOAD_BITS = 0
 
 # which output link a tier's result leaves by
 FRAME_PATH_BY_TIER = {
@@ -78,14 +88,33 @@ class DecoderOutput:
         """Send one window's escalation to the strong decoder.
 
         The send is in the weak job's name for the strong request it
-        selects; returns the delay the link expects.
+        selects; returns the delay the link expects. A selection names
+        a request and carries no payload, so it is sent as zero bits: a
+        bounded hop serializes its header alone, and a hop with a
+        default payload does not price it as a region.
         """
         return self.transfers.send_for_job(
             transfer_records.LinkPath.WEAK_DECODER_TO_STRONG_DECODER,
             weak_job,
-            payload_bits=None,
+            payload_bits=SELECTION_PAYLOAD_BITS,
             request_key=strong_request_key,
             on_delivered=on_delivered,
+        )
+
+    def send_region(
+        self,
+        region: round_records.EscalatedRegion,
+        on_delivered: Callable[[], None],
+    ) -> int:
+        """Send a strong window's rounds to the strong decoder's store.
+
+        The send is in the strong request's name and carries the rounds'
+        width; returns the delay the link expects.
+        """
+        return self.transfers.send_region(
+            transfer_records.LinkPath.WEAK_DECODER_TO_STRONG_DECODER,
+            region,
+            on_delivered,
         )
 
     def _commit(

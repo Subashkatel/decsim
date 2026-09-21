@@ -12,7 +12,7 @@ A decoder fills the `Decoder` port (`decsim/ports.py`;
 [The ports](../reference/ports.md) lists its methods and members). The shortest
 way is to inherit `DecoderBase` from `decsim/decoders/decoder.py`, which
 gives you the port's defaults: `start`, `cancel`, `occupancy`,
-`pipeline_depth`, the two members every row must answer, and the
+`pipeline_depth`, a default for every member a row answers, and the
 wall-clock measurement around your call. Then your class is two methods:
 
 ```python
@@ -41,9 +41,17 @@ two detectors, or the physical model with hyperedges, or both. Get this
 wrong and your decoder is handed a model it cannot read.
 
 `stage_recorded` is the trace source your unit's internal stages fire,
-or `SILENT` for a decoder with no stages of its own.
+or `SILENT` for a decoder with no stages of its own. A trace source is
+one named event a component fires and listeners hear
+(`decsim/trace_source.py`).
 
-Both are declared on the class, never read off its type, because a port
+`decoder_evidence` is what your decode can show a confidence signal
+beyond the correction. Leave it at the default and the build refuses
+your row as the weak tier of a switching run, naming the evidence the
+signal wanted. `missing_evidence_reasons` is the sentence that refusal
+quotes.
+
+All of them are declared on the class, never read off its type, because a port
 promises not to reveal what a row is (`tools/check_row_recognition.py`
 fails on a module that tests against a row's class).
 
@@ -72,10 +80,11 @@ through the machine and PyMatching decoding the same shots straight
 through, outside it, and comparing the predictions. A backend that is
 correct and different from matching will disagree on some windows; a
 backend that is broken disagrees on most. Even a matching backend
-disagrees on a few, because the window commits without the rounds the
-whole-circuit decode reads (4 shots in 1800 at distances 3 and 5 and
-physical error rates 0.003 to 0.01), so read a handful as the windowing
-and a noticeable fraction as the bug.
+disagrees on a few. The window commits without the later rounds that a
+whole-circuit decode reads, so the two can differ. In one measurement at
+distances 3 and 5 and physical error rates 0.003 to 0.01, 4 shots in
+1800 disagreed. Read a handful of disagreements as the windowing and a
+noticeable fraction as a bug in your decoder.
 
 For a second opinion per window rather than per shot, set
 `observation.check_windows_with: tesseract`, which re-decodes every

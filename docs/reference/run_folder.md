@@ -57,6 +57,10 @@ its maximum.
 | `direct_failure`, `direct_mismatch` | the same shot decoded straight through PyMatching outside the machine, and whether the machine disagreed with it |
 | `throughput_windows_per_us`, `throughput_rounds_per_us` | what the machine got through |
 | `max_queued_windows` | the deepest the ready queue ever got |
+| `weak_queue_max`, `strong_queue_max` | the deepest each tier's ready queue got, in jobs. The tier that decodes the planned windows owns the default pool's number, so under `strong_only` that number is in the strong column. A tier the run does not build reads zero. |
+| `weak_busy_fraction`, `strong_busy_fraction` | the time-weighted fraction of each tier's units whose compute was busy |
+| `escalated_windows`, `strong_decoded_rounds`, `strong_service_mean_us` | the windows the strong tier committed, the rounds its decodes read, and their mean service |
+| `parallel_processes_needed` | Skoric's least count of parallel decoding processes for no backlog, ceil(2 tau_W / ((n_com + n_W) tau_rd)) from this shot's mean service (2209.08552 lines 429-438) |
 | `tesseract_windows_checked`, `tesseract_window_disagreements` | the referee's count, when `observation.check_windows_with` asked for one |
 | `sim_wall_seconds` | how long the simulation itself took to run, on the host |
 | `<point>_mean_us`, `<point>_max_us` | one pair per latency point below |
@@ -81,7 +85,7 @@ and they are the same names in `shots.csv`, `window_samples.csv` and
 | `service` | the compute start, to the decode done: the fetch, the algorithm and the release, and nothing the decode waited for |
 | `confidence` | the committing decode's end, to the verdict on the window's answer: the confidence signal's own computation, which is the walk under `cluster_gap` and the sibling forced-class solve's remaining time under `complementary_gap`, and zero for a window that escalated |
 | `weak_attempt` | a unit taking an escalated window's weak job, to the verdict that escalated it: the attempt whose result did not commit, zero when the first decode committed |
-| `escalation_link_per_window` | the weak decoder to the strong decoder: the escalation hop, zero for a window that did not escalate |
+| `escalation_link_per_window` | the weak decoder to the strong decoder: the escalation hop, from the selection's send to the landing of the rounds the strong store lacked, zero for a window that did not escalate |
 | `dd_per_window` | one decoder to the next: the boundary handoff |
 | `output_link_per_window` | the decoder to the Pauli frame |
 | `frame_commit` | the frame accepting a correction, to it being committed |
@@ -100,14 +104,21 @@ committed, which the frame's own record names by tier and by request
 ordinal: for a window the strong tier recovered, the two link points are
 the strong tier's hops and the stage points are the strong decode's. A
 window can be decoded more than once, and then every tick still belongs
-to one decode. `queue_wait` ends where a unit took the window's first
-decode; `weak_attempt` runs from there to the verdict that sent the
-window to the strong tier, and is zero when the first decode is the one
-that committed; `input_link_per_window`, `dep_block`, `compute_wait`,
-`service` and `output_link_per_window` are the committing decode's own
-hop, the two halves of its park, its compute and its way home;
-`confidence` is the signal the verdict needs, computed after that
-decode ended; `frame_commit` closes it. On a serial path those nine add
+to one decode.
+
+- `queue_wait` ends where a unit took the window's first decode.
+- `weak_attempt` runs from there to the verdict that sent the window to
+  the strong tier. It is zero when the first decode is the one that
+  committed.
+- `input_link_per_window` is the committing decode's own hop in.
+- `dep_block` and `compute_wait` are the two halves of its park, the
+  wait between its input landing and its compute starting.
+- `service` is its compute, and `output_link_per_window` its way home.
+- `confidence` is the signal the verdict needs, computed after that
+  decode ended.
+- `frame_commit` closes it.
+
+On a serial path those nine add
 up to `buffer0_ready_to_frame` to the tick, on every window of every
 config this repository ships.
 
@@ -116,7 +127,10 @@ The park is two points because it has two causes
 A run whose windows wait on the seam reports the park in `dep_block` and
 zero in `compute_wait`; two decodes of one window sharing a unit, which
 is what a complementary gap's forced-class pair is, report it in the
-second.
+second. A strong decode whose rounds crossed with the escalation waits
+for them before its input hop can start, and that wait is `dep_block`
+too: the point runs from the verdict to the first startable tick, less
+the input hop itself.
 
 `input_link_per_window` is that decode's own hop, so it is zero when the
 decode read an input that was already in its unit's memory: a tier
@@ -137,8 +151,9 @@ compute, a run whose signal is a second forced-class solve, the same on
 a host-clock strong tier, and a run whose signal is a priced walk.
 
 `escalation_link_per_window` is a hop that is measured and not summed,
-like `dd_per_window`: the escalation hop runs beside the strong input
-hop, and what it makes the strong decode wait for is in `dep_block`.
+like `dd_per_window`: one span from the selection's send to the landing
+of the rounds the strong store lacked, the two transfers side by side,
+and what it makes the strong decode wait for is in `dep_block`.
 
 ### `shot_links.csv`
 
@@ -187,7 +202,7 @@ cycle count. A decoder priced by a number produces no rows here.
 
 One row per sweep point, summarized from `shots.csv` and
 `window_samples.csv` by `summarize_point` in `decsim/experiments/report.py`.
-The nineteen scalars come first, then four columns for every latency
+The scalar columns come first, then four columns for every latency
 point the run held:
 
 | Column | What it is |
@@ -200,6 +215,11 @@ point the run held:
 | `direct_pymatching_failures`, `prediction_mismatches_vs_direct` | the same shots decoded outside the machine, and the disagreements |
 | `throughput_windows_per_us`, `throughput_rounds_per_us` | the means |
 | `max_queued_windows` | the deepest queue over the point |
+| `weak_queue_max`, `strong_queue_max` | the deepest each tier's own queue over the point |
+| `weak_busy_fraction`, `strong_busy_fraction` | the mean busy fractions |
+| `escalated_windows`, `strong_service_mean_us` | the strong tier's windows over the point and their mean service |
+| `strong_service_bound_us` | Toshio's Theorem 1 bound on that service, tau_gen d windows / strong rounds over the point (2510.25222 lines 1270-1300); infinite when nothing escalated |
+| `parallel_processes_needed` | the largest over the point's shots |
 | `tesseract_windows_checked`, `tesseract_window_disagreements` | the referee's totals |
 | `load` | the mean load |
 | `sim_wall_seconds_per_shot` | what the simulation cost to run |
@@ -222,6 +242,21 @@ One row per sweep point per link path, averaged over that point's shots.
 | `bits_per_transfer` | the payload bits divided by the transfers |
 | `unknown_payload_transfers_per_shot` | the mean count of transfers with no stated size |
 | `queue_wait_us_per_shot`, `serialization_us_per_shot`, `propagation_us_per_shot` | the mean time each part of the path charged |
+
+### `residence.csv`
+
+One row per traced shot per structure, then one per link path. The two
+data movement files, `shot_data_movement.csv` and `data_movement.csv`,
+are described in the table at the top of this page and are not tabulated
+here.
+
+| Column | What it is |
+| --- | --- |
+| `distance`, `physical_error_probability`, `algorithm`, `round_period_us`, `seed` | the traced shot |
+| `counting` | what the row counts: `residence` for stays in a structure, `link_path` for a path's moves |
+| `name` | the structure (a store, a decoder unit, the controller, the frame) or the link path |
+| `samples` | how many stays or moves the shot had there |
+| `mean_us`, `longest_us` | the mean and the longest: a stay's length, or a move's wait on the wire |
 
 ### `manifest.json`
 

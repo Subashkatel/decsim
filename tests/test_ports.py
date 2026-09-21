@@ -2,7 +2,7 @@
 
 Lampson: an interface is the set of assumptions two programs make about
 each other, so a row written from the port alone must answer every call
-the shipped callers make (note 17 P4). The law is read out of the tree
+the shipped callers make. The law is read out of the tree
 with ast: the Protocol bodies of decsim/ports.py against the attribute
 names the callers reach for through their collaborator reference.
 

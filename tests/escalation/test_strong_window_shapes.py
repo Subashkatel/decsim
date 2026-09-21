@@ -36,6 +36,7 @@ import decsim.machine as machine_module
 import decsim.observe.run_views as run_views
 import decsim.ports as ports
 import decsim.records.decoding as decoding_records
+import decsim.records.identity as identity_records
 import decsim.records.windows as window_records
 import decsim.settings as machine_settings
 import decsim.trace_source as trace_source
@@ -74,8 +75,8 @@ GATE_SWITCHING_CARD = {
         "frame_to_controller": None,
         "controller_to_qpu": None,
     },
-    "weak_syndrome_buffer": {"rounds": None},
-    "strong_syndrome_buffer": {"rounds": None},
+    "weak_syndrome_buffer": {"bits": None},
+    "strong_syndrome_buffer": {"bits": None},
     "windows": {
         "kind": "sliding",
         "commit_rounds": None,
@@ -84,21 +85,25 @@ GATE_SWITCHING_CARD = {
     "weak_decoder": {
         "kind": "pymatching",
         "units": 1,
-        "unit_memory_rounds": None,
+        "unit_memory": {"bits": None},
         "engine": {
             "clock": "fridge",
             "fetch_cycles_per_round": 1,
+            "fetch_cycles_per_job": 0,
             "release_cycles_per_job": 10,
+            "release_cycles_per_round": 0,
         },
     },
     "strong_decoder": {
         "kind": "belief_matching",
         "units": 1,
-        "unit_memory_rounds": None,
+        "unit_memory": {"bits": None},
         "engine": {
             "clock": "room",
             "fetch_cycles_per_round": 1,
+            "fetch_cycles_per_job": 0,
             "release_cycles_per_job": 10,
+            "release_cycles_per_round": 0,
         },
     },
     "escalation": {"kind": "switching", "gap_threshold_db": 20.0},
@@ -218,6 +223,38 @@ def test_the_forward_window_at_the_operations_end_waits_for_terminal_data():
         ((1, 2), "strong"),
     ]
     assert not machine.window_manager.strong_redecode.has_pending()
+
+
+def test_a_region_at_a_back_to_back_seam_waits_for_its_own_weak_commit():
+    """Its near boundary condition is the escalated window's own commit.
+
+    A held region names every commit it waits on, and at a back-to-back
+    seam the near face's commit is the escalated window's own (Toshio et
+    al. 2510.25222 lines 1248-1250), which has not happened when the
+    region is planned.
+    """
+    machine = fabric.switching_machine(
+        rounds=15,
+        escalated_windows={1, 4},
+        strong_window="forward_seam_pinned",
+        round_microseconds=4.0,
+    )
+    waits = _recorded_waits(machine)
+    machine.run()
+    own_commit = "commit of window (1, 4)"
+    assert own_commit in waits[(1, 4)]
+
+
+def _recorded_waits(machine) -> dict:
+    """What each held strong window said it waits for."""
+    waits = {}
+
+    def held(_request_key, window_key, waits_for, _rounds) -> None:
+        waits[window_key] = waits_for
+
+    redecode = machine.window_manager.strong_redecode
+    redecode.trace.strong_window_held.connect(held)
+    return waits
 
 
 def test_a_second_escalation_of_one_window_is_refused():
@@ -430,8 +467,8 @@ def test_the_paper_width_restarts_on_the_round_after_the_strong_region():
 def test_the_forward_window_lands_in_the_declared_backlog_regime():
     """1 us rounds against a 10 us weak decode: W1 escalates with W2 landed.
 
-    The stabilization suite pinned this run as a refusal (finding R3);
-    the refusal was the bug.
+    The regime is a declared one, so the run completes; it is not
+    refused.
     """
     machine = fabric.switching_machine(
         rounds=15, escalated_windows={1}, strong_window="forward"
@@ -742,8 +779,8 @@ def test_a_shape_name_off_the_table_is_refused_naming_the_rows():
 
     A strong window that pins both faces and absorbs nothing waits for
     the window after it, which waits for the strong result: the serial
-    sliding chain deadlocks on it (design audit note 21). It is not a
-    row, and a name that is not a row is refused naming the rows.
+    sliding chain deadlocks on it. It is not a row, and a name that is
+    not a row is refused naming the rows.
     """
     with pytest.raises(ValueError) as refusal:
         fabric.switching_machine(
@@ -804,20 +841,28 @@ def _pinned_boundary_transfers(result) -> list:
     """(window index, payload bits) of every pinned face on the wire.
 
     A weak delivery is attributed to the window that produced it; a
-    pinned face is attributed to the strong window that reads it, so a
-    transfer whose attribution names a window other than the producing
-    request's is a pin.
+    pinned face is attributed to the strong window it lands in, so a
+    transfer attributed to its own delivery's destination is a pin, its
+    own weak commit at a back-to-back seam included.
     """
     pinned = []
     for transfer in result.link_traffic["transfers"]:
         if transfer["path"] != "decoder_to_decoder":
             continue
         attribution = transfer["attribution"]
-        source_window_id = attribution["relation"]["request_key"]["window_id"]
-        if attribution["window_id"] == source_window_id:
+        if not _is_pinned_face(attribution):
             continue
         pinned.append((attribution["window_id"], transfer["payload_bits"]))
     return pinned
+
+
+def _is_pinned_face(attribution: dict) -> bool:
+    """Whether the transfer is a face pinned on a committed correction."""
+    relation = attribution["relation"]
+    recorded_key = relation["destination_window_key"]
+    destination_key = identity_records.stable_identity_from_json(recorded_key)
+    destination_window_id = destination_key[1]
+    return attribution["window_id"] == destination_window_id
 
 
 def test_a_yaml_names_the_near_seam_row_and_its_pin_crosses_the_wire():
@@ -908,9 +953,25 @@ def _pin_sources(result) -> list:
         if transfer["path"] != "decoder_to_decoder":
             continue
         attribution = transfer["attribution"]
-        source_window_id = attribution["relation"]["request_key"]["window_id"]
-        if attribution["window_id"] == source_window_id:
+        if not _is_pinned_face(attribution):
             continue
+        source_window_id = attribution["relation"]["request_key"]["window_id"]
+        sources.append(source_window_id)
+    return sources
+
+
+def _pin_sources_into(result, window_id: int) -> list:
+    """The window that produced each face pinned into that strong window."""
+    sources = []
+    for transfer in result.link_traffic["transfers"]:
+        if transfer["path"] != "decoder_to_decoder":
+            continue
+        attribution = transfer["attribution"]
+        if attribution["window_id"] != window_id:
+            continue
+        if not _is_pinned_face(attribution):
+            continue
+        source_window_id = attribution["relation"]["request_key"]["window_id"]
         sources.append(source_window_id)
     return sources
 
@@ -940,16 +1001,15 @@ def test_the_forward_seam_row_at_the_operations_end_has_no_far_pin():
     assert sources == [1]
 
 
-def test_the_forward_seam_row_reads_an_unpinned_near_face_raw():
-    """A window whose dependency was absorbed has nothing to pin on.
+def test_a_region_at_a_back_to_back_seam_reads_the_rounds_it_commits():
+    """A window whose dependency was absorbed still has a near boundary.
 
     W1's strong region commits 4-12 and absorbs W2 and W3, so the
-    restart window W4 keeps no dependency: no committed correction
-    closes its past face. When W4 escalates in turn, its strong region
-    commits 13-21 and reads one buffer region of raw context behind it,
-    10-21, since an open face keeps its buffer (Bombin 2303.04846 lines
-    850-852) rather than reading nothing at all. Its far face is the
-    window that restarts the chain after 21, W7, and that one is pinned.
+    restart window W4 keeps no dependency: no neighbour commits the
+    round before it. W4's own weak decode owns the faults crossing that
+    seam and the region 4-12 is pinned on them, so when W4 escalates in
+    turn, its region commits 13-21 and reads those nine rounds and
+    nothing behind them (Toshio 2510.25222 lines 1248-1250).
     """
     machine = fabric.switching_machine(
         rounds=30,
@@ -958,13 +1018,35 @@ def test_the_forward_seam_row_reads_an_unpinned_near_face_raw():
         round_microseconds=4.0,
         record=True,
     )
+    machine.run()
+    first_region = _strong_request_record(machine, 1)
+    assert (first_region.input_round_lo, first_region.input_round_hi) == (
+        4,
+        12,
+    )
+    seam_region = _strong_request_record(machine, 4)
+    assert (seam_region.input_round_lo, seam_region.input_round_hi) == (13, 21)
+
+
+def test_a_region_at_a_back_to_back_seam_pins_its_near_face_on_itself():
+    """The near face's commit is the escalated window's own weak one.
+
+    Each pinned face is one message on decoder_to_decoder: W4, whose
+    region sits at the back-to-back seam, pins its own weak commit and
+    W7, the window that restarts the chain after it.
+    """
+    machine = fabric.switching_machine(
+        rounds=30,
+        escalated_windows={1, 4},
+        strong_window="forward_seam_pinned",
+        round_microseconds=4.0,
+    )
     result = machine.run()
-    pinned_faces = _strong_request_record(machine, 1)
-    assert (pinned_faces.input_round_lo, pinned_faces.input_round_hi) == (4, 12)
-    open_face = _strong_request_record(machine, 4)
-    assert (open_face.input_round_lo, open_face.input_round_hi) == (10, 21)
-    # W1 pins both faces (W0 and W4), W4 only its far face (W7)
-    assert _pin_sources(result) == [0, 4, 7]
+    seam_window_id = 4
+    restart_window_id = 7
+    sources = _pin_sources_into(result, seam_window_id)
+    sources_in_order = sorted(sources)
+    assert sources_in_order == [seam_window_id, restart_window_id]
 
 
 def test_a_yaml_names_the_forward_seam_row_and_it_runs():
@@ -984,7 +1066,7 @@ def test_a_yaml_names_the_forward_seam_row_and_it_runs():
 
 
 def test_a_pinned_far_face_refuses_a_re_reading_restart_window():
-    """Q5 of design audit note 20, settled as a refusal.
+    """A far pin and a restart window that re-reads the region are refused.
 
     With escalation.restart_reread_buffer_regions 1 the restart window
     commits rounds inside the strong region, so pinning the far face on

@@ -15,7 +15,7 @@ request_ended and service_ended; the record ledger listens.
 """
 
 import dataclasses
-from typing import Callable, Optional
+from typing import Optional
 
 import decsim.decoders.strong_requests as strong_requests_module
 import decsim.records.decoding as decoding_records
@@ -40,13 +40,10 @@ class DecodeOutcomes:
         engine,
         escalation_policy,
         strong_requests: strong_requests_module.StrongRequests,
-        cancel_strong: Callable[[tuple], None],
     ) -> None:
         self.engine = engine
         self.escalation_policy = escalation_policy
         self.strong_requests = strong_requests
-        # the manager's cancel, for a weak result the policy keeps
-        self.cancel_strong = cancel_strong
         self.trace = _TraceSources()
 
     def deliver_weak(
@@ -78,15 +75,14 @@ class DecodeOutcomes:
     ) -> None:
         """The window side decided this weak request: close the attempt.
 
-        A kept result cancels a live strong request; an escalated one
-        has already asked the strong tier through the window side.
+        Either way the window side has already told the strong side: a
+        kept result cancelled its strong request there, an escalated one
+        asked for the strong result.
         """
         key = (job.operation_id, job.window_id)
         self.trace.verdict_given.fire(key, job.request_key, verdict)
         self.strong_requests.resolve_weak(key)
         is_escalated = verdict is decoding_records.Verdict.ESCALATE
-        if not is_escalated:
-            self.cancel_strong(key)  # no-op unless one is live or done
         outcomes = decoding_records.RequestProcessingOutcome
         processing = outcomes.PRIMARY_FORWARDED_FOR_DELIVERY
         if is_escalated:

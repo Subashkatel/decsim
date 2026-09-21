@@ -135,7 +135,7 @@ def build_decoder_pool(
     if unit_pools is None:
         active_settings = _active_tier_settings(settings, policy)
         unit_pools = {"default": active_settings.units}
-    decoder_memory = _decoder_memory(settings, policy)
+    decoder_memory = _decoder_memory(settings, policy, unit_pools)
     copies_input_by_pool = _copies_input_by_pool(settings, policy, unit_pools)
     blocks_unit_by_pool = _blocks_unit_by_pool(settings, policy, unit_pools)
     formation_by_pool = _formation_by_pool(
@@ -156,10 +156,14 @@ def build_decoder_pool(
 def _tier_formation(
     detection_events: ports.DetectionEventPlacement,
 ) -> Optional[detection_events_module.TierFormation]:
-    """This tier's event-detection logic; None when rounds arrive formed."""
-    former = detection_events.decoder_side_former()
-    if former is None:
+    """This tier's event-detection logic; None when rounds arrive formed.
+
+    The placement decides whether the tier has the logic. A source with
+    no former leaves it nothing to convert and the same stage to pay.
+    """
+    if not detection_events.forms_at_the_decoder:
         return None
+    former = detection_events.decoder_side_former()
     return detection_events_module.TierFormation(former)
 
 
@@ -245,7 +249,7 @@ def _switching_pools(
 
     A window's two forced-class solves are two ordinary jobs of the
     default pool, so weak_decoder.units alone decides whether they
-    overlap (design audit note 12 section 4).
+    overlap.
     """
     if strong is None:
         raise ValueError(
@@ -268,19 +272,39 @@ def _active_tier_settings(
 
 
 def _decoder_memory(
-    settings: machine_settings.MachineSettings, policy
+    settings: machine_settings.MachineSettings, policy, unit_pools: dict
 ) -> Optional[decoder_memory_module.DecoderMemoryConfig]:
-    """The pools' input memory: the given one, or the active tier's SRAM."""
+    """Each pool's unit memory, from the tier whose units that pool holds.
+
+    The strong pool is the strong tier's; every other pool decodes the
+    plan's windows on the active tier. A Python-built memory is used as
+    it is. A pool whose tier sets no capacity is left out, which is an
+    unbounded memory.
+    """
     given = settings.decoder_manager.decoder_memory
     if given is not None:
         return given
     active_settings = _active_tier_settings(settings, policy)
-    unit_memory_rounds = active_settings.unit_memory_rounds
-    if unit_memory_rounds is None:
+    bits_by_pool = {}
+    for pool in unit_pools:
+        bits_by_pool[pool] = active_settings.unit_memory.bits
+    if decode_queue.STRONG_POOL in bits_by_pool:
+        strong_bits = settings.strong_decoder.unit_memory.bits
+        bits_by_pool[decode_queue.STRONG_POOL] = strong_bits
+    bounded_pools = _without_unset(bits_by_pool)
+    if not bounded_pools:
         return None
-    return decoder_memory_module.DecoderMemoryConfig(
-        {"default": unit_memory_rounds}
-    )
+    return decoder_memory_module.DecoderMemoryConfig(bounded_pools)
+
+
+def _without_unset(value_by_pool: dict) -> dict:
+    """The pools whose value is set; a None value is a key left unset."""
+    set_by_pool = {}
+    for pool, value in value_by_pool.items():
+        if value is None:
+            continue
+        set_by_pool[pool] = value
+    return set_by_pool
 
 
 def _algorithm(tier_settings: decoder_settings.DecoderSettings, tier: str):
@@ -300,9 +324,13 @@ def _algorithm(tier_settings: decoder_settings.DecoderSettings, tier: str):
         latency_model = decoders.PresetLatencyDecoder(kind)
         return minimum_weight_perfect_matching.PyMatchingDecoder(latency_model)
     row = tables.row(decoder_settings.DECODERS, f"{tier}_decoder.kind", kind)
-    if cycle_count is None:
+    if kind != "union_find":
         return row(latency_model=None)
-    return row(latency_model=None, cycle_count=cycle_count)
+    return row(
+        latency_model=None,
+        weight_step=tier_settings.weight_step,
+        cycle_count=cycle_count,
+    )
 
 
 def _check_serves_the_confidence(
@@ -318,13 +346,13 @@ def _check_serves_the_confidence(
     is not refused: it prices one decode of one window, and a forced pair
     is two decodes, so the card is charged once per forced solve.
     """
-    signal = escalation_build.confidence_signal(escalation)
+    signal = escalation_build.confidence_row(escalation)
     required = signal.decoder_evidence_requirement
     missing = required - algorithm.decoder_evidence
     if not missing:
         return
     reason = _missing_evidence_reason(algorithm, missing, signal)
-    signal_name = signal.source.method
+    signal_name = escalation.confidence
     raise ValueError(
         f"{tier}_decoder.kind {kind!r} cannot serve the confidence "
         f"{signal_name}: {reason}"
@@ -358,19 +386,23 @@ def _staged_unit(
     """The algorithm between its stages, on the tier's engine clock.
 
     This tier's event-detection logic first when the rounds reach it raw,
-    then fetch cycles per round, then the algorithm, then release cycles
-    per job.
+    then the fetch stage, then the algorithm, then the release stage,
+    each stage priced once a job and once a round.
     """
     before = []
     formation_stage = _formation_stage(tier_settings, formation)
     if formation_stage is not None:
         before.append(formation_stage)
     fetch = staged_decoder.DecoderStage(
-        "fetch", cycles_per_round=tier_settings.fetch_cycles_per_round
+        "fetch",
+        cycles_per_job=tier_settings.fetch_cycles_per_job,
+        cycles_per_round=tier_settings.fetch_cycles_per_round,
     )
     before.append(fetch)
     release = staged_decoder.DecoderStage(
-        "release", cycles_per_job=tier_settings.release_cycles_per_job
+        "release",
+        cycles_per_job=tier_settings.release_cycles_per_job,
+        cycles_per_round=tier_settings.release_cycles_per_round,
     )
     timing = staged_decoder.UnitTiming(
         before=tuple(before),

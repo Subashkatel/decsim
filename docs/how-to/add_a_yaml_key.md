@@ -29,7 +29,8 @@ rounds ends in `_rounds`, a cycle count ends in `_cycles`
 ## 2. Check it at the boundary, once
 
 The yaml is where input enters decsim, so this is one of the two places
-a check belongs (`STYLE.md` rule 4). Check the value in `from_yaml`,
+a check belongs (`STYLE.md` rule 4). The other is a component refusing a
+call that would corrupt a result. Check the value in `from_yaml`,
 loudly, with a message that reads as a sentence, and raise `ValueError`.
 Do not check it again anywhere inside the machine: a component trusts
 what its callers send.

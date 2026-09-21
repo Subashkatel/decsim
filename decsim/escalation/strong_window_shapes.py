@@ -9,12 +9,12 @@ context row's commit region with its past face pinned, and
 ForwardSeamWindow is the forward row's extent with both faces pinned. A
 fifth shape, both faces pinned and absorbing nothing, is not a row: it
 waits for the window after it, which waits for its own strong result,
-and the serial sliding chain deadlocks (design audit note 21). What
-would make it a row is a windowing scheme whose windows do not commit in
-one serial chain, the shape Skoric et al. 2209.08552 decode block by
-block (lines 398-401, 1038-1040); the row would read that off a fact the
-scheme declares, the way it reads absorption off itself, and refuse a
-scheme that does not declare it.
+and the serial sliding chain deadlocks. What would make it a row is a
+windowing scheme whose windows do not commit in one serial chain, the
+shape Skoric et al. 2209.08552 decode block by block (lines 398-401,
+1038-1040); the row would read that off a fact the scheme declares, the
+way it reads absorption off itself, and refuse a scheme that does not
+declare it.
 ContextWindow reads the escalated window's
 commit region with one buffer of raw context on each side, built the
 moment it is asked for; that geometry is decsim's own, not the paper's
@@ -82,7 +82,7 @@ class StrongAssignment:
     views name while the job is held. folded_boundaries names the
     neighbour windows whose committed boundary conditions the row folds
     into the job's input, Bombin et al. 2303.04846's input adaptation
-    (lines 775-788); both shipped rows fold none and read raw rounds.
+    (lines 775-788); a row that reads raw rounds folds none.
     """
 
     request_key: window_records.DecoderRequestKey
@@ -161,6 +161,9 @@ class StrongWindowShape(Protocol):
     ) -> Optional[decoding_records.DecodeJob]:
         """The held job, once its rounds are there; None while they are not."""
 
+    def rounds_to_carry(self, assignment: StrongAssignment) -> tuple:
+        """The rounds the row reads that the strong side does not have yet."""
+
 
 class ContextWindow(StrongWindowPorts):
     """The commit region and one buffer of raw context on each side.
@@ -178,12 +181,11 @@ class ContextWindow(StrongWindowPorts):
     The job is built as soon as its context is stored in the strong
     syndrome buffer, and priced for the context rounds that exist: a
     window at the operation's edge has a shorter context than commit + 2 buffer.
-    A context round still crossing controller_to_strong_buffer holds the
-    job instead, because Step 1 feeds both decoders the same data and a
-    model that prices transport starts the strong decoder when its copy
-    lands (the paper's Monte-Carlo simulations set T_comm^strong to ten
-    times T_comm^weak, lines 1109-1114; its Table I is a notation table
-    and prices nothing). This shape absorbs no weak window, so its
+    Every context round is measured by the verdict, so the redecode
+    carries them all up with the escalation and the job is held until
+    they land (the paper's Monte-Carlo simulations set T_comm^strong to
+    ten times T_comm^weak, lines 1109-1114; its Table I is a notation
+    table and prices nothing). This shape absorbs no weak window, so its
     window_absorbed source is the silent one.
 
     Both faces are read raw, so the row folds no neighbour boundary
@@ -221,6 +223,10 @@ class ContextWindow(StrongWindowPorts):
     ) -> Optional[decoding_records.DecodeJob]:
         """The job, once every context round that arrived is stored."""
         return _job_once_stored(self, assignment.held_plan)
+
+    def rounds_to_carry(self, assignment: StrongAssignment) -> tuple:
+        """The context rounds the strong syndrome buffer lacks."""
+        return _rounds_not_stored(self, assignment.held_plan)
 
 
 class NearSeamWindow(StrongWindowPorts):
@@ -288,6 +294,10 @@ class NearSeamWindow(StrongWindowPorts):
     ) -> Optional[decoding_records.DecodeJob]:
         """The job, once every round it reads is stored."""
         return _job_once_stored(self, assignment.held_plan)
+
+    def rounds_to_carry(self, assignment: StrongAssignment) -> tuple:
+        """The rounds it reads that the strong syndrome buffer lacks."""
+        return _rounds_not_stored(self, assignment.held_plan)
 
 
 class ForwardWindow(StrongWindowPorts):
@@ -393,12 +403,13 @@ class ForwardWindow(StrongWindowPorts):
     def release_conditions(
         self, assignment: StrongAssignment
     ) -> pending_strong_windows.ReleaseConditions:
-        """The restart window's commit, or the operation's stored tail.
+        """The restart window's commit and then its rounds, or the stored tail.
 
         A strong window bounded by a later weak window waits for that
-        window to commit; one at the end of the stream has no later
-        window, so it waits for the rounds it reads to be stored
-        (Toshio et al. 2510.25222 lines 1248-1250).
+        window to commit, and then for the rounds it reads to be carried
+        up and stored; one at the end of the stream has no later window,
+        so it waits for its stored rounds alone (Toshio et al.
+        2510.25222 lines 1248-1250).
         """
         held = assignment.held_plan
         restart_key = held.resolved_region.restart_window_key
@@ -410,6 +421,7 @@ class ForwardWindow(StrongWindowPorts):
             )
         return pending_strong_windows.ReleaseConditions(
             committed_windows=(restart_key,),
+            stored_data_of_operation=held.key[0],
             name="far_boundary",
             released_description="far-side weak boundary determined",
         )
@@ -417,19 +429,27 @@ class ForwardWindow(StrongWindowPorts):
     def held_job(
         self, assignment: StrongAssignment
     ) -> Optional[decoding_records.DecodeJob]:
-        """The held job, once the rounds it reads are stored.
+        """The held job, once every round it reads is stored.
 
-        A window waiting on a later weak commit reads rounds that were
-        stored long before that commit; a terminal one is released by
-        the stored round itself, so it is the one that can be asked
-        before its tail is there.
+        The rounds the chip has are carried up first; a terminal window's
+        tail is still being measured, so the store must also have been
+        filled through the extent's last round.
         """
         held = assignment.held_plan
-        if held.resolved_region.restart_window_key is None:
-            stored_through = self.regions.strong_rounds_stored(held.key[0])
-            if stored_through < held.resolved_region.plan.context_hi:
-                return None
+        crossing = self.rounds_to_carry(assignment)
+        if crossing:
+            return None
+        stored_through = self.regions.strong_rounds_stored(held.key[0])
+        if stored_through < held.resolved_region.plan.context_hi:
+            return None
         return self._build_strong_job(held)
+
+    def rounds_to_carry(self, assignment: StrongAssignment) -> tuple:
+        """The rounds of its extent that the strong syndrome buffer lacks."""
+        held = assignment.held_plan
+        return self.retention.context_rounds_in_flight(
+            held.key, held.resolved_region.context_round_keys
+        )
 
     # ---- the two facts a row of this geometry declares
 
@@ -634,9 +654,9 @@ class ForwardSeamWindow(ForwardWindow):
     far face on the restart window's weak commit, which is exactly the
     boundary the shipped forward row already waits for, so the wait does
     not change and the circular wait that a non-absorbing both-faces row
-    runs into (design audit note 21) does not arise: this row absorbs the
-    windows it covers, the weak chain keeps committing, and the restart
-    window commits the rounds past the strong region.
+    runs into does not arise: this row absorbs the windows it covers,
+    the weak chain keeps committing, and the restart window commits the
+    rounds past the strong region.
 
     A strong window at the end of the operation has no later window, so
     it has no far pin: its future face is closed by the readout and it
@@ -644,12 +664,20 @@ class ForwardSeamWindow(ForwardWindow):
     window (2209.09219 lines 953-955, "both time boundaries of the last
     windows are closed").
 
-    A near face that no committed correction closes is read instead of
-    pinned, with one buffer region of raw context (Bombin lines
-    850-852). That is the window that restarts the weak chain after an
-    earlier strong region: the absorption takes its dependency out of
-    the chain, so nothing hands it the rounds before its own, and its
-    own weak decode reads that face open too.
+    At a back-to-back seam, where the escalated window is the one that
+    restarted the weak chain after an earlier strong region, the near
+    face pins on that window's own weak commit. The absorption takes its
+    dependency out of the chain, so no neighbour commits the round
+    before it and it owns the faults crossing that seam itself; the
+    region ending at the seam is pinned on its choice of them, so this
+    region keeps it: those faults are prior faults of its model, their
+    committed effect is folded into its input, and their observable
+    flips stay with the window when the strong result replaces its
+    prediction.
+
+    Only the region at the operation's first round reads a face open,
+    with one buffer region of raw context (Bombin lines 850-852), since
+    there is no earlier commit to pin on.
 
     The row needs escalation.restart_reread_buffer_regions 0, the
     paper's value: with a re-read the restart window shares rounds with
@@ -661,9 +689,29 @@ class ForwardSeamWindow(ForwardWindow):
 
     pins_the_far_face = True
 
+    def release_conditions(
+        self, assignment: StrongAssignment
+    ) -> pending_strong_windows.ReleaseConditions:
+        """The far boundary, and its own weak commit when it pins on it.
+
+        A region at a back-to-back seam reads its near boundary
+        condition off the escalated window's own weak commit, so it
+        waits for that commit as it waits for the far one (Toshio et al.
+        2510.25222 lines 1248-1250).
+        """
+        forward_window = super()
+        conditions = forward_window.release_conditions(assignment)
+        key = assignment.held_plan.key
+        if key not in assignment.folded_boundaries:
+            return conditions
+        committed_windows = conditions.committed_windows + (key,)
+        return dataclasses.replace(
+            conditions, committed_windows=committed_windows
+        )
+
     def _resolved_region(self, key: tuple) -> strong_regions.ForwardRegion:
         """The extent, read with no context on the faces it pins."""
-        near_source_key = self.regions.near_seam_source(key)
+        near_source_key = self.regions.forward_near_face(key)
         return self.regions.forward_seam_region(
             key, near_source_key=near_source_key
         )
@@ -671,13 +719,13 @@ class ForwardSeamWindow(ForwardWindow):
     def _declared_faces(
         self, key: tuple, resolved_region: strong_regions.ForwardRegion
     ) -> tuple:
-        """The window before the extent, and the window that restarts after it.
+        """The commit closing the near face, and the window restarting after.
 
         The restart window's weak commit is the far boundary (Toshio et
         al. 2510.25222 lines 1253-1259); a terminal region has no
         restart window and no far pin.
         """
-        near_source_key = self.regions.near_seam_source(key)
+        near_source_key = self.regions.forward_near_face(key)
         faces = _declared_faces(near_source_key)
         restart_key = resolved_region.restart_window_key
         if restart_key is None:
@@ -685,7 +733,7 @@ class ForwardSeamWindow(ForwardWindow):
         return faces + (restart_key,)
 
 
-# both shipped rows read raw rounds on both faces and fold no committed
+# a row that reads raw rounds on both faces folds no committed
 # neighbour boundary into the strong job's input
 FOLDS_NO_BOUNDARY: tuple = ()
 
@@ -767,12 +815,17 @@ def _job_once_stored(
     shape: StrongWindowPorts, held: "_HeldStrongRedo"
 ) -> Optional[decoding_records.DecodeJob]:
     """The job, once every round the window reads is stored."""
-    crossing = shape.retention.context_rounds_in_flight(
-        held.key, held.read_keys
-    )
+    crossing = _rounds_not_stored(shape, held)
     if crossing:
         return None
     return _strong_job_of(shape, held)
+
+
+def _rounds_not_stored(
+    shape: StrongWindowPorts, held: "_HeldStrongRedo"
+) -> tuple:
+    """The rounds the row reads that the strong syndrome buffer lacks."""
+    return shape.retention.context_rounds_in_flight(held.key, held.read_keys)
 
 
 def _log_hold(
@@ -780,7 +833,7 @@ def _log_hold(
     held: "_HeldStrongRedo",
     crossing: tuple,
 ) -> None:
-    """The rounds the window reads are still on controller_to_strong_buffer."""
+    """The rounds the window reads are not on the strong side yet."""
     shape.engine.log(
         log_sources.DECODER_MANAGER,
         f"{held.label}: strong start deferred until the context "

@@ -117,10 +117,10 @@ def test_a_formation_row_that_is_not_on_the_table_is_refused():
         assert repr(row) in sentence
 
 
-def test_the_two_formation_rows_are_the_two_the_key_offers():
+def test_the_formation_rows_are_the_rows_the_key_offers():
     rows = controller_settings.DETECTION_EVENT_FORMATION
 
-    assert sorted(rows) == ["controller", "decoder"]
+    assert sorted(rows) == ["controller", "decoder", "weak_syndrome_buffer"]
 
 
 def test_one_decoder_for_both_tiers_is_refused_when_the_run_may_escalate():
@@ -220,12 +220,19 @@ def test_the_process_name_says_which_point_a_trace_is_of():
 class _PlacementOfMyOwn:
     """A placement row written outside decsim: it forms nothing at all."""
 
+    forms_at_the_weak_syndrome_buffer = False
+    forms_at_the_decoder = False
+
     def __init__(self, former, detection_event_formation_cycles):
         self.former = former
         self.detection_event_formation_cycles = detection_event_formation_cycles
 
     def form_before_departure(self, fragments):
         """The round's fragments as they leave the controller."""
+        return fragments
+
+    def form_before_storage(self, fragments):
+        """The round's fragments as the weak syndrome buffer stores them."""
         return fragments
 
     def decoder_side_former(self):

@@ -140,6 +140,11 @@ work queues. It is far above 1 here because PyMatching in Python on a
 small window is slow compared to one microsecond a round; the figure
 itself is this host's, like every tick in the block.
 
+`p99` is the 99th percentile: ninety-nine windows in a hundred finished
+within it. The `data movement` line says the run did not count copies,
+references and moves, because the key `data_movement` in the
+`observation` section of `configs/reference.yaml` is off by default.
+
 ## Step 4. Open the run folder
 
 ```bash
@@ -172,7 +177,8 @@ the csv files the facts.
 
 ## Step 5. Read one row and one figure
 
-`sweep.csv` has one row per sweep point and 107 columns. The first few:
+`sweep.csv` has one row per sweep point and more than a hundred
+columns. The first few:
 
 ```bash
 cut -d, -f1-10 results/2026-09-10T02-29-33Z-reference/sweep.csv
@@ -201,8 +207,9 @@ results/2026-09-10T02-29-33Z-reference/stage_breakdown.png
 ```
 
 `stage_breakdown.png` shows where a window's time went, stage by stage:
-the queue, the link into the decoder unit, the fetch, the algorithm and
-the release. `collect` draws a figure only when its input is there,
+the buffer filling, the queue, the link into the decoder unit, the
+fetch, the algorithm, the release, the boundary handed to the next
+window, the link out and the frame commit. `collect` draws a figure only when its input is there,
 which is why this run has the `timeline.png` it drew for you and no
 others: it traced a shot, but its sweep has one physical error rate and
 one distance.
@@ -228,15 +235,15 @@ decsim trace follow \
 round 1:1 of decsim weak_baseline d3 p0.001 seed0
 
 tick (us)  where                        what                                                                 dur (us)  transfer   bits
-0.000      the weak syndrome buffer                     hold registered                                                                reference
+0.000      weak syndrome buffer         hold registered                                                                reference
 1.000      QPU                          emitted round 1                                                                           8
 1.000      qpu_to_controller            move                                                                 0.004     move       8
 1.000      Controller                   controller intake copy                                                         copy       8
 1.004      Controller                   controller assembler copy                                                      copy       8
 1.004      Controller                   residence, unbounded, freed at packed                                0.000     copy       8
 1.004      controller_to_weak_buffer    move                                                                 0.006     move       4
-1.010      the weak syndrome buffer                     the weak syndrome buffer copy                                                                  copy       4
-1.010      the weak syndrome buffer                     residence, unbounded, data ready 1.010, freed at last hold released  5.006     copy       4
+1.010      weak syndrome buffer         weak syndrome buffer copy                                                      copy       4
+1.010      weak syndrome buffer         residence, unbounded, data ready 1.010, freed at last hold released  5.006     copy       4
 6.012      Window planner               W0 ready
 6.012      weak_buffer_to_weak_decoder  move, with W0 rounds 1..6                                            0.004     move       44
 6.016      Decoder unit default#0       unit default#0 memory copy                                                     copy       44
@@ -264,7 +271,11 @@ microseconds on this host.
 
 The `transfer` column is the vocabulary decsim uses for data movement: a
 **move** leaves the bits behind, a **copy** ends with both sides holding
-them, and a **reference** hands over an object both sides read.
+them, and a **reference** hands over an object both sides read. The
+summary line counts two kinds of reference. A **job** is one window's
+request to a decoder unit. A **hold** is a note a reader puts on a round
+saying it may still need it, so the buffer may not drop the round; the
+round itself does not move.
 [The data path, hop by hop](../explanation/data_path.md) walks every hop.
 
 The same command follows a window instead of a round:

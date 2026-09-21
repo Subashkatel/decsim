@@ -11,11 +11,14 @@ the classes it lists, in the package that owns the part, and
 `decsim/tables.py` is the one function that reads them all, so
 a name that is not a row is refused the same way everywhere
 with the rows printed. Each class fills the port named in
-[The ports](ports.md).
+[The ports](ports.md). The key a table is named under is a yaml
+key when `configs/reference.yaml` carries it. One does not:
+`magic_state_factory.kind` has no yaml section today and is set
+from Python, on `MachineSettings`.
 
 ## `BOUNDARY_PAYLOADS`
 
-In `decsim/windows/settings.py`. A yaml names a row of it under `windows.boundary_payload`.
+In `decsim/windows/settings.py`. A row of it is named under `windows.boundary_payload`.
 
 | Row | Class | What it is |
 | --- | --- | --- |
@@ -24,7 +27,7 @@ In `decsim/windows/settings.py`. A yaml names a row of it under `windows.boundar
 
 ## `BOUNDARY_POLICIES`
 
-In `decsim/windows/settings.py`. A yaml names a row of it under `windows.boundaries`.
+In `decsim/windows/settings.py`. A row of it is named under `windows.boundaries`.
 
 | Row | Class | What it is |
 | --- | --- | --- |
@@ -33,16 +36,17 @@ In `decsim/windows/settings.py`. A yaml names a row of it under `windows.boundar
 
 ## `CONFIDENCE_SIGNALS`
 
-In `decsim/confidence/signals.py`. A yaml names a row of it under `escalation.confidence`.
+In `decsim/confidence/signals.py`. A row of it is named under `escalation.confidence`.
 
 | Row | Class | What it is |
 | --- | --- | --- |
 | `complementary_gap` | `ComplementaryGap` in `decsim/confidence/complementary.py` | The signal row: the gap between one window's two forced solves. |
 | `cluster_gap` | `ClusterGap` in `decsim/confidence/cluster.py` | The signal row: the gap of one cluster-based decode's own growth. |
+| `extra_cluster_gap` | `ExtraClusterGap` in `decsim/confidence/extra_cluster.py` | The signal row: the growth spent before the boundaries join. |
 
 ## `DECODERS`
 
-In `decsim/decoders/settings.py`. A yaml names a row of it under `<tier>_decoder.kind`.
+In `decsim/decoders/settings.py`. A row of it is named under `<tier>_decoder.kind`.
 
 | Row | Class | What it is |
 | --- | --- | --- |
@@ -56,16 +60,17 @@ In `decsim/decoders/settings.py`. A yaml names a row of it under `<tier>_decoder
 
 ## `DETECTION_EVENT_FORMATION`
 
-In `decsim/controller/settings.py`. A yaml names a row of it under `controller.detection_events_formed_at`.
+In `decsim/controller/settings.py`. A row of it is named under `controller.detection_events_formed_at`.
 
 | Row | Class | What it is |
 | --- | --- | --- |
 | `controller` | `ControllerSideFormation` in `decsim/detector_error_model/detection_event_formation.py` | The controller's assembler forms the round before it leaves. |
+| `weak_syndrome_buffer` | `WeakSyndromeBufferSideFormation` in `decsim/detector_error_model/detection_event_formation.py` | The weak decoder chip forms the round once, as it stores it. |
 | `decoder` | `DecoderSideFormation` in `decsim/detector_error_model/detection_event_formation.py` | Each tier forms the rounds it reads. |
 
 ## `ESCALATIONS`
 
-In `decsim/escalation/settings.py`. A yaml names a row of it under `escalation.kind`.
+In `decsim/escalation/settings.py`. A row of it is named under `escalation.kind`.
 
 | Row | Class | What it is |
 | --- | --- | --- |
@@ -75,7 +80,7 @@ In `decsim/escalation/settings.py`. A yaml names a row of it under `escalation.k
 
 ## `FRAMES`
 
-In `decsim/pauli_frame/pauli_frame.py`. A yaml names a row of it under `pauli_frame.kind`.
+In `decsim/pauli_frame/pauli_frame.py`. A row of it is named under `pauli_frame.kind`.
 
 | Row | Class | What it is |
 | --- | --- | --- |
@@ -83,7 +88,7 @@ In `decsim/pauli_frame/pauli_frame.py`. A yaml names a row of it under `pauli_fr
 
 ## `IDLE_POLICIES`
 
-In `decsim/controller/settings.py`. A yaml names a row of it under `idle_policy`.
+In `decsim/controller/settings.py`. A row of it is named under `idle_policy`.
 
 | Row | Class | What it is |
 | --- | --- | --- |
@@ -93,18 +98,18 @@ In `decsim/controller/settings.py`. A yaml names a row of it under `idle_policy`
 
 ## `LINK_FABRICS`
 
-In `decsim/links/link_profiles.py`. A yaml names a row of it under `links.kind`.
+In `decsim/links/link_profiles.py`. A row of it is named under `links.kind`.
 
 | Row | Class | What it is |
 | --- | --- | --- |
-| `logical_reference` | `LogicalReferenceFabric` in `decsim/links/link_profiles.py` | The default row: Khalid's latencies on unbounded channels. |
+| `logical_reference` | `LogicalReferenceFabric` in `decsim/links/link_profiles.py` | The default row: the reference card's latencies on unbounded channels. |
 | `bandwidth_limited` | `BandwidthLimitedFabric` in `decsim/links/link_profiles.py` | The same fabric with finite rates, provisioned from the geometry. |
 | `roce_v2_cpu` | `RoceV2CpuFabric` in `decsim/links/link_profiles.py` | The reference card with the strong path on Backline's CPU round trip. |
 | `roce_v2_gpu` | `RoceV2GpuFabric` in `decsim/links/link_profiles.py` | The reference card with the strong path on Backline's GPU round trip. |
 
 ## `MAGIC_STATE_FACTORIES`
 
-In `decsim/qpu/settings.py`. A yaml names a row of it under `magic_state_factory.kind`.
+In `decsim/qpu/settings.py`. A row of it is named under `magic_state_factory.kind`.
 
 | Row | Class | What it is |
 | --- | --- | --- |
@@ -114,7 +119,7 @@ In `decsim/qpu/settings.py`. A yaml names a row of it under `magic_state_factory
 
 ## `STRONG_WINDOW_SHAPES`
 
-In `decsim/escalation/settings.py`. A yaml names a row of it under `escalation.strong_window`.
+In `decsim/escalation/settings.py`. A row of it is named under `escalation.strong_window`.
 
 | Row | Class | What it is |
 | --- | --- | --- |
@@ -125,7 +130,7 @@ In `decsim/escalation/settings.py`. A yaml names a row of it under `escalation.s
 
 ## `SYNDROME_BUFFERS`
 
-In `decsim/syndrome_buffer/syndrome_buffer.py`. A yaml names a row of it under `weak_syndrome_buffer.kind` and `strong_syndrome_buffer.kind`.
+In `decsim/syndrome_buffer/syndrome_buffer.py`. A row of it is named under `weak_syndrome_buffer.kind` and `strong_syndrome_buffer.kind`.
 
 | Row | Class | What it is |
 | --- | --- | --- |
@@ -133,28 +138,28 @@ In `decsim/syndrome_buffer/syndrome_buffer.py`. A yaml names a row of it under `
 
 ## `SYNDROME_SOURCES`
 
-In `decsim/qpu/settings.py`. A yaml names a row of it under `qpu.kind`.
+In `decsim/qpu/settings.py`. A row of it is named under `qpu.kind`.
 
 | Row | Class | What it is |
 | --- | --- | --- |
 | `stim_device` | `StimDevice` in `decsim/qpu/stim_device.py` | Streams one sampled Stim shot as raw measurement packets, by round. |
-| `timing_only` | `TimingOnlyDevice` in `decsim/qpu/syndrome_devices.py` | Emits payloads without bits, so a run prices timing alone. |
+| `timing_only` | `TimingOnlyDevice` in `decsim/qpu/syndrome_devices.py` | Emits payloads with a size and no bit values: timing alone. |
 | `syndrome_bits` | `SyndromeBitDevice` in `decsim/qpu/syndrome_devices.py` | Emits seeded random bits shaped like the code card's syndrome. |
 | `recorded_stim` | `RecordedStimDevice` in `decsim/qpu/stim_device.py` | Replays recorded raw measurements (hardware data) instead of sampling. |
 
 ## `THRESHOLD_SOURCES`
 
-In `decsim/escalation/settings.py`. A yaml names a row of it under `escalation.threshold_source`.
+In `decsim/escalation/settings.py`. A row of it is named under `escalation.threshold_source`.
 
 | Row | Class | What it is |
 | --- | --- | --- |
 | `fixed` | `FixedThreshold` in `decsim/escalation/threshold_sources.py` | The paper's constant g_th: keep at gap >= threshold, escalate below. |
 | `table` | `TableThreshold` in `decsim/escalation/threshold_sources.py` | The calibration table's g_th for this sweep point. |
-| `online` | `OnlineThreshold` in `decsim/escalation/threshold_sources.py` | The controller at Switching's decision point (threshold_source online). |
+| `online` | `OnlineThreshold` in `decsim/escalation/threshold_sources.py` | Adapts the threshold during the run, from the escalation rate it sees. |
 
 ## `WINDOWING_SCHEMES`
 
-In `decsim/windows/settings.py`. A yaml names a row of it under `windows.kind`.
+In `decsim/windows/settings.py`. A row of it is named under `windows.kind`.
 
 | Row | Class | What it is |
 | --- | --- | --- |
@@ -165,7 +170,7 @@ In `decsim/windows/settings.py`. A yaml names a row of it under `windows.kind`.
 
 ## `WINDOW_CHECKS`
 
-In `decsim/observe/settings.py`. A yaml names a row of it under `observation.check_windows_with`.
+In `decsim/observe/settings.py`. A row of it is named under `observation.check_windows_with`.
 
 | Row | Class | What it is |
 | --- | --- | --- |
@@ -174,7 +179,7 @@ In `decsim/observe/settings.py`. A yaml names a row of it under `observation.che
 
 ## `WORKLOADS`
 
-In `decsim/frontends/settings.py`. A yaml names a row of it under `workload.kind`.
+In `decsim/frontends/settings.py`. A row of it is named under `workload.kind`.
 
 | Row | Class | What it is |
 | --- | --- | --- |

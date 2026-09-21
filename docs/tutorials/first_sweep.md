@@ -27,11 +27,14 @@ extends: weak_decoder_baseline.yaml
 weak_decoder:
   kind: pymatching
   units: 1
-  unit_memory_rounds: null
+  unit_memory:
+    bits: null
   engine:
     clock: fridge
     fetch_cycles_per_round: 1
+    fetch_cycles_per_job: 0
     release_cycles_per_job: 10
+    release_cycles_per_round: 0
 
 sweep:
   - physical_error_probability: [0.003]
@@ -45,7 +48,7 @@ Three things are happening here.
 `extends` reads `weak_decoder_baseline.yaml` from the same folder first
 and applies this file's keys over it. A section written here replaces
 the base's section **whole**, which is why the `weak_decoder` block
-repeats `units`, `unit_memory_rounds` and `engine` even though the base
+repeats `units`, `unit_memory` and `engine` even though the base
 already had them. Leave `engine` out and the load fails.
 
 The `weak_decoder` block names `pymatching`, so decsim decodes every
@@ -68,7 +71,9 @@ decsim show configs/my_first_sweep.yaml
 decsim collect configs/my_first_sweep.yaml --processes 4
 ```
 
-`--processes` gives each worker one work unit at a time. Shots inside a
+`--processes` gives each worker one work unit at a time. A work unit is
+a block of one point's shots that one process runs from start to finish;
+step 5 shows how to size it. Shots inside a
 unit stay serial, which is what keeps a shot's result a function of its
 seed alone.
 

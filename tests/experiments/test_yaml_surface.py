@@ -33,6 +33,21 @@ def test_reference_config_defines_both_tiers_and_the_mode_picks_weak():
     assert settings.strong_decoder.engine_clock == settings.clocks.clock("room")
 
 
+def test_the_reference_controller_charges_the_traced_issue_pipeline():
+    """Eight cycles from the decision at the core to the pulse trigger.
+
+    The trace on QubiC's core is in the reference yaml's own comment
+    (Fruitwala 2404.15260 Sec. III and IV, gem5's MinorCPU stage delays
+    where the paper is silent); a run that keeps the reference card
+    charges it on every feedback decision.
+    """
+    reference_path = CONFIGS_DIR / "reference.yaml"
+    config = experiment.load_experiment(reference_path)
+    controller = config.settings.controller
+    assert controller.decision_to_pulse_cycles == 8
+    assert controller.clock == config.settings.clocks.clock("fridge")
+
+
 def test_every_shipped_config_loads():
     for name in SHIPPED_CONFIGS:
         config_path = CONFIGS_DIR / name
@@ -179,11 +194,13 @@ def test_unknown_algorithms_and_stale_keys_fail_loudly(tmp_path):
         {
             "decoder": {
                 "units": 1,
-                "unit_memory_rounds": None,
+                "unit_memory": {"bits": None},
                 "engine": {
                     "clock": "fridge",
                     "fetch_cycles_per_round": 1,
+                    "fetch_cycles_per_job": 0,
                     "release_cycles_per_job": 1,
+                    "release_cycles_per_round": 0,
                 },
             }
         },
@@ -256,7 +273,9 @@ def test_engine_clock_must_name_a_clock_domain(tmp_path):
                 "engine": {
                     "clock": "sfq",
                     "fetch_cycles_per_round": 1,
+                    "fetch_cycles_per_job": 0,
                     "release_cycles_per_job": 1,
+                    "release_cycles_per_round": 0,
                 },
             }
         },

@@ -1,11 +1,12 @@
 """The sender: a finished round into every store it must reach, or held.
 
 The backpressure law of the readout path: each store's own end answers
-has_room before any round leaves for it, counting the rounds it holds
-and the writes it has in flight, and the room is reserved before the
-wire is used (gem5's queue counts its reserved entries as taken,
-tmp/resources/gem5/src/mem/cache/queue.hh:150-153 isFull, the reserve at
-:87-93; Ruby sums the same two counts, MessageBuffer.cc:181). A finished
+has_room with the round's bits before any round leaves for it, counting
+the bits it holds and the bits reserved for the writes in flight, and
+the room is reserved before the wire is used (gem5's packet store
+answers `avail() = _maxsize - _size - _reserved` against the packet's
+own length and reserves it with `reserve(len)`,
+src/dev/net/pktfifo.hh). A finished
 round that finds no room in either store waits in HeldRounds, upstream
 of the stores, and enters when a slot frees, in the order the rounds
 were completed. gem5's blocked port keeps the request at the requester
@@ -181,18 +182,18 @@ class SyndromeRoundSender:
     def admit(self, packed: round_records.PackedRound) -> bool:
         """Write the round where it belongs; False when it found no room."""
         if self._takes_the_strong_hop_only(packed):
-            if not self.strong_receiver.has_room():
+            if not self.strong_receiver.has_room(packed.wire_bits):
                 return self.held_rounds.refuse(packed, self.admit)
             self._write_strong(packed)
             return True
-        if not self.weak_receiver.has_room():
+        if not self.weak_receiver.has_room(packed.wire_bits):
             return self.held_rounds.refuse(packed, self.admit)
-        if not self._strong_has_room():
+        if not self._strong_has_room(packed):
             return self.held_rounds.refuse(packed, self.admit)
         # the round takes its weak syndrome buffer slot when its bits are
         # there: the room is reserved here, and the landing stores and
         # publishes it
-        self.weak_receiver.reserve_write()
+        self.weak_receiver.reserve_write(packed.wire_bits)
         if self.publishes_from_strong_store:
             # a strong-primary run's feedback-memory round: the room side
             # counts it too, as it counts every round of such a run
@@ -215,10 +216,10 @@ class SyndromeRoundSender:
         on_window_route = packed.route.kind is window_input
         return on_window_route and self.publishes_from_strong_store
 
-    def _strong_has_room(self) -> bool:
+    def _strong_has_room(self, packed: round_records.PackedRound) -> bool:
         if not self.publishes_from_strong_store:
             return True
-        return self.strong_receiver.has_room()
+        return self.strong_receiver.has_room(packed.wire_bits)
 
     def _write_strong(self, packed: round_records.PackedRound) -> None:
         """Carry the round over its link to the strong syndrome buffer.
@@ -229,13 +230,13 @@ class SyndromeRoundSender:
         gem5 bills a transfer to the port it left by,
         coherent_xbar.cc:354-357).
         The room side takes the room before the round leaves, gem5's
-        cache reserving its write buffer entry before the send
-        (src/mem/cache/queue.hh:150-152), and handles the landing itself.
+        packet store reserving the packet's bytes before the data lands
+        (src/dev/net/pktfifo.hh reserve), and handles the landing itself.
         """
         attribution = transfer_records.TransferAttribution.for_packet(
             packed.packet
         )
-        self.strong_receiver.reserve_write()
+        self.strong_receiver.reserve_write(packed.wire_bits)
         landed = functools.partial(self._land_in_strong_store, packed)
         self.link.send(
             transfer_records.LinkPath.CONTROLLER_TO_STRONG_BUFFER,

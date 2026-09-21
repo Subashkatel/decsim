@@ -62,9 +62,9 @@ links:
   controller_to_qpu:  null
 
 weak_syndrome_buffer:
-  rounds: null
+  bits: null
 strong_syndrome_buffer:
-  rounds: null
+  bits: null
 
 strong_decoder:
   kind: belief_matching

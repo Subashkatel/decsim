@@ -6,13 +6,28 @@ from typing import Optional
 
 import decsim.config as config
 
+# the keys a syndrome buffer section reads
+SYNDROME_BUFFER_KEYS = (
+    "kind",
+    "bits",
+    "clock",
+    "write_cycles",
+    "read_cycles",
+    "detection_event_cycles_per_round",
+)
+
 
 @dataclasses.dataclass(frozen=True)
 class SyndromeBufferSettings:
     """The yaml's `weak_syndrome_buffer` and `strong_syndrome_buffer` sections.
 
     Table row (SYNDROME_BUFFERS, syndrome_buffer.py): syndrome_buffer.
-    rounds bounds the store; None is unbounded. A full store makes the
+    bits bounds the store, the capacity a memory is declared in; None is
+    unbounded. gem5 sizes its packet store the same way, in bytes on the
+    store itself (`rx_fifo_size = Param.MemorySize("384KiB", ...)`,
+    src/dev/net/Ethernet.py) and answers room against the packet's own
+    size (`avail()` over the reserved bytes, `reserve(len)` before the
+    data lands, src/dev/net/pktfifo.hh). A full store makes the
     controller hold the finished round and write it in order once a slot frees,
     the backpressure real systems apply to their source (Caune et al.
     2410.05202: the sequencer stalls on the decoder's status register).
@@ -28,7 +43,7 @@ class SyndromeBufferSettings:
     """
 
     kind: str = "syndrome_buffer"
-    rounds: Optional[int] = None
+    bits: Optional[int] = None
     clock: Optional[config.Clock] = None
     write_cycles: int = 0
     read_cycles: int = 0
@@ -54,16 +69,22 @@ class SyndromeBufferSettings:
     def from_yaml(
         cls,
         section: Mapping,
+        section_name: str,
         clocks: config.ClockSettings,
         default_clock: Optional[config.Clock] = None,
     ) -> "SyndromeBufferSettings":
-        """A store section: its kind, and `rounds`, a positive count or null."""
-        kind = section.get("kind", "syndrome_buffer")
-        rounds = section.get("rounds")
-        if rounds is not None and rounds < 1:
+        """A store section: its kind, and `bits`, a bit capacity or null."""
+        unknown = set(section) - set(SYNDROME_BUFFER_KEYS)
+        if unknown:
+            listed = sorted(unknown)
             raise ValueError(
-                f"a syndrome buffer holds at least one round, got {rounds!r}"
+                f"{section_name} does not know {listed}; its keys are "
+                f"{list(SYNDROME_BUFFER_KEYS)}"
             )
+        kind = section.get("kind", "syndrome_buffer")
+        bits = section.get("bits")
+        key = f"{section_name}.bits"
+        config.check_capacity_bits(key, bits)
         clock = default_clock
         if "clock" in section:
             clock = clocks.clock(section["clock"])
@@ -72,7 +93,7 @@ class SyndromeBufferSettings:
         formation_cycles = section.get("detection_event_cycles_per_round", 0)
         return cls(
             kind=kind,
-            rounds=rounds,
+            bits=bits,
             clock=clock,
             write_cycles=write_cycles,
             read_cycles=read_cycles,

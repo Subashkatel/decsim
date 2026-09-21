@@ -147,15 +147,20 @@ class SyndromeBuffer(Protocol):
     in the store, which is at the landing of the hop that carried them, and
     it is readable at that same instant: the store and the publication
     are one call at one tick. The end that takes the landing asks
-    has_room first, counting the writes it has in flight (gem5's queue
-    answers isFull with its reserved entries taken,
-    src/mem/cache/queue.hh:150-153, :87-93); a packed round is written
-    once and kept until every consumer releases it. A store never
-    refuses a write: a round that finds no room waits upstream.
+    has_room first with the round's bits, counting the bits it has
+    reserved for the writes in flight (gem5's packet store answers
+    `avail() = _maxsize - _size - _reserved` against the packet's own
+    length, src/dev/net/pktfifo.hh); a packed round is written once and
+    kept until every consumer releases it. A store never refuses a
+    write: a round that finds no room waits upstream.
     """
 
-    def has_room(self) -> bool:
-        """Whether one more round fits now."""
+    def has_room(self, bits: Optional[int], reserved_bits: int = 0) -> bool:
+        """Whether a round of that many bits fits beside what is taken.
+
+        A bounded store raises on a round that states no size: a bound
+        is measured against a size.
+        """
 
     def accept_packed_round(
         self,
@@ -168,10 +173,10 @@ class SyndromeBuffer(Protocol):
     def release_round(self, round_key: tuple) -> None:
         """Free the round; its consumers are done with it."""
 
-    def capacity_rounds(self) -> Optional[int]:
-        """The slots this store is bounded to, or None for unbounded.
+    def capacity_bits(self) -> Optional[int]:
+        """The bits this store is bounded to, or None for unbounded.
 
-        A store bounded some other way than by a slot count answers
+        A store bounded some other way than by a bit capacity answers
         None and refuses nothing: the callers that size a trace lane or
         a room check ask this instead of reading a settings record, so
         the bound stays the store's own to decide.
@@ -260,7 +265,7 @@ class SyndromeRoundSender(Protocol):
 class StrongSyndromeRoundReceiver(Protocol):
     """The strong syndrome buffer's receiving end, as its two senders see it.
 
-    The store counts the rounds still crossing toward it as room taken.
+    The store counts the bits still crossing toward it as room taken.
     A strong-primary run's controller reserves that room before a round
     leaves and the store keeps the round when it lands; a switching
     run's strong redecode reserves the room of an escalated region before
@@ -268,11 +273,11 @@ class StrongSyndromeRoundReceiver(Protocol):
     landing.
     """
 
-    def has_room(self) -> bool:
-        """Whether one more write can land."""
+    def has_room(self, bits: Optional[int]) -> bool:
+        """Whether a write of that many bits can land."""
 
-    def reserve_write(self) -> None:
-        """Take the room one crossing round will need, before it leaves."""
+    def reserve_write(self, bits: Optional[int]) -> None:
+        """Take the bits one crossing round will need, before it leaves."""
 
     def receive_round(
         self,
@@ -281,7 +286,7 @@ class StrongSyndromeRoundReceiver(Protocol):
     ) -> None:
         """Take one round that landed here and keep it on arrival."""
 
-    def reserve_region(self, round_count: int) -> None:
+    def reserve_region(self, round_count: int, bits: Optional[int]) -> None:
         """Take the room an escalated region's rounds will need, or refuse."""
 
     def receive_region(self, region: round_records.EscalatedRegion) -> None:
@@ -293,19 +298,20 @@ class WeakSyndromeRoundReceiver(Protocol):
     """The weak syndrome round receiver, as the controller sees it.
 
     This end owns the store's room and its landing. It answers has_room
-    against the rounds stored and the writes still in flight, the sender
-    reserves that room before the round leaves, and the transfer that
-    carries the round lands here: this end stores it, which is the tick
-    it becomes readable, and announces it to whoever waits on it. The
-    same port takes the controller's ask for a timing-only round, which
-    takes its slot here and leaves by the store's own outgoing port.
+    against the bits stored and the bits reserved for the writes still
+    in flight, the sender reserves that room before the round leaves,
+    and the transfer that carries the round lands here: this end stores
+    it, which is the tick it becomes readable, and announces it to
+    whoever waits on it. The same port takes the controller's ask for a
+    timing-only round, which takes its slot here and leaves by the
+    store's own outgoing port.
     """
 
-    def has_room(self) -> bool:
-        """Whether one more round fits: the stored ones and those in flight."""
+    def has_room(self, bits: Optional[int]) -> bool:
+        """Whether that many bits fit: the stored ones and those in flight."""
 
-    def reserve_write(self) -> None:
-        """Take the room one crossing round will need, before it leaves."""
+    def reserve_write(self, bits: Optional[int]) -> None:
+        """Take the bits one crossing round will need, before it leaves."""
 
     def receive_round(self, packed: round_records.PackedRound) -> None:
         """Take one round that landed here: store it, then announce it."""

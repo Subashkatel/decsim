@@ -530,12 +530,19 @@ weak_syndrome_buffer:            # the weak syndrome buffer, on the decoder chip
                                    # fix theirs at 5 FPGA clock cycles
                                    # (2605.04892 lines 1273-1275)
   kind: syndrome_buffer            # the one row today
-  rounds: null                     # capacity in rounds. When it is full the
-                                   # controller holds the finished round and
-                                   # publishes it in order once a slot frees,
-                                   # the backpressure real systems apply to their
-                                   # source; controller.packing_overflow chooses
-                                   # that hold or a drop. null = unbounded.
+  bits: null                       # capacity in bits, the unit a memory is
+                                   # declared in (gem5 states its packet store
+                                   # in bytes on the store itself,
+                                   # src/dev/net/Ethernet.py rx_fifo_size).
+                                   # When it is full the controller holds the
+                                   # finished round and publishes it in order
+                                   # once a slot frees, the backpressure real
+                                   # systems apply to their source;
+                                   # controller.packing_overflow chooses that
+                                   # hold or a drop. null = unbounded. A
+                                   # bounded store refuses a round that states
+                                   # no size, so a timing-only device runs
+                                   # with null here.
                                    # A store too small for the rounds the
                                    # plan's windows hold at once fills, and the
                                    # run stops: "run ended with N rounds held
@@ -544,12 +551,13 @@ weak_syndrome_buffer:            # the weak syndrome buffer, on the decoder chip
 strong_syndrome_buffer:          # the strong syndrome buffer, on the strong host
                                    # (exists only when the escalation uses it)
   kind: syndrome_buffer
-  rounds: null                     # capacity in rounds. A strong-only run's
-                                   # controller holds a finished round that finds
-                                   # no room, the same waiting line the weak
-                                   # syndrome buffer uses; a switching run's
-                                   # escalated region cannot wait, so a store with
-                                   # no room for it stops the run. null = unbounded
+  bits: null                       # capacity in bits, as above. A strong-only
+                                   # run's controller holds a finished round
+                                   # that finds no room, the same waiting line
+                                   # the weak syndrome buffer uses; a switching
+                                   # run's escalated region cannot wait, so a
+                                   # store with no room for it stops the run.
+                                   # null = unbounded
                                    # This buffer stores a round as it lands and
                                    # charges no cycles, so the weak syndrome
                                    # buffer's cost keys are refused here

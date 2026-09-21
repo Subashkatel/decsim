@@ -137,7 +137,7 @@ class UnitMemorySettings:
             )
         bits = section.get("bits")
         key = f"{section_name}.unit_memory.bits"
-        _check_capacity_bits(key, bits)
+        config.check_capacity_bits(key, bits)
         return cls(bits=bits)
 
 
@@ -386,27 +386,6 @@ def _formation_cycles_per_round(engine: Mapping) -> int:
     if "detection_event_cycles_per_round" not in engine:
         return DETECTION_EVENT_CYCLES_PER_ROUND
     return engine["detection_event_cycles_per_round"]
-
-
-def _check_capacity_bits(key: str, value) -> None:
-    """A unit memory's capacity, checked where the yaml enters."""
-    if value is None:
-        return
-    if _is_whole_bit_count(value):
-        return
-    raise ValueError(
-        f"{key} must be at least one bit, or null for an unbounded unit "
-        f"memory (got {value!r})"
-    )
-
-
-def _is_whole_bit_count(value) -> bool:
-    """A capacity a memory can have: a whole number of bits, never a flag."""
-    if value is True or value is False:
-        return False
-    if not isinstance(value, int):
-        return False
-    return value >= 1
 
 
 def _check_boolean(section_name: str, key: str, value) -> None:

@@ -410,7 +410,7 @@ def _residence_phrase(args: dict) -> str:
 
 
 def _room_phrase(args: dict) -> str:
-    """The room's size: a unit memory states bits, every other room rounds."""
+    """The room's size: a memory states bits, the workspace rounds."""
     capacity_bits = args.get("capacity_bits")
     if capacity_bits is not None:
         return f"of {capacity_bits} bits"

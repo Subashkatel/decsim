@@ -40,6 +40,7 @@ import decsim.experiments.experiment as experiment
 import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
 import decsim.observe.settings as observe_settings
+import decsim.qpu.code_geometry as code_geometry
 import decsim.qpu.cycle_clock as cycle_clock
 import decsim.qpu.magic_state_factories as magic_state_factories
 import decsim.qpu.round_policies as round_policies
@@ -65,6 +66,8 @@ THIS_FILE = pathlib.Path(__file__)
 TESTS_DIRECTORY = THIS_FILE.parents[1]
 CONFIGS = TESTS_DIRECTORY.parent / "configs"
 CYCLE_TICKS = config.microseconds_to_ticks(1.0)
+# the syndrome bits of one round of a distance-three patch
+BITS_PER_ROUND = 8
 # the decoder engines of these runs: 250 MHz and 100 MHz
 FAST_ENGINE_CLOCK = config.Clock(4000)
 ENGINE_CLOCK = config.Clock(10_000)
@@ -1076,6 +1079,17 @@ PACKING_BOUND_STOP_TICKS = {
 TWELVE_ROUND_RUN_END_TICK = 54_000_000
 
 
+def sized_syndrome_device() -> qpu_settings.QpuSettings:
+    """A device whose rounds state their size, which a bounded store needs."""
+    code = code_geometry.SurfaceCodeModel(distance=3)
+    return qpu_settings.QpuSettings(
+        kind="syndrome_bits",
+        distance=3,
+        round_period_microseconds=declared_run.ROUND_MICROSECONDS,
+        arguments={"code": code},
+    )
+
+
 def published_rounds(machine):
     """(round index, tick) of every round published, in publication order."""
     published = []
@@ -1108,9 +1122,13 @@ def test_a_full_syndrome_buffer_stalls_the_controller_instead_of_dropping():
     seven at 16 us and round 8 waits past 17 us for the first window's
     input to land instead of being dropped.
     """
-    seven_rounds = syndrome_buffer_settings.SyndromeBufferSettings(rounds=7)
+    seven_rounds_bits = 7 * BITS_PER_ROUND
+    seven_rounds = syndrome_buffer_settings.SyndromeBufferSettings(
+        bits=seven_rounds_bits
+    )
+    sized_device = sized_syndrome_device()
     machine = declared_run.weak_only_run(
-        rounds=12, weak_syndrome_buffer=seven_rounds
+        rounds=12, qpu=sized_device, weak_syndrome_buffer=seven_rounds
     )
     published = published_rounds(machine)
     ticks = publication_ticks(published)

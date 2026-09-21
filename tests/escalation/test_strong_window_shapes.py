@@ -75,8 +75,8 @@ GATE_SWITCHING_CARD = {
         "frame_to_controller": None,
         "controller_to_qpu": None,
     },
-    "weak_syndrome_buffer": {"rounds": None},
-    "strong_syndrome_buffer": {"rounds": None},
+    "weak_syndrome_buffer": {"bits": None},
+    "strong_syndrome_buffer": {"bits": None},
     "windows": {
         "kind": "sliding",
         "commit_rounds": None,

@@ -195,7 +195,7 @@ def test_round_ones_first_hops_are_the_notes_worked_example(traced):
     assert residence["args"]["bits"] == 4
     assert residence["args"]["data_ready"] == 1_008_000
     assert residence["args"]["freed"] == 6_012_000
-    assert residence["args"]["capacity"] is None
+    assert residence["args"]["capacity_bits"] is None
 
 
 def test_window_zeros_service_and_stages_are_the_notes_worked_example(traced):

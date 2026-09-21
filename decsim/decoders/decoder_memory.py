@@ -123,9 +123,7 @@ class DecoderInput:
         a size, and it refuses such an input before it lands.
         """
         bits = self.size_bits()
-        if bits is None:
-            return 0
-        return bits
+        return round_records.stated_bits(bits)
 
 
 @dataclasses.dataclass

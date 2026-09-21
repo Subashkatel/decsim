@@ -11,9 +11,9 @@ its handler (tmp/resources/omnetpp/src/sim/csimplemodule.cc:782-783,
 destination's own accept (Ciw/ciw/node.py:602 into :102-103), and Caune
 2410.05202 lines 1243-1247 store the outcomes in the decoder sequencer's
 memory only after the propagation. The sender still refuses before it
-sends, so the room counts the writes in flight as taken (gem5
-src/mem/cache/queue.hh:150-153 with the reserve at :87-93; Ruby
-MessageBuffer.cc:181). The rest are the laws of the buffer contract
+sends, so the room counts the bits of the writes in flight as taken
+(gem5 src/dev/net/pktfifo.hh, `avail() = _maxsize - _size - _reserved`
+with `reserve(len)`). The rest are the laws of the buffer contract
 (validation/responsibility_audit_2026_08_30/buffer_contract.md): the
 publication never precedes the store, and the window manager hears of a
 round only once the store's record says it is readable.
@@ -34,6 +34,8 @@ from decsim.syndrome_buffer import (
 
 LANDING_TICKS = 40_000
 MEMORY_ROUTE = round_records.SyndromePacketRoute.feedback_memory_round(9)
+# every round this file sends carries one fragment of two bits
+BITS_PER_ROUND = 2
 
 
 class _Windows:
@@ -73,11 +75,11 @@ def _packed(
         fragment_index=0,
     )
     packet = round_records.SyndromeRoundPacket(1, round_index, (fragment,))
-    return round_records.PackedRound(packet, route, 2)
+    return round_records.PackedRound(packet, route, BITS_PER_ROUND)
 
 
-def _store(rounds=None) -> syndrome_buffer_module.SyndromeBuffer:
-    settings = syndrome_buffer_settings.SyndromeBufferSettings(rounds=rounds)
+def _store(bits=None) -> syndrome_buffer_module.SyndromeBuffer:
+    settings = syndrome_buffer_settings.SyndromeBufferSettings(bits=bits)
     return syndrome_buffer_module.SyndromeBuffer(settings)
 
 
@@ -99,7 +101,7 @@ def _receiver_with(engine, store, output=None, detection_events=None):
 
 def _cross(receiver, packed, landing_ticks=LANDING_TICKS):
     """One crossing: the room is taken at the send, the slot at the landing."""
-    receiver.reserve_write()
+    receiver.reserve_write(packed.wire_bits)
     receiver.engine.schedule(
         landing_ticks,
         lambda: receiver.receive_round(packed),
@@ -123,20 +125,24 @@ def test_a_crossing_round_holds_no_slot_until_it_lands():
     assert store.retained_fragments((1, 1)) is not None
 
 
-def test_the_room_counts_the_write_in_flight_against_the_capacity():
+def test_the_reserved_bits_count_against_the_room_until_the_round_lands():
     engine = engine_module.Engine()
-    store = _store(rounds=1)
+    store = _store(bits=BITS_PER_ROUND)
     receiver, _windows = _receiver_with(engine, store)
     packed = _packed(1)
-    room_before = receiver.has_room()
+    room_before = receiver.has_room(BITS_PER_ROUND)
 
     _cross(receiver, packed)
-    room_while_crossing = receiver.has_room()
+    room_while_crossing = receiver.has_room(BITS_PER_ROUND)
+    reserved_while_crossing = receiver.reserved_bits
     engine.run()
 
     assert room_before is True
     assert room_while_crossing is False
-    assert receiver.has_room() is False
+    assert reserved_while_crossing == BITS_PER_ROUND
+    assert receiver.has_room(BITS_PER_ROUND) is False
+    assert receiver.reserved_bits == 0
+    assert store.occupied_bits == BITS_PER_ROUND
     assert receiver.writes_in_flight == 0
 
 
@@ -243,7 +249,7 @@ def test_a_timing_only_round_takes_its_slot_here_and_is_never_published():
     packed = _packed(2, route=MEMORY_ROUTE)
     delivered = []
 
-    receiver.reserve_write()
+    receiver.reserve_write(packed.wire_bits)
     receiver.send_memory_round(packed, lambda: delivered.append(True))
 
     assert output.sent == [(1, 2)]
@@ -258,7 +264,7 @@ def test_a_write_still_in_flight_at_the_end_of_a_run_is_a_failure():
     store = _store()
     receiver, _windows = _receiver_with(engine, store)
 
-    receiver.reserve_write()
+    receiver.reserve_write(BITS_PER_ROUND)
 
     try:
         receiver.check_settled()
@@ -280,7 +286,7 @@ def test_write_cycles_move_every_reaction_point_by_the_store_periods():
     clocks = config.ClockSettings.from_yaml({"storage": 1.0})
     section = {"clock": "storage", "write_cycles": 3}
     settings = syndrome_buffer_settings.SyndromeBufferSettings.from_yaml(
-        section, clocks
+        section, "weak_syndrome_buffer", clocks
     )
     free = declared_run.weak_only_run()
     charged = declared_run.weak_only_run(weak_syndrome_buffer=settings)
@@ -297,16 +303,16 @@ def test_a_priced_write_keeps_its_reservation_until_the_write_edge():
     engine.now = 1
     clock = config.Clock(10)
     settings = syndrome_buffer_settings.SyndromeBufferSettings(
-        rounds=1, clock=clock, write_cycles=3
+        bits=BITS_PER_ROUND, clock=clock, write_cycles=3
     )
     store = syndrome_buffer_module.SyndromeBuffer(settings)
     receiver, windows = _receiver_with(engine, store)
     packed = _packed(1)
-    receiver.reserve_write()
+    receiver.reserve_write(packed.wire_bits)
     receiver.receive_round(packed)
     assert store.occupancy == 0
     assert receiver.writes_in_flight == 1
-    assert receiver.has_room() is False
+    assert receiver.has_room(BITS_PER_ROUND) is False
     assert windows.published == []
 
     engine.run()
@@ -369,7 +375,7 @@ def test_the_chips_formation_cycles_are_added_to_the_write_cycles():
     )
     packed = _packed(1)
 
-    receiver.reserve_write()
+    receiver.reserve_write(packed.wire_bits)
     receiver.receive_round(packed)
     engine.run()
 

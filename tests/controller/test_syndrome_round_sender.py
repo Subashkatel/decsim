@@ -1,11 +1,12 @@
 """The sender: a finished round leaves for every store it reaches, or waits.
 
-The backpressure law: each store's own end answers has_room before any
-round leaves for it, counting the rounds it holds and the writes it has
-in flight, and the room is reserved before the wire is used (gem5's
-queue counts its reserved entries as taken,
-tmp/resources/gem5/src/mem/cache/queue.hh:150-153 isFull with the
-reserve at :87-93; Ruby MessageBuffer.cc:181 sums the same two counts).
+The backpressure law: each store's own end answers has_room with the
+round's bits before any round leaves for it, counting the bits it holds
+and the bits reserved for the writes in flight, and the room is
+reserved before the wire is used (gem5's packet store answers
+`avail() = _maxsize - _size - _reserved` against the packet's own
+length, tmp/resources/gem5/src/dev/net/pktfifo.hh, and reserves it with
+`reserve(len)`).
 A round that finds no room waits in HeldRounds and enters in completion
 order when a slot frees (gem5 src/mem/cache/base.cc:255-257 setBlocked,
 :266-271 clearBlocked and the retry; Ciw
@@ -48,6 +49,8 @@ from decsim.syndrome_buffer import (
 
 STALL = controller_settings.PackingOverflowPolicy.STALL
 DROP = controller_settings.PackingOverflowPolicy.DROP_ROUND
+# every round this file sends carries one fragment of two bits
+BITS_PER_ROUND = 2
 MEMORY_ROUTE = round_records.SyndromePacketRoute.feedback_memory_round(9)
 
 
@@ -57,11 +60,11 @@ def packed(round_index, route=round_records.WINDOW_INPUT_ROUTE):
         patch_id=0,
         round_index=round_index,
         bits=(1, 0),
-        size_bits=2,
+        size_bits=BITS_PER_ROUND,
         fragment_index=0,
     )
     packet = round_records.SyndromeRoundPacket(1, round_index, (fragment,))
-    return round_records.PackedRound(packet, route, 2)
+    return round_records.PackedRound(packet, route, BITS_PER_ROUND)
 
 
 class RecordingTransmitter:
@@ -89,13 +92,16 @@ class RecordingStrongReceiver:
     def __init__(self, room=True):
         self.room = room
         self.reserved = 0
+        self.reserved_bits = 0
         self.written = []
 
-    def has_room(self):
+    def has_room(self, bits):
+        del bits
         return self.room
 
-    def reserve_write(self):
+    def reserve_write(self, bits):
         self.reserved += 1
+        self.reserved_bits += bits
 
     def receive_round(self, packet, packet_bits):
         del packet_bits
@@ -104,7 +110,7 @@ class RecordingStrongReceiver:
 
 def sender_with(
     engine,
-    weak_rounds=None,
+    weak_bits=None,
     strong_receiver=None,
     publishes_from_strong_store=False,
     on_full=STALL,
@@ -112,9 +118,7 @@ def sender_with(
     recorder = round_events.RoundEventRecorder(engine)
     held = syndrome_round_sender.HeldRounds(engine, on_full)
     held.trace.round_event.connect(recorder.record)
-    settings = syndrome_buffer_settings.SyndromeBufferSettings(
-        rounds=weak_rounds
-    )
+    settings = syndrome_buffer_settings.SyndromeBufferSettings(bits=weak_bits)
     weak_store = syndrome_buffer_module.SyndromeBuffer(settings)
     weak_store.held_rounds = held
     transmitter = RecordingTransmitter(engine)
@@ -143,14 +147,15 @@ def test_a_round_with_no_room_is_held_and_written_in_order_when_a_slot_frees():
     """One slot, taken by a round in flight: the next waits for it to free.
 
     The room a crossing round will need is spent the moment it leaves,
-    so a weak syndrome buffer of one slot refuses the second round while the
+    so a weak syndrome buffer of one round's bits refuses the second
+    round while the
     first is still on controller_to_weak_buffer, and still refuses it once the
     first lands and holds the slot. The slot frees, and the head of the
     waiting line enters.
     """
     engine = engine_module.Engine()
     sender, weak_receiver, transmitter, recorder = sender_with(
-        engine, weak_rounds=1
+        engine, weak_bits=BITS_PER_ROUND
     )
     first = packed(1)
     second = packed(2)
@@ -272,7 +277,7 @@ def test_a_strong_primary_round_with_no_room_on_the_room_side_is_held():
 def test_the_drop_knob_drops_a_round_that_found_no_room():
     engine = engine_module.Engine()
     sender, _weak_input, transmitter, recorder = sender_with(
-        engine, weak_rounds=1, on_full=DROP
+        engine, weak_bits=BITS_PER_ROUND, on_full=DROP
     )
     first = packed(1)
     second = packed(2)

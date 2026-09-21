@@ -106,11 +106,11 @@ by the weak syndrome buffer's own incoming port
 (`decsim/syndrome_buffer/weak_syndrome_round_receiver.py`), which stores the round with
 the landing tick as its publication tick, narrates the copy and the
 intake, and announces the published round to the window manager. The
-same end decides whether the buffer has space. It counts the rounds
-already stored and the writes still crossing the link, and the
-controller's sender reserves a space before the round leaves. The
-transmitter is told when the round lands, and only so that it can keep
-its own count of the rounds in flight.
+same end decides whether the buffer has space. It counts the bits
+already stored and the bits reserved for the writes still crossing the
+link, and the controller's sender reserves the round's bits before it
+leaves. The transmitter is told when the round lands, and only so that
+it can keep its own count of the rounds in flight.
 
 What crosses: one **packed round**, every fragment that leaves the
 controller. The bit count is `PackedRound.wire_bits`, computed in

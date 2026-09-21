@@ -246,14 +246,15 @@ class TraceWriter:
     # ---- the stores
 
     def round_stored(
-        self, store_name: str, capacity, round_key, packet
+        self, store_name: str, capacity_bits, round_key, packet
     ) -> None:
         """A round takes a slot in the store."""
+        bits = _packet_bits(packet)
         args = {
             "round": round_text(round_key),
-            "bits": _packet_bits(packet),
+            "bits": bits,
             "transfer": "copy",
-            "capacity": capacity,
+            "capacity_bits": capacity_bits,
             "slot_taken": self.engine.now,
         }
         _operation_id, round_index = round_key
@@ -264,6 +265,9 @@ class TraceWriter:
         self._step_flow(store_name, round_key)
         counter = f"{store_name} rounds"
         self._count(store_name, counter, 1)
+        held_bits = round_records.stated_bits(bits)
+        bits_counter = f"{store_name} bits"
+        self._count(store_name, bits_counter, held_bits, series="bits")
 
     def round_published(self, store_name: str, round_key, tick: int) -> None:
         """The round's bits are readable in the store."""
@@ -272,6 +276,7 @@ class TraceWriter:
 
     def round_released(self, store_name: str, round_key) -> None:
         """The round's last holder let go; the slot is free."""
+        held_bits = self._residence_bits(store_name, round_key)
         closing = {
             "freed": self.engine.now,
             "freed_reason": "last hold released",
@@ -279,6 +284,8 @@ class TraceWriter:
         self._end_residence(store_name, round_key, closing)
         counter = f"{store_name} rounds"
         self._count(store_name, counter, -1)
+        bits_counter = f"{store_name} bits"
+        self._count(store_name, bits_counter, -held_bits, series="bits")
 
     def hold_registered(self, store_name: str, holder, round_keys) -> None:
         """One consumer token keeps the listed rounds alive."""
@@ -734,6 +741,14 @@ class TraceWriter:
         if open_row is None:
             return
         open_row["args"].update(learned)
+
+    def _residence_bits(self, thread: str, key) -> int:
+        """The bits an open residence states; none stated holds none."""
+        open_row = self._open.open_residence.get((thread, key))
+        if open_row is None:
+            return 0
+        bits = open_row["args"]["bits"]
+        return round_records.stated_bits(bits)
 
     def _end_residence(self, thread: str, key, closing: dict) -> None:
         open_row = self._open.open_residence.pop((thread, key), None)

@@ -52,6 +52,10 @@ from tests.experiments.yaml_configs import (
     measure_point_shot,
 )
 
+# the detection events of one round of the swept distance-three patch,
+# and of its readout round, which compares the data qubits as well
+BITS_PER_ROUND = 8
+READOUT_ROUND_BITS = 12
 # every hop of the weak-only fabric at one cycle of the fridge clock
 ONE_TIER_LINKS = {
     "qpu_to_controller": {
@@ -228,16 +232,18 @@ def switching_shot(
 def bounded_store_shot(tmp_path):
     """One shot whose weak syndrome buffer holds six rounds, with a slow unit.
 
-    Thirty rounds arrive a microsecond apart into a store of six, and
-    the 5.0 us unit frees three slots per window it reads, so the
+    Thirty rounds arrive a microsecond apart into a store of six
+    rounds, which is five ordinary rounds and the wider readout round,
+    and the 5.0 us unit frees three slots per window it reads, so the
     controller has to hold rounds it has already packed.
     """
+    six_rounds_bits = 5 * BITS_PER_ROUND + READOUT_ROUND_BITS
     raw = dict(MINIMAL_CONFIG)
     workload = dict(MINIMAL_CONFIG["workload"])
     workload["rounds_per_shot"] = 30
     raw["workload"] = workload
     raw["links"] = ONE_TIER_LINKS
-    raw["weak_syndrome_buffer"] = {"rounds": 6}
+    raw["weak_syndrome_buffer"] = {"bits": six_rounds_bits}
     raw["weak_decoder"] = {
         "kind": 5.0,
         "units": 1,

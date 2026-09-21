@@ -48,8 +48,11 @@ had them. Leaving `engine` out raises `KeyError: 'engine'` at load.
 needs a payload size, so a run whose device emits payloads without bits
 is refused on the first bounded hop:
 `controller_to_weak_buffer has no payload size and its channel is
-bounded; a bounded wire needs a size to serialize`. The weak baseline's
-channels are unbounded, which is why the example extends it.
+bounded; a bounded wire needs a size to serialize`. A syndrome buffer
+sized in bits refuses such a round for the same reason, so both
+`weak_syndrome_buffer.bits` and `strong_syndrome_buffer.bits` stay null
+here. The weak baseline's channels and stores are unbounded, which is
+why the example extends it.
 
 ## 2. Run it
 

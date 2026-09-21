@@ -141,10 +141,12 @@ class _StrongReceiver:
 
     def __init__(self) -> None:
         self.reserved = 0
+        self.reserved_bits = 0
         self.landed = []
 
-    def reserve_region(self, round_count):
+    def reserve_region(self, round_count, bits):
         self.reserved += round_count
+        self.reserved_bits += bits
 
     def receive_region(self, region):
         self.landed.append(region)

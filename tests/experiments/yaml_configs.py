@@ -96,8 +96,8 @@ MINIMAL_CONFIG = {
             "bits_per_cycle": None,
         }
     },
-    "weak_syndrome_buffer": {"rounds": None},
-    "strong_syndrome_buffer": {"rounds": None},
+    "weak_syndrome_buffer": {"bits": None},
+    "strong_syndrome_buffer": {"bits": None},
     "weak_decoder": {
         "kind": 0.028,
         "units": 1,

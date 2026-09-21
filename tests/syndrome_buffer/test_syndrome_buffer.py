@@ -8,10 +8,11 @@ leave in order; that is Ciw's blocking law
 the next node is at node_capacity, release_blocked_individual releases
 the longest blocked one when a customer leaves); the same trace runs
 through a two-node Ciw network when Ciw imports from the resources
-folder. gem5's queue answers isFull
-before allocate (gem5 src/mem/cache/queue.hh:150-153)
-and its blocked port retries the requester (src/mem/cache/base.cc:
-clearBlocked, processSendRetry); the store never refuses a write.
+folder, one slot standing for one round's bits. gem5's packet store
+answers `avail()` against the packet's own length before it lands (gem5
+src/dev/net/pktfifo.hh) and its blocked port retries the requester
+(src/mem/cache/base.cc: clearBlocked, processSendRetry); the store
+never refuses a write.
 
 The two whole-run laws at the end of the file place the store in the
 pipeline: its publication tick is what makes a weak window ready, on
@@ -34,6 +35,8 @@ import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 import tests.declared_run as declared_run
 
 STALL = controller_settings.PackingOverflowPolicy.STALL
+# every round this file stores carries one fragment of two bits
+BITS_PER_ROUND = 2
 
 
 def packet(
@@ -55,8 +58,21 @@ def packet(
 def packed(round_index: int) -> round_records.PackedRound:
     stored = packet(round_index)
     return round_records.PackedRound(
-        stored, round_records.WINDOW_INPUT_ROUTE, 2
+        stored, round_records.WINDOW_INPUT_ROUTE, BITS_PER_ROUND
     )
+
+
+def unsized_packet(round_index: int) -> round_records.SyndromeRoundPacket:
+    """A timing-only round: it carries no bits and states no size."""
+    fragment = round_records.RetainedSyndromeFragment(
+        operation_id=1,
+        patch_id=0,
+        round_index=round_index,
+        bits=None,
+        size_bits=None,
+        fragment_index=0,
+    )
+    return round_records.SyndromeRoundPacket(1, round_index, (fragment,))
 
 
 def held_rounds() -> syndrome_round_sender.HeldRounds:
@@ -64,8 +80,8 @@ def held_rounds() -> syndrome_round_sender.HeldRounds:
     return syndrome_round_sender.HeldRounds(engine, STALL)
 
 
-def store(rounds=None, waiting_line=None, listener=None):
-    settings = syndrome_buffer_settings.SyndromeBufferSettings(rounds=rounds)
+def store(bits=None, waiting_line=None, listener=None):
+    settings = syndrome_buffer_settings.SyndromeBufferSettings(bits=bits)
     the_store = syndrome_buffer_module.SyndromeBuffer(settings)
     if waiting_line is not None:
         the_store.held_rounds = waiting_line
@@ -117,11 +133,12 @@ def run_trace(arrivals, holds, capacity):
     """The trace through the store: enter ticks, in round order."""
     engine = engine_module.Engine()
     held = held_rounds()
-    the_store = store(rounds=capacity, waiting_line=held)
+    capacity_bits = capacity * BITS_PER_ROUND
+    the_store = store(bits=capacity_bits, waiting_line=held)
     enters = {}
 
     def admit(round: round_records.PackedRound) -> bool:
-        if not the_store.has_room():
+        if not the_store.has_room(round.wire_bits):
             return False
         the_store.accept_packed_round(round.packet, publication_tick=engine.now)
         round_index = round.packet.round_index
@@ -189,13 +206,15 @@ def test_ciw_blocks_at_the_same_ticks_over_random_holds():
 
 
 def test_a_full_store_answers_no_room_and_is_unchanged():
-    the_store = store(rounds=2)
+    two_rounds_bits = 2 * BITS_PER_ROUND
+    the_store = store(bits=two_rounds_bits)
     first = packet(1)
     second = packet(2)
     the_store.accept_packed_round(first, publication_tick=10)
     the_store.accept_packed_round(second, publication_tick=11)
 
-    assert the_store.has_room() is False
+    assert the_store.has_room(BITS_PER_ROUND) is False
+    assert the_store.occupied_bits == two_rounds_bits
     assert the_store.occupancy == 2
     assert the_store.publication_tick((1, 1)) == 10
     assert the_store.publication_tick((1, 2)) == 11
@@ -203,11 +222,11 @@ def test_a_full_store_answers_no_room_and_is_unchanged():
 
 def test_a_held_round_enters_when_a_slot_frees_in_completion_order():
     held = held_rounds()
-    the_store = store(rounds=1, waiting_line=held)
+    the_store = store(bits=BITS_PER_ROUND, waiting_line=held)
     entered = []
 
     def admit(round: round_records.PackedRound) -> bool:
-        if not the_store.has_room():
+        if not the_store.has_room(round.wire_bits):
             return False
         the_store.accept_packed_round(round.packet, publication_tick=0)
         entered.append(round.packet.round_index)
@@ -341,6 +360,46 @@ def test_the_hold_sources_carry_the_token_and_its_rounds():
         ("transferred", reads, potential),
         ("released", potential),
     ]
+
+
+def test_a_bounded_store_has_room_while_the_bits_fit_beside_what_is_taken():
+    """gem5's avail(): the capacity less what is stored and reserved."""
+    three_rounds_bits = 3 * BITS_PER_ROUND
+    one_round_reserved = BITS_PER_ROUND
+    the_store = store(bits=three_rounds_bits)
+    first = packet(1)
+    the_store.accept_packed_round(first, publication_tick=0)
+
+    fits_beside_the_stored = the_store.has_room(BITS_PER_ROUND)
+    fits_beside_the_reserved = the_store.has_room(
+        BITS_PER_ROUND, one_round_reserved
+    )
+    exceeds_the_capacity = the_store.has_room(three_rounds_bits)
+
+    assert fits_beside_the_stored is True
+    assert fits_beside_the_reserved is True
+    assert exceeds_the_capacity is False
+    assert the_store.occupied_bits == BITS_PER_ROUND
+
+
+def test_a_bounded_store_refuses_a_round_that_states_no_size():
+    """A bound is measured against a size, so the round must state one."""
+    the_store = store(bits=BITS_PER_ROUND)
+
+    with pytest.raises(
+        RuntimeError, match="a bounded syndrome buffer needs sized rounds"
+    ):
+        the_store.has_room(None)
+
+
+def test_an_unbounded_store_takes_a_round_that_states_no_size():
+    the_store = store()
+    timing_only = unsized_packet(1)
+
+    the_store.accept_packed_round(timing_only, publication_tick=None)
+
+    assert the_store.occupancy == 1
+    assert the_store.occupied_bits == 0
 
 
 # ---- the publication tick in the whole pipeline

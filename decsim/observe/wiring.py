@@ -343,8 +343,10 @@ def _connect_store_trace(
     trace_writer: trace_writer_module.TraceWriter, store, store_name: str
 ) -> None:
     """One store's residences, its occupancy and its holds."""
-    capacity = store.capacity_rounds()
-    stored = functools.partial(trace_writer.round_stored, store_name, capacity)
+    capacity_bits = store.capacity_bits()
+    stored = functools.partial(
+        trace_writer.round_stored, store_name, capacity_bits
+    )
     store.trace.round_stored.connect(stored)
     published = functools.partial(trace_writer.round_published, store_name)
     store.trace.round_published.connect(published)

@@ -159,8 +159,13 @@ class DecoderSettings:
     units is the count of identical decoding engines inside this tier's
     one chip, gem5's FUDesc.count ("number of these FU's available",
     gem5 src/cpu/FuncUnit.py): every unit has its own input memory and
-    all of them share the tier's links. The chip count is one and is not
-    a key.
+    all of them share the tier's links. Hardware holds several engines
+    on a chip too: AFS "uses L/N decoder blocks to perform error
+    correction over the L logical qubits" (2001.06598 lines 1049-1052),
+    and Yang et al. instantiate an X-type and a Z-type decoder in one
+    FPGA (2605.04892 lines 986-988). Each paper fixes its count; sweeping
+    it is this simulator's own use of the key. The chip count is one and
+    is not a key.
     unit_memory is the input SRAM of one unit, sized in bits
     (UnitMemorySettings, above); a unit overlaps input transfer with
     compute only when two windows fit.

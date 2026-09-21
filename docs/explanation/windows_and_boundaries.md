@@ -29,9 +29,12 @@ commit region consisting of the 'long-lived' defects in the first
 `n_com` rounds, and a buffer region containing the last `n_buf` rounds"
 (arXiv:2209.08552, Sec. I B, lines 194-199 of the text extraction,
 which the code's docstrings cite too). Toshio et
-al. write the same two as `r_com` and `r_buf`. In decsim they are
-`commit_round_count` and `buffer_round_count`, and both default to the
-code distance.
+al. write the same two as `r_com` and `r_buf`. In a decsim yaml they are
+the keys `windows.commit_rounds` and `windows.buffer_rounds`, and both
+default to the code distance. Inside the code the same two are
+`commit_round_count` and `buffer_round_count`. A buffer of any size
+runs: the buffer is an axis a study sweeps, and decsim sets no smallest
+value for it.
 
 - The **commit region** is the part of the window whose correction is
   taken as final. Nothing revises it later, unless the escalation
@@ -93,8 +96,11 @@ question rather than an implementation detail.
 
 The default is not written in the yaml but declared by the rows
 themselves: an escalation policy that never escalates declares `eager`,
-and one that may escalate asks its strong window shape, whose absorption
-behaviour decides. `decsim/build/plan.py`, `_boundaries_name`, is where
+and one that may escalate asks its strong window shape whether it
+absorbs the weak windows it covers. A strong window absorbs a weak
+window when it decodes the same rounds again and replaces that window's
+answer, so the weak window never ships a boundary of its own.
+`decsim/build/plan.py`, `_boundaries_name`, is where
 that happens, and its docstring cites gem5's rule that a default lives
 on the class that owns the parameter.
 
@@ -109,6 +115,14 @@ Each row is one file under `decsim/windows/schemes/`.
 | `parallel` | the stream is cut into A blocks that decode at the same time and B blocks that reconcile the seams between them, so the dependency graph has depth two rather than the length of the chain | Skoric arXiv:2209.08552 Sec. I C |
 | `sandwich` | type-1 cores of width `s + 2b` every `s` rounds, with a one-layer type-2 seam window between each adjacent pair | Tan et al. arXiv:2209.09219, supplement |
 | `naive_online` | one window over the whole operation, decoded as one batch once the rounds have arrived | no windowing; the baseline the others are measured against |
+
+Two rows need a particular step. The `parallel` row needs
+`windows.commit_rounds` equal to `windows.buffer_rounds`, as Skoric's
+blocks are laid. The `sandwich` row lays each step as one seam round and
+`s - 1` core rounds, so it needs `windows.commit_rounds` of at least 2
+and `windows.buffer_rounds` of at least 1. That limit is decsim's own
+layout: Tan's Fig. S9 runs a step of 1, and this row does not lay that
+case. Both rows refuse other values when they plan an operation.
 
 The interesting difference between them is not accuracy but dependency
 depth. A sliding chain is serial: window i+1 cannot commit until window

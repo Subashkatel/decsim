@@ -23,8 +23,8 @@ port interface, quoted in
 write and one class the machine builds for it. That is sinter's shape,
 its `BUILT_IN_DECODERS` dictionary plus one abstract class per pluggable
 part, and `decsim/tables.py` is the single function that reads all
-seventeen tables so a name off a table is refused the same way
-everywhere.
+seventeen tables, so a name that is not on a table is refused the same
+way everywhere.
 
 **One root wires everything by constructor.** `decsim/machine.py` builds
 every component from its settings and hands each one its neighbours. No
@@ -86,10 +86,10 @@ An arrow nobody makes fails the suite.
 
 | Component | Package | It is handed | It hands on |
 | --- | --- | --- | --- |
-| QPU device | `qpu/` | one operation body per patch | one readout per round, on a cycle boundary of its clock |
+| QPU device | `qpu/` | the circuit of one logical operation, for each patch (the block of physical qubits holding one logical qubit) | one readout per round, on a cycle boundary of its clock |
 | Detection event formation | `detector_error_model/` | one round's raw measurement fragments | the same round as detection events, when the `controller` row is chosen |
 | Controller | `controller/` | readouts | one packed round per round, written to every store that must hold it |
-| The weak syndrome buffer | `syndrome_buffer/` | packed rounds | the rounds a weak window reads, kept until every hold releases |
+| The weak syndrome buffer | `syndrome_buffer/` | packed rounds | the rounds a weak window reads, kept until every hold releases (a hold is a note from one reader saying it may still need the round) |
 | The strong syndrome buffer | `syndrome_buffer/` | the same packed rounds, in parallel | the rounds a strong window reads |
 | Window manager | `windows/` | published rounds | one decode job per complete window, and each window's boundary to the next |
 | Window fault models | `qpu/`, built by `detector_error_model/` | the circuit's whole-circuit error model | one fault model per window |
@@ -132,8 +132,8 @@ rest still runs; Parnas and Dijkstra are quoted for it in
 [The principles behind the shape](principles.md#2-the-uses-relation-is-a-partial-order).
 
 `tools/check_uses_graph.py`, which `tools/check.sh` runs, fails on any
-cycle and prints the levels. There are twenty-five packages on eleven
-levels; `decsim/machine.py`'s docstring names them and
+cycle and prints the packages level by level. `decsim/machine.py`'s
+docstring names them and
 [The map of the package](../reference/map.md) lists every module under them. Nothing at level
 3 or below imports `decsim/build/` or `decsim/machine.py`, so the
 decoders' own tests build a decoder pool and a store and decode a window
@@ -141,7 +141,9 @@ with no root at all.
 
 ## The line where a call stops being local
 
-The eleven priced hops are that line, and Waldo is quoted for it in
+A priced hop is a link between two components that charges a latency,
+and the [data path](data_path.md) walks all eleven. Those hops are that
+line, and Waldo is quoted for it in
 [The principles behind the shape](principles.md#11-local-and-remote-calls-differ-in-kind-and-the-interface-must-say-which).
 A call across a hop has a card, a payload a record names, and a send at
 one end; a call inside a unit is never priced.

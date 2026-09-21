@@ -8,6 +8,12 @@ decided, why, and the source the answer came from, because a modelling
 question is answered by reading the referent rather than by choosing
 (`STYLE.md` rule 8). The last section says what is not modelled yet.
 
+Some decisions carry a short note after them. **Narrowed since** and
+**Widened since** say how later work shrank or grew what the decision
+covers. **Flagged with the decision** names a known weakness recorded
+when the decision was made. **What it cost the port file** lists what
+the decision added to `decsim/ports.py`.
+
 ## D1. Whoever executes a send is an end of that hop
 
 **Decided.** A component may name a link path only if it is one of that
@@ -31,7 +37,10 @@ table is the rule, and which walks `decsim/` to enforce it.
 
 ## D2. The complementary gap is two forced-class jobs of one window
 
-**Decided.** The second gap solve is not a job of its own kind. The
+**Decided.** The second gap solve is not a job of its own kind. A
+forced-class job is one decode of the window that is made to return its
+correction in one of the two logical classes; the two jobs' weights are
+subtracted into the gap. The
 window side submits the window's two forced-class jobs at one instant,
 both into the weak pool, and the two weights are subtracted in the
 confidence component rather than in the decoder manager. The base case
@@ -77,7 +86,8 @@ compatible beyond the MWPM decoder.
 over the weak pool, and, in a run whose windows may escalate, the
 host's over the strong pool. The escalation side and a window's strong
 sibling submit to the host's; the ledger of strong requests is one seat
-both take, since the chip's side opens a request and the host's serves
+both take (a seat is a named slot in `decsim/assembly.py` that the root
+fills with one built component and wires to its neighbours), since the chip's side opens a request and the host's serves
 it; a kept weak result halts its request through the escalation side.
 Each manager's own work is charged: `decoder_manager.dispatch_cycles`
 on a named clock, defaulting to zero, the one card both read.
@@ -136,12 +146,18 @@ from one measured round trip instead, on two rows a config can name.
 
 ## D6. Pair placement is deferred
 
-**Decided.** Whether the two forced-class jobs of a window are kept
-together on one unit or spread across two stays a scheduler row, to be
-added when it matters.
+**Decided.** There is no scheduler row that keeps the two forced-class
+jobs of a window together or spreads them apart. The pool's one staging
+rule answers it: a job that cannot start yet is staged on the unit with
+room that has the least work left, so the two solves of one window land
+on two units and overlap whenever two units have room
+(`decsim/decoders/decoder_pool.py`). A staged job stays on the unit it
+was staged on. A row a config can choose is deferred until a study needs
+to force the pair together.
 
-**Why.** Timing. No referent answers this one, and this page does not
-invent a source.
+**Why.** Timing. No referent answers how the pair should be placed, and
+this page does not invent a source. Least work left is the general
+task-assignment rule, not a rule about pairs.
 
 ## D7. A priced weak card is charged once per forced solve
 
@@ -355,7 +371,8 @@ messages (`MessageBuffer.cc:181`, the two sizes read at `:155-158`).
 **Decided.** Two rows of `LINK_FABRICS`, `roce_v2_cpu` and `roce_v2_gpu`,
 are the default card with four hops repriced from one measurement:
 Backline's steady-state round trip from an FPGA controller to a CPU
-coprocessor over RoCE v2, 2.305 microseconds in the median, and to a GPU
+coprocessor over RoCE v2 (remote direct memory access, RDMA, run over
+ordinary Ethernet), 2.305 microseconds in the median, and to a GPU
 coprocessor, 4.5 microseconds. The controller's write into the strong
 syndrome buffer (hop 3), the escalation request (hop 5) and the strong
 decoder's reply to the frame (hop 9) are each half of the round trip; the strong
@@ -372,14 +389,15 @@ that path than a table row, and a config that asks "strong tier on a CPU
 or on a GPU" needs a card behind each answer. The split is decsim's rule,
 stated in the docstring, because the measurement is one number and
 neither the paper nor its published runtime gives a per-direction
-figure: one hardware timer starts at the controller's doorbell and stops
-when the reply lands. The rows price the median; the first, warm-up
+figure: one hardware timer starts when the controller signals its
+network card to send (its doorbell) and stops when the reply lands. The rows price the median; the first, warm-up
 round trip (4.64 and 9.27 microseconds) and the tails are on the
 docstring and not on the card.
 
 **Sources.** Backline, Lee et al. arXiv:2609.09270, Sec. V-C1 lines 1607
 to 1633 for the measurement (a 16-byte payload with an 8-byte syndrome
-as a one-sided RDMA write, the coprocessor polling its buffer, the reply
+as a one-sided RDMA write, which lands in the far machine's memory with
+no software on that side taking part, the coprocessor polling its buffer, the reply
 as a one-sided write, the GPU signalling a CPU thread that writes back,
 the FPGA timing the round trip in its own clock), Table III lines 1736
 to 1745 for the echo rows the card takes, footnote 3 lines 1629 to 1631
@@ -396,8 +414,9 @@ card, the four Backline citations and both rows running from a yaml.
 
 ## D15. The park before a decode is two points, by what it waited for
 
-**Decided.** `dep_block` keeps its name and means the dependency wait
-only: from the committing decode's input landing in its unit's memory,
+**Decided.** The park is the stretch after a decode's input has landed
+and before its compute starts. `dep_block` keeps its name and means the
+dependency wait only: from the committing decode's input landing in its unit's memory,
 or from the tick a unit took it when the input was already there, to the
 first tick that decode may compute, which is where its window's last
 boundary arrived and is the landing itself when nothing was owed. The
@@ -463,9 +482,10 @@ under `complementary_gap`, the walk under `cluster_gap`, and zero under
 `weak_baseline`, whose verdict needs no signal. For a window that
 escalated it is zero too: its committing decode is the strong one,
 which answers after the verdict, and `weak_attempt` already runs from
-the window's first dispatch to that verdict. The chain identity closes
-on every window of every config this repository ships, and
-`run_both_at_once` is the only run outside the sum. `chain_load` counts
+the window's first dispatch to that verdict. On every window of every
+config this repository ships, the named spans add up exactly to the
+window's reaction time, and `run_both_at_once` is the only run outside
+the sum. `chain_load` counts
 the step as the unit's occupancy, because it is the unit's time.
 
 **Why.** A span that is on the reaction time and in no column makes a

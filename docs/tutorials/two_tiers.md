@@ -123,8 +123,8 @@ config: configs/two_tiers.yaml <- configs/weak_decoder_baseline.yaml
 qpu: kind stim_device
 idle_policy: kind separate_decode_jobs
 links: kind logical_reference
-weak_syndrome_buffer: kind weak_syndrome_buffer
-strong_syndrome_buffer: kind weak_syndrome_buffer
+weak_syndrome_buffer: kind syndrome_buffer
+strong_syndrome_buffer: kind syndrome_buffer
 windows: kind sliding
 weak_decoder: kind 1.0
 strong_decoder: kind 10.0
@@ -235,7 +235,6 @@ tick (us)  where                        what                                    
 6.012      Decoder unit default#0       stage fetch                                                   0.024
 6.012      Decoder unit default#0       decode service                                                1.064
 6.012      Decoder unit default#0       residence, unbounded, data ready 6.012, freed at decode done  2.128     copy      44
-6.012      Decoder unit default#0       residence, unbounded, data ready 6.012, freed at end of run   64.272    copy      44
 6.036      Decoder unit default#0       stage algorithm                                               1.000
 7.036      Decoder unit default#0       stage release                                                 0.040
 7.076      Window planner               solve held
@@ -251,7 +250,7 @@ tick (us)  where                        what                                    
 8.148      Frame                        1:0 committed
 
 copies 1, references 2 jobs and 0 holds, moves 3
-longest residence: 64.272 us in Decoder unit default#0 (residence, unbounded, data ready 6.012, freed at end of run)
+longest residence: 62.140 us in Frame (residence, unbounded, committed 8.148, freed at end of run)
 longest queue wait: 0.000 us in Window planner (queued, dispatched to default#0)
 ```
 
@@ -293,7 +292,6 @@ tick (us)  where                            what                                
 15.012     Decoder unit default#0           stage fetch                                                    0.024
 15.012     Decoder unit default#0           decode service                                                 1.064
 15.012     Decoder unit default#0           residence, unbounded, data ready 15.012, freed at decode done  2.128     copy      48
-15.012     Decoder unit default#0           residence, unbounded, data ready 15.012, freed at end of run   55.272    copy      48
 15.036     Decoder unit default#0           stage algorithm                                                1.000
 16.036     Decoder unit default#0           stage release                                                  0.040
 16.076     Window planner                   masked view copy                                                         copy      48
@@ -305,7 +303,7 @@ tick (us)  where                            what                                
 17.140     Window planner                   verdict
 17.140     Window planner                   W3 committed
 17.140     Strong tier                      W3 strong window held                                          0.004
-17.140     weak_decoder_to_strong_decoder   move, with W3 rounds 10..15                                    0.004     move
+17.140     weak_decoder_to_strong_decoder   move, with W3 rounds 10..15                                    0.004     move      0
 17.140     weak_decoder_to_strong_decoder   move, with W3 rounds 7..15                                     0.004     move      72
 17.144     Window planner                   queued, dispatched to strong#0                                 0.000
 17.144     strong_buffer_to_strong_decoder  move, with W3 rounds 7..15                                     0.004     move      72
@@ -321,7 +319,7 @@ tick (us)  where                            what                                
 27.232     Frame                            1:3 committed
 
 copies 4, references 3 jobs and 0 holds, moves 6
-longest residence: 55.272 us in Decoder unit default#0 (residence, unbounded, data ready 15.012, freed at end of run)
+longest residence: 43.056 us in Frame (residence, unbounded, committed 27.232, freed at end of run)
 longest queue wait: 0.000 us in Window planner (queued, dispatched to default#0)
 ```
 
@@ -338,7 +336,7 @@ seven things happen that did not happen for window 0.
   its rounds yet, so the strong request waits for them to land.
 - **`weak_decoder_to_strong_decoder`, twice.** The escalation crosses
   this hop as two transfers. The first carries only the selection, which
-  window to decode again, so its bits column is empty. The second
+  window to decode again, so it carries zero bits. The second
   carries the window's rounds, 72 bits, read out of the weak syndrome
   buffer: nine rounds, `7..15`, where the weak window read six, the
   escalated window's commit region plus one buffer region of raw context
@@ -362,7 +360,10 @@ so the windows behind it are not blocked
 (`decsim/windows/window_commits.py`, `commit`). What it does not do is
 ship its boundary: this run's boundary policy is `held`, chosen for you
 because the escalation may escalate and `two_sided_context` does not
-absorb the windows it covers (`decsim/windows/settings.py`,
+absorb the windows it covers. A strong window absorbs a weak window when
+it decodes the same rounds again and replaces that window's answer, so
+the weak window never ships a boundary of its own
+(`decsim/windows/settings.py`,
 `BOUNDARY_POLICIES`, and the `boundaries` key's docstring). The held
 boundary ships only when the strong answer lands, which is the
 `decoder_to_decoder` move at 27.232
@@ -376,8 +377,10 @@ apart.
 To price the strong tier's off-board hops with a measured cable instead
 of the one-cycle room-clock cards above, set `links.kind` to
 `roce_v2_cpu` or `roce_v2_gpu` and delete the four strong-side cards, so
-the row's numbers stand: half of Backline's measured round trip on the
-write into the strong syndrome buffer, on the escalation and on the reply, and
+the row's numbers stand. They come from Backline (arXiv:2609.09270),
+which measured a real round trip from a controller to a CPU or GPU over
+Ethernet: half of that round trip on the write into the strong syndrome
+buffer, on the escalation and on the reply, and
 zero on the strong store's own read
 ([D14](../explanation/decisions.md#d14-the-strong-tiers-off-board-path-can-be-priced-by-a-measured-round-trip)).
 
@@ -393,7 +396,7 @@ zero on the strong store's own read
 ## Read next
 
 - [Two tiers](../explanation/two_tiers.md): the four tables behind the knobs
-  above, the other confidence signal, and the other strong window
+  above, the other two confidence signals, and the other strong window
   shapes.
 - [Windows and boundaries](../explanation/windows_and_boundaries.md): what a commit region, a
   buffer region and a seam are.

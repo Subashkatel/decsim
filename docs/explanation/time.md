@@ -51,7 +51,8 @@ count: `readout_to_bits_cycles`, `packing_cycles_per_round`,
 yaml gives each domain a frequency in megahertz, and the settings layer turns cycles
 into microseconds once, at load. The two shipped domains are `fridge`
 and `room`, both at 250 megahertz, which is LILLIPUT's FPGA clock
-(arXiv:2108.06569, Table 4). A machine with an SFQ decoder at 4 kelvin
+(arXiv:2108.06569, Table 4). A machine with an SFQ (single flux quantum,
+a superconducting logic family) decoder at 4 kelvin
 and a room-temperature controller is one more entry in that section, not
 a code change.
 
@@ -119,7 +120,10 @@ rate and the timing sweep for the time, and says so.
 
 ## Where the reaction time is measured
 
-The run folder's latency points are the pieces of the loop, and the four
+A latency point is one named span of a window's path that the run folder
+reports as its own column, such as the queue wait or the decode's own
+compute (`decsim/experiments/measure.py`, `POINTS`). The run folder's
+latency points are the pieces of the loop, and the four
 totals are the ways of naming the whole of it. Two of them start the
 clock when a window's rounds are available to the decoder
 (`buffer0_ready_to_frame`, `buffer0_first_round_to_frame`), and two

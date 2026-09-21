@@ -13,12 +13,13 @@ hop its configured time, and reports where the time went and how often
 the answer was wrong.
 
 Two things a simulator can measure are here at once. The **reaction
-time** is how long the loop takes, end to end, and it is charged out of
-component cards and link latencies. The **logical error rate** is how
-often the corrected answer is wrong, and it is real: windows of a Stim
-circuit are decoded by PyMatching, union find, belief matching, BP-OSD,
-Relay-BP or Tesseract, so an accuracy number is a measurement and not a
-model.
+time** is how long the loop takes, end to end. It is charged out of
+cards: a card is a small record of numbers that prices one part, such
+as a link's latency or a decoder's time per decode. The **logical error
+rate** is how often the corrected answer is wrong, and it is real:
+windows of a Stim circuit are decoded by PyMatching (weighted or
+unweighted), union find, belief matching, BP-OSD, Relay-BP or Tesseract,
+so an accuracy number is a measurement and not a model.
 
 **New here?** Start with [Your first run](tutorials/first_run.md). It
 takes ten minutes and needs nothing but a terminal.
@@ -123,8 +124,8 @@ sources, and the ideas behind the tree.
 
 | Folder | What is in it |
 | --- | --- |
-| `decsim/` | the simulator: twenty-five packages on eleven uses levels, mapped in [The map of the package](reference/map.md) |
-| `decsim/ports.py` | the thirty-eight ports, the only way two packages talk |
+| `decsim/` | the simulator, in packages layered so that a lower one never imports a higher one; mapped in [The map of the package](reference/map.md) |
+| `decsim/ports.py` | the ports, the only way two packages talk; listed in [The ports](reference/ports.md) |
 | `configs/` | the yaml experiments. `configs/reference.yaml` documents every key. |
 | `results/` | what a run writes, one folder per run. Not tracked by git. |
 | `tests/` | the test suite, one folder per package |

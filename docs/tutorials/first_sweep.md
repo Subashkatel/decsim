@@ -70,7 +70,9 @@ decsim show configs/my_first_sweep.yaml
 decsim collect configs/my_first_sweep.yaml --processes 4
 ```
 
-`--processes` gives each worker one work unit at a time. Shots inside a
+`--processes` gives each worker one work unit at a time. A work unit is
+a block of one point's shots that one process runs from start to finish;
+step 5 shows how to size it. Shots inside a
 unit stay serial, which is what keeps a shot's result a function of its
 seed alone.
 

@@ -60,7 +60,6 @@ The same store, as the window side that reads and holds it sees it.
 | `has_operation` | Whether the store still serves this operation. |
 | `close_operation` | The operation sends no more rounds; a closed one never reopens. |
 | `has_live_operation_reference` | Whether a hold or a stored round still names this operation. |
-| `capacity_rounds` | The slots this store is bounded to, or None for unbounded. |
 
 ### `SyndromeRoundSender`
 

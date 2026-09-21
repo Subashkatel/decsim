@@ -761,12 +761,11 @@ mistake a gap for a result.
   channels. A circuit with any other noise, such as a channel on every
   idle step, can be handed to the machine from Python and not from a
   yaml.
-- **O13. A store's minimum size is necessary and not sufficient.** A
-  syndrome buffer smaller than the rounds one operation's windows hold
-  at once is refused when the machine is built. A larger one can still
-  fill, as when several operations share it, and the run then stops and
-  names the work it could not settle. The size that is always enough is
-  the union of every hold, and an open-ended dynamic stream has none.
+- **O13. No check sizes a store against its plan before the run.** A
+  syndrome buffer too small for the rounds the plan's windows hold at
+  once fills, and the run then stops and says how many rounds were left
+  held for store room. The size that is always enough is the union of
+  every hold, and an open-ended dynamic stream has none.
 - **O14. A unit memory's room test and its deposit can count two
   widths.** A waiting job is tested for room at the width its rounds
   cross the input link. When the tier forms its own detection events

@@ -529,63 +529,7 @@ def test_a_windows_hold_reaches_into_the_successors_it_overflows_into():
         (2, 1),
         (3, 1),
     )
-    assert buffering.minimum_live_rounds == held_rounds
     assert buffering.potential_holds == ()
-
-
-def rounds_of_operation_one(first_round: int, last_round: int) -> tuple:
-    """The keys of operation 1's rounds from the first to the last."""
-    round_keys = []
-    past_the_last = last_round + 1
-    for round_index in range(first_round, past_the_last):
-        round_keys.append((1, round_index))
-    return tuple(round_keys)
-
-
-def skorics_first_three_blocks():
-    """Layer A, layer B and the next layer A at a width of three rounds.
-
-    The parallel row's own layout (windows/schemes/parallel.py): A0 reads
-    rounds 1 to 9, B0 reads 7 to 15 and waits for both A blocks, A1 reads
-    13 to 21.
-    """
-    first_a = window_records.Window(1, 0, 1, 6, 9, 9, buffer_lo=1)
-    dependencies = [(1, 0), (1, 2)]
-    first_b = window_records.Window(
-        1, 1, 7, 15, 15, 9, buffer_lo=7, deps=dependencies
-    )
-    second_a = window_records.Window(1, 2, 16, 18, 21, 9, buffer_lo=13)
-    return window_records.WindowPlan(
-        windows={(1, 0): first_a, (1, 1): first_b, (1, 2): second_a},
-        window_count={1: 3},
-        op_windows={1: [0, 1, 2]},
-        successors={1: []},
-        spatial_nodes={1: 1},
-        rounds_by_operation={1: 21},
-        code_names={1: "surface"},
-        total_windows=3,
-        windowed_by_operation={1: True},
-        batch_preceding_idle_rounds_by_operation={1: False},
-    )
-
-
-def test_the_store_floor_holds_a_window_beside_the_window_it_waits_for():
-    """Layer B keeps rounds 7 to 15 while layer A's 13 to 21 arrive.
-
-    Skoric et al. 2209.08552 lines 416-421: a layer B window starts only
-    once both adjacent layer A windows have completed, and the later of
-    the two reads rounds past its own.
-    """
-    execution = skorics_first_three_blocks()
-
-    buffering = planner._plan_syndrome_buffering(
-        execution,
-        retain_strong_context=False,
-        absorbs_weak_windows=False,
-        restart_reread_buffer_regions=0,
-    )
-
-    assert buffering.minimum_live_rounds == rounds_of_operation_one(7, 21)
 
 
 def test_an_open_ended_stream_leaves_the_stores_capacity_unbounded():

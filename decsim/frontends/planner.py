@@ -31,23 +31,17 @@ class RunPlan:
 
 @dataclasses.dataclass(frozen=True)
 class SyndromeBufferingPlan:
-    """The holds every window places on the stores, and the store floors.
+    """The holds every window places on the stores.
 
-    A hold names the rounds a consumer keeps alive. The minimum is the
-    longest set of rounds one operation's planned windows keep at once:
-    a single hold, or a window's arrived rounds beside a window it waits
-    for. A store below it cannot run and is refused at the build. The
-    sufficient set is the union of every hold, None when an open-ended
-    dynamic stream makes it unbounded. Between the two a run may still
-    fill the store, as when several operations share it, and the run
-    then stops and names the work it could not settle.
+    A hold names the rounds a consumer keeps alive. The sufficient set
+    is the union of every hold, None when an open-ended dynamic stream
+    makes it unbounded. A store smaller than it can fill, and the run
+    then stops and says how many rounds were left held for store room.
     """
 
     weak_holds: tuple
     potential_holds: tuple
-    minimum_live_rounds: tuple
     sufficient_live_rounds: Optional[tuple]
-    sb1_minimum_live_rounds: tuple
     sb1_sufficient_live_rounds: Optional[tuple]
 
 
@@ -372,9 +366,7 @@ def _plan_syndrome_buffering(
     return SyndromeBufferingPlan(
         tuple(weak.holds),
         tuple(strong.holds),
-        weak.minimum_live_rounds,
         weak_sufficient,
-        strong.minimum_live_rounds,
         strong_sufficient,
     )
 
@@ -396,8 +388,7 @@ def _hold_window(
         execution, operation_id, window.start_round, window.buffer_hi
     )
     reads = decoding_records.WindowReads(key)
-    weak.add(reads, round_keys, round_keys)
-    _require_room_beside_dependencies(execution, operation_id, window, weak)
+    weak.add(reads, round_keys)
     _hold_restart_reads(
         execution,
         operation_id,
@@ -406,39 +397,6 @@ def _hold_window(
         absorbs_weak_windows,
         restart_reread_buffer_regions,
     )
-
-
-def _require_room_beside_dependencies(
-    execution, operation_id, window, weak: "_HoldSet"
-) -> None:
-    """A window and a window it waits for are in the buffer together.
-
-    A window takes no slot of a unit before every window it depends on
-    is dispatched (windows/decode_requests.py may_stage), and a window
-    is dispatched once its last round is stored. So while a dependency's
-    rounds arrive, the rounds of this window that arrived before them
-    stay, and a buffer that cannot hold both stops the run with neither
-    able to move. Skoric's layer B window waits for the layer A window
-    after it (2209.08552 lines 416-421), which reads later rounds, so
-    the parallel row needs five widths where its widest window is three.
-    """
-    for dependency_key in window.deps:
-        if dependency_key[0] != operation_id:
-            continue
-        dependency = execution.windows[dependency_key]
-        arrived_hi = min(window.buffer_hi, dependency.buffer_hi)
-        waiting = _read_keys(
-            execution, operation_id, window.start_round, arrived_hi
-        )
-        awaited = _read_keys(
-            execution,
-            operation_id,
-            dependency.start_round,
-            dependency.buffer_hi,
-        )
-        both_reads = waiting + awaited
-        held_together = dict.fromkeys(both_reads)
-        weak.require_live(tuple(held_together))
 
 
 def _hold_restart_reads(
@@ -474,7 +432,7 @@ def _hold_restart_reads(
     owner = decoding_records.PotentialRestart(
         (operation_id, window.window_index)
     )
-    weak.add(owner, round_keys, round_keys)
+    weak.add(owner, round_keys)
 
 
 def _has_same_operation_dependency(window, operation_id) -> bool:
@@ -514,8 +472,7 @@ def _hold_strong_context(
     owner = decoding_records.PotentialStrong(
         (operation_id, window.window_index)
     )
-    arrived = _arrived_by_buffer(potential, operation_id, window.buffer_hi)
-    strong.add(owner, potential, arrived)
+    strong.add(owner, potential)
 
 
 def _read_keys(execution, operation_id, lower: int, upper: int) -> tuple:
@@ -536,39 +493,17 @@ def _read_keys(execution, operation_id, lower: int, upper: int) -> tuple:
     return tuple(keys)
 
 
-def _arrived_by_buffer(potential, operation_id, buffer_hi: int) -> tuple:
-    """The rounds of a hold that have arrived once the window's buffer has."""
-    arrived = []
-    for identity in potential:
-        is_own = identity[0] == operation_id
-        if is_own and identity[1] > buffer_hi:
-            continue
-        arrived.append(identity)
-    return tuple(arrived)
-
-
 class _HoldSet:
-    """The holds one consumer places, the longest one, and their union."""
+    """The holds one consumer places, and their union."""
 
     def __init__(self):
         self.holds = []
-        self.minimum_live_rounds = ()
         self._live_rounds = set()
 
-    def add(self, owner, round_keys: tuple, arrived_keys: tuple) -> None:
-        """Record a hold; the longest arrived set is the store's floor."""
+    def add(self, owner, round_keys: tuple) -> None:
+        """Record a hold and the rounds it keeps alive."""
         self.holds.append((owner, round_keys))
         self._live_rounds.update(round_keys)
-        self.require_live(arrived_keys)
-
-    def require_live(self, round_keys: tuple) -> None:
-        """Note a set of rounds the store must hold at the same time.
-
-        The longest set seen is minimum_live_rounds; a store smaller
-        than it cannot run the plan.
-        """
-        if len(round_keys) > len(self.minimum_live_rounds):
-            self.minimum_live_rounds = round_keys
 
     def sufficient_live_rounds(self, is_open_ended: bool) -> Optional[tuple]:
         """Every round any hold names; None when a stream never ends."""

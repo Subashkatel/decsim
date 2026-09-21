@@ -172,9 +172,9 @@ class SyndromeBuffer(Protocol):
         """The slots this store is bounded to, or None for unbounded.
 
         A store bounded some other way than by a slot count answers
-        None and refuses nothing: the callers that size a plan, a trace
-        lane or a room check ask this instead of reading a settings
-        record, so the bound stays the store's own to decide.
+        None and refuses nothing: the callers that size a trace lane or
+        a room check ask this instead of reading a settings record, so
+        the bound stays the store's own to decide.
         """
 
     def held_rounds_description(self) -> str:
@@ -239,9 +239,6 @@ class RetainedRounds(Protocol):
 
     def has_live_operation_reference(self, operation_id) -> bool:
         """Whether a hold or a stored round still names this operation."""
-
-    def capacity_rounds(self) -> Optional[int]:
-        """The slots this store is bounded to, or None for unbounded."""
 
 
 @runtime_checkable

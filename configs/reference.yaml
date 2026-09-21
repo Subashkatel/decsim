@@ -535,10 +535,11 @@ weak_syndrome_buffer:            # the weak syndrome buffer, on the decoder chip
                                    # publishes it in order once a slot frees,
                                    # the backpressure real systems apply to their
                                    # source; controller.packing_overflow chooses
-                                   # that hold or a drop. null = unbounded
-                                   # A capacity below the rounds one operation's
-                                   # windows hold at once is refused when the
-                                   # machine is built, naming both numbers
+                                   # that hold or a drop. null = unbounded.
+                                   # A store too small for the rounds the
+                                   # plan's windows hold at once fills, and the
+                                   # run stops: "run ended with N rounds held
+                                   # for store room"
 
 strong_syndrome_buffer:          # the strong syndrome buffer, on the strong host
                                    # (exists only when the escalation uses it)

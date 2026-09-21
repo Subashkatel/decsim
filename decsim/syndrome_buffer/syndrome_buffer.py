@@ -118,9 +118,9 @@ class SyndromeBuffer:
     def capacity_rounds(self) -> Optional[int]:
         """The slots this store is bounded to, or None for unbounded.
 
-        The plan check, the trace lane and the strong syndrome round
-        receiver ask this instead of reading the settings record, so a
-        row bounded some other way answers for itself.
+        The trace lane and the two round receivers ask this instead of
+        reading the settings record, so a row bounded some other way
+        answers for itself.
         """
         return self.settings.rounds
 

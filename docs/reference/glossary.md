@@ -62,6 +62,9 @@ These are not from the papers. The pages use them everywhere.
   are the hops' names.
 - **unit**: one decoder unit, a memory that holds a job's rounds plus
   the compute that decodes them. A tier's units form its pool.
+- **unit memory**: the input memory of one decoder unit, sized in bits
+  by `<tier>_decoder.unit_memory.bits`. A window's rounds are copied
+  into it before the unit decodes them and freed when the decode ends.
 - **job**: one decode of one window, asked of a tier's pool.
 - **stage (a job)**: to put a job's rounds on a unit before the job may
   compute, so the move overlaps the wait. A staged job stays on that

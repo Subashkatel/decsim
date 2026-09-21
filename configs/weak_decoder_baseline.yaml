@@ -68,7 +68,8 @@ strong_syndrome_buffer:
 weak_decoder:
   kind: 0.028                       # LILLIPUT card
   units: 1
-  unit_memory_rounds: null
+  unit_memory:
+    bits: null
   engine:
     clock: fridge
     fetch_cycles_per_round: 1

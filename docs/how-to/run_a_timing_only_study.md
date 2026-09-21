@@ -21,7 +21,8 @@ extends: weak_decoder_baseline.yaml
 weak_decoder:
   kind: 1.0
   units: 1
-  unit_memory_rounds: null
+  unit_memory:
+    bits: null
   engine:
     clock: fridge
     fetch_cycles_per_round: 1
@@ -40,7 +41,7 @@ Two things to know before you copy it.
 
 **A section replaces its base's section whole.** `extends` does not
 merge inside a section, so the `weak_decoder` block above repeats
-`units`, `unit_memory_rounds` and `engine` even though the base already
+`units`, `unit_memory` and `engine` even though the base already
 had them. Leaving `engine` out raises `KeyError: 'engine'` at load.
 
 **The links must be able to price what crosses them.** A bounded channel

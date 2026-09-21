@@ -636,10 +636,19 @@ weak_decoder:                      # the lightweight tier: fast, higher LER
                                    # per window needs a unit per forced class
                                    # under true, because the join reads neither
                                    # solve until both have finished
-  unit_memory_rounds: null         # input SRAM rounds PER UNIT; null = unbounded.
-                                   # Each unit holds two windows when they fit
-                                   # (transfer overlaps compute); a unit sized
-                                   # for one window falls back to serial residency
+  unit_memory:                     # the input memory of one decoder unit: a
+                                   # window's rounds are copied into it before
+                                   # the unit decodes them, and freed when the
+                                   # decode ends
+    bits: null                     # that memory's capacity in bits, PER UNIT;
+                                   # null = no capacity is modelled, a memory
+                                   # nothing ever fills. A unit holds a second
+                                   # window only when both fit, so the next
+                                   # window's rounds load while the current one
+                                   # decodes; a window larger than the memory
+                                   # stops the run. A bounded memory needs
+                                   # rounds that state their size, which
+                                   # qpu.kind timing_only does not emit
   weight_step: 0.1                 # the union_find row's growth resolution: the
                                    # natural-log units of weight one tick of an
                                    # edge length is (Huang, Newman and Brown
@@ -787,7 +796,8 @@ strong_decoder:                    # the accurate tier: slow, lower LER
                                    # transfers the assigned data in the paper
                                    # (Toshio 2510.25222 lines 1248-1250), which
                                    # is the copy row
-  unit_memory_rounds: null
+  unit_memory:
+    bits: null                     # as above
   weight_step: 0.1                 # as above; the union_find row's growth
                                    # resolution
   cycle_count: null                # as above; the union_find row's own
@@ -904,8 +914,8 @@ observation:                       # what a run records beyond its results
                                    # change: the buffer's occupancy over time
   backlog_trace: false             # true samples the undecoded-round backlog after
                                    # every action: the backlog over time, as a step function
-  decoder_memory_occupancy: false  # true samples each unit memory's held-round count,
-                                   # for a sweep over unit_memory_rounds
+  decoder_memory_occupancy: false  # true samples each unit memory's held-bit count,
+                                   # for a sweep over unit_memory.bits
   data_movement: false             # true counts the copies, references and moves of
                                    # every round, on the RunResult without the trace,
                                    # and writes them to the run folder:

@@ -101,7 +101,7 @@ MINIMAL_CONFIG = {
     "weak_decoder": {
         "kind": 0.028,
         "units": 1,
-        "unit_memory_rounds": None,
+        "unit_memory": {"bits": None},
         "engine": {
             "clock": "fridge",
             "fetch_cycles_per_round": 1,
@@ -128,7 +128,7 @@ def strong_unit(algorithm) -> dict:
         "strong_decoder": {
             "kind": algorithm,
             "units": 1,
-            "unit_memory_rounds": None,
+            "unit_memory": {"bits": None},
             "engine": {
                 "clock": "room",
                 "fetch_cycles_per_round": 1,

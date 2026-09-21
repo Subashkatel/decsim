@@ -26,7 +26,8 @@ weak_decoder:
   units: 1
   input: copy
   boundary_fold: copy
-  unit_memory_rounds: null
+  unit_memory:
+    bits: null
   engine:
     clock: fridge
     fetch_cycles_per_round: 1

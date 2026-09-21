@@ -174,8 +174,12 @@ def test_each_tiers_unit_memory_reaches_the_pool_of_its_own_units():
         gap_threshold_nats=2.0,
         confidence="complementary_gap",
     )
-    weak = dataclasses.replace(_preset(10.0), unit_memory_rounds=12)
-    strong = dataclasses.replace(_preset(30.0), unit_memory_rounds=30)
+    weak_memory = decoder_settings.UnitMemorySettings(bits=12)
+    strong_memory = decoder_settings.UnitMemorySettings(bits=30)
+    weak_preset = _preset(10.0)
+    strong_preset = _preset(30.0)
+    weak = dataclasses.replace(weak_preset, unit_memory=weak_memory)
+    strong = dataclasses.replace(strong_preset, unit_memory=strong_memory)
     settings = _settings(escalation=escalation, weak=weak, strong=strong)
 
     pool = _pool(settings)

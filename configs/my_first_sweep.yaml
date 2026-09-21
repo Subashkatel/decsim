@@ -4,7 +4,8 @@ extends: weak_decoder_baseline.yaml
 weak_decoder:
   kind: pymatching
   units: 1
-  unit_memory_rounds: null
+  unit_memory:
+    bits: null
   engine:
     clock: fridge
     fetch_cycles_per_round: 1

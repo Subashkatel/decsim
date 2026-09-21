@@ -47,7 +47,7 @@ def switching_config(
         "weak_decoder": {
             "kind": "pymatching",
             "units": 1,
-            "unit_memory_rounds": None,
+            "unit_memory": {"bits": None},
             "engine": {
                 "clock": "fridge",
                 "fetch_cycles_per_round": 1,
@@ -705,7 +705,7 @@ def _walk_card(microseconds, weak_kind: str, confidence: str) -> dict:
         "weak_decoder": {
             "kind": weak_kind,
             "units": 1,
-            "unit_memory_rounds": None,
+            "unit_memory": {"bits": None},
             "engine": {
                 "clock": "fridge",
                 "fetch_cycles_per_round": 1,

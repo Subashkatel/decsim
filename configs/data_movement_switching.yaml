@@ -46,7 +46,8 @@ weak_decoder:
   units: 1
   input: copy
   boundary_fold: copy
-  unit_memory_rounds: null
+  unit_memory:
+    bits: null
   engine:
     clock: fridge
     fetch_cycles_per_round: 1
@@ -57,7 +58,8 @@ strong_decoder:
   kind: 10.0                        # ten tau_gen, Toshio 2510.25222
   units: 1
   input: copy
-  unit_memory_rounds: null
+  unit_memory:
+    bits: null
   engine:
     clock: room
     fetch_cycles_per_round: 1

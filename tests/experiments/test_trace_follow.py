@@ -90,6 +90,24 @@ def test_round_one_leaves_on_window_zeros_input_move(traced):
     assert memory.bits == 44
 
 
+def test_a_bounded_unit_memory_residence_states_its_room_in_bits():
+    landed = {
+        "ph": "X",
+        "cat": "window,residence",
+        "name": "W0 input in memory",
+        "thread": "Decoder unit default#0",
+        "tid": 7,
+        "dur": 0.092,
+        "args": {"tick": 6_012_000, "window": "1:0", "capacity_bits": 96},
+    }
+    document = trace_file.TraceDocument([landed], "one hand-made residence")
+
+    followed = trace_follow.follow(document, "window", "1:0")
+
+    (hop,) = followed.hops
+    assert hop.what == "residence, of 96 bits"
+
+
 def test_round_ones_counts_are_the_notes_counts(traced):
     followed = trace_follow.follow(traced, "round", "1:1")
 

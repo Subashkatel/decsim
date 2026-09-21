@@ -63,7 +63,8 @@ links:
 weak_decoder:
   kind: 1.0                         # one tau_gen
   units: 1
-  unit_memory_rounds: null
+  unit_memory:
+    bits: null
   engine:
     clock: fridge
     fetch_cycles_per_round: 1
@@ -73,7 +74,8 @@ weak_decoder:
 strong_decoder:
   kind: 10.0                        # ten tau_gen
   units: 1
-  unit_memory_rounds: null
+  unit_memory:
+    bits: null
   engine:
     clock: room
     fetch_cycles_per_round: 1

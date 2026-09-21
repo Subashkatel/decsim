@@ -293,7 +293,7 @@ def switching_run(
     probability_for=None,
     record=False,
     strong_buffer_microseconds=None,
-    weak_memory_rounds=None,
+    weak_memory_bits=None,
     round_microseconds=ROUND_MICROSECONDS,
     bulk_strong=False,
     probes=(),
@@ -329,9 +329,9 @@ def switching_run(
     if pools is None:
         pools = {"default": 1, "strong": 1}
     memory = None
-    if weak_memory_rounds is not None:
+    if weak_memory_bits is not None:
         memory = decoder_memory.DecoderMemoryConfig(
-            {"default": weak_memory_rounds}
+            {"default": weak_memory_bits}
         )
     decoder_manager = decoder_settings.DecoderManagerSettings(
         router=router,

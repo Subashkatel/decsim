@@ -141,7 +141,7 @@ Link paths and yaml keys are plain words too. The link path names are
 listed in [The link paths](docs/reference/glossary.md#the-link-paths),
 and the config keys read the same way: readout_to_bits_cycles,
 decision_to_pulse_cycles, packing_cycles_per_round,
-packing_rounds_in_flight, unit_memory_rounds, write_cycles,
+packing_rounds_in_flight, result_blocks_unit, write_cycles,
 setup_cycles_per_transfer, log_component_io, check_windows_with.
 
 ## Rule 3. Comments say why, in the present tense

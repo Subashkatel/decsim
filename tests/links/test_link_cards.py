@@ -41,7 +41,7 @@ CARD_YAML = (
     "weak_decoder:\n"
     "  kind: 0.028\n"
     "  units: 1\n"
-    "  unit_memory_rounds: null\n"
+    "  unit_memory: {bits: null}\n"
     "  engine: {clock: fridge, fetch_cycles_per_round: 1, "
     "fetch_cycles_per_job: 0, release_cycles_per_job: 1, "
     "release_cycles_per_round: 0}\n"

@@ -285,13 +285,13 @@ def _decoder_memory(
     if given is not None:
         return given
     active_settings = _active_tier_settings(settings, policy)
-    rounds_by_pool = {}
+    bits_by_pool = {}
     for pool in unit_pools:
-        rounds_by_pool[pool] = active_settings.unit_memory_rounds
-    if decode_queue.STRONG_POOL in rounds_by_pool:
-        strong_rounds = settings.strong_decoder.unit_memory_rounds
-        rounds_by_pool[decode_queue.STRONG_POOL] = strong_rounds
-    bounded_pools = _without_unset(rounds_by_pool)
+        bits_by_pool[pool] = active_settings.unit_memory.bits
+    if decode_queue.STRONG_POOL in bits_by_pool:
+        strong_bits = settings.strong_decoder.unit_memory.bits
+        bits_by_pool[decode_queue.STRONG_POOL] = strong_bits
+    bounded_pools = _without_unset(bits_by_pool)
     if not bounded_pools:
         return None
     return decoder_memory_module.DecoderMemoryConfig(bounded_pools)

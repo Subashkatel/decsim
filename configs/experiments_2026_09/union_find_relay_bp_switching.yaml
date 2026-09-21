@@ -14,7 +14,8 @@ escalation:
 weak_decoder:
   kind: union_find
   units: 1
-  unit_memory_rounds: null
+  unit_memory:
+    bits: null
   engine:
     clock: fridge
     fetch_cycles_per_round: 1
@@ -25,7 +26,8 @@ weak_decoder:
 strong_decoder:
   kind: relay_bp
   units: 1
-  unit_memory_rounds: null
+  unit_memory:
+    bits: null
   engine:
     clock: room
     fetch_cycles_per_round: 1

@@ -140,7 +140,7 @@ component.
 | a complete event (`X`) on a component's lane | a residence or a service. A residence is one round's or one window's stay in a store or a unit's memory. A service is one decode's fetch, algorithm and release, without anything it waited for. Its arguments carry the capacity, when the slot was taken, when the data was ready, and why it was freed |
 | a complete event on a link path's lane | a move, from its send tick to its delivery tick, with the bits it carried and the request it served |
 | an instant event (`i`) | something with no duration: a hold registered, transferred or released, a verdict, a selection, a copy made |
-| a counter event (`C`) | an occupancy at every change: the weak syndrome buffer's rounds, the strong syndrome buffer's rounds, a unit's memory rounds, the ready queue's depth, the controller's packing workspace, and the rounds the controller holds while it waits for room in a store |
+| a counter event (`C`) | an occupancy at every change: the weak syndrome buffer's rounds, the strong syndrome buffer's rounds, a unit's memory bits, the ready queue's depth, the controller's packing workspace, and the rounds the controller holds while it waits for room in a store |
 | flow events (`s`, `t`, `f`) | one round's hops joined into a chain, and one window's chain from queue to frame |
 
 Every event carries `args.tick`, the exact integer tick. The `ts` field

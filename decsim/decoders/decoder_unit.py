@@ -114,7 +114,7 @@ class DecoderUnit:
         self,
         job: decoding_records.DecodeJob,
         resident_capacity: int,
-        memory_demand_of: Callable[[decoding_records.DecodeJob], int],
+        memory_demand_of: Callable[[decoding_records.DecodeJob], Optional[int]],
     ) -> bool:
         """Whether a slot is free and the memory holds the job beside the rest.
 
@@ -137,12 +137,12 @@ class DecoderUnit:
         live = self.live_residents()
         if not live:
             return True
-        capacity = self.memory.capacity_rounds
+        capacity = self.memory.capacity_bits
         if capacity is None:
             return True
         readers = live + [job]
-        arriving_rounds = self._arriving_rounds(readers, memory_demand_of)
-        demand = self.memory.occupied_rounds + arriving_rounds
+        arriving_bits = self._arriving_bits(readers, memory_demand_of)
+        demand = self.memory.occupied_bits + arriving_bits
         return demand <= capacity
 
     def live_residents(self) -> list:
@@ -368,19 +368,21 @@ class DecoderUnit:
             return None
         return owner
 
-    def _arriving_rounds(
+    def _arriving_bits(
         self,
         readers: list,
-        memory_demand_of: Callable[[decoding_records.DecodeJob], int],
+        memory_demand_of: Callable[[decoding_records.DecodeJob], Optional[int]],
     ) -> int:
-        """The rounds not yet in the memory, each input counted once."""
-        rounds_by_input = {}
+        """The bits not yet in the memory, each input counted once."""
+        bits_by_input = {}
         for reader in readers:
             if self.memory.holds(reader):
                 continue
             input_identity = self.memory.landing_key(reader)
-            rounds_by_input[input_identity] = memory_demand_of(reader)
-        arriving = rounds_by_input.values()
+            bits = memory_demand_of(reader)
+            self.memory.check_input_size(reader, bits)
+            bits_by_input[input_identity] = bits
+        arriving = bits_by_input.values()
         return sum(arriving)
 
     def _resident_phase(self, resident: decoding_records.DecodeJob) -> str:

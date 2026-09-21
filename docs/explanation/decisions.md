@@ -767,6 +767,17 @@ mistake a gap for a result.
   fill, as when several operations share it, and the run then stops and
   names the work it could not settle. The size that is always enough is
   the union of every hold, and an open-ended dynamic stream has none.
+- **O14. A unit memory's room test and its deposit can count two
+  widths.** A waiting job is tested for room at the width its rounds
+  cross the input link. When the tier forms its own detection events
+  (`controller.detection_events_formed_at: decoder`) the rounds are
+  formed as they land, and the memory holds the events at their own
+  width, which a round with fewer detectors than measurements makes
+  narrower. The test then asks for more room than the deposit takes.
+  Every other placement lands the rounds at one width and the two agree.
+  The two ways to close it are to hold the rounds in the unit memory at
+  the width they crossed the link, or to give the former a way to state
+  a round's event width before it forms.
 
 O3, O4, O5 and O10 are closed: the sends name what they carry
 (`QPUReadout.size_bits` on the readout hop, nothing on the escalation

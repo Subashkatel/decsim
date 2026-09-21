@@ -142,7 +142,7 @@ class DecoderPool:
         now: int,
         carries_input: bool,
         resident_capacity: int,
-        memory_demand_of: Callable[[decoding_records.DecodeJob], int],
+        memory_demand_of: Callable[[decoding_records.DecodeJob], Optional[int]],
         input_is_on_the_unit: InputIsOnTheUnit,
     ) -> Optional[tuple]:
         """(unit, has free compute) for this job, or None.
@@ -258,7 +258,7 @@ def _with_room(
     units: list,
     job: decoding_records.DecodeJob,
     resident_capacity: int,
-    memory_demand_of: Callable[[decoding_records.DecodeJob], int],
+    memory_demand_of: Callable[[decoding_records.DecodeJob], Optional[int]],
 ) -> list:
     """The units of that list whose slots and memory hold this job."""
     with_room = []

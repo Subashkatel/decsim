@@ -454,7 +454,7 @@ class TraceWriter:
             "rounds": _job_rounds_text(job),
             "bits": _landed_bits(job),
             "transfer": "copy",
-            "capacity": unit.memory.capacity_rounds,
+            "capacity_bits": unit.memory.capacity_bits,
             "slot_taken": _dispatch_tick(job),
             "data_ready": self.engine.now,
         }
@@ -520,9 +520,9 @@ class TraceWriter:
         """One job's rounds landed in a unit's memory."""
         unit_name = _unit_of_memory(memory_name)
         thread = _unit_thread(unit_name)
-        counter = f"{memory_name} rounds"
-        rounds = len(decoder_input.rounds)
-        self._count(thread, counter, rounds)
+        counter = f"{memory_name} bits"
+        bits = decoder_input.held_bits()
+        self._count(thread, counter, bits, series="bits")
 
     def memory_taken(
         self, memory_name: str, job: decoding_records.DecodeJob, decoder_input
@@ -533,9 +533,9 @@ class TraceWriter:
         closing = {"freed": self.engine.now, "freed_reason": "decode done"}
         key = _input_key(job)
         self._end_residence(thread, key, closing)
-        counter = f"{memory_name} rounds"
-        rounds = len(decoder_input.rounds)
-        self._count(thread, counter, -rounds)
+        counter = f"{memory_name} bits"
+        bits = decoder_input.held_bits()
+        self._count(thread, counter, -bits, series="bits")
 
     # ---- the frame
 
@@ -643,10 +643,13 @@ class TraceWriter:
         }
         self.events.append(row)
 
-    def _count(self, thread: str, name: str, step: int) -> None:
+    def _count(
+        self, thread: str, name: str, step: int, series: str = "rounds"
+    ) -> None:
+        """One step of a counter track; series names what it counts."""
         value = self._open.counter_value.get(name, 0) + step
         self._open.counter_value[name] = value
-        self._counter(thread, name, {"rounds": value}, self.engine.now)
+        self._counter(thread, name, {series: value}, self.engine.now)
 
     def _begin_assembly(self, capacity, round_key, event) -> None:
         """The round's first fragment opens its place in the workspace."""

@@ -481,7 +481,7 @@ SWITCHING_FOLD_SWEEP = {
     "strong_decoder": {
         "kind": 1.0,
         "units": 1,
-        "unit_memory_rounds": None,
+        "unit_memory": {"bits": None},
         "engine": {
             "clock": "fridge",
             "fetch_cycles_per_round": 1,

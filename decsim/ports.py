@@ -1247,9 +1247,15 @@ class SyndromeSource(Protocol):
     a row that draws a whole shot fires it once per fresh shot, and a row
     that draws nothing carries the silent source, so a listener connects
     to every row by name.
+
+    takes_code_card says whether the row shapes its payloads by the
+    run's code card: such a row is built with the card, so its rounds
+    state the code's syndrome width, and a row that reads its widths
+    off a circuit is built without it.
     """
 
     operation_circuit_scope: str
+    takes_code_card: bool
     shot_sampled: Any
 
     def begin_operation(

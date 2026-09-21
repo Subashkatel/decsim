@@ -146,11 +146,6 @@ def declared_qpu(round_microseconds=ROUND_MICROSECONDS):
     )
 
 
-# the device a builder uses unless a test names another; it states no
-# payload size, so a test that bounds a store in bits names one that does
-DECLARED_QPU = declared_qpu()
-
-
 def declared_frame():
     """The frame's declared write cost."""
     write_cycles = declared_cycles("frame")
@@ -207,15 +202,12 @@ def weak_only_run(
     windows=None,
     controller=None,
     observation=None,
-    qpu=DECLARED_QPU,
     probes=(),
 ):
     """The weak-only baseline: one tier, readiness on the weak syndrome buffer.
 
     One complete machine keeps every path fixed while a test replaces
-    only the component card whose reaction-time shift it measures. The
-    default device states no payload size, so a test that bounds a
-    store in bits names a device that does.
+    only the component card whose reaction-time shift it measures.
     """
     workload = declared_workload(operations, rounds)
     decoder = decoders.PresetLatencyDecoder(DECLARED_MICROSECONDS["weak"])
@@ -229,6 +221,7 @@ def weak_only_run(
         observation = observe_settings.ObservationSettings(
             log_component_io=io_trace
         )
+    qpu = declared_qpu()
     frame = declared_frame()
     settings = machine_settings.MachineSettings(
         workload=workload,

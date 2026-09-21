@@ -125,7 +125,8 @@ class FakeWeakDecoder(decoder_module.DecoderBase):
 def test_readouts_reach_the_receiver_in_cycle_order_cycle_ticks_apart():
     engine = engine_module.Engine()
     receiver = RecordingReceiver(engine)
-    device = syndrome_devices.TimingOnlyDevice()
+    code = code_geometry.SurfaceCodeModel(distance=3)
+    device = syndrome_devices.TimingOnlyDevice(code)
     cycle_clock_domain = config.Clock(CYCLE_TICKS)
     qpu = cycle_clock.QPUDevice(engine, device, cycle_clock_domain)
     runtime = FinishingRuntime(qpu)
@@ -1079,17 +1080,6 @@ PACKING_BOUND_STOP_TICKS = {
 TWELVE_ROUND_RUN_END_TICK = 54_000_000
 
 
-def sized_syndrome_device() -> qpu_settings.QpuSettings:
-    """A device whose rounds state their size, which a bounded store needs."""
-    code = code_geometry.SurfaceCodeModel(distance=3)
-    return qpu_settings.QpuSettings(
-        kind="syndrome_bits",
-        distance=3,
-        round_period_microseconds=declared_run.ROUND_MICROSECONDS,
-        arguments={"code": code},
-    )
-
-
 def published_rounds(machine):
     """(round index, tick) of every round published, in publication order."""
     published = []
@@ -1126,9 +1116,8 @@ def test_a_full_syndrome_buffer_stalls_the_controller_instead_of_dropping():
     seven_rounds = syndrome_buffer_settings.SyndromeBufferSettings(
         bits=seven_rounds_bits
     )
-    sized_device = sized_syndrome_device()
     machine = declared_run.weak_only_run(
-        rounds=12, qpu=sized_device, weak_syndrome_buffer=seven_rounds
+        rounds=12, weak_syndrome_buffer=seven_rounds
     )
     published = published_rounds(machine)
     ticks = publication_ticks(published)

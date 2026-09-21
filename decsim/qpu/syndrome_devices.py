@@ -5,10 +5,16 @@ is driven by the QPU cycle clock (cycle_clock.py): one payload list per
 operation round, one per idle stream round. Neither source here has a
 circuit, so both answer every detector-error-model question with nothing.
 
-TimingOnlyDevice emits payloads that carry no bits, for runs that price
-timing alone; it is the default source of a run. SyndromeBitDevice emits
-seeded random bits sized by the code card's syndrome width, to exercise
-the payload path end to end without Stim.
+TimingOnlyDevice emits payloads that carry no bit values and state the
+code card's syndrome width, for runs that price timing alone; it is the
+default source of a run. A timing simulation models a transfer's size
+and not its content: gem5's packet trace records a tick, a command, an
+address and a size and no data (gem5 src/proto/packet.proto), and its
+network tester says "No need to do functional simulation / We just do
+timing simulation of the network" (gem5 src/cpu/testers/
+garnet_synthetic_traffic/GarnetSyntheticTraffic.cc). SyndromeBitDevice
+emits seeded random bits sized by the same width, to exercise the
+payload path end to end without Stim.
 """
 
 from typing import Any, Optional
@@ -27,11 +33,21 @@ import decsim.trace_source as trace_source
 
 
 class TimingOnlyDevice:
-    """Emits payloads without bits, so a run prices timing alone."""
+    """Emits payloads with a size and no bit values: timing alone.
+
+    A round's size is the code card's: a rotated surface code "requires
+    d2 - 1 syndrome qubits" a round (Barber et al. 2309.05558 lines
+    947-951), so every link and every memory the round crosses can
+    price it.
+    """
 
     operation_circuit_scope = "none"
+    takes_code_card = True
     # nothing is sampled here, so the port's shot source never fires
     shot_sampled = trace_source.SILENT
+
+    def __init__(self, code: code_geometry.CodeModel) -> None:
+        self.code = code
 
     def logical_observable_truth(
         self, operation_id: Any
@@ -51,12 +67,17 @@ class TimingOnlyDevice:
     def round_payloads(
         self, operation: program_records.Operation, round_index: int
     ) -> list[round_records.QPUReadout]:
-        """One bitless payload on the operation's first patch."""
+        """One valueless payload on the operation's first patch."""
         target, global_round = _stream_target_and_global_round(
             operation, round_index
         )
         patch = _first_patch_of(operation)
-        return [round_records.QPUReadout(target, patch, global_round)]
+        patch_count = _patch_count_of(operation)
+        size_bits = self.code.syndrome_bits_per_round(patch_count)
+        readout = round_records.QPUReadout(
+            target, patch, global_round, size_bits=size_bits
+        )
+        return [readout]
 
     def idle_round_payloads(
         self,
@@ -65,9 +86,13 @@ class TimingOnlyDevice:
         global_round: int,
         patch: Any,
     ) -> list[round_records.QPUReadout]:
-        """One bitless payload for the idle stream round."""
+        """One valueless payload for the idle stream round's one patch."""
         del operation
-        return [round_records.QPUReadout(stream_id, patch, global_round)]
+        size_bits = self.code.syndrome_bits_per_round(1)
+        readout = round_records.QPUReadout(
+            stream_id, patch, global_round, size_bits=size_bits
+        )
+        return [readout]
 
     def finalize_stream_round(
         self, operation: program_records.Operation, source_round_count: int
@@ -141,6 +166,7 @@ class SyndromeBitDevice(seeding._RandomSeedConsumer):
     """Emits seeded random bits shaped like the code card's syndrome."""
 
     operation_circuit_scope = "none"
+    takes_code_card = True
     # the bits are drawn per round, not per shot, so nothing fires here
     shot_sampled = trace_source.SILENT
 
@@ -185,9 +211,7 @@ class SyndromeBitDevice(seeding._RandomSeedConsumer):
         )
         if self.one_payload_per_patch:
             return self._payload_per_patch(operation, target, global_round)
-        patch_count = len(operation.patches)
-        if not operation.patches:
-            patch_count = len(operation.qubits)
+        patch_count = _patch_count_of(operation)
         bits = self._fake_bits(patch_count)
         patch = _first_patch_of(operation)
         return [self._payload(target, patch, global_round, bits)]
@@ -322,6 +346,13 @@ def _stream_target_and_global_round(
         stream_offset = operation.stream_offset
     global_round = round_index + stream_offset
     return target, global_round
+
+
+def _patch_count_of(operation: program_records.Operation) -> int:
+    """The patches whose syndrome one round of the operation reads out."""
+    if operation.patches:
+        return len(operation.patches)
+    return len(operation.qubits)
 
 
 def _first_patch_of(operation: program_records.Operation) -> Any:

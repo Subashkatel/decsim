@@ -19,7 +19,13 @@ qpu:
                                    # | recorded_stim: what the QPU reads out
                                    # each round. stim_device samples the
                                    # workload's circuit (real detector data);
-                                   # the sweep sets the distance and the round
+                                   # timing_only states each round's size, the
+                                   # code's syndrome bits per round, and
+                                   # carries no values (gem5's packet trace
+                                   # keeps a size and no data,
+                                   # src/proto/packet.proto); syndrome_bits
+                                   # fills that size with seeded random bits.
+                                   # The sweep sets the distance and the round
                                    # period
 
 escalation:
@@ -541,8 +547,7 @@ weak_syndrome_buffer:            # the weak syndrome buffer, on the decoder chip
                                    # controller.packing_overflow chooses that
                                    # hold or a drop. null = unbounded. A
                                    # bounded store refuses a round that states
-                                   # no size, so a timing-only device runs
-                                   # with null here.
+                                   # no size.
                                    # A store too small for the rounds the
                                    # plan's windows hold at once fills, and the
                                    # run stops: "run ended with N rounds held
@@ -662,8 +667,7 @@ weak_decoder:                      # the lightweight tier: fast, higher LER
                                    # window's rounds load while the current one
                                    # decodes; a window larger than the memory
                                    # stops the run. A bounded memory needs
-                                   # rounds that state their size, which
-                                   # qpu.kind timing_only does not emit
+                                   # rounds that state their size
   weight_step: 0.1                 # the union_find row's growth resolution: the
                                    # natural-log units of weight one tick of an
                                    # edge length is (Huang, Newman and Brown

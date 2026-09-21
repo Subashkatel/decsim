@@ -165,7 +165,7 @@ def build_plan(
         view = view_by_id[operation.id]
         claims = layout.resources_for(view)
         resource_claims[operation.id] = tuple(claims)
-    device = _syndrome_source(settings.qpu)
+    device = _syndrome_source(settings.qpu, code)
     _install_device_circuits(device, all_operations)
     error_model_provider = settings.qpu.error_model_provider
     if error_model_provider is None:
@@ -389,12 +389,19 @@ def _idle_policy(settings: controller_settings.IdlePolicySettings):
     return row()
 
 
-def _syndrome_source(settings: qpu_settings.QpuSettings):
-    """The device of the qpu kind, or the Python-built one."""
+def _syndrome_source(settings: qpu_settings.QpuSettings, code):
+    """The device of the qpu kind, or the Python-built one.
+
+    A row that shapes its payloads by the code card is built with the
+    run's card, so a yaml that names it needs no argument of its own.
+    """
     if settings.device is not None:
         return settings.device
     row = tables.row(qpu_settings.SYNDROME_SOURCES, "qpu.kind", settings.kind)
-    return row(**settings.arguments)
+    arguments = dict(settings.arguments)
+    if row.takes_code_card:
+        arguments.setdefault("code", code)
+    return row(**arguments)
 
 
 def _install_device_circuits(device, operations) -> None:

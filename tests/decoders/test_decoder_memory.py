@@ -32,7 +32,6 @@ import decsim.engine as engine_module
 import decsim.escalation.policies as escalation_policies
 import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
-import decsim.qpu.code_geometry as code_geometry
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
 import decsim.records.decoding as decoding_records
@@ -249,11 +248,7 @@ def test_the_capacity_error_names_the_memorys_bits():
 
 
 def _two_patch_memory_run(bits_per_unit, unit_count):
-    """Two three-round memory operations, one memory of the size given.
-
-    The device states the size of every round it emits, because a
-    bounded memory admits nothing else.
-    """
+    """Two three-round memory operations, one memory of the size given."""
     operations = []
     for operation_id in (1, 2):
         operation = program_records.Operation(
@@ -267,10 +262,7 @@ def _two_patch_memory_run(bits_per_unit, unit_count):
     workload = workload_settings.WorkloadSettings(
         operations=operations, rounds_policy=rounds_policy
     )
-    code = code_geometry.SurfaceCodeModel(distance=3)
-    qpu = qpu_settings.QpuSettings(
-        distance=3, kind="syndrome_bits", arguments={"code": code}
-    )
+    qpu = qpu_settings.QpuSettings(distance=3)
     decoder = decoders.PerRoundDecoder(tau_us=1.0)
     weak_decoder = decoder_settings.DecoderSettings(
         decoder=decoder, units=unit_count

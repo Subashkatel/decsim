@@ -419,6 +419,7 @@ What the QPU reads out each round for an operation.
 | Member | Type |
 | --- | --- |
 | `operation_circuit_scope` | `str` |
+| `takes_code_card` | `bool` |
 | `shot_sampled` | `Any` |
 
 | Method | What it does |

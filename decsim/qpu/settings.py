@@ -38,17 +38,18 @@ class QpuSettings:
     """The QPU: its round period, its code card and its syndrome source.
 
     Table rows for the source (SYNDROME_SOURCES, above): stim_device (Stim
-    samples the operation's circuit), timing_only (bitless payloads,
-    timing alone), syndrome_bits (seeded random bits shaped like the
-    code's syndrome), recorded_stim (a released experiment's
-    measurements replayed). The round period is the device's physical
-    cadence, a quantum-device number, not a classical clock's cycles:
-    Google 921 ns (2207.06431) and 1.1 us (2408.13687), Krinner 1.1 us
-    (2112.03708), Yang 1.25 us (2605.04892). The code card is a rotated
-    surface code of the distance, with the windows section's commit and
-    buffer sizes; a Python-built code, layout, device or error-model
-    provider is used as it is. The arguments are the source row's
-    keyword arguments (a seed, a recorded shot's measurements).
+    samples the operation's circuit), timing_only (payloads of the
+    code's size with no values), syndrome_bits (seeded random bits
+    shaped like the code's syndrome), recorded_stim (a released
+    experiment's measurements replayed). The round period is the
+    device's physical cadence, a quantum-device number, not a classical
+    clock's cycles: Google 921 ns (2207.06431) and 1.1 us (2408.13687),
+    Krinner 1.1 us (2112.03708), Yang 1.25 us (2605.04892). The code
+    card is a rotated surface code of the distance, with the windows
+    section's commit and buffer sizes; a Python-built code, layout,
+    device or error-model provider is used as it is. The arguments are
+    the source row's keyword arguments (a seed, a recorded shot's
+    measurements).
     """
 
     kind: str = "timing_only"

@@ -394,6 +394,50 @@ def test_the_boundary_hop_pays_one_bulk_layer_per_hand_off(distance):
     assert set(sizes) == {bulk_layer}
 
 
+def bounded_strong_hops_run():
+    """The d=5 switching run with both strong hops at the bounded row's rates.
+
+    The row provisions each hop for one escalation a commit region: a
+    selection and a region of fifteen rounds, each behind a name, is
+    488 bits in 5 us, 97.6 bits per us; an answer is 65 bits in 5 us,
+    13 bits per us.
+    """
+    distance = 5
+    syndrome_bits_per_round = distance * distance - 1
+    bounded = link_profiles.bandwidth_limited_profile(
+        syndrome_bits_per_round=syndrome_bits_per_round,
+        round_microseconds=1.0,
+        commit_rounds=distance,
+        buffer_rounds=distance,
+    )
+    settings = machine_settings("switching", distance)
+    links = dataclasses.replace(
+        settings.links,
+        weak_decoder_to_strong_decoder=bounded.weak_decoder_to_strong_decoder,
+        strong_decoder_to_frame=bounded.strong_decoder_to_frame,
+    )
+    settings = dataclasses.replace(settings, links=links)
+    machine = machine_module.Machine.build(settings, SEED)
+    result = machine.run()
+    return transfers_by_path(result)
+
+
+def test_a_bounded_escalation_hop_serializes_the_selections_name():
+    """64 bits at 97.6 bits per us is 0.655738 us on the wire."""
+    grouped = bounded_strong_hops_run()
+    first_selection = grouped["weak_decoder_to_strong_decoder"][0]
+    assert first_selection["payload_bits"] == NAME_BITS
+    assert first_selection["serialization_ticks"] == 655_738
+
+
+def test_a_bounded_answer_hop_serializes_the_answers_name_and_flip():
+    """65 bits at 13 bits per us is 5 us, the one commit region it has."""
+    grouped = bounded_strong_hops_run()
+    first_answer = grouped["strong_decoder_to_frame"][0]
+    assert first_answer["payload_bits"] == NAME_BITS + 1
+    assert first_answer["serialization_ticks"] == 5_000_000
+
+
 @pytest.mark.parametrize("distance", (3, 5))
 def test_the_escalation_carries_the_selection_bare_and_each_round_once(
     distance,

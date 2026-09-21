@@ -11,8 +11,8 @@ back into one report.
 
 `--shard i/n` gives one array task the work units whose index modulo `n`
 is `i`. `--shots-per-unit N` sets how many shots one work unit is: a
-smaller unit trades the per-task window-model cache for shards that fit
-a time limit.
+smaller unit makes shards that fit a time limit, at the cost of building
+the window models more often, since they are cached per task.
 
 Size them from the wall time. `configs/weak_ler.yaml`'s own header does
 the arithmetic for its 35 points and 10,425,000 shots: at 0.22 seconds

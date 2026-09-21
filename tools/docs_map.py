@@ -651,7 +651,7 @@ def _table_section(entry: tuple, keys: dict, checkout) -> list:
     named_keys = keys[name]
     quoted = _quoted_keys(named_keys)
     lines = [f"## `{name}`", ""]
-    lines.append(f"In `{shown}`. A yaml names a row of it under {quoted}.")
+    lines.append(f"In `{shown}`. A row of it is named under {quoted}.")
     lines.append("")
     lines.append("| Row | Class | What it is |")
     lines.append("| --- | --- | --- |")
@@ -685,7 +685,10 @@ def _tables_header(count: int) -> list:
         "`decsim/tables.py` is the one function that reads them all, so",
         "a name that is not a row is refused the same way everywhere",
         "with the rows printed. Each class fills the port named in",
-        "[The ports](ports.md).",
+        "[The ports](ports.md). The key a table is named under is a yaml",
+        "key when `configs/reference.yaml` carries it. One does not:",
+        "`magic_state_factory.kind` has no yaml section today and is set",
+        "from Python, on `MachineSettings`.",
         "",
     ]
 

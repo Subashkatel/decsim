@@ -164,7 +164,7 @@ The rounds a window may still read, as the escalation side sees it.
 | --- | --- |
 | `hold_strong_input` | The strong job's context becomes its input hold. |
 | `strong_window_input` | The room-side payloads of a strong window, first round stamped. |
-| `hold_strong_context` | The window's potential strong read becomes the request's hold. |
+| `hold_strong_context` | The rounds kept in case the window escalates pass to its request. |
 | `context_rounds_in_flight` | The rounds the strong syndrome buffer lacks that the weak one has. |
 | `escalated_rounds` | The weak syndrome buffer's packets of these rounds, to carry up. |
 | `guard_restart_reads` | Hold the restart window's strong context while a plan lands. |
@@ -172,7 +172,7 @@ The rounds a window may still read, as the escalation side sees it.
 | `release_restart_reads` | No earlier escalation can re-slice the window: its claim ends. |
 | `release_hold_if_live` | Drop a hold that is still live; nothing for one already gone. |
 | `release_strong_hold_if_live` | Drop a room-side hold when it is still registered. |
-| `release_absorbed_strong_hold` | Drop the absorbed window's potential read; the request holds it. |
+| `release_absorbed_strong_hold` | Drop the rounds an absorbed window kept; the strong request has them. |
 | `require_rounds_retained` | A strong window starts only once every round it reads is held. |
 | `read_keys_for_bounds` | The retained round keys of a possibly cross-operation range. |
 | `require_retained` | Refuse a new consumer if an already-arrived round was released. |
@@ -263,7 +263,7 @@ The window side's say over a job's input, carried on the job.
 
 | Method | What it does |
 | --- | --- |
-| `may_stage` | Whether a blocked job may occupy an input slot yet. |
+| `may_stage` | Whether a job that cannot decode yet may take a unit's input slot. |
 | `may_start` | Whether the landed job owes no boundary and may decode. |
 | `mask_input` | Fold the window's boundary into the landed input, once. |
 

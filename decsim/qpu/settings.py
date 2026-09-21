@@ -23,8 +23,9 @@ SYNDROME_SOURCES = {
     "syndrome_bits": syndrome_devices.SyndromeBitDevice,
     "recorded_stim": stim_device.RecordedStimDevice,
 }
-# qpu.magic_state_factory names one of these rows: what supplies the
-# T states an operation consumes.
+# MachineSettings.magic_state_factory names one of these rows from
+# Python: what supplies the T states an operation consumes. No yaml
+# section sets it today.
 MAGIC_STATE_FACTORIES = {
     "infinite": magic_state_factories.InfiniteFactory,
     "distillation": magic_state_factories.DistillationFactory,

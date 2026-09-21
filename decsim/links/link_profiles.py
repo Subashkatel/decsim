@@ -461,7 +461,7 @@ def roce_v2_measured_profile(coprocessor: str) -> settings.FabricSettings:
 
 
 class LogicalReferenceFabric:
-    """The default row: Khalid's latencies on unbounded channels.
+    """The default row: the reference card's latencies on unbounded channels.
 
     Every channel is unbounded, so the fabric prices propagation only and
     no transfer ever queues. This is the row a yaml gets when it names no

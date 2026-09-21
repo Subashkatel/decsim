@@ -532,7 +532,10 @@ class WindowRetention(Protocol):
     def hold_strong_context(
         self, key: tuple, strong_request_key, context_keys
     ) -> None:
-        """The window's potential strong read becomes the request's hold."""
+        """The rounds kept in case the window escalates pass to its request.
+
+        The window's potential strong read becomes the request's hold.
+        """
 
     def context_rounds_in_flight(self, key: tuple, read_keys) -> tuple:
         """The rounds the strong syndrome buffer lacks that the weak one has."""
@@ -568,7 +571,10 @@ class WindowRetention(Protocol):
     def release_absorbed_strong_hold(
         self, key: tuple, restart_key: Optional[tuple], replacement
     ) -> None:
-        """Drop the absorbed window's potential read; the request holds it."""
+        """Drop the rounds an absorbed window kept; the strong request has them.
+
+        A strong window covered this window, so its potential read goes.
+        """
 
     def require_rounds_retained(
         self, label: str, payloads: list, first_round: int, last_round: int
@@ -774,7 +780,7 @@ class WindowInputGate(Protocol):
     """
 
     def may_stage(self, job: decoding_records.DecodeJob) -> bool:
-        """Whether a blocked job may occupy an input slot yet."""
+        """Whether a job that cannot decode yet may take a unit's input slot."""
 
     def may_start(self, job: decoding_records.DecodeJob) -> bool:
         """Whether the landed job owes no boundary and may decode."""

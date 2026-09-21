@@ -752,6 +752,21 @@ mistake a gap for a result.
   `weak_decoder` and `strong_decoder` sections do not yet refuse an
   unknown key by name the way `decoder_manager` does, so a misspelt key
   there runs the default in silence.
+- **O11. A staged job never moves to another unit.** A job that cannot
+  start is staged with its rounds on one unit (D6) and stays there. If
+  another unit frees first, the job still waits for its own, so it can
+  start later than the pool as a whole allowed.
+- **O12. No yaml key names a noise model.** A yaml run uses the noise of
+  Stim's generated circuit, one physical error rate on its four noise
+  channels. A circuit with any other noise, such as a channel on every
+  idle step, can be handed to the machine from Python and not from a
+  yaml.
+- **O13. A store's minimum size is necessary and not sufficient.** A
+  syndrome buffer smaller than the rounds one operation's windows hold
+  at once is refused when the machine is built. A larger one can still
+  fill, as when several operations share it, and the run then stops and
+  names the work it could not settle. The size that is always enough is
+  the union of every hold, and an open-ended dynamic stream has none.
 
 O3, O4, O5 and O10 are closed: the sends name what they carry
 (`QPUReadout.size_bits` on the readout hop, nothing on the escalation

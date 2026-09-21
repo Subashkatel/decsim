@@ -20,7 +20,8 @@ and what it does. The ports are in pipeline order, so the part you want
 is near the component that uses it.
 
 Write a class with those methods. The ports are `typing.Protocol`
-classes and they are structural: you do not inherit anything, and there
+classes and they are structural: a class fits a port by having the right
+methods, so you do not inherit anything, and there
 is no registration step for the type system. The records each method
 takes and returns live in `decsim/records/`.
 
@@ -104,8 +105,10 @@ than any description of it.
 Your class runs inside the machine, so it keeps the machine's contract.
 
 **Charge your own time through the engine.** A component never sleeps
-and never polls. Take the `Engine` in your constructor and call
-`engine.schedule` with the delay you just charged.
+and never polls. The engine reaches your class the way its port says: a
+decoder is handed one by `start`, and a magic state factory reads it off
+the collaborators record its constructor takes. Call `engine.schedule`
+with the delay you just charged.
 
 **Derive your randomness from the run's seed.** A stochastic component
 reports its own seed source and derives its generator from the root seed

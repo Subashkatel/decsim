@@ -213,7 +213,7 @@ class DecodeJob:
 
     The window's rounds, its detector error model, its identity in the
     decoder queues, and the timestamps of its life. ``payloads`` is the
-    the weak syndrome buffer view of the rounds until the transfer lands them
+    weak syndrome buffer's view of the rounds until the transfer lands them
     in a unit's memory (``decoder_input``); a decoder reads only its unit's
     memory.
     """

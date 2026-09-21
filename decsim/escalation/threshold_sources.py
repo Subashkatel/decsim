@@ -265,7 +265,10 @@ class OnlineThresholdController:
 
 
 class OnlineThreshold:
-    """The controller at Switching's decision point (threshold_source online).
+    """Adapts the threshold during the run, from the escalation rate it sees.
+
+    The row of threshold_source online, asked at Switching's decision
+    point.
 
     One instance persists across every shot of a sweep point, so the
     controller learns over the point's whole window stream; its random

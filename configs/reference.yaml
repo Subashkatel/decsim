@@ -755,11 +755,14 @@ links:                             # a kind, then one card per path; null = the
                                    # weak syndrome buffer -> weak decoder, one window
   weak_decoder_to_strong_decoder: null
                                    # weak -> strong: the escalation's selection,
-                                   # one 64-bit control word that names the
-                                   # request (gem5 sizes a message with no data
-                                   # at control_msg_size, 8 bytes; CUDA-Q QEC's
-                                   # smallest request is one int64), then
-                                   # the strong window's rounds, read out of the
+                                   # the request's 64-bit name alone, then that
+                                   # name in front of the strong window's rounds
+                                   # (gem5 sizes a message with no data at
+                                   # control_msg_size, 8 bytes, and one with
+                                   # data at its data plus that size,
+                                   # src/mem/ruby/network/Network.cc; CUDA-Q
+                                   # QEC opens every request with one int64).
+                                   # The rounds are read out of the
                                    # weak syndrome buffer (rcom + 2 rbuf of them)
   strong_buffer_to_strong_decoder: null
                                    # strong syndrome buffer -> strong decoder, one window
@@ -767,7 +770,9 @@ links:                             # a kind, then one card per path; null = the
                                    # decoder -> decoder boundary handoff
   weak_decoder_to_frame: {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
                                    # weak decoder -> Pauli frame
-  strong_decoder_to_frame: null    # strong decoder -> Pauli frame
+  strong_decoder_to_frame: null    # strong decoder -> Pauli frame: the flips
+                                   # behind the request's 64-bit name, the same
+                                   # gem5 rule; a weak answer carries no name
   frame_to_controller: {latency_cycles: 0, clock: fridge, bits_per_cycle: 32}
                                    # Pauli frame -> controller, a release: one
                                    # 32-bit word with a ready signal (QubiC

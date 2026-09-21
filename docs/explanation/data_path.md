@@ -224,7 +224,8 @@ handled by the room side
 (`decsim/syndrome_buffer/strong_syndrome_round_receiver.py`).
 
 What crosses: first a selection, which window escalates and nothing
-else, one 64-bit control word; then the strong window's rounds, read out
+else, the request's 64-bit name alone; then the same name in front of
+the strong window's rounds (`EscalatedRegion.message_bits`), read out
 of the weak syndrome buffer, `r_com + 2 r_buf` of them under Toshio's
 assumption less any the strong side already has, at the width each
 round left the controller (`EscalatedRegion.wire_bits`). A window whose
@@ -310,6 +311,18 @@ arXiv:2410.05202 returns one Boolean per decode and Google
 arXiv:2408.13687 an observable bitmask per block. A decoder that fed a
 physical frame instead would emit a per-qubit correction vector, which
 is a different card.
+
+A strong answer carries the request's 64-bit name in front of those
+bits (`ANSWER_NAME_BITS_BY_TIER`), because it comes back across the
+wall while other requests are open. The three messages of a strong
+request, the selection, the region and the answer, follow gem5's rule
+for a network message: one with no data is the control size, 8 bytes,
+and one with data is its data plus that size (gem5
+`src/mem/ruby/network/Network.cc`, `MessageSizeType_to_int` and
+`m_data_msg_size`; `Network.py`, `control_msg_size`). The width is
+`REQUEST_KEY_WIRE_BITS` in `decsim/records/windows.py`. A weak answer
+carries no name on the wire: its framing is the unit's release stage,
+priced there in cycles.
 
 Both are moves. The weak one is on board, because the frame is the
 controller's; the strong one is off board, because the strong decoder is

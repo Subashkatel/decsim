@@ -25,7 +25,6 @@ side's record and leaves by the object that holds it
 
 import functools
 from collections.abc import Callable
-from typing import Optional
 
 import decsim.engine as engine_module
 import decsim.ports as ports
@@ -35,16 +34,20 @@ import decsim.records.rounds as round_records
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 
-# A selection names the strong request and carries nothing else, so it
-# is a control message, and a control message has a size of its own:
-# gem5's network sizes every message with no data at control_msg_size,
-# 8 bytes, and a data message at its data plus that size (gem5
-# src/mem/ruby/network/Network.cc MessageSizeType_to_int, Network.py
-# control_msg_size). The width is one name: CUDA-Q QEC's smallest
-# request, the one that names a decoder and nothing else, is one int64
-# (cudaqx decoder_rpc_wire_format.h ResetRequestPayload, 8 bytes). The
-# path's header frames it like any other transfer of the hop.
-SELECTION_PAYLOAD_BITS = 64
+# What a tier's answer carries beside its flips. A strong answer comes
+# back across the wall while other requests are open, so it names the
+# request it answers, and gem5 sizes a response that carries data as
+# that data plus the control size (gem5 src/mem/ruby/network/Network.cc
+# MessageSizeType_to_int, Response_Data). CUDA-Q's reply echoes the
+# request's id, "enabling
+# out-of-order or pipelined verification of responses"
+# (cudaq_realtime_message_protocol.md, Request ID Semantics). A weak
+# answer's framing is its unit's release stage, priced there in cycles
+# (Helios streams three header bytes per job).
+ANSWER_NAME_BITS_BY_TIER = {
+    window_records.DecoderTier.WEAK: 0,
+    window_records.DecoderTier.STRONG: window_records.REQUEST_KEY_WIRE_BITS,
+}
 
 # which output link a tier's result leaves by
 FRAME_PATH_BY_TIER = {
@@ -86,7 +89,9 @@ class DecoderOutput:
         has a frame, gates on_committed.
         """
         output_path = FRAME_PATH_BY_TIER[request_key.tier]
-        payload_bits = result_payload_bits(result, operation)
+        flip_bits = result_payload_bits(result, operation)
+        name_bits = ANSWER_NAME_BITS_BY_TIER[request_key.tier]
+        payload_bits = flip_bits + name_bits
         commit = functools.partial(
             self._commit, window.key, result, request_key, on_committed
         )
@@ -104,14 +109,15 @@ class DecoderOutput:
 
         The send is in the weak job's name for the strong request it
         selects; returns the delay the link expects. A selection is
-        one control word, the name of the request, so a bounded hop
+        the request's name and nothing else
+        (records/windows.py REQUEST_KEY_WIRE_BITS), so a bounded hop
         serializes that word and its header, and a hop with a default
         payload does not price it as a region.
         """
         return self.transfers.send_for_job(
             transfer_records.LinkPath.WEAK_DECODER_TO_STRONG_DECODER,
             weak_job,
-            payload_bits=SELECTION_PAYLOAD_BITS,
+            payload_bits=window_records.REQUEST_KEY_WIRE_BITS,
             request_key=strong_request_key,
             on_delivered=on_delivered,
         )
@@ -127,8 +133,9 @@ class DecoderOutput:
         priced here, once, by that store (book_read), and the send starts
         at its end; a bit is priced by the memory it leaves, at the tick
         it leaves. The send is in the strong request's name and carries
-        the rounds' width; returns the delay expected, the read then the
-        link, which is exact whenever no later request overtakes it.
+        that name and the rounds (EscalatedRegion.message_bits); returns
+        the delay expected, the read then the link, which is exact
+        whenever no later request overtakes it.
         """
         round_keys = _region_round_keys(region)
         read_tick = self.weak_store.book_read(round_keys)
@@ -137,9 +144,10 @@ class DecoderOutput:
         send = functools.partial(self._send_region, region, on_delivered)
         read_delay = read_tick - self.engine.now
         self.engine.schedule(read_delay, send, label="syndrome buffer read")
+        message_bits = region.message_bits()
         link_delay = self.link.expected_delay_ticks(
             transfer_records.LinkPath.WEAK_DECODER_TO_STRONG_DECODER,
-            region.wire_bits,
+            message_bits,
             read_tick,
         )
         return read_delay + link_delay
@@ -176,7 +184,7 @@ class DecoderOutput:
 
 def result_payload_bits(
     result: decoding_records.DecodeResult, operation: program_records.Operation
-) -> Optional[int]:
+) -> int:
     """A result reaches the frame as one bit per logical observable.
 
     A timing-only result stands for one observable per patch.

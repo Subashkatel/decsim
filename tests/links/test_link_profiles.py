@@ -156,7 +156,7 @@ def test_the_reference_card_names_the_runtime_quantity_of_each_actual_path():
     )
     assert (
         profile.weak_decoder_to_strong_decoder.actual_payload_source
-        == "EscalatedRegion.wire_bits"
+        == "EscalatedRegion.message_bits()"
     )
     assert profile.strong_buffer_to_strong_decoder.actual_payload_source == (
         "DecodeJob.payload_bits()"
@@ -165,7 +165,7 @@ def test_the_reference_card_names_the_runtime_quantity_of_each_actual_path():
         "DecodeResult.logical_observables bits"
     )
     assert profile.strong_decoder_to_frame.actual_payload_source == (
-        "DecodeResult.logical_observables bits"
+        "DecodeResult.logical_observables bits behind the request's name"
     )
 
 
@@ -293,11 +293,13 @@ def test_the_bandwidth_card_provisions_each_path_for_one_commit_region():
         "controller_to_weak_buffer": 24.0,
         "controller_to_strong_buffer": 24.0,
         "weak_buffer_to_weak_decoder": 48.0,
-        "weak_decoder_to_strong_decoder": 72.0,
+        # a selection and a region of 360 bits, each behind a 64-bit name
+        "weak_decoder_to_strong_decoder": fractions.Fraction("97.6"),
         "strong_buffer_to_strong_decoder": 72.0,
         "weak_decoder_to_frame": fractions.Fraction("0.2"),
         "decoder_to_decoder": fractions.Fraction("4.8"),
-        "strong_decoder_to_frame": fractions.Fraction("0.2"),
+        # one flip behind the same name
+        "strong_decoder_to_frame": 13,
         "frame_to_controller": fractions.Fraction("6.4"),
         "controller_to_qpu": fractions.Fraction("25.6"),
     }
@@ -342,7 +344,8 @@ def test_the_bandwidth_cards_default_payloads_are_one_regions_traffic():
         == 360
     )
     assert (
-        profile.weak_decoder_to_strong_decoder.default_payload.input_bits == 360
+        profile.weak_decoder_to_strong_decoder.default_payload.input_bits
+        == 64 + 360
     )
     assert profile.decoder_to_decoder.default_payload.input_bits == 24
 

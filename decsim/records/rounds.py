@@ -177,7 +177,9 @@ class EscalatedRegion:
     QEC's enqueue_syndromes names the decoder and carries the rounds
     (cudaqx_realtime_decoding.h lines 27 to 35). wire_bits is the sum of
     the packets' fragment sizes, the width each round left the controller
-    at (PackedRound.wire_bits), and None when any fragment has no size.
+    at (PackedRound.wire_bits), and None when any fragment has no size;
+    it is what the strong syndrome buffer is written. message_bits is
+    what crosses the hop: those rounds behind the request's name.
     carries_the_round_before is true when the first packet is the raw
     round before the strong window's first, which a strong side that
     forms the events reads for that round's detectors
@@ -215,6 +217,18 @@ class EscalatedRegion:
             wire_bits=wire_bits,
             carries_the_round_before=carries_the_round_before,
         )
+
+    def message_bits(self) -> Optional[int]:
+        """The region on the wire: the request's name, then the rounds.
+
+        gem5 sizes a data message the same way, its data plus the
+        control size (gem5 src/mem/ruby/network/Network.cc
+        m_data_msg_size). None when a round states no size, as
+        wire_bits is.
+        """
+        if self.wire_bits is None:
+            return None
+        return window_records.REQUEST_KEY_WIRE_BITS + self.wire_bits
 
     @property
     def round_keys(self) -> tuple:

@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 
 import decsim.records.rounds as round_records
+import decsim.records.windows as window_records
 
 
 def make_fragment(**overrides):
@@ -138,6 +139,29 @@ def test_retained_fragment_normalizes_readout_bits():
     assert fragment.bits == (1, 0)
     assert fragment.operation_id == "operation"
     assert fragment.fragment_index == 3
+
+
+def region_of(fragment) -> round_records.EscalatedRegion:
+    """One round's escalated region, in a strong request's name."""
+    request_key = window_records.DecoderRequestKey(
+        7, 0, window_records.DecoderTier.STRONG, 1
+    )
+    packet = round_records.SyndromeRoundPacket(7, 3, (fragment,))
+    return round_records.EscalatedRegion.of(request_key, (packet,))
+
+
+def test_a_region_crosses_as_its_rounds_behind_the_requests_name():
+    """The store is written the two bits; the wire carries the name too."""
+    two_bits = make_fragment()
+    region = region_of(two_bits)
+    assert region.wire_bits == 2
+    assert region.message_bits() == 64 + 2
+
+
+def test_a_region_of_unsized_rounds_states_no_message_size():
+    unsized = make_fragment(bits=None, size_bits=None)
+    region = region_of(unsized)
+    assert region.message_bits() is None
 
 
 def test_round_packet_preserves_supplied_fragment_order():

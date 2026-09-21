@@ -74,11 +74,11 @@ class _Link:
     """The fabric, answering what a send starting at a tick would pay."""
 
     def __init__(self) -> None:
-        self.asked_at = []
+        self.asked = []
 
     def expected_delay_ticks(self, path, payload_bits, now_ticks) -> int:
-        del path, payload_bits
-        self.asked_at.append(now_ticks)
+        del path
+        self.asked.append((now_ticks, payload_bits))
         return REGION_LINK_TICKS
 
 
@@ -141,7 +141,32 @@ def test_each_tier_publishes_over_its_own_output_link():
     ]
 
 
-def test_a_selection_is_sent_as_one_control_word():
+def _published_bits(tier) -> int:
+    """The bits one one-observable answer of that tier puts on its link."""
+    engine = engine_module.Engine()
+    transfers = _Transfers(engine, 4)
+    output = decoder_output_module.DecoderOutput(engine)
+    output.transfers = transfers
+    result = decoding_records.DecodeResult(4, 1, logical_observables=(1,))
+    request_key = _request_key(tier)
+    window = _window()
+    operation = _operation(1)
+    output.publish(window, operation, result, request_key, _ignore)
+    ((_path, _key, _tier, payload_bits),) = transfers.sent
+    return payload_bits
+
+
+def test_a_strong_answer_is_its_flip_behind_the_requests_name():
+    """It crosses the wall out of order, so it says which request it answers."""
+    assert _published_bits(window_records.DecoderTier.STRONG) == 64 + 1
+
+
+def test_a_weak_answer_is_its_flip_alone():
+    """Its framing is the unit's release stage, priced there in cycles."""
+    assert _published_bits(window_records.DecoderTier.WEAK) == 1
+
+
+def test_a_selection_is_the_requests_name_alone():
     """A message that only names a request is still 8 bytes on the wire."""
     engine = engine_module.Engine()
     transfers = _Transfers(engine, 4)
@@ -239,3 +264,18 @@ def test_an_escalated_region_leaves_when_its_weak_store_read_ends(read_ticks):
     assert output.weak_store.read_keys == [((4, 2), (4, 3))]
     assert transfers.left_at == [100 + read_ticks]
     assert expected_delay == read_ticks + REGION_LINK_TICKS
+
+
+def test_a_region_that_waits_on_its_read_is_priced_as_its_message():
+    """The link is asked about the name and the rounds, from the read's end."""
+    engine = engine_module.Engine()
+    engine.now = 100
+    output = decoder_output_module.DecoderOutput(engine)
+    output.transfers = _RegionTransfers(engine)
+    output.weak_store = _WeakStore(engine, 30)
+    output.link = _Link()
+    region = _region()
+
+    output.send_region(region, _ignore)
+
+    assert output.link.asked == [(130, 64 + 16)]

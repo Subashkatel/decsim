@@ -42,8 +42,9 @@ import decsim.records.windows as window_records
 # request's id, "enabling
 # out-of-order or pipelined verification of responses"
 # (cudaq_realtime_message_protocol.md, Request ID Semantics). A weak
-# answer's framing is its unit's release stage, priced there in cycles
-# (Helios streams three header bytes per job).
+# answer stays on the board with its frame and decsim prices no name on
+# that hop; a run that frames it sets the hop's
+# header_bits_per_transfer.
 ANSWER_NAME_BITS_BY_TIER = {
     window_records.DecoderTier.WEAK: 0,
     window_records.DecoderTier.STRONG: window_records.REQUEST_KEY_WIRE_BITS,

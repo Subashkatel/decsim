@@ -394,7 +394,7 @@ def test_the_boundary_hop_pays_one_bulk_layer_per_hand_off(distance):
     assert set(sizes) == {bulk_layer}
 
 
-def bounded_strong_hops_run():
+def bounded_strong_hops_run() -> dict:
     """The d=5 switching run with both strong hops at the bounded row's rates.
 
     The row provisions each hop for one escalation a commit region: a
@@ -438,36 +438,68 @@ def test_a_bounded_answer_hop_serializes_the_answers_name_and_flip():
     assert first_answer["serialization_ticks"] == 5_000_000
 
 
-@pytest.mark.parametrize("distance", (3, 5))
-def test_the_escalation_carries_the_selection_bare_and_each_round_once(
-    distance,
-):
-    """The decision names a request; the region carries the rounds' layers.
+def escalation_transfers(distance: int) -> tuple:
+    """(selections, regions) of the switching run's escalation hop.
 
-    Each region's bits are the request's name and the detector layers
-    of the rounds it carries, and no round rides up twice. A selection
-    is the name alone, so its width tells it from any region.
+    A selection is the request's name alone, so its width tells it from
+    a region, which is the same name in front of at least one round.
     """
     _machine, result = run_case("switching", distance)
     grouped = transfers_by_path(result)
     selections = []
-    carried_rounds = []
+    regions = []
     for transfer in grouped["weak_decoder_to_strong_decoder"]:
-        payload_bits = transfer["payload_bits"]
-        if payload_bits == NAME_BITS:
+        if transfer["payload_bits"] == NAME_BITS:
             selections.append(transfer)
-            continue
-        attribution = transfer["attribution"]
-        first_round = attribution["round_lo"]
-        last_round = attribution["round_hi"]
-        layers = window_detectors(first_round, last_round, ROUNDS, distance)
-        assert payload_bits == NAME_BITS + layers, attribution
-        past_last = last_round + 1
-        carried_rounds.extend(range(first_round, past_last))
+        else:
+            regions.append(transfer)
+    return selections, regions
+
+
+def bits_beside_the_layers(region: dict, distance: int) -> int:
+    """What one region transfer carries beside its rounds' detector layers."""
+    attribution = region["attribution"]
+    first_round = attribution["round_lo"]
+    last_round = attribution["round_hi"]
+    layers = window_detectors(first_round, last_round, ROUNDS, distance)
+    return region["payload_bits"] - layers
+
+
+def rounds_carried(regions: list) -> list:
+    """Every round the regions carry, in order, a repeat kept as a repeat."""
+    carried = []
+    for region in regions:
+        attribution = region["attribution"]
+        past_last = attribution["round_hi"] + 1
+        carried.extend(range(attribution["round_lo"], past_last))
+    return sorted(carried)
+
+
+@pytest.mark.parametrize("distance", (3, 5))
+def test_every_strong_answer_has_one_selection(distance):
+    """The decision names a request, once, and the answer names it back."""
+    _machine, result = run_case("switching", distance)
+    grouped = transfers_by_path(result)
+    answers = grouped["strong_decoder_to_frame"]
+    selections, _regions = escalation_transfers(distance)
+    assert len(selections) == len(answers)
+
+
+@pytest.mark.parametrize("distance", (3, 5))
+def test_a_region_transfer_is_the_name_and_its_rounds_layers(distance):
+    """Each transfer of a region carries the request's name once."""
+    _selections, regions = escalation_transfers(distance)
+    beside = {bits_beside_the_layers(region, distance) for region in regions}
+    assert beside == {NAME_BITS}
+
+
+@pytest.mark.parametrize("distance", (3, 5))
+def test_every_round_rides_up_once(distance):
+    """The strong side is filled by the escalation alone, no round twice."""
+    _selections, regions = escalation_transfers(distance)
     past_last_round = ROUNDS + 1
     every_round = list(range(1, past_last_round))
-    assert len(selections) == len(grouped["strong_decoder_to_frame"])
-    assert sorted(carried_rounds) == every_round
+    assert rounds_carried(regions) == every_round
 
 
 @pytest.mark.parametrize("distance", (3, 5))

@@ -314,15 +314,18 @@ is a different card.
 
 A strong answer carries the request's 64-bit name in front of those
 bits (`ANSWER_NAME_BITS_BY_TIER`), because it comes back across the
-wall while other requests are open. The three messages of a strong
-request, the selection, the region and the answer, follow gem5's rule
+wall while other requests are open. The three kinds of message of a
+strong request, the selection, the region and the answer, follow gem5's rule
 for a network message: one with no data is the control size, 8 bytes,
 and one with data is its data plus that size (gem5
 `src/mem/ruby/network/Network.cc`, `MessageSizeType_to_int` and
 `m_data_msg_size`; `Network.py`, `control_msg_size`). The width is
-`REQUEST_KEY_WIRE_BITS` in `decsim/records/windows.py`. A weak answer
-carries no name on the wire: its framing is the unit's release stage,
-priced there in cycles.
+`REQUEST_KEY_WIRE_BITS` in `decsim/records/windows.py`. The name is
+decsim's own abstraction of whatever identifies the request, and every
+transfer carries it once, each transfer of a region that crosses in
+several among them. A weak answer stays on the board with its frame and
+decsim prices no name on that hop; a run that frames it sets the hop's
+`header_bits_per_transfer`.
 
 Both are moves. The weak one is on board, because the frame is the
 controller's; the strong one is off board, because the strong decoder is

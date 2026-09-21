@@ -116,6 +116,23 @@ def _request_key(tier) -> window_records.DecoderRequestKey:
     return window_records.DecoderRequestKey(4, 1, tier, 0)
 
 
+def _published_bits(tier, logical_observables: tuple) -> int:
+    """The bits one answer of that tier puts on its output link."""
+    engine = engine_module.Engine()
+    transfers = _Transfers(engine, 4)
+    output = decoder_output_module.DecoderOutput(engine)
+    output.transfers = transfers
+    result = decoding_records.DecodeResult(
+        4, 1, logical_observables=logical_observables
+    )
+    request_key = _request_key(tier)
+    window = _window()
+    operation = _operation(1)
+    output.publish(window, operation, result, request_key, _ignore)
+    ((_path, _key, _tier, payload_bits),) = transfers.sent
+    return payload_bits
+
+
 def test_each_tier_publishes_over_its_own_output_link():
     """A weak result rides weak_decoder_to_frame, a strong one its own."""
     engine = engine_module.Engine()
@@ -141,29 +158,18 @@ def test_each_tier_publishes_over_its_own_output_link():
     ]
 
 
-def _published_bits(tier) -> int:
-    """The bits one one-observable answer of that tier puts on its link."""
-    engine = engine_module.Engine()
-    transfers = _Transfers(engine, 4)
-    output = decoder_output_module.DecoderOutput(engine)
-    output.transfers = transfers
-    result = decoding_records.DecodeResult(4, 1, logical_observables=(1,))
-    request_key = _request_key(tier)
-    window = _window()
-    operation = _operation(1)
-    output.publish(window, operation, result, request_key, _ignore)
-    ((_path, _key, _tier, payload_bits),) = transfers.sent
-    return payload_bits
-
-
 def test_a_strong_answer_is_its_flip_behind_the_requests_name():
     """It crosses the wall out of order, so it says which request it answers."""
-    assert _published_bits(window_records.DecoderTier.STRONG) == 64 + 1
+    one_flip = (1,)
+    strong = window_records.DecoderTier.STRONG
+    assert _published_bits(strong, one_flip) == 64 + 1
 
 
 def test_a_weak_answer_is_its_flip_alone():
-    """Its framing is the unit's release stage, priced there in cycles."""
-    assert _published_bits(window_records.DecoderTier.WEAK) == 1
+    """It stays on the board with its frame, and no name is priced there."""
+    one_flip = (1,)
+    weak = window_records.DecoderTier.WEAK
+    assert _published_bits(weak, one_flip) == 1
 
 
 def test_a_selection_is_the_requests_name_alone():

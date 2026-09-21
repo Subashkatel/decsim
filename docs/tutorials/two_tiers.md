@@ -317,8 +317,8 @@ tick (us)  where                            what                                
 17.140     Window planner                   verdict
 17.140     Window planner                   W3 committed
 17.140     Strong tier                      W3 strong window held                                          0.004
-17.140     weak_decoder_to_strong_decoder   move, with W3 rounds 10..15                                    0.004     move      0
-17.140     weak_decoder_to_strong_decoder   move, with W3 rounds 10..15                                    0.004     move      48
+17.140     weak_decoder_to_strong_decoder   move, with W3 rounds 10..15                                    0.004     move      64
+17.140     weak_decoder_to_strong_decoder   move, with W3 rounds 10..15                                    0.004     move      112
 17.144     Window planner                   queued, dispatched to strong#0                                 0.000
 17.144     strong_buffer_to_strong_decoder  move, with W3 rounds 10..15                                    0.004     move      48
 17.144     decoder_to_decoder               move, with W3 rounds 10..15                                    0.004     move      8
@@ -329,7 +329,7 @@ tick (us)  where                            what                                
 17.148     Decoder unit strong#0            decode service                                                 10.064
 17.172     Decoder unit strong#0            stage algorithm                                                10.000
 27.172     Decoder unit strong#0            stage release                                                  0.040
-27.212     strong_decoder_to_frame          move, with W3 rounds 10..15                                    0.004     move      1
+27.212     strong_decoder_to_frame          move, with W3 rounds 10..15                                    0.004     move      65
 27.216     Frame                            residence, unbounded, committed 27.220, freed at end of run    53.100    copy
 27.220     decoder_to_decoder               move, with W3 rounds 10..15                                    0.004     move      8
 27.220     Frame                            1:3 committed
@@ -352,11 +352,11 @@ eight things happen that did not happen for window 0.
   its rounds yet, so the strong request waits for them to land.
 - **`weak_decoder_to_strong_decoder`, twice.** The escalation crosses
   this hop as two transfers. The first carries only the selection, which
-  window to decode again, the request's 64-bit name. The second
-  carries that name and the window's rounds, 48 bits, read out of the
-  weak syndrome buffer: six rounds, `10..15`, the escalated window's commit region
-  and the buffer region ahead of it. The rounds cross once, when a
-  window escalates, and never before.
+  window to decode again, the request's 64-bit name. The second is
+  112 bits: that name and 48 bits of rounds, read out of the weak
+  syndrome buffer. They are six rounds, `10..15`, the escalated
+  window's commit region and the buffer region ahead of it. The rounds
+  cross once, when a window escalates, and never before.
 - **`queued, dispatched to strong#0`.** A third decode job, on the other
   pool's unit, dispatched at 17.144 when the rounds land in the strong
   syndrome buffer.

@@ -141,7 +141,9 @@ def test_retained_fragment_normalizes_readout_bits():
     assert fragment.fragment_index == 3
 
 
-def region_of(fragment) -> round_records.EscalatedRegion:
+def region_of(
+    fragment: round_records.RetainedSyndromeFragment,
+) -> round_records.EscalatedRegion:
     """One round's escalated region, in a strong request's name."""
     request_key = window_records.DecoderRequestKey(
         7, 0, window_records.DecoderTier.STRONG, 1

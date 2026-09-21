@@ -147,7 +147,12 @@ class PathSettings:
     messages are the worked case: a 24 byte RPCHeader in front of every
     request and a 24 byte RPCResponse in front of every reply
     (cudaqx decoder_rpc_wire_format.h lines 41-43), and 32 bytes of
-    fields in front of the syndromes of an enqueue (lines 62-69).
+    fields in front of the syndromes of an enqueue (lines 62-69). Those
+    bytes hold CUDA-Q's own ids, an int64 decoder id among the enqueue's
+    fields and a 32-bit request id in each header, and the three kinds
+    of message of a strong request already carry decsim's 64-bit name
+    (records/windows.py REQUEST_KEY_WIRE_BITS), so a run that prices
+    this framing leaves out the id the name stands for.
     excludes_receiver_processing says what the card's latency covers: a
     reference number measured end to end includes the receiver turning
     the arrival into bits, and a card the run's own yaml wrote times the

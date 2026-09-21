@@ -754,7 +754,11 @@ links:                             # a kind, then one card per path; null = the
   weak_buffer_to_weak_decoder: {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
                                    # weak syndrome buffer -> weak decoder, one window
   weak_decoder_to_strong_decoder: null
-                                   # weak -> strong: the escalation's selection, then
+                                   # weak -> strong: the escalation's selection,
+                                   # one 64-bit control word that names the
+                                   # request (gem5 sizes a message with no data
+                                   # at control_msg_size, 8 bytes; CUDA-Q QEC's
+                                   # smallest request is one int64), then
                                    # the strong window's rounds, read out of the
                                    # weak syndrome buffer (rcom + 2 rbuf of them)
   strong_buffer_to_strong_decoder: null

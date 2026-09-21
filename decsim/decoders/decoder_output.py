@@ -35,10 +35,16 @@ import decsim.records.rounds as round_records
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 
-# a selection names the strong request and carries nothing else
-# (links/link_profiles.py, ESCALATION_PAYLOAD_SOURCE), so the escalation
-# hop charges it the link's latency and no time on the wire
-SELECTION_PAYLOAD_BITS = 0
+# A selection names the strong request and carries nothing else, so it
+# is a control message, and a control message has a size of its own:
+# gem5's network sizes every message with no data at control_msg_size,
+# 8 bytes, and a data message at its data plus that size (gem5
+# src/mem/ruby/network/Network.cc MessageSizeType_to_int, Network.py
+# control_msg_size). The width is one name: CUDA-Q QEC's smallest
+# request, the one that names a decoder and nothing else, is one int64
+# (cudaqx decoder_rpc_wire_format.h ResetRequestPayload, 8 bytes). The
+# path's header frames it like any other transfer of the hop.
+SELECTION_PAYLOAD_BITS = 64
 
 # which output link a tier's result leaves by
 FRAME_PATH_BY_TIER = {
@@ -97,10 +103,10 @@ class DecoderOutput:
         """Send one window's escalation to the strong decoder.
 
         The send is in the weak job's name for the strong request it
-        selects; returns the delay the link expects. A selection names
-        a request and carries no payload, so it is sent as zero bits: a
-        bounded hop serializes its header alone, and a hop with a
-        default payload does not price it as a region.
+        selects; returns the delay the link expects. A selection is
+        one control word, the name of the request, so a bounded hop
+        serializes that word and its header, and a hop with a default
+        payload does not price it as a region.
         """
         return self.transfers.send_for_job(
             transfer_records.LinkPath.WEAK_DECODER_TO_STRONG_DECODER,

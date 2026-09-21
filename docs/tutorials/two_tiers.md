@@ -352,7 +352,7 @@ eight things happen that did not happen for window 0.
   its rounds yet, so the strong request waits for them to land.
 - **`weak_decoder_to_strong_decoder`, twice.** The escalation crosses
   this hop as two transfers. The first carries only the selection, which
-  window to decode again, so it carries zero bits. The second
+  window to decode again, one 64-bit control word. The second
   carries the window's rounds, 48 bits, read out of the weak syndrome
   buffer: six rounds, `10..15`, the escalated window's commit region
   and the buffer region ahead of it. The rounds cross once, when a

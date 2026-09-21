@@ -224,8 +224,8 @@ handled by the room side
 (`decsim/syndrome_buffer/strong_syndrome_round_receiver.py`).
 
 What crosses: first a selection, which window escalates and nothing
-else, with no payload; then the strong window's rounds, read out of the
-weak syndrome buffer, `r_com + 2 r_buf` of them under Toshio's
+else, one 64-bit control word; then the strong window's rounds, read out
+of the weak syndrome buffer, `r_com + 2 r_buf` of them under Toshio's
 assumption less any the strong side already has, at the width each
 round left the controller (`EscalatedRegion.wire_bits`). A window whose
 rounds are all measured at the verdict carries them with the selection;

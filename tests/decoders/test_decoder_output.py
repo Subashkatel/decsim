@@ -141,8 +141,8 @@ def test_each_tier_publishes_over_its_own_output_link():
     ]
 
 
-def test_a_selection_is_sent_as_zero_bits_so_a_bounded_hop_can_carry_it():
-    """A size of None is refused by a bounded wire; a selection has a size."""
+def test_a_selection_is_sent_as_one_control_word():
+    """A message that only names a request is still 8 bytes on the wire."""
     engine = engine_module.Engine()
     transfers = _Transfers(engine, 4)
     output = decoder_output_module.DecoderOutput(engine)
@@ -154,7 +154,7 @@ def test_a_selection_is_sent_as_zero_bits_so_a_bounded_hop_can_carry_it():
     output.send_selection(weak_job, strong_key, _ignore)
     escalation_path = transfer_records.LinkPath.WEAK_DECODER_TO_STRONG_DECODER
     tiers = window_records.DecoderTier
-    assert transfers.sent == [(escalation_path, "weak", tiers.STRONG, 0)]
+    assert transfers.sent == [(escalation_path, "weak", tiers.STRONG, 64)]
 
 
 def test_a_result_is_one_bit_per_logical_observable():

@@ -69,7 +69,8 @@ READOUT_PAYLOAD_SOURCE = "QPUReadout.size_bits"
 # (Toshio et al. 2510.25222 lines 1247 to 1250 assign the region's
 # syndrome data to the strong decoder at the switch; decoders/
 # decoder_output.py send_region). The selection that names the strong
-# request rides the same hop first with no bits.
+# request rides the same hop first as one control word
+# (decoder_output.py SELECTION_PAYLOAD_BITS).
 ESCALATION_PAYLOAD_SOURCE = "EscalatedRegion.wire_bits"
 
 # The two controller-to-store hops carry the packed round at the width

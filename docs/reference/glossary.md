@@ -86,7 +86,7 @@ These are not from the papers. The pages use them everywhere.
   strong tier. The **verdict** is that decision, taken on a finished
   weak decode: keep its correction, or escalate. The **selection** is
   the message that names the escalated window to the strong side; it
-  carries zero bits.
+  is one 64-bit control word.
 - **absorb**: a strong window absorbs a weak window when it decodes the
   same rounds again and replaces that window's answer, so the weak
   window is never decoded on its own.

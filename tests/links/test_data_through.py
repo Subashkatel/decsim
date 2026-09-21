@@ -26,8 +26,8 @@ the first and last rounds of a stream.
 
 The switching shape's strong side is filled by the escalation alone
 (Toshio 2510.25222 lines 1247 to 1250): each escalated window sends its
-selection as zero bits and then the rounds its strong window reads that
-the strong syndrome buffer lacks, so the fifteen rounds cross
+selection as one 64-bit word and then the rounds its strong window
+reads that the strong syndrome buffer lacks, so the fifteen rounds cross
 weak_decoder_to_strong_decoder once each and controller_to_strong_buffer
 carries nothing. The strong window is the commit region and one buffer
 ahead, its past face pinned on the neighbour's commit (Bombin
@@ -46,6 +46,7 @@ import dataclasses
 import pytest
 
 import decsim.config as config
+import decsim.decoders.decoder_output as decoder_output
 import decsim.decoders.settings as decoder_settings
 import decsim.escalation.settings as escalation_settings
 import decsim.frontends.settings as workload_settings
@@ -136,7 +137,8 @@ EXPECTED = {
         "qpu_to_controller": Traffic(15, 129),
         "controller_to_weak_buffer": Traffic(15, 120),
         "weak_buffer_to_weak_decoder": Traffic(5, 220),
-        "weak_decoder_to_strong_decoder": Traffic(9, 120),
+        # five selections of 64 bits and the four regions' 120
+        "weak_decoder_to_strong_decoder": Traffic(9, 440),
         "strong_buffer_to_strong_decoder": Traffic(5, 220),
         "decoder_to_decoder": Traffic(8, 64),
         "strong_decoder_to_frame": Traffic(5, 5),
@@ -145,7 +147,8 @@ EXPECTED = {
         "qpu_to_controller": Traffic(15, 385),
         "controller_to_weak_buffer": Traffic(15, 360),
         "weak_buffer_to_weak_decoder": Traffic(3, 612),
-        "weak_decoder_to_strong_decoder": Traffic(5, 360),
+        # three selections of 64 bits and the two regions' 360
+        "weak_decoder_to_strong_decoder": Traffic(5, 552),
         "strong_buffer_to_strong_decoder": Traffic(3, 612),
         "decoder_to_decoder": Traffic(4, 96),
         "strong_decoder_to_frame": Traffic(3, 3),
@@ -391,7 +394,8 @@ def test_the_escalation_carries_the_selection_bare_and_each_round_once(
     """The decision names a request; the region carries the rounds' layers.
 
     Each region's bits are the detector layers of the rounds it names,
-    and no round rides up twice.
+    and no round rides up twice. No region of this grid is as narrow as
+    the selection's one word, so the width tells the two apart.
     """
     _machine, result = run_case("switching", distance)
     grouped = transfers_by_path(result)
@@ -399,7 +403,7 @@ def test_the_escalation_carries_the_selection_bare_and_each_round_once(
     carried_rounds = []
     for transfer in grouped["weak_decoder_to_strong_decoder"]:
         payload_bits = transfer["payload_bits"]
-        if payload_bits == 0:
+        if payload_bits == decoder_output.SELECTION_PAYLOAD_BITS:
             selections.append(transfer)
             continue
         attribution = transfer["attribution"]

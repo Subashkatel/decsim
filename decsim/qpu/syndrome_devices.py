@@ -181,11 +181,9 @@ class SyndromeBitDevice(seeding._RandomSeedConsumer):
         self,
         code: code_geometry.CodeModel,
         seed: Optional[int] = None,
-        max_bit_count: int = 8,
         one_payload_per_patch: bool = False,
     ):
         self.code = code
-        self.max_bit_count = max_bit_count
         self.one_payload_per_patch = one_payload_per_patch
         self._initialize_run_seed_state(seed)
 
@@ -296,8 +294,7 @@ class SyndromeBitDevice(seeding._RandomSeedConsumer):
         """No circuit, so no strong re-decode has an error model."""
 
     def _fake_bits(self, patch_count: int) -> list:
-        syndrome_bit_count = self.code.syndrome_bits_per_round(patch_count)
-        bit_count = min(syndrome_bit_count, self.max_bit_count)
+        bit_count = self.code.syndrome_bits_per_round(patch_count)
         self._mark_stochastic_use()
         return [self._rng.randint(0, 1) for _ in range(bit_count)]
 

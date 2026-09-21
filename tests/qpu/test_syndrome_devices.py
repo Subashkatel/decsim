@@ -70,22 +70,14 @@ def test_fake_bits_are_as_wide_as_the_syndrome():
     assert payload.code == "rotated surface code (d=3)"
 
 
-def test_fake_bits_are_capped_at_max_bit_count():
+def test_fake_bits_grow_with_the_codes_distance():
+    """A d = 5 patch reads 24 stabilizers a round, so 24 bits."""
     wide_code = code_geometry.SurfaceCodeModel(distance=5)
-    capped = syndrome_devices.SyndromeBitDevice(
-        wide_code, seed=1, max_bit_count=10
-    )
+    device = syndrome_devices.SyndromeBitDevice(wide_code, seed=1)
     operation = program_records.Operation(id=1, name="memory", qubits=(0,))
-    payload = first_payload(capped, operation, 1)
-    assert len(payload.bits) == 10
-
-
-def test_a_cap_above_the_syndrome_leaves_its_width():
-    code = code_geometry.SurfaceCodeModel(distance=3)
-    roomy = syndrome_devices.SyndromeBitDevice(code, seed=1, max_bit_count=100)
-    operation = program_records.Operation(id=1, name="memory", qubits=(0,))
-    payload = first_payload(roomy, operation, 1)
-    assert len(payload.bits) == 8
+    payload = first_payload(device, operation, 1)
+    assert len(payload.bits) == 24
+    assert payload.size_bits == 24
 
 
 def test_one_payload_per_patch_when_asked():

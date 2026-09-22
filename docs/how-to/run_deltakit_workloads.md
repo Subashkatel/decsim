@@ -18,9 +18,10 @@ python3.11 -m venv .venv-deltakit
 .venv-deltakit/bin/python -m pip install 'ldpc==2.4.1' 'beliefmatching==0.2.0'
 ```
 
-The second install supplies existing eagerly imported decoder backends
-needed by the machine. It does not select them for the examples. Keep
-this environment separate from another checkout's editable installation.
+The second install is required: the machine imports the `ldpc` and
+`beliefmatching` decoder backends at build time, and neither extra pins
+them. The examples do not select them. Keep this environment separate
+from another checkout's editable installation.
 The Deltakit extra pins component versions in `pyproject.toml`; it does
 not require the umbrella SDK or a cloud account. Core Python 3.9 support
 is unchanged; the pinned SDK supports Python >=3.10,<3.15. For the compiler
@@ -45,7 +46,8 @@ PYTHONPATH=. .venv-deltakit/bin/python tools/deltakit_example.py \
 Use `--family repetition` for repetition memory, with X or Z selecting
 both its check basis and logical preparation/readout basis. Repetition
 uses a whole-shot window in this example; the protection mode requires
-rotated surface memory.
+rotated surface memory. `--patch` names the patch the operations occupy;
+the default is `memory-patch`.
 
 The output folder contains the circuit, measurement map, argument values,
 result, command arrival/start events and Chrome trace. Inspect
@@ -161,12 +163,17 @@ physical Bell-memory experiment, not high-level lattice surgery. Its explicit
 wait slots make every exported fragment occupy the declared period and receive
 the selected idle noise exactly once.
 
-The BB example is one [[30,8,2]] block with eight logical outputs. Use one physical
-resource patch and eight logical qubit identities. Use a compatible code card
-and a full-model decoder such as BP-OSD: its noisy model contains hyperedges that
-cannot be represented exactly by graphlike matching. Patch count never sizes
-these logical outputs. The distance describes this small code, not the fault
-distance of its syndrome schedule.
+The BB example is one [[30,8,2]] block with eight logical outputs. Use one
+physical resource patch and eight logical qubit identities: the owner's
+`qubits` are `range(8)` and its `patches` the one block. Its code card is
+`code_geometry.BivariateBicycleCodeModel(qubit_count=30,
+logical_qubit_count=8, distance=2)` with the window overrides the run
+wants, and its decoder a full-model one such as BP-OSD: the noisy model
+contains hyperedges that graphlike matching cannot represent exactly.
+`_bb_settings` in `tests/machine/test_machine.py` is the runnable
+assembly of those pieces. Patch count never sizes these logical outputs.
+The distance describes this small code, not the fault distance of its
+syndrome schedule.
 
 The end-to-end examples are reproducible through the public Machine tests:
 
@@ -200,6 +207,11 @@ PYTHONPATH=. .venv-deltakit/bin/python tools/deltakit_example.py \
 The prefix's decoded decision releases the continuation. The controller
 keeps the patch protected while it waits; the QPU starts the continuation
 on its eligible cycle boundary. Arrival and start are separate events.
+The prefix ends on a window boundary: the rotated surface card commits
+`distance` rounds per window, so `--prefix-rounds` is a multiple of the
+distance (3 or 6 at distance 3). A prefix that ends inside a window is
+refused by the window's commit, because a scored segment cannot share a
+window with its continuation.
 The declared decoder service time prices actual functional PyMatching.
 It is not a measured decoder benchmark or a timing-only substitute.
 
@@ -215,7 +227,8 @@ needs rounds beyond the finite source fails explicitly.
 `--input` reads ordinary Stim text and the saved measurement map without
 calling Deltakit. It inherits only the physical parameters: family,
 distance, horizon, basis and noise probability. An explicit conflicting
-physical parameter is refused. Runtime choices, including period,
+physical parameter is refused with a `ValueError` naming the parameter.
+Runtime choices, including period,
 feedback latency, decoder service time, mode, prefix length, patch and
 seed, come from the new command and its defaults. State them explicitly
 when comparing timing. Replay resamples the exported circuit; it is not

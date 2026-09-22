@@ -89,6 +89,8 @@ CYCLE_TICKS = config.microseconds_to_ticks(1.0)
 # the decoder engines of these runs: 250 MHz and 100 MHz
 FAST_ENGINE_CLOCK = config.Clock(4000)
 ENGINE_CLOCK = config.Clock(10_000)
+# The run helpers' default root seed: one call is one repeatable shot.
+RUN_SEED = 17
 
 
 def tier_rows() -> str:
@@ -2342,11 +2344,14 @@ def _physical_settings(
     )
 
 
-def _run(settings: machine_settings.MachineSettings) -> _Run:
+def _run(
+    settings: machine_settings.MachineSettings, seed: int = RUN_SEED
+) -> _Run:
+    """One run of the machine: one shot of the source at the seed."""
     source = settings.qpu.device
     shots = []
     source.shot_sampled.connect(lambda *sample: shots.append(sample))
-    machine = machine_module.Machine.build(settings, 17)
+    machine = machine_module.Machine.build(settings, seed)
     packets = []
     weak_writes = []
     strong_occupancies = []
@@ -2575,9 +2580,9 @@ def _static_idle_settings(idle_policy: str) -> machine_settings.MachineSettings:
 
 
 def _run_static(
-    settings: machine_settings.MachineSettings,
+    settings: machine_settings.MachineSettings, seed: int = RUN_SEED
 ) -> tuple[_Run, dict]:
-    machine = machine_module.Machine.build(settings, 17)
+    machine = machine_module.Machine.build(settings, seed)
     weak_writes = []
     machine.weak_syndrome_buffer.trace.round_stored.connect(
         lambda *event: weak_writes.append(event)

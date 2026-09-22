@@ -428,7 +428,7 @@ def _install_operation_circuits(device, model_provider, operations) -> None:
 
 
 def _operation_circuit_scope(component, role):
-    scope = getattr(component, "operation_circuit_scope", None)
+    scope = component.operation_circuit_scope
     if scope not in ("none", "per_operation"):
         raise ValueError(
             f"{role} operation_circuit_scope must be none or per_operation"

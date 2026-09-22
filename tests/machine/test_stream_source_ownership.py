@@ -189,7 +189,6 @@ def test_timing_only_source_preserves_the_finite_models_circuit_copy() -> None:
 @pytest.mark.parametrize(
     "declaration",
     [
-        {},
         {"operation_circuit_scope": None},
         {"operation_circuit_scope": "shared"},
     ],

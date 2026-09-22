@@ -442,12 +442,11 @@ def switching_escalate_mode(_generator, rounds):
 
 
 def switching_parallel_mode(_generator, rounds):
-    """Both tiers started at once, on a faster strong-buffer path."""
+    """Both tiers started at once."""
     return declared_run.switching_run(
         rounds=rounds,
         escalation_probability=1.0,
         run_both_at_once=True,
-        strong_buffer_microseconds=2.0,
     )
 
 

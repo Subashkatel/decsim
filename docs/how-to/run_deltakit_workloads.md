@@ -3,14 +3,14 @@
 # Run Deltakit memory, protection and compiler workloads
 
 Deltakit supplies a circuit and its measurement schedule. The existing
-DECSIM machine runs them through readout, stores, windows, decoding and
+decsim machine runs them through readout, stores, windows, decoding and
 feedback. The finite example is `tools/deltakit_example.py`;
 `tools/live_memory_example.py` keeps memory live until decoded feedback
 permits final readout. Neither adds a yaml workload row.
 
 ## Install in a separate environment
 
-From the checkout root, use Python 3.11, the tested enabled interpreter:
+From the checkout root, with Python 3.10 or newer:
 
 ```bash
 python3.11 -m venv .venv-deltakit
@@ -23,10 +23,9 @@ needed by the machine. It does not select them for the examples. Keep
 this environment separate from another checkout's editable installation.
 The Deltakit extra pins component versions in `pyproject.toml`; it does
 not require the umbrella SDK or a cloud account. Core Python 3.9 support
-is unchanged. The pinned SDK supports Python >=3.10,<3.15;
-Python 3.10 package resolution and actual Python 3.9 refusal were checked,
-while enabled runtime checks used Python 3.11. For the compiler entrypoint
-below, install its separate extra in the same isolated environment:
+is unchanged; the pinned SDK supports Python >=3.10,<3.15. For the compiler
+entrypoint below, install its separate extra in the same isolated
+environment:
 
 ```bash
 .venv-deltakit/bin/python -m pip install -e '.[run,deltakit-compile]'
@@ -92,7 +91,7 @@ continues on the same live stream, and decoded release permits resume
 and actual final readout. There is no fixed round horizon. Longer feedback
 adds physical syndrome rounds before destructive readout. The ordinary
 `StreamingStimDevice` retains the quantum state across those rounds;
-DECSIM owns the wait, the QPU cadence and the stopping decision. The provider
+decsim owns the wait, the QPU cadence and the stopping decision. The provider
 only exports the physical fragments.
 
 For duration-aware noise, generate a separate physical input:
@@ -126,9 +125,7 @@ the completed run's raw measurements for independent conversion.
 
 This path supports rotated-surface memory and trailing-buffer feedback.
 It does not implement arbitrary result-dependent quantum gates. Canonical
-replay of the physical-noise example was checked in an actual
-SDK-absent environment. Reproduction evidence is under
-`../tmp/deltakit-integration/completion/upstream/LIVE_EXAMPLE_IMPLEMENTATION.md`.
+replay of the physical-noise example works without the SDK installed.
 
 ## Supply a joint group or a CSS code block
 
@@ -262,10 +259,9 @@ public logical support to an observable. It never relabels a detector as
 logical truth. This supported CircuitBuilder path does not repair the
 separate high-level LogAsm Hadamard/rotation limitations.
 
-The entrypoint was exercised at distances 3 and 5, both bases, multiple
-round counts, noiseless logical action, SD6 noise and actual DECSIM runs.
-Exact reproducible probes and their scope are under
-`../tmp/deltakit-integration/completion/upstream/COMPILER_IMPLEMENTATION.md`.
+The entrypoint is tested at distances 3 and 5, both bases, several round
+counts, noiseless logical action, SD6 noise and whole decsim runs
+(`tests/frontends/test_deltakit_compiler.py`).
 
 ## Interpret the result within its scope
 

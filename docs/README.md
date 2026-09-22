@@ -119,7 +119,7 @@ sources, and the ideas behind the tree.
 
 - [The design decisions](explanation/decisions.md)
 - [The principles behind the shape](explanation/principles.md)
-- [Deltakit integration: boundary, evidence and limits](explanation/deltakit_integration.md)
+- [Deltakit integration: boundary and limits](explanation/deltakit_integration.md)
 
 ## Where everything lives
 

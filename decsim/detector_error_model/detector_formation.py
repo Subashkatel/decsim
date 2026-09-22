@@ -258,7 +258,9 @@ class _CircuitTables:
     detector_rounds: Optional[dict]
 
 
-def _check_formation_prefix(previous: FormationTable, table: FormationTable):
+def _check_formation_prefix(
+    previous: FormationTable, table: FormationTable
+) -> None:
     for round_index, width in previous.packet_width_by_round.items():
         if table.packet_width_by_round.get(round_index) != width:
             raise RuntimeError("formation extension changes an existing packet")
@@ -274,7 +276,9 @@ def _check_retained_recipe_records(recipes, packets: dict) -> None:
         _check_recipe_history(recipe, packets, last_received_round)
 
 
-def _check_recipe_history(recipe, packets: dict, last_received_round: int):
+def _check_recipe_history(
+    recipe, packets: dict, last_received_round: int
+) -> None:
     for record_round, _ in recipe.records:
         if record_round > last_received_round:
             continue

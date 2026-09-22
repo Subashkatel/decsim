@@ -70,9 +70,9 @@ class TimingOnlyDevice:
         round_period_ticks: int,
     ) -> list[round_records.QPUReadout]:
         """One bitless payload for the idle stream round."""
-        patches = program_records.patches_of(operation)
         del is_final
         del round_period_ticks
+        patches = program_records.patches_of(operation)
         return [round_records.QPUReadout(stream_id, patches, global_round)]
 
     def finalize_stream_round(

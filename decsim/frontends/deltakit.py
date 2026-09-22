@@ -44,7 +44,7 @@ def memory_circuit(
     """
     _require_explorer()
     _check_memory_parameters(distance, round_count, basis)
-    _check_probability(physical_error_probability)
+    check_probability(physical_error_probability)
     import deltakit_circuit.gates as gates
     import deltakit_explorer.codes as codes
     import deltakit_explorer.qpu as qpu
@@ -88,7 +88,8 @@ def memory_rounds(
     and dephasing times; SD6 rejects them. T1/T2 use a Pauli approximation.
     """
     _require_explorer()
-    _check_memory_parameters(distance, 1, basis)
+    check_positive_integer(distance, "distance")
+    _check_basis(basis)
     import deltakit_circuit.gates as gates
 
     logical_basis = gates.PauliBasis[basis]
@@ -124,9 +125,8 @@ def css_memory_rounds(
     timing are visibly shared by both finite templates.
     """
     _require_explorer()
-    if basis not in ("X", "Z"):
-        raise ValueError("memory basis must be X or Z")
-    _check_probability(physical_error_probability)
+    _check_basis(basis)
+    check_probability(physical_error_probability)
     _positive_duration(round_period_microseconds, "round_period_microseconds")
     import deltakit_circuit.gates as gates
 
@@ -173,7 +173,7 @@ def bell_memory_rounds(
     """
     _require_explorer()
     _check_memory_parameters(distance, 1, basis)
-    _check_probability(physical_error_probability)
+    check_probability(physical_error_probability)
     _positive_duration(round_period_microseconds, "round_period_microseconds")
     left, right = _bell_patches(distance)
     template = _bell_experiment(left, right, basis, 4)
@@ -199,6 +199,21 @@ def bell_memory_rounds(
     return _bell_wait_fragments(fragments, template, single, device, mapping)
 
 
+def check_positive_integer(value: int, name: str) -> None:
+    """Refuse a distance or round count that is not a positive int."""
+    value_type = type(value)
+    if value_type is not int or value < 1:
+        raise ValueError(f"{name} must be a positive integer")
+
+
+def check_probability(probability: float) -> None:
+    """Refuse a physical error probability outside [0, 1] or not finite."""
+    if not math.isfinite(probability):
+        raise ValueError("physical_error_probability must be finite")
+    if not 0 <= probability <= 1:
+        raise ValueError("physical_error_probability must lie in [0, 1]")
+
+
 def _require_explorer() -> None:
     if sys.version_info < (3, 10):
         raise ValueError("Deltakit memory requires Python 3.10 or newer")
@@ -212,16 +227,14 @@ def _require_explorer() -> None:
 def _check_memory_parameters(
     distance: int, round_count: int, basis: str
 ) -> None:
-    _positive_integer(distance, "distance")
-    _positive_integer(round_count, "round_count")
+    check_positive_integer(distance, "distance")
+    check_positive_integer(round_count, "round_count")
+    _check_basis(basis)
+
+
+def _check_basis(basis: str) -> None:
     if basis not in ("X", "Z"):
         raise ValueError("memory basis must be X or Z")
-
-
-def _positive_integer(value: int, name: str) -> None:
-    value_type = type(value)
-    if value_type is not int or value < 1:
-        raise ValueError(f"{name} must be a positive integer")
 
 
 def _memory_code(
@@ -253,13 +266,6 @@ def _measurement_rounds(code, round_count: int, basis: str) -> dict[int, int]:
     rounds.extend(terminal_rounds)
     measurement_items = enumerate(rounds)
     return dict(measurement_items)
-
-
-def _check_probability(probability: float) -> None:
-    if not math.isfinite(probability):
-        raise ValueError("physical_error_probability must be finite")
-    if not 0 <= probability <= 1:
-        raise ValueError("physical_error_probability must lie in [0, 1]")
 
 
 def _positive_duration(duration: float, name: str) -> None:

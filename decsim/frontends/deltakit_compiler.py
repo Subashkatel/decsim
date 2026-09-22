@@ -6,13 +6,14 @@ public terminal MeasurementReg outputs using the declared logical support.
 
 import contextlib
 import importlib.util
-import math
 import sys
 from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable, Optional
 
 import stim
+
+import decsim.frontends.deltakit as deltakit
 
 if TYPE_CHECKING:
     import deltakit_circuit as physical_api
@@ -37,7 +38,7 @@ def compile_experiment(
     """
     _require_compiler()
     _check_parameters(experiment, distance, round_count, basis)
-    _check_probability(physical_error_probability)
+    deltakit.check_probability(physical_error_probability)
     schedule = _code_schedule(distance, basis)
     final_basis = basis
     if experiment == "hadamard":
@@ -79,27 +80,14 @@ def _require_compiler() -> None:
 def _check_parameters(
     experiment: str, distance: int, round_count: int, basis: str
 ) -> None:
-    _positive_integer(distance, "distance")
-    _positive_integer(round_count, "round_count")
+    deltakit.check_positive_integer(distance, "distance")
+    deltakit.check_positive_integer(round_count, "round_count")
     if distance < 2:
         raise ValueError("compiler distance must be at least two")
     if basis not in ("X", "Z"):
         raise ValueError("compiler basis must be X or Z")
     if experiment not in ("memory", "hadamard"):
         raise ValueError("experiment must be memory or hadamard")
-
-
-def _positive_integer(value: int, name: str) -> None:
-    value_type = type(value)
-    if value_type is not int or value < 1:
-        raise ValueError(f"{name} must be a positive integer")
-
-
-def _check_probability(probability: float) -> None:
-    if not math.isfinite(probability):
-        raise ValueError("physical_error_probability must be finite")
-    if not 0 <= probability <= 1:
-        raise ValueError("physical_error_probability must lie in [0, 1]")
 
 
 def _code_schedule(distance: int, basis: str) -> _CodeSchedule:

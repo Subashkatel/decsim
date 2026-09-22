@@ -29,8 +29,11 @@ the soft output on the weak decoder).
 The exact likelihood-ratio reading of the gap holds only in the uniform
 repetition-code setting of Meister's Theorem 10; on a surface code it is
 a confidence, not a calibrated failure probability. The gap needs one
-nonzero logical-observable row, and thresholds are calibrated per
-weight step.
+logical-observable row; a growth no edge of which crosses that row
+admits no odd closed walk, so its gap is infinite (Definition 9 takes
+the minimum over the odd walks, and there are none), which is what a
+noiseless model leaves behind. Thresholds are calibrated per weight
+step.
 """
 
 import math
@@ -137,20 +140,13 @@ class ClusterGap:
 
 
 def require_one_logical_row(graph) -> None:
-    """The gap is defined for exactly one nonzero logical-observable row."""
+    """The gap is defined for exactly one logical-observable row."""
     row_count = graph.logical_observable_count
     if row_count != 1:
         raise ValueError(
             "Union-Find cluster confidence requires exactly one logical "
             f"observable, got {row_count}"
         )
-    for edge in graph.edges:
-        if edge.logical_observables[0]:
-            return
-    raise ValueError(
-        "Union-Find cluster confidence requires one nonzero logical "
-        "observable row"
-    )
 
 
 def require_weight_step(graph, weight_step: float) -> None:

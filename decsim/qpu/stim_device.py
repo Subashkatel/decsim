@@ -57,7 +57,7 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         terminal_detector_ids: Optional[dict] = None,
         measurement_rounds: Optional[dict] = None,
     ):
-        self._seed = _validated_seed(seed)
+        self._seed = validated_seed(seed)
         self._initialize_run_seed_binding(self._seed)
         detector_rounds_override = _rounds_by_key(detector_rounds)
         terminal_ids = _detector_ids_by_key(terminal_detector_ids)
@@ -630,8 +630,11 @@ def _sample_key_of(operation: program_records.Operation):
     return operation.id
 
 
-def _validated_seed(seed) -> Optional[int]:
-    """The seed under Stim's public unsigned 64-bit contract, or None."""
+def validated_seed(seed) -> Optional[int]:
+    """The seed under Stim's public unsigned 64-bit contract, or None.
+
+    Every Stim-backed source draws under the same contract.
+    """
     if seed is None:
         return None
     if not isinstance(seed, numbers.Integral):

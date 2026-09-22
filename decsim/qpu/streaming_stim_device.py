@@ -13,6 +13,7 @@ import stim
 import decsim.config as config
 import decsim.detector_error_model.detector_formation as formation
 import decsim.detector_error_model.fault_model_contracts as fault_models
+import decsim.qpu.stim_device as stim_device
 import decsim.qpu.stim_stream_models as stream_models
 import decsim.records.circuits as circuit_records
 import decsim.records.program as program_records
@@ -41,7 +42,7 @@ class StreamingStimDevice(seeding._AtomicRunSeedConsumer):
         programs: Mapping[Any, circuit_records.RepeatedStimCircuit],
         seed: Optional[int] = None,
     ) -> None:
-        self._seed = _validated_seed(seed)
+        self._seed = stim_device.validated_seed(seed)
         self._initialize_run_seed_binding(self._seed)
         self._programs = _copied_programs(programs)
         self._streams_by_id: dict[Any, _Stream] = {}
@@ -395,18 +396,6 @@ def _copied_programs(programs):
             raise ValueError("live Stim stream identities must be int or str")
         copied[stream_id] = dataclasses.replace(program)
     return copied
-
-
-def _validated_seed(seed):
-    if seed is None:
-        return None
-    seed_type = type(seed)
-    if seed_type is not int:
-        raise ValueError("seed must be a 64-bit unsigned integer or None")
-    seed_limit = 1 << 64
-    if not 0 <= seed < seed_limit:
-        raise ValueError("seed must be a 64-bit unsigned integer or None")
-    return seed
 
 
 def _stream_seed(seed, stream_id):

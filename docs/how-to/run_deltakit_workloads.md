@@ -91,9 +91,9 @@ PYTHONPATH=. .venv-deltakit/bin/python tools/live_memory_example.py \
 The default noise model is SD6. The prefix requests decoding, protection
 continues on the same live stream, and decoded release permits resume
 and actual final readout. The prefix ends on a window boundary, so
-`--prefix-rounds` is a whole number of the distance (the default 3
-suits distance 3; use 5 or 10 at distance 5), or the first commit
-refuses it. There is no fixed round horizon. Longer feedback
+`--prefix-rounds` is a whole number of the distance; left unset it is
+one window, the distance's rounds. A prefix that ends inside a window
+is refused by the first commit. There is no fixed round horizon. Longer feedback
 adds physical syndrome rounds before destructive readout. The ordinary
 `StreamingStimDevice` retains the quantum state across those rounds;
 decsim owns the wait, the QPU cadence and the stopping decision. The provider
@@ -212,9 +212,9 @@ keeps the patch protected while it waits; the QPU starts the continuation
 on its eligible cycle boundary. Arrival and start are separate events.
 The prefix ends on a window boundary: the rotated surface card commits
 `distance` rounds per window, so `--prefix-rounds` is a multiple of the
-distance (3 or 6 at distance 3). A prefix that ends inside a window is
-refused by the window's commit, because a scored segment cannot share a
-window with its continuation.
+distance (3 or 6 at distance 3), and left unset it is one window. A
+prefix that ends inside a window is refused by the window's commit,
+because a scored segment cannot share a window with its continuation.
 The declared decoder service time prices actual functional PyMatching.
 It is not a measured decoder benchmark or a timing-only substitute.
 

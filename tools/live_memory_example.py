@@ -38,6 +38,8 @@ def main() -> None:
     arguments = _arguments()
     parameters = _physical_parameters(arguments)
     program = _program(arguments.input, parameters)
+    if arguments.prefix_round_count is None:
+        arguments.prefix_round_count = parameters["distance"]
     source = streaming_stim_device.StreamingStimDevice(
         programs={STREAM_OWNER_ID: program}
     )
@@ -158,9 +160,9 @@ def protection_workload(
 def _arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     _physical_arguments(parser)
-    parser.add_argument(
-        "--prefix-rounds", dest="prefix_round_count", type=int, default=3
-    )
+    # a prefix ends on a window boundary; the default is one window, the
+    # distance's rounds, so it follows the distance
+    parser.add_argument("--prefix-rounds", dest="prefix_round_count", type=int)
     parser.add_argument("--feedback-microseconds", type=float, default=4.0)
     parser.add_argument("--decoder-microseconds", type=float, default=0.1)
     parser.add_argument("--seed", type=int, default=17)

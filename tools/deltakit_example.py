@@ -290,7 +290,9 @@ def _arguments() -> argparse.Namespace:
         choices=("rotated_surface", "repetition"),
     )
     parser.add_argument("--rounds", type=int)
-    parser.add_argument("--prefix-rounds", type=int, default=3)
+    # a prefix ends on a window boundary; the default is one window, the
+    # distance's rounds, so it follows the distance
+    parser.add_argument("--prefix-rounds", type=int)
     parser.add_argument("--basis", choices=("X", "Z"))
     parser.add_argument("--probability", type=float)
     parser.add_argument("--period-microseconds", type=float, default=1.1)
@@ -322,6 +324,8 @@ def _resolve_memory_parameters(arguments) -> None:
         _check_replay_parameter(arguments.input, name, selected, value)
         if selected is None:
             setattr(arguments, name, value)
+    if arguments.prefix_rounds is None:
+        arguments.prefix_rounds = arguments.distance
 
 
 def _check_replay_parameter(input_folder, name, selected, recorded) -> None:

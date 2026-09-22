@@ -240,17 +240,17 @@ class WindowManager:
         """
         operation = self.tracker.operation_by_id[packet.operation_id]
         self._refuse_unplanned_round(packet, operation)
-        if self.retention.primary_tier is not window_records.DecoderTier.STRONG:
-            # The weak syndrome buffer publication is the readiness authority
-            # for the weak lane
-            self._count_arrival(operation, packet.round_index)
-            self._update_stream(operation.id)
-            self._wake_strong_tier(operation.id)
-            self._wake_windows(operation)
+        # The weak syndrome buffer publication is the readiness authority
+        # for the weak lane; a strong-primary run's rounds never come here
+        # (controller/syndrome_round_sender.py writes them to the strong
+        # store alone)
+        self._count_arrival(operation, packet.round_index)
+        self._update_stream(operation.id)
+        self._wake_strong_tier(operation.id)
+        self._wake_windows(operation)
         # a round whose every consumer already resolved (an absorbed window's
-        # tail, or every round of a strong-primary plan) frees its the weak
-        # syndrome buffer slot on arrival, the same drop-on-arrival rule strong
-        # syndrome buffer applies
+        # tail) frees its weak syndrome buffer slot on arrival, the same
+        # drop-on-arrival rule the strong syndrome buffer applies
         round_key = (packet.operation_id, packet.round_index)
         self.retention.release_round_if_unheld(round_key)
 

@@ -28,6 +28,10 @@ import decsim.qpu.stim_device as stim_device
 import decsim.records.program as program_records
 import decsim.settings as machine_settings
 
+# The stream owner: the operation whose live stream the segments extend
+# and whose complete result the run scores.
+STREAM_OWNER_ID = 100
+
 
 def main() -> None:
     """Write the input circuit, settings, result and trace into one folder."""
@@ -93,7 +97,11 @@ def protection_workload(
     if not 1 <= prefix_round_count < round_count:
         raise ValueError("prefix rounds must lie inside the finite horizon")
     owner = program_records.Operation(
-        100, "protected-memory", (patch,), patches=(patch,), circuit=circuit
+        STREAM_OWNER_ID,
+        "protected-memory",
+        (patch,),
+        patches=(patch,),
+        circuit=circuit,
     )
     prefix = program_records.Operation(
         1,
@@ -101,7 +109,7 @@ def protection_workload(
         (patch,),
         patches=(patch,),
         circuit=circuit,
-        stream_id=100,
+        stream_id=STREAM_OWNER_ID,
         stream_offset=0,
     )
     begin = program_records.Operation(
@@ -130,8 +138,14 @@ def protection_workload(
         scheduled_start_round=round_count,
         emits_detector_data=False,
     )
-    region = program_records.ProtectedRegion(100, 2, 4)
-    counts = {100: round_count, 1: prefix_round_count, 2: 0, 3: 1, 4: 0}
+    region = program_records.ProtectedRegion(STREAM_OWNER_ID, 2, 4)
+    counts = {
+        STREAM_OWNER_ID: round_count,
+        1: prefix_round_count,
+        2: 0,
+        3: 1,
+        4: 0,
+    }
     policy = round_policies.PerOperationRounds(counts)
     return workload_settings.WorkloadSettings(
         operations=(prefix, begin, resume, finish),

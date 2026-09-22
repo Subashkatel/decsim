@@ -176,7 +176,9 @@ def test_protected_segments_emit_one_faulted_history_without_resampling() -> (
     workload = example.protection_workload(circuit, 24, 3, "patch")
     settings = _settings(circuit, mapping, workload, 3, 24)
     source = sources.RecordedStimDevice(
-        measurements, 0, measurement_rounds={100: mapping}
+        measurements,
+        0,
+        measurement_rounds={example.STREAM_OWNER_ID: mapping},
     )
     qpu = dataclasses.replace(settings.qpu, device=source)
     settings = dataclasses.replace(settings, qpu=qpu)
@@ -187,7 +189,9 @@ def test_protected_segments_emit_one_faulted_history_without_resampling() -> (
     emitted = tuple(bit for packet in readouts for bit in packet.bits)
     assert emitted == tuple(measurements[0])
     assert [packet.round_index for packet in readouts] == list(range(1, 25))
-    assert {packet.operation_id for packet in readouts} == {100}
+    assert {packet.operation_id for packet in readouts} == {
+        example.STREAM_OWNER_ID
+    }
     assert result.operation_results[-1].observable_truth == (1,)
     assert result.operation_results[-1].logical_failure is True
 

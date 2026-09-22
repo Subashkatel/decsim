@@ -28,13 +28,19 @@ import decsim.records.program as program_records
 import decsim.records.results as result_records
 import decsim.settings as machine_settings
 
+# The stream owner: the operation whose live stream the segments extend
+# and whose complete result the run scores.
+STREAM_OWNER_ID = 100
+
 
 def main() -> None:
     """Save canonical inputs and the physical history selected by feedback."""
     arguments = _arguments()
     parameters = _physical_parameters(arguments)
     program = _program(arguments.input, parameters)
-    source = streaming_stim_device.StreamingStimDevice(programs={100: program})
+    source = streaming_stim_device.StreamingStimDevice(
+        programs={STREAM_OWNER_ID: program}
+    )
     settings = live_settings(
         source,
         distance=parameters["distance"],
@@ -102,9 +108,16 @@ def protection_workload(
     """
     if prefix_round_count < 1:
         raise ValueError("prefix_round_count must be positive")
-    owner = program_records.Operation(100, "memory", (patch,), patches=(patch,))
+    owner = program_records.Operation(
+        STREAM_OWNER_ID, "memory", (patch,), patches=(patch,)
+    )
     prefix = program_records.Operation(
-        1, "prefix", (patch,), patches=(patch,), stream_id=100, stream_offset=0
+        1,
+        "prefix",
+        (patch,),
+        patches=(patch,),
+        stream_id=STREAM_OWNER_ID,
+        stream_offset=0,
     )
     begin = program_records.Operation(
         2,
@@ -131,8 +144,8 @@ def protection_workload(
         predecessors=(3,),
         emits_detector_data=False,
     )
-    region = program_records.ProtectedRegion(100, 2, 4)
-    counts = {100: 0, 1: prefix_round_count, 2: 0, 3: 1, 4: 0}
+    region = program_records.ProtectedRegion(STREAM_OWNER_ID, 2, 4)
+    counts = {STREAM_OWNER_ID: 0, 1: prefix_round_count, 2: 0, 3: 1, 4: 0}
     policy = round_policies.PerOperationRounds(counts)
     return workload_settings.WorkloadSettings(
         operations=(prefix, begin, resume, finish),
@@ -279,13 +292,13 @@ def _write_execution(
     machine: machine_module.Machine,
     result: result_records.RunResult,
 ) -> None:
-    circuit = source.executed_circuit(100)
+    circuit = source.executed_circuit(STREAM_OWNER_ID)
     circuit_path = folder / "executed.stim"
     circuit.to_file(str(circuit_path))
-    measurement_rounds = source.measurement_rounds_for_stream(100)
+    measurement_rounds = source.measurement_rounds_for_stream(STREAM_OWNER_ID)
     mapping_path = folder / "measurement_rounds.json"
     _write_json(mapping_path, measurement_rounds)
-    measurements = source.sampled_measurements(100)
+    measurements = source.sampled_measurements(STREAM_OWNER_ID)
     measurement_path = folder / "measurements.json"
     _write_json(measurement_path, measurements)
     result_values = dataclasses.asdict(result)

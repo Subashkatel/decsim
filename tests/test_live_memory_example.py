@@ -176,7 +176,9 @@ def test_prefix_requires_a_physical_measurement_round() -> None:
 
 def test_public_settings_keep_the_user_patch_in_a_complete_live_run() -> None:
     program = memory_programs.memory_program()
-    source = streaming_stim_device.StreamingStimDevice(programs={100: program})
+    source = streaming_stim_device.StreamingStimDevice(
+        programs={example.STREAM_OWNER_ID: program}
+    )
     settings = example.live_settings(
         source,
         distance=3,
@@ -191,7 +193,7 @@ def test_public_settings_keep_the_user_patch_in_a_complete_live_run() -> None:
     machine = machine_module.Machine.build(settings, seed=81)
     result = machine.run()
     assert result.terminal_status == "complete"
-    assert source.logical_observable_truth(100) is not None
+    assert source.logical_observable_truth(example.STREAM_OWNER_ID) is not None
 
 
 def _canonical_inputs(folder: pathlib.Path) -> pathlib.Path:

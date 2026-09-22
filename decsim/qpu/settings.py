@@ -49,8 +49,12 @@ class QpuSettings:
     (2112.03708), Yang 1.25 us (2605.04892). The code card is a rotated
     surface code of the distance, with the windows section's commit and
     buffer sizes; a Python-built code, layout, device or error-model
-    provider is used as it is. The arguments are the source row's
-    keyword arguments (a seed, a recorded shot's measurements).
+    provider is used as it is. The card provisions the links and sizes
+    the circuit-less sources' rounds; a circuit source's payloads carry
+    the circuit's own widths, so a card and a circuit at different
+    distances run links provisioned for the wrong code. The arguments
+    are the source row's keyword arguments (a seed, a recorded shot's
+    measurements).
     """
 
     kind: str = "timing_only"

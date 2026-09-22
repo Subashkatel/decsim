@@ -90,7 +90,10 @@ PYTHONPATH=. .venv-deltakit/bin/python tools/live_memory_example.py \
 
 The default noise model is SD6. The prefix requests decoding, protection
 continues on the same live stream, and decoded release permits resume
-and actual final readout. There is no fixed round horizon. Longer feedback
+and actual final readout. The prefix ends on a window boundary, so
+`--prefix-rounds` is a whole number of the distance (the default 3
+suits distance 3; use 5 or 10 at distance 5), or the first commit
+refuses it. There is no fixed round horizon. Longer feedback
 adds physical syndrome rounds before destructive readout. The ordinary
 `StreamingStimDevice` retains the quantum state across those rounds;
 decsim owns the wait, the QPU cadence and the stopping decision. The provider

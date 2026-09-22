@@ -105,16 +105,6 @@ def test_a_final_readout_without_observables_has_no_accuracy_truth() -> None:
     assert source.logical_observable_truth(owner.id) is None
 
 
-def test_measurement_closed_feedback_is_refused_before_sampling() -> None:
-    source, owner = _source()
-    closed = dataclasses.replace(
-        owner, feedback_boundary_mode="measurement_closed"
-    )
-    with pytest.raises(ValueError, match="trailing-buffer feedback"):
-        source.begin_operation(closed, 1, 0, round_period_ticks=1_100_000)
-    assert source.sampled_measurements(owner.id) == ()
-
-
 def test_idle_first_refuses_a_measurement_closed_owner() -> None:
     program = memory_programs.memory_program()
     source = streaming_stim_device.StreamingStimDevice(programs={1: program})

@@ -95,10 +95,6 @@ class StreamingStimDevice(seeding._AtomicRunSeedConsumer):
         """Bind a segment to its live stream without sampling ahead."""
         del segment_round_count
         del source_round_count
-        if operation.feedback_boundary_mode == "measurement_closed":
-            raise ValueError(
-                "live Stim memory requires trailing-buffer feedback"
-            )
         stream_id = _stream_id_of(operation)
         if stream_id not in self._streams_by_id:
             raise ValueError("live Stim memory requires a registered stream")

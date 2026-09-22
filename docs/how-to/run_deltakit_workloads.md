@@ -157,11 +157,11 @@ block = deltakit.css_memory_rounds(
 block_source = streaming_stim_device.StreamingStimDevice({100: block})
 ```
 
-Use a two-patch owner for the Bell source. It prepares two rotated-surface blocks
-with a transversal CNOT and reports their joint parity in X or Z. This is a
-physical Bell-memory experiment, not high-level lattice surgery. Its explicit
-wait slots make every exported fragment occupy the declared period and receive
-the selected idle noise exactly once.
+Use a two-patch owner for the Bell source. It prepares two rotated-surface
+blocks with a transversal CNOT and reports their joint parity in X or Z.
+This is a physical Bell-memory experiment, not high-level lattice surgery.
+Its explicit wait slots make every exported fragment occupy the declared
+period and receive the selected idle noise exactly once.
 
 The BB example is one [[30,8,2]] block with eight logical outputs. Use one
 physical resource patch and eight logical qubit identities: the owner's

@@ -19,8 +19,11 @@ class RepeatedStimCircuit:
     fragment contains a complete last round and destructive readout;
     single_round contains preparation and readout for a one-round run.
     All fragments use the same physical qubit and logical observable ids.
-    A declared period binds duration-dependent physics to the QPU cadence;
-    None leaves cadence independent of the circuit's noise probabilities.
+    A declared period binds duration-dependent physics to the QPU cadence,
+    and the live source checks it against the run's period before it
+    executes. None leaves cadence independent of the circuit's noise
+    probabilities and skips that check: every fragment, preparation and
+    the terminal readout included, is then charged one round period.
     """
 
     first_round: stim.Circuit

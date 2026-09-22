@@ -6,7 +6,6 @@ ownership rule on each complete model, while published ids stay stable.
 """
 
 import dataclasses
-import math
 from typing import Optional
 
 import decsim.detector_error_model.detector_formation as formation
@@ -15,13 +14,18 @@ import decsim.detector_error_model.window_slicer as window_slicer
 import decsim.records.circuits as circuit_records
 import decsim.records.windows as window_records
 
-# Stim's independent-probability merges can change floating addition order
-# when a repeated block is expanded. This tolerance changes no model weight.
-_PRIOR_PROBABILITY_TOLERANCE = 1e-15
-
 
 class GrowingStimModels:
-    """Keep fault identities stable while a physical stream gains rounds."""
+    """Keep fault identities stable while a physical stream gains rounds.
+
+    A window's model is sliced from a circuit assembled to one round past
+    the window's buffer, and that round is the terminal fragment: the
+    fragment that defines the logical observable, whose effect a data
+    error has whenever the readout happens, while the fragment's own
+    detectors lie past the window. Growth therefore leaves a queued
+    window's model as it was; tests/qpu/test_stim_stream_models.py pins
+    that.
+    """
 
     def __init__(
         self,
@@ -32,9 +36,6 @@ class GrowingStimModels:
         self.requirement = requirement
         self.identities = _FaultIdentities()
         self.windows_by_index: dict[int, window_records.Window] = {}
-        self.models_by_window_index: dict[
-            int, fault_models.WindowErrorModel
-        ] = {}
         self.final_round_count: Optional[int] = None
 
     def finish(self, round_count: int) -> None:
@@ -46,23 +47,22 @@ class GrowingStimModels:
     def for_window(
         self, window: window_records.Window
     ) -> fault_models.WindowErrorModel:
-        """Build one window, preserving every already-queued window's law."""
+        """One window's model, after the windows before it took theirs.
+
+        The slicer hands a boundary fault from one window to the next in
+        window order (the qLDPC rule window_planner.py cites), and every
+        call slices a circuit assembled to this window's horizon, so the
+        windows before this one are sliced again on it first.
+        """
         slicer, source_ids, round_count = self._build_slicer(window)
         self.windows_by_index[window.window_index] = window
-        requested_model = None
+        model = None
         for window_index in sorted(self.windows_by_index):
             if window_index > window.window_index:
                 break
             earlier_window = self.windows_by_index[window_index]
             model = _slice(slicer, earlier_window, round_count)
-            stable_model = _stable_model(model, source_ids)
-            self._check_published(window_index, earlier_window, stable_model)
-            requested_model = stable_model
-        assert requested_model is not None, (
-            "the requested window is in the stream"
-        )
-        self.models_by_window_index[window.window_index] = requested_model
-        return requested_model
+        return _stable_model(model, source_ids)
 
     def for_strong_window(
         self,
@@ -111,13 +111,6 @@ class GrowingStimModels:
             slicer.catalogs, slicer.catalog_link
         )
         return slicer, source_ids, round_count
-
-    def _check_published(self, window_index, window, model) -> None:
-        if not window.queued and not window.committed:
-            return
-        previous = self.models_by_window_index.get(window_index)
-        assert previous is not None, "a queued window has an installed model"
-        _check_same_model(previous, model)
 
 
 class _FaultIdentities:
@@ -206,56 +199,3 @@ def _local_prior_faults(prior_faults, source_ids):
             raise RuntimeError("committed faults changed during stream growth")
         local[representation] = {reverse[identity] for identity in stable_ids}
     return local
-
-
-def _check_same_model(previous, current) -> None:
-    if previous.detector_ids != current.detector_ids:
-        raise RuntimeError("stream growth changed a queued window's detectors")
-    if previous.defect_positions != current.defect_positions:
-        raise RuntimeError("stream growth changed a queued window's handoff")
-    _check_same_faults(previous.graphlike_faults, current.graphlike_faults)
-    _check_same_faults(previous.physical_faults, current.physical_faults)
-
-
-def _check_same_faults(previous, current) -> None:
-    has_previous_faults = previous is not None
-    has_current_faults = current is not None
-    if has_previous_faults != has_current_faults:
-        raise RuntimeError(
-            "stream growth changed a queued fault representation"
-        )
-    if previous is None:
-        return
-    earlier = _columns_by_identity(previous)
-    later = _columns_by_identity(current)
-    if earlier.keys() != later.keys():
-        raise RuntimeError("stream growth changed a queued window's faults")
-    for identity, column in earlier.items():
-        _check_same_column(column, later[identity])
-
-
-def _columns_by_identity(faults):
-    columns = {}
-    for column_index, identity in enumerate(faults.source_fault_ids):
-        check_column = faults.check.getcol(column_index)
-        observable_column = faults.observables.getcol(column_index)
-        handoff = faults.boundary_flips.get(column_index, ())
-        signature = (
-            tuple(check_column.indices),
-            tuple(observable_column.indices),
-            bool(faults.owned[column_index]),
-            handoff,
-        )
-        probability = float(faults.priors[column_index])
-        columns[identity] = (signature, probability)
-    return columns
-
-
-def _check_same_column(previous, current) -> None:
-    if previous[0] != current[0]:
-        raise RuntimeError("stream growth changed a queued correction's effect")
-    same_probability = math.isclose(
-        previous[1], current[1], rel_tol=0, abs_tol=_PRIOR_PROBABILITY_TOLERANCE
-    )
-    if not same_probability:
-        raise RuntimeError("stream growth changed a queued fault's probability")

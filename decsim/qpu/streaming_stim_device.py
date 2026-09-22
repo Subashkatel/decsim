@@ -145,14 +145,7 @@ class StreamingStimDevice(seeding._AtomicRunSeedConsumer):
     ) -> tuple[int, ...]:
         """Form arrived records using retained measurements across rounds."""
         stream = self._stream_for(operation_id)
-        table = stream.history.table
-        assert table is not None, "formation follows physical execution"
-        if stream.former is None:
-            stream.former = formation.StreamingDetectorFormer(table)
-        else:
-            stream.former.extend_table(table)
-        events, _ = stream.former.feed_packet(round_index, raw_bits)
-        return tuple(value for _, value in events)
+        return stream.history.form_round(round_index, raw_bits)
 
     def logical_observable_truth(
         self, operation_id: Any
@@ -334,19 +327,22 @@ class StreamingStimDevice(seeding._AtomicRunSeedConsumer):
         self.shot_sampled.fire(operation, events)
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class _Stream:
-    """The state owned by one registered source stream."""
+    """One registered source stream: its owner, program and history."""
 
     owner: program_records.Operation
     program: circuit_records.RepeatedStimCircuit
     history: "_History"
     round_period_ticks: Optional[int]
-    former: Optional[formation.StreamingDetectorFormer] = None
 
 
 class _History:
-    """The physical instructions and measurements executed so far."""
+    """The physical instructions and measurements executed so far.
+
+    The former holds the formation table of the circuit so far and forms
+    arrived rounds against it; every appended fragment extends it.
+    """
 
     def __init__(self, seed: Optional[int]) -> None:
         self.simulator = stim.TableauSimulator(seed=seed)
@@ -354,7 +350,7 @@ class _History:
         self.measurement_rounds: dict[int, int] = {}
         self.round_count = 0
         self.is_final = False
-        self.table: Optional[formation.FormationTable] = None
+        self.former: Optional[formation.StreamingDetectorFormer] = None
 
     def append(self, fragment: stim.Circuit, is_final: bool) -> tuple[int, ...]:
         first_measurement = self.circuit.num_measurements
@@ -365,23 +361,34 @@ class _History:
         after_last_measurement = self.circuit.num_measurements
         for index in range(first_measurement, after_last_measurement):
             self.measurement_rounds[index] = self.round_count
-        self.table = formation.build_formation_table(
+        table = formation.build_formation_table(
             self.circuit,
             self.round_count,
             measurement_rounds=self.measurement_rounds,
         )
+        if self.former is None:
+            self.former = formation.StreamingDetectorFormer(table)
+        else:
+            self.former.extend_table(table)
         measurements = self.simulator.current_measurement_record()
         new_measurements = measurements[first_measurement:]
         return tuple(int(bit) for bit in new_measurements)
 
+    def form_round(
+        self, round_index: int, raw_bits: Sequence[int]
+    ) -> tuple[int, ...]:
+        """One arrived round's detection events against the table so far."""
+        assert self.former is not None, "formation follows physical execution"
+        events, _ = self.former.feed_packet(round_index, raw_bits)
+        return tuple(value for _, value in events)
+
     def formed_shot(self) -> tuple[tuple[int, ...], tuple[int, ...]]:
-        if self.table is None:
+        if self.former is None:
             return (), ()
+        table = self.former.table
         measurements = self.simulator.current_measurement_record()
-        packets = formation.split_measurements_into_packets(
-            self.table, measurements
-        )
-        return formation.form_shot(self.table, packets)
+        packets = formation.split_measurements_into_packets(table, measurements)
+        return formation.form_shot(table, packets)
 
 
 def _copied_programs(programs):

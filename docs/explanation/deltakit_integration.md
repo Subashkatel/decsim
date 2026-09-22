@@ -83,21 +83,22 @@ raw shot.
 
 ## Capability boundaries
 
-VERIFIED describes bounded evidence in the tests. It does not establish an
-unrestricted compiler, fault tolerance or a statistical logical error rate.
+Supported means the tests pin it within the stated scope. It does not
+establish an unrestricted compiler, fault tolerance or a statistical
+logical error rate.
 
-| Capability | Status | Physical/backend evidence | decsim scope |
+| Capability | Status | What the tests pin | decsim scope |
 | --- | --- | --- | --- |
-| Surface and repetition memory | VERIFIED | Noisy finite circuits, explicit maps, same-record Stim detector/observable oracle | Functional decoding and SDK-free supplied-input replay |
-| Live surface protection | VERIFIED | One retained state, actual final readout, exact shared-record conversion | Functional decoding with feedback-selected stopping time |
-| Duration-aware memory noise | VERIFIED | Native schedule and T1/T2 channels checked against independent formulas | Live physical cadence checked before execution |
-| Compiler memory | VERIFIED | Public CircuitBuilder, validated terminal records and logical support | Finite supplied-circuit decoding at distances 3 and 5 |
-| Compiler terminal Hadamard | VERIFIED | Both logical bases, conjugate readout, clean and known-fault parity checks | Finite noisy supplied-circuit decoding |
-| High-level LogAsm Hadamard/rotation | BLOCKED | Pinned observable backpropagation rejects these operations | Unsupported through that frontend |
-| Leakage sampling | VERIFIED sampling only | Explicitly allocated Deltakit FlipSimulator preserves heralds and matches whole-circuit execution | Local leakage decoding BLOCKED by unverified model semantics |
-| Shared multi-patch streams | VERIFIED | Retained joint state and complete-record Stim oracle, including interleaved acquisitions | Whole-group lifetime, strong and weak primary routes |
-| Transversal Bell memory | VERIFIED | Initial cross-patch check parities, both bases, d3/d5, explicit physical wait noise | Live two-patch functional decoding; no lattice-surgery claim |
-| qLDPC/bivariate bicycle | VERIFIED bounded example | Public [[30,8,2]] CSS code, all eight outputs, undecomposed noisy model | BP-OSD agreement, live feedback and higher-index logical-failure detection |
+| Surface and repetition memory | supported | Noisy finite circuits, explicit maps, same-record Stim detector/observable oracle | Functional decoding and SDK-free supplied-input replay |
+| Live surface protection | supported | One retained state, actual final readout, exact shared-record conversion | Functional decoding with feedback-selected stopping time |
+| Duration-aware memory noise | supported | Native schedule and T1/T2 channels checked against independent formulas | Live physical cadence checked before execution |
+| Compiler memory | supported | Public CircuitBuilder, validated terminal records and logical support | Finite supplied-circuit decoding at distances 3 and 5 |
+| Compiler terminal Hadamard | supported | Both logical bases, conjugate readout, clean and known-fault parity checks | Finite noisy supplied-circuit decoding |
+| High-level LogAsm Hadamard/rotation | not supported | Pinned observable backpropagation rejects these operations | Unsupported through that frontend |
+| Leakage sampling | supported, sampling only | Explicitly allocated Deltakit FlipSimulator preserves heralds and matches whole-circuit execution | Local leakage decoding not supported: the leakage model semantics are unverified |
+| Shared multi-patch streams | supported | Retained joint state and complete-record Stim oracle, including interleaved acquisitions | Whole-group lifetime, strong and weak primary routes |
+| Transversal Bell memory | supported | Initial cross-patch check parities, both bases, d3/d5, explicit physical wait noise | Live two-patch functional decoding; no lattice-surgery claim |
+| qLDPC/bivariate bicycle | supported, one bounded example | Public [[30,8,2]] CSS code, all eight outputs, undecomposed noisy model | BP-OSD agreement, live feedback and higher-index logical-failure detection |
 
 Compiler Hadamard is transversal H followed immediately by destructive readout
 in the conjugate basis. It does not establish continued extraction in the old

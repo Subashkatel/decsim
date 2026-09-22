@@ -220,7 +220,8 @@ def test_physical_idle_noise_uses_the_declared_cadence(
     )
     channel = _first_instruction(fragments.repeated_round, "PAULI_CHANNEL_1")
     actual = channel.gate_args_copy()
-    gate_microseconds = period_microseconds / 6
+    layer_count = _layer_count(fragments.repeated_round)
+    gate_microseconds = period_microseconds / layer_count
     expected = _idle_probabilities(gate_microseconds, 20, 30)
     numpy.testing.assert_allclose(actual, expected, rtol=1e-5)
     gate_channel = _first_instruction(fragments.repeated_round, "DEPOLARIZE2")
@@ -435,7 +436,9 @@ def test_bell_physical_padding_charges_one_declared_idle_slot(
     channel = padding[0]
     assert channel.name == "PAULI_CHANNEL_1"
     actual = channel.gate_args_copy()
-    slot_microseconds = period_microseconds / 7
+    # the gate layers and the one explicit wait slot share the period
+    slot_count = _layer_count(fragments.repeated_round) + 1
+    slot_microseconds = period_microseconds / slot_count
     expected = _idle_probabilities(slot_microseconds, 20, 30)
     numpy.testing.assert_allclose(actual, expected, rtol=1e-5)
     targets = channel.targets_copy()
@@ -674,6 +677,14 @@ def _first_instruction(
         if instruction.name == name:
             return instruction
     raise AssertionError(f"Expected a {name} noise channel")
+
+
+def _layer_count(fragment) -> int:
+    """The gate layers of an exported round: one TICK closes each."""
+    ticks = [
+        instruction for instruction in fragment if instruction.name == "TICK"
+    ]
+    return len(ticks)
 
 
 def _idle_probabilities(

@@ -16,6 +16,12 @@ import stim
 
 import decsim.records.circuits as circuit_records
 
+# The smallest memory whose export has a distinct first round, a repeated
+# interior round and a terminal round: four rounds, so the interior repeat
+# block holds two.
+TEMPLATE_ROUND_COUNT = 4
+TEMPLATE_REPEAT_COUNT = TEMPLATE_ROUND_COUNT - 2
+
 if TYPE_CHECKING:
     import deltakit_circuit as circuit_api
     import deltakit_circuit.gates as gates
@@ -139,7 +145,9 @@ def css_memory_rounds(
     )
     device = _memory_device(code, round_period_microseconds, noise)
     qubit_mapping = _qubit_mapping(code.qubits)
-    template = _compile_memory(code, logical_basis, 4, device)
+    template = _compile_memory(
+        code, logical_basis, TEMPLATE_ROUND_COUNT, device
+    )
     single = _compile_memory(code, logical_basis, 1, device)
     exported = _export_compiled_memory(template, device, qubit_mapping)
     single_round = _export_compiled_memory(single, device, qubit_mapping)
@@ -172,11 +180,12 @@ def bell_memory_rounds(
     the finite templates and their reusable physical fragments.
     """
     _require_explorer()
-    _check_memory_parameters(distance, 1, basis)
+    check_positive_integer(distance, "distance")
+    _check_basis(basis)
     check_probability(physical_error_probability)
     _positive_duration(round_period_microseconds, "round_period_microseconds")
     left, right = _bell_patches(distance)
-    template = _bell_experiment(left, right, basis, 4)
+    template = _bell_experiment(left, right, basis, TEMPLATE_ROUND_COUNT)
     single = _bell_experiment(left, right, basis, 1)
     noise = _memory_noise(
         noise_model,
@@ -300,6 +309,16 @@ def _physical_noise(
     relaxation_microseconds: Optional[float],
     dephasing_microseconds: Optional[float],
 ) -> "qpu.PhysicalNoise":
+    """The Explorer's T1/T2 idle noise with one probability at every gate.
+
+    Idle noise per interval is the Pauli channel of Ghosh et al.
+    1210.5799 equation 10 (Explorer qpu/_noise/_noise_parameters.py,
+    which also refuses a T2 of twice T1 or more). The Explorer takes a
+    separate probability for one-qubit gates, two-qubit gates, resets,
+    measurement and readout flips; this frontend puts the one supplied
+    probability at all five, a simplification of its own, so the T1/T2
+    times are the only place the two models differ.
+    """
     import deltakit_explorer.qpu as qpu
 
     if relaxation_microseconds is None or dephasing_microseconds is None:
@@ -308,12 +327,6 @@ def _physical_noise(
         )
     _positive_duration(relaxation_microseconds, "relaxation_time_microseconds")
     _positive_duration(dephasing_microseconds, "dephasing_time_microseconds")
-    maximum_dephasing_microseconds = 2 * relaxation_microseconds
-    if dephasing_microseconds >= maximum_dephasing_microseconds:
-        raise ValueError(
-            "dephasing_time_microseconds must be less than twice "
-            "relaxation_time_microseconds"
-        )
     relaxation_seconds = relaxation_microseconds * 1e-6
     dephasing_seconds = dephasing_microseconds * 1e-6
     return qpu.PhysicalNoise(
@@ -344,6 +357,15 @@ def _calibrated_device(
     round_period_microseconds: float,
     noise: "qpu.NoiseParameters",
 ) -> "qpu.QPU":
+    """A device whose native schedule of one round fills the round period.
+
+    Every gate family gets the same duration, the period divided by the
+    layers of the reference round, so a round of the schedule takes the
+    declared period. A real cycle is dominated by measurement and reset,
+    not by the gate layers (Google 2408.13687: a 1.1 us cycle), so this
+    even split is the frontend's simplification, and it decides how the
+    physical model's idle noise is spread over the round.
+    """
     import deltakit_explorer.qpu as qpu
 
     native_gates = qpu.ExhaustiveGateSet()
@@ -498,7 +520,7 @@ def _memory_fragments(
         )
     boundary = repeat_indices[0]
     repeat_block = template[boundary]
-    if repeat_block.repeat_count != 2:
+    if repeat_block.repeat_count != TEMPLATE_REPEAT_COUNT:
         raise ValueError(
             "Deltakit four-round memory must repeat two interior rounds"
         )
@@ -538,6 +560,8 @@ def _bell_patches(distance: int) -> tuple["codes.CSSCode", "codes.CSSCode"]:
     import deltakit_circuit as circuit_api
     import deltakit_explorer.codes as codes
 
+    # a rotated planar code of distance d spans x = 0 to 2d, so this shift
+    # leaves one empty column between the two blocks
     offset = 2 * distance
     offset += 2
     shift = circuit_api.Coord2DDelta(offset, 0)

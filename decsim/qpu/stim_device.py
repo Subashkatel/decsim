@@ -106,8 +106,11 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         operation: program_records.Operation,
         segment_round_count: int,
         source_round_count: int,
+        *,
+        round_period_ticks: int,
     ) -> None:
         """Sample one fresh shot, or reuse the stream's shot for a segment."""
+        del round_period_ticks
         if operation.circuit is None:
             raise ValueError("StimDevice operations require a circuit")
         _check_segment(operation, segment_round_count, source_round_count)
@@ -155,10 +158,10 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
             stream_offset = operation.stream_offset
         global_round = round_index + stream_offset
         bits = self._round_packet_bits(key, global_round)
-        patch = _first_patch_or_zero(operation)
+        patches = program_records.patches_of(operation)
         return [
             round_records.QPUReadout(
-                key, patch, global_round, bits=bits, size_bits=len(bits)
+                key, patches, global_round, bits=bits, size_bits=len(bits)
             )
         ]
 
@@ -191,10 +194,10 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
             raise RuntimeError("terminal finalizer has no folded readout bits")
         final_packet = shot.packets[table.round_count]
         bits = final_packet[table.readout_slot_start :]
-        patch = _first_patch_of(operation)
+        patches = program_records.patches_of(operation)
         return [
             round_records.QPUReadout(
-                key, patch, final_round, bits=bits, size_bits=len(bits)
+                key, patches, final_round, bits=bits, size_bits=len(bits)
             )
         ]
 
@@ -203,19 +206,36 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         operation: program_records.Operation,
         stream_id: Any,
         global_round: int,
-        patch: Any,
+        *,
+        is_final: bool,
+        round_period_ticks: int,
     ) -> list[round_records.QPUReadout]:
         """This idle stream round as one raw measurement packet."""
-        del operation
+        patches = program_records.patches_of(operation)
+        del is_final
+        del round_period_ticks
         binding = self._shots.source_binding_by_key[stream_id]
         if not 1 <= global_round <= binding.round_count:
             raise ValueError("idle round is outside the finite source")
         bits = self._round_packet_bits(stream_id, global_round)
         return [
             round_records.QPUReadout(
-                stream_id, patch, global_round, bits=bits, size_bits=len(bits)
+                stream_id, patches, global_round, bits=bits, size_bits=len(bits)
             )
         ]
+
+    def declare_stream(
+        self,
+        stream_operation: program_records.Operation,
+        round_count: int,
+    ) -> Optional[int]:
+        """Bind the finite physical circuit without sampling a shot."""
+        if stream_operation.circuit is None:
+            return None
+        self._bind_source(
+            stream_operation.id, stream_operation.circuit, round_count
+        )
+        return round_count
 
     def register_dynamic_stream(
         self,
@@ -249,19 +269,26 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         stream_round_count: int,
     ) -> None:
         """Refuse a stream whose runtime length differs from its circuit."""
+        binding = self._shots.source_binding_by_key.get(stream_operation.id)
+        if binding is None:
+            return
+        _check_finite_stream_length(
+            stream_operation, stream_round_count, binding.round_count
+        )
+
+    def finalize_stream_models(
+        self,
+        stream_operation: program_records.Operation,
+        stream_round_count: int,
+    ) -> bool:
+        """Require the model's declared finite terminal boundary."""
         stream_model = self._shots.stream_model_by_id.get(stream_operation.id)
         if stream_model is None:
-            return
-        finite_round_count = stream_model.round_count
-        if stream_round_count == finite_round_count:
-            return
-        raise RuntimeError(
-            f"{stream_operation.name} sealed at {stream_round_count} rounds, "
-            f"but its Stim circuit was registered for {finite_round_count} "
-            "rounds. Real-syndrome live streams need an exact finite "
-            "circuit. Use a timing-only stream for unknown feedback length, "
-            "or build the Stim circuit after the stream length is known."
+            return False
+        _check_finite_stream_length(
+            stream_operation, stream_round_count, stream_model.round_count
         )
+        return False
 
     def window_models_for_operation(
         self,
@@ -583,6 +610,20 @@ class _StreamModel:
     slicer: window_slicer.WindowSlicer
 
 
+def _check_finite_stream_length(
+    operation, actual_round_count, expected_round_count
+):
+    if actual_round_count == expected_round_count:
+        return
+    raise RuntimeError(
+        f"{operation.name} sealed at {actual_round_count} rounds, "
+        f"but its Stim circuit was registered for {expected_round_count} "
+        "rounds. Real-syndrome live streams need an exact finite "
+        "circuit. Use a timing-only stream for unknown feedback length, "
+        "or build the Stim circuit after the stream length is known."
+    )
+
+
 def _sample_key_of(operation: program_records.Operation):
     if operation.stream_id is not None:
         return operation.stream_id
@@ -636,20 +677,6 @@ def _check_segment(
 
 def _as_int_bits(bits) -> tuple[int, ...]:
     return tuple(int(bit) for bit in bits)
-
-
-def _first_patch_of(operation: program_records.Operation):
-    if operation.patches:
-        return operation.patches[0]
-    return operation.qubits[0]
-
-
-def _first_patch_or_zero(operation: program_records.Operation):
-    if operation.patches:
-        return operation.patches[0]
-    if operation.qubits:
-        return operation.qubits[0]
-    return 0
 
 
 def _window_span(window: window_records.Window) -> tuple:

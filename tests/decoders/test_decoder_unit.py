@@ -38,7 +38,7 @@ def _carrying_job(label, rounds):
     for round_index in range(rounds):
         fragment = round_records.RetainedSyndromeFragment(
             operation_id=1,
-            patch_id="patch-0",
+            patch_ids=("patch-0",),
             round_index=round_index,
             bits=(0, 1),
             size_bits=2,

@@ -99,9 +99,8 @@ class RunOperationBody:
 
 @dataclass(frozen=True)
 class ProtectedRegion:
-    """One patch allocation generation with inclusive operation endpoints."""
+    """One owner patch group protected between inclusive operation endpoints."""
 
-    patch_id: Any
     stream_id: int
     start_operation_id: int
     end_operation_id: int

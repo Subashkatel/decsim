@@ -13,7 +13,7 @@ import decsim.records.rounds as round_records
 def make_fragment(**overrides):
     values = {
         "operation_id": 7,
-        "patch_id": "patch-a",
+        "patch_ids": ("patch-a",),
         "round_index": 3,
         "bits": (0, 1),
         "size_bits": 2,
@@ -27,7 +27,7 @@ def test_a_timing_only_readout_retains_no_bits():
     """A readout with no bits stays a timing-only fragment."""
     readout = round_records.QPUReadout(
         operation_id="operation",
-        patch_id="patch",
+        patch_ids=("patch",),
         round_index=2,
         bits=None,
         size_bits=2,
@@ -41,7 +41,7 @@ def test_readout_bits_from_a_boolean_array_become_zero_one_integers():
     bits = np.array([True, False, True], dtype=bool)
     readout = round_records.QPUReadout(
         operation_id="operation",
-        patch_id="patch",
+        patch_ids=("patch",),
         round_index=2,
         bits=bits,
         size_bits=3,
@@ -54,7 +54,7 @@ def test_retained_fragment_normalizes_readout_bits():
     """A fragment normalizes the bits and copies the transport metadata."""
     readout = round_records.QPUReadout(
         operation_id="operation",
-        patch_id="patch",
+        patch_ids=("patch",),
         round_index=2,
         bits=[True, 0],
         code="code",
@@ -69,8 +69,8 @@ def test_retained_fragment_normalizes_readout_bits():
 
 def test_round_packet_preserves_supplied_fragment_order():
     """Round packets preserve supplied fragment order without sorting."""
-    later_fragment = make_fragment(patch_id="patch-b", fragment_index=1)
-    earlier_fragment = make_fragment(patch_id="patch-a", fragment_index=0)
+    later_fragment = make_fragment(patch_ids=("patch-b",), fragment_index=1)
+    earlier_fragment = make_fragment(patch_ids=("patch-a",), fragment_index=0)
     packet = round_records.SyndromeRoundPacket(
         operation_id=7,
         round_index=3,

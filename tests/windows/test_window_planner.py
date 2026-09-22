@@ -12,6 +12,7 @@ static plan).
 """
 
 import types
+from typing import Optional
 
 import pytest
 
@@ -70,6 +71,8 @@ class _FiniteSource:
     no model is one of the answers.
     """
 
+    operation_circuit_scope = "none"
+
     def __init__(self, round_limit: int) -> None:
         self.round_limit = round_limit
 
@@ -77,8 +80,14 @@ class _FiniteSource:
         del operation, round_count
         return self.round_limit
 
-    def validate_stream_length(self, operation, stream_round_count):
-        del operation, stream_round_count
+    def finalize_stream_models(
+        self,
+        operation: program_records.Operation,
+        stream_round_count: int,
+    ) -> bool:
+        del operation
+        del stream_round_count
+        return False
 
     def window_models_for_operation(
         self, operation, windows, round_count, **_arguments
@@ -230,7 +239,7 @@ def test_tan_type_1_width_is_s_plus_2b_and_the_seam_is_closed_both_sides():
 def test_a_stream_grows_one_window_when_its_commit_region_begins():
     planner = _planner()
     stream = _stream()
-    planner.register_stream(stream)
+    planner.register_stream(stream, None)
     assert planner.grow_stream("stream", 1, None) != []
     assert planner.grow_stream("stream", 3, None) == []
     created = planner.grow_stream("stream", 7, None)
@@ -243,16 +252,22 @@ def test_a_stream_grows_one_window_when_its_commit_region_begins():
     assert planner.window_count_of("stream") == 3
 
 
-def test_a_finite_source_fixes_the_stream_windows_in_its_own_order():
+@pytest.mark.parametrize("physical_round_limit", [None, 5])
+def test_a_finite_source_fixes_the_stream_windows_in_its_own_order(
+    physical_round_limit: Optional[int],
+) -> None:
     source = _FiniteSource(5)
     planner = _planner(source)
     stream = _stream()
-    limit = planner.register_stream(stream)
+    limit = planner.register_stream(stream, physical_round_limit)
     assert limit == 5
     assert planner.is_finite_stream("stream")
     assert planner.grow_stream("stream", 0, None) == []
     created = planner.grow_stream("stream", 5, None)
-    geometries = [(w.commit_lo, w.commit_hi, w.buffer_hi) for w in created]
+    geometries = [
+        (window.commit_lo, window.commit_hi, window.buffer_hi)
+        for window in created
+    ]
     assert geometries == [(1, 5, 5)]
     assert planner.grow_stream("stream", 9, None) == []
 
@@ -260,7 +275,7 @@ def test_a_finite_source_fixes_the_stream_windows_in_its_own_order():
 def test_the_seal_clips_the_window_holding_the_last_round():
     planner = _planner()
     stream = _stream()
-    planner.register_stream(stream)
+    planner.register_stream(stream, None)
     planner.grow_stream("stream", 5, 5)
     first, second = planner.windows_of("stream")
     assert (second.commit_lo, second.commit_hi) == (4, 5)

@@ -106,16 +106,31 @@ class QPUDevice:
             raise ValueError("QPU boundary query tick must be nonnegative")
         return self.clock.edge(0, tick)
 
+    def are_patches_idle(self, operation_id: Any, patches: tuple) -> bool:
+        """Every group member is idle after the same completed operation."""
+        for patch in patches:
+            idle = self._live.idle_by_patch.get(patch)
+            if idle is None:
+                return False
+            if idle.operation_id != operation_id:
+                return False
+        return True
+
     def emit_idle_stream_round(
         self,
         operation: program_records.Operation,
         stream_id: Any,
         global_round: int,
-        patch: Any,
+        *,
+        is_final: bool,
     ) -> None:
         """Produce and deliver one idle round of a live stream."""
         payloads = self.syndrome_source.idle_round_payloads(
-            operation, stream_id, global_round, patch
+            operation,
+            stream_id,
+            global_round,
+            is_final=is_final,
+            round_period_ticks=self.clock.period_ticks,
         )
         self._deliver(payloads, operation)
 
@@ -124,7 +139,7 @@ class QPUDevice:
     ) -> None:
         """Deliver the timing-only round of an idle patch."""
         payload = round_records.QPUReadout(
-            ("idle", operation_id, patch), patch, round_index
+            ("idle", operation_id, patch), (patch,), round_index
         )
         route = round_records.SyndromePacketRoute.feedback_memory_round(
             operation_id
@@ -205,7 +220,10 @@ class QPUDevice:
             return
         if command.emits_detector_data:
             self.syndrome_source.begin_operation(
-                operation, command.round_count, command.source_round_count
+                operation,
+                command.round_count,
+                command.source_round_count,
+                round_period_ticks=self.clock.period_ticks,
             )
         running = _RunningOperation(command, 0)
         self._live.running_by_operation_id[operation.id] = running
@@ -274,7 +292,7 @@ class QPUDevice:
             readout.operation_id,
             readout.round_index,
             route,
-            readout.patch_id,
+            readout.patch_ids,
         )
         self.trace.round_event.fire(emitted)
         self.readout_receiver.accept_qpu_readout(readout, route)

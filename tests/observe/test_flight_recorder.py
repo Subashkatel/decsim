@@ -117,11 +117,17 @@ def terminal_kinds_of_operation(ledger, operation_id):
     return kinds
 
 
-def record_round_event(recorder, kind, operation_id, round_index, patch=None):
+def record_round_event(
+    recorder: round_events_module.RoundEventRecorder,
+    kind: str,
+    operation_id: object,
+    round_index: int,
+    patch_ids: tuple = (),
+) -> None:
     """One transition of one round on the window-input route, at tick 0."""
     route = round_records.WINDOW_INPUT_ROUTE
     event = round_records.RoundEvent.of(
-        kind, 0, operation_id, round_index, route, patch
+        kind, 0, operation_id, round_index, route, patch_ids
     )
     recorder.record(event)
 
@@ -362,10 +368,10 @@ def test_a_round_dropped_for_want_of_store_room_ends_in_dropped():
     """
     engine = engine_module.Engine()
     recorder = round_events_module.RoundEventRecorder(engine)
-    record_round_event(recorder, "EMITTED", 1, 1, patch=0)
+    record_round_event(recorder, "EMITTED", 1, 1, patch_ids=(0,))
     record_round_event(recorder, "PACKED", 1, 1)
     record_round_event(recorder, "PUBLISHED", 1, 1)
-    record_round_event(recorder, "EMITTED", 1, 2, patch=0)
+    record_round_event(recorder, "EMITTED", 1, 2, patch_ids=(0,))
     record_round_event(recorder, "PACKED", 1, 2)
     record_round_event(recorder, "DROPPED", 1, 2)
     ledger = ledger_of_rounds_alone(recorder)
@@ -387,9 +393,9 @@ def test_a_round_refused_a_reassembly_context_ends_in_dropped():
     """
     engine = engine_module.Engine()
     recorder = round_events_module.RoundEventRecorder(engine)
-    record_round_event(recorder, "EMITTED", 1, 1, patch=0)
-    record_round_event(recorder, "EMITTED", 1, 2, patch=0)
-    record_round_event(recorder, "DROPPED", 1, 2, patch=0)
+    record_round_event(recorder, "EMITTED", 1, 1, patch_ids=(0,))
+    record_round_event(recorder, "EMITTED", 1, 2, patch_ids=(0,))
+    record_round_event(recorder, "DROPPED", 1, 2, patch_ids=(0,))
     record_round_event(recorder, "PACKED", 1, 1)
     record_round_event(recorder, "PUBLISHED", 1, 1)
     ledger = ledger_of_rounds_alone(recorder)

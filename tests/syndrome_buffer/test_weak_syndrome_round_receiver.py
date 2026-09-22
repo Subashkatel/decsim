@@ -66,7 +66,7 @@ def _packed(
 ) -> round_records.PackedRound:
     fragment = round_records.RetainedSyndromeFragment(
         operation_id=1,
-        patch_id=0,
+        patch_ids=(0,),
         round_index=round_index,
         bits=(1, 0),
         size_bits=2,

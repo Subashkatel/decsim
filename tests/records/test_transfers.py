@@ -15,7 +15,7 @@ import decsim.records.windows as window_records
 def make_fragment(patch_id):
     return round_records.RetainedSyndromeFragment(
         operation_id=7,
-        patch_id=patch_id,
+        patch_ids=(patch_id,),
         round_index=3,
         bits=(0, 1),
         size_bits=2,

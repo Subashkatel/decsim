@@ -7,8 +7,19 @@ holds. The load order is the other rule here: streams first, then every
 operation with the windows, then the idle accounting, then the runtime.
 """
 
+from typing import Callable, Optional
+
+import pytest
+
+import decsim.build.escalation as escalation_build
 import decsim.build.listeners as listener_build
+import decsim.build.plan as plan_build
+import decsim.frontends.settings as workload_settings
+import decsim.qpu.round_policies as round_policies
+import decsim.qpu.settings as qpu_settings
+import decsim.records.program as program_records
 import decsim.records.seeds as seed_records
+import decsim.settings as machine_settings
 
 
 def test_each_stochastic_owner_is_named_by_the_field_it_arrived_under():
@@ -34,10 +45,15 @@ def test_a_run_with_no_stochastic_owner_names_no_root():
     assert roots == ()
 
 
-def test_the_workload_reaches_every_component_in_the_stated_order():
-    """Streams, then the windows, then the idle accounting, then the run."""
+@pytest.mark.parametrize("source_round_limit", [None, 11])
+def test_the_workload_reaches_every_component_in_the_stated_order(
+    source_round_limit: Optional[int],
+) -> None:
+    """Physical declaration precedes stream models and execution consumers."""
     order = []
-    plan = _Plan()
+    device = _PhysicalDevice(order, source_round_limit)
+    planned_round_count = 9
+    plan = _plan(device, planned_round_count)
     release = _Recorder("conditional_release", order)
     windows = _Recorder("window_manager", order)
     streams = _Recorder("streams", order)
@@ -50,48 +66,72 @@ def test_the_workload_reaches_every_component_in_the_stated_order():
         "conditional_release.register_blocked_operation",
         "window_manager.register_operation",
         "window_manager.install_planned_holds",
+        "physical_device.declare_stream",
         "window_manager.register_stream",
         "streams.load",
         "window_manager.register_operation",
         "idle_rounds.load",
         "execution_runtime.load_program",
     ]
+    stream = plan.dynamic_streams[0]
+    assert device.declared_streams == [(stream, planned_round_count)]
+    assert windows.calls[2] == (
+        "register_stream",
+        (stream, source_round_limit),
+        {},
+    )
 
 
-class _Operation:
-    """The three fields load_program reads off an operation."""
+def _plan(device: "_PhysicalDevice", round_count: int) -> plan_build.Plan:
+    operation = program_records.Operation(
+        1, "blocked", (0,), blocked_by=2, emits_detector_data=False
+    )
+    blocker = program_records.Operation(2, "blocker", (0,))
+    stream = program_records.Operation(3, "memory", (0,), patches=(0,))
+    rounds_policy = round_policies.FixedRounds(round_count)
+    workload = workload_settings.WorkloadSettings(
+        operations=(operation,),
+        decode_operations=(blocker,),
+        dynamic_streams=(stream,),
+        rounds_policy=rounds_policy,
+    )
+    qpu = qpu_settings.QpuSettings(distance=3, device=device)
+    settings = machine_settings.MachineSettings(workload=workload, qpu=qpu)
+    policy = escalation_build.build_escalation_policy(
+        settings.escalation, settings.weak_decoder
+    )
+    return plan_build.build_plan(settings, policy)
 
-    def __init__(self, operation_id: int, blocked_by=None) -> None:
-        self.id = operation_id
-        self.blocked_by = blocked_by
 
+class _PhysicalDevice:
+    """Declare physical history with a limit independent of planning rounds."""
 
-class _RunPlan:
-    buffering = ()
+    operation_circuit_scope = "none"
 
+    def __init__(self, order: list[str], round_limit: Optional[int]) -> None:
+        self.order = order
+        self.round_limit = round_limit
+        self.declared_streams: list[tuple[program_records.Operation, int]] = []
 
-class _Plan:
-    """A plan with one blocked operation and one stream."""
-
-    def __init__(self) -> None:
-        self.operations = (_Operation(1, blocked_by=2),)
-        self.decode_operations = ()
-        self.dynamic_streams = (_Operation(3),)
-        self.protected_regions = ()
-        self.planned_operations = (_Operation(1),)
-        self.run_plan = _RunPlan()
+    def declare_stream(
+        self, stream: program_records.Operation, round_count: int
+    ) -> Optional[int]:
+        self.order.append("physical_device.declare_stream")
+        self.declared_streams.append((stream, round_count))
+        return self.round_limit
 
 
 class _Recorder:
     """Records every call made on it, by component and method name."""
 
-    def __init__(self, name: str, order: list) -> None:
+    def __init__(self, name: str, order: list[str]) -> None:
         self.name = name
         self.order = order
+        self.calls: list[tuple[str, tuple, dict]] = []
 
-    def __getattr__(self, method_name: str):
-        def record(*arguments, **keywords):
-            del arguments, keywords
+    def __getattr__(self, method_name: str) -> Callable[..., None]:
+        def record(*arguments: object, **keywords: object) -> None:
+            self.calls.append((method_name, arguments, keywords))
             self.order.append(f"{self.name}.{method_name}")
 
         return record

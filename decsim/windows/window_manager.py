@@ -111,7 +111,9 @@ class WindowManager:
             self.retention.open_operation_store(operation.id)
 
     def register_stream(
-        self, stream_operation: program_records.Operation
+        self,
+        stream_operation: program_records.Operation,
+        physical_round_limit: Optional[int],
     ) -> None:
         """Register a stream whose windows are created at runtime."""
         resolved_feedback_mode = stream_operation.feedback_boundary_mode
@@ -121,7 +123,9 @@ class WindowManager:
             stream_operation, feedback_boundary_mode=resolved_feedback_mode
         )
         self.retention.open_operation_store(stream_operation.id)
-        source_round_limit = self.planner.register_stream(stream_operation)
+        source_round_limit = self.planner.register_stream(
+            stream_operation, physical_round_limit
+        )
         self.tracker.register_stream(stream_operation, source_round_limit)
 
     def install_planned_holds(self, buffering_plan) -> None:
@@ -186,7 +190,9 @@ class WindowManager:
         """Close a dynamic stream once its full length has arrived."""
         if self.tracker.is_sealed(stream_id):
             return
-        self.tracker.check_stream_length(stream_id, stream_round_count)
+        models_changed = self.tracker.finalize_stream_models(
+            stream_id, stream_round_count
+        )
         self._grow_stream(stream_id, stream_round_count, stream_round_count)
         if not self.planner.is_finite_stream(stream_id):
             clipped = self.planner.trim_stream_tail(
@@ -194,6 +200,8 @@ class WindowManager:
             )
             if clipped is not None:
                 self.retention.reset_clipped_window_reads(clipped)
+        if models_changed:
+            self.planner.refresh_stream_models(stream_id)
         self.tracker.seal(stream_id, stream_round_count)
         self.check_windows_for_operation(stream_id)
         self.results.finish_workload_if_ready()

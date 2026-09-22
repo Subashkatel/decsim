@@ -277,12 +277,8 @@ class StrongSyndromeRoundReceiver(Protocol):
     def reserve_write(self) -> None:
         """Take the room one crossing round will need, before it leaves."""
 
-    def receive_round(
-        self,
-        packet: round_records.SyndromeRoundPacket,
-        packet_bits: Optional[int],
-    ) -> None:
-        """Take one round that landed here and keep it on arrival."""
+    def receive_round(self, packed: round_records.PackedRound) -> None:
+        """Store a landed round and deliver it on its canonical route."""
 
     def reserve_region(self, round_count: int) -> None:
         """Take the room an escalated region's rounds will need, or refuse."""
@@ -1210,14 +1206,26 @@ class Qpu(Protocol):
     def finish(self) -> None:
         """The program is complete: idle patches stop after this cycle."""
 
+    def are_patches_idle(self, operation_id: Any, patches: tuple) -> bool:
+        """Every patch is idle after this same operation, as the QPU owns it.
+
+        The controller queries this before advancing a joint stream from
+        per-patch idle callbacks; a busy group member must not execute.
+        """
+
     def emit_idle_stream_round(
         self,
         operation: program_records.Operation,
         stream_id: Any,
         global_round: int,
-        patch: Any,
+        *,
+        is_final: bool,
     ) -> None:
-        """Produce and deliver one idle round of a live stream."""
+        """Deliver one protection round, including readout when it is final.
+
+        is_final requests this round's terminal readout from a live source.
+        It replaces the bulk fragment rather than adding a second round.
+        """
 
     def emit_feedback_memory_round(
         self, operation_id: Any, patch: Any, round_index: int
@@ -1229,46 +1237,96 @@ class Qpu(Protocol):
 class SyndromeSource(Protocol):
     """What the QPU reads out each round for an operation.
 
-    Table rows: stim_device, timing_only, syndrome_bits, recorded_stim.
+    Table rows: stim_device, timing_only, syndrome_bits, recorded_stim,
+    streaming_stim.
     Payload bits are raw measurement bits per round; a source with a
     detector formation table also answers DetectionEventFormer below,
     the port the machine forms a round's detection events through.
 
     shot_sampled(operation, detection_events) is the port's shot source:
-    a row that draws a whole shot fires it once per fresh shot, and a row
-    that draws nothing carries the silent source, so a listener connects
-    to every row by name.
+    a physical source fires it once when its complete shot is available.
+    A live source waits for final readout; a source that draws nothing
+    carries the silent source, so a listener connects to every row by name.
     """
 
+    # none means this consumer does not need Operation.circuit; it does not
+    # require removal when an independent model provider needs the circuit.
     operation_circuit_scope: str
     shot_sampled: Any
+
+    def declare_stream(
+        self,
+        stream_operation: program_records.Operation,
+        round_count: int,
+    ) -> Optional[int]:
+        """Bind physical provenance without sampling or building decode models.
+
+        The root declares each owner after seed binding and before execution.
+        Return the physical round limit, or None for an open-ended source.
+        This declaration is independent of the selected model provider.
+        """
+
+    def validate_stream_length(
+        self,
+        stream_operation: program_records.Operation,
+        stream_round_count: int,
+    ) -> None:
+        """Require a sealed length consistent with the physical history.
+
+        A finite source requires its declared length. A live source requires
+        actual final readout at this length, before decoder models finalize.
+        """
 
     def begin_operation(
         self,
         operation: program_records.Operation,
         segment_round_count: int,
         source_round_count: int,
+        *,
+        round_period_ticks: int,
     ) -> None:
-        """Prepare the operation's rounds (a Stim source samples its shot)."""
+        """Prepare the operation's rounds at the resolved QPU cadence.
+
+        round_period_ticks is the actual physical round period in integer
+        simulator ticks. A duration-dependent source checks it against its
+        declared circuit period before executing any instructions.
+        """
 
     def round_payloads(
         self, operation: program_records.Operation, round_index: int
     ) -> list[round_records.QPUReadout]:
-        """The readouts of one round, one per patch or fragment."""
+        """The round's acquisitions in measurement order.
+
+        Each acquisition names its contributing patches. The QPU assigns
+        fragment_index from list order before transport, unless the operation
+        declares a single fragment's slot in a partitioned round. Sources
+        preserve circuit measurement order here; numbered fragments may
+        arrive out of order downstream without changing that record order.
+        """
 
     def finalize_stream_round(
         self, operation: program_records.Operation, source_round_count: int
     ) -> list[round_records.QPUReadout]:
-        """The stream's final data readout, as its own fragment."""
+        """Final data readout, ordered by the round_payloads contract."""
 
     def idle_round_payloads(
         self,
         operation: program_records.Operation,
         stream_id: Any,
         global_round: int,
-        patch: Any,
+        *,
+        is_final: bool,
+        round_period_ticks: int,
     ) -> list[round_records.QPUReadout]:
-        """The readouts of one idle round on a patch of a live stream."""
+        """The protection round the controller requests, possibly its last.
+
+        round_period_ticks is the resolved QPU cadence in simulator ticks.
+        A duration-dependent source checks it before physical execution.
+        For a live source, is_final selects a terminal fragment containing
+        this round's checks and final data readout in place of a bulk round.
+        A finite source retains its already-declared measurement schedule.
+        Return acquisitions in the measurement order of round_payloads.
+        """
 
     def logical_observable_truth(
         self, operation_id: Any
@@ -1359,6 +1417,10 @@ class WindowModelSource(Protocol):
     window side never imports that package to hold the port.
     """
 
+    # per_operation retains the root-owned circuit; none does not require it.
+    # Both physical and model consumers declare this independently.
+    operation_circuit_scope: str
+
     def window_models_for_operation(
         self,
         operation: program_records.Operation,
@@ -1385,12 +1447,19 @@ class WindowModelSource(Protocol):
     ) -> Optional[int]:
         """Note a dynamic stream; the rounds it can supply, or None."""
 
-    def validate_stream_length(
+    def finalize_stream_models(
         self,
         stream_operation: program_records.Operation,
         stream_round_count: int,
-    ) -> None:
-        """Refuse a stream longer than this source can supply."""
+    ) -> bool:
+        """Bind the terminal boundary; return whether pending models changed.
+
+        Physical source validation has already succeeded. A finite model
+        checks its declared length; an evolving model fixes its final length.
+        The provider needs no physical execution state to answer this call.
+        True requests rebuilding unqueued models without changing any queued
+        or committed model's semantics. False retains the installed models.
+        """
 
     def strong_window_model_for_operation(
         self,

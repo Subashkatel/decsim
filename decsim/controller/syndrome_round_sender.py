@@ -167,9 +167,8 @@ class SyndromeRoundSender:
     def start(self) -> None:
         """Read which store the plan's windows come from, once.
 
-        A strong-primary plan reads its windows from the room side, so a
-        window-input round takes one hop, into the strong store; a
-        feedback-memory round still crosses the weak syndrome buffer. The
+        A strong-primary plan reads its windows from the room side, so
+        every round takes one hop into the strong store. The
         window side settles that when the root wires it and never moves it
         again, so the sender reads it here rather than at every admit.
         """
@@ -180,23 +179,17 @@ class SyndromeRoundSender:
 
     def admit(self, packed: round_records.PackedRound) -> bool:
         """Write the round where it belongs; False when it found no room."""
-        if self._takes_the_strong_hop_only(packed):
+        if self.publishes_from_strong_store:
             if not self.strong_receiver.has_room():
                 return self.held_rounds.refuse(packed, self.admit)
             self._write_strong(packed)
             return True
         if not self.weak_receiver.has_room():
             return self.held_rounds.refuse(packed, self.admit)
-        if not self._strong_has_room():
-            return self.held_rounds.refuse(packed, self.admit)
         # the round takes its weak syndrome buffer slot when its bits are
         # there: the room is reserved here, and the landing stores and
         # publishes it
         self.weak_receiver.reserve_write()
-        if self.publishes_from_strong_store:
-            # a strong-primary run's feedback-memory round: the room side
-            # counts it too, as it counts every round of such a run
-            self._write_strong(packed)
         self.transmitter.send(packed)
         return True
 
@@ -207,18 +200,6 @@ class SyndromeRoundSender:
                 f"run ended with {self.held_rounds.count} rounds held for "
                 f"store room"
             )
-
-    def _takes_the_strong_hop_only(
-        self, packed: round_records.PackedRound
-    ) -> bool:
-        window_input = round_records.SyndromePacketRouteKind.WINDOW_INPUT
-        on_window_route = packed.route.kind is window_input
-        return on_window_route and self.publishes_from_strong_store
-
-    def _strong_has_room(self) -> bool:
-        if not self.publishes_from_strong_store:
-            return True
-        return self.strong_receiver.has_room()
 
     def _write_strong(self, packed: round_records.PackedRound) -> None:
         """Carry the round over its link to the strong syndrome buffer.
@@ -248,7 +229,7 @@ class SyndromeRoundSender:
         self, packed: round_records.PackedRound, _transfer
     ) -> None:
         """The strong syndrome buffer took the round and handles the landing."""
-        self.strong_receiver.receive_round(packed.packet, packed.wire_bits)
+        self.strong_receiver.receive_round(packed)
 
 
 @dataclasses.dataclass(frozen=True)

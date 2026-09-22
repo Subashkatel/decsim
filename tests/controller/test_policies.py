@@ -32,10 +32,10 @@ class RecordingIdleRounds:
     def emit_memory_round(self, operation, patch, round_index):
         self.memory_rounds.append((operation, patch, round_index))
 
-    def extend_live_stream(self, operation, patch):
+    def extend_live_stream(self, operation: str) -> bool:
         if not self.is_stream_live:
             return False
-        self.stream_rounds.append((operation, patch))
+        self.stream_rounds.append(operation)
         return True
 
 
@@ -51,7 +51,7 @@ def test_extend_stream_sends_the_idle_round_into_a_live_stream():
     extend = policies.ExtendStream()
     idle_rounds = RecordingIdleRounds(is_stream_live=True)
     extend.relay(idle_rounds, "operation", "patch-a", 3)
-    assert idle_rounds.stream_rounds == [("operation", "patch-a")]
+    assert idle_rounds.stream_rounds == ["operation"]
     assert idle_rounds.memory_rounds == []
 
 

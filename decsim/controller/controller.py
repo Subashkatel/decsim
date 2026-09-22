@@ -57,7 +57,7 @@ class Controller:
             round_key, readout.size_bits, "readout", "controller intake"
         )
         attribution = transfer_records.TransferAttribution.for_round(
-            fragment.operation_id, (fragment.patch_id,), fragment.round_index
+            fragment.operation_id, fragment.patch_ids, fragment.round_index
         )
         readout_cycles = self.settings.readout_to_bits_cycles
 

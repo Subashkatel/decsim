@@ -1,9 +1,9 @@
 """Stream bookkeeping on the controller's QPU-facing side.
 
 A stream is a run of syndrome rounds shared by several operations
-(segments) on one patch. This object owns which operation is bound to
-which stream round, the next free round of every stream, and the
-protected regions: a protected region keeps one live stream on a patch
+(segments) on one physical patch group. This object owns which operation
+is bound to which stream round, the next free round of every stream, and the
+protected regions: a protected region keeps one live stream on its owner group
 between a start and an end operation, emits one round of it per QEC cycle
 at the cycle boundary, holds operations that need the patch until that
 boundary, and seals the stream only after its final round. Each stream's
@@ -22,12 +22,14 @@ change it alone (STYLE.md rule 7).
 
 import dataclasses
 import functools
-from typing import Optional, Protocol, runtime_checkable
+from typing import Any, Optional, Protocol, runtime_checkable
 
 import decsim.engine as engine_module
 import decsim.ports as ports
 import decsim.records.identity as identity_records
 import decsim.records.program as program_records
+
+# Any denotes opaque operation, stream and patch identities in port calls.
 
 
 @runtime_checkable
@@ -57,7 +59,7 @@ class Streams(Protocol):
     def is_live_protected_patch(self, patch) -> bool:
         """True when a live protected region already emits this patch."""
 
-    def extend_live_stream(self, operation, patch) -> bool:
+    def extend_live_stream(self, operation: program_records.Operation) -> bool:
         """Emit one more round of the live stream on this patch."""
 
 
@@ -106,10 +108,9 @@ class NoFeedbackStreams:
         del patch
         return False
 
-    def extend_live_stream(self, operation, patch) -> bool:
+    def extend_live_stream(self, operation: program_records.Operation) -> bool:
         """No stream to extend."""
         del operation
-        del patch
         return False
 
 
@@ -169,17 +170,16 @@ class FeedbackStreams:
 
     # ---- starting an operation
 
-    def blocks_start(self, operation) -> bool:
-        """True while a live protected stream holds the operation."""
+    def blocks_start(self, operation: program_records.Operation) -> bool:
+        """True while a live protected group holds this operation."""
         live_patches = self._live_protected_patches()
         patches = set(operation.patches)
         active_patches = patches.intersection(live_patches)
         starting_regions = self.table.regions_starting_at(operation.id)
-        starts_on_live_patch = any(
-            region.patch_id in active_patches for region in starting_regions
-        )
-        if starts_on_live_patch:
-            return True
+        for region in starting_regions:
+            starting_patches = self.table.patches_of_stream(region.stream_id)
+            if active_patches.intersection(starting_patches):
+                return True
         if not active_patches:
             return False
         open_patches = self._boundary_open_patches()
@@ -243,25 +243,30 @@ class FeedbackStreams:
         live_patches = self._live_protected_patches()
         return patch in live_patches
 
-    def extend_live_stream(self, operation, patch) -> bool:
-        """Emit an idle round of the patch as the next round of the stream.
-
-        False when the operation's stream is not live.
-        """
+    def extend_live_stream(self, operation: program_records.Operation) -> bool:
+        """Advance an idle group once per tick, after proving all are idle."""
         binding = self.bindings.get(operation.id)
         if binding is None:
             return False
         stream_id = binding.stream_id
         if not self.windows.has_dynamic_stream(stream_id):
             return False
+        patches = self.table.patches_of_stream(stream_id)
+        if not self.qpu.are_patches_idle(operation.id, patches):
+            raise RuntimeError(
+                f"stream {stream_id!r} cannot extend a partially idle patch "
+                f"group {patches!r} after operation {operation.id}"
+            )
         live = self._live(stream_id)
+        if live.last_emission_tick == self.engine.now:
+            return True
         live.next_round += 1
+        live.last_emission_tick = self.engine.now
+        owner = self.table.owner_of(stream_id)
         self.qpu.emit_idle_stream_round(
-            operation, stream_id, live.next_round, patch
+            owner, stream_id, live.next_round, is_final=False
         )
         return True
-
-    # ---- private: bindings and reservations
 
     def _live(self, stream_id) -> _LiveStream:
         live = self.live_by_stream_id.get(stream_id)
@@ -278,21 +283,26 @@ class FeedbackStreams:
 
     def _live_protected_patches(self) -> set:
         patches = set()
-        for live in self.live_by_stream_id.values():
+        for stream_id, live in self.live_by_stream_id.items():
             if live.region is not None:
-                patches.add(live.region.patch_id)
+                owner_patches = self.table.patches_of_stream(stream_id)
+                patches.update(owner_patches)
         return patches
 
     def _boundary_open_patches(self) -> set:
         patches = set()
-        for live in self.live_by_stream_id.values():
+        for stream_id, live in self.live_by_stream_id.items():
             if live.region is not None and live.is_boundary_open:
-                patches.add(live.region.patch_id)
+                owner_patches = self.table.patches_of_stream(stream_id)
+                patches.update(owner_patches)
         return patches
 
     def _active_stream_id_of(self, patch):
         for stream_id, live in self.live_by_stream_id.items():
-            if live.region is not None and live.region.patch_id == patch:
+            if live.region is None:
+                continue
+            owner_patches = self.table.patches_of_stream(stream_id)
+            if patch in owner_patches:
                 return stream_id
         return None
 
@@ -317,18 +327,7 @@ class FeedbackStreams:
         """The one protected stream a feedback source feeds, or None."""
         if not self.table.is_feedback_source(operation.id):
             return None
-        live_stream_ids = set()
-        for patch in operation.patches:
-            stream_id = self._active_stream_id_of(patch)
-            if stream_id is not None:
-                live_stream_ids.add(stream_id)
-        starting_regions = self.table.regions_starting_at(operation.id)
-        starting_stream_ids = {
-            region.stream_id
-            for region in starting_regions
-            if region.patch_id in operation.patches
-        }
-        stream_ids = live_stream_ids | starting_stream_ids
+        stream_ids = self._protected_stream_ids(operation)
         ordered_stream_ids = tuple(sorted(stream_ids))
         if len(ordered_stream_ids) > 1:
             raise ValueError(
@@ -338,6 +337,21 @@ class FeedbackStreams:
         if not ordered_stream_ids:
             return None
         stream_id = ordered_stream_ids[0]
+        self._check_protected_binding(operation, stream_id)
+        return stream_id
+
+    def _protected_stream_ids(self, operation) -> set:
+        stream_ids = set()
+        for patch in operation.patches:
+            stream_id = self._active_stream_id_of(patch)
+            if stream_id is not None:
+                stream_ids.add(stream_id)
+        starting_regions = self.table.regions_starting_at(operation.id)
+        for region in starting_regions:
+            stream_ids.add(region.stream_id)
+        return stream_ids
+
+    def _check_protected_binding(self, operation, stream_id) -> None:
         declared_stream_id, declared_offset = self._declared_stream(operation)
         if declared_stream_id not in (None, stream_id):
             raise ValueError(
@@ -348,31 +362,35 @@ class FeedbackStreams:
             raise ValueError(
                 f"feedback source {operation.id} has conflicting stream_offset"
             )
-        return stream_id
 
     def _activate_protected_regions(self, operation) -> None:
         starting_regions = self.table.regions_starting_at(operation.id)
         live_patches = self._live_protected_patches()
-        patches = set(operation.patches)
-        protected_patches = patches.intersection(live_patches)
+        operation_patches = set(operation.patches)
+        protected_patches = operation_patches.intersection(live_patches)
         for region in starting_regions:
-            protected_patches.add(region.patch_id)
+            owner_patches = self.table.patches_of_stream(region.stream_id)
+            protected_patches.update(owner_patches)
         if protected_patches and operation.emits_detector_data:
             raise ValueError(
                 f"operation {operation.id} duplicates protected detector "
                 "emission"
             )
-        pending_patches = set()
-        for region in starting_regions:
-            is_live = region.patch_id in live_patches
-            is_pending = region.patch_id in pending_patches
-            if is_live or is_pending:
-                raise RuntimeError(
-                    f"protected patch {region.patch_id!r} already has a stream"
-                )
-            pending_patches.add(region.patch_id)
+        self._check_starting_regions(starting_regions, live_patches)
         for region in starting_regions:
             self._activate_region(region)
+
+    def _check_starting_regions(self, starting_regions, live_patches) -> None:
+        occupied_patches = set(live_patches)
+        for region in starting_regions:
+            owner_patches = self.table.patches_of_stream(region.stream_id)
+            overlap = occupied_patches.intersection(owner_patches)
+            if overlap:
+                raise RuntimeError(
+                    f"protected patch group {owner_patches!r} already has "
+                    "an active stream"
+                )
+            occupied_patches.update(owner_patches)
 
     def _activate_region(self, region) -> None:
         live = self._live(region.stream_id)
@@ -421,7 +439,7 @@ class FeedbackStreams:
 
     def _schedule_next_boundary(self, region, *, boundary_round: int) -> None:
         stream_id = region.stream_id
-        cadence = self.table.round_ticks_of(region.patch_id)
+        cadence = self.table.round_ticks_of_stream(stream_id)
         live = self._live(stream_id)
         live.next_boundary_tick = self.engine.now + cadence
         open_boundary = functools.partial(
@@ -473,23 +491,29 @@ class FeedbackStreams:
         live.next_round += 1
         owner = self.table.owner_of(stream_id)
         self.qpu.emit_idle_stream_round(
-            owner, stream_id, live.next_round, region.patch_id
+            owner,
+            stream_id,
+            live.next_round,
+            is_final=live.is_close_requested,
         )
         live.last_emission_tick = self.engine.now
         if live.is_close_requested:
             live.next_boundary_tick = None
-            seal = functools.partial(self._seal_protected_region, stream_id)
+            self.windows.seal_stream(stream_id, live.next_round)
+            release = functools.partial(
+                self._release_protected_region, stream_id
+            )
             self.engine.schedule(
                 0,
-                seal,
-                label=f"protected-seal({stream_id})",
-                priority=engine_module.Priority.PROTECTED_SEAL,
+                release,
+                label=f"protected-release({stream_id})",
+                priority=engine_module.Priority.PROTECTED_RELEASE,
             )
             return
         next_boundary_round = live.next_round + 1
         self._schedule_next_boundary(region, boundary_round=next_boundary_round)
 
-    def _seal_protected_region(self, stream_id) -> None:
+    def _release_protected_region(self, stream_id) -> None:
         live = self._live(stream_id)
         assert live.region is not None, (
             f"protected stream {stream_id} is not active"
@@ -503,7 +527,6 @@ class FeedbackStreams:
         assert live.last_emission_tick == self.engine.now, (
             f"protected stream {stream_id} lacks final-round evidence"
         )
-        self.windows.seal_stream(stream_id, live.next_round)
         live.region = None
         live.is_close_requested = False
         live.last_emission_tick = None
@@ -538,32 +561,33 @@ class _StreamTable:
         self.owner_by_stream_id: dict = {}
         self.feedback_source_ids: set = set()
 
-    def index(self, program) -> None:
-        """Index the program: feedback sources, then every region once."""
-        operations = program.operations
-        for operation in operations:
-            if operation.blocked_by is not None:
-                self.feedback_source_ids.add(operation.blocked_by)
-        executable_ids = {operation.id for operation in operations}
+    def index(self, program: program_records.ExecutionProgram) -> None:
+        """Index owner footprints, region endpoints and feedback sources."""
+        self.owner_by_stream_id = {
+            operation.id: operation for operation in program.dynamic_streams
+        }
+        self._index_regions(program.operations)
+        self._index_feedback_sources(program.operations)
+        executable_ids = {operation.id for operation in program.operations}
         self._reject_external_sources(
             "decode_ops", program.decode_operations, executable_ids
         )
         self._reject_external_sources(
             "dynamic_streams", program.dynamic_streams, executable_ids
         )
-        operations_by_id = {operation.id: operation for operation in operations}
-        stream_owners = {
-            operation.id: operation for operation in program.dynamic_streams
-        }
-        regions = sorted(self.regions, key=_protected_region_stream_id)
-        for region in regions:
-            self._index_region(region, operations_by_id, stream_owners)
 
     def round_count_of(self, operation_id) -> int:
         return self.resolved_operation_by_id[operation_id].round_count
 
-    def round_ticks_of(self, patch_id) -> int:
-        return self.resolved_patch_by_identity[patch_id].round_ticks
+    def round_ticks_of_stream(self, stream_id: Any) -> int:
+        """The common cadence validated for the owner's physical group."""
+        patches = self.patches_of_stream(stream_id)
+        first_patch = patches[0]
+        return self.resolved_patch_by_identity[first_patch].round_ticks
+
+    def patches_of_stream(self, stream_id: Any) -> tuple:
+        """The owner's authoritative physical patch footprint."""
+        return self.owner_by_stream_id[stream_id].patches
 
     def regions_starting_at(self, operation_id) -> tuple:
         return self.regions_by_endpoint.get(("start", operation_id), ())
@@ -571,14 +595,31 @@ class _StreamTable:
     def regions_ending_at(self, operation_id) -> tuple:
         return self.regions_by_endpoint.get(("end", operation_id), ())
 
-    def is_protected(self, stream_id) -> bool:
-        return stream_id in self.owner_by_stream_id
+    def is_protected(self, stream_id: Any) -> bool:
+        return any(region.stream_id == stream_id for region in self.regions)
 
     def owner_of(self, stream_id):
         return self.owner_by_stream_id[stream_id]
 
     def is_feedback_source(self, operation_id) -> bool:
         return operation_id in self.feedback_source_ids
+
+    def _index_regions(self, operations) -> None:
+        operations_by_id = {operation.id: operation for operation in operations}
+        indexed_stream_ids = set()
+        regions = sorted(self.regions, key=_protected_region_stream_id)
+        for region in regions:
+            if region.stream_id in indexed_stream_ids:
+                raise ValueError(
+                    f"duplicate protected stream {region.stream_id}"
+                )
+            self._index_region(region, operations_by_id)
+            indexed_stream_ids.add(region.stream_id)
+
+    def _index_feedback_sources(self, operations) -> None:
+        for operation in operations:
+            if operation.blocked_by is not None:
+                self.feedback_source_ids.add(operation.blocked_by)
 
     def _reject_external_sources(
         self, source_role: str, sources, executable_ids: set
@@ -595,16 +636,7 @@ class _StreamTable:
                 self._reject_external_source(source_role, source)
 
     def _reject_external_source(self, source_role: str, source) -> None:
-        protected_stream_ids = {region.stream_id for region in self.regions}
-        protected_patch_ids = {region.patch_id for region in self.regions}
-        touched_patches = protected_patch_ids.intersection(source.patches)
-        touched_stream_ids = {
-            region.stream_id
-            for region in self.regions
-            if region.patch_id in touched_patches
-        }
-        if source.id in protected_stream_ids:
-            touched_stream_ids.add(source.id)
+        touched_stream_ids, touched_patches = self._protected_contacts(source)
         if not touched_stream_ids:
             return
         ordered_streams = tuple(sorted(touched_stream_ids))
@@ -619,43 +651,65 @@ class _StreamTable:
             f"{ordered_streams} and patches {ordered_patches}"
         )
 
-    def _index_region(
-        self, region, operations_by_id: dict, stream_owners: dict
-    ) -> None:
+    def _protected_contacts(self, source) -> tuple[set, set]:
+        touched_stream_ids = set()
+        touched_patches = set()
+        source_patches = set(source.patches)
+        for region in self.regions:
+            owner_patches = self.patches_of_stream(region.stream_id)
+            overlap = source_patches.intersection(owner_patches)
+            touched_patches.update(overlap)
+            if overlap or source.id == region.stream_id:
+                touched_stream_ids.add(region.stream_id)
+        return touched_stream_ids, touched_patches
+
+    def _index_region(self, region, operations_by_id: dict) -> None:
         stream_id = region.stream_id
-        if stream_id in self.owner_by_stream_id:
-            raise ValueError(f"duplicate protected stream {stream_id}")
-        owner = stream_owners.get(stream_id)
+        owner = self.owner_by_stream_id.get(stream_id)
         if owner is None:
             raise ValueError(
                 f"protected stream {stream_id} owner/patch mismatch"
             )
         owner_patches = tuple(owner.patches)
-        if owner_patches != (region.patch_id,):
-            raise ValueError(
-                f"protected stream {stream_id} owner/patch mismatch"
-            )
+        self._check_group_footprint(stream_id, owner_patches)
         endpoints = (
             ("start", region.start_operation_id),
             ("end", region.end_operation_id),
         )
         for endpoint, operation_id in endpoints:
             operation = operations_by_id.get(operation_id)
-            _check_region_endpoint(region, endpoint, operation)
+            _check_region_endpoint(region, owner_patches, endpoint, operation)
             regions = self.regions_by_endpoint.setdefault(
                 (endpoint, operation_id), []
             )
             regions.append(region)
-        self.owner_by_stream_id[stream_id] = owner
+
+    def _check_group_footprint(self, stream_id, patches: tuple) -> None:
+        unique_patches = set(patches)
+        if not patches or len(unique_patches) != len(patches):
+            raise ValueError(
+                f"protected stream {stream_id} requires nonempty unique patches"
+            )
+        periods = {
+            self.resolved_patch_by_identity[patch].round_ticks
+            for patch in patches
+        }
+        if len(periods) != 1:
+            raise ValueError(
+                f"protected stream {stream_id} patches require a common cadence"
+            )
 
 
 def _protected_region_stream_id(region):
     return region.stream_id
 
 
-def _check_region_endpoint(region, endpoint: str, operation) -> None:
+def _check_region_endpoint(
+    region, owner_patches: tuple, endpoint: str, operation
+) -> None:
     stream_id = region.stream_id
     if operation is None:
         raise ValueError(f"protected stream {stream_id} invalid {endpoint}")
-    if region.patch_id not in operation.patches:
+    required_patches = set(owner_patches)
+    if not required_patches.issubset(operation.patches):
         raise ValueError(f"protected stream {stream_id} invalid {endpoint}")

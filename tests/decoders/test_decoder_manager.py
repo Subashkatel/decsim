@@ -72,7 +72,7 @@ def _manager(engine, row, formation_by_pool=None):
 def _window_job():
     payload = round_records.RetainedSyndromeFragment(
         operation_id=1,
-        patch_id="p",
+        patch_ids=("p",),
         round_index=1,
         bits=(0, 1),
         size_bits=2,

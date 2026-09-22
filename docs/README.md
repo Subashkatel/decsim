@@ -71,6 +71,7 @@ and reading what it wrote.
 - [How to compare two runs](how-to/compare_two_runs.md)
 - [How to run a timing study whose numbers do not depend on your computer](how-to/run_a_timing_only_study.md)
 - [How to run a workload whose next operation waits on a decision](how-to/run_a_feedback_workload.md)
+- [How to run Deltakit memory and protection workloads](how-to/run_deltakit_workloads.md)
 
 ## Reference
 
@@ -118,6 +119,7 @@ sources, and the ideas behind the tree.
 
 - [The design decisions](explanation/decisions.md)
 - [The principles behind the shape](explanation/principles.md)
+- [Deltakit integration: boundary, evidence and limits](explanation/deltakit_integration.md)
 
 ## Where everything lives
 

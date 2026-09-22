@@ -101,7 +101,7 @@ class RoundAssembler:
             fragment.operation_id,
             fragment.round_index,
             route,
-            fragment.patch_id,
+            fragment.patch_ids,
         )
         self.trace.round_event.fire(available)
         round_key = (fragment.operation_id, fragment.round_index)
@@ -159,7 +159,7 @@ class RoundAssembler:
                 fragment.operation_id,
                 fragment.round_index,
                 route,
-                fragment.patch_id,
+                fragment.patch_ids,
             )
             self.trace.round_event.fire(drop)
         return None
@@ -172,7 +172,7 @@ class RoundAssembler:
     def _finish_packing(self, context) -> None:
         """The round is complete: merge, form detection events, hand on."""
         operation_id, round_index = context.round_key
-        raw_fragments = _merge_fragments_by_patch(context.fragments)
+        raw_fragments = _merge_adjacent_fragments(context.fragments)
         # the workspace holds the raw measurement bits the fragments
         # arrived with, whatever width leaves afterwards
         raw_bits = round_records.fragment_wire_bits(raw_fragments)
@@ -289,29 +289,27 @@ def _fragment_index(fragment: round_records.RetainedSyndromeFragment) -> int:
     return fragment.fragment_index
 
 
-def _merge_fragments_by_patch(fragments) -> tuple:
-    """Order fragments by index, merging parts from the same patch.
+def _merge_adjacent_fragments(fragments) -> tuple:
+    """Coalesce adjacent acquisitions without permuting measurement records.
 
-    SyndromeRoundPacket requires distinct patch identities, so parts of
-    one patch concatenate bits and sizes in fragment-index order. Distinct
-    patches keep their own immutable fragments untouched.
+    Stim record targets address the declared measurement order. Two parts
+    with another acquisition between them cannot be concatenated here.
     """
-    merged: list = []
-    for fragment in sorted(fragments, key=_fragment_index):
-        prior_index = _index_of_patch(merged, fragment.patch_id)
-        if prior_index is None:
+    merged = []
+    ordered = sorted(fragments, key=_fragment_index)
+    for fragment in ordered:
+        if not merged:
             merged.append(fragment)
             continue
-        prior = merged[prior_index]
-        merged[prior_index] = _concatenated(prior, fragment)
+        prior = merged[-1]
+        same_patches = identity_records.same_stable_identity(
+            prior.patch_ids, fragment.patch_ids
+        )
+        if same_patches:
+            merged[-1] = _concatenated(prior, fragment)
+            continue
+        merged.append(fragment)
     return tuple(merged)
-
-
-def _index_of_patch(fragments: list, patch_id) -> Optional[int]:
-    for index, fragment in enumerate(fragments):
-        if identity_records.same_stable_identity(fragment.patch_id, patch_id):
-            return index
-    return None
 
 
 def _concatenated(

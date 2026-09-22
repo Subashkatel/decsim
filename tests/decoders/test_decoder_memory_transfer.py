@@ -37,7 +37,7 @@ class _CopyRecorder:
 def _fragment(round_index: int) -> round_records.RetainedSyndromeFragment:
     return round_records.RetainedSyndromeFragment(
         operation_id=41,
-        patch_id=0,
+        patch_ids=(0,),
         round_index=round_index,
         bits=(1, 0, 1),
         size_bits=3,

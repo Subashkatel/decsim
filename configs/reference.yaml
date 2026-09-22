@@ -16,11 +16,14 @@
 
 qpu:
   kind: stim_device                # stim_device | timing_only | syndrome_bits
-                                   # | recorded_stim: what the QPU reads out
+                                   # | recorded_stim | streaming_stim:
+                                   # what the QPU reads out
                                    # each round. stim_device samples the
                                    # workload's circuit (real detector data);
                                    # the sweep sets the distance and the round
-                                   # period
+                                   # period. streaming_stim needs Python
+                                   # arguments with repeated circuit records
+                                   # keyed by dynamic stream owner.
 
 escalation:
   clock: fridge                    # a clocks domain; absent uses controller.clock
@@ -35,10 +38,11 @@ escalation:
                                    # src/mem/XBar.py separates its frontend and
                                    # forwarding cycles
   kind: weak_baseline              # weak_baseline | strong_only | switching.
-                                   # strong_only wakes windows from syndrome
-                                   # strong syndrome buffer, moves inputs on
+                                   # strong_only wakes static and live windows
+                                   # from the strong buffer, moves inputs on
                                    # strong_buffer_to_strong_decoder, results
-                                   # on strong_decoder_to_frame. switching adds
+                                   # on strong_decoder_to_frame. Idle rounds
+                                   # also use only the strong path. switching adds
                                    # the keys below (refused for any other
                                    # kind, so they are documented as comments;
                                    # switching_validation.yaml runs them):

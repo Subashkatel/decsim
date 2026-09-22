@@ -12,6 +12,7 @@ sentence naming the setting, or drops
 the new round under the drop knob.
 """
 
+import dataclasses
 import functools
 import types
 
@@ -34,7 +35,7 @@ DROP = controller_settings.PackingOverflowPolicy.DROP_ROUND
 def fragment(round_index, fragment_index=0, bits=(1, 0)):
     return round_records.RetainedSyndromeFragment(
         operation_id=1,
-        patch_id=0,
+        patch_ids=(0,),
         round_index=round_index,
         bits=bits,
         size_bits=len(bits),
@@ -303,6 +304,26 @@ def test_an_uncharged_controller_row_hands_the_round_on_at_once():
 
     departure_ticks, _round = departures.records[0]
     assert departure_ticks == 0
+
+
+def test_interleaved_patch_fragments_keep_measurement_order() -> None:
+    engine = engine_module.Engine()
+    packed = []
+    assembler = assembler_with(engine, packed, None)
+    first = fragment(1, fragment_index=0, bits=(1,))
+    second = fragment(1, fragment_index=1, bits=(0,))
+    second = dataclasses.replace(second, patch_ids=("other",))
+    third = fragment(1, fragment_index=2, bits=(1,))
+
+    assembler.add(third, 3, round_records.WINDOW_INPUT_ROUTE)
+    assembler.add(first, 3, round_records.WINDOW_INPUT_ROUTE)
+    assert packed == []
+    assembler.add(second, 3, round_records.WINDOW_INPUT_ROUTE)
+    engine.run()
+
+    (round,) = packed
+    assert round.packet.fragments == (first, second, third)
+    assert round.wire_bits == 3
 
 
 class _Departures:

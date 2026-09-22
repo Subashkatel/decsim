@@ -113,15 +113,6 @@ class StrongOnly(EscalationPolicyBase):
     requires_strong_context = False
     primary_tier = window_records.DecoderTier.STRONG
 
-    def check_plan(self, plan: decoding_records.RunShape) -> None:
-        """A static plan; dynamic streams re-point live window reads."""
-        if plan.has_dynamic_streams:
-            raise ValueError(
-                "strong-only runs support static plans; dynamic streams "
-                "re-point live window reads and are not wired to the "
-                "strong syndrome buffer yet"
-            )
-
     def verdict_for_weak_result(self, job, result) -> decoding_records.Verdict:
         """Every result is final: the strong tier decoded it."""
         del job

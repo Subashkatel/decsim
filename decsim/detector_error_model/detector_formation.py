@@ -180,6 +180,24 @@ class StreamingDetectorFormer:
             ]
         return events, observables
 
+    def extend_table(self, table: FormationTable) -> None:
+        """Append recipes without changing earlier rounds or losing history.
+
+        Live circuits and incrementally described recorded streams supply
+        the next recipes before their packets. Stim's record lookbacks
+        still require every referenced earlier measurement to be retained.
+        """
+        _check_formation_prefix(self.table, table)
+        previous_detector_count = len(self.table.detectors)
+        new_detectors = table.detectors[previous_detector_count:]
+        new_recipes = new_detectors + table.observables
+        _check_retained_recipe_records(new_recipes, self.packets)
+        required_packet_count = table.max_record_span + 1
+        self.kept_packet_count = max(
+            self.kept_packet_count, required_packet_count
+        )
+        self.table = table
+
     def _forget_through(self, newest_stale_round: int) -> None:
         stale_rounds = [
             kept_round
@@ -238,6 +256,32 @@ class _CircuitTables:
     reference_sample: object
     coordinates: dict
     detector_rounds: Optional[dict]
+
+
+def _check_formation_prefix(previous: FormationTable, table: FormationTable):
+    for round_index, width in previous.packet_width_by_round.items():
+        if table.packet_width_by_round.get(round_index) != width:
+            raise RuntimeError("formation extension changes an existing packet")
+    previous_detector_count = len(previous.detectors)
+    detector_prefix = table.detectors[:previous_detector_count]
+    if detector_prefix != previous.detectors:
+        raise RuntimeError("formation extension changes an existing detector")
+
+
+def _check_retained_recipe_records(recipes, packets: dict) -> None:
+    last_received_round = max(packets, default=0)
+    for recipe in recipes:
+        _check_recipe_history(recipe, packets, last_received_round)
+
+
+def _check_recipe_history(recipe, packets: dict, last_received_round: int):
+    for record_round, _ in recipe.records:
+        if record_round > last_received_round:
+            continue
+        if record_round not in packets:
+            raise RuntimeError(
+                f"formation extension references discarded round {record_round}"
+            )
 
 
 def _circuit_tables(

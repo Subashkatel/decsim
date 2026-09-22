@@ -9,6 +9,15 @@ page builds the smallest workload that does close that loop: two
 operations, the second held until the first operation's decision reaches
 the QPU.
 
+To use only the strong decoder, select `escalation.kind: strong_only` and
+configure `strong_decoder`. In Python, pass
+`EscalationSettings(kind="strong_only")` from `decsim.escalation.settings`
+as the machine's escalation settings. The same selection works for finite
+streams and live protection: input and idle rounds use the strong buffer,
+window jobs use the strong decoder, and corrections return through the frame.
+There is no weak decode or escalation hop. Detection events may be formed at
+the controller or decoder; formation in the weak buffer is incompatible.
+
 ## 1. Know why this one is Python and not yaml
 
 `workload.kind` names one of four rows, and the row that takes an

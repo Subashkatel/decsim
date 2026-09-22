@@ -87,8 +87,9 @@ class PlacedFaultModel:
     maps each owned column to every detector it flips anywhere in the
     circuit; the window that receives the handoff intersects that with its
     own rows, so one record serves a forward handoff and a dependency
-    handoff alike. `source_fault_ids` maps every column back to its
-    position in the whole-circuit catalog.
+    handoff alike. `source_fault_ids` maps every column to its stable identity
+    in the source's fault catalog. Finite sources use catalog positions;
+    growing sources preserve identities when their catalog order changes.
     """
 
     representation: FaultRepresentation

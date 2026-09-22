@@ -143,6 +143,7 @@ In `decsim/qpu/settings.py`. A yaml names a row of it under `qpu.kind`.
 | `timing_only` | `TimingOnlyDevice` in `decsim/qpu/syndrome_devices.py` | Emits payloads without bits, so a run prices timing alone. |
 | `syndrome_bits` | `SyndromeBitDevice` in `decsim/qpu/syndrome_devices.py` | Emits seeded random bits shaped like the code card's syndrome. |
 | `recorded_stim` | `RecordedStimDevice` in `decsim/qpu/stim_device.py` | Replays recorded raw measurements (hardware data) instead of sampling. |
+| `streaming_stim` | `StreamingStimDevice` in `decsim/qpu/streaming_stim_device.py` | Keep one physical memory history until its actual final readout. |
 
 ## `THRESHOLD_SOURCES`
 

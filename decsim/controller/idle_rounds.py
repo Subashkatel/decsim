@@ -17,6 +17,7 @@ import dataclasses
 
 import decsim.controller.feedback_streams as feedback_streams
 import decsim.ports as ports
+import decsim.records.program as program_records
 import decsim.trace_source as trace_source
 
 
@@ -91,9 +92,9 @@ class IdleRoundAccounting:
         """The round travels as a feedback-memory round of the operation."""
         self.qpu.emit_feedback_memory_round(operation.id, patch, round_index)
 
-    def extend_live_stream(self, operation, patch) -> bool:
-        """The round becomes the next round of the operation's live stream."""
-        return self.streams.extend_live_stream(operation, patch)
+    def extend_live_stream(self, operation: program_records.Operation) -> bool:
+        """Advance the operation's live physical group once per cycle."""
+        return self.streams.extend_live_stream(operation)
 
     def submit_idle_decode_if_due(self, operation, patch, round_index) -> None:
         """Count one idle round toward the patch's next decode job.

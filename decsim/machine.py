@@ -342,21 +342,40 @@ def _operation_result(
     if logical is not None:
         bits = tuple(logical)
         status = "logical_observables"
-    actual = truth_for(operation_id)
+    binding = machine.issuer.stream_binding_for(operation_id)
+    actual = _operation_truth(operation, binding, truth_for)
     if actual is not None:
         actual = tuple(actual)
-    failure = None
-    if bits is not None and actual is not None:
-        if len(bits) != len(actual):
-            raise RuntimeError(
-                f"operation {operation_id} predicted {len(bits)} logical "
-                f"observables but the syndrome source sampled {len(actual)}"
-            )
-        failure = bits != actual
-    binding = machine.issuer.stream_binding_for(operation_id)
+    failure = _logical_failure(operation_id, bits, actual)
     stream_offset = operation.stream_offset
     if binding is not None:
         stream_offset = binding.stream_offset
     return result_records.LogicalOperationResult(
         operation_id, status, bits, stream_offset, actual, failure
     )
+
+
+def _operation_truth(operation, binding, truth_for):
+    """A segment contribution has no independently sampled logical truth.
+
+    Sinter's _CompiledStimThenDecodeSampler.sample compares predictions
+    and actual_obs for the same complete circuit shot. A stream segment
+    contributes only its commit interval, so only its owner is scored.
+    """
+    stream_id = operation.stream_id
+    if binding is not None:
+        stream_id = binding.stream_id
+    if stream_id is not None and stream_id != operation.id:
+        return None
+    return truth_for(operation.id)
+
+
+def _logical_failure(operation_id, prediction, truth) -> Optional[bool]:
+    if prediction is None or truth is None:
+        return None
+    if len(prediction) != len(truth):
+        raise RuntimeError(
+            f"operation {operation_id} predicted {len(prediction)} logical "
+            f"observables but the syndrome source sampled {len(truth)}"
+        )
+    return prediction != truth

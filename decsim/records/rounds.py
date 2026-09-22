@@ -1,12 +1,13 @@
 """One syndrome round on its way out of the QPU and through the controller.
 
-A readout arrives per patch, becomes a retained fragment, joins the other
+A readout names its contributing patches, becomes a fragment, joins the other
 fragments of its round into a packet, and leaves the assembler as a
 packed round on a route. The two events at the end are what the ledgers
 record; the bits themselves are raw measurements, and detection events
 are formed later, downstream of these records.
 """
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Any, Optional
@@ -55,7 +56,7 @@ class QPUReadout:
     """
 
     operation_id: Any
-    patch_id: Any
+    patch_ids: tuple
     round_index: int
     bits: Optional[Any] = None
     code: Optional[str] = None
@@ -69,7 +70,7 @@ class RetainedSyndromeFragment:
     """One validated immutable fragment retained after controller packing."""
 
     operation_id: Any
-    patch_id: Any
+    patch_ids: tuple
     round_index: int
     bits: Optional[tuple[int, ...]]
     size_bits: Optional[int]
@@ -87,7 +88,7 @@ class RetainedSyndromeFragment:
             bits = tuple(int(bit) for bit in readout.bits)
         return cls(
             operation_id=readout.operation_id,
-            patch_id=readout.patch_id,
+            patch_ids=readout.patch_ids,
             round_index=readout.round_index,
             bits=bits,
             size_bits=readout.size_bits,
@@ -97,7 +98,7 @@ class RetainedSyndromeFragment:
 
 @dataclass(frozen=True)
 class SyndromeRoundPacket:
-    """One complete immutable syndrome round in transport-arrival order."""
+    """One complete immutable syndrome round in declared measurement order."""
 
     operation_id: Any
     round_index: int
@@ -202,7 +203,7 @@ class RoundEvent:
     tick: int
     operation_id: object
     round_index: int
-    patch_id: object = None
+    patch_ids: tuple = ()
     route: str = ""
 
     @classmethod
@@ -210,14 +211,14 @@ class RoundEvent:
         cls,
         kind: str,
         tick: int,
-        operation_id,
+        operation_id: object,
         round_index: int,
         route: SyndromePacketRoute,
-        patch_id=None,
+        patch_ids: tuple = (),
     ) -> "RoundEvent":
         """One transition on a route, named by the route's kind."""
         return cls(
-            kind, tick, operation_id, round_index, patch_id, route.kind.name
+            kind, tick, operation_id, round_index, patch_ids, route.kind.name
         )
 
 
@@ -241,3 +242,14 @@ def fragment_wire_bits(fragments) -> Optional[int]:
     if None in fragment_sizes:
         return None
     return sum(fragment_sizes)
+
+
+def fragment_patch_ids(
+    fragments: Sequence[RetainedSyndromeFragment],
+) -> tuple:
+    """The contributing footprint, once per patch in first appearance order."""
+    patches = []
+    for fragment in fragments:
+        patches.extend(fragment.patch_ids)
+    distinct = dict.fromkeys(patches)
+    return tuple(distinct)

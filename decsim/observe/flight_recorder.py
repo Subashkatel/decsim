@@ -103,7 +103,7 @@ class LedgerEvent:
     op: object
     round: Optional[int] = None
     window: Optional[int] = None
-    patch: object = None
+    patch_ids: tuple = ()
     route: str = ""
     prev_event_id: Optional[int] = None
     status: str = ""
@@ -215,13 +215,13 @@ class _LedgerRows:
         self,
         kind: str,
         tick: int,
-        op,
+        op: object,
         *,
-        round=None,
-        window=None,
-        patch=None,
+        round: Optional[int] = None,
+        window: Optional[int] = None,
+        patch_ids: tuple = (),
         route: str = "",
-        prev=None,
+        prev: Optional[dict] = None,
         status: str = "",
     ) -> dict:
         """One row, whose cause is another row or None."""
@@ -231,7 +231,7 @@ class _LedgerRows:
             "op": op,
             "round": round,
             "window": window,
-            "patch": patch,
+            "patch_ids": patch_ids,
             "route": route,
             "prev": prev,
             "status": status,
@@ -259,7 +259,7 @@ class _LedgerRows:
                 op=row["op"],
                 round=row["round"],
                 window=row["window"],
-                patch=row["patch"],
+                patch_ids=row["patch_ids"],
                 route=row["route"],
                 prev_event_id=prev_event_id,
                 status=row["status"],
@@ -298,7 +298,7 @@ def _round_chains(rows: _LedgerRows, events) -> _RoundChains:
             event.tick,
             event.operation_id,
             round=event.round_index,
-            patch=event.patch_id,
+            patch_ids=event.patch_ids,
             route=event.route,
             prev=prev,
             status=status,

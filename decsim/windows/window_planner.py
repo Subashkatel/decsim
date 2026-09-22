@@ -15,7 +15,7 @@ the RoundTracker's.
 
 import dataclasses
 import types
-from typing import Optional
+from typing import Any, Optional
 
 import decsim.ports as ports
 import decsim.records.program as program_records
@@ -43,10 +43,6 @@ class WindowModels:
         # the model each planned or grown window was laid with; the
         # models object builds them, so it is where they live
         self.model_by_window: dict = {}
-
-    def has_provider(self) -> bool:
-        """Whether the source builds models at all."""
-        return self.provider is not None
 
     def requirement_for(self, resolved_operation):
         """The decoder views for the operation's frozen code."""
@@ -99,13 +95,15 @@ class WindowModels:
             fault_model_requirement=requirement,
         )
 
-    def check_stream_length(
-        self, stream_operation, stream_round_count: int
-    ) -> None:
-        """Refuse a stream longer than its source can supply."""
+    def finalize_stream_models(
+        self,
+        stream_operation: program_records.Operation,
+        stream_round_count: int,
+    ) -> bool:
+        """Fix the model boundary after physical completion is validated."""
         if self.provider is None:
-            return
-        self.provider.validate_stream_length(
+            return False
+        return self.provider.finalize_stream_models(
             stream_operation, stream_round_count
         )
 
@@ -379,8 +377,12 @@ class WindowPlanner:
 
     # ---- a dynamic stream: registered, grown, clipped
 
-    def register_stream(self, stream_operation: program_records.Operation):
-        """Open a stream's tables; returns the source's round limit or None."""
+    def register_stream(
+        self,
+        stream_operation: program_records.Operation,
+        physical_round_limit: Optional[int],
+    ) -> Optional[int]:
+        """Open a stream with agreeing physical and model limits, if finite."""
         stream_id = stream_operation.id
         self.plan.window_count[stream_id] = 0
         self.plan.op_windows[stream_id] = []
@@ -388,8 +390,11 @@ class WindowPlanner:
         self.plan.windowed_by_operation[stream_id] = True
         self.plan.batch_preceding_idle_rounds_by_operation[stream_id] = False
         resolved = self.resolved_operation_by_id[stream_id]
-        source_round_limit = self.models.register_stream(
+        model_round_limit = self.models.register_stream(
             stream_operation, resolved
+        )
+        source_round_limit = _stream_round_limit(
+            physical_round_limit, model_round_limit
         )
         geometry = resolved.code_geometry
         finite_geometries = None
@@ -447,6 +452,17 @@ class WindowPlanner:
         model = self.models.model_for_stream(window.operation_id, window)
         if model is not None:
             self.models.model_by_window[window.key] = model
+
+    def refresh_stream_models(self, stream_id: Any) -> None:
+        """Install actual terminal models before the remaining windows queue.
+
+        The stream identity is opaque. A runtime-selected readout can affect
+        every unqueued tail buffer, while published models stay unchanged.
+        """
+        for window in self.windows_of(stream_id):
+            if window.queued or window.committed:
+                continue
+            self.attach_stream_model(window)
 
     def trim_stream_tail(
         self, stream_id, stream_round_count: int
@@ -507,6 +523,16 @@ class WindowPlanner:
         growth.next_window_index += 1
         self.trace.window_planned.fire(window)
         return window
+
+
+def _stream_round_limit(physical_round_limit, model_round_limit):
+    if physical_round_limit is None:
+        return model_round_limit
+    if model_round_limit is None:
+        return physical_round_limit
+    if physical_round_limit != model_round_limit:
+        raise ValueError("physical and model stream round limits must agree")
+    return physical_round_limit
 
 
 class _StreamGrowth:

@@ -69,7 +69,9 @@ The readout electronics to the control workstation. Ends: `qpu` to
 `controller`; the send is executed in `decsim/controller/controller.py`,
 by the controller's intake.
 
-What crosses: one patch's classified measurement bits for one round.
+What crosses: one acquisition fragment of classified measurements for a round.
+`patch_ids` names its contributing patch group; `fragment_index` preserves
+measurement order when a source emits several acquisitions.
 The count is `readout.size_bits`, set where the device builds the
 readout (`decsim/qpu/stim_device.py`, `decsim/qpu/syndrome_devices.py`).
 For a distance 3 rotated surface code that is 8 bits per round, the
@@ -206,7 +208,13 @@ What crosses: the strong window's assigned rounds, `r_com + 2 r_buf` of
 them under Toshio's assumption, in one transfer. The bit count is again
 `job.payload_bits()`.
 
-Move, on board, with the same copy into the unit's memory. Default
+Under strong-only, this path also carries each timing-only feedback-memory
+round after it lands in the strong store. The round occupies its slot until
+delivery to `MemoryRoundArrivals`, exactly as hop 4 does for a weak-primary run.
+These timing-only rounds are counted there and occupy no decoder-unit input
+memory. No weak-buffer hop or escalation is involved.
+
+Window input moves on board, with the same copy into the unit's memory. Default
 latency 2.0 microseconds. It is on board rather than off board because
 the rounds already crossed boards into the strong syndrome buffer, at
 hop 3 or hop 5: the strong syndrome buffer sits beside the strong

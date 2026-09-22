@@ -696,6 +696,189 @@ the rest of that commit is exactly what the region decodes again.
 (`_with_the_crossing_commit`), `decsim/decoders/decoder.py`
 (`_crossing_commit`).
 
+## D22. Physical stream ownership is independent of decoder model selection
+
+**Decided.** The root declares physical streams through
+`SyndromeSource.declare_stream` after seed binding, without sampling or building
+decoder graphs. Model registration is separate. Both consumers declare whether
+they need the operation's circuit, so the root copies it once if either needs
+it. A consumer that does not use the circuit cannot erase another's input.
+
+**Why.** A finite physical source can use an independently calibrated model;
+a live physical source can use a separate model generator. Initializing physical
+history as a side effect of model registration breaks both substitutions. A
+timing-only source can also retain a circuit required by its selected model.
+Finite physical and model limits must agree when both are declared. An absent
+model limit cannot remove a finite physical limit.
+
+**Source.** gem5's AbstractMemory separates physical backing state from access
+and timing policy (src/mem/abstract_mem.hh, the class description, pmemAddr and
+setBackingStore). DECSIM borrows that ownership separation, not a memory-specific
+implementation: choosing an analysis component cannot create or reset the
+physical state it describes.
+
+**What it cost the port file.** SyndromeSource declares the physical limit and
+validates actual completion. WindowModelSource declares its circuit requirement
+and finalizes its models after physical validation. Its finalization result says
+whether unqueued models need rebuilding. Finite geometry alone cannot answer
+that question: a finite recording can use an evolving model, while a finite
+model's stateful slicer must not be advanced twice for the same window.
+
+**Another implementation.** Recorded measurements retain their finite limit
+when paired with another decoder model. A future compiler can supply ordinary
+circuits to the same consumers. None of these contracts identifies a producer.
+The public composition tests are in
+`tests/machine/test_stream_source_ownership.py`.
+
+## D23. Final models precede readout delivery; patch release follows emission
+
+**Decided.** The controller requests the final physical round, then seals model
+metadata before returning control to the event queue. A later event at the same
+tick releases the protected region and retries waiting operations. The QPU still
+delivers readout through its normal links and stores; no artificial delay is
+introduced.
+
+**Why.** A zero-delay readout can complete a window in the same tick that final
+data measurements add detectors. Its decoder must receive the final model.
+Releasing the physical patch at that point is a different transition: a waiting
+operation can span two protected patches. Releasing one while the other's
+boundary is still open can change that other stream's final-round decision.
+Every protected emission at that tick therefore precedes region release.
+
+**Source.** gem5's EventQueue::serviceOne executes an event's process method to
+completion before selecting another event (src/sim/eventq.cc). Its named event
+priorities order effects that require a shared-tick phase (src/sim/eventq.hh).
+DECSIM uses those two principles separately: establish metadata before yielding
+to scheduled consumers, and retain a later phase for shared resource release.
+
+**Another implementation.** Any source whose final readout changes a window
+uses this ordering, including direct Stim and compiler-generated circuits.
+Independent link latency and protected-region policies retain their own state.
+`tests/machine/test_live_stream_finalization.py` checks zero-delay real decoding;
+`tests/controller/test_feedback_streams.py` checks crossing region endpoints.
+
+## D24. A live source executes only the rounds the controller requests
+
+**Decided.** RepeatedStimCircuit carries ordinary Stim preparation, bulk,
+terminal and single-round fragments. A terminal fragment replaces the last bulk
+round. StreamingStimDevice retains one physical state, executes each requested
+fragment once and reports logical truth only after actual final readout.
+An optional physical period is checked against the QPU's resolved integer tick
+cadence before execution. Model lookahead never advances that physical state.
+
+**Why.** A finite pre-sampled circuit cannot supply an earlier destructive
+readout merely because feedback arrives sooner. Both direct Stim memories and
+circuits from another compiler need actual continuation and termination.
+Recorded workloads remain finite because missing measurements cannot be invented.
+Duration-dependent idle noise also needs the actual declared round period;
+changing only a display-time value cannot change physical noise consistently.
+
+**Sources.** Stim's TableauSimulator.do applies each circuit to retained state;
+its compile_m2d_converter converts the resulting complete raw record into
+detection events and observable flips. These installed public APIs supply the
+execution and same-record oracle. StreamingDetectorFormer extends its existing
+record-lookback recipes without changing prior packets or resurrecting discarded
+measurements. That also serves incrementally described recorded traces.
+
+Growing models reuse WindowSlicer and the qLDPC sequential-window ownership law
+already cited in `decsim/windows/window_planner.py`. Complete detector effects,
+logical effects and linked physical decomposition identify faults across model
+growth; changing catalog positions do not. Published window semantics remain
+fixed, and finalization rebuilds only pending models when the provider requests
+it. Strong-decoder priors use the same stable identity namespace.
+
+**Another implementation.** A direct Stim generator, an optional frontend or a
+future compiler supplies the same fragment record. Sources, model providers,
+window schemes, decoders and links stay independently replaceable. The controller
+owns waiting and round requests; the source owns physical execution. The current
+live Stim implementation requires trailing-buffer feedback. Its retained
+executed circuit and raw record grow with the run length. D26 extends its
+physical footprint to a group without changing that ownership.
+
+## D25. Every primary round follows its selected tier
+
+**Decided.** Static and growing windows retain their reads in the selected
+primary store. An arrival publishes to the window manager before the receiver
+releases an unheld round, because that arrival can create a window's first hold.
+Strong-only runs send both window input and timing-only idle rounds through the
+strong buffer. The receiver accepts the existing PackedRound record so it knows
+which route to deliver. Idle rounds keep a slot until the existing store output
+delivers them to MemoryRoundArrivals; they never create a window.
+
+**Why.** Live physical execution and finite recorded streams both create window
+holds at runtime. Static workloads with delayed operations also emit idle rounds.
+Hard-coded weak retention or a weak idle route makes primary-tier selection
+incomplete in these distinct cases. No new interface or provider identity is
+needed; the existing receiver signature now carries the canonical route.
+
+**Sources.** In the local gem5 tree, `src/mem/cache/base.hh:1175-1187` lets the
+cache decide allocation while `src/mem/cache/queue.hh:234-257` owns reclamation.
+`src/mem/cache/base.cc:637-656` services response targets and considers deferred
+consumers before deallocating their entry. DECSIM borrows this ownership and
+lifetime ordering, not gem5's cache policy. Its sender reserves receiver space
+before transfer, and the receiving port interprets the packet, as in gem5's
+`src/mem/port.hh:603-614` and `src/mem/protocol/timing.cc:49-53`.
+
+**Another implementation.** Direct Stim, recorded workloads and optional
+compiler frontends provide the same canonical rounds. A replacement buffer
+implements the existing storage port; a replacement link prices the existing
+strong paths. Window creation, storage, scheduling and feedback remain owned by
+their current components. Removing an optional frontend leaves the correction
+useful to the simulator.
+
+## D26. A shared physical stream owns a group, not one patch
+
+**Problem.** A joint two-patch experiment needs one retained quantum state;
+executing each patch separately destroys entanglement. A BB code block
+supplies a different case: one physical block can encode many logical outputs,
+so patch count cannot determine logical-vector width. Independent or recorded
+acquisition fragments also need their declared measurement order preserved,
+including an A, B, A sequence of patch footprints.
+
+**Decided.** The stream owner's existing `Operation.patches` is authoritative.
+`ProtectedRegion` refers to the stream and its endpoints without duplicating a
+patch. All group members remain reserved until shared finalization. For
+ordinary idle notifications, the controller asks the QPU whether the entire
+footprint is idle after the same operation. A partial group is refused;
+per-patch notifications coalesce into one group execution. Protected rounds
+instead follow the region scheduler, including while a region endpoint
+operation remains active. `SyndromeSource.idle_round_payloads` and
+`Qpu.emit_idle_stream_round` therefore receive the operation without a
+redundant scalar patch argument. Every existing source follows that same port.
+
+Readouts and retained fragments carry `patch_ids`. A joint acquisition names
+its whole footprint and crosses the acquisition link once at its actual width.
+A source with separate acquisition channels emits separate fragments instead.
+The source returns acquisitions in measurement order; the QPU assigns their
+`fragment_index` values before transport. Those indices determine assembly
+order even if transport changes arrival order. Only adjacent fragments with
+equal footprints coalesce. Formation concatenates a complete round once,
+preserving the Stim measurement record and attributing its detector vector to
+the union of its contributing footprints. Logical outputs remain the model's
+full vector.
+
+**Reference and principle.** gem5 `src/sim/sim_object.hh:68-101` separates
+object settings, construction, port binding and startup.
+`src/mem/port.hh:603-614` and `src/mem/protocol/timing.cc:49-53` send through
+bound protocols without discovering the concrete peer.
+`src/mem/abstract_mem.hh:103-118,245` separates physical storage ownership
+from access timing. Stim's public `TableauSimulator.do` and
+`current_measurement_record` retain shared state and chronological outcomes.
+DECSIM borrows these ownership boundaries. The source executes quantum
+fragments; the controller, QPU, windows, decoder manager and frame retain
+their respective waiting, cadence, windowing, scheduling and release
+decisions.
+
+**Provider neutrality.** Direct Stim, optional DeltaKit CSS programs and
+recorded acquisitions use the same canonical records. Timing-only and
+synthetic sources also implement the migrated port. Removing DeltaKit leaves
+joint footprints, ordered acquisition and complete-round formation useful on
+their own. A future compiler supplies the same circuit records; a future
+hardware model can supply separate fragments through the existing
+list-of-readouts contract. The current aggregate source does not establish
+independent per-patch acquisition latency, variable-duration rounds, dynamic
+tableau merging or arbitrary conditional gates.
+
 ## What is not modelled yet
 
 These are open, recorded rather than hidden, so that a reader does not

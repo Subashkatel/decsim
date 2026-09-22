@@ -1,0 +1,76 @@
+"""Ordinary Stim fragments for a repeated physical measurement program.
+
+A final round replaces a bulk round, so a producer may combine its last
+check readout and destructive data measurement in one physical instruction.
+"""
+
+import math
+from dataclasses import dataclass
+from typing import Optional
+
+import stim
+
+
+@dataclass(frozen=True)
+class RepeatedStimCircuit:
+    """One preparation, repeatable protection, and actual final readout.
+
+    The first and repeated fragments leave the data live. The final
+    fragment contains a complete last round and destructive readout;
+    single_round contains preparation and readout for a one-round run.
+    All fragments use the same physical qubit and logical observable ids.
+    A declared period binds duration-dependent physics to the QPU cadence;
+    None leaves cadence independent of the circuit's noise probabilities.
+    """
+
+    first_round: stim.Circuit
+    repeated_round: stim.Circuit
+    final_round: stim.Circuit
+    single_round: stim.Circuit
+    round_period_microseconds: Optional[float] = None
+
+    def __post_init__(self) -> None:
+        period = self.round_period_microseconds
+        if period is not None:
+            if not math.isfinite(period) or period <= 0:
+                raise ValueError(
+                    "round_period_microseconds must be finite and positive"
+                )
+        for name in (
+            "first_round",
+            "repeated_round",
+            "final_round",
+            "single_round",
+        ):
+            circuit = getattr(self, name)
+            copied = circuit.copy()
+            object.__setattr__(self, name, copied)
+
+    def round_circuit(self, round_index: int, is_final: bool) -> stim.Circuit:
+        """The physical instructions of the requested one-based round."""
+        if round_index < 1:
+            raise ValueError("round_index must be positive")
+        if round_index == 1:
+            if is_final:
+                return self.single_round.copy()
+            return self.first_round.copy()
+        if is_final:
+            return self.final_round.copy()
+        return self.repeated_round.copy()
+
+    def assemble(self, round_count: int) -> tuple[stim.Circuit, dict[int, int]]:
+        """Describe a complete physical history and its measurement schedule."""
+        if round_count < 1:
+            raise ValueError("round_count must be positive")
+        circuit = stim.Circuit()
+        measurement_rounds = {}
+        after_last_round = round_count + 1
+        for round_index in range(1, after_last_round):
+            is_final = round_index == round_count
+            fragment = self.round_circuit(round_index, is_final)
+            first_measurement = circuit.num_measurements
+            circuit += fragment
+            after_last_measurement = circuit.num_measurements
+            for measurement in range(first_measurement, after_last_measurement):
+                measurement_rounds[measurement] = round_index
+        return circuit, measurement_rounds

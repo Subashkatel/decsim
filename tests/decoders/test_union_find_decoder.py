@@ -83,7 +83,7 @@ def _job(model, syndrome) -> decoding_records.DecodeJob:
     bits = tuple(bits)
     payload = round_records.RetainedSyndromeFragment(
         operation_id=1,
-        patch_id=0,
+        patch_ids=(0,),
         round_index=1,
         bits=bits,
         size_bits=len(bits),

@@ -23,7 +23,6 @@ from typing import Callable, Optional
 import decsim.config as config
 import decsim.ports as ports
 import decsim.records.decoding as decoding_records
-import decsim.records.identity as identity_records
 import decsim.records.log_sources as log_sources
 import decsim.records.program as program_records
 import decsim.records.windows as window_records
@@ -379,10 +378,10 @@ class DecodeRequestBuilder:
     def _append_round_payloads(
         self, payloads, fragments, window_info, round_index
     ) -> None:
-        """One round's fragments in stable patch order, no boundary folded."""
+        """One round's fragments in measurement order, no boundary folded."""
         if fragments is None:
             return
-        ordered = sorted(fragments, key=_fragment_patch_order)
+        ordered = sorted(fragments, key=_fragment_order)
         for fragment in ordered:
             payload = self.interaction.apply_boundary(
                 None, window_info, fragment, round_index
@@ -740,8 +739,8 @@ def _first_forced_class(forced_classes: tuple) -> Optional[int]:
     return forced_classes[0]
 
 
-def _fragment_patch_order(fragment):
-    return identity_records.stable_identity_order_key(fragment.patch_id)
+def _fragment_order(fragment):
+    return fragment.fragment_index
 
 
 @dataclasses.dataclass(frozen=True)

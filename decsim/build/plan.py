@@ -68,7 +68,11 @@ class Plan:
 def build_plan(
     settings: machine_settings.MachineSettings, escalation_policy
 ) -> Plan:
-    """The code, the workload's operations and the window plan."""
+    """The code, the workload's operations and the window plan.
+
+    Keep the root's run-shape and plan records together so their shared
+    inputs remain visible; named helpers resolve individual collaborators.
+    """
     code, layout = settings.qpu.build_code(
         commit_rounds_override=settings.windows.commit_rounds,
         buffer_rounds_override=settings.windows.buffer_rounds,
@@ -76,18 +80,12 @@ def build_plan(
     operations, decode_operations, dynamic_streams, rounds_policy = _operations(
         settings.workload, code
     )
-    every_operation = operations + decode_operations + dynamic_streams
+    external_decode_operations = decode_operations + dynamic_streams
+    every_operation = operations + external_decode_operations
     all_operations = _unique_operations(every_operation)
-    views = []
-    for operation in all_operations:
-        view = program_records.OperationPlanningView.from_operation(operation)
-        views.append(view)
-    views = tuple(views)
-    view_by_id = {}
-    for view in views:
-        view_by_id[view.id] = view
+    views, view_by_id = _planning_views(all_operations)
     external_blocker_ids = []
-    for operation in decode_operations + dynamic_streams:
+    for operation in external_decode_operations:
         external_blocker_ids.append(operation.id)
     planner.check_operation_graph(
         list(operations),
@@ -102,17 +100,7 @@ def build_plan(
         settings.escalation
     )
     reread_regions = settings.escalation.restart_reread_buffer_regions
-    window_interaction = settings.windows.window_interaction
-    if window_interaction is None:
-        payload_row = tables.row(
-            window_settings.BOUNDARY_PAYLOADS,
-            "windows.boundary_payload",
-            settings.windows.boundary_payload,
-        )
-        boundary_payload = payload_row()
-        window_interaction = window_interactions.DefaultWindowInteraction(
-            reread_regions, boundary_payload
-        )
+    window_interaction = _window_interaction(settings.windows, reread_regions)
     if dynamic_streams and not scheme.supports_dynamic_streams:
         raise ValueError(
             "dynamic streams require a windowing scheme that supports them"
@@ -160,18 +148,12 @@ def build_plan(
         restart_reread_buffer_regions=reread_regions,
         has_open_ended_dynamic_streams=bool(dynamic_streams),
     )
-    resource_claims = {}
-    for operation in operations:
-        view = view_by_id[operation.id]
-        claims = layout.resources_for(view)
-        resource_claims[operation.id] = tuple(claims)
+    resource_claims = _resource_claims(operations, view_by_id, layout)
     device = _syndrome_source(settings.qpu)
-    _install_device_circuits(device, all_operations)
     error_model_provider = settings.qpu.error_model_provider
     if error_model_provider is None:
         error_model_provider = device
-    elif hasattr(error_model_provider, "operation_circuit_scope"):
-        _install_device_circuits(error_model_provider, all_operations)
+    _install_operation_circuits(device, error_model_provider, all_operations)
     idle_policy = _idle_policy(settings.idle_policy)
     return Plan(
         code=code,
@@ -191,6 +173,39 @@ def build_plan(
         resource_claims=resource_claims,
         device=device,
         error_model_provider=error_model_provider,
+    )
+
+
+def _planning_views(operations):
+    views = []
+    view_by_id = {}
+    for operation in operations:
+        view = program_records.OperationPlanningView.from_operation(operation)
+        views.append(view)
+        view_by_id[view.id] = view
+    return tuple(views), view_by_id
+
+
+def _resource_claims(operations, view_by_id, layout):
+    claims_by_operation = {}
+    for operation in operations:
+        view = view_by_id[operation.id]
+        claims = layout.resources_for(view)
+        claims_by_operation[operation.id] = tuple(claims)
+    return claims_by_operation
+
+
+def _window_interaction(settings, reread_regions):
+    if settings.window_interaction is not None:
+        return settings.window_interaction
+    payload_row = tables.row(
+        window_settings.BOUNDARY_PAYLOADS,
+        "windows.boundary_payload",
+        settings.boundary_payload,
+    )
+    boundary_payload = payload_row()
+    return window_interactions.DefaultWindowInteraction(
+        reread_regions, boundary_payload
     )
 
 
@@ -397,19 +412,25 @@ def _syndrome_source(settings: qpu_settings.QpuSettings):
     return row(**settings.arguments)
 
 
-def _install_device_circuits(device, operations) -> None:
-    """Give a per-operation device its own copy of every circuit."""
-    scope = getattr(device, "operation_circuit_scope", None)
-    if scope == "none":
-        for operation in operations:
-            operation.circuit = None
-        return
-    if scope != "per_operation":
-        raise ValueError(
-            "device operation_circuit_scope must be none or per_operation"
-        )
+def _install_operation_circuits(device, model_provider, operations) -> None:
+    """Copy the root-owned circuit once when either consumer requires it."""
+    source_scope = _operation_circuit_scope(device, "syndrome source")
+    model_scope = _operation_circuit_scope(model_provider, "model provider")
+    needs_circuit = "per_operation" in (source_scope, model_scope)
     for operation in operations:
+        if not needs_circuit:
+            operation.circuit = None
+            continue
         if operation.circuit is None:
             continue
         circuit_text = str(operation.circuit)
         operation.circuit = stim.Circuit(circuit_text)
+
+
+def _operation_circuit_scope(component, role):
+    scope = getattr(component, "operation_circuit_scope", None)
+    if scope not in ("none", "per_operation"):
+        raise ValueError(
+            f"{role} operation_circuit_scope must be none or per_operation"
+        )
+    return scope

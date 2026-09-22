@@ -14,6 +14,8 @@ to the job that first asks for it, and a job that never runs gives its
 rounds back.
 """
 
+import dataclasses
+
 import decsim.decoders.detection_events as detection_events
 import decsim.detector_error_model.detection_event_formation as event_formation
 import decsim.records.decoding as decoding_records
@@ -39,7 +41,7 @@ class Former:
 def fragment(round_index, bits=(1, 0, 1, 1)):
     return round_records.RetainedSyndromeFragment(
         operation_id=1,
-        patch_id=0,
+        patch_ids=(0,),
         round_index=round_index,
         bits=bits,
         size_bits=len(bits),
@@ -211,3 +213,18 @@ def test_a_job_that_carries_no_rounds_forms_and_pays_nothing():
     cycles = formation_stage.cycles_for(windowless)
 
     assert cycles == 0
+
+
+def test_a_joint_round_forms_once_after_all_fragments_arrive() -> None:
+    table = Former()
+    remembered = event_formation.RememberedDetectionEvents(table)
+    formation = detection_events.TierFormation(remembered)
+    first = fragment(1, bits=(1,))
+    second = dataclasses.replace(first, patch_ids=("other",), fragment_index=1)
+    last = dataclasses.replace(first, fragment_index=2)
+
+    (formed,) = formation.form([last, first, second])
+    assert table.asked == [(1, 1)]
+    assert formed.patch_ids == (0, "other")
+    assert formed.bits == (1, 0)
+    assert formed.size_bits == 2

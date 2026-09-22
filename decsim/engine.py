@@ -41,13 +41,15 @@ class Priority(enum.IntEnum):
     tick alone fixes its place. The other two order one protected
     cycle inside its boundary tick: the boundary opens and the
     operations held for it may start, then the stream's round is
-    emitted, then a region whose close was requested is sealed
-    (controller/feedback_streams.py).
+    emitted, then a region whose close was requested releases its patch.
+    Final model metadata is sealed during emission, before zero-delay
+    readouts can queue decoding; resource release waits until every
+    protected round at this tick has emitted (controller/feedback_streams.py).
     """
 
     DEFAULT = 0
     PROTECTED_ROUND = 1
-    PROTECTED_SEAL = 2
+    PROTECTED_RELEASE = 2
 
 
 @dataclasses.dataclass(order=True)

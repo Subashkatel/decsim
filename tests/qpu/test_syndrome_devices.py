@@ -24,7 +24,7 @@ def test_a_timing_only_round_carries_no_bits_and_names_its_patch():
         id=4, name="memory", qubits=(2,), patches=(7,)
     )
     payload = first_payload(device, operation, 3)
-    assert payload == round_records.QPUReadout(4, 7, 3)
+    assert payload == round_records.QPUReadout(4, (7,), 3)
 
 
 def test_a_stream_segment_reports_its_stream_and_global_round():
@@ -33,7 +33,7 @@ def test_a_stream_segment_reports_its_stream_and_global_round():
         id=4, name="tail", qubits=(2,), stream_id="s", stream_offset=6
     )
     payload = first_payload(device, operation, 2)
-    assert payload == round_records.QPUReadout("s", 2, 8)
+    assert payload == round_records.QPUReadout("s", (2,), 8)
 
 
 def test_fake_bits_are_as_wide_as_the_syndrome():
@@ -74,8 +74,8 @@ def test_one_payload_per_patch_when_asked():
     )
     payloads = device.round_payloads(operation, 1)
     assert len(payloads) == 2
-    assert payloads[0].patch_id == 5
-    assert payloads[1].patch_id == 6
+    assert payloads[0].patch_ids == (5,)
+    assert payloads[1].patch_ids == (6,)
     assert payloads[0].operation_id == 1
     assert payloads[1].operation_id == 1
 

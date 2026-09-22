@@ -17,6 +17,75 @@ import stim
 from decsim.detector_error_model import detector_chronology, detector_formation
 
 
+def test_extending_a_live_table_keeps_the_previous_measurement() -> None:
+    first = stim.Circuit("R 0\nM 0\nDETECTOR rec[-1]")
+    first_table = detector_formation.build_formation_table(
+        first, 1, measurement_rounds={0: 1}
+    )
+    former = detector_formation.StreamingDetectorFormer(first_table)
+    first_events, _ = former.feed_packet(1, (1,))
+    assert first_events == [(0, 1)]
+    complete = first.copy()
+    complete.append_from_stim_program_text("M 0\nDETECTOR rec[-1] rec[-2]")
+    complete_table = detector_formation.build_formation_table(
+        complete, 2, measurement_rounds={0: 1, 1: 2}
+    )
+    former.extend_table(complete_table)
+    second_events, _ = former.feed_packet(2, (1,))
+    converter = complete.compile_m2d_converter()
+    measurements = numpy.array([[1, 1]], dtype=numpy.bool_)
+    expected = converter.convert(
+        measurements=measurements, append_observables=False
+    )
+    assert first_events + second_events == [(0, 1), (1, 0)]
+    assert expected.tolist() == [[True, False]]
+
+
+def test_a_recorded_table_extension_refuses_a_discarded_measurement() -> None:
+    first = stim.Circuit("R 0\nM 0\nDETECTOR rec[-1]")
+    complete = first * 2
+    table = detector_formation.build_formation_table(
+        complete, 2, measurement_rounds={0: 1, 1: 2}
+    )
+    former = detector_formation.StreamingDetectorFormer(table)
+    former.feed_packet(1, (0,))
+    former.feed_packet(2, (0,))
+    complete.append_from_stim_program_text("M 0\nDETECTOR rec[-1] rec[-3]")
+    extended = detector_formation.build_formation_table(
+        complete, 3, measurement_rounds={0: 1, 1: 2, 2: 3}
+    )
+    with pytest.raises(RuntimeError, match="references discarded round 1"):
+        former.extend_table(extended)
+
+
+def test_a_table_extension_cannot_change_an_existing_packet() -> None:
+    circuit = stim.Circuit("R 0\nM 0\nDETECTOR rec[-1]")
+    table = detector_formation.build_formation_table(
+        circuit, 1, measurement_rounds={0: 1}
+    )
+    former = detector_formation.StreamingDetectorFormer(table)
+    circuit.append_from_stim_program_text("M 0\nDETECTOR rec[-1] rec[-2]")
+    changed = detector_formation.build_formation_table(
+        circuit, 1, measurement_rounds={0: 1, 1: 1}
+    )
+    with pytest.raises(RuntimeError, match="changes an existing packet"):
+        former.extend_table(changed)
+
+
+def test_a_table_extension_cannot_reinterpret_an_existing_detector() -> None:
+    circuit = stim.Circuit("R 0\nM 0\nDETECTOR rec[-1]")
+    table = detector_formation.build_formation_table(
+        circuit, 1, measurement_rounds={0: 1}
+    )
+    former = detector_formation.StreamingDetectorFormer(table)
+    changed_circuit = stim.Circuit("R 0\nX 0\nM 0\nDETECTOR rec[-1]\nM 0")
+    changed = detector_formation.build_formation_table(
+        changed_circuit, 2, measurement_rounds={0: 1, 1: 2}
+    )
+    with pytest.raises(RuntimeError, match="changes an existing detector"):
+        former.extend_table(changed)
+
+
 def surface_code_circuit(rounds):
     return stim.Circuit.generated(
         "surface_code:rotated_memory_z",

@@ -65,6 +65,7 @@ def observe(
     on their own.
     """
     strong_syndrome_buffer = seats.get("strong_syndrome_buffer")
+    strong_syndrome_round_receiver = seats.get("strong_syndrome_round_receiver")
     pauli_frame = seats.get("pauli_frame")
     decoder_managers = _decoder_managers(seats)
     log = _connect_log(observation, engine)
@@ -79,6 +80,7 @@ def observe(
         weak_syndrome_round_receiver=seats["weak_syndrome_round_receiver"],
         instruction_output=seats["instruction_output"],
         strong_syndrome_buffer=strong_syndrome_buffer,
+        strong_syndrome_round_receiver=strong_syndrome_round_receiver,
     )
     syndrome_buffer_occupancy = _syndrome_buffer_occupancy(
         observation, engine, seats["weak_syndrome_buffer"]
@@ -451,6 +453,7 @@ def _connect_round_events(
     weak_syndrome_round_receiver,
     instruction_output,
     strong_syndrome_buffer,
+    strong_syndrome_round_receiver,
 ) -> round_events_module.RoundEventRecorder:
     """The recorder hears every round event, output and strong landing."""
     round_events = round_events_module.RoundEventRecorder(engine)
@@ -467,6 +470,10 @@ def _connect_round_events(
     if strong_syndrome_buffer is not None:
         strong_syndrome_buffer.trace.round_stored.connect(
             round_events.round_stored
+        )
+    if strong_syndrome_round_receiver is not None:
+        strong_syndrome_round_receiver.trace.round_event.connect(
+            round_events.record
         )
     return round_events
 

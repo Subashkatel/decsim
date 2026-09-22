@@ -27,6 +27,7 @@ docstring.
 ### records
 
 - `decsim/records/__init__.py`: The vocabulary every component speaks, one module per record family.
+- `decsim/records/circuits.py`: Ordinary Stim fragments for a repeated physical measurement program.
 - `decsim/records/decoder_evidence.py`: The evidence a decode returns beside its correction, for a signal to read.
 - `decsim/records/decoding.py`: One decode: the job, the result, and the holds that keep its rounds.
 - `decsim/records/identity.py`: What decsim accepts as an operation, patch or window key.
@@ -207,6 +208,8 @@ docstring.
 - `decsim/qpu/round_policies.py`: The round policies: how many syndrome rounds an operation occupies.
 - `decsim/qpu/settings.py`: The QPU's settings, and the magic state factory that feeds it.
 - `decsim/qpu/stim_device.py`: The Stim syndrome source: one sampled shot, emitted as raw bits by round.
+- `decsim/qpu/stim_stream_models.py`: Window fault models of a growing repeated Stim circuit.
+- `decsim/qpu/streaming_stim_device.py`: Execute a repeated Stim memory only when the QPU requests a round.
 - `decsim/qpu/syndrome_devices.py`: Syndrome sources without a circuit: timing-only and fake-bit readout.
 
 ## Level 4: confidence, frontends, observe
@@ -224,6 +227,8 @@ docstring.
 
 - `decsim/frontends/__init__.py`: Everything that happens to a program before and while it runs.
 - `decsim/frontends/circuit_frontend.py`: Workloads written by hand: an operation list, or a small text IR.
+- `decsim/frontends/deltakit.py`: Deltakit memory circuits exported into the supplied-circuit frontend.
+- `decsim/frontends/deltakit_compiler.py`: Compile finite rotated-code experiments through Deltakit's CircuitBuilder.
 - `decsim/frontends/execution_runtime.py`: Which operation runs when: readiness, resource ownership, timestamps.
 - `decsim/frontends/planner.py`: The plan of one run: cadence, geometry, windows and buffer holds.
 - `decsim/frontends/qlx_frontend.py`: Lower a QLX schedule into decsim operations and decode streams.

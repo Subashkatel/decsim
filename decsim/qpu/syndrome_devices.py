@@ -45,29 +45,35 @@ class TimingOnlyDevice:
         operation: program_records.Operation,
         segment_round_count: int,
         source_round_count: int,
+        *,
+        round_period_ticks: int,
     ) -> None:
         """Nothing to sample."""
 
     def round_payloads(
         self, operation: program_records.Operation, round_index: int
     ) -> list[round_records.QPUReadout]:
-        """One bitless payload on the operation's first patch."""
+        """One bitless acquisition attributed to the operation's footprint."""
         target, global_round = _stream_target_and_global_round(
             operation, round_index
         )
-        patch = _first_patch_of(operation)
-        return [round_records.QPUReadout(target, patch, global_round)]
+        patches = program_records.patches_of(operation)
+        return [round_records.QPUReadout(target, patches, global_round)]
 
     def idle_round_payloads(
         self,
         operation: program_records.Operation,
         stream_id: Any,
         global_round: int,
-        patch: Any,
+        *,
+        is_final: bool,
+        round_period_ticks: int,
     ) -> list[round_records.QPUReadout]:
         """One bitless payload for the idle stream round."""
-        del operation
-        return [round_records.QPUReadout(stream_id, patch, global_round)]
+        patches = program_records.patches_of(operation)
+        del is_final
+        del round_period_ticks
+        return [round_records.QPUReadout(stream_id, patches, global_round)]
 
     def finalize_stream_round(
         self, operation: program_records.Operation, source_round_count: int
@@ -75,6 +81,13 @@ class TimingOnlyDevice:
         """Refused: a stream without a circuit has no final readout."""
         del operation, source_round_count
         raise ValueError("TimingOnlyDevice cannot finalize a physical stream")
+
+    def declare_stream(
+        self,
+        stream_operation: program_records.Operation,
+        round_count: int,
+    ) -> None:
+        """No physical circuit constrains this stream's length."""
 
     def register_dynamic_stream(
         self,
@@ -91,6 +104,16 @@ class TimingOnlyDevice:
         stream_round_count: int,
     ) -> None:
         """No circuit, so any length is fine."""
+
+    def finalize_stream_models(
+        self,
+        stream_operation: program_records.Operation,
+        stream_round_count: int,
+    ) -> bool:
+        """No decoder model has a terminal boundary to fix."""
+        del stream_operation
+        del stream_round_count
+        return False
 
     def window_models_for_operation(
         self,
@@ -173,6 +196,8 @@ class SyndromeBitDevice(seeding._RandomSeedConsumer):
         operation: program_records.Operation,
         segment_round_count: int,
         source_round_count: int,
+        *,
+        round_period_ticks: int,
     ) -> None:
         """Nothing to sample ahead of time."""
 
@@ -189,20 +214,26 @@ class SyndromeBitDevice(seeding._RandomSeedConsumer):
         if not operation.patches:
             patch_count = len(operation.qubits)
         bits = self._fake_bits(patch_count)
-        patch = _first_patch_of(operation)
-        return [self._payload(target, patch, global_round, bits)]
+        patches = program_records.patches_of(operation)
+        return [self._payload(target, patches, global_round, bits)]
 
     def idle_round_payloads(
         self,
         operation: program_records.Operation,
         stream_id: Any,
         global_round: int,
-        patch: Any,
+        *,
+        is_final: bool,
+        round_period_ticks: int,
     ) -> list[round_records.QPUReadout]:
         """One fake-bit payload for the idle stream round."""
-        del operation
-        bits = self._fake_bits(1)
-        return [self._payload(stream_id, patch, global_round, bits)]
+        del is_final
+        del round_period_ticks
+        patches = program_records.patches_of(operation)
+        if self.one_payload_per_patch:
+            return self._payload_per_patch(operation, stream_id, global_round)
+        bits = self._fake_bits(len(patches))
+        return [self._payload(stream_id, patches, global_round, bits)]
 
     def finalize_stream_round(
         self, operation: program_records.Operation, source_round_count: int
@@ -210,6 +241,13 @@ class SyndromeBitDevice(seeding._RandomSeedConsumer):
         """Refused: a stream without a circuit has no final readout."""
         del operation, source_round_count
         raise ValueError("SyndromeBitDevice cannot finalize a physical stream")
+
+    def declare_stream(
+        self,
+        stream_operation: program_records.Operation,
+        round_count: int,
+    ) -> None:
+        """No physical circuit constrains this stream's length."""
 
     def register_dynamic_stream(
         self,
@@ -226,6 +264,16 @@ class SyndromeBitDevice(seeding._RandomSeedConsumer):
         stream_round_count: int,
     ) -> None:
         """No circuit, so any length is fine."""
+
+    def finalize_stream_models(
+        self,
+        stream_operation: program_records.Operation,
+        stream_round_count: int,
+    ) -> bool:
+        """No decoder model has a terminal boundary to fix."""
+        del stream_operation
+        del stream_round_count
+        return False
 
     def window_models_for_operation(
         self,
@@ -278,11 +326,11 @@ class SyndromeBitDevice(seeding._RandomSeedConsumer):
         return [self._rng.randint(0, 1) for _ in range(bit_count)]
 
     def _payload(
-        self, target: Any, patch: Any, global_round: int, bits: list
+        self, target: Any, patches: tuple, global_round: int, bits: list
     ) -> round_records.QPUReadout:
         return round_records.QPUReadout(
             target,
-            patch,
+            patches,
             global_round,
             bits=bits,
             code=self.code.name,
@@ -301,7 +349,7 @@ class SyndromeBitDevice(seeding._RandomSeedConsumer):
         payloads = []
         for patch in patches:
             bits = self._fake_bits(1)
-            payload = self._payload(target, patch, global_round, bits)
+            payload = self._payload(target, (patch,), global_round, bits)
             payloads.append(payload)
         return payloads
 
@@ -322,9 +370,3 @@ def _stream_target_and_global_round(
         stream_offset = operation.stream_offset
     global_round = round_index + stream_offset
     return target, global_round
-
-
-def _first_patch_of(operation: program_records.Operation) -> Any:
-    if operation.patches:
-        return operation.patches[0]
-    return operation.qubits[0]

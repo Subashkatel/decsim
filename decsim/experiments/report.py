@@ -257,7 +257,7 @@ def summarize_point(point: tuple, totals, counts: dict) -> dict:
     _add_pool_columns(row, totals, distance, round_period_us)
     for name in _points_held(totals.means):
         multiset = counts.get((point, name), {})
-        _addpoint_columns(row, totals, name, multiset)
+        _add_latency_point_columns(row, totals, name, multiset)
     return row
 
 
@@ -1310,7 +1310,9 @@ def _sweep_point_order(point: tuple) -> tuple:
     )
 
 
-def _addpoint_columns(row: dict, totals, name: str, multiset: dict) -> None:
+def _add_latency_point_columns(
+    row: dict, totals, name: str, multiset: dict
+) -> None:
     """One latency point's mean, median, p99 and max columns.
 
     The mean averages the per-shot means and the max takes the largest

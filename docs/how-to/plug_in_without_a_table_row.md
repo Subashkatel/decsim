@@ -9,19 +9,28 @@ class in your own file runs with no registration step.
 ## Pass the instance
 
 ```python
-from decsim.decoders.settings import DecoderSettings
-from decsim.windows.settings import WindowSettings
-from decsim.qpu.settings import QpuSettings
-from decsim.machine import Machine
-from decsim.settings import MachineSettings
+import decsim.decoders.settings as decoder_settings
+import decsim.frontends.settings as workload_settings
+import decsim.machine as machine_module
+import decsim.qpu.settings as qpu_settings
+import decsim.records.program as program_records
+import decsim.settings as machine_settings
+import decsim.windows.settings as window_settings
 
-settings = MachineSettings(
-    weak_decoder=DecoderSettings(decoder=MyDecoder()),
-    windows=WindowSettings(scheme=MyScheme()),
-    qpu=QpuSettings(code=MyCard()),
+memory = program_records.Operation(id=1, name="memory", qubits=(0,))
+workload = workload_settings.WorkloadSettings(operations=(memory,))
+settings = machine_settings.MachineSettings(
+    workload=workload,
+    weak_decoder=decoder_settings.DecoderSettings(decoder=MyDecoder()),
+    windows=window_settings.WindowSettings(scheme=MyScheme()),
+    qpu=qpu_settings.QpuSettings(code=MyCard()),
 )
-result = Machine.build(settings, seed=0).run()
+machine = machine_module.Machine.build(settings, 0)
+result = machine.run()
 ```
+
+The default workload is empty, so a run with no operations completes
+at tick zero without calling any of your classes; name one.
 
 Every field of `MachineSettings` has a default, so you name only what
 differs from the default machine. The build site prefers your object
@@ -33,16 +42,24 @@ caller's own object before its table
 
 ## What you give up
 
-Only the yaml. Without a row your class cannot be named from a config
-file, which means it cannot appear in a sweep run by `decsim collect`
-and cannot be recorded in a run folder's manifest as a name. Everything
-else works: the ports, the engine, the trace, the metrics.
+Only the yaml, and with it a sweep point's settings for a code card:
+a point sets `qpu.distance`, and a `QpuSettings` that names both a
+distance and a code is refused ("multiple code sources supplied").
+Replace the distance with None beside your card, as
+`tools/deltakit_example.py` does for its repetition card. A card passed
+this way also keeps its own window sizes; `windows.commit_rounds` and
+`windows.buffer_rounds` size only the default surface code.
+
+Without a row your class cannot be named from a config file, which
+means it cannot appear in a sweep run by `decsim collect` and a run
+folder's manifest records it by its class name only. Everything else
+works: the ports, the engine, the trace, the metrics.
 
 ## When to add the row
 
 When the class stops changing, or the moment you want to sweep it.
-[How to add a row to a table](add_a_table_row.md) is one entry in a dictionary and one
-key in `configs/reference.yaml`.
+[How to add a row to a table](add_a_table_row.md) is the recipe. A code
+card has no table yet, so it stays on this page's path.
 
 ## The worked examples
 

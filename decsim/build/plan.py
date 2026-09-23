@@ -420,14 +420,17 @@ def _syndrome_source(settings: qpu_settings.QpuSettings, code):
     """The device of the qpu kind, or the Python-built one.
 
     A row that shapes its payloads by the code card is built with the
-    run's card, so a yaml that names it needs no argument of its own.
+    run's card, so a yaml that names it needs no argument of its own; a
+    row with keys of its own is built with its Settings record too.
     """
     if settings.device is not None:
         return settings.device
     row = tables.row(qpu_settings.SYNDROME_SOURCES, "qpu.kind", settings.kind)
-    arguments = dict(settings.arguments)
+    arguments = {}
     if row.takes_code_card:
-        arguments.setdefault("code", code)
+        arguments["code"] = code
+    if settings.row_settings is not None:
+        arguments["settings"] = settings.row_settings
     return row(**arguments)
 
 

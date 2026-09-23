@@ -26,6 +26,10 @@ SYNDROME_SOURCES = {
     "recorded_stim": stim_device.RecordedStimDevice,
     "streaming_stim": streaming_stim_device.StreamingStimDevice,
 }
+# The keys the qpu section reads for itself; any other key is the source
+# row's own (its Settings, decsim/tables.py row_settings). The sweep sets
+# the distance and the round period, so neither is a key here.
+QPU_KEYS = ("kind",)
 # MachineSettings.magic_state_factory names one of these rows from
 # Python: what supplies the T states an operation consumes. No yaml
 # section sets it today.
@@ -55,8 +59,9 @@ class QpuSettings:
     it is. The card provisions the links and sizes the circuit-less
     sources' rounds; a circuit source's payloads carry the circuit's own
     widths, so a card and a circuit at different distances run links
-    provisioned for the wrong code. The arguments are the source row's
-    keyword arguments (a seed, a recorded shot's measurements).
+    provisioned for the wrong code. row_settings is the source row's own
+    Settings, read from the section's keys outside QPU_KEYS, or None for
+    a row that declares none.
     """
 
     kind: str = "timing_only"
@@ -66,7 +71,8 @@ class QpuSettings:
     layout: Optional[layouts.LayoutModel] = None
     device: Optional[ports.SyndromeSource] = None
     error_model_provider: Optional[Any] = None
-    arguments: Mapping[str, Any] = dataclasses.field(default_factory=dict)
+    # the source row's own Settings record, opaque to the section
+    row_settings: Optional[Any] = None
 
     def __post_init__(self) -> None:
         config.check_duration(
@@ -77,20 +83,16 @@ class QpuSettings:
     def from_yaml(cls, section: Mapping) -> "QpuSettings":
         """The `qpu` section: the source kind; the sweep sets the rest.
 
-        kind is the section's one key, so a distance or a period written
-        here, which the sweep would silently replace, is refused. The kind
-        is looked up here, where the yaml enters, so a misspelt source is
-        refused before `decsim show` prints it or a run folder exists.
+        A distance or a period written here, which the sweep would
+        silently replace, is refused with every other key the section
+        and its row do not declare. The kind is looked up here, where the
+        yaml enters, so a misspelt source is refused before `decsim show`
+        prints it or a run folder exists.
         """
-        if set(section) != {"kind"}:
-            listed = sorted(section)
-            raise ValueError(
-                f"the qpu section takes one key, kind, and was given "
-                f"{listed}; the sweep sets the distance and the round period"
-            )
-        kind = section["kind"]
-        tables.row(SYNDROME_SOURCES, "qpu.kind", kind)
-        return cls(kind=kind)
+        kind = section.get("kind")
+        row = tables.row(SYNDROME_SOURCES, "qpu.kind", kind)
+        row_settings = tables.row_settings(row, "qpu", section, QPU_KEYS)
+        return cls(kind=kind, row_settings=row_settings)
 
     def build_code(
         self,

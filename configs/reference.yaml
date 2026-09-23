@@ -27,11 +27,14 @@ qpu:
                                    # keeps a size and no data,
                                    # src/proto/packet.proto); syndrome_bits
                                    # fills that size with seeded random bits.
-                                   # streaming_stim needs Python arguments
-                                   # with repeated circuit records keyed by
-                                   # dynamic stream owner. kind is the
-                                   # section's one key: the sweep sets the
-                                   # distance and the round period
+                                   # streaming_stim takes repeated circuit
+                                   # records keyed by dynamic stream owner,
+                                   # which no yaml key carries: build it in
+                                   # Python (QpuSettings(device=...)). A
+                                   # source row with keys of its own reads
+                                   # them here (its Settings); the sweep
+                                   # sets the distance and the round period,
+                                   # so neither is a key here
 
 escalation:
   clock: fridge                    # a clocks domain; absent uses controller.clock

@@ -6,6 +6,8 @@ refused with a sentence, the swept distance reaches the rounds policy,
 and a run writes its manifest and its per-shot records.
 """
 
+import dataclasses
+
 import pytest
 import yaml
 
@@ -14,6 +16,9 @@ import decsim.experiments.collect_command as collect_command
 import decsim.experiments.experiment as experiment
 import decsim.experiments.report as report
 import decsim.experiments.run_folder as run_folder
+import decsim.machine as machine_module
+import decsim.qpu.settings as qpu_settings
+import decsim.qpu.syndrome_devices as syndrome_devices
 from tests.experiments.yaml_configs import (
     CONFIGS_DIR,
     MINIMAL_CONFIG,
@@ -180,11 +185,46 @@ def test_a_sweep_axis_given_as_one_value_is_refused(tmp_path):
 
 
 def test_a_qpu_key_other_than_kind_is_refused(tmp_path):
+    """The sweep sets the distance, so the section refuses one written here."""
     qpu = {"kind": "stim_device", "distance": 5}
     config_path = write_config(tmp_path, {"qpu": qpu})
-    sentence = r"the qpu section takes one key, kind, and was given"
+    sentence = r"qpu does not know \['distance'\]; its keys are \['kind'\]"
     with pytest.raises(ValueError, match=sentence):
         experiment.load_experiment(config_path)
+
+
+class _SplitBits(syndrome_devices.SyndromeBitDevice):
+    """A source with a key of its own, for the section's split."""
+
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        one_payload_per_patch: bool = False
+
+        @classmethod
+        def from_yaml(cls, section):
+            return cls(**section)
+
+    def __init__(self, code, settings) -> None:
+        syndrome_devices.SyndromeBitDevice.__init__(
+            self, code, one_payload_per_patch=settings.one_payload_per_patch
+        )
+        self.settings = settings
+
+
+def test_a_source_rows_own_key_reaches_the_built_source(monkeypatch, tmp_path):
+    monkeypatch.setitem(qpu_settings.SYNDROME_SOURCES, "split", _SplitBits)
+    qpu = {"kind": "split", "one_payload_per_patch": True}
+    config_path = write_config(tmp_path, {"qpu": qpu})
+    config = experiment.load_experiment(config_path)
+    settings = config.point_settings(
+        physical_error_probability=0.001, distance=3, round_period_us=1.0
+    )
+
+    machine = machine_module.Machine.build(settings, 0)
+
+    own_settings = _SplitBits.Settings(one_payload_per_patch=True)
+    assert machine.syndrome_source.settings == own_settings
+    assert machine.syndrome_source.one_payload_per_patch is True
 
 
 def test_a_mode_without_its_tier_is_refused(tmp_path):

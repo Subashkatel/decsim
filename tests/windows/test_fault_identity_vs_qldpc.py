@@ -1,13 +1,10 @@
 """decsim's per-window fault ownership beside qLDPC's, fault by fault.
 
-This is the projection the 2026-08-22 window validation harness was
-built around (archive/2026-09-09-window-harness/harness/references.py,
-in the sandbox: "A fault is
-identified everywhere by its signature (frozenset of detectors,
-frozenset of observables), never by column index"). Two implementations
-number their columns differently, so a column index proves nothing; the
-signature is the same object in both, and the sets of signatures a
-window commits can be compared element by element.
+A fault is identified by its signature, the pair (frozenset of
+detectors, frozenset of observables), never by its column index. Two
+implementations number their columns differently, so a column index
+proves nothing; the signature is the same object in both, and the sets
+of signatures a window commits can be compared element by element.
 
 The reference is qLDPC's SlidingWindowDecoder
 (qldpc/decoders/sinter.py, class SlidingWindowDecoder and

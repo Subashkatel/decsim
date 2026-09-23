@@ -122,7 +122,7 @@ class UnionFindHardEvidence:
 def normalized_weight_step(weight_step) -> float:
     """The weight step as a positive finite float; anything else is refused."""
     if isinstance(weight_step, bool) or not isinstance(weight_step, Real):
-        raise TypeError("Union-Find weight_step must be a real number")
+        raise ValueError("Union-Find weight_step must be a real number")
     normalized = float(weight_step)
     if not math.isfinite(normalized) or normalized <= 0.0:
         raise ValueError("Union-Find weight_step must be finite and positive")

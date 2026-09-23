@@ -420,3 +420,19 @@ def test_a_manager_clock_the_clocks_do_not_have_is_refused_at_no_cost():
 
     with pytest.raises(ValueError, match="clock 'nowhere' is not a clocks"):
         decoder_settings.DecoderManagerSettings.from_yaml(section, clocks)
+
+
+@pytest.mark.parametrize("weight_step", [True, "0.1", None])
+def test_a_weight_step_that_is_not_a_number_is_refused_with_a_sentence(
+    weight_step,
+):
+    """A ValueError, so the experiments layer names the file it is in."""
+    clocks = config.ClockSettings({"decoder": 250.0})
+    section = _tier_section({"bits": None})
+    section["kind"] = "union_find"
+    section["weight_step"] = weight_step
+
+    with pytest.raises(ValueError, match="weight_step must be a real number"):
+        decoder_settings.DecoderSettings.from_yaml(
+            section, clocks, "weak_decoder"
+        )

@@ -79,6 +79,7 @@ study most often extends:
 | `SYNDROME_BUFFERS` | `row(settings)`, the section's record, whose `row_settings` holds the row's own `Settings` | `decsim/build/stores.py` |
 | `IDLE_POLICIES` | `row()`, or `row(settings=...)` for a row with a `Settings` | `decsim/build/plan.py`, `_idle_policy` |
 | `BOUNDARY_POLICIES`, `BOUNDARY_PAYLOADS` | `row()` | `decsim/build/plan.py` |
+| `LINK_FABRICS` | not built: the yaml load calls `row.base_card()` for the numbers the section's per-path cards override, and the root calls `row.build(card, engine)` for the `Link` the run sends on, which also carries `trace.transfer_delivered` for the traffic ledger | `decsim/links/link_profiles.py`, `from_yaml`; `decsim/build/stores.py`, `build_links` |
 
 A syndrome source also says where the run's window models come from,
 through its `window_model_source` method, unless Python names another
@@ -170,7 +171,7 @@ than any description of it.
 | a boundary or idle policy | `tests/machine/test_machine.py::test_a_policy_written_outside_decsim_is_used_on_its_own_axis` |
 | a windowing scheme | `tests/windows/test_window_planner.py`, and the `WindowingScheme` port |
 | a windowing scheme with a key of its own | `tests/windows/test_settings.py::test_a_scheme_rows_own_key_reaches_its_settings` |
-| a link card | `tests/links/test_link_profiles.py`, and the `Link` port |
+| a link fabric | `tests/links/test_link_profiles.py::test_a_fabric_row_written_outside_decsim_runs_from_a_yaml`, and the `Link` port |
 | an escalation policy | `tests/escalation/test_policies.py`, and the `EscalationPolicy` port |
 
 ## Two rules your class has to keep

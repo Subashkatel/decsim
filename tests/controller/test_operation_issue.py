@@ -15,9 +15,12 @@ import decsim.controller.feedback_streams as feedback_streams
 import decsim.controller.instruction_output as instruction_output
 import decsim.controller.operation_issue as operation_issue
 import decsim.engine as engine_module
+import decsim.links.fabric as fabric_module
+import decsim.links.link_profiles as link_profiles
 import decsim.observe.log_writers as log_writers
 import decsim.observe.round_events as round_events
 import decsim.records.program as program_records
+import decsim.records.transfers as transfer_records
 
 BOUNDARY_TICK = 3000
 # a one-tick period, so the pulse cost is its cycles and every tick is
@@ -70,10 +73,10 @@ def resolved(operation_id, round_ticks=1000, round_count=6):
     )
 
 
-def issuer_with(engine, qpu, idle_rounds, windows, recorder, link=None):
+def issuer_with(engine, qpu, idle_rounds, windows, recorder):
+    reference = link_profiles.logical_reference_profile()
     output = instruction_output.InstructionOutput(engine, CLOCK, PULSE_TICKS)
-    if link is not None:
-        output.link = link
+    output.link = fabric_module.LinkFabric(reference, engine)
     output.qpu = qpu
     if recorder is not None:
         output.trace.output_event.connect(recorder.output)
@@ -149,10 +152,13 @@ def test_a_feedback_blocked_operation_pays_the_pulse_cost_before_it_starts():
 
     issuer.issue_operation(operation, on_started)
     issued_before_the_pulse = list(qpu.issued)
+    to_qpu = issuer.output.link.expected_delay_ticks(
+        transfer_records.LinkPath.CONTROLLER_TO_QPU, None, PULSE_TICKS
+    )
     engine.run()
 
     assert issued_before_the_pulse == []
-    assert started == [(PULSE_TICKS, BOUNDARY_TICK)]
+    assert started == [(PULSE_TICKS + to_qpu, BOUNDARY_TICK)]
     kinds_and_ticks = [
         (event.kind, event.tick) for event in recorder.output_events
     ]

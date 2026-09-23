@@ -35,8 +35,7 @@ class InstructionOutput:
     CONTROL_PULSE_COMMAND_ISSUED, each carrying its payload.
     """
 
-    # an output built with no fabric hands the payload straight over
-    link = ports.Port(ports.Link, optional=True)
+    link = ports.Port(ports.Link)
     qpu = ports.Port(ports.Qpu)
 
     def __init__(self, engine, clock: config.Clock, pulse_cycles: int) -> None:
@@ -130,9 +129,6 @@ class InstructionOutput:
 
         def output_ready():
             self._fire(event_kind, operation_id, payload)
-            if self.link is None:
-                deliver(payload)
-                return
             self.link.send(
                 transfer_records.LinkPath.CONTROLLER_TO_QPU,
                 None,

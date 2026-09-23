@@ -157,7 +157,7 @@ class StagedDecoder(decoder_module.DecoderBase):
     for its own stages. A stage ends at its own time or at a cancel, and
     a record closed by a cancel says so: gem5 stops a squashed
     instruction where it stands and counts it apart from the rest
-    (tmp/resources/gem5/src/cpu/o3/inst_queue.cc:895-908 for the issue
+    (gem5 src/cpu/o3/inst_queue.cc:895-908 for the issue
     it abandons, :294-298 and :1442 for the squashed counters), and
     decoder switching halts the strong decoder's ongoing computation at
     the weak decoder's confident verdict (Toshio et al. 2510.25222

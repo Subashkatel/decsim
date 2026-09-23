@@ -392,7 +392,7 @@ def _boundaries_name(
     """The section's boundaries row, or the one the rows declare.
 
     A default lives on the class that owns the parameter, gem5's rule for
-    a SimObject's params (tmp/resources/gem5/src/python/m5/SimObject.py
+    a SimObject's params (gem5 src/python/m5/SimObject.py
     :313-318, _new_param setting the ParamDesc's default on the class it
     is declared in, inherited through the _values parent chain set at
     :240-254). The escalation policy row owns this one, and a row that

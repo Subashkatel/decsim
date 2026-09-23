@@ -15,7 +15,7 @@ and re-sends it when clearBlocked schedules the retry
 :266-271 clearBlocked when it drains, processSendRetry); Ciw's Type I
 blocking keeps the customer at the upstream node and releases the
 longest blocked one when the destination has capacity
-(tmp/resources/l5_buffers/Ciw/ciw/node.py:470-473, block_individual,
+(Ciw ciw/node.py:470-473, block_individual,
 release_blocked_individual). Nothing is reordered; under the stall
 policy nothing is dropped. The written round leaves on its route at the
 write (RoundTransmitter) and takes its slot where it lands.
@@ -44,11 +44,11 @@ class HeldRounds:
     nowhere else: the round waits here, before the wire is asked for, so
     its transfer carries none of it. Ruby's MessageBuffer counts that
     wait as the buffer's own statistic, the ticks a message was stalled
-    in it (tmp/resources/gem5/src/mem/ruby/network/MessageBuffer.cc:76-82
+    in it (gem5 src/mem/ruby/network/MessageBuffer.cc:76-82
     for the stall counters, :331 where the wait is summed at the
     dequeue), and ns-3's queue disc stamps a packet at the enqueue and
     reads the sojourn time back at the dequeue
-    (tmp/resources/l5_buffers/ns3-traffic-control/queue-disc.cc:851
+    (ns-3 src/traffic-control/model/queue-disc.cc:851
     and :701, the trace source described at queue-disc.h:162-167).
     """
 
@@ -227,7 +227,7 @@ class SyndromeRoundSender:
 
         The controller is the end this round leaves by, so it executes
         the send (OMNeT++ refuses a module that sends a message it does
-        not own, tmp/resources/omnetpp/src/sim/csimplemodule.cc:333-334;
+        not own, omnetpp src/sim/csimplemodule.cc:333-334;
         gem5 bills a transfer to the port it left by,
         coherent_xbar.cc:354-357).
         The room side takes the room before the round leaves, gem5's
@@ -271,7 +271,7 @@ class _HeldRoundsTraceSources:
     """Every event the held rounds reports, as one member.
 
     gem5 groups a component's statistics into one nested Group member
-    (tmp/resources/gem5/src/base/stats/group.hh:60-92) rather than one
+    (gem5 src/base/stats/group.hh:60-92) rather than one
     member per counter; a component's events are the same shape, so a
     listener reaches all of them through one name.
     """

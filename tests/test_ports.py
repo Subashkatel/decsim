@@ -9,10 +9,10 @@ names the callers reach for through their collaborator reference.
 The Port declaration carries the second law. Its three rules are gem5's:
 a port assigned twice is refused naming the port, the peer it holds and
 the peer offered, as PortRef.connect does
-(tmp/resources/gem5/src/python/m5/params/port_params.py:109-114); a
+(gem5 src/python/m5/params/port_params.py:109-114); a
 required port read before it is bound raises, as gem5's default peer
 throws UnboundPortException on any call
-(tmp/resources/gem5/src/mem/port.cc:62-65, 86-101); and an optional port
+(gem5 src/mem/port.cc:62-65, 86-101); and an optional port
 reads as None, which is the peer a run does not have.
 """
 

@@ -5,10 +5,10 @@ root builds them, beside the function that builds that one seat from the
 run's settings. WIRES names every edge between two seats as the port it
 fills and the seat that fills it, which is gem5's script assigning one
 component's port to another's
-(tmp/resources/gem5/configs/learning_gem5/part1/simple.py:68). The root
+(gem5 configs/learning_gem5/part1/simple.py:68). The root
 builds, then binds, then starts: nothing is scheduled while the graph is
 still being assembled, so the order the rows sit in cannot move a tick
-(tmp/resources/gem5/src/sim/sim_object.hh lines 194 and 280).
+(gem5 src/sim/sim_object.hh lines 194 and 280).
 
 SEED_ROOTS names every owner of randomness as the segment the run seed
 hashes beside the seat that owns it. A component's seed is derived from
@@ -347,7 +347,7 @@ def bind(wires: tuple, seats: dict) -> None:
 
     The assignment runs the port's own refusal of a second bind
     (decsim/ports.py, Port), gem5's PortRef.connect
-    (tmp/resources/gem5/src/python/m5/params/port_params.py:109-114). The
+    (gem5 src/python/m5/params/port_params.py:109-114). The
     table is this file's input, so a row that names a seat the run did
     not build, a port a class does not declare, or a peer that does not
     answer the port's protocol is refused here, with the row printed.

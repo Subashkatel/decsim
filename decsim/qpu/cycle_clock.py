@@ -58,7 +58,7 @@ class QPUDevice:
     for the controller, on the readout path's own ledger. The event is
     the emitter's own: gem5's SimObject reports its statistics from the
     object the event happened in
-    (tmp/resources/gem5/src/base/stats/group.hh:60-92).
+    (gem5 src/base/stats/group.hh:60-92).
     """
 
     readout_receiver = ports.Port(ports.ReadoutReceiver)
@@ -381,7 +381,7 @@ class _TraceSources:
     """Every event the QPU device reports, as one member.
 
     gem5 groups a component's statistics into one nested Group member
-    (tmp/resources/gem5/src/base/stats/group.hh:60-92) rather than one
+    (gem5 src/base/stats/group.hh:60-92) rather than one
     member per counter; a component's events are the same shape, so a
     listener reaches all of them through one name.
     """
@@ -403,7 +403,7 @@ class _LiveOperations:
     is the tick the latest readout of a patch that had to wait leaves
     at, so a later one queues behind it. gem5 groups a
     component's many members the same way
-    (tmp/resources/gem5/src/base/stats/group.hh:60-92).
+    (gem5 src/base/stats/group.hh:60-92).
     """
 
     running_by_operation_id: dict = dataclasses.field(default_factory=dict)

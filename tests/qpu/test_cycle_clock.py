@@ -518,7 +518,7 @@ def test_the_emitted_event_is_the_qpus_own_at_the_instant_it_emits():
     """The event belongs to the object the emission happened in.
 
     gem5 reports a component's statistics from that component's own
-    group (tmp/resources/gem5/src/base/stats/group.hh:60-92), so the
+    group (gem5 src/base/stats/group.hh:60-92), so the
     instant a readout leaves is the QPU's event and not the receiver's.
     Every readout the clock hands on carries one, the timing-only
     feedback-memory round included, each with the route it travels.

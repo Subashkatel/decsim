@@ -68,7 +68,7 @@ class FactoryCollaborators:
     tables.py row_settings), None for a row with no keys. This is gem5's params
     object, where a SimObject's collaborators arrive as one structure
     rather than as a signature per subclass
-    (tmp/resources/gem5/src/python/m5/SimObject.py:204-205). The decode
+    (gem5 src/python/m5/SimObject.py:204-205). The decode
     queue a row submits its correction decodes to is not here: it is a
     port, decode_queue, which the root binds once every seat exists.
     """

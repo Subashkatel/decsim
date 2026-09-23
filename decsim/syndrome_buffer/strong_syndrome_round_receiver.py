@@ -11,7 +11,7 @@ is small), so the rounds a cold weak tier keeps for itself never cross
 the cryostat (Battistel 2303.00054 lines 342 to 347). Either sender
 executes its own crossing, being the end the data leaves by (OMNeT++
 refuses a module that sends a message it does not own,
-tmp/resources/omnetpp/src/sim/csimplemodule.cc:333-334; gem5 bills a
+omnetpp src/sim/csimplemodule.cc:333-334; gem5 bills a
 transfer to the port it left by, coherent_xbar.cc:354-357). This end owns the
 room and the landing: it answers has_room counting the bits still in
 flight, reserves those bits before a crossing starts, gem5's packet
@@ -265,7 +265,7 @@ class _TraceSources:
     """Every event the strong syndrome round receiver reports, as one member.
 
     gem5 groups a component's statistics into one nested Group member
-    (tmp/resources/gem5/src/base/stats/group.hh:60-92) rather than one
+    (gem5 src/base/stats/group.hh:60-92) rather than one
     member per counter; a component's events are the same shape, so a
     listener reaches all of them through one name.
     """

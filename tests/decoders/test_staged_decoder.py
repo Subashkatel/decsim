@@ -265,7 +265,7 @@ def test_a_cancel_during_a_hardware_stage_ends_that_stage_at_the_cancel():
     wanted, and the stage that was open ends at the cancel rather than
     at the time its cycles would have taken: gem5 abandons a squashed
     instruction where it stands and counts it apart
-    (tmp/resources/gem5/src/cpu/o3/inst_queue.cc:895-908, :294-298).
+    (gem5 src/cpu/o3/inst_queue.cc:895-908, :294-298).
     Nothing after it is charged or reported.
     """
     engine = engine_module.Engine()

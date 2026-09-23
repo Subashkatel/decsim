@@ -232,7 +232,7 @@ class Machine:
         event queues it here, in build order. That is gem5's split
         between the constructor and startup, "the appropriate place to
         schedule initial event(s)"
-        (tmp/resources/gem5/src/sim/sim_object.hh lines 194 and 280).
+        (gem5 src/sim/sim_object.hh lines 194 and 280).
         """
         self.factory.start()
         self.execution_runtime.start()

@@ -234,7 +234,7 @@ def test_no_component_queues_an_event_until_the_machine_is_started():
     gem5 splits the constructor, which takes a component's
     collaborators, from startup, "the appropriate place to schedule
     initial event(s)"
-    (tmp/resources/gem5/src/sim/sim_object.hh lines 194 and 280). With
+    (gem5 src/sim/sim_object.hh lines 194 and 280). With
     that split the order the root builds its components in cannot move a
     tick, because no component has queued anything while the rest of the
     machine is still being built.

@@ -731,7 +731,7 @@ def test_a_continuous_row_queues_nothing_until_it_is_started():
 
     gem5 splits the constructor from startup, "the appropriate place to
     schedule initial event(s)"
-    (tmp/resources/gem5/src/sim/sim_object.hh lines 194 and 280), so the
+    (gem5 src/sim/sim_object.hh lines 194 and 280), so the
     order the root builds its components in cannot move a tick.
     """
     engine = decsim.engine.Engine()

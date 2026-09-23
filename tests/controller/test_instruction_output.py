@@ -95,7 +95,7 @@ def test_a_result_return_pays_the_pulse_cost_and_the_crossing_to_the_qpu():
 def test_the_pulse_cost_runs_from_the_controller_clocks_next_edge():
     """The control processor charges whole cycles, edge to edge.
 
-    gem5's clockEdge (tmp/resources/gem5/src/sim/clocked_object.hh lines
+    gem5's clockEdge (gem5 src/sim/clocked_object.hh lines
     174-186): a decision that lands mid-cycle waits out that cycle, so
     on a 100-tick period a decision at tick 10 has its pulse ready two
     cycles later, at 300.

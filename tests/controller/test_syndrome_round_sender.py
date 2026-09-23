@@ -5,12 +5,12 @@ round's bits before any round leaves for it, counting the bits it holds
 and the bits reserved for the writes in flight, and the room is
 reserved before the wire is used (gem5's packet store answers
 `avail() = _maxsize - _size - _reserved` against the packet's own
-length, tmp/resources/gem5/src/dev/net/pktfifo.hh, and reserves it with
+length, gem5 src/dev/net/pktfifo.hh, and reserves it with
 `reserve(len)`).
 A round that finds no room waits in HeldRounds and enters in completion
 order when a slot frees (gem5 src/mem/cache/base.cc:255-257 setBlocked,
 :266-271 clearBlocked and the retry; Ciw
-tmp/resources/l5_buffers/Ciw/ciw/node.py:470-473
+Ciw ciw/node.py:470-473
 release_blocked_individual), or is dropped under the drop knob (ns-3
 point-to-point-net-device.cc Send: Enqueue false, packet dropped). A
 strong-primary plan takes one hop into the strong store for both window

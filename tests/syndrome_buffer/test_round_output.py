@@ -2,7 +2,7 @@
 
 Whoever executes a send is an end of that hop, and the end a decoder
 input leaves from is the store that holds the rounds
-(tmp/resources/omnetpp/src/sim/csimplemodule.cc:333-334, omnetpp-6.1.0;
+(omnetpp src/sim/csimplemodule.cc:333-334, omnetpp-6.1.0;
 gem5 packet.hh:424-431). The other half of that
 rule is here too: an input the decoder reads in place rides no link, and
 the store lands it without asking the fabric for anything.

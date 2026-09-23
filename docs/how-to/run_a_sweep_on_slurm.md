@@ -42,7 +42,7 @@ is the case where nothing can say what the task ran. `ALLOW_DIRTY=1`
 starts either one anyway.
 
 ```
-decsim tree: /scratch/.../decsim-weak_ler
+decsim tree: /path/to/decsim
 decsim commit: 264853ada3..., dirty: 0
 ```
 
@@ -119,7 +119,7 @@ which one.
 Rerun those array indices, and name the count the sweep was cut into:
 
 ```bash
-RUN=/scratch/.../results/weak_ler SHARDS=500 sbatch -a 447-499 \
+RUN=results/weak_ler SHARDS=500 sbatch -a 447-499 \
   slurm/slurm_run.sh configs/weak_ler.yaml --shots-per-unit 50000
 ```
 

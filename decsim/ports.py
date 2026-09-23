@@ -40,16 +40,16 @@ class Port:
     A component declares a port as a class attribute and reads it as an
     ordinary attribute; the root binds it by assignment once every
     component exists, which is gem5's script assigning one port to
-    another (tmp/resources/gem5/configs/learning_gem5/part1/simple.py:68).
+    another (gem5 configs/learning_gem5/part1/simple.py:68).
     The port carries the Protocol its peer answers, so a class points at
     this file rather than the other way about.
 
     Two refusals, both gem5's. A second bind names the port, the peer it
     holds and the peer offered, as PortRef.connect does
-    (tmp/resources/gem5/src/python/m5/params/port_params.py:109-114). A
+    (gem5 src/python/m5/params/port_params.py:109-114). A
     required port read before it is bound raises, as gem5's default peer
     throws UnboundPortException
-    (tmp/resources/gem5/src/mem/port.cc:62-65); an optional port reads as
+    (gem5 src/mem/port.cc:62-65); an optional port reads as
     None instead, which is the neighbour a run does not have.
 
     Whether the peer answers the Protocol is not asked here. Every bind
@@ -63,7 +63,7 @@ class Port:
     The name arrives at class creation rather than at construction,
     because a descriptor learns what it was called only once the class
     body has run; gem5 fills it the same way, from its metaclass
-    (tmp/resources/gem5/src/python/m5/SimObject.py:353-357).
+    (gem5 src/python/m5/SimObject.py:353-357).
     """
 
     def __init__(self, protocol, optional: bool = False) -> None:
@@ -422,9 +422,9 @@ class HeldRounds(Protocol):
     the sender, and the store tells the line when a slot frees so the
     head can try again. Ruby's MessageBuffer counts that wait as the
     buffer's own statistic
-    (tmp/resources/gem5/src/mem/ruby/network/MessageBuffer.cc:76-82), and
+    (gem5 src/mem/ruby/network/MessageBuffer.cc:76-82), and
     ns-3's queue disc stamps the packet at the enqueue
-    (tmp/resources/l5_buffers/ns3-traffic-control/queue-disc.cc:851).
+    (ns-3 src/traffic-control/model/queue-disc.cc:851).
     """
 
     def retry(self) -> None:
@@ -1180,7 +1180,7 @@ class OperationRuntime(Protocol):
     release path when a decision lands, and the protected streams when a
     cadence change frees an operation that was waiting. gem5 keeps the
     same split between the workload's graph and the object that runs it
-    (tmp/resources/gem5/configs/deprecated/example/se.py builds the
+    (gem5 configs/deprecated/example/se.py builds the
     process list, the system runs it).
     """
 
@@ -1975,7 +1975,7 @@ class MagicStateFactory(Protocol):
     ahead of demand queues its first attempt in start, never in its
     constructor, so the order the root builds its components in cannot
     move a tick (gem5's startup, the place to schedule initial events,
-    tmp/resources/gem5/src/sim/sim_object.hh lines 194 and 280). A row
+    gem5 src/sim/sim_object.hh lines 194 and 280). A row
     declares a decode_queue port (a DecodeQueue), which the root binds
     to the run's decoder manager; a row whose card corrects nothing
     leaves it unread.

@@ -5,17 +5,17 @@ The link landing starts that write; a zero write cost completes at the
 landing tick. Every referent that models storage writes it there: ns-3's
 channel schedules the destination device's own Receive after the
 transmission and the propagation
-(`tmp/resources/l5_buffers/ns3-point-to-point/point-to-point-channel.cc:88-92`,
+(`ns-3 src/point-to-point/model/point-to-point-channel.cc:88-92`,
 "Simulator::ScheduleWithContext(m_link[wire].m_dst->GetNode()->GetId(),
 txTime + m_delay, &PointToPointNetDevice::Receive, ...)", whose method
 is `point-to-point-net-device.cc:324`); OMNeT++ takes ownership into the
 destination module and inserts inside that module's handler
-(`tmp/resources/omnetpp/src/sim/csimplemodule.cc:782-783` "// get
+(`omnetpp src/sim/csimplemodule.cc:782-783` "// get
 ownership" then "take(msg);", `:799` "handleMessage(msg);", with
-`tmp/resources/l5_buffers/omnetpp-queueing/queueinglib/Queue.cc:84-94`
+`omnetpp samples/queueinglib/Queue.cc:84-94`
 checking "queue.length() >= capacity" and then "queue.insert( job );"
 inside it); Ciw counts the individual in the destination's own accept
-(`tmp/resources/l5_buffers/Ciw/ciw/node.py:602` "next_node.accept(
+(`Ciw ciw/node.py:602` "next_node.accept(
 next_individual)" into `:102-103` "self.individuals[...].append(
 next_individual)" and "self.number_of_individuals += 1"). The quantum
 control papers put the store on the far side of the wire too: Caune
@@ -34,7 +34,7 @@ room with the bits of the writes it has in flight counted as taken,
 gem5's `_reserved` bytes in `avail() = _maxsize - _size - _reserved`
 (src/dev/net/pktfifo.hh, `reserve(len)` before the data lands). gem5's
 entry-counted cache queue holds its reserve against its size the same way
-(`tmp/resources/gem5/src/mem/cache/queue.hh:150-153` "bool isFull() const
+(`gem5 src/mem/cache/queue.hh:150-153` "bool isFull() const
 { return (allocated >= numEntries - numReserve); }", the reserve declared
 at `:87-93`), its cache blocks the port the moment the write buffer fills
 (`src/mem/cache/base.cc:255-257` "if (writeBuffer.isFull()) { setBlocked(
@@ -42,7 +42,7 @@ at `:87-93`), its cache blocks the port the moment the write buffer fills
 it drains), a refusal being the receiver's answer to the sender
 (`src/mem/port.hh:244-255`, "If the send does not succeed ... the sender
 must wait for a recvReqRetry"); and Ruby sums the same two counts
-(`tmp/resources/gem5/src/mem/ruby/network/MessageBuffer.cc:181`
+(`gem5 src/mem/ruby/network/MessageBuffer.cc:181`
 "if (current_size + current_stall_size + n <= m_max_size)", the two sizes
 read at `:159-177`). This is the shape of the strong syndrome buffer's end
 (strong_syndrome_round_receiver.py, has_room and reserve_write), so both
@@ -258,7 +258,7 @@ class _TraceSources:
     """Every event the receiver reports, as one member.
 
     gem5 groups a component's statistics into one nested Group member
-    (tmp/resources/gem5/src/base/stats/group.hh:60-92) rather than one
+    (gem5 src/base/stats/group.hh:60-92) rather than one
     member per counter; a component's events are the same shape, so a
     listener reaches all of them through one name.
     """

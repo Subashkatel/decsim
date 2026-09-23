@@ -4,7 +4,7 @@ Whoever executes a send is an end of that hop, and the end a round
 leaves from is the store that holds it. OMNeT++ enforces the rule at
 runtime, that a module may only send a message it owns:
 cSimpleModule::send refuses one whose owner is another module
-(`tmp/resources/omnetpp/src/sim/csimplemodule.cc:333-334`, omnetpp-6.1.0,
+(`omnetpp src/sim/csimplemodule.cc:333-334`, omnetpp-6.1.0,
 the diagnostic at 506-508). And gem5 bills a transfer to the port it left
 by, never to whoever arranged it (`coherent_xbar.cc:354-357`). Two kinds
 of round leave here. A decode job's input: the window side plans the

@@ -714,7 +714,7 @@ class _ShotTable:
     override maps are the caller's declarations about the circuit; the
     four registries are what sampling fills in. Grouping them is gem5's
     move for a component's many members
-    (tmp/resources/gem5/src/base/stats/group.hh:60-92).
+    (gem5 src/base/stats/group.hh:60-92).
     """
 
     detector_rounds_override: dict

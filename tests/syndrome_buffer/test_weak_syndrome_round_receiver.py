@@ -6,7 +6,7 @@ ns-3 schedules the destination device's own Receive after the
 propagation (the ns3-point-to-point copy of
 point-to-point-channel.cc:88-92 into point-to-point-net-device.cc:324),
 OMNeT++ takes ownership into the destination module and inserts inside
-its handler (tmp/resources/omnetpp/src/sim/csimplemodule.cc:782-783,
+its handler (omnetpp src/sim/csimplemodule.cc:782-783,
 :799, with queueinglib/Queue.cc:84-94), Ciw counts the individual in the
 destination's own accept (Ciw/ciw/node.py:602 into :102-103), and Caune
 2410.05202 lines 1243-1247 store the outcomes in the decoder sequencer's

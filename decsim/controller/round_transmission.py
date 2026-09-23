@@ -92,7 +92,7 @@ class RoundTransmitter:
         (syndrome_buffer/weak_syndrome_round_receiver.py); this sender
         hears the publication for its in_flight count alone, as gem5's
         requesting port hands the packet to the peer's own receive method
-        (tmp/resources/gem5/src/mem/port.hh:603-614, whose
+        (gem5 src/mem/port.hh:603-614, whose
         src/mem/protocol/timing.cc:49-53 calls peer->recvTimingReq).
         """
         self.weak_receiver.receive_round(packed, self._leave_after_publication)
@@ -158,7 +158,7 @@ class _TraceSources:
     """Every event the round transmitter reports, as one member.
 
     gem5 groups a component's statistics into one nested Group member
-    (tmp/resources/gem5/src/base/stats/group.hh:60-92) rather than one
+    (gem5 src/base/stats/group.hh:60-92) rather than one
     member per counter; a component's events are the same shape, so a
     listener reaches all of them through one name.
     """

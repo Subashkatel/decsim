@@ -11,13 +11,16 @@ Table III, the CPU and GPU echo rows, for the two measured RoCE v2 rows.
 """
 
 import ast
+import fractions
 import pathlib
 import re
 
 import pytest
 
 import decsim.config as config
+import decsim.engine
 import decsim.experiments.experiment as experiment
+import decsim.links.channel as channel_module
 import decsim.links.fabric as fabric_module
 import decsim.links.link_profiles as link_profiles
 import decsim.machine as machine
@@ -282,13 +285,36 @@ def test_the_bandwidth_card_provisions_each_path_for_one_commit_region():
         "weak_buffer_to_weak_decoder": 48.0,
         "weak_decoder_to_strong_decoder": 72.0,
         "strong_buffer_to_strong_decoder": 72.0,
-        "weak_decoder_to_frame": 0.2,
-        "decoder_to_decoder": 4.8,
-        "strong_decoder_to_frame": 0.2,
-        "frame_to_controller": 6.4,
-        "controller_to_qpu": 25.6,
+        "weak_decoder_to_frame": fractions.Fraction("0.2"),
+        "decoder_to_decoder": fractions.Fraction("4.8"),
+        "strong_decoder_to_frame": fractions.Fraction("0.2"),
+        "frame_to_controller": fractions.Fraction("6.4"),
+        "controller_to_qpu": fractions.Fraction("25.6"),
     }
     assert profile.profile_name == "bandwidth_limited"
+
+
+def test_a_nominal_round_serializes_in_exactly_one_round_period():
+    """ns-3 txTime = bits / rate (point-to-point-net-device.cc:243).
+
+    At 8 bits per 1.1 us a float rate falls below 80/11 bits per
+    microsecond and the round would take one tick more than its period.
+    """
+    profile = link_profiles.bandwidth_limited_profile(
+        syndrome_bits_per_round=8,
+        round_microseconds=1.1,
+        commit_rounds=3,
+        buffer_rounds=3,
+    )
+    engine = decsim.engine.Engine()
+    readout = profile.qpu_to_controller.channel
+    channel = channel_module.Channel(readout, engine)
+    framed = channel_module.FramedPayload(8)
+    delivered = []
+    channel.send(framed, 0, 0, delivered.append)
+    engine.run()
+    transfer = delivered[0]
+    assert transfer.serialization_ticks == 1_100_000
 
 
 def test_the_bandwidth_card_keeps_the_reference_latencies():
@@ -321,7 +347,7 @@ def test_the_capacity_scale_multiplies_every_rate():
     )
     capacities = capacities_of(halved)
     assert capacities["qpu_to_controller"] == 12.0
-    assert capacities["controller_to_qpu"] == 12.8
+    assert capacities["controller_to_qpu"] == fractions.Fraction("12.8")
 
 
 def test_a_capacity_scale_of_zero_is_refused():

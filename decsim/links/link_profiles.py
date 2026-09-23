@@ -22,6 +22,7 @@ it as the machine's links setting.
 """
 
 import dataclasses
+import fractions
 from collections.abc import Mapping
 from typing import Optional
 
@@ -277,8 +278,16 @@ def bandwidth_limited_profile(
     accumulates (Little's law). The rates are an explicit per-link
     provisioning, the way ns-3 declares a DataRate per point-to-point
     device, never a floor borrowed from another path.
+
+    Each rate is an exact fraction of the decimals given, so a nominal
+    payload serializes in exactly its period: a float such as 8 / 1.1
+    lands below the true rate, and the rounded-up serialization then
+    runs one tick past the period and a periodic stream queues one tick
+    more every round (ns-3 times a packet from its size and the device's
+    stated DataRate, point-to-point-net-device.cc:243).
     """
-    commit_region_microseconds = commit_rounds * round_microseconds
+    round_period_microseconds = fractions.Fraction(str(round_microseconds))
+    commit_region_microseconds = commit_rounds * round_period_microseconds
     weak_window_rounds = commit_rounds + buffer_rounds
     weak_window_bits = weak_window_rounds * syndrome_bits_per_round
     strong_window_rounds = window_records.strong_region_round_count(
@@ -286,7 +295,9 @@ def bandwidth_limited_profile(
     )
     strong_window_bits = strong_window_rounds * syndrome_bits_per_round
     one_per_region = 1 / commit_region_microseconds
-    round_bits_per_microsecond = syndrome_bits_per_round / round_microseconds
+    round_bits_per_microsecond = (
+        syndrome_bits_per_round / round_period_microseconds
+    )
     weak_window_bits_per_microsecond = (
         weak_window_bits / commit_region_microseconds
     )
@@ -757,14 +768,14 @@ class _Provisioning:
     """The bounded card's paths: one channel per path at a scaled rate."""
 
     def __init__(self, capacity_scale: float):
-        self._capacity_scale = capacity_scale
+        self._capacity_scale = fractions.Fraction(str(capacity_scale))
 
     def path(
         self,
         name: str,
         latency_microseconds: float,
         bits: int,
-        nominal_bits_per_microsecond: float,
+        nominal_bits_per_microsecond: fractions.Fraction,
         source: str,
         actual_payload_source: Optional[str],
     ) -> settings.PathSettings:

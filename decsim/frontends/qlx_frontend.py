@@ -436,12 +436,7 @@ def _check_task_start(task: _Task, tasks: list) -> None:
 
 def _resource_flows(tasks: list) -> list:
     """Every resource chain: (resource, producer id, ..., inject id)."""
-    dependents = {}
-    for task in tasks:
-        dependents[task.position] = []
-    for task in tasks:
-        for dependency_id in task.dependencies:
-            dependents[dependency_id].append(task.position)
+    dependents = _dependents_of(tasks)
     flows = []
     consumes_at = {}
     for task in tasks:
@@ -453,10 +448,34 @@ def _resource_flows(tasks: list) -> list:
     return flows
 
 
+def _dependents_of(tasks: list) -> dict:
+    """Each task's position, mapped to the positions that depend on it."""
+    dependents = {}
+    for task in tasks:
+        dependents[task.position] = []
+    for task in tasks:
+        for dependency_id in task.dependencies:
+            dependents[dependency_id].append(task.position)
+    return dependents
+
+
 def _follow_chain(
     producer: _Task, tasks: list, dependents: dict, consumes_at: dict
 ) -> tuple:
     """The producer's chain of transports to its one inject."""
+    chain = _transport_chain(producer, tasks, dependents)
+    head = chain[-1]
+    sink = _the_one_inject(producer, head, tasks, dependents, consumes_at)
+    chain.append(sink)
+    consumes_at[sink] = producer.produces
+    qlx_ids = []
+    for position in chain:
+        qlx_ids.append(tasks[position].qlx_id)
+    return (producer.produces, *qlx_ids)
+
+
+def _transport_chain(producer: _Task, tasks: list, dependents: dict) -> list:
+    """The producer, then each transport after it, in chain order."""
     chain = [producer.position]
     head = producer.position
     while True:
@@ -464,11 +483,17 @@ def _follow_chain(
         if len(transports) > 1:
             raise ValueError("QLX resource transport chain forks")
         if not transports:
-            break
+            return chain
         head = transports[0]
         if head in chain:
             raise ValueError("QLX resource transport chain cycles")
         chain.append(head)
+
+
+def _the_one_inject(
+    producer: _Task, head: int, tasks: list, dependents: dict, consumes_at
+) -> int:
+    """The one inject the chain's head feeds, consuming what was produced."""
     sinks = _dependents_named(head, "inject", tasks, dependents)
     if len(sinks) != 1:
         raise ValueError("QLX resource must terminate at one inject")
@@ -478,12 +503,7 @@ def _follow_chain(
     declared_kind = tasks[sink].consumes
     if declared_kind is not None and declared_kind != producer.produces:
         raise ValueError("QLX produced and consumed resource kinds differ")
-    chain.append(sink)
-    consumes_at[sink] = producer.produces
-    qlx_ids = []
-    for position in chain:
-        qlx_ids.append(tasks[position].qlx_id)
-    return (producer.produces, *qlx_ids)
+    return sink
 
 
 def _dependents_named(head: int, name: str, tasks: list, dependents) -> list:
@@ -517,10 +537,7 @@ def _lower(
     feedback_from_measurements: bool,
 ) -> QLXProgram:
     """The operations, streams and rounds of the parsed tasks."""
-    has_explicit_if = False
-    for task in tasks:
-        if task.name == "if":
-            has_explicit_if = True
+    has_explicit_if = _has_explicit_if(tasks)
     operations = []
     raw_durations = {}
     protocols = {}
@@ -528,13 +545,12 @@ def _lower(
     op_ids = {}
     feedback_candidates = []
     for task in tasks:
-        bit_producers = _bit_producer_dependencies(task, tasks)
-        candidate = _feedback_candidate(task, bit_producers, has_explicit_if)
-        if candidate is not None:
-            feedback_candidates.append(candidate)
+        producer = _feedback_producer(task, tasks, has_explicit_if)
+        if producer is not None:
+            feedback_candidates.append((task.position, producer))
         blocked_by = None
         if feedback_from_measurements:
-            blocked_by = _blocker_of(task, bit_producers, has_explicit_if)
+            blocked_by = producer
         operation = _operation_for(task, patch_of_cell, blocked_by)
         operations.append(operation)
         raw_durations[task.position] = task.duration
@@ -561,6 +577,11 @@ def _lower(
     )
 
 
+def _has_explicit_if(tasks: list) -> bool:
+    """Whether the schedule marks its conditioned tasks with fabric.if."""
+    return any(task.name == "if" for task in tasks)
+
+
 def _bit_producer_dependencies(task: _Task, tasks: list) -> list:
     producers = []
     for dependency_id in task.dependencies:
@@ -569,24 +590,16 @@ def _bit_producer_dependencies(task: _Task, tasks: list) -> list:
     return producers
 
 
-def _feedback_candidate(
-    task: _Task, bit_producers: list, has_explicit_if: bool
-) -> Optional[tuple]:
-    """(task, producer) when the task may be classically conditioned.
+def _feedback_producer(
+    task: _Task, tasks: list, has_explicit_if: bool
+) -> Optional[int]:
+    """The bit producer the task may be classically conditioned on, or None.
 
     An explicit fabric.if entry is authoritative; without one, every
-    task that depends on a bit producer is a candidate.
+    task that depends on a bit producer is a candidate, conditioned on
+    the first of them.
     """
-    if not bit_producers:
-        return None
-    if has_explicit_if and task.name != "if":
-        return None
-    return (task.position, bit_producers[0])
-
-
-def _blocker_of(
-    task: _Task, bit_producers: list, has_explicit_if: bool
-) -> Optional[int]:
+    bit_producers = _bit_producer_dependencies(task, tasks)
     if not bit_producers:
         return None
     if has_explicit_if and task.name != "if":
@@ -708,6 +721,13 @@ def _check_physical_inputs(
     id_type = type(decode_operation_id)
     if id_type is not int:
         raise ValueError("decode_operation_id must be an exact int")
+    _check_decode_operation_id_is_free(program, decode_operation_id)
+
+
+def _check_decode_operation_id_is_free(
+    program: QLXProgram, decode_operation_id: int
+) -> None:
+    """The stream owner's id is no schedule task's id."""
     for operation in program.operations:
         if operation.id == decode_operation_id:
             raise ValueError(
@@ -735,6 +755,11 @@ def _check_measurement_tasks(program: QLXProgram, measurements: list) -> None:
             raise ValueError(
                 "physical QLX requires unit-duration measure_syndrome tasks"
             )
+    _check_submission_order(measurements)
+
+
+def _check_submission_order(measurements: list) -> None:
+    """Each syndrome measurement starts after the one before it."""
     for earlier, later in zip(measurements, measurements[1:]):
         if earlier.scheduled_start_round >= later.scheduled_start_round:
             raise ValueError("measure_syndrome submissions must be ordered")
@@ -759,16 +784,22 @@ def _terminal_operation(
     last_measurement = measurements[-1]
     matching = []
     for operation in candidates:
-        if operation.patches != (patch,):
-            continue
-        if program.raw_durations[operation.id] != 0:
-            continue
-        if last_measurement.id not in operation.predecessors:
-            continue
-        matching.append(operation)
+        if _ends_the_stream(program, operation, last_measurement, patch):
+            matching.append(operation)
     if len(matching) != 1:
         raise ValueError("terminal detectors require one final dependent mz")
     return matching[0]
+
+
+def _ends_the_stream(
+    program: QLXProgram, operation, last_measurement, patch
+) -> bool:
+    """A zero-duration mz on the patch that follows the last submission."""
+    if operation.patches != (patch,):
+        return False
+    if program.raw_durations[operation.id] != 0:
+        return False
+    return last_measurement.id in operation.predecessors
 
 
 def _replace_stream_operations(
@@ -944,17 +975,20 @@ def _ordinary_record(routing: _Routing, location: list) -> list:
         raise ValueError("detector submission is out of range")
     if not 0 <= check_index < routing.check_count:
         raise ValueError("detector syndrome bit is out of range")
-    expected = [submission * routing.check_count + check_index]
-    if prior_submission >= 0:
-        if not 0 <= prior_submission < submission:
-            raise ValueError(
-                "detector baseline must precede current submission"
-            )
-        baseline = prior_submission * routing.check_count + check_index
-        expected.append(baseline)
-    elif prior_submission != -1:
+    current = submission * routing.check_count + check_index
+    if prior_submission == -1:
+        return [current]
+    _check_baseline(prior_submission, submission)
+    baseline = prior_submission * routing.check_count + check_index
+    return [current, baseline]
+
+
+def _check_baseline(prior_submission: int, submission: int) -> None:
+    """A baseline is an earlier submission; -1, no baseline, is read before."""
+    if prior_submission < 0:
         raise ValueError("detector baseline must be -1 or a submission")
-    return expected
+    if prior_submission >= submission:
+        raise ValueError("detector baseline must precede current submission")
 
 
 def _terminal_record(routing: _Routing, location: list) -> list:

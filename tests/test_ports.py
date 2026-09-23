@@ -21,8 +21,13 @@ import pathlib
 
 import pytest
 
+import decsim.controller.settings as controller_settings
+import decsim.decoders.settings as decoder_settings
+import decsim.frontends.settings as workload_settings
 import decsim.ports as ports
 import decsim.qpu.settings as qpu_settings
+import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer
+import decsim.windows.settings as window_settings
 
 TESTS_FILE = pathlib.Path(__file__)
 TESTS_PATH = TESTS_FILE.resolve()
@@ -32,6 +37,17 @@ PORTS_PATH = DECSIM_ROOT / "ports.py"
 # STYLE.md rule 7: a shared module beside ports in the package order, so
 # its two Protocols cannot move into ports without a cycle of levels
 SHARED_PROTOCOL_MODULE = "seeding"
+# The tables whose section reads a row's own keys (decsim/tables.py
+# row_settings), so whose rows may declare a Settings.
+TABLES_WITH_ROW_KEYS = (
+    decoder_settings.DECODERS,
+    window_settings.WINDOWING_SCHEMES,
+    syndrome_buffer.SYNDROME_BUFFERS,
+    workload_settings.WORKLOADS,
+    qpu_settings.SYNDROME_SOURCES,
+    qpu_settings.CODE_CARDS,
+    controller_settings.IDLE_POLICIES,
+)
 
 
 def _port_names(port: str) -> set:
@@ -228,6 +244,46 @@ def test_every_code_card_row_is_a_code_model(kind):
     row = qpu_settings.CODE_CARDS[kind]
     card = row()
     assert isinstance(card, ports.CodeModel)
+
+
+@pytest.mark.parametrize("kind", sorted(workload_settings.WORKLOADS))
+def test_every_workload_row_is_a_workload_row(kind):
+    row = workload_settings.WORKLOADS[kind]
+    assert isinstance(row, ports.WorkloadRow)
+
+
+def _declared_row_settings() -> list:
+    """Every shipped row's nested Settings, across the tables that read one."""
+    rows = []
+    for table in TABLES_WITH_ROW_KEYS:
+        table_rows = table.values()
+        rows.extend(table_rows)
+    declared = []
+    for row in rows:
+        settings_class = getattr(row, "Settings", None)
+        if settings_class is not None:
+            declared.append(settings_class)
+    return declared
+
+
+def _qualified_name(settings_class) -> str:
+    """The test id: the row's class and Settings, as Python names them."""
+    return settings_class.__qualname__
+
+
+DECLARED_ROW_SETTINGS = _declared_row_settings()
+
+
+@pytest.mark.parametrize(
+    "settings_class", DECLARED_ROW_SETTINGS, ids=_qualified_name
+)
+def test_every_rows_settings_is_a_frozen_dataclass_with_from_yaml(
+    settings_class,
+):
+    """The contract decsim/tables.py row_settings reads a row's keys by."""
+    parameters = settings_class.__dataclass_params__
+    assert parameters.frozen
+    assert isinstance(settings_class, ports.RowSettings)
 
 
 def _decsim_modules() -> list:

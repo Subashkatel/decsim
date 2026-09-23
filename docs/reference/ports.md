@@ -641,3 +641,23 @@ A code card: the numbers the machine reads off a QEC code.
 | `buffer_rounds` | Look-ahead rounds per decode window. |
 | `spatial_nodes` | The per-round graph size a latency model prices this card at. |
 | `syndrome_bits_per_round` | Syndrome bits one round of this many patches produces. |
+
+### `RowSettings`
+
+A table row's own yaml keys, read into one record.
+
+| Method | What it does |
+| --- | --- |
+| `from_yaml` | The record, read from the row's own keys the yaml wrote. |
+
+### `WorkloadRow`
+
+A workload row: what the machine runs, as the root reads it.
+
+| Member | Type |
+| --- | --- |
+| `has_frontend` | `bool` |
+
+| Method | What it does |
+| --- | --- |
+| `operations` | The operations, and the rounds policy the row fixes or None. |

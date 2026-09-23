@@ -1946,3 +1946,53 @@ class CodeModel(Protocol):
 
     def syndrome_bits_per_round(self, num_patches: int) -> int:
         """Syndrome bits one round of this many patches produces."""
+
+
+@runtime_checkable
+class RowSettings(Protocol):
+    """A table row's own yaml keys, read into one record.
+
+    A row with keys of its own declares a nested frozen dataclass named
+    Settings that fills this: its fields are the keys, and from_yaml
+    reads and checks the ones the yaml wrote, which are all it is
+    handed. context is whatever the row's section passes on, nothing
+    for most sections and the run's clocks (config.ClockSettings) for a
+    decoder tier, whose timing names a clock domain. A row with no keys
+    declares no Settings. The section splits its keys from the row's
+    and refuses a key neither declares (decsim/tables.py row_settings);
+    how the record reaches the row is its table's build call. The shape
+    is gem5's: a SimObject's parameters declared on its class
+    (tmp/resources/gem5/src/mem/SimpleMemory.py:43-53) and handed to
+    its constructor as one Params record (src/mem/simple_mem.cc:53).
+    """
+
+    @classmethod
+    def from_yaml(cls, section, *context) -> "RowSettings":
+        """The record, read from the row's own keys the yaml wrote."""
+
+
+@runtime_checkable
+class WorkloadRow(Protocol):
+    """A workload row: what the machine runs, as the root reads it.
+
+    Table rows: memory_circuit, circuit_list, surgery_ir (WORKLOADS,
+    frontends/settings.py), named by workload.kind. The root never
+    builds a workload row; it reads the class. operations turns the
+    workload section's record (frontends/settings.py WorkloadSettings,
+    whose row_settings holds the row's own RowSettings) and the run's
+    code card into the operations and the rounds policy the row fixes,
+    or None where the workload's policy applies (build/plan.py
+    _operations). has_frontend says whether an operation chain is built
+    in front of the run, a fact of the run shape the escalation policy
+    checks (build/plan.py build_plan). A row that no yaml can name
+    declares a Settings whose from_yaml refuses with a sentence. gem5's
+    Workload is the same shape: a SimObject whose parameters sit on its
+    class and whose few answers the system reads before it runs
+    (tmp/resources/gem5/src/sim/Workload.py:46-52,
+    src/sim/workload.hh:103-105).
+    """
+
+    has_frontend: bool
+
+    def operations(self, settings, code: CodeModel) -> tuple:
+        """The operations, and the rounds policy the row fixes or None."""

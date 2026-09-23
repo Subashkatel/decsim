@@ -263,11 +263,8 @@ def _is_per_distance_text(value) -> bool:
     return int(digits) >= 1
 
 
-# workload.kind names one of these rows: a row reads its own section
-# keys at the yaml boundary through its Settings, declares whether an
-# operation chain is built in front of the run (has_frontend), and turns
-# its settings and the run's code into the operations and, when the row
-# fixes them, the rounds policy.
+# workload.kind names one of these rows; each fills the WorkloadRow port
+# (decsim/ports.py).
 WORKLOADS = {
     "memory_circuit": MemoryCircuitWorkload,
     "circuit_list": CircuitListWorkload,

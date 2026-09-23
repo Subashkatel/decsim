@@ -14,7 +14,8 @@ which `python tools/docs_map.py` rewrites from the tables. If it takes
 more, something is wrong with the port rather than with your class.
 
 A row with yaml keys of its own declares them on a nested frozen
-dataclass named `Settings`: its fields are the keys, its classmethod
+dataclass named `Settings`, which fills the `RowSettings` port in
+`decsim/ports.py`: its fields are the keys, its classmethod
 `from_yaml(section)` reads and checks the ones the yaml wrote, and your
 constructor takes the record as `settings`. The section keeps the keys
 every row of its table shares and hands your row the rest
@@ -74,8 +75,8 @@ study most often extends:
 | `DECODERS` | `row(latency_model=None)`, or `row(latency_model=None, settings=...)` for a row with a `Settings` | `decsim/build/decoders.py`, `_algorithm` |
 | `WINDOWING_SCHEMES` | `row(card)`, a `WindowingSchemeCard`, or `row(card, settings=...)` for a row with a `Settings` | `decsim/build/plan.py`, `_chosen_scheme` |
 | `SYNDROME_SOURCES` | `row()`, with `code=card` when `takes_code_card` and `settings=...` for a row with a `Settings` | `decsim/build/plan.py`, `_syndrome_source` |
-| `CODE_CARDS` | `row(commit_rounds_override=..., buffer_rounds_override=...)`, the windows section's sizes, with `distance=` when the sweep sets one and `settings=...` for a row with a `Settings` | `decsim/qpu/settings.py`, `QpuSettings._named_card` |
-| `WORKLOADS` | not built: the root calls `row.operations(settings, code)` for the operations and the rounds policy the row fixes (or None), with the row's own `Settings` on `settings.row_settings`, and reads `row.has_frontend` | `decsim/build/plan.py`, `_operations` |
+| `CODE_CARDS` (the `CodeModel` port) | `row(commit_rounds_override=..., buffer_rounds_override=...)`, the windows section's sizes, with `distance=` when the sweep sets one and `settings=...` for a row with a `Settings` | `decsim/qpu/settings.py`, `QpuSettings._named_card` |
+| `WORKLOADS` | not built (the `WorkloadRow` port): the root calls `row.operations(settings, code)` for the operations and the rounds policy the row fixes (or None), with the row's own `Settings` on `settings.row_settings`, and reads `row.has_frontend` | `decsim/build/plan.py`, `_operations` |
 | `SYNDROME_BUFFERS` | `row(settings)`, the section's record, whose `row_settings` holds the row's own `Settings` | `decsim/build/stores.py` |
 | `IDLE_POLICIES` | `row()`, or `row(settings=...)` for a row with a `Settings` | `decsim/build/plan.py`, `_idle_policy` |
 | `BOUNDARY_POLICIES`, `BOUNDARY_PAYLOADS` | `row()` | `decsim/build/plan.py` |

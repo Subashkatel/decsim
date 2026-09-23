@@ -34,17 +34,11 @@ def row_settings(
 ):
     """The row's own settings, read from the section's keys it declares.
 
-    A row with keys of its own declares a nested frozen dataclass
-    `Settings`: its fields are the keys, its `from_yaml` reads them, and
-    the row's constructor takes the record as `settings`. That is gem5's
-    shape, a SimObject's parameters declared on its class
-    (src/mem/SimpleMemory.py:43-53) and handed to its constructor as one
-    Params record (src/mem/simple_mem.cc:53), and CUDA-Q QEC's, a code or
-    a decoder built by name with its own options map
-    (libs/qec/include/cudaq/qec/code.h:98, get_code at 257). other_keys
-    are the keys the section reads for itself or for another row; any
-    key that is neither those nor the row's is refused by name, as gem5
-    refuses a parameter its class does not declare
+    A row with keys of its own declares them on a nested `Settings`,
+    whose contract is decsim/ports.py RowSettings. other_keys are the
+    keys the section reads for itself or for another row; any key that
+    is neither those nor the row's is refused by name, as gem5 refuses
+    a parameter its class does not declare
     (src/python/m5/SimObject.py:932-936). context rides to from_yaml
     (the decoder tiers hand it the run's clocks). None for a row with no
     Settings, including no row at all.

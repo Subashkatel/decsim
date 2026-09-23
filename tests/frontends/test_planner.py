@@ -63,7 +63,7 @@ def test_a_cadence_that_is_not_a_finite_number_is_refused():
     qpu = qpu_settings.QpuSettings(code=card)
     settings = machine_settings.MachineSettings(qpu=qpu)
     with pytest.raises(
-        ValueError, match="resolved round_us must be a finite real number"
+        ValueError, match="the code card's round_microseconds must be a finite"
     ):
         machine_module.Machine.build(settings)
 

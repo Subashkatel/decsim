@@ -53,6 +53,7 @@ import decsim.frontends.settings as workload_settings
 import decsim.links.settings as link_settings
 import decsim.machine as machine_module
 import decsim.observe.settings as observe_settings
+import decsim.ports as ports
 import decsim.qpu.code_geometry as code_geometry
 import decsim.qpu.cycle_clock as cycle_clock
 import decsim.qpu.round_policies as round_policies
@@ -1224,8 +1225,11 @@ class AlwaysReadyFactory:
 
     Its constructor is InfiniteFactory's own shape, one parameter, which
     is the shape the root refused before every row was built from one
-    collaborators record.
+    collaborators record. It declares the decode queue port the root
+    binds on every factory row.
     """
+
+    decode_queue = ports.Port(ports.DecodeQueue)
 
     def __init__(self, collaborators):
         self.engine = collaborators.engine

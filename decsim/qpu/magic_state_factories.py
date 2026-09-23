@@ -64,17 +64,21 @@ class FactoryCollaborators:
     the magic_state_factory section's keys. This is gem5's params
     object, where a SimObject's collaborators arrive as one structure
     rather than as a signature per subclass
-    (tmp/resources/gem5/src/python/m5/SimObject.py:204-205).
+    (tmp/resources/gem5/src/python/m5/SimObject.py:204-205). The decode
+    queue a row submits its correction decodes to is not here: it is a
+    port, decode_queue, which the root binds once every seat exists.
     """
 
     engine: decsim.engine.Engine
-    decode_service: Optional[ports.DecodeQueue]
     round_ticks: int
     arguments: Mapping[str, Any] = dataclasses.field(default_factory=dict)
 
 
 class InfiniteFactory:
     """The idealized factory: a magic state is always in stock."""
+
+    # bound by the root as on every row; this row corrects nothing
+    decode_queue = ports.Port(ports.DecodeQueue)
 
     def __init__(self, collaborators: FactoryCollaborators):
         self.engine = collaborators.engine
@@ -101,9 +105,12 @@ class DistillationFactory(seeding._RandomSeedConsumer):
     that carry no trace.
     """
 
+    # the run's decoder manager, where the correction decodes compete
+    # with the core's windows
+    decode_queue = ports.Port(ports.DecodeQueue)
+
     def __init__(self, collaborators: FactoryCollaborators):
         self.engine = collaborators.engine
-        self.decode_service = collaborators.decode_service
         self._read_card(**collaborators.arguments)
 
     def start(self) -> None:
@@ -177,8 +184,10 @@ class DistillationFactory(seeding._RandomSeedConsumer):
         _check_production_mode(
             self.card.production_mode, self.card.buffer_capacity
         )
-        _check_decode_service(
-            self.decode_service, self.card.correction_decode_count
+        _check_count(
+            "correction_decode_count",
+            self.card.correction_decode_count,
+            minimum=0,
         )
         _check_count("unit_count", self.card.unit_count, minimum=1)
         _check_count("attempt_ticks", self.card.attempt_ticks, minimum=0)
@@ -279,7 +288,7 @@ class DistillationFactory(seeding._RandomSeedConsumer):
         batch = _CorrectionBatch(self.card.correction_decode_count, trace)
         on_done = functools.partial(self._finish_correction_decode, batch)
         for _ in range(self.card.correction_decode_count):
-            self.decode_service.enqueue_without_input(
+            self.decode_queue.enqueue_without_input(
                 self.card.correction_round_count,
                 on_done=on_done,
                 label="MSF-corr",
@@ -380,9 +389,11 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
     chain; continuous mode also keeps buffer_capacity states at the top.
     """
 
+    # the run's decoder manager, where a card's correction decodes go
+    decode_queue = ports.Port(ports.DecodeQueue)
+
     def __init__(self, collaborators: FactoryCollaborators):
         self.engine = collaborators.engine
-        self.decode_service = collaborators.decode_service
         self._read_card(collaborators.round_ticks, **collaborators.arguments)
 
     def start(self) -> None:
@@ -432,7 +443,9 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
         The preparation_logical_cycles of two and preparation_distance of
         three are project coefficients: Silva et al. 2411.04270 Sec. II B
         prices a level in logical cycles of its own distance but fixes
-        neither number for the physical injection stage.
+        neither number for the physical injection stage. No correction
+        decode by default: Silva line 249 counts the correction inside a
+        level's 13 logical cycles.
         """
         self.levels = _checked_levels(levels)
         checked_ticks = _checked_preparation_ticks(
@@ -460,8 +473,10 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
         _check_production_mode(
             self.card.production_mode, self.card.buffer_capacity
         )
-        _check_decode_service(
-            self.decode_service, self.card.correction_decode_count
+        _check_count(
+            "correction_decode_count",
+            self.card.correction_decode_count,
+            minimum=0,
         )
         _check_count("inputs_per_round", self.card.inputs_per_round, minimum=1)
         _check_count(
@@ -636,7 +651,7 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
                 self._finish_correction_decode, distillation_round
             )
             for _ in range(self.card.correction_decode_count):
-                self.decode_service.enqueue_without_input(
+                self.decode_queue.enqueue_without_input(
                     self.card.correction_round_count,
                     on_done=on_done,
                     label=f"MSF-corr-L{level}",
@@ -757,23 +772,6 @@ def _check_production_mode(
         return
     if buffer_capacity is None or buffer_capacity < 1:
         raise ValueError("continuous production needs buffer_capacity >= 1")
-
-
-def _check_decode_service(decode_service, correction_decode_count: int) -> None:
-    """Require a decode service when the card asks for correction decodes.
-
-    A card with no correction decode ignores the service the root hands
-    it, as FactoryCollaborators says of every collaborator: Silva
-    2411.04270 line 249 counts the correction inside a level's 13
-    logical cycles, so the multi-level card's own default decodes nothing.
-    """
-    if correction_decode_count < 0:
-        raise ValueError("correction_decode_count must be nonnegative")
-    if correction_decode_count > 0 and decode_service is None:
-        raise ValueError(
-            "decode_service is required when correction_decode_count is "
-            "positive"
-        )
 
 
 def _check_count(name: str, value, *, minimum: int) -> None:

@@ -20,13 +20,12 @@ A run the machine has no use for a seat in has no SEATS row for it and
 no WIRES row either, so no port is ever bound to None; seats_for reads
 the five conditions that decide that, once.
 
-Three rows name a seat another row built, because the class takes that
-neighbour at construction and cannot take it as a port: the magic state
-factory, whose card refuses a missing decode service as it reads it;
-the primary store output, which is one of the two store ends rather
-than a third one; and the two decoder managers, which share the ledger
-of strong requests that the chip's side opens and the host's side
-serves. Each such row therefore sits after the rows it reads.
+Two rows name a seat another row built, because the class takes that
+neighbour at construction and cannot take it as a port: the primary
+store output, which is one of the two store ends rather than a third
+one; and the two decoder managers, which share the ledger of strong
+requests that the chip's side opens and the host's side serves. Each
+such row therefore sits after the rows it reads.
 
 The member readers come before the tables because a tuple is built when
 the module loads and every row names its builder.
@@ -271,6 +270,7 @@ WIRES = (
     ("streams.windows", "window_manager"),
     ("streams.runtime", "execution_runtime"),
     ("idle_rounds.decode_queue", "decoder_manager"),
+    ("factory.decode_queue", "decoder_manager"),
     ("idle_rounds.streams", "streams"),
     ("idle_rounds.qpu", "qpu"),
     ("issuer.streams", "streams"),

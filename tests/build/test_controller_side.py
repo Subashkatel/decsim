@@ -207,13 +207,13 @@ _ROOT_BUILT_FACTORIES = (
 
 
 @pytest.mark.parametrize("factory_settings", _ROOT_BUILT_FACTORIES)
-def test_every_factory_row_builds_from_the_decode_queue_the_root_hands_it(
+def test_every_factory_row_builds_and_binds_the_decode_queue_the_root_wires(
     factory_settings,
 ):
     """A row reads the collaborators it needs and ignores the rest.
 
-    The root hands every row the run's decoder manager, so a row whose
-    card asks for no correction decode builds beside it.
+    The root binds every row's decode queue to the run's decoder manager,
+    so a row whose card asks for no correction decode runs beside it.
     """
     settings = machine_settings.MachineSettings(
         magic_state_factory=factory_settings
@@ -245,7 +245,6 @@ def test_the_collaborators_record_carries_the_runs_round_and_arguments():
 
     collaborators = magic_state_factories.FactoryCollaborators(
         engine=None,
-        decode_service=None,
         round_ticks=plan.round_ticks,
         arguments=settings.arguments,
     )
@@ -311,7 +310,6 @@ def _parts(factory_settings, plan):
         pool=None,
         detection_events=None,
     )
-    parts.seats["decoder_manager"] = None
     return parts
 
 

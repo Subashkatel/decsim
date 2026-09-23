@@ -1975,7 +1975,10 @@ class MagicStateFactory(Protocol):
     ahead of demand queues its first attempt in start, never in its
     constructor, so the order the root builds its components in cannot
     move a tick (gem5's startup, the place to schedule initial events,
-    tmp/resources/gem5/src/sim/sim_object.hh lines 194 and 280).
+    tmp/resources/gem5/src/sim/sim_object.hh lines 194 and 280). A row
+    declares a decode_queue port (a DecodeQueue), which the root binds
+    to the run's decoder manager; a row whose card corrects nothing
+    leaves it unread.
     """
 
     def start(self) -> None:

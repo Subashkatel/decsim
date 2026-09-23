@@ -52,7 +52,7 @@ study most often extends:
 | Table | The root builds your row as | Where |
 | --- | --- | --- |
 | `DECODERS` | `row(latency_model=None)`, or `row(latency_model=None, settings=...)` for a row with a `Settings` | `decsim/build/decoders.py`, `_algorithm` |
-| `WINDOWING_SCHEMES` | `row(card)`, a `WindowingSchemeCard` | `decsim/build/plan.py`, `_chosen_scheme` |
+| `WINDOWING_SCHEMES` | `row(card)`, a `WindowingSchemeCard`, or `row(card, settings=...)` for a row with a `Settings` | `decsim/build/plan.py`, `_chosen_scheme` |
 | `SYNDROME_SOURCES` | `row(**arguments)`, the arguments Python-only, with `code=card` added when `takes_code_card` | `decsim/build/plan.py`, `_syndrome_source` |
 | `SYNDROME_BUFFERS` | `row(settings)`, the section's record | `decsim/build/stores.py` |
 | `IDLE_POLICIES`, `BOUNDARY_POLICIES`, `BOUNDARY_PAYLOADS` | `row()` | `decsim/build/plan.py` |

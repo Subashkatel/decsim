@@ -2,7 +2,7 @@
 
 import dataclasses
 from collections.abc import Mapping
-from typing import Optional
+from typing import Any, Optional
 
 import decsim.config as config
 import decsim.ports as ports
@@ -36,6 +36,18 @@ BOUNDARY_PAYLOADS = {
     "dense_seam_mask": boundary_payloads.DenseSeamMask,
     "sparse_seam_list": boundary_payloads.SparseSeamList,
 }
+# The keys every row of the windows section shares; any other key is the
+# scheme row's own (its Settings, decsim/tables.py row_settings).
+WINDOWS_KEYS = (
+    "kind",
+    "clock",
+    "decision_cycles",
+    "commit_rounds",
+    "buffer_rounds",
+    "boundary_payload",
+    "terminal_policy",
+    "boundaries",
+)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -62,7 +74,9 @@ class WindowSettings:
     absorb the weak windows it covers, and eager otherwise. A
     Python-built scheme, boundary policy or window interaction is used as
     it is; the root's defaults are the sliding scheme, Eager shipping and
-    the default interaction.
+    the default interaction. row_settings is the scheme row's own
+    Settings, read from the section's keys outside WINDOWS_KEYS, or None
+    for a row that declares none.
     """
 
     clock: Optional[config.Clock] = None
@@ -76,6 +90,8 @@ class WindowSettings:
     scheme: Optional[ports.WindowingScheme] = None
     boundary_policy: Optional[ports.BoundaryPolicy] = None
     window_interaction: Optional[window_interactions.WindowInteraction] = None
+    # the scheme row's own Settings record, opaque to the section
+    row_settings: Optional[Any] = None
 
     def __post_init__(self) -> None:
         config.check_cycles("windows.decision_cycles", self.decision_cycles)
@@ -90,6 +106,11 @@ class WindowSettings:
         default_clock: Optional[config.Clock] = None,
     ) -> "WindowSettings":
         """The `windows` section: a kind of the table, two sizes, the wire."""
+        kind = section["kind"]
+        row = tables.row(WINDOWING_SCHEMES, "windows.kind", kind)
+        row_settings = tables.row_settings(
+            row, "windows", section, WINDOWS_KEYS
+        )
         boundary_payload = section.get("boundary_payload", "dense_seam_mask")
         terminal_policy = section.get("terminal_policy")
         _check_terminal_policy(terminal_policy)
@@ -103,12 +124,13 @@ class WindowSettings:
         return cls(
             clock=clock,
             decision_cycles=decision_cycles,
-            kind=section["kind"],
+            kind=kind,
             commit_rounds=section["commit_rounds"],
             buffer_rounds=section["buffer_rounds"],
             boundary_payload=boundary_payload,
             terminal_policy=terminal_policy,
             boundaries=boundaries,
+            row_settings=row_settings,
         )
 
 

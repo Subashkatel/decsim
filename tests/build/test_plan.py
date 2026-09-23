@@ -7,6 +7,8 @@ Both are pinned here through build_plan, on settings shaped as a yaml
 would leave them.
 """
 
+import dataclasses
+
 import pytest
 
 import decsim.build.escalation as escalation_build
@@ -20,6 +22,7 @@ import decsim.records.windows as window_records
 import decsim.settings as machine_settings
 import decsim.trace_source as trace_source
 import decsim.windows.boundary_policies as boundary_policies
+import decsim.windows.schemes.sliding as sliding_scheme
 import decsim.windows.settings as window_settings
 import tests.declared_run as declared_run
 
@@ -133,6 +136,32 @@ def test_a_windows_kind_that_names_no_row_is_refused():
         _plan(windows=windows)
 
     assert "windows.kind" in str(refusal.value)
+
+
+class _SettingsRecordingScheme(sliding_scheme.SlidingWindowScheme):
+    """A sliding scheme that keeps the Settings record it is built with."""
+
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        stride_rounds: int = 1
+
+    def __init__(self, card, settings) -> None:
+        sliding_scheme.SlidingWindowScheme.__init__(self, card)
+        self.settings = settings
+
+
+def test_a_scheme_row_with_settings_is_built_with_its_record(monkeypatch):
+    monkeypatch.setitem(
+        window_settings.WINDOWING_SCHEMES, "recording", _SettingsRecordingScheme
+    )
+    own_settings = _SettingsRecordingScheme.Settings(stride_rounds=2)
+    windows = window_settings.WindowSettings(
+        kind="recording", row_settings=own_settings
+    )
+
+    plan = _plan(windows=windows)
+
+    assert plan.scheme.settings is own_settings
 
 
 def test_a_scheme_that_declares_none_of_the_three_facts_is_refused():

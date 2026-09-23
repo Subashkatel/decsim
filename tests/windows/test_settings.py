@@ -7,10 +7,13 @@ a null default whose meaning is decided later, so the refusal each
 one raises at the yaml boundary is what a user meets first.
 """
 
+import dataclasses
+
 import pytest
 
 import decsim.config as config
 import decsim.records.windows as window_records
+import decsim.windows.schemes.sliding as sliding_scheme
 import decsim.windows.settings as window_settings
 
 CLOCKS = config.ClockSettings({"decisions": 250.0})
@@ -85,3 +88,40 @@ def test_a_charged_window_decision_needs_its_clock():
         ValueError, match="windows.decision_cycles needs a clock"
     ):
         window_settings.WindowSettings(decision_cycles=1)
+
+
+class _SteppedScheme(sliding_scheme.SlidingWindowScheme):
+    """A sliding scheme with one key of its own, for the section's split."""
+
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        stride_rounds: int = 1
+
+        @classmethod
+        def from_yaml(cls, section):
+            return cls(**section)
+
+
+def test_a_scheme_rows_own_key_reaches_its_settings(monkeypatch):
+    """gem5's shape: the row declares its key, the section hands it over."""
+    monkeypatch.setitem(
+        window_settings.WINDOWING_SCHEMES, "stepped", _SteppedScheme
+    )
+    section = _section(kind="stepped", stride_rounds=2)
+
+    settings = window_settings.WindowSettings.from_yaml(section, CLOCKS)
+
+    assert settings.row_settings == _SteppedScheme.Settings(stride_rounds=2)
+
+
+def test_a_key_no_row_declares_is_refused_naming_the_sections_keys():
+    section = _section(stride_rounds=2)
+
+    with pytest.raises(ValueError) as refusal:
+        window_settings.WindowSettings.from_yaml(section, CLOCKS)
+
+    assert str(refusal.value) == (
+        "windows does not know ['stride_rounds']; its keys are ['kind', "
+        "'clock', 'decision_cycles', 'commit_rounds', 'buffer_rounds', "
+        "'boundary_payload', 'terminal_policy', 'boundaries']"
+    )

@@ -300,7 +300,10 @@ def _scheme(windows: window_settings.WindowSettings, escalation_policy):
 
 
 def _chosen_scheme(windows: window_settings.WindowSettings, escalation_policy):
-    """The Python-built scheme, or the kind's row on the section's card."""
+    """The Python-built scheme, or the kind's row on the section's card.
+
+    A row with keys of its own is built with its Settings record too.
+    """
     if windows.scheme is not None:
         return windows.scheme
     row = tables.row(
@@ -308,7 +311,9 @@ def _chosen_scheme(windows: window_settings.WindowSettings, escalation_policy):
     )
     terminal_policy = _terminal_policy(windows, escalation_policy)
     card = window_records.WindowingSchemeCard(terminal_policy=terminal_policy)
-    return row(card)
+    if windows.row_settings is None:
+        return row(card)
+    return row(card, settings=windows.row_settings)
 
 
 def _terminal_policy(

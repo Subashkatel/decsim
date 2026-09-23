@@ -433,18 +433,24 @@ def test_correction_decodes_need_a_decode_service():
         )
 
 
-def test_a_decode_service_without_correction_decodes_is_refused():
+def test_a_card_with_no_correction_decode_ignores_the_decode_service():
+    """The root hands every row its decoder manager; this card sends none."""
     engine = decsim.engine.Engine()
     decoder = DecodeLog(engine, latency_ticks=1)
-    with pytest.raises(ValueError, match="decode_service must be None"):
-        distillation(
-            engine,
-            decode_service=decoder,
-            unit_count=1,
-            attempt_ticks=1,
-            correction_round_count=0,
-            correction_decode_count=0,
-        )
+    factory = distillation(
+        engine,
+        decode_service=decoder,
+        unit_count=1,
+        attempt_ticks=100,
+        correction_round_count=0,
+        correction_decode_count=0,
+        return_ticks=30,
+    )
+    delivered = []
+    factory.request(1, lambda: delivered.append(engine.now))
+    engine.run()
+    assert delivered == [130]
+    assert decoder.submitted == []
 
 
 def test_a_negative_correction_decode_count_is_refused():

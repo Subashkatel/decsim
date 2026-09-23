@@ -14,6 +14,7 @@ import decsim.build.controller_side as controller_side
 import decsim.build.parts as build_parts
 import decsim.controller.settings as controller_settings
 import decsim.decoders.decoders as decoders
+import decsim.machine as machine_module
 import decsim.ports as ports
 import decsim.qpu.magic_state_factories as magic_state_factories
 import decsim.qpu.settings as qpu_settings
@@ -176,6 +177,52 @@ def test_two_rows_with_different_cards_are_built_by_the_one_call():
 
     assert isinstance(always_in_stock, magic_state_factories.InfiniteFactory)
     assert isinstance(fifteen_to_one, magic_state_factories.DistillationFactory)
+
+
+_ONE_LEVEL = magic_state_factories.DistillLevel(unit_count=1, distance=3)
+_ROOT_BUILT_FACTORIES = (
+    qpu_settings.FactorySettings(kind="infinite"),
+    qpu_settings.FactorySettings(
+        kind="distillation",
+        arguments={
+            "unit_count": 1,
+            "attempt_ticks": 1000,
+            "correction_round_count": 1,
+            "correction_decode_count": 0,
+        },
+    ),
+    qpu_settings.FactorySettings(
+        kind="distillation",
+        arguments={
+            "unit_count": 1,
+            "attempt_ticks": 1000,
+            "correction_round_count": 1,
+        },
+    ),
+    qpu_settings.FactorySettings(
+        kind="multi_level",
+        arguments={"levels": [_ONE_LEVEL]},
+    ),
+)
+
+
+@pytest.mark.parametrize("factory_settings", _ROOT_BUILT_FACTORIES)
+def test_every_factory_row_builds_from_the_decode_queue_the_root_hands_it(
+    factory_settings,
+):
+    """A row reads the collaborators it needs and ignores the rest.
+
+    The root hands every row the run's decoder manager, so a row whose
+    card asks for no correction decode builds beside it.
+    """
+    settings = machine_settings.MachineSettings(
+        magic_state_factory=factory_settings
+    )
+
+    machine = machine_module.Machine.build(settings, 0)
+    result = machine.run()
+
+    assert result.terminal_status == "complete"
 
 
 def test_a_factory_kind_that_names_no_row_is_refused():

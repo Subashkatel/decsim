@@ -47,6 +47,7 @@ import decsim.qpu.settings as qpu_settings
 import decsim.qpu.stim_device as stim_device
 import decsim.records.program as program_records
 import decsim.records.transfers as transfer_records
+import decsim.records.windows as window_records
 import decsim.settings as machine_settings
 import decsim.windows.settings as window_settings
 from tests.experiments.yaml_configs import (
@@ -170,6 +171,9 @@ def switching_run(
     gap_threshold_db: float,
     run_both_at_once: bool = False,
     seed: int = 0,
+    strong_units: int = 1,
+    observation: tuple = (),
+    patch_count: int = 1,
 ):
     """One collected shot of a 1.0 us weak tier beside a 10.0 us one.
 
@@ -177,12 +181,17 @@ def switching_run(
     below escalates none, so the same two cards answer both branches.
     run_both_at_once starts the strong sibling with the weak job and
     cancels it when the weak result is kept, which is Toshio et al.
-    2510.25222 Sec. III A step 1.
+    2510.25222 Sec. III A step 1. observation names the section's flags
+    the shot turns on; more than one patch runs the memory_patches row.
     """
     raw = dict(MINIMAL_CONFIG)
+    raw["observation"] = dict.fromkeys(observation, True)
     workload = dict(MINIMAL_CONFIG["workload"])
     workload["rounds_per_shot"] = 30
     raw["workload"] = workload
+    if patch_count > 1:
+        workload["kind"] = "memory_patches"
+        workload["patch_count"] = patch_count
     raw["links"] = TWO_TIER_LINKS
     raw["escalation"] = {
         "kind": "switching",
@@ -204,7 +213,7 @@ def switching_run(
     }
     raw["strong_decoder"] = {
         "kind": 10.0,
-        "units": 1,
+        "units": strong_units,
         "unit_memory": {"bits": None},
         "engine": {
             "clock": "fridge",
@@ -1208,3 +1217,111 @@ def test_a_shot_fails_when_any_of_its_patches_reads_a_wrong_observable(
     assert first.logical_observables == first.observable_truth
     assert second.logical_observables != second.observable_truth
     assert measurement.logical_failure is True
+
+
+LOAD_FLAGS = ("record_switching_windows", "backlog_trace")
+
+
+def escalating_shot(tmp_path, strong_units: int):
+    """Three patches' windows all escalate to 10 us strong cards.
+
+    One patch's strong decodes wait on one another's boundaries and
+    never queue; three patches' reach the strong units together.
+    """
+    shot = switching_run(
+        tmp_path,
+        1000000.0,
+        strong_units=strong_units,
+        observation=LOAD_FLAGS,
+        patch_count=3,
+    )
+    return shot, measure.measure_shot(shot)
+
+
+def lindley_waits_us(requests, stages) -> list:
+    """One server's waits by Lindley's recursion, W' = max(0, W + S - A).
+
+    Lindley 1952: a customer's service starts when it has arrived and the
+    one before it has finished. The server is the strong unit's compute:
+    a decode arrives at it an input hop after its enqueue, and is served
+    for its compute span, both off the stage ledger, in arrival order.
+    """
+    strong = window_records.DecoderTier.STRONG
+    strong_requests = [
+        request for request in requests if request.request_key.tier is strong
+    ]
+    by_arrival = sorted(strong_requests, key=ready_ticks_of)
+    waits = []
+    free_at = 0
+    for request in by_arrival:
+        run_sequence = request.request_key.run_sequence
+        records = [
+            record
+            for record in stages.records
+            if run_sequence in record.run_sequences
+        ]
+        first = records[0]
+        input_hop = first.ready_ticks - first.dispatch_ticks
+        arrival = request.ready_ticks + input_hop
+        starts = [record.start_ticks for record in records]
+        ends = [record.end_ticks for record in records]
+        duration = max(ends) - min(starts)
+        start = max(arrival, free_at)
+        wait_ticks = start - arrival
+        wait = measure.ticks_to_microseconds(wait_ticks)
+        waits.append(wait)
+        free_at = start + duration
+    return waits
+
+
+def ready_ticks_of(request) -> int:
+    return request.ready_ticks
+
+
+def test_a_strong_requests_wait_is_lindleys_one_server_wait(tmp_path):
+    """Three patches' escalations into one strong unit queue as one server's."""
+    shot, measurement = escalating_shot(tmp_path, 1)
+    observation = shot.machine.observation
+    requests = observation.decode_records.requests
+    waits = lindley_waits_us(requests, observation.stages)
+
+    assert measurement.strong_wait_max_us == pytest.approx(max(waits))
+    mean_wait = sum(waits) / len(waits)
+    assert measurement.strong_wait_mean_us == pytest.approx(mean_wait)
+    assert measurement.strong_wait_max_us > 0
+
+
+def test_enough_strong_units_leave_the_same_windows_and_no_wait(tmp_path):
+    """The paired run: the same seed, the real unit count and ten.
+
+    The syndromes and the escalations are the same in both, so what the
+    extra units remove, the strong wait and the rounds held, is the
+    overload alone; what stays, the weak input's weight and service and
+    the escalated windows, is the difficulty.
+    """
+    _, real = escalating_shot(tmp_path, 1)
+    _, ample = escalating_shot(tmp_path, 10)
+
+    assert ample.weak_syndrome_weight_mean == real.weak_syndrome_weight_mean
+    assert ample.weak_syndrome_weight_max == real.weak_syndrome_weight_max
+    assert ample.weak_service_mean_us == real.weak_service_mean_us
+    assert ample.escalated_windows == real.escalated_windows == 30
+    assert ample.strong_wait_max_us == 0.0
+    assert real.strong_wait_max_us > 0.0
+    assert ample.backlog_peak_rounds < real.backlog_peak_rounds
+
+
+def test_a_shot_that_kept_no_records_writes_no_load_columns(tmp_path):
+    """A column of zeros would say nothing waited; the shot writes none."""
+    bare = switching_shot(tmp_path, 1000000.0)
+    _, kept = escalating_shot(tmp_path, 1)
+    bare_record = report.record_of([bare])
+    kept_record = report.record_of([kept])
+    bare_rows = report.summarize(bare_record.shots, bare_record.window_samples)
+    kept_rows = report.summarize(kept_record.shots, kept_record.window_samples)
+
+    assert "strong_wait_max_us" not in bare_record.shots[0]
+    assert "escalated_fraction" not in bare_rows[0]
+    assert kept_record.shots[0]["strong_wait_max_us"] > 0
+    assert kept_rows[0]["escalated_fraction"] == 1.0
+    assert kept_rows[0]["backlog_peak_rounds"] == kept.backlog_peak_rounds

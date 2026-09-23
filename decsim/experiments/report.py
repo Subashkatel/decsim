@@ -78,6 +78,18 @@ MOVEMENT_COUNTERS = (
 # on a store's slot and belongs to no path, so these repeat on every row
 # of one shot
 REFERENCE_COUNTERS = ("references", "referenced_rounds")
+# the columns that tell harder windows from an overloaded strong side, in
+# sweep.csv order; a point whose shots did not keep them gets none
+LOAD_MEANS = (
+    "weak_syndrome_weight_mean",
+    "weak_service_mean_us",
+    "strong_wait_mean_us",
+)
+LOAD_MAXES = (
+    "weak_syndrome_weight_max",
+    "strong_wait_max_us",
+    "backlog_peak_rounds",
+)
 # which role each field of shots.csv plays in a sweep point's row: a
 # mean over the point's shots, the largest over them, a sum, or how many
 # shots hold it true. The latency points' own mean and max columns are
@@ -91,12 +103,14 @@ SHOT_MEANS = (
     "weak_busy_fraction",
     "strong_busy_fraction",
     "strong_service_mean_us",
+    *LOAD_MEANS,
 )
 SHOT_MAXES = (
     "max_queued_windows",
     "weak_queue_max",
     "strong_queue_max",
     "parallel_processes_needed",
+    *LOAD_MAXES,
 )
 SHOT_SUMS = (
     "tesseract_windows_checked",
@@ -265,6 +279,7 @@ def summarize_point(point: tuple, totals, counts: dict) -> dict:
         "sim_wall_seconds_per_shot": totals.mean("sim_wall_seconds"),
     }
     _add_pool_columns(row, totals, distance, round_period_microseconds)
+    _add_load_columns(row, totals)
     for name in _points_held(totals.means):
         multiset = counts.get((point, name), {})
         _add_latency_point_columns(row, totals, name, multiset)
@@ -756,6 +771,26 @@ def _add_pool_columns(
         totals, distance, round_period_microseconds
     )
     row["parallel_processes_needed"] = totals.maxes["parallel_processes_needed"]
+
+
+def _add_load_columns(row: dict, totals) -> None:
+    """The difficulty and overload columns the point's shots hold.
+
+    The escalated share rides with them: the windows the strong tier
+    committed over the windows decoded, the escalation rate a burst
+    raises when it makes the weak decoder unsure.
+    """
+    for name in LOAD_MEANS:
+        if name in totals.means:
+            row[name] = totals.mean(name)
+    for name in LOAD_MAXES:
+        if name in totals.maxes:
+            row[name] = totals.maxes[name]
+    if "strong_wait_max_us" not in totals.maxes:
+        return
+    windows = totals.sums["windows"]
+    escalated = totals.sums["escalated_windows"]
+    row["escalated_fraction"] = escalated / windows
 
 
 def strong_service_bound_us(
@@ -1291,12 +1326,17 @@ def _row_task_and_seed(positions: dict, row: dict) -> tuple:
 
 
 def _scalar_fields(measurement) -> dict:
-    """The measurement's own fields, the per-window collections left out."""
+    """The measurement's own fields, the per-window collections left out.
+
+    A field the shot did not measure holds None and is no column, the
+    rule _points_held keeps for a latency point.
+    """
     row = {}
     for name in measurement.__dataclass_fields__:
-        if name in NON_COLUMN_FIELDS:
+        value = getattr(measurement, name)
+        if name in NON_COLUMN_FIELDS or value is None:
             continue
-        row[name] = getattr(measurement, name)
+        row[name] = value
     return row
 
 

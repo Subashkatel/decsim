@@ -159,6 +159,22 @@ class ShotMeasurement:
     # Skoric's least count of parallel decoding processes, ceil(2 tau_W
     # / ((n_com + n_W) tau_rd)) (2209.08552 lines 429-438)
     parallel_processes_needed: int
+    # what tells harder windows from an overloaded strong side (the
+    # paired run of docs/how-to/compare_two_runs.md): the set bits of each
+    # weak decode's input, its detection events when they are formed
+    # ahead of the decoder; each weak decode's compute, its stages' span;
+    # each strong decode's wait from its enqueue to its compute start,
+    # the queueing delay a queue splits from service; and the most
+    # undecoded rounds the machine held at once. The first five need
+    # observation.record_switching_windows and the last
+    # observation.backlog_trace; a shot that kept neither holds None,
+    # and its row no column, since zeros would say nothing waited
+    weak_syndrome_weight_mean: Optional[float]
+    weak_syndrome_weight_max: Optional[int]
+    weak_service_mean_us: Optional[float]
+    strong_wait_mean_us: Optional[float]
+    strong_wait_max_us: Optional[float]
+    backlog_peak_rounds: Optional[int]
     tesseract_windows_checked: int  # referee re-decodes (0 = referee off)
     # referee reached a different owned observable contribution
     tesseract_window_disagreements: int
@@ -711,6 +727,8 @@ def _measurement(
     primary_tier = escalation_build.primary_tier(settings.escalation)
     pools = _pool_measures(observation, primary_tier)
     strong = _strong_decodes(observation)
+    tiers = _tier_records(observation)
+    backlog_peak = _backlog_peak_rounds(observation)
     processes = parallel_processes_needed(
         samples, settings, distance, round_period_microseconds
     )
@@ -742,6 +760,12 @@ def _measurement(
         strong_decoded_rounds=strong.rounds,
         strong_service_mean_us=strong.service_mean_us,
         parallel_processes_needed=processes,
+        weak_syndrome_weight_mean=tiers.weak_syndrome_weight_mean,
+        weak_syndrome_weight_max=tiers.weak_syndrome_weight_max,
+        weak_service_mean_us=tiers.weak_service_mean_us,
+        strong_wait_mean_us=tiers.strong_wait_mean_us,
+        strong_wait_max_us=tiers.strong_wait_max_us,
+        backlog_peak_rounds=backlog_peak,
         tesseract_windows_checked=referee.windows_checked,
         tesseract_window_disagreements=referee.window_disagreements,
         link_totals=totals,
@@ -815,6 +839,27 @@ class _StrongDecodes:
     windows: int
     rounds: int
     service_mean_us: float
+
+
+@dataclasses.dataclass(frozen=True)
+class _DecodeLife:
+    """One decode's ticks: taken by a unit, input in, compute, done."""
+
+    dispatch: int
+    ready: int
+    compute_start: int
+    end: int
+
+
+@dataclasses.dataclass(frozen=True)
+class _TierRecords:
+    """The switching records' weak inputs and services and strong waits."""
+
+    weak_syndrome_weight_mean: Optional[float] = None
+    weak_syndrome_weight_max: Optional[int] = None
+    weak_service_mean_us: Optional[float] = None
+    strong_wait_mean_us: Optional[float] = None
+    strong_wait_max_us: Optional[float] = None
 
 
 def _logical_verdicts(
@@ -952,6 +997,123 @@ def _strong_decodes(
         services.append(service)
     service_mean_us = _mean_or_zero(services)
     return _StrongDecodes(windows, rounds, service_mean_us)
+
+
+def _tier_records(
+    observation: observation_module.Observation,
+) -> _TierRecords:
+    """Each tier's inputs, computes and waits off the switching records.
+
+    Every request record names its tier and run ordinal in its request
+    key (records/windows.py DecoderRequestKey), and the stage ledger
+    names the decode each stage served by the same ordinal, so a
+    decode's compute is its own stages, first start to last end, the
+    service point's span. A strong decode's wait is the two waits the
+    latency points split, queue_wait (enqueue to a unit taking it) and
+    compute_wait (its input landed to its compute start, the unit busy
+    with another decode, gem5's fuBusy), and not the input hop between
+    them, which a free unit pays too.
+    """
+    records = observation.decode_records
+    if records is None:
+        return _TierRecords()
+    lives = _decode_lives(observation.stages)
+    weights = _weak_syndrome_weights(records.requests)
+    weak_computes = _weak_compute_microseconds(records.requests, lives)
+    strong_waits = _strong_wait_microseconds(records.requests, lives)
+    weight_mean = _mean_or_zero(weights)
+    weight_max = max(weights, default=0)
+    compute_mean = _mean_or_zero(weak_computes)
+    wait_mean = _mean_or_zero(strong_waits)
+    wait_max = _max_or_zero(strong_waits)
+    return _TierRecords(
+        weak_syndrome_weight_mean=weight_mean,
+        weak_syndrome_weight_max=weight_max,
+        weak_service_mean_us=compute_mean,
+        strong_wait_mean_us=wait_mean,
+        strong_wait_max_us=wait_max,
+    )
+
+
+def _decode_lives(stages) -> dict:
+    """Each decode's dispatch, ready, compute start and end, by ordinal."""
+    records_by_run_sequence = collections.defaultdict(list)
+    for record in stages.records:
+        for run_sequence in record.run_sequences:
+            records_by_run_sequence[run_sequence].append(record)
+    lives = {}
+    for run_sequence, records in records_by_run_sequence.items():
+        lives[run_sequence] = _decode_life(records)
+    return lives
+
+
+def _decode_life(records: list) -> _DecodeLife:
+    """One decode's ticks off its own stage records.
+
+    A decoder that records no dispatch or ready tick leaves them at the
+    compute start, so none of its time counts as an input hop.
+    """
+    starts = [record.start_ticks for record in records]
+    ends = [record.end_ticks for record in records]
+    compute_start = min(starts)
+    dispatch = _dispatch_ticks(records, compute_start)
+    ready = _ready_ticks(records)
+    if ready is None:
+        ready = dispatch
+    return _DecodeLife(dispatch, ready, compute_start, max(ends))
+
+
+def _weak_syndrome_weights(requests: list) -> list:
+    """The set bits of every weak request's landed input that has bits."""
+    weights = []
+    for request in requests:
+        is_weak = request.request_key.tier is window_records.DecoderTier.WEAK
+        if is_weak and request.syndrome_weight is not None:
+            weights.append(request.syndrome_weight)
+    return weights
+
+
+def _weak_compute_microseconds(requests: list, lives: dict) -> list:
+    """Each weak decode's compute, first stage start to last stage end."""
+    durations = []
+    for request in _requests_of_tier(requests, lives, "weak"):
+        life = lives[request.request_key.run_sequence]
+        duration = _span_microseconds(life.end, life.compute_start)
+        durations.append(duration)
+    return durations
+
+
+def _strong_wait_microseconds(requests: list, lives: dict) -> list:
+    """Each strong decode's queue wait plus its compute wait."""
+    waits = []
+    for request in _requests_of_tier(requests, lives, "strong"):
+        life = lives[request.request_key.run_sequence]
+        queue_wait = life.dispatch - request.ready_ticks
+        compute_wait = life.compute_start - life.ready
+        wait_ticks = queue_wait + compute_wait
+        wait = ticks_to_microseconds(wait_ticks)
+        waits.append(wait)
+    return waits
+
+
+def _requests_of_tier(requests: list, lives: dict, tier: str) -> list:
+    """The tier's requests whose decode ran at least one stage."""
+    chosen = []
+    for request in requests:
+        key = request.request_key
+        if key.tier.value == tier and key.run_sequence in lives:
+            chosen.append(request)
+    return chosen
+
+
+def _backlog_peak_rounds(
+    observation: observation_module.Observation,
+) -> Optional[int]:
+    """The most undecoded rounds held at once, when the sampler ran."""
+    backlog = observation.decode_backlog
+    if backlog is None:
+        return None
+    return backlog.peak
 
 
 def parallel_processes_needed(

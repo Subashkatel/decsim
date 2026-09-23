@@ -186,7 +186,7 @@ def build_qpu(parts: build_parts.Parts) -> cycle_clock.QPUDevice:
     """The device on its cycle clock, one QEC round per cycle."""
     cycle_clock_domain = config.Clock(parts.plan.round_ticks)
     return cycle_clock.QPUDevice(
-        parts.engine, parts.plan.device, cycle_clock_domain
+        parts.engine, parts.plan.device, cycle_clock_domain, parts.plan.code
     )
 
 

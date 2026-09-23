@@ -107,7 +107,7 @@ def clocked_qpu(cycle_ticks, source=None):
     if source is None:
         source = syndrome_devices.TimingOnlyDevice(CODE)
     clock = config.Clock(cycle_ticks)
-    qpu = cycle_clock.QPUDevice(engine, source, clock)
+    qpu = cycle_clock.QPUDevice(engine, source, clock, CODE)
     qpu.readout_receiver = log
     qpu.runtime = log
     qpu.idle_rounds = log
@@ -468,8 +468,19 @@ def test_a_feedback_memory_round_is_routed_to_its_source_operation():
     engine, qpu, log = clocked_qpu(10)
     qpu.emit_feedback_memory_round(7, "A", 4)
     payload, route = log.readouts[0]
-    assert payload == round_records.QPUReadout(("idle", 7, "A"), ("A",), 4)
+    assert payload.operation_id == ("idle", 7, "A")
+    assert payload.patch_ids == ("A",)
+    assert payload.round_index == 4
     assert route == round_records.SyndromePacketRoute.feedback_memory_round(7)
+
+
+def test_an_idle_patchs_round_is_as_wide_as_one_patchs_syndrome():
+    """Every measure qubit is read out each cycle, used or not."""
+    engine, qpu, log = clocked_qpu(10)
+    qpu.emit_feedback_memory_round(7, "A", 4)
+    payload, _route = log.readouts[0]
+    assert payload.size_bits == BITS_PER_ROUND
+    assert payload.bits is None
 
 
 def test_a_command_with_another_cadence_is_refused():

@@ -114,7 +114,11 @@ class LinkFabric:
             lambda transfer: self._finish(outgoing, transfer),
         )
 
-    def _binding_for(self, path, attribution):
+    def _binding_for(
+        self,
+        path: transfer_records.LinkPath,
+        attribution: transfer_records.TransferAttribution,
+    ) -> "_PathBinding":
         """Route the complete footprint, as gem5's xbar routes an address.
 
         src/mem/xbar.cc findPort keeps the default when no explicit route

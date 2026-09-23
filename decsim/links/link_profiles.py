@@ -29,8 +29,10 @@ from collections.abc import Mapping
 from typing import Optional
 
 import decsim.config as config
+import decsim.engine
 import decsim.links.fabric as fabric
 import decsim.links.settings as settings
+import decsim.ports as ports
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 import decsim.tables as tables
@@ -503,7 +505,9 @@ class LogicalReferenceFabric:
         return logical_reference_profile()
 
     @staticmethod
-    def build(card: settings.FabricSettings, engine):
+    def build(
+        card: settings.FabricSettings, engine: decsim.engine.Engine
+    ) -> ports.Link:
         """The object that carries this run's transfers."""
         return fabric.LinkFabric(card, engine)
 
@@ -533,7 +537,9 @@ class BandwidthLimitedFabric:
         )
 
     @staticmethod
-    def build(card: settings.FabricSettings, engine):
+    def build(
+        card: settings.FabricSettings, engine: decsim.engine.Engine
+    ) -> ports.Link:
         """The object that carries this run's transfers."""
         return fabric.LinkFabric(card, engine)
 
@@ -554,7 +560,9 @@ class RoceV2CpuFabric:
         return roce_v2_measured_profile("cpu")
 
     @staticmethod
-    def build(card: settings.FabricSettings, engine):
+    def build(
+        card: settings.FabricSettings, engine: decsim.engine.Engine
+    ) -> ports.Link:
         """The object that carries this run's transfers."""
         return fabric.LinkFabric(card, engine)
 
@@ -577,7 +585,9 @@ class RoceV2GpuFabric:
         return roce_v2_measured_profile("gpu")
 
     @staticmethod
-    def build(card: settings.FabricSettings, engine):
+    def build(
+        card: settings.FabricSettings, engine: decsim.engine.Engine
+    ) -> ports.Link:
         """The object that carries this run's transfers."""
         return fabric.LinkFabric(card, engine)
 

@@ -148,7 +148,8 @@ escalation:
 #                                  # gth_brute_force | gth_eq4 | gth_eq4_wilson
 #                                  # (default: the Wilson-conservative one)
 #   online:                        # online only; defaults are the validated
-#                                  # drift-replay configuration
+#                                  # drift-replay configuration. A knob that
+#                                  # is no finite number is refused
 #     target_escalation_rate: 1e-3 # the rate tracker's starting duty target
 #     step_db: 0.25                # threshold step per window (adaptive
 #                                  # conformal recursion, arXiv:2106.00170)

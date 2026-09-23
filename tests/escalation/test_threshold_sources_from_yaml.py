@@ -208,6 +208,42 @@ def test_online_card_guards(tmp_path):
         load_experiment(high_audit_rate_path)
 
 
+@pytest.mark.parametrize(
+    "online, sentence",
+    [
+        ({"step_db": True}, "online.step_db must be a finite number"),
+        ({"step_db": "abc"}, "online.step_db must be a finite number"),
+        ({"adjust_factor": math.inf}, "online.adjust_factor must be a finite"),
+        ({"step_db": math.nan}, "online.step_db must be a finite number"),
+        (5, "escalation.online must be a mapping"),
+    ],
+)
+def test_an_online_knob_that_is_no_finite_number_is_refused(
+    tmp_path, online, sentence
+):
+    card = {
+        "threshold_source": "online",
+        "gap_threshold_db": 20.0,
+        "online": online,
+    }
+    config_path = source_config(tmp_path, card)
+    with pytest.raises(ValueError, match=sentence):
+        load_experiment(config_path)
+
+
+def test_an_online_target_written_in_exponent_form_loads(tmp_path):
+    """YAML 1.1 reads 1e-3 as text; the card reads it as the number."""
+    card = {
+        "threshold_source": "online",
+        "gap_threshold_db": 20.0,
+        "online": {"target_escalation_rate": "1e-3"},
+    }
+    config_path = source_config(tmp_path, card)
+    config = load_experiment(config_path)
+    online = config.settings.escalation.online
+    assert online.target_escalation_rate == 0.001
+
+
 def test_online_source_learns_across_a_point_and_records_the_path(tmp_path):
     """One calibrator serves every shot of the point.
 

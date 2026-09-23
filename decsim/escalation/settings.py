@@ -116,6 +116,11 @@ class OnlineThresholdSettings:
     @classmethod
     def from_yaml(cls, section: Mapping) -> "OnlineThresholdSettings":
         """The `online` card, every key optional."""
+        if not isinstance(section, Mapping):
+            raise ValueError(
+                "escalation.online must be a mapping of the calibrator's "
+                f"knobs (got {section!r})"
+            )
         unknown = set(section) - set(ONLINE_KEYS)
         if unknown:
             listed = sorted(unknown)
@@ -557,7 +562,9 @@ def _online_settings(
         )
     if not learns_across_a_point:
         return None
-    raw_online = section.get("online") or {}
+    raw_online = section.get("online")
+    if raw_online is None:
+        raw_online = {}
     return OnlineThresholdSettings.from_yaml(raw_online)
 
 
@@ -618,8 +625,22 @@ def _check_serial_only(
 
 
 def _online_float(section: Mapping, key: str, default: float) -> float:
+    """One knob of the online card: a finite number, never a flag.
+
+    A string is read as a number, because YAML 1.1 loads `1e-3`, the
+    way reference.yaml writes the target, as text.
+    """
     raw = section.get(key, default)
-    return float(raw)
+    sentence = f"escalation.online.{key} must be a finite number (got {raw!r})"
+    if isinstance(raw, bool):
+        raise ValueError(sentence)
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        raise ValueError(sentence) from None
+    if not math.isfinite(value):
+        raise ValueError(sentence)
+    return value
 
 
 def _listed(keys: tuple) -> str:

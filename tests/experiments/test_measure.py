@@ -525,9 +525,9 @@ def test_toshios_bound_is_the_round_time_d_windows_over_the_strong_rounds(
 ):
     """Theorem 1 read off a point where every window escalated.
 
-    Ten windows escalated and their strong decodes read 84 rounds in
-    all, so gamma_switch is 1 and r_strong is 8.4, and the bound
-    (1 / gamma)(d / r_strong) tau_gen is 3 / 8.4 microseconds
+    Ten windows escalated and their strong decodes read 57 rounds in
+    all, so gamma_switch is 1 and r_strong is 5.7, and the bound
+    (1 / gamma)(d / r_strong) tau_gen is 3 / 5.7 microseconds
     (2510.25222 lines 1270-1300). The strong service it bounds is the
     10.0 us card plus its fetch and release, which is above it, as a
     card ten times the round time must be.
@@ -537,9 +537,9 @@ def test_toshios_bound_is_the_round_time_d_windows_over_the_strong_rounds(
     rows = report.summarize(record.shots, record.window_samples)
 
     assert measurement.escalated_windows == 10
-    assert measurement.strong_decoded_rounds == 84
-    assert measurement.strong_service_mean_us == 10.0736
-    assert rows[0]["strong_service_bound_us"] == 3 * 10 / 84
+    assert measurement.strong_decoded_rounds == 57
+    assert measurement.strong_service_mean_us == 10.0628
+    assert rows[0]["strong_service_bound_us"] == 3 * 10 / 57
     assert rows[0]["escalated_windows"] == 10
 
 
@@ -563,7 +563,7 @@ def test_an_escalated_window_is_measured_on_the_strong_tiers_own_hops(
     window's first decode,
     so on window 2, whose complementary gap ran its two forced-class
     solves one after the other, it is both of them: 1.064 us of the
-    first solve on top of the 12.252 us from the second one's dispatch,
+    first solve on top of the 12.240 us from the second one's dispatch,
     which waits on window 1's held boundary and so on window 1's strong
     decode, 0.008 us of input hop after its rounds landed.
     """
@@ -576,7 +576,7 @@ def test_an_escalated_window_is_measured_on_the_strong_tiers_own_hops(
     assert samples["dep_block"] == [0.020] * 9 + [0.012]
     assert samples["compute_wait"] == [0.0] * 10
     assert samples["algorithm"] == [10.0] * 10
-    assert samples["weak_attempt"][2] == 13.316
+    assert samples["weak_attempt"][2] == 13.304
 
 
 def test_an_escalated_windows_points_sum_to_its_reaction_time(tmp_path):
@@ -800,9 +800,10 @@ def test_the_stage_points_are_the_committing_decodes_own_stages(tmp_path):
 
     Every window of this run escalates, so the decode the frame took is
     the strong one and its three stages are the compute the service
-    point measures: a nine-round strong window fetches 0.036 us, decodes
-    10.0 and releases 0.040, and the two six-round ones at the ends
-    fetch 0.024.
+    point measures: a six-round strong window, the commit region and
+    the buffer ahead of it, fetches 0.024 us, decodes 10.0 and releases
+    0.040, and the last one, whose buffer the stream's end clips to
+    nothing, fetches 0.012.
     """
     measurement = switching_shot(tmp_path, 1000000.0)
 
@@ -818,7 +819,7 @@ def test_the_stage_points_are_the_committing_decodes_own_stages(tmp_path):
         ticks = ticks_of(sample)
         service_ticks.append(ticks)
     assert stage_totals == service_ticks
-    assert samples["fetch"] == [0.024] + [0.036] * 8 + [0.024]
+    assert samples["fetch"] == [0.024] * 9 + [0.012]
 
 
 def test_a_cancelled_siblings_card_is_not_the_windows_algorithm(tmp_path):

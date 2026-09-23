@@ -26,14 +26,18 @@ the first and last rounds of a stream.
 
 The switching shape's strong side is filled by the escalation alone
 (Toshio 2510.25222 lines 1247 to 1250): each escalated window sends its
-selection as zero bits and then the rounds of its two-sided context
-that the strong syndrome buffer lacks, so the fifteen rounds cross
+selection as zero bits and then the rounds its strong window reads that
+the strong syndrome buffer lacks, so the fifteen rounds cross
 weak_decoder_to_strong_decoder once each and controller_to_strong_buffer
-carries nothing. At d=3 the contexts are 1-6, 1-9, 4-12, 7-15 and
-10-15, so four regions carry rounds 1-6, 7-9, 10-12 and 13-15 (44, 24,
-24 and 28 bits) and the fifth window finds its rounds there already;
-at d=5 the contexts are 1-10, 1-15 and 6-15, so two regions carry 1-10
-and 11-15 (228 and 132 bits).
+carries nothing. The strong window is the commit region and one buffer
+ahead, its past face pinned on the neighbour's commit (Bombin
+2303.04846 lines 775-788, 1456-1458), so it reads what the weak window
+read. At d=3 that is 1-6, 4-9, 7-12, 10-15 and 13-15, so four regions
+carry rounds 1-6, 7-9, 10-12 and 13-15 (44, 24, 24 and 28 bits) and the
+fifth window finds its rounds there already; at d=5 it is 1-10, 6-15
+and 11-15, so two regions carry 1-10 and 11-15 (228 and 132 bits). Each
+pinned face crosses decoder_to_decoder beside the weak hand-offs, one
+bulk layer each, so that hop carries twice the hand-offs.
 """
 
 import collections
@@ -132,8 +136,8 @@ EXPECTED = {
         "controller_to_weak_buffer": Traffic(15, 120),
         "weak_buffer_to_weak_decoder": Traffic(5, 220),
         "weak_decoder_to_strong_decoder": Traffic(9, 120),
-        "strong_buffer_to_strong_decoder": Traffic(5, 312),
-        "decoder_to_decoder": Traffic(4, 32),
+        "strong_buffer_to_strong_decoder": Traffic(5, 220),
+        "decoder_to_decoder": Traffic(8, 64),
         "strong_decoder_to_frame": Traffic(5, 5),
     },
     ("switching", 5): {
@@ -141,8 +145,8 @@ EXPECTED = {
         "controller_to_weak_buffer": Traffic(15, 360),
         "weak_buffer_to_weak_decoder": Traffic(3, 612),
         "weak_decoder_to_strong_decoder": Traffic(5, 360),
-        "strong_buffer_to_strong_decoder": Traffic(3, 840),
-        "decoder_to_decoder": Traffic(2, 48),
+        "strong_buffer_to_strong_decoder": Traffic(3, 612),
+        "decoder_to_decoder": Traffic(4, 96),
         "strong_decoder_to_frame": Traffic(3, 3),
     },
 }

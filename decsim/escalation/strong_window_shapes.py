@@ -171,32 +171,14 @@ class StrongWindowShape(Protocol):
 
 
 class ContextWindow(StrongWindowPorts):
-    """The commit region and one buffer of raw context on each side.
+    """The commit region, its past face pinned, and one buffer ahead.
 
-    The geometry is decsim's own. Toshio et al. 2510.25222 Sec. III A
-    feeds the strong decoder the same window as the weak one, "a
-    sequence of syndrome data sigma is simultaneously fed to both the
-    weak and strong decoders" (lines 599-601), and the formula
-    r_strong = r_com + 2 r_buf is Sec. III C, stated with Fig. 12 (lines
-    1250-1251) for the forward window. decsim reads context on both
-    sides because escalation discards the weak result, which unpins the
-    past face, and a buffer of raw context is the standard answer to an
-    open face (Skoric 2209.08552 line 388; Tan 2209.09219 line 1021).
-
-    The job is built as soon as its context is stored in the strong
-    syndrome buffer, and priced for the context rounds that exist: a
-    window at the operation's edge has a shorter context than commit + 2 buffer.
-    Every context round is measured by the verdict, so the redecode
-    carries them all up with the escalation and the job is held until
-    they land (the paper's Monte-Carlo simulations set T_comm^strong to
-    ten times T_comm^weak, lines 1109-1114; its Table I is a notation
-    table and prices nothing). This shape absorbs no weak window, so its
+    The same window NearSeamWindow lays: the escalated window's commit
+    region is re-decoded on an input whose past face carries the
+    earlier neighbour's committed correction (Bombin et al. 2303.04846
+    lines 775-788, 1456-1458), and the open future face keeps one buffer
+    of raw context. This shape absorbs no weak window, so its
     window_absorbed source is the silent one.
-
-    Both faces are read raw, so the row folds no neighbour boundary
-    (FOLDS_NO_BOUNDARY): a mask on the commit_lo layer would flip a seam
-    whose rounds the input already carries as raw defects, which is the
-    double count Bombin et al. 2303.04846 lines 775-788 rule out.
     """
 
     absorbs_weak_windows = False
@@ -205,15 +187,26 @@ class ContextWindow(StrongWindowPorts):
     window_absorbed = trace_source.SILENT
 
     def plan(self, weak_job: decoding_records.DecodeJob) -> StrongAssignment:
-        """The two-sided context job, built now or held for its context."""
+        """The job pinned on the committed neighbour, now or held.
+
+        A past face read raw lets the strong decode explain a seam
+        defect differently from the final commit of the window before
+        it, or with a past fault nobody commits, and the committed
+        corrections then leave detection events unmatched. The past face
+        is pinned on that commit instead, and no round behind the commit
+        region is read (Bombin et al. 2303.04846 lines 775-788 and
+        1456-1458).
+        """
         key = (weak_job.operation_id, weak_job.window_id)
-        region = self.regions.context_region(key)
+        region = self.regions.near_seam_region(key)
+        pinned_source_key = self.regions.near_seam_source(key)
+        folded_boundaries = _declared_faces(pinned_source_key)
         held = _held_redo(
             self,
             weak_job,
             region.window,
             region.context_read_keys,
-            FOLDS_NO_BOUNDARY,
+            folded_boundaries,
         )
         return _assignment_of(self, held)
 

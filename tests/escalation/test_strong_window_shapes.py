@@ -133,15 +133,16 @@ def _strong_request_record(machine, window_id: int):
     raise AssertionError(f"no strong request for window {window_id}")
 
 
-def test_the_context_window_reads_commit_plus_one_buffer_each_side():
+def test_the_context_window_pins_its_past_face_and_reads_one_buffer_ahead():
     machine = fabric.switching_machine(
         rounds=12, escalated_windows={1}, record=True
     )
     machine.run()
     strong = _strong_request_record(machine, 1)
-    # W1 commits rounds 4-6; one 3-round buffer each side reads 1-9
-    assert (strong.input_round_lo, strong.input_round_hi) == (1, 9)
-    assert strong.input_round_count == 9
+    # W1 commits rounds 4-6; its past face is pinned on W0's commit, so
+    # it reads the commit region and the 3-round buffer ahead, 4-9
+    assert (strong.input_round_lo, strong.input_round_hi) == (4, 9)
+    assert strong.input_round_count == 6
     assert fabric.frame_tiers(machine) == [
         ((1, 0), "weak"),
         ((1, 1), "strong"),
@@ -556,9 +557,9 @@ def test_a_shape_row_added_from_outside_runs_by_its_yaml_name():
     shape = machine.window_manager.strong_redecode.shape
     assert type(shape) is RecordingContextWindow
     assert shape.planned_windows == [2]
-    # the row reads raw rounds on both faces: it folds no neighbour
-    # boundary into the strong job's input
-    assert shape.assignments[0].folded_boundaries == ()
+    # the row pins its past face on W1, the neighbour that committed
+    # the round before W2's commit region
+    assert shape.assignments[0].folded_boundaries == ((1, 1),)
     assert fabric.frame_tiers(machine) == [
         ((1, 0), "weak"),
         ((1, 1), "weak"),
@@ -761,16 +762,17 @@ def _input_bits(decoder_input) -> tuple:
     return tuple(bits)
 
 
-def test_a_context_row_strong_job_reads_the_raw_rounds_of_its_span(
+def test_a_context_row_strong_job_is_masked_where_its_weak_job_is(
     monkeypatch,
 ):
-    """The row folds no boundary, so nothing masks its input.
+    """The row pins its past face on the neighbour its weak job pins on.
 
-    The context window reads one buffer of raw context on each side, so
-    a mask on its commit_lo layer would flip a seam whose rounds are
-    already in the input as raw defects: the double count Bombin et al.
-    2303.04846 lines 775-788 rule out. The weak job of the same window
-    is masked on this run, which is what makes the check meaningful.
+    Bombin et al. 2303.04846 lines 775-788: the input of a later task is
+    the syndrome plus the corrections the tasks before it committed. The
+    context row reads no round behind its commit region, so the seam
+    the neighbour's commit flips reaches its input only as that mask,
+    and every escalated window whose weak job was masked has its strong
+    job masked too.
     """
     masked = _masked_jobs(monkeypatch)
     machine = _gate_machine("two_sided_context")
@@ -778,9 +780,9 @@ def test_a_context_row_strong_job_reads_the_raw_rounds_of_its_span(
     weak_masked = _keys_of(masked, strong=False, changed_only=True)
     strong_keys = _keys_of(masked, strong=True, changed_only=False)
     strong_masked = _keys_of(masked, strong=True, changed_only=True)
-    assert strong_keys
-    assert weak_masked & strong_keys
-    assert strong_masked == set()
+    masked_and_escalated = weak_masked & strong_keys
+    assert masked_and_escalated
+    assert masked_and_escalated <= strong_masked
 
 
 def _keys_of(masked: list, *, strong: bool, changed_only: bool) -> set:

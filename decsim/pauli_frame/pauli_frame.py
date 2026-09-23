@@ -364,6 +364,7 @@ class _FrameState:
 
 
 # pauli_frame.kind names one of these rows: the frame a decoder's
-# correction is committed into. Every row takes the engine and the write
-# cost in ticks, and fills the Frame port (decsim/ports.py).
+# correction is committed into. Every row takes the engine, the clock and
+# the write cost in cycles of it, and fills the Frame port
+# (decsim/ports.py).
 FRAMES = {"logical_register": PauliFrame}

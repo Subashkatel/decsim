@@ -1096,11 +1096,11 @@ class Decoder(Protocol):
 
 @runtime_checkable
 class Frame(Protocol):
-    """The Pauli frame, as the window manager sees it.
+    """The Pauli frame, as the decoder output sees it.
 
     Table row: logical_register (FRAMES,
     pauli_frame/pauli_frame.py), named by pauli_frame.kind; every row
-    takes the engine and the write cost in ticks.
+    takes the engine, the clock and the write cost in cycles of it.
     """
 
     def commit_correction(

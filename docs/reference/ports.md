@@ -349,7 +349,7 @@ One decoder: correctness and timing from one object.
 
 ### `Frame`
 
-The Pauli frame, as the window manager sees it.
+The Pauli frame, as the decoder output sees it.
 
 | Method | What it does |
 | --- | --- |

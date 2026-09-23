@@ -70,11 +70,11 @@ class WorkloadSettings:
     line-based text IR), qlx (a lowered QLX program). The other fields
     are Python-only: the decode owners, the dynamic streams and
     protected regions of a feedback workload, the round policy
-    (GateRounds by default; the memory circuit fixes its rounds), the
-    feedback boundary mode every operation takes unless it names its
-    own, and the window error models a task built once for all of its
-    shots (built_window_models; a Machine built alone gets none and
-    builds its own).
+    (GateRounds by default; the memory circuit fixes its rounds and
+    refuses one), the feedback boundary mode every operation takes
+    unless it names its own, and the window error models a task built
+    once for all of its shots (built_window_models; a Machine built
+    alone gets none and builds its own).
     """
 
     kind: str = "circuit_list"

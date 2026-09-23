@@ -213,13 +213,20 @@ def _operations(settings: workload_settings.WorkloadSettings, code) -> tuple:
     """The workload's private operation copies and its rounds policy.
 
     The run never mutates the caller's operations; an operation without
-    its own feedback boundary mode takes the workload's.
+    its own feedback boundary mode takes the workload's. A row that fixes
+    its rounds built its operations for that count, so a second policy
+    is refused rather than one of the two winning in silence.
     """
     row = tables.row(
         workload_settings.WORKLOADS, "workload.kind", settings.kind
     )
     source_operations, fixed_rounds_policy = row.operations(settings, code)
     rounds_policy = settings.rounds_policy
+    if fixed_rounds_policy is not None and rounds_policy is not None:
+        raise ValueError(
+            f"workload.kind {settings.kind} fixes its own rounds, so the "
+            "workload takes no rounds_policy"
+        )
     if rounds_policy is None:
         rounds_policy = fixed_rounds_policy
     if rounds_policy is None:

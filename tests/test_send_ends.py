@@ -139,6 +139,7 @@ DELIVERY_CALLBACKS = {
     ("decoders/decoder_output.py", "WEAK_DECODER_TO_STRONG_DECODER"): (
         None,
         None,
+        None,
     ),
     ("pauli_frame/decision_dispatch.py", "FRAME_TO_CONTROLLER"): (
         "_at_the_controller",

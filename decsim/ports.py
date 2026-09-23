@@ -885,7 +885,10 @@ class DecoderOutput(Protocol):
         region: round_records.EscalatedRegion,
         on_delivered: Callable[[], None],
     ) -> int:
-        """Send a strong window's rounds up; the delay the link expects."""
+        """Read a strong window's rounds out of the weak store, send them up.
+
+        The delay expected: the store's read, then the link.
+        """
 
 
 @runtime_checkable

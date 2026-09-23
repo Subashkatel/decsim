@@ -130,7 +130,7 @@ class _Fixture:
         )
         self.transfers = _Transfers(self.engine, 4)
         self.frame = _Frame(self.engine, frame_ticks)
-        decoder_output = decoder_output_module.DecoderOutput()
+        decoder_output = decoder_output_module.DecoderOutput(self.engine)
         decoder_output.transfers = self.transfers
         decoder_output.frame = self.frame
         committer = window_commits.WindowCommitter(self.engine)
@@ -289,7 +289,7 @@ def test_the_frame_receives_the_strong_result_with_the_crossing_commit():
 
 def test_a_frameless_run_commits_at_the_delivery():
     fixture = _Fixture()
-    decoder_output = decoder_output_module.DecoderOutput()
+    decoder_output = decoder_output_module.DecoderOutput(fixture.engine)
     decoder_output.transfers = fixture.transfers
     committed = []
     window = fixture.window

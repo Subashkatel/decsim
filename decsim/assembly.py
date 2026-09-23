@@ -179,6 +179,8 @@ WIRES = (
     ("retention.tracker", "tracker"),
     ("decoder_output.transfers", "window_transfers"),
     ("decoder_output.frame", "pauli_frame"),
+    ("decoder_output.weak_store", "weak_syndrome_buffer"),
+    ("decoder_output.link", "links"),
     ("gate.planner", "planner"),
     ("gate.interaction", "window_interaction"),
     ("gate.input_fold", "decoder_manager.input_fold()"),

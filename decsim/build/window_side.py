@@ -69,8 +69,7 @@ def build_window_transfers(parts):
 
 def build_decoder_output(parts):
     """Where a finished decode's correction goes."""
-    del parts
-    return decoder_output_module.DecoderOutput()
+    return decoder_output_module.DecoderOutput(parts.engine)
 
 
 def build_gate(parts):

@@ -26,6 +26,7 @@ side's record and leaves by the object that holds it
 import functools
 from typing import Callable, Optional
 
+import decsim.engine as engine_module
 import decsim.ports as ports
 import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
@@ -55,6 +56,13 @@ class DecoderOutput:
     transfers = ports.Port(ports.WindowTransfers)
     # a run with no frame commits its corrections nowhere
     frame = ports.Port(ports.Frame, optional=True)
+    # the store an escalated region's rounds are read out of, and the
+    # fabric asked what their move will pay once that read is done
+    weak_store = ports.Port(ports.SyndromeBuffer)
+    link = ports.Port(ports.Link)
+
+    def __init__(self, engine: engine_module.Engine) -> None:
+        self.engine = engine
 
     def publish(
         self,
@@ -106,11 +114,34 @@ class DecoderOutput:
         region: round_records.EscalatedRegion,
         on_delivered: Callable[[], None],
     ) -> int:
-        """Send a strong window's rounds to the strong decoder's store.
+        """Read a strong window's rounds, then send them to the strong store.
 
-        The send is in the strong request's name and carries the rounds'
-        width; returns the delay the link expects.
+        The rounds leave the weak syndrome buffer here, so the read is
+        priced here, once, by that store (book_read), and the send starts
+        at its end; a bit is priced by the memory it leaves, at the tick
+        it leaves. The send is in the strong request's name and carries
+        the rounds' width; returns the delay expected, the read then the
+        link, which is exact whenever no later request overtakes it.
         """
+        round_keys = _region_round_keys(region)
+        read_tick = self.weak_store.book_read(round_keys)
+        if read_tick == self.engine.now:
+            return self._send_region(region, on_delivered)
+        send = functools.partial(self._send_region, region, on_delivered)
+        read_delay = read_tick - self.engine.now
+        self.engine.schedule(read_delay, send, label="syndrome buffer read")
+        link_delay = self.link.expected_delay_ticks(
+            transfer_records.LinkPath.WEAK_DECODER_TO_STRONG_DECODER,
+            region.wire_bits,
+            read_tick,
+        )
+        return read_delay + link_delay
+
+    def _send_region(
+        self,
+        region: round_records.EscalatedRegion,
+        on_delivered: Callable[[], None],
+    ) -> int:
         return self.transfers.send_region(
             transfer_records.LinkPath.WEAK_DECODER_TO_STRONG_DECODER,
             region,
@@ -147,3 +178,11 @@ def result_payload_bits(
         return len(result.logical_observables)
     patch_count = len(operation.patches)
     return max(1, patch_count)
+
+
+def _region_round_keys(region: round_records.EscalatedRegion) -> tuple:
+    """The (operation, round) key of every round the region carries."""
+    round_keys = []
+    for packet in region.packets:
+        round_keys.append((packet.operation_id, packet.round_index))
+    return tuple(round_keys)

@@ -285,7 +285,7 @@ The decoder side's outgoing sends, as the window side asks them.
 | --- | --- |
 | `publish` | Send the result on its tier's output link; commit it at delivery. |
 | `send_selection` | Send one window's escalation; returns the delay the link expects. |
-| `send_region` | Send a strong window's rounds up; the delay the link expects. |
+| `send_region` | Read a strong window's rounds out of the weak store, send them up. |
 
 ### `WindowGapJoin`
 

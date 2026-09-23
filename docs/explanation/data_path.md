@@ -233,6 +233,11 @@ arXiv:2510.25222 lines 1247 to 1250: the syndrome data of `r_strong`
 rounds is assigned to the strong decoder at the switch, after both
 boundaries are determined).
 
+The rounds leave the weak syndrome buffer when the region is sent, so
+that store prices their read there (`book_read`), once, and the region
+starts across this hop when the read ends; under the default row's
+`read_cycles: 0` it starts at once.
+
 Move, off board, with a copy into the strong syndrome buffer at the
 landing. Default latency 0.26 microseconds and 100 Gb/s: the strong
 node is one inter-chassis hop from the weak chip, Caune Fig. 1a stage F,

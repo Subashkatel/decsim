@@ -283,6 +283,24 @@ def test_a_yaml_section_nobody_owns_is_refused_naming_the_sections():
         )
 
 
+@pytest.mark.parametrize(
+    "qpu_entry,sentence",
+    [
+        ({}, r"the yaml needs the sections \['qpu'\]"),
+        ({"qpu": 3}, "the yaml section qpu holds 3; a section is a mapping"),
+    ],
+)
+def test_a_section_missing_or_not_a_mapping_is_refused_with_a_sentence(
+    qpu_entry, sentence
+):
+    sections = _required_sections_but_the_qpu()
+    sections.update(qpu_entry)
+    with pytest.raises(ValueError, match=sentence):
+        machine_settings.MachineSettings.from_mapping(
+            sections, name="x", base_directory=None
+        )
+
+
 def test_the_wiring_reaches_its_components():
     """Every cross-reference is bound, by port or by constructor."""
     settings = machine_settings.MachineSettings()
@@ -3020,3 +3038,12 @@ def _direct_matching_prediction(
 
 def _transfer_paths(run: _Run) -> set[str]:
     return {row["path"] for row in run.result.link_traffic["transfers"]}
+
+
+def _required_sections_but_the_qpu() -> dict:
+    """Every required section as an empty mapping, the qpu left out."""
+    sections = {}
+    for name in machine_settings.REQUIRED_SECTIONS:
+        sections[name] = {}
+    del sections["qpu"]
+    return sections

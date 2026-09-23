@@ -75,6 +75,7 @@ study most often extends:
 | `WINDOWING_SCHEMES` | `row(card)`, a `WindowingSchemeCard`, or `row(card, settings=...)` for a row with a `Settings` | `decsim/build/plan.py`, `_chosen_scheme` |
 | `SYNDROME_SOURCES` | `row()`, with `code=card` when `takes_code_card` and `settings=...` for a row with a `Settings` | `decsim/build/plan.py`, `_syndrome_source` |
 | `CODE_CARDS` | `row(commit_rounds_override=..., buffer_rounds_override=...)`, the windows section's sizes, with `distance=` when the sweep sets one and `settings=...` for a row with a `Settings` | `decsim/qpu/settings.py`, `QpuSettings._named_card` |
+| `WORKLOADS` | not built: the root calls `row.operations(settings, code)` for the operations and the rounds policy the row fixes (or None), with the row's own `Settings` on `settings.row_settings`, and reads `row.has_frontend` | `decsim/build/plan.py`, `_operations` |
 | `SYNDROME_BUFFERS` | `row(settings)`, the section's record, whose `row_settings` holds the row's own `Settings` | `decsim/build/stores.py` |
 | `IDLE_POLICIES`, `BOUNDARY_POLICIES`, `BOUNDARY_PAYLOADS` | `row()` | `decsim/build/plan.py` |
 
@@ -85,6 +86,10 @@ returns itself and answers `WindowModelSource` too, as `StimDevice`
 does; a source with no circuit returns
 `syndrome_devices.NO_WINDOW_MODELS`, which answers every model question
 with nothing, as `TimingOnlyDevice` does.
+
+A workload row's operations that share a qubit need program-order
+edges (`Operation.predecessors`) or the run refuses them; a frontend
+fills them (`decsim/frontends/circuit_frontend.py`, `_wire_circuit`).
 
 ## 2. Add the row
 
@@ -131,6 +136,15 @@ One function does that for every table (`decsim/tables.py`, `row`), so
 the refusal reads the same wherever it comes from. It is pinned by
 `tests/machine/test_machine.py::test_a_decoder_kind_off_the_table_is_refused_naming_the_rows`.
 
+A key that neither the section nor your row declares is refused the
+same way, with the keys the section reads and your row's own listed:
+
+```
+weak_syndrome_buffer does not know ['banks']; its keys are ['kind',
+'bits', 'clock', 'write_cycles', 'read_cycles',
+'detection_event_cycles_per_round', 'bank_count']
+```
+
 A yaml section that no package owns is refused the same way, with the
 sections listed:
 `tests/machine/test_machine.py::test_a_yaml_section_nobody_owns_is_refused_naming_the_sections`.
@@ -146,11 +160,15 @@ than any description of it.
 | a decoder | `tests/machine/test_machine.py::test_a_new_decoder_is_one_class_and_one_table_row` |
 | a decoder, through a whole run of a shipped config | `tests/machine/test_machine.py::test_a_second_table_row_runs_gate_point_one` |
 | a syndrome buffer | `tests/machine/test_machine.py::test_a_new_syndrome_buffer_is_one_class_and_one_table_row` |
+| a syndrome buffer with a key of its own | `tests/syndrome_buffer/test_settings.py::test_a_buffer_rows_own_key_reaches_its_settings` |
+| a syndrome source with a key of its own | `tests/experiments/test_yaml_surface.py::test_a_source_rows_own_key_reaches_the_built_source` |
+| a workload | `tests/frontends/test_settings.py::test_a_workload_row_written_outside_decsim_runs_from_a_yaml` |
 | a code card | `tests/machine/test_machine.py::test_a_code_card_written_outside_decsim_runs_with_no_registration` |
 | a code card with keys of its own, named in the yaml | `tests/experiments/test_yaml_surface.py::test_the_code_card_row_named_in_the_yaml_is_built_with_its_own_keys` |
 | a layout | `tests/qpu/test_layouts.py::test_a_layout_written_outside_decsim_hears_every_hook_of_a_run` |
 | a boundary or idle policy | `tests/machine/test_machine.py::test_a_policy_written_outside_decsim_is_used_on_its_own_axis` |
 | a windowing scheme | `tests/windows/test_window_planner.py`, and the `WindowingScheme` port |
+| a windowing scheme with a key of its own | `tests/windows/test_settings.py::test_a_scheme_rows_own_key_reaches_its_settings` |
 | a link card | `tests/links/test_link_profiles.py`, and the `Link` port |
 | an escalation policy | `tests/escalation/test_policies.py`, and the `EscalationPolicy` port |
 

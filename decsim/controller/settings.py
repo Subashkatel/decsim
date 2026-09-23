@@ -47,6 +47,14 @@ _CONTROLLER_KEYS = (
     "packing_overflow",
     "detection_events_formed_at",
 )
+# The keys with no default: a controller card states its clock and its
+# three per-round costs.
+_REQUIRED_CONTROLLER_KEYS = (
+    "clock",
+    "readout_to_bits_cycles",
+    "packing_cycles_per_round",
+    "decision_to_pulse_cycles",
+)
 
 
 class PackingOverflowPolicy(enum.Enum):
@@ -210,7 +218,7 @@ class IdlePolicySettings:
 
 
 def _check_section_keys(section: Mapping) -> None:
-    """The section names no key it does not have.
+    """The section names its required keys and no key it does not have.
 
     gem5 refuses a parameter its class does not declare
     (src/python/m5/SimObject.py:932-936), as the decoder_manager and
@@ -222,6 +230,13 @@ def _check_section_keys(section: Mapping) -> None:
         raise ValueError(
             f"controller does not know {listed}; its keys are "
             f"{list(_CONTROLLER_KEYS)}"
+        )
+    missing = set(_REQUIRED_CONTROLLER_KEYS) - set(section)
+    if missing:
+        listed = sorted(missing)
+        raise ValueError(
+            f"controller needs the keys {listed}; configs/reference.yaml "
+            "holds every key with its unit"
         )
 
 

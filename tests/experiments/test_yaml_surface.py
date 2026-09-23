@@ -155,6 +155,15 @@ def test_an_unknown_controller_key_is_refused(tmp_path):
         experiment.load_experiment(config_path)
 
 
+def test_a_controller_without_its_clock_is_refused_naming_the_key(tmp_path):
+    controller = dict(MINIMAL_CONFIG["controller"])
+    del controller["clock"]
+    config_path = write_config(tmp_path, {"controller": controller})
+    sentence = r"controller needs the keys \['clock'\]"
+    with pytest.raises(ValueError, match=sentence):
+        experiment.load_experiment(config_path)
+
+
 def test_the_bulk_strong_key_reaches_the_decoder_manager(tmp_path):
     config_path = write_config(
         tmp_path, {"decoder_manager": {"bulk_strong": True}}

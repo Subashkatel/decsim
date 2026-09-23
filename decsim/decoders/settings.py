@@ -368,15 +368,19 @@ class DecoderManagerSettings:
 def _dispatch_clock(
     section: Mapping, clocks: config.ClockSettings, dispatch_cycles: int
 ) -> Optional[config.Clock]:
-    """The clock dispatch_cycles are counted on; None when none are charged."""
+    """The clock dispatch_cycles are counted on; None when none is named.
+
+    A named clock is resolved whether or not a cycle is charged, so a
+    domain the clocks section does not have is refused either way.
+    """
+    if "clock" in section:
+        return clocks.clock(section["clock"])
     if dispatch_cycles == 0:
         return None
-    if "clock" not in section:
-        raise ValueError(
-            "decoder_manager.dispatch_cycles needs a clock: name the "
-            "domain its cycles are counted in"
-        )
-    return clocks.clock(section["clock"])
+    raise ValueError(
+        "decoder_manager.dispatch_cycles needs a clock: name the "
+        "domain its cycles are counted in"
+    )
 
 
 def _check_required_keys(section: Mapping, section_name: str) -> None:

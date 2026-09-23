@@ -411,3 +411,12 @@ def test_a_memory_row_that_is_not_a_row_is_refused_at_load_by_name(key):
         decoder_settings.DecoderSettings.from_yaml(
             section, clocks, "weak_decoder"
         )
+
+
+def test_a_manager_clock_the_clocks_do_not_have_is_refused_at_no_cost():
+    """A named domain is resolved even when dispatch charges nothing."""
+    clocks = config.ClockSettings({"decoder": 250.0})
+    section = {"clock": "nowhere", "dispatch_cycles": 0}
+
+    with pytest.raises(ValueError, match="clock 'nowhere' is not a clocks"):
+        decoder_settings.DecoderManagerSettings.from_yaml(section, clocks)

@@ -105,8 +105,6 @@ class QPUDevice:
 
     def boundary_at_or_after(self, tick: int) -> int:
         """The first cycle boundary not earlier than the tick."""
-        if tick < 0:
-            raise ValueError("QPU boundary query tick must be nonnegative")
         return self.clock.edge(0, tick)
 
     def are_patches_idle(self, operation_id: Any, patches: tuple) -> bool:

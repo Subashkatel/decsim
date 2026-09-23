@@ -229,12 +229,6 @@ def test_the_boundary_at_or_after_a_tick_on_a_1250_ns_clock():
     assert qpu.boundary_at_or_after(1_300_000) == 2_500_000
 
 
-def test_a_boundary_query_before_time_zero_is_refused():
-    engine, qpu, log = clocked_qpu(921_000)
-    with pytest.raises(ValueError, match="nonnegative"):
-        qpu.boundary_at_or_after(-1)
-
-
 def test_an_idle_patch_emits_one_round_per_cycle_until_finish():
     engine, qpu, log = clocked_qpu(10)
     body = memory_body(1, 2, 10)

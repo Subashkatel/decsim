@@ -8,14 +8,22 @@ round 1, 4-11 in round 2, 12-19 in round 3 and 20-31 in round 4); Stim's
 measurement-to-detector converter
 (stim.CompiledMeasurementsToDetectionEventsConverter) as the oracle for
 detection events and observable flips; Stim's compile_sampler(seed=...)
-as the oracle for a seeded shot; validation matrix row Q4.
+as the oracle for a seeded shot; validation matrix row Q4. The burst
+source against the public qec-burst-scaling code
+(github.com/AlanPai777/qec-burst-scaling, qecburst/circuit.py
+inject_burst_profile and exponential_decay_profile, written out below)
+and against the places Stim's generator puts its four noise parameters
+(src/stim/gen/circuit_gen_params.cc).
 """
 
+import collections
 import hashlib
+import math
 
 import numpy
 import pytest
 
+import decsim.detector_error_model.detector_formation as detector_formation
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.qpu.stim_device as stim_device
 import decsim.records.program as program_records
@@ -661,3 +669,256 @@ def test_a_hardware_detector_belongs_to_its_latest_layer_up_to_the_end():
         circuit, 3
     )
     assert rounds == {0: 1, 1: 2, 2: 3, 3: 3}
+
+
+def qec_burst_scaling_circuit(circuit, qubits, start_round, probabilities):
+    """qecburst/circuit.py inject_burst_profile, written out.
+
+    One DEPOLARIZE1 per burst round on the chosen qubits, right after the
+    round's first TICK, finding rounds as every seventh TICK of the
+    flattened generated circuit; start_round counts from zero.
+    """
+    flattened = circuit.flattened()
+    flattened_text = str(flattened)
+    lines = flattened_text.splitlines()
+    ticks = [index for index, line in enumerate(lines) if line == "TICK"]
+    round_starts = ticks[::7]
+    targets = " ".join(str(qubit) for qubit in qubits)
+    by_offset = list(enumerate(probabilities))
+    for offset, probability in reversed(by_offset):
+        round_start = round_starts[start_round + offset]
+        after_the_tick = round_start + 1
+        inserted = f"DEPOLARIZE1({probability:.17g}) {targets}"
+        lines.insert(after_the_tick, inserted)
+    text = "\n".join(lines)
+    return stim.Circuit(text)
+
+
+def qec_burst_scaling_extras(background, peak, decay_rounds, round_count):
+    """exponential_decay_profile, then _extra_depolarizing_probability.
+
+    qecburst/circuit.py targets p0 + (p_peak - p0) exp(-t / tau) in burst
+    round t and composes an extra DEPOLARIZE1(q) onto the round's own
+    DEPOLARIZE1(p0): q = (target - p0) / (1 - 4 p0 / 3).
+    """
+    composition = 1 - 4 * background / 3
+    extras = []
+    for offset in range(round_count):
+        exponent = -offset / decay_rounds
+        decay = math.exp(exponent)
+        target = background + (peak - background) * decay
+        extra = (target - background) / composition
+        extras.append(extra)
+    return extras
+
+
+def data_depolarizing_circuit(distance, rounds, noise):
+    """qecburst/circuit.py build_background_circuit: round-start noise only."""
+    return stim.Circuit.generated(
+        "surface_code:rotated_memory_z",
+        distance=distance,
+        rounds=rounds,
+        before_round_data_depolarization=noise,
+    )
+
+
+def burst_of(circuit, rounds, **settings):
+    table = detector_formation.build_formation_table(circuit, rounds)
+    burst = stim_device.BurstStimDevice.Settings(**settings)
+    return stim_device.burst_circuit(circuit, table, burst)
+
+
+def inserted_lines(circuit, burst):
+    flattened = circuit.flattened()
+    plain_text = str(flattened)
+    burst_text = str(burst)
+    plain_lines = plain_text.splitlines()
+    burst_lines = burst_text.splitlines()
+    plain_counts = collections.Counter(plain_lines)
+    burst_counts = collections.Counter(burst_lines)
+    added = burst_counts - plain_counts
+    added_lines = added.elements()
+    return sorted(added_lines)
+
+
+def test_an_idle_burst_is_qec_burst_scalings_decaying_burst():
+    """The same circuit, region and schedule give the same circuit.
+
+    qec-burst-scaling's extra probability in burst round t is
+    (p_peak - p0) exp(-t / tau) / (1 - 4 p0 / 3), so
+    burst_error_probability is its amplitude. Its disk of radius 2 about
+    the middle data qubit of distance 3 holds data qubits 3, 8, 10, 12
+    and 17 (qecburst/geometry.py select_disk).
+    """
+    circuit = data_depolarizing_circuit(3, 5, 0.001)
+    extras = qec_burst_scaling_extras(0.001, 0.101, 1.5, 4)
+    reference = qec_burst_scaling_circuit(
+        circuit, (3, 8, 10, 12, 17), 1, extras
+    )
+
+    burst = burst_of(
+        circuit,
+        5,
+        burst_onset_round=2,
+        burst_decay_rounds=1.5,
+        burst_radius=2.0,
+        burst_error_probability=extras[0],
+        burst_channels=("idle",),
+    )
+
+    assert burst.approx_equals(reference, atol=1e-12)
+
+
+def test_each_channel_raises_the_noise_stim_places_there():
+    """Gate after a unitary, idle after TICK, flips beside measure and reset.
+
+    A whole-patch burst from the last round of a two-round distance-3
+    memory adds, beside each noise instruction of that round, the same
+    instruction at the burst's probability.
+    """
+    circuit = memory_circuit(3, 2)
+    burst = burst_of(
+        circuit, 2, burst_onset_round=2, burst_error_probability=0.25
+    )
+
+    assert inserted_lines(circuit, burst) == [
+        "DEPOLARIZE1(0.25) 1 3 5 8 10 12 15 17 19",
+        "DEPOLARIZE1(0.25) 2 11 16 25",
+        "DEPOLARIZE1(0.25) 2 11 16 25",
+        "DEPOLARIZE2(0.25) 16 10 11 5 25 19 8 9 17 18 12 13",
+        "DEPOLARIZE2(0.25) 16 8 11 3 25 17 1 9 10 18 5 13",
+        "DEPOLARIZE2(0.25) 2 1 16 15 11 10 8 14 3 9 12 18",
+        "DEPOLARIZE2(0.25) 2 3 16 17 11 12 15 14 10 9 19 18",
+        "X_ERROR(0.25) 1 3 5 8 10 12 15 17 19",
+        "X_ERROR(0.25) 2 9 11 13 14 16 18 25",
+        "X_ERROR(0.25) 2 9 11 13 14 16 18 25",
+        "X_ERROR(0.25) 2 9 11 13 14 16 18 25",
+    ]
+
+
+def test_a_measurement_burst_flips_only_the_readout_of_its_region():
+    """The TLS case: one measure qubit's readout, from the onset on."""
+    circuit = memory_circuit(3, 3)
+    burst = burst_of(
+        circuit,
+        3,
+        burst_onset_round=2,
+        burst_radius=0.0,
+        burst_center=(2.0, 0.0),
+        burst_error_probability=0.2,
+        burst_channels=("measurement",),
+    )
+
+    assert inserted_lines(circuit, burst) == [
+        "X_ERROR(0.2) 2",
+        "X_ERROR(0.2) 2",
+    ]
+
+
+def test_a_two_qubit_channel_keeps_a_pair_when_either_qubit_is_hit():
+    circuit = memory_circuit(3, 1)
+    burst = burst_of(
+        circuit,
+        1,
+        burst_radius=0.0,
+        burst_center=(2.0, 0.0),
+        burst_error_probability=0.1,
+        burst_channels=("gate",),
+    )
+
+    assert inserted_lines(circuit, burst) == [
+        "DEPOLARIZE1(0.1) 2",
+        "DEPOLARIZE1(0.1) 2",
+        "DEPOLARIZE2(0.1) 2 1",
+        "DEPOLARIZE2(0.1) 2 3",
+    ]
+
+
+def test_a_burst_source_without_a_burst_samples_the_stim_device_shot():
+    """With the probability at 0 the two rows draw the same bits."""
+    circuit = memory_circuit(3, 3)
+    operation = memory_operation(circuit)
+    plain = stim_device.StimDevice(seed=7)
+    quiet = stim_device.BurstStimDevice(seed=7)
+    plain.begin_operation(operation, 3, 3, round_period_ticks=1_100_000)
+    quiet.begin_operation(operation, 3, 3, round_period_ticks=1_100_000)
+
+    assert quiet.sampled_detection_events(1) == plain.sampled_detection_events(
+        1
+    )
+    assert round_payload(quiet, operation, 3) == round_payload(
+        plain, operation, 3
+    )
+
+
+def test_a_burst_shot_is_stims_shot_of_the_burst_circuit():
+    """Drawn under the stim_device seed law, from the burst circuit."""
+    circuit = memory_circuit(3, 3)
+    operation = memory_operation(circuit)
+    settings = stim_device.BurstStimDevice.Settings(
+        burst_onset_round=2, burst_error_probability=0.3
+    )
+    device = stim_device.BurstStimDevice(settings, seed=7)
+    device.begin_operation(operation, 3, 3, round_period_ticks=1_100_000)
+    burst = burst_of(
+        circuit, 3, burst_onset_round=2, burst_error_probability=0.3
+    )
+    sampler = burst.compile_sampler(seed=7382560267478030810)
+    shots = sampler.sample(1)
+    oracle_row = shots[0]
+    converter = circuit.compile_m2d_converter()
+    oracle_events = converter.convert(
+        measurements=shots, separate_observables=False
+    )
+
+    third = round_payload(device, operation, 3)
+    assert third.bits == tuple(int(bit) for bit in oracle_row[16:])
+    assert device.sampled_detection_events(1) == tuple(oracle_events[0])
+
+
+def test_a_burst_the_decoders_are_not_told_of_leaves_their_models_alone():
+    circuit = memory_circuit(3, 4)
+    operation = memory_operation(circuit)
+    settings = stim_device.BurstStimDevice.Settings(burst_error_probability=0.3)
+    plain = stim_device.StimDevice(seed=1)
+    burst = stim_device.BurstStimDevice(settings, seed=1)
+    whole = window(1, 4, 4)
+    plain_model = plain.strong_window_model_for_operation(
+        operation, whole, 4, fault_model_requirement=GRAPHLIKE
+    )
+    burst_model = burst.strong_window_model_for_operation(
+        operation, whole, 4, fault_model_requirement=GRAPHLIKE
+    )
+
+    plain_faults = plain_model.require_faults(GRAPHLIKE_REPRESENTATION)
+    burst_faults = burst_model.require_faults(GRAPHLIKE_REPRESENTATION)
+    assert burst.window_model_source() is burst
+    assert burst_faults.source_fault_ids == plain_faults.source_fault_ids
+    assert list(burst_faults.priors) == list(plain_faults.priors)
+
+
+def test_a_burst_that_adds_no_noise_is_refused():
+    circuit = memory_circuit(3, 3)
+    sentence = "the burst adds no noise to the circuit"
+    with pytest.raises(ValueError, match=sentence):
+        burst_of(circuit, 3, burst_onset_round=4, burst_error_probability=0.1)
+
+
+@pytest.mark.parametrize(
+    ("key", "value", "sentence"),
+    [
+        ("burst_onset_round", True, "burst_onset_round is a one-based round"),
+        ("burst_decay_rounds", 0, "burst_decay_rounds is a number of rounds"),
+        ("burst_radius", -1.0, "burst_radius is a distance of 0 or more"),
+        ("burst_center", [1.0], "burst_center is \\[x, y\\]"),
+        ("burst_error_probability", "1e-3", "YAML reads 1e-3 as text"),
+        ("burst_error_probability", 0.8, "a number from 0 to 0.75"),
+        ("burst_channels", ["leakage"], "burst_channels is a non-empty list"),
+        ("burst_channels", [], "burst_channels is a non-empty list"),
+    ],
+)
+def test_a_burst_key_outside_its_domain_is_refused_naming_it(
+    key, value, sentence
+):
+    with pytest.raises(ValueError, match=sentence):
+        stim_device.BurstStimDevice.Settings.from_yaml({key: value})

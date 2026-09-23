@@ -1360,7 +1360,7 @@ class SyndromeSource(Protocol):
     """What the QPU reads out each round for an operation.
 
     Table rows: stim_device, timing_only, syndrome_bits, recorded_stim,
-    streaming_stim.
+    streaming_stim, burst_stim.
     Payload bits are raw measurement bits per round; a source with a
     detector formation table also answers DetectionEventFormer below,
     the port the machine forms a round's detection events through.

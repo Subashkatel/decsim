@@ -156,6 +156,7 @@ In `decsim/qpu/settings.py`. A row of it is named under `qpu.kind`.
 | `syndrome_bits` | `SyndromeBitDevice` in `decsim/qpu/syndrome_devices.py` | Emits seeded random bits shaped like the code card's syndrome. |
 | `recorded_stim` | `RecordedStimDevice` in `decsim/qpu/stim_device.py` | Replays recorded raw measurements (hardware data) instead of sampling. |
 | `streaming_stim` | `StreamingStimDevice` in `decsim/qpu/streaming_stim_device.py` | Keep one physical memory history until its actual final readout. |
+| `burst_stim` | `BurstStimDevice` in `decsim/qpu/stim_device.py` | Samples every shot with one error burst the decoders are not told of. |
 
 ## `THRESHOLD_SOURCES`
 

@@ -111,6 +111,18 @@ def test_a_study_knob_that_is_not_true_or_false_is_refused():
     )
 
 
+def test_a_study_knob_written_as_one_is_refused_as_not_true_or_false():
+    """A yaml `1` is an integer, and 1 == True in Python."""
+    section = _section("observation:\n  data_movement: 1\n")
+
+    with pytest.raises(ValueError) as refusal:
+        observe_settings.ObservationSettings.from_yaml(section)
+
+    assert "observation.data_movement must be true or false, got 1" in str(
+        refusal.value
+    )
+
+
 def test_every_study_knob_is_read_from_the_section():
     """The five knobs the Machine builds listeners for are yaml keys."""
     text = "observation:\n"

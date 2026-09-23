@@ -209,9 +209,14 @@ def _refuse_a_shot_that_is_not_a_count(shot) -> None:
 
 
 def _boolean(section: Mapping, key: str) -> bool:
-    """One of the section's on-or-off knobs, off when the yaml is silent."""
+    """One of the section's on-or-off knobs, off when the yaml is silent.
+
+    The check is by identity: 1 == True and 0 == False in Python (the
+    language reference, "The standard type hierarchy", bool is a subtype
+    of int), so a membership test would let a count through as a knob.
+    """
     value = section.get(key, False)
-    if value not in (True, False):
+    if value is not True and value is not False:
         raise ValueError(
             f"observation.{key} must be true or false, got {value!r}"
         )

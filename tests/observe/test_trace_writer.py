@@ -8,6 +8,7 @@ narrates the same log and returns the same results as one with it off.
 """
 
 import dataclasses
+import gzip
 import hashlib
 import json
 
@@ -122,6 +123,18 @@ def test_the_trace_is_not_a_reason_to_build_the_counters(tmp_path):
     traced_fields = dataclasses.asdict(traced_result)
     assert traced_fields == plain_fields
     assert traced_result.data_movement is None
+
+
+def test_a_path_ending_in_gz_holds_the_same_trace_compressed(traced, tmp_path):
+    """The reference yaml's own promise: .gz compresses."""
+    machine, _result, document = traced
+    path = tmp_path / "point1.trace.json.gz"
+
+    machine.observation.trace_writer.write(str(path))
+
+    with gzip.open(path, "rt") as handle:
+        compressed = json.load(handle)
+    assert compressed == document
 
 
 def test_every_event_carries_the_fields_its_phase_declares(traced):

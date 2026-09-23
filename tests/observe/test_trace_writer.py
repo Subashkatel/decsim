@@ -62,10 +62,13 @@ def _by_phase(document, phase) -> list:
     return [row for row in document if row["ph"] == phase]
 
 
-def _flow_of(document, flow_id) -> list:
+def _flow_of(document, kind, key_text) -> list:
+    """The events of the chain that follows that round or that window."""
     rows = []
     for row in document:
-        if row["ph"] in ("s", "t", "f") and row["id"] == flow_id:
+        if row["ph"] not in ("s", "t", "f"):
+            continue
+        if row["args"].get(kind) == key_text:
             rows.append(row)
     return rows
 
@@ -154,6 +157,30 @@ def test_every_flow_event_lies_inside_a_complete_event_on_its_thread(traced):
         spans = spans_by_tid.get(row["tid"], ())
         covered = any(start <= tick <= end for start, end in spans)
         assert covered, row
+
+
+def test_every_flow_chain_has_a_number_of_its_own(traced):
+    """A flow's id is a number and one chain's events share it.
+
+    The spec's ids are numbers (Trace Event Format, Async Events, which
+    flow events follow), and Perfetto's trace processor drops a flow
+    whose id does not read as one (its stat flow_invalid_id), so the
+    round or window a chain follows is in its args.
+    """
+    _machine, _result, document = traced
+    chains_by_id = {}
+    for row in document:
+        if row["ph"] not in ("s", "t", "f"):
+            continue
+        args = row["args"]
+        followed = (row["cat"], args.get("round"), args.get("window"))
+        chains = chains_by_id.setdefault(row["id"], set())
+        chains.add(followed)
+
+    starts = _by_phase(document, "s")
+    assert all(isinstance(flow_id, int) for flow_id in chains_by_id)
+    assert len(chains_by_id) == len(starts)
+    assert all(len(chains) == 1 for chains in chains_by_id.values())
 
 
 def test_round_ones_first_hops_are_the_notes_worked_example(traced):
@@ -253,7 +280,7 @@ def test_one_rounds_flow_chain_equals_the_round_events_recorded(traced):
             continue
         recorded.append((event.kind, event.tick))
 
-    flow = _flow_of(document, "1:1")
+    flow = _flow_of(document, "round", "1:1")
     assert [row["ph"] for row in flow] == ["s", "t", "t", "t", "f"]
     flow_ticks = [row["args"]["tick"] for row in flow]
     assert flow_ticks == [1_000_000, 1_004_000, 1_008_000, 6_008_000, 6_012_000]
@@ -343,7 +370,7 @@ def test_a_windows_flow_joins_its_queue_its_moves_its_unit_and_the_frame(
     """
     _machine, _result, document = traced
     threads = _thread_names(document)
-    flow = _flow_of(document, "window 1:0")
+    flow = _flow_of(document, "window", "1:0")
     lanes = []
     for row in flow:
         lanes.append((row["ph"], threads[row["tid"]], row["args"]["tick"]))
@@ -448,7 +475,7 @@ def _check_row(row) -> None:
     if row["ph"] == "i":
         assert row["s"] == "t"
     if row["ph"] in ("s", "t", "f"):
-        assert isinstance(row["id"], str)
+        assert isinstance(row["id"], int)
     if row["ph"] == "f":
         assert row["bp"] == "e"
 

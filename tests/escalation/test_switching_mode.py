@@ -544,7 +544,7 @@ def test_a_deferred_strong_job_is_traced_from_its_hold_to_its_release(
     assert args["tick"] == expected_held
     assert slice_row["dur"] == pytest.approx(3.0)
 
-    arrows = _flows_of(document, lanes, "Strong tier", "window 1:0")
+    arrows = _flows_of(document, lanes, "Strong tier", "1:0")
     (arrow,) = arrows
     assert arrow["args"]["tick"] == expected_released
 
@@ -567,13 +567,15 @@ def _events_named(document, phase: str, name: str) -> list:
     return rows
 
 
-def _flows_of(document, lanes: dict, lane: str, flow_id: str) -> list:
-    """Every flow event of one chain on one lane."""
+def _flows_of(document, lanes: dict, lane: str, window_text: str) -> list:
+    """Every flow event of one window's chain on one lane."""
     rows = []
     for row in document:
         if row["ph"] not in ("s", "t", "f"):
             continue
-        if lanes[row["tid"]] != lane or row["id"] != flow_id:
+        if lanes[row["tid"]] != lane:
+            continue
+        if row["args"].get("window") != window_text:
             continue
         rows.append(row)
     return rows

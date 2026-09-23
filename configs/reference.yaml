@@ -252,13 +252,11 @@ escalation:
 #                                  # the restart window's weak commit (Toshio
 #                                  # 2510.25222 lines 1248-1259). It absorbs
 #                                  # the windows it covers as forward does,
-#                                  # needs restart_reread_buffer_regions 0
-#                                  # (refused otherwise), and reads one buffer
-#                                  # region of raw context on a near face that
-#                                  # no committed correction closes
-#   restart_reread_buffer_regions: 0  # forward window only (refused with
-#                                  # forward_seam_pinned, whose far pin needs
-#                                  # 0): how many of the
+#                                  # leaves the faults crossing its far face
+#                                  # to the restart window, and reads one
+#                                  # buffer region of raw context on a near
+#                                  # face that no committed correction closes
+#   restart_reread_buffer_regions: 0  # the forward rows only: how many of the
 #                                  # strong region's buffer regions the
 #                                  # restarted weak window re-reads. Toshio
 #                                  # 2510.25222 lines 1229-1235 resume the weak
@@ -269,10 +267,12 @@ escalation:
 #                                  # faults of the rounds it reads. 1 re-reads
 #                                  # the region's last buffer region as the
 #                                  # restart window's past context, as Fig. 12
-#                                  # step 5 draws it, and the strong region
-#                                  # keeps the crossing faults; it costs the
-#                                  # weak syndrome buffer one more buffer
-#                                  # region per bounded window
+#                                  # step 5 draws it; forward's strong region
+#                                  # keeps the crossing faults, and
+#                                  # forward_seam_pinned's leaves them to the
+#                                  # restart window its far face pins on. It
+#                                  # costs the weak syndrome buffer one more
+#                                  # buffer region per bounded window
 
 workload:
   kind: memory_circuit             # memory_circuit | memory_patches are the

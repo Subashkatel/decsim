@@ -225,8 +225,7 @@ class EscalationSettings:
     buffer regions the restarted weak window re-reads under the forward
     shapes; forward_seam_pinned is
     forward's extent read with no context, both faces pinned, which is
-    Toshio's Sec. III C as it is stated (lines 1248-1259) and which
-    needs restart_reread_buffer_regions 0.
+    Toshio's Sec. III C as it is stated (lines 1248-1259).
     confidence names the signal the weak tier reports and the threshold
     decides on (confidence/signals.py), and the yaml refuses a
     weak decoder whose decode cannot produce that signal's evidence;
@@ -453,7 +452,6 @@ def _switching_settings(
     strong_window = _strong_window(section)
     _check_serial_only(threshold_source, threshold_row, strong_window)
     reread_regions = _restart_reread_buffer_regions(section)
-    _check_far_pin_reread(strong_window, reread_regions)
     threshold_table = section.get("threshold_table")
     threshold_cycles = section.get("threshold_cycles", 0)
     switch_cycles = section.get("switch_cycles", 0)
@@ -579,33 +577,6 @@ def _strong_window(section: Mapping) -> str:
             f"table; the rows are {rows}"
         )
     return str(named)
-
-
-def _check_far_pin_reread(strong_window: str, reread_regions: int) -> None:
-    """A pinned far face and a re-reading restart window double count.
-
-    A row that pins its far face on the restart window's commit needs
-    the restart window to share no round with the strong region, which
-    is escalation.restart_reread_buffer_regions 0, the default (Toshio
-    et al. 2510.25222 Fig. 12 step 5 draws the restart window re-reading
-    one buffer region, which is 1). With a re-read the
-    restart window commits rounds inside the region, so pinning on its
-    correction would carry an explanation of those rounds into an input
-    that already holds them raw, the double count Bombin et al.
-    2303.04846 lines 775-788 rule out.
-    """
-    row = STRONG_WINDOW_SHAPES[strong_window]
-    if not row.pins_the_far_face:
-        return
-    if reread_regions == 0:
-        return
-    raise ValueError(
-        f"escalation.strong_window {strong_window} pins its far face on "
-        "the restart window's committed correction, so the restart window "
-        "must share no round with the strong region: "
-        "escalation.restart_reread_buffer_regions must be 0 (got "
-        f"{reread_regions})"
-    )
 
 
 def _check_serial_only(

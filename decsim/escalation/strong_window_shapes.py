@@ -130,10 +130,7 @@ class StrongWindowShape(Protocol):
     strong region replaces the weak windows it covers, so the planner
     claims the rounds a restart would read and the weak chain keeps
     committing; a reader of the run's shape asks the row rather than a
-    yaml flag. pins_the_far_face is its declaration that the far face is
-    pinned on the restart window's weak commit, which the escalation
-    section reads to refuse a restart window that re-reads the region
-    (escalation/settings.py). default_boundary_policy is the row of
+    yaml flag. default_boundary_policy is the row of
     BOUNDARY_POLICIES a
     run gets when windows.boundaries is null and the escalation may
     escalate: an absorbing region needs the weak chain to keep
@@ -147,7 +144,6 @@ class StrongWindowShape(Protocol):
     """
 
     absorbs_weak_windows: bool
-    pins_the_far_face: bool
     default_boundary_policy: str
     window_absorbed: Any
 
@@ -217,7 +213,6 @@ class NearSeamWindow(StrongWindowPorts):
     """
 
     absorbs_weak_windows = False
-    pins_the_far_face = False
     default_boundary_policy = "held"
     window_absorbed = trace_source.SILENT
 
@@ -268,7 +263,6 @@ class ForwardWindow(StrongWindowPorts):
     """
 
     absorbs_weak_windows = True
-    pins_the_far_face = False
     default_boundary_policy = "eager"
 
     def __init__(self, engine: engine_module.Engine) -> None:
@@ -617,16 +611,15 @@ class ForwardSeamWindow(ForwardWindow):
     with one buffer region of raw context (Bombin lines 850-852), since
     there is no earlier commit to pin on.
 
-    The row needs escalation.restart_reread_buffer_regions 0, the
-    default (Fig. 12 step 5 draws a re-read of one buffer region, which
-    this row does not take): with a re-read the restart window shares
-    rounds with the strong region, and pinning the far face on a
-    correction that explains rounds inside the region is the double
-    count Bombin's input adaptation rules out. The escalation section
-    refuses the pairing at load.
+    The restart window owns the faults crossing the far face at every
+    escalation.restart_reread_buffer_regions width, since this region
+    reads no round past its commit (strong_regions.py,
+    forward_seam_region). At width 1, the width Fig. 12 step 5 draws,
+    the restart window reads the region's last buffer region raw as its
+    own past context and commits nothing inside the region, so the far
+    pin carries only those crossing faults and no round of the input is
+    explained twice (Bombin lines 775-788).
     """
-
-    pins_the_far_face = True
 
     def release_conditions(
         self, assignment: StrongAssignment

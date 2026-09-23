@@ -211,14 +211,25 @@ class StrongRegions:
         first round, where the region has no earlier commit to pin on
         and keeps one buffer region of raw context (Bombin lines
         850-852).
+
+        The far face pins on the restart window's commit and the region
+        reads no round past its own, so the restart window owns the
+        faults crossing that face at every re-read width. Fig. 12 step 5
+        draws the restart window reading the region's last block as its
+        buffer and committing only past it, so what the pin carries is
+        those crossing faults and nothing inside the region.
         """
         proposal = self._proposed_forward_region(key)
         plan = proposal.plan
         context_lo = plan.context_lo
         if near_source_key is not None:
             context_lo = plan.commit_lo
+        seam_fault_owner = _far_pinned_seam_owner(plan)
         pinned_plan = dataclasses.replace(
-            plan, context_lo=context_lo, context_hi=plan.commit_hi
+            plan,
+            context_lo=context_lo,
+            context_hi=plan.commit_hi,
+            restart_seam_fault_owner=seam_fault_owner,
         )
         pinned = dataclasses.replace(proposal, plan=pinned_plan)
         pinned_faces = _PinnedFaces(near_source_key)
@@ -438,6 +449,15 @@ class StrongRegions:
         proposed = copy.deepcopy(restart)
         proposed.buffer_lo = plan.restart_buffer_lo
         return proposed
+
+
+def _far_pinned_seam_owner(
+    plan: window_records.StrongRegionPlan,
+) -> Optional[window_records.SeamFaultOwner]:
+    """The restart window, when there is one to pin the far face on."""
+    if plan.restart_seam_fault_owner is None:
+        return None
+    return window_records.SeamFaultOwner.RESTART_WINDOW
 
 
 def _union_of_owned_faults(owned_sets: list):

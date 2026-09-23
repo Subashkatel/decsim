@@ -254,8 +254,9 @@ def _gate_forward_window_machine(
     strong_microseconds: float,
     weak_units: int,
     reread_buffer_regions: int,
+    strong_window: str = "forward",
 ) -> machine_module.Machine:
-    """The gate's switching card with the forward window, both tiers priced.
+    """The gate's switching card with a forward window, both tiers priced.
 
     The gate's card at p 0.008, d 3, 1 us rounds, 30 rounds, seed 1,
     a shot whose first escalation is W3. The weak tier at 40 us per
@@ -269,7 +270,7 @@ def _gate_forward_window_machine(
     sections["weak_decoder"]["kind"] = weak_microseconds
     sections["weak_decoder"]["units"] = weak_units
     sections["strong_decoder"]["kind"] = strong_microseconds
-    sections["escalation"]["strong_window"] = "forward"
+    sections["escalation"]["strong_window"] = strong_window
     sections["escalation"]["restart_reread_buffer_regions"] = (
         reread_buffer_regions
     )
@@ -1061,28 +1062,30 @@ def test_a_yaml_names_the_forward_seam_row_and_it_runs():
     assert not machine.window_manager.strong_redecode.has_pending()
 
 
-def test_a_pinned_far_face_refuses_a_re_reading_restart_window():
-    """A far pin and a restart window that re-reads the region are refused.
+def test_a_re_reading_restart_window_owns_the_faults_the_far_pin_carries():
+    """Fig. 12 step 5: the restart window reads the region's last block.
 
-    With escalation.restart_reread_buffer_regions 1 the restart window
-    commits rounds inside the strong region, so pinning the far face on
-    its correction would carry an explanation of rounds the input holds
-    raw: the double count Bombin 2303.04846 lines 775-788 rule out. The
-    section refuses the pairing at load rather than reconciling it.
+    Toshio 2510.25222 draws the restarted weak window with its buffer
+    over the strong region's last block, and the region is decoded once
+    the weak decoder has fixed both of its ends (lines 1248-1250). At
+    re-read 1 on the gate's card W3's region commits 10-18, and the
+    restart window W6 reads 16-24: that last buffer region as its own
+    past context. The region reads nothing past 18, so W6 owns the
+    faults crossing 18 to 19 and the region's far face is pinned on its
+    commit.
     """
-    clocks = config.ClockSettings({})
-    section = {
-        "kind": "switching",
-        "gap_threshold_db": 20.0,
-        "strong_window": "forward_seam_pinned",
-        "restart_reread_buffer_regions": 1,
-    }
-    with pytest.raises(ValueError) as refusal:
-        escalation_settings.EscalationSettings.from_yaml(section, clocks)
-    assert "restart_reread_buffer_regions must be 0" in str(refusal.value)
-    section["strong_window"] = "forward"
-    kept = escalation_settings.EscalationSettings.from_yaml(section, clocks)
-    assert kept.restart_reread_buffer_regions == 1
+    machine = _gate_forward_window_machine(
+        3, 3, 40.0, 5.0, 2, 1, strong_window="forward_seam_pinned"
+    )
+    result = machine.run()
+    resliced = fabric.log_lines_containing(machine, "re-sliced")
+    sources = _pin_sources_into(result, 3)
+    assert _run_statuses(result) == [(1, "logical_observables")]
+    assert (
+        "restart window (1, 6) re-sliced across strong window edge 18 "
+        "(reads rounds 16-24; crossing faults owned by restart_window)"
+    ) in resliced[0]
+    assert 6 in sources
 
 
 def _strong_window_keys(machine) -> set:

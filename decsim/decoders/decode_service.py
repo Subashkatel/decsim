@@ -11,8 +11,7 @@ A landed job whose window still owes a boundary parks in its slot and
 releases its compute claim (Tomasulo's rule at the boundary hazard), so
 a dependent that fills early never deadlocks the unit against its own
 predecessor. A pipelined unit issues one decode per initiation interval
-and keeps at most its depth in flight (Hennessy and Patterson App. C;
-rowD4).
+and keeps at most its depth in flight (Hennessy and Patterson App. C).
 """
 
 import dataclasses
@@ -800,7 +799,7 @@ class _TraceSources:
     """Every event the decode service reports, as one member.
 
     gem5 groups a component's statistics into one nested Group member
-    (tmp/resources/gem5/src/base/stats/group.hh:60-92) rather than one
+    (gem5 src/base/stats/group.hh:60-92) rather than one
     member per counter; a component's events are the same shape, so a
     listener reaches all of them through one name.
     """

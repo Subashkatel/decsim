@@ -3,7 +3,7 @@
 Referents: the trace-exact G/D/k FIFO form (the i-th job in arrival
 order starts at max(arrival, earliest unit free) and every unit frees at
 start + service) and the M/D/1 mean wait, Pollaczek-Khinchine
-E[W_q] = rho S / (2 (1 - rho)) (rowD1, compare_queue_laws.py). Both laws
+E[W_q] = rho S / (2 (1 - rho)). Both laws
 are computed inside the tests; the random-trace tests say so in their
 names. The batching law's referent is Toshio et al. 2510.25222, Sec.
 III C, where the accurate decoder processes its assigned data in bulk.

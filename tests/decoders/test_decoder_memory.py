@@ -123,8 +123,8 @@ def test_a_second_reader_of_one_input_is_one_copy_held_until_both_are_done():
 
     gem5 keeps every target of a single fill on one MSHR
     (src/mem/cache/mshr.hh); OpenMP's shared clause says every task
-    reads the storage of the original item (openmp_spec_5_2.txt:
-    4315-4317). The two forced-class solves of one window are two jobs
+    reads the storage of the original item (OpenMP API 5.2,
+    section 5.4.2). The two forced-class solves of one window are two jobs
     and one resident input.
     """
     four_rounds_bits = 4 * BITS_PER_ROUND

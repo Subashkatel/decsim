@@ -7,7 +7,7 @@ storage this side owns, so this side makes them and books its own copy:
 a copy is booked where it lands, by the name of the structure it landed
 in (docs/explanation/data_path.md), and the destination takes what it is
 handed before it acts (OMNeT++
-tmp/resources/omnetpp/src/sim/csimplemodule.cc:782-783). One input has
+src/sim/csimplemodule.cc:782-783). One input has
 one writer, which is the memory's own rule (Helios 2301.08419 lines
 632-640, decoder_memory.py rewrite).
 """

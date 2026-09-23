@@ -111,7 +111,7 @@ def test_a_result_whose_selection_has_not_landed_waits_in_its_unit():
     """D1: the ledger holds no result; the unit that produced it does.
 
     gem5's sender keeps the packet until the far side accepts it
-    (tmp/resources/gem5/src/mem/port.hh:244-255).
+    (gem5 src/mem/port.hh:244-255).
     """
     outcomes, requests, _policy = _outcomes(decoding_records.Verdict.KEEP)
     delivered = []

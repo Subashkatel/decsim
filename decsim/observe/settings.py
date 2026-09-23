@@ -153,8 +153,10 @@ def _log_mode(section: Mapping) -> str:
 def _window_check(section: Mapping) -> str:
     """The referee that re-decodes every window, or none."""
     check_windows_with = section.get("check_windows_with", "none")
+    # a list of names, not the table: a yaml list or block is unhashable
+    # and a dictionary lookup would raise TypeError before the sentence
     rows = sorted(WINDOW_CHECKS)
-    if check_windows_with not in WINDOW_CHECKS:
+    if check_windows_with not in rows:
         raise ValueError(
             "observation.check_windows_with must be one of "
             f"{rows}, got {check_windows_with!r}"

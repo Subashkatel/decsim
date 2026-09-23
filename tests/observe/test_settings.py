@@ -123,6 +123,16 @@ def test_a_study_knob_written_as_one_is_refused_as_not_true_or_false():
     )
 
 
+def test_a_list_of_referees_is_refused_with_the_rows_by_name():
+    """A yaml list is a user's mistake, and the refusal is a sentence."""
+    section = _section("observation:\n  check_windows_with: [tesseract]\n")
+
+    with pytest.raises(ValueError) as refusal:
+        observe_settings.ObservationSettings.from_yaml(section)
+
+    assert "observation.check_windows_with must be one of" in str(refusal.value)
+
+
 def test_every_study_knob_is_read_from_the_section():
     """The five knobs the Machine builds listeners for are yaml keys."""
     text = "observation:\n"

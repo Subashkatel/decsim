@@ -46,7 +46,6 @@ YAML_BOUNDARY = frozenset(
 # a construction.
 RECORD_TYPES = frozenset(
     {
-        "decoding_records.DecodeJob",
         "evidence_records.Closed",
         "transfer_records.BoundaryTransferRelation",
         "window_records.DependencyResidual",

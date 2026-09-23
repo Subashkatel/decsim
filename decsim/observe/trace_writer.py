@@ -984,16 +984,14 @@ def _copied_identity(key) -> dict:
 
     A round key is a round; a decode job is a window, and the rounds it
     reads, so a round's own path can be followed through the copy into a
-    unit's memory.
+    unit's memory. Every copy_made source fires one or the other.
     """
-    if isinstance(key, tuple) and len(key) == 2:
+    if isinstance(key, tuple):
         return {"round": round_text(key)}
-    if isinstance(key, decoding_records.DecodeJob):
-        window_key = (key.operation_id, key.window_id)
-        window = window_text(window_key)
-        rounds = _job_rounds_text(key)
-        return {"window": window, "rounds": rounds}
-    return {"key": str(key)}
+    window_key = (key.operation_id, key.window_id)
+    window = window_text(window_key)
+    rounds = _job_rounds_text(key)
+    return {"window": window, "rounds": rounds}
 
 
 def _job_rounds_text(job: decoding_records.DecodeJob) -> str:

@@ -23,6 +23,7 @@ it as the machine's links setting.
 
 import dataclasses
 import fractions
+import math
 from collections.abc import Mapping
 from typing import Optional
 
@@ -753,6 +754,33 @@ def _check_card(path_name: str, card) -> None:
             f"{list(_REQUIRED_CARD_KEYS)}, with bits_per_cycle null for an "
             f"unbounded wire"
         )
+    _check_bits_per_cycle(card_name, card["bits_per_cycle"])
+
+
+def _check_bits_per_cycle(card_name: str, bits_per_cycle) -> None:
+    """A lane's rate is a positive finite number, or null for no bound.
+
+    A yaml `true` is a boolean, which Python would read as the number 1,
+    so it is refused with the rest rather than priced as one bit.
+    """
+    if bits_per_cycle is None:
+        return
+    if _is_positive_number(bits_per_cycle):
+        return
+    raise ValueError(
+        f"{card_name}.bits_per_cycle is {bits_per_cycle!r}; it is the "
+        f"positive number of bits each lane moves per cycle, or null for "
+        f"an unbounded wire"
+    )
+
+
+def _is_positive_number(value) -> bool:
+    """A finite number above zero, never a yaml boolean."""
+    if isinstance(value, bool):
+        return False
+    if not isinstance(value, (int, float)):
+        return False
+    return 0 < value < math.inf
 
 
 def _card_ticks(card: Mapping, clocks: config.ClockSettings) -> tuple:

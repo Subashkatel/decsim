@@ -181,3 +181,37 @@ def test_a_card_key_no_card_reads_is_refused_naming_the_card_keys():
         "links.qpu_to_controller does not know ['latency_cycle']; its keys "
         "are ['latency_cycles', 'clock', 'bits_per_cycle', 'channels', "
     )
+
+
+@pytest.mark.parametrize(
+    "bits_per_cycle", [True, "fast", 0, -1.0, float("nan"), float("inf")]
+)
+def test_a_lane_rate_that_is_not_a_positive_number_is_refused(bits_per_cycle):
+    card = dict(GOOD_CARD, bits_per_cycle=bits_per_cycle)
+    with pytest.raises(ValueError) as refusal:
+        _load_readout_card(card)
+    message = str(refusal.value)
+    assert message == (
+        f"links.qpu_to_controller.bits_per_cycle is {bits_per_cycle!r}; it "
+        f"is the positive number of bits each lane moves per cycle, or null "
+        f"for an unbounded wire"
+    )
+
+
+@pytest.mark.parametrize(
+    ("bits_per_cycle", "bits_per_microsecond"), [(1, 250), (2.5, 625)]
+)
+def test_a_positive_lane_rate_is_read_at_its_clock(
+    bits_per_cycle, bits_per_microsecond
+):
+    card = dict(GOOD_CARD, bits_per_cycle=bits_per_cycle)
+    fabric = _load_readout_card(card)
+    capacity = fabric.qpu_to_controller.channel.capacity
+    rate = capacity.exact_aggregate_bits_per_microsecond()
+    assert rate == bits_per_microsecond
+
+
+def test_a_null_lane_rate_is_an_unbounded_wire():
+    card = dict(GOOD_CARD, bits_per_cycle=None)
+    fabric = _load_readout_card(card)
+    assert fabric.qpu_to_controller.channel.capacity is None

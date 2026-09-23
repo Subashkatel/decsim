@@ -118,6 +118,13 @@ def test_the_text_ir_reads_a_blocked_by_as_a_feedback_source():
     assert indexed[1].blocked_by == 0
 
 
+def test_the_text_ir_refuses_a_rotation_angle_it_cannot_read():
+    frontend = circuit_frontend.SurgeryIRFrontend("rz q0 π/2\n")
+
+    with pytest.raises(ValueError, match="rotation angle 'π/2' is not"):
+        frontend.build()
+
+
 def test_a_named_circuit_is_wired_before_it_is_handed_out():
     """The four named circuits are what the guides and slides run."""
     operations = circuit_frontend.cnot_plus_two_t_circuit()

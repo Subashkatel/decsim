@@ -305,7 +305,12 @@ def _rotation_is_clifford(angle_expression: Optional[str]) -> bool:
 
 
 def _parse_angle(angle_expression) -> Optional[float]:
-    """A numeric or pi-fraction angle in radians; None when unreadable."""
+    """A numeric or pi-fraction angle in radians; None when there is none.
+
+    An angle that is written but cannot be read is refused: read as no
+    angle it would make a quarter turn a non-Clifford gate that draws a
+    magic state.
+    """
     if angle_expression is None:
         return None
     if isinstance(angle_expression, (int, float)):
@@ -318,8 +323,11 @@ def _parse_angle(angle_expression) -> Optional[float]:
         return None
     try:
         return _angle_from_text(normalized)
-    except (ValueError, ZeroDivisionError):
-        return None
+    except (ValueError, ZeroDivisionError) as unreadable:
+        raise ValueError(
+            f"rotation angle {text!r} is not a number or a fraction of pi, "
+            "such as pi/2 or -3*pi/4"
+        ) from unreadable
 
 
 def _angle_from_text(normalized: str) -> float:

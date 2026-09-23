@@ -44,9 +44,9 @@ it drains), a refusal being the receiver's answer to the sender
 must wait for a recvReqRetry"); and Ruby sums the same two counts
 (`tmp/resources/gem5/src/mem/ruby/network/MessageBuffer.cc:181`
 "if (current_size + current_stall_size + n <= m_max_size)", the two sizes
-read at `:155-158`). This is the shape strong syndrome buffer already has
-(strong_syndrome_round_receiver.py:48-53), so both stores now answer the same
-question by the same shape of object.
+read at `:159-177`). This is the shape of the strong syndrome buffer's end
+(strong_syndrome_round_receiver.py, has_room and reserve_write), so both
+stores answer the same question by the same shape of object.
 
 Two calls of the controller arrive here, both about the weak syndrome buffer. A
 packed round lands over controller_to_weak_buffer: this end stores it as the

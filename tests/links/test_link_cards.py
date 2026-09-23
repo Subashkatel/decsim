@@ -215,3 +215,24 @@ def test_a_null_lane_rate_is_an_unbounded_wire():
     card = dict(GOOD_CARD, bits_per_cycle=None)
     fabric = _load_readout_card(card)
     assert fabric.qpu_to_controller.channel.capacity is None
+
+
+@pytest.mark.parametrize("lane_count", [True, "four", 0, -2, 2.5])
+def test_a_lane_count_that_is_not_a_positive_whole_number_is_refused(
+    lane_count,
+):
+    card = dict(GOOD_CARD, channels=lane_count)
+    with pytest.raises(ValueError) as refusal:
+        _load_readout_card(card)
+    message = str(refusal.value)
+    assert message == (
+        f"links.qpu_to_controller.channels is {lane_count!r}; it is the "
+        f"positive whole number of parallel lanes the path's wire has"
+    )
+
+
+def test_a_cards_lanes_multiply_its_lane_rate():
+    card = dict(GOOD_CARD, channels=8)
+    fabric = _load_readout_card(card)
+    capacity = fabric.qpu_to_controller.channel.capacity
+    assert capacity.exact_aggregate_bits_per_microsecond() == 8 * 250

@@ -755,6 +755,8 @@ def _check_card(path_name: str, card) -> None:
             f"unbounded wire"
         )
     _check_bits_per_cycle(card_name, card["bits_per_cycle"])
+    lane_count = card.get("channels", 1)
+    _check_lane_count(card_name, lane_count)
 
 
 def _check_bits_per_cycle(card_name: str, bits_per_cycle) -> None:
@@ -772,6 +774,25 @@ def _check_bits_per_cycle(card_name: str, bits_per_cycle) -> None:
         f"positive number of bits each lane moves per cycle, or null for "
         f"an unbounded wire"
     )
+
+
+def _check_lane_count(card_name: str, lane_count) -> None:
+    """A card's lanes are a positive whole number, never a yaml boolean."""
+    if _is_positive_whole_number(lane_count):
+        return
+    raise ValueError(
+        f"{card_name}.channels is {lane_count!r}; it is the positive whole "
+        f"number of parallel lanes the path's wire has"
+    )
+
+
+def _is_positive_whole_number(value) -> bool:
+    """A whole number above zero, never a yaml boolean."""
+    if isinstance(value, bool):
+        return False
+    if not isinstance(value, int):
+        return False
+    return value > 0
 
 
 def _is_positive_number(value) -> bool:

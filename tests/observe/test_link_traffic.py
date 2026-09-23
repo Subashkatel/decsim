@@ -408,8 +408,8 @@ def test_the_traffic_json_sums_the_setup_over_a_paths_transfers():
     report = run.ledger.traffic_json_value()
     semantic_edge = edge_of(report, "strong_buffer_to_strong_decoder")
     assert report["transfers"][0]["setup_ticks"] == 50
-    assert report["transfers"][1]["setup_ticks"] == 100
-    assert semantic_edge["setup_ticks"] == 150
+    assert report["transfers"][1]["setup_ticks"] == 50
+    assert semantic_edge["setup_ticks"] == 100
 
 
 def test_the_ledger_sums_the_queue_wait_per_transfer_and_per_channel():

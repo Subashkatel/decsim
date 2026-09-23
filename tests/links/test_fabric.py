@@ -313,7 +313,8 @@ def test_two_paths_with_setups_on_one_channel_share_its_setup_engine():
     )
     engine.run()
     second = delivered[1]
-    assert (second.setup_ticks, second.send_ticks) == (9, 20)
+    assert (second.setup_wait_ticks, second.setup_ticks) == (4, 5)
+    assert second.send_ticks == 20
 
 
 def test_a_path_with_no_setup_never_waits_for_another_paths_setup():

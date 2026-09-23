@@ -20,10 +20,16 @@ qpu:
                                    # what the QPU reads out
                                    # each round. stim_device samples the
                                    # workload's circuit (real detector data);
-                                   # the sweep sets the distance and the round
-                                   # period. streaming_stim needs Python
-                                   # arguments with repeated circuit records
-                                   # keyed by dynamic stream owner.
+                                   # timing_only states each round's size, the
+                                   # code's syndrome bits per round, and
+                                   # carries no values (gem5's packet trace
+                                   # keeps a size and no data,
+                                   # src/proto/packet.proto); syndrome_bits
+                                   # fills that size with seeded random bits.
+                                   # streaming_stim needs Python arguments
+                                   # with repeated circuit records keyed by
+                                   # dynamic stream owner. The sweep sets the
+                                   # distance and the round period
 
 escalation:
   clock: fridge                    # a clocks domain; absent uses controller.clock
@@ -38,14 +44,16 @@ escalation:
                                    # src/mem/XBar.py separates its frontend and
                                    # forwarding cycles
   kind: weak_baseline              # weak_baseline | strong_only | switching.
-                                   # strong_only wakes static and live windows
-                                   # from the strong buffer, moves inputs on
-                                   # strong_buffer_to_strong_decoder, results
-                                   # on strong_decoder_to_frame. Idle rounds
-                                   # also use only the strong path. switching adds
-                                   # the keys below (refused for any other
-                                   # kind, so they are documented as comments;
-                                   # switching_validation.yaml runs them):
+                                   # strong_only reads static and live windows
+                                   # out of the strong syndrome buffer, moves
+                                   # inputs on strong_buffer_to_strong_decoder
+                                   # and returns results on
+                                   # strong_decoder_to_frame; idle rounds use
+                                   # only the strong path. switching adds the
+                                   # keys below (refused for any other kind, so
+                                   # they are documented as comments;
+                                   # two_tiers.yaml is the shortest config
+                                   # that runs them):
 # escalation:
 #   kind: switching
 #   confidence: complementary_gap  # complementary_gap | cluster_gap |
@@ -80,7 +88,7 @@ escalation:
 #                                  # decode cannot produce the signal's evidence.
 #                                  # A signal's own computation is charged on
 #                                  # the weak unit that produced the evidence
-#                                  # (decision D8)
+#                                  # (docs/explanation/decisions.md, D8)
 #   confidence_walk_microseconds: 12.0  # what the signal's own computation
 #                                  # costs on the weak unit, priced as a card
 #                                  # the way a decoder tier is. null, the
@@ -119,14 +127,20 @@ escalation:
 #     target_escalation_rate: 1e-3 # the rate tracker's starting duty target
 #     step_db: 0.25                # threshold step per window (adaptive
 #                                  # conformal recursion, arXiv:2106.00170)
-#     audit_rate: 0.01             # fraction of KEPT windows strong-decoded
-#                                  # anyway for ground truth (set-dueling's
-#                                  # sampler sets; breaks the selective-labels
-#                                  # bias)
-#     kept_bad_budget: 2e-4        # budget on P(weak revised AND kept); one
-#                                  # blown audit doubles the target, and only
-#                                  # ceil(3/budget) consecutive clean audits
-#                                  # halve it back (rule of three)
+#     audit_rate: 0.01             # the fraction of kept windows the strong
+#                                  # tier decodes anyway, so the run learns
+#                                  # whether a kept window was right. Without it
+#                                  # the run sees the truth only for windows it
+#                                  # already escalated, which would bias the
+#                                  # threshold (the selective-labels bias; set
+#                                  # dueling samples the same way)
+#     kept_bad_budget: 2e-4        # the allowed probability that a window is
+#                                  # kept and the strong tier would have changed
+#                                  # its answer. One failed audit doubles the
+#                                  # target escalation rate, and only
+#                                  # ceil(3/budget) clean audits in a row halve
+#                                  # it back: that many clean samples bound a
+#                                  # rate under the budget (the rule of three)
 #     adjust_factor: 2.0           # the raise/relax multiplier
 #     min_escalation_rate: 1e-5    # the target's floor
 #     max_escalation_rate: 0.30    # the target's cap: the Theorem 1 backlog
@@ -220,6 +234,8 @@ workload:
                                    # ("10d" = the 10 d-round memory experiment,
                                    # Toshio 2510.25222 Fig. 4)
 
+# The plan, a word the comments below use, is the list of windows the scheme
+# lays out for each operation before the run starts.
 windows:
   clock: fridge                    # a clocks domain; absent uses controller.clock
   decision_cycles: 0               # per-submission readiness decision before
@@ -230,12 +246,16 @@ windows:
                                    # RISC-Q 2603.16203 lines 893-904 times
                                    # aggregation and distribution separately
   kind: sliding                    # sliding | parallel | sandwich | naive_online
-  commit_rounds: null              # rounds committed per window; null = d
+  commit_rounds: null              # rounds committed per window; null = d. The
+                                   # sandwich row needs at least 2: it lays each
+                                   # step as one seam round and s - 1 core
+                                   # rounds, which is decsim's own layout and
+                                   # not the paper's
   buffer_rounds: null              # look-ahead rounds per window; null = d
   terminal_policy: null            # flush | lookahead: how a finite stream drains
                                    # its last buffered window. flush ends the last
-                                   # window at the stream's last round, Tan's QUITS
-                                   # flush (2209.09219 lines 1029-1030); lookahead
+                                   # window at the stream's last round, Tan's last
+                                   # window (2209.09219 lines 952-955); lookahead
                                    # keeps the regular stride, so the last window
                                    # still reads rounds past its own commit. null,
                                    # the default, leaves the row on flush, and on
@@ -285,7 +305,7 @@ windows:
 # round periods with few shots (the weak baseline's 0.9/0.85/0.8 bracket
 # the load = 1 knee of its 0.028 card), and an LER block sweeps several
 # probabilities with many shots at one timing point, since timing knobs
-# never change the decoded answer (Gate 10).
+# never change the decoded answer.
 sweep:
   - physical_error_probability: [0.001]    # p on all four Stim noise channels
     distance: [3]                          # code distance d; one LER curve per d
@@ -521,22 +541,33 @@ weak_syndrome_buffer:            # the weak syndrome buffer, on the decoder chip
                                    # fix theirs at 5 FPGA clock cycles
                                    # (2605.04892 lines 1273-1275)
   kind: syndrome_buffer            # the one row today
-  rounds: null                     # capacity in rounds. When it is full the
-                                   # controller holds the finished round and
-                                   # publishes it in order once a slot frees,
-                                   # the backpressure real systems apply to their
-                                   # source; controller.packing_overflow chooses
-                                   # that hold or a drop. null = unbounded
+  bits: null                       # capacity in bits, the unit a memory is
+                                   # declared in (gem5 states its packet store
+                                   # in bytes on the store itself,
+                                   # src/dev/net/Ethernet.py rx_fifo_size).
+                                   # When it is full the controller holds the
+                                   # finished round and publishes it in order
+                                   # once a slot frees, the backpressure real
+                                   # systems apply to their source;
+                                   # controller.packing_overflow chooses that
+                                   # hold or a drop. null = unbounded. A
+                                   # bounded store refuses a round that states
+                                   # no size.
+                                   # A store too small for the rounds the
+                                   # plan's windows hold at once fills, and the
+                                   # run stops: "run ended with N rounds held
+                                   # for store room"
 
 strong_syndrome_buffer:          # the strong syndrome buffer, on the strong host
                                    # (exists only when the escalation uses it)
   kind: syndrome_buffer
-  rounds: null                     # capacity in rounds. A strong-only run's
-                                   # controller holds a finished round that finds
-                                   # no room, the same waiting line the weak
-                                   # syndrome buffer uses; a switching run's
-                                   # escalated region cannot wait, so a store with
-                                   # no room for it stops the run. null = unbounded
+  bits: null                       # capacity in bits, as above. A strong-only
+                                   # run's controller holds a finished round
+                                   # that finds no room, the same waiting line
+                                   # the weak syndrome buffer uses; a switching
+                                   # run's escalated region cannot wait, so a
+                                   # store with no room for it stops the run.
+                                   # null = unbounded
                                    # This buffer stores a round as it lands and
                                    # charges no cycles, so the weak syndrome
                                    # buffer's cost keys are refused here
@@ -555,11 +586,35 @@ weak_decoder:                      # the lightweight tier: fast, higher LER
                                    # number: fixed core latency in us.
                                    # Known number cards: 0.028 = LILLIPUT-class
                                    # core, [d=3, m=2] 7 cycles at 250 MHz
-                                   # (2108.06569 sec. 6.3, Table 4); 5.0 = the
-                                   # old accuracy-first strong reference card.
+                                   # (2108.06569 sec. 6.3, Table 4).
                                    # A card prices the algorithm stage ONLY;
                                    # fetch and release cycles are separate
-  units: 1                         # decoder units in this tier's pool
+  units: 1                         # how many identical decoding engines this
+                                   # tier's one chip holds. Each engine has its
+                                   # own input memory, and all of them share
+                                   # the tier's links. It is gem5's
+                                   # FUDesc.count, "number of these FU's
+                                   # available" (gem5 src/cpu/FuncUnit.py).
+                                   # Hardware holds several engines on a chip
+                                   # too: AFS "uses L/N decoder blocks to
+                                   # perform error correction over the L
+                                   # logical qubits" (2001.06598 lines
+                                   # 1049-1052), and Yang et al. instantiate an
+                                   # X-type and a Z-type decoder in one FPGA
+                                   # (2605.04892 lines 986-988). Each paper
+                                   # fixes its count; sweeping it is this
+                                   # simulator's own use of the key. The
+                                   # chip count is one and is not a key. A job
+                                   # that may start takes a free unit with room
+                                   # for its rounds: the unit that already holds
+                                   # them, else the unit the fewest jobs wait
+                                   # on. A job that must wait, for compute or
+                                   # for a boundary, is staged with its input on
+                                   # the unit with room that has the least work
+                                   # left, then the fewest live jobs, then the
+                                   # one that already has its rounds. A staged
+                                   # job never moves to another unit
+                                   # (decoders/decoder_pool.py)
   input: copy                      # copy | in_place: how this tier's unit gets
                                    # the rounds it decodes. copy moves them over
                                    # the tier's input link into the unit's own
@@ -615,10 +670,18 @@ weak_decoder:                      # the lightweight tier: fast, higher LER
                                    # per window needs a unit per forced class
                                    # under true, because the join reads neither
                                    # solve until both have finished
-  unit_memory_rounds: null         # input SRAM rounds PER UNIT; null = unbounded.
-                                   # Each unit holds two windows when they fit
-                                   # (transfer overlaps compute); a unit sized
-                                   # for one window falls back to serial residency
+  unit_memory:                     # the input memory of one decoder unit: a
+                                   # window's rounds are copied into it before
+                                   # the unit decodes them, and freed when the
+                                   # decode ends
+    bits: null                     # that memory's capacity in bits, PER UNIT;
+                                   # null = no capacity is modelled, a memory
+                                   # nothing ever fills. A unit holds a second
+                                   # window only when both fit, so the next
+                                   # window's rounds load while the current one
+                                   # decodes; a window larger than the memory
+                                   # stops the run. A bounded memory needs
+                                   # rounds that state their size
   weight_step: 0.1                 # the union_find row's growth resolution: the
                                    # natural-log units of weight one tick of an
                                    # edge length is (Huang, Newman and Brown
@@ -629,7 +692,7 @@ weak_decoder:                      # the lightweight tier: fast, higher LER
                                    # is one growth iteration, so this key sets
                                    # the engine's cycles directly. Helios's own
                                    # weights run 2 to 16 (2301.08419 lines
-                                   # 1053-1063, the weight resolution wmax).
+                                   # 1242-1254, the weight resolution wmax).
                                    # Read on any kind and used by union_find
   cycle_count: null                # the union_find row's own timing, in place of
                                    # its host wall clock: the decoder's cycle
@@ -661,13 +724,15 @@ weak_decoder:                      # the lightweight tier: fast, higher LER
                                    # one quiet iteration runs even for an empty
                                    # syndrome. A step's changes are what its
                                    # fusions ripple through the cluster they
-                                   # fused, a level a cycle: nothing when its
-                                   # closing edges united no two clusters, its
-                                   # deepest flood when only roots and the
-                                   # touching flag move, and one for the root
-                                   # plus two a level when a parity moves, the
-                                   # parity climbing while the odd flag
-                                   # descends. A step's hop count is the
+                                   # fused, a level a cycle. A step whose
+                                   # closing edges joined no two clusters
+                                   # changes nothing. A step that joins clusters
+                                   # without moving a parity costs its deepest
+                                   # flood, because only roots and the touching
+                                   # flag move. A step that moves a parity costs
+                                   # one cycle for the root plus two a level,
+                                   # because the parity climbs while the odd
+                                   # flag descends. A step's hop count is the
                                    # deepest flood among the clusters it fused
                                    # and its fusion the strongest of them, so
                                    # a step that joins a deep even cluster and
@@ -764,7 +829,8 @@ strong_decoder:                    # the accurate tier: slow, lower LER
                                    # transfers the assigned data in the paper
                                    # (Toshio 2510.25222 lines 1248-1250), which
                                    # is the copy row
-  unit_memory_rounds: null
+  unit_memory:
+    bits: null                     # as above
   weight_step: 0.1                 # as above; the union_find row's growth
                                    # resolution
   cycle_count: null                # as above; the union_find row's own
@@ -812,10 +878,11 @@ decoder_manager:                   # the manager that gives ready windows a unit
                                    # on a unit and before that job's input is
                                    # asked for. 0 is the default and models
                                    # none of it. Caune et al. arXiv:2410.05202
-                                   # lines 519-526 and 636-641 measure 250 to
-                                   # 370 control cycles per decode between a
-                                   # decode's arrival and its dispatch, which
-                                   # is the range to price this from
+                                   # lines 519-526 measure 250 to 370 control
+                                   # cycles per decode for collecting the
+                                   # packets, the bus transfer, the result's
+                                   # return and the conditional together, so
+                                   # that range bounds this from above
 
 pauli_frame:
   kind: logical_register           # logical_register (FRAMES,
@@ -845,7 +912,7 @@ observation:                       # what a run records beyond its results
                                    # contribution; never latency-priced. A window is
                                    # a d-round problem at any shot length, so this
                                    # holds at every distance (9.6 ms/window at d=9,
-                                   # 18.1 ms at d=11, measured 2026-08-26).
+                                   # 18.1 ms at d=11).
   log_component_io: false          # true adds component I/O lines to the trace:
                                    # what each store and unit received, holds
                                    # (rounds, residents), and emitted
@@ -877,11 +944,11 @@ observation:                       # what a run records beyond its results
   record_switching_windows: false  # true keeps every decode request and service record
                                    # for the switching study's per-window rows
   syndrome_buffer_occupancy: false     # true samples the weak syndrome buffer's held-round count at every
-                                   # change, the occupancy the L5 harness reads
+                                   # change: the buffer's occupancy over time
   backlog_trace: false             # true samples the undecoded-round backlog after
-                                   # every action, the step function the D7 harness reads
-  decoder_memory_occupancy: false  # true samples each unit memory's held-round count,
-                                   # thrust 2's sweep over unit memory
+                                   # every action: the backlog over time, as a step function
+  decoder_memory_occupancy: false  # true samples each unit memory's held-bit count,
+                                   # for a sweep over unit_memory.bits
   data_movement: false             # true counts the copies, references and moves of
                                    # every round, on the RunResult without the trace,
                                    # and writes them to the run folder:

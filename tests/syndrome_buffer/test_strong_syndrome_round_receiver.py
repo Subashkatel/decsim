@@ -1,9 +1,10 @@
-"""The room-side end: room counts writes in flight, the landing stores.
+"""The room-side end: room counts the bits in flight, the landing stores.
 
-Referent: gem5's queue counts its reserved entries as taken before they
-are allocated (gem5 src/mem/cache/queue.hh:150-153, isFull over
-allocated plus reserve); this end counts a round crossing toward it the
-same way, reserved by the sender before the round leaves. The crossing
+Referent: gem5's packet store counts its reserved bytes as taken before
+the data lands (gem5 src/dev/net/pktfifo.hh, `avail() = _maxsize -
+_size - _reserved` with `reserve(len)`); this end counts the bits of a
+round crossing toward it the same way, reserved by the sender before
+the round leaves. The crossing
 itself is the sender's and is tested where it is executed: the
 controller's write in tests/controller/test_syndrome_round_sender.py,
 the escalated region's send in tests/escalation/test_strong_redecode.py.
@@ -31,6 +32,8 @@ from decsim.syndrome_buffer import (
 )
 
 LANDING_TICKS = config.microseconds_to_ticks(0.5)
+# every round this file sends carries one fragment of three bits
+BITS_PER_ROUND = 3
 
 
 def packet(round_index: int) -> round_records.SyndromeRoundPacket:
@@ -39,7 +42,7 @@ def packet(round_index: int) -> round_records.SyndromeRoundPacket:
         patch_ids=(0,),
         round_index=round_index,
         bits=(1, 0, 1),
-        size_bits=3,
+        size_bits=BITS_PER_ROUND,
         fragment_index=0,
     )
     return round_records.SyndromeRoundPacket(1, round_index, (fragment,))
@@ -71,10 +74,8 @@ class RecordingListener:
         self.copies.append((round_key, bits, source_name, target_name))
 
 
-def room_side(engine, rounds=None, listener=None, windows=None):
-    store_settings = syndrome_buffer_settings.SyndromeBufferSettings(
-        rounds=rounds
-    )
+def room_side(engine, bits=None, listener=None, windows=None):
+    store_settings = syndrome_buffer_settings.SyndromeBufferSettings(bits=bits)
     store = syndrome_buffer_module.SyndromeBuffer(store_settings)
     if listener is not None:
         store.trace.round_stored.connect(listener.round_stored)
@@ -111,10 +112,10 @@ def cross(
     tests/controller/test_syndrome_round_sender.py, so this file stands
     the round up at the landing tick instead.
     """
-    receiver.reserve_write()
+    receiver.reserve_write(BITS_PER_ROUND)
     landing = packet(round_index)
     packed = round_records.PackedRound(
-        landing, round_records.WINDOW_INPUT_ROUTE, 3
+        landing, round_records.WINDOW_INPUT_ROUTE, BITS_PER_ROUND
     )
     engine.schedule(LANDING_TICKS, lambda: receiver.receive_round(packed))
 
@@ -137,19 +138,23 @@ def test_a_write_lands_after_the_crossing_and_the_listener_hears_it_once():
     assert windows.room_rounds == [(1, 1)]
 
 
-def test_the_receiver_counts_a_write_in_flight_as_room_taken():
+def test_the_reserved_bits_count_against_the_room_until_the_round_lands():
     engine = engine_module.Engine()
-    receiver = room_side(engine, rounds=1)
+    receiver = room_side(engine, bits=BITS_PER_ROUND)
     reads = decoding_records.WindowReads((1, 0))
     receiver.store.register_hold(reads, [(1, 1)])
 
     cross(engine, receiver, 1)
-    room_while_crossing = receiver.has_room()
+    room_while_crossing = receiver.has_room(BITS_PER_ROUND)
+    reserved_while_crossing = receiver.reserved_bits
     engine.run()
 
     assert room_while_crossing is False
+    assert reserved_while_crossing == BITS_PER_ROUND
     assert receiver.writes_in_flight == 0
-    assert receiver.has_room() is False
+    assert receiver.reserved_bits == 0
+    assert receiver.has_room(BITS_PER_ROUND) is False
+    assert receiver.store.occupied_bits == BITS_PER_ROUND
     assert receiver.store.occupancy == 1
 
 
@@ -169,9 +174,9 @@ def test_a_round_whose_readers_resolved_while_crossing_is_dropped_at_landing():
 
 def test_a_round_that_lands_after_its_operation_closed_is_dropped():
     engine = engine_module.Engine()
-    receiver = room_side(engine, rounds=1)
+    receiver = room_side(engine, bits=BITS_PER_ROUND)
     receiver.store.open_operation(1)
-    room_before = receiver.has_room()
+    room_before = receiver.has_room(BITS_PER_ROUND)
 
     cross(engine, receiver, 1)
     receiver.store.close_operation(1)
@@ -182,7 +187,7 @@ def test_a_round_that_lands_after_its_operation_closed_is_dropped():
     assert receiver.store.occupancy == 0
     assert receiver.store.has_operation(1) is False
     assert receiver.writes_in_flight == 0
-    assert receiver.has_room() is True
+    assert receiver.has_room(BITS_PER_ROUND) is True
     receiver.check_settled()
 
 
@@ -201,40 +206,61 @@ def test_an_escalated_region_lands_whole_and_each_round_wakes_the_windows():
     engine = engine_module.Engine()
     listener = RecordingListener()
     windows = RecordingWindows()
-    receiver = room_side(engine, rounds=3, listener=listener, windows=windows)
+    three_rounds_bits = 3 * BITS_PER_ROUND
+    two_rounds_bits = 2 * BITS_PER_ROUND
+    receiver = room_side(
+        engine, bits=three_rounds_bits, listener=listener, windows=windows
+    )
     reads = decoding_records.WindowReads((1, 0))
     receiver.store.register_hold(reads, [(1, 1), (1, 2)])
     carried = region(1, 2)
 
-    receiver.reserve_region(2)
-    room_while_crossing = receiver.has_room()
+    receiver.reserve_region(2, carried.wire_bits)
+    room_while_crossing = receiver.has_room(BITS_PER_ROUND)
     engine.schedule(LANDING_TICKS, lambda: receiver.receive_region(carried))
     engine.run()
 
-    assert carried.wire_bits == 6
+    assert carried.wire_bits == two_rounds_bits
     assert room_while_crossing is True
     assert receiver.writes_in_flight == 0
+    assert receiver.reserved_bits == 0
     assert receiver.store.occupancy == 2
+    assert receiver.store.occupied_bits == two_rounds_bits
     assert receiver.store.publication_tick((1, 2)) == LANDING_TICKS
     assert windows.room_rounds == [(1, 1), (1, 2)]
     assert listener.copies == [
-        ((1, 1), 3, "weak syndrome buffer", "strong syndrome buffer"),
-        ((1, 2), 3, "weak syndrome buffer", "strong syndrome buffer"),
+        (
+            (1, 1),
+            BITS_PER_ROUND,
+            "weak syndrome buffer",
+            "strong syndrome buffer",
+        ),
+        (
+            (1, 2),
+            BITS_PER_ROUND,
+            "weak syndrome buffer",
+            "strong syndrome buffer",
+        ),
     ]
 
 
-def test_a_region_the_strong_store_has_no_room_for_stops_the_run():
+def test_a_regions_reservation_is_its_bits_and_the_refusal_names_them():
     """An escalation cannot wait, so the refusal names the yaml key."""
     engine = engine_module.Engine()
-    receiver = room_side(engine, rounds=1)
+    two_rounds_bits = 2 * BITS_PER_ROUND
+    receiver = room_side(engine, bits=BITS_PER_ROUND)
+    carried = region(1, 2)
 
     with pytest.raises(RuntimeError) as refusal:
-        receiver.reserve_region(2)
+        receiver.reserve_region(2, carried.wire_bits)
 
     sentence = str(refusal.value)
-    assert "no room for the 2 rounds of an escalated region" in sentence
-    assert "strong_syndrome_buffer.rounds 1" in sentence
+    assert f"no room for the {two_rounds_bits} bits" in sentence
+    assert "of an escalated region's 2 rounds" in sentence
+    assert "0 bits stored and 0 reserved" in sentence
+    assert f"strong_syndrome_buffer.bits {BITS_PER_ROUND}" in sentence
     assert receiver.writes_in_flight == 0
+    assert receiver.reserved_bits == 0
 
 
 # ---- the landing in the whole pipeline
@@ -273,7 +299,7 @@ def test_a_strong_primary_window_is_ready_on_the_room_side_landing():
 def test_arrival_can_create_a_windows_first_round_hold() -> None:
     """gem5 base.cc services response targets before freeing their entry."""
     engine = engine_module.Engine()
-    receiver = room_side(engine, rounds=1)
+    receiver = room_side(engine, bits=BITS_PER_ROUND)
     receiver.store.open_operation(1)
     receiver.windows = _ArrivalConsumer(receiver.store)
 
@@ -284,7 +310,7 @@ def test_arrival_can_create_a_windows_first_round_hold() -> None:
     assert fragments is not None
     assert fragments[0].bits == (1, 0, 1)
     assert receiver.store.publication_tick((1, 1)) == LANDING_TICKS
-    assert receiver.has_room() is False
+    assert receiver.has_room(BITS_PER_ROUND) is False
 
 
 class _ArrivalConsumer:

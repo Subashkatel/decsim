@@ -141,7 +141,7 @@ Link paths and yaml keys are plain words too. The link path names are
 listed in [The link paths](docs/reference/glossary.md#the-link-paths),
 and the config keys read the same way: readout_to_bits_cycles,
 decision_to_pulse_cycles, packing_cycles_per_round,
-packing_rounds_in_flight, unit_memory_rounds, write_cycles,
+packing_rounds_in_flight, result_blocks_unit, write_cycles,
 setup_cycles_per_transfer, log_component_io, check_windows_with.
 
 ## Rule 3. Comments say why, in the present tense
@@ -228,8 +228,10 @@ is sinter's (`BUILT_IN_DECODERS` and `Decoder`); the wiring is gem5's
 late port bind: a component declares each neighbour as a `ports.Port`
 class attribute, its constructor takes settings only, and the root binds
 every wire by attribute assignment after every component is built, then
-calls `start` on each in build order. A port bound twice or left unbound
-is refused by name. It applies to every component.
+calls `start` on each in build order. A port bound twice is refused by
+name, and a required port read before it is bound raises. An optional
+port left unbound reads as None, which is the neighbour a run does not
+have. It applies to every component.
 
 A port is a small Protocol in `decsim/ports.py` with the
 methods one component needs from another, named for what they do:
@@ -429,9 +431,8 @@ message that the results hash is unchanged.
 ## Size
 
 A file's size is three numbers: lines before a change, lines after, and
-lines after with blank lines, comments and docstrings removed; and one
-line in the commit message saying where any growth came from. Growth
-that is right: a dense line unpacked under rule 1, a value named, a check at a
+lines after with blank lines, comments and docstrings removed, measured
+for every change and reported with it. Growth that is right: a dense line unpacked under rule 1, a value named, a check at a
 boundary that was missing. Growth that is wrong, and is removed before
 the change lands: a check for an input no caller produces, a law for a
 shape nothing runs, a helper that exists to dodge the line cap, a
@@ -439,9 +440,15 @@ docstring that repeats the code, a record or alias that has one reader.
 A file may end larger than it began when all of its growth is the right
 kind; it may not end larger for the wrong kind.
 
-The commit message also carries the gate's wall time before and after.
+The gate's wall time is measured before and after for the same reason.
 One action per line adds loads and stores, and a sweep multiplies the
 engine, the buffers, the links and the decoder unit by shots and points.
+
+A commit message is a title, "component: what changed", and a body of
+up to five lines saying why, what and how, in Google's and LLVM's
+shape; the diff and the docstrings are not repeated. The size numbers
+and the gate's wall time go into the message only for a commit the
+owner asks to carry them.
 A hot path may keep a dense line when the measured cost says so in a
 comment; that is Google's "concede to practicalities", and it is the
 only exception to rule 1.

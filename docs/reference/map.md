@@ -126,7 +126,6 @@ docstring.
 - `decsim/windows/round_retention.py`: The round retention: which rounds each window and request holds.
 - `decsim/windows/round_tracker.py`: The round tracker: which rounds arrived, and each window's readiness.
 - `decsim/windows/schemes/__init__.py`: The windowing schemes, one file per table row.
-- `decsim/windows/schemes/buffer_floors.py`: The buffer floor a scheme refuses to run below without a reason.
 - `decsim/windows/schemes/naive_online.py`: The naive_online row: one window over the whole operation.
 - `decsim/windows/schemes/parallel.py`: The parallel row: Skoric block A/B windows.
 - `decsim/windows/schemes/sandwich.py`: The sandwich row: Tan et al.'s zero-seam sandwich decoder.
@@ -255,7 +254,7 @@ docstring.
 - `decsim/observe/sampled_shots.py`: The shots the syndrome source sampled, by the operation that asked.
 - `decsim/observe/settings.py`: The observation settings: what a run records beyond its results.
 - `decsim/observe/stage_records.py`: One run's decoder stage records, kept per operation and window.
-- `decsim/observe/syndrome_buffer_occupancy.py`: One syndrome buffer's L5 numbers: occupancy over time, residence per round.
+- `decsim/observe/syndrome_buffer_occupancy.py`: One syndrome buffer's occupancy over time, and how long each round stayed.
 - `decsim/observe/trace_writer.py`: One shot's Chrome trace: where every round and window sat and moved.
 - `decsim/observe/window_ledger.py`: The window ledger: every window's record, what owns it, what absorbed it.
 - `decsim/observe/wiring.py`: Every listener of one run, built from the observation section and wired.

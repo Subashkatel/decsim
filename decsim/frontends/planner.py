@@ -31,18 +31,17 @@ class RunPlan:
 
 @dataclasses.dataclass(frozen=True)
 class SyndromeBufferingPlan:
-    """The holds every window places on the stores, and the store floors.
+    """The holds every window places on the stores.
 
-    A hold names the rounds a consumer keeps alive. The minimum is the
-    longest single hold; the sufficient set is the union of every hold,
-    None when an open-ended dynamic stream makes it unbounded.
+    A hold names the rounds a consumer keeps alive. The sufficient set
+    is the union of every hold, None when an open-ended dynamic stream
+    makes it unbounded. A store smaller than it can fill, and the run
+    then stops and says how many rounds were left held for store room.
     """
 
     weak_holds: tuple
     potential_holds: tuple
-    minimum_live_rounds: tuple
     sufficient_live_rounds: Optional[tuple]
-    sb1_minimum_live_rounds: tuple
     sb1_sufficient_live_rounds: Optional[tuple]
 
 
@@ -66,7 +65,6 @@ def plan_execution(
     patch_count_by_id = _patch_count_by_operation_id(operations)
     base_nodes = _base_nodes_by_patch_count(code, patch_count_by_id)
     geometry = _resolve_geometry(code, base_nodes[1])
-    scheme.validate_buffer(geometry)
     resolved = []
     patches_by_key = {}
     for operation in operations:
@@ -218,7 +216,6 @@ def _base_nodes_by_patch_count(code, patch_count_by_id: dict) -> dict:
 
 
 def _resolve_geometry(code, one_patch_node_count: int):
-    leading, trailing = code.buffering_floor()
     commit_round_count = code.commit_rounds()
     buffer_round_count = code.buffer_rounds()
     return program_records.ResolvedCodeGeometry(
@@ -226,10 +223,7 @@ def _resolve_geometry(code, one_patch_node_count: int):
         distance=code.distance,
         commit_round_count=commit_round_count,
         buffer_round_count=buffer_round_count,
-        minimum_leading_buffer_round_count=leading,
-        minimum_trailing_buffer_round_count=trailing,
         one_patch_spatial_node_count=one_patch_node_count,
-        window_floor_justification=code.window_floor_justification,
     )
 
 
@@ -372,9 +366,7 @@ def _plan_syndrome_buffering(
     return SyndromeBufferingPlan(
         tuple(weak.holds),
         tuple(strong.holds),
-        weak.minimum_live_rounds,
         weak_sufficient,
-        strong.minimum_live_rounds,
         strong_sufficient,
     )
 
@@ -396,7 +388,7 @@ def _hold_window(
         execution, operation_id, window.start_round, window.buffer_hi
     )
     reads = decoding_records.WindowReads(key)
-    weak.add(reads, round_keys, round_keys)
+    weak.add(reads, round_keys)
     _hold_restart_reads(
         execution,
         operation_id,
@@ -440,7 +432,7 @@ def _hold_restart_reads(
     owner = decoding_records.PotentialRestart(
         (operation_id, window.window_index)
     )
-    weak.add(owner, round_keys, round_keys)
+    weak.add(owner, round_keys)
 
 
 def _has_same_operation_dependency(window, operation_id) -> bool:
@@ -480,8 +472,7 @@ def _hold_strong_context(
     owner = decoding_records.PotentialStrong(
         (operation_id, window.window_index)
     )
-    arrived = _arrived_by_buffer(potential, operation_id, window.buffer_hi)
-    strong.add(owner, potential, arrived)
+    strong.add(owner, potential)
 
 
 def _read_keys(execution, operation_id, lower: int, upper: int) -> tuple:
@@ -502,31 +493,17 @@ def _read_keys(execution, operation_id, lower: int, upper: int) -> tuple:
     return tuple(keys)
 
 
-def _arrived_by_buffer(potential, operation_id, buffer_hi: int) -> tuple:
-    """The rounds of a hold that have arrived once the window's buffer has."""
-    arrived = []
-    for identity in potential:
-        is_own = identity[0] == operation_id
-        if is_own and identity[1] > buffer_hi:
-            continue
-        arrived.append(identity)
-    return tuple(arrived)
-
-
 class _HoldSet:
-    """The holds one consumer places, the longest one, and their union."""
+    """The holds one consumer places, and their union."""
 
     def __init__(self):
         self.holds = []
-        self.minimum_live_rounds = ()
         self._live_rounds = set()
 
-    def add(self, owner, round_keys: tuple, arrived_keys: tuple) -> None:
-        """Record a hold; the longest arrived set is the store's floor."""
+    def add(self, owner, round_keys: tuple) -> None:
+        """Record a hold and the rounds it keeps alive."""
         self.holds.append((owner, round_keys))
         self._live_rounds.update(round_keys)
-        if len(arrived_keys) > len(self.minimum_live_rounds):
-            self.minimum_live_rounds = arrived_keys
 
     def sufficient_live_rounds(self, is_open_ended: bool) -> Optional[tuple]:
         """Every round any hold names; None when a stream never ends."""

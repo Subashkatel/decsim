@@ -8,6 +8,8 @@ strong pool, and every other policy routes every job to the tier that
 decodes the plan's windows.
 """
 
+import dataclasses
+
 import pytest
 
 import decsim.build.decoders as decoder_build
@@ -163,6 +165,28 @@ def test_a_run_that_may_escalate_gets_a_strong_pool_behind_one_router():
 
     assert isinstance(pool.router, decoders.SwitchingRouter)
     assert decode_queue.STRONG_POOL in pool.unit_pools
+
+
+def test_each_tiers_unit_memory_reaches_the_pool_of_its_own_units():
+    escalation = escalation_settings.EscalationSettings(
+        kind="switching",
+        threshold_source="fixed",
+        gap_threshold_nats=2.0,
+        confidence="complementary_gap",
+    )
+    weak_memory = decoder_settings.UnitMemorySettings(bits=12)
+    strong_memory = decoder_settings.UnitMemorySettings(bits=30)
+    weak_preset = _preset(10.0)
+    strong_preset = _preset(30.0)
+    weak = dataclasses.replace(weak_preset, unit_memory=weak_memory)
+    strong = dataclasses.replace(strong_preset, unit_memory=strong_memory)
+    settings = _settings(escalation=escalation, weak=weak, strong=strong)
+
+    pool = _pool(settings)
+
+    memory = pool.decoder_memory
+    assert memory.capacity_for("default") == 12
+    assert memory.capacity_for(decode_queue.STRONG_POOL) == 30
 
 
 def test_a_plan_whose_active_tier_names_no_decoder_is_refused():

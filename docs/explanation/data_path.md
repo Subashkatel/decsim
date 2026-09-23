@@ -86,6 +86,16 @@ For a distance 3 rotated surface code that is 8 bits per round, the
 `d*d - 1` stabilizers of the patch (`decsim/qpu/code_geometry.py`,
 `syndrome_bits_per_round`).
 
+A round's width is not one number over a whole stream. The last round of
+a memory experiment also reads the patch's `d*d` data qubits, so it
+carries `2*d*d - 1` bits: 17 at distance 3, 49 at distance 5. A hop that
+carries detection events instead of raw outcomes sees `(d*d - 1)/2` of
+them on the first round, `d*d - 1` in the bulk and `3*(d*d - 1)/2` on
+the last, since the first round has no round before it to difference
+against and the last closes on the data readout
+(`tests/links/test_data_through.py` derives each count from the circuit).
+A bounded link therefore serializes the last round longer than the rest.
+
 Move, off board, and the landing is also a copy into the controller's
 intake register. Default latency 0.15 microseconds. The hop is modelled
 on measurement signals classified into bits and then sent to a
@@ -105,11 +115,12 @@ The packed round into the weak syndrome buffer. Ends: `controller` to
 by the weak syndrome buffer's own incoming port
 (`decsim/syndrome_buffer/weak_syndrome_round_receiver.py`), which stores the round with
 the landing tick as its publication tick, narrates the copy and the
-intake, and announces the published round to the window manager. That
-end also answers for the room, counting the rounds it holds and the
-writes still in flight, and the controller's sender reserves that room
-before the round leaves. The transmitter hears the landing for its count
-of the rounds on their route and for nothing else.
+intake, and announces the published round to the window manager. The
+same end decides whether the buffer has space. It counts the bits
+already stored and the bits reserved for the writes still crossing the
+link, and the controller's sender reserves the round's bits before it
+leaves. The transmitter is told when the round lands, and only so that
+it can keep its own count of the rounds in flight.
 
 What crosses: one **packed round**, every fragment that leaves the
 controller. The bit count is `PackedRound.wire_bits`, computed in
@@ -162,7 +173,10 @@ A window's rounds into a weak unit's memory. Ends: `syndrome_buffer` to
 What crosses: the whole input of one decode job, every payload round of
 the window at once. The bit count is `job.payload_bits()`
 (`decsim/records/decoding.py`). The same path also carries a
-timing-only feedback-memory round, which is sent by the weak syndrome buffer on the
+timing-only feedback-memory round. That is an idle patch's round: it
+carries no syndrome a decoder reads, and it travels so that the buffer's
+slot, the link and the decoder's stream stage are charged for it. It is
+sent by the weak syndrome buffer on the
 controller's ask and lands at the decoders' own end for it
 (`decsim/decoders/memory_rounds.py`): nothing is deposited in a unit's
 memory, and what the end does is count the round its stream stage was
@@ -196,7 +210,8 @@ assumption less any the strong side already has, at the width each
 round left the controller (`EscalatedRegion.wire_bits`). A window whose
 rounds are all measured at the verdict carries them with the selection;
 a forward window carries them at the far commit, when its extent is
-known, and a terminal one carries the rest as they arrive (Toshio
+known, and a terminal one, a window at the end of the stream whose last
+rounds are still being measured, carries the rest as they arrive (Toshio
 arXiv:2510.25222 lines 1247 to 1250: the syndrome data of `r_strong`
 rounds is assigned to the strong decoder at the switch, after both
 boundaries are determined).
@@ -239,7 +254,8 @@ decoders; what the ends name is which package holds the objects at them
 ([The design decisions](decisions.md) D12).
 
 What crosses: the residual defects on the seam layer the two windows
-share. Under the default `dense_seam_mask` row of `BOUNDARY_PAYLOADS`
+share, which are the detection events the committed correction leaves
+unexplained at the window's edge (Skoric's artificial defects). Under the default `dense_seam_mask` row of `BOUNDARY_PAYLOADS`
 the cost is the seam layer's whole detector count, `d*d - 1`, because
 both compiled implementations carry a mask whatever the noise did. Under
 `sparse_seam_list` it is the flipped detectors and their index width,

@@ -147,15 +147,20 @@ class SyndromeBuffer(Protocol):
     in the store, which is at the landing of the hop that carried them, and
     it is readable at that same instant: the store and the publication
     are one call at one tick. The end that takes the landing asks
-    has_room first, counting the writes it has in flight (gem5's queue
-    answers isFull with its reserved entries taken,
-    src/mem/cache/queue.hh:150-153, :87-93); a packed round is written
-    once and kept until every consumer releases it. A store never
-    refuses a write: a round that finds no room waits upstream.
+    has_room first with the round's bits, counting the bits it has
+    reserved for the writes in flight (gem5's packet store answers
+    `avail() = _maxsize - _size - _reserved` against the packet's own
+    length, src/dev/net/pktfifo.hh); a packed round is written once and
+    kept until every consumer releases it. A store never refuses a
+    write: a round that finds no room waits upstream.
     """
 
-    def has_room(self) -> bool:
-        """Whether one more round fits now."""
+    def has_room(self, bits: Optional[int], reserved_bits: int = 0) -> bool:
+        """Whether a round of that many bits fits beside what is taken.
+
+        A bounded store raises on a round that states no size: a bound
+        is measured against a size.
+        """
 
     def accept_packed_round(
         self,
@@ -168,13 +173,13 @@ class SyndromeBuffer(Protocol):
     def release_round(self, round_key: tuple) -> None:
         """Free the round; its consumers are done with it."""
 
-    def capacity_rounds(self) -> Optional[int]:
-        """The slots this store is bounded to, or None for unbounded.
+    def capacity_bits(self) -> Optional[int]:
+        """The bits this store is bounded to, or None for unbounded.
 
-        A store bounded some other way than by a slot count answers
-        None and refuses nothing: the callers that size a plan, a trace
-        lane or a room check ask this instead of reading a settings
-        record, so the bound stays the store's own to decide.
+        A store bounded some other way than by a bit capacity answers
+        None and refuses nothing: the callers that size a trace lane or
+        a room check ask this instead of reading a settings record, so
+        the bound stays the store's own to decide.
         """
 
     def held_rounds_description(self) -> str:
@@ -240,9 +245,6 @@ class RetainedRounds(Protocol):
     def has_live_operation_reference(self, operation_id) -> bool:
         """Whether a hold or a stored round still names this operation."""
 
-    def capacity_rounds(self) -> Optional[int]:
-        """The slots this store is bounded to, or None for unbounded."""
-
 
 @runtime_checkable
 class SyndromeRoundSender(Protocol):
@@ -263,7 +265,7 @@ class SyndromeRoundSender(Protocol):
 class StrongSyndromeRoundReceiver(Protocol):
     """The strong syndrome buffer's receiving end, as its two senders see it.
 
-    The store counts the rounds still crossing toward it as room taken.
+    The store counts the bits still crossing toward it as room taken.
     A strong-primary run's controller reserves that room before a round
     leaves and the store keeps the round when it lands; a switching
     run's strong redecode reserves the room of an escalated region before
@@ -271,16 +273,16 @@ class StrongSyndromeRoundReceiver(Protocol):
     landing.
     """
 
-    def has_room(self) -> bool:
-        """Whether one more write can land."""
+    def has_room(self, bits: Optional[int]) -> bool:
+        """Whether a write of that many bits can land."""
 
-    def reserve_write(self) -> None:
-        """Take the room one crossing round will need, before it leaves."""
+    def reserve_write(self, bits: Optional[int]) -> None:
+        """Take the bits one crossing round will need, before it leaves."""
 
     def receive_round(self, packed: round_records.PackedRound) -> None:
         """Store a landed round and deliver it on its canonical route."""
 
-    def reserve_region(self, round_count: int) -> None:
+    def reserve_region(self, round_count: int, bits: Optional[int]) -> None:
         """Take the room an escalated region's rounds will need, or refuse."""
 
     def receive_region(self, region: round_records.EscalatedRegion) -> None:
@@ -292,19 +294,20 @@ class WeakSyndromeRoundReceiver(Protocol):
     """The weak syndrome round receiver, as the controller sees it.
 
     This end owns the store's room and its landing. It answers has_room
-    against the rounds stored and the writes still in flight, the sender
-    reserves that room before the round leaves, and the transfer that
-    carries the round lands here: this end stores it, which is the tick
-    it becomes readable, and announces it to whoever waits on it. The
-    same port takes the controller's ask for a timing-only round, which
-    takes its slot here and leaves by the store's own outgoing port.
+    against the bits stored and the bits reserved for the writes still
+    in flight, the sender reserves that room before the round leaves,
+    and the transfer that carries the round lands here: this end stores
+    it, which is the tick it becomes readable, and announces it to
+    whoever waits on it. The same port takes the controller's ask for a
+    timing-only round, which takes its slot here and leaves by the
+    store's own outgoing port.
     """
 
-    def has_room(self) -> bool:
-        """Whether one more round fits: the stored ones and those in flight."""
+    def has_room(self, bits: Optional[int]) -> bool:
+        """Whether that many bits fit: the stored ones and those in flight."""
 
-    def reserve_write(self) -> None:
-        """Take the room one crossing round will need, before it leaves."""
+    def reserve_write(self, bits: Optional[int]) -> None:
+        """Take the bits one crossing round will need, before it leaves."""
 
     def receive_round(self, packed: round_records.PackedRound) -> None:
         """Take one round that landed here: store it, then announce it."""
@@ -528,7 +531,10 @@ class WindowRetention(Protocol):
     def hold_strong_context(
         self, key: tuple, strong_request_key, context_keys
     ) -> None:
-        """The window's potential strong read becomes the request's hold."""
+        """The rounds kept in case the window escalates pass to its request.
+
+        The window's potential strong read becomes the request's hold.
+        """
 
     def context_rounds_in_flight(self, key: tuple, read_keys) -> tuple:
         """The rounds the strong syndrome buffer lacks that the weak one has."""
@@ -564,7 +570,10 @@ class WindowRetention(Protocol):
     def release_absorbed_strong_hold(
         self, key: tuple, restart_key: Optional[tuple], replacement
     ) -> None:
-        """Drop the absorbed window's potential read; the request holds it."""
+        """Drop the rounds an absorbed window kept; the strong request has them.
+
+        A strong window covered this window, so its potential read goes.
+        """
 
     def require_rounds_retained(
         self, label: str, payloads: list, first_round: int, last_round: int
@@ -770,7 +779,7 @@ class WindowInputGate(Protocol):
     """
 
     def may_stage(self, job: decoding_records.DecodeJob) -> bool:
-        """Whether a blocked job may occupy an input slot yet."""
+        """Whether a job that cannot decode yet may take a unit's input slot."""
 
     def may_start(self, job: decoding_records.DecodeJob) -> bool:
         """Whether the landed job owes no boundary and may decode."""
@@ -1247,11 +1256,17 @@ class SyndromeSource(Protocol):
     a physical source fires it once when its complete shot is available.
     A live source waits for final readout; a source that draws nothing
     carries the silent source, so a listener connects to every row by name.
+
+    takes_code_card says whether the row shapes its payloads by the
+    run's code card: such a row is built with the card, so its rounds
+    state the code's syndrome width, and a row that reads its widths
+    off a circuit is built without it.
     """
 
     # none means this consumer does not need Operation.circuit; it does not
     # require removal when an independent model provider needs the circuit.
     operation_circuit_scope: str
+    takes_code_card: bool
     shot_sampled: Any
 
     def declare_stream(
@@ -1772,8 +1787,7 @@ class WindowingScheme(Protocol):
     """How an operation's rounds are cut into windows.
 
     Table rows: sliding, parallel, sandwich, naive_online. The static
-    window graph of an operation, when a window has its data, and the
-    buffer floor the scheme needs.
+    window graph of an operation, and when a window has its data.
 
     Three facts about the layout are declared rather than read off the
     row's class, so a scheme written outside decsim answers the same
@@ -1810,11 +1824,6 @@ class WindowingScheme(Protocol):
         readiness: window_records.WindowReadiness,
     ) -> bool:
         """Whether the window has every round it reads."""
-
-    def validate_buffer(
-        self, geometry: program_records.ResolvedCodeGeometry
-    ) -> None:
-        """Refuse a buffer below the scheme's floor."""
 
 
 @runtime_checkable

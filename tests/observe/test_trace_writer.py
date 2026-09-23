@@ -195,7 +195,7 @@ def test_round_ones_first_hops_are_the_notes_worked_example(traced):
     assert residence["args"]["bits"] == 4
     assert residence["args"]["data_ready"] == 1_008_000
     assert residence["args"]["freed"] == 6_012_000
-    assert residence["args"]["capacity"] is None
+    assert residence["args"]["capacity_bits"] is None
 
 
 def test_window_zeros_service_and_stages_are_the_notes_worked_example(traced):
@@ -218,6 +218,7 @@ def test_window_zeros_service_and_stages_are_the_notes_worked_example(traced):
     assert resident["args"]["tick"] == 6_012_000
     assert resident["dur"] == 0.092
     assert resident["args"]["bits"] == 44
+    assert resident["args"]["capacity_bits"] is None
     assert resident["args"]["freed"] == 6_104_000
 
     stages = [row for row in _by_phase(document, "X") if row["cat"] == "stage"]
@@ -388,15 +389,15 @@ def test_the_unit_memory_counter_peaks_at_the_memorys_high_water_mark(traced):
     """The C track of the unit's memory is the memory's own occupancy."""
     machine, _result, document = traced
     (unit,) = machine.decoder_manager.pool.units()
-    name = f"{unit.memory.name} rounds"
+    name = f"{unit.memory.name} bits"
     values = []
     for row in _by_phase(document, "C"):
         if row["name"] == name:
-            values.append(row["args"]["rounds"])
+            values.append(row["args"]["bits"])
 
     assert values
-    assert max(values) == unit.memory.statistics.peak_occupied_rounds
-    assert values[-1] == unit.memory.occupied_rounds
+    assert max(values) == unit.memory.statistics.peak_occupied_bits
+    assert values[-1] == unit.memory.occupied_bits
 
 
 def test_the_assembler_workspace_holds_round_one_until_it_is_packed(traced):

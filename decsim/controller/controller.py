@@ -2,8 +2,9 @@
 
 The model carries no analog waveform. A readout's classified bits cross
 qpu_to_controller, pay the readout-to-bits cost (40 ns in-FPGA
-discrimination, Fermilab 2406.18807; 20 ns to a syndrome, Yang
-2605.04892), and reach the round assembler as one fragment. The rest of
+discrimination, Fermilab 2406.18807; 32 ns of IQ demodulation and 4 ns
+of state classification, Yang 2605.04892 lines 1054-1055), and reach
+the round assembler as one fragment. The rest of
 the controller is its own components: the issuer (operation_issue.py)
 turns admitted operations into commands, the output
 (instruction_output.py) carries commands and decisions to the QPU, the

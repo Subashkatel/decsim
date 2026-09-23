@@ -75,8 +75,8 @@ GATE_SWITCHING_CARD = {
         "frame_to_controller": None,
         "controller_to_qpu": None,
     },
-    "weak_syndrome_buffer": {"rounds": None},
-    "strong_syndrome_buffer": {"rounds": None},
+    "weak_syndrome_buffer": {"bits": None},
+    "strong_syndrome_buffer": {"bits": None},
     "windows": {
         "kind": "sliding",
         "commit_rounds": None,
@@ -85,7 +85,7 @@ GATE_SWITCHING_CARD = {
     "weak_decoder": {
         "kind": "pymatching",
         "units": 1,
-        "unit_memory_rounds": None,
+        "unit_memory": {"bits": None},
         "engine": {
             "clock": "fridge",
             "fetch_cycles_per_round": 1,
@@ -97,7 +97,7 @@ GATE_SWITCHING_CARD = {
     "strong_decoder": {
         "kind": "belief_matching",
         "units": 1,
-        "unit_memory_rounds": None,
+        "unit_memory": {"bits": None},
         "engine": {
             "clock": "room",
             "fetch_cycles_per_round": 1,

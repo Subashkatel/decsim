@@ -6,7 +6,7 @@ runtime, that a module may only send a message it owns:
 cSimpleModule::send refuses one whose owner is another module
 (`tmp/resources/omnetpp/src/sim/csimplemodule.cc:333-334`, omnetpp-6.1.0,
 the diagnostic at 506-508). And gem5 bills a transfer to the port it left
-by, never to whoever arranged it (`packet.hh:424-431`). Two kinds
+by, never to whoever arranged it (`coherent_xbar.cc:354-357`). Two kinds
 of round leave here. A decode job's input: the window side plans the
 decode and the decoder manager says when the input moves (the
 accelerator's invoke, then DMA into the unit's memory, then compute),

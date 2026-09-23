@@ -9,7 +9,8 @@ escalation:
 strong_decoder:
   kind: belief_matching
   units: 1
-  unit_memory_rounds: null
+  unit_memory:
+    bits: null
   engine:
     clock: room
     fetch_cycles_per_round: 1

@@ -229,3 +229,58 @@ def test_a_potential_restart_read_outlives_the_landing_and_follows_a_reslice():
     assert not store.has_hold(claim)
     assert store.retained_fragments((1, 1)) is None
     assert store.retained_fragments((1, 9)) is None
+
+
+def _absorbing_retention(absorbed_rounds, request_rounds, restart_rounds):
+    """Both stores holding one absorbed window, a request and a restart."""
+    store = _store()
+    retention = _strong_retention(store, rounds_arrived=0)
+    absorbed = decoding_records.PotentialStrong((1, 1))
+    request = decoding_records.PendingStrong("request")
+    restart = decoding_records.PotentialStrong((1, 2))
+    holds = (
+        (absorbed, absorbed_rounds),
+        (request, request_rounds),
+        (restart, restart_rounds),
+    )
+    for holder, rounds in holds:
+        round_keys = _round_keys(rounds)
+        store.register_hold(holder, round_keys)
+        retention.weak_store.register_hold(holder, round_keys)
+    return retention, store, request
+
+
+def _round_keys(rounds) -> list:
+    keys = []
+    for round_index in rounds:
+        keys.append((1, round_index))
+    return keys
+
+
+def test_an_absorbed_read_behind_the_strong_window_needs_no_new_holder():
+    """A buffer wider than the commit reaches behind a pinned near face.
+
+    The absorbed window would have read rounds 4 to 12; the strong
+    window pinned at round 7 reads 7 to 9 and the restart window 10 to
+    12, so rounds 4 to 6 have no reader left and the absorption lands.
+    """
+    absorbed_rounds = range(4, 13)
+    request_rounds = range(7, 10)
+    restart_rounds = range(10, 13)
+    retention, store, request = _absorbing_retention(
+        absorbed_rounds, request_rounds, restart_rounds
+    )
+    retention.release_absorbed_strong_hold((1, 1), (1, 2), request)
+    absorbed = decoding_records.PotentialStrong((1, 1))
+    assert not store.has_hold(absorbed)
+
+
+def test_an_absorbed_read_past_the_first_round_that_nobody_holds_is_refused():
+    absorbed_rounds = range(7, 13)
+    request_rounds = range(7, 10)
+    restart_rounds = range(11, 13)
+    retention, _store_under_test, request = _absorbing_retention(
+        absorbed_rounds, request_rounds, restart_rounds
+    )
+    with pytest.raises(RuntimeError, match=r"rounds \[\(1, 10\)\] are held"):
+        retention.release_absorbed_strong_hold((1, 1), (1, 2), request)

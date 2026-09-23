@@ -7,7 +7,6 @@ chain. The published construction fixes ncom = nbuf = d.
 """
 
 import decsim.records.windows as window_records
-import decsim.windows.schemes.buffer_floors as buffer_floors
 import decsim.windows.schemes.window_data as window_data
 
 
@@ -67,16 +66,6 @@ class ParallelWindowScheme:
     ) -> bool:
         """Whether the window has every round it reads."""
         return window_data.sliding_data_complete(window, readiness)
-
-    def validate_buffer(self, geometry) -> None:
-        """Reject a buffer below the two-sided floor without a justification."""
-        floor = max(
-            geometry.minimum_leading_buffer_round_count,
-            geometry.minimum_trailing_buffer_round_count,
-        )
-        buffer_floors.require_buffer_floor(
-            geometry, floor, "two-sided buffering floor"
-        )
 
 
 class _BlockLayout:

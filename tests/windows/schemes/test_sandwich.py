@@ -8,7 +8,6 @@ room for a seam and a buffer below 1 leaves the cores non-overlapping.
 
 import pytest
 
-import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.windows.schemes.sandwich as sandwich_scheme
 
@@ -78,7 +77,7 @@ def test_a_step_below_two_is_refused():
     with pytest.raises(ValueError) as refusal:
         row.plan_operation(1, 30, commit_round_count=1, buffer_round_count=2)
 
-    assert "step size s >= 2" in str(refusal.value)
+    assert "needs a step of at least 2" in str(refusal.value)
 
 
 def test_a_buffer_below_one_is_refused():
@@ -89,29 +88,3 @@ def test_a_buffer_below_one_is_refused():
         row.plan_operation(1, 30, commit_round_count=5, buffer_round_count=0)
 
     assert "overlapping windows (b >= 1)" in str(refusal.value)
-
-
-def test_the_same_two_refusals_answer_a_geometry_card():
-    """validate_buffer refuses the card the plan would refuse."""
-    row = sandwich_scheme.TanSandwichScheme()
-
-    geometry = _geometry(commit_round_count=5, buffer_round_count=0)
-
-    with pytest.raises(ValueError) as refusal:
-        row.validate_buffer(geometry)
-
-    assert "overlapping windows (b >= 1)" in str(refusal.value)
-
-
-def _geometry(*, commit_round_count, buffer_round_count):
-    """A d=3 surface geometry with the step and buffer given."""
-    return program_records.ResolvedCodeGeometry(
-        code_name="rotated surface code (d=3)",
-        distance=3,
-        commit_round_count=commit_round_count,
-        buffer_round_count=buffer_round_count,
-        minimum_leading_buffer_round_count=0,
-        minimum_trailing_buffer_round_count=0,
-        one_patch_spatial_node_count=9,
-        window_floor_justification=None,
-    )

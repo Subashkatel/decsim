@@ -18,6 +18,7 @@ import pytest
 import stim
 
 import decsim.config as config
+import decsim.decoders.settings as decoder_settings
 import decsim.detector_error_model.detector_formation as formation
 import decsim.frontends.deltakit as deltakit
 import decsim.machine as machines
@@ -298,9 +299,13 @@ def test_bounded_buffer_and_unit_memory_use_the_normal_data_path() -> None:
     )
     workload = example.protection_workload(circuit, 24, 3, "patch")
     settings = _settings(circuit, mapping, workload, 3, 24)
-    buffer = buffer_settings.SyndromeBufferSettings(rounds=12)
+    # twelve rounds of the distance-three memory, the final round's data
+    # readout included: 11 * 8 + 17 bits
+    twelve_rounds_bits = 11 * 8 + 17
+    buffer = buffer_settings.SyndromeBufferSettings(bits=twelve_rounds_bits)
+    memory = decoder_settings.UnitMemorySettings(bits=twelve_rounds_bits)
     decoder = dataclasses.replace(
-        settings.weak_decoder, unit_memory_rounds=12, units=2
+        settings.weak_decoder, unit_memory=memory, units=2
     )
     settings = dataclasses.replace(
         settings, weak_syndrome_buffer=buffer, weak_decoder=decoder

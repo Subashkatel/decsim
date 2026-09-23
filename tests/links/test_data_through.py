@@ -26,7 +26,7 @@ the first and last rounds of a stream.
 
 The switching shape's strong side is filled by the escalation alone
 (Toshio 2510.25222 lines 1247 to 1250): each escalated window sends its
-selection with no payload and then the rounds of its two-sided context
+selection as zero bits and then the rounds of its two-sided context
 that the strong syndrome buffer lacks, so the fifteen rounds cross
 weak_decoder_to_strong_decoder once each and controller_to_strong_buffer
 carries nothing. At d=3 the contexts are 1-6, 1-9, 4-12, 7-15 and
@@ -131,7 +131,7 @@ EXPECTED = {
         "qpu_to_controller": Traffic(15, 129),
         "controller_to_weak_buffer": Traffic(15, 120),
         "weak_buffer_to_weak_decoder": Traffic(5, 220),
-        "weak_decoder_to_strong_decoder": Traffic(9, 120, 5),
+        "weak_decoder_to_strong_decoder": Traffic(9, 120),
         "strong_buffer_to_strong_decoder": Traffic(5, 312),
         "decoder_to_decoder": Traffic(4, 32),
         "strong_decoder_to_frame": Traffic(5, 5),
@@ -140,7 +140,7 @@ EXPECTED = {
         "qpu_to_controller": Traffic(15, 385),
         "controller_to_weak_buffer": Traffic(15, 360),
         "weak_buffer_to_weak_decoder": Traffic(3, 612),
-        "weak_decoder_to_strong_decoder": Traffic(5, 360, 3),
+        "weak_decoder_to_strong_decoder": Traffic(5, 360),
         "strong_buffer_to_strong_decoder": Traffic(3, 840),
         "decoder_to_decoder": Traffic(2, 48),
         "strong_decoder_to_frame": Traffic(3, 3),
@@ -392,7 +392,7 @@ def test_the_escalation_carries_the_selection_bare_and_each_round_once(
     carried_rounds = []
     for transfer in grouped["weak_decoder_to_strong_decoder"]:
         payload_bits = transfer["payload_bits"]
-        if payload_bits is None:
+        if payload_bits == 0:
             selections.append(transfer)
             continue
         attribution = transfer["attribution"]

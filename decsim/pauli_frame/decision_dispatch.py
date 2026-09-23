@@ -2,7 +2,7 @@
 
 A decision leaves the frame side and lands at the controller, so the
 send is executed here: gem5 bills a transfer to the port it left by
-(tmp/resources/gem5/src/mem/packet.hh:424-431), and OMNeT++ refuses a
+(tmp/resources/gem5/src/mem/coherent_xbar.cc:354-357), and OMNeT++ refuses a
 module that sends a message it does not own
 (tmp/resources/omnetpp/src/sim/csimplemodule.cc:333-334). The line that
 narrates the dispatch is sourced at the end that executes it. What the

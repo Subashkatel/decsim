@@ -47,6 +47,9 @@ DECODERS = {
 
 DECODER_MANAGER_KEYS = ("bulk_strong", "clock", "dispatch_cycles")
 
+# <tier>_decoder.unit_memory's keys.
+UNIT_MEMORY_KEYS = ("bits",)
+
 # <tier>_decoder.engine's four stage keys, each with what it prices, so
 # a card that leaves one out is refused by name and by what is missing.
 ENGINE_CYCLE_KEYS = {
@@ -100,6 +103,45 @@ DETECTION_EVENT_CYCLES_PER_ROUND = 1
 
 
 @dataclasses.dataclass(frozen=True)
+class UnitMemorySettings:
+    """The yaml's `<tier>_decoder.unit_memory` section.
+
+    The input memory of one decoder unit: a window's rounds are copied
+    into it before that unit decodes them, and freed when the decode
+    ends. bits is one unit's capacity, in bits; null models no capacity
+    at all, an ideal memory nothing ever fills. A memory is its own
+    object carrying its own size, the way gem5 declares a cache's
+    capacity on the memory rather than on the compute beside it
+    (`size = Param.MemorySize("Capacity")`, gem5
+    src/mem/cache/Cache.py) and gem5-Aladdin's systolic array declares
+    its private scratchpad
+    (`size = Param.Int(32768, "Size of the scratchpad in bytes.")`,
+    src/systolic_array/SystolicArray.py). The unit is bits because the
+    rest of the tree counts bits (payload_bits, bits_per_cycle) and a
+    syndrome round is not byte aligned.
+    """
+
+    bits: Optional[int] = None
+
+    @classmethod
+    def from_yaml(
+        cls, section: Mapping, section_name: str
+    ) -> "UnitMemorySettings":
+        """The unit_memory block: one capacity, checked where it enters."""
+        unknown = set(section) - set(UNIT_MEMORY_KEYS)
+        if unknown:
+            listed = sorted(unknown)
+            raise ValueError(
+                f"{section_name}.unit_memory does not know {listed}; its "
+                f"keys are {list(UNIT_MEMORY_KEYS)}"
+            )
+        bits = section.get("bits")
+        key = f"{section_name}.unit_memory.bits"
+        config.check_capacity_bits(key, bits)
+        return cls(bits=bits)
+
+
+@dataclasses.dataclass(frozen=True)
 class DecoderSettings:
     """The yaml's `weak_decoder` and `strong_decoder` sections.
 
@@ -114,8 +156,19 @@ class DecoderSettings:
     (Helios 2301.08419v2's controller takes one header byte and then a
     round's bytes and a loading cycle, and streams three header bytes
     and a round's correction bytes back).
-    unit_memory_rounds is the input SRAM per unit (None is unbounded); a
-    unit overlaps input transfer with compute only when two windows fit.
+    units is the count of identical decoding engines inside this tier's
+    one chip, gem5's FUDesc.count ("number of these FU's available",
+    gem5 src/cpu/FuncUnit.py): every unit has its own input memory and
+    all of them share the tier's links. Hardware holds several engines
+    on a chip too: AFS "uses L/N decoder blocks to perform error
+    correction over the L logical qubits" (2001.06598 lines 1049-1052),
+    and Yang et al. instantiate an X-type and a Z-type decoder in one
+    FPGA (2605.04892 lines 986-988). Each paper fixes its count; sweeping
+    it is this simulator's own use of the key. The chip count is one and
+    is not a key.
+    unit_memory is the input SRAM of one unit, sized in bits
+    (UnitMemorySettings, above); a unit overlaps input transfer with
+    compute only when two windows fit.
     input names a row of DECODER_INPUTS (above): whether this tier's
     unit is given a copy of the rounds it reads or reads them where the
     store keeps them. boundary_fold names a row of
@@ -159,7 +212,7 @@ class DecoderSettings:
     input: str = "copy"
     boundary_fold: str = "copy"
     result_blocks_unit: bool = False
-    unit_memory_rounds: Optional[int] = None
+    unit_memory: UnitMemorySettings = UnitMemorySettings()
     fetch_cycles_per_round: int = 1
     fetch_cycles_per_job: int = 0
     release_cycles_per_job: int = 1
@@ -202,12 +255,9 @@ class DecoderSettings:
         """A tier section: kind, units, unit memory and the engine card."""
         engine = section["engine"]
         engine_clock = clocks.clock(engine["clock"])
-        unit_memory_rounds = section["unit_memory_rounds"]
-        if unit_memory_rounds is not None and unit_memory_rounds < 1:
-            raise ValueError(
-                "unit_memory_rounds must be at least one round, or null "
-                f"for an unbounded unit memory (got {unit_memory_rounds})"
-            )
+        unit_memory = UnitMemorySettings.from_yaml(
+            section["unit_memory"], section_name
+        )
         input_kind = section.get("input", "copy")
         boundary_fold = section.get("boundary_fold", "copy")
         stage_cycles = _engine_stage_cycles(engine, section_name)
@@ -226,7 +276,7 @@ class DecoderSettings:
             input=input_kind,
             boundary_fold=boundary_fold,
             result_blocks_unit=result_blocks_unit,
-            unit_memory_rounds=unit_memory_rounds,
+            unit_memory=unit_memory,
             **stage_cycles,
             detection_event_latency_cycles=formation_latency,
             detection_event_cycles_per_round=formation_rate,
@@ -253,7 +303,7 @@ class DecoderManagerSettings:
     scheduler orders the ready queue (FifoScheduler by default),
     unit_pools names each pool's unit count (built from the tiers' units
     by default) and decoder_memory bounds each pool's input memory in
-    rounds (built from the active tier's unit_memory_rounds by default).
+    bits (built from the active tier's unit_memory by default).
     """
 
     router: Optional[Any] = None

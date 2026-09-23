@@ -72,7 +72,8 @@ def stage(formation):
     )
 
 
-def test_a_formed_round_carries_its_events_at_their_own_width():
+def test_a_formed_round_carries_its_events_at_the_size_it_landed():
+    """The input memory was written four raw bits a round, not two events."""
     former = Former()
     formation = detection_events.TierFormation(former)
     reading_two_rounds = job([1, 2])
@@ -80,7 +81,7 @@ def test_a_formed_round_carries_its_events_at_their_own_width():
     formed = formation.form(reading_two_rounds.payloads)
 
     assert [carried.bits for carried in formed] == [(1, 0), (2, 0)]
-    assert [carried.size_bits for carried in formed] == [2, 2]
+    assert [carried.size_bits for carried in formed] == [4, 4]
 
 
 def test_a_round_two_windows_read_is_formed_once():
@@ -227,4 +228,5 @@ def test_a_joint_round_forms_once_after_all_fragments_arrive() -> None:
     assert table.asked == [(1, 1)]
     assert formed.patch_ids == (0, "other")
     assert formed.bits == (1, 0)
-    assert formed.size_bits == 2
+    # three one-bit fragments landed in the unit's memory: the size it holds
+    assert formed.size_bits == 3

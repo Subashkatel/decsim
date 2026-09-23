@@ -12,7 +12,8 @@ escalation:
 weak_decoder:
   kind: pymatching
   units: 1
-  unit_memory_rounds: null
+  unit_memory:
+    bits: null
   engine:
     clock: fridge
     fetch_cycles_per_round: 1
@@ -23,7 +24,8 @@ weak_decoder:
 strong_decoder:
   kind: bposd
   units: 1
-  unit_memory_rounds: null
+  unit_memory:
+    bits: null
   engine:
     clock: room
     fetch_cycles_per_round: 1

@@ -9,7 +9,8 @@ escalation:
 weak_decoder:
   kind: union_find
   units: 1
-  unit_memory_rounds: null
+  unit_memory:
+    bits: null
   engine:
     clock: fridge
     fetch_cycles_per_round: 1

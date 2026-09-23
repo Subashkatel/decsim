@@ -92,7 +92,12 @@ class EscalationRateTracker:
     quantile of the live gap distribution, and their Proposition 4.1
     (lines 309-317) bounds the long-run average of err_t around alpha
     with no assumption on the data-generating distribution, which is
-    what a drifting gap distribution needs. The same shape is old in
+    what a drifting gap distribution needs. The bound rests on the
+    recursion running unclipped (their Lemma 4.1, lines 303-308): the
+    threshold may dip below zero, where no gap is below it and nothing
+    escalates until the kept windows have raised it again. A floor at
+    zero would let a stream of gaps tied at zero escalate far above the
+    target. The same shape is old in
     hardware, where an update threshold is servoed by the balance of two
     event rates (Seznec's O-GEHL, CBP-1 2004).
     """
@@ -113,8 +118,6 @@ class EscalationRateTracker:
         self.escalated_count += int(escalated)
         move = self.target_escalation_rate - float(escalated)
         self.threshold += self.step * move
-        if self.threshold < 0.0:
-            self.threshold = 0.0
         return escalated
 
     def escalation_rate(self) -> float:
@@ -201,9 +204,11 @@ class OnlineThresholdController:
     budget; only a full clean quota shrinks the target.
 
     The target always stays inside [min_escalation_rate,
-    max_escalation_rate]; the max is the Theorem 1 backlog bound: the
-    strong tier's duty cycle may never exceed what its latency can
-    absorb, whatever accuracy would prefer.
+    max_escalation_rate]; the max is where the yaml writes the backlog
+    bound of Toshio 2510.25222 Theorem 1 (lines 1272-1291): the strong
+    tier's duty cycle may never exceed what its latency can absorb,
+    whatever accuracy would prefer. The number is the yaml's, and
+    nothing here derives it from the theorem's inputs.
     """
 
     def __init__(
@@ -260,7 +265,10 @@ class OnlineThresholdController:
 
 
 class OnlineThreshold:
-    """The controller at Switching's decision point (threshold_source online).
+    """Adapts the threshold during the run, from the escalation rate it sees.
+
+    The row of threshold_source online, asked at Switching's decision
+    point.
 
     One instance persists across every shot of a sweep point, so the
     controller learns over the point's whole window stream; its random

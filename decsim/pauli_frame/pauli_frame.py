@@ -48,7 +48,6 @@ class PauliFrameConfig:
     kind: str = "logical_register"
     write_cycles: int = 0
     clock: Optional[config.Clock] = None
-    zero_commit_cost_justification: Optional[str] = None
 
     def __post_init__(self) -> None:
         cycles = self.write_cycles
@@ -56,15 +55,6 @@ class PauliFrameConfig:
         is_free = cycles == 0
         if not is_free and self.clock is None:
             raise ValueError("a charged write needs the clock it is priced on")
-        has_justification = bool(self.zero_commit_cost_justification)
-        if is_free and not has_justification:
-            raise ValueError(
-                "a free write needs zero_commit_cost_justification"
-            )
-        if not is_free and has_justification:
-            raise ValueError(
-                "zero_commit_cost_justification needs a free write"
-            )
 
     @classmethod
     def from_yaml(

@@ -21,6 +21,7 @@ import decsim.links.link_profiles as link_profiles
 import decsim.machine as machine_module
 import decsim.observe.settings as observation_settings
 import decsim.ports as ports
+import decsim.qpu.code_geometry as code_geometry
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
 import decsim.qpu.stim_device as stim_device
@@ -173,7 +174,8 @@ def test_conflicting_stream_limits_are_refused_before_sampling() -> None:
 
 def test_timing_only_source_preserves_the_finite_models_circuit_copy() -> None:
     circuit = memory_programs.memory_circuit(24)
-    source = syndrome_devices.TimingOnlyDevice()
+    code = code_geometry.SurfaceCodeModel(distance=3)
+    source = syndrome_devices.TimingOnlyDevice(code)
     models = stim_device.StimDevice()
     workload = _workload(circuit, 24, 24)
     machine = _machine(source, models, workload, 4.0)
@@ -196,7 +198,8 @@ def test_timing_only_source_preserves_the_finite_models_circuit_copy() -> None:
 def test_model_circuit_scope_is_required_at_the_root_boundary(
     declaration: dict,
 ) -> None:
-    source = syndrome_devices.TimingOnlyDevice()
+    code = code_geometry.SurfaceCodeModel(distance=3)
+    source = syndrome_devices.TimingOnlyDevice(code)
     models = types.SimpleNamespace(**declaration)
     workload = _workload()
     message = (

@@ -4,11 +4,16 @@ Table row syndrome_buffer. The store's own round receiver writes each round
 once at its landing (accept_packed_round) after asking has_room, the
 window side keeps it alive with holds (RoundHolds), and the slot is
 freed when the last hold releases; the waiting line then hears it, so a
-round held for room enters in order. That is gem5's cache queue
-(src/mem/cache/queue.hh isFull, then allocate) and its blocked port
+round held for room enters in order. Capacity is bits, gem5's packet
+store: its size is declared on the store itself
+(`rx_fifo_size = Param.MemorySize("384KiB", ...)`,
+src/dev/net/Ethernet.py) and the room test takes the packet's own
+length, `avail()` over the reserved bytes and `reserve(len)` before the
+data lands (src/dev/net/pktfifo.hh). The blocked port is gem5's too
 (src/mem/cache/base.cc clearBlocked schedules the retry): the store
 never refuses a write, it answers room first. A round's status (its
-packet, its publication tick) lives on its record, gem5's CacheBlk.
+packet, the bits it holds, its publication tick) lives on its record,
+gem5's CacheBlk.
 
 The store reports through trace sources (trace_source.py) and
 runs with no listener: round_stored(round_key, packet) when a slot is
@@ -48,18 +53,21 @@ class _TraceSources:
 
 
 class _StoredRound:
-    """One stored round: its packet and, once published, its tick."""
+    """One stored round: its packet, its bits, and once published its tick."""
 
-    def __init__(self, packet: round_records.SyndromeRoundPacket) -> None:
+    def __init__(
+        self, packet: round_records.SyndromeRoundPacket, held_bits: int
+    ) -> None:
         self.packet = packet
+        self.held_bits = held_bits
         self.publication_tick: Optional[int] = None
 
 
 class SyndromeBuffer:
     """The store: rounds by key, their holds, and the operations it serves.
 
-    Its state is the settings, the rounds, the holds, the operations and
-    its events (trace).
+    Its state is the settings, the rounds, the bits they hold, the
+    holds, the operations and its events (trace).
     """
 
     # a store built with no waiting line in front of it frees its slots
@@ -72,6 +80,8 @@ class SyndromeBuffer:
     ) -> None:
         self.settings = settings
         self.round_by_key: dict = {}
+        # the bits the stored rounds hold, summed as they land and leave
+        self._occupied_bits = 0
         self.holds = round_holds.RoundHolds()
         # operation id -> True while it may receive rounds, False once
         # closed; a closed identity never reopens
@@ -80,12 +90,20 @@ class SyndromeBuffer:
 
     # ---- the port
 
-    def has_room(self) -> bool:
-        """Whether one more round fits; asked before every write."""
-        capacity = self.settings.rounds
+    def has_room(self, bits: Optional[int], reserved_bits: int = 0) -> bool:
+        """Whether a round of that many bits fits beside what is taken.
+
+        reserved_bits is the room a crossing round has already taken,
+        gem5's `_reserved` in `avail() = _maxsize - _size - _reserved`
+        (src/dev/net/pktfifo.hh).
+        """
+        capacity = self.settings.bits
         if capacity is None:
             return True
-        return len(self.round_by_key) < capacity
+        if bits is None:
+            self._refuse_unsized_round(capacity)
+        taken = self._occupied_bits + reserved_bits
+        return taken + bits <= capacity
 
     def accept_packed_round(
         self,
@@ -94,15 +112,20 @@ class SyndromeBuffer:
         publication_tick: Optional[int],
     ) -> None:
         """Keep one landed round, readable at that tick; None publishes none."""
-        assert self.has_room(), "a round was written into a full store"
+        packet_bits = round_records.fragment_wire_bits(packet.fragments)
+        assert self.has_room(packet_bits), (
+            "a round was written into a full store"
+        )
         round_key = (packet.operation_id, packet.round_index)
         assert round_key not in self.round_by_key, (
             f"round {round_key!r} was written twice"
         )
         self._open(packet.operation_id)
-        stored = _StoredRound(packet)
+        held_bits = round_records.stated_bits(packet_bits)
+        stored = _StoredRound(packet, held_bits)
         stored.publication_tick = publication_tick
         self.round_by_key[round_key] = stored
+        self._occupied_bits += held_bits
         self.trace.round_stored.fire(round_key, packet)
         if publication_tick is not None:
             self.trace.round_published.fire(round_key, publication_tick)
@@ -115,14 +138,14 @@ class SyndromeBuffer:
             raise RuntimeError(f"round {round_key!r} has live consumer holds")
         self._free_round(round_key)
 
-    def capacity_rounds(self) -> Optional[int]:
-        """The slots this store is bounded to, or None for unbounded.
+    def capacity_bits(self) -> Optional[int]:
+        """The bits this store is bounded to, or None for unbounded.
 
-        The plan check, the trace lane and the strong syndrome round
-        receiver ask this instead of reading the settings record, so a
-        row bounded some other way answers for itself.
+        The trace lane and the two round receivers ask this instead of
+        reading the settings record, so a row bounded some other way
+        answers for itself.
         """
-        return self.settings.rounds
+        return self.settings.bits
 
     # ---- reads
 
@@ -130,6 +153,11 @@ class SyndromeBuffer:
     def occupancy(self) -> int:
         """The rounds stored now."""
         return len(self.round_by_key)
+
+    @property
+    def occupied_bits(self) -> int:
+        """The bits stored now; a round that states no size holds none."""
+        return self._occupied_bits
 
     def retained_fragments(self, round_key) -> Optional[tuple]:
         """The stored round's fragments, or None before and after storage."""
@@ -301,8 +329,16 @@ class SyndromeBuffer:
             if round_key in self.round_by_key:
                 self._free_round(round_key)
 
+    def _refuse_unsized_round(self, capacity: int) -> None:
+        """A bound is measured against a size, so a round must state one."""
+        raise RuntimeError(
+            f"the syndrome buffer holds {capacity} bits and the round "
+            "states no size; a bounded syndrome buffer needs sized rounds"
+        )
+
     def _free_round(self, round_key) -> None:
-        del self.round_by_key[round_key]
+        stored = self.round_by_key.pop(round_key)
+        self._occupied_bits -= stored.held_bits
         self.trace.round_released.fire(round_key)
         if self.held_rounds is not None:
             self.held_rounds.retry()

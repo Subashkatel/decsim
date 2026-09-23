@@ -319,3 +319,14 @@ def _check_measurement_partitions(readout, partitions) -> None:
             raise ValueError(
                 "measurement partition is outside the readout footprint"
             )
+
+
+def stated_bits(bits: Optional[int]) -> int:
+    """A stated width as a number to add up; an unstated one counts zero.
+
+    A memory bounded in bits refuses rounds of unknown width before they
+    land, so only an unbounded memory ever adds one up.
+    """
+    if bits is None:
+        return 0
+    return bits

@@ -7,12 +7,13 @@ logical error rate the system achieves.
 
 The simulated path is the whole loop: QPU rounds, controller readout,
 links, the syndrome buffers, window creation, decoder memory, decoder
-units, the Pauli frame, and the instruction back to the QPU. Every hop
-charges its configured latency and bandwidth, so a run says where the
-time went and which component set the reaction time. Decoding is real:
-windows of a Stim circuit are decoded by PyMatching, BP-OSD, belief
-matching, union find, Relay-BP or Tesseract. A run may also price a
-decoder with a number instead of measuring one.
+units, the Pauli frame, and the instruction back to the QPU. A hop is
+one link between two of those parts. Every hop charges its configured
+latency and bandwidth, so a run says where the time went and which
+component set the reaction time. Decoding is real: windows of a Stim
+circuit are decoded by PyMatching (weighted or unweighted), BP-OSD,
+belief matching, union find, Relay-BP or Tesseract. A run may also price
+a decoder with a number instead of measuring one.
 
 ## Install
 
@@ -25,8 +26,10 @@ python -m pip install -e ".[run]"
 ```
 
 The `bb-decoders` extra adds the three optional backends (Relay-BP,
-Tesseract, BP-OSD through quits); each one is one row of a table and
-nothing else needs it.
+Tesseract, BP-OSD through quits). decsim keeps its choices in tables: a
+table lists the names a yaml may write, and a row is one name and the
+class built for it. Each optional backend is one row, and nothing else
+needs it.
 
 The union find row decodes in C, and the cluster gap that reads its
 growth walks in C beside it, in one library. Build it once, and again

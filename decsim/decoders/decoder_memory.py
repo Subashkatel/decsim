@@ -3,7 +3,7 @@
 Each unit holds the input of the jobs it is decoding: the manager assigns
 a unit, the window's rounds move from the weak syndrome buffer into that unit's
 memory as one immutable DecoderInput, the engine reads them, and the memory is
-freed when the decode completes. Capacity is rounds per unit; a window
+freed when the decode completes. Capacity is bits per unit; a window
 larger than the unit's memory cannot be decoded by that unit and stops
 the run. There is no shared store, no credits and no waiting: a job
 waits in the weak syndrome buffer for a unit, never for memory. Precedent:
@@ -40,44 +40,44 @@ class DecoderMemoryCapacityError(RuntimeError):
         *,
         pool: str,
         unit: int,
-        requested_rounds: int,
-        capacity_rounds: int,
+        requested_bits: int,
+        capacity_bits: int,
     ) -> None:
         text = (
-            f"decoder unit {pool!r}#{unit} holds {capacity_rounds} rounds; "
-            f"the window needs {requested_rounds}"
+            f"decoder unit {pool!r}#{unit} holds {capacity_bits} bits; "
+            f"the window needs {requested_bits}"
         )
         RuntimeError.__init__(self, text)
         self.pool = pool
         self.unit = unit
-        self.requested_rounds = requested_rounds
-        self.capacity_rounds = capacity_rounds
+        self.requested_bits = requested_bits
+        self.capacity_bits = capacity_bits
 
 
 @dataclasses.dataclass(frozen=True)
 class DecoderMemoryConfig:
-    """Rounds of memory per decoder unit, by pool.
+    """Bits of memory per decoder unit, by pool.
 
     A pool absent from the map is unbounded; no config at all leaves
     every unit unbounded.
     """
 
-    capacity_rounds_by_pool: Mapping[str, int]
+    capacity_bits_by_pool: Mapping[str, int]
 
     def __post_init__(self) -> None:
-        copied = dict(self.capacity_rounds_by_pool)
+        copied = dict(self.capacity_bits_by_pool)
         for pool, capacity in copied.items():
             if capacity < 1:
                 raise ValueError(
-                    f"pool {pool!r} needs a positive round capacity, "
+                    f"pool {pool!r} needs a positive bit capacity, "
                     f"got {capacity}"
                 )
         frozen = types.MappingProxyType(copied)
-        object.__setattr__(self, "capacity_rounds_by_pool", frozen)
+        object.__setattr__(self, "capacity_bits_by_pool", frozen)
 
     def capacity_for(self, pool: str) -> Optional[int]:
-        """The pool's rounds per unit; None when unbounded."""
-        return self.capacity_rounds_by_pool.get(pool)
+        """The pool's bits per unit; None when unbounded."""
+        return self.capacity_bits_by_pool.get(pool)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -108,6 +108,23 @@ class DecoderInput:
             fragments.extend(round_input.fragments)
         return fragments
 
+    def size_bits(self) -> Optional[int]:
+        """The bits this input occupies; None when a fragment states none.
+
+        An input with no rounds is no bits at all.
+        """
+        fragments = self.fragments()
+        return round_records.fragment_wire_bits(fragments)
+
+    def held_bits(self) -> int:
+        """The bits this input holds in a memory.
+
+        Rounds that state no size hold none; only a bounded memory needs
+        a size, and it refuses such an input before it lands.
+        """
+        bits = self.size_bits()
+        return round_records.stated_bits(bits)
+
 
 @dataclasses.dataclass
 class ResidentInput:
@@ -127,10 +144,11 @@ class DecoderMemorySnapshot:
 
     pool: str
     unit: int
-    capacity_rounds: Optional[int]
-    occupied_rounds: int
-    peak_occupied_rounds: int
+    capacity_bits: Optional[int]
+    occupied_bits: int
+    peak_occupied_bits: int
     admissions: int
+    unsized_admission_count: int
 
 
 def materialize_decoder_input(job: decoding_records.DecodeJob) -> DecoderInput:
@@ -167,15 +185,15 @@ class DecoderMemory:
     Trace sources: deposited(job, decoder_input) when a job's rounds land
     here, taken(job, decoder_input) when they are freed; a residence in
     this memory runs between the two (data_path.md hop 6), and both
-    carry the rounds so a listener counts what is held.
+    carry the input so a listener counts the bits that are held.
     """
 
     def __init__(
-        self, pool: str, unit: int, capacity_rounds: Optional[int]
+        self, pool: str, unit: int, capacity_bits: Optional[int]
     ) -> None:
         self.pool = pool
         self.unit = unit
-        self.capacity_rounds = capacity_rounds
+        self.capacity_bits = capacity_bits
         self._inputs: dict = {}  # input key -> ResidentInput
         self.statistics = _MemoryStatistics()
         self.trace = _TraceSources()
@@ -186,12 +204,37 @@ class DecoderMemory:
         return f"unit {self.pool}#{self.unit} memory"
 
     @property
-    def occupied_rounds(self) -> int:
-        """Rounds held right now, over every input."""
+    def occupied_bits(self) -> int:
+        """Bits held right now, over every input."""
         occupied = 0
         for resident in self._inputs.values():
-            occupied += len(resident.decoder_input.rounds)
+            occupied += resident.decoder_input.held_bits()
         return occupied
+
+    @property
+    def resident_input_count(self) -> int:
+        """Inputs held right now, whatever size their rounds state."""
+        return len(self._inputs)
+
+    def check_input_size(
+        self, job: decoding_records.DecodeJob, bits: Optional[int]
+    ) -> None:
+        """A bounded memory needs rounds that state their size.
+
+        The link fabric refuses a payload of unknown size on a bounded
+        wire for the same reason (decsim/links/fabric.py): a bound is
+        measured against a size, so rounds with none cannot be admitted
+        to a memory that has one.
+        """
+        if self.capacity_bits is None:
+            return
+        if bits is not None:
+            return
+        raise RuntimeError(
+            f"{job.label}: unit {self.pool!r}#{self.unit} memory holds "
+            f"{self.capacity_bits} bits and the job's rounds state no "
+            "size; a bounded unit memory needs sized rounds"
+        )
 
     def landing_key(self, job: decoding_records.DecodeJob) -> tuple:
         """The identity of the rounds this job reads, in this unit."""
@@ -211,19 +254,17 @@ class DecoderMemory:
                 f"unit {self.pool!r}#{self.unit} already holds {job.label!r}"
             )
         decoder_input = materialize_decoder_input(job)
-        needed = self.occupied_rounds + len(decoder_input.rounds)
-        if self.capacity_rounds is not None and needed > self.capacity_rounds:
-            raise DecoderMemoryCapacityError(
-                pool=self.pool,
-                unit=self.unit,
-                requested_rounds=needed,
-                capacity_rounds=self.capacity_rounds,
-            )
+        bits = decoder_input.size_bits()
+        self.check_input_size(job, bits)
+        needed = self.occupied_bits + decoder_input.held_bits()
+        self._check_capacity(needed)
         self._inputs[key] = ResidentInput(decoder_input, [job])
-        self.statistics.peak_occupied_rounds = max(
-            self.statistics.peak_occupied_rounds, needed
+        self.statistics.peak_occupied_bits = max(
+            self.statistics.peak_occupied_bits, needed
         )
         self.statistics.admissions += 1
+        if bits is None:
+            self.statistics.unsized_admission_count += 1
         self.trace.deposited.fire(job, decoder_input)
         return decoder_input
 
@@ -289,10 +330,24 @@ class DecoderMemory:
         return DecoderMemorySnapshot(
             self.pool,
             self.unit,
-            self.capacity_rounds,
-            self.occupied_rounds,
-            self.statistics.peak_occupied_rounds,
+            self.capacity_bits,
+            self.occupied_bits,
+            self.statistics.peak_occupied_bits,
             self.statistics.admissions,
+            self.statistics.unsized_admission_count,
+        )
+
+    def _check_capacity(self, needed_bits: int) -> None:
+        """A bounded memory refuses the input that does not fit it."""
+        if self.capacity_bits is None:
+            return
+        if needed_bits <= self.capacity_bits:
+            return
+        raise DecoderMemoryCapacityError(
+            pool=self.pool,
+            unit=self.unit,
+            requested_bits=needed_bits,
+            capacity_bits=self.capacity_bits,
         )
 
 
@@ -417,11 +472,15 @@ class _TraceSources:
 class _MemoryStatistics:
     """What one unit's memory has held, over the run.
 
-    peak_occupied_rounds is the high-water mark a study sizes the SRAM
-    by; admissions counts the inputs that landed. gem5 keeps a
-    component's counters in one Group member
+    peak_occupied_bits is the high-water mark a study sizes the SRAM
+    by; admissions counts the inputs that landed, and
+    unsized_admission_count those of them whose rounds state no size and
+    so hold no bits here, the count the links keep for a transfer of
+    unknown width (observe/link_traffic.py). gem5 keeps a component's
+    counters in one Group member
     (tmp/resources/gem5/src/base/stats/group.hh:60-92).
     """
 
-    peak_occupied_rounds: int = 0
+    peak_occupied_bits: int = 0
     admissions: int = 0
+    unsized_admission_count: int = 0

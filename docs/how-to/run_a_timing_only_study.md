@@ -21,7 +21,8 @@ extends: weak_decoder_baseline.yaml
 weak_decoder:
   kind: 1.0
   units: 1
-  unit_memory_rounds: null
+  unit_memory:
+    bits: null
   engine:
     clock: fridge
     fetch_cycles_per_round: 1
@@ -40,15 +41,17 @@ Two things to know before you copy it.
 
 **A section replaces its base's section whole.** `extends` does not
 merge inside a section, so the `weak_decoder` block above repeats
-`units`, `unit_memory_rounds` and `engine` even though the base already
+`units`, `unit_memory` and `engine` even though the base already
 had them. Leaving `engine` out raises `KeyError: 'engine'` at load.
 
 **The links must be able to price what crosses them.** A bounded channel
-needs a payload size, so a run whose device emits payloads without bits
-is refused on the first bounded hop:
+needs a payload size, so a run whose device emits payloads that state
+no size is refused on the first bounded hop:
 `controller_to_weak_buffer has no payload size and its channel is
-bounded; a bounded wire needs a size to serialize`. The weak baseline's
-channels are unbounded, which is why the example extends it.
+bounded; a bounded wire needs a size to serialize`. A syndrome buffer
+or a unit memory sized in bits refuses such a round for the same reason.
+Every `qpu.kind` row states its rounds' size, so this bites only a
+device you build in Python.
 
 ## 2. Run it
 
@@ -100,7 +103,9 @@ still measured; only the time it is charged comes from the card. That is
 why `mismatches vs direct PyMatching: 0` is still meaningful above.
 
 If you want a run with no syndrome data at all, `qpu.kind: timing_only`
-emits payloads without bits. It builds and runs as a machine, but
+emits payloads that state the code's size per round and carry no values,
+so links and memories are still charged in bits. It builds and runs as a
+machine, but
 `decsim collect` currently raises `KeyError` on it, because the
 experiments layer's per-shot measurement always compares the loop's
 prediction against PyMatching on the device's sampled shot, and a

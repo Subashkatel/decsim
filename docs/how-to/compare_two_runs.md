@@ -38,10 +38,11 @@ distance,algorithm,shots,load,queue_wait_mean_us,algorithm_mean_us,buffer0_ready
 3,1.0,20,0.35585185185185186,0.0,1.0,1.076
 ```
 
-Read across. The card's smaller algorithm time takes the load under 1,
-and a load under 1 is why the queue wait falls to nothing and the
-reaction time, the median from a window having its rounds to its
-correction reaching the frame, falls with it.
+Read across. The card's algorithm time is smaller, so the load falls
+under 1. Under a load of 1 the decoder keeps up, the queue wait falls to
+nothing, and the reaction time falls with it. The reaction time here is
+the median from a window having its rounds to its correction reaching
+the frame.
 
 That comparison is between a software wall clock and a hardware card,
 which is a comparison of two questions rather than of two machines. Say
@@ -58,10 +59,11 @@ decsim plot results/<first> results/<second> \
 results/<first>/ler_vs_distance.png
 ```
 
-Every figure takes several run folders, and the file is written next to
-the first one unless `--out` says otherwise. `ler_vs_d` reads one
-physical error rate out of the sweep, so it asks which one; `timeline`,
-`stage_breakdown` and `latency` do not.
+`ler_vs_d`, `latency` and `data_movement` read every folder given;
+`timeline` and `stage_breakdown` read only the first. The file is
+written next to the first folder unless `--out` says otherwise.
+`ler_vs_d` reads one physical error rate out of the sweep, so it asks
+which one; the other four do not.
 
 ## What to check before you believe a difference
 

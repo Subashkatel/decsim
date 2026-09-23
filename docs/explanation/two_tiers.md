@@ -50,7 +50,8 @@ Escalating usefully needs the weak decoder to know when it is unsure.
 how reliable the decoder's own estimate is, rather than a hard decision
 about the most likely logical error (Toshio Sec. II B,
 `2510.25222.txt` lines 386-396). decsim's name for the number is the
-`SoftOutput`, and `CONFIDENCE_SIGNALS` has two rows for how to get it.
+`SoftOutput`, and the table `CONFIDENCE_SIGNALS` has a row for each way
+to get it.
 
 **`complementary_gap`.** Decode the window twice, each solve pinned to
 one logical class, and subtract the two weights. If the two hypotheses
@@ -66,6 +67,16 @@ way rather than by running two matchings, so this is what a real-time
 system would run (Toshio Fig. 3(c,d), citing Meister arXiv:2405.07433,
 Algorithm 2).
 
+**`extra_cluster_gap`.** Decode the window once with union find, then
+keep growing every cluster and the boundary, half a weight step per
+tick, until the two boundaries join. The growth spent when they join is
+the gap. The growth stops at the threshold's worth, and a window whose
+boundaries have not joined by then is kept. Kishi et al.
+(arXiv:2602.03336, Algorithm 1) define it. Their Theorems 1 and 2 say it
+is never larger than the cluster gap and never misses a window the
+cluster gap would escalate. It reuses the decoder's own growth loop, so
+it needs union find too.
+
 The pairing is checked at load. A signal needs particular evidence from
 the decode, and a decoder row that cannot produce that evidence is
 refused by name rather than running and reporting a meaningless number.
@@ -74,8 +85,10 @@ logical class, which is minimum-weight perfect matching today;
 `cluster_gap` needs a cluster-based decoder, which is union find today.
 
 Gaps and thresholds are carried in natural-log weight, the unit the
-decoder compares in. The yaml lets you write the paper's decibels and
-converts once, at load.
+decoder compares in: a decoder scores a set of faults by adding the
+natural logarithms of their probabilities, so a gap is a difference of
+two such sums. The yaml lets you write the paper's decibels and converts
+once, at load.
 
 ## The threshold
 
@@ -111,6 +124,9 @@ faced, and would have little reason to do better.
 | `near_seam_pinned` | the context row's commit region with its past face pinned on the neighbour's committed correction. |
 | `forward_seam_pinned` | the forward row's extent with both faces pinned. |
 
+A **face** is one end of a window, where it meets the window beside it:
+the past face behind it and the far face ahead of it.
+
 Toshio's own assumption for the size is `r_strong = r_com + 2 r_buf`
 ("In this paper, we assume that rstrong = rcom + 2rbuf",
 `2510.25222.txt` line 1250).
@@ -125,9 +141,10 @@ of the errors plus the corrections already committed. It is the
 A fifth shape suggests itself and is deliberately not a row: both faces
 pinned and absorbing nothing. It waits for the window after it, which
 waits for its own strong result, and a serial sliding chain deadlocks.
-What would make it a row is a windowing scheme whose windows do not
-commit in one serial chain, and the row would read that off a fact the
-scheme declares rather than off the scheme's class.
+It would become a row once it ran under a windowing scheme whose windows
+do not commit one after another. The row would then ask the scheme
+whether its commits form one chain, a fact every scheme declares, rather
+than checking which scheme it is.
 
 ## Restart
 

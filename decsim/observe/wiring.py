@@ -345,8 +345,10 @@ def _connect_store_trace(
     trace_writer: trace_writer_module.TraceWriter, store, store_name: str
 ) -> None:
     """One store's residences, its occupancy and its holds."""
-    capacity = store.capacity_rounds()
-    stored = functools.partial(trace_writer.round_stored, store_name, capacity)
+    capacity_bits = store.capacity_bits()
+    stored = functools.partial(
+        trace_writer.round_stored, store_name, capacity_bits
+    )
     store.trace.round_stored.connect(stored)
     published = functools.partial(trace_writer.round_published, store_name)
     store.trace.round_published.connect(published)
@@ -540,14 +542,14 @@ def _decoder_utilization(
 def _decoder_memory_occupancy(
     engine: engine_module.Engine, decoder_managers
 ) -> metrics.DecoderMemoryOccupancy:
-    """The held-round integral of every unit memory, at deposit and take."""
+    """The held-bit integral of every unit memory, at deposit and take."""
     units = []
     for manager in decoder_managers:
         pool_units = manager.pool.units()
         units.extend(pool_units)
     capacity_by_unit = {}
     for unit in units:
-        capacity_by_unit[unit.name] = unit.memory.capacity_rounds
+        capacity_by_unit[unit.name] = unit.memory.capacity_bits
     occupancy = metrics.DecoderMemoryOccupancy(engine, capacity_by_unit)
     for unit in units:
         deposited = functools.partial(occupancy.deposited, unit.name)

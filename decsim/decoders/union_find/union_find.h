@@ -65,7 +65,7 @@ enum union_find_status {
  * parity takes as many stages as the cluster is deep); the ticks the
  * step spanned, which is how many one-unit growth iterations a unit
  * that grows one unit of weight at a time spends on it (Helios lines
- * 1053-1063); and what the strongest of the step's fusions changed, 0
+ * 1242-1254); and what the strongest of the step's fusions changed, 0
  * when its closing edges united no two clusters, 1 when clusters united
  * and only roots and the touching flag moved, 2 when the survivor's
  * parity took an odd absorbed root's. A step that fused nothing has

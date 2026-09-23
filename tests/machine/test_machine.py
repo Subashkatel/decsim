@@ -86,6 +86,18 @@ THIS_FILE = pathlib.Path(__file__)
 TESTS_DIRECTORY = THIS_FILE.parents[1]
 CONFIGS = TESTS_DIRECTORY.parent / "configs"
 CYCLE_TICKS = config.microseconds_to_ticks(1.0)
+# the syndrome bits of one round of a distance-three patch
+BITS_PER_ROUND = 8
+# The live memory program at distance three, as a six-round window
+# ending on its final round occupies a memory. Raw (formed at the
+# decoder): five rounds of eight check bits and the final round's eight
+# plus the nine data qubits. Formed at the controller: five rounds of
+# eight events and the final round's eight plus the four Z checks the
+# data readout closes.
+SIX_ROUND_WINDOW_BITS = {
+    "decoder": 5 * BITS_PER_ROUND + BITS_PER_ROUND + 9,
+    "controller": 5 * BITS_PER_ROUND + BITS_PER_ROUND + 4,
+}
 # the decoder engines of these runs: 250 MHz and 100 MHz
 FAST_ENGINE_CLOCK = config.Clock(4000)
 ENGINE_CLOCK = config.Clock(10_000)
@@ -145,7 +157,8 @@ class FakeWeakDecoder(decoder_module.DecoderBase):
 def test_readouts_reach_the_receiver_in_cycle_order_cycle_ticks_apart():
     engine = engine_module.Engine()
     receiver = RecordingReceiver(engine)
-    device = syndrome_devices.TimingOnlyDevice()
+    code = code_geometry.SurfaceCodeModel(distance=3)
+    device = syndrome_devices.TimingOnlyDevice(code)
     cycle_clock_domain = config.Clock(CYCLE_TICKS)
     qpu = cycle_clock.QPUDevice(engine, device, cycle_clock_domain)
     runtime = FinishingRuntime(qpu)
@@ -379,17 +392,19 @@ def test_bounded_strong_storage_and_unit_memory_drain_without_weak_data(
 ) -> None:
     program = memory_programs.memory_program()
     settings = _settings(program, "live", placement)
-    buffer = syndrome_buffer_settings.SyndromeBufferSettings(rounds=6)
-    decoder = dataclasses.replace(settings.strong_decoder, unit_memory_rounds=6)
+    window_bits = SIX_ROUND_WINDOW_BITS[placement]
+    buffer = syndrome_buffer_settings.SyndromeBufferSettings(bits=window_bits)
+    memory = decoder_settings.UnitMemorySettings(bits=window_bits)
+    decoder = dataclasses.replace(settings.strong_decoder, unit_memory=memory)
     settings = dataclasses.replace(
         settings, strong_syndrome_buffer=buffer, strong_decoder=decoder
     )
     run = _run(settings)
-    assert max(run.strong_occupancies) <= 6
+    assert max(run.strong_occupancies) <= window_bits
     units = run.machine.decoder_manager.pool.units()
     memory = units[0].memory.snapshot()
-    assert memory.capacity_rounds == 6
-    assert memory.peak_occupied_rounds == 6
+    assert memory.capacity_bits == window_bits
+    assert memory.peak_occupied_bits == window_bits
     assert memory.admissions > 1
     _assert_direct_strong_path(run)
     _assert_actual_truth(run)
@@ -399,9 +414,15 @@ def test_bounded_strong_storage_and_unit_memory_drain_without_weak_data(
 def test_a_strong_unit_cannot_admit_a_window_wider_than_its_memory() -> None:
     program = memory_programs.memory_program()
     settings = _settings(program, "live", "controller")
-    decoder = dataclasses.replace(settings.strong_decoder, unit_memory_rounds=5)
+    five_rounds_bits = 5 * BITS_PER_ROUND
+    memory = decoder_settings.UnitMemorySettings(bits=five_rounds_bits)
+    decoder = dataclasses.replace(settings.strong_decoder, unit_memory=memory)
     settings = dataclasses.replace(settings, strong_decoder=decoder)
-    message = "holds 5 rounds; the window needs 6"
+    # the first window's events: four from the first round, eight a round
+    first_window_bits = 4 + 5 * BITS_PER_ROUND
+    message = (
+        f"holds {five_rounds_bits} bits; the window needs {first_window_bits}"
+    )
     with pytest.raises(
         decoder_memory.DecoderMemoryCapacityError, match=message
     ):
@@ -451,9 +472,11 @@ def test_single_terminal_window_matches_direct_pymatching(
 def test_full_strong_storage_retries_held_live_rounds_without_loss() -> None:
     program = memory_programs.memory_program()
     settings = _settings(program, "live", "controller")
-    buffer = syndrome_buffer_settings.SyndromeBufferSettings(rounds=6)
+    window_bits = SIX_ROUND_WINDOW_BITS["controller"]
+    buffer = syndrome_buffer_settings.SyndromeBufferSettings(bits=window_bits)
+    memory = decoder_settings.UnitMemorySettings(bits=window_bits)
     decoder = dataclasses.replace(
-        settings.strong_decoder, kind=5.0, unit_memory_rounds=6
+        settings.strong_decoder, kind=5.0, unit_memory=memory
     )
     links = _price_path(
         settings.links, "strong_buffer_to_strong_decoder", 1_000_000
@@ -466,7 +489,7 @@ def test_full_strong_storage_retries_held_live_rounds_without_loss() -> None:
     )
     run = _run(settings)
     _assert_held_rounds_retried(run)
-    assert max(run.strong_occupancies) <= 6
+    assert max(run.strong_occupancies) <= window_bits
     _assert_direct_strong_path(run)
     _assert_actual_truth(run)
     _assert_drained(run)
@@ -1361,11 +1384,6 @@ class OutsideCodeCard:
     def buffer_rounds(self):
         return 0
 
-    def buffering_floor(self):
-        return (0, 0)
-
-    window_floor_justification = None
-
     def spatial_nodes(self, num_patches):
         return 4 * num_patches
 
@@ -1659,7 +1677,10 @@ def test_a_full_syndrome_buffer_stalls_the_controller_instead_of_dropping():
     seven at 16 us and round 8 waits past 17 us for the first window's
     input to land instead of being dropped.
     """
-    seven_rounds = syndrome_buffer_settings.SyndromeBufferSettings(rounds=7)
+    seven_rounds_bits = 7 * BITS_PER_ROUND
+    seven_rounds = syndrome_buffer_settings.SyndromeBufferSettings(
+        bits=seven_rounds_bits
+    )
     machine = declared_run.weak_only_run(
         rounds=12, weak_syndrome_buffer=seven_rounds
     )
@@ -2525,7 +2546,7 @@ def _assert_drained(run: _Run) -> None:
     assert run.machine.strong_syndrome_buffer.occupancy == 0
     assert run.machine.strong_syndrome_round_receiver.writes_in_flight == 0
     units = run.machine.decoder_manager.pool.units()
-    occupied = [unit.memory.occupied_rounds for unit in units]
+    occupied = [unit.memory.occupied_bits for unit in units]
     assert occupied == [0] * len(units)
 
 

@@ -213,14 +213,12 @@ def supplied_settings(
 class RepetitionMemory:
     """Whole-shot repetition card, with one check per neighbouring pair.
 
-    This example chooses a single finite decode window. It asserts no
-    surface-code buffering floor or repetition window threshold.
+    This example chooses a single finite decode window.
     """
 
     distance: int
     round_count: int
     name: str = "repetition memory"
-    window_floor_justification: Optional[str] = None
 
     def rounds_per_logical_cycle(self) -> int:
         """Use one distance of rounds per logical cycle."""
@@ -237,10 +235,6 @@ class RepetitionMemory:
     def buffer_rounds(self) -> int:
         """The whole-shot problem needs no look-ahead."""
         return 0
-
-    def buffering_floor(self) -> tuple[int, int]:
-        """Declare no floor for this whole-shot example."""
-        return (0, 0)
 
     def spatial_nodes(self, num_patches: int) -> int:
         """Count the check nodes in one repetition round."""

@@ -494,7 +494,7 @@ def _weak_unit() -> dict:
         "weak_decoder": {
             "kind": "pymatching",
             "units": 1,
-            "unit_memory_rounds": None,
+            "unit_memory": {"bits": None},
             "engine": {
                 "clock": "fridge",
                 "fetch_cycles_per_round": 1,
@@ -720,10 +720,6 @@ class DelegatingWindowScheme:
     def data_complete(self, window, *, readiness) -> bool:
         """Whether the window has every round it reads."""
         return self.inner.data_complete(window, readiness=readiness)
-
-    def validate_buffer(self, geometry) -> None:
-        """The sliding scheme's trailing floor."""
-        self.inner.validate_buffer(geometry)
 
 
 class UndeclaredWindowScheme:

@@ -149,7 +149,7 @@ def build_plan(
         has_open_ended_dynamic_streams=bool(dynamic_streams),
     )
     resource_claims = _resource_claims(operations, view_by_id, layout)
-    device = _syndrome_source(settings.qpu)
+    device = _syndrome_source(settings.qpu, code)
     error_model_provider = settings.qpu.error_model_provider
     if error_model_provider is None:
         error_model_provider = device
@@ -404,12 +404,19 @@ def _idle_policy(settings: controller_settings.IdlePolicySettings):
     return row()
 
 
-def _syndrome_source(settings: qpu_settings.QpuSettings):
-    """The device of the qpu kind, or the Python-built one."""
+def _syndrome_source(settings: qpu_settings.QpuSettings, code):
+    """The device of the qpu kind, or the Python-built one.
+
+    A row that shapes its payloads by the code card is built with the
+    run's card, so a yaml that names it needs no argument of its own.
+    """
     if settings.device is not None:
         return settings.device
     row = tables.row(qpu_settings.SYNDROME_SOURCES, "qpu.kind", settings.kind)
-    return row(**settings.arguments)
+    arguments = dict(settings.arguments)
+    if row.takes_code_card:
+        arguments.setdefault("code", code)
+    return row(**arguments)
 
 
 def _install_operation_circuits(device, model_provider, operations) -> None:

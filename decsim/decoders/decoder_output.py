@@ -33,6 +33,11 @@ import decsim.records.rounds as round_records
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 
+# a selection names the strong request and carries nothing else
+# (links/link_profiles.py, ESCALATION_PAYLOAD_SOURCE), so the escalation
+# hop charges it the link's latency and no time on the wire
+SELECTION_PAYLOAD_BITS = 0
+
 # which output link a tier's result leaves by
 FRAME_PATH_BY_TIER = {
     window_records.DecoderTier.WEAK: (
@@ -83,12 +88,15 @@ class DecoderOutput:
         """Send one window's escalation to the strong decoder.
 
         The send is in the weak job's name for the strong request it
-        selects; returns the delay the link expects.
+        selects; returns the delay the link expects. A selection names
+        a request and carries no payload, so it is sent as zero bits: a
+        bounded hop serializes its header alone, and a hop with a
+        default payload does not price it as a region.
         """
         return self.transfers.send_for_job(
             transfer_records.LinkPath.WEAK_DECODER_TO_STRONG_DECODER,
             weak_job,
-            payload_bits=None,
+            payload_bits=SELECTION_PAYLOAD_BITS,
             request_key=strong_request_key,
             on_delivered=on_delivered,
         )

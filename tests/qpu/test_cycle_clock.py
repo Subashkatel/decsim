@@ -23,6 +23,9 @@ import decsim.qpu.syndrome_devices as syndrome_devices
 import decsim.records.program as program_records
 import decsim.records.rounds as round_records
 
+CODE = code_geometry.SurfaceCodeModel(distance=3)
+BITS_PER_ROUND = 8
+
 
 class ReadoutLog:
     """Every end of the clock at once: readouts, idle rounds, completions."""
@@ -69,6 +72,8 @@ class RecordingSource(syndrome_devices.TimingOnlyDevice):
     """A timing-only source that keeps every begin_operation call."""
 
     def __init__(self):
+        timing_only = super()
+        timing_only.__init__(CODE)
         self.begun = []
 
     def begin_operation(
@@ -100,7 +105,7 @@ def clocked_qpu(cycle_ticks, source=None):
     engine = decsim.engine.Engine()
     log = ReadoutLog(engine)
     if source is None:
-        source = syndrome_devices.TimingOnlyDevice()
+        source = syndrome_devices.TimingOnlyDevice(CODE)
     clock = config.Clock(cycle_ticks)
     qpu = cycle_clock.QPUDevice(engine, source, clock)
     qpu.readout_receiver = log
@@ -299,7 +304,7 @@ def test_a_body_without_detector_data_holds_its_patch_silently():
 
 
 def test_a_zero_round_finalizer_delivers_the_final_readout_and_completes():
-    source = FinalizingSource()
+    source = FinalizingSource(CODE)
     engine, qpu, log = clocked_qpu(10, source)
     operation = program_records.Operation(
         id=2,
@@ -333,7 +338,12 @@ def test_a_declared_fragment_slot_is_stamped_on_the_one_payload():
     engine.run()
     payload, route = log.readouts[0]
     assert payload == round_records.QPUReadout(
-        1, (0,), 1, fragment_count=3, fragment_index=1
+        1,
+        (0,),
+        1,
+        size_bits=BITS_PER_ROUND,
+        fragment_count=3,
+        fragment_index=1,
     )
     assert route == round_records.WINDOW_INPUT_ROUTE
 

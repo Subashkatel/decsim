@@ -74,8 +74,7 @@ class RoundRetention:
         return store
 
     def install_planned_holds(self, buffering_plan) -> None:
-        """Refuse a store the yaml sized below the plan; place its holds."""
-        self._check_store_capacities(buffering_plan)
+        """Place the holds the plan's windows keep on the stores."""
         for owner, identities in buffering_plan.weak_holds:
             self.primary_store.register_hold(owner, identities)
         for owner, identities in buffering_plan.potential_holds:
@@ -356,12 +355,23 @@ class RoundRetention:
     def release_absorbed_strong_hold(
         self, key: tuple, restart_key: Optional[tuple], replacement
     ) -> None:
-        """Drop the absorbed window's potential read; the request holds it."""
+        """Drop the absorbed window's potential read; the request holds it.
+
+        From the request's first round on, every round the absorbed
+        window's own strong window would have read is the request's or
+        the restart window's. The rounds behind that first round are
+        behind the strong window too, and the absorbed window is never
+        decoded, so no reader of them is left: a potential read reaches
+        one buffer behind its commit region, further back than a near
+        face pinned on the commit before it reads.
+        """
         absorbed = decoding_records.PotentialStrong(key)
-        needed_identities = self.strong_store.hold_round_identities(absorbed)
-        needed = set(needed_identities)
+        absorbed_identities = self.strong_store.hold_round_identities(absorbed)
         replacement_identities = self.strong_store.hold_round_identities(
             replacement
+        )
+        needed = _from_the_first_round_on(
+            absorbed_identities, replacement_identities
         )
         replacements = set(replacement_identities)
         if restart_key is not None:
@@ -370,8 +380,13 @@ class RoundRetention:
                 restart_potential
             )
             replacements.update(restart_identities)
-        if not needed <= replacements:
-            raise RuntimeError("absorption replacement does not cover packets")
+        unheld = needed - replacements
+        if unheld:
+            listed = sorted(unheld)
+            raise RuntimeError(
+                f"absorbing window {key}: rounds {listed} are held by "
+                f"neither the strong request nor the restart window"
+            )
         for store in self._strong_context_stores():
             store.release_hold(absorbed)
 
@@ -482,43 +497,29 @@ class RoundRetention:
         for store in self._strong_context_stores():
             store.release_hold(owner)
 
-    def _check_store_capacities(self, buffering_plan) -> None:
-        strong_is_primary = (
-            self.primary_tier is window_records.DecoderTier.STRONG
-        )
-        capacity = self.weak_store.capacity_rounds()
-        minimum = buffering_plan.minimum_live_rounds
-        if self.is_strong_context_retained:
-            # the chip keeps the strong context until the verdict
-            minimum = _longer(minimum, buffering_plan.sb1_minimum_live_rounds)
-        if strong_is_primary:
-            minimum = ()
-        if capacity is not None and capacity < len(minimum):
-            raise ValueError(
-                f"upstream syndrome buffer needs {len(minimum)} packet slots, "
-                f"got {capacity}"
-            )
-        if self.strong_store is None:
-            return
-        strong_capacity = self.strong_store.capacity_rounds()
-        strong_minimum = buffering_plan.sb1_minimum_live_rounds
-        if strong_is_primary:
-            # the plan's window reads live on the strong syndrome buffer
-            strong_minimum = buffering_plan.minimum_live_rounds
-        if strong_capacity is not None and strong_capacity < len(
-            strong_minimum
-        ):
-            raise ValueError(
-                f"strong syndrome buffer needs {len(strong_minimum)} packet "
-                f"slots, got {strong_capacity}"
-            )
+
+def round_identities_of(payloads) -> tuple:
+    """The distinct (operation, round) keys of the payloads, in order."""
+    identities = {}
+    for fragment in payloads:
+        identities[(fragment.operation_id, fragment.round_index)] = None
+    return tuple(identities)
 
 
-def _longer(first: tuple, second: tuple) -> tuple:
-    """Whichever of two round lists is longer, the first on a tie."""
-    if len(second) > len(first):
-        return second
-    return first
+def _from_the_first_round_on(identities: tuple, first_of: tuple) -> set:
+    """The identities at or after the earliest identity of first_of.
+
+    An absorbed strong window's rounds behind the first round of the
+    window that replaces it have no reader left; this keeps the rest,
+    the rounds that still need a holder.
+    """
+    first_identity = min(first_of)
+    kept = set()
+    for identity in identities:
+        if identity < first_identity:
+            continue
+        kept.add(identity)
+    return kept
 
 
 def _is_released(store, arrived_for, round_key: tuple) -> bool:
@@ -542,11 +543,3 @@ def _move_hold_to_input(
         return
     identities = round_identities_of(job.payloads)
     store.register_hold(owner, identities)
-
-
-def round_identities_of(payloads) -> tuple:
-    """The distinct (operation, round) keys of the payloads, in order."""
-    identities = {}
-    for fragment in payloads:
-        identities[(fragment.operation_id, fragment.round_index)] = None
-    return tuple(identities)

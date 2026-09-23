@@ -13,6 +13,7 @@ import decsim.build.escalation as escalation_build
 import decsim.build.plan as plan_build
 import decsim.escalation.settings as escalation_settings
 import decsim.frontends.settings as workload_settings
+import decsim.qpu.settings as qpu_settings
 import decsim.records.decoding as decoding_records
 import decsim.records.windows as window_records
 import decsim.settings as machine_settings
@@ -22,14 +23,15 @@ import decsim.windows.settings as window_settings
 import tests.declared_run as declared_run
 
 
-def _plan(*, escalation=None, windows=None):
-    """The plan of a six-round memory run with the given two sections."""
+def _plan(*, escalation=None, windows=None, qpu=None):
+    """The plan of a six-round memory run with the given sections."""
     if escalation is None:
         escalation = escalation_settings.EscalationSettings()
     if windows is None:
         windows = window_settings.WindowSettings()
+    if qpu is None:
+        qpu = declared_run.declared_qpu()
     workload = declared_run.declared_workload(None, 6)
-    qpu = declared_run.declared_qpu()
     links = declared_run.declared_profile()
     controller = declared_run.declared_controller()
     frame = declared_run.declared_frame()
@@ -56,6 +58,15 @@ def _switching():
         gap_threshold_nats=2.0,
         confidence="complementary_gap",
     )
+
+
+def test_a_row_shaped_by_the_code_card_is_built_with_the_runs_card():
+    """A yaml names the kind alone, so the build supplies the card."""
+    named_by_kind = qpu_settings.QpuSettings(kind="syndrome_bits", distance=5)
+
+    plan = _plan(qpu=named_by_kind)
+
+    assert plan.device.code is plan.code
 
 
 def test_a_run_that_never_escalates_gets_the_flush_tail():

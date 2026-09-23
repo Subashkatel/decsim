@@ -135,7 +135,7 @@ def build_decoder_pool(
     if unit_pools is None:
         active_settings = _active_tier_settings(settings, policy)
         unit_pools = {"default": active_settings.units}
-    decoder_memory = _decoder_memory(settings, policy)
+    decoder_memory = _decoder_memory(settings, policy, unit_pools)
     copies_input_by_pool = _copies_input_by_pool(settings, policy, unit_pools)
     blocks_unit_by_pool = _blocks_unit_by_pool(settings, policy, unit_pools)
     formation_by_pool = _formation_by_pool(
@@ -272,19 +272,39 @@ def _active_tier_settings(
 
 
 def _decoder_memory(
-    settings: machine_settings.MachineSettings, policy
+    settings: machine_settings.MachineSettings, policy, unit_pools: dict
 ) -> Optional[decoder_memory_module.DecoderMemoryConfig]:
-    """The pools' input memory: the given one, or the active tier's SRAM."""
+    """Each pool's unit memory, from the tier whose units that pool holds.
+
+    The strong pool is the strong tier's; every other pool decodes the
+    plan's windows on the active tier. A Python-built memory is used as
+    it is. A pool whose tier sets no capacity is left out, which is an
+    unbounded memory.
+    """
     given = settings.decoder_manager.decoder_memory
     if given is not None:
         return given
     active_settings = _active_tier_settings(settings, policy)
-    unit_memory_rounds = active_settings.unit_memory_rounds
-    if unit_memory_rounds is None:
+    bits_by_pool = {}
+    for pool in unit_pools:
+        bits_by_pool[pool] = active_settings.unit_memory.bits
+    if decode_queue.STRONG_POOL in bits_by_pool:
+        strong_bits = settings.strong_decoder.unit_memory.bits
+        bits_by_pool[decode_queue.STRONG_POOL] = strong_bits
+    bounded_pools = _without_unset(bits_by_pool)
+    if not bounded_pools:
         return None
-    return decoder_memory_module.DecoderMemoryConfig(
-        {"default": unit_memory_rounds}
-    )
+    return decoder_memory_module.DecoderMemoryConfig(bounded_pools)
+
+
+def _without_unset(value_by_pool: dict) -> dict:
+    """The pools whose value is set; a None value is a key left unset."""
+    set_by_pool = {}
+    for pool, value in value_by_pool.items():
+        if value is None:
+            continue
+        set_by_pool[pool] = value
+    return set_by_pool
 
 
 def _algorithm(tier_settings: decoder_settings.DecoderSettings, tier: str):

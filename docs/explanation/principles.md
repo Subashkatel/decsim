@@ -39,7 +39,7 @@ cut off the upper levels and still have a usable and useful product"
 time, each level an abstraction the levels above rely on and the levels
 below know nothing of (`dijkstra_the.txt` lines 52-57).
 
-**In decsim.** Twenty-five packages on eleven levels, printed by
+**In decsim.** The packages sit on levels, printed by
 `tools/check_uses_graph.py` and enforced by `tools/check.sh`, which
 fails on any cycle. Nothing at level 3 or below imports `decsim/build/`
 or `decsim/machine.py`, so the decoders' own tests decode a window on a
@@ -198,6 +198,6 @@ Design*, and Liskov and Zilles 1974.
 ## Read next
 
 - `STYLE.md`: these eleven as rules, with the tools that check them.
-- [The design decisions](decisions.md): the nineteen decisions made
+- [The design decisions](decisions.md): the decisions made
   under them.
 - [Architecture](architecture.md): the shape they produced.

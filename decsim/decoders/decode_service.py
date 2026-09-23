@@ -92,11 +92,15 @@ class DecodeService:
         return depth + 1
 
     def carries_input(self, job: decoding_records.DecodeJob) -> bool:
-        """The job moves syndrome data into a unit's memory."""
+        """The job moves syndrome data into a unit's memory.
+
+        Its rounds, not their width: a timing-only device's rounds state
+        no size and still move.
+        """
         if job.send_input is not None:
             return True
-        demand = self.memory_demand(job)
-        return demand > 0
+        round_count = self._input_round_count(job)
+        return round_count > 0
 
     def input_is_on_the_unit(
         self,
@@ -114,21 +118,43 @@ class DecodeService:
             return True
         return self.staging.is_landing_into(memory, job)
 
-    def memory_demand(self, job: decoding_records.DecodeJob) -> int:
-        """The rounds a job's input occupies in unit memory.
+    def memory_demand(self, job: decoding_records.DecodeJob) -> Optional[int]:
+        """The bits a job's input occupies in unit memory.
 
-        The distinct rounds of its payloads, the same count the deposit
-        charges. An external job carries no syndrome data and stores
-        nothing; a merged batch stores every member's input.
+        The bits of the payloads that land for it, at the width they
+        cross the input link. None when a payload states no size. A
+        tier that forms its own detection events forms them after they
+        land, so its memory holds the rounds at this same width
+        (controller.detection_events_formed_at decoder).
+        """
+        demand = 0
+        for input_job in self._input_jobs(job):
+            bits = input_job.payload_bits()
+            if bits is None:
+                return None
+            demand += bits
+        return demand
+
+    def _input_jobs(self, job: decoding_records.DecodeJob) -> list:
+        """The jobs whose payloads land in the unit's memory for this one.
+
+        An external job carries no syndrome data and stores nothing; a
+        merged batch stores every member's input; every other job stores
+        its own.
         """
         if job.on_done is not None:
-            return 0
+            return []
         if strong_requests_module.is_merged_batch(job):
-            demand = 0
-            for member in self.strong_requests.members_of(job):
-                demand += decoding_records.distinct_round_count(member.payloads)
-            return demand
-        return decoding_records.distinct_round_count(job.payloads)
+            return self.strong_requests.members_of(job)
+        return [job]
+
+    def _input_round_count(self, job: decoding_records.DecodeJob) -> int:
+        """The syndrome rounds a job moves into the unit's memory."""
+        round_count = 0
+        for input_job in self._input_jobs(job):
+            payloads = input_job.payloads
+            round_count += decoding_records.distinct_round_count(payloads)
+        return round_count
 
     # -------------------------------------------------- dispatch and start
 
@@ -359,7 +385,7 @@ class DecodeService:
         """The names of the units whose memory still holds rounds."""
         held = []
         for unit in self.pool.units():
-            if unit.memory.occupied_rounds:
+            if unit.memory.resident_input_count:
                 held.append(unit.name)
         return held
 
@@ -428,7 +454,7 @@ class DecodeService:
         free_now = self.pool.free_count(pool)
         self.engine.log(
             log_sources.DECODER_MANAGER,
-            f"ASSIGN UNIT {job.label} "
+            f"ASSIGN UNIT {job.decoding_unit_name} to {job.label} "
             f"({slot_note}waited {waited} in queue, "
             f"{pool_tag}units free now {free_now})",
         )

@@ -44,9 +44,10 @@ class FixedRounds:
 class PerOperationRounds:
     """A round count per operation id, with a fallback policy for the rest.
 
-    The QLX frontend fills this from each task's duration; a zero count is
-    allowed there, because a zero-duration task finalizes a stream round
-    without occupying the QPU.
+    A Python workload fills this with its own counts (protection_workload
+    in tools/deltakit_example.py does); a zero count is allowed,
+    because an operation may finalize a stream round without occupying
+    the QPU.
     """
 
     rounds_by_operation: dict

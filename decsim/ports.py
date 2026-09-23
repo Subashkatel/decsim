@@ -1848,10 +1848,9 @@ class RoundsPolicy(Protocol):
 
     The policies are FixedRounds, PerOperationRounds, CodeRounds,
     GateRounds and TemporalRounds (qpu/round_policies.py), with no table
-    and no yaml key: the memory_circuit row fixes its rounds, the QLX
-    frontend fills a PerOperationRounds from each task's duration (a
-    zero-duration task there runs none), a Python workload may pass its
-    own, and GateRounds is the default. The lattice-surgery unit of d
+    and no yaml key: the memory_circuit row fixes its rounds, a Python
+    workload may pass its own (a PerOperationRounds may give an operation
+    none), and GateRounds is the default. The lattice-surgery unit of d
     rounds per step is Horsman 1111.4022 Sec. 3.1 and Litinski
     1808.02892.
     """

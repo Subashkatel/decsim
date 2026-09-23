@@ -1,4 +1,4 @@
-"""The windows section: the tables it resolves and the two keys it refuses.
+"""The windows section: the tables it resolves and the keys it refuses.
 
 STYLE.md rule 7: a pluggable component's section carries one kind key
 naming a row of the root's table. This section carries four such keys,
@@ -64,6 +64,17 @@ def test_a_boundaries_key_that_names_no_row_is_refused():
     sentence = str(refusal.value)
     assert "windows.boundaries" in sentence
     assert "lazy" in sentence
+
+
+def test_a_boundary_payload_that_names_no_row_is_refused_at_load():
+    section = _section(boundary_payload="bitmap")
+
+    with pytest.raises(ValueError) as refusal:
+        window_settings.WindowSettings.from_yaml(section, CLOCKS)
+
+    sentence = str(refusal.value)
+    assert "windows.boundary_payload" in sentence
+    assert "bitmap" in sentence
 
 
 def test_both_boundary_policy_rows_are_reachable_by_name():

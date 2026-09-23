@@ -112,6 +112,9 @@ class WindowSettings:
             row, "windows", section, WINDOWS_KEYS
         )
         boundary_payload = section.get("boundary_payload", "dense_seam_mask")
+        tables.row(
+            BOUNDARY_PAYLOADS, "windows.boundary_payload", boundary_payload
+        )
         terminal_policy = section.get("terminal_policy")
         _check_terminal_policy(terminal_policy)
         boundaries = section.get("boundaries")

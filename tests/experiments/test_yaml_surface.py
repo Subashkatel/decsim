@@ -13,6 +13,7 @@ import decsim.controller.settings as controller_settings
 import decsim.experiments.collect_command as collect_command
 import decsim.experiments.experiment as experiment
 import decsim.experiments.report as report
+import decsim.experiments.run_folder as run_folder
 from tests.experiments.yaml_configs import (
     CONFIGS_DIR,
     MINIMAL_CONFIG,
@@ -408,3 +409,22 @@ def test_a_run_writes_its_manifest_and_per_shot_records(tmp_path, monkeypatch):
     assert run_dir.name.endswith("-unit_test_config")
     assert (run_dir / "config" / "unit_test_config.yaml").exists()
     assert (run_dir / "sweep.csv").exists() and (run_dir / "links.csv").exists()
+
+
+def test_two_config_files_of_one_name_are_both_copied(tmp_path):
+    """The chain's files keep their places, so a base of one name stays."""
+    base_path = write_config(tmp_path, {})
+    child_folder = tmp_path / "child"
+    child_folder.mkdir()
+    child_path = child_folder / base_path.name
+    child_path.write_text(f"extends: ../{base_path.name}\n")
+    config = experiment.load_experiment(child_path)
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+
+    run_folder.snapshot_code_state(config, run_dir)
+
+    child_copy = run_dir / "config" / "child" / base_path.name
+    base_copy = run_dir / "config" / base_path.name
+    assert child_copy.read_text() == child_path.read_text()
+    assert base_copy.read_text() == base_path.read_text()

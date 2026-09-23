@@ -27,7 +27,7 @@ without any number changing (`decsim/experiments/report.py`).
 | `data_movement.csv` | `decsim/experiments/report.py`, `data_movement_rows` | one row per sweep point per path, then per memory class, averaged over the point's shots |
 | `residence.csv` | `decsim/experiments/residence.py`, `write_residence` | one row per traced shot per structure, then per link path: how long a round or window sat there, and how long a move waited on the wire |
 | `manifest.json` | `decsim/experiments/run_folder.py`, `write_manifest` | one object: what ran, where, and with which library versions |
-| `config/` | `decsim/experiments/run_folder.py`, `snapshot_code_state` | a verbatim copy of every yaml file in the config chain |
+| `config/` | `decsim/experiments/run_folder.py`, `snapshot_code_state` | a verbatim copy of every yaml file in the config chain, each at its place relative to the others, so every `extends` still resolves |
 | `code_state.patch` | `decsim/experiments/run_folder.py`, `snapshot_code_state` | `git diff HEAD`, written only when the checkout was dirty |
 | `trace/<shot>.trace.json` | `decsim/observe/trace_writer.py` | one Chrome trace per traced shot |
 | `log/<shot>.log` | `decsim/experiments/measure.py`, and `decsim/experiments/run_command.py` for one shot | the engine narrator's lines, written when the `observation` section asks for a log |

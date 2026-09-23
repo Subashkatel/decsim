@@ -88,10 +88,14 @@ def snapshot_code_state(config, run_dir: Path) -> None:
     """
     config_dir = run_dir / "config"
     config_dir.mkdir(exist_ok=True)
+    chain_folder = _chain_folder(config.config_files)
     for config_file in config.config_files:
-        source = Path(config_file)
-        target = config_dir / source.name
-        shutil.copy2(config_file, target)
+        config_path = Path(config_file)
+        source = config_path.resolve()
+        place = source.relative_to(chain_folder)
+        target = config_dir / place
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
     checkout = _checkout()
     diff = _git_output("git", "-C", str(checkout), "diff", "HEAD")
     if diff:
@@ -186,6 +190,22 @@ def utc_now() -> str:
     """This moment as an iso timestamp, for the manifest's times."""
     now = datetime.datetime.now(datetime.timezone.utc)
     return now.isoformat()
+
+
+def _chain_folder(config_files: tuple) -> Path:
+    """The deepest folder that holds every file of the extends chain.
+
+    Each copy keeps its place below it, so two files of one name in two
+    folders stay two copies, and every copy's `extends` still names its
+    base's copy.
+    """
+    folders = []
+    for config_file in config_files:
+        config_path = Path(config_file)
+        source = config_path.resolve()
+        folders.append(str(source.parent))
+    common_folder = os.path.commonpath(folders)
+    return Path(common_folder)
 
 
 def _write_the_manifest(manifest: dict, run_dir: Path) -> None:

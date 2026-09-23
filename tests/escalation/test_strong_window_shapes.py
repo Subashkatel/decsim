@@ -310,19 +310,22 @@ def _claim(machine, window_index: int):
 
 
 def test_a_forward_window_plan_claims_the_rounds_a_restart_would_read():
-    """The plan's claims at the default re-read width, which is 0.
+    """The plan's claims at the default re-read width, which is 1.
 
-    A bounded window claims exactly its own reads, since a restart of
-    it would begin on its first committed round. The first window, and
-    every window of an ordinary run, claims nothing.
+    A bounded window claims exactly the rounds its restart would read:
+    its own reads and the buffer region behind its commit, the last
+    block of the strong region before it (Toshio 2510.25222 Fig. 12
+    step 5). The first window, and every window of an ordinary run,
+    claims nothing.
     """
     forward = fabric.switching_machine(
         rounds=15, escalated_windows=set(), strong_window="forward"
     )
-    # W1 commits 4-6 and reads to 9
-    assert _claim(forward, 1) == tuple((1, index) for index in range(4, 10))
-    # W4 commits 13-15 and reads to 18, clipped at the operation's end
-    assert _claim(forward, 4) == tuple((1, index) for index in range(13, 16))
+    # W1 commits 4-6 and reads to 9; the re-read adds 1-3
+    assert _claim(forward, 1) == tuple((1, index) for index in range(1, 10))
+    # W4 commits 13-15, reads to 18 clipped at the operation's end, and
+    # re-reads 10-12
+    assert _claim(forward, 4) == tuple((1, index) for index in range(10, 16))
     assert _claim(forward, 0) is None
     ordinary = fabric.switching_machine(rounds=15, escalated_windows=set())
     for window_index in range(5):

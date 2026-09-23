@@ -52,11 +52,10 @@ THRESHOLD_SOURCES = {
 # window re-reads under the forward strong window (Toshio 2510.25222
 # Sec. III C). The text has the weak decoder resume once r_com + r_buf
 # rounds are stored after the strong region (lines 1229-1235), which
-# both values meet. 0, the default, reads nothing inside the region. 1
-# reads its last buffer region as the restart window's past context,
-# which is how Fig. 12 step 5 draws the restart window: that block is
-# half assigned to the strong decoder and half the weak decoder's
-# buffer.
+# both values meet. 1, the default, reads its last buffer region as the
+# restart window's past context, which is how Fig. 12 step 5 draws the
+# restart window: that block is half assigned to the strong decoder and
+# half the weak decoder's buffer. 0 reads nothing inside the region.
 RESTART_REREAD_BUFFER_REGIONS = (0, 1)
 ESCALATION_KEYS = (
     "kind",
@@ -253,7 +252,7 @@ class EscalationSettings:
     online: Optional[OnlineThresholdSettings] = None
     run_both_at_once: bool = False
     strong_window: str = "near_seam_pinned"
-    restart_reread_buffer_regions: int = 0
+    restart_reread_buffer_regions: int = 1
     policy: Optional[ports.EscalationPolicy] = None
     gap_threshold_nats: Optional[float] = None
     online_threshold: Optional[ports.ThresholdSource] = None
@@ -491,7 +490,7 @@ def _switching_boolean(section: Mapping, key: str) -> bool:
 
 def _restart_reread_buffer_regions(section: Mapping) -> int:
     """How far into the strong region the restart window re-reads."""
-    regions = section.get("restart_reread_buffer_regions", 0)
+    regions = section.get("restart_reread_buffer_regions", 1)
     is_a_count = type(regions) is int
     if not is_a_count or regions not in RESTART_REREAD_BUFFER_REGIONS:
         raise ValueError(

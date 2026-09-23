@@ -256,15 +256,13 @@ escalation:
 #                                  # to the restart window, and reads one
 #                                  # buffer region of raw context on a near
 #                                  # face that no committed correction closes
-#   restart_reread_buffer_regions: 0  # the forward rows only: how many of the
+#   restart_reread_buffer_regions: 1  # the forward rows only: how many of the
 #                                  # strong region's buffer regions the
 #                                  # restarted weak window re-reads. Toshio
 #                                  # 2510.25222 lines 1229-1235 resume the weak
 #                                  # decoder once commit plus buffer rounds are
 #                                  # stored after the strong region, which both
-#                                  # values meet. 0 reads nothing inside the
-#                                  # region, and the restart window owns the
-#                                  # faults of the rounds it reads. 1 re-reads
+#                                  # values meet. 1, the default, re-reads
 #                                  # the region's last buffer region as the
 #                                  # restart window's past context, as Fig. 12
 #                                  # step 5 draws it; forward's strong region
@@ -272,7 +270,10 @@ escalation:
 #                                  # forward_seam_pinned's leaves them to the
 #                                  # restart window its far face pins on. It
 #                                  # costs the weak syndrome buffer one more
-#                                  # buffer region per bounded window
+#                                  # buffer region per bounded window. 0 reads
+#                                  # nothing inside the region, and the
+#                                  # restart window owns the faults of the
+#                                  # rounds it reads
 
 workload:
   kind: memory_circuit             # memory_circuit | memory_patches are the

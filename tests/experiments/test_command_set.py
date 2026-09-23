@@ -899,6 +899,30 @@ def test_show_refuses_a_shot_count_that_is_not_a_whole_number_of_one_or_more(
     )
 
 
+def test_show_refuses_a_sweep_axis_written_as_one_value_not_a_list(
+    tmp_path, capsys
+):
+    scalar_axis = {
+        "sweep": [
+            {
+                "physical_error_probability": [0.001],
+                "distance": 3,
+                "round_period_us": [1.0],
+                "shots": 1,
+            }
+        ]
+    }
+    config_path = yaml_configs.write_config(tmp_path, scalar_axis)
+    with pytest.raises(SystemExit) as stopped:
+        command.main(["show", str(config_path)])
+
+    printed = capsys.readouterr()
+    assert stopped.value.code == 1
+    assert "sweep block 1 distance must be a list of at least one value" in (
+        printed.err
+    )
+
+
 def test_plot_refuses_a_figure_it_does_not_draw(tmp_path, capsys):
     with pytest.raises(SystemExit) as stopped:
         command.main(["plot", str(tmp_path), "--figure", "everything"])

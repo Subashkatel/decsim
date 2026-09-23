@@ -237,7 +237,7 @@ def test_unknown_algorithms_and_stale_keys_fail_loudly(tmp_path):
             ]
         },
     )
-    with pytest.raises(KeyError):
+    with pytest.raises(ValueError, match=r"sweep block 1 lacks \['distance'\]"):
         experiment.load_experiment(fixed_distance_key)
 
 

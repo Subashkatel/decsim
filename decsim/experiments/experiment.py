@@ -25,12 +25,12 @@ _REPOSITORY_ROOT = _FRONT_DIR.parents[2]
 # configs/ sits beside the decsim package, gem5's configs/ beside its
 # binary; the shipped experiments are what a refused path is listed with.
 CONFIGS_DIR = _REPOSITORY_ROOT / "configs"
-SWEEP_KEYS = (
+SWEEP_AXES = (
     "physical_error_probability",
     "distance",
     "round_period_us",
-    "shots",
 )
+SWEEP_KEYS = SWEEP_AXES + ("shots",)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -351,6 +351,7 @@ def _sweep_block(block: dict, index: int) -> SweepBlock:
             "plus shots (the algorithm lives on the decoder card, not in "
             "the sweep)"
         )
+    _check_axes(block, index)
     shots = block["shots"]
     _check_shots(shots, index)
     return SweepBlock(
@@ -359,6 +360,25 @@ def _sweep_block(block: dict, index: int) -> SweepBlock:
         round_periods_microseconds=tuple(block["round_period_us"]),
         shots=shots,
     )
+
+
+def _check_axes(block: dict, index: int) -> None:
+    """Every key is there, and each axis lists the values it sweeps."""
+    missing = set(SWEEP_KEYS) - set(block)
+    if missing:
+        listed = sorted(missing)
+        raise refusal.RefusalError(
+            f"sweep block {index} lacks {listed}; a block lists "
+            "physical_error_probability, distance and round_period_us and "
+            "names its shots"
+        )
+    for axis in SWEEP_AXES:
+        values = block[axis]
+        if not isinstance(values, list) or not values:
+            raise refusal.RefusalError(
+                f"sweep block {index} {axis} must be a list of at least one "
+                f"value, got {values!r}"
+            )
 
 
 def _check_shots(shots, index: int) -> None:

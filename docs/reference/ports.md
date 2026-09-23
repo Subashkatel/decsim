@@ -487,6 +487,10 @@ Who builds the decoder-facing error model of one window.
 
 The link fabric as every sender sees it.
 
+| Member | Type |
+| --- | --- |
+| `trace` | `Any` |
+
 | Method | What it does |
 | --- | --- |
 | `expected_delay_ticks` | What a send now would pay if nothing else reached its channel. |

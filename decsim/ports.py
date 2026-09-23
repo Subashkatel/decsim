@@ -1570,7 +1570,19 @@ class Link(Protocol):
     override and builds the fabric the root sends on. Every hop of the
     reaction path is priced, and a send delivers by callback with every
     tick of the transfer on the record.
+
+    trace holds transfer_delivered, a trace source the fabric fires once
+    per delivered transfer with a TransferRecord. It is on the port
+    because the machine connects the traffic ledger, the data-movement
+    ledger and the trace writer to whatever answers this port
+    (decsim/observe/wiring.py), as the Decoder port carries
+    stage_recorded; ns-3's point-to-point device declares its trace
+    sources on the device the same way (ns-3
+    src/point-to-point/model/point-to-point-net-device.cc, GetTypeId's
+    AddTraceSource calls).
     """
+
+    trace: Any
 
     def expected_delay_ticks(
         self,

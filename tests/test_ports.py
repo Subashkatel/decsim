@@ -172,6 +172,13 @@ def test_the_window_transfers_port_declares_what_its_senders_call():
     assert _undeclared(called, ("WindowTransfers",)) == {}
 
 
+def test_the_link_port_declares_what_its_senders_and_the_wiring_reach():
+    """The wiring connects the fabric's trace, so the port declares it."""
+    callers = ("controller", "links", "pauli_frame", "observe")
+    called = _called_on(("link", "links"), callers)
+    assert _undeclared(called, ("Link",)) == {}
+
+
 def test_the_window_model_port_declares_what_the_planner_calls():
     """The planner's provider is a port, not an Any-typed field."""
     called = _called_on(("provider",), ("windows",))

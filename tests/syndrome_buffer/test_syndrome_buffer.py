@@ -40,6 +40,8 @@ import tests.declared_run as declared_run
 STALL = controller_settings.PackingOverflowPolicy.STALL
 # every round this file stores carries one fragment of two bits
 BITS_PER_ROUND = 2
+# the key the random programs ask room for; no program writes it
+PROBE_ROUND = ("probe", 0)
 
 
 def packet(
@@ -141,7 +143,7 @@ def run_trace(arrivals, holds, capacity):
     enters = {}
 
     def admit(round: round_records.PackedRound) -> bool:
-        if not the_store.has_room(round.wire_bits):
+        if not the_store.has_room(round.round_key, round.wire_bits, {}):
             return False
         the_store.accept_packed_round(round.packet, publication_tick=engine.now)
         round_index = round.packet.round_index
@@ -312,7 +314,7 @@ def run_on_both(steps: list, capacity_bits: int) -> tuple:
             reference.release(subject)
         if kind == "write":
             write_if_room(the_store, reference, subject, detail)
-        our_room = the_store.has_room(9)
+        our_room = the_store.has_room(PROBE_ROUND, 9, {})
         their_room = reference.has_room(9)
         ours.append((the_store.occupied_bits, our_room))
         theirs.append((reference.occupied_bits, their_room))
@@ -321,7 +323,7 @@ def run_on_both(steps: list, capacity_bits: int) -> tuple:
 
 def write_if_room(the_store, reference, round_key, bits: int) -> None:
     """Both sides answer room for themselves; a refused round is skipped."""
-    if the_store.has_room(bits):
+    if the_store.has_room(round_key, bits, {}):
         written = sized_packet(round_key, bits)
         the_store.accept_packed_round(written, publication_tick=0)
         the_store.release_round_if_unheld(round_key)
@@ -347,7 +349,7 @@ def test_a_full_store_answers_no_room_and_is_unchanged():
     the_store.accept_packed_round(first, publication_tick=10)
     the_store.accept_packed_round(second, publication_tick=11)
 
-    assert the_store.has_room(BITS_PER_ROUND) is False
+    assert the_store.has_room((1, 3), BITS_PER_ROUND, {}) is False
     assert the_store.occupied_bits == two_rounds_bits
     assert the_store.occupancy == 2
     assert the_store.publication_tick((1, 1)) == 10
@@ -360,7 +362,7 @@ def test_a_held_round_enters_when_a_slot_frees_in_completion_order():
     entered = []
 
     def admit(round: round_records.PackedRound) -> bool:
-        if not the_store.has_room(round.wire_bits):
+        if not the_store.has_room(round.round_key, round.wire_bits, {}):
             return False
         the_store.accept_packed_round(round.packet, publication_tick=0)
         entered.append(round.packet.round_index)
@@ -504,11 +506,11 @@ def test_a_bounded_store_has_room_while_the_bits_fit_beside_what_is_taken():
     first = packet(1)
     the_store.accept_packed_round(first, publication_tick=0)
 
-    fits_beside_the_stored = the_store.has_room(BITS_PER_ROUND)
+    fits_beside_the_stored = the_store.has_room((1, 2), BITS_PER_ROUND, {})
     fits_beside_the_reserved = the_store.has_room(
-        BITS_PER_ROUND, one_round_reserved
+        (1, 3), BITS_PER_ROUND, {(1, 2): one_round_reserved}
     )
-    exceeds_the_capacity = the_store.has_room(three_rounds_bits)
+    exceeds_the_capacity = the_store.has_room((1, 2), three_rounds_bits, {})
 
     assert fits_beside_the_stored is True
     assert fits_beside_the_reserved is True
@@ -523,7 +525,7 @@ def test_a_bounded_store_refuses_a_round_that_states_no_size():
     with pytest.raises(
         RuntimeError, match="a bounded syndrome buffer needs sized rounds"
     ):
-        the_store.has_room(None)
+        the_store.has_room((1, 1), None, {})
 
 
 def test_an_unbounded_store_takes_a_round_that_states_no_size():

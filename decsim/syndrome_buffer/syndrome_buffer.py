@@ -24,6 +24,7 @@ new_holder) and hold_released(holder) for the consumers' tokens.
 """
 
 import dataclasses
+from collections.abc import Mapping
 from typing import Optional
 
 import decsim.ports as ports
@@ -90,18 +91,27 @@ class SyndromeBuffer:
 
     # ---- the port
 
-    def has_room(self, bits: Optional[int], reserved_bits: int = 0) -> bool:
+    def has_room(
+        self,
+        round_key: tuple,
+        bits: Optional[int],
+        reserved_bits_by_round: Mapping[tuple, int],
+    ) -> bool:
         """Whether a round of that many bits fits beside what is taken.
 
-        reserved_bits is the room a crossing round has already taken,
-        gem5's `_reserved` in `avail() = _maxsize - _size - _reserved`
-        (src/dev/net/pktfifo.hh).
+        The reserved bits are the room the crossing rounds have already
+        taken, gem5's `_reserved` in `avail() = _maxsize - _size -
+        _reserved` (src/dev/net/pktfifo.hh).
         """
+        # one memory: every round shares its room, whatever its key
+        del round_key
         capacity = self.settings.bits
         if capacity is None:
             return True
         if bits is None:
             self._refuse_unsized_round(capacity)
+        reserved_widths = reserved_bits_by_round.values()
+        reserved_bits = sum(reserved_widths)
         taken = self._occupied_bits + reserved_bits
         return taken + bits <= capacity
 
@@ -113,10 +123,10 @@ class SyndromeBuffer:
     ) -> None:
         """Keep one landed round, readable at that tick; None publishes none."""
         packet_bits = round_records.fragment_wire_bits(packet.fragments)
-        assert self.has_room(packet_bits), (
+        round_key = (packet.operation_id, packet.round_index)
+        assert self.has_room(round_key, packet_bits, {}), (
             "a round was written into a full store"
         )
-        round_key = (packet.operation_id, packet.round_index)
         assert round_key not in self.round_by_key, (
             f"round {round_key!r} was written twice"
         )

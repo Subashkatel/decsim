@@ -144,9 +144,9 @@ class _StrongReceiver:
         self.reserved_bits = 0
         self.landed = []
 
-    def reserve_region(self, round_count, bits):
-        self.reserved += round_count
-        self.reserved_bits += bits
+    def reserve_region(self, region):
+        self.reserved += len(region.packets)
+        self.reserved_bits += region.wire_bits
 
     def receive_region(self, region):
         self.landed.append(region)

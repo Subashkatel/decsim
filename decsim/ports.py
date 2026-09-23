@@ -24,7 +24,7 @@ A component names its neighbours by declaring a Port (below) for each
 one, and the root binds them by assignment once every component exists.
 """
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any, Callable, Optional, Protocol, runtime_checkable
 
 import decsim.records.decoding as decoding_records
@@ -147,8 +147,8 @@ class SyndromeBuffer(Protocol):
     in the store, which is at the landing of the hop that carried them, and
     it is readable at that same instant: the store and the publication
     are one call at one tick. The end that takes the landing asks
-    has_room first with the round's bits, counting the bits it has
-    reserved for the writes in flight (gem5's packet store answers
+    has_room first with the round's key and bits, counting the rounds it
+    has reserved for the writes in flight (gem5's packet store answers
     `avail() = _maxsize - _size - _reserved` against the packet's own
     length, src/dev/net/pktfifo.hh); a packed round is written once and
     kept until every consumer releases it. A store never refuses a
@@ -159,11 +159,23 @@ class SyndromeBuffer(Protocol):
 
     occupied_bits: int
 
-    def has_room(self, bits: Optional[int], reserved_bits: int = 0) -> bool:
-        """Whether a round of that many bits fits beside what is taken.
+    def has_room(
+        self,
+        round_key: tuple,
+        bits: Optional[int],
+        reserved_bits_by_round: Mapping[tuple, int],
+    ) -> bool:
+        """Whether this round fits beside the stored and the reserved rounds.
 
-        A bounded store raises on a round that states no size: a bound
-        is measured against a size.
+        The store is asked with the round itself, as gem5's requester
+        asks its responder with the packet (RequestPort::tryTiming(
+        PacketPtr pkt), src/mem/port.hh:268 and 617-623), so a store of
+        several memories answers for the memory the round goes to, which
+        gem5's interleaved ranges pick from the address
+        (src/base/addr_range.hh 70-78). reserved_bits_by_round is the
+        bits each round still crossing toward the store will take, by
+        its key. A bounded store raises on a round that states no size:
+        a bound is measured against a size.
         """
 
     def accept_packed_round(
@@ -280,16 +292,16 @@ class StrongSyndromeRoundReceiver(Protocol):
     landing.
     """
 
-    def has_room(self, bits: Optional[int]) -> bool:
-        """Whether a write of that many bits can land."""
+    def has_room(self, packed: round_records.PackedRound) -> bool:
+        """Whether this round's write can land."""
 
-    def reserve_write(self, bits: Optional[int]) -> None:
-        """Take the bits one crossing round will need, before it leaves."""
+    def reserve_write(self, packed: round_records.PackedRound) -> None:
+        """Take the room this crossing round will need, before it leaves."""
 
     def receive_round(self, packed: round_records.PackedRound) -> None:
         """Store a landed round and deliver it on its canonical route."""
 
-    def reserve_region(self, round_count: int, bits: Optional[int]) -> None:
+    def reserve_region(self, region: round_records.EscalatedRegion) -> None:
         """Take the room an escalated region's rounds will need, or refuse."""
 
     def receive_region(self, region: round_records.EscalatedRegion) -> None:
@@ -310,11 +322,11 @@ class WeakSyndromeRoundReceiver(Protocol):
     store's own outgoing port.
     """
 
-    def has_room(self, bits: Optional[int]) -> bool:
-        """Whether that many bits fit: the stored ones and those in flight."""
+    def has_room(self, packed: round_records.PackedRound) -> bool:
+        """Whether this round fits beside the stored and the crossing ones."""
 
-    def reserve_write(self, bits: Optional[int]) -> None:
-        """Take the bits one crossing round will need, before it leaves."""
+    def reserve_write(self, packed: round_records.PackedRound) -> None:
+        """Take the room this crossing round will need, before it leaves."""
 
     def receive_round(self, packed: round_records.PackedRound) -> None:
         """Take one round that landed here: store it, then announce it."""

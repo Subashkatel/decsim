@@ -1740,7 +1740,7 @@ def test_both_stores_settle_empty_at_the_end_of_an_escalating_run():
 
     assert machine.weak_syndrome_buffer.occupancy == 0
     assert machine.strong_syndrome_buffer.occupancy == 0
-    assert machine.strong_syndrome_round_receiver.writes_in_flight == 0
+    assert machine.strong_syndrome_round_receiver.reserved_bits_by_round == {}
 
 
 def test_the_execution_and_the_decoding_views_agree_on_the_workload():
@@ -2519,7 +2519,8 @@ def _record_strong_occupancy(
     _packet: round_records.SyndromeRoundPacket,
 ) -> None:
     stored = machine.strong_syndrome_buffer.occupancy
-    in_flight = machine.strong_syndrome_round_receiver.writes_in_flight
+    receiver = machine.strong_syndrome_round_receiver
+    in_flight = len(receiver.reserved_bits_by_round)
     taken = stored + in_flight
     counts.append(taken)
 
@@ -2570,7 +2571,8 @@ def _assert_actual_truth(run: _Run) -> None:
 def _assert_drained(run: _Run) -> None:
     assert run.machine.weak_syndrome_buffer.occupancy == 0
     assert run.machine.strong_syndrome_buffer.occupancy == 0
-    assert run.machine.strong_syndrome_round_receiver.writes_in_flight == 0
+    receiver = run.machine.strong_syndrome_round_receiver
+    assert receiver.reserved_bits_by_round == {}
     units = run.machine.decoder_manager.pool.units()
     occupied = [unit.memory.occupied_bits for unit in units]
     assert occupied == [0] * len(units)

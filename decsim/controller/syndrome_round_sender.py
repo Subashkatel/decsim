@@ -1,7 +1,7 @@
 """The sender: a finished round into every store it must reach, or held.
 
 The backpressure law of the readout path: each store's own end answers
-has_room with the round's bits before any round leaves for it, counting
+has_room for the round before any round leaves for it, counting
 the bits it holds and the bits reserved for the writes in flight, and
 the room is reserved before the wire is used (gem5's packet store
 answers `avail() = _maxsize - _size - _reserved` against the packet's
@@ -205,16 +205,16 @@ class SyndromeRoundSender:
     def _write(self, packed: round_records.PackedRound) -> bool:
         """Write the round if its store has room; False when it has none."""
         if self.publishes_from_strong_store:
-            if not self.strong_receiver.has_room(packed.wire_bits):
+            if not self.strong_receiver.has_room(packed):
                 return self.held_rounds.refuse(packed, self._write)
             self._write_strong(packed)
             return True
-        if not self.weak_receiver.has_room(packed.wire_bits):
+        if not self.weak_receiver.has_room(packed):
             return self.held_rounds.refuse(packed, self._write)
         # the round takes its weak syndrome buffer slot when its bits are
         # there: the room is reserved here, and the landing stores and
         # publishes it
-        self.weak_receiver.reserve_write(packed.wire_bits)
+        self.weak_receiver.reserve_write(packed)
         self.transmitter.send(packed)
         return True
 
@@ -233,7 +233,7 @@ class SyndromeRoundSender:
         attribution = transfer_records.TransferAttribution.for_packet(
             packed.packet
         )
-        self.strong_receiver.reserve_write(packed.wire_bits)
+        self.strong_receiver.reserve_write(packed)
         landed = functools.partial(self._land_in_strong_store, packed)
         self.link.send(
             transfer_records.LinkPath.CONTROLLER_TO_STRONG_BUFFER,

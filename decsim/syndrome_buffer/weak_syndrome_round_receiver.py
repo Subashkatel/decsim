@@ -94,20 +94,22 @@ class WeakSyndromeRoundReceiver:
     ) -> None:
         self.engine = engine
         self.settings = settings
-        self.writes_in_flight = 0
-        # the bits the crossing rounds will take, held against the store
-        self.reserved_bits = 0
+        # the bits each crossing round will take, by its key, held
+        # against the store until its write completes
+        self.reserved_bits_by_round: dict = {}
         self.trace = _TraceSources()
 
-    def has_room(self, bits: Optional[int]) -> bool:
+    def has_room(self, packed: round_records.PackedRound) -> bool:
         """A write can land: the store weighs it against what is reserved."""
-        return self.store.has_room(bits, self.reserved_bits)
+        return self.store.has_room(
+            packed.round_key, packed.wire_bits, self.reserved_bits_by_round
+        )
 
-    def reserve_write(self, bits: Optional[int]) -> None:
+    def reserve_write(self, packed: round_records.PackedRound) -> None:
         """Take the bits one crossing round will need, before it leaves."""
-        assert self.has_room(bits), "a round was written into a full store"
-        self.writes_in_flight += 1
-        self.reserved_bits += round_records.stated_bits(bits)
+        assert self.has_room(packed), "a round was written into a full store"
+        bits = round_records.stated_bits(packed.wire_bits)
+        self.reserved_bits_by_round[packed.round_key] = bits
 
     def receive_round(self, packed: round_records.PackedRound) -> None:
         """Start one landed round's write, retaining its reservation until done.
@@ -163,9 +165,10 @@ class WeakSyndromeRoundReceiver:
         ends with nothing delivered is a legal end, and the law that
         covers it is the callback law (tests/test_callback_law.py).
         """
-        if self.writes_in_flight:
+        if self.reserved_bits_by_round:
+            in_flight = len(self.reserved_bits_by_round)
             raise RuntimeError(
-                f"weak syndrome buffer ended with {self.writes_in_flight} "
+                f"weak syndrome buffer ended with {in_flight} "
                 f"controller_to_weak_buffer writes in flight"
             )
 
@@ -178,8 +181,7 @@ class WeakSyndromeRoundReceiver:
 
     def _give_back_reservation(self, packed: round_records.PackedRound) -> None:
         """The crossing is over: it gives back exactly what it reserved."""
-        self.writes_in_flight -= 1
-        self.reserved_bits -= round_records.stated_bits(packed.wire_bits)
+        del self.reserved_bits_by_round[packed.round_key]
 
     def _as_stored(
         self, landed: round_records.PackedRound

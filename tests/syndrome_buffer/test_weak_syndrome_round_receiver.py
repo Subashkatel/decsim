@@ -101,7 +101,7 @@ def _receiver_with(engine, store, output=None, detection_events=None):
 
 def _cross(receiver, packed, landing_ticks=LANDING_TICKS):
     """One crossing: the room is taken at the send, the slot at the landing."""
-    receiver.reserve_write(packed.wire_bits)
+    receiver.reserve_write(packed)
     receiver.engine.schedule(
         landing_ticks,
         lambda: receiver.receive_round(packed),
@@ -130,20 +130,20 @@ def test_the_reserved_bits_count_against_the_room_until_the_round_lands():
     store = _store(bits=BITS_PER_ROUND)
     receiver, _windows = _receiver_with(engine, store)
     packed = _packed(1)
-    room_before = receiver.has_room(BITS_PER_ROUND)
+    next_round = _packed(2)
+    room_before = receiver.has_room(next_round)
 
     _cross(receiver, packed)
-    room_while_crossing = receiver.has_room(BITS_PER_ROUND)
-    reserved_while_crossing = receiver.reserved_bits
+    room_while_crossing = receiver.has_room(next_round)
+    reserved_while_crossing = dict(receiver.reserved_bits_by_round)
     engine.run()
 
     assert room_before is True
     assert room_while_crossing is False
-    assert reserved_while_crossing == BITS_PER_ROUND
-    assert receiver.has_room(BITS_PER_ROUND) is False
-    assert receiver.reserved_bits == 0
+    assert reserved_while_crossing == {(1, 1): BITS_PER_ROUND}
+    assert receiver.has_room(next_round) is False
+    assert receiver.reserved_bits_by_round == {}
     assert store.occupied_bits == BITS_PER_ROUND
-    assert receiver.writes_in_flight == 0
 
 
 def test_the_landing_stamps_the_publication_tick_of_the_end_it_reached():
@@ -249,7 +249,7 @@ def test_a_timing_only_round_takes_its_slot_here_and_is_never_published():
     packed = _packed(2, route=MEMORY_ROUTE)
     delivered = []
 
-    receiver.reserve_write(packed.wire_bits)
+    receiver.reserve_write(packed)
     receiver.send_memory_round(packed, lambda: delivered.append(True))
 
     assert output.sent == [(1, 2)]
@@ -264,7 +264,8 @@ def test_a_write_still_in_flight_at_the_end_of_a_run_is_a_failure():
     store = _store()
     receiver, _windows = _receiver_with(engine, store)
 
-    receiver.reserve_write(BITS_PER_ROUND)
+    crossing = _packed(1)
+    receiver.reserve_write(crossing)
 
     try:
         receiver.check_settled()
@@ -311,16 +312,17 @@ def test_a_priced_write_keeps_its_reservation_until_the_write_edge():
     store = syndrome_buffer_module.SyndromeBuffer(settings)
     receiver, windows = _receiver_with(engine, store)
     packed = _packed(1)
-    receiver.reserve_write(packed.wire_bits)
+    receiver.reserve_write(packed)
     receiver.receive_round(packed)
+    next_round = _packed(2)
     assert store.occupancy == 0
-    assert receiver.writes_in_flight == 1
-    assert receiver.has_room(BITS_PER_ROUND) is False
+    assert receiver.reserved_bits_by_round == {(1, 1): BITS_PER_ROUND}
+    assert receiver.has_room(next_round) is False
     assert windows.published == []
 
     engine.run()
 
-    assert receiver.writes_in_flight == 0
+    assert receiver.reserved_bits_by_round == {}
     assert store.occupancy == 1
     assert windows.published == [(40, (1, 1), 40)]
 
@@ -378,10 +380,38 @@ def test_the_chips_formation_cycles_are_added_to_the_write_cycles():
     )
     packed = _packed(1)
 
-    receiver.reserve_write(packed.wire_bits)
+    receiver.reserve_write(packed)
     receiver.receive_round(packed)
     engine.run()
 
     charged_cycles = formation_cycles + write_cycles
     expected = charged_cycles * clock.period_ticks
     assert windows.published == [(expected, (1, 1), expected)]
+
+
+def test_the_store_is_asked_for_the_round_beside_the_rounds_in_flight():
+    """gem5 asks the responder with the packet (src/mem/port.hh:268)."""
+    engine = engine_module.Engine()
+    store = _RoomAskingStore()
+    receiver, _windows = _receiver_with(engine, store)
+    crossing = _packed(1)
+    asked = _packed(2)
+    receiver.reserve_write(crossing)
+
+    receiver.has_room(asked)
+
+    assert store.asked[-1] == ((1, 2), BITS_PER_ROUND, {(1, 1): BITS_PER_ROUND})
+
+
+class _RoomAskingStore(syndrome_buffer_module.SyndromeBuffer):
+    """An unbounded store recording every room question it is asked."""
+
+    def __init__(self) -> None:
+        settings = syndrome_buffer_settings.SyndromeBufferSettings()
+        syndrome_buffer_module.SyndromeBuffer.__init__(self, settings)
+        self.asked = []
+
+    def has_room(self, round_key, bits, reserved_bits_by_round):
+        reserved = dict(reserved_bits_by_round)
+        self.asked.append((round_key, bits, reserved))
+        return True

@@ -95,13 +95,13 @@ class RecordingStrongReceiver:
         self.reserved_bits = 0
         self.written = []
 
-    def has_room(self, bits):
-        del bits
+    def has_room(self, packed):
+        del packed
         return self.room
 
-    def reserve_write(self, bits):
+    def reserve_write(self, packed):
         self.reserved += 1
-        self.reserved_bits += bits
+        self.reserved_bits += packed.wire_bits
 
     def receive_round(self, packed: round_records.PackedRound) -> None:
         self.written.append(packed.packet.round_index)
@@ -240,7 +240,7 @@ def test_strong_primary_rounds_use_only_the_strong_store() -> None:
     engine.run()
 
     assert strong_receiver.written == [1, 2]
-    assert weak_receiver.writes_in_flight == 0
+    assert weak_receiver.reserved_bits_by_round == {}
     assert transmitter.sent == []
 
 
@@ -268,7 +268,7 @@ def test_the_controller_carries_the_round_to_the_room_side_and_lands_it():
     first = packed(1)
 
     sender.admit(first)
-    reserved_while_crossing = room_side.writes_in_flight
+    reserved_while_crossing = len(room_side.reserved_bits_by_round)
     stored_at_the_write = strong_store.occupancy
     engine.run()
 
@@ -280,7 +280,7 @@ def test_the_controller_carries_the_round_to_the_room_side_and_lands_it():
     assert stored_at_the_write == 0
     assert strong_store.occupancy == 1
     assert strong_store.publication_tick((1, 1)) == crossing_ticks
-    assert room_side.writes_in_flight == 0
+    assert room_side.reserved_bits_by_round == {}
 
 
 def test_a_weak_primary_round_never_leaves_for_the_strong_store():
@@ -298,7 +298,7 @@ def test_a_weak_primary_round_never_leaves_for_the_strong_store():
     assert admitted is True
     assert strong_receiver.written == []
     assert strong_receiver.reserved == 0
-    assert weak_receiver.writes_in_flight == 1
+    assert weak_receiver.reserved_bits_by_round == {(1, 1): BITS_PER_ROUND}
     assert transmitter.sent == [1]
 
 
@@ -316,7 +316,7 @@ def test_a_strong_primary_round_with_no_room_on_the_room_side_is_held():
 
     assert admitted is False
     assert weak_receiver.store.occupancy == 0
-    assert weak_receiver.writes_in_flight == 0
+    assert weak_receiver.reserved_bits_by_round == {}
     assert transmitter.sent == []
     assert sender.held_rounds.count == 1
 

@@ -243,7 +243,7 @@ class StrongRedecode:
         region = round_records.EscalatedRegion.of(
             assignment.request_key, packets
         )
-        self.strong_receiver.reserve_region(len(packets), region.wire_bits)
+        self.strong_receiver.reserve_region(region)
         self.carried_round_keys.update(missing)
         landed = functools.partial(self._region_landed, region)
         self.decoder_output.send_region(region, landed)

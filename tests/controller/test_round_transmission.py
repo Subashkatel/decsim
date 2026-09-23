@@ -186,6 +186,12 @@ def transmitter_with(engine, profile, windows=None):
     return transmitter, store, windows, recorder, ledger
 
 
+def reserve_and_send(transmitter, packed) -> None:
+    """The sender's two steps: the room is reserved, then the round leaves."""
+    transmitter.weak_receiver.reserve_write(packed)
+    transmitter.send(packed)
+
+
 def test_a_priced_hop_publishes_at_delivery_and_stamps_the_store():
     engine = engine_module.Engine()
     profile = priced_cwb_profile()
@@ -194,7 +200,7 @@ def test_a_priced_hop_publishes_at_delivery_and_stamps_the_store():
     )
     first = packed(1)
 
-    transmitter.send(first)
+    reserve_and_send(transmitter, first)
     engine.run()
 
     assert store.publication_tick((1, 1)) == CWB_TICKS
@@ -212,7 +218,7 @@ def test_a_memory_round_tells_the_windows_at_delivery_and_frees_its_slot():
     )
     memory_round = packed(1, route=MEMORY_ROUTE)
 
-    transmitter.send(memory_round)
+    reserve_and_send(transmitter, memory_round)
     engine.run()
 
     assert windows.memory_rounds == [(WBD_TICKS, 7)]
@@ -231,7 +237,7 @@ def test_memory_rounds_pipeline_onto_the_link_without_a_landing_wait():
     second = packed(2, route=MEMORY_ROUTE)
 
     def send(memory_round):
-        transmitter.send(memory_round)
+        reserve_and_send(transmitter, memory_round)
 
     engine.schedule(0, lambda: send(first))
     engine.schedule(CYCLE_TICKS, lambda: send(second))
@@ -276,7 +282,7 @@ def test_two_routes_take_one_wire_in_the_order_they_reach_it(
     window_round = packed(2, wire_bits=ROUND_BITS)
 
     def send(finished):
-        transmitter.send(finished)
+        reserve_and_send(transmitter, finished)
 
     engine.schedule(0, lambda: send(window_round))
     engine.schedule(memory_send_ticks, lambda: send(memory_round))

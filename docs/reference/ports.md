@@ -38,7 +38,7 @@ The weak syndrome buffer, as its own round receiver sees it.
 
 | Method | What it does |
 | --- | --- |
-| `has_room` | Whether a round of that many bits fits beside what is taken. |
+| `has_room` | Whether this round fits beside the stored and the reserved rounds. |
 | `accept_packed_round` | Keep one landed round, readable at that tick; None publishes none. |
 | `release_round` | Free the round; its consumers are done with it. |
 | `capacity_bits` | The bits this store is bounded to, or None for unbounded. |
@@ -80,8 +80,8 @@ The strong syndrome buffer's receiving end, as its two senders see it.
 
 | Method | What it does |
 | --- | --- |
-| `has_room` | Whether a write of that many bits can land. |
-| `reserve_write` | Take the bits one crossing round will need, before it leaves. |
+| `has_room` | Whether this round's write can land. |
+| `reserve_write` | Take the room this crossing round will need, before it leaves. |
 | `receive_round` | Store a landed round and deliver it on its canonical route. |
 | `reserve_region` | Take the room an escalated region's rounds will need, or refuse. |
 | `receive_region` | Take an escalated region that landed here: every round its slot. |
@@ -92,8 +92,8 @@ The weak syndrome round receiver, as the controller sees it.
 
 | Method | What it does |
 | --- | --- |
-| `has_room` | Whether that many bits fit: the stored ones and those in flight. |
-| `reserve_write` | Take the bits one crossing round will need, before it leaves. |
+| `has_room` | Whether this round fits beside the stored and the crossing ones. |
+| `reserve_write` | Take the room this crossing round will need, before it leaves. |
 | `receive_round` | Take one round that landed here: store it, then announce it. |
 | `send_memory_round` | Send one timing-only round to the decoder side the store feeds. |
 

@@ -79,7 +79,7 @@ class QpuSettings:
     code_card: str = "rotated_surface"
     round_period_microseconds: float = 1.1
     distance: Optional[int] = None
-    code: Optional[code_geometry.CodeModel] = None
+    code: Optional[ports.CodeModel] = None
     layout: Optional[layouts.LayoutModel] = None
     device: Optional[ports.SyndromeSource] = None
     error_model_provider: Optional[Any] = None
@@ -152,7 +152,7 @@ class QpuSettings:
         self,
         commit_rounds_override: Optional[int],
         buffer_rounds_override: Optional[int],
-    ) -> code_geometry.CodeModel:
+    ) -> ports.CodeModel:
         """The code_card row, at the sweep's distance and the yaml's windows."""
         card_row = tables.row(CODE_CARDS, "qpu.code_card", self.code_card)
         arguments = {

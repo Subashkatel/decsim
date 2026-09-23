@@ -621,3 +621,23 @@ How idle rounds travel while an operation waits for feedback.
 | --- | --- |
 | `relay` | Carry one idle round of the patch through the idle accounting. |
 | `end_idle_period` | Settle the uncharged rounds when an operation claims the patch. |
+
+## the rows the root reads before it builds
+
+### `CodeModel`
+
+A code card: the numbers the machine reads off a QEC code.
+
+| Member | Type |
+| --- | --- |
+| `name` | `str` |
+| `distance` | `int` |
+
+| Method | What it does |
+| --- | --- |
+| `rounds_per_logical_cycle` | Syndrome rounds per logical cycle. |
+| `round_period_us` | The card's own round period, or None for the run's cadence. |
+| `commit_rounds` | Rounds committed per decode window. |
+| `buffer_rounds` | Look-ahead rounds per decode window. |
+| `spatial_nodes` | The per-round graph size a latency model prices this card at. |
+| `syndrome_bits_per_round` | Syndrome bits one round of this many patches produces. |

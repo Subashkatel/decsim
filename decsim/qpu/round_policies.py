@@ -16,7 +16,6 @@ import dataclasses
 from typing import Optional
 
 import decsim.ports as ports
-import decsim.qpu.code_geometry as code_geometry
 import decsim.records.program as program_records
 
 
@@ -33,7 +32,7 @@ class FixedRounds:
     def rounds_for(
         self,
         operation: program_records.OperationPlanningView,
-        code: code_geometry.CodeModel,
+        code: ports.CodeModel,
     ) -> int:
         """The fixed count."""
         del operation, code
@@ -67,7 +66,7 @@ class PerOperationRounds:
     def rounds_for(
         self,
         operation: program_records.OperationPlanningView,
-        code: code_geometry.CodeModel,
+        code: ports.CodeModel,
     ) -> int:
         """The operation's own count, or the fallback policy's."""
         if operation.id in self.rounds_by_operation:
@@ -84,7 +83,7 @@ class CodeRounds:
     def rounds_for(
         self,
         operation: program_records.OperationPlanningView,
-        code: code_geometry.CodeModel,
+        code: ports.CodeModel,
     ) -> int:
         """The scaled logical cycle, rounded, never below one."""
         del operation
@@ -123,7 +122,7 @@ class GateRounds:
     def rounds_for(
         self,
         operation: program_records.OperationPlanningView,
-        code: code_geometry.CodeModel,
+        code: ports.CodeModel,
     ) -> int:
         """The kind's cost in rounds of the code's distance."""
         distance = code.distance
@@ -165,7 +164,7 @@ class TemporalRounds:
     def rounds_for(
         self,
         operation: program_records.OperationPlanningView,
-        code: code_geometry.CodeModel,
+        code: ports.CodeModel,
     ) -> int:
         """The temporal distance for surgery, else the base policy's count."""
         kind = operation.kind

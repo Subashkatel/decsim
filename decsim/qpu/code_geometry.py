@@ -4,7 +4,8 @@ A card is a small frozen record, not a stabilizer code. The simulator
 prices decoder timing, so all it takes from a code is its distance, its
 window sizes, the size of the decoding graph per round, and the syndrome
 bits per round. The numbers can be set by hand or copied from an upstream
-tool's output; decsim never imports such a tool.
+tool's output; decsim never imports such a tool. Each card fills the
+CodeModel port (decsim/ports.py).
 
 The rotated surface-code card follows Stim's generated
 ``surface_code:rotated_memory_z`` circuit (Stim, src/stim/gen/
@@ -18,33 +19,7 @@ Z checks, the [[144, 12, 12]] gross code by default.
 
 import dataclasses
 from collections.abc import Mapping
-from typing import Optional, Protocol, runtime_checkable
-
-
-@runtime_checkable
-class CodeModel(Protocol):
-    """A code card: window sizes, cycle length, graph size, syndrome width."""
-
-    name: str
-    distance: int
-
-    def rounds_per_logical_cycle(self) -> int:
-        """Syndrome rounds per logical cycle."""
-
-    def round_period_us(self) -> Optional[float]:
-        """The card's own round period, or None for the run's cadence."""
-
-    def commit_rounds(self) -> int:
-        """Rounds committed per decode window."""
-
-    def buffer_rounds(self) -> int:
-        """Look-ahead rounds per decode window."""
-
-    def spatial_nodes(self, num_patches: int) -> int:
-        """The per-round graph size a latency model prices this card at."""
-
-    def syndrome_bits_per_round(self, num_patches: int) -> int:
-        """Syndrome bits one round of this many patches produces."""
+from typing import Optional
 
 
 @dataclasses.dataclass(frozen=True)

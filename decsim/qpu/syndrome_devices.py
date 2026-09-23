@@ -23,7 +23,7 @@ import random
 from typing import Any, Optional
 
 import decsim.detector_error_model.fault_model_contracts as fault_models
-import decsim.qpu.code_geometry as code_geometry
+import decsim.ports as ports
 import decsim.records.program as program_records
 import decsim.records.rounds as round_records
 import decsim.records.seeds as seed_records
@@ -49,7 +49,7 @@ class TimingOnlyDevice:
     # nothing is sampled here, so the port's shot source never fires
     shot_sampled = trace_source.SILENT
 
-    def __init__(self, code: code_geometry.CodeModel) -> None:
+    def __init__(self, code: ports.CodeModel) -> None:
         self.code = code
 
     def logical_observable_truth(
@@ -155,7 +155,7 @@ class SyndromeBitDevice(seeding._AtomicRunSeedConsumer):
 
     def __init__(
         self,
-        code: code_geometry.CodeModel,
+        code: ports.CodeModel,
         seed: Optional[int] = None,
         one_payload_per_patch: bool = False,
     ):

@@ -7,7 +7,7 @@ the seam it fills is LayoutModel below.
 
 from typing import Any, Protocol, runtime_checkable
 
-import decsim.qpu.code_geometry as code_geometry
+import decsim.ports as ports
 import decsim.records.program as program_records
 
 # A patch identity is opaque to the layout; Any stands for it below.
@@ -52,17 +52,17 @@ class LayoutModel(Protocol):
 class UniformLayout:
     """Every patch uses the same code card."""
 
-    def __init__(self, code: code_geometry.CodeModel):
+    def __init__(self, code: ports.CodeModel):
         self.code = code
 
-    def code_for_patch(self, patch_id: Any) -> code_geometry.CodeModel:
+    def code_for_patch(self, patch_id: Any) -> ports.CodeModel:
         """The one code, whatever the patch."""
         del patch_id
         return self.code
 
     def code_for_op(
         self, operation: program_records.OperationPlanningView
-    ) -> code_geometry.CodeModel:
+    ) -> ports.CodeModel:
         """The one code, whatever the operation."""
         del operation
         return self.code
@@ -91,6 +91,6 @@ class UniformLayout:
         qubits = frozenset(operation.qubits)
         return [program_records.ResourceClaim("qubits", qubits)]
 
-    def codes(self) -> list[code_geometry.CodeModel]:
+    def codes(self) -> list[ports.CodeModel]:
         """The one code, as the list the seam asks for."""
         return [self.code]

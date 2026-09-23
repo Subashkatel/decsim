@@ -20,7 +20,6 @@ from typing import Any
 import decsim.config as config
 import decsim.engine
 import decsim.ports as ports
-import decsim.qpu.code_geometry as code_geometry
 import decsim.records.log_sources as log_sources
 import decsim.records.program as program_records
 import decsim.records.rounds as round_records
@@ -67,7 +66,7 @@ class QPUDevice:
         engine: decsim.engine.Engine,
         syndrome_source: ports.SyndromeSource,
         clock: config.Clock,
-        code: code_geometry.CodeModel,
+        code: ports.CodeModel,
     ):
         self.engine = engine
         self.syndrome_source = syndrome_source

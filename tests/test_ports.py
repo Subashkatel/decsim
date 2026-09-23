@@ -22,6 +22,7 @@ import pathlib
 import pytest
 
 import decsim.ports as ports
+import decsim.qpu.settings as qpu_settings
 
 TESTS_FILE = pathlib.Path(__file__)
 TESTS_PATH = TESTS_FILE.resolve()
@@ -207,6 +208,26 @@ def test_the_weak_receiver_port_declares_what_the_controller_calls():
     """
     called = _called_on(("weak_receiver", "weak_receiver"), ("controller",))
     assert _undeclared(called, ("WeakSyndromeRoundReceiver",)) == {}
+
+
+def test_the_code_card_port_declares_what_the_tree_calls_on_a_card():
+    """The planner, the workload rows, the plan and the QPU hold a card.
+
+    frontends is walked by module, because its Deltakit compiler names
+    a Deltakit code `code` too.
+    """
+    called = _called_on(("code",), ("qpu", "build"))
+    for module in ("planner.py", "settings.py"):
+        path = DECSIM_ROOT / "frontends" / module
+        _collect_calls(path, ("code",), called)
+    assert _undeclared(called, ("CodeModel",)) == {}
+
+
+@pytest.mark.parametrize("kind", sorted(qpu_settings.CODE_CARDS))
+def test_every_code_card_row_is_a_code_model(kind):
+    row = qpu_settings.CODE_CARDS[kind]
+    card = row()
+    assert isinstance(card, ports.CodeModel)
 
 
 def _decsim_modules() -> list:

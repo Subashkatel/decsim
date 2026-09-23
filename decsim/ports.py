@@ -1904,3 +1904,45 @@ class IdlePolicy(Protocol):
 
     def end_idle_period(self, idle_rounds, operation, patch) -> None:
         """Settle the uncharged rounds when an operation claims the patch."""
+
+
+# ---------------------------- the rows the root reads before it builds
+
+
+@runtime_checkable
+class CodeModel(Protocol):
+    """A code card: the numbers the machine reads off a QEC code.
+
+    Table rows: rotated_surface, bivariate_bicycle (CODE_CARDS,
+    qpu/settings.py), named by qpu.code_card. A card is a record of
+    numbers, not a stabilizer code: the machine prices decoder timing,
+    so it asks a card for its name and distance, its window sizes, its
+    own round period, the graph size a latency model prices, and the
+    bits one round reads out, and for nothing else. The shape is CUDA-Q
+    QEC's code base class, a few counts every code implements
+    (tmp/resources/cudaqx/libs/qec/include/cudaq/qec/code.h lines 51-58
+    and 140-160), built by name with the code's own options (get_code,
+    line 257). The planner, the plan, the round policies, the QPU clock
+    and the circuit-less sources call it.
+    """
+
+    name: str
+    distance: int
+
+    def rounds_per_logical_cycle(self) -> int:
+        """Syndrome rounds per logical cycle."""
+
+    def round_period_us(self) -> Optional[float]:
+        """The card's own round period, or None for the run's cadence."""
+
+    def commit_rounds(self) -> int:
+        """Rounds committed per decode window."""
+
+    def buffer_rounds(self) -> int:
+        """Look-ahead rounds per decode window."""
+
+    def spatial_nodes(self, num_patches: int) -> int:
+        """The per-round graph size a latency model prices this card at."""
+
+    def syndrome_bits_per_round(self, num_patches: int) -> int:
+        """Syndrome bits one round of this many patches produces."""

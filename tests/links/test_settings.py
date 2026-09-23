@@ -156,6 +156,20 @@ def test_a_negative_header_is_refused():
         actual_path(FREE_CHANNEL, header_bits=-8)
 
 
+def test_a_boolean_header_is_refused_as_no_whole_number():
+    with pytest.raises(
+        ValueError, match="header_bits_per_transfer must be a finite whole"
+    ):
+        actual_path(FREE_CHANNEL, header_bits=True)
+
+
+def test_a_boolean_capacity_is_refused_as_no_number():
+    with pytest.raises(
+        ValueError, match="input_bits_per_microsecond must be a finite number"
+    ):
+        capacity(True)
+
+
 def test_a_fractional_setup_cost_is_refused():
     with pytest.raises(
         ValueError, match="setup_ticks must be a finite whole number"

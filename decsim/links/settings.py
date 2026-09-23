@@ -291,8 +291,11 @@ def _check_capacity_matches_payload(
 def _as_whole_number(value, name: str) -> int:
     """A value as an exact int, or a ValueError naming the field.
 
-    3.0 is fine; 3.5, NaN and None are not.
+    3.0 is fine; 3.5, NaN and None are not, nor a boolean, which Python
+    would read as 0 or 1 and a yaml writes as a flag.
     """
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be a finite whole number")
     try:
         whole = int(value)
     except (OverflowError, ValueError, TypeError):
@@ -311,11 +314,13 @@ def _as_count(value, name: str) -> int:
 
 
 def _require_finite_number(value, name: str) -> None:
-    """Refuse NaN and infinity.
+    """Refuse NaN, infinity and a boolean.
 
     A Python int of any size is finite: math.isfinite overflows converting
     it to float, and that overflow reads as finite.
     """
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be a finite number")
     try:
         is_finite = math.isfinite(value)
     except OverflowError:

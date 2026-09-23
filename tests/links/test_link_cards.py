@@ -236,3 +236,11 @@ def test_a_cards_lanes_multiply_its_lane_rate():
     fabric = _load_readout_card(card)
     capacity = fabric.qpu_to_controller.channel.capacity
     assert capacity.exact_aggregate_bits_per_microsecond() == 8 * 250
+
+
+def test_a_boolean_header_in_a_card_is_refused():
+    card = dict(GOOD_CARD, header_bits_per_transfer=True)
+    with pytest.raises(ValueError) as refusal:
+        _load_readout_card(card)
+    message = str(refusal.value)
+    assert message == "header_bits_per_transfer must be a finite whole number"

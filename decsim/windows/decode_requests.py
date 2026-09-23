@@ -72,10 +72,7 @@ class WindowInputGate:
         if window is None or window.deps_remaining <= 0:
             return True
         visiting = {(window.operation_id, window.window_index)}
-        for dependency in window.deps:
-            if not self._resolving_without_new_slots(dependency, visiting):
-                return False
-        return True
+        return self._every_dependency_resolving(window.deps, visiting)
 
     def may_start(self, job: decoding_records.DecodeJob) -> bool:
         """May this landed job start its decode?
@@ -131,23 +128,22 @@ class WindowInputGate:
 
     # ---- private
 
+    def _every_dependency_resolving(self, dependencies, visiting: set) -> bool:
+        for dependency in dependencies:
+            if not self._resolving_without_new_slots(dependency, visiting):
+                return False
+        return True
+
     def _resolving_without_new_slots(self, key: tuple, visiting: set) -> bool:
         if key in visiting:
             return False
         window = self.planner.windows_by_key.get(key)
-        if window is None:
-            return True
-        if window.is_absorbed:
-            return True
-        if window.t_done is not None or window.service_began:
+        if _needs_no_slot(window):
             return True
         if window.t_dispatch is None:
             return False
         visited = visiting | {key}
-        for dependency in window.deps:
-            if not self._resolving_without_new_slots(dependency, visited):
-                return False
-        return True
+        return self._every_dependency_resolving(window.deps, visited)
 
     def _masked_round(self, state, window_info, round_input):
         fragments = []
@@ -722,6 +718,17 @@ class _SharedInputHold:
         if self.readers_left > 0:
             return
         self.hold_release()
+
+
+def _needs_no_slot(window: Optional[window_records.Window]) -> bool:
+    """Unplanned, absorbed, decoded or decoding: it asks for no slot."""
+    if window is None:
+        return True
+    if window.is_absorbed:
+        return True
+    if window.t_done is not None:
+        return True
+    return window.service_began
 
 
 def _sibling_submissions(sibling) -> list:

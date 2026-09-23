@@ -204,28 +204,18 @@ class SyndromeBuffer:
 
     def close_operation(self, operation_id) -> None:
         """Retire an operation once none of its rounds or holds are live."""
-        live_rounds = []
-        for round_key in self.round_by_key:
-            if identity_records.same_stable_identity(
-                round_key[0], operation_id
-            ):
-                live_rounds.append(round_key)
+        live_rounds = self._stored_rounds_of(operation_id)
         if live_rounds:
-            ordered = sorted(
-                live_rounds, key=identity_records.stable_identity_order_key
-            )
             raise RuntimeError(
-                f"operation {operation_id!r} has live buffer rounds {ordered!r}"
+                f"operation {operation_id!r} has live buffer rounds "
+                f"{live_rounds!r}"
             )
         if self.holds.references(operation_id):
             raise RuntimeError(
                 f"operation {operation_id!r} has live consumer holds"
             )
         self.operations[operation_id] = False
-        open_ids = set()
-        for candidate, is_open in self.operations.items():
-            if is_open:
-                open_ids.add(candidate)
+        open_ids = self._open_operation_ids()
         self.holds.forget_released_outside(open_ids)
 
     def has_live_operation_reference(self, operation_id) -> bool:
@@ -315,6 +305,23 @@ class SyndromeBuffer:
         if is_open is False:
             raise RuntimeError("closed operation identities cannot be reused")
         self.operations[operation_id] = True
+
+    def _stored_rounds_of(self, operation_id) -> list:
+        """The operation's stored rounds, in stable identity order."""
+        stored = []
+        for round_key in self.round_by_key:
+            if identity_records.same_stable_identity(
+                round_key[0], operation_id
+            ):
+                stored.append(round_key)
+        return sorted(stored, key=identity_records.stable_identity_order_key)
+
+    def _open_operation_ids(self) -> set:
+        open_ids = set()
+        for operation_id, is_open in self.operations.items():
+            if is_open:
+                open_ids.add(operation_id)
+        return open_ids
 
     def _hold_record(self, holder, round_keys) -> round_holds.HoldRecord:
         """The record of a hold; a hold may name rounds not yet written.

@@ -292,9 +292,10 @@ class DecoderSettings:
         formation_rate = _formation_cycles_per_round(engine)
         result_blocks_unit = section.get("result_blocks_unit", False)
         _check_boolean(section_name, "result_blocks_unit", result_blocks_unit)
+        units = _unit_count(section, section_name)
         return cls(
             kind=kind,
-            units=section["units"],
+            units=units,
             input=input_kind,
             boundary_fold=boundary_fold,
             result_blocks_unit=result_blocks_unit,
@@ -464,6 +465,26 @@ def _check_boolean(section_name: str, key: str, value) -> None:
     raise ValueError(
         f"{section_name}.{key} {value!r} is not a boolean; write true or false"
     )
+
+
+def _unit_count(section: Mapping, section_name: str) -> int:
+    """A tier's engine count, checked where it enters."""
+    units = section["units"]
+    if _is_engine_count(units):
+        return units
+    raise ValueError(
+        f"{section_name}.units must be a whole number of engines, at least "
+        f"one (got {units!r})"
+    )
+
+
+def _is_engine_count(units) -> bool:
+    """A count of engines: a whole number at least one, never a flag."""
+    if isinstance(units, bool):
+        return False
+    if not isinstance(units, int):
+        return False
+    return units >= 1
 
 
 def _decoder_row(kind, section_name: str):

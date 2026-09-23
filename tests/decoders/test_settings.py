@@ -381,3 +381,18 @@ def test_a_finite_nonnegative_kind_is_a_preset_core_latency(kind):
     )
 
     assert settings.kind == kind
+
+
+@pytest.mark.parametrize("units", [0, -1, True, 1.5, "two"])
+def test_a_unit_count_that_is_not_a_whole_count_is_refused_by_name(units):
+    """None of these is a number of engines a chip can hold."""
+    clocks = config.ClockSettings({"decoder": 250.0})
+    section = _tier_section({"bits": None})
+    section["units"] = units
+
+    with pytest.raises(
+        ValueError, match="weak_decoder.units must be a whole number"
+    ):
+        decoder_settings.DecoderSettings.from_yaml(
+            section, clocks, "weak_decoder"
+        )

@@ -1828,7 +1828,11 @@ class WindowingScheme(Protocol):
 
 @runtime_checkable
 class RoundsPolicy(Protocol):
-    """How many syndrome rounds an operation runs for; always at least 1.
+    """How many syndrome rounds an operation runs for: one or more if decoded.
+
+    An operation the plan does not decode may run none; the planner
+    refuses a decoded one with none (frontends/planner.py
+    _check_decode_owner_rounds).
 
     The policies are FixedRounds, PerOperationRounds, CodeRounds,
     GateRounds and TemporalRounds (qpu/round_policies.py), with no table

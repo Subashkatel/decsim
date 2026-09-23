@@ -1,8 +1,9 @@
 """The round policies: how many syndrome rounds an operation occupies.
 
 Every policy fills the RoundsPolicy port (decsim/ports.py): given an
-operation and its code card, return the round count, at least one. The
-lattice-surgery unit of d rounds per step comes from Horsman et al.
+operation and its code card, return the round count, one or more for
+an operation the plan decodes. The lattice-surgery unit of d rounds per
+step comes from Horsman et al.
 (arXiv 1111.4022v3, Sec. 3.1, 3.2 and 6: d rounds of error correction per
 merge, per split, and per operation) and Litinski (arXiv 1808.02892v3,
 "Translation to surface codes": a two-patch or multi-patch measurement is

@@ -592,7 +592,7 @@ How an operation's rounds are cut into windows.
 
 ### `RoundsPolicy`
 
-How many syndrome rounds an operation runs for; always at least 1.
+How many syndrome rounds an operation runs for: one or more if decoded.
 
 | Method | What it does |
 | --- | --- |

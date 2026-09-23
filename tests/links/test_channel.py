@@ -412,6 +412,33 @@ def test_the_expected_delay_is_the_delivery_when_nothing_overtakes():
     assert second.total_delay_ticks == 16295
 
 
+def test_the_expected_delay_counts_a_transfer_still_in_setup_ahead():
+    """A setup queued behind another's reaches the wire after it.
+
+    The first send's setup ends at 20000 and its 30 bits hold the wire
+    until 50000; the second, asked at 5, is ready at 40000 and starts at
+    50000, so it delivers at 58000, not at 48000.
+    """
+    engine = decsim.engine.Engine()
+    channel = bounded_channel(engine, 1000.0, 0)
+    delivered = []
+    expected = []
+
+    framed = channel_module.FramedPayload(8)
+
+    def ask_then_send():
+        delay = channel.expected_delay_ticks(framed, 5, 20000)
+        expected.append(delay)
+        channel.send(framed, 5, 20000, delivered.append)
+
+    send_at(engine, channel, 0, 30, 20000, delivered)
+    engine.schedule(5, ask_then_send)
+    engine.run()
+    second = delivered[1]
+    assert second.delivery_ticks == 58000
+    assert expected == [second.total_delay_ticks]
+
+
 def test_the_expected_delay_leaves_the_channel_untouched():
     engine = decsim.engine.Engine()
     channel = bounded_channel(engine, 1000.0, 0)

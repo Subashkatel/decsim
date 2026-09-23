@@ -56,6 +56,10 @@ DECODER_KEYS = (
     "engine",
 )
 
+# The keys a <tier>_decoder section cannot leave out: the row, the unit
+# count, the unit's memory and the card its stages are priced on.
+_REQUIRED_DECODER_KEYS = ("kind", "units", "unit_memory", "engine")
+
 DECODER_MANAGER_KEYS = ("bulk_strong", "clock", "dispatch_cycles")
 
 # <tier>_decoder.unit_memory's keys.
@@ -259,13 +263,14 @@ class DecoderSettings:
         section_name: str,
     ) -> "DecoderSettings":
         """A tier section: kind, units, unit memory and the engine card."""
+        _check_required_keys(section, section_name)
         kind = section["kind"]
         row = _decoder_row(kind, section_name)
         row_settings = tables.row_settings(
             row, section_name, section, DECODER_KEYS, clocks
         )
         engine = section["engine"]
-        engine_clock = clocks.clock(engine["clock"])
+        engine_clock = _engine_clock(engine, clocks, section_name)
         unit_memory = UnitMemorySettings.from_yaml(
             section["unit_memory"], section_name
         )
@@ -365,6 +370,30 @@ def _dispatch_clock(
             "domain its cycles are counted in"
         )
     return clocks.clock(section["clock"])
+
+
+def _check_required_keys(section: Mapping, section_name: str) -> None:
+    """A tier section names every key it cannot do without."""
+    missing = set(_REQUIRED_DECODER_KEYS) - set(section)
+    if not missing:
+        return
+    listed = sorted(missing)
+    raise ValueError(
+        f"{section_name} needs the keys {listed}; configs/reference.yaml "
+        "holds every key with its unit"
+    )
+
+
+def _engine_clock(
+    engine: Mapping, clocks: config.ClockSettings, section_name: str
+) -> config.Clock:
+    """The domain the engine card's cycles count on; a card must name it."""
+    if "clock" not in engine:
+        raise ValueError(
+            f"{section_name}.engine needs clock, the domain its stage "
+            "cycles are counted in"
+        )
+    return clocks.clock(engine["clock"])
 
 
 def _engine_stage_cycles(engine: Mapping, section_name: str) -> dict:

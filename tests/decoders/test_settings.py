@@ -309,3 +309,33 @@ def test_the_cycle_count_block_is_read_and_absent_is_none():
     assert cycle_count.setup_cycles == 11
     assert cycle_count.clock == clocks.clock("helios")
     assert plain.row_settings.cycle_count is None
+
+
+@pytest.mark.parametrize("key", ["kind", "units", "unit_memory", "engine"])
+def test_a_tier_section_without_a_required_key_is_refused_by_name(key):
+    """A sweep that leaves a key out reads a sentence, not a KeyError."""
+    clocks = config.ClockSettings({"decoder": 250.0})
+    section = _tier_section({"bits": None})
+    del section[key]
+
+    with pytest.raises(ValueError) as refusal:
+        decoder_settings.DecoderSettings.from_yaml(
+            section, clocks, "weak_decoder"
+        )
+    assert str(refusal.value) == (
+        f"weak_decoder needs the keys ['{key}']; configs/reference.yaml "
+        "holds every key with its unit"
+    )
+
+
+def test_an_engine_card_without_a_clock_is_refused_by_name():
+    clocks = config.ClockSettings({"decoder": 250.0})
+    section = _tier_section({"bits": None})
+    del section["engine"]["clock"]
+
+    with pytest.raises(
+        ValueError, match="weak_decoder.engine needs clock, the domain"
+    ):
+        decoder_settings.DecoderSettings.from_yaml(
+            section, clocks, "weak_decoder"
+        )

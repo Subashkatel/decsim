@@ -101,7 +101,12 @@ class DefaultWindowInteraction:
         return _DefectBoundaryState()
 
     def boundary_from_result(self, result, fallback):
-        """The result's residual, its boundary defects, or the fallback."""
+        """The result's residual, its boundary defects, or the fallback.
+
+        A result that carries a correction and no defects crosses no
+        seam: its boundary is empty, never the fallback, which stands in
+        only for a timing-only result.
+        """
         if result is None:
             return fallback
         if isinstance(result.boundary_data, window_records.DependencyResidual):
@@ -109,7 +114,7 @@ class DefaultWindowInteraction:
         if result.boundary_defects is not None:
             return result.boundary_defects
         if result.correction is not None:
-            return result.boundary_defects
+            return None
         return fallback
 
     def boundary_targets(self, source, _windows):

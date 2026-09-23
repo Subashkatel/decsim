@@ -30,6 +30,8 @@ import decsim.trace_source as trace_source
 
 ObservableBits = tuple[int, ...]
 
+# The pauli_frame section's keys.
+_PAULI_FRAME_KEYS = ("kind", "clock", "write_cycles")
 # The keys with no default: a frame card states the write's cost and the
 # clock it counts on.
 _REQUIRED_PAULI_FRAME_KEYS = ("clock", "write_cycles")
@@ -274,7 +276,18 @@ class PauliFrame:
 
 
 def _check_section_keys(section: Mapping) -> None:
-    """The section names the keys it cannot do without."""
+    """The section names its required keys and no key it does not have.
+
+    gem5 refuses a parameter its class does not declare
+    (src/python/m5/SimObject.py:932-936), as the controller section does.
+    """
+    unknown = set(section) - set(_PAULI_FRAME_KEYS)
+    if unknown:
+        listed = sorted(unknown)
+        raise ValueError(
+            f"pauli_frame does not know {listed}; its keys are "
+            f"{list(_PAULI_FRAME_KEYS)}"
+        )
     missing = set(_REQUIRED_PAULI_FRAME_KEYS) - set(section)
     if missing:
         listed = sorted(missing)

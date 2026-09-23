@@ -221,6 +221,19 @@ def test_a_section_without_a_required_key_is_refused_by_name(key):
     )
 
 
+def test_a_key_the_section_does_not_have_is_refused_by_name():
+    """A misspelt key would otherwise leave its default silently."""
+    clocks = config.ClockSettings({"fridge": 250.0})
+    section = {"clock": "fridge", "write_cycles": 1, "write_cycle": 2}
+
+    with pytest.raises(ValueError) as refusal:
+        PauliFrameConfig.from_yaml(section, clocks)
+    assert str(refusal.value) == (
+        "pauli_frame does not know ['write_cycle']; its keys are "
+        "['kind', 'clock', 'write_cycles']"
+    )
+
+
 def test_a_free_write_is_accepted_and_needs_no_clock():
     settings = PauliFrameConfig(write_cycles=0)
     assert settings.write_cycles == 0

@@ -223,7 +223,7 @@ point the run held:
 | `weak_queue_max`, `strong_queue_max` | the deepest each tier's own queue over the point |
 | `weak_busy_fraction`, `strong_busy_fraction` | the mean busy fractions |
 | `escalated_windows`, `strong_service_mean_us` | the strong tier's windows over the point and their mean service |
-| `strong_service_bound_us` | Toshio's Theorem 1 bound on that service, tau_gen d windows / strong rounds over the point (2510.25222 lines 1270-1300); infinite when nothing escalated |
+| `strong_service_bound_us` | Toshio's Theorem 1 bound on one strong decode's time, the unit of `strong_service_mean_us`: tau_gen r_com windows / escalated windows over the point, with r_com = d (2510.25222 eq. (6)); infinite when nothing escalated |
 | `parallel_processes_needed` | the largest over the point's shots |
 | `weak_syndrome_weight_mean`, `weak_service_mean_us`, `strong_wait_mean_us` | the means over the point's shots, when they kept the switching records |
 | `weak_syndrome_weight_max`, `strong_wait_max_us`, `backlog_peak_rounds` | the largest over the point's shots, when they kept the records |

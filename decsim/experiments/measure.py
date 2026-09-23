@@ -151,8 +151,7 @@ class ShotMeasurement:
     strong_busy_fraction: float
     # the windows the strong tier committed, the rounds its decodes read
     # and their mean service: the report forms Toshio's Theorem 1 bound
-    # on that service per sweep point from the first two (2510.25222
-    # lines 1270-1300)
+    # on that service per sweep point from the first (2510.25222 eq. (6))
     escalated_windows: int
     strong_decoded_rounds: int
     strong_service_mean_us: float
@@ -975,10 +974,10 @@ def _strong_decodes(
 ) -> _StrongDecodes:
     """The windows the strong tier committed, their rounds, their service.
 
-    Toshio's Theorem 1 bounds the strong decode time by the round time
-    times d over r_strong over the switching rate (2510.25222 lines
-    1270-1300); the report forms that bound per sweep point from these
-    two sums, and the mean service here is the time it bounds.
+    Toshio's Theorem 1 bounds one strong decode's time by the round
+    time times d over the switching rate (2510.25222 eq. (6)); the
+    report forms that bound per sweep point from the escalated windows,
+    and the mean service here is the time it bounds.
     """
     stages = observation.stages
     windows = 0

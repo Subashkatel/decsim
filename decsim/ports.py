@@ -1979,7 +1979,15 @@ class MagicStateFactory(Protocol):
     declares a decode_queue port (a DecodeQueue), which the root binds
     to the run's decoder manager; a row whose card corrects nothing
     leaves it unread.
+
+    trace holds state_delivered(operation_id, waited_ticks), fired at
+    every delivery with the ticks the request waited, which is the
+    supply stall; it is on the port because the machine connects the
+    run's runtime stamps to whatever answers this port, and a row whose
+    requests never wait carries it and never fires it.
     """
+
+    trace: Any
 
     def start(self) -> None:
         """Queue whatever the factory does before the first request."""

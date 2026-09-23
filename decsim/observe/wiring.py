@@ -91,7 +91,9 @@ def observe(
     window_ledger = _connect_window_ledger(seats["window_manager"])
     result_ledger = _connect_result_ledger(seats["window_manager"])
     runtime_stamps = runtime_stamps_module.RuntimeStamps()
-    _connect_runtime_stamps(seats["execution_runtime"], runtime_stamps)
+    _connect_runtime_stamps(
+        seats["execution_runtime"], seats["factory"], runtime_stamps
+    )
     queue_depth = _connect_queue_depth(decoder_managers)
     controller_counters = _connect_controller_counters(seats["idle_rounds"])
     command_events = _connect_command_events(seats["qpu"])
@@ -453,14 +455,15 @@ def _connect_decode_records(
 
 
 def _connect_runtime_stamps(
-    execution_runtime, stamps: runtime_stamps_module.RuntimeStamps
+    execution_runtime, factory, stamps: runtime_stamps_module.RuntimeStamps
 ) -> None:
-    """The stamps hear every tick of an operation's life."""
+    """The stamps hear every tick of an operation's life and its waits."""
     execution_runtime.trace.operation_issued.connect(stamps.operation_issued)
     execution_runtime.trace.operation_started.connect(stamps.operation_started)
     execution_runtime.trace.body_finished.connect(stamps.body_finished)
     execution_runtime.trace.decode_released.connect(stamps.decode_released)
     execution_runtime.trace.result_returned.connect(stamps.result_returned)
+    factory.trace.state_delivered.connect(stamps.magic_state_delivered)
 
 
 def _connect_round_events(

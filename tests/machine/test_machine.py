@@ -56,6 +56,7 @@ import decsim.observe.settings as observe_settings
 import decsim.ports as ports
 import decsim.qpu.code_geometry as code_geometry
 import decsim.qpu.cycle_clock as cycle_clock
+import decsim.qpu.magic_state_factories as magic_state_factories
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
 import decsim.qpu.stim_device as stim_device
@@ -73,6 +74,7 @@ import decsim.seeding as seeding
 import decsim.settings as machine_settings
 import decsim.syndrome_buffer.settings as syndrome_buffer_settings
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
+import decsim.trace_source as trace_source
 import decsim.windows.boundary_policies as boundary_policies
 import decsim.windows.built_window_models as built_window_models
 import decsim.windows.settings as window_settings
@@ -1220,13 +1222,20 @@ def test_a_new_escalation_kind_is_one_class_and_one_table_row():
     assert set(tiers) == {"strong"}
 
 
+class _SilentFactoryTrace:
+    """The one source the factory port declares, for a row that never waits."""
+
+    state_delivered = trace_source.SilentSource()
+
+
 class AlwaysReadyFactory:
     """A factory row written outside decsim: the collaborators alone.
 
     Its constructor is InfiniteFactory's own shape, one parameter, which
     is the shape the root refused before every row was built from one
     collaborators record. It declares the decode queue port the root
-    binds on every factory row.
+    binds on every factory row, and the trace source the port declares,
+    silent because no request waits.
     """
 
     decode_queue = ports.Port(ports.DecodeQueue)
@@ -1234,6 +1243,7 @@ class AlwaysReadyFactory:
     def __init__(self, collaborators):
         self.engine = collaborators.engine
         self.requests = []
+        self.trace = _SilentFactoryTrace()
 
     def start(self):
         """Nothing is made ahead of a request, so nothing is queued."""
@@ -1268,6 +1278,49 @@ def test_a_factory_row_written_outside_decsim_builds_by_its_own_name():
         del qpu_settings.MAGIC_STATE_FACTORIES["always_ready"]
     assert isinstance(machine.factory, AlwaysReadyFactory)
     assert result.terminal_status == "complete"
+
+
+def test_the_run_result_carries_the_factorys_supply_stall():
+    """The wait for a distilled state reaches the result the run returns.
+
+    One unit, a 5 us attempt and a 1 us return trip, no correction
+    decode: the one operation that needs a state asks at tick 0 and
+    waits for both.
+    """
+    operation = declared_run.memory_operation(1, consumes_magic_state=True)
+    workload = declared_run.declared_workload([operation], 6)
+    attempt_ticks = config.microseconds_to_ticks(5.0)
+    return_ticks = config.microseconds_to_ticks(1.0)
+    card = magic_state_factories.DistillationFactory.Settings(
+        unit_count=1,
+        attempt_ticks=attempt_ticks,
+        correction_round_count=0,
+        correction_decode_count=0,
+        return_ticks=return_ticks,
+    )
+    factory = qpu_settings.FactorySettings(
+        kind="distillation", row_settings=card
+    )
+    weak_microseconds = declared_run.DECLARED_MICROSECONDS["weak"]
+    decoder = decoders.PresetLatencyDecoder(weak_microseconds)
+    weak_decoder = decoder_settings.DecoderSettings(decoder=decoder)
+    qpu = declared_run.declared_qpu()
+    links = declared_run.declared_profile()
+    controller = declared_run.declared_controller()
+    settings = machine_settings.MachineSettings(
+        workload=workload,
+        qpu=qpu,
+        weak_decoder=weak_decoder,
+        links=links,
+        controller=controller,
+        magic_state_factory=factory,
+    )
+
+    machine = machine_module.Machine.build(settings, 0)
+    result = machine.run()
+
+    assert result.magic_state_stall_ticks == attempt_ticks + return_ticks
+    assert result.magic_state_stall_ticks == machine.factory.total_stall_ticks
 
 
 class RecordingBoundaryPolicy:

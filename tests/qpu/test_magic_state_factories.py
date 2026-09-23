@@ -17,6 +17,7 @@ import decsim.engine
 import decsim.observe.log_writers as log_writers
 import decsim.ports as ports
 import decsim.qpu.magic_state_factories as magic_state_factories
+import decsim.trace_source as trace_source
 
 
 class DecodeLog:
@@ -121,7 +122,10 @@ def test_every_factory_row_fills_the_port_it_is_built_behind():
 
 
 class _StartRequestShutdown:
-    """A factory row that keeps no engine: the three calls, nothing else."""
+    """A factory row that keeps no engine: three calls and its trace."""
+
+    def __init__(self):
+        self.trace = _SilentFactoryTrace()
 
     def start(self):
         """Nothing ahead of a request."""
@@ -133,6 +137,12 @@ class _StartRequestShutdown:
 
     def shutdown(self):
         """Nothing runs."""
+
+
+class _SilentFactoryTrace:
+    """The one source the port declares, for a row that never waits."""
+
+    state_delivered = trace_source.SilentSource()
 
 
 def test_the_port_asks_a_row_for_its_three_calls_and_no_engine():

@@ -626,6 +626,10 @@ How many syndrome rounds an operation runs for: one or more if decoded.
 
 Where a non-Clifford operation gets its magic state.
 
+| Member | Type |
+| --- | --- |
+| `trace` | `Any` |
+
 | Method | What it does |
 | --- | --- |
 | `start` | Queue whatever the factory does before the first request. |

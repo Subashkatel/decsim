@@ -2,14 +2,19 @@
 
 A listener on the runtime's operation_issued, operation_started,
 body_finished, decode_released and result_returned sources, each carrying
-(operation_id, tick). The runtime keeps which operations have started,
-finished and been released; the ticks live here, keyed by operation id,
-and last_finish is the latest body done.
+(operation_id, tick), and on the magic state factory's state_delivered
+(operation_id, waited_ticks). The runtime keeps which operations have
+started, finished and been released; the ticks live here, keyed by
+operation id, and last_finish is the latest body done.
 """
 
 
 class RuntimeStamps:
-    """Five maps of operation id to tick, and the last body's finish."""
+    """Five maps of operation id to tick, the last body's finish, the waits.
+
+    magic_state_wait holds the ticks each operation waited for its magic
+    state, the factory's supply stall.
+    """
 
     def __init__(self) -> None:
         self.op_start: dict = {}
@@ -17,6 +22,7 @@ class RuntimeStamps:
         self.decode_release: dict = {}
         self.result_return: dict = {}
         self.last_finish = 0
+        self.magic_state_wait: dict = {}
 
     def operation_issued(self, operation_id, tick: int) -> None:
         """The issuer took the operation; its QPU start replaces this stamp."""
@@ -38,3 +44,7 @@ class RuntimeStamps:
     def result_returned(self, operation_id, tick: int) -> None:
         """The operation's result return reached the controller."""
         self.result_return[operation_id] = tick
+
+    def magic_state_delivered(self, operation_id, waited_ticks: int) -> None:
+        """The factory handed the operation its state after that wait."""
+        self.magic_state_wait[operation_id] = waited_ticks

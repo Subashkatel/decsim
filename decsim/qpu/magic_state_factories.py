@@ -3,7 +3,9 @@
 A factory fills the MagicStateFactory port (decsim/ports.py): an
 operation that needs a magic state calls request and is called back when
 one is ready; an empty store stalls the requester, and that supply stall
-is the quantity the factories exist to measure.
+is the quantity the factories exist to measure. Trace source:
+state_delivered(operation_id, waited_ticks) at every delivery, which the
+run result sums.
 
 InfiniteFactory is the idealized supply with no stall. DistillationFactory
 is one 15-to-1 distillation stage: every unit attempts a distillation
@@ -38,6 +40,7 @@ import decsim.engine
 import decsim.ports as ports
 import decsim.records.log_sources as log_sources
 import decsim.seeding as seeding
+import decsim.trace_source as trace_source
 
 
 @dataclasses.dataclass
@@ -84,6 +87,8 @@ class InfiniteFactory:
 
     def __init__(self, collaborators: FactoryCollaborators):
         self.engine = collaborators.engine
+        # a state is always in stock, so no request waits and none fires
+        self.trace = _TraceSources()
 
     def start(self) -> None:
         """Nothing is made ahead of a request, so nothing is queued."""
@@ -159,6 +164,7 @@ class DistillationFactory(seeding._RandomSeedConsumer):
     def __init__(self, collaborators: FactoryCollaborators):
         self.engine = collaborators.engine
         self.card = collaborators.settings
+        self.trace = _TraceSources()
         self._initialize_run_seed_state(self.card.seed)
         self._reset_state(self.card.initial_store)
 
@@ -326,6 +332,7 @@ class DistillationFactory(seeding._RandomSeedConsumer):
             operation_id, callback = self.waiting.pop(0)
             waited_ticks = self._stall_ticks_of(operation_id)
             self.total_stall_ticks += waited_ticks
+            self.trace.state_delivered.fire(operation_id, waited_ticks)
             tag = _stall_tag(waited_ticks)
             self.engine.log(
                 log_sources.MAGIC_STATE_FACTORY,
@@ -465,6 +472,7 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
         self.preparation_ticks = _preparation_ticks(
             self.card, collaborators.round_ticks
         )
+        self.trace = _TraceSources()
         self._initialize_run_seed_state(self.card.seed)
         self._reset_state(collaborators.round_ticks)
 
@@ -520,6 +528,7 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
             operation_id, callback = self.waiting.pop(0)
             waited_ticks = self._stall_ticks_of(operation_id)
             self.total_stall_ticks += waited_ticks
+            self.trace.state_delivered.fire(operation_id, waited_ticks)
             tag = _stall_tag(waited_ticks)
             self.engine.log(
                 log_sources.MAGIC_STATE_FACTORY,
@@ -882,3 +891,16 @@ def _stall_tag(waited_ticks: int) -> str:
     stall_text = config.format_ticks(waited_ticks)
     stall_text = stall_text.strip()
     return f"  (supply stall {stall_text})"
+
+
+@dataclasses.dataclass(frozen=True)
+class _TraceSources:
+    """Every event a factory reports, as one member.
+
+    gem5 groups a component's statistics into one nested Group member
+    (gem5 src/base/stats/group.hh:60-92) rather than one member per
+    counter; a component's events are the same shape, so a listener
+    reaches all of them through one name.
+    """
+
+    state_delivered: trace_source.TraceSource = trace_source.new_source()

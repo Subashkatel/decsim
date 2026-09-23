@@ -310,13 +310,17 @@ def _capture_result(machine: Machine) -> result_records.RunResult:
         rows.append(row)
     link_traffic = machine.observation.traffic.traffic_json_value()
     data_movement = _data_movement_value(machine.observation)
+    stamps = machine.observation.runtime_stamps
+    waits = stamps.magic_state_wait.values()
+    magic_state_stall_ticks = sum(waits)
     return result_records.RunResult(
         terminal_status="complete",
         event_queue_empty=True,
         decode_work_settled=True,
         execution_workload_complete=True,
-        execution_done_ticks=machine.observation.runtime_stamps.last_finish,
+        execution_done_ticks=stamps.last_finish,
         fully_done_ticks=engine.now,
+        magic_state_stall_ticks=magic_state_stall_ticks,
         operation_results=tuple(rows),
         link_traffic=link_traffic,
         data_movement=data_movement,

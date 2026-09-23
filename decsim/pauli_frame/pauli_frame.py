@@ -350,7 +350,8 @@ class _TraceSources:
 class _FrameState:
     """What the frame holds: its records and its two registries.
 
-    records is every committed correction in commit order;
+    records is every accepted correction in the order the frame
+    accepted it, a write still landing included;
     pending_by_window is the writes charged and not yet landed;
     committed_by_window is the window that already has a correction, so
     a second one is refused. A stream id is whatever the front end

@@ -253,10 +253,10 @@ def link_delay_by_window(transfers: list) -> dict:
     names a per-instruction fact the same way: the reorder buffer finds
     an instruction by its thread and its sequence number, findInst(
     ThreadID tid, InstSeqNum squash_inst) walking instList[tid]
-    (tmp/resources/gem5/src/cpu/o3/rob.hh:131-134 and rob.cc:515-523),
-    and a retired instruction's counters land in that thread's own
-    bucket, commitStats[tid] and thread[tid]->threadStats
-    (tmp/resources/gem5/src/cpu/o3/cpu.cc:1156-1174).
+    (gem5 src/cpu/o3/rob.hh:131-134 and rob.cc:515-523), and a retired
+    instruction's counters land in that thread's own bucket,
+    commitStats[tid] and thread[tid]->threadStats (gem5
+    src/cpu/o3/cpu.cc:1156-1174).
     """
     first_request = {}
     last_delivery = {}
@@ -441,8 +441,7 @@ def window_points_us(
     functional unit counted on its own (NoFreeFU and statFuBusy,
     inst_queue.cc:1009-1014, the stats at 306-316); and Ciw's per
     customer record keeps the whole pre-service wait as named parts
-    rather than one number (tmp/resources/l5_buffers/Ciw/
-    ciw/data_record.py lines 3-21).
+    rather than one number (Ciw ciw/data_record.py lines 3-21).
     """
     operation_id, window_id = window.key
     last_emitted_round = max(qpu_send)
@@ -517,8 +516,8 @@ def frame_records_by_window(
     rest, and the windows that lost theirs would be measured against
     another stream's decode. gem5 asks the same way: an instruction in
     the reorder buffer is found by its thread and its sequence number,
-    findInst(ThreadID tid, InstSeqNum squash_inst)
-    (tmp/resources/gem5/src/cpu/o3/rob.hh:131-134).
+    findInst(ThreadID tid, InstSeqNum squash_inst) (gem5
+    src/cpu/o3/rob.hh:131-134).
     """
     records = {}
     for record in observation.frame_corrections.committed:

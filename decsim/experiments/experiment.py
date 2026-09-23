@@ -20,8 +20,8 @@ import decsim.experiments.refusal as refusal
 import decsim.settings as machine_settings
 
 _THIS_FILE = Path(__file__)
-_FRONT_DIR = _THIS_FILE.resolve()
-_REPOSITORY_ROOT = _FRONT_DIR.parents[2]
+_RESOLVED_FILE = _THIS_FILE.resolve()
+_REPOSITORY_ROOT = _RESOLVED_FILE.parents[2]
 # configs/ sits beside the decsim package, gem5's configs/ beside its
 # binary; the shipped experiments are what a refused path is listed with.
 CONFIGS_DIR = _REPOSITORY_ROOT / "configs"

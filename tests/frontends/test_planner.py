@@ -692,7 +692,7 @@ def test_the_strong_union_counts_a_shared_round_once():
     read_count = 0
     for _owner, held_rounds in buffering.potential_holds:
         read_count += len(held_rounds)
-    sufficient = buffering.sb1_sufficient_live_rounds
+    sufficient = buffering.strong_sufficient_live_rounds
     every_round = set()
     for index in range(1, 16):
         every_round.add((1, index))

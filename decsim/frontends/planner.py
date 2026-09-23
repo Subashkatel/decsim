@@ -42,7 +42,7 @@ class SyndromeBufferingPlan:
     weak_holds: tuple
     potential_holds: tuple
     sufficient_live_rounds: Optional[tuple]
-    sb1_sufficient_live_rounds: Optional[tuple]
+    strong_sufficient_live_rounds: Optional[tuple]
 
 
 def plan_execution(

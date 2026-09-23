@@ -42,7 +42,7 @@ The weak syndrome buffer, as its own round receiver sees it.
 | `accept_packed_round` | Keep one landed round, readable at that tick; None publishes none. |
 | `release_round` | Free the round; its consumers are done with it. |
 | `capacity_bits` | The bits this store is bounded to, or None for unbounded. |
-| `held_rounds_description` | The live holds, in one line, for a refusal a reader must debug. |
+| `held_rounds_description` | The stored rounds, in one line, for the I/O trace. |
 | `check_settled` | At the end of a run no round is stored and no hold is live. |
 
 ### `RetainedRounds`
@@ -64,7 +64,7 @@ The same store, as the window side that reads and holds it sees it.
 | `open_operation` | This operation may receive rounds from now on. |
 | `has_operation` | Whether the store still serves this operation. |
 | `close_operation` | The operation sends no more rounds; a closed one never reopens. |
-| `has_live_operation_reference` | Whether a hold or a stored round still names this operation. |
+| `has_live_operation_reference` | Whether a live hold still names this operation. |
 
 ### `SyndromeRoundSender`
 

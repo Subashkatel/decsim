@@ -199,7 +199,7 @@ class SyndromeBuffer(Protocol):
         """
 
     def held_rounds_description(self) -> str:
-        """The live holds, in one line, for a refusal a reader must debug."""
+        """The stored rounds, in one line, for the I/O trace."""
 
     def check_settled(self) -> None:
         """At the end of a run no round is stored and no hold is live."""
@@ -262,7 +262,11 @@ class RetainedRounds(Protocol):
         """
 
     def has_live_operation_reference(self, operation_id) -> bool:
-        """Whether a hold or a stored round still names this operation."""
+        """Whether a live hold still names this operation.
+
+        A stored round that no hold names has no reader, so it does not
+        keep its operation's result waiting.
+        """
 
 
 @runtime_checkable

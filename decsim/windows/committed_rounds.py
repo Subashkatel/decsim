@@ -5,7 +5,8 @@ over an exact inclusive round extent; the contributions of one stream
 tile it without gap or overlap, and the observables of an interval are
 the XOR of the contributions that cover it. A strong result may replace
 the prediction of an owner; a strong window may replace ordinary
-windows. Row W5 checks the ledger against a per-round oracle.
+windows. tests/windows/test_committed_rounds.py checks the ledger
+against a per-round oracle.
 """
 
 from typing import Optional

@@ -46,6 +46,7 @@ import decsim.experiments.experiment as experiment
 import decsim.experiments.measure as measure_shot
 import decsim.experiments.report as sweep_report
 import decsim.frontends.settings as workload_settings
+import decsim.qpu.round_policies as round_policies
 import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.settings as machine_settings
@@ -495,5 +496,25 @@ def test_two_tasks_whose_controllers_stall_or_drop_are_two_tasks():
     dropping_task = collect.Task(dropping, 1, {"point": 1})
 
     unique = collect.unique_tasks([stalling_task, dropping_task])
+
+    assert len(unique) == 2
+
+
+def test_two_tasks_whose_round_policies_differ_in_count_are_two_tasks():
+    """A round policy enters the strong id by its arguments."""
+    three_rounds = round_policies.FixedRounds(3)
+    five_rounds = round_policies.FixedRounds(5)
+    three_workload = workload_settings.WorkloadSettings(
+        rounds_policy=three_rounds
+    )
+    five_workload = workload_settings.WorkloadSettings(
+        rounds_policy=five_rounds
+    )
+    three_settings = machine_settings.MachineSettings(workload=three_workload)
+    five_settings = machine_settings.MachineSettings(workload=five_workload)
+    three_task = collect.Task(three_settings, 1, {"point": 1})
+    five_task = collect.Task(five_settings, 1, {"point": 1})
+
+    unique = collect.unique_tasks([three_task, five_task])
 
     assert len(unique) == 2

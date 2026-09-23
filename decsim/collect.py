@@ -329,12 +329,13 @@ def run_shot(task: Task, seed: int, *, built_models=None) -> Shot:
 def json_value(value: Any) -> Any:
     """A settings record as plain json: dataclasses walked, objects named.
 
-    A Python-built component (a decoder, a policy) has no yaml text, so
-    it appears as its class name; every number, string and flag appears
-    as written, and an enum member as its name. A Stim circuit appears as
-    its text, as sinter's strong id carries the task's circuit
-    (sinter/_data/_task.py:193), so two tasks that run different circuits
-    are two tasks.
+    A dataclass (a settings record, a round policy) appears as its
+    fields. A Python-built component (a decoder, a device) appears as its
+    class name, since the machine binds its neighbours onto it; every
+    number, string and flag appears as written, and an enum member as
+    its name. A Stim circuit appears as its text, as sinter's strong id
+    carries the task's circuit (sinter/_data/_task.py:193), so two tasks
+    that run different circuits are two tasks.
     """
     if dataclasses.is_dataclass(value):
         return _json_record(value)

@@ -331,22 +331,42 @@ def json_value(value: Any) -> Any:
     as written.
     """
     if dataclasses.is_dataclass(value):
-        fields = {}
-        for field in dataclasses.fields(value):
-            field_value = getattr(value, field.name)
-            fields[field.name] = json_value(field_value)
-        return fields
+        return _json_record(value)
     if isinstance(value, Mapping):
-        items = {}
-        for key, item in value.items():
-            items[str(key)] = json_value(item)
-        return items
+        return _json_mapping(value)
     if isinstance(value, (list, tuple)):
-        items = []
-        for item in value:
-            json_item = json_value(item)
-            items.append(json_item)
-        return items
+        return _json_list(value)
+    return _json_scalar(value)
+
+
+def _json_record(record: Any) -> dict:
+    """A dataclass as its fields, each one walked."""
+    fields = {}
+    for field in dataclasses.fields(record):
+        field_value = getattr(record, field.name)
+        fields[field.name] = json_value(field_value)
+    return fields
+
+
+def _json_mapping(mapping: Mapping) -> dict:
+    """A mapping with its keys as text and its values walked."""
+    items = {}
+    for key, item in mapping.items():
+        items[str(key)] = json_value(item)
+    return items
+
+
+def _json_list(sequence) -> list:
+    """A list or a tuple, each item walked."""
+    items = []
+    for item in sequence:
+        json_item = json_value(item)
+        items.append(json_item)
+    return items
+
+
+def _json_scalar(value: Any) -> Any:
+    """A number, string, flag or path as written; any other object named."""
     if isinstance(value, (bool, int, float, str)) or value is None:
         return value
     if isinstance(value, pathlib.Path):

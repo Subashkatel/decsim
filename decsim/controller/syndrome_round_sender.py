@@ -165,6 +165,10 @@ class SyndromeRoundSender:
 
     def __init__(self, engine: engine_module.Engine) -> None:
         self.engine = engine
+        # strong-primary rounds sent to the strong syndrome buffer and not
+        # yet landed there; the packing stage's bound reads it
+        # (RoundsInFlight), as it reads the transmitter's in_flight
+        self.strong_crossing_count = 0
 
     def start(self) -> None:
         """Read which store the plan's windows come from, once.
@@ -234,6 +238,7 @@ class SyndromeRoundSender:
             packed.packet
         )
         self.strong_receiver.reserve_write(packed)
+        self.strong_crossing_count += 1
         landed = functools.partial(self._land_in_strong_store, packed)
         self.link.send(
             transfer_records.LinkPath.CONTROLLER_TO_STRONG_BUFFER,
@@ -246,8 +251,19 @@ class SyndromeRoundSender:
     def _land_in_strong_store(
         self, packed: round_records.PackedRound, _transfer
     ) -> None:
-        """The strong syndrome buffer took the round and handles the landing."""
+        """The strong syndrome buffer took the round and handles the landing.
+
+        The landing publishes the round, so it stops counting in the
+        event after, as the transmitter lets a weak round go: a fragment
+        landing at this tick still counts it.
+        """
         self.strong_receiver.receive_round(packed)
+        self.engine.schedule(
+            0, self._leave_strong_crossing, label="strong round landed"
+        )
+
+    def _leave_strong_crossing(self) -> None:
+        self.strong_crossing_count -= 1
 
 
 @dataclasses.dataclass(frozen=True)

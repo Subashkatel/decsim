@@ -257,6 +257,7 @@ WIRES = (
     ("syndrome_round_sender.windows", "window_manager"),
     ("rounds_in_flight.held_rounds", "held_rounds"),
     ("rounds_in_flight.transmitter", "transmitter"),
+    ("rounds_in_flight.syndrome_round_sender", "syndrome_round_sender"),
     ("assembler.detection_events", "detection_events"),
     ("assembler.rounds_in_flight", "rounds_in_flight"),
     ("assembler.syndrome_round_sender", "syndrome_round_sender"),

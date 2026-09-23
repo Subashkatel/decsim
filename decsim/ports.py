@@ -278,7 +278,15 @@ class SyndromeRoundSender(Protocol):
     sends it on; a round that finds no room goes to the waiting line,
     which holds it for a retry or drops it as the controller's overflow
     setting says.
+
+    strong_crossing_count is the strong-primary rounds sent to the
+    strong syndrome buffer and not yet landed there, which the packing
+    stage's bound on rounds in flight counts (controller/round_assembly.py
+    RoundsInFlight), since the windows hear of such a round at its
+    landing.
     """
+
+    strong_crossing_count: int
 
     def admit(self, packed: round_records.PackedRound) -> bool:
         """Write the round where it belongs; False when it found no room."""
@@ -332,8 +340,16 @@ class WeakSyndromeRoundReceiver(Protocol):
     def reserve_write(self, packed: round_records.PackedRound) -> None:
         """Take the room this crossing round will need, before it leaves."""
 
-    def receive_round(self, packed: round_records.PackedRound) -> None:
-        """Take one round that landed here: store it, then announce it."""
+    def receive_round(
+        self,
+        packed: round_records.PackedRound,
+        on_published: Callable[[], None],
+    ) -> None:
+        """Take one landed round: store it, announce it, then on_published.
+
+        on_published runs once the windows have heard of the round, which
+        is where the sender's count of rounds in flight lets it go.
+        """
 
     def send_memory_round(
         self,

@@ -152,11 +152,12 @@ def five_microsecond_wbd_profile(bits_per_microsecond=None):
     )
 
 
-def transmitter_with(engine, profile, windows=None):
+def transmitter_with(engine, profile, windows=None, settings=None):
     ledger = link_traffic.TrafficLedger(profile)
     links = fabric_module.LinkFabric(profile, engine, channel_module.Channel)
     links.trace.transfer_delivered.connect(ledger.on_transfer)
-    settings = syndrome_buffer_settings.SyndromeBufferSettings()
+    if settings is None:
+        settings = syndrome_buffer_settings.SyndromeBufferSettings()
     store = syndrome_buffer_module.SyndromeBuffer(settings)
     if windows is None:
         windows = RecordingWindows(engine)
@@ -208,6 +209,38 @@ def test_a_priced_hop_publishes_at_delivery_and_stamps_the_store():
     assert windows.published == [(CWB_TICKS, 1)]
     kinds_and_ticks = [(event.kind, event.tick) for event in recorder.events]
     assert kinds_and_ticks == [("CWB_SENT", 0), ("PUBLISHED", CWB_TICKS)]
+    assert transmitter.in_flight == 0
+
+
+def test_a_window_round_is_in_flight_until_its_write_publishes_it():
+    """The packing stage's bound holds a round until the windows hear of it.
+
+    A five-cycle write on a 1 MHz clock publishes the round microseconds
+    after its 0.25 us landing, and the count holds it until then.
+    """
+    engine = engine_module.Engine()
+    profile = priced_cwb_profile()
+    clock = config.Clock(CYCLE_TICKS)
+    settings = syndrome_buffer_settings.SyndromeBufferSettings(
+        clock=clock, write_cycles=5
+    )
+    transmitter, _store, windows, _recorder, _ledger = transmitter_with(
+        engine, profile, settings=settings
+    )
+    counts_after_the_landing = []
+    first = packed(1)
+    probe_ticks = CWB_TICKS + 1
+
+    reserve_and_send(transmitter, first)
+    engine.schedule(
+        probe_ticks,
+        lambda: counts_after_the_landing.append(transmitter.in_flight),
+    )
+    engine.run()
+    publication_tick, _round_index = windows.published[0]
+
+    assert counts_after_the_landing == [1]
+    assert publication_tick > probe_ticks
     assert transmitter.in_flight == 0
 
 

@@ -14,7 +14,9 @@ request behind the front of transmitList (src/dev/dma_device.cc) and
 ns-3's point-to-point device starts the next packet at TransmitComplete
 (point-to-point-net-device.cc); the FIFO channel keeps delivery order.
 in_flight counts the rounds from their send until the windows have heard
-of them; the packing stage's bound reads it (RoundsInFlight).
+of them, which the weak syndrome buffer's end reports once its write is
+done and the round published; the packing stage's bound reads it
+(RoundsInFlight).
 """
 
 import dataclasses
@@ -88,13 +90,12 @@ class RoundTransmitter:
         Everything the landing does to the weak syndrome buffer's record and to
         whoever waits on it is the weak syndrome round receiver's
         (syndrome_buffer/weak_syndrome_round_receiver.py); this sender
-        hears the landing for its in_flight count alone, as gem5's
+        hears the publication for its in_flight count alone, as gem5's
         requesting port hands the packet to the peer's own receive method
         (tmp/resources/gem5/src/mem/port.hh:603-614, whose
         src/mem/protocol/timing.cc:49-53 calls peer->recvTimingReq).
         """
-        self.weak_receiver.receive_round(packed)
-        self._leave_after_publication()
+        self.weak_receiver.receive_round(packed, self._leave_after_publication)
 
     def _leave_after_publication(self) -> None:
         """The round leaves in the event after its publication.

@@ -111,7 +111,11 @@ class WeakSyndromeRoundReceiver:
         bits = round_records.stated_bits(packed.wire_bits)
         self.reserved_bits_by_round[packed.round_key] = bits
 
-    def receive_round(self, packed: round_records.PackedRound) -> None:
+    def receive_round(
+        self,
+        packed: round_records.PackedRound,
+        on_published: Callable[[], None],
+    ) -> None:
         """Start one landed round's write, retaining its reservation until done.
 
         The store and the publication are one call at one tick, because
@@ -120,6 +124,7 @@ class WeakSyndromeRoundReceiver:
         hears of a round the store does not yet call readable. The
         delay is the chip's formation cycles and the write cycles on one
         clock edge: a round is readable once it is formed and written.
+        on_published runs after the announcement.
 
         A round whose operation closed while it crossed is dropped at the
         door on the strong side (strong_syndrome_round_receiver.py,
@@ -134,11 +139,11 @@ class WeakSyndromeRoundReceiver:
         write_cycles = self.settings.write_cycles
         cycles = formation_cycles + write_cycles
         if cycles == 0:
-            self._finish_write(packed)
+            self._finish_write(packed, on_published)
             return
         edge = self.settings.clock.edge(cycles, self.engine.now)
         delay = edge - self.engine.now
-        finish = functools.partial(self._finish_write, packed)
+        finish = functools.partial(self._finish_write, packed, on_published)
         self.engine.schedule(delay, finish, label="syndrome buffer write")
 
     def send_memory_round(
@@ -175,12 +180,17 @@ class WeakSyndromeRoundReceiver:
         if self.store.occupied_bits:
             self.store.check_settled()
 
-    def _finish_write(self, landed: round_records.PackedRound) -> None:
+    def _finish_write(
+        self,
+        landed: round_records.PackedRound,
+        on_published: Callable[[], None],
+    ) -> None:
         self._give_back_reservation(landed)
         packed = self._as_stored(landed)
         self._take_slot(packed, "controller_to_weak_buffer", self.engine.now)
         self._fire_published(packed)
         self.windows.accept_window_input(packed.packet)
+        on_published()
 
     def _give_back_reservation(self, packed: round_records.PackedRound) -> None:
         """The crossing is over: it gives back exactly what it reserved."""

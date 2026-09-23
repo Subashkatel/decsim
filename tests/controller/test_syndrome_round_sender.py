@@ -108,6 +108,10 @@ class RecordingStrongReceiver:
         self.written.append(packed.packet.round_index)
 
 
+def no_sender_counts_it() -> None:
+    """The publication callback of a round no transmitter counts here."""
+
+
 def sender_with(
     engine,
     weak_bits=None,
@@ -163,7 +167,7 @@ def test_a_round_with_no_room_is_held_and_written_in_order_when_a_slot_frees():
     first_admitted = sender.admit(first)
     second_admitted = sender.admit(second)
     held_while_in_flight = sender.held_rounds.count
-    weak_receiver.receive_round(first)
+    weak_receiver.receive_round(first, no_sender_counts_it)
     held_after_the_landing = sender.held_rounds.count
     weak_receiver.store.release_round((1, 1))
 
@@ -202,7 +206,7 @@ def test_a_narrow_round_waits_behind_a_held_round_it_would_fit_beside():
     sender.admit(second)
     narrow_admitted = sender.admit(narrow)
     sent_while_held = list(transmitter.sent)
-    weak_receiver.receive_round(first)
+    weak_receiver.receive_round(first, no_sender_counts_it)
     weak_receiver.store.release_round((1, 1))
 
     assert narrow_admitted is False
@@ -282,6 +286,31 @@ def test_the_controller_carries_the_round_to_the_room_side_and_lands_it():
     assert strong_store.occupancy == 1
     assert strong_store.publication_tick((1, 1)) == crossing_ticks
     assert room_side.reserved_bits_by_round == {}
+
+
+def test_a_strong_primary_round_is_in_flight_until_it_lands():
+    """The packing stage's bound holds the round until the windows hear of it.
+
+    The strong syndrome buffer publishes a strong-primary round at its
+    landing, the card's 0.26 us after the send, so the sender counts it
+    across the crossing and lets it go in the event after the landing.
+    """
+    engine = engine_module.Engine()
+    strong_receiver = RecordingStrongReceiver()
+    sender, _weak_receiver, _transmitter, _recorder = sender_with(
+        engine,
+        strong_receiver=strong_receiver,
+        publishes_from_strong_store=True,
+    )
+    first = packed(1)
+
+    sender.admit(first)
+    count_while_crossing = sender.strong_crossing_count
+    engine.run()
+
+    assert count_while_crossing == 1
+    assert strong_receiver.written == [1]
+    assert sender.strong_crossing_count == 0
 
 
 def test_a_weak_primary_round_never_leaves_for_the_strong_store():

@@ -100,12 +100,16 @@ def _receiver_with(engine, store, output=None, detection_events=None):
     return receiver, windows
 
 
+def _no_sender_counts_it() -> None:
+    """The publication callback of a round no transmitter counts here."""
+
+
 def _cross(receiver, packed, landing_ticks=LANDING_TICKS):
     """One crossing: the room is taken at the send, the slot at the landing."""
     receiver.reserve_write(packed)
     receiver.engine.schedule(
         landing_ticks,
-        lambda: receiver.receive_round(packed),
+        lambda: receiver.receive_round(packed, _no_sender_counts_it),
     )
 
 
@@ -316,6 +320,33 @@ def test_write_cycles_move_every_reaction_point_by_the_store_periods():
     assert shifts == [expected] * 6
 
 
+def test_the_sender_hears_the_publication_after_the_windows_do():
+    """on_published runs at the write edge, once the windows have the round.
+
+    Three cycles of a 10-tick clock from tick 1 end at the edge 40.
+    """
+    engine = engine_module.Engine()
+    engine.now = 1
+    clock = config.Clock(10)
+    settings = syndrome_buffer_settings.SyndromeBufferSettings(
+        bits=BITS_PER_ROUND, clock=clock, write_cycles=3
+    )
+    store = syndrome_buffer_module.SyndromeBuffer(settings)
+    receiver, windows = _receiver_with(engine, store)
+    packed = _packed(1)
+    heard = []
+
+    def sender_hears() -> None:
+        published_count = len(windows.published)
+        heard.append((engine.now, published_count))
+
+    receiver.reserve_write(packed)
+    receiver.receive_round(packed, sender_hears)
+    engine.run()
+
+    assert heard == [(40, 1)]
+
+
 def test_a_priced_write_keeps_its_reservation_until_the_write_edge():
     engine = engine_module.Engine()
     engine.now = 1
@@ -327,7 +358,7 @@ def test_a_priced_write_keeps_its_reservation_until_the_write_edge():
     receiver, windows = _receiver_with(engine, store)
     packed = _packed(1)
     receiver.reserve_write(packed)
-    receiver.receive_round(packed)
+    receiver.receive_round(packed, _no_sender_counts_it)
     next_round = _packed(2)
     assert store.occupancy == 0
     assert receiver.reserved_bits_by_round == {(1, 1): BITS_PER_ROUND}
@@ -395,7 +426,7 @@ def test_the_chips_formation_cycles_are_added_to_the_write_cycles():
     packed = _packed(1)
 
     receiver.reserve_write(packed)
-    receiver.receive_round(packed)
+    receiver.receive_round(packed, _no_sender_counts_it)
     engine.run()
 
     charged_cycles = formation_cycles + write_cycles

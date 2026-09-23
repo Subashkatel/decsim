@@ -95,7 +95,7 @@ class WindowInputGate:
         The fold's condition is that a boundary arrived, which the window
         interaction answers, and not that a bit is set in it: cuda-q QEC
         applies the accumulated syndrome mods to every window past the
-        first, whatever they hold (sliding_window.cpp:283-292, the
+        first, whatever they hold (sliding_window.cpp:287-293, the
         `w > 0` branch), and a fold skipped on an all-zero mask would
         make the work the seam costs follow the noise, which is the cost
         D9 (docs/explanation/decisions.md:156-164) prices independent of

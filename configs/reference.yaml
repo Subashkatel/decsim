@@ -693,7 +693,7 @@ weak_decoder:                      # the lightweight tier: fast, higher LER
                                    # duplicate, leaving the unit's rounds raw,
                                    # which is what a software decoder does
                                    # (cuda-q QEC rebuilds the window syndrome
-                                   # each time, sliding_window.cpp:283-292).
+                                   # each time, sliding_window.cpp:287-293).
                                    # in_place XORs it into the unit's own
                                    # memory, which is what a hardware decoder
                                    # does (AFS 2001.06598 lines 528-531; Helios

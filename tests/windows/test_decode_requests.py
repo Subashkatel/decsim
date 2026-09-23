@@ -258,7 +258,7 @@ def test_a_boundary_that_flipped_nothing_is_still_folded():
     """The fold follows the arrival, not the bits the arrival carried.
 
     cuda-q QEC applies the accumulated syndrome mods to every window
-    past the first whatever they hold (sliding_window.cpp:283-292), so
+    past the first whatever they hold (sliding_window.cpp:287-293), so
     an all-zero seam still costs the window its masked view; the rounds
     it reads come out of the fold unchanged.
     """

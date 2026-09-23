@@ -88,7 +88,7 @@ DECODER_INPUTS = {"copy": True, "in_place": False}
 # duplicates the landed input and XORs the mask into the duplicate, so
 # the unit's stored rounds stay raw, which is what a software decoder
 # does (cuda-q QEC keeps the raw rounds and rebuilds the window syndrome
-# each time, sliding_window.cpp:283-292). in_place XORs the mask into
+# each time, sliding_window.cpp:287-293). in_place XORs the mask into
 # the unit's own memory, which is what a hardware decoder does: AFS's
 # processing elements write on-chip memory directly (2001.06598 lines
 # 528-531) and Helios keeps its shared memory in registers with a single

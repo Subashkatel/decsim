@@ -125,6 +125,13 @@ class TimingOnlyDevice:
     ) -> None:
         """No circuit, so any length is fine."""
 
+    def readout_departure_tick(
+        self, readout: round_records.QPUReadout, readout_tick: int
+    ) -> int:
+        """The readout leaves the chip at the boundary it was read out at."""
+        del readout
+        return readout_tick
+
     def window_model_source(self) -> "NoWindowModels":
         """No circuit, so no window has a model to build."""
         return NO_WINDOW_MODELS
@@ -232,6 +239,13 @@ class SyndromeBitDevice(seeding._AtomicRunSeedConsumer):
         stream_round_count: int,
     ) -> None:
         """No circuit, so any length is fine."""
+
+    def readout_departure_tick(
+        self, readout: round_records.QPUReadout, readout_tick: int
+    ) -> int:
+        """The readout leaves the chip at the boundary it was read out at."""
+        del readout
+        return readout_tick
 
     def window_model_source(self) -> "NoWindowModels":
         """No circuit, so no window has a model to build."""

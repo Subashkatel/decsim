@@ -432,6 +432,7 @@ What the QPU reads out each round for an operation.
 | `finalize_stream_round` | Final data readout, ordered by the round_payloads contract. |
 | `idle_round_payloads` | The protection round the controller requests, possibly its last. |
 | `logical_observable_truth` | The observable flips the source drew, or None when it draws none. |
+| `readout_departure_tick` | The tick this readout leaves the chip, at or after readout_tick. |
 | `window_model_source` | Where the run's window error models come from, by default. |
 
 ### `DetectionEventFormer`

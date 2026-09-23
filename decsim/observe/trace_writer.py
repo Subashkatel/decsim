@@ -146,7 +146,7 @@ class TraceWriter:
     # ---- the QPU and the controller
 
     def round_emitted(self, readout: round_records.QPUReadout) -> None:
-        """One readout leaves the QPU."""
+        """One readout, at the boundary the QPU reads it out at."""
         round_key = (readout.operation_id, readout.round_index)
         args = {"round": round_text(round_key), "bits": readout.size_bits}
         name = f"emitted round {readout.round_index}"

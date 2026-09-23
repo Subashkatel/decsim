@@ -101,6 +101,33 @@ class SplitSource(syndrome_devices.TimingOnlyDevice):
         return [payload] * self.payload_count
 
 
+class DelayedSource(syndrome_devices.TimingOnlyDevice):
+    """A timing-only source whose readouts leave a set delay after readout."""
+
+    def __init__(self, delay_by_round):
+        timing_only = super()
+        timing_only.__init__(CODE)
+        self.delay_by_round = delay_by_round
+
+    def readout_departure_tick(self, readout, readout_tick):
+        delay = self.delay_by_round[readout.round_index]
+        return readout_tick + delay
+
+
+class PatchDelayedSource(syndrome_devices.TimingOnlyDevice):
+    """A timing-only source whose readouts leave a set delay per patch."""
+
+    def __init__(self, delay_by_patch):
+        timing_only = super()
+        timing_only.__init__(CODE)
+        self.delay_by_patch = delay_by_patch
+
+    def readout_departure_tick(self, readout, readout_tick):
+        patch = readout.patch_ids[0]
+        delay = self.delay_by_patch[patch]
+        return readout_tick + delay
+
+
 def clocked_qpu(cycle_ticks, source=None):
     engine = decsim.engine.Engine()
     log = ReadoutLog(engine)
@@ -176,6 +203,63 @@ def test_a_round_is_logged_as_fired_with_its_place_in_the_body():
         "[  2.200 us] QPU: memory fires round 2/3",
         "[  3.300 us] QPU: memory fires round 3/3",
     ]
+
+
+def test_a_readout_leaves_at_the_tick_its_source_names():
+    """gem5's queued port: the sender names the absolute send tick.
+
+    tmp/resources/gem5/src/mem/qport.hh:94, schedTimingResp(pkt, when).
+    The body still ends on the clock's boundary.
+    """
+    source = DelayedSource({1: 3, 2: 3, 3: 3})
+    engine, qpu, log = clocked_qpu(10, source)
+    body = memory_body(1, 3, 10)
+    qpu.issue(body)
+    engine.schedule(30, qpu.finish)
+    engine.run()
+    assert log.round_ticks == [(13, 1), (23, 2), (33, 3)]
+    assert log.completion_ticks == [(30, 1)]
+
+
+def test_a_later_round_of_a_patch_waits_behind_an_earlier_one():
+    """gem5's packet queue with forceOrder queues behind the same address.
+
+    tmp/resources/gem5/src/mem/packet_queue.cc:134-147: round 1 leaves
+    at 35, so rounds 2 and 3, read out at 20 and 30, leave at 35 after it.
+    """
+    source = DelayedSource({1: 25, 2: 0, 3: 0})
+    engine, qpu, log = clocked_qpu(10, source)
+    body = memory_body(1, 3, 10)
+    qpu.issue(body)
+    engine.schedule(30, qpu.finish)
+    engine.run()
+    assert log.round_ticks == [(35, 1), (35, 2), (35, 3)]
+
+
+def test_a_round_of_another_patch_does_not_wait():
+    source = PatchDelayedSource({"A": 25, "B": 0})
+    engine, qpu, log = clocked_qpu(10, source)
+    slow = memory_body(1, 1, 10, patch="A")
+    fast = memory_body(2, 1, 10, patch="B")
+    qpu.issue(slow)
+    qpu.issue(fast)
+    engine.schedule(10, qpu.finish)
+    engine.run()
+    assert log.rounds == [(10, 2, ("B",), 1), (35, 1, ("A",), 1)]
+
+
+def test_a_departure_before_the_readout_is_refused():
+    """gem5's packet queue asserts when >= curTick (packet_queue.cc:114)."""
+    source = DelayedSource({1: -1})
+    engine, qpu, log = clocked_qpu(10, source)
+    body = memory_body(1, 1, 10)
+    qpu.issue(body)
+    with pytest.raises(RuntimeError) as refusal:
+        engine.run()
+    assert str(refusal.value) == (
+        "the syndrome source sends readout 1 of operation 1 at tick 9, "
+        "before tick 10 it was read out at"
+    )
 
 
 def test_a_command_arriving_mid_cycle_starts_on_the_next_boundary():

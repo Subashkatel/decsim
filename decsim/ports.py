@@ -1349,6 +1349,21 @@ class SyndromeSource(Protocol):
     ) -> Optional[tuple[int, ...]]:
         """The observable flips the source drew, or None when it draws none."""
 
+    def readout_departure_tick(
+        self, readout: round_records.QPUReadout, readout_tick: int
+    ) -> int:
+        """The tick this readout leaves the chip, at or after readout_tick.
+
+        readout_tick is the cycle boundary the clock read the round out
+        at, and a source whose readout arrives with a fixed delay or a
+        jitter names a later tick, as gem5's queued port lets its owner
+        name the absolute tick a response or a request is sent
+        (tmp/resources/gem5/src/mem/qport.hh:94 schedTimingResp, 150
+        schedTimingReq). The clock asks for every readout it hands the
+        controller, and sends it at that tick behind every earlier
+        readout of its patches.
+        """
+
     def window_model_source(self) -> "WindowModelSource":
         """Where the run's window error models come from, by default.
 

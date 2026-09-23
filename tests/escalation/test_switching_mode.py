@@ -136,15 +136,15 @@ def _restart_width_card(regions: int) -> dict:
 def test_both_restart_re_read_widths_load_from_the_escalation_section(
     tmp_path,
 ):
-    """0 is Toshio 2510.25222 Sec. III C, 1 is decsim's forward window."""
-    paper_card = _restart_width_card(0)
-    paper_path = write_config(tmp_path, paper_card)
-    paper = load_experiment(paper_path)
+    """Toshio 2510.25222 lines 1229-1235 allow both; Fig. 12 draws 1."""
+    no_reread_card = _restart_width_card(0)
+    no_reread_path = write_config(tmp_path, no_reread_card)
+    no_reread = load_experiment(no_reread_path)
     one_region_card = _restart_width_card(1)
     one_region_path = write_config(tmp_path, one_region_card)
     one_region = load_experiment(one_region_path)
 
-    assert paper.settings.escalation.restart_reread_buffer_regions == 0
+    assert no_reread.settings.escalation.restart_reread_buffer_regions == 0
     assert one_region.settings.escalation.restart_reread_buffer_regions == 1
 
 
@@ -152,11 +152,11 @@ def test_a_wider_restart_re_read_and_another_kind_are_refused(tmp_path):
     """Only the two widths have a referent, and only switching restarts."""
     wide_card = _restart_width_card(2)
     wide_path = write_config(tmp_path, wide_card)
-    with pytest.raises(ValueError, match="must be 0, the paper's restart"):
+    with pytest.raises(ValueError, match="must be 0, a restart on the rounds"):
         load_experiment(wide_path)
     flag_card = _restart_width_card(True)
     flag_path = write_config(tmp_path, flag_card)
-    with pytest.raises(ValueError, match="must be 0, the paper's restart"):
+    with pytest.raises(ValueError, match="must be 0, a restart on the rounds"):
         load_experiment(flag_path)
     weak_card = {
         "escalation": {

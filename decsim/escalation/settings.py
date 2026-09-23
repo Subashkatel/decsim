@@ -496,10 +496,10 @@ def _restart_reread_buffer_regions(section: Mapping) -> int:
     is_a_count = type(regions) is int
     if not is_a_count or regions not in RESTART_REREAD_BUFFER_REGIONS:
         raise ValueError(
-            "escalation.restart_reread_buffer_regions must be 0, the "
-            "paper's restart on the rounds stored after the strong "
-            "region, or 1, decsim's re-read of one buffer region of it "
-            f"for the far boundary; got {regions!r}"
+            "escalation.restart_reread_buffer_regions must be 0, a "
+            "restart on the rounds stored after the strong region, or 1, "
+            "a re-read of the region's last buffer region as Toshio "
+            f"2510.25222 Fig. 12 step 5 draws it; got {regions!r}"
         )
     return int(regions)
 

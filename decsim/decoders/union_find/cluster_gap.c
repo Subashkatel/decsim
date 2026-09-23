@@ -123,12 +123,19 @@ static int32_t take_edge_layout(struct workspace *workspace,
   return taken;
 }
 
+/* The pushes one source can make: two per adjacency slot, one from each
+ * parity state of the node the slot leaves, and the source itself, with
+ * one to spare. */
+static int32_t heap_capacity_for(int32_t slot_count) {
+  return 2 * slot_count + 2;
+}
+
 /* The node count and the slot count are known only once every edge has
  * been split, so the rest of the workspace is taken after the layout. */
 static int32_t take_quotient_graph(struct workspace *workspace,
                                    int32_t node_count, int32_t slot_count) {
   int32_t state_count = 2 * node_count;
-  int32_t heap_capacity = 2 * slot_count + 2;
+  int32_t heap_capacity = heap_capacity_for(slot_count);
   int32_t taken = 1;
   workspace->adjacency_start =
       allocate_array(node_count + 1, sizeof(int32_t), &taken);
@@ -333,7 +340,7 @@ static void search_over(struct search *search, struct workspace *workspace,
   search->heap_distance = workspace->heap_distance;
   search->heap_state = workspace->heap_state;
   search->heap_size = 0;
-  search->heap_capacity = 2 * slot_count + 2;
+  search->heap_capacity = heap_capacity_for(slot_count);
   search->distance = workspace->distance;
   search->distance_stamp = workspace->distance_stamp;
   search->generation = 0;
@@ -373,10 +380,9 @@ static int64_t heap_pop(struct search *search, int32_t *state) {
   while (child < search->heap_size) {
     int32_t right = child + 1;
     int64_t left_distance = search->heap_distance[child];
-    if (right < search->heap_size) {
-      if (search->heap_distance[right] < left_distance) {
-        child = right;
-      }
+    if (right < search->heap_size &&
+        search->heap_distance[right] < left_distance) {
+      child = right;
     }
     if (search->heap_distance[child] >= distance) {
       break;

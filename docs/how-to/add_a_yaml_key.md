@@ -3,7 +3,8 @@
 # How to add a yaml key
 
 You want a knob a config file can set. A key belongs to exactly one
-settings section, and adding one touches three files.
+settings section, and adding one touches its section's settings module,
+`configs/reference.yaml`, and the test of its refusal.
 
 ## 1. Add the field to the settings record
 
@@ -45,8 +46,10 @@ are ['bulk_strong', 'clock', 'dispatch_cycles']
 
 Not every section does yet. A key the `weak_decoder` section does not
 know is currently ignored in silence, so a typo there runs the default
-without saying so. A section no package owns is always refused, with the
-fifteen sections listed.
+without saying so; the `windows`, `controller` and `pauli_frame`
+sections read the same way. A section no package owns is always
+refused, with the fifteen sections listed, and so is a yaml that leaves
+out a section every run needs.
 
 ## 3. Document it in `configs/reference.yaml`, in the same commit
 
@@ -55,10 +58,12 @@ key the layer reads, with a comment saying what it means and, where the
 value came from a paper or a reference implementation, which one. A key
 that is not in that file is a key nobody can find.
 
-This is not optional and it is not a convention:
-`tests/experiments/test_yaml_surface.py` fails when the file and the
-readers drift apart, and it names the drift. Read its
-`test_unknown_algorithms_and_stale_keys_fail_loudly` to see the shape.
+This is not optional, and no test does it for you: a key read with a
+default and left out of the file passes every test. What
+`tests/experiments/test_yaml_surface.py` does catch is the other drift,
+a key the file still carries that a section which refuses unknown keys
+no longer reads. Its `test_unknown_algorithms_and_stale_keys_fail_loudly`
+shows the shape.
 
 ## 4. Run the checks
 

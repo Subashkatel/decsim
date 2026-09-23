@@ -58,8 +58,7 @@ class DecoderManager:
         router,
         scheduler,
         strong_requests: strong_requests_module.StrongRequests,
-        unit_pools: Optional[dict] = None,
-        num_units: int = 1,
+        unit_pools: dict,
         bulk_strong: bool = False,
         decoder_memory: Optional[
             decoder_memory_module.DecoderMemoryConfig
@@ -71,8 +70,6 @@ class DecoderManager:
         blocks_unit_by_pool: Optional[dict] = None,
         formation_by_pool: Optional[dict] = None,
     ):
-        if unit_pools is None:
-            unit_pools = {"default": num_units}
         self.engine = engine
         pool = decoder_pool_module.DecoderPool(
             router, unit_pools, decoder_memory, blocks_unit_by_pool

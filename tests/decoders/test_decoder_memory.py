@@ -338,7 +338,7 @@ def window_completion_ticks(
         router=router,
         scheduler=scheduler,
         strong_requests=strong_requests,
-        num_units=1,
+        unit_pools={"default": 1},
         decoder_memory=memory_config,
         escalation_policy=policy,
     )

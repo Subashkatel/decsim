@@ -54,7 +54,7 @@ def _manager(engine, units, scheduler=None):
         router=router,
         scheduler=scheduler,
         strong_requests=strong_requests,
-        num_units=units,
+        unit_pools={"default": units},
         escalation_policy=None,
     )
 

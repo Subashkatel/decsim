@@ -63,7 +63,7 @@ def _manager(engine, row, formation_by_pool=None, unit_count=1):
         router=router,
         scheduler=scheduler,
         strong_requests=strong_requests,
-        num_units=unit_count,
+        unit_pools={"default": unit_count},
         escalation_policy=policy,
         formation_by_pool=formation_by_pool,
     )
@@ -302,7 +302,7 @@ def _blocking_manager(engine, row, *, blocks_unit: bool):
         router=router,
         scheduler=scheduler,
         strong_requests=strong_requests,
-        num_units=1,
+        unit_pools={"default": 1},
         escalation_policy=policy,
         blocks_unit_by_pool={"default": blocks_unit},
     )
@@ -455,7 +455,7 @@ def _staging_manager(engine, row, *, copies_input: bool):
         router=router,
         scheduler=scheduler,
         strong_requests=strong_requests,
-        num_units=1,
+        unit_pools={"default": 1},
         escalation_policy=policy,
         copies_input_by_pool={"default": copies_input},
     )

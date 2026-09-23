@@ -408,7 +408,7 @@ def test_a_detector_emitting_round_must_emit_a_readout():
     body = memory_body(1, 1, 10)
     qpu.issue(body)
     engine.schedule(10, qpu.finish)
-    with pytest.raises(ValueError, match="at least one readout"):
+    with pytest.raises(RuntimeError, match="at least one readout"):
         engine.run()
 
 
@@ -480,7 +480,7 @@ def test_an_idle_patchs_round_is_as_wide_as_one_patchs_syndrome():
 def test_a_command_with_another_cadence_is_refused():
     engine, qpu, log = clocked_qpu(10)
     body = memory_body(1, 2, 11)
-    with pytest.raises(ValueError, match="cadence"):
+    with pytest.raises(RuntimeError, match="cadence"):
         qpu.issue(body)
 
 

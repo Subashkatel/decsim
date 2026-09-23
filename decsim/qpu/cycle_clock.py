@@ -79,7 +79,7 @@ class QPUDevice:
     def issue(self, command: program_records.RunOperationBody) -> None:
         """Queue one operation body; it starts on the next cycle boundary."""
         if command.round_ticks != self.clock.period_ticks:
-            raise ValueError("operation cadence must equal the QPU cycle")
+            raise RuntimeError("operation cadence must equal the QPU cycle")
         is_instant = command.round_count == 0
         emits_without_finalizing = (
             command.emits_detector_data and not command.finalizes_stream_round
@@ -268,7 +268,7 @@ class QPUDevice:
     ) -> None:
         """Stamp every payload with its fragment slot and hand it on."""
         if not payloads:
-            raise ValueError(
+            raise RuntimeError(
                 "a detector-emitting round must emit at least one readout"
             )
         fragment_count, first_index = _fragment_slots(operation, len(payloads))

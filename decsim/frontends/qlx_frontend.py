@@ -44,7 +44,6 @@ _KIND_BY_NAME = types.MappingProxyType(
     {
         "mz": program_records.OpKind.MEASURE,
         "mx": program_records.OpKind.MEASURE,
-        "measure": program_records.OpKind.MEASURE,
         "inject": program_records.OpKind.INJECT,
         "merge": program_records.OpKind.MERGE,
         "measure_product": program_records.OpKind.MERGE,
@@ -54,7 +53,7 @@ _KIND_BY_NAME = types.MappingProxyType(
 # Op names that produce a classical bit usable for measurement feedback.
 # measure_product is a bit producer although its round-count kind is
 # MERGE, so feedback keys off names, not OpKind.MEASURE.
-_BIT_PRODUCER_NAMES = ("mz", "mx", "measure", "measure_product")
+_BIT_PRODUCER_NAMES = ("mz", "mx", "measure_product")
 
 _GENERATION_END_NAMES = ("mz", "mx", "dealloc")
 

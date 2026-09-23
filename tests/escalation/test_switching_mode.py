@@ -244,10 +244,13 @@ def test_the_yaml_asks_for_the_papers_parallel_variant(tmp_path):
     assert parallel.cancelled > 0
 
 
-def test_a_run_both_at_once_that_is_not_a_flag_is_refused(tmp_path):
-    card = _parallel_variant_card("yes")
+@pytest.mark.parametrize("value", ["yes", 1, 0])
+def test_a_run_both_at_once_that_is_not_a_flag_is_refused(tmp_path, value):
+    card = _parallel_variant_card(value)
     config_path = write_config(tmp_path, card)
-    sentence = "escalation.run_both_at_once must be true or false, got 'yes'"
+    sentence = (
+        f"escalation.run_both_at_once must be true or false, got {value!r}"
+    )
     with pytest.raises(ValueError, match=sentence):
         load_experiment(config_path)
 

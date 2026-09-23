@@ -472,9 +472,13 @@ def _switching_settings(
 
 
 def _switching_boolean(section: Mapping, key: str) -> bool:
-    """One of the switching section's on-or-off knobs, off when silent."""
+    """One of the switching section's on-or-off knobs, off when silent.
+
+    The test is the type, because 1 == True and 0 == False would let a
+    count stand in for a flag.
+    """
     value = section.get(key, False)
-    if value not in (True, False):
+    if not isinstance(value, bool):
         raise ValueError(
             f"escalation.{key} must be true or false, got {value!r}"
         )

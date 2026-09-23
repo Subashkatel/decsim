@@ -37,6 +37,7 @@ import stim
 import yaml
 
 import decsim.collect as collect
+import decsim.controller.settings as controller_settings
 import decsim.decoders.settings as decoder_settings
 import decsim.escalation.policies as escalation_policies
 import decsim.escalation.settings as escalation_settings
@@ -478,5 +479,21 @@ def test_two_tasks_that_run_different_circuits_are_two_tasks():
     five_rounds = _memory_task(5)
 
     unique = collect.unique_tasks([three_rounds, five_rounds])
+
+    assert len(unique) == 2
+
+
+def test_two_tasks_whose_controllers_stall_or_drop_are_two_tasks():
+    """An enum setting enters the strong id as its member's name."""
+    settings = machine_settings.MachineSettings()
+    drop_round = controller_settings.PackingOverflowPolicy.DROP_ROUND
+    dropping_controller = dataclasses.replace(
+        settings.controller, packing_overflow=drop_round
+    )
+    dropping = dataclasses.replace(settings, controller=dropping_controller)
+    stalling_task = collect.Task(settings, 1, {"point": 1})
+    dropping_task = collect.Task(dropping, 1, {"point": 1})
+
+    unique = collect.unique_tasks([stalling_task, dropping_task])
 
     assert len(unique) == 2

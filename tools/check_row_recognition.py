@@ -71,9 +71,11 @@ PORTS = frozenset(
     }
 )
 
-# Types decsim does not own, met at the edge of another library.
+# Types decsim does not own, met at the edge of another library; an
+# enum member is written into json as its name (collect.json_value).
 FOREIGN_TYPES = frozenset(
     {
+        "enum.Enum",
         "stim.Circuit",
         "stim.CircuitRepeatBlock",
         "TesseractDecoderConfig",

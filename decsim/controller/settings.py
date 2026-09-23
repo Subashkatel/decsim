@@ -12,6 +12,7 @@ from typing import Optional
 import decsim.config as config
 import decsim.controller.policies as policies
 import decsim.ports as ports
+import decsim.tables as tables
 from decsim.detector_error_model import detection_event_formation
 
 # idle_policy.kind names one of these rows: what the controller does
@@ -154,6 +155,11 @@ class ControllerSettings:
         packing_rounds_in_flight = section.get("packing_rounds_in_flight")
         packing_overflow = _packing_overflow(section)
         formed_at = section.get("detection_events_formed_at", "controller")
+        tables.row(
+            DETECTION_EVENT_FORMATION,
+            "controller.detection_events_formed_at",
+            formed_at,
+        )
         return cls(
             clock=clock,
             readout_to_bits_cycles=readout_cycles,

@@ -164,6 +164,20 @@ def test_a_controller_without_its_clock_is_refused_naming_the_key(tmp_path):
         experiment.load_experiment(config_path)
 
 
+def test_a_formation_placement_off_its_table_is_refused_when_the_yaml_loads(
+    tmp_path,
+):
+    controller = dict(MINIMAL_CONFIG["controller"])
+    controller["detection_events_formed_at"] = "nowhere"
+    config_path = write_config(tmp_path, {"controller": controller})
+    sentence = (
+        "controller.detection_events_formed_at 'nowhere' is not a row of "
+        "its table"
+    )
+    with pytest.raises(ValueError, match=sentence):
+        experiment.load_experiment(config_path)
+
+
 def test_the_bulk_strong_key_reaches_the_decoder_manager(tmp_path):
     config_path = write_config(
         tmp_path, {"decoder_manager": {"bulk_strong": True}}

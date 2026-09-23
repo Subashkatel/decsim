@@ -19,7 +19,7 @@ import dataclasses
 import enum
 import fractions
 import math
-from typing import Optional
+from typing import Optional, Union
 
 import decsim.records.identity as identity_records
 import decsim.records.transfers as transfer_records
@@ -44,12 +44,13 @@ class QuantityBasis(str, enum.Enum):
 class CapacitySettings:
     """Bandwidth of one channel in bits per microsecond, aggregate or per lane.
 
-    The rate is kept as written. The serialization arithmetic reads it as
-    the decimal on the card and multiplies by the lane count exactly
-    (exact_aggregate_bits_per_microsecond).
+    The rate is kept as written, a decimal from a Python card or an exact
+    Fraction from the yaml and the bandwidth card. The serialization
+    arithmetic reads it as the decimal on the card and multiplies by the
+    lane count exactly (exact_aggregate_bits_per_microsecond).
     """
 
-    input_bits_per_microsecond: float
+    input_bits_per_microsecond: Union[float, fractions.Fraction]
     basis: QuantityBasis
     lane_count: Optional[int]
     source: str

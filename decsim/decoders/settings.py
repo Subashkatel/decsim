@@ -279,10 +279,10 @@ class DecoderSettings:
         row_settings = tables.row_settings(
             row, section_name, section, DECODER_KEYS, clocks
         )
-        engine = _engine_card(section["engine"], clocks, section_name)
-        unit_memory = UnitMemorySettings.from_yaml(
-            section["unit_memory"], section_name
-        )
+        engine_section = _block(section, section_name, "engine")
+        engine = _engine_card(engine_section, clocks, section_name)
+        memory_section = _block(section, section_name, "unit_memory")
+        unit_memory = UnitMemorySettings.from_yaml(memory_section, section_name)
         input_kind = _copy_row(section, section_name, "input", DECODER_INPUTS)
         boundary_fold = _copy_row(
             section, section_name, "boundary_fold", DECODER_BOUNDARY_FOLDS
@@ -388,6 +388,21 @@ def _check_required_keys(section: Mapping, section_name: str) -> None:
     raise ValueError(
         f"{section_name} needs the keys {listed}; configs/reference.yaml "
         "holds every key with its unit"
+    )
+
+
+def _block(section: Mapping, section_name: str, key: str) -> Mapping:
+    """A nested block of the section, which is a mapping of its own keys.
+
+    `unit_memory: 4096` reads as a capacity to a user and as no mapping
+    to the reader, so it is refused with the form it takes.
+    """
+    block = section[key]
+    if isinstance(block, Mapping):
+        return block
+    raise ValueError(
+        f"{section_name}.{key} holds {block!r}; it is a mapping of its "
+        "keys, as in configs/reference.yaml"
     )
 
 

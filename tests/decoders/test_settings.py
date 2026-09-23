@@ -448,3 +448,17 @@ def test_a_cycle_count_block_without_a_clock_is_refused_by_name():
         decoder_settings.DecoderSettings.from_yaml(
             section, clocks, "weak_decoder"
         )
+
+
+@pytest.mark.parametrize("key", ["unit_memory", "engine"])
+def test_a_nested_block_written_as_one_value_is_refused_by_name(key):
+    clocks = config.ClockSettings({"decoder": 250.0})
+    section = _tier_section({"bits": None})
+    section[key] = 4096
+
+    with pytest.raises(
+        ValueError, match=f"weak_decoder.{key} holds 4096; it is a mapping"
+    ):
+        decoder_settings.DecoderSettings.from_yaml(
+            section, clocks, "weak_decoder"
+        )

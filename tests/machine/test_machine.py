@@ -72,6 +72,7 @@ import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 import decsim.seeding as seeding
 import decsim.settings as machine_settings
+import decsim.syndrome_buffer.ported_syndrome_buffer as ported_syndrome_buffer
 import decsim.syndrome_buffer.settings as syndrome_buffer_settings
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 import decsim.trace_source as trace_source
@@ -277,7 +278,7 @@ def test_a_strong_store_kind_off_the_table_is_refused_even_when_unused():
     with pytest.raises(
         ValueError,
         match="strong_syndrome_buffer.kind 'off_table' is not a row of its "
-        r"table; the rows are \['syndrome_buffer'\]",
+        r"table; the rows are \['ported_syndrome_buffer', 'syndrome_buffer'\]",
     ):
         machine_module.Machine.build(settings)
 
@@ -1167,12 +1168,12 @@ def test_a_new_syndrome_buffer_is_one_class_and_one_table_row():
         settings.weak_syndrome_buffer, kind="counting"
     )
     settings = dataclasses.replace(settings, weak_syndrome_buffer=counting)
-    syndrome_buffer_module.SYNDROME_BUFFERS["counting"] = CountingSyndromeBuffer
+    ported_syndrome_buffer.SYNDROME_BUFFERS["counting"] = CountingSyndromeBuffer
     try:
         machine = machine_module.Machine.build(settings, 0)
         result = machine.run()
     finally:
-        del syndrome_buffer_module.SYNDROME_BUFFERS["counting"]
+        del ported_syndrome_buffer.SYNDROME_BUFFERS["counting"]
     assert result.terminal_status == "complete"
     assert type(machine.weak_syndrome_buffer) is CountingSyndromeBuffer
     fired = [

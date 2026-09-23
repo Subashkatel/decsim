@@ -16,6 +16,7 @@ import decsim.ports as ports
 import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
 import decsim.records.transfers as transfer_records
+import decsim.syndrome_buffer.ported_syndrome_buffer as ported_syndrome_buffer
 import decsim.syndrome_buffer.round_output as round_output
 import decsim.syndrome_buffer.settings as syndrome_buffer_settings
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
@@ -229,7 +230,7 @@ def test_read_cycles_delay_the_decode_from_dispatch_on(decoder_input):
         section,
         "weak_syndrome_buffer",
         clocks,
-        syndrome_buffer_module.SYNDROME_BUFFERS,
+        ported_syndrome_buffer.SYNDROME_BUFFERS,
     )
     free = declared_run.weak_only_run(decoder_input=decoder_input)
     charged = declared_run.weak_only_run(

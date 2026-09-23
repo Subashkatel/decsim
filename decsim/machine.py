@@ -163,6 +163,7 @@ class Machine:
             settings, escalation_policy, detection_events
         )
         store_build.check_readout_cost_is_priced(settings)
+        store_build.check_one_price_for_a_read(settings)
         store_build.check_store_kinds(settings)
         controller_side.check_strong_route(escalation_policy, pool.router)
         parts = build_parts.Parts(

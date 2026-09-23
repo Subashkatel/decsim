@@ -19,8 +19,8 @@ import decsim.engine as engine_module
 import decsim.links.settings as link_settings
 import decsim.records.windows as window_records
 import decsim.settings as machine_settings
+import decsim.syndrome_buffer.ported_syndrome_buffer as ported_syndrome_buffer
 import decsim.syndrome_buffer.settings as store_settings
-import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 import tests.declared_run as declared_run
 
 
@@ -52,7 +52,7 @@ def test_buffer_zero_is_built_from_the_kind_the_section_names():
     store = store_build.build_weak_syndrome_buffer(parts)
 
     kind = settings.weak_syndrome_buffer.kind
-    assert isinstance(store, syndrome_buffer_module.SYNDROME_BUFFERS[kind])
+    assert isinstance(store, ported_syndrome_buffer.SYNDROME_BUFFERS[kind])
 
 
 def test_a_syndrome_buffer_kind_that_names_no_row_is_refused():
@@ -278,3 +278,33 @@ def _machine_settings(**changes):
         pauli_frame=frame,
     )
     return dataclasses.replace(settings, **changes)
+
+
+def _ported_run_with_a_rate(bits_per_microsecond):
+    """A weak-only machine on a ported store, its read link rated or not."""
+    links = declared_run.declared_profile()
+    path = links.weak_buffer_to_weak_decoder
+    capacity = None
+    if bits_per_microsecond is not None:
+        capacity = link_settings.CapacitySettings(bits_per_microsecond, "card")
+    channel = dataclasses.replace(path.channel, capacity=capacity)
+    path = dataclasses.replace(path, channel=channel)
+    links = dataclasses.replace(links, weak_buffer_to_weak_decoder=path)
+    ported = store_settings.SyndromeBufferSettings(
+        kind="ported_syndrome_buffer"
+    )
+    return _machine_settings(weak_syndrome_buffer=ported, links=links)
+
+
+def test_a_rate_out_of_a_ported_store_is_refused_as_a_second_price():
+    """The store's read port prices the bits; the link keeps its latency."""
+    settings = _ported_run_with_a_rate(2000.0)
+
+    with pytest.raises(ValueError, match="set its bits_per_cycle to null"):
+        store_build.check_one_price_for_a_read(settings)
+
+
+def test_a_ported_store_beside_an_unrated_link_is_accepted():
+    settings = _ported_run_with_a_rate(None)
+
+    store_build.check_one_price_for_a_read(settings)

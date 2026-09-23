@@ -602,7 +602,34 @@ weak_syndrome_buffer:            # the weak syndrome buffer, on the decoder chip
                                    # positive under any other row. Yang et al.
                                    # fix theirs at 5 FPGA clock cycles
                                    # (2605.04892 lines 1273-1275)
-  kind: syndrome_buffer            # the one row today
+  kind: syndrome_buffer            # syndrome_buffer | ported_syndrome_buffer.
+                                   # syndrome_buffer prices a write and a read
+                                   # by write_cycles and read_cycles above, and
+                                   # no access waits for another.
+                                   # ported_syndrome_buffer stores a round in
+                                   # whole words and serves each write and read
+                                   # in arrival order on the port that frees
+                                   # first: k = sum over its rounds of
+                                   # ceil(bits / word_bits) accesses hold the
+                                   # port k x cycles_per_access cycles, and the
+                                   # data is usable access_latency_cycles later
+                                   # (gem5 src/mem/simple_mem.cc:154-174 and
+                                   # src/mem/xbar.cc:135, 206, 288-289). It
+                                   # refuses write_cycles and read_cycles, and a
+                                   # rate on links.weak_buffer_to_weak_decoder,
+                                   # which would price the same read twice. Its
+                                   # own keys, with their defaults (the sky130
+                                   # pseudo dual port FIFO, one byte a clock):
+  # read_ports: 1                  # ports that only read (OpenRAM num_r_ports)
+  # write_ports: 1                 # ports that only write (num_w_ports)
+  # read_write_ports: 0            # ports that do either (num_rw_ports); 1 with
+                                   # the two above at 0 is a single-port memory
+  # word_bits: 8                   # bits one access moves; AFS is 32 with
+                                   # cycles_per_access 4 (2001.06598 lines
+                                   # 529-531, 1107-1110)
+  # cycles_per_access: 1           # cycles one access holds its port
+  # access_latency_cycles: 0       # cycles after the last access before the
+                                   # data is usable
   bits: null                       # capacity in bits, the unit a memory is
                                    # declared in (gem5 states its packet store
                                    # in bytes on the store itself,

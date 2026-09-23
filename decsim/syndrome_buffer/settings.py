@@ -21,7 +21,8 @@ SYNDROME_BUFFER_KEYS = (
 class SyndromeBufferSettings:
     """The yaml's `weak_syndrome_buffer` and `strong_syndrome_buffer` sections.
 
-    Table row (SYNDROME_BUFFERS, syndrome_buffer.py): syndrome_buffer.
+    Table rows (SYNDROME_BUFFERS, ported_syndrome_buffer.py):
+    syndrome_buffer and ported_syndrome_buffer.
     bits bounds the store, the capacity a memory is declared in; None is
     unbounded. gem5 sizes its packet store the same way, in bytes on the
     store itself (`rx_fifo_size = Param.MemorySize("384KiB", ...)`,
@@ -74,7 +75,8 @@ class SyndromeBufferSettings:
         """A store section: its kind, and `bits`, a bit capacity or null.
 
         buffer_rows is SYNDROME_BUFFERS, which sits beside the store
-        class and so cannot be imported here (syndrome_buffer.py).
+        classes and so cannot be imported here
+        (ported_syndrome_buffer.py).
         """
         kind = section.get("kind", "syndrome_buffer")
         row = tables.row(buffer_rows, f"{section_name}.kind", kind)
@@ -112,8 +114,16 @@ def check_strong_section_charges_nothing(section: Mapping) -> None:
 
     Its receiving end stores a round at the tick it lands
     (strong_syndrome_round_receiver.py), so a cost or its clock written
-    there would be read and never paid, whatever its value.
+    there would be read and never paid, whatever its value, and the
+    strong side is a latency model behind its backend, so a store with
+    ports has no place there.
     """
+    if section.get("kind") == "ported_syndrome_buffer":
+        raise ValueError(
+            "strong_syndrome_buffer.kind ported_syndrome_buffer prices its "
+            "accesses on ports; the strong syndrome buffer stores a round "
+            "as it lands and charges nothing, so name syndrome_buffer"
+        )
     for key in _WEAK_BUFFER_ONLY_KEYS:
         if key in section:
             raise ValueError(

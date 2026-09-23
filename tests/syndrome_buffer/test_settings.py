@@ -12,10 +12,11 @@ import pytest
 
 import decsim.config as config
 import decsim.engine as engine_module
+import decsim.syndrome_buffer.ported_syndrome_buffer as ported_syndrome_buffer
 import decsim.syndrome_buffer.settings as syndrome_buffer_settings
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 
-BUFFER_ROWS = syndrome_buffer_module.SYNDROME_BUFFERS
+BUFFER_ROWS = ported_syndrome_buffer.SYNDROME_BUFFERS
 
 
 def test_a_charged_store_cost_needs_its_clock():

@@ -20,7 +20,10 @@ runs with no listener: round_stored(round_key, packet) when a slot is
 taken, round_published(round_key, tick) when the round's data is ready
 for the windows, round_released(round_key) when the slot frees;
 hold_registered(holder, round_keys), hold_transferred(old_holder,
-new_holder) and hold_released(holder) for the consumers' tokens.
+new_holder) and hold_released(holder) for the consumers' tokens;
+access_served(direction, port_index, round_keys, arrival_tick,
+start_tick, completion_tick) for every write and read it books, the
+port index None on a row with no ports.
 """
 
 import dataclasses
@@ -53,6 +56,7 @@ class _TraceSources:
     hold_registered: trace_source.TraceSource = trace_source.new_source()
     hold_transferred: trace_source.TraceSource = trace_source.new_source()
     hold_released: trace_source.TraceSource = trace_source.new_source()
+    access_served: trace_source.TraceSource = trace_source.new_source()
 
 
 class _StoredRound:
@@ -113,7 +117,6 @@ class SyndromeBuffer:
         settings: syndrome_buffer_settings.SyndromeBufferSettings,
         engine: engine_module.Engine,
     ) -> None:
-        _check_costs_have_a_clock(settings)
         self.settings = settings
         self.engine = engine
         self.round_by_key: dict = {}
@@ -124,6 +127,7 @@ class SyndromeBuffer:
         # closed; a closed identity never reopens
         self.operations: dict = {}
         self.trace = _TraceSources()
+        self._check_costs_have_a_clock()
 
     # ---- the port
 
@@ -184,9 +188,12 @@ class SyndromeBuffer:
         now, gem5 SimpleMemory's latency with no bandwidth term
         (src/mem/simple_mem.cc:174), and a zero cost completes now.
         """
-        del round_key, bits
+        del bits
         costs = _costs(self.settings)
-        return self._access_completion_tick(costs.write_cycles)
+        round_keys = (round_key,)
+        return self._access_completion_tick(
+            "write", round_keys, costs.write_cycles
+        )
 
     def book_read(self, round_keys: tuple) -> int:
         """The tick a read of these rounds completes: read_cycles on its clock.
@@ -194,9 +201,10 @@ class SyndromeBuffer:
         One read of a job's rounds costs read_cycles whatever their
         width, and never waits for another access (book_write).
         """
-        del round_keys
         costs = _costs(self.settings)
-        return self._access_completion_tick(costs.read_cycles)
+        return self._access_completion_tick(
+            "read", round_keys, costs.read_cycles
+        )
 
     def release_round(self, round_key) -> None:
         """Free one unheld round; its consumers are done with it."""
@@ -365,11 +373,24 @@ class SyndromeBuffer:
 
     # ---- private
 
-    def _access_completion_tick(self, cycles: int) -> int:
+    def _check_costs_have_a_clock(self) -> None:
+        costs = _costs(self.settings)
+        charged = costs.write_cycles + costs.read_cycles
+        if charged > 0 and self.settings.clock is None:
+            raise ValueError("charged weak_syndrome_buffer costs need a clock")
+
+    def _access_completion_tick(
+        self, direction: str, round_keys: tuple, cycles: int
+    ) -> int:
+        """The access's end, cycles after now's edge; a zero cost is now."""
         now = self.engine.now
-        if cycles == 0:
-            return now
-        return self.settings.clock.edge(cycles, now)
+        completion_tick = now
+        if cycles > 0:
+            completion_tick = self.settings.clock.edge(cycles, now)
+        self.trace.access_served.fire(
+            direction, None, round_keys, now, now, completion_tick
+        )
+        return completion_tick
 
     def _refuse_rounds_left(self) -> None:
         held = list(self.round_by_key)
@@ -499,15 +520,6 @@ def _costs(
     return settings.row_settings
 
 
-def _check_costs_have_a_clock(
-    settings: syndrome_buffer_settings.SyndromeBufferSettings,
-) -> None:
-    costs = _costs(settings)
-    charged = costs.write_cycles + costs.read_cycles
-    if charged > 0 and settings.clock is None:
-        raise ValueError("charged weak_syndrome_buffer costs need a clock")
-
-
 def _round_ranges_text(sorted_round_indices: list) -> str:
     """[1, 2, 3, 7, 8] -> "1..3, 7..8"."""
     ranges = []
@@ -527,11 +539,3 @@ def _range_text(low: int, high: int) -> str:
     if low == high:
         return f"{low}"
     return f"{low}..{high}"
-
-
-# weak_syndrome_buffer.kind and strong_syndrome_buffer.kind name one of these
-# rows. The table sits beside the class rather than in the package's
-# settings.py, which this module imports for SyndromeBufferSettings.
-SYNDROME_BUFFERS = {
-    "syndrome_buffer": SyndromeBuffer,
-}

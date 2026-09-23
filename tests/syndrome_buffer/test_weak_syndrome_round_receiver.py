@@ -26,6 +26,7 @@ import decsim.engine as engine_module
 import decsim.observe.log_writers as log_writers
 import decsim.ports as ports
 import decsim.records.rounds as round_records
+import decsim.syndrome_buffer.ported_syndrome_buffer as ported_syndrome_buffer
 import decsim.syndrome_buffer.settings as syndrome_buffer_settings
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 import tests.declared_run as declared_run
@@ -308,7 +309,7 @@ def test_write_cycles_move_every_reaction_point_by_the_store_periods():
         section,
         "weak_syndrome_buffer",
         clocks,
-        syndrome_buffer_module.SYNDROME_BUFFERS,
+        ported_syndrome_buffer.SYNDROME_BUFFERS,
     )
     free = declared_run.weak_only_run()
     charged = declared_run.weak_only_run(weak_syndrome_buffer=settings)

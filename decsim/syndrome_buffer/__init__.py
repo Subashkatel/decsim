@@ -1,8 +1,11 @@
 """The syndrome buffers: a finished round kept until its last reader is done.
 
-syndrome_buffer.py is the store itself, the one row of SYNDROME_BUFFERS: rounds
+syndrome_buffer.py is the store itself, the syndrome_buffer row: rounds
 by key, bounded to the bits settings.py gives it or unbounded, each
-round kept while any hold on it is live (round_holds.py). A machine
+round kept while any hold on it is live (round_holds.py), each access
+priced by a flat cost. ported_syndrome_buffer.py is the same store behind
+memory ports, whose accesses take words in arrival order, and holds the
+table of both rows, SYNDROME_BUFFERS. A machine
 always builds the weak syndrome buffer, which the tier that decodes as the
 rounds arrive reads, with weak_syndrome_round_receiver.py as its receiving
 end, its room and its landing; it builds the strong syndrome buffer as

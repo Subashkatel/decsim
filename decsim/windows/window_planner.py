@@ -498,6 +498,11 @@ class WindowPlanner:
         )
         if not models:
             return
+        successor_ids = self.plan.successors.get(operation.id, ())
+        if successor_ids:
+            _refuse_reads_past_the_model(
+                operation, windows, models, resolved.round_count
+            )
         for window, model in zip(windows, models):
             self.models.model_by_window[window.key] = model
 
@@ -523,6 +528,36 @@ class WindowPlanner:
         growth.next_window_index += 1
         self.trace.window_planned.fire(window)
         return window
+
+
+def _refuse_reads_past_the_model(
+    operation: program_records.Operation,
+    windows: list,
+    models: list,
+    round_count: int,
+) -> None:
+    """A window with an error model reads only its own operation's rounds.
+
+    The model is sliced from the operation's own circuit, so its rows
+    end at the operation's last round. A window whose buffer runs on
+    into the next operation's rounds would hand the decoder rows its
+    model does not have, which the decoder's input memory refuses in the
+    middle of the run (decoders/decoder_memory.py). The flush terminal
+    policy ends the last window inside its operation.
+    """
+    for window, model in zip(windows, models):
+        if model is None:
+            continue
+        if window.buffer_hi <= round_count:
+            continue
+        first_foreign_round = round_count + 1
+        raise ValueError(
+            f"{operation.name} window {window.window_index} reads rounds "
+            f"{first_foreign_round} to {window.buffer_hi} from the operation "
+            f"after it, but its error model holds only the operation's own "
+            f"{round_count} rounds; windows.terminal_policy flush ends the "
+            "last window inside its operation"
+        )
 
 
 def _stream_round_limit(physical_round_limit, model_round_limit):

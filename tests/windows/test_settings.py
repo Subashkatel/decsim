@@ -94,6 +94,18 @@ def test_both_keys_default_to_null_so_the_plan_decides_them():
     assert settings.boundaries is None
 
 
+def test_a_section_without_its_sizes_is_refused_by_name():
+    section = {"kind": "sliding"}
+
+    with pytest.raises(ValueError) as refusal:
+        window_settings.WindowSettings.from_yaml(section, CLOCKS)
+
+    assert str(refusal.value) == (
+        "windows needs the keys ['buffer_rounds', 'commit_rounds']; "
+        "configs/reference.yaml holds every key with its meaning"
+    )
+
+
 def test_a_window_size_is_a_whole_count_of_rounds():
     """F >= 1 and B >= 0, refused at load, never as a TypeError at build."""
     refused = (

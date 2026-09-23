@@ -48,6 +48,8 @@ WINDOWS_KEYS = (
     "terminal_policy",
     "boundaries",
 )
+# The keys the section must name; the rest have a default.
+_REQUIRED_WINDOWS_KEYS = ("kind", "commit_rounds", "buffer_rounds")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -108,6 +110,7 @@ class WindowSettings:
         default_clock: Optional[config.Clock] = None,
     ) -> "WindowSettings":
         """The `windows` section: a kind of the table, two sizes, the wire."""
+        _check_required_keys(section)
         kind = section["kind"]
         row = tables.row(WINDOWING_SCHEMES, "windows.kind", kind)
         row_settings = tables.row_settings(
@@ -137,6 +140,18 @@ class WindowSettings:
             boundaries=boundaries,
             row_settings=row_settings,
         )
+
+
+def _check_required_keys(section: Mapping) -> None:
+    """The section names the scheme and both window sizes."""
+    missing = set(_REQUIRED_WINDOWS_KEYS) - set(section)
+    if not missing:
+        return
+    listed = sorted(missing)
+    raise ValueError(
+        f"windows needs the keys {listed}; configs/reference.yaml holds "
+        "every key with its meaning"
+    )
 
 
 def _check_window_rounds(key: str, rounds, least: int) -> None:

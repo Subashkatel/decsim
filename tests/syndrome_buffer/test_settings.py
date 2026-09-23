@@ -88,15 +88,24 @@ def test_an_unknown_key_under_a_store_section_is_refused_by_name():
 
 
 @pytest.mark.parametrize(
-    "cost",
-    ["write_cycles", "read_cycles", "detection_event_cycles_per_round"],
+    "key",
+    [
+        "clock",
+        "write_cycles",
+        "read_cycles",
+        "detection_event_cycles_per_round",
+    ],
 )
-def test_a_cost_on_the_strong_syndrome_buffer_is_refused(cost):
-    section = {cost: 3}
+@pytest.mark.parametrize("value", [3, 0, "3x"])
+def test_a_cost_or_its_clock_on_the_strong_syndrome_buffer_is_refused(
+    key, value
+):
+    """Whatever the value: the strong store reads none of these keys."""
+    section = {key: value}
 
     with pytest.raises(
         ValueError,
-        match=f"strong_syndrome_buffer.{cost} is a cost of the weak",
+        match=f"strong_syndrome_buffer.{key} belongs to the weak",
     ):
         syndrome_buffer_settings.check_strong_section_charges_nothing(section)
 

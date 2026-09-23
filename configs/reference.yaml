@@ -621,7 +621,8 @@ strong_syndrome_buffer:          # the strong syndrome buffer, on the strong hos
                                    # null = unbounded
                                    # This buffer stores a round as it lands and
                                    # charges no cycles, so the weak syndrome
-                                   # buffer's cost keys are refused here
+                                   # buffer's cost keys and clock are refused
+                                   # here, whatever their value
 
 # The two decoder tiers are two distinct units (Toshio 2510.25222:
 # lightweight decoders decode constantly, a separate accurate decoder is

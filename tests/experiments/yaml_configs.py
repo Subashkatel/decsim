@@ -23,6 +23,7 @@ CONFIGS_DIR = _REPOSITORY_ROOT / "configs"
 # shipped config walk this tuple and not the folder, so a config a user
 # writes into configs/ of their own checkout fails none of them.
 SHIPPED_CONFIGS = (
+    "cluster_gap_switching.yaml",
     "data_movement.yaml",
     "data_movement_fold_in_place.yaml",
     "data_movement_input_in_place.yaml",

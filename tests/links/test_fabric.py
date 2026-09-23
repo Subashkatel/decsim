@@ -248,7 +248,9 @@ def test_a_routed_readout_estimate_without_attribution_is_refused() -> None:
     route = link_settings.ReadoutRoute(("left",), FREE_PATH)
     fabric = fabric_with(engine, readout_routes=(route,))
 
-    with pytest.raises(ValueError, match="readout delay requires a footprint"):
+    with pytest.raises(
+        RuntimeError, match="readout delay requires a footprint"
+    ):
         fabric.expected_delay_ticks(PATH.QPU_TO_CONTROLLER, 8, 0)
 
 

@@ -20,10 +20,11 @@ A weak tier must report a confidence, which is why Relay-BP and BP-OSD
 appear as strong tiers and alone but never as the weak side of a
 switching pair (reference.yaml, escalation.confidence).
 
-Shot table: base.yaml's sweep, one table for all sixteen, each point
-about 100 failures from the August strong-tier rates, floor 400, cap
-200,000; four points skipped: d 11 to 15 at p 0.001 and d 15 at p
-0.002. 1,792,115 shots an experiment.
+Shot table: the sweep of the shared base every experiment extends,
+configs/common/experiments_2026_09_base.yaml, one table for all
+sixteen, each point about 100 failures from the August strong-tier
+rates, floor 400, cap 200,000; four points skipped: d 11 to 15 at p
+0.001 and d 15 at p 0.002. 1,792,115 shots an experiment.
 
 Costs: seconds a shot at p 0.003 on the compiled union find (D17) and
 the compiled cluster gap walk (D18), the model build included. A

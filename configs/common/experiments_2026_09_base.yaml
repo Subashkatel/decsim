@@ -1,12 +1,16 @@
-# The shared base of the sixteen 2026-09 experiments (PLAN.md): each
-# of pymatching, union find, Relay-BP and BP-OSD as the weak tier
-# alone, as the strong tier alone (belief matching too), and switching
-# from a weak tier that reports a confidence to each strong tier. Every
-# experiment extends this file and changes only its escalation section
-# and its decoder rows, so any difference between two experiments' rows
-# is the decoders' and nothing else. Every key is documented in
-# reference.yaml; the workload, windows, clocks, links, engine stages
-# and idle policy are the weak_ler and strong_ler settings.
+# The shared base of the sixteen 2026-09 experiments
+# (configs/experiments_2026_09/PLAN.md): each of pymatching, union find,
+# Relay-BP and BP-OSD as the weak tier alone, as the strong tier alone
+# (belief matching too), and switching from a weak tier that reports a
+# confidence to each strong tier. Every experiment extends this file and
+# changes only its escalation section and its decoder rows, so any
+# difference between two experiments' rows is the decoders' and nothing
+# else. It names no decoder, so it is not an experiment itself, and it
+# lives outside the experiments' folder so that running every file there
+# runs experiments only, as gem5 keeps the pieces its scripts share in
+# configs/common. Every key is documented in reference.yaml; the
+# workload, windows, clocks, links, engine stages and idle policy are
+# the weak_ler and strong_ler settings.
 #
 # Grid: d 3 to 15 and error rates 0.001 to 0.01, the shots of each
 # point in the sweep below.

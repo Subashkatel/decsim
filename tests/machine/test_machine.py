@@ -2080,7 +2080,7 @@ def test_a_landing_after_its_operations_close_costs_the_result_nothing(
 
 CAMPAIGN_DIRECTORY = yaml_configs.CONFIGS_DIR / "experiments_2026_09"
 CAMPAIGN_DISTANCE = 3
-CAMPAIGN_ROUND_COUNT = 30  # base.yaml's rounds_per_shot, 10d at d = 3
+CAMPAIGN_ROUND_COUNT = 30  # the shared base's rounds_per_shot, 10d at d 3
 CAMPAIGN_PHYSICAL_ERROR = 0.001  # the smallest p of every family's sweep
 CAMPAIGN_ROUND_PERIOD_US = 1.0
 CAMPAIGN_SHOT_COUNT = 8

@@ -6,7 +6,7 @@ lines 102-105 (a window commits its final correction once); Yang et al.
 2605.04892 Fig. 1 (one frame update costs one cycle, 4 ns at 250 MHz,
 and the loop waits for it). The write
 is charged from the frame clock's next edge, gem5's clockEdge
-(tmp/resources/gem5/src/sim/clocked_object.hh lines 174-186).
+(gem5 src/sim/clocked_object.hh lines 174-186).
 """
 
 import dataclasses
@@ -296,7 +296,7 @@ def test_a_frame_kind_off_the_table_is_refused_naming_the_rows(tmp_path):
 
 
 def test_two_windows_writes_are_charged_in_parallel_and_never_queued():
-    """C7 finding 8: the frame's parallel-write rule, never pinned.
+    """Two windows' writes overlap: the frame is a register, not a queue.
 
     A write is one XOR into a register, one clock cycle of the frame unit
     (Yang et al. 2605.04892 Fig. 1 measures 4 ns inside a 550 ns loop,

@@ -1143,8 +1143,8 @@ def test_the_cluster_gap_is_not_a_tier_kind_under_any_escalation(
 class CountingSyndromeBuffer(syndrome_buffer_module.SyndromeBuffer):
     """A table row for the plug-in test: the store, counting its writes."""
 
-    def __init__(self, settings):
-        syndrome_buffer_module.SyndromeBuffer.__init__(self, settings)
+    def __init__(self, settings, engine):
+        syndrome_buffer_module.SyndromeBuffer.__init__(self, settings, engine)
         self.stored_count = 0
 
     def accept_packed_round(self, packet, *, publication_tick):

@@ -153,7 +153,7 @@ def transmitter_with(engine, profile, windows=None, settings=None):
     links.trace.transfer_delivered.connect(ledger.on_transfer)
     if settings is None:
         settings = syndrome_buffer_settings.SyndromeBufferSettings()
-    store = syndrome_buffer_module.SyndromeBuffer(settings)
+    store = syndrome_buffer_module.SyndromeBuffer(settings, engine)
     if windows is None:
         windows = RecordingWindows(engine)
     else:

@@ -101,7 +101,9 @@ class _Fixture:
             round_count=5,
         )
         settings = syndrome_buffer_settings.SyndromeBufferSettings()
-        self.store = syndrome_buffer_module.SyndromeBuffer(settings)
+        self.store = syndrome_buffer_module.SyndromeBuffer(
+            settings, self.engine
+        )
         self.arrived = 0
         geometry = types.SimpleNamespace(code_name="surface")
         no_models = types.SimpleNamespace(model_by_window={})

@@ -40,6 +40,7 @@ The weak syndrome buffer, as its own round receiver sees it.
 | --- | --- |
 | `has_room` | Whether this round fits beside the stored and the reserved rounds. |
 | `accept_packed_round` | Keep one landed round, readable at that tick; None publishes none. |
+| `book_write` | Take a write of this round's stored bits; the tick it completes. |
 | `release_round` | Free the round; its consumers are done with it. |
 | `capacity_bits` | The bits this store is bounded to, or None for unbounded. |
 | `held_rounds_description` | The stored rounds, in one line, for the I/O trace. |

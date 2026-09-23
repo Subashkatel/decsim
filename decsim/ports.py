@@ -187,6 +187,17 @@ class SyndromeBuffer(Protocol):
     ) -> None:
         """Keep one landed round, readable at that tick; None publishes none."""
 
+    def book_write(self, round_key: tuple, bits: Optional[int]) -> int:
+        """Take a write of this round's stored bits; the tick it completes.
+
+        The store owns its access timing, so the receiving end asks it
+        rather than pricing the write itself. The tick is fixed when the
+        write is booked, as gem5's SimpleMemory fixes a response tick at
+        acceptance (src/mem/simple_mem.cc:174), and a booking is never
+        withdrawn. Nothing is scheduled: the caller schedules its own
+        continuation at the tick.
+        """
+
     def release_round(self, round_key: tuple) -> None:
         """Free the round; its consumers are done with it."""
 

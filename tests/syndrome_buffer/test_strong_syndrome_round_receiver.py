@@ -85,7 +85,7 @@ class RecordingListener:
 
 def room_side(engine, bits=None, listener=None, windows=None):
     store_settings = syndrome_buffer_settings.SyndromeBufferSettings(bits=bits)
-    store = syndrome_buffer_module.SyndromeBuffer(store_settings)
+    store = syndrome_buffer_module.SyndromeBuffer(store_settings, engine)
     if listener is not None:
         store.trace.round_stored.connect(listener.round_stored)
         store.trace.round_released.connect(listener.round_released)
@@ -125,8 +125,8 @@ class StoreWithoutSettlement:
 class RoomAskingStore(syndrome_buffer_module.SyndromeBuffer):
     """The one-memory store, recording every room question it is asked."""
 
-    def __init__(self, settings) -> None:
-        syndrome_buffer_module.SyndromeBuffer.__init__(self, settings)
+    def __init__(self, settings, engine) -> None:
+        syndrome_buffer_module.SyndromeBuffer.__init__(self, settings, engine)
         self.asked = []
 
     def has_room(self, round_key, bits, reserved_bits_by_round):
@@ -396,7 +396,7 @@ def test_a_region_asks_the_store_for_each_round_beside_the_ones_before_it():
         engine
     )
     store_settings = syndrome_buffer_settings.SyndromeBufferSettings(bits=9)
-    receiver.store = RoomAskingStore(store_settings)
+    receiver.store = RoomAskingStore(store_settings, engine)
     carried = region(1, 2)
 
     receiver.reserve_region(carried)

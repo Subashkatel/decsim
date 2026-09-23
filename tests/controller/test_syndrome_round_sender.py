@@ -123,7 +123,7 @@ def sender_with(
     held = syndrome_round_sender.HeldRounds(engine, on_full)
     held.trace.round_event.connect(recorder.record)
     settings = syndrome_buffer_settings.SyndromeBufferSettings(bits=weak_bits)
-    weak_store = syndrome_buffer_module.SyndromeBuffer(settings)
+    weak_store = syndrome_buffer_module.SyndromeBuffer(settings, engine)
     weak_store.held_rounds = held
     transmitter = RecordingTransmitter(engine)
     profile = link_profiles.logical_reference_profile()
@@ -260,7 +260,7 @@ def test_the_controller_carries_the_round_to_the_room_side_and_lands_it():
     """
     engine = engine_module.Engine()
     store_settings = syndrome_buffer_settings.SyndromeBufferSettings()
-    strong_store = syndrome_buffer_module.SyndromeBuffer(store_settings)
+    strong_store = syndrome_buffer_module.SyndromeBuffer(store_settings, engine)
     reads = decoding_records.WindowReads((1, 0))
     strong_store.register_hold(reads, [(1, 1)])
     room_side = strong_syndrome_round_receiver.StrongSyndromeRoundReceiver(

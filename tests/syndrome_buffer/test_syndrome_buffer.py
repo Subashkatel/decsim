@@ -87,7 +87,8 @@ def held_rounds() -> syndrome_round_sender.HeldRounds:
 
 def store(bits=None, waiting_line=None, listener=None):
     settings = syndrome_buffer_settings.SyndromeBufferSettings(bits=bits)
-    the_store = syndrome_buffer_module.SyndromeBuffer(settings)
+    engine = engine_module.Engine()
+    the_store = syndrome_buffer_module.SyndromeBuffer(settings, engine)
     if waiting_line is not None:
         the_store.held_rounds = waiting_line
     if listener is not None:
@@ -630,3 +631,19 @@ def test_a_weak_window_is_ready_on_this_store_and_nothing_lands_room_side():
     assert published == expected_data_complete
     assert room_side_landings == []
     assert machine.strong_syndrome_buffer.occupancy == 0
+
+
+def test_a_write_completes_its_write_cycles_after_the_edge_at_or_after_now():
+    """gem5's clockEdge then the latency (src/mem/simple_mem.cc:174).
+
+    From tick 1 on a 10-tick clock the edge is 10, and 3 cycles end at 40.
+    """
+    engine = engine_module.Engine()
+    engine.now = 1
+    clock = config.Clock(10)
+    settings = syndrome_buffer_settings.SyndromeBufferSettings(
+        clock=clock, write_cycles=3
+    )
+    the_store = syndrome_buffer_module.SyndromeBuffer(settings, engine)
+
+    assert the_store.book_write((1, 1), BITS_PER_ROUND) == 40

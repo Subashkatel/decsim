@@ -116,14 +116,15 @@ class WeakSyndromeRoundReceiver:
         packed: round_records.PackedRound,
         on_published: Callable[[], None],
     ) -> None:
-        """Start one landed round's write, retaining its reservation until done.
+        """Form one landed round, then write it, retaining its reservation.
 
         The store and the publication are one call at one tick, because
         the bits become readable when they are here and not before, and
         the announcement follows the record, so the window manager never
         hears of a round the store does not yet call readable. The
-        delay is the chip's formation cycles and the write cycles on one
-        clock edge: a round is readable once it is formed and written.
+        chip's formation cycles come first, on the buffer's clock, then
+        the store is asked when the write of the width it keeps
+        completes: a round is readable once it is formed and written.
         on_published runs after the announcement.
 
         A round whose operation closed while it crossed is dropped at the
@@ -136,15 +137,13 @@ class WeakSyndromeRoundReceiver:
         is no drop to make here.
         """
         formation_cycles = self.settings.detection_event_cycles_per_round
-        write_cycles = self.settings.write_cycles
-        cycles = formation_cycles + write_cycles
-        if cycles == 0:
-            self._finish_write(packed, on_published)
+        if formation_cycles == 0:
+            self._write(packed, on_published)
             return
-        edge = self.settings.clock.edge(cycles, self.engine.now)
+        edge = self.settings.clock.edge(formation_cycles, self.engine.now)
         delay = edge - self.engine.now
-        finish = functools.partial(self._finish_write, packed, on_published)
-        self.engine.schedule(delay, finish, label="syndrome buffer write")
+        write = functools.partial(self._write, packed, on_published)
+        self.engine.schedule(delay, write, label="detection event formation")
 
     def send_memory_round(
         self,
@@ -180,13 +179,28 @@ class WeakSyndromeRoundReceiver:
         if self.store.occupied_bits:
             self.store.check_settled()
 
-    def _finish_write(
+    def _write(
         self,
         landed: round_records.PackedRound,
         on_published: Callable[[], None],
     ) -> None:
-        self._give_back_reservation(landed)
+        """Ask the store when the formed round's write completes."""
         packed = self._as_stored(landed)
+        stored_bits = round_records.fragment_wire_bits(packed.packet.fragments)
+        written_tick = self.store.book_write(packed.round_key, stored_bits)
+        if written_tick == self.engine.now:
+            self._finish_write(packed, on_published)
+            return
+        delay = written_tick - self.engine.now
+        finish = functools.partial(self._finish_write, packed, on_published)
+        self.engine.schedule(delay, finish, label="syndrome buffer write")
+
+    def _finish_write(
+        self,
+        packed: round_records.PackedRound,
+        on_published: Callable[[], None],
+    ) -> None:
+        self._give_back_reservation(packed)
         self._take_slot(packed, "controller_to_weak_buffer", self.engine.now)
         self._fire_published(packed)
         self.windows.accept_window_input(packed.packet)

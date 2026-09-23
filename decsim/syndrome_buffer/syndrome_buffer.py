@@ -27,6 +27,7 @@ import dataclasses
 from collections.abc import Mapping
 from typing import Optional
 
+import decsim.engine as engine_module
 import decsim.ports as ports
 import decsim.records.identity as identity_records
 import decsim.records.rounds as round_records
@@ -67,8 +68,9 @@ class _StoredRound:
 class SyndromeBuffer:
     """The store: rounds by key, their holds, and the operations it serves.
 
-    Its state is the settings, the rounds, the bits they hold, the
-    holds, the operations and its events (trace).
+    Its state is the settings, the engine its accesses are timed on,
+    the rounds, the bits they hold, the holds, the operations and its
+    events (trace).
     """
 
     # a store built with no waiting line in front of it frees its slots
@@ -78,8 +80,10 @@ class SyndromeBuffer:
     def __init__(
         self,
         settings: syndrome_buffer_settings.SyndromeBufferSettings,
+        engine: engine_module.Engine,
     ) -> None:
         self.settings = settings
+        self.engine = engine
         self.round_by_key: dict = {}
         # the bits the stored rounds hold, summed as they land and leave
         self._occupied_bits = 0
@@ -139,6 +143,17 @@ class SyndromeBuffer:
         self.trace.round_stored.fire(round_key, packet)
         if publication_tick is not None:
             self.trace.round_published.fire(round_key, publication_tick)
+
+    def book_write(self, round_key: tuple, bits: Optional[int]) -> int:
+        """The tick this round's write completes: write_cycles on its clock.
+
+        This row holds no port, so a write never waits for another
+        access: it takes write_cycles from the clock edge at or after
+        now, gem5 SimpleMemory's latency with no bandwidth term
+        (src/mem/simple_mem.cc:174), and a zero cost completes now.
+        """
+        del round_key, bits
+        return self._access_completion_tick(self.settings.write_cycles)
 
     def release_round(self, round_key) -> None:
         """Free one unheld round; its consumers are done with it."""
@@ -306,6 +321,12 @@ class SyndromeBuffer:
         return "; ".join(parts)
 
     # ---- private
+
+    def _access_completion_tick(self, cycles: int) -> int:
+        now = self.engine.now
+        if cycles == 0:
+            return now
+        return self.settings.clock.edge(cycles, now)
 
     def _refuse_rounds_left(self) -> None:
         held = list(self.round_by_key)

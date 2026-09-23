@@ -51,7 +51,7 @@ def build_weak_syndrome_buffer(
         "weak_syndrome_buffer.kind",
         settings.kind,
     )
-    return row(settings)
+    return row(settings, parts.engine)
 
 
 def build_strong_syndrome_buffer(
@@ -64,7 +64,7 @@ def build_strong_syndrome_buffer(
         "strong_syndrome_buffer.kind",
         settings.kind,
     )
-    return row(settings)
+    return row(settings, parts.engine)
 
 
 def check_store_kinds(settings: machine_settings.MachineSettings) -> None:

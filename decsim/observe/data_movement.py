@@ -194,13 +194,6 @@ class DataMovement:
         """The rounds the QPU emitted."""
         return len(self.rounds_seen)
 
-    @property
-    def copies_per_round(self) -> float:
-        """Copies over rounds; zero when the run emitted none."""
-        if not self.rounds_seen:
-            return 0.0
-        return self.copies.total.events / len(self.rounds_seen)
-
     def json_value(self) -> dict:
         """The counters as the RunResult carries them."""
         holds = self.holds.total()

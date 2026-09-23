@@ -13,15 +13,15 @@ Accepted input forms: a live SpaceTimeDiagram (objects with .entries),
 its as_dict() form, or the frozen reflection capture under
 tests/data/qlx, where every value is a Python repr string.
 
-Mapping rules (tests/09_qlx_workloads asserts them):
+Mapping rules (tests/qlx/test_qlx_workloads.py asserts them):
   * entry order is kept; Operation.id is the position; the QLX op_id
     string is kept in QLXProgram.op_ids.
   * dependencies become workload-only Operation.predecessors.
   * duration becomes PerOperationRounds, zero-duration tasks included.
   * occupied cells become patches; a transport with no cell claims none.
-  * fabric.mz, fabric.mx and fabric.measure* are OpKind.MEASURE,
-    fabric.inject is OpKind.INJECT, fabric.merge* is OpKind.MERGE, the
-    rest GENERIC.
+  * fabric.mz and fabric.mx are OpKind.MEASURE, fabric.inject is
+    OpKind.INJECT, fabric.merge and fabric.measure_product are
+    OpKind.MERGE, and the rest, measure_syndrome among them, GENERIC.
   * a resource chain has one producer, zero or more transports and one
     non-Clifford inject; QLX owns that resource, so the inject sets
     consumes_magic_state=False rather than asking a second factory.

@@ -169,9 +169,7 @@ class CycleCount:
 
     def extra_growth_cycles(self, steps: tuple) -> int:
         """The cycles the extra growth's events cost after the decode."""
-        growth_ticks = 0
-        for step in steps:
-            growth_ticks += step.growth_ticks
+        growth_ticks = _growth_ticks(steps)
         if growth_ticks == 0:
             return JOIN_TEST_CYCLES
         iteration = GROW_AND_DECIDE_CYCLES + self.delay_cycles
@@ -186,9 +184,7 @@ class CycleCount:
 
     def _iteration_cycles(self, steps: tuple) -> int:
         """Grow, wait and decide, once per growth tick the decode spans."""
-        growth_ticks = 0
-        for step in steps:
-            growth_ticks += step.growth_ticks
+        growth_ticks = _growth_ticks(steps)
         iterations = max(1, growth_ticks)
         floor = GROW_AND_DECIDE_CYCLES + self.delay_cycles
         return floor * iterations
@@ -212,6 +208,14 @@ class CycleCount:
         level_cycles = PEEL_CYCLES_PER_LEVEL * forest_depth
         floor = self.delay_cycles + PEEL_BUSY_AND_DECIDE_CYCLES
         return floor + level_cycles
+
+
+def _growth_ticks(steps: tuple) -> int:
+    """The growth ticks the steps span, one growth iteration each."""
+    growth_ticks = 0
+    for step in steps:
+        growth_ticks += step.growth_ticks
+    return growth_ticks
 
 
 def _fusion_changes(step: evidence_records.GrowthStep) -> int:

@@ -62,11 +62,6 @@ def card(**paths):
     return link_settings.FabricSettings(profile_name="test", **wiring)
 
 
-def test_a_per_lane_rate_reports_the_input_times_the_lane_count():
-    per_lane = capacity(2.0, PER_LANE, 4)
-    assert per_lane.aggregate_bits_per_microsecond == 8.0
-
-
 def test_a_per_lane_rate_is_multiplied_exactly():
     per_lane = capacity(0.7, PER_LANE, 3)
     exact = per_lane.exact_aggregate_bits_per_microsecond()

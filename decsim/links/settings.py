@@ -19,7 +19,7 @@ import dataclasses
 import enum
 import fractions
 import math
-from typing import Optional, Union
+from typing import Optional
 
 import decsim.records.identity as identity_records
 import decsim.records.transfers as transfer_records
@@ -46,8 +46,7 @@ class CapacitySettings:
 
     The rate is kept as written. The serialization arithmetic reads it as
     the decimal on the card and multiplies by the lane count exactly
-    (exact_aggregate_bits_per_microsecond); the reported aggregate is the
-    input times the lane count in the input's own arithmetic.
+    (exact_aggregate_bits_per_microsecond).
     """
 
     input_bits_per_microsecond: float
@@ -63,15 +62,6 @@ class CapacitySettings:
             raise ValueError("input_bits_per_microsecond must be positive")
         lane_count = _lane_count_for(self.basis, self.lane_count, "capacity")
         object.__setattr__(self, "lane_count", lane_count)
-
-    @property
-    def aggregate_bits_per_microsecond(
-        self,
-    ) -> Union[int, float, fractions.Fraction]:
-        """The whole channel's rate: the input times the lane count."""
-        if self.basis is QuantityBasis.AGGREGATE:
-            return self.input_bits_per_microsecond
-        return self.input_bits_per_microsecond * self.lane_count
 
     def exact_aggregate_bits_per_microsecond(self) -> fractions.Fraction:
         """The whole channel's rate as an exact Fraction of the card's text.

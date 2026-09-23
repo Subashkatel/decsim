@@ -94,10 +94,9 @@ def test_the_latency_and_rate_keys_reach_the_channel(tmp_path):
         card.weak_buffer_to_weak_decoder.channel.propagation_latency_ticks
         == microseconds_to_ticks(1.0)
     )
-    assert (
-        card.controller_to_weak_buffer.channel.capacity.aggregate_bits_per_microsecond
-        == 100_000.0
-    )
+    store_capacity = card.controller_to_weak_buffer.channel.capacity
+    store_rate = store_capacity.exact_aggregate_bits_per_microsecond()
+    assert store_rate == 100_000
     assert card.qpu_to_controller.excludes_receiver_processing is True
 
 

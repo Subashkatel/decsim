@@ -158,11 +158,13 @@ class WeakSyndromeRoundReceiver:
         self.output.send_memory_round(packed, on_delivered)
 
     def check_settled(self) -> None:
-        """At the end of a run no write may still be on the wire.
+        """At the end of a run no write is on the wire and no bit is stored.
 
-        What the store itself still holds is not asked here: a run that
-        ends with nothing delivered is a legal end, and the law that
-        covers it is the callback law (tests/test_callback_law.py).
+        A round still stored is a leak, or a store too small for its
+        widest hold, and the store names which. Holds on rounds that
+        never came are not asked here: a run that ends with nothing
+        delivered is a legal end, and the law that covers it is the
+        callback law (tests/test_callback_law.py).
         """
         if self.reserved_bits_by_round:
             in_flight = len(self.reserved_bits_by_round)
@@ -170,6 +172,8 @@ class WeakSyndromeRoundReceiver:
                 f"weak syndrome buffer ended with {in_flight} "
                 f"controller_to_weak_buffer writes in flight"
             )
+        if self.store.occupied_bits:
+            self.store.check_settled()
 
     def _finish_write(self, landed: round_records.PackedRound) -> None:
         self._give_back_reservation(landed)

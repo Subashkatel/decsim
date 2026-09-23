@@ -604,10 +604,14 @@ weak_syndrome_buffer:            # the weak syndrome buffer, on the decoder chip
                                    # hold or a drop. null = unbounded. A
                                    # bounded store refuses a round that states
                                    # no size.
-                                   # A store too small for the rounds the
-                                   # plan's windows hold at once fills, and the
-                                   # run stops: "run ended with N rounds held
-                                   # for store room"
+                                   # A store holds its widest hold's rounds
+                                   # at once: a window's reads, and in a
+                                   # switching run its strong context; the
+                                   # last round of a memory is the widest. A
+                                   # smaller store stops the run naming that
+                                   # hold and the round it waits for. Round
+                                   # widths come from the source as it runs,
+                                   # so the load does not check this.
 
 strong_syndrome_buffer:          # the strong syndrome buffer, on the strong host
                                    # (exists only when the escalation uses it)

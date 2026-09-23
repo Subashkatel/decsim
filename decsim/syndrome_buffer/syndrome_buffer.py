@@ -267,12 +267,19 @@ class SyndromeBuffer:
     # ---- settlement and the trace
 
     def check_settled(self) -> None:
-        """At the end of a run nothing may still be held: a leak is a bug."""
+        """At the end of a run nothing may still be held: a leak is a bug.
+
+        A bounded store that ends with rounds under a live hold is too
+        small for that hold: the hold waits for a round that needs the
+        room its own stored rounds keep, so nothing ever frees. The stop
+        names the widest such hold, as gem5 stops a run on a deadlock it
+        detects rather than let it idle ("Possible Deadlock detected",
+        src/mem/ruby/system/Sequencer.cc:236-239); the size a store needs
+        is its widest hold's rounds together, and restart and seam
+        re-reads place holds only at run time.
+        """
         if self.round_by_key:
-            held = list(self.round_by_key)
-            raise RuntimeError(
-                f"the syndrome buffer still holds rounds {held} at the end"
-            )
+            self._refuse_rounds_left()
         held_keys = self.holds.held_round_keys()
         if held_keys:
             raise RuntimeError(
@@ -299,6 +306,48 @@ class SyndromeBuffer:
         return "; ".join(parts)
 
     # ---- private
+
+    def _refuse_rounds_left(self) -> None:
+        held = list(self.round_by_key)
+        capacity = self.settings.bits
+        widest_holder = self._widest_live_hold()
+        if capacity is None or widest_holder is None:
+            raise RuntimeError(
+                f"the syndrome buffer still holds rounds {held} at the end"
+            )
+        round_keys = self.holds.round_keys_of(widest_holder)
+        kept_bits = self._stored_bits_of(round_keys)
+        never_stored = [
+            round_key
+            for round_key in round_keys
+            if round_key not in self.round_by_key
+        ]
+        raise RuntimeError(
+            f"the syndrome buffer still holds rounds {held} at the end, "
+            f"{self._occupied_bits} of its {capacity} bits: its widest live "
+            f"hold {widest_holder!r} keeps {kept_bits} bits of them and "
+            f"waits for {never_stored}, which never found room; a bounded "
+            "store must hold its widest hold's rounds at once"
+        )
+
+    def _widest_live_hold(self):
+        """The live holder whose stored rounds take the most bits, or None."""
+        widest_holder = None
+        widest_bits = 0
+        for holder, record in self.holds.record_by_holder.items():
+            kept_bits = self._stored_bits_of(record.round_keys)
+            if kept_bits > widest_bits:
+                widest_holder = holder
+                widest_bits = kept_bits
+        return widest_holder
+
+    def _stored_bits_of(self, round_keys) -> int:
+        kept_bits = 0
+        for round_key in round_keys:
+            stored = self.round_by_key.get(round_key)
+            if stored is not None:
+                kept_bits += stored.held_bits
+        return kept_bits
 
     def _open(self, operation_id) -> None:
         is_open = self.operations.get(operation_id)

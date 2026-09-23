@@ -252,11 +252,13 @@ class Machine:
             self.strong_decoder_manager.check_decode_work_settled()
         self.window_manager.check_settled()
         self.assembler.check_settled()
-        self.syndrome_round_sender.check_settled()
-        self.transmitter.check_settled()
+        # the stores before the waiting line: a round held for room is
+        # the symptom, the hold that keeps the store full is the cause
         self.weak_syndrome_round_receiver.check_settled()
         if self.strong_syndrome_round_receiver is not None:
             self.strong_syndrome_round_receiver.check_settled()
+        self.syndrome_round_sender.check_settled()
+        self.transmitter.check_settled()
         return _capture_result(self)
 
 

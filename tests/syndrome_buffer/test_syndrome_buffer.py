@@ -470,6 +470,28 @@ def test_settlement_reports_a_hold_on_a_round_never_written():
         the_store.check_settled()
 
 
+def test_a_bounded_store_ending_under_a_live_hold_names_its_widest_hold():
+    """The hold waits for a round its own stored rounds leave no room for."""
+    two_rounds_bits = 2 * BITS_PER_ROUND
+    the_store = store(bits=two_rounds_bits)
+    wide = decoding_records.WindowReads((1, 0))
+    narrow = decoding_records.WindowReads((1, 1))
+    the_store.register_hold(wide, [(1, 1), (1, 2), (1, 3)])
+    the_store.register_hold(narrow, [(1, 2)])
+    first = packet(1)
+    second = packet(2)
+    the_store.accept_packed_round(first, publication_tick=0)
+    the_store.accept_packed_round(second, publication_tick=0)
+
+    with pytest.raises(RuntimeError) as stop:
+        the_store.check_settled()
+
+    sentence = str(stop.value)
+    assert "4 of its 4 bits" in sentence
+    assert "widest live hold WindowReads(window_key=(1, 0))" in sentence
+    assert "keeps 4 bits of them and waits for [(1, 3)]" in sentence
+
+
 def test_the_hold_sources_carry_the_token_and_its_rounds():
     heard = []
     the_store = store()

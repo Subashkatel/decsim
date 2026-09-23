@@ -18,10 +18,19 @@ import decsim.records.transfers as transfer_records
 
 @dataclasses.dataclass(frozen=True)
 class TrafficCounters:
-    """Additive counters kept per path and per channel."""
+    """Additive counters kept per path and per channel.
+
+    header_bits is the framing the wire serialized beside the payload:
+    ns-3's point-to-point device adds its header in Send and times the
+    whole packet in TransmitStart
+    (src/point-to-point/model/point-to-point-net-device.cc lines 528 and
+    243), so a path's serialization ticks follow from its payload bits,
+    its header bits and its channel's rate.
+    """
 
     transfer_count: int = 0
     known_payload_bits: int = 0
+    header_bits: int = 0
     unknown_payload_transfer_count: int = 0
     serialization_ticks: int = 0
     propagation_ticks: int = 0
@@ -38,6 +47,7 @@ class TrafficCounters:
         else:
             known_payload_bits += transfer.payload_bits
         transfer_count = self.transfer_count + 1
+        header_bits = self.header_bits + transfer.header_bits
         serialization_ticks = (
             self.serialization_ticks + transfer.serialization_ticks
         )
@@ -46,6 +56,7 @@ class TrafficCounters:
         return TrafficCounters(
             transfer_count=transfer_count,
             known_payload_bits=known_payload_bits,
+            header_bits=header_bits,
             unknown_payload_transfer_count=unknown_payload_transfer_count,
             serialization_ticks=serialization_ticks,
             propagation_ticks=propagation_ticks,
@@ -56,6 +67,7 @@ class TrafficCounters:
         """The sum of these counters and another's."""
         transfer_count = self.transfer_count + other.transfer_count
         known_payload_bits = self.known_payload_bits + other.known_payload_bits
+        header_bits = self.header_bits + other.header_bits
         unknown_payload_transfer_count = (
             self.unknown_payload_transfer_count
             + other.unknown_payload_transfer_count
@@ -68,6 +80,7 @@ class TrafficCounters:
         return TrafficCounters(
             transfer_count=transfer_count,
             known_payload_bits=known_payload_bits,
+            header_bits=header_bits,
             unknown_payload_transfer_count=unknown_payload_transfer_count,
             serialization_ticks=serialization_ticks,
             propagation_ticks=propagation_ticks,
@@ -80,6 +93,7 @@ class TrafficCounters:
         return {
             "transfer_count": self.transfer_count,
             "known_payload_bits": self.known_payload_bits,
+            "header_bits": self.header_bits,
             "unknown_payload_transfer_count": unknown_payload_transfer_count,
             "serialization_ticks": self.serialization_ticks,
             "propagation_ticks": self.propagation_ticks,
@@ -172,21 +186,17 @@ class TrafficLedger:
     def traffic_json_value(self) -> dict:
         """What the links carried, as result.link_traffic.
 
-        Counters per path with the setup ticks itemized (setup is
-        engine-side work before the wire and never enters a channel's
-        counters), counters per channel, every transfer, and the
-        reconciliation of each channel against its member paths. A
-        transfer's wait for the setup engine is not a key of its own: it
-        is the span from the request to send_ticks less its setup, and
-        the request is delivery_ticks less total_delay_ticks.
+        Counters per path with the setup and the wait for the setup
+        engine itemized (both are engine-side work before the wire and
+        never enter a channel's counters), counters per channel, every
+        transfer, and the reconciliation of each channel against its
+        member paths.
         """
         snapshot = self.snapshot()
-        setup_ticks_by_binding = self._setup_ticks_by_binding(snapshot)
+        setup_by_binding = self._setup_by_binding(snapshot)
         semantic_edges = []
         for path_snapshot in snapshot.paths:
-            semantic_edge = _semantic_edge_json(
-                path_snapshot, setup_ticks_by_binding
-            )
+            semantic_edge = _semantic_edge_json(path_snapshot, setup_by_binding)
             semantic_edges.append(semantic_edge)
         physical_channels = []
         reconciliation = []
@@ -210,15 +220,26 @@ class TrafficLedger:
             "reconciliation": reconciliation,
         }
 
-    def _setup_ticks_by_binding(self, snapshot: FabricSnapshot) -> dict:
-        setup_ticks_by_binding = {}
+    def _setup_by_binding(self, snapshot: FabricSnapshot) -> dict:
+        """Each binding's summed setup ticks and setup wait ticks.
+
+        Kept apart as gem5's DMA port keeps a transfer's setup delay
+        apart from its wait on transmitList (src/dev/dma_device.cc,
+        dmaAction).
+        """
+        setup_by_binding = {}
         for path in snapshot.paths:
-            setup_ticks_by_binding[(path.path, path.physical_alias)] = 0
+            binding = (path.path, path.physical_alias)
+            setup_by_binding[binding] = {
+                "setup_ticks": 0,
+                "setup_wait_ticks": 0,
+            }
         for record in snapshot.transfers:
             alias = self._alias_by_channel[record.channel]
-            binding = (record.path, alias)
-            setup_ticks_by_binding[binding] += record.transfer.setup_ticks
-        return setup_ticks_by_binding
+            setup = setup_by_binding[(record.path, alias)]
+            setup["setup_ticks"] += record.transfer.setup_ticks
+            setup["setup_wait_ticks"] += record.transfer.setup_wait_ticks
+        return setup_by_binding
 
     def _path_snapshot(self, binding: tuple) -> PathSnapshot:
         path, channel_name = binding
@@ -278,14 +299,16 @@ def _request_sequence(record: transfer_records.TransferRecord) -> int:
 
 
 def _semantic_edge_json(
-    path_snapshot: PathSnapshot, setup_ticks_by_binding: dict
+    path_snapshot: PathSnapshot, setup_by_binding: dict
 ) -> dict:
     binding = (path_snapshot.path, path_snapshot.physical_alias)
+    setup = setup_by_binding[binding]
     return {
         "path": path_snapshot.path.value,
         "physical_alias": path_snapshot.physical_alias,
         "counters": path_snapshot.counters.to_json_value(),
-        "setup_ticks": setup_ticks_by_binding[binding],
+        "setup_ticks": setup["setup_ticks"],
+        "setup_wait_ticks": setup["setup_wait_ticks"],
     }
 
 
@@ -312,6 +335,7 @@ def _transfer_json(
             "relation": _relation_json(attribution.relation),
         },
         "payload_bits": transfer.payload_bits,
+        "header_bits": transfer.header_bits,
         "payload_selection": record.payload_selection.value,
         "payload_source": record.payload_source,
         "setup_ticks": transfer.setup_ticks,

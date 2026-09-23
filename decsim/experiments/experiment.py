@@ -1,7 +1,7 @@
 """One yaml file is one experiment; this module is the only yaml reader.
 
 The file's sections are handed to the packages that own them, one
-settings record each (decsim.machine_settings.MachineSettings.from_mapping); the
+settings record each (decsim.settings.MachineSettings.from_mapping); the
 sweep blocks stay here, since the machine knows nothing of sweeps.
 `extends: other.yaml` starts from that file (same folder) and overrides
 the top-level keys this file names.

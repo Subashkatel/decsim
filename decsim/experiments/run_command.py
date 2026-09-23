@@ -1,11 +1,12 @@
 """`decsim run`: one seeded shot of one yaml, narrated.
 
-The two-line Python front is `MachineSettings.from_yaml` and
-`Machine.build(settings, seed).run()`; this is that, with the
-observation knobs on the command line instead of in the file, the way
-gem5's --debug-flags and --debug-file set what the config script did not
-(src/python/m5/main.py:280, 299). The shot is the first point of the
-first sweep block, so one yaml runs without naming a point.
+The Python it wraps is `experiment.load_experiment(path)`, the first
+point's `point_settings`, and `Machine.build(settings, seed).run()`,
+with the observation knobs on the command line instead of in the file,
+the way gem5's --debug-flags and --debug-file set what the config
+script did not (src/python/m5/main.py:280, 299). The shot is the first
+point of the first sweep block, so one yaml runs without naming a
+point.
 """
 
 import argparse

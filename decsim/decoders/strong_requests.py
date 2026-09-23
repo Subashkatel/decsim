@@ -26,7 +26,6 @@ import enum
 from typing import Optional
 
 import decsim.records.decoding as decoding_records
-import decsim.records.identity as identity_records
 import decsim.records.windows as window_records
 
 ACCURACY_FIELDS = (
@@ -412,34 +411,6 @@ class StrongRequests:
             unsettled[state] = sorted(unsettled[state])
         return unsettled
 
-    def snapshot(self, queue_memberships: dict) -> tuple:
-        """Each physical strong job once in its authoritative phase.
-
-        running, queued, or in_transit (admitted but not yet queued: in
-        input transport). queue_memberships maps id(job) to the queued
-        jobs with that identity.
-        """
-        jobs_by_identity = {}
-        keys_by_identity = {}
-        for destination_key, record in self.by_window.items():
-            if record.live is None:
-                continue
-            job = record.live.service_job
-            identity = id(job)
-            jobs_by_identity[identity] = job
-            keys = keys_by_identity.setdefault(identity, [])
-            keys.append(destination_key)
-        records = []
-        for identity, job in jobs_by_identity.items():
-            queued_matches = queue_memberships.get(identity, ())
-            phase = _phase_of(job, queued_matches)
-            destination_keys = sorted(
-                keys_by_identity[identity],
-                key=identity_records.stable_identity_order_key,
-            )
-            records.append((tuple(destination_keys), phase, job.round_count))
-        return tuple(sorted(records, key=_snapshot_order))
-
 
 def _states_of(record: WindowRequests) -> list:
     """The names unsettled() reports one window's record under."""
@@ -465,27 +436,3 @@ def _populated_accuracy_fields(result: decoding_records.DecodeResult) -> list:
         if value is not None:
             populated.append(field_name)
     return populated
-
-
-def _phase_of(job: decoding_records.DecodeJob, queued_matches) -> str:
-    for candidate in queued_matches:
-        if candidate is not job:
-            raise RuntimeError("strong-work identity collision in ready queues")
-    if len(queued_matches) > 1:
-        raise RuntimeError("one strong job appears in multiple ready queues")
-    if job.pool is not None:
-        if queued_matches:
-            raise RuntimeError("running strong job also remains queued")
-        return "running"
-    if queued_matches:
-        return "queued"
-    return "in_transit"
-
-
-def _snapshot_order(record: tuple) -> tuple:
-    destination_keys, phase, round_count = record
-    ordered_keys = []
-    for key in destination_keys:
-        order_key = identity_records.stable_identity_order_key(key)
-        ordered_keys.append(order_key)
-    return tuple(ordered_keys), phase, round_count

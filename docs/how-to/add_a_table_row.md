@@ -4,7 +4,7 @@
 
 A pluggable part of decsim is a **table**: a dictionary whose keys are
 the names a yaml file may write and whose values are the classes the
-machine builds. There are seventeen of them, listed with every row in
+machine builds. There are eighteen of them, listed with every row in
 [The plug-in tables](../reference/tables.md). This is the recipe for adding a row to any
 of them.
 
@@ -43,9 +43,6 @@ weak_decoder:
   step_count: 4          # MyDecoder's own key, beside the tier's keys
 ```
 
-A code card has no table and no yaml key yet. It plugs in from Python
-([How to plug a component in without a table row](plug_in_without_a_table_row.md)).
-
 ## 1. Find the port and fill it
 
 Open `decsim/ports.py` and find the port your part fills.
@@ -77,6 +74,7 @@ study most often extends:
 | `DECODERS` | `row(latency_model=None)`, or `row(latency_model=None, settings=...)` for a row with a `Settings` | `decsim/build/decoders.py`, `_algorithm` |
 | `WINDOWING_SCHEMES` | `row(card)`, a `WindowingSchemeCard`, or `row(card, settings=...)` for a row with a `Settings` | `decsim/build/plan.py`, `_chosen_scheme` |
 | `SYNDROME_SOURCES` | `row()`, with `code=card` when `takes_code_card` and `settings=...` for a row with a `Settings` | `decsim/build/plan.py`, `_syndrome_source` |
+| `CODE_CARDS` | `row(commit_rounds_override=..., buffer_rounds_override=...)`, the windows section's sizes, with `distance=` when the sweep sets one and `settings=...` for a row with a `Settings` | `decsim/qpu/settings.py`, `QpuSettings._named_card` |
 | `SYNDROME_BUFFERS` | `row(settings)`, the section's record, whose `row_settings` holds the row's own `Settings` | `decsim/build/stores.py` |
 | `IDLE_POLICIES`, `BOUNDARY_POLICIES`, `BOUNDARY_PAYLOADS` | `row()` | `decsim/build/plan.py` |
 
@@ -146,6 +144,7 @@ than any description of it.
 | a decoder, through a whole run of a shipped config | `tests/machine/test_machine.py::test_a_second_table_row_runs_gate_point_one` |
 | a syndrome buffer | `tests/machine/test_machine.py::test_a_new_syndrome_buffer_is_one_class_and_one_table_row` |
 | a code card | `tests/machine/test_machine.py::test_a_code_card_written_outside_decsim_runs_with_no_registration` |
+| a code card with keys of its own, named in the yaml | `tests/experiments/test_yaml_surface.py::test_the_code_card_row_named_in_the_yaml_is_built_with_its_own_keys` |
 | a layout | `tests/qpu/test_layouts.py::test_a_layout_written_outside_decsim_hears_every_hook_of_a_run` |
 | a boundary or idle policy | `tests/machine/test_machine.py::test_a_policy_written_outside_decsim_is_used_on_its_own_axis` |
 | a windowing scheme | `tests/windows/test_window_planner.py`, and the `WindowingScheme` port |
@@ -184,4 +183,4 @@ and its path, so one seed reproduces one shot exactly. See
 - [How to plug a component in without a table row](plug_in_without_a_table_row.md): skip step 2 while the
   class is still changing.
 - [How to add a decoder backend](add_a_decoder_backend.md): the decoder case in full.
-- [The plug-in tables](../reference/tables.md): all seventeen tables and their rows.
+- [The plug-in tables](../reference/tables.md): all eighteen tables and their rows.

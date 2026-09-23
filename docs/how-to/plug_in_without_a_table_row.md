@@ -48,7 +48,7 @@ distance and a code is refused ("multiple code sources supplied").
 Replace the distance with None beside your card, as
 `tools/deltakit_example.py` does for its repetition card. A card passed
 this way also keeps its own window sizes; `windows.commit_rounds` and
-`windows.buffer_rounds` size only the default surface code.
+`windows.buffer_rounds` size only the card `qpu.code_card` names.
 
 Without a row your class cannot be named from a config file, which
 means it cannot appear in a sweep run by `decsim collect` and a run
@@ -58,8 +58,8 @@ works: the ports, the engine, the trace, the metrics.
 ## When to add the row
 
 When the class stops changing, or the moment you want to sweep it.
-[How to add a row to a table](add_a_table_row.md) is the recipe. A code
-card has no table yet, so it stays on this page's path.
+[How to add a row to a table](add_a_table_row.md) is the recipe; a code
+card's table is `CODE_CARDS`, named by `qpu.code_card`.
 
 ## The worked examples
 

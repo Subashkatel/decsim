@@ -188,7 +188,10 @@ def test_a_qpu_key_other_than_kind_is_refused(tmp_path):
     """The sweep sets the distance, so the section refuses one written here."""
     qpu = {"kind": "stim_device", "distance": 5}
     config_path = write_config(tmp_path, {"qpu": qpu})
-    sentence = r"qpu does not know \['distance'\]; its keys are \['kind'\]"
+    sentence = (
+        r"qpu does not know \['distance'\]; its keys are "
+        r"\['kind', 'code_card'\]"
+    )
     with pytest.raises(ValueError, match=sentence):
         experiment.load_experiment(config_path)
 
@@ -209,6 +212,48 @@ class _SplitBits(syndrome_devices.SyndromeBitDevice):
             self, code, one_payload_per_patch=settings.one_payload_per_patch
         )
         self.settings = settings
+
+
+def test_the_code_card_row_named_in_the_yaml_is_built_with_its_own_keys(
+    tmp_path,
+):
+    """CUDA-Q QEC's get_code(name, options): a card by name, its own keys."""
+    qpu = {
+        "kind": "timing_only",
+        "code_card": "bivariate_bicycle",
+        "qubit_count": 30,
+        "logical_qubit_count": 8,
+    }
+    config_path = write_config(tmp_path, {"qpu": qpu})
+    config = experiment.load_experiment(config_path)
+    settings = config.point_settings(
+        physical_error_probability=0.001, distance=2, round_period_us=1.0
+    )
+
+    machine = machine_module.Machine.build(settings, 0)
+
+    code = machine.syndrome_source.code
+    assert code.name == "bivariate-bicycle code [[30,8,2]]"
+    assert code.syndrome_bits_per_round(1) == 30
+
+
+def test_a_card_key_on_a_card_that_declares_none_is_refused(tmp_path):
+    qpu = {"kind": "timing_only", "qubit_count": 30}
+    config_path = write_config(tmp_path, {"qpu": qpu})
+    sentence = (
+        r"qpu does not know \['qubit_count'\]; its keys are "
+        r"\['kind', 'code_card'\]"
+    )
+    with pytest.raises(ValueError, match=sentence):
+        experiment.load_experiment(config_path)
+
+
+def test_a_code_card_off_its_table_is_refused_when_the_yaml_loads(tmp_path):
+    qpu = {"kind": "timing_only", "code_card": "color"}
+    config_path = write_config(tmp_path, {"qpu": qpu})
+    sentence = "qpu.code_card 'color' is not a row of its table"
+    with pytest.raises(ValueError, match=sentence):
+        experiment.load_experiment(config_path)
 
 
 def test_a_source_rows_own_key_reaches_the_built_source(monkeypatch, tmp_path):

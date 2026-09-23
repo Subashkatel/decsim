@@ -26,10 +26,18 @@ SYNDROME_SOURCES = {
     "recorded_stim": stim_device.RecordedStimDevice,
     "streaming_stim": streaming_stim_device.StreamingStimDevice,
 }
+# qpu.code_card names one of these rows: the code card the run prices.
+# CUDA-Q QEC builds a code by name the same way
+# (libs/qec/include/cudaq/qec/code.h:257, get_code(name, options)).
+CODE_CARDS = {
+    "rotated_surface": code_geometry.SurfaceCodeModel,
+    "bivariate_bicycle": code_geometry.BivariateBicycleCodeModel,
+}
 # The keys the qpu section reads for itself; any other key is the source
-# row's own (its Settings, decsim/tables.py row_settings). The sweep sets
-# the distance and the round period, so neither is a key here.
-QPU_KEYS = ("kind",)
+# row's or the code card row's own (its Settings, decsim/tables.py
+# row_settings). The sweep sets the distance and the round period, so
+# neither is a key here.
+QPU_KEYS = ("kind", "code_card")
 # MachineSettings.magic_state_factory names one of these rows from
 # Python: what supplies the T states an operation consumes. No yaml
 # section sets it today.
@@ -53,18 +61,22 @@ class QpuSettings:
     period is the device's physical cadence, a quantum-device number,
     not a classical clock's cycles: Google 921 ns (2207.06431) and
     1.1 us (2408.13687), Krinner 1.1 us (2112.03708), Yang 1.25 us
-    (2605.04892). The code card is a rotated surface code of the
-    distance, with the windows section's commit and buffer sizes; a
-    Python-built code, layout, device or error-model provider is used as
-    it is. The card provisions the links and sizes the circuit-less
-    sources' rounds; a circuit source's payloads carry the circuit's own
-    widths, so a card and a circuit at different distances run links
-    provisioned for the wrong code. row_settings is the source row's own
-    Settings, read from the section's keys outside QPU_KEYS, or None for
-    a row that declares none.
+    (2605.04892). The code card is the row code_card names (CODE_CARDS,
+    above: rotated_surface, the default, after Stim's generated
+    surface_code:rotated_memory_z; bivariate_bicycle, Bravyi et al.
+    2308.07915) at the sweep's distance, with the windows section's
+    commit and buffer sizes; a Python-built code, layout, device or
+    error-model provider is used as it is. The card provisions the links
+    and sizes the circuit-less sources' rounds; a circuit source's
+    payloads carry the circuit's own widths, so a card and a circuit at
+    different distances run links provisioned for the wrong code.
+    row_settings and code_card_settings are the source row's and the
+    card row's own Settings, read from the section's keys outside
+    QPU_KEYS, or None for a row that declares none.
     """
 
     kind: str = "timing_only"
+    code_card: str = "rotated_surface"
     round_period_microseconds: float = 1.1
     distance: Optional[int] = None
     code: Optional[code_geometry.CodeModel] = None
@@ -73,6 +85,8 @@ class QpuSettings:
     error_model_provider: Optional[Any] = None
     # the source row's own Settings record, opaque to the section
     row_settings: Optional[Any] = None
+    # the code card row's own Settings record, opaque to the section
+    code_card_settings: Optional[Any] = None
 
     def __post_init__(self) -> None:
         config.check_duration(
@@ -90,9 +104,25 @@ class QpuSettings:
         prints it or a run folder exists.
         """
         kind = section.get("kind")
-        row = tables.row(SYNDROME_SOURCES, "qpu.kind", kind)
-        row_settings = tables.row_settings(row, "qpu", section, QPU_KEYS)
-        return cls(kind=kind, row_settings=row_settings)
+        source_row = tables.row(SYNDROME_SOURCES, "qpu.kind", kind)
+        code_card = section.get("code_card", "rotated_surface")
+        card_row = tables.row(CODE_CARDS, "qpu.code_card", code_card)
+        source_keys = tables.row_keys(source_row)
+        card_keys = tables.row_keys(card_row)
+        keys_beside_the_source = QPU_KEYS + card_keys
+        keys_beside_the_card = QPU_KEYS + source_keys
+        row_settings = tables.row_settings(
+            source_row, "qpu", section, keys_beside_the_source
+        )
+        code_card_settings = tables.row_settings(
+            card_row, "qpu", section, keys_beside_the_card
+        )
+        return cls(
+            kind=kind,
+            code_card=code_card,
+            row_settings=row_settings,
+            code_card_settings=code_card_settings,
+        )
 
     def build_code(
         self,
@@ -100,12 +130,12 @@ class QpuSettings:
         commit_rounds_override: Optional[int],
         buffer_rounds_override: Optional[int],
     ) -> tuple:
-        """The code card and its layout: the built ones, or one surface code.
+        """The code card and its layout: the built ones, or the named card.
 
         At most one of distance, code and layout is given. The two
         overrides are the window sizes the yaml declares, which size the
-        default surface code's commit and buffer regions; None leaves
-        each at the code distance.
+        named card's commit and buffer regions; None leaves each at the
+        card's own. A distance of None is the card's own default.
         """
         self._check_one_code_source()
         if self.layout is not None:
@@ -113,15 +143,27 @@ class QpuSettings:
             return code, self.layout
         code = self.code
         if code is None:
-            distance = self.distance
-            if distance is None:
-                distance = 3
-            code = code_geometry.SurfaceCodeModel(
-                distance=distance,
-                commit_rounds_override=commit_rounds_override,
-                buffer_rounds_override=buffer_rounds_override,
+            code = self._named_card(
+                commit_rounds_override, buffer_rounds_override
             )
         return code, layouts.UniformLayout(code)
+
+    def _named_card(
+        self,
+        commit_rounds_override: Optional[int],
+        buffer_rounds_override: Optional[int],
+    ) -> code_geometry.CodeModel:
+        """The code_card row, at the sweep's distance and the yaml's windows."""
+        card_row = tables.row(CODE_CARDS, "qpu.code_card", self.code_card)
+        arguments = {
+            "commit_rounds_override": commit_rounds_override,
+            "buffer_rounds_override": buffer_rounds_override,
+        }
+        if self.distance is not None:
+            arguments["distance"] = self.distance
+        if self.code_card_settings is not None:
+            arguments["settings"] = self.code_card_settings
+        return card_row(**arguments)
 
     def _check_one_code_source(self) -> None:
         """Refuse settings that name the code more than one way."""

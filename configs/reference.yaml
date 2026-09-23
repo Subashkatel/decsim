@@ -35,6 +35,24 @@ qpu:
                                    # them here (its Settings); the sweep
                                    # sets the distance and the round period,
                                    # so neither is a key here
+  code_card: rotated_surface       # rotated_surface | bivariate_bicycle: the
+                                   # code card the run prices, at the sweep's
+                                   # distance, with windows.commit_rounds and
+                                   # buffer_rounds as its window sizes.
+                                   # rotated_surface, the default, is Stim's
+                                   # generated surface_code:rotated_memory_z:
+                                   # d*d - 1 measure qubits read out every
+                                   # round (Stim src/stim/gen/
+                                   # gen_surface_code.cc); bivariate_bicycle is
+                                   # Bravyi et al. 2308.07915, n/2 X and n/2 Z
+                                   # checks a round. CUDA-Q QEC names its codes
+                                   # the same way (code.h get_code(name,
+                                   # options)). A card with keys of its own
+                                   # reads them here; bivariate_bicycle's two,
+                                   # with their defaults, the [[144, 12, 12]]
+                                   # gross code's:
+  # qubit_count: 144               # n, the physical qubits of one block
+  # logical_qubit_count: 12        # k, the logical qubits it encodes
 
 escalation:
   clock: fridge                    # a clocks domain; absent uses controller.clock

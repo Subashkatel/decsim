@@ -498,9 +498,10 @@ links:                             # a kind, then one card per path; null = the
                                    #   clock: the domain (a clocks: key)
                                    #   bits_per_cycle: per-lane capacity
                                    #     (null = unbounded)
-                                   #   channels: parallel one-bit lanes (default 1);
-                                   #     aggregate bandwidth = bits_per_cycle x
-                                   #     channels x clock MHz
+                                   #   channels: parallel lanes, each moving
+                                   #     bits_per_cycle (default 1); aggregate
+                                   #     bandwidth = bits_per_cycle x channels
+                                   #     per period of the clock domain
                                    #   setup_cycles_per_transfer: optional fixed
                                    #     per-transfer DMA setup (setups serialize)
                                    #   header_bits_per_transfer: optional framing

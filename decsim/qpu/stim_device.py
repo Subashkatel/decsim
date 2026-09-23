@@ -584,6 +584,26 @@ class RecordedStimDevice(StimDevice):
         return _as_int_bits(row)
 
 
+def validated_seed(seed) -> Optional[int]:
+    """The seed under Stim's public unsigned 64-bit contract, or None.
+
+    Every Stim-backed source draws under the same contract.
+    """
+    if seed is None:
+        return None
+    if not isinstance(seed, numbers.Integral):
+        raise ValueError(
+            f"seed must be None or a 64-bit unsigned integer; got {seed!r}"
+        )
+    root_seed = int(seed)
+    seed_limit = 1 << 64
+    if not 0 <= root_seed < seed_limit:
+        raise ValueError(
+            f"seed must be None or a 64-bit unsigned integer; got {seed!r}"
+        )
+    return root_seed
+
+
 @dataclasses.dataclass(frozen=True)
 class _SampledShot:
     """One shot of a circuit: its packets and formed events."""
@@ -630,26 +650,6 @@ def _sample_key_of(operation: program_records.Operation):
     if operation.stream_id is not None:
         return operation.stream_id
     return operation.id
-
-
-def validated_seed(seed) -> Optional[int]:
-    """The seed under Stim's public unsigned 64-bit contract, or None.
-
-    Every Stim-backed source draws under the same contract.
-    """
-    if seed is None:
-        return None
-    if not isinstance(seed, numbers.Integral):
-        raise ValueError(
-            f"seed must be None or a 64-bit unsigned integer; got {seed!r}"
-        )
-    root_seed = int(seed)
-    seed_limit = 1 << 64
-    if not 0 <= root_seed < seed_limit:
-        raise ValueError(
-            f"seed must be None or a 64-bit unsigned integer; got {seed!r}"
-        )
-    return root_seed
 
 
 def _check_sample_key(key) -> None:

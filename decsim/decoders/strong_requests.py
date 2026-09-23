@@ -328,15 +328,7 @@ class StrongRequests:
         """
         unit = service_job.unit
         requests = self.members_of(service_job)
-        keys = []
-        for request in requests:
-            keys.append(request.strong_decode_for)
-        result_identity = (result.operation_id, result.window_id)
-        is_merged = len(keys) > 1
-        for key in keys:
-            if key != result_identity:
-                is_merged = True
-        if not is_merged:
+        if not _is_merged_service(requests, result):
             request = requests[0]
             return (StrongCompletion(request, result, now, unit),)
         populated = _populated_accuracy_fields(result)
@@ -348,7 +340,8 @@ class StrongRequests:
                 "switching"
             )
         deliveries = []
-        for key, request in zip(keys, requests):
+        for request in requests:
+            key = request.strong_decode_for
             empty = decoding_records.DecodeResult(
                 operation_id=key[0], window_id=key[1]
             )
@@ -436,3 +429,16 @@ def _populated_accuracy_fields(result: decoding_records.DecodeResult) -> list:
         if value is not None:
             populated.append(field_name)
     return populated
+
+
+def _is_merged_service(
+    requests: list, result: decoding_records.DecodeResult
+) -> bool:
+    """Whether one decode served several requests, or another window's."""
+    if len(requests) > 1:
+        return True
+    result_identity = (result.operation_id, result.window_id)
+    for request in requests:
+        if request.strong_decode_for != result_identity:
+            return True
+    return False

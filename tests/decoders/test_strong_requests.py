@@ -188,3 +188,23 @@ def test_a_merged_batch_may_carry_no_accuracy_bearing_field():
     result = decoding_records.DecodeResult(-1, 0, logical_observables=(1,))
     with pytest.raises(RuntimeError, match="accuracy-bearing"):
         requests.deliveries_for(batch, result, now=40)
+
+
+def test_a_batch_left_with_one_member_still_splits_into_an_empty_result():
+    """The batch's own result names no window, so it is never delivered."""
+    requests = strong_requests_module.StrongRequests()
+    first_key = _request_key(1)
+    first = _strong_job(first_key, window_key=(1, 0))
+    second_key = _request_key(2)
+    second = _strong_job(second_key, window_key=(1, 1))
+    requests.admit_strong(first, now=0)
+    requests.admit_strong(second, now=0)
+    batch = decoding_records.DecodeJob(
+        operation_id=-1, window_id=0, round_count=18, strong_decode_for=(1, 0)
+    )
+    requests.register_batch([(1, 0), (1, 1)], [first, second], batch)
+    requests.take_live((1, 0))
+    result = decoding_records.DecodeResult(-1, 0)
+    (delivery,) = requests.deliveries_for(batch, result, now=40)
+    assert delivery.request_job is second
+    assert delivery.result.window_id == 1

@@ -92,7 +92,7 @@ def switching_machine(
     *,
     rounds: int,
     escalated_windows,
-    strong_window: str = "two_sided_context",
+    strong_window: str = "near_seam_pinned",
     run_both_at_once: bool = False,
     round_microseconds: float = 1.0,
     escalation_microseconds: Optional[float] = None,

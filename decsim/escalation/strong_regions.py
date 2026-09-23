@@ -1,6 +1,6 @@
 """Where a strong window sits: its rounds, its faults, its neighbours.
 
-One owner for the region arithmetic of both strong window shapes
+One owner for the region arithmetic of the strong window shapes
 (strong_window_shapes.py). A region is asked for by window key and comes
 back resolved against the live window graph: the rounds the strong
 decoder commits and reads, the windows its extent absorbs, the window
@@ -12,8 +12,9 @@ across the region's edge, committed regions tile without a gap.
 
 Toshio et al. 2510.25222 Sec. III C and Fig. 12 give the forward
 region's rule, r_strong = r_com + 2 r_buf with the weak chain resuming
-after it (lines 1232-1235, 1248-1251); the two-sided context region is
-decsim's own (see ContextWindow).
+after it (lines 1232-1235, 1248-1251); the near-seam region is the
+escalated window's commit region with its past face pinned (Bombin et
+al. 2303.04846 lines 775-788, 1456-1458).
 """
 
 import copy
@@ -86,18 +87,6 @@ class StrongRegions:
     # the one call this package makes on the window interaction; the rest
     # of that class is the windows package's own seam
     interaction = ports.Port(ports.RegionProposer)
-
-    def context_region(self, key: tuple) -> RedoRegion:
-        """The escalated window with one buffer of raw context per side."""
-        weak_window = self.planner.window_at(key)
-        strong_window = _context_window_of(weak_window)
-        read_keys = self.retention.read_keys_for_bounds(
-            key[0],
-            strong_window.buffer_lo,
-            strong_window.buffer_hi,
-            strong_window,
-        )
-        return RedoRegion(strong_window, tuple(read_keys))
 
     def near_seam_region(self, key: tuple) -> RedoRegion:
         """The escalated window's commit rounds, its past face pinned.
@@ -462,25 +451,6 @@ def _union_of_owned_faults(owned_sets: list):
             already = union.get(representation, empty)
             union[representation] = already | fault_ids
     return union
-
-
-def _context_window_of(
-    weak_window: window_records.Window,
-) -> window_records.Window:
-    """The weak window with one buffer of raw context on each side.
-
-    The strong window starts with the empty boundary state a Window is
-    given, and not the escalated weak window's. This row folds no
-    neighbour's boundary into its input (FOLDS_NO_BOUNDARY): both faces
-    are read raw, so a mask on the commit_lo layer would flip a seam the
-    rounds before it already carry as raw defects, which is the double
-    count Bombin et al. 2303.04846 lines 775-788 rule out and the row's
-    own module docstring forbids.
-    """
-    bounds = window_records.strong_context_bounds(weak_window)
-    return _window_over(
-        weak_window.operation_id, weak_window.window_index, bounds
-    )
 
 
 def _near_pinned_window_of(

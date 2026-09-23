@@ -148,10 +148,10 @@ def build_regions(parts):
 
 
 def build_strong_window_shape(parts):
-    """The strong window of the escalation's row: forward, or two-sided.
+    """The strong window of the escalation's row.
 
-    escalation.strong_window names the row: the forward window of Toshio
-    Sec. III C, or decsim's own two-sided context.
+    escalation.strong_window names the row: the near-seam window, or a
+    forward window of Toshio Sec. III C.
     """
     row = escalation_build.strong_window_row(parts.settings.escalation)
     return row(parts.engine)

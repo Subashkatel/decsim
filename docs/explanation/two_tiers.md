@@ -115,13 +115,12 @@ Not just the escalated window: a re-decode that saw only the escalated
 commit region would face the same artificial boundaries the weak decoder
 faced, and would have little reason to do better.
 
-`STRONG_WINDOW_SHAPES` has four rows.
+`STRONG_WINDOW_SHAPES` has three rows.
 
 | Row | The rounds it reads |
 | --- | --- |
-| `two_sided_context` | the escalated window's commit region with one buffer of raw context on each side. decsim's own geometry, not the paper's, built the moment it is asked for. |
+| `near_seam_pinned` | the escalated window's commit region and one buffer ahead, with its past face pinned on the neighbour's committed correction. Built the moment its rounds are stored. |
 | `forward` | Toshio Sec. III C and Fig. 12: it starts at the escalated commit and extends forward, absorbing the weak windows it covers. |
-| `near_seam_pinned` | the context row's commit region with its past face pinned on the neighbour's committed correction. |
 | `forward_seam_pinned` | the forward row's extent with both faces pinned. |
 
 A **face** is one end of a window, where it meets the window beside it:
@@ -138,7 +137,7 @@ re-deriving it. That is Bombin et al.'s input adaptation
 of the errors plus the corrections already committed. It is the
 `BoundaryCourier` port, and the courier lives in the windows package.
 
-A fifth shape suggests itself and is deliberately not a row: both faces
+A fourth shape suggests itself and is deliberately not a row: both faces
 pinned and absorbing nothing. It waits for the window after it, which
 waits for its own strong result, and a serial sliding chain deadlocks.
 It would become a row once it ran under a windowing scheme whose windows

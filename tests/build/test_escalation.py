@@ -101,17 +101,17 @@ def test_a_table_threshold_with_no_number_from_the_experiment_is_refused():
 
 
 def test_the_strong_window_row_is_named_and_declares_whether_it_absorbs():
-    two_sided = escalation_settings.EscalationSettings(
-        strong_window="two_sided_context"
+    near_seam = escalation_settings.EscalationSettings(
+        strong_window="near_seam_pinned"
     )
     forward = escalation_settings.EscalationSettings(strong_window="forward")
 
-    two_sided_row = escalation_build.strong_window_row(two_sided)
+    near_seam_row = escalation_build.strong_window_row(near_seam)
     forward_row = escalation_build.strong_window_row(forward)
 
-    assert two_sided_row.absorbs_weak_windows is False
+    assert near_seam_row.absorbs_weak_windows is False
     assert forward_row.absorbs_weak_windows is True
-    assert escalation_build.absorbs_weak_windows(two_sided) is False
+    assert escalation_build.absorbs_weak_windows(near_seam) is False
     assert escalation_build.absorbs_weak_windows(forward) is True
 
 

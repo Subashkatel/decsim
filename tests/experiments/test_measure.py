@@ -196,7 +196,7 @@ def switching_run(
     raw["escalation"] = {
         "kind": "switching",
         "gap_threshold_db": gap_threshold_db,
-        "strong_window": "two_sided_context",
+        "strong_window": "near_seam_pinned",
         "run_both_at_once": run_both_at_once,
     }
     raw["weak_decoder"] = {

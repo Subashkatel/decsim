@@ -1,10 +1,9 @@
-"""The two strong-window shapes plan the region the paper gives.
+"""The strong-window shapes plan the region the paper gives.
 
-The context window is the commit region with one buffer of context on
-each side, clipped at the operation's edge; that geometry is decsim's
-own, since escalation unpins the past face (Skoric 2209.08552 line 388,
-Tan 2209.09219 line 1021). Toshio et al. 2510.25222: the forward window
-starts at the
+The near-seam window is the commit region and one buffer ahead, its
+past face pinned on the earlier neighbour's committed correction
+(Bombin 2303.04846 lines 775-788, 1456-1458). Toshio et al. 2510.25222:
+the forward window starts at the
 escalated commit, absorbs the windows it covers, and is decoded once
 both of its boundaries are weak-determined: the restart window's commit, or the
 terminal data (Sec. III C, Fig. 12). A d=3 sliding window commits 3
@@ -131,35 +130,6 @@ def _strong_request_record(machine, window_id: int):
         if is_window and is_strong:
             return record
     raise AssertionError(f"no strong request for window {window_id}")
-
-
-def test_the_context_window_pins_its_past_face_and_reads_one_buffer_ahead():
-    machine = fabric.switching_machine(
-        rounds=12, escalated_windows={1}, record=True
-    )
-    machine.run()
-    strong = _strong_request_record(machine, 1)
-    # W1 commits rounds 4-6; its past face is pinned on W0's commit, so
-    # it reads the commit region and the 3-round buffer ahead, 4-9
-    assert (strong.input_round_lo, strong.input_round_hi) == (4, 9)
-    assert strong.input_round_count == 6
-    assert fabric.frame_tiers(machine) == [
-        ((1, 0), "weak"),
-        ((1, 1), "strong"),
-        ((1, 2), "weak"),
-        ((1, 3), "weak"),
-    ]
-
-
-def test_the_context_window_is_clipped_at_the_operations_first_round():
-    machine = fabric.switching_machine(
-        rounds=9, escalated_windows={0}, record=True
-    )
-    machine.run()
-    strong = _strong_request_record(machine, 0)
-    # W0 commits rounds 1-3; the left buffer has no rounds before 1
-    assert (strong.input_round_lo, strong.input_round_hi) == (1, 6)
-    assert strong.input_round_count == 6
 
 
 def test_the_forward_window_absorbs_the_windows_it_covers():
@@ -492,10 +462,10 @@ def test_the_forward_window_lands_in_the_declared_backlog_regime():
 # ---- a shape row added from outside decsim
 
 
-class RecordingContextWindow(strong_window_shapes.ContextWindow):
-    """A shape row a study adds: the context window, with its plans noted.
+class RecordingNearSeamWindow(strong_window_shapes.NearSeamWindow):
+    """A shape row a study adds: the near-seam window, its plans noted.
 
-    It fills the StrongWindowShape port on the context window's own
+    It fills the StrongWindowShape port on the near-seam window's own
     layout and ports, which is what a new row does: one class, one table
     entry, one yaml name, and nothing else changes.
     """
@@ -506,10 +476,10 @@ class RecordingContextWindow(strong_window_shapes.ContextWindow):
         self.assignments = []
 
     def plan(self, weak_job):
-        """Note the window, then plan it as the context window does."""
+        """Note the window, then plan it as the near-seam window does."""
         self.planned_windows.append(weak_job.window_id)
-        context = strong_window_shapes.ContextWindow
-        assignment = context.plan(self, weak_job)
+        near_seam = strong_window_shapes.NearSeamWindow
+        assignment = near_seam.plan(self, weak_job)
         self.assignments.append(assignment)
         return assignment
 
@@ -544,18 +514,18 @@ def test_a_shape_row_added_from_outside_runs_by_its_yaml_name():
     components the port needs (_decoding_all_built_in_decoders.py).
     """
     table = escalation_settings.STRONG_WINDOW_SHAPES
-    table["recording_context"] = RecordingContextWindow
+    table["recording_near_seam"] = RecordingNearSeamWindow
     try:
         machine = fabric.switching_machine(
             rounds=9,
             escalated_windows={2},
-            strong_window="recording_context",
+            strong_window="recording_near_seam",
         )
         machine.run()
     finally:
-        del table["recording_context"]
+        del table["recording_near_seam"]
     shape = machine.window_manager.strong_redecode.shape
-    assert type(shape) is RecordingContextWindow
+    assert type(shape) is RecordingNearSeamWindow
     assert shape.planned_windows == [2]
     # the row pins its past face on W1, the neighbour that committed
     # the round before W2's commit region
@@ -572,7 +542,7 @@ class RecordingForwardWindow(strong_window_shapes.ForwardWindow):
 
     It takes the same one constructor and the same ports the shipped
     rows take, although its layout reads the planner, the requester and
-    the ledger that the context window never touches.
+    the ledger that the near-seam window never touches.
     """
 
     def __init__(self, engine) -> None:
@@ -590,8 +560,9 @@ class RecordingForwardWindow(strong_window_shapes.ForwardWindow):
 def test_an_absorbing_row_added_from_outside_builds_through_the_same_call():
     """One constructor signature, whatever the row's geometry.
 
-    The two shipped rows read different components: the context window
-    reads the regions, the retention and the builder; the forward window
+    The shipped rows read different components: the near-seam window
+    reads the regions, the retention, the builder and the courier; the
+    forward window
     also re-slices on the planner, withdraws on the requester and
     rewrites the ledger. Both take the engine alone and the same ports,
     so the root builds a row without branching on its geometry.
@@ -762,20 +733,20 @@ def _input_bits(decoder_input) -> tuple:
     return tuple(bits)
 
 
-def test_a_context_row_strong_job_is_masked_where_its_weak_job_is(
+def test_a_near_seam_strong_job_is_masked_where_its_weak_job_is(
     monkeypatch,
 ):
     """The row pins its past face on the neighbour its weak job pins on.
 
     Bombin et al. 2303.04846 lines 775-788: the input of a later task is
     the syndrome plus the corrections the tasks before it committed. The
-    context row reads no round behind its commit region, so the seam
+    row reads no round behind its commit region, so the seam
     the neighbour's commit flips reaches its input only as that mask,
     and every escalated window whose weak job was masked has its strong
     job masked too.
     """
     masked = _masked_jobs(monkeypatch)
-    machine = _gate_machine("two_sided_context")
+    machine = _gate_machine("near_seam_pinned")
     machine.run()
     weak_masked = _keys_of(masked, strong=False, changed_only=True)
     strong_keys = _keys_of(masked, strong=True, changed_only=False)
@@ -821,9 +792,9 @@ def test_a_shape_name_off_the_table_is_refused_naming_the_rows():
 def test_the_near_seam_row_reads_its_commit_region_and_one_buffer():
     """Bombin 2303.04846 lines 1456-1458: a pinned face needs no buffer.
 
-    W1 of a d=3 run commits rounds 4-6. The two-sided context row reads
-    1-9; pinning the past face on W0's committed correction drops the
-    leading buffer, so this row reads 4-9 and commits the same rounds.
+    W1 of a d=3 run commits rounds 4-6. Its past face is pinned on W0's
+    committed correction, so no buffer behind it is read: the row reads
+    4-9 and commits the same rounds.
     """
     machine = fabric.switching_machine(
         rounds=12,
@@ -1160,7 +1131,7 @@ def _folding_shape(retention, courier):
     The builder is the one this retention hands back untouched, so the
     fold's own two components are all the test binds for real.
     """
-    shape = strong_window_shapes.ContextWindow(None)
+    shape = strong_window_shapes.NearSeamWindow(None)
     shape.retention = retention
     shape.courier = courier
     shape.builder = _UnusedBuilder()

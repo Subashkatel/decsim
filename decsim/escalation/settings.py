@@ -37,9 +37,8 @@ ESCALATIONS = {
 # window the strong tier re-decodes. The root resolves the name once and
 # builds the row with the window components it needs.
 STRONG_WINDOW_SHAPES = {
-    "two_sided_context": strong_window_shapes.ContextWindow,
-    "forward": strong_window_shapes.ForwardWindow,
     "near_seam_pinned": strong_window_shapes.NearSeamWindow,
+    "forward": strong_window_shapes.ForwardWindow,
     "forward_seam_pinned": strong_window_shapes.ForwardSeamWindow,
 }
 # escalation.threshold_source names one of these rows: where the
@@ -217,14 +216,14 @@ class EscalationSettings:
     (false, the default, is the same section's on-demand variant, lines
     631-640); strong_window names the shape of the window the strong
     tier re-decodes (STRONG_WINDOW_SHAPES in
-    decsim/escalation/strong_window_shapes.py: two_sided_context, the
-    default, or forward, the paper's Sec. III C scheme), and
+    decsim/escalation/strong_window_shapes.py): near_seam_pinned, the
+    default, re-decodes the escalated window's commit region with its
+    past face pinned on the earlier neighbour's committed correction and
+    one buffer ahead (Bombin et al. 2303.04846 lines 775-788 and
+    1456-1458); forward is the paper's Sec. III C scheme, and
     restart_reread_buffer_regions is how many of the strong region's
     buffer regions the restarted weak window re-reads under the forward
-    shape; near_seam_pinned re-decodes the same commit region as
-    two_sided_context but pins its past face on the earlier neighbour's
-    committed correction and reads no context behind it (Bombin et al.
-    2303.04846 lines 775-788 and 1456-1458); forward_seam_pinned is
+    shapes; forward_seam_pinned is
     forward's extent read with no context, both faces pinned, which is
     Toshio's Sec. III C as it is stated (lines 1248-1259) and which
     needs restart_reread_buffer_regions 0.
@@ -254,7 +253,7 @@ class EscalationSettings:
     threshold_column: Optional[str] = None
     online: Optional[OnlineThresholdSettings] = None
     run_both_at_once: bool = False
-    strong_window: str = "two_sided_context"
+    strong_window: str = "near_seam_pinned"
     restart_reread_buffer_regions: int = 0
     policy: Optional[ports.EscalationPolicy] = None
     gap_threshold_nats: Optional[float] = None
@@ -572,7 +571,7 @@ def _online_settings(
 
 def _strong_window(section: Mapping) -> str:
     """The strong window shape the section names, refused if not a row."""
-    named = section.get("strong_window", "two_sided_context")
+    named = section.get("strong_window", "near_seam_pinned")
     rows = sorted(STRONG_WINDOW_SHAPES)
     if named not in rows:
         raise ValueError(

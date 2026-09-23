@@ -349,10 +349,12 @@ def strong_region_round_count(
 
 
 def strong_context_bounds(window: "Window") -> tuple:
-    """(context_lo, commit_lo, commit_hi, context_hi) of a strong redo.
+    """(context_lo, commit_lo, commit_hi, context_hi) a strong read may span.
 
-    A strong redo of one window commits the same rounds and reads one
-    buffer region of context on each side of them, clipped at round 1.
+    The widest read a strong window starting at this window's commit
+    takes: one buffer region of context on each side of its commit
+    rounds, clipped at round 1, which is the raw near face of the forward
+    rows (windows/window_interactions.py, plan_strong_region).
     """
     buffer_span = window.buffer_hi - window.commit_hi
     buffer_rounds = max(0, buffer_span)

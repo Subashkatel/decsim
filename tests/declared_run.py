@@ -280,7 +280,7 @@ def switching_run(
     escalation_probability=0.0,
     operations=None,
     run_both_at_once=False,
-    strong_window="two_sided_context",
+    strong_window="near_seam_pinned",
     unit_pools=None,
     seed=0,
     io_trace=False,

@@ -457,8 +457,7 @@ class RunShape:
     names the shape the yaml chose; is_absorbing_strong_window is that
     row's own declaration that its region replaces the weak windows it
     covers (the forward rows of Toshio et al. 2510.25222 Sec. III C;
-    decsim's own two-sided context absorbs
-    nothing); is_bulk_strong is the
+    the near-seam row absorbs nothing); is_bulk_strong is the
     decoder manager's merging of queued strong re-decodes; operations
     are the workload's planning views; commit_round_count and
     buffer_round_count size every window (windows.commit_rounds and

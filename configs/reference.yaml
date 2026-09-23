@@ -220,36 +220,30 @@ escalation:
 #                                  # weak_decoder_to_strong_decoder hop, which the
 #                                  # paper expects to cost little because the
 #                                  # switching rate decays with the code distance
-#   strong_window: two_sided_context  # two_sided_context | forward |
-#                                  # near_seam_pinned | forward_seam_pinned:
-#                                  # the shape
+#   strong_window: near_seam_pinned  # near_seam_pinned | forward |
+#                                  # forward_seam_pinned: the shape
 #                                  # of the window the strong tier re-decodes
 #                                  # (STRONG_WINDOW_SHAPES in
 #                                  # escalation/strong_window_shapes.py).
-#                                  # two_sided_context, the default, re-decodes
-#                                  # the escalated window's commit region with
-#                                  # one buffer of raw context on each side and
-#                                  # escalates serially, with Held boundaries;
-#                                  # that geometry is decsim's own, since
-#                                  # discarding the weak result unpins the past
-#                                  # face (Skoric 2209.08552 line 388, Tan
-#                                  # 2209.09219 line 1021). forward is the
+#                                  # near_seam_pinned, the default, re-decodes
+#                                  # the escalated window's commit region and
+#                                  # pins its past face on the earlier
+#                                  # neighbour's committed correction: the
+#                                  # input carries d(e + kappa) on the seam
+#                                  # layer (Bombin 2303.04846 lines 775-788)
+#                                  # and the row reads no round behind its
+#                                  # commit region, since a fixed boundary
+#                                  # condition needs no buffer (lines
+#                                  # 1456-1458). Its open future face keeps one
+#                                  # buffer region, which is Bombin's b >= d
+#                                  # (lines 850-852) when windows.buffer_rounds
+#                                  # is the distance. It escalates with Held
+#                                  # boundaries, serially or beside the weak
+#                                  # decode (run_both_at_once). forward is the
 #                                  # paper's Sec. III C scheme: the weak chain
 #                                  # keeps committing past an escalated strong
 #                                  # window, which absorbs the windows it
 #                                  # covers and re-slices the one past it.
-#                                  # near_seam_pinned commits the same rounds
-#                                  # as two_sided_context and pins its past
-#                                  # face on the earlier neighbour's committed
-#                                  # correction: the input carries
-#                                  # d(e + kappa) on the seam layer (Bombin
-#                                  # 2303.04846 lines 775-788) and the row
-#                                  # reads no round behind its commit region,
-#                                  # since a fixed boundary condition needs no
-#                                  # buffer (lines 1456-1458). Its open future
-#                                  # face keeps one buffer region, which is
-#                                  # Bombin's b >= d (lines 850-852) when
-#                                  # windows.buffer_rounds is the distance.
 #                                  # forward_seam_pinned is the paper's
 #                                  # Sec. III C as it is stated: the same
 #                                  # r_com + 2 r_buf extent as forward, read

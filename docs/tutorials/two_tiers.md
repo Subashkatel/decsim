@@ -45,7 +45,7 @@ extends: weak_decoder_baseline.yaml
 escalation:
   kind: switching
   gap_threshold_db: 20.0
-  strong_window: two_sided_context
+  strong_window: near_seam_pinned
 
 links:
   qpu_to_controller:  {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
@@ -99,9 +99,10 @@ The `escalation` section is the new part.
   escalated, written in the paper's decibels. decsim converts it once,
   at load, into natural-log weight, which is the unit the decoder
   compares in (`decsim/escalation/settings.py`, `decibels_to_nats`).
-- `strong_window: two_sided_context` says which rounds the strong
-  decoder re-reads: the escalated window's commit region with one
-  buffer region of raw context on each side.
+- `strong_window: near_seam_pinned` says which rounds the strong
+  decoder re-reads: the escalated window's commit region and one buffer
+  region ahead of it, with its past face pinned on the correction the
+  window before it committed.
 
 The two decoder sections are priced cards: `kind: 1.0` says the weak
 decode costs one microsecond, which is this sweep's round period and so
@@ -342,8 +343,8 @@ seven things happen that did not happen for window 0.
   carries the window's rounds, 72 bits, read out of the weak syndrome
   buffer: nine rounds, `7..15`, where the weak window read six, the
   escalated window's commit region plus one buffer region of raw context
-  on each side, which is what `strong_window: two_sided_context` asked
-  for. The rounds cross once, when a window escalates, and never before.
+  on each side. The rounds cross once, when a window escalates, and
+  never before.
 - **`queued, dispatched to strong#0`.** A third decode job, on the other
   pool's unit, dispatched at 17.144 when the rounds land in the strong
   syndrome buffer.
@@ -361,7 +362,7 @@ provisionally commits on the weak answer as soon as the verdict is in,
 so the windows behind it are not blocked
 (`decsim/windows/window_commits.py`, `commit`). What it does not do is
 ship its boundary: this run's boundary policy is `held`, chosen for you
-because the escalation may escalate and `two_sided_context` does not
+because the escalation may escalate and `near_seam_pinned` does not
 absorb the windows it covers. A strong window absorbs a weak window when
 it decodes the same rounds again and replaces that window's answer, so
 the weak window never ships a boundary of its own

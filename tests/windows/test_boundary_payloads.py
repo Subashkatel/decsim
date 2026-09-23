@@ -58,7 +58,7 @@ def reference_run(distance: int):
     settings = config.point_settings(
         physical_error_probability=0.003,
         distance=distance,
-        round_period_us=1.0,
+        round_period_microseconds=1.0,
     )
     machine = machine_module.Machine.build(settings, 0)
     return machine.run()
@@ -240,7 +240,7 @@ def _pinned_run(strong_window: str, distance: int, seed: int = 0):
     settings = config.point_settings(
         physical_error_probability=0.008,
         distance=distance,
-        round_period_us=1.0,
+        round_period_microseconds=1.0,
     )
     escalation = dataclasses.replace(
         settings.escalation, strong_window=strong_window
@@ -398,7 +398,7 @@ def _parallel_run(distance: int, seed: int):
     settings = config.point_settings(
         physical_error_probability=0.005,
         distance=distance,
-        round_period_us=1.0,
+        round_period_microseconds=1.0,
     )
     windows = dataclasses.replace(
         settings.windows, kind="parallel", boundary_payload="sparse_seam_list"

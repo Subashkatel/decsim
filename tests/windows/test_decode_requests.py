@@ -428,7 +428,7 @@ FOLD_COUNTING_SWEEP = {
         {
             "physical_error_probability": [0.001, 0.01],
             "distance": [3],
-            "round_period_us": [1.0],
+            "round_period_microseconds": [1.0],
             "shots": 1,
         }
     ],
@@ -457,7 +457,7 @@ def test_every_window_with_a_predecessor_folds_its_boundary(
             config,
             physical_error_probability=probability,
             distance=3,
-            round_period_us=1.0,
+            round_period_microseconds=1.0,
             seed=seed,
         )
         by_path = measurement.data_movement["copies_by_path"]
@@ -494,7 +494,7 @@ SWITCHING_FOLD_SWEEP = {
         {
             "physical_error_probability": [0.0001, 0.008],
             "distance": [3],
-            "round_period_us": [1.0],
+            "round_period_microseconds": [1.0],
             "shots": len(FOLD_SEEDS),
         }
     ],
@@ -545,7 +545,7 @@ def _fold_outcome(config, probability: float, seed: int) -> tuple:
     task = config.point_task(
         physical_error_probability=probability,
         distance=3,
-        round_period_us=1.0,
+        round_period_microseconds=1.0,
         shots=len(FOLD_SEEDS),
     )
     shot = collect.run_shot(task, seed)

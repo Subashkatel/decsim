@@ -50,7 +50,7 @@ its maximum.
 
 | Column | What it is |
 | --- | --- |
-| `physical_error_probability`, `distance`, `round_period_us`, `algorithm`, `seed` | the sweep point and the seed, which together name the shot |
+| `physical_error_probability`, `distance`, `round_period_microseconds`, `algorithm`, `seed` | the sweep point and the seed, which together name the shot |
 | `windows` | how many windows this shot decoded |
 | `logical_failure` | 1 when the decoded observable did not match the truth, else 0 |
 | `load` | service time per window divided by the interval between windows arriving; above 1 the decoder cannot keep up |
@@ -162,7 +162,7 @@ counters.
 
 | Column | What it is |
 | --- | --- |
-| `distance`, `physical_error_probability`, `algorithm`, `round_period_us`, `seed` | the shot |
+| `distance`, `physical_error_probability`, `algorithm`, `round_period_microseconds`, `seed` | the shot |
 | `link` | the link path's name, one of the values in `decsim/records/transfers.py` |
 | `transfers` | how many transfers crossed that path |
 | `payload_bits` | how many bits they carried |
@@ -178,7 +178,7 @@ One row per sweep point, latency point and distinct microsecond value.
 
 | Column | What it is |
 | --- | --- |
-| `distance`, `physical_error_probability`, `algorithm`, `round_period_us` | the sweep point |
+| `distance`, `physical_error_probability`, `algorithm`, `round_period_microseconds` | the sweep point |
 | `name` | which latency point, from the list above |
 | `value_us` | one microsecond value that occurred |
 | `count` | how many windows carried it |
@@ -196,7 +196,7 @@ with no rows writes no file.
 
 | Column | What it is |
 | --- | --- |
-| `distance`, `physical_error_probability`, `round_period_us`, `algorithm`, `seed` | the shot |
+| `distance`, `physical_error_probability`, `round_period_microseconds`, `algorithm`, `seed` | the shot |
 | `algorithm_us` | the time the algorithm stage held the unit for one decode: its wall clock, or its cycle count |
 
 ### `sweep.csv`
@@ -208,7 +208,7 @@ point the run held:
 
 | Column | What it is |
 | --- | --- |
-| `distance`, `physical_error_probability`, `algorithm`, `round_period_us` | the point |
+| `distance`, `physical_error_probability`, `algorithm`, `round_period_microseconds` | the point |
 | `shots` | how many shots the point ran |
 | `windows_per_shot` | the mean over those shots |
 | `logical_failures`, `logical_error_rate` | the count and the fraction |
@@ -237,7 +237,7 @@ One row per sweep point per link path, averaged over that point's shots.
 
 | Column | What it is |
 | --- | --- |
-| `distance`, `physical_error_probability`, `algorithm`, `round_period_us` | the point |
+| `distance`, `physical_error_probability`, `algorithm`, `round_period_microseconds` | the point |
 | `link` | the path's name |
 | `transfers_per_shot`, `payload_bits_per_shot` | the means |
 | `bits_per_transfer` | the payload bits divided by the transfers |
@@ -253,7 +253,7 @@ here.
 
 | Column | What it is |
 | --- | --- |
-| `distance`, `physical_error_probability`, `algorithm`, `round_period_us`, `seed` | the traced shot |
+| `distance`, `physical_error_probability`, `algorithm`, `round_period_microseconds`, `seed` | the traced shot |
 | `counting` | what the row counts: `residence` for stays in a structure, `link_path` for a path's moves |
 | `name` | the structure (a store, a decoder unit, the controller, the frame) or the link path |
 | `samples` | how many stays or moves the shot had there |

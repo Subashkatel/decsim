@@ -507,7 +507,9 @@ def test_a_fabric_row_written_outside_decsim_runs_from_a_yaml(
     config_path = yaml_configs.write_config(tmp_path, {"links": links})
     experiment_config = experiment.load_experiment(config_path)
     settings = experiment_config.point_settings(
-        physical_error_probability=0.001, distance=3, round_period_us=1.0
+        physical_error_probability=0.001,
+        distance=3,
+        round_period_microseconds=1.0,
     )
     built = machine.Machine.build(settings, 0)
     result = built.run()
@@ -760,7 +762,9 @@ def test_the_measured_cpu_row_runs_from_a_yaml(tmp_path):
     config_path = yaml_configs.write_config(tmp_path, {"links": links})
     experiment_config = experiment.load_experiment(config_path)
     settings = experiment_config.point_settings(
-        physical_error_probability=0.001, distance=3, round_period_us=1.0
+        physical_error_probability=0.001,
+        distance=3,
+        round_period_microseconds=1.0,
     )
     built = machine.Machine.build(settings, 0)
     result = built.run()
@@ -777,7 +781,9 @@ def test_the_measured_gpu_row_runs_from_a_yaml(tmp_path):
     config_path = yaml_configs.write_config(tmp_path, {"links": links})
     experiment_config = experiment.load_experiment(config_path)
     settings = experiment_config.point_settings(
-        physical_error_probability=0.001, distance=3, round_period_us=1.0
+        physical_error_probability=0.001,
+        distance=3,
+        round_period_microseconds=1.0,
     )
     built = machine.Machine.build(settings, 0)
     result = built.run()

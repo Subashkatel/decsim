@@ -160,7 +160,7 @@ def slow_unit_shot(tmp_path, units: int, card_microseconds: float = 5.0):
         config,
         physical_error_probability=0.001,
         distance=3,
-        round_period_us=1.0,
+        round_period_microseconds=1.0,
         seed=0,
     )
 
@@ -221,7 +221,7 @@ def switching_run(
     task = config.point_task(
         physical_error_probability=0.008,
         distance=3,
-        round_period_us=1.0,
+        round_period_microseconds=1.0,
         shots=1,
     )
     return collect.run_shot(task, seed)
@@ -273,7 +273,7 @@ def bounded_store_shot(tmp_path):
         config,
         physical_error_probability=0.001,
         distance=3,
-        round_period_us=1.0,
+        round_period_microseconds=1.0,
         seed=0,
     )
 
@@ -499,11 +499,11 @@ def test_skorics_process_count_is_above_one_when_a_decode_outlasts_the_layers(
 
     commit_round_count = 3
     buffer_round_count = 3
-    round_period_us = 1.0
+    round_period_microseconds = 1.0
     both_buffers_round_count = 2 * buffer_round_count
     window_round_count = commit_round_count + both_buffers_round_count
     committed_round_count = commit_round_count + window_round_count
-    committed_rounds_us = committed_round_count * round_period_us
+    committed_rounds_us = committed_round_count * round_period_microseconds
     both_layers_service_us = 2 * measurement.means["service"]
     processes = both_layers_service_us / committed_rounds_us
     expected = math.ceil(processes)
@@ -631,7 +631,7 @@ def shipped_shot(config_name: str):
     task = config.point_task(
         physical_error_probability=0.008,
         distance=3,
-        round_period_us=1.0,
+        round_period_microseconds=1.0,
         shots=1,
     )
     return collect.run_shot(task, 0)
@@ -950,7 +950,7 @@ def test_a_hops_setup_is_in_the_hop_and_not_in_the_wait_before_it(tmp_path):
         config,
         physical_error_probability=0.001,
         distance=3,
-        round_period_us=1.0,
+        round_period_microseconds=1.0,
         seed=0,
     )
 

@@ -86,7 +86,7 @@ strong_decoder:
 sweep:
   - physical_error_probability: [0.008]
     distance: [3, 5]
-    round_period_us: [1.0]
+    round_period_microseconds: [1.0]
     shots: 50
 ```
 

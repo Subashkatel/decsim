@@ -144,10 +144,10 @@ def _report_point_done(
     point = task.metadata
     physical_error_probability = point["physical_error_probability"]
     distance = point["distance"]
-    round_period_us = point["round_period_us"]
+    round_period_microseconds = point["round_period_microseconds"]
     print(
         f"p {physical_error_probability}, d {distance}, "
-        f"round period {round_period_us} us: {task.shots} shots done",
+        f"round period {round_period_microseconds} us: {task.shots} shots done",
         file=sys.stderr,
     )
     if task.online_threshold is not None:
@@ -156,7 +156,7 @@ def _report_point_done(
             run_dir,
             physical_error_probability=physical_error_probability,
             distance=distance,
-            round_period_us=round_period_us,
+            round_period_microseconds=round_period_microseconds,
         )
 
 
@@ -166,7 +166,7 @@ def _write_online_threshold_record(
     *,
     physical_error_probability: float,
     distance: int,
-    round_period_us: float,
+    round_period_microseconds: float,
 ) -> None:
     """One csv per sweep point with the online threshold's trajectory.
 
@@ -182,7 +182,7 @@ def _write_online_threshold_record(
         return
     record_path = Path(run_dir) / (
         f"online_threshold_p{physical_error_probability}_d{distance}"
-        f"_round{round_period_us}us.csv"
+        f"_round{round_period_microseconds}us.csv"
     )
     with open(record_path, "w", newline="") as record_file:
         writer = csv.writer(record_file)

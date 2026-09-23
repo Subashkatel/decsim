@@ -338,7 +338,7 @@ windows:
 sweep:
   - physical_error_probability: [0.001]    # p on all four Stim noise channels
     distance: [3]                          # code distance d; one LER curve per d
-    round_period_us: [1.0]                 # the QPU's physical round period, in us:
+    round_period_microseconds: [1.0]       # the QPU's physical round period:
                                            # a quantum-device cadence, deliberately
                                            # not a classical clock's cycles
     shots: 2

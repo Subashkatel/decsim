@@ -42,8 +42,8 @@ wrong number.
 A cost can be written two ways.
 
 In microseconds, when a paper states it in seconds:
-`round_period_us` on the sweep, `confidence_walk_microseconds` on the
-escalation section.
+`round_period_microseconds` on the sweep, `confidence_walk_microseconds`
+on the escalation section.
 
 In cycles of a **clock domain**, when a paper states it as a cycle
 count: `readout_to_bits_cycles`, `packing_cycles_per_round`,

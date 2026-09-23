@@ -35,7 +35,7 @@ def _machine_formed_at(where: str, distance: int = 3):
     settings = config.point_settings(
         physical_error_probability=0.001,
         distance=distance,
-        round_period_us=1.0,
+        round_period_microseconds=1.0,
     )
     controller = dataclasses.replace(
         settings.controller, detection_events_formed_at=where
@@ -70,7 +70,9 @@ def _switching_machine_formed_at(where: str):
     config_path = CONFIGS / "seam_pinned_switching.yaml"
     config = experiment.load_experiment(config_path)
     settings = config.point_settings(
-        physical_error_probability=0.008, distance=3, round_period_us=1.0
+        physical_error_probability=0.008,
+        distance=3,
+        round_period_microseconds=1.0,
     )
     controller = dataclasses.replace(
         settings.controller, detection_events_formed_at=where
@@ -89,7 +91,9 @@ def _forward_switching_at_the_decoder():
     config_path = CONFIGS / "seam_pinned_switching.yaml"
     config = experiment.load_experiment(config_path)
     settings = config.point_settings(
-        physical_error_probability=0.008, distance=3, round_period_us=1.0
+        physical_error_probability=0.008,
+        distance=3,
+        round_period_microseconds=1.0,
     )
     controller = dataclasses.replace(
         settings.controller, detection_events_formed_at="decoder"
@@ -201,7 +205,9 @@ def _machine(**weak_changes):
     config_path = CONFIGS / "weak_decoder_baseline.yaml"
     config = experiment.load_experiment(config_path)
     settings = config.point_settings(
-        physical_error_probability=0.001, distance=3, round_period_us=1.0
+        physical_error_probability=0.001,
+        distance=3,
+        round_period_microseconds=1.0,
     )
     weak = dataclasses.replace(settings.weak_decoder, **weak_changes)
     observation = dataclasses.replace(settings.observation, data_movement=True)
@@ -495,7 +501,9 @@ def test_a_shape_that_reads_disjoint_ranges_cannot_form_at_the_decoder():
     config_path = CONFIGS / "weak_decoder_baseline.yaml"
     config = experiment.load_experiment(config_path)
     settings = config.point_settings(
-        physical_error_probability=0.001, distance=3, round_period_us=1.0
+        physical_error_probability=0.001,
+        distance=3,
+        round_period_microseconds=1.0,
     )
     controller = dataclasses.replace(
         settings.controller, detection_events_formed_at="decoder"

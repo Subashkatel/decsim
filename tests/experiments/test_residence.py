@@ -139,7 +139,7 @@ class _TracedShot:
         self.distance = 3
         self.physical_error_probability = 0.001
         self.algorithm = 1.0
-        self.round_period_us = 1.0
+        self.round_period_microseconds = 1.0
 
 
 def test_a_structures_residences_are_its_lanes_complete_events(tmp_path):
@@ -200,7 +200,7 @@ def test_a_row_names_the_sweep_point_its_shot_ran_at(tmp_path):
     for row in rows:
         assert row["distance"] == 3
         assert row["physical_error_probability"] == 0.001
-        assert row["round_period_us"] == 1.0
+        assert row["round_period_microseconds"] == 1.0
         assert row["seed"] == 0
 
 
@@ -230,7 +230,7 @@ def test_a_traced_run_writes_the_table_beside_its_rows(tmp_path, monkeypatch):
                 {
                     "physical_error_probability": [0.001],
                     "distance": [3],
-                    "round_period_us": [1.0],
+                    "round_period_microseconds": [1.0],
                     "shots": 2,
                 }
             ],

@@ -38,7 +38,7 @@ def online_threshold_calibrator(
     task = config.point_task(
         physical_error_probability=physical_error_probability,
         distance=distance,
-        round_period_us=1.0,
+        round_period_microseconds=1.0,
         shots=1,
     )
     return task.online_threshold
@@ -457,7 +457,7 @@ def test_an_outside_row_built_per_point_is_the_installed_source(
     task = config.point_task(
         physical_error_probability=NEAR_THRESHOLD_P,
         distance=3,
-        round_period_us=1.0,
+        round_period_microseconds=1.0,
         shots=1,
     )
 

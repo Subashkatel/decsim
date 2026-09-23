@@ -22,7 +22,7 @@ COUNTING_SWEEP = {
         {
             "physical_error_probability": [0.001],
             "distance": [3, 5],
-            "round_period_us": [1.0],
+            "round_period_microseconds": [1.0],
             "shots": 1,
         }
     ],
@@ -95,7 +95,7 @@ def test_a_run_that_counted_no_movement_is_refused(tmp_path):
                 {
                     "physical_error_probability": [0.001],
                     "distance": [3],
-                    "round_period_us": [1.0],
+                    "round_period_microseconds": [1.0],
                     "shots": 1,
                 }
             ]

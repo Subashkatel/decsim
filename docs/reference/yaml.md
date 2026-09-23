@@ -35,10 +35,9 @@ Both refusals are checked by `tests/machine/test_machine.py`.
 Read it top to bottom as the pipeline: `qpu` is where a readout starts
 and `observation` is where the run is watched. Each key carries its unit
 in its name (`_microseconds`, `_cycles` for clock cycles, `_rounds` for
-rounds, `_count` for a count; the sweep axis `round_period_us` is the
-one key still spelled short), and the comment beside it
-says what the key means and, where the value came from a paper or a
-reference implementation, which one. A key whose comment cites, for
+rounds, `_count` for a count), and the comment beside it says what the
+key means and, where the value came from a paper or a reference
+implementation, which one. A key whose comment cites, for
 example, `Toshio 2510.25222 Sec. III C`, has that section as its source,
 and you can change it knowing what you are departing from.
 

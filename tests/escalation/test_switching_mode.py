@@ -61,7 +61,7 @@ def switching_config(
     sweep_point = {
         "physical_error_probability": [NEAR_THRESHOLD_P],
         "distance": [3],
-        "round_period_us": [1.0],
+        "round_period_microseconds": [1.0],
         "shots": 1,
     }
     strong_decoder = strong_unit("belief_matching")
@@ -82,7 +82,7 @@ def measured_shot(config, seed: int):
         config,
         physical_error_probability=NEAR_THRESHOLD_P,
         distance=3,
-        round_period_us=1.0,
+        round_period_microseconds=1.0,
         seed=seed,
     )
 
@@ -99,7 +99,7 @@ def test_switching_config_requires_both_tiers_and_the_card(tmp_path):
         weak_only_settings = weak_only.point_settings(
             physical_error_probability=NEAR_THRESHOLD_P,
             distance=3,
-            round_period_us=1.0,
+            round_period_microseconds=1.0,
         )
         Machine.build(weak_only_settings)
     strong_decoder = strong_unit("belief_matching")
@@ -218,7 +218,7 @@ def _strong_request_counts(tmp_path, card: dict):
     settings = config.point_settings(
         physical_error_probability=NEAR_THRESHOLD_P,
         distance=3,
-        round_period_us=1.0,
+        round_period_microseconds=1.0,
     )
     machine = Machine.build(settings, 0)
     machine.run()
@@ -394,7 +394,7 @@ def test_gap_records_decide_the_selected_tier(tmp_path):
         settings = config.point_settings(
             physical_error_probability=NEAR_THRESHOLD_P,
             distance=3,
-            round_period_us=1.0,
+            round_period_microseconds=1.0,
         )
         observation = replace(
             settings.observation, record_switching_windows=True
@@ -794,7 +794,7 @@ def _walk_card_machine(tmp_path, microseconds):
     settings = config.point_settings(
         physical_error_probability=NEAR_THRESHOLD_P,
         distance=3,
-        round_period_us=1.0,
+        round_period_microseconds=1.0,
     )
     machine = Machine.build(settings, 0)
     machine.run()
@@ -887,7 +887,7 @@ def test_one_landed_input_is_one_residence_however_many_solves_read_it(
     task = config.point_task(
         physical_error_probability=NEAR_THRESHOLD_P,
         distance=3,
-        round_period_us=1.0,
+        round_period_microseconds=1.0,
         shots=1,
     )
     shot = collect.run_shot(task, 0)

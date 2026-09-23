@@ -77,7 +77,7 @@ def _one_point_config(tmp_path, shots):
             {
                 "physical_error_probability": [0.001],
                 "distance": [3],
-                "round_period_us": [1.0],
+                "round_period_microseconds": [1.0],
                 "shots": shots,
             }
         ]

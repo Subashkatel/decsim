@@ -32,7 +32,7 @@ def wall_clock_config(tmp_path, distances):
                 {
                     "physical_error_probability": [0.001],
                     "distance": distances,
-                    "round_period_us": [1.0],
+                    "round_period_microseconds": [1.0],
                     "shots": 2,
                 }
             ],
@@ -47,7 +47,7 @@ def test_every_decoded_window_contributes_one_latency_sample(tmp_path):
         config,
         physical_error_probability=0.001,
         distance=3,
-        round_period_us=1.0,
+        round_period_microseconds=1.0,
         seed=0,
     )
     samples = measurement.samples["algorithm"]
@@ -63,7 +63,7 @@ def test_latency_samples_pool_over_shots_per_distance(tmp_path):
             config,
             physical_error_probability=0.001,
             distance=distance,
-            round_period_us=1.0,
+            round_period_microseconds=1.0,
             seed=seed,
         )
         for distance in (3, 5)
@@ -101,7 +101,7 @@ def test_latency_figure_written_only_for_wall_clock_multi_distance(
                 {
                     "physical_error_probability": [0.001],
                     "distance": [3, 5],
-                    "round_period_us": [1.0],
+                    "round_period_microseconds": [1.0],
                     "shots": 1,
                 }
             ]
@@ -131,7 +131,7 @@ def test_combined_figure_reads_two_runs_sample_files(tmp_path, monkeypatch):
                 {
                     "physical_error_probability": [0.001],
                     "distance": [3, 5],
-                    "round_period_us": [1.0],
+                    "round_period_microseconds": [1.0],
                     "shots": 1,
                 }
             ],

@@ -27,7 +27,7 @@ FOUR_POINT_SWEEP = {
         {
             "physical_error_probability": [0.001, 0.003],
             "distance": [3, 5],
-            "round_period_us": [1.0],
+            "round_period_microseconds": [1.0],
             "shots": 2,
         }
     ]
@@ -68,7 +68,7 @@ def _point_and_seed_of_every_row(run_dir, name):
         point_and_seed = (
             row["distance"],
             row["physical_error_probability"],
-            row["round_period_us"],
+            row["round_period_microseconds"],
             row["seed"],
         )
         order.append(point_and_seed)
@@ -183,7 +183,7 @@ def test_run_prints_the_result_fields_the_gate_hashes():
     settings = config.point_settings(
         physical_error_probability=block.physical_error_probabilities[0],
         distance=block.distances[0],
-        round_period_us=block.round_periods_microseconds[0],
+        round_period_microseconds=block.round_periods_microseconds[0],
     )
     machine = machine_module.Machine.build(settings, 0)
     result = machine.run()
@@ -749,7 +749,7 @@ def test_one_points_seeds_divide_across_two_shards(tmp_path):
             {
                 "physical_error_probability": [0.001],
                 "distance": [3],
-                "round_period_us": [1.0],
+                "round_period_microseconds": [1.0],
                 "shots": 4,
             }
         ]
@@ -858,7 +858,7 @@ def test_show_refuses_a_sweep_axis_the_yaml_layer_does_not_have(
             {
                 "physical_error_probability": [0.001],
                 "distance": [3],
-                "round_period_us": [1.0],
+                "round_period_microseconds": [1.0],
                 "algorithm": ["pymatching"],
                 "shots": 1,
             }
@@ -883,7 +883,7 @@ def test_show_refuses_a_shot_count_that_is_not_a_whole_number_of_one_or_more(
             {
                 "physical_error_probability": [0.001],
                 "distance": [3],
-                "round_period_us": [1.0],
+                "round_period_microseconds": [1.0],
                 "shots": shots,
             }
         ]
@@ -907,7 +907,7 @@ def test_show_refuses_a_sweep_axis_written_as_one_value_not_a_list(
             {
                 "physical_error_probability": [0.001],
                 "distance": 3,
-                "round_period_us": [1.0],
+                "round_period_microseconds": [1.0],
                 "shots": 1,
             }
         ]

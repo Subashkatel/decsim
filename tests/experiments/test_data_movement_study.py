@@ -125,7 +125,7 @@ def _both_in_place_config(tmp_path):
         {
             "physical_error_probability": [0.01],
             "distance": [3],
-            "round_period_us": [1.0],
+            "round_period_microseconds": [1.0],
             "shots": 1,
         }
     ]

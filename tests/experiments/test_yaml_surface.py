@@ -91,7 +91,9 @@ def test_controller_cycle_card_reaches_both_runtime_paths(tmp_path):
     assert controller.clock.period_ticks == 2000
 
     settings = config.point_settings(
-        physical_error_probability=0.001, distance=3, round_period_us=1.0
+        physical_error_probability=0.001,
+        distance=3,
+        round_period_microseconds=1.0,
     )
     completed = Machine.build(settings, 0)
     built = completed.controller.settings
@@ -284,7 +286,7 @@ def test_a_sweep_axis_given_as_one_value_is_refused(tmp_path):
     block = {
         "physical_error_probability": [0.001],
         "distance": 3,
-        "round_period_us": [1.0],
+        "round_period_microseconds": [1.0],
         "shots": 1,
     }
     config_path = write_config(tmp_path, {"sweep": [block]})
@@ -335,7 +337,9 @@ def test_the_code_card_row_named_in_the_yaml_is_built_with_its_own_keys(
     config_path = write_config(tmp_path, {"qpu": qpu})
     config = experiment.load_experiment(config_path)
     settings = config.point_settings(
-        physical_error_probability=0.001, distance=2, round_period_us=1.0
+        physical_error_probability=0.001,
+        distance=2,
+        round_period_microseconds=1.0,
     )
 
     machine = machine_module.Machine.build(settings, 0)
@@ -370,7 +374,9 @@ def test_a_source_rows_own_key_reaches_the_built_source(monkeypatch, tmp_path):
     config_path = write_config(tmp_path, {"qpu": qpu})
     config = experiment.load_experiment(config_path)
     settings = config.point_settings(
-        physical_error_probability=0.001, distance=3, round_period_us=1.0
+        physical_error_probability=0.001,
+        distance=3,
+        round_period_microseconds=1.0,
     )
 
     machine = machine_module.Machine.build(settings, 0)
@@ -388,7 +394,9 @@ def test_a_mode_without_its_tier_is_refused(tmp_path):
     )  # only weak_decoder is defined
     config = experiment.load_experiment(config_path)
     settings = config.point_settings(
-        physical_error_probability=0.001, distance=3, round_period_us=1.0
+        physical_error_probability=0.001,
+        distance=3,
+        round_period_microseconds=1.0,
     )
     with pytest.raises(ValueError, match="strong tier, which names no decoder"):
         Machine.build(settings)
@@ -435,7 +443,7 @@ def test_unknown_algorithms_and_stale_keys_fail_loudly(tmp_path):
                 {
                     "physical_error_probability": [0.001],
                     "distance": [3],
-                    "round_period_us": [1.0],
+                    "round_period_microseconds": [1.0],
                     "algorithm_latency_us": [0.028],
                     "shots": 1,
                 }
@@ -451,7 +459,7 @@ def test_unknown_algorithms_and_stale_keys_fail_loudly(tmp_path):
             "sweep": [
                 {
                     "physical_error_probability": [0.001],
-                    "round_period_us": [1.0],
+                    "round_period_microseconds": [1.0],
                     "shots": 1,
                 }
             ]
@@ -520,7 +528,7 @@ def test_report_rows_carry_the_algorithm_column(tmp_path):
             config,
             physical_error_probability=0.001,
             distance=3,
-            round_period_us=1.0,
+            round_period_microseconds=1.0,
             seed=seed,
         )
         for seed in range(2)
@@ -547,7 +555,7 @@ def test_rounds_per_shot_scales_with_the_swept_distance(tmp_path):
                 {
                     "physical_error_probability": [0.001],
                     "distance": [3, 5],
-                    "round_period_us": [1.0],
+                    "round_period_microseconds": [1.0],
                     "shots": 1,
                 }
             ],
@@ -562,7 +570,7 @@ def test_rounds_per_shot_scales_with_the_swept_distance(tmp_path):
         config,
         physical_error_probability=0.001,
         distance=5,
-        round_period_us=1.0,
+        round_period_microseconds=1.0,
         seed=0,
     )
     assert measurement.distance == 5

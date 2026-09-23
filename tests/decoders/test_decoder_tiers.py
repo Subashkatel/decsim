@@ -35,7 +35,7 @@ def test_weak_unit_loop_matches_direct_pymatching(tmp_path):
             config,
             physical_error_probability=0.005,
             distance=3,
-            round_period_us=1.0,
+            round_period_microseconds=1.0,
             seed=seed,
         )
         assert measurement.algorithm == "pymatching"
@@ -53,7 +53,7 @@ def test_strong_unit_runs_belief_matching(tmp_path):
         config,
         physical_error_probability=0.001,
         distance=3,
-        round_period_us=1.0,
+        round_period_microseconds=1.0,
         seed=0,
     )
     assert measurement.algorithm == "belief_matching"
@@ -81,7 +81,9 @@ def test_a_union_find_tier_with_a_cycle_count_is_held_by_the_count(tmp_path):
     )
     config = experiment.load_experiment(config_path)
     settings = config.point_settings(
-        physical_error_probability=0.001, distance=3, round_period_us=1.0
+        physical_error_probability=0.001,
+        distance=3,
+        round_period_microseconds=1.0,
     )
     machine = machine_module.Machine.build(settings)
     machine.run()

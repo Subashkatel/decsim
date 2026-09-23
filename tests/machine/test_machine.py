@@ -187,7 +187,9 @@ def test_a_new_decoder_is_one_class_and_one_table_row():
     config_path = CONFIGS / "weak_decoder_baseline.yaml"
     config = experiment.load_experiment(config_path)
     settings = config.point_settings(
-        physical_error_probability=0.003, distance=3, round_period_us=1.0
+        physical_error_probability=0.003,
+        distance=3,
+        round_period_microseconds=1.0,
     )
     weak_decoder = dataclasses.replace(settings.weak_decoder, kind="fake")
     settings = dataclasses.replace(settings, weak_decoder=weak_decoder)
@@ -210,7 +212,9 @@ def test_a_second_table_row_runs_gate_point_one():
     config_path = CONFIGS / "weak_decoder_baseline.yaml"
     config = experiment.load_experiment(config_path)
     settings = config.point_settings(
-        physical_error_probability=0.003, distance=3, round_period_us=1.0
+        physical_error_probability=0.003,
+        distance=3,
+        round_period_microseconds=1.0,
     )
     weak_decoder = dataclasses.replace(settings.weak_decoder, kind="union_find")
     settings = dataclasses.replace(settings, weak_decoder=weak_decoder)
@@ -236,7 +240,9 @@ def test_no_component_queues_an_event_until_the_machine_is_started():
     config_path = CONFIGS / "weak_decoder_baseline.yaml"
     config = experiment.load_experiment(config_path)
     settings = config.point_settings(
-        physical_error_probability=0.003, distance=3, round_period_us=1.0
+        physical_error_probability=0.003,
+        distance=3,
+        round_period_microseconds=1.0,
     )
     machine = machine_module.Machine.build(settings, 0)
     assert machine.engine.idle is True
@@ -1151,7 +1157,9 @@ def test_a_new_syndrome_buffer_is_one_class_and_one_table_row():
     config_path = CONFIGS / "weak_decoder_baseline.yaml"
     config = experiment.load_experiment(config_path)
     settings = config.point_settings(
-        physical_error_probability=0.003, distance=3, round_period_us=1.0
+        physical_error_probability=0.003,
+        distance=3,
+        round_period_microseconds=1.0,
     )
     counting = dataclasses.replace(
         settings.weak_syndrome_buffer, kind="counting"
@@ -1190,7 +1198,9 @@ def test_a_new_escalation_kind_is_one_class_and_one_table_row():
     config_path = CONFIGS / "strong_decoder_baseline.yaml"
     config = experiment.load_experiment(config_path)
     settings = config.point_settings(
-        physical_error_probability=0.003, distance=3, round_period_us=1.0
+        physical_error_probability=0.003,
+        distance=3,
+        round_period_microseconds=1.0,
     )
     escalation = dataclasses.replace(settings.escalation, kind="always_strong")
     settings = dataclasses.replace(settings, escalation=escalation)
@@ -1245,7 +1255,9 @@ def test_a_factory_row_written_outside_decsim_builds_by_its_own_name():
     config_path = CONFIGS / "weak_decoder_baseline.yaml"
     config = experiment.load_experiment(config_path)
     settings = config.point_settings(
-        physical_error_probability=0.003, distance=3, round_period_us=1.0
+        physical_error_probability=0.003,
+        distance=3,
+        round_period_microseconds=1.0,
     )
     factory_settings = qpu_settings.FactorySettings(kind="always_ready")
     settings = dataclasses.replace(
@@ -1878,7 +1890,9 @@ def reference_run(escalation_kind):
     config_path = CONFIGS / "reference.yaml"
     config = experiment.load_experiment(config_path)
     settings = config.point_settings(
-        physical_error_probability=0.001, distance=3, round_period_us=1.0
+        physical_error_probability=0.001,
+        distance=3,
+        round_period_microseconds=1.0,
     )
     escalation = dataclasses.replace(settings.escalation, kind=escalation_kind)
     settings = dataclasses.replace(settings, escalation=escalation)
@@ -2031,7 +2045,7 @@ def late_landing_shot(directory, links):
     task = experiment_config.point_task(
         physical_error_probability=0.001,
         distance=3,
-        round_period_us=1.0,
+        round_period_microseconds=1.0,
         shots=1,
     )
     return collect.run_shot(task, 0)
@@ -2130,7 +2144,7 @@ def campaign_point_task(family):
     return config.point_task(
         physical_error_probability=CAMPAIGN_PHYSICAL_ERROR,
         distance=CAMPAIGN_DISTANCE,
-        round_period_us=CAMPAIGN_ROUND_PERIOD_US,
+        round_period_microseconds=CAMPAIGN_ROUND_PERIOD_US,
         shots=CAMPAIGN_SHOT_COUNT,
     )
 

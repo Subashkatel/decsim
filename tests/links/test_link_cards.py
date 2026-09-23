@@ -20,7 +20,7 @@ CARD_YAML = (
     "           rounds_per_shot: 15}\n"
     "windows: {kind: sliding, commit_rounds: null, buffer_rounds: null}\n"
     "sweep: [{physical_error_probability: [0.001], distance: [3],\n"
-    "         round_period_us: [1.0], shots: 1}]\n"
+    "         round_period_microseconds: [1.0], shots: 1}]\n"
     "controller: {clock: fridge, "
     "readout_to_bits_cycles: 0, "
     "packing_cycles_per_round: 0, "
@@ -143,7 +143,9 @@ def test_a_separate_readout_cost_is_refused_on_an_uncarded_readout_hop(
     card_path.write_text(text)
     config = load_experiment(card_path)
     settings = config.point_settings(
-        physical_error_probability=0.001, distance=3, round_period_us=1.0
+        physical_error_probability=0.001,
+        distance=3,
+        round_period_microseconds=1.0,
     )
     with pytest.raises(ValueError) as refusal:
         machine_module.Machine.build(settings, 0)

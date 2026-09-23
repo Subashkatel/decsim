@@ -48,7 +48,7 @@ def _traced_switching_run(tmp_path, trace_path):
     sweep_point = {
         "physical_error_probability": [0.008],
         "distance": [3],
-        "round_period_us": [1.0],
+        "round_period_microseconds": [1.0],
         "shots": 1,
     }
     card = {
@@ -60,7 +60,9 @@ def _traced_switching_run(tmp_path, trace_path):
     config_path = yaml_configs.write_config(tmp_path, card)
     config = experiment.load_experiment(config_path)
     shipped = config.point_settings(
-        physical_error_probability=0.008, distance=3, round_period_us=1.0
+        physical_error_probability=0.008,
+        distance=3,
+        round_period_microseconds=1.0,
     )
     observation = dataclasses.replace(
         shipped.observation, trace=str(trace_path)
@@ -141,7 +143,7 @@ def test_the_timeline_reads_the_lanes_and_the_period_off_the_file(tmp_path):
     assert lanes.store_name == "weak syndrome buffer"
     assert lanes.input_path == "weak_buffer_to_weak_decoder"
     assert lanes.output_path == "weak_decoder_to_frame"
-    assert shot.round_period_us == 1.0
+    assert shot.round_period_microseconds == 1.0
 
 
 def test_the_timeline_figure_is_written_from_the_file(tmp_path):

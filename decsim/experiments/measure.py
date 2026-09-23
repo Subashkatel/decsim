@@ -126,7 +126,7 @@ class ShotMeasurement:
 
     physical_error_probability: float
     distance: int
-    round_period_us: float
+    round_period_microseconds: float
     algorithm: object  # the active unit's card: a name or a latency in us
     seed: int
     windows: int
@@ -185,7 +185,7 @@ def measure_shot(shot: collect.Shot, run_dir=None) -> ShotMeasurement:
     settings = shot.task.settings
     physical_error_probability = settings.workload.physical_error_probability
     distance = settings.qpu.distance
-    round_period_us = settings.qpu.round_period_microseconds
+    round_period_microseconds = settings.qpu.round_period_microseconds
     label = shot_label(settings, shot.seed)
     observation = shot.machine.observation
     if run_dir is not None and settings.observation.writes_log:
@@ -199,7 +199,7 @@ def measure_shot(shot: collect.Shot, run_dir=None) -> ShotMeasurement:
         shot.result,
         physical_error_probability=physical_error_probability,
         distance=distance,
-        round_period_us=round_period_us,
+        round_period_microseconds=round_period_microseconds,
         seed=shot.seed,
         wall_seconds=shot.wall_seconds,
         trace_path=trace_path,
@@ -611,7 +611,7 @@ def chain_load(
     samples: dict,
     settings: machine_settings.MachineSettings,
     distance: int,
-    round_period_us: float,
+    round_period_microseconds: float,
 ) -> float:
     """rho: the serial chain's service per window over the window period.
 
@@ -635,7 +635,7 @@ def chain_load(
     commit_rounds = settings.windows.commit_rounds
     if commit_rounds is None:
         commit_rounds = distance
-    inter_arrival_us = commit_rounds * round_period_us
+    inter_arrival_us = commit_rounds * round_period_microseconds
     chain_us = service_us + confidence_us + handoff_us
     return chain_us / inter_arrival_us
 
@@ -674,11 +674,11 @@ def shot_label(settings: machine_settings.MachineSettings, seed: int) -> str:
     """The name a shot's log and trace files carry: its point and seed."""
     physical_error_probability = settings.workload.physical_error_probability
     distance = settings.qpu.distance
-    round_period_us = settings.qpu.round_period_microseconds
+    round_period_microseconds = settings.qpu.round_period_microseconds
     algorithm = active_decoder_kind(settings)
     return (
         f"p{physical_error_probability:g}_d{distance}_algo{algorithm}"
-        f"_round{round_period_us:g}us_seed{seed}"
+        f"_round{round_period_microseconds:g}us_seed{seed}"
     )
 
 
@@ -689,7 +689,7 @@ def _measurement(
     *,
     physical_error_probability: float,
     distance: int,
-    round_period_us: float,
+    round_period_microseconds: float,
     seed: int,
     wall_seconds: float,
     trace_path: Optional[str],
@@ -705,14 +705,14 @@ def _measurement(
     throughput = _throughput_per_microsecond(observation, samples)
     referee = _referee_counts(observation)
     decoded_windows = len(samples["service"])
-    load = chain_load(samples, settings, distance, round_period_us)
+    load = chain_load(samples, settings, distance, round_period_microseconds)
     algorithm = active_decoder_kind(settings)
     queued = observation.queue_depth.peak
     primary_tier = escalation_build.primary_tier(settings.escalation)
     pools = _pool_measures(observation, primary_tier)
     strong = _strong_decodes(observation)
     processes = parallel_processes_needed(
-        samples, settings, distance, round_period_us
+        samples, settings, distance, round_period_microseconds
     )
     totals = link_totals(result.link_traffic)
     means = _means(samples)
@@ -720,7 +720,7 @@ def _measurement(
     return ShotMeasurement(
         physical_error_probability=physical_error_probability,
         distance=distance,
-        round_period_us=round_period_us,
+        round_period_microseconds=round_period_microseconds,
         algorithm=algorithm,
         seed=seed,
         windows=decoded_windows,
@@ -950,7 +950,7 @@ def parallel_processes_needed(
     samples: dict,
     settings: machine_settings.MachineSettings,
     distance: int,
-    round_period_us: float,
+    round_period_microseconds: float,
 ) -> int:
     """Skoric's least count of parallel decoding processes for no backlog.
 
@@ -974,7 +974,7 @@ def parallel_processes_needed(
     both_buffers_round_count = 2 * buffer_rounds
     window_round_count = commit_rounds + both_buffers_round_count
     committed_round_count = commit_rounds + window_round_count
-    committed_rounds_us = committed_round_count * round_period_us
+    committed_rounds_us = committed_round_count * round_period_microseconds
     both_layers_service_us = 2 * service_us
     processes = both_layers_service_us / committed_rounds_us
     return math.ceil(processes)

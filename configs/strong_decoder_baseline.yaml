@@ -18,23 +18,23 @@ windows:
 sweep:
   - physical_error_probability: [0.001]                                   # timing
     distance: [3]
-    round_period_us: [10.0, 5.0, 3.0, 2.0, 1.5, 1.0, 0.5]
+    round_period_microseconds: [10.0, 5.0, 3.0, 2.0, 1.5, 1.0, 0.5]
     shots: 10
   - physical_error_probability: [0.001, 0.002, 0.003, 0.005, 0.007, 0.01] # LER
     distance: [3]
-    round_period_us: [1.0]
+    round_period_microseconds: [1.0]
     shots: 2000
   - physical_error_probability: [0.001, 0.002, 0.003, 0.005, 0.007, 0.01] # LER, d=5
     distance: [5]
-    round_period_us: [1.0]
+    round_period_microseconds: [1.0]
     shots: 300
   - physical_error_probability: [0.001, 0.002, 0.003, 0.005, 0.007, 0.01] # LER, d=7
     distance: [7]
-    round_period_us: [1.0]
+    round_period_microseconds: [1.0]
     shots: 200
   - physical_error_probability: [0.001, 0.002, 0.003, 0.005, 0.007, 0.01] # LER, d=9
     distance: [9]
-    round_period_us: [1.0]
+    round_period_microseconds: [1.0]
     shots: 100
 
 controller:

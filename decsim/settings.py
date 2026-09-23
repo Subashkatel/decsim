@@ -141,17 +141,16 @@ class MachineSettings:
             )
         _check_section_shapes(sections)
         clocks = config.ClockSettings.from_yaml(sections["clocks"])
-        idle_policy = controller_settings.IdlePolicySettings()
-        if "idle_policy" in sections:
-            idle_policy = controller_settings.IdlePolicySettings(
-                kind=sections["idle_policy"]
-            )
+        idle_policy_section = sections.get("idle_policy", {})
         escalation_section = sections.get("escalation", {})
         decoder_manager_section = sections.get("decoder_manager", {})
         observation_section = sections.get("observation", {})
         qpu = qpu_settings.QpuSettings.from_yaml(sections["qpu"])
         controller = controller_settings.ControllerSettings.from_yaml(
             sections["controller"], clocks
+        )
+        idle_policy = controller_settings.IdlePolicySettings.from_yaml(
+            idle_policy_section
         )
         links = link_profiles.from_yaml(sections["links"], clocks, name)
         buffer_settings = syndrome_buffer_settings.SyndromeBufferSettings
@@ -210,10 +209,7 @@ class MachineSettings:
 
 
 def _check_section_shapes(sections: Mapping) -> None:
-    """Every section the machine reads is there, and each holds its keys.
-
-    idle_policy is the one section that is a single word.
-    """
+    """Every section the machine reads is there, and each holds its keys."""
     missing = set(REQUIRED_SECTIONS) - set(sections)
     if missing:
         listed = sorted(missing)
@@ -222,13 +218,24 @@ def _check_section_shapes(sections: Mapping) -> None:
             "holds every section with its keys"
         )
     for name, section in sections.items():
-        if name == "idle_policy":
-            continue
         if not isinstance(section, Mapping):
-            raise ValueError(
-                f"the yaml section {name} holds {section!r}; a section is "
-                "a mapping of its keys, as in configs/reference.yaml"
-            )
+            sentence = _not_a_mapping_sentence(name, section)
+            raise ValueError(sentence)
+
+
+def _not_a_mapping_sentence(name: str, section) -> str:
+    """The refusal of a section written as one value, with its mapping form.
+
+    A section written as a bare word is a row's name, so the sentence
+    shows that word under the section's kind key.
+    """
+    sentence = (
+        f"the yaml section {name} holds {section!r}; a section is a "
+        "mapping of its keys, as in configs/reference.yaml"
+    )
+    if not isinstance(section, str):
+        return sentence
+    return f"{sentence}, so write {name}: {{kind: {section}}}"
 
 
 def _tier_settings(

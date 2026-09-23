@@ -178,6 +178,65 @@ def test_a_formation_placement_off_its_table_is_refused_when_the_yaml_loads(
         experiment.load_experiment(config_path)
 
 
+def test_the_idle_policy_kind_reaches_the_controller(tmp_path):
+    config_path = write_config(tmp_path, {"idle_policy": {"kind": "ignore"}})
+    config = experiment.load_experiment(config_path)
+    assert config.settings.idle_policy.kind == "ignore"
+
+
+def test_an_idle_policy_written_as_a_bare_word_is_refused_with_its_mapping(
+    tmp_path,
+):
+    config_path = write_config(tmp_path, {"idle_policy": "ignore"})
+    sentence = (
+        "the yaml section idle_policy holds 'ignore'; a section is a "
+        "mapping of its keys, as in configs/reference.yaml, so write "
+        "idle_policy: {kind: ignore}"
+    )
+    with pytest.raises(ValueError) as refusal:
+        experiment.load_experiment(config_path)
+    assert sentence in str(refusal.value)
+
+
+def test_a_key_no_idle_policy_row_declares_is_refused(tmp_path):
+    idle_policy = {"kind": "ignore", "every_nth_round": 2}
+    config_path = write_config(tmp_path, {"idle_policy": idle_policy})
+    sentence = (
+        r"idle_policy does not know \['every_nth_round'\]; its keys are "
+        r"\['kind'\]"
+    )
+    with pytest.raises(ValueError, match=sentence):
+        experiment.load_experiment(config_path)
+
+
+def test_an_idle_policy_rows_own_key_reaches_its_settings(
+    monkeypatch, tmp_path
+):
+    """gem5's shape: the row declares its key, the section hands it over."""
+    monkeypatch.setitem(
+        controller_settings.IDLE_POLICIES, "every_nth", _EveryNthIdlePolicy
+    )
+    idle_policy = {"kind": "every_nth", "every_nth_round": 2}
+    config_path = write_config(tmp_path, {"idle_policy": idle_policy})
+
+    config = experiment.load_experiment(config_path)
+
+    row_settings = config.settings.idle_policy.row_settings
+    assert row_settings == _EveryNthIdlePolicy.Settings(every_nth_round=2)
+
+
+class _EveryNthIdlePolicy:
+    """An idle row with one key of its own, for the section's split."""
+
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        every_nth_round: int = 1
+
+        @classmethod
+        def from_yaml(cls, section):
+            return cls(**section)
+
+
 def test_the_bulk_strong_key_reaches_the_decoder_manager(tmp_path):
     config_path = write_config(
         tmp_path, {"decoder_manager": {"bulk_strong": True}}

@@ -13,6 +13,8 @@ import pytest
 
 import decsim.build.escalation as escalation_build
 import decsim.build.plan as plan_build
+import decsim.controller.policies as policies
+import decsim.controller.settings as controller_settings
 import decsim.escalation.settings as escalation_settings
 import decsim.frontends.settings as workload_settings
 import decsim.qpu.round_policies as round_policies
@@ -28,8 +30,10 @@ import decsim.windows.settings as window_settings
 import tests.declared_run as declared_run
 
 
-def _plan(*, escalation=None, windows=None, qpu=None):
+def _plan(*, escalation=None, windows=None, qpu=None, idle_policy=None):
     """The plan of a six-round memory run with the given sections."""
+    if idle_policy is None:
+        idle_policy = controller_settings.IdlePolicySettings()
     if escalation is None:
         escalation = escalation_settings.EscalationSettings()
     if windows is None:
@@ -48,6 +52,7 @@ def _plan(*, escalation=None, windows=None, qpu=None):
         pauli_frame=frame,
         escalation=escalation,
         windows=windows,
+        idle_policy=idle_policy,
     )
     policy = escalation_build.build_escalation_policy(
         escalation, settings.weak_decoder
@@ -177,6 +182,35 @@ def test_a_scheme_row_with_settings_is_built_with_its_record(monkeypatch):
     plan = _plan(windows=windows)
 
     assert plan.scheme.settings is own_settings
+
+
+class _SettingsRecordingIdlePolicy(policies.Ignore):
+    """An idle row that keeps the Settings record it is built with."""
+
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        every_nth_round: int = 1
+
+    def __init__(self, settings) -> None:
+        self.settings = settings
+
+
+def test_an_idle_policy_row_with_settings_is_built_with_its_record(
+    monkeypatch,
+):
+    monkeypatch.setitem(
+        controller_settings.IDLE_POLICIES,
+        "recording",
+        _SettingsRecordingIdlePolicy,
+    )
+    own_settings = _SettingsRecordingIdlePolicy.Settings(every_nth_round=2)
+    idle_policy = controller_settings.IdlePolicySettings(
+        kind="recording", row_settings=own_settings
+    )
+
+    plan = _plan(idle_policy=idle_policy)
+
+    assert plan.idle_policy.settings is own_settings
 
 
 def test_a_scheme_that_declares_none_of_the_three_facts_is_refused():

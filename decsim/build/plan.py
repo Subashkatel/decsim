@@ -408,12 +408,18 @@ def _boundaries_name(
 
 
 def _idle_policy(settings: controller_settings.IdlePolicySettings):
+    """The Python-built policy, or the kind's row.
+
+    A row with keys of its own is built with its Settings record.
+    """
     if settings.policy is not None:
         return settings.policy
     row = tables.row(
-        controller_settings.IDLE_POLICIES, "idle_policy", settings.kind
+        controller_settings.IDLE_POLICIES, "idle_policy.kind", settings.kind
     )
-    return row()
+    if settings.row_settings is None:
+        return row()
+    return row(settings=settings.row_settings)
 
 
 def _syndrome_source(settings: qpu_settings.QpuSettings, code):

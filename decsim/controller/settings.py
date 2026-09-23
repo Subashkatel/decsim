@@ -7,7 +7,7 @@ workspace; the idle policy says how an idle patch's rounds are charged.
 import dataclasses
 import enum
 from collections.abc import Mapping
-from typing import Optional
+from typing import Any, Optional
 
 import decsim.config as config
 import decsim.controller.policies as policies
@@ -22,6 +22,9 @@ IDLE_POLICIES = {
     "ignore": policies.Ignore,
     "extend_stream": policies.ExtendStream,
 }
+# The keys every row of the idle_policy section shares; any other key is
+# the row's own (its Settings, decsim/tables.py row_settings).
+_IDLE_POLICY_KEYS = ("kind",)
 
 # controller.detection_events_formed_at names one of these rows: where
 # the machine turns a round's measurement outcomes into its detection
@@ -207,7 +210,7 @@ class ControllerSettings:
 
 @dataclasses.dataclass(frozen=True)
 class IdlePolicySettings:
-    """The yaml's `idle_policy` value: how an idle patch's rounds are charged.
+    """The yaml's `idle_policy` section: how an idle patch's rounds are charged.
 
     Table rows (IDLE_POLICIES, above): separate_decode_jobs, ignore,
     extend_stream. Idle rounds are decoder workload, because the backlog
@@ -216,11 +219,30 @@ class IdlePolicySettings:
     2303.00054 line 144), so separate_decode_jobs is the default; ignore
     is the optimistic card for active-path latency studies;
     extend_stream folds them into a live stream. A Python-built policy is
-    used as it is.
+    used as it is. row_settings is the row's own Settings, read from the
+    section's keys other than kind, or None for a row that declares
+    none.
     """
 
     kind: str = "separate_decode_jobs"
     policy: Optional[ports.IdlePolicy] = None
+    # the row's own Settings record, opaque to the section
+    row_settings: Optional[Any] = None
+
+    @classmethod
+    def from_yaml(cls, section: Mapping) -> "IdlePolicySettings":
+        """The `idle_policy` section: a kind of the table, the row's keys.
+
+        The section is a mapping with a kind key like every other, since
+        a row owns its parameters the way a gem5 SimObject declares its
+        own (src/mem/SimpleMemory.py:43-53).
+        """
+        kind = section.get("kind", "separate_decode_jobs")
+        row = tables.row(IDLE_POLICIES, "idle_policy.kind", kind)
+        row_settings = tables.row_settings(
+            row, "idle_policy", section, _IDLE_POLICY_KEYS
+        )
+        return cls(kind=kind, row_settings=row_settings)
 
 
 def _check_section_keys(section: Mapping) -> None:

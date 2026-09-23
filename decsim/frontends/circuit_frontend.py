@@ -304,41 +304,36 @@ def _rotation_is_clifford(angle_expression: Optional[str]) -> bool:
     return abs(distance) < 1e-9
 
 
-def _parse_angle(angle_expression) -> Optional[float]:
-    """A numeric or pi-fraction angle in radians; None when there is none.
+def _parse_angle(angle_expression: Optional[str]) -> Optional[float]:
+    """A number or a pi fraction in radians; None when the line gives none.
 
-    An angle that is written but cannot be read is refused: read as no
-    angle it would make a quarter turn a non-Clifford gate that draws a
-    magic state.
+    The text IR is input, so an angle the grammar cannot read is refused
+    with the line's angle rather than read as a non-Clifford rotation
+    that would ask the factory for a magic state (STYLE.md rule 4).
     """
     if angle_expression is None:
         return None
-    if isinstance(angle_expression, (int, float)):
-        return float(angle_expression)
-    text = str(angle_expression)
-    normalized = text.strip()
-    normalized = normalized.lower()
-    normalized = normalized.replace(" ", "")
-    if not normalized:
-        return None
+    stripped = angle_expression.strip()
+    lowered = stripped.lower()
+    normalized = lowered.replace(" ", "")
     try:
         return _angle_from_text(normalized)
-    except (ValueError, ZeroDivisionError) as unreadable:
+    except (ValueError, ZeroDivisionError) as error:
         raise ValueError(
-            f"rotation angle {text!r} is not a number or a fraction of pi, "
-            "such as pi/2 or -3*pi/4"
-        ) from unreadable
+            f"rotation angle {angle_expression!r} is not "
+            "[-]factor[*factor...][/factor] with each factor a number or pi"
+        ) from error
 
 
 def _angle_from_text(normalized: str) -> float:
-    """[-]<factor>[*<factor>...][/<denominator>] with pi as a factor."""
+    """[-]<factor>[*<factor>...][/<factor>] with pi as a factor."""
     is_negative = normalized.startswith("-")
     if is_negative:
         normalized = normalized[1:]
     denominator = 1.0
     if "/" in normalized:
         numerator_text, denominator_text = normalized.split("/", 1)
-        denominator = _denominator_value(denominator_text)
+        denominator = _factor_value(denominator_text)
         normalized = numerator_text
     coefficient = 1.0
     for factor_text in normalized.split("*"):
@@ -353,9 +348,3 @@ def _factor_value(factor_text: str) -> float:
     if factor_text == "pi":
         return math.pi
     return float(factor_text)
-
-
-def _denominator_value(denominator_text: str) -> float:
-    if "pi" in denominator_text:
-        return math.pi
-    return float(denominator_text)

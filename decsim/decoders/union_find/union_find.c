@@ -13,7 +13,9 @@
  * incident edges", fusion appends one cluster's list to the other's,
  * and a last pass over the list drops what is no longer on the
  * boundary. An edge with no growing end cannot move, so leaving it out
- * of the event changes nothing it would have done.
+ * of the event changes nothing it would have done. The cycle count's
+ * flood is not bounded this way: every growth step lays the
+ * closed edges of the whole graph out again (fused_flood_hops).
  *
  * The extra growth (Kishi et al. arXiv:2602.03336 Algorithm 1) runs the
  * same loop on from where a decode stopped, every cluster and the
@@ -832,7 +834,9 @@ static void build_closed_adjacency(struct workspace *workspace,
   place_closed_neighbors(workspace, graph, interval_is_closed);
 }
 
-/* Queue every unvisited closed-edge neighbour of node behind tail. */
+/* Queue every unvisited closed-edge neighbour of node behind tail, and
+ * write its depth, one more than node's, into tree_order: the flood
+ * borrows that array before the peel lays its order there. */
 static int32_t queue_closed_neighbors(struct workspace *workspace,
                                       int32_t node, int32_t depth,
                                       int32_t tail) {

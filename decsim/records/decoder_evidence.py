@@ -50,12 +50,13 @@ class GrowthStep:
     """One growth step's cycle count inputs: its work and its critical path.
 
     edge_count is the boundary edges the step advanced. hop_count is the
-    deepest flood over closed edges from the root of any cluster the step
-    fused, the stages a cluster identifier and its parity take to cross
-    the cluster (Helios 2301.08419 lines 623-629); zero when the step
-    fused nothing. growth_ticks is the ticks the step spanned, which is
-    the one-unit growth iterations a unit that grows one unit of weight
-    at a time spends on it (lines 1242-1254, latency growing with the
+    deepest flood over closed edges from the lowest detector of any
+    cluster the step fused, the boundary left out: the stages a cluster
+    identifier and its parity take to cross the cluster (Helios
+    2301.08419 lines 623-629); zero when the step fused nothing.
+    growth_ticks is the ticks the step spanned, which is the one-unit
+    growth iterations a unit that grows one unit of weight at a time
+    spends on it (lines 1242-1254, latency growing with the
     weight resolution). fusion is the strongest kind among the step's
     own fusions, one of FUSION_KINDS: none when the closing edges united
     no two clusters, roots when clusters united and only roots and the

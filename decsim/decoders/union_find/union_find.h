@@ -65,16 +65,18 @@ enum union_find_status {
  *
  * The four step arrays are the growth's cycle count per step, one
  * entry per growth step: the boundary edges the step advanced, which is
- * its work; the deepest flood over closed edges from the root of any
- * cluster the step fused, which is its critical path in hops (Helios
- * 2301.08419 lines 623-629: propagating a cluster identifier and its
- * parity takes as many stages as the cluster is deep); the ticks the
- * step spanned, which is how many one-unit growth iterations a unit
- * that grows one unit of weight at a time spends on it (Helios lines
- * 1242-1254); and what the strongest of the step's fusions changed, 0
- * when its closing edges united no two clusters, 1 when clusters united
- * and only roots and the touching flag moved, 2 when the survivor's
- * parity took an odd absorbed root's. A step that fused nothing has
+ * its work; the deepest flood over closed edges from the lowest
+ * detector of any cluster the step fused, the identifier Helios
+ * floods, with the boundary left out, which is its critical path in
+ * hops (Helios 2301.08419 lines 623-629: propagating a cluster
+ * identifier and its parity takes as many stages as the cluster is
+ * deep); the ticks the step spanned, which is how many one-unit
+ * growth iterations a unit that grows one unit of weight at a time
+ * spends on it (Helios lines 1242-1254); and what the strongest of
+ * the step's fusions changed, 0 when its closing edges united no two
+ * clusters, 1 when clusters united and only roots and the touching
+ * flag moved, 2 when the survivor's parity took an odd absorbed
+ * root's. A step that fused nothing has
  * zero hops. An edge of length zero is closed before the first step and
  * is fused there, so it belongs to no step and is charged in none. The
  * growth takes at most one step per edge, so edge_count entries always

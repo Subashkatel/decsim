@@ -23,11 +23,13 @@ class UnionFindDecoder(decoder_module.WindowDecoderBase):
 
     Faults must be graphlike; detector hyperedges are rejected. Initial
     erasure side information is not implemented. Growth rounds natural
-    log-odds to the configured weight step; a probability of one half is
-    an ordinary zero-log-odds fault, not erasure. Every logical
-    observable row is kept in the hard result. Host runtime is not
-    simulated service latency, and this Python implementation does not
-    claim the paper's complexity bound.
+    log-odds to the configured weight step; a probability of one half
+    has zero log-odds, so its edge has length zero and starts closed,
+    as an erased edge does (Delfosse and Nickerson 1709.06218). Every
+    logical observable row is kept in the hard result. Host runtime is
+    not simulated service latency, and the decoder does not claim the
+    paper's almost-linear bound: the cycle count's flood lays the closed
+    edges out again at every growth step.
 
     The row is priced one of three ways: a latency model, as any window
     decoder; its own cycle count (cycle_count.py), which reads the

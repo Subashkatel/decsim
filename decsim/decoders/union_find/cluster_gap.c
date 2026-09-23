@@ -341,7 +341,8 @@ static void search_over(struct search *search, struct workspace *workspace,
 
 /* A state is pushed only when its distance falls, and a state is
  * processed once, so the pushes of one source are bounded by the
- * relaxations its states can make: two slots per slot, and the source
+ * relaxations its states can make: two pushes per adjacency slot, one
+ * from each parity state of the node the slot leaves, and the source
  * itself. */
 static void heap_push(struct search *search, int64_t distance,
                       int32_t state) {

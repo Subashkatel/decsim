@@ -380,8 +380,8 @@ def _intervals(is_closed, lower_tick, upper_tick) -> tuple:
     Open and Closed are frozen and carry no identity: every reader tests
     the type and reads the bounds, so one instance stands for every edge
     with the same interval. A window has tens of thousands of edges and
-    a few hundred distinct intervals, and building one object each was
-    three quarters of a decode's Python time. The arrays are read whole
+    a few hundred distinct intervals, so one object per edge would be
+    most of a decode's Python time. The arrays are read whole
     because element by element indexing of numpy costs more than the
     list does.
     """

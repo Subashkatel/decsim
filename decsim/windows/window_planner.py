@@ -146,41 +146,6 @@ class WindowModels:
         )
 
 
-def _model_key(
-    operation, resolved_operation, windows: list, requirement, protocol
-) -> tuple:
-    """What one operation's window models are a function of.
-
-    The circuit and its rounds, every window's span, dependencies and
-    closed boundaries, the decoder's fault-model requirement and the
-    window protocol: exactly the arguments the builder is given
-    (qpu/stim_device.py window_models_for_operation), and nothing a seed
-    touches.
-    """
-    circuit_text = str(operation.circuit)
-    plan = []
-    for window in windows:
-        deps = tuple(window.deps)
-        span = (
-            window.key,
-            window.start_round,
-            window.commit_lo,
-            window.commit_hi,
-            window.buffer_hi,
-            deps,
-            window.closed_temporal_boundaries,
-        )
-        plan.append(span)
-    return (
-        operation.id,
-        circuit_text,
-        resolved_operation.round_count,
-        tuple(plan),
-        requirement,
-        protocol,
-    )
-
-
 class WindowPlanner:
     """Which windows exist: the plan's, and a stream's as it grows.
 
@@ -528,6 +493,41 @@ class WindowPlanner:
         growth.next_window_index += 1
         self.trace.window_planned.fire(window)
         return window
+
+
+def _model_key(
+    operation, resolved_operation, windows: list, requirement, protocol
+) -> tuple:
+    """What one operation's window models are a function of.
+
+    The circuit and its rounds, every window's span, dependencies and
+    closed boundaries, the decoder's fault-model requirement and the
+    window protocol: exactly the arguments the builder is given
+    (qpu/stim_device.py window_models_for_operation), and nothing a seed
+    touches.
+    """
+    circuit_text = str(operation.circuit)
+    plan = []
+    for window in windows:
+        deps = tuple(window.deps)
+        span = (
+            window.key,
+            window.start_round,
+            window.commit_lo,
+            window.commit_hi,
+            window.buffer_hi,
+            deps,
+            window.closed_temporal_boundaries,
+        )
+        plan.append(span)
+    return (
+        operation.id,
+        circuit_text,
+        resolved_operation.round_count,
+        tuple(plan),
+        requirement,
+        protocol,
+    )
 
 
 def _refuse_reads_past_the_model(

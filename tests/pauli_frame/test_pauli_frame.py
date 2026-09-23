@@ -335,3 +335,33 @@ def test_every_write_is_stamped_with_its_own_arrival_and_its_own_end():
 
     assert (first.accepted_ticks, first.committed_ticks) == (10, 14)
     assert (second.accepted_ticks, second.committed_ticks) == (10, 14)
+
+
+def test_the_frames_fold_is_the_reported_prediction_on_a_switching_run():
+    """What the frame holds is what the run reports, escalations included.
+
+    The frame takes one final correction per window, the strong answer
+    for an escalated window and never its provisional weak one; the
+    report folds the windows' contributions with the strong answer
+    replacing the weak (Skoric et al. 2209.08552 lines 444-445: a
+    stream's logical correction is the sum of its committed windows'
+    effects). Both folds must agree.
+    """
+    config_path = yaml_configs.CONFIGS_DIR / "two_tiers.yaml"
+    experiment_config = experiment.load_experiment(config_path)
+    settings = experiment_config.point_settings(
+        physical_error_probability=0.01, distance=3, round_period_us=1.0
+    )
+    machine = machine_module.Machine.build(settings, 0)
+    result = machine.run()
+    (operation_result,) = result.operation_results
+    snapshot = machine.pauli_frame.snapshot()
+    strong_flips = [
+        record.logical_observables
+        for record in snapshot.records
+        if record.tier == "strong"
+    ]
+    frame = machine.pauli_frame.frame_for_stream(operation_result.operation_id)
+
+    assert (1,) in strong_flips
+    assert frame == tuple(operation_result.logical_observables)

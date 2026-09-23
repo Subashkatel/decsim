@@ -279,9 +279,7 @@ class DecoderSettings:
         row_settings = tables.row_settings(
             row, section_name, section, DECODER_KEYS, clocks
         )
-        engine = section["engine"]
-        _check_engine_keys(engine, section_name)
-        engine_clock = _engine_clock(engine, clocks, section_name)
+        engine = _engine_card(section["engine"], clocks, section_name)
         unit_memory = UnitMemorySettings.from_yaml(
             section["unit_memory"], section_name
         )
@@ -289,9 +287,6 @@ class DecoderSettings:
         boundary_fold = _copy_row(
             section, section_name, "boundary_fold", DECODER_BOUNDARY_FOLDS
         )
-        stage_cycles = _engine_stage_cycles(engine, section_name)
-        formation_latency = _formation_latency_cycles(engine)
-        formation_rate = _formation_cycles_per_round(engine)
         result_blocks_unit = section.get("result_blocks_unit", False)
         _check_boolean(section_name, "result_blocks_unit", result_blocks_unit)
         units = _unit_count(section, section_name)
@@ -302,11 +297,8 @@ class DecoderSettings:
             boundary_fold=boundary_fold,
             result_blocks_unit=result_blocks_unit,
             unit_memory=unit_memory,
-            **stage_cycles,
-            detection_event_latency_cycles=formation_latency,
-            detection_event_cycles_per_round=formation_rate,
-            engine_clock=engine_clock,
             row_settings=row_settings,
+            **engine,
         )
 
 
@@ -396,6 +388,20 @@ def _check_required_keys(section: Mapping, section_name: str) -> None:
         f"{section_name} needs the keys {listed}; configs/reference.yaml "
         "holds every key with its unit"
     )
+
+
+def _engine_card(
+    engine: Mapping, clocks: config.ClockSettings, section_name: str
+) -> dict:
+    """The engine card's fields: its clock and every stage it prices."""
+    _check_engine_keys(engine, section_name)
+    fields = _engine_stage_cycles(engine, section_name)
+    fields["engine_clock"] = _engine_clock(engine, clocks, section_name)
+    latency = _formation_latency_cycles(engine)
+    fields["detection_event_latency_cycles"] = latency
+    rate = _formation_cycles_per_round(engine)
+    fields["detection_event_cycles_per_round"] = rate
+    return fields
 
 
 def _check_engine_keys(engine: Mapping, section_name: str) -> None:

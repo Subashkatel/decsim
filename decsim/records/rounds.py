@@ -74,12 +74,17 @@ class MeasurementPartition:
 
 @dataclass(frozen=True)
 class QPUReadout:
-    """One QPU-side readout awaiting controller front-end handling.
+    """One readout of one round as it leaves the QPU for the controller.
 
-    DECSIM intentionally does not carry an analog waveform. ``bits`` is the
-    sampled/classifiable outcome cargo; after the configured physical
-    acquisition/discrimination latency, the controller exposes its normalized
-    classical-bit tuple. Detection events are formed later from these packets.
+    decsim carries no analog waveform: bits are the round's raw
+    measurement outcomes, None from a timing-only source, and detection
+    events are formed from them later. operation_id is the decode
+    identity (a stream segment's stream id; an idle patch's memory round
+    names the patch), round_index the one-based round of that stream,
+    patch_ids the patches whose checks the bits read. fragment_index
+    (zero-based) and fragment_count place the readout among its round's
+    fragments. size_bits is its width on the wire, None when the source
+    states none.
     """
 
     operation_id: Any

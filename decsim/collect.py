@@ -32,6 +32,8 @@ import time
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any, Optional
 
+import stim
+
 import decsim.machine as machine_module
 import decsim.records.results as result_records
 import decsim.settings as machine_settings
@@ -328,7 +330,9 @@ def json_value(value: Any) -> Any:
 
     A Python-built component (a decoder, a policy) has no yaml text, so
     it appears as its class name; every number, string and flag appears
-    as written.
+    as written. A Stim circuit appears as its text, as sinter's strong id
+    carries the task's circuit (sinter/_data/_task.py:193), so two tasks
+    that run different circuits are two tasks.
     """
     if dataclasses.is_dataclass(value):
         return _json_record(value)
@@ -370,6 +374,8 @@ def _json_scalar(value: Any) -> Any:
     if isinstance(value, (bool, int, float, str)) or value is None:
         return value
     if isinstance(value, pathlib.Path):
+        return str(value)
+    if isinstance(value, stim.Circuit):
         return str(value)
     value_type = type(value)
     return value_type.__name__

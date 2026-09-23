@@ -550,6 +550,18 @@ def test_a_bounded_store_refuses_a_round_that_states_no_size():
         the_store.has_room((1, 1), None, {})
 
 
+def test_a_bounded_store_refuses_a_round_wider_than_itself():
+    """No free makes room for it (gem5 Network.cc:64-65 refuses the same)."""
+    the_store = store(bits=BITS_PER_ROUND)
+    wide_bits = BITS_PER_ROUND + 1
+
+    with pytest.raises(RuntimeError) as refusal:
+        the_store.has_room((1, 4), wide_bits, {})
+
+    sentence = str(refusal.value)
+    assert f"holds {BITS_PER_ROUND} bits and round (1, 4) states 3" in sentence
+
+
 def test_an_unbounded_store_takes_a_round_that_states_no_size():
     the_store = store()
     timing_only = unsized_packet(1)

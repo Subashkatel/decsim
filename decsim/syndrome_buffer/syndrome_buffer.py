@@ -103,13 +103,13 @@ class SyndromeBuffer:
         taken, gem5's `_reserved` in `avail() = _maxsize - _size -
         _reserved` (src/dev/net/pktfifo.hh).
         """
-        # one memory: every round shares its room, whatever its key
-        del round_key
         capacity = self.settings.bits
         if capacity is None:
             return True
         if bits is None:
             self._refuse_unsized_round(capacity)
+        if bits > capacity:
+            self._refuse_round_wider_than_store(round_key, bits, capacity)
         reserved_widths = reserved_bits_by_round.values()
         reserved_bits = sum(reserved_widths)
         taken = self._occupied_bits + reserved_bits
@@ -400,6 +400,22 @@ class SyndromeBuffer:
         raise RuntimeError(
             f"the syndrome buffer holds {capacity} bits and the round "
             "states no size; a bounded syndrome buffer needs sized rounds"
+        )
+
+    def _refuse_round_wider_than_store(
+        self, round_key, bits: int, capacity: int
+    ) -> None:
+        """A round wider than the whole store waits for room forever.
+
+        gem5 refuses a message wider than the block that must hold it
+        (src/mem/ruby/network/Network.cc:64-65, "data message size >
+        cache line size"); round widths come from the source as it runs,
+        so the refusal comes at the first ask rather than at the load.
+        """
+        raise RuntimeError(
+            f"the syndrome buffer holds {capacity} bits and round "
+            f"{round_key!r} states {bits}: no round leaving it makes room, "
+            "so a bounded syndrome buffer holds at least its widest round"
         )
 
     def _free_round(self, round_key) -> None:

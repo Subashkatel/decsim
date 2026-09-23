@@ -603,7 +603,7 @@ class BoundaryCourier:
         return update
 
 
-def _row_positions(model) -> dict:
+def _row_positions(model) -> Optional[dict]:
     """Where the model's own detector rows sit, and no other detector.
 
     A window's input is its own checks, so the residual is intersected

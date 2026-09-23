@@ -641,21 +641,6 @@ def from_yaml(
     )
 
 
-def _check_section_names(section: Mapping) -> None:
-    """The links section names the kind and paths, and nothing else."""
-    path_names = []
-    for path in transfer_records.LinkPath:
-        path_names.append(path.value)
-    for section_name in section:
-        if section_name == "kind":
-            continue
-        if section_name not in path_names:
-            raise ValueError(
-                f"links names {section_name!r}, which is not a path; the "
-                f"paths are {path_names}"
-            )
-
-
 def with_transfer_overhead(
     profile: settings.FabricSettings,
     *,
@@ -738,6 +723,21 @@ def _roce_v2_strong_paths(
         "strong_buffer_to_strong_decoder": strong_buffer_to_strong_decoder,
         "strong_decoder_to_frame": strong_decoder_to_frame,
     }
+
+
+def _check_section_names(section: Mapping) -> None:
+    """The links section names the kind and paths, and nothing else."""
+    path_names = []
+    for path in transfer_records.LinkPath:
+        path_names.append(path.value)
+    for section_name in section:
+        if section_name == "kind":
+            continue
+        if section_name not in path_names:
+            raise ValueError(
+                f"links names {section_name!r}, which is not a path; the "
+                f"paths are {path_names}"
+            )
 
 
 def _check_card(path_name: str, card) -> None:

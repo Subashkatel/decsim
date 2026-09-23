@@ -230,11 +230,17 @@ def logical_reference_profile() -> settings.FabricSettings:
         RESULT_PAYLOAD_SOURCE,
     )
     frame_to_controller = _default_path(
-        "frame_to_controller", 4.0, BUS_WORD_BITS, BUS_WORD_SOURCE
+        "frame_to_controller",
+        4.0,
+        "Khalid 2511.10633 Table I toc, instructions from orchestrator "
+        "to controller",
+        BUS_WORD_BITS,
+        BUS_WORD_SOURCE,
     )
     controller_to_qpu = _default_path(
         "controller_to_qpu",
         0.15,
+        "Khalid 2511.10633 Table I tcq, instructions from controller to QPU",
         INSTRUCTION_WORD_BITS,
         INSTRUCTION_WORD_SOURCE,
     )
@@ -820,8 +826,12 @@ def _actual_path(
 
 
 def _default_path(
-    name: str, latency_microseconds: float, bits: int, source: str
+    name: str,
+    latency_microseconds: float,
+    latency_source: str,
+    bits: int,
+    payload_source: str,
 ) -> settings.PathSettings:
-    channel = _unbounded_channel(name, latency_microseconds, source)
-    payload = _aggregate_payload(bits, source)
+    channel = _unbounded_channel(name, latency_microseconds, latency_source)
+    payload = _aggregate_payload(bits, payload_source)
     return settings.PathSettings(channel, payload, None)

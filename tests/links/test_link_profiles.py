@@ -715,6 +715,18 @@ def test_the_gpu_rows_strong_side_sources_cite_backline():
     assert declared == []
 
 
+def test_the_instruction_hops_cite_the_rows_their_latencies_come_from():
+    """Khalid 2511.10633 Table I: toc 4 us, tcq 0.15 us.
+
+    The payload of these hops is a word width from other papers, so the
+    latency and the payload each name their own source.
+    """
+    profile = link_profiles.logical_reference_profile()
+    sources = sources_of(profile)
+    assert "Table I toc" in sources["frame_to_controller"]
+    assert "Table I tcq" in sources["controller_to_qpu"]
+
+
 def test_a_coprocessor_backline_did_not_echo_from_is_refused():
     """The measurement covers two paths, and the refusal names them."""
     with pytest.raises(ValueError, match="'cpu' or 'gpu'"):

@@ -111,7 +111,7 @@ In `decsim/links/link_profiles.py`. A row of it is named under `links.kind`.
 
 | Row | Class | What it is |
 | --- | --- | --- |
-| `logical_reference` | `LogicalReferenceFabric` in `decsim/links/link_profiles.py` | The default row: the reference card's latencies on unbounded channels. |
+| `logical_reference` | `LogicalReferenceFabric` in `decsim/links/link_profiles.py` | The default row: the reference card's latencies and rates. |
 | `bandwidth_limited` | `BandwidthLimitedFabric` in `decsim/links/link_profiles.py` | The same fabric with finite rates, provisioned from the geometry. |
 | `roce_v2_cpu` | `RoceV2CpuFabric` in `decsim/links/link_profiles.py` | The reference card with the strong path on Backline's CPU round trip. |
 | `roce_v2_gpu` | `RoceV2GpuFabric` in `decsim/links/link_profiles.py` | The reference card with the strong path on Backline's GPU round trip. |

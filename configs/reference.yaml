@@ -479,8 +479,25 @@ links:                             # a kind, then one card per path; null = the
                                    # supplies the numbers the per-path cards below
                                    # override and builds the fabric the run sends
                                    # on. logical_reference prices every one of the
-                                   # eleven hops with unbounded channels, so no hop
-                                   # is free and nothing queues.
+                                   # eleven hops from a system of this scale, a
+                                   # latency plus the hop's bits over its rate:
+                                   # the weak loop from Yang 2605.04892 Table I
+                                   # (readout 48 ns; controller to weak buffer and
+                                   # weak decoder to frame 18 ns each, half of its
+                                   # 36 ns digital communication; pulse path 88 ns),
+                                   # every hop to or from the strong node at Caune
+                                   # 2410.05202 Fig. 1a F (260 ns), the on-chip
+                                   # hops one 250 MHz cycle, a stated assumption,
+                                   # and the frame's word to the controller no
+                                   # propagation. Rates: a 32-bit word per 250 MHz
+                                   # cycle on the decoder bus and on chip (Caune
+                                   # lines 998-1008), a 128-bit instruction word
+                                   # per cycle to the pulse generator (QubiC
+                                   # 2404.15260), 100 Gb/s off board (Backline
+                                   # 2609.09270 lines 1229-1230). The readout and
+                                   # the seam are unbounded: every qubit and every
+                                   # graph edge has its own channel. Transfers on
+                                   # one bounded hop queue for its wire.
                                    # bandwidth_limited provisions each channel from
                                    # the sweep point's own geometry and is refused
                                    # here: a caller builds its card with
@@ -545,8 +562,14 @@ links:                             # a kind, then one card per path; null = the
   weak_decoder_to_frame: {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
                                    # weak decoder -> Pauli frame
   strong_decoder_to_frame: null    # strong decoder -> Pauli frame
-  frame_to_controller: null        # Pauli frame -> controller, a release
-  controller_to_qpu: null          # controller -> QPU, an instruction
+  frame_to_controller: {latency_cycles: 0, clock: fridge, bits_per_cycle: 32}
+                                   # Pauli frame -> controller, a release: one
+                                   # 32-bit word with a ready signal (QubiC
+                                   # 2404.15260 lines 186-190)
+  controller_to_qpu: {latency_cycles: 22, clock: fridge, bits_per_cycle: 128}
+                                   # controller -> QPU, an instruction: trigger,
+                                   # waveform and DAC, 16 + 32 + 40 ns (Yang
+                                   # 2605.04892 Table I), one 128-bit word a cycle
 
 weak_syndrome_buffer:            # the weak syndrome buffer, on the decoder chip
   clock: fridge                    # a clocks domain; absent uses controller.clock

@@ -122,9 +122,11 @@ fabric can be in, so no hop can silently be free.
 **Why.** A hop that could be unwired was a hop that could be free
 without anyone saying so.
 
-**Sources.** Caune et al. arXiv:2410.05202 Fig. 1a, stage D for the
-weak-side write (40 nanoseconds) and stage F for the inter-node
-broadcast (240 to 260 nanoseconds at the stated worst case).
+**Sources.** Yang et al. arXiv:2605.04892 Table I for the weak-side
+write (half of its 36 nanoseconds of digital communication, which cover
+the readout-to-decoder and decoder-to-pulse links), and Caune et al.
+arXiv:2410.05202 Fig. 1a stage F for the inter-node broadcast (240 to
+260 nanoseconds at the stated worst case).
 
 **Where to see it.** `decsim/links/link_profiles.py`, and
 [The data path, hop by hop](data_path.md) hops 2 and 3.
@@ -137,12 +139,14 @@ the one a cold weak tier exists for (Battistel arXiv:2303.00054 lines
 342 to 347). The hop stays priced for the strong-only run, whose one
 transport it is.
 
-**Flagged with the decision.** The reference card's weak-side sum
-exceeds Toshio's own communication time for the weak side, because the
-card's six latencies are taken from one source's table rather than
-derived from one referent. Re-deriving the fabric card from a single
-referent is open work; D14 prices the strong tier's four off-board hops
-from one measured round trip instead, on two rows a config can name.
+**Flagged with the decision.** The reference card now takes every hop
+from a system of decsim's scale: the weak loop from Yang's Table I hop
+for hop, the strong node's crossings from Caune's stage F, and a rate on
+every hop whose referent serializes, so a hop's time is its latency plus
+its bits over the rate. The on-chip hops and the split of Yang's one
+digital-communication line are stated assumptions, said so on the card.
+D14 prices the strong tier's four off-board hops from one measured round
+trip instead, on two rows a config can name.
 
 ## D6. Pair placement is deferred
 
@@ -382,9 +386,8 @@ round trip, hops 5, 6 and 9, is the measured median exactly. Every other
 hop keeps the default card's number and source, and the default row is
 unchanged.
 
-**Why.** On the default card hop 5 has no source: its string reads
-"repository weak-to-strong model choice". The three cited hops around it
-come from one table each. A measured cable is a better kind of fact for
+**Why.** The default card prices the strong node as one more chassis of
+the control system, Caune's stage F on each crossing. A measured cable is a better kind of fact for
 that path than a table row, and a config that asks "strong tier on a CPU
 or on a GPU" needs a card behind each answer. The split is decsim's rule,
 stated in the docstring, because the measurement is one number and

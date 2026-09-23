@@ -46,6 +46,7 @@ import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
 import decsim.qpu.stim_device as stim_device
 import decsim.records.program as program_records
+import decsim.records.transfers as transfer_records
 import decsim.settings as machine_settings
 import decsim.windows.settings as window_settings
 from tests.experiments.yaml_configs import (
@@ -942,7 +943,15 @@ def seam_only_fabric():
         "clock": "fridge",
         "bits_per_cycle": None,
     }
-    fabric = {"kind": "logical_reference", "decoder_to_decoder": seam_card}
+    free_card = {
+        "latency_cycles": 0,
+        "clock": "fridge",
+        "bits_per_cycle": None,
+    }
+    fabric = {"kind": "logical_reference"}
+    for path in transfer_records.LinkPath:
+        fabric[path.value] = free_card
+    fabric["decoder_to_decoder"] = seam_card
     return link_profiles.from_yaml(fabric, clocks, "one_card")
 
 

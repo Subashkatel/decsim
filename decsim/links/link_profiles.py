@@ -1,15 +1,13 @@
 """The link number cards: the four shipped rows and the yaml's own.
 
 logical_reference_profile is the default when no links card is given:
-every channel unbounded, so it prices propagation only and no transfer
-ever queues; latencies from Khalid et al., arXiv 2511.10633, Table I,
-and the two controller-to-buffer hops from Caune et al. Fig. 1a. Khalid
-Table I also gives a size per channel and a channel count beside each
-latency; decsim takes the latencies only, because it wires one channel
-per path and counts each transfer's own payload from the record that
-carries it, so the paper's channel counts would price nothing here.
-bandwidth_limited_profile is the same fabric with finite calibrated rates
-so contention becomes measurable; capacity_scale sweeps the whole fabric.
+each hop priced from a system of decsim's scale, a surface-code patch on
+one control rack with a decoder FPGA and a strong node one hop away. A
+card is a latency and a rate, so a transfer takes its latency plus its
+bits over the rate, the law ns-3's point-to-point device times a packet
+by (point-to-point-net-device.cc:243). bandwidth_limited_profile keeps
+those latencies and provisions finite rates from the run's geometry so
+contention becomes measurable; capacity_scale sweeps the whole fabric.
 roce_v2_measured_profile is the reference card with the strong tier's
 off-board path priced by Backline's measured RoCE v2 round trip; it is
 the roce_v2_cpu and roce_v2_gpu rows. from_yaml puts the yaml's own card
@@ -17,7 +15,7 @@ on any path; with_transfer_overhead adds a setup cost to any fabric.
 
 Every number carries a source string on the settings record it sets,
 and a payload's source also travels into the traffic report with every
-transfer; paper locators are arXiv numbers and sections. To
+transfer; paper locators are arXiv numbers and text lines. To
 change a number, copy a card into your own file and edit it, then pass
 it as the machine's links setting.
 """
@@ -94,33 +92,113 @@ DECODER_INPUT_PAYLOAD_SOURCE = "DecodeJob.payload_bits()"
 # the send.
 BOUNDARY_PAYLOAD_SOURCE = "DependencyResidual seam-layer detectors"
 
-# The controller's write into a syndrome buffer is a hop of the control
-# system, and Caune et al., arXiv:2410.05202, Fig. 1a is the referent that
-# measures such hops one by one, with worst-case values where measured.
-# The weak syndrome buffer sits with the controller, so its write is stage D,
-# "time required to handle result message and prepare for broadcast"
-# (40 ns). The strong syndrome buffer sits at room temperature, so its write
-# leaves the chassis: stage F, "inter-node delay time for broadcasting between
-# control system chassis" (240 to 260 ns), taken at the stated worst case.
-# Google, arXiv:2408.13687, gives the same topology without a per-hop
-# number: bits go to a workstation over low-latency Ethernet and are then
-# streamed to the decoder through a shared memory buffer. Toshio et al.,
-# arXiv:2510.25222, run their simulations with the whole
-# controller-to-decoder path at T_comm^weak = tau_gen and
-# T_comm^strong = 10 tau_gen (lines 1109-1114; their Table I is a
-# notation table and prices nothing), which decsim splits into this hop,
-# the buffer-to-decoder hop and the decoder-to-frame hop, so those
-# simulation parameters bound the sum of three cards rather than either
-# card here.
-WEAK_STORE_LATENCY_MICROSECONDS = 0.04
-WEAK_STORE_SOURCE = (
-    "Caune 2410.05202 Fig. 1a D, result message handled and prepared for "
-    "broadcast, 40 ns"
+# Every default card counts on one 250 MHz clock, a 4 ns cycle: the clock
+# Yang et al. break their closed loop down at (arXiv 2605.04892 Table I,
+# text lines 1047-1063) and the cycle of IBM's decoder FPGA (Maurer et
+# al., arXiv 2510.21600, line 404). A card's rate is bits per cycle of it.
+_REFERENCE_CLOCK_MEGAHERTZ = 250
+_REFERENCE_CYCLE_MICROSECONDS = 1 / _REFERENCE_CLOCK_MEGAHERTZ
+
+# Yang et al., arXiv 2605.04892, Table I, is the one loop of decsim's scale
+# broken down hop by hop: a d=3 surface code whose readout modules send
+# bit strings over low-latency links to a decoder FPGA, which sends branch
+# control over further links to the pulse generators (lines 184-199).
+# The readout hop starts where Table I's acquisition window ends, which
+# decsim's round period already holds, and it includes turning the signal
+# into bits, which is why the card is the reference number a yaml's own
+# readout cost must not repeat. Each qubit has its own demodulation
+# channel (QubiC, Fruitwala et al. 2404.15260, lines 709-715), so a
+# round's bits arrive in parallel and the hop serializes nothing.
+_READOUT_LATENCY_MICROSECONDS = 0.048
+_READOUT_SOURCE = (
+    "Yang 2605.04892 Table I lines 1053-1055: ADC chip 12 ns, IQ "
+    "demodulation 32 ns, qubit-state classification 4 ns"
 )
+
+# Table I gives one 36 ns digital-communication line for the loop's two
+# links, readout module to decoder FPGA and decoder FPGA to the pulse
+# side, and no split, so each link is charged half, the way the RoCE rows
+# split a round trip. The weak syndrome buffer sits on the decoder chip,
+# so the controller's write into it is the first link; a weak result
+# reaches the frame in the controller over the second.
+WEAK_STORE_LATENCY_MICROSECONDS = 0.018
+WEAK_STORE_SOURCE = (
+    "Yang 2605.04892 Table I line 1056, digital communication 36 ns over "
+    "the loop's two links; half, readout module to decoder FPGA"
+)
+_WEAK_RESULT_SOURCE = (
+    "Yang 2605.04892 Table I line 1056, digital communication 36 ns over "
+    "the loop's two links; half, decoder FPGA to the pulse side"
+)
+
+# The strong node is one hop from the control rack, the way Caune et al.,
+# arXiv 2410.05202, keep every chassis one inter-chassis hop from the hub
+# (lines 1013-1017). Fig. 1a measures that hop, stage F, "inter-node delay
+# time for broadcasting between control system chassis" (240 to 260 ns,
+# lines 176-177), taken at the stated worst case for every hop that
+# crosses to or from the strong node.
 STRONG_STORE_LATENCY_MICROSECONDS = 0.26
 STRONG_STORE_SOURCE = (
     "Caune 2410.05202 Fig. 1a F, inter-node broadcast between control "
     "system chassis, 240 to 260 ns at the stated worst case"
+)
+
+# No referent measures a wire inside one chip. Yang keep the syndrome in
+# FPGA registers, fully pipelined (lines 1273-1275), and a compiled
+# on-chip memory moves one 32-bit word per access (the sky130 1rw1r 32x256
+# SRAM macro, VLSIDA sky130_sram_macros, configuration lines 7-18), so an
+# on-chip hop is one cycle and a word per cycle, a stated assumption.
+_ON_CHIP_SOURCE = (
+    "one 250 MHz cycle on chip, a stated assumption: Yang 2605.04892 "
+    "lines 1273-1275 keep the syndrome in registers, fully pipelined"
+)
+# A seam layer crosses one link per graph edge in one clock domain
+# (Helios, Liyanage et al. 2301.08419, lines 764-769 and 801), so all its
+# detectors move in parallel.
+_BOUNDARY_SOURCE = (
+    "one 250 MHz cycle on chip, a stated assumption: Helios 2301.08419 "
+    "lines 764-769 and 801, a link per graph edge in one clock domain"
+)
+# The frame sits in the controller and hands the decision to the core as
+# one 32-bit word with a ready signal (QubiC 2404.15260 lines 186-190),
+# so the hop adds nothing beyond that word's one cycle.
+_DECISION_SOURCE = (
+    "no propagation: the frame hands the core one 32-bit word with a "
+    "ready signal (QubiC 2404.15260 lines 186-190)"
+)
+# From the pulse trigger to the pulse leaving the rack. The coax down to
+# the QPU is outside Yang's measurement, which ends at the pulse
+# generator's output port (lines 1699-1702), and no source gives it.
+_PULSE_LATENCY_MICROSECONDS = 0.088
+_PULSE_SOURCE = (
+    "Yang 2605.04892 Table I lines 1058-1060: trigger propagation to the "
+    "pulse generator 16 ns, waveform generation 32 ns, DAC chip 40 ns; "
+    "QICK 2110.00557 lines 884-886 measure a 45 ns DAC"
+)
+
+# The rates. A word per cycle on the 32-bit bus the decoder is written
+# and read over (Caune 2410.05202 lines 998-1008 and 1252-1254; the paper
+# gives the width, not a transaction rate) and on the on-chip memory
+# word above; one 128-bit instruction word per cycle into the pulse
+# generator; and off board, the 100 Gb direct-attach cable from an FPGA
+# controller to its coprocessor host (Backline, arXiv 2609.09270, lines
+# 1229-1230), the one off-board line rate a referent of this scale gives.
+_WORD_BITS_PER_MICROSECOND = BUS_WORD_BITS * _REFERENCE_CLOCK_MEGAHERTZ
+_WORD_RATE_SOURCE = (
+    "one 32-bit word per 250 MHz cycle (Caune 2410.05202 lines 998-1008, "
+    "the decoder's 32-bit bus)"
+)
+_INSTRUCTION_BITS_PER_MICROSECOND = (
+    INSTRUCTION_WORD_BITS * _REFERENCE_CLOCK_MEGAHERTZ
+)
+_INSTRUCTION_RATE_SOURCE = (
+    "one 128-bit instruction word per 250 MHz cycle (QubiC 2404.15260 "
+    "lines 176-179)"
+)
+_OFF_BOARD_BITS_PER_MICROSECOND = 100_000
+_OFF_BOARD_RATE_SOURCE = (
+    "100 Gb/s, Backline 2609.09270 lines 1229-1230, the FPGA "
+    "controller's direct-attach cable to its coprocessor host"
 )
 
 # Backline (Xanadu and AMD), arXiv 2609.09270, Sec. V-C and Table III.
@@ -180,17 +258,28 @@ _CARD_KEYS = _REQUIRED_CARD_KEYS + (
 
 
 def logical_reference_profile() -> settings.FabricSettings:
-    """The default card: Khalid's latencies, unbounded bandwidth.
+    """The default card: every hop from a system of decsim's scale.
 
-    Propagation only, nothing ever queues. Actual-payload paths price the
-    runtime's own bit counts; default-payload paths price a stated word
-    width, not one of Khalid's per-channel sizes.
+    Each hop has a latency and a rate, or is unbounded where its
+    referent moves every bit in parallel, so a transfer costs its
+    latency plus its bits over the rate. The weak loop is Yang et al.'s
+    closed loop (arXiv 2605.04892 Table I) hop for hop, the strong node
+    is Caune et al.'s inter-chassis hop away (arXiv 2410.05202 Fig. 1a),
+    and the rates are the referents' bus words and Backline's cable.
+    Actual-payload paths price the runtime's own bit counts;
+    default-payload paths price a stated word width.
     """
+    word_rate = _capacity(_WORD_BITS_PER_MICROSECOND, _WORD_RATE_SOURCE)
+    instruction_rate = _capacity(
+        _INSTRUCTION_BITS_PER_MICROSECOND, _INSTRUCTION_RATE_SOURCE
+    )
+    off_board_rate = _capacity(
+        _OFF_BOARD_BITS_PER_MICROSECOND, _OFF_BOARD_RATE_SOURCE
+    )
     qpu_to_controller = _actual_path(
         "qpu_to_controller",
-        0.15,
-        "Khalid 2511.10633 Table I tqc, syndrome transfer from QPU "
-        "to controller",
+        _READOUT_LATENCY_MICROSECONDS,
+        _READOUT_SOURCE,
         READOUT_PAYLOAD_SOURCE,
     )
     controller_to_weak_buffer = _actual_path(
@@ -198,65 +287,71 @@ def logical_reference_profile() -> settings.FabricSettings:
         WEAK_STORE_LATENCY_MICROSECONDS,
         WEAK_STORE_SOURCE,
         ROUND_PAYLOAD_SOURCE,
+        word_rate,
     )
     controller_to_strong_buffer = _actual_path(
         "controller_to_strong_buffer",
         STRONG_STORE_LATENCY_MICROSECONDS,
         STRONG_STORE_SOURCE,
         ROUND_PAYLOAD_SOURCE,
+        off_board_rate,
     )
     weak_buffer_to_weak_decoder = _actual_path(
         "weak_buffer_to_weak_decoder",
-        2.0,
-        "Khalid 2511.10633 Table I tcd, syndrome transfer from "
-        "controller to decoders; the integrated weak-input transfer",
+        _REFERENCE_CYCLE_MICROSECONDS,
+        _ON_CHIP_SOURCE,
         DECODER_INPUT_PAYLOAD_SOURCE,
+        word_rate,
     )
     weak_decoder_to_strong_decoder = _actual_path(
         "weak_decoder_to_strong_decoder",
-        0.5,
-        "repository weak-to-strong model choice",
+        STRONG_STORE_LATENCY_MICROSECONDS,
+        STRONG_STORE_SOURCE,
         ESCALATION_PAYLOAD_SOURCE,
+        off_board_rate,
     )
     strong_buffer_to_strong_decoder = _actual_path(
         "strong_buffer_to_strong_decoder",
-        2.0,
-        "Khalid 2511.10633 Table I tcd mapped to the strong input",
+        _REFERENCE_CYCLE_MICROSECONDS,
+        _ON_CHIP_SOURCE,
         DECODER_INPUT_PAYLOAD_SOURCE,
+        word_rate,
     )
     weak_decoder_to_frame = _actual_path(
         "weak_decoder_to_frame",
-        1.0,
-        "Khalid 2511.10633 Table I tdo, decoding results transfer, "
-        "mapped to the weak output",
+        WEAK_STORE_LATENCY_MICROSECONDS,
+        _WEAK_RESULT_SOURCE,
         RESULT_PAYLOAD_SOURCE,
+        word_rate,
     )
     decoder_to_decoder = _actual_path(
         "decoder_to_decoder",
-        0.5,
-        "Khalid 2511.10633 Table I tdd, decoder-to-decoder exchange",
+        _REFERENCE_CYCLE_MICROSECONDS,
+        _BOUNDARY_SOURCE,
         BOUNDARY_PAYLOAD_SOURCE,
     )
     strong_decoder_to_frame = _actual_path(
         "strong_decoder_to_frame",
-        1.0,
-        "Khalid 2511.10633 Table I tdo, decoding results transfer",
+        STRONG_STORE_LATENCY_MICROSECONDS,
+        STRONG_STORE_SOURCE,
         RESULT_PAYLOAD_SOURCE,
+        off_board_rate,
     )
     frame_to_controller = _default_path(
         "frame_to_controller",
-        4.0,
-        "Khalid 2511.10633 Table I toc, instructions from orchestrator "
-        "to controller",
+        0.0,
+        _DECISION_SOURCE,
         BUS_WORD_BITS,
         BUS_WORD_SOURCE,
+        word_rate,
     )
     controller_to_qpu = _default_path(
         "controller_to_qpu",
-        0.15,
-        "Khalid 2511.10633 Table I tcq, instructions from controller to QPU",
+        _PULSE_LATENCY_MICROSECONDS,
+        _PULSE_SOURCE,
         INSTRUCTION_WORD_BITS,
         INSTRUCTION_WORD_SOURCE,
+        instruction_rate,
     )
     return settings.FabricSettings(
         qpu_to_controller=qpu_to_controller,
@@ -482,11 +577,11 @@ def roce_v2_measured_profile(coprocessor: str) -> settings.FabricSettings:
 
 
 class LogicalReferenceFabric:
-    """The default row: the reference card's latencies on unbounded channels.
+    """The default row: the reference card's latencies and rates.
 
-    Every channel is unbounded, so the fabric prices propagation only and
-    no transfer ever queues. This is the row a yaml gets when it names no
-    kind, and the numbers its per-path cards override.
+    A transfer costs its latency plus its bits over the hop's rate, and
+    transfers on one hop queue for its wire. This is the row a yaml gets
+    when it names no kind, and the numbers its per-path cards override.
     """
 
     @staticmethod
@@ -911,11 +1006,22 @@ def _aggregate_payload(bits: int, source: str) -> settings.PayloadSettings:
     )
 
 
-def _unbounded_channel(
-    name: str, latency_microseconds: float, source: str
+def _capacity(
+    bits_per_microsecond: int, source: str
+) -> settings.CapacitySettings:
+    return settings.CapacitySettings(
+        bits_per_microsecond, settings.QuantityBasis.AGGREGATE, None, source
+    )
+
+
+def _channel(
+    name: str,
+    latency_microseconds: float,
+    source: str,
+    capacity: Optional[settings.CapacitySettings],
 ) -> settings.ChannelSettings:
     latency_ticks = config.microseconds_to_ticks(latency_microseconds)
-    return settings.ChannelSettings(name, latency_ticks, None, source)
+    return settings.ChannelSettings(name, latency_ticks, capacity, source)
 
 
 def _actual_path(
@@ -923,8 +1029,9 @@ def _actual_path(
     latency_microseconds: float,
     source: str,
     actual_payload_source: str,
+    capacity: Optional[settings.CapacitySettings] = None,
 ) -> settings.PathSettings:
-    channel = _unbounded_channel(name, latency_microseconds, source)
+    channel = _channel(name, latency_microseconds, source, capacity)
     return settings.PathSettings(channel, None, actual_payload_source)
 
 
@@ -934,7 +1041,8 @@ def _default_path(
     latency_source: str,
     bits: int,
     payload_source: str,
+    capacity: settings.CapacitySettings,
 ) -> settings.PathSettings:
-    channel = _unbounded_channel(name, latency_microseconds, latency_source)
+    channel = _channel(name, latency_microseconds, latency_source, capacity)
     payload = _aggregate_payload(bits, payload_source)
     return settings.PathSettings(channel, payload, None)

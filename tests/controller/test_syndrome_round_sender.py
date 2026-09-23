@@ -248,9 +248,10 @@ def test_the_controller_carries_the_round_to_the_room_side_and_lands_it():
     """The send is the controller's; the landing is the room side's.
 
     The reference card prices controller_to_strong_buffer at 0.26
-    microseconds (Caune 2410.05202 Fig. 1a stage F), so a strong-primary
-    run's round is reserved and sent at the write and stored one card
-    delay later, by the room side's own method.
+    microseconds (Caune 2410.05202 Fig. 1a stage F) and 100 Gb/s
+    (Backline 2609.09270), so a strong-primary run's round is reserved
+    and sent at the write and stored the card's latency plus its bits'
+    serialization later, by the room side's own method.
     """
     engine = engine_module.Engine()
     store_settings = syndrome_buffer_settings.SyndromeBufferSettings()
@@ -271,7 +272,10 @@ def test_the_controller_carries_the_round_to_the_room_side_and_lands_it():
     stored_at_the_write = strong_store.occupancy
     engine.run()
 
-    crossing_ticks = config.microseconds_to_ticks(0.26)
+    latency_ticks = config.microseconds_to_ticks(0.26)
+    # 100 Gb/s is 100000 bits per microsecond, 10 ticks a bit
+    serialization_ticks = BITS_PER_ROUND * 10
+    crossing_ticks = latency_ticks + serialization_ticks
     assert reserved_while_crossing == 1
     assert stored_at_the_write == 0
     assert strong_store.occupancy == 1

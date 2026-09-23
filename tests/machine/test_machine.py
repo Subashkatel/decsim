@@ -414,8 +414,16 @@ def test_bounded_strong_storage_and_unit_memory_drain_without_weak_data(
     buffer = syndrome_buffer_settings.SyndromeBufferSettings(bits=window_bits)
     memory = decoder_settings.UnitMemorySettings(bits=window_bits)
     decoder = dataclasses.replace(settings.strong_decoder, unit_memory=memory)
+    # a two microsecond strong input keeps the live stream running fifteen
+    # rounds, so its last window holds six rounds ending on the final one
+    links = _price_path(
+        settings.links, "strong_buffer_to_strong_decoder", 2_000_000
+    )
     settings = dataclasses.replace(
-        settings, strong_syndrome_buffer=buffer, strong_decoder=decoder
+        settings,
+        strong_syndrome_buffer=buffer,
+        strong_decoder=decoder,
+        links=links,
     )
     run = _run(settings)
     assert max(run.strong_occupancies) <= window_bits
@@ -2592,7 +2600,7 @@ def _zero_delay_links(
     for path in transfer_records.LinkPath:
         settings = links.path_settings(path)
         channel = dataclasses.replace(
-            settings.channel, propagation_latency_ticks=0
+            settings.channel, propagation_latency_ticks=0, capacity=None
         )
         paths_by_name[path.value] = dataclasses.replace(
             settings, channel=channel
@@ -2621,8 +2629,9 @@ def _price_path(
     links: link_settings.FabricSettings, name: str, latency_ticks: int
 ) -> link_settings.FabricSettings:
     path = getattr(links, name)
+    # a pure delay, so the path's time is the latency written here
     channel = dataclasses.replace(
-        path.channel, propagation_latency_ticks=latency_ticks
+        path.channel, propagation_latency_ticks=latency_ticks, capacity=None
     )
     priced = dataclasses.replace(path, channel=channel)
     return dataclasses.replace(links, **{name: priced})

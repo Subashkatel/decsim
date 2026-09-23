@@ -438,8 +438,8 @@ def test_the_re_read_rounds_survive_the_absorbed_inputs_landing_first():
     ]
 
 
-def test_the_paper_width_restarts_on_the_round_after_the_strong_region():
-    """The eaa316d reproduction at re-read width 0, two weak units.
+def test_width_zero_restarts_on_the_round_after_the_strong_region():
+    """Re-read width 0 with two weak units, both restart inputs landed.
 
     The absorbed W5 and the restart W6 land in unit memory before W3's
     verdict. With no re-read W6 begins at round 19, the round after the

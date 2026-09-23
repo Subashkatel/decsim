@@ -3,12 +3,12 @@
 Toshio et al. 2510.25222 Sec. III C (text lines 1236-1246) and Fig. 12:
 the strong region is r_strong = r_com + 2 r_buf rounds from the
 escalated window's commit start, and the weak decoder resumes "after
-r_com + r_buf rounds are subsequently stored", so the paper's restart
-window begins at the round after the strong region and reads nothing
-inside it. escalation.restart_reread_buffer_regions is that width in
-buffer regions: 0 is the paper, 1 is decsim's forward window, which
-reads one buffer region of the strong region as the restart window's
-far boundary.
+r_com + r_buf rounds are subsequently stored", which a restart window
+at the round after the strong region meets, and so does one that reads
+back into it. escalation.restart_reread_buffer_regions is that width in
+buffer regions: 0 reads nothing inside the region, and 1 reads the
+region's last buffer region as the restart window's past context, as
+Fig. 12 step 5 draws it.
 """
 
 import pytest
@@ -48,7 +48,7 @@ def test_the_strong_region_is_commit_plus_two_buffers_from_the_commit_start():
     assert plan.context_hi == 12
 
 
-def test_the_paper_restart_reads_no_round_of_the_strong_region():
+def test_width_zero_restart_reads_no_round_of_the_strong_region():
     """Width 0: the restart begins at the round after the strong region.
 
     It shares no round with the strong region, so it owns the faults of

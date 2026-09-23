@@ -444,25 +444,20 @@ def forms_like_stim(circuit, rounds, seed=3, shots=200):
 
 
 def test_a_declared_map_folds_two_measurement_blocks_into_one_round():
-    """A QLX circuit measures Z then X ancillas as two blocks per round.
+    """A Z-first memory measures Z then X ancillas as two blocks per round.
 
-    The frontend declares that packet schedule, so the round a
-    measurement belongs to comes from the map and not from the circuit's
-    detector groups: round 1 carries its bits but announces no detector,
-    and the last round's packet carries the data readout after its own
-    ancilla bits.
+    The circuit is a Deltakit rotated surface-code memory at d=3 with the
+    Z-first schedule (tests/data/surface_memory_z_first.stim). The map
+    declares one round per stabiliser round, so both blocks share one
+    packet, Z bits first, and the last packet carries the data readout
+    after its own ancilla bits.
     """
-    circuit_path = DATA_DIRECTORY / "qlx" / "mem_surface.stim"
+    circuit_path = DATA_DIRECTORY / "surface_memory_z_first.stim"
     circuit = stim.Circuit.from_file(circuit_path)
     rounds = 8
     checks_per_round = 8
-    measurement_count = 0
-    for instruction in circuit.flattened():
-        if instruction.name in ("M", "MR"):
-            targets = instruction.targets_copy()
-            measurement_count += len(targets)
     measurement_rounds = {}
-    for index in range(measurement_count):
+    for index in range(circuit.num_measurements):
         announced_round = index // checks_per_round + 1
         measurement_rounds[index] = min(announced_round, rounds)
 
@@ -477,8 +472,12 @@ def test_a_declared_map_folds_two_measurement_blocks_into_one_round():
         detector_counts.append(len(detectors))
     assert widths == [8] * 7 + [17]
     assert table.readout_slot_start is None
-    assert detector_counts == [0] + [8] * 7
+    assert detector_counts == [4] + [8] * 6 + [12]
     assert len(table.observables) == 1
+    first_round_records = set()
+    for recipe in table.detectors_of_round(1):
+        first_round_records.update(recipe.records)
+    assert first_round_records == {(1, 0), (1, 1), (1, 2), (1, 3)}
 
     sampler = circuit.compile_sampler(seed=3)
     measurements = sampler.sample(100)

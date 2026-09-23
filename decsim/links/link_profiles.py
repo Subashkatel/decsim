@@ -728,16 +728,23 @@ def _roce_v2_strong_paths(
 
 
 def _check_card(path_name: str, card) -> None:
-    """A path's card is a mapping that writes the three keys every card needs.
+    """A path's card is a mapping of the card keys, the first three written.
 
     Refused here, once, with the card's yaml name, so a card never reaches
-    the arithmetic below as a list or with a key missing.
+    the arithmetic below as a list or with a key missing, and a misspelt
+    key is never read as the default of the key it meant.
     """
     card_name = f"links.{path_name}"
     if not isinstance(card, Mapping):
         raise ValueError(
             f"{card_name} holds {card!r}; a path's card is a mapping of "
             f"{list(_CARD_KEYS)}, or null for the row's own numbers"
+        )
+    unknown = [key for key in card if key not in _CARD_KEYS]
+    if unknown:
+        raise ValueError(
+            f"{card_name} does not know {unknown}; its keys are "
+            f"{list(_CARD_KEYS)}"
         )
     missing = [key for key in _REQUIRED_CARD_KEYS if key not in card]
     if missing:

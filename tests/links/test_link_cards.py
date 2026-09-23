@@ -170,3 +170,14 @@ def test_a_card_missing_a_key_every_card_writes_is_refused_naming_it(key):
     assert message.startswith(
         f"links.qpu_to_controller needs ['{key}']; a card writes"
     )
+
+
+def test_a_card_key_no_card_reads_is_refused_naming_the_card_keys():
+    card = dict(GOOD_CARD, latency_cycle=2)
+    with pytest.raises(ValueError) as refusal:
+        _load_readout_card(card)
+    message = str(refusal.value)
+    assert message.startswith(
+        "links.qpu_to_controller does not know ['latency_cycle']; its keys "
+        "are ['latency_cycles', 'clock', 'bits_per_cycle', 'channels', "
+    )

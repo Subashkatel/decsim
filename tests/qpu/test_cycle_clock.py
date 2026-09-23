@@ -425,16 +425,14 @@ def test_an_idle_stream_round_carries_the_sources_bits_to_the_windows():
     operation = program_records.Operation(
         id=1, name="stream", qubits=(0,), patches=(0,), stream_id="s"
     )
+    same_seed = syndrome_devices.SyndromeBitDevice(code, seed=1)
+    drawn = same_seed.idle_round_payloads(
+        operation, "s", 4, is_final=False, round_period_ticks=10
+    )
     qpu.emit_idle_stream_round(operation, "s", 4, is_final=False)
     payload, route = log.readouts[0]
-    assert payload == round_records.QPUReadout(
-        "s",
-        (0,),
-        4,
-        bits=[0, 0, 1, 0, 1, 1, 1, 1],
-        code="rotated surface code (d=3)",
-        size_bits=8,
-    )
+    assert payload == drawn[0]
+    assert payload.size_bits == 8
     assert route == round_records.WINDOW_INPUT_ROUTE
 
 

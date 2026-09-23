@@ -208,7 +208,7 @@ def test_a_round_is_logged_as_fired_with_its_place_in_the_body():
 def test_a_readout_leaves_at_the_tick_its_source_names():
     """gem5's queued port: the sender names the absolute send tick.
 
-    tmp/resources/gem5/src/mem/qport.hh:94, schedTimingResp(pkt, when).
+    gem5 src/mem/qport.hh:94, schedTimingResp(pkt, when).
     The body still ends on the clock's boundary.
     """
     source = DelayedSource({1: 3, 2: 3, 3: 3})
@@ -224,7 +224,7 @@ def test_a_readout_leaves_at_the_tick_its_source_names():
 def test_a_later_round_of_a_patch_waits_behind_an_earlier_one():
     """gem5's packet queue with forceOrder queues behind the same address.
 
-    tmp/resources/gem5/src/mem/packet_queue.cc:134-147: round 1 leaves
+    gem5 src/mem/packet_queue.cc:134-147: round 1 leaves
     at 35, so rounds 2 and 3, read out at 20 and 30, leave at 35 after it.
     """
     source = DelayedSource({1: 25, 2: 0, 3: 0})

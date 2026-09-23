@@ -49,7 +49,7 @@ class QPUDevice:
     readout of one of its patches: it waits behind that one, as gem5's
     packet queue with forceOrder schedules a packet after the last one
     to the same address rather than ahead of it
-    (tmp/resources/gem5/src/mem/packet_queue.cc:134-147), and a tick
+    (gem5 src/mem/packet_queue.cc:134-147), and a tick
     before the readout is refused, as that queue asserts
     (packet_queue.cc:114). Trace sources: command_event(QPUCommandEvent)
     when a command arrives and when it starts; round_emitted(readout)

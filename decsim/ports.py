@@ -1358,7 +1358,7 @@ class SyndromeSource(Protocol):
         at, and a source whose readout arrives with a fixed delay or a
         jitter names a later tick, as gem5's queued port lets its owner
         name the absolute tick a response or a request is sent
-        (tmp/resources/gem5/src/mem/qport.hh:94 schedTimingResp, 150
+        (gem5 src/mem/qport.hh:94 schedTimingResp, 150
         schedTimingReq). The clock asks for every readout it hands the
         controller, and sends it at that tick behind every earlier
         readout of its patches.
@@ -1935,7 +1935,7 @@ class CodeModel(Protocol):
     own round period, the graph size a latency model prices, and the
     bits one round reads out, and for nothing else. The shape is CUDA-Q
     QEC's code base class, a few counts every code implements
-    (tmp/resources/cudaqx/libs/qec/include/cudaq/qec/code.h lines 51-58
+    (cudaqx libs/qec/include/cudaq/qec/code.h lines 51-58
     and 140-160), built by name with the code's own options (get_code,
     line 257). The planner, the plan, the round policies, the QPU clock
     and the circuit-less sources call it.
@@ -1977,7 +1977,7 @@ class RowSettings(Protocol):
     and refuses a key neither declares (decsim/tables.py row_settings);
     how the record reaches the row is its table's build call. The shape
     is gem5's: a SimObject's parameters declared on its class
-    (tmp/resources/gem5/src/mem/SimpleMemory.py:43-53) and handed to
+    (gem5 src/mem/SimpleMemory.py:43-53) and handed to
     its constructor as one Params record (src/mem/simple_mem.cc:53).
     """
 
@@ -2003,7 +2003,7 @@ class WorkloadRow(Protocol):
     declares a Settings whose from_yaml refuses with a sentence. gem5's
     Workload is the same shape: a SimObject whose parameters sit on its
     class and whose few answers the system reads before it runs
-    (tmp/resources/gem5/src/sim/Workload.py:46-52,
+    (gem5 src/sim/Workload.py:46-52,
     src/sim/workload.hh:103-105).
     """
 

@@ -10,7 +10,6 @@ first sweep block, so one yaml runs without naming a point.
 
 import argparse
 import dataclasses
-import sys
 from pathlib import Path
 from typing import Optional
 
@@ -201,7 +200,3 @@ def _operation_line(row) -> str:
         f"observables {row.logical_observables}, "
         f"truth {row.observable_truth}"
     )
-
-
-if __name__ == "__main__":
-    main(sys.argv[1:])

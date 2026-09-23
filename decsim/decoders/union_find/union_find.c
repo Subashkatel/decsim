@@ -1055,45 +1055,19 @@ static int32_t contact_forest(struct workspace *workspace,
   return forest_count;
 }
 
-/* Each node's forest neighbours, in edge order, which is fault order. */
+/* Each node's forest neighbours, in edge order, which is fault order.
+ * They are laid as the closed neighbours are, with the forest's edges
+ * as the flags: Kruskal takes no edge whose ends are one node, so the
+ * closed builder's skip of such an edge drops nothing here. */
 static void build_forest_adjacency(struct workspace *workspace,
                                    const struct graph_arrays *graph,
                                    const int32_t *forest_edges,
                                    int32_t forest_count) {
-  int32_t node_count = graph->detector_count + 1;
   memset(workspace->is_forest_edge, 0, (size_t)graph->edge_count);
   for (int32_t position = 0; position < forest_count; ++position) {
     workspace->is_forest_edge[forest_edges[position]] = 1;
   }
-  for (int32_t node = 0; node <= node_count; ++node) {
-    workspace->adjacency_start[node] = 0;
-  }
-  for (int32_t edge = 0; edge < graph->edge_count; ++edge) {
-    if (!workspace->is_forest_edge[edge]) {
-      continue;
-    }
-    int32_t node_a =
-        endpoint_node(graph->endpoint_a[edge], graph->detector_count);
-    int32_t node_b =
-        endpoint_node(graph->endpoint_b[edge], graph->detector_count);
-    workspace->adjacency_start[node_a + 1] += 1;
-    workspace->adjacency_start[node_b + 1] += 1;
-  }
-  for (int32_t node = 0; node < node_count; ++node) {
-    workspace->adjacency_start[node + 1] += workspace->adjacency_start[node];
-    workspace->adjacency_cursor[node] = workspace->adjacency_start[node];
-  }
-  for (int32_t edge = 0; edge < graph->edge_count; ++edge) {
-    if (!workspace->is_forest_edge[edge]) {
-      continue;
-    }
-    int32_t node_a =
-        endpoint_node(graph->endpoint_a[edge], graph->detector_count);
-    int32_t node_b =
-        endpoint_node(graph->endpoint_b[edge], graph->detector_count);
-    place_neighbor(workspace, node_a, node_b, edge);
-    place_neighbor(workspace, node_b, node_a, edge);
-  }
+  build_closed_adjacency(workspace, graph, workspace->is_forest_edge);
 }
 
 static int32_t collect_component(struct workspace *workspace, int32_t start) {

@@ -24,9 +24,12 @@ unit a staged job waits on is not an empty one, so two jobs that become
 startable together are staged on two units, and the two forced-class
 solves of one window overlap whenever two units have room. Least work
 left is the task-assignment rule that sends each job to the server whose
-outstanding work ends soonest. Where no cost is declared the work is
-unbounded, and the unit holding the fewest live jobs is taken, then the
-one that has the rounds.
+outstanding work ends soonest. A job that may start is staged only on a
+unit whose work left is the pool's least, and waits in the queue while
+every such unit is full: on a unit with more work left it would start
+later than a central queue would start it. Where no cost is declared the
+work is unbounded, and the unit holding the fewest live jobs is taken,
+then the one that has the rounds.
 
 The rule ranks compute only. When a parked job is released is not
 known, so its decode is counted whole, which bounds the newcomer's
@@ -39,13 +42,11 @@ first unit would have been.
 When the work is known and deterministic, as a declared decode cost is,
 immediate dispatch of startable jobs by least work left starts every
 job at the tick a central FIFO queue over the pool would, so staging
-costs them nothing in start time and buys the input move. That equality
-is checked here, not taken on authority:
-validation/component_matrix/rowD2_access_execute/compare_overlap_laws.py
-runs law_lwl_pool against the pool. The
-textbook treatment is Harchol-Balter, Performance Modeling and Design
-of Computer Systems, Cambridge 2013, which is not on disk under the
-sandbox, so no chapter or page is claimed. A job with no input has
+costs them nothing in start time and buys the input move. The central
+queue is Kiefer and Wolfowitz's (1955) over c identical servers: job n
+starts at the later of its arrival and the earliest tick a server is
+free. The textbook treatment is Harchol-Balter, Performance Modeling
+and Design of Computer Systems, Cambridge 2013. A job with no input has
 nothing to prefetch and waits in the queue for free compute.
 """
 
@@ -149,10 +150,11 @@ class DecoderPool:
 
         A job that may start takes a free unit with room: one that
         already has its rounds, else the one the fewest jobs are
-        already waiting on. A job carrying input that finds none, or
-        that may not start yet, is staged on the unit with room that
-        has the least work left. now is the current tick; a unit's
-        work left is counted from it.
+        already waiting on. A job carrying input that finds none is
+        staged on a unit with the pool's least work left, or waits
+        while those are full; one that may not start yet is staged on
+        the unit with room that has the least work left. now is the
+        current tick; a unit's work left is counted from it.
         """
         takes_free_compute = decoder_unit_module.is_startable(job)
         if takes_free_compute or not carries_input:
@@ -167,6 +169,8 @@ class DecoderPool:
             return None
         units = self.units_by_pool[pool]
         with_room = _with_room(units, job, resident_capacity, memory_demand_of)
+        if takes_free_compute:
+            with_room = self._freeing_first(units, with_room, now)
         if not with_room:
             return None
         staging_rank = functools.partial(
@@ -192,6 +196,27 @@ class DecoderPool:
         free = self.free_by_pool[unit.pool]
         free.append(unit)
         self.trace.unit_freed.fire(unit)
+
+    def _freeing_first(self, units: list, with_room: list, now: int) -> list:
+        """The units with room among those with the pool's least work left.
+
+        A job that may start and finds no free unit starts when the unit
+        it is staged on frees its compute. Staged on a unit with more
+        work left, it starts later than a central FIFO queue over the
+        pool would start it, so while every unit that frees first is
+        full the job waits in the queue.
+        """
+        work_left_by_unit = {}
+        for unit in units:
+            work_left = unit.work_left_ticks(now, self._occupancy_ticks)
+            work_left_by_unit[unit] = work_left
+        work_left_values = work_left_by_unit.values()
+        least_work_left = min(work_left_values)
+        freeing_first = []
+        for unit in with_room:
+            if work_left_by_unit[unit] == least_work_left:
+                freeing_first.append(unit)
+        return freeing_first
 
     def _staging_rank(
         self,

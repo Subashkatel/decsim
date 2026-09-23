@@ -8,11 +8,9 @@ escalation.confidence).
 
 The law: with known deterministic work, dispatching each job to the
 server with the least work left starts it at the tick a central FIFO
-queue over the pool would. Checked against
-validation/component_matrix/rowD2_access_execute/compare_overlap_laws.py
-law_lwl_pool (rowD2). The textbook treatment is Harchol-Balter,
-Performance Modeling and Design of Computer Systems, Cambridge 2013,
-not on disk under the sandbox, so no chapter is claimed.
+queue over the pool would (test_decoder_manager.py pins it through the
+manager). The textbook treatment is Harchol-Balter, Performance
+Modeling and Design of Computer Systems, Cambridge 2013.
 """
 
 import pytest

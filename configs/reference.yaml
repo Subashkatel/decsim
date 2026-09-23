@@ -89,11 +89,18 @@ escalation:
 #                                  # (Toshio 2510.25222 Sec. III A), so it needs
 #                                  # a weak decoder that minimises weight inside
 #                                  # a class: pymatching and
-#                                  # unweighted_pymatching today. cluster_gap
+#                                  # unweighted_pymatching today. Its two
+#                                  # solves are submitted at one instant as
+#                                  # two ordinary jobs of the weak pool, so
+#                                  # weak_decoder.units alone decides whether
+#                                  # they overlap, and a priced weak card,
+#                                  # which prices one decode of one window,
+#                                  # is charged once per solve. cluster_gap
 #                                  # decodes the window once and walks the
 #                                  # growth that decode did (Meister 2405.07433
 #                                  # Algorithm 2), so it needs a cluster-based
-#                                  # decoder: union_find today. extra_cluster_gap
+#                                  # decoder: union_find today, one job and
+#                                  # one card per window. extra_cluster_gap
 #                                  # decodes the window once and grows every
 #                                  # cluster on, half a weight_step a tick,
 #                                  # until the two boundaries join or the
@@ -244,16 +251,6 @@ escalation:
 #                                  # keeps the crossing faults; it costs the
 #                                  # weak syndrome buffer one more buffer
 #                                  # region per bounded window
-#                                  # The complementary gap is two solves of
-#                                  # one window, each pinned to one logical
-#                                  # class, submitted at one instant as two
-#                                  # ordinary jobs of the weak pool; so
-#                                  # weak_decoder.units alone decides whether
-#                                  # they overlap. A priced weak card prices
-#                                  # one decode of one window, so it is
-#                                  # charged once per forced solve. The cluster
-#                                  # gap needs one job per window and charges
-#                                  # one card.
 
 workload:
   kind: memory_circuit             # memory_circuit is the one yaml row; the

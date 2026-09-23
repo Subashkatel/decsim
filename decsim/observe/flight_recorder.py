@@ -13,8 +13,6 @@ no component, records nothing itself and writes nothing back.
 import dataclasses
 from typing import Optional
 
-import decsim.records.identity as identity_records
-
 
 class FlightRecorder:
     """The listeners of one run, walked into one causal event list."""
@@ -188,14 +186,6 @@ class RunLedgerView:
 
 
 # ---- private
-
-
-def _first_identity_order(item) -> tuple:
-    return identity_records.stable_identity_order_key(item[0])
-
-
-def _unit_name(unit) -> tuple:
-    return (unit.pool, unit.index)
 
 
 def _event_id(event: LedgerEvent) -> int:

@@ -97,6 +97,8 @@ class WindowSettings:
         config.check_cycles("windows.decision_cycles", self.decision_cycles)
         if self.decision_cycles > 0 and self.clock is None:
             raise ValueError("windows.decision_cycles needs a clock")
+        _check_window_rounds("windows.commit_rounds", self.commit_rounds, 1)
+        _check_window_rounds("windows.buffer_rounds", self.buffer_rounds, 0)
 
     @classmethod
     def from_yaml(
@@ -135,6 +137,34 @@ class WindowSettings:
             boundaries=boundaries,
             row_settings=row_settings,
         )
+
+
+def _check_window_rounds(key: str, rounds, least: int) -> None:
+    """A window size is a whole count of rounds, or null for the code's.
+
+    A window is a commit region of ncom rounds and a buffer region of
+    nbuf (Skoric et al. 2209.08552 lines 194-197, nW = ncom + nbuf). A
+    window that commits no round never moves the stream on, so ncom is
+    at least one; a buffer may be empty. YAML reads `true` as a
+    boolean, which Python counts as an int, so a flag is refused by name
+    as config.check_cycles refuses it.
+    """
+    if rounds is None:
+        return
+    if _is_round_count(rounds, least):
+        return
+    raise ValueError(
+        f"{key} is a whole number of rounds, at least {least}, or null "
+        f"for the code's own size (got {rounds!r})"
+    )
+
+
+def _is_round_count(rounds, least: int) -> bool:
+    if isinstance(rounds, bool):
+        return False
+    if not isinstance(rounds, int):
+        return False
+    return rounds >= least
 
 
 def _check_terminal_policy(terminal_policy) -> None:

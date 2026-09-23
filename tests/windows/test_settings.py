@@ -94,6 +94,26 @@ def test_both_keys_default_to_null_so_the_plan_decides_them():
     assert settings.boundaries is None
 
 
+def test_a_window_size_is_a_whole_count_of_rounds():
+    """F >= 1 and B >= 0, refused at load, never as a TypeError at build."""
+    refused = (
+        ("commit_rounds", 0),
+        ("commit_rounds", True),
+        ("commit_rounds", "3"),
+        ("commit_rounds", 2.5),
+        ("buffer_rounds", -1),
+        ("buffer_rounds", False),
+    )
+    for key, rounds in refused:
+        section = _section(**{key: rounds})
+        with pytest.raises(ValueError, match=f"windows.{key} is a whole"):
+            window_settings.WindowSettings.from_yaml(section, CLOCKS)
+    section = _section(commit_rounds=1, buffer_rounds=0)
+    settings = window_settings.WindowSettings.from_yaml(section, CLOCKS)
+
+    assert (settings.commit_rounds, settings.buffer_rounds) == (1, 0)
+
+
 def test_a_charged_window_decision_needs_its_clock():
     with pytest.raises(
         ValueError, match="windows.decision_cycles needs a clock"

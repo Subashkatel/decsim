@@ -707,7 +707,7 @@ def _measurement(
     decoded_windows = len(samples["service"])
     load = chain_load(samples, settings, distance, round_period_us)
     algorithm = active_decoder_kind(settings)
-    queued = _max_queued_windows(observation)
+    queued = observation.queue_depth.peak
     primary_tier = escalation_build.primary_tier(settings.escalation)
     pools = _pool_measures(observation, primary_tier)
     strong = _strong_decodes(observation)
@@ -880,16 +880,6 @@ def _referee_counts(
         windows_checked=audit.windows_checked,
         window_disagreements=audit.window_disagreements,
     )
-
-
-def _max_queued_windows(
-    observation: observation_module.Observation,
-) -> int:
-    """The deepest the decode ready queue got over the shot."""
-    depths = []
-    for _tick, depth in observation.queue_depth.samples:
-        depths.append(depth)
-    return max(depths, default=0)
 
 
 def _pool_measures(

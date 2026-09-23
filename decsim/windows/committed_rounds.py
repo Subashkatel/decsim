@@ -14,7 +14,6 @@ from typing import Optional
 import decsim.records.decoding as decoding_records
 
 OWNERSHIP_KINDS = ("ordinary_window", "strong_window")
-BOUNDARY_POLICIES = ("strict", "stream_segment")
 
 
 class LogicalLedger:
@@ -116,11 +115,6 @@ class LogicalLedger:
         stream_segment, only a functional (observable-bearing) one may
         not. None when any covering contribution is timing-only.
         """
-        if boundary_policy not in BOUNDARY_POLICIES:
-            raise ValueError(
-                f"unknown logical contribution boundary policy "
-                f"{boundary_policy!r}"
-            )
         if commit_lo < 1 or commit_hi < commit_lo:
             raise ValueError(
                 f"invalid logical prediction interval {commit_lo}-{commit_hi}"

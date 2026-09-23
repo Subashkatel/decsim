@@ -25,13 +25,14 @@ github.com/qLDPCOrg/qLDPC at commit
 
 These are referent tests and each builds a real Stim circuit and a real
 detector error model at d=3, so they cost seconds rather than
-milliseconds. Nothing here decodes: the harness's own reading was that
-every per-shot difference against qLDPC is a minimum-weight matching
-tie broken by a different column order (VALIDATION.md, "Every
-per-window difference against qldpc / the reference loop has equal
-total matching weight"), so a shot comparison pins the tie-breaking of
-PyMatching and not the window rule. The window rule is what this file
-pins, and it is exact.
+milliseconds. Nothing here decodes. A shot comparison against qLDPC
+differs where two faults share a matching edge: qLDPC builds its
+matching with pymatching.Matching.from_check_matrix
+(qldpc/decoders/retrieval.py:281), whose default merge_strategy is
+"smallest-weight" (pymatching/matching.py:938), while decsim merges
+parallel faults as "independent". With the same merge strategy every
+window's commit is equal, so the window rule is what this file pins,
+and it is exact.
 """
 
 import numpy

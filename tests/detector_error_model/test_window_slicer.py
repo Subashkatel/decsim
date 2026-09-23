@@ -444,8 +444,9 @@ def test_a_round_no_detector_belongs_to_slices_an_empty_window():
 
     A window with no rows selects no columns, which is allowed and not
     refused: the run still spends the round's time, and the addresses of
-    every other detector are untouched by the gap (a QLX program declares
-    such a map when a round measures nothing the decoder reads).
+    every other detector are untouched by the gap (a supplied circuit
+    declares such a map through StimDevice's detector_rounds when a round
+    measures nothing the decoder reads).
     """
     detector_rounds = {0: 1, 1: 1, 2: 3, 3: 4}
     circuit = chain_circuit()

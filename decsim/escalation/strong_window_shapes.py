@@ -132,7 +132,11 @@ class StrongWindowShape(Protocol):
     strong region replaces the weak windows it covers, so the planner
     claims the rounds a restart would read and the weak chain keeps
     committing; a reader of the run's shape asks the row rather than a
-    yaml flag. default_boundary_policy is the row of BOUNDARY_POLICIES a
+    yaml flag. pins_the_far_face is its declaration that the far face is
+    pinned on the restart window's weak commit, which the escalation
+    section reads to refuse a restart window that re-reads the region
+    (escalation/settings.py). default_boundary_policy is the row of
+    BOUNDARY_POLICIES a
     run gets when windows.boundaries is null and the escalation may
     escalate: an absorbing region needs the weak chain to keep
     committing, so it names eager, and a region that absorbs nothing
@@ -145,6 +149,7 @@ class StrongWindowShape(Protocol):
     """
 
     absorbs_weak_windows: bool
+    pins_the_far_face: bool
     default_boundary_policy: str
     window_absorbed: Any
 

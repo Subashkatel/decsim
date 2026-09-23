@@ -513,6 +513,28 @@ class RecordingContextWindow(strong_window_shapes.ContextWindow):
         return assignment
 
 
+def test_a_shape_row_that_declares_only_the_ports_facts_loads_by_name():
+    """The escalation section reads a row's facts off the port alone."""
+    port_facts = strong_window_shapes.StrongWindowShape.__annotations__
+    facts = dict.fromkeys(port_facts, False)
+    row = type("PortOnlyShape", (), facts)
+    table = escalation_settings.STRONG_WINDOW_SHAPES
+    table["port_only"] = row
+    section = {
+        "kind": "switching",
+        "gap_threshold_db": 20.0,
+        "strong_window": "port_only",
+    }
+    clocks = config.ClockSettings({})
+    try:
+        settings = escalation_settings.EscalationSettings.from_yaml(
+            section, clocks
+        )
+    finally:
+        del table["port_only"]
+    assert settings.strong_window == "port_only"
+
+
 def test_a_shape_row_added_from_outside_runs_by_its_yaml_name():
     """A new strong window shape is one class and one table row.
 

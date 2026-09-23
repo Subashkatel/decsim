@@ -329,12 +329,8 @@ def _commit_from_git_files(checkout: Path) -> Optional[str]:
     git_dir = _git_dir(checkout)
     if git_dir is None:
         return None
-    head_path = git_dir / "HEAD"
-    if not head_path.exists():
-        return None
-    head_text = head_path.read_text()
-    head = head_text.strip()
-    if not head.startswith("ref: "):
+    head = _head_of(git_dir)
+    if head is None or not head.startswith("ref: "):
         return head
     reference = head[len("ref: ") :]
     common = _common_git_dir(git_dir)
@@ -343,6 +339,15 @@ def _commit_from_git_files(checkout: Path) -> Optional[str]:
         if found is not None:
             return found
     return None
+
+
+def _head_of(git_dir: Path) -> Optional[str]:
+    """What HEAD holds: a commit, or "ref: " and a branch; None if absent."""
+    head_path = git_dir / "HEAD"
+    if not head_path.exists():
+        return None
+    head_text = head_path.read_text()
+    return head_text.strip()
 
 
 def _reference_in(directory: Path, reference: str) -> Optional[str]:

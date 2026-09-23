@@ -3,9 +3,10 @@
 The packing time is charged once per complete round, however many
 fragments it arrived in (Caune et al. 2410.05202 measure 250 to 370 FPGA
 cycles for packetization, bus transfer, result return and the
-conditional together, an upper bound); a two-fragment round is the QLX
-frontend's shape (decsim/frontends/qlx_frontend.py, the terminal data
-readout as its own fragment). The bound counts every round in flight
+conditional together, an upper bound); a round arrives in several
+fragments when its source reads it out in more than one acquisition
+group (RepeatedStimCircuit.readout_partitions in decsim/records/
+circuits.py). The bound counts every round in flight
 through the stage, in assembly, held for store room or on its route
 (controller.packing_rounds_in_flight); a full stage stops the run with a
 sentence naming the setting, or drops

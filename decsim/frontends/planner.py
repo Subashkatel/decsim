@@ -151,20 +151,11 @@ def check_workload_identity(operations, decode_operations, dynamic_streams):
     for role, members in groups:
         _note_role(role, members, operation_by_id, roles_by_object)
     static_owners = tuple(decode_operations)
-    dynamic_owners = tuple(dynamic_streams)
     owners = static_owners
     if dynamic_streams:
-        owners = dynamic_owners
+        owners = tuple(dynamic_streams)
     for operation in operations:
-        if operation.stream_id is None:
-            _check_static_membership(operation, static_owners)
-            continue
-        owner = _stream_owner(operation, owners)
-        if owner is None:
-            raise ValueError(
-                f"operation {operation.id} stream_id {operation.stream_id} "
-                "does not name a declared stream owner"
-            )
+        _check_stream_membership(operation, owners, static_owners)
 
 
 def _resolve_round_ticks(code, fallback_round_microseconds: float) -> int:
@@ -296,10 +287,15 @@ def _planned(operations, resolved, planned_operation_ids) -> tuple:
     for operation_id in planned_operation_ids:
         planned_views.append(view_by_id[operation_id])
         planned_resolved.append(resolved_by_id[operation_id])
+    _check_decode_owner_rounds(planned_resolved)
+    return tuple(planned_views), tuple(planned_resolved)
+
+
+def _check_decode_owner_rounds(planned_resolved: list) -> None:
+    """Every operation the plan windows runs one round or more."""
     for planning in planned_resolved:
         if planning.round_count < 1:
             raise ValueError("decode owners must have at least one round")
-    return tuple(planned_views), tuple(planned_resolved)
 
 
 def _plan_windows(
@@ -775,6 +771,21 @@ def _check_stream_role(operation, roles: set) -> None:
         f"operation id {operation.id} cannot appear in both "
         f"{other_role} and dynamic_streams"
     )
+
+
+def _check_stream_membership(
+    operation, owners: tuple, static_owners: tuple
+) -> None:
+    """A stream member names a declared owner; the rest join the static plan."""
+    if operation.stream_id is None:
+        _check_static_membership(operation, static_owners)
+        return
+    owner = _stream_owner(operation, owners)
+    if owner is None:
+        raise ValueError(
+            f"operation {operation.id} stream_id {operation.stream_id} "
+            "does not name a declared stream owner"
+        )
 
 
 def _check_static_membership(operation, static_owners: tuple) -> None:

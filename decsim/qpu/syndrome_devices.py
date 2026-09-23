@@ -73,9 +73,8 @@ class TimingOnlyDevice:
         self, operation: program_records.Operation, round_index: int
     ) -> list[round_records.QPUReadout]:
         """One valueless payload attributed to the operation's footprint."""
-        target, global_round = _stream_target_and_global_round(
-            operation, round_index
-        )
+        target = program_records.decode_identity(operation)
+        global_round = program_records.global_round(operation, round_index)
         patches = program_records.patches_of(operation)
         patch_count = _patch_count_of(operation)
         size_bits = self.code.syndrome_bits_per_round(patch_count)
@@ -190,9 +189,8 @@ class SyndromeBitDevice(seeding._AtomicRunSeedConsumer):
         self, operation: program_records.Operation, round_index: int
     ) -> list[round_records.QPUReadout]:
         """One payload per patch, or one payload covering every patch."""
-        target, global_round = _stream_target_and_global_round(
-            operation, round_index
-        )
+        target = program_records.decode_identity(operation)
+        global_round = program_records.global_round(operation, round_index)
         if self.one_payload_per_patch:
             return self._payload_per_patch(operation, target, global_round)
         patch_count = _patch_count_of(operation)
@@ -382,24 +380,6 @@ class NoWindowModels:
 
 # The one no-model component every circuit-less source names.
 NO_WINDOW_MODELS = NoWindowModels()
-
-
-def _stream_target_and_global_round(
-    operation: program_records.Operation, round_index: int
-) -> tuple:
-    """The decode identity and global round of one operation round.
-
-    A stream segment folds into its stream at its offset; a standalone
-    operation is its own stream.
-    """
-    target = operation.id
-    if operation.stream_id is not None:
-        target = operation.stream_id
-    stream_offset = 0
-    if operation.stream_offset is not None:
-        stream_offset = operation.stream_offset
-    global_round = round_index + stream_offset
-    return target, global_round
 
 
 def _patch_count_of(operation: program_records.Operation) -> int:

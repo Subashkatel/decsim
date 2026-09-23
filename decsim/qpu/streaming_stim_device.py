@@ -96,7 +96,7 @@ class StreamingStimDevice(seeding._AtomicRunSeedConsumer):
         """Bind a segment to its live stream without sampling ahead."""
         del segment_round_count
         del source_round_count
-        stream_id = _stream_id_of(operation)
+        stream_id = program_records.decode_identity(operation)
         if stream_id not in self._streams_by_id:
             raise ValueError("live Stim memory requires a registered stream")
         stream = self._streams_by_id[stream_id]
@@ -111,11 +111,8 @@ class StreamingStimDevice(seeding._AtomicRunSeedConsumer):
         self, operation: program_records.Operation, round_index: int
     ) -> list[round_records.QPUReadout]:
         """Execute a segment round without introducing a physical boundary."""
-        stream_id = _stream_id_of(operation)
-        stream_offset = operation.stream_offset
-        if stream_offset is None:
-            stream_offset = 0
-        global_round = stream_offset + round_index
+        stream_id = program_records.decode_identity(operation)
+        global_round = program_records.global_round(operation, round_index)
         return self._emit(stream_id, global_round, False)
 
     def idle_round_payloads(
@@ -283,7 +280,7 @@ class StreamingStimDevice(seeding._AtomicRunSeedConsumer):
         """Keep strong priors in the stream's stable fault namespace."""
         del round_count
         del fault_model_requirement
-        stream_id = _stream_id_of(operation)
+        stream_id = program_records.decode_identity(operation)
         models = self._models_by_stream_id[stream_id]
         return models.for_strong_window(
             window, fault_exclusion_ranges, prior_faults
@@ -422,12 +419,6 @@ def _stream_seed(seed, stream_id):
         kind = "integer_key"
     segment = seed_records.RunSeedPathSegment(kind, stream_id)
     return seeding.derive_component_seed(seed, (segment,))
-
-
-def _stream_id_of(operation):
-    if operation.stream_id is not None:
-        return operation.stream_id
-    return operation.id
 
 
 def _declared_round_period(program):

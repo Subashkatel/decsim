@@ -131,7 +131,7 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         if operation.circuit is None:
             raise ValueError("StimDevice operations require a circuit")
         _check_segment(operation, segment_round_count, source_round_count)
-        key = _sample_key_of(operation)
+        key = program_records.decode_identity(operation)
         if self._seed is not None:
             _check_sample_key(key)
         detector_rounds = self._bind_source(
@@ -169,11 +169,8 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         self, operation: program_records.Operation, round_index: int
     ) -> list[round_records.QPUReadout]:
         """This operation round in its declared raw measurement partitions."""
-        key = _sample_key_of(operation)
-        stream_offset = 0
-        if operation.stream_offset is not None:
-            stream_offset = operation.stream_offset
-        global_round = round_index + stream_offset
+        key = program_records.decode_identity(operation)
+        global_round = program_records.global_round(operation, round_index)
         bits = self._round_packet_bits(key, global_round)
         return self._readouts(key, operation, global_round, bits)
 
@@ -186,7 +183,7 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         stream: a wrong declaration would stamp another round's bits as
         the final readout.
         """
-        key = _sample_key_of(operation)
+        key = program_records.decode_identity(operation)
         shot = self._shots.shot_by_key[key]
         binding = self._shots.source_binding_by_key[key]
         circuit_text = str(operation.circuit)
@@ -305,7 +302,7 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         """The detector error models of one finite Stim operation's windows."""
         if operation.circuit is None or not windows:
             return []
-        key = _sample_key_of(operation)
+        key = program_records.decode_identity(operation)
         detector_rounds = self._bind_source(key, operation.circuit, round_count)
         model_plan = [_window_span(window) for window in windows]
         index_by_key = {
@@ -363,7 +360,7 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         """
         if operation.circuit is None:
             return None
-        key = _sample_key_of(operation)
+        key = program_records.decode_identity(operation)
         detector_rounds = self._bind_source(key, operation.circuit, round_count)
         span = _window_span(window)
         return window_models.build_single_window_error_model(
@@ -389,7 +386,7 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         """A strong re-decode model with several non-owned inclusive ranges."""
         if operation.circuit is None:
             return None
-        key = _sample_key_of(operation)
+        key = program_records.decode_identity(operation)
         detector_rounds = self._bind_source(key, operation.circuit, round_count)
         span = _window_span(window)
         return window_models.build_single_window_error_model_with_exclusions(
@@ -655,12 +652,6 @@ def _check_finite_stream_length(
         "circuit. Use a timing-only stream for unknown feedback length, "
         "or build the Stim circuit after the stream length is known."
     )
-
-
-def _sample_key_of(operation: program_records.Operation):
-    if operation.stream_id is not None:
-        return operation.stream_id
-    return operation.id
 
 
 def _check_sample_key(key) -> None:

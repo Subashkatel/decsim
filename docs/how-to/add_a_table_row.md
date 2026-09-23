@@ -54,7 +54,7 @@ study most often extends:
 | `DECODERS` | `row(latency_model=None)`, or `row(latency_model=None, settings=...)` for a row with a `Settings` | `decsim/build/decoders.py`, `_algorithm` |
 | `WINDOWING_SCHEMES` | `row(card)`, a `WindowingSchemeCard`, or `row(card, settings=...)` for a row with a `Settings` | `decsim/build/plan.py`, `_chosen_scheme` |
 | `SYNDROME_SOURCES` | `row(**arguments)`, the arguments Python-only, with `code=card` added when `takes_code_card` | `decsim/build/plan.py`, `_syndrome_source` |
-| `SYNDROME_BUFFERS` | `row(settings)`, the section's record | `decsim/build/stores.py` |
+| `SYNDROME_BUFFERS` | `row(settings)`, the section's record, whose `row_settings` holds the row's own `Settings` | `decsim/build/stores.py` |
 | `IDLE_POLICIES`, `BOUNDARY_POLICIES`, `BOUNDARY_PAYLOADS` | `row()` | `decsim/build/plan.py` |
 
 A syndrome source is also the run's window model source unless Python

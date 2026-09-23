@@ -2,11 +2,13 @@
 
 import dataclasses
 from collections.abc import Mapping
-from typing import Optional
+from typing import Any, Optional
 
 import decsim.config as config
+import decsim.tables as tables
 
-# the keys a syndrome buffer section reads
+# the keys every row of a syndrome buffer section shares; any other key is
+# the row's own (its Settings, decsim/tables.py row_settings)
 SYNDROME_BUFFER_KEYS = (
     "kind",
     "bits",
@@ -40,6 +42,9 @@ class SyndromeBufferSettings:
     Yang et al. fix their syndrome calculation at 5 FPGA clock cycles
     (2605.04892 lines 1273-1275).
     A zero cost runs synchronously without clock-edge alignment.
+    row_settings is the row's own Settings, read from the section's keys
+    outside SYNDROME_BUFFER_KEYS, or None for a row that declares none;
+    the row reads it off this record, which its constructor takes whole.
     """
 
     kind: str = "syndrome_buffer"
@@ -48,6 +53,8 @@ class SyndromeBufferSettings:
     write_cycles: int = 0
     read_cycles: int = 0
     detection_event_cycles_per_round: int = 0
+    # the row's own Settings record, opaque to the section
+    row_settings: Optional[Any] = None
 
     def __post_init__(self) -> None:
         config.check_cycles(
@@ -71,17 +78,19 @@ class SyndromeBufferSettings:
         section: Mapping,
         section_name: str,
         clocks: config.ClockSettings,
+        buffer_rows: Mapping,
         default_clock: Optional[config.Clock] = None,
     ) -> "SyndromeBufferSettings":
-        """A store section: its kind, and `bits`, a bit capacity or null."""
-        unknown = set(section) - set(SYNDROME_BUFFER_KEYS)
-        if unknown:
-            listed = sorted(unknown)
-            raise ValueError(
-                f"{section_name} does not know {listed}; its keys are "
-                f"{list(SYNDROME_BUFFER_KEYS)}"
-            )
+        """A store section: its kind, and `bits`, a bit capacity or null.
+
+        buffer_rows is SYNDROME_BUFFERS, which sits beside the store
+        class and so cannot be imported here (syndrome_buffer.py).
+        """
         kind = section.get("kind", "syndrome_buffer")
+        row = tables.row(buffer_rows, f"{section_name}.kind", kind)
+        row_settings = tables.row_settings(
+            row, section_name, section, SYNDROME_BUFFER_KEYS
+        )
         bits = section.get("bits")
         key = f"{section_name}.bits"
         config.check_capacity_bits(key, bits)
@@ -98,6 +107,7 @@ class SyndromeBufferSettings:
             write_cycles=write_cycles,
             read_cycles=read_cycles,
             detection_event_cycles_per_round=formation_cycles,
+            row_settings=row_settings,
         )
 
 

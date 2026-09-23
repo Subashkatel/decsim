@@ -117,6 +117,7 @@ class ControllerSettings:
             "detection_event_cycles_per_round",
             self.detection_event_cycles_per_round,
         )
+        self._check_rounds_in_flight()
         self._check_clock()
 
     @classmethod
@@ -141,6 +142,25 @@ class ControllerSettings:
             packing_rounds_in_flight=packing_rounds_in_flight,
             packing_overflow=packing_overflow,
             detection_events_formed_at=formed_at,
+        )
+
+    def _check_rounds_in_flight(self) -> None:
+        """The packing stage's bound is a whole count of rounds, or null.
+
+        A round enters the stage whole, so the bound counts whole rounds,
+        and a bound below one admits no round and stops the run at the
+        first fragment. gem5's integer parameters refuse a value outside
+        their range where the configuration is read
+        (src/python/m5/params/param_types.py:230-235, CheckedInt._check).
+        """
+        bound = self.packing_rounds_in_flight
+        if bound is None:
+            return
+        if _is_round_count(bound):
+            return
+        raise ValueError(
+            "controller.packing_rounds_in_flight must be a whole count of "
+            f"rounds, at least one, or null for no bound (got {bound!r})"
         )
 
     def _check_clock(self) -> None:
@@ -174,6 +194,15 @@ class IdlePolicySettings:
 
     kind: str = "separate_decode_jobs"
     policy: Optional[ports.IdlePolicy] = None
+
+
+def _is_round_count(value) -> bool:
+    """A number of rounds a stage can hold: a whole count, never a flag."""
+    if isinstance(value, bool):
+        return False
+    if not isinstance(value, int):
+        return False
+    return value >= 1
 
 
 def _formation_cycles(section: Mapping) -> int:

@@ -131,6 +131,21 @@ def test_an_unknown_packing_overflow_word_is_refused(tmp_path):
         experiment.load_experiment(config_path)
 
 
+@pytest.mark.parametrize("bound", [0.5, True, -1, 0, "x"])
+def test_a_packing_bound_that_is_not_a_count_of_rounds_is_refused(
+    tmp_path, bound
+):
+    controller = dict(MINIMAL_CONFIG["controller"])
+    controller["packing_rounds_in_flight"] = bound
+    config_path = write_config(tmp_path, {"controller": controller})
+    sentence = (
+        "controller.packing_rounds_in_flight must be a whole count of "
+        "rounds, at least one, or null for no bound"
+    )
+    with pytest.raises(ValueError, match=sentence):
+        experiment.load_experiment(config_path)
+
+
 def test_the_bulk_strong_key_reaches_the_decoder_manager(tmp_path):
     config_path = write_config(
         tmp_path, {"decoder_manager": {"bulk_strong": True}}

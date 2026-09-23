@@ -380,7 +380,8 @@ controller:                        # controller work per round, in cycles of its
                                    # bus transfer, result return and the
                                    # conditional together: an upper bound here
   packing_rounds_in_flight: null   # packing assembly workspace: rounds in flight
-                                   # through the packing stage. null = unbounded
+                                   # through the packing stage, a whole count of
+                                   # at least one. null = unbounded
   packing_overflow: stall          # stall | drop_round: what the controller does
                                    # with a finished round the weak syndrome buffer (or the packing
                                    # workspace) cannot take. stall holds it upstream

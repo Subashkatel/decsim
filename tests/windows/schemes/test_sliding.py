@@ -1,8 +1,8 @@
 """The sliding row's two terminal policies, laid out by the row itself.
 
-Skoric et al. 2209.08552 section I.B for the (W, F) construction; Tan et
-al. 2209.09219 lines 952-955 for the last window, which is also
-qLDPC's SlidingWindowDecoder tail rule. The row's own docstring says
+Skoric et al. 2209.08552 section I.B for the (W, F) construction; qLDPC's
+SlidingWindowDecoder tail rule (qLDPC src/qldpc/decoders/sinter.py:
+776-777) for the last window. The row's own docstring says
 windows.terminal_policy is the one key it reads, so both branches are
 pinned here on the row, not through the planner.
 """

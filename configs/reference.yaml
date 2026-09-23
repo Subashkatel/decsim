@@ -277,8 +277,9 @@ windows:
   buffer_rounds: null              # look-ahead rounds per window; null = d
   terminal_policy: null            # flush | lookahead: how a finite stream drains
                                    # its last buffered window. flush ends the last
-                                   # window at the stream's last round, Tan's last
-                                   # window (2209.09219 lines 952-955); lookahead
+                                   # window at the stream's last round, qLDPC's last
+                                   # window (qLDPC src/qldpc/decoders/sinter.py:
+                                   # 776-777); lookahead
                                    # keeps the regular stride, so the last window
                                    # still reads rounds past its own commit. null,
                                    # the default, leaves the row on flush, and on

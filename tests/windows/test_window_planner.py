@@ -177,7 +177,7 @@ def qldpc_sliding_windows(round_count, width, stride):
 
 
 def test_the_sliding_tail_is_qldpcs_tail_on_every_shape_it_ships():
-    """The Tan flush terminal policy against qLDPC's loop, shape for shape."""
+    """The flush terminal policy against qLDPC's loop, shape for shape."""
     scheme = sliding_scheme.SlidingWindowScheme()
     for round_count in (5, 13, 20, 30, 31, 32, 33):
         for commit_rounds, buffer_rounds in ((3, 6), (3, 3), (2, 4), (5, 5)):

@@ -29,9 +29,9 @@ class DecoderTier(Enum):
 
 # windows.terminal_policy names one of these: how a finite serial stream
 # drains its last buffered window. flush ends the last window at the
-# stream's last round, which is Tan's last window (2209.09219 lines
-# 952-955); lookahead keeps the regular stride, so the last window
-# still reads rounds past its own commit.
+# stream's last round, which is qLDPC's last window (qLDPC
+# src/qldpc/decoders/sinter.py:776-777); lookahead keeps the regular
+# stride, so the last window still reads rounds past its own commit.
 TERMINAL_POLICIES = ("flush", "lookahead")
 
 

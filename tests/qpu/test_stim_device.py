@@ -273,7 +273,7 @@ def test_a_seeded_device_refuses_an_identity_it_cannot_hash_stably():
     circuit = memory_circuit(3, 3)
     operation = memory_operation(circuit, stream_id=("tuple",), stream_offset=0)
     device = stim_device.StimDevice(seed=7)
-    with pytest.raises(TypeError, match="int or str"):
+    with pytest.raises(ValueError, match="int or str"):
         device.begin_operation(operation, 3, 3, round_period_ticks=1_100_000)
 
 

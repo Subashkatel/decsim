@@ -656,7 +656,7 @@ def _check_sample_key(key) -> None:
     """Refuse an identity whose equality could alias a legal cache key."""
     key_type = type(key)
     if key_type not in (int, str):
-        raise TypeError(
+        raise ValueError(
             f"stream_id must be an int or str so the run's sampling is "
             f"reproducible across processes; sample key {key!r} is a "
             f"{key_type.__name__}"

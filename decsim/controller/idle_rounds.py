@@ -41,7 +41,7 @@ class IdleRoundAccounting:
     streams = ports.Port(feedback_streams.Streams)
     qpu = ports.Port(ports.Qpu)
 
-    def __init__(self, policy, geometry_by_patch):
+    def __init__(self, policy: ports.IdlePolicy, geometry_by_patch) -> None:
         self.policy = policy
         self.geometry_by_patch = geometry_by_patch
         self.operation_by_id: dict = {}

@@ -20,6 +20,7 @@ import functools
 from typing import Callable
 
 import decsim.config as config
+import decsim.engine as engine_module
 import decsim.ports as ports
 import decsim.records.program as program_records
 import decsim.records.rounds as round_records
@@ -38,7 +39,12 @@ class InstructionOutput:
     link = ports.Port(ports.Link)
     qpu = ports.Port(ports.Qpu)
 
-    def __init__(self, engine, clock: config.Clock, pulse_cycles: int) -> None:
+    def __init__(
+        self,
+        engine: engine_module.Engine,
+        clock: config.Clock,
+        pulse_cycles: int,
+    ) -> None:
         self.engine = engine
         self.clock = clock
         self.pulse_cycles = pulse_cycles

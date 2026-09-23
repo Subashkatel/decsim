@@ -27,6 +27,7 @@ from typing import Callable
 
 import decsim.controller.round_transmission as round_transmission
 import decsim.controller.settings as controller_settings
+import decsim.engine as engine_module
 import decsim.ports as ports
 import decsim.records.rounds as round_records
 import decsim.records.transfers as transfer_records
@@ -53,7 +54,7 @@ class HeldRounds:
 
     def __init__(
         self,
-        engine,
+        engine: engine_module.Engine,
         on_full: controller_settings.PackingOverflowPolicy,
     ) -> None:
         self.engine = engine
@@ -162,7 +163,7 @@ class SyndromeRoundSender:
     transmitter = ports.Port(round_transmission.RoundTransmitter)
     windows = ports.Port(ports.WindowInput)
 
-    def __init__(self, engine) -> None:
+    def __init__(self, engine: engine_module.Engine) -> None:
         self.engine = engine
 
     def start(self) -> None:

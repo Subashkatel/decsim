@@ -137,12 +137,12 @@ class FeedbackStreams:
 
     def __init__(
         self,
-        engine,
+        engine: engine_module.Engine,
         *,
         regions,
         resolved_operations,
         resolved_patches,
-    ):
+    ) -> None:
         self.engine = engine
         self.table = _StreamTable(
             regions, resolved_operations, resolved_patches

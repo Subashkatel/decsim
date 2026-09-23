@@ -281,7 +281,7 @@ def test_a_two_faced_window_costs_the_sum_of_its_two_one_sided_halves():
     also priced on a window whose oldest layer holds two detectors and
     whose newest holds one: 2 and 1, a sum no single layer of it gives.
     """
-    result = _pinned_run("forward_seam_pinned", 3)
+    result = _pinned_run("forward_seam_pinned", 3, 1)
     faces = _pinned_faces(result)
     charged = _charge_by_window(faces)
     counts = _face_counts(faces)
@@ -332,14 +332,14 @@ def _one_sided_halves() -> tuple:
 def test_a_far_pin_is_charged_the_layer_its_mask_lands_on():
     """The far face lands on the strong window's newest read layer.
 
-    On forward_seam_pinned at d=3, seed 100, the escalated window (1,0)
+    On forward_seam_pinned at d=3, seed 0, the escalated window (1,0)
     reads rounds 1 to 9 and pins its far face on (1,3), which commits
     from round 10: the message updates round 9, a bulk layer of
     d*d-1 = 8 detectors, while round 1 carries only (d*d-1)/2 = 4.
     Bombin 2303.04846 lines 775-788 makes that update the input the
     strong task reads, and it is one layer.
     """
-    result = _pinned_run("forward_seam_pinned", 3, 100)
+    result = _pinned_run("forward_seam_pinned", 3, 0)
     near, far = _pins_by_direction(result)
     assert far == [8]
     assert near == [8]
@@ -376,18 +376,18 @@ def test_a_backward_weak_hand_off_is_charged_the_layer_it_lands_on():
     window a neighbour on each side: at d=5 window (1,1) commits and
     reads 11-25, and window (1,2), which commits from round 26, hands
     its boundary back onto round 25. Two of that layer's detectors are
-    flipped at seed 0, and the sparse row charges one index per flip,
+    flipped at seed 62, and the sparse row charges one index per flip,
     ceil(log2(24)) = 5 bits each. Priced on round 11, where the message
     lands nothing, it would be free.
     """
-    result = _parallel_run(5)
+    result = _parallel_run(5, 62)
     charged = _hand_offs(result)
     assert charged[(2, 1)] == 10
-    assert charged[(2, 3)] == 10
+    assert charged[(2, 3)] == 5
     assert charged[(0, 1)] == 0
 
 
-def _parallel_run(distance: int):
+def _parallel_run(distance: int, seed: int):
     """One shot of the weak baseline cut into parallel windows.
 
     The sparse row prices the flips the message carries, so which layer
@@ -404,7 +404,7 @@ def _parallel_run(distance: int):
         settings.windows, kind="parallel", boundary_payload="sparse_seam_list"
     )
     settings = dataclasses.replace(settings, windows=windows)
-    machine = machine_module.Machine.build(settings, 0)
+    machine = machine_module.Machine.build(settings, seed)
     return machine.run()
 
 

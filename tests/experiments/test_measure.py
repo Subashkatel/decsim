@@ -166,7 +166,10 @@ def slow_unit_shot(tmp_path, units: int, card_microseconds: float = 5.0):
 
 
 def switching_run(
-    tmp_path, gap_threshold_db: float, run_both_at_once: bool = False
+    tmp_path,
+    gap_threshold_db: float,
+    run_both_at_once: bool = False,
+    seed: int = 0,
 ):
     """One collected shot of a 1.0 us weak tier beside a 10.0 us one.
 
@@ -221,14 +224,17 @@ def switching_run(
         round_period_us=1.0,
         shots=1,
     )
-    return collect.run_shot(task, 0)
+    return collect.run_shot(task, seed)
 
 
 def switching_shot(
-    tmp_path, gap_threshold_db: float, run_both_at_once: bool = False
+    tmp_path,
+    gap_threshold_db: float,
+    run_both_at_once: bool = False,
+    seed: int = 0,
 ):
     """That shot's measurement."""
-    shot = switching_run(tmp_path, gap_threshold_db, run_both_at_once)
+    shot = switching_run(tmp_path, gap_threshold_db, run_both_at_once, seed)
     return measure.measure_shot(shot)
 
 
@@ -584,12 +590,13 @@ def test_a_kept_weak_result_is_measured_on_the_weak_hops(tmp_path):
 
     The same config below the threshold keeps every weak result, so both
     link points read the weak path's one cycle and the two escalation
-    points are zero on every window. Window 3 is the exception that
-    makes the rule plain: the result it committed came from the second
-    of its two forced-class solves, which read the input the first solve
-    had already brought into the unit's memory, so that decode crossed
-    no link at all and its own hop is zero. The window's rounds still
-    crossed once, and shot_links.csv still counts that crossing.
+    points are zero on every window. On seed 50 window 3 is the
+    exception that makes the rule plain: the result it committed came
+    from the second of its two forced-class solves, which read the input
+    the first solve had already brought into the unit's memory, so that
+    decode crossed no link at all and its own hop is zero. The window's
+    rounds still crossed once, and shot_links.csv still counts that
+    crossing.
 
     Window 3 is where the park's two halves trade places. Its decode
     was dispatched with its sibling and waited 0.004 us for the input
@@ -599,7 +606,7 @@ def test_a_kept_weak_result_is_measured_on_the_weak_hops(tmp_path):
     is the plain case beside it: 1.064 us of dependency wait and no
     structural wait at all.
     """
-    measurement = switching_shot(tmp_path, -1000000.0)
+    measurement = switching_shot(tmp_path, -1000000.0, seed=50)
 
     samples = measurement.samples
     weak_hops = [0.004] * 3 + [0.0] + [0.004] * 6
@@ -698,9 +705,9 @@ def test_the_shipped_weak_baseline_sums_to_its_reaction_time():
 def test_the_shipped_two_tier_config_sums_to_its_reaction_time():
     """The identity on every window of configs/two_tiers.yaml.
 
-    Windows 3 to 6 escalated: their weak attempt, the strong decode that
-    committed and the hops around it are the whole path, and their
-    confidence step is zero because the attempt already runs to the
+    Windows 0, 1, 8 and 9 escalated: their weak attempt, the strong
+    decode that committed and the hops around it are the whole path, and
+    their confidence step is zero because the attempt already runs to the
     verdict. The other six kept a weak result whose complementary gap
     ran a second forced-class solve after it, and that solve is their
     confidence step (decision D2, and Toshio et al. 2510.25222 Sec.
@@ -711,8 +718,8 @@ def test_the_shipped_two_tier_config_sums_to_its_reaction_time():
 
     measurement = measure.measure_shot(shot)
     gaps = chain_gap_ticks(shot, measurement)
-    escalated = [3, 4, 5, 6]
-    with_a_later_solve = [0, 1, 2, 7, 8, 9]
+    escalated = [0, 1, 8, 9]
+    with_a_later_solve = [2, 3, 4, 5, 6, 7]
     decoded = escalated + with_a_later_solve
     assert sorted(gaps) == sorted(decoded)
     for window_id in escalated:

@@ -26,7 +26,7 @@ POINT = {
 SEED = 0
 # the log hash of the point; it moves when a log line changes text, and the
 # results the gate hashes do not move with it
-POINT_LOG_SHA256 = "1f76ae71ab61"
+POINT_LOG_SHA256 = "42b473b3cb9c"
 
 
 def settings(**observation_changes):

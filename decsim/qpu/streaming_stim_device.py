@@ -18,7 +18,6 @@ import decsim.qpu.stim_stream_models as stream_models
 import decsim.records.circuits as circuit_records
 import decsim.records.program as program_records
 import decsim.records.rounds as round_records
-import decsim.records.seeds as seed_records
 import decsim.records.windows as window_records
 import decsim.seeding as seeding
 import decsim.trace_source as trace_source
@@ -62,7 +61,9 @@ class StreamingStimDevice(seeding._AtomicRunSeedConsumer):
         del round_count
         program = self._program_for(stream_operation)
         stream_id = stream_operation.id
-        seed = _stream_seed(self._seed, stream_id)
+        seed = None
+        if self._seed is not None:
+            seed = seeding.substream_seed(self._seed, (stream_id,))
         history = _History(seed)
         period_ticks = _declared_round_period(program)
         self._streams_by_id[stream_id] = _Stream(
@@ -409,16 +410,6 @@ def _copied_programs(programs):
             raise ValueError("live Stim stream identities must be int or str")
         copied[stream_id] = dataclasses.replace(program)
     return copied
-
-
-def _stream_seed(seed, stream_id):
-    if seed is None:
-        return None
-    kind = "string_key"
-    if type(stream_id) is int:
-        kind = "integer_key"
-    segment = seed_records.RunSeedPathSegment(kind, stream_id)
-    return seeding.derive_component_seed(seed, (segment,))
 
 
 def _declared_round_period(program):

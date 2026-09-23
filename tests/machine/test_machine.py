@@ -974,10 +974,11 @@ def test_a_union_find_weak_tier_reports_the_gap_of_its_own_growth():
     decode returned (Meister et al. 2405.07433 Algorithm 2 lines
     518-536), and the unit charged that decode. The matching run beside
     it is the comparison the charge is read against: Union-Find's own
-    decode is this implementation's, not sparse blossom's.
+    decode is this implementation's, not sparse blossom's. Seed 1 is a
+    shot in which no window escalates, so every decode is a weak one.
     """
     settings = _switching_memory("union_find", "cluster_gap")
-    machine = machine_module.Machine.build(settings, 0)
+    machine = machine_module.Machine.build(settings, 1)
     result = machine.run()
     assert result.terminal_status == "complete"
     assert result.operation_results[0].logical_observables == (0,)
@@ -990,7 +991,7 @@ def test_a_union_find_weak_tier_reports_the_gap_of_its_own_growth():
     window_count = len(machine.observation.decode_records.services)
     assert len(requests) == window_count
     matching_settings = _switching_memory("pymatching", "complementary_gap")
-    matching = machine_module.Machine.build(matching_settings, 0)
+    matching = machine_module.Machine.build(matching_settings, 1)
     matching.run()
     union_find_services = _weak_service_ticks(machine)
     matching_services = _weak_service_ticks(matching)
@@ -1020,10 +1021,11 @@ def test_the_cluster_gaps_walk_is_charged_on_the_unit_that_grew_it():
     union-find decode's own edge intervals (2405.07433 lines 518-536),
     so the evidence and its reader are the same hardware. The run
     charges one walk per window on the weak unit, and each weak service
-    ends after the decode and the walk it fed.
+    ends after the decode and the walk it fed. Seed 1 is a shot in which
+    no window escalates, so every service is a weak one.
     """
     settings = _switching_memory("union_find", "cluster_gap")
-    machine = machine_module.Machine.build(settings, 0)
+    machine = machine_module.Machine.build(settings, 1)
     machine.run()
     charged = _confidence_charges(machine)
     services = machine.observation.decode_records.services
@@ -2086,6 +2088,11 @@ CAMPAIGN_ROUND_COUNT = 30  # the shared base's rounds_per_shot, 10d at d 3
 CAMPAIGN_PHYSICAL_ERROR = 0.001  # the smallest p of every family's sweep
 CAMPAIGN_ROUND_PERIOD_US = 1.0
 CAMPAIGN_SHOT_COUNT = 8
+# seeds 9 to 16: the eight shots include windows the switching families
+# escalate, which the kept-window rule needs beside it
+CAMPAIGN_FIRST_SEED = 9
+CAMPAIGN_SEED_END = CAMPAIGN_FIRST_SEED + CAMPAIGN_SHOT_COUNT
+CAMPAIGN_SEEDS = range(CAMPAIGN_FIRST_SEED, CAMPAIGN_SEED_END)
 CAMPAIGN_WINDOW_COUNT = 10  # 30 rounds committed 3 at a time
 SINGLE_TIER_FAMILIES = (
     "pymatching_weak",
@@ -2149,7 +2156,7 @@ def timed_and_untimed_decodes(family):
     task = campaign_point_task(family)
     models = built_window_models.BuiltWindowModels()
     decodes = []
-    for seed in range(CAMPAIGN_SHOT_COUNT):
+    for seed in CAMPAIGN_SEEDS:
         settings = task.shot_settings(models)
         machine = machine_module.Machine.build(settings, seed)
         untimed = machine_module.Machine.build(settings, seed)
@@ -2216,7 +2223,7 @@ def test_a_switching_familys_kept_windows_match_the_untimed_weak_model(family):
     tier (Toshio et al. 2510.25222 Sec. III A), so only the windows the
     weak verdict kept are the weak model's to answer; the escalated ones
     are counted and left to the strong tier. Eight shots at p = 0.001
-    and d = 3 escalate one or two of their eighty windows, and every
+    and d = 3 escalate one of their eighty windows, and every
     window the verdict kept carries the correction the untimed weak row
     decodes from the same window error model and the same syndrome
     (IBM arXiv 2510.21600 lines 488-495).
@@ -2268,7 +2275,7 @@ def campaign_predictions_and_events(family):
     predictions = []
     shot_events = []
     sampled = None
-    for seed in range(CAMPAIGN_SHOT_COUNT):
+    for seed in CAMPAIGN_SEEDS:
         settings = task.shot_settings(models)
         machine = machine_module.Machine.build(settings, seed)
         result = machine.run()

@@ -4,12 +4,12 @@ Every round carries one bit per measure qubit and the final round of a
 memory circuit also carries the data-qubit readout (Stim,
 src/stim/gen/gen_surface_code.cc); detection events are formed at the
 decoder input by form_round. One shot is sampled per stream identity,
-under a blake2b substream of the root seed so a run is reproducible
-across processes, and reused by every segment of the stream.
+under that identity's substream of the root seed (seeding.substream_seed)
+so a run is reproducible across processes, and reused by every segment
+of the stream.
 """
 
 import dataclasses
-import hashlib
 import numbers
 from collections.abc import Sequence
 from typing import Any, Optional
@@ -413,28 +413,12 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
             source_binding_by_key={},
         )
 
-    def _sample_seed_for(self, key) -> int:
-        """A substream seed that is stable across processes for one identity."""
-        key_type_tag = b"str"
-        if type(key) is int:
-            key_type_tag = b"int"
-        root_text = str(self._seed)
-        key_text = str(key)
-        root_bytes = root_text.encode()
-        key_bytes = key_text.encode()
-        hash_input = b"\0".join(
-            (root_bytes, b"stim_device", key_type_tag, key_bytes)
-        )
-        hasher = hashlib.blake2b(hash_input, digest_size=8)
-        digest = hasher.digest()
-        return int.from_bytes(digest, "big")
-
     def _sampler_for(
         self, key, circuit: stim.Circuit
     ) -> stim.CompiledMeasurementSampler:
         if self._seed is None:
             return circuit.compile_sampler()
-        sample_seed = self._sample_seed_for(key)
+        sample_seed = seeding.substream_seed(self._seed, (key,))
         return circuit.compile_sampler(seed=sample_seed)
 
     def _readouts(self, key, operation, round_index, bits):

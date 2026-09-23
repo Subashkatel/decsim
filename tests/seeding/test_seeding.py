@@ -110,6 +110,21 @@ def test_a_component_seed_is_blake2b_over_the_namespace_root_and_path():
     assert derived == independent
 
 
+def test_a_substream_seed_is_the_component_law_over_its_framed_keys():
+    path = (
+        seed_records.RunSeedPathSegment("string_key", "stream"),
+        seed_records.RunSeedPathSegment("integer_key", 4),
+    )
+    independent = blake2b_seed(23, path)
+    derived = seeding.substream_seed(23, ("stream", 4))
+    assert derived == independent
+
+
+def test_a_substream_key_that_is_not_an_int_or_str_is_refused():
+    with pytest.raises(ValueError, match="must be an int or str"):
+        seeding.substream_seed(23, (("stream", 4),))
+
+
 def test_the_root_seed_alone_derives_the_seed_of_the_empty_path():
     independent = blake2b_seed(0, ())
     derived = seeding.derive_component_seed(0, ())

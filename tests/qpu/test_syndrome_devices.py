@@ -8,6 +8,9 @@ gem5's packet trace records a size and no data (gem5
 src/proto/packet.proto).
 """
 
+import dataclasses
+import random
+
 import pytest
 
 import decsim.ports as ports
@@ -15,6 +18,7 @@ import decsim.qpu.code_geometry as code_geometry
 import decsim.qpu.syndrome_devices as syndrome_devices
 import decsim.records.program as program_records
 import decsim.records.rounds as round_records
+import decsim.seeding as seeding
 
 
 def first_payload(device, operation, round_index):
@@ -87,7 +91,7 @@ def test_a_rounds_fake_bits_do_not_depend_on_the_rounds_drawn_before_it():
 
     Which operation's round the clock draws first is decided by other
     components' timing; the Stim source keeps each stream's shot under
-    its own substream for the same reason (stim_device._sample_seed_for).
+    its own substream for the same reason (seeding.substream_seed).
     """
     code = code_geometry.SurfaceCodeModel(distance=3)
     first = program_records.Operation(id=1, name="memory", qubits=(0,))
@@ -98,6 +102,20 @@ def test_a_rounds_fake_bits_do_not_depend_on_the_rounds_drawn_before_it():
     payload_alone = first_payload(alone, first, 1)
     payload_after_another = first_payload(after_another, first, 1)
     assert payload_after_another.bits == payload_alone.bits
+
+
+def test_a_fake_bit_payload_draws_under_its_stream_round_and_patches():
+    code = code_geometry.SurfaceCodeModel(distance=3)
+    device = syndrome_devices.SyndromeBitDevice(code, seed=1)
+    operation = program_records.Operation(
+        id=4, name="memory", qubits=(0,), patches=(7,)
+    )
+    segment = dataclasses.replace(operation, stream_id="s", stream_offset=2)
+    payload_seed = seeding.substream_seed(1, ("s", 5, 7))
+    generator = random.Random(payload_seed)
+    oracle_bits = [generator.randint(0, 1) for _ in range(8)]
+    payload = first_payload(device, segment, 3)
+    assert payload.bits == oracle_bits
 
 
 def test_one_payload_per_patch_when_asked():

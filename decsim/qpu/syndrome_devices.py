@@ -140,11 +140,11 @@ class SyndromeBitDevice(seeding._AtomicRunSeedConsumer):
     """Emits seeded random bits shaped like the code card's syndrome.
 
     Each payload draws from a generator of its own, seeded by the
-    device's seed, the stream, the round and the patches, the way the
-    Stim source samples each stream under its own substream
-    (stim_device.py, _sample_seed_for). A round's bits therefore depend
-    on the seed and the round alone, and not on how many rounds another
-    operation drew before it, which another component's timing decides.
+    substream of its stream, round and patches (seeding.substream_seed,
+    the rule the Stim source samples each stream under). A round's bits
+    therefore depend on the seed and the round alone, and not on how many
+    rounds another operation drew before it, which another component's
+    timing decides.
     """
 
     operation_circuit_scope = "none"
@@ -263,16 +263,12 @@ class SyndromeBitDevice(seeding._AtomicRunSeedConsumer):
     def _payload_generator(
         self, target: Any, global_round: int, patches: tuple
     ) -> random.Random:
-        """The generator of one payload; an unseeded device draws entropy.
-
-        random.Random hashes a text seed with SHA-512, so the same text
-        gives the same bits in every process (Python's random module,
-        seed version 2).
-        """
+        """The generator of one payload; an unseeded device draws entropy."""
         if self._seed is None:
             return random.Random()
-        payload_identity = f"{self._seed}|{target!r}|{global_round}|{patches!r}"
-        return random.Random(payload_identity)
+        keys = (target, global_round, *patches)
+        payload_seed = seeding.substream_seed(self._seed, keys)
+        return random.Random(payload_seed)
 
     def _payload(
         self, target: Any, patches: tuple, global_round: int, bits: list

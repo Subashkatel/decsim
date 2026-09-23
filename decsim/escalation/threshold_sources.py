@@ -204,11 +204,15 @@ class OnlineThresholdController:
     budget; only a full clean quota shrinks the target.
 
     The target always stays inside [min_escalation_rate,
-    max_escalation_rate]; the max is where the yaml writes the backlog
-    bound of Toshio 2510.25222 Theorem 1 (lines 1272-1291): the strong
-    tier's duty cycle may never exceed what its latency can absorb,
-    whatever accuracy would prefer. The number is the yaml's, and
-    nothing here derives it from the theorem's inputs.
+    max_escalation_rate], whatever accuracy would prefer. The max caps
+    the windows escalated on their gap, and the audited windows reach
+    the strong tier on top of them, audit_rate of the kept ones. The
+    switching rate of Toshio 2510.25222 Theorem 1 (lines 1272-1291)
+    counts every window the strong tier decodes (lines 1333-1340), so
+    the strong duty is at most max_escalation_rate plus audit_rate, and
+    a yaml that writes the theorem's backlog bound leaves room for the
+    audits under it. The number is the yaml's, and nothing here derives
+    it from the theorem's inputs.
     """
 
     def __init__(

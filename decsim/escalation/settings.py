@@ -98,8 +98,10 @@ class OnlineThresholdSettings:
     windows; one revised audit multiplies the target by adjust_factor,
     and only ceil(3 / kept_bad_budget) consecutive clean audits divide it
     back. The target stays inside [min_escalation_rate,
-    max_escalation_rate]; the max is the Theorem 1 backlog cap. Defaults
-    are the validated drift-replay configuration.
+    max_escalation_rate]. The audits reach the strong tier on top of the
+    target, so the strong duty is at most max_escalation_rate plus
+    audit_rate (threshold_sources.py, OnlineThresholdController).
+    Defaults are the validated drift-replay configuration.
     """
 
     target_escalation_rate: float = 1e-3

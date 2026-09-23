@@ -285,9 +285,9 @@ def bandwidth_limited_profile(
 ) -> settings.FabricSettings:
     """The reference card with finite rates from the run's own geometry.
 
-    Same latencies, paths and payload rules as logical_reference_profile,
-    so switching cards changes bandwidth and nothing else. Capacity is
-    bits per microsecond.
+    Same paths and payload rules as logical_reference_profile, and its
+    latencies read from that card, so switching cards changes bandwidth
+    and nothing else. Capacity is bits per microsecond.
 
     Every path is provisioned to carry exactly its nominal traffic in one
     commit region (qc: one round's syndrome bits per round period), so at
@@ -338,10 +338,10 @@ def bandwidth_limited_profile(
     instruction_word_source = (
         INSTRUCTION_WORD_SOURCE + ", one per commit region"
     )
-    provisioning = _Provisioning(capacity_scale)
+    reference = logical_reference_profile()
+    provisioning = _Provisioning(capacity_scale, reference)
     qpu_to_controller = provisioning.path(
         "qpu_to_controller",
-        0.15,
         syndrome_bits_per_round,
         round_bits_per_microsecond,
         "one syndrome round per round period",
@@ -349,7 +349,6 @@ def bandwidth_limited_profile(
     )
     controller_to_weak_buffer = provisioning.path(
         "controller_to_weak_buffer",
-        WEAK_STORE_LATENCY_MICROSECONDS,
         syndrome_bits_per_round,
         round_bits_per_microsecond,
         "one packed round per round period",
@@ -357,7 +356,6 @@ def bandwidth_limited_profile(
     )
     controller_to_strong_buffer = provisioning.path(
         "controller_to_strong_buffer",
-        STRONG_STORE_LATENCY_MICROSECONDS,
         syndrome_bits_per_round,
         round_bits_per_microsecond,
         "one packed round per round period",
@@ -365,7 +363,6 @@ def bandwidth_limited_profile(
     )
     weak_buffer_to_weak_decoder = provisioning.path(
         "weak_buffer_to_weak_decoder",
-        2.0,
         weak_window_bits,
         weak_window_bits_per_microsecond,
         "one weak window of rcom+rbuf rounds per commit region "
@@ -375,7 +372,6 @@ def bandwidth_limited_profile(
     )
     weak_decoder_to_strong_decoder = provisioning.path(
         "weak_decoder_to_strong_decoder",
-        0.5,
         strong_window_bits,
         strong_window_bits_per_microsecond,
         "one strong window of rcom+2rbuf rounds per commit region "
@@ -385,7 +381,6 @@ def bandwidth_limited_profile(
     )
     strong_buffer_to_strong_decoder = provisioning.path(
         "strong_buffer_to_strong_decoder",
-        2.0,
         strong_window_bits,
         strong_window_bits_per_microsecond,
         "one strong window of rcom+2rbuf rounds per commit region "
@@ -395,7 +390,6 @@ def bandwidth_limited_profile(
     )
     weak_decoder_to_frame = provisioning.path(
         "weak_decoder_to_frame",
-        1.0,
         1,
         one_per_region,
         "one frame-update bit per logical observable per commit region",
@@ -403,7 +397,6 @@ def bandwidth_limited_profile(
     )
     decoder_to_decoder = provisioning.path(
         "decoder_to_decoder",
-        0.5,
         syndrome_bits_per_round,
         boundary_bits_per_microsecond,
         "one dense seam layer per commit region",
@@ -411,7 +404,6 @@ def bandwidth_limited_profile(
     )
     strong_decoder_to_frame = provisioning.path(
         "strong_decoder_to_frame",
-        1.0,
         1,
         one_per_region,
         "one frame-update bit per logical observable per commit region",
@@ -419,7 +411,6 @@ def bandwidth_limited_profile(
     )
     frame_to_controller = provisioning.path(
         "frame_to_controller",
-        4.0,
         BUS_WORD_BITS,
         bus_word_bits_per_microsecond,
         bus_word_source,
@@ -427,7 +418,6 @@ def bandwidth_limited_profile(
     )
     controller_to_qpu = provisioning.path(
         "controller_to_qpu",
-        0.15,
         INSTRUCTION_WORD_BITS,
         instruction_word_bits_per_microsecond,
         instruction_word_source,
@@ -885,15 +875,17 @@ def _carded_path(
 
 
 class _Provisioning:
-    """The bounded card's paths: one channel per path at a scaled rate."""
+    """The bounded card's paths: the reference latency at a scaled rate."""
 
-    def __init__(self, capacity_scale: float):
+    def __init__(
+        self, capacity_scale: float, reference: settings.FabricSettings
+    ):
         self._capacity_scale = fractions.Fraction(str(capacity_scale))
+        self._reference = reference
 
     def path(
         self,
         name: str,
-        latency_microseconds: float,
         bits: int,
         nominal_bits_per_microsecond: fractions.Fraction,
         source: str,
@@ -903,7 +895,9 @@ class _Provisioning:
         capacity = settings.CapacitySettings(
             rate, settings.QuantityBasis.AGGREGATE, None, source
         )
-        latency_ticks = config.microseconds_to_ticks(latency_microseconds)
+        reference_path = getattr(self._reference, name)
+        reference_channel = reference_path.channel
+        latency_ticks = reference_channel.propagation_latency_ticks
         channel = settings.ChannelSettings(
             name, latency_ticks, capacity, source
         )

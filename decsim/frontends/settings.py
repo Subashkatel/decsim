@@ -14,6 +14,8 @@ import decsim.tables as tables
 import decsim.windows.built_window_models as built_window_models
 
 FEEDBACK_BOUNDARY_MODES = ("trailing_buffer", "measurement_closed")
+# The workload keys the memory_circuit row reads beside kind.
+_MEMORY_CIRCUIT_KEYS = ("code_task", "rounds_per_shot")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -136,7 +138,19 @@ class MemoryCircuitWorkload:
 
     @staticmethod
     def from_yaml(section: Mapping) -> dict:
-        """The `workload` keys this row reads, as settings fields."""
+        """The `workload` keys this row reads, as settings fields.
+
+        The row reads exactly its two keys, so a misspelt or a missing
+        one is refused here rather than run on a default.
+        """
+        given = set(section) - {"kind"}
+        if given != set(_MEMORY_CIRCUIT_KEYS):
+            listed = sorted(given)
+            raise ValueError(
+                "workload.kind memory_circuit reads the keys "
+                f"{list(_MEMORY_CIRCUIT_KEYS)} beside kind; the section "
+                f"has {listed}"
+            )
         rounds_per_shot = RoundsPerShot.from_yaml(section["rounds_per_shot"])
         return {
             "code_task": section["code_task"],

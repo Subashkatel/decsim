@@ -100,3 +100,13 @@ def test_each_python_only_row_refuses_a_yaml_by_name(tmp_path):
         )
         with pytest.raises(ValueError, match=sentence):
             experiment.load_experiment(config_path)
+
+
+def test_a_memory_circuit_key_off_its_list_is_refused():
+    section = {
+        "kind": "memory_circuit",
+        "code_task": "surface_code:rotated_memory_z",
+        "round_per_shot": 15,
+    }
+    with pytest.raises(ValueError, match="memory_circuit reads the keys"):
+        workload_settings.WorkloadSettings.from_yaml(section)

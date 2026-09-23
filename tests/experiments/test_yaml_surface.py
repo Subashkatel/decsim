@@ -251,11 +251,13 @@ def test_the_default_decoder_manager_does_not_batch(tmp_path):
     assert config.settings.decoder_manager.bulk_strong is False
 
 
-def test_a_bulk_strong_that_is_not_a_flag_is_refused(tmp_path):
+@pytest.mark.parametrize("value", ["batch", 1, 0])
+def test_a_bulk_strong_that_is_not_a_flag_is_refused(tmp_path, value):
+    """A one or a zero equals a flag in Python and is still no flag."""
     config_path = write_config(
-        tmp_path, {"decoder_manager": {"bulk_strong": "batch"}}
+        tmp_path, {"decoder_manager": {"bulk_strong": value}}
     )
-    sentence = "decoder_manager.bulk_strong must be true or false, got 'batch'"
+    sentence = f"decoder_manager.bulk_strong {value!r} is not a boolean"
     with pytest.raises(ValueError, match=sentence):
         experiment.load_experiment(config_path)
 

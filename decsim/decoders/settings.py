@@ -351,11 +351,7 @@ class DecoderManagerSettings:
                 f"{list(DECODER_MANAGER_KEYS)}"
             )
         bulk_strong = section.get("bulk_strong", False)
-        if bulk_strong not in (True, False):
-            raise ValueError(
-                "decoder_manager.bulk_strong must be true or false, got "
-                f"{bulk_strong!r}"
-            )
+        _check_boolean("decoder_manager", "bulk_strong", bulk_strong)
         dispatch_cycles = section.get("dispatch_cycles", 0)
         clock = _dispatch_clock(section, clocks, dispatch_cycles)
         return cls(

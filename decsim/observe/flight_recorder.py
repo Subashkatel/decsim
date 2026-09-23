@@ -163,17 +163,7 @@ class RunLedgerView:
         return problems
 
     def _one_terminal_per_round(self) -> list:
-        round_terminals: dict = {}
-        emitted_rounds = set()
-        for event in self.events:
-            if event.round is None or event.window is not None:
-                continue
-            key = (event.op, event.round)
-            if event.kind == "EMITTED":
-                emitted_rounds.add(key)
-            if event.status == "terminal":
-                terminals = round_terminals.setdefault(key, [])
-                terminals.append(event.kind)
+        emitted_rounds, round_terminals = _round_terminals(self.events)
         problems = []
         for key in sorted(emitted_rounds, key=repr):
             terminals = round_terminals.get(key, [])
@@ -190,6 +180,26 @@ class RunLedgerView:
 
 def _event_id(event: LedgerEvent) -> int:
     return event.event_id
+
+
+def _round_terminals(events: tuple) -> tuple:
+    """The rounds the QPU emitted, and each round's terminal kinds.
+
+    Only a round's own controller chain counts: a window's rows name the
+    window, and their terminal is the window's, not the round's.
+    """
+    round_terminals: dict = {}
+    emitted_rounds = set()
+    for event in events:
+        if event.round is None or event.window is not None:
+            continue
+        key = (event.op, event.round)
+        if event.kind == "EMITTED":
+            emitted_rounds.add(key)
+        if event.status == "terminal":
+            terminals = round_terminals.setdefault(key, [])
+            terminals.append(event.kind)
+    return emitted_rounds, round_terminals
 
 
 _ROUND_TERMINALS = ("PUBLISHED", "DROPPED", "FEEDBACK_MEMORY_DELIVERED")

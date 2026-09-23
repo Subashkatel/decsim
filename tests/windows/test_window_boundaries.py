@@ -13,6 +13,7 @@ import types
 import pytest
 
 import decsim.engine as engine_module
+import decsim.links.channel as channel_module
 import decsim.links.fabric as fabric
 import decsim.links.link_profiles as link_profiles
 import decsim.links.window_transfers as window_transfers
@@ -69,7 +70,7 @@ def test_a_stale_delivery_is_ignored_and_the_edge_releases_once():
         round_count_of=lambda _operation_id: 20,
     )
     profile = link_profiles.logical_reference_profile()
-    links = fabric.LinkFabric(profile, engine)
+    links = fabric.LinkFabric(profile, engine, channel_module.Channel)
     boundary_payload = boundary_payloads.DenseSeamMask()
     interaction = window_interactions.DefaultWindowInteraction(
         0, boundary_payload
@@ -173,7 +174,7 @@ def _pinned_courier():
         round_count_of=lambda _operation_id: 20,
     )
     profile = link_profiles.logical_reference_profile()
-    links = fabric.LinkFabric(profile, engine)
+    links = fabric.LinkFabric(profile, engine, channel_module.Channel)
     boundary_payload = boundary_payloads.DenseSeamMask()
     interaction = window_interactions.DefaultWindowInteraction(
         0, boundary_payload

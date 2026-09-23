@@ -1665,6 +1665,43 @@ class WindowTransfers(Protocol):
         """Send an escalated region in its request's name; the delay."""
 
 
+@runtime_checkable
+class Channel(Protocol):
+    """One physical channel under the fabric: its setup engine and its wire.
+
+    One step below Link: the fabric selects a path's payload, frames it
+    with the path's header and hands it to the channel the path's card
+    names; the channel decides when the bits cross and calls back at
+    the delivery. The split is ns-3's, where the net device frames and
+    queues and the channel it is attached to times the crossing (ns-3
+    src/point-to-point/model/point-to-point-net-device.cc TransmitStart
+    calls point-to-point-channel.cc TransmitStart), and gem5's, where a
+    port hands its packets to the packet queue that decides when each
+    one goes (gem5 src/mem/port.hh, src/mem/packet_queue.hh:62-63).
+
+    A Link row's build hands the fabric a channel class, which the
+    fabric calls once per channel name with that channel's
+    ChannelSettings and the engine, so a jittered or credit-limited
+    channel is one class and no fabric subclass. framed is a
+    FramedPayload (decsim/links/channel.py): the payload bits a
+    component sent and the header bits its path adds.
+    """
+
+    def send(
+        self,
+        framed,
+        now_ticks: int,
+        setup_ticks: int,
+        on_delivered: Callable[[transfer_records.Transfer], None],
+    ) -> None:
+        """Carry one framed payload; on_delivered runs at its delivery."""
+
+    def expected_delay_ticks(
+        self, framed, now_ticks: int, setup_ticks: int
+    ) -> int:
+        """What the transfer would pay if nothing else reached the channel."""
+
+
 # ------------------------------------ the pluggable policies off the path
 
 

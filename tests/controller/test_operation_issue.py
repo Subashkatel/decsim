@@ -15,6 +15,7 @@ import decsim.controller.feedback_streams as feedback_streams
 import decsim.controller.instruction_output as instruction_output
 import decsim.controller.operation_issue as operation_issue
 import decsim.engine as engine_module
+import decsim.links.channel as channel_module
 import decsim.links.fabric as fabric_module
 import decsim.links.link_profiles as link_profiles
 import decsim.observe.log_writers as log_writers
@@ -79,7 +80,9 @@ def resolved(operation_id, round_ticks=1000, round_count=6):
 def issuer_with(engine, qpu, idle_rounds, windows, recorder):
     reference = link_profiles.logical_reference_profile()
     output = instruction_output.InstructionOutput(engine, CLOCK, PULSE_TICKS)
-    output.link = fabric_module.LinkFabric(reference, engine)
+    output.link = fabric_module.LinkFabric(
+        reference, engine, channel_module.Channel
+    )
     output.qpu = qpu
     if recorder is not None:
         output.trace.output_event.connect(recorder.output)

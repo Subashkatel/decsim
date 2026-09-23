@@ -508,6 +508,15 @@ The link fabric, as a sender that names a window or a job sees it.
 | `send_boundary` | Send one boundary on its path, in its attribution's name. |
 | `send_region` | Send an escalated region in its request's name; the delay. |
 
+### `Channel`
+
+One physical channel under the fabric: its setup engine and its wire.
+
+| Method | What it does |
+| --- | --- |
+| `send` | Carry one framed payload; on_delivered runs at its delivery. |
+| `expected_delay_ticks` | What the transfer would pay if nothing else reached the channel. |
+
 ## the pluggable policies off the path
 
 ### `BoundaryPolicy`

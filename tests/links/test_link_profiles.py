@@ -483,7 +483,7 @@ class CountingFabric:
     @staticmethod
     def build(card, engine):
         """One LinkFabric, with every send counted on the way through."""
-        return _CountingLinkFabric(card, engine)
+        return _CountingLinkFabric(card, engine, channel_module.Channel)
 
 
 class _CountingLinkFabric(fabric_module.LinkFabric):

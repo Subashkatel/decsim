@@ -28,6 +28,7 @@ from typing import Optional
 
 import decsim.config as config
 import decsim.engine
+import decsim.links.channel as channel_module
 import decsim.links.fabric as fabric
 import decsim.links.settings as settings
 import decsim.ports as ports
@@ -594,7 +595,7 @@ class LogicalReferenceFabric:
         card: settings.FabricSettings, engine: decsim.engine.Engine
     ) -> ports.Link:
         """The object that carries this run's transfers."""
-        return fabric.LinkFabric(card, engine)
+        return fabric.LinkFabric(card, engine, channel_module.Channel)
 
 
 class BandwidthLimitedFabric:
@@ -626,7 +627,7 @@ class BandwidthLimitedFabric:
         card: settings.FabricSettings, engine: decsim.engine.Engine
     ) -> ports.Link:
         """The object that carries this run's transfers."""
-        return fabric.LinkFabric(card, engine)
+        return fabric.LinkFabric(card, engine, channel_module.Channel)
 
 
 class RoceV2CpuFabric:
@@ -649,7 +650,7 @@ class RoceV2CpuFabric:
         card: settings.FabricSettings, engine: decsim.engine.Engine
     ) -> ports.Link:
         """The object that carries this run's transfers."""
-        return fabric.LinkFabric(card, engine)
+        return fabric.LinkFabric(card, engine, channel_module.Channel)
 
 
 class RoceV2GpuFabric:
@@ -674,7 +675,7 @@ class RoceV2GpuFabric:
         card: settings.FabricSettings, engine: decsim.engine.Engine
     ) -> ports.Link:
         """The object that carries this run's transfers."""
-        return fabric.LinkFabric(card, engine)
+        return fabric.LinkFabric(card, engine, channel_module.Channel)
 
 
 # links.kind names one of these rows: which fabric model carries the

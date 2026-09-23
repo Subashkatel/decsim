@@ -81,7 +81,7 @@ study most often extends:
 | `SYNDROME_BUFFERS` | `row(settings)`, the section's record, whose `row_settings` holds the row's own `Settings` | `decsim/build/stores.py` |
 | `IDLE_POLICIES` | `row()`, or `row(settings=...)` for a row with a `Settings` | `decsim/build/plan.py`, `_idle_policy` |
 | `BOUNDARY_POLICIES`, `BOUNDARY_PAYLOADS` | `row()` | `decsim/build/plan.py` |
-| `LINK_FABRICS` | not built: the yaml load calls `row.base_card()` for the numbers the section's per-path cards override, and the root calls `row.build(card, engine)` for the `Link` the run sends on, which also carries `trace.transfer_delivered` for the traffic ledger | `decsim/links/link_profiles.py`, `from_yaml`; `decsim/build/stores.py`, `build_links` |
+| `LINK_FABRICS` | not built: the yaml load calls `row.base_card()` for the numbers the section's per-path cards override, and the root calls `row.build(card, engine)` for the `Link` the run sends on, which also carries `trace.transfer_delivered` for the traffic ledger; a row that keeps the fabric and changes how a wire times its bits hands `LinkFabric` its own `Channel` class instead | `decsim/links/link_profiles.py`, `from_yaml`; `decsim/build/stores.py`, `build_links` |
 
 A syndrome source also says where the run's window models come from,
 through its `window_model_source` method, unless Python names another

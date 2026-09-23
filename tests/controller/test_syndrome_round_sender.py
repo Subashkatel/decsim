@@ -33,6 +33,7 @@ import decsim.controller.settings as controller_settings
 import decsim.controller.syndrome_round_sender as syndrome_round_sender
 import decsim.detector_error_model.detection_event_formation as formation
 import decsim.engine as engine_module
+import decsim.links.channel as channel_module
 import decsim.links.fabric as fabric_module
 import decsim.links.link_profiles as link_profiles
 import decsim.observe.round_events as round_events
@@ -122,7 +123,7 @@ def sender_with(
     weak_store.held_rounds = held
     transmitter = RecordingTransmitter(engine)
     profile = link_profiles.logical_reference_profile()
-    links = fabric_module.LinkFabric(profile, engine)
+    links = fabric_module.LinkFabric(profile, engine, channel_module.Channel)
     windows = RecordingWindows()
     weak_receiver = weak_syndrome_round_receiver.WeakSyndromeRoundReceiver(
         engine, settings

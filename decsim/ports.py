@@ -2162,9 +2162,9 @@ class RowSettings(Protocol):
 class WorkloadRow(Protocol):
     """A workload row: what the machine runs, as the root reads it.
 
-    Table rows: memory_circuit, circuit_list, surgery_ir (WORKLOADS,
-    frontends/settings.py), named by workload.kind. The root never
-    builds a workload row; it reads the class. operations turns the
+    Table rows: memory_circuit, memory_patches, circuit_list, surgery_ir
+    (WORKLOADS, frontends/settings.py), named by workload.kind. The root
+    never builds a workload row; it reads the class. operations turns the
     workload section's record (frontends/settings.py WorkloadSettings,
     whose row_settings holds the row's own RowSettings) and the run's
     code card into the operations and the rounds policy the row fixes,

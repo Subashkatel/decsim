@@ -14,6 +14,7 @@ import pytest
 import decsim.experiments.experiment as experiment
 import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
+import decsim.qpu.code_geometry as code_geometry
 import decsim.qpu.round_policies as round_policies
 import decsim.records.program as program_records
 import tests.experiments.yaml_configs as yaml_configs
@@ -138,4 +139,86 @@ def test_a_workload_without_a_kind_is_refused_naming_the_rows():
         "rounds_per_shot": 15,
     }
     with pytest.raises(ValueError, match="workload.kind None is not a row"):
+        workload_settings.WorkloadSettings.from_yaml(section)
+
+
+def patches_workload(tmp_path, patch_count):
+    workload = {
+        "kind": "memory_patches",
+        "code_task": "surface_code:rotated_memory_z",
+        "rounds_per_shot": 6,
+        "patch_count": patch_count,
+    }
+    card = {"workload": workload}
+    config_path = yaml_configs.write_config(tmp_path, card)
+    config = experiment.load_experiment(config_path)
+    return config.point_settings(
+        physical_error_probability=0.001,
+        distance=3,
+        round_period_microseconds=1.0,
+    )
+
+
+def test_memory_patches_runs_one_memory_per_patch_at_once(tmp_path):
+    """Three patches, three operations, a shot drawn for each."""
+    settings = patches_workload(tmp_path, 3)
+    machine = machine_module.Machine.build(settings, 0)
+    result = machine.run()
+    shots = machine.observation.sampled_shots.shots_by_operation
+
+    assert result.terminal_status == "complete"
+    assert [operation.patches for operation in machine.operations] == [
+        (0,),
+        (1,),
+        (2,),
+    ]
+    assert len(result.operation_results) == 3
+    assert sorted(shots) == [1, 2, 3]
+
+
+def test_memory_patches_sit_side_by_side_two_d_plus_two_apart():
+    """Patch p is the memory circuit with every x shifted by p (2 d + 2).
+
+    Stim's SHIFT_COORDS moves the qubit and the detector coordinates that
+    follow it; the detectors' last coordinate, their round, stays.
+    """
+    section = {
+        "kind": "memory_patches",
+        "code_task": "surface_code:rotated_memory_z",
+        "rounds_per_shot": 4,
+        "patch_count": 2,
+    }
+    workload = workload_settings.WorkloadSettings.from_yaml(section)
+    workload = dataclasses.replace(workload, physical_error_probability=0.001)
+    code = code_geometry.SurfaceCodeModel(distance=3)
+    row = workload_settings.MemoryPatchesWorkload
+    operations, policy = row.operations(workload, code)
+    first = operations[0].circuit.get_final_qubit_coordinates()
+    second = operations[1].circuit.get_final_qubit_coordinates()
+    first_detectors = operations[0].circuit.get_detector_coordinates()
+    second_detectors = operations[1].circuit.get_detector_coordinates()
+
+    assert policy.round_count == 4
+    assert first[10] == [3.0, 3.0]
+    assert second[10] == [11.0, 3.0]
+    assert first_detectors[30] == [4.0, 4.0, 4.0]
+    assert second_detectors[30] == [12.0, 4.0, 4.0]
+
+
+@pytest.mark.parametrize("patch_count", [0, True, "2"])
+def test_a_patch_count_that_is_not_a_count_of_patches_is_refused(
+    tmp_path, patch_count
+):
+    with pytest.raises(ValueError, match="patch_count is a number of patches"):
+        patches_workload(tmp_path, patch_count)
+
+
+def test_a_memory_patches_workload_without_its_count_is_refused():
+    section = {
+        "kind": "memory_patches",
+        "code_task": "surface_code:rotated_memory_z",
+        "rounds_per_shot": 4,
+    }
+    sentence = r"memory_patches needs \['patch_count'\] beside kind"
+    with pytest.raises(ValueError, match=sentence):
         workload_settings.WorkloadSettings.from_yaml(section)

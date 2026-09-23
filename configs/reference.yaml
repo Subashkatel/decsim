@@ -281,14 +281,23 @@ escalation:
 #                                  # region per bounded window
 
 workload:
-  kind: memory_circuit             # memory_circuit is the one yaml row; the
-                                   # other rows (circuit_list, surgery_ir)
-                                   # are built in Python
+  kind: memory_circuit             # memory_circuit | memory_patches are the
+                                   # yaml rows; the other rows (circuit_list,
+                                   # surgery_ir) are built in Python.
+                                   # memory_patches runs patch_count copies of
+                                   # the memory circuit at once, one operation
+                                   # per patch sharing the decoder units
+                                   # (Elastic 2406.17995 lines 121-123), side
+                                   # by side along x, 2d + 2 Stim coordinate
+                                   # units apart, so a qpu burst region covers
+                                   # the patches it reaches
   code_task: surface_code:rotated_memory_z   # stim generator task
   rounds_per_shot: 15              # QEC rounds per shot: a fixed count, or
                                    # "<n>d" to scale with the swept distance
                                    # ("10d" = the 10 d-round memory experiment,
                                    # Toshio 2510.25222 Fig. 4)
+  # patch_count: 4                 # memory_patches only, and required there:
+                                   # the patches, at least 1
 
 # The plan, a word the comments below use, is the list of windows the scheme
 # lays out for each operation before the run starts.

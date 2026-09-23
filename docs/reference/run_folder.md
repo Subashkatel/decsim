@@ -20,7 +20,7 @@ without any number changing (`decsim/experiments/report.py`).
 | `shots.csv` | `decsim/experiments/report.py`, `shot_rows` | one row per shot |
 | `shot_links.csv` | `decsim/experiments/report.py`, `shot_link_rows` | one row per shot per link |
 | `window_samples.csv` | `decsim/experiments/report.py`, `window_sample_rows` | one row per sweep point, latency point and distinct microsecond value |
-| `latency_samples.csv` | `decsim/experiments/report.py`, `latency_sample_rows` | one row per decoded window of a wall-clock decoder |
+| `latency_samples.csv` | `decsim/experiments/report.py`, `latency_sample_rows` | one row per decoded window of a decoder named by a table row, written only when one ran |
 | `sweep.csv` | `decsim/experiments/report.py`, `summarize` | one row per sweep point, summarized from `shots.csv` and `window_samples.csv` |
 | `links.csv` | `decsim/experiments/report.py`, `link_rows` | one row per sweep point per link, averaged over that point's shots |
 | `shot_data_movement.csv` | `decsim/experiments/report.py`, `shot_data_movement_rows` | one row per shot per path: that shot's copy and move counters and the memory class the path crosses, written only when `observation.data_movement` is on |
@@ -191,7 +191,8 @@ process to reach the same numbers.
 
 One row per decoded window, written only for a decoder named by a table
 row: the time that held the unit, its measured wall clock or its own
-cycle count. A decoder priced by a number produces no rows here.
+cycle count. A decoder priced by a number produces no rows, and a run
+with no rows writes no file.
 
 | Column | What it is |
 | --- | --- |

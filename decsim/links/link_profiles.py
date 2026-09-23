@@ -510,9 +510,10 @@ class LogicalReferenceFabric:
 class BandwidthLimitedFabric:
     """The same fabric with finite rates, provisioned from the geometry.
 
-    Every channel carries exactly its nominal traffic in one round, so
-    contention becomes measurable and capacity_scale sweeps the whole
-    fabric. Its numbers come from the run's own geometry, not from the
+    Every channel carries exactly its nominal traffic in one commit
+    region (the readout and store hops: one round's bits in one round
+    period), so contention becomes measurable and capacity_scale sweeps
+    the whole fabric. Its numbers come from the run's own geometry, not from the
     links section, which is why base_card refuses a yaml and names what
     a caller has to give it.
     """

@@ -11,14 +11,15 @@ schedules a decode, the decoder returns a result, the frame commits the
 correction, the frame releases the controller, the controller instructs
 the QPU, and every hop between components rides a link.
 
-The pluggable parts (SyndromeSource, SyndromeBuffer, Decoder, Link,
-EscalationPolicy, ThresholdSource, ConfidenceSignal, WindowingScheme,
-IdlePolicy) have their abstract class here, sinter's Decoder shape
-(sinter/_decoding/_decoding_decoder_class.py, one class with the methods
-a row of the table must offer), written as a Protocol because the
-implementations fill it without inheriting. Observation (metrics, the
-traffic ledger, the trace) reaches a component through callbacks it
-fires, never through a port, so every component runs with no observer.
+The pluggable parts (SyndromeSource, SyndromeBuffer, Decoder,
+StrongBackend, Link, EscalationPolicy, ThresholdSource, ConfidenceSignal,
+WindowingScheme, IdlePolicy) have their abstract class here, sinter's
+Decoder shape (sinter/_decoding/_decoding_decoder_class.py, one class
+with the methods a row of the table must offer), written as a Protocol
+because the implementations fill it without inheriting. Observation
+(metrics, the traffic ledger, the trace) reaches a component through
+callbacks it fires, never through a port, so every component runs with
+no observer.
 
 A component names its neighbours by declaring a Port (below) for each
 one, and the root binds them by assignment once every component exists.
@@ -1105,6 +1106,52 @@ class Decoder(Protocol):
 
     def pipeline_depth(self, job: decoding_records.DecodeJob) -> int:
         """Decodes that may be in flight on one unit; one is no pipeline."""
+
+
+@runtime_checkable
+class StrongBackend(Protocol):
+    """The device a strong decode runs on, as the strong decoder sees it.
+
+    Rows: measured_table, a device's measured time law with decsim's own
+    answer. A live device (a real GPU process decsim hands the region to
+    and waits for) answers the same four methods.
+
+    A strong decode crosses the link in, lands, is noticed, waits, is
+    decoded and is written back before the link out. The link cards
+    price the two links from echo round trips, which already hold the
+    landing, the notice and the write back with no work done: Backline's
+    responders poll their memory and "return the received value without
+    decoding" (2609.09270 lines 2355-2360), and NVQLink's persistent
+    kernel "waits for packet arrival, and loops them back" (2510.25213
+    lines 528-533). So a backend reports only the time beyond the echo
+    on the same path, the launch included, and never the wait: the wait
+    emerges from its capacity in front of the arrivals, a queue decsim
+    keeps. IonQ gives each decoding core a fixed set of blocks served in
+    turn (2608.25027 lines 507-511), and a device graph "cannot be
+    launched twice from the device at the same time" (CUDA C++
+    Programming Guide, device graph launch), so one CUDA-Q dispatcher's
+    decode ends before its next begins (cudaqx
+    docs/sphinx/examples_rst/qec/realtime_relay_bp.rst:49-50).
+
+    submit takes the region with the count of decodes already running on
+    the device, because the device's time depends on it (IonQ lines
+    550-554 time every decode under full co-running load). The ticket
+    lets a device answer after its own call returns; service_ticks and
+    result are asked after submit, once each.
+    """
+
+    def capacity(self) -> int:
+        """Decodes the device runs at once; decsim queues the rest."""
+
+    # The ticket is an opaque identity only the backend that issued it reads.
+    def submit(self, request: decoding_records.DecodeJob, running: int) -> Any:
+        """Start one region's decode with running others on the device."""
+
+    def service_ticks(self, ticket: Any) -> int:
+        """The decode's time beyond the echo on the same path, in ticks."""
+
+    def result(self, ticket: Any) -> decoding_records.DecodeResult:
+        """The correction and observables; decode_status marks unconverged."""
 
 
 # ------------------------------------------- the frame commits the correction

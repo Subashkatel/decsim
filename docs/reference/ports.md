@@ -349,6 +349,17 @@ One decoder: correctness and timing from one object.
 | `occupancy` | Ticks the unit's compute is held from the start; None if measured. |
 | `pipeline_depth` | Decodes that may be in flight on one unit; one is no pipeline. |
 
+### `StrongBackend`
+
+The device a strong decode runs on, as the strong decoder sees it.
+
+| Method | What it does |
+| --- | --- |
+| `capacity` | Decodes the device runs at once; decsim queues the rest. |
+| `submit` | Start one region's decode with running others on the device. |
+| `service_ticks` | The decode's time beyond the echo on the same path, in ticks. |
+| `result` | The correction and observables; decode_status marks unconverged. |
+
 ## the frame commits the correction
 
 ### `Frame`

@@ -968,6 +968,45 @@ do not schedule separate analog acquisition resources or move measurements withi
 a round. Unequal round durations, arbitrary decoded conditional gates and dynamic
 composition of retained histories remain separate work.
 
+## D28. A strong decode runs on a backend behind one port of four methods
+
+**Decided.** `StrongBackend` in `decsim/ports.py` is the device a strong
+decode runs on: `capacity()` is how many decodes it runs at once,
+`submit(request, running)` starts one region with the count already
+running and returns a ticket, `service_ticks(ticket)` is the decode's
+time beyond the echo on the same path, and `result(ticket)` is its
+correction, observables and convergence. `StrongBackendDecoder`
+(`decsim/decoders/strong_backend.py`) is the Decoder port over one: a
+first-come first-served queue in front of the capacity. A table of
+measured times and a live device process answer the same four methods.
+
+**Why.** Every strong decode is the same steps on any device: the link
+in, the landing, the notice, the wait, the decode, the write back and
+the link out. The link cards already price the links from echo round
+trips, and an echo holds the landing, the notice and the write back
+with no work done (Backline arXiv:2609.09270 lines 2355-2360, NVQLink
+arXiv:2510.25213 lines 528-533), so a backend that reported its whole
+round trip would count them twice. It reports the time beyond the echo,
+the launch folded in, since the device path has no separate launch to
+price. The wait is not the backend's number: it follows from the
+capacity and the arrivals, so the queue lives in decsim, and a table
+cannot hide a wait inside a time. The count of decodes already running
+is an argument because a device's time depends on it: IonQ times every
+decode with all twelve decoder processes running (arXiv:2608.25027
+lines 550-554). A ticket lets a live device answer after its own call
+returns, so a live row plugs in without changing the port.
+
+**Sources.** The queue discipline is arrival order, as IonQ's cores serve
+their blocks (lines 509-511) and a CUDA-Q dispatcher its ring's slots
+(cuda-quantum realtime/lib/daemon/dispatcher/dispatch_kernel.cu:213-265).
+A cancelled running decode holds the device until it ends, because a
+GPU starts other work only "as the currently running ... kernel's thread
+blocks finish" (CUDA C++ Programming Guide, preemption).
+
+**Where to see it.** `tests/decoders/test_strong_backend.py` holds the
+queue against the Kiefer and Wolfowitz first-come first-served
+recursion and the two cancels.
+
 ## What is not modelled yet
 
 These are open, recorded rather than hidden, so that a reader does not

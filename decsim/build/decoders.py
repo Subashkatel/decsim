@@ -120,21 +120,10 @@ def build_decoder_pool(
     active = weak
     if active_tier == "strong":
         active = strong
-    has_no_decoder = active is None and manager.router is None
-    if has_no_decoder and plan.planned_operations:
-        raise ValueError(
-            f"the plan decodes windows on the {active_tier} tier, which "
-            "names no decoder: give it a kind or a Python-built decoder"
-        )
-    router = manager.router
-    unit_pools = manager.unit_pools
-    if policy.requires_strong_context and router is None:
-        router, unit_pools = _switching_pools(settings, weak, strong)
-    if router is None:
-        router = decoders.CodeRouter(default=active)
-    if unit_pools is None:
-        active_settings = _active_tier_settings(settings, policy)
-        unit_pools = {"default": active_settings.units}
+    _check_the_active_tier_decodes(manager, active, active_tier, plan)
+    router, unit_pools = _router_and_pools(
+        settings, policy, weak, strong, active
+    )
     decoder_memory = _decoder_memory(settings, policy, unit_pools)
     copies_input_by_pool = _copies_input_by_pool(settings, policy, unit_pools)
     blocks_unit_by_pool = _blocks_unit_by_pool(settings, policy, unit_pools)
@@ -151,6 +140,44 @@ def build_decoder_pool(
         blocks_unit_by_pool=blocks_unit_by_pool,
         formation_by_pool=formation_by_pool,
     )
+
+
+def _check_the_active_tier_decodes(
+    manager: decoder_settings.DecoderManagerSettings,
+    active,
+    active_tier: str,
+    plan: plan_build.Plan,
+) -> None:
+    """A plan with windows needs a decoder on the tier that decodes them."""
+    has_no_decoder = active is None and manager.router is None
+    if not has_no_decoder or not plan.planned_operations:
+        return
+    raise ValueError(
+        f"the plan decodes windows on the {active_tier} tier, which "
+        "names no decoder: give it a kind or a Python-built decoder"
+    )
+
+
+def _router_and_pools(
+    settings: machine_settings.MachineSettings, policy, weak, strong, active
+) -> tuple:
+    """The router over the tiers and each pool's unit count.
+
+    A router or pools given in Python are used as they are; switching
+    routes escalated jobs to a strong pool of their own, and any other
+    escalation routes every job to the active tier's one default pool.
+    """
+    manager = settings.decoder_manager
+    router = manager.router
+    unit_pools = manager.unit_pools
+    if policy.requires_strong_context and router is None:
+        router, unit_pools = _switching_pools(settings, weak, strong)
+    if router is None:
+        router = decoders.CodeRouter(default=active)
+    if unit_pools is None:
+        active_settings = _active_tier_settings(settings, policy)
+        unit_pools = {"default": active_settings.units}
+    return router, unit_pools
 
 
 def _tier_formation(

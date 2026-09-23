@@ -14,6 +14,7 @@ zero-failure point at d 5.
 
 import csv
 
+import matplotlib.figure
 import pytest
 
 import decsim.experiments.refusal as refusal
@@ -81,6 +82,26 @@ def test_figure_written_with_zero_failure_point_left_off(tmp_path):
     figure_path = tmp_path / "ler_vs_d.png"
     ler_vs_distance_plot([weak, strong], 0.001, figure_path)
     assert figure_path.exists()
+
+
+def test_the_y_axis_names_no_round_count_the_sweep_did_not_write(
+    tmp_path, monkeypatch
+):
+    """A shot runs the yaml's rounds_per_shot, not always 10 d rounds."""
+    weak, strong = two_tier_runs(tmp_path)
+    figure_path = tmp_path / "ler_vs_d.png"
+    labels = []
+
+    def record_the_label(figure, path, **options):
+        del path, options
+        axis = figure.axes[0]
+        label = axis.get_ylabel()
+        labels.append(label)
+
+    monkeypatch.setattr(matplotlib.figure.Figure, "savefig", record_the_label)
+    ler_vs_distance_plot([weak, strong], 0.001, figure_path)
+
+    assert labels == ["Logical error rate per shot"]
 
 
 def test_run_without_the_requested_p_is_refused(tmp_path):

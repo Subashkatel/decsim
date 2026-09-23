@@ -236,7 +236,7 @@ def ler_vs_distance_plot(
     axis.set_yscale("log")
     axis.set_xticks(sorted(swept_distances))
     axis.set_xlabel("Code distance")
-    axis.set_ylabel("Logical error rate per shot (10d rounds)")
+    axis.set_ylabel("Logical error rate per shot")
     probability_label = _power_of_ten_label(probability)
     axis.set_title(f"Logical error rate vs distance, p={probability_label}")
     axis.grid(alpha=0.3, which="both")

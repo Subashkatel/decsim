@@ -28,7 +28,6 @@ import sys
 YAML_BOUNDARY = frozenset(
     {
         "bool",
-        "dict",
         "float",
         "int",
         "list",

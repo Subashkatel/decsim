@@ -249,7 +249,7 @@ escalation:
 
 workload:
   kind: memory_circuit             # memory_circuit is the one yaml row; the
-                                   # other rows (circuit_list, surgery_ir, qlx)
+                                   # other rows (circuit_list, surgery_ir)
                                    # are built in Python
   code_task: surface_code:rotated_memory_z   # stim generator task
   rounds_per_shot: 15              # QEC rounds per shot: a fixed count, or

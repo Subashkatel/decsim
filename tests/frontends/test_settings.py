@@ -95,7 +95,6 @@ def test_each_python_only_row_refuses_a_yaml_by_name(tmp_path):
     sentences = {
         "circuit_list": "a list of Operation records",
         "surgery_ir": "the qubit_to_patch mapping",
-        "qlx": "a lowered QLX program object",
     }
     for kind, sentence in sentences.items():
         workload = {"kind": kind}

@@ -318,7 +318,7 @@ def _request_run_sequence(row: dict):
 
 
 def controller_to_weak_buffer_delays_us(transfers: list) -> list:
-    """Every round's controller-to-Buffer-0 delay, in microseconds."""
+    """Every round's controller_to_weak_buffer delay, in microseconds."""
     delays = []
     for row in transfers:
         if row["path"] != "controller_to_weak_buffer":

@@ -351,12 +351,13 @@ def data_movement_rows(shot_data_movement: list) -> list:
 def shot_data_movement_rows(measurements: list) -> list:
     """One row per shot per path: that shot's own copy and move counters.
 
-    A path is a copy's source and target (`controller intake -> Buffer
-    0`) or a link's own name, and each row names the memory class that
-    path crosses, which observe/data_movement.py places from the
-    sources. A shot whose run had observation.data_movement off writes
-    no row at all: a run that counted nothing has no counts, which is
-    not the same fact as a run whose counts were zero.
+    A path is a copy's source and target (`controller assembler -> weak
+    syndrome buffer`) or a link's own name, and each row names the
+    memory class that path crosses, which observe/data_movement.py
+    places from the sources. A shot whose run had
+    observation.data_movement off writes no row at all: a run that
+    counted nothing has no counts, which is not the same fact as a run
+    whose counts were zero.
     """
     rows = []
     for measurement in measurements:

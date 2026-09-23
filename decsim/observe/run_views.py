@@ -2,8 +2,7 @@
 
 The decode backlog sampler (observe/metrics.py) takes a view after every
 action and the switching study reads one at the end of the run. Each
-builder receives the owners it reads and writes nothing back; the flight
-recorder that used to live here is observe/flight_recorder.py.
+builder receives the owners it reads and writes nothing back.
 """
 
 import dataclasses

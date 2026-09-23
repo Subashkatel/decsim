@@ -66,7 +66,7 @@ HELD_ROUNDS_COUNTER = "controller rounds held for store room"
 
 
 def round_text(round_key) -> str:
-    """A round key as the flow id and the args carry it: `op:index`."""
+    """A round key as the args carry it: `op:index`."""
     operation_id, round_index = round_key
     return f"{operation_id}:{round_index}"
 

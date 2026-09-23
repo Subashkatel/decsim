@@ -203,7 +203,7 @@ def _trace_writer(
     engine: engine_module.Engine,
     process_name: str,
 ) -> Optional[trace_writer_module.TraceWriter]:
-    """The Chrome trace writer, only when the section names a path."""
+    """The Chrome trace writer, only when the section asks for a trace."""
     if not observation.writes_trace:
         return None
     return trace_writer_module.TraceWriter(engine, process_name)

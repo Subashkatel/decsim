@@ -85,9 +85,7 @@ def _fragment(round_index, bits=None) -> round_records.RetainedSyndromeFragment:
 class _Fixture:
     """One six-round operation with one window reading rounds 1 to 5."""
 
-    def __init__(
-        self, read_cycles=0, read_clock=None, decision_cycles=0, clock=None
-    ) -> None:
+    def __init__(self, decision_cycles=0, clock=None) -> None:
         self.engine = engine_module.Engine()
         self.operation = program_records.Operation(
             1, "memory", (0,), patches=(0,)
@@ -136,11 +134,13 @@ class _Fixture:
         transfers = window_transfers.WindowTransfers(self.engine)
         transfers.link = link
         store_output = round_output.SyndromeBufferOutput(
+            self.engine,
             transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER,
             "weak syndrome buffer",
         )
         store_output.transfers = transfers
         store_output.store = self.store
+        store_output.link = link
         boundary_payload = boundary_payloads.DenseSeamMask()
         interaction = window_interactions.DefaultWindowInteraction(
             0, boundary_payload
@@ -164,8 +164,6 @@ class _Fixture:
             accept_result=_ignore_result, accept_strong_result=_ignore_result
         )
         self.requester = decode_requests.DecodeRequester(
-            read_cycles=read_cycles,
-            read_clock=read_clock,
             decision_cycles=decision_cycles,
             clock=clock,
         )
@@ -560,48 +558,6 @@ def _fold_outcome(config, probability: float, seed: int) -> tuple:
         measurement.logical_failure,
         measurement.direct_mismatch,
     )
-
-
-@pytest.mark.parametrize("decoder_input", ["copy", "in_place"])
-def test_read_cycles_delay_submission_and_later_reaction_points(decoder_input):
-    clocks = config.ClockSettings.from_yaml({"storage": 1.0})
-    section = {"clock": "storage", "read_cycles": 3}
-    settings = syndrome_buffer_settings.SyndromeBufferSettings.from_yaml(
-        section,
-        "weak_syndrome_buffer",
-        clocks,
-        syndrome_buffer_module.SYNDROME_BUFFERS,
-    )
-    free = declared_run.weak_only_run(decoder_input=decoder_input)
-    charged = declared_run.weak_only_run(
-        weak_syndrome_buffer=settings, decoder_input=decoder_input
-    )
-    free_ticks = declared_run.reaction_ticks(free)
-    charged_ticks = declared_run.reaction_ticks(charged)
-    paired = zip(charged_ticks, free_ticks)
-    shifts = [charged_tick - free_tick for charged_tick, free_tick in paired]
-    expected = 3 * settings.clock.period_ticks
-    assert shifts == [0, expected, expected, expected, expected, expected]
-
-
-def test_a_withdrawn_read_cannot_submit_the_replacement_window_twice():
-    clock = config.Clock(10)
-    fixture = _Fixture(read_cycles=3, read_clock=clock)
-    fixture.engine.now = 1
-    fixture.arrive(1)
-    fixture.arrive(2)
-    fixture.arrive(3)
-    fixture.arrive(4)
-    fixture.arrive(5)
-    assert fixture.queue.enqueued == []
-    fixture.requester.withdraw(fixture.window)
-    fixture.requester.request_if_ready(fixture.window, None)
-
-    fixture.engine.run()
-
-    assert len(fixture.queue.enqueued) == 1
-    assert fixture.queue.withdrawn == []
-    assert fixture.window.t_queued == 40
 
 
 def test_decision_cycles_delay_queue_admission_and_later_reaction_points():

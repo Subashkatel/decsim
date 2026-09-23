@@ -14,7 +14,8 @@ with several targets on one fill (src/mem/cache/mshr.hh).
 That is the copy rule, and it is a tier's setting: with
 <tier>.input in_place the unit reads the rounds where the store keeps
 them, so nothing is deposited in the unit's memory, nothing crosses the
-input link, and the store's hold is kept for the whole decode. AFS's
+input link, and the store's hold is kept for the whole decode; the
+store's read still takes its time. AFS's
 processing elements "can directly access the data stored on-chip"
 (2001.06598 lines 528-531); Collision Clustering's Init unit loads the
 syndrome into the storage elements instead (2309.05558 lines 268-271),
@@ -243,11 +244,27 @@ class DecoderInputStaging:
     ) -> None:
         """The unit reads the rounds where the store keeps them.
 
-        No link move, no deposit, and the store's hold is kept until the
-        decode releases the job, because the rounds it reads are the
-        store's own (<tier>.input in_place).
+        No deposit, and the store's hold is kept until the decode
+        releases the job, because the rounds it reads are the store's
+        own (<tier>.input in_place). The store's end reads them and
+        lands the job at the read's end with no link crossed
+        (syndrome_buffer/round_output.py), so a cancel before then
+        suppresses the landing as it does a transfer's.
         """
+        send_input = job.send_input
         job.send_input = None
+        land = functools.partial(self._land_in_place, job, on_landed)
+        expected_delay_ticks = self.transport.deliver(job, send_input, land)
+        job.input_landing_ticks = self.engine.now + expected_delay_ticks
+
+    def _land_in_place(
+        self,
+        job: decoding_records.DecodeJob,
+        on_landed: Callable[[decoding_records.DecodeJob], None],
+        delivered: decoding_records.DecodeJob,
+    ) -> None:
+        """The read completed: the unit reads the store's rounds now."""
+        del delivered
         job.input_landing_ticks = self.engine.now
         self._form_detection_events(job)
         decoder_input = decoder_memory_module.materialize_decoder_input(job)

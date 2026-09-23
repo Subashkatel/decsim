@@ -16,11 +16,21 @@ feedback-memory round, which the controller packs and asks for: the
 store sends it and frees its own slot at the delivery. What lands in
 the store is the round receiver's (weak_syndrome_round_receiver.py); this
 one sends.
+
+A job's input is read out of the store when its bits leave, at
+dispatch: the store is asked when the read of the job's rounds
+completes (book_read) and the move starts then. A tier that reads its
+input in place (<tier>.input in_place) has its unit read the store's
+words where they sit, so the same read is booked and the input lands
+at its completion with no link crossed: one read, priced once, by the
+memory the bits leave (gem5 prices an access where the memory serves it,
+src/mem/simple_mem.cc:154-174).
 """
 
 import functools
-from typing import Callable
+from typing import Callable, Optional
 
+import decsim.engine as engine_module
 import decsim.ports as ports
 import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
@@ -28,37 +38,52 @@ import decsim.records.transfers as transfer_records
 
 
 class SyndromeBufferOutput:
-    """One store's link to the decoders it feeds, bound once by the root."""
+    """One store's link to the decoders it feeds, bound once by the root.
+
+    reads_in_place is the input row of the tier this store feeds: True
+    when that tier's unit reads the rounds where the store keeps them.
+    """
 
     transfers = ports.Port(ports.WindowTransfers)
     store = ports.Port(ports.SyndromeBuffer)
+    # the fabric, asked what a move that starts after its read will pay
+    link = ports.Port(ports.Link)
 
     def __init__(
         self,
+        engine: engine_module.Engine,
         path: transfer_records.LinkPath,
         name: str,
+        reads_in_place: bool = False,
     ) -> None:
+        self.engine = engine
         self.path = path
         # the store this port belongs to, as the data path names it
         self.name = name
+        self.reads_in_place = reads_in_place
 
     def send_input(
         self,
         job: decoding_records.DecodeJob,
         on_landed: Callable[[], None],
     ) -> int:
-        """Move one job's rounds to its unit; the delay the link expects.
+        """Read one job's rounds, then move them; the delay expected.
 
         The bits are the job's payloads, which the staging clears when
         the input lands, so they are read here while they are still the
         job's. The strong re-decode calls this send without asking for
-        one first, so this names the store too.
+        one first, so this names the store too. Under in_place the read
+        is the landing: nothing crosses the link.
         """
         self.name_this_store(job)
         payload_bits = job.payload_bits()
-        return self.transfers.send_for_job(
-            self.path, job, payload_bits=payload_bits, on_delivered=on_landed
-        )
+        round_keys = _payload_round_keys(job.payloads)
+        read_tick = self.store.book_read(round_keys)
+        if self.reads_in_place:
+            return self._land_at(read_tick, on_landed)
+        if read_tick == self.engine.now:
+            return self._move(job, payload_bits, on_landed)
+        return self._move_at(read_tick, job, payload_bits, on_landed)
 
     def land_held_input(
         self,
@@ -119,11 +144,61 @@ class SyndromeBufferOutput:
         """Stamp the job with this store's name, where its rounds sit.
 
         The naming happens where the job is bound to this store and not
-        where its send runs, because a tier that reads its input in place
-        never runs one (<tier>.input in_place,
-        decoders/decoder_memory_transfer.py) and would otherwise reach
-        the observers with no source at all. Whoever records the landing
-        then reads where the rounds came from rather than deriving it
-        from the job's tier.
+        only where its send runs, because a resubmitted job whose rounds
+        never left runs no send (land_held_input) and would otherwise
+        reach the observers with no source at all. Whoever records the
+        landing then reads where the rounds came from rather than
+        deriving it from the job's tier.
         """
         job.input_source_name = self.name
+
+    def _land_at(self, read_tick: int, on_landed: Callable[[], None]) -> int:
+        """The unit reads the store's words: it has them at the read's end."""
+        now = self.engine.now
+        if read_tick == now:
+            on_landed()
+            return 0
+        delay = read_tick - now
+        self.engine.schedule(delay, on_landed, label="syndrome buffer read")
+        return delay
+
+    def _move(
+        self,
+        job: decoding_records.DecodeJob,
+        payload_bits: Optional[int],
+        on_landed: Callable[[], None],
+    ) -> int:
+        return self.transfers.send_for_job(
+            self.path, job, payload_bits=payload_bits, on_delivered=on_landed
+        )
+
+    def _move_at(
+        self,
+        read_tick: int,
+        job: decoding_records.DecodeJob,
+        payload_bits: Optional[int],
+        on_landed: Callable[[], None],
+    ) -> int:
+        """Start the move when the read completes; the delay expected.
+
+        The link is asked what a send at the read's end would pay, which
+        is exact whenever no later request overtakes it there, the same
+        estimate a send made now answers (links/channel.py
+        expected_delay_ticks).
+        """
+        move = functools.partial(self._move, job, payload_bits, on_landed)
+        read_delay = read_tick - self.engine.now
+        self.engine.schedule(read_delay, move, label="syndrome buffer read")
+        link_delay = self.link.expected_delay_ticks(
+            self.path, payload_bits, read_tick
+        )
+        return read_delay + link_delay
+
+
+def _payload_round_keys(payloads) -> tuple:
+    """The stored rounds a job's payloads come from, once each, in order."""
+    round_keys = []
+    for payload in payloads:
+        round_keys.append((payload.operation_id, payload.round_index))
+    unique = dict.fromkeys(round_keys)
+    return tuple(unique)

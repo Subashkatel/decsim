@@ -34,7 +34,8 @@ class SyndromeBufferSettings:
     the backpressure real systems apply to their source (Caune et al.
     2410.05202: the sequencer stalls on the decoder's status register).
     The weak syndrome buffer charges write_cycles before publication and
-    read_cycles once per primary window before assembling its input. The stages
+    read_cycles once per read of a decode's rounds, when they leave it at
+    dispatch; the store answers both (book_write, book_read). The stages
     follow gem5's frontend and forward latencies (src/mem/XBar.py).
     detection_event_cycles_per_round is what forming a round's detection
     events costs the weak decoder chip ahead of that write, read under

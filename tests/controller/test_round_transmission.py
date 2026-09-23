@@ -162,11 +162,13 @@ def transmitter_with(engine, profile, windows=None, settings=None):
     transfers = window_transfers.WindowTransfers(engine)
     transfers.link = links
     store_output = round_output.SyndromeBufferOutput(
+        engine,
         transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER,
         "weak syndrome buffer",
     )
     store_output.transfers = transfers
     store_output.store = store
+    store_output.link = links
     weak_receiver = weak_syndrome_round_receiver.WeakSyndromeRoundReceiver(
         engine, settings
     )

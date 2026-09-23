@@ -15,7 +15,6 @@ import decsim.escalation.pending_strong_windows as pending_strong_windows
 import decsim.escalation.strong_redecode as strong_redecode_module
 import decsim.escalation.strong_regions as strong_regions
 import decsim.links.window_transfers as window_transfers_module
-import decsim.records.windows as window_records
 import decsim.settings as machine_settings
 import decsim.tables as tables
 import decsim.windows.built_window_models as built_window_models
@@ -135,14 +134,9 @@ def build_gap_join(parts):
 
 
 def build_requester(parts):
-    """The requester, whose read cost is the store its tier reads from."""
+    """The requester, whose decisions are priced on the windows' clock."""
     settings = parts.settings
-    read_cycles = settings.weak_syndrome_buffer.read_cycles
-    if _reads_from_the_room_side(parts.escalation_policy):
-        read_cycles = 0
     return decode_requests.DecodeRequester(
-        read_clock=settings.weak_syndrome_buffer.clock,
-        read_cycles=read_cycles,
         clock=settings.windows.clock,
         decision_cycles=settings.windows.decision_cycles,
     )
@@ -196,12 +190,6 @@ def decides_on_a_confidence(
         return False
     row = escalation_build.escalation_row(settings.escalation)
     return row.decides_on_a_confidence
-
-
-def _reads_from_the_room_side(escalation_policy) -> bool:
-    """Whether the plan's decoding tier reads the strong syndrome buffer."""
-    strong = window_records.DecoderTier.STRONG
-    return escalation_policy.primary_tier is strong
 
 
 def _copies_the_boundary_fold(

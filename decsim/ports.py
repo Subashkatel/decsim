@@ -198,6 +198,15 @@ class SyndromeBuffer(Protocol):
         continuation at the tick.
         """
 
+    def book_read(self, round_keys: tuple) -> int:
+        """Take a read of these stored rounds; the tick their bits are out.
+
+        Asked by whoever takes the bits out, at the tick they leave: the
+        store's outgoing port at dispatch. The store sizes the read from
+        the widths it keeps. The tick is fixed and never withdrawn, as
+        for book_write.
+        """
+
     def release_round(self, round_key: tuple) -> None:
         """Free the round; its consumers are done with it."""
 
@@ -388,7 +397,11 @@ class SyndromeBufferOutput(Protocol):
         job: decoding_records.DecodeJob,
         on_landed: Callable[[], None],
     ) -> int:
-        """Move one job's rounds to its unit; the delay the link expects."""
+        """Read one job's rounds out of the store and move them to its unit.
+
+        The delay expected: the read, then the link. A store whose tier
+        reads in place lands the input at the read's end instead.
+        """
 
     def land_held_input(
         self,

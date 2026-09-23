@@ -155,6 +155,15 @@ class SyndromeBuffer:
         del round_key, bits
         return self._access_completion_tick(self.settings.write_cycles)
 
+    def book_read(self, round_keys: tuple) -> int:
+        """The tick a read of these rounds completes: read_cycles on its clock.
+
+        One read of a job's rounds costs read_cycles whatever their
+        width, and never waits for another access (book_write).
+        """
+        del round_keys
+        return self._access_completion_tick(self.settings.read_cycles)
+
     def release_round(self, round_key) -> None:
         """Free one unheld round; its consumers are done with it."""
         if round_key not in self.round_by_key:

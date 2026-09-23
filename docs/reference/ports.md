@@ -41,6 +41,7 @@ The weak syndrome buffer, as its own round receiver sees it.
 | `has_room` | Whether this round fits beside the stored and the reserved rounds. |
 | `accept_packed_round` | Keep one landed round, readable at that tick; None publishes none. |
 | `book_write` | Take a write of this round's stored bits; the tick it completes. |
+| `book_read` | Take a read of these stored rounds; the tick their bits are out. |
 | `release_round` | Free the round; its consumers are done with it. |
 | `capacity_bits` | The bits this store is bounded to, or None for unbounded. |
 | `held_rounds_description` | The stored rounds, in one line, for the I/O trace. |
@@ -108,7 +109,7 @@ A syndrome buffer's outgoing port, as whoever asks for a round sees it.
 
 | Method | What it does |
 | --- | --- |
-| `send_input` | Move one job's rounds to its unit; the delay the link expects. |
+| `send_input` | Read one job's rounds out of the store and move them to its unit. |
 | `land_held_input` | Land a resubmitted job whose rounds never left: no delay. |
 | `send_memory_round` | Send one timing-only round and free its slot at the delivery. |
 | `input_send_for` | The send the decoder manager calls at dispatch, bound to a job. |

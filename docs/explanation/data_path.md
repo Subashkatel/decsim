@@ -178,7 +178,9 @@ docstrings cite).
 
 A window's rounds into a weak unit's memory. Ends: `syndrome_buffer` to
 `decoders`; the send is executed by the store's own outgoing port,
-`decsim/syndrome_buffer/round_output.py`.
+`decsim/syndrome_buffer/round_output.py`. The store's read of the rounds
+comes first, at dispatch, when the bits leave: the port asks the store
+when that read completes (`book_read`) and the move starts then.
 
 What crosses: the whole input of one decode job, every payload round of
 the window at once. The bit count is `job.payload_bits()`
@@ -200,7 +202,7 @@ Clustering's Init unit for (arXiv:2309.05558, `2309.05558.txt` lines
 268-272: the Init unit "loads the input syndrome data and appropriate
 data into the storage elements"). The other row, `in_place`, sends
 nothing at all and books a reference instead: the unit reads the rounds
-where they sit, which is what a decoder with its input on chip does,
+where they sit, landing when the store's read of them completes, which is what a decoder with its input on chip does,
 and the same comment cites AFS for it (arXiv:2001.06598,
 `2001.06598.txt` lines 520-535: "the processing elements can directly
 access the data stored on-chip"). Default latency one 250 MHz cycle and

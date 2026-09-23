@@ -7,6 +7,7 @@ file's (decsim/assembly.py).
 
 import decsim.build.parts as build_parts
 import decsim.controller.syndrome_round_sender as syndrome_round_sender
+import decsim.decoders.settings as decoder_settings
 import decsim.links.link_profiles as link_profiles
 import decsim.links.window_transfers as window_transfers
 import decsim.ports as ports
@@ -97,10 +98,12 @@ def build_weak_output(
     parts: build_parts.Parts,
 ) -> round_output.SyndromeBufferOutput:
     """The weak syndrome buffer's outgoing end, which executes every send."""
-    del parts
+    reads_in_place = _reads_in_place(parts.settings.weak_decoder, "weak")
     return round_output.SyndromeBufferOutput(
+        parts.engine,
         transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER,
         "weak syndrome buffer",
+        reads_in_place,
     )
 
 
@@ -108,10 +111,12 @@ def build_strong_output(
     parts: build_parts.Parts,
 ) -> round_output.SyndromeBufferOutput:
     """The strong syndrome buffer's outgoing end."""
-    del parts
+    reads_in_place = _reads_in_place(parts.settings.strong_decoder, "strong")
     return round_output.SyndromeBufferOutput(
+        parts.engine,
         transfer_records.LinkPath.STRONG_BUFFER_TO_STRONG_DECODER,
         "strong syndrome buffer",
+        reads_in_place,
     )
 
 
@@ -222,3 +227,19 @@ def check_readout_cost_is_priced(
                 "a separate controller readout cost requires a "
                 "qpu_to_controller card whose latency excludes that cost"
             )
+
+
+def _reads_in_place(tier_settings, tier: str) -> bool:
+    """Whether the tier a store feeds reads the rounds where they sit.
+
+    The rule is the tier's input row (<tier>.input); a run without that
+    tier builds the store's end and never sends on it.
+    """
+    if tier_settings is None:
+        return False
+    copies = tables.row(
+        decoder_settings.DECODER_INPUTS,
+        f"{tier}_decoder.input",
+        tier_settings.input,
+    )
+    return not copies

@@ -581,8 +581,10 @@ links:                             # a kind, then one card per path; null = the
 weak_syndrome_buffer:            # the weak syndrome buffer, on the decoder chip
   clock: fridge                    # a clocks domain; absent uses controller.clock
   write_cycles: 0                  # per-round write before storage/publication
-  read_cycles: 0                   # one bulk read per primary window, before
-                                   # assembling its input for copy or in_place.
+  read_cycles: 0                   # one read of a decode's rounds, paid when
+                                   # they leave the store at dispatch, for copy
+                                   # (then the move) or in_place (then the
+                                   # decode). A read never waits for another.
                                    # Both default to zero, with no edge rounding.
                                    # Positive costs finish on this clock's edge.
                                    # FIFO intake and window trigger: IBM

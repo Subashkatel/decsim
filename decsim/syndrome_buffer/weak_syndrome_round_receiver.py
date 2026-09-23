@@ -117,8 +117,7 @@ class WeakSyndromeRoundReceiver:
         The store and the publication are one call at one tick, because
         the bits become readable when they are here and not before, and
         the announcement follows the record, so the window manager never
-        hears of a round the store does not yet call readable
-        (validation buffer_contract.md, the weak syndrome buffer). The
+        hears of a round the store does not yet call readable. The
         delay is the chip's formation cycles and the write cycles on one
         clock edge: a round is readable once it is formed and written.
 

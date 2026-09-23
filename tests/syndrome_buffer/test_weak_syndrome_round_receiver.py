@@ -13,8 +13,7 @@ destination's own accept (Ciw/ciw/node.py:602 into :102-103), and Caune
 memory only after the propagation. The sender still refuses before it
 sends, so the room counts the bits of the writes in flight as taken
 (gem5 src/dev/net/pktfifo.hh, `avail() = _maxsize - _size - _reserved`
-with `reserve(len)`). The rest are the laws of the buffer contract
-(validation/responsibility_audit_2026_08_30/buffer_contract.md): the
+with `reserve(len)`). The rest pin the store's two ordering laws: the
 publication never precedes the store, and the window manager hears of a
 round only once the store's record says it is readable.
 """

@@ -413,10 +413,11 @@ def _staged_unit(
     formation_stage = _formation_stage(tier_settings, formation)
     if formation_stage is not None:
         before.append(formation_stage)
-    fetch = staged_decoder.DecoderStage(
+    fetch = staged_decoder.MemoryFetchStage(
         "fetch",
         cycles_per_job=tier_settings.fetch_cycles_per_job,
         cycles_per_round=tier_settings.fetch_cycles_per_round,
+        word_bits=tier_settings.unit_memory.word_bits,
     )
     before.append(fetch)
     release = staged_decoder.DecoderStage(

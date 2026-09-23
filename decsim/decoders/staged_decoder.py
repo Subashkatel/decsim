@@ -28,6 +28,7 @@ import decsim.config as config
 import decsim.decoders.decoder as decoder_module
 import decsim.records.decoding as decoding_records
 import decsim.records.log_sources as log_sources
+import decsim.records.rounds as round_records
 import decsim.records.seeds as seed_records
 import decsim.trace_source as trace_source
 
@@ -62,6 +63,34 @@ class DecoderStage:
         """
         del job
         return ()
+
+
+@dataclasses.dataclass(frozen=True)
+class MemoryFetchStage(DecoderStage):
+    """The fetch out of the unit's own memory: its cycles, then one a word.
+
+    Each round is read in whole words of word_bits, one word a cycle,
+    beside the stage's cycles per job and per round, as gem5's crossbar
+    charges divCeil(size, width) per packet (src/mem/xbar.cc:135) and
+    Helios loads each round a byte a clock from a byte boundary
+    (Helios_scalable_QEC control_node_single_FPGA.v lines 35-36 and
+    152-167). word_bits None prices no words.
+    """
+
+    word_bits: Optional[int] = None
+
+    def cycles_for(self, job: decoding_records.DecodeJob) -> int:
+        """Per job, per round, and a cycle for every word of every round."""
+        overhead_cycles = DecoderStage.cycles_for(self, job)
+        if self.word_bits is None:
+            return overhead_cycles
+        word_count = 0
+        for round_bits in _round_widths(job):
+            whole_words, part_word_bits = divmod(round_bits, self.word_bits)
+            word_count += whole_words
+            if part_word_bits:
+                word_count += 1
+        return overhead_cycles + word_count
 
 
 @dataclasses.dataclass(frozen=True)
@@ -440,3 +469,26 @@ def _stage_text(step: "_Step", job: decoding_records.DecodeJob) -> str:
     if step.round_keys:
         text += f" forming {len(step.round_keys)} rounds"
     return text
+
+
+def _round_widths(job: decoding_records.DecodeJob) -> list:
+    """The bits of each round the job reads, in round order.
+
+    The landed input once it is in the unit's memory, the payloads
+    before; a fragment that states no size holds no bits.
+    """
+    bits_by_round: dict = {}
+    for fragment in _fragments_of(job):
+        round_key = (fragment.operation_id, fragment.round_index)
+        fragment_bits = round_records.stated_bits(fragment.size_bits)
+        bits_by_round.setdefault(round_key, 0)
+        bits_by_round[round_key] += fragment_bits
+    widths = bits_by_round.values()
+    return list(widths)
+
+
+def _fragments_of(job: decoding_records.DecodeJob) -> list:
+    decoder_input = job.decoder_input
+    if decoder_input is None:
+        return list(job.payloads)
+    return decoder_input.fragments()

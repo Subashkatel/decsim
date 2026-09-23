@@ -778,6 +778,14 @@ weak_decoder:                      # the lightweight tier: fast, higher LER
                                    # decodes; a window larger than the memory
                                    # stops the run. A bounded memory needs
                                    # rounds that state their size
+    word_bits: null                # what one read of that memory moves: the
+                                   # fetch reads each round in whole words, one
+                                   # word a cycle, beside fetch_cycles_per_job
+                                   # and fetch_cycles_per_round (gem5
+                                   # src/mem/xbar.cc:135 divCeil; Helios loads
+                                   # a byte a clock). null prices no words.
+                                   # Refused under input in_place, where the
+                                   # store prices the read
   # A row's own keys sit in this section beside the shared keys above
   # (its Settings, decsim/tables.py row_settings), and any other kind
   # refuses them. union_find's two, with their defaults:
@@ -929,6 +937,7 @@ strong_decoder:                    # the accurate tier: slow, lower LER
                                    # is the copy row
   unit_memory:
     bits: null                     # as above
+    word_bits: null                # as above
                                    # a union_find strong tier takes
                                    # weight_step and cycle_count here, as above
   # device: a100                   # the measured_table row's GPU: a100 |

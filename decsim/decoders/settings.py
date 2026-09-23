@@ -69,7 +69,7 @@ _REQUIRED_DECODER_KEYS = ("kind", "units", "unit_memory", "engine")
 DECODER_MANAGER_KEYS = ("bulk_strong", "clock", "dispatch_cycles")
 
 # <tier>_decoder.unit_memory's keys.
-UNIT_MEMORY_KEYS = ("bits",)
+UNIT_MEMORY_KEYS = ("bits", "word_bits")
 
 # <tier>_decoder.engine's four stage keys, each with what it prices, so
 # a card that leaves one out is refused by name and by what is missing.
@@ -148,9 +148,18 @@ class UnitMemorySettings:
     src/systolic_array/SystolicArray.py). The unit is bits because the
     rest of the tree counts bits (payload_bits, bits_per_cycle) and a
     syndrome round is not byte aligned.
+
+    word_bits is what one read of that memory moves: the fetch stage
+    reads each round in whole words, one word a cycle, beside its per-job
+    and per-round cycles, as gem5's crossbar charges divCeil(size, width)
+    per packet (src/mem/xbar.cc:135) and Helios loads a round a byte a
+    clock (Helios_scalable_QEC control_node_single_FPGA.v lines 35-36
+    and 152-167). null keeps the fetch at its per-round cycles alone. A
+    tier that reads in place has no memory of its own, so it takes none.
     """
 
     bits: Optional[int] = None
+    word_bits: Optional[int] = None
 
     @classmethod
     def from_yaml(
@@ -167,7 +176,10 @@ class UnitMemorySettings:
         bits = section.get("bits")
         key = f"{section_name}.unit_memory.bits"
         config.check_capacity_bits(key, bits)
-        return cls(bits=bits)
+        word_bits = section.get("word_bits")
+        word_key = f"{section_name}.unit_memory.word_bits"
+        _check_word_bits(word_key, word_bits)
+        return cls(bits=bits, word_bits=word_bits)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -292,6 +304,7 @@ class DecoderSettings:
             section, section_name, "boundary_fold", DECODER_BOUNDARY_FOLDS
         )
         _check_fold_has_a_memory(section_name, input_kind, boundary_fold)
+        _check_word_has_a_memory(section_name, input_kind, unit_memory)
         result_blocks_unit = section.get("result_blocks_unit", False)
         _check_boolean(section_name, "result_blocks_unit", result_blocks_unit)
         units = _unit_count(section, section_name)
@@ -519,6 +532,39 @@ def _check_fold_has_a_memory(
         f"{section_name}.boundary_fold in_place needs the unit's own copy "
         "of the rounds, and input in_place reads them where the store "
         "keeps them; fold into a copy, or copy the input"
+    )
+
+
+def _check_word_has_a_memory(
+    section_name: str,
+    input_kind: str,
+    unit_memory: UnitMemorySettings,
+) -> None:
+    """A word width prices reads of the unit's own memory, which in_place lacks.
+
+    Under input in_place the unit reads the store's words, and the store
+    prices that read (syndrome_buffer/round_output.py); a width here would
+    price the same bits twice.
+    """
+    if input_kind == "copy" or unit_memory.word_bits is None:
+        return
+    raise ValueError(
+        f"{section_name}.unit_memory.word_bits prices reads of the unit's own "
+        "memory, and input in_place reads the rounds where the store keeps "
+        "them, which the store prices; leave word_bits out, or copy the input"
+    )
+
+
+def _check_word_bits(key: str, word_bits) -> None:
+    """A word is a whole number of bits, at least one; null has none."""
+    if word_bits is None:
+        return
+    is_count = isinstance(word_bits, int) and not isinstance(word_bits, bool)
+    if is_count and word_bits >= 1:
+        return
+    raise ValueError(
+        f"{key} must be a whole number of bits, at least one, or null "
+        f"(got {word_bits!r})"
     )
 
 

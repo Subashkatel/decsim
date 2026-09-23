@@ -462,3 +462,42 @@ def test_a_nested_block_written_as_one_value_is_refused_by_name(key):
         decoder_settings.DecoderSettings.from_yaml(
             section, clocks, "weak_decoder"
         )
+
+
+def test_a_unit_memory_word_is_read_from_its_block():
+    clocks = config.ClockSettings({"decoder": 250.0})
+    section = _tier_section({"bits": None, "word_bits": 8})
+
+    settings = decoder_settings.DecoderSettings.from_yaml(
+        section, clocks, "weak_decoder"
+    )
+
+    assert settings.unit_memory.word_bits == 8
+
+
+@pytest.mark.parametrize("word_bits", [0, True, 8.0])
+def test_a_unit_memory_word_that_is_not_whole_bits_is_refused_by_name(
+    word_bits,
+):
+    clocks = config.ClockSettings({"decoder": 250.0})
+    section = _tier_section({"bits": None, "word_bits": word_bits})
+    with pytest.raises(
+        ValueError,
+        match="weak_decoder.unit_memory.word_bits must be a whole number",
+    ):
+        decoder_settings.DecoderSettings.from_yaml(
+            section, clocks, "weak_decoder"
+        )
+
+
+def test_a_unit_memory_word_under_an_in_place_input_is_refused():
+    """The store prices that read; a width here would price it twice."""
+    clocks = config.ClockSettings({"decoder": 250.0})
+    section = _tier_section({"bits": None, "word_bits": 8})
+    section["input"] = "in_place"
+    with pytest.raises(
+        ValueError, match="input in_place reads the rounds where the store"
+    ):
+        decoder_settings.DecoderSettings.from_yaml(
+            section, clocks, "weak_decoder"
+        )

@@ -22,8 +22,8 @@ for the windows, round_released(round_key) when the slot frees;
 hold_registered(holder, round_keys), hold_transferred(old_holder,
 new_holder) and hold_released(holder) for the consumers' tokens;
 access_served(direction, port_index, round_keys, arrival_tick,
-start_tick, completion_tick) for every write and read it books, the
-port index None on a row with no ports.
+start_tick, completion_tick) for every write and read a row with ports
+books (ported_syndrome_buffer.py). This row holds no port and fires none.
 """
 
 import dataclasses
@@ -188,12 +188,9 @@ class SyndromeBuffer:
         now, gem5 SimpleMemory's latency with no bandwidth term
         (src/mem/simple_mem.cc:174), and a zero cost completes now.
         """
-        del bits
+        del round_key, bits
         costs = _costs(self.settings)
-        round_keys = (round_key,)
-        return self._access_completion_tick(
-            "write", round_keys, costs.write_cycles
-        )
+        return self._access_completion_tick(costs.write_cycles)
 
     def book_read(self, round_keys: tuple) -> int:
         """The tick a read of these rounds completes: read_cycles on its clock.
@@ -201,10 +198,9 @@ class SyndromeBuffer:
         One read of a job's rounds costs read_cycles whatever their
         width, and never waits for another access (book_write).
         """
+        del round_keys
         costs = _costs(self.settings)
-        return self._access_completion_tick(
-            "read", round_keys, costs.read_cycles
-        )
+        return self._access_completion_tick(costs.read_cycles)
 
     def release_round(self, round_key) -> None:
         """Free one unheld round; its consumers are done with it."""
@@ -379,18 +375,12 @@ class SyndromeBuffer:
         if charged > 0 and self.settings.clock is None:
             raise ValueError("charged weak_syndrome_buffer costs need a clock")
 
-    def _access_completion_tick(
-        self, direction: str, round_keys: tuple, cycles: int
-    ) -> int:
+    def _access_completion_tick(self, cycles: int) -> int:
         """The access's end, cycles after now's edge; a zero cost is now."""
         now = self.engine.now
-        completion_tick = now
-        if cycles > 0:
-            completion_tick = self.settings.clock.edge(cycles, now)
-        self.trace.access_served.fire(
-            direction, None, round_keys, now, now, completion_tick
-        )
-        return completion_tick
+        if cycles == 0:
+            return now
+        return self.settings.clock.edge(cycles, now)
 
     def _refuse_rounds_left(self) -> None:
         held = list(self.round_by_key)

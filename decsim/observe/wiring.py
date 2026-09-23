@@ -364,7 +364,7 @@ def _copy_sources(seats: Mapping[str, Any]) -> list:
 def _connect_store_trace(
     trace_writer: trace_writer_module.TraceWriter, store, store_name: str
 ) -> None:
-    """One store's residences, its occupancy and its holds."""
+    """One store's residences, its occupancy, its holds and its accesses."""
     capacity_bits = store.capacity_bits()
     stored = functools.partial(
         trace_writer.round_stored, store_name, capacity_bits
@@ -380,6 +380,8 @@ def _connect_store_trace(
     store.trace.hold_transferred.connect(transferred)
     hold_released = functools.partial(trace_writer.hold_released, store_name)
     store.trace.hold_released.connect(hold_released)
+    access_served = functools.partial(trace_writer.access_served, store_name)
+    store.trace.access_served.connect(access_served)
 
 
 def _connect_decoder_trace(

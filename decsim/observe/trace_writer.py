@@ -311,6 +311,30 @@ class TraceWriter:
         args = {"holder": _holder_text(holder)}
         self._instant(store_name, "hold released", "hold", args)
 
+    def access_served(
+        self,
+        store_name: str,
+        direction: str,
+        port_index: int,
+        round_keys: tuple,
+        arrival_tick: int,
+        start_tick: int,
+        completion_tick: int,
+    ) -> None:
+        """One write or read on a store's port, from its start to its data.
+
+        The span on the port's own lane shows the port's occupancy; the
+        wait for the port is its start less its arrival.
+        """
+        thread = f"{store_name} port {port_index}"
+        duration = completion_tick - start_tick
+        args = {
+            "rounds": _rounds_text(round_keys),
+            "arrival": arrival_tick,
+            "waited_ticks": start_tick - arrival_tick,
+        }
+        self._complete(thread, direction, "access", start_tick, duration, args)
+
     # ---- the window side
 
     def window_planned(self, window: window_records.Window) -> None:

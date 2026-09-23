@@ -17,6 +17,7 @@ import pytest
 import decsim.decoders.decoders as decoders
 import decsim.decoders.settings as decoder_settings
 import decsim.machine as machine_module
+import decsim.syndrome_buffer.ported_syndrome_buffer as ported_syndrome_buffer
 import tests.observe.gate_point as gate_point
 
 SEED = gate_point.SEED
@@ -603,3 +604,42 @@ def test_a_counter_row_carries_one_series_and_the_tick_stays_in_ts(traced):
         assert "tick" not in row["args"]
         for value in row["args"].values():
             assert isinstance(value, int)
+
+
+def test_each_port_access_is_one_span_on_its_ports_lane(tmp_path):
+    """A ported store's port serves one access at a time, in arrival order.
+
+    gem5's SimpleMemory is busy for an access's duration and refuses the
+    next until it frees (src/mem/simple_mem.cc:136-161), so the spans on
+    one port's lane never overlap.
+    """
+    path = tmp_path / "ported.trace.json"
+    point = _settings(path)
+    row_settings = ported_syndrome_buffer.PortedSyndromeBuffer.Settings()
+    ported = dataclasses.replace(
+        point.weak_syndrome_buffer,
+        kind="ported_syndrome_buffer",
+        row_settings=row_settings,
+    )
+    point = dataclasses.replace(point, weak_syndrome_buffer=ported)
+    machine = machine_module.Machine.build(point, SEED)
+    machine.run()
+    machine.observation.trace_writer.write(str(path))
+    text = path.read_text()
+    document = json.loads(text)
+
+    accesses = [row for row in document if row.get("cat") == "access"]
+    names = {row["name"] for row in accesses}
+    tids = {row["tid"] for row in accesses}
+    first_port, second_port = sorted(tids)
+    assert names == {"read", "write"}
+    assert _lane_spans_overlap(accesses, first_port) is False
+    assert _lane_spans_overlap(accesses, second_port) is False
+
+
+def _lane_spans_overlap(accesses, tid) -> bool:
+    """Whether a span on this lane starts before the one before it ends."""
+    spans = [row for row in accesses if row["tid"] == tid]
+    ends = [row["ts"] + row["dur"] for row in spans[:-1]]
+    starts = [row["ts"] for row in spans[1:]]
+    return any(start < end for start, end in zip(starts, ends))

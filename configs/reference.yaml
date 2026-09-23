@@ -745,7 +745,8 @@ weak_decoder:                      # the lightweight tier: fast, higher LER
   # weight_step: 0.1               # the union_find row's growth resolution: the
                                    # natural-log units of weight one tick of an
                                    # edge length is (Huang, Newman and Brown
-                                   # 2004.04693, weighted growth). An edge of
+                                   # 2004.04693, the precision the weights are
+                                   # truncated to). An edge of
                                    # log-odds weight w is round(w / weight_step)
                                    # ticks long, at least one, and under the
                                    # cycle_count below every unit of that length

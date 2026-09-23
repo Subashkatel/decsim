@@ -5,13 +5,19 @@
  * forest into a correction. The caller owns every buffer and passes the
  * graph as flat arrays.
  *
- * Delfosse and Nickerson arXiv:1709.06218 give the two algorithms:
- * every odd cluster grows by one half edge per round and clusters that
- * meet fuse (Algorithm 1), and the correction is read off a spanning
- * forest of the grown erasure by peeling leaf to root (Algorithm 2).
- * Huang, Newman and Brown arXiv:2004.04693 make the growth weighted: an
- * edge carries an integer length and a front covers one half tick per
- * tick, so a likelier fault is crossed sooner.
+ * Delfosse and Nickerson arXiv:1709.06218 give the algorithm (Algorithm
+ * 1, and Algorithm 2 its almost-linear form): every odd cluster grows by
+ * one half edge per round, clusters that meet fuse, and the peeling
+ * decoder of Delfosse and Zemor arXiv:1703.01517 reads the correction
+ * off a spanning forest of the grown erasure, leaf to root. The growth
+ * keeps that schedule on a weighted graph, as Helios arXiv:2301.08419
+ * does: an edge carries an integer length and every front of every odd
+ * cluster covers one half tick per tick, so a likelier fault is crossed
+ * sooner. Huang, Newman and Brown arXiv:2004.04693 give the lengths,
+ * the log-odds weight truncated to a finite precision, and the minimum
+ * weight spanning forest the peel takes; their growth instead grows
+ * the one cluster with the smallest boundary by its lightest boundary
+ * edge.
  *
  * A second call grows on from where a decode stopped, every cluster
  * the decode left and the boundary (a bare node grows once a front

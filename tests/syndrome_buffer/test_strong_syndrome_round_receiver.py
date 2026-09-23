@@ -19,6 +19,7 @@ window ready, on the declared card of tests/declared_run.py.
 
 import pytest
 
+import decsim.assembly as assembly
 import decsim.config as config
 import decsim.engine as engine_module
 import decsim.records.decoding as decoding_records
@@ -89,6 +90,28 @@ def room_side(engine, bits=None, listener=None, windows=None):
     if windows is not None:
         receiver.windows = windows
     return receiver
+
+
+class StoreWithoutSettlement:
+    """A store row with every SyndromeBuffer method but check_settled."""
+
+    occupied_bits = 0
+
+    def has_room(self, bits, reserved_bits=0):
+        del bits, reserved_bits
+        return True
+
+    def accept_packed_round(self, packet, *, publication_tick):
+        del packet, publication_tick
+
+    def release_round(self, round_key):
+        del round_key
+
+    def capacity_bits(self):
+        return None
+
+    def held_rounds_description(self):
+        return "empty"
 
 
 def region(*round_indices) -> round_records.EscalatedRegion:
@@ -323,3 +346,19 @@ class _ArrivalConsumer:
         reads = decoding_records.WindowReads((operation_id, 0))
         round_key = (operation_id, round_index)
         self.store.register_hold(reads, [round_key])
+
+
+def test_a_store_row_without_check_settled_does_not_bind_to_the_strong_end():
+    """The strong end calls check_settled, so the port it binds says so."""
+    engine = engine_module.Engine()
+    receiver = strong_syndrome_round_receiver.StrongSyndromeRoundReceiver(
+        engine
+    )
+    seats = {
+        "strong_syndrome_round_receiver": receiver,
+        "strong_syndrome_buffer": StoreWithoutSettlement(),
+    }
+    wires = (("strong_syndrome_round_receiver.store", "strong_syndrome_buffer"),)
+
+    with pytest.raises(ValueError, match="does not answer"):
+        assembly.bind(wires, seats)

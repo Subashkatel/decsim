@@ -32,6 +32,10 @@ The idle accounting, as the QPU sees it: it takes every idle round.
 
 The weak syndrome buffer, as its own round receiver sees it.
 
+| Member | Type |
+| --- | --- |
+| `occupied_bits` | `int` |
+
 | Method | What it does |
 | --- | --- |
 | `has_room` | Whether a round of that many bits fits beside what is taken. |
@@ -39,6 +43,7 @@ The weak syndrome buffer, as its own round receiver sees it.
 | `release_round` | Free the round; its consumers are done with it. |
 | `capacity_bits` | The bits this store is bounded to, or None for unbounded. |
 | `held_rounds_description` | The live holds, in one line, for a refusal a reader must debug. |
+| `check_settled` | At the end of a run no round is stored and no hold is live. |
 
 ### `RetainedRounds`
 

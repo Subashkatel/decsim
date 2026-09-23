@@ -152,8 +152,12 @@ class SyndromeBuffer(Protocol):
     `avail() = _maxsize - _size - _reserved` against the packet's own
     length, src/dev/net/pktfifo.hh); a packed round is written once and
     kept until every consumer releases it. A store never refuses a
-    write: a round that finds no room waits upstream.
+    write: a round that finds no room waits upstream. occupied_bits is
+    the bits the stored rounds hold now, which the strong receiving end
+    names when an escalated region finds no room.
     """
+
+    occupied_bits: int
 
     def has_room(self, bits: Optional[int], reserved_bits: int = 0) -> bool:
         """Whether a round of that many bits fits beside what is taken.
@@ -184,6 +188,9 @@ class SyndromeBuffer(Protocol):
 
     def held_rounds_description(self) -> str:
         """The live holds, in one line, for a refusal a reader must debug."""
+
+    def check_settled(self) -> None:
+        """At the end of a run no round is stored and no hold is live."""
 
 
 @runtime_checkable

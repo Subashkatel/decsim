@@ -77,7 +77,7 @@ def test_a_distance_that_is_not_a_whole_number_is_refused_by_name():
     card = code_geometry.SurfaceCodeModel(distance=3.5)
     qpu = qpu_settings.QpuSettings(code=card)
     settings = machine_settings.MachineSettings(qpu=qpu)
-    with pytest.raises(TypeError, match="distance must be an int >= 1"):
+    with pytest.raises(ValueError, match="distance must be an int >= 1"):
         machine_module.Machine.build(settings)
 
 
@@ -85,7 +85,7 @@ def test_a_distance_of_zero_is_refused_by_name():
     card = code_geometry.SurfaceCodeModel(distance=0)
     qpu = qpu_settings.QpuSettings(code=card)
     settings = machine_settings.MachineSettings(qpu=qpu)
-    with pytest.raises(TypeError, match="distance must be an int >= 1"):
+    with pytest.raises(ValueError, match="distance must be an int >= 1"):
         machine_module.Machine.build(settings)
 
 
@@ -93,9 +93,7 @@ def test_a_commit_width_of_zero_is_refused_by_name():
     card = code_geometry.SurfaceCodeModel(commit_rounds_override=0)
     qpu = qpu_settings.QpuSettings(code=card)
     settings = machine_settings.MachineSettings(qpu=qpu)
-    with pytest.raises(
-        TypeError, match="commit_round_count must be an int >= 1"
-    ):
+    with pytest.raises(ValueError, match="commit_rounds must be an int >= 1"):
         machine_module.Machine.build(settings)
 
 

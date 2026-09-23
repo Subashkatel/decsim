@@ -177,18 +177,22 @@ def _resolve_round_ticks(code, fallback_round_microseconds: float) -> int:
 
 
 def _check_geometry_counts(code) -> None:
-    """A zero or fractional geometry never terminates; refuse the card."""
+    """A zero or fractional geometry never terminates; refuse the card.
+
+    The labels are the keys a yaml sets them by: the sweep's distance and
+    windows.commit_rounds and windows.buffer_rounds.
+    """
     commit_round_count = code.commit_rounds()
     buffer_round_count = code.buffer_rounds()
     counts = (
         ("distance", code.distance, 1),
-        ("commit_round_count", commit_round_count, 1),
-        ("buffer_round_count", buffer_round_count, 0),
+        ("commit_rounds", commit_round_count, 1),
+        ("buffer_rounds", buffer_round_count, 0),
     )
     for label, value, minimum in counts:
         value_type = type(value)
         if value_type is not int or value < minimum:
-            raise TypeError(
+            raise ValueError(
                 f"{label} must be an int >= {minimum}; got {value!r}"
             )
 

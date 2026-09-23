@@ -513,7 +513,8 @@ links:                             # a kind, then one card per path; null = the
                                    # strong tier's off-board hops priced by
                                    # Backline's measured FPGA-to-CPU round trip over
                                    # RoCE v2 (2609.09270 Table III), half of the
-                                   # 2.305 us median on each leg it crosses.
+                                   # 2.305 us median on each leg it crosses, the
+                                   # bits at the cable's 100 Gb/s on top.
                                    # roce_v2_gpu is the same card on the FPGA-to-GPU
                                    # round trip, 4.5 us in the median.
                                    # Each card, in cycles of its named clock domain;

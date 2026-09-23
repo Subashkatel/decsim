@@ -552,10 +552,13 @@ def roce_v2_measured_profile(coprocessor: str) -> settings.FabricSettings:
     escalation request and the strong decoder's reply to the frame are
     each one half of the round trip, and the
     strong store's read into the strong decoder is zero because the
-    coprocessor polls a buffer in its own memory. The escalation round
-    trip on this card, weak_decoder_to_strong_decoder plus
-    strong_buffer_to_strong_decoder plus strong_decoder_to_frame, is
-    therefore the measured median exactly.
+    coprocessor polls a buffer in its own memory. The latencies of the
+    escalation round trip on this card, weak_decoder_to_strong_decoder
+    plus strong_buffer_to_strong_decoder plus strong_decoder_to_frame,
+    therefore sum to the measured median exactly. The three legs that
+    cross the cable also serialize their bits at its 100 Gb/s (lines
+    1229-1230), so a transfer costs its latency plus its bits, as on
+    every other row.
 
     The card prices that median. It does not cover the first, warm-up
     round trip, 4.64 us on the CPU path and 9.27 us on the GPU path, nor
@@ -745,8 +748,16 @@ def _roce_v2_measurement(coprocessor: str) -> tuple:
 def _roce_v2_strong_paths(
     round_trip_microseconds: float, measurement_source: str
 ) -> dict:
-    """The four strong-side paths, priced from one measured round trip."""
+    """The four strong-side paths, priced from one measured round trip.
+
+    The three legs that cross Backline's cable serialize their bits at
+    its 100 Gb/s, as the reference card's strong hops do; the poll reads
+    the coprocessor's own memory, crosses no cable and stays unbounded.
+    """
     leg_microseconds = round_trip_microseconds / 2
+    cable_rate = settings.CapacitySettings(
+        _OFF_BOARD_BITS_PER_MICROSECOND, _OFF_BOARD_RATE_SOURCE
+    )
     write_source = f"{measurement_source}; {ROCE_V2_WRITE_LEG}"
     escalation_source = f"{measurement_source}; {ROCE_V2_ESCALATION_LEG}"
     poll_source = f"{measurement_source}; {ROCE_V2_POLL_LEG}"
@@ -756,12 +767,14 @@ def _roce_v2_strong_paths(
         leg_microseconds,
         write_source,
         ROUND_PAYLOAD_SOURCE,
+        cable_rate,
     )
     weak_decoder_to_strong_decoder = _actual_path(
         "weak_decoder_to_strong_decoder",
         leg_microseconds,
         escalation_source,
         ESCALATION_PAYLOAD_SOURCE,
+        cable_rate,
     )
     strong_buffer_to_strong_decoder = _actual_path(
         "strong_buffer_to_strong_decoder",
@@ -774,6 +787,7 @@ def _roce_v2_strong_paths(
         leg_microseconds,
         reply_source,
         RESULT_PAYLOAD_SOURCE,
+        cable_rate,
     )
     return {
         "controller_to_strong_buffer": controller_to_strong_buffer,

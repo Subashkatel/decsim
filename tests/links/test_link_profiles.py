@@ -654,6 +654,29 @@ def test_the_gpu_row_charges_half_the_measured_round_trip_on_each_leg():
     assert escalation_round_trip == config.microseconds_to_ticks(4.5)
 
 
+@pytest.mark.parametrize("coprocessor", ["cpu", "gpu"])
+def test_a_measured_rows_cable_legs_serialize_at_backlines_100_gbps(
+    coprocessor,
+):
+    """Backline 2609.09270 lines 1229-1230: a 100 Gb direct-attach cable.
+
+    The write, the escalation and the reply cross it at 100000 bits per
+    microsecond; the poll reads the coprocessor's own memory, so it
+    crosses no cable and is unbounded.
+    """
+    profile = link_profiles.roce_v2_measured_profile(coprocessor)
+    write = profile.controller_to_strong_buffer.channel.capacity
+    escalation = profile.weak_decoder_to_strong_decoder.channel.capacity
+    reply = profile.strong_decoder_to_frame.channel.capacity
+    poll = profile.strong_buffer_to_strong_decoder.channel.capacity
+    write_rate = write.exact_aggregate_bits_per_microsecond()
+    escalation_rate = escalation.exact_aggregate_bits_per_microsecond()
+    reply_rate = reply.exact_aggregate_bits_per_microsecond()
+
+    assert (write_rate, escalation_rate, reply_rate) == (100000,) * 3
+    assert poll is None
+
+
 def test_the_measured_rows_keep_the_reference_card_off_the_strong_side():
     """Only the four strong-side hops move: the rest is the default card."""
     reference = link_profiles.logical_reference_profile()

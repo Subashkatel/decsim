@@ -381,10 +381,12 @@ coprocessor, 4.5 microseconds. The controller's write into the strong
 syndrome buffer (hop 3), the escalation request (hop 5) and the strong
 decoder's reply to the frame (hop 9) are each half of the round trip; the strong
 store's read into the strong decoder (hop 6) is zero, because the
-coprocessor polls a slot in its own memory. On either row the escalation
-round trip, hops 5, 6 and 9, is the measured median exactly. Every other
-hop keeps the default card's number and source, and the default row is
-unchanged.
+coprocessor polls a slot in its own memory. On either row the latencies
+of the escalation round trip, hops 5, 6 and 9, sum to the measured
+median exactly, and the three hops that cross Backline's 100 Gb cable
+(lines 1229 to 1230) serialize their bits at its rate, so every row
+prices latency plus bits. Every other hop keeps the default card's
+number and source, and the default row is unchanged.
 
 **Why.** The default card prices the strong node as one more chassis of
 the control system, Caune's stage F on each crossing. A measured cable is a better kind of fact for

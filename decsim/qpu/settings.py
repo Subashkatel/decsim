@@ -105,24 +105,10 @@ class QpuSettings:
         default surface code's commit and buffer regions; None leaves
         each at the code distance.
         """
-        given = []
-        if self.distance is not None:
-            given.append("distance")
-        if self.code is not None:
-            given.append("code")
+        self._check_one_code_source()
         if self.layout is not None:
-            given.append("layout")
-        if len(given) > 1:
-            listed = ", ".join(given)
-            raise ValueError(f"multiple code sources supplied: {listed}")
-        if self.layout is not None:
-            declared_codes = self.layout.codes()
-            codes = list(declared_codes)
-            if len(codes) != 1:
-                raise ValueError(
-                    f"layout must declare exactly one code (got {len(codes)})"
-                )
-            return codes[0], self.layout
+            code = _the_layouts_one_code(self.layout)
+            return code, self.layout
         code = self.code
         if code is None:
             distance = self.distance
@@ -134,6 +120,30 @@ class QpuSettings:
                 buffer_rounds_override=buffer_rounds_override,
             )
         return code, layouts.UniformLayout(code)
+
+    def _check_one_code_source(self) -> None:
+        """Refuse settings that name the code more than one way."""
+        given = []
+        if self.distance is not None:
+            given.append("distance")
+        if self.code is not None:
+            given.append("code")
+        if self.layout is not None:
+            given.append("layout")
+        if len(given) > 1:
+            listed = ", ".join(given)
+            raise ValueError(f"multiple code sources supplied: {listed}")
+
+
+def _the_layouts_one_code(layout: layouts.LayoutModel):
+    """The one code a layout declares; a layout of several is refused."""
+    declared_codes = layout.codes()
+    codes = list(declared_codes)
+    if len(codes) != 1:
+        raise ValueError(
+            f"layout must declare exactly one code (got {len(codes)})"
+        )
+    return codes[0]
 
 
 @dataclasses.dataclass(frozen=True)

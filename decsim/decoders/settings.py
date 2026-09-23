@@ -8,7 +8,9 @@ when a window is decoded again by the strong tier.
 """
 
 import dataclasses
+import math
 from collections.abc import Mapping
+from numbers import Real
 from typing import Any, Optional, Union
 
 import decsim.config as config
@@ -470,7 +472,26 @@ def _decoder_row(kind, section_name: str):
     A number is a fixed core latency on the MWPM path
     (decsim/build/decoders.py), so it is no row and takes no keys.
     """
-    if not isinstance(kind, str):
-        return None
     key = f"{section_name}.kind"
-    return tables.row(DECODERS, key, kind)
+    if isinstance(kind, str):
+        return tables.row(DECODERS, key, kind)
+    if kind is None:
+        return None
+    if _is_latency_microseconds(kind):
+        return None
+    rows = sorted(DECODERS)
+    raise ValueError(
+        f"{key} {kind!r} is neither a row nor a latency; name one of "
+        f"{rows}, or write a finite nonnegative number of microseconds"
+    )
+
+
+def _is_latency_microseconds(kind) -> bool:
+    """A preset core latency: a finite number at least zero, never a flag."""
+    if isinstance(kind, bool):
+        return False
+    if not isinstance(kind, Real):
+        return False
+    if not math.isfinite(kind):
+        return False
+    return kind >= 0

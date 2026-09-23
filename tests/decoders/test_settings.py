@@ -353,3 +353,31 @@ def test_an_unknown_key_on_the_engine_card_is_refused_by_name():
         decoder_settings.DecoderSettings.from_yaml(
             section, clocks, "weak_decoder"
         )
+
+
+@pytest.mark.parametrize("kind", [-1, True, float("nan"), float("inf"), [1]])
+def test_a_kind_that_is_neither_a_row_nor_a_latency_is_refused_by_name(kind):
+    """A negative, a flag, an infinity and a list are no core latency."""
+    clocks = config.ClockSettings({"decoder": 250.0})
+    section = _tier_section({"bits": None})
+    section["kind"] = kind
+
+    with pytest.raises(
+        ValueError, match="weak_decoder.kind .* is neither a row nor a latency"
+    ):
+        decoder_settings.DecoderSettings.from_yaml(
+            section, clocks, "weak_decoder"
+        )
+
+
+@pytest.mark.parametrize("kind", [0, 0.028, 10])
+def test_a_finite_nonnegative_kind_is_a_preset_core_latency(kind):
+    clocks = config.ClockSettings({"decoder": 250.0})
+    section = _tier_section({"bits": None})
+    section["kind"] = kind
+
+    settings = decoder_settings.DecoderSettings.from_yaml(
+        section, clocks, "weak_decoder"
+    )
+
+    assert settings.kind == kind

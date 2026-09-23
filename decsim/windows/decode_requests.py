@@ -450,11 +450,10 @@ class DecodeRequester:
             return
         operation = self.tracker.operation_by_id[window.operation_id]
         self.builder.note_data_complete(window, operation)
-        if window.deps_remaining > 0 and not window.blocked_logged:
-            # raw rounds ship now; the boundary is XORed into the landed
-            # input at the decoder when it arrives (qLDPC net_error /
-            # cudaq-x syndrome_mods / LILLIPUT's state register)
-            window.blocked_logged = True
+        # a window still owed a boundary ships its raw rounds now; the
+        # boundary is XORed into the landed input at the decoder when it
+        # arrives (qLDPC net_error / cudaq-x syndrome_mods / LILLIPUT's
+        # state register)
         self.request(window, operation, strong_redecode)
 
     def request(
@@ -601,7 +600,6 @@ class DecodeRequester:
         if pending is None and not cancelled:
             self.decode_queue.withdraw_window(window.key)
         window.queued = False
-        window.blocked_logged = False
         window.t_queued = None
         window.t_dispatch = None
         window.service_began = False

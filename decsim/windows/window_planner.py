@@ -211,7 +211,7 @@ class WindowPlanner:
 
         The models come from the port, so they are built once the root
         has bound it, which is gem5's split between the constructor and
-        startup (tmp/resources/gem5/src/sim/sim_object.hh lines 194 and
+        startup (gem5 src/sim/sim_object.hh lines 194 and
         280).
         """
         for operation in self.planned_operations:
@@ -588,7 +588,7 @@ class _TraceSources:
     """Every event the window planner reports, as one member.
 
     gem5 groups a component's statistics into one nested Group member
-    (tmp/resources/gem5/src/base/stats/group.hh:60-92) rather than one
+    (gem5 src/base/stats/group.hh:60-92) rather than one
     member per counter; a component's events are the same shape, so a
     listener reaches all of them through one name.
     """

@@ -512,9 +512,10 @@ class DecodeRequester:
 
         A confidence built from forced-class solves needs the window
         decoded once per class, and all of them are asked for at one instant
-        (CUDA launches a whole grid in one call, cuda_guide.txt:
-        1888-1892; OpenMP's primary thread creates the whole team,
-        openmp_spec_5_2.txt:1400-1407).
+        (CUDA launches a whole grid in one call, CUDA C++ Programming
+        Guide section 5.1, Kernels; OpenMP's primary thread "creates a
+        team of itself and zero or more additional threads", OpenMP 5.2
+        specification section 1.3, Execution Model).
         """
         jobs = [job]
         for forced_class in forced_classes[1:]:
@@ -748,7 +749,7 @@ class _TraceSources:
     """Every event the decode request builder reports, as one member.
 
     gem5 groups a component's statistics into one nested Group member
-    (tmp/resources/gem5/src/base/stats/group.hh:60-92) rather than one
+    (gem5 src/base/stats/group.hh:60-92) rather than one
     member per counter; a component's events are the same shape, so a
     listener reaches all of them through one name.
     """

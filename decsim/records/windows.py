@@ -44,7 +44,7 @@ class WindowingSchemeCard:
     lays; a row reads the keys its own layout needs and ignores the
     rest. This is the shape the rows of STRONG_WINDOW_SHAPES have, and
     gem5's params object
-    (tmp/resources/gem5/src/python/m5/SimObject.py:204-205).
+    (gem5 src/python/m5/SimObject.py:204-205).
     """
 
     terminal_policy: str = "flush"

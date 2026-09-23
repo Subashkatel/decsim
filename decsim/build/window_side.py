@@ -4,7 +4,7 @@ Every function here reads the settings its seat needs and returns the
 seat; which seats a run has and what each is wired to is the assembly
 file's (decsim/assembly.py), which is gem5's script naming a component
 once and assigning its ports
-(tmp/resources/gem5/configs/learning_gem5/part1/simple.py:68).
+(gem5 configs/learning_gem5/part1/simple.py:68).
 """
 
 import decsim.build.escalation as escalation_build

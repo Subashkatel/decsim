@@ -6,7 +6,7 @@ decoder_to_decoder, whose two ends this package holds: the record kept
 here is what leaves, and the destination window's record is what it
 lands in, so this component executes the send and handles the landing
 (OMNeT++ refuses a module that sends a message it does not own,
-tmp/resources/omnetpp/src/sim/csimplemodule.cc:333-334; decisions.md
+src/sim/csimplemodule.cc:333-334; decisions.md
 D12). A held boundary waits for a final result. Versions
 make late deliveries harmless: every send bumps the source's version and
 each delivery's version, and a receiver only accepts the latest. Each

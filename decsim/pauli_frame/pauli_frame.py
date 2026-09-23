@@ -9,13 +9,17 @@ Every write costs a fixed number of cycles of the frame unit's clock.
 The caller is called back only when that write lands on a clock edge, so
 anything waiting on the write waits too.
 
-The XOR fold follows PECOS's Pauli frame accumulator. Applying a
-correction exactly once follows Riesebos, "Pauli Frames for Quantum
-Computer Architectures", TU Delft MSc thesis CE-MS-2016, Sec. 3.2
-Table 3.1: a flush applies the gates in a Pauli record on the target
-qubit and then resets that record to I, so a tracked correction leaves
-the frame once. One write costs one clock cycle, 4 ns at 250 MHz (Yang
-et al. 2605.04892).
+The XOR fold follows PECOS's Pauli frame accumulator, which XORs each
+decode's observable mask into a running frame (PECOS
+crates/pecos-decoder-core/src/pauli_frame.rs:82). One correction per
+window is the sliding-window commit: a window makes the final correction
+decision for its commit region once, in software, and hands on its
+effect on the logical operators (Skoric et al. 2209.08552 lines 102-105
+and 444-445). The frame never applies a correction to a qubit, so the
+flush a Pauli frame unit performs before a non-Clifford gate (Riesebos,
+"Pauli Frames for Quantum Computer Architectures", TU Delft MSc thesis
+CE-MS-2016, Sec. 3.2 Table 3.1) has no counterpart here. One write costs
+one clock cycle, 4 ns at 250 MHz (Yang et al. 2605.04892 Table I).
 """
 
 import dataclasses

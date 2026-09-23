@@ -1,11 +1,10 @@
 """The Pauli frame behaves like a real frame and charges what it says.
 
 Sources: PECOS pauli_frame.rs (a stream's frame is the XOR of its
-corrections; folding is non-destructive); Riesebos, "Pauli Frames for
-Quantum Computer Architectures", TU Delft MSc thesis CE-MS-2016,
-Sec. 3.2 Table 3.1 (a flush applies a Pauli record's gates once and
-resets the record to I); Yang et al. 2605.04892 Fig. 1 (one frame update
-costs one cycle, 4 ns at 250 MHz, and the loop waits for it). The write
+corrections; folding is non-destructive); Skoric et al. 2209.08552
+lines 102-105 (a window commits its final correction once); Yang et al.
+2605.04892 Fig. 1 (one frame update costs one cycle, 4 ns at 250 MHz,
+and the loop waits for it). The write
 is charged from the frame clock's next edge, gem5's clockEdge
 (tmp/resources/gem5/src/sim/clocked_object.hh lines 174-186).
 """

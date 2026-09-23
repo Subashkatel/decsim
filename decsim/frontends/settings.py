@@ -102,8 +102,12 @@ class WorkloadSettings:
 
     @classmethod
     def from_yaml(cls, section: Mapping) -> "WorkloadSettings":
-        """The `workload` section: the kind's row reads its own keys."""
-        kind = section.get("kind", "memory_circuit")
+        """The `workload` section: the kind's row reads its own keys.
+
+        The yaml names its kind: the dataclass's default, circuit_list, is
+        for Python-built runs, and a section without one is refused.
+        """
+        kind = section.get("kind")
         row = tables.row(WORKLOADS, "workload.kind", kind)
         fields = row.from_yaml(section)
         return cls(kind=kind, **fields)

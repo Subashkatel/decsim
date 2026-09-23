@@ -110,3 +110,13 @@ def test_a_memory_circuit_key_off_its_list_is_refused():
     }
     with pytest.raises(ValueError, match="memory_circuit reads the keys"):
         workload_settings.WorkloadSettings.from_yaml(section)
+
+
+def test_a_workload_without_a_kind_is_refused_naming_the_rows():
+    """The one default kind is the dataclass's, for Python-built runs."""
+    section = {
+        "code_task": "surface_code:rotated_memory_z",
+        "rounds_per_shot": 15,
+    }
+    with pytest.raises(ValueError, match="workload.kind None is not a row"):
+        workload_settings.WorkloadSettings.from_yaml(section)

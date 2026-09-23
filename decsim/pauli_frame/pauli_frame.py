@@ -100,12 +100,8 @@ class PauliFrameCommitRecord:
 class PauliFrameSnapshot:
     """What the frame holds at one instant."""
 
-    configured_commit_ticks: int
     commit_count: int
     pending_write_count: int
-    charged_ticks: int
-    first_commit_ticks: Optional[int]
-    last_commit_ticks: Optional[int]
     frames: tuple
     records: tuple
 
@@ -189,24 +185,9 @@ class PauliFrame:
         for stream_id in stream_ids:
             frame = self.frame_for_stream(stream_id)
             frames.append((stream_id, frame))
-        commit_ticks = [
-            record.committed_ticks for record in self._state.records
-        ]
-        commit_count = len(self._state.records)
-        first_commit_ticks = None
-        last_commit_ticks = None
-        if commit_ticks:
-            first_commit_ticks = commit_ticks[0]
-            last_commit_ticks = commit_ticks[-1]
-        write_ticks = self._write_ticks()
-        charged_ticks = commit_count * write_ticks
         return PauliFrameSnapshot(
-            configured_commit_ticks=write_ticks,
-            commit_count=commit_count,
+            commit_count=len(self._state.records),
             pending_write_count=len(self._state.pending_by_window),
-            charged_ticks=charged_ticks,
-            first_commit_ticks=first_commit_ticks,
-            last_commit_ticks=last_commit_ticks,
             frames=tuple(frames),
             records=tuple(self._state.records),
         )
@@ -238,12 +219,6 @@ class PauliFrame:
         if self.write_cycles == 0:
             return now
         return self.clock.edge(self.write_cycles, now)
-
-    def _write_ticks(self) -> int:
-        """One write's cost in ticks, the cost the snapshot reports."""
-        if self.write_cycles == 0:
-            return 0
-        return self.clock.period_ticks * self.write_cycles
 
     def _has_accepted(self, window_key) -> bool:
         is_pending = window_key in self._state.pending_by_window

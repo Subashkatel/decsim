@@ -51,7 +51,8 @@ Three conventions are worth knowing before you read:
   row with keys of its own declares them on a nested `Settings` record,
   and they sit in its section beside the keys every row of that table
   shares (`decsim/tables.py`, `row_settings`): `union_find`'s
-  `weight_step` and `cycle_count` in a decoder tier, and the
+  `weight_step` and `cycle_count` in a decoder tier, `measured_table`'s
+  `device` and `partition` in a decoder tier, and the
   `bivariate_bicycle` code card's `qubit_count` and
   `logical_qubit_count` in the `qpu` section, which names its card
   with `code_card` (default `rotated_surface`, Stim's generated

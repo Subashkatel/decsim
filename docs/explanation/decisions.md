@@ -1003,9 +1003,23 @@ A cancelled running decode holds the device until it ends, because a
 GPU starts other work only "as the currently running ... kernel's thread
 blocks finish" (CUDA C++ Programming Guide, preemption).
 
+**The first row.** `measured_table` answers with decsim's own Relay-BP
+decode and prices it from a line measured on a GPU: intercept plus slope
+times the iterations decsim's decode ran, per device, partition,
+decodes running and region size (`decsim/decoders/measured_table/`).
+The line is fitted on NVIDIA's nv-qldpc-decoder run on decsim's own
+regions, one decode at a time; the time follows decsim's iteration count
+rather than a draw from the samples because the two implementations
+agree on iteration counts in distribution, and it keeps a hard region
+slow on the device. Its capacity is one: one chip's regions reach one
+dispatcher. Several decodes on one GPU are not priced, because their
+times follow the other decodes' work rather than their own iterations.
+
 **Where to see it.** `tests/decoders/test_strong_backend.py` holds the
 queue against the Kiefer and Wolfowitz first-come first-served
-recursion and the two cancels.
+recursion and the two cancels; `tests/decoders/test_measured_table_decoder.py`
+holds the line against relay-bp's own iteration count and the answer
+against the relay_bp row under one run seed.
 
 ## What is not modelled yet
 
@@ -1018,7 +1032,8 @@ mistake a gap for a result.
   microsecond round, which is the whole source of order and queue-depth
   variance between two runs of one seed. The proposal on the table is a
   latency key on the decoder section, with the two points priced at
-  Toshio's generation time and ten times it.
+  Toshio's generation time and ten times it. A strong tier that names
+  `measured_table` is priced by a GPU's measured line instead (D28).
 - **O2. The `bandwidth_limited` link row cannot be named from a yaml.**
   Its card is built before the sweep point sets the geometry, so
   reaching it from a config would mean building the links card inside

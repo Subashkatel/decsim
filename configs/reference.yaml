@@ -645,7 +645,9 @@ weak_decoder:                      # the lightweight tier: fast, higher LER
                                    # belief_matching | union_find |
                                    # tesseract | relay_bp | bposd: the
                                    # real algorithm,
-                                   # measured wall clock per window; or a
+                                   # measured wall clock per window;
+                                   # measured_table: relay_bp's answer at a
+                                   # GPU's measured time; or a
                                    # number: fixed core latency in us.
                                    # Known number cards: 0.028 = LILLIPUT-class
                                    # core, [d=3, m=2] 7 cycles at 250 MHz
@@ -898,6 +900,15 @@ strong_decoder:                    # the accurate tier: slow, lower LER
     bits: null                     # as above
                                    # a union_find strong tier takes
                                    # weight_step and cycle_count here, as above
+  # device: a100                   # the measured_table row's GPU: a100 |
+                                   # gh200. Its time is intercept plus slope
+                                   # times the iterations decsim's own
+                                   # Relay-BP ran, a line measured with
+                                   # NVIDIA's nv-qldpc-decoder (cudaq-qec
+                                   # 0.8.0) on that GPU, one decode at a time
+                                   # (decoders/measured_table/measurements.py)
+  # partition: whole               # how the GPU was shared when measured:
+                                   # whole | mps (a100 only)
   engine:
     clock: room                    # the strong unit lives room-side
     fetch_cycles_per_round: 1

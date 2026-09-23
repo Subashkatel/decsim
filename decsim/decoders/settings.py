@@ -17,6 +17,7 @@ import decsim.config as config
 import decsim.decoders.belief_matching.decoder as belief_matching
 import decsim.decoders.belief_propagation_osd.decoder as belief_propagation_osd
 import decsim.decoders.decoder_memory as decoder_memory_module
+import decsim.decoders.measured_table.decoder as measured_table
 import decsim.decoders.tesseract.decoder as tesseract
 import decsim.decoders.union_find.decoder as union_find
 import decsim.ports as ports
@@ -30,9 +31,11 @@ from decsim.decoders.relay_belief_propagation import (
 
 # weak_decoder.kind and strong_decoder.kind name one of these rows. A
 # named row decodes every window for real and is charged its measured
-# wall clock; a number instead of a name is a fixed core latency in
-# microseconds on the MWPM path (decsim/build/decoders.py). Every row is
-# one class on the Decoder port (decsim/decoders/decoder.py); sinter's
+# wall clock, except measured_table, which is charged a GPU's measured
+# time for decsim's own Relay-BP decode (measured_table/decoder.py); a
+# number instead of a name is a fixed core latency in microseconds on
+# the MWPM path (decsim/build/decoders.py). Every row is one class on
+# the Decoder port (decsim/decoders/decoder.py); sinter's
 # BUILT_IN_DECODERS is the shape.
 DECODERS = {
     "pymatching": minimum_weight_perfect_matching.PyMatchingDecoder,
@@ -44,6 +47,7 @@ DECODERS = {
     "tesseract": tesseract.TesseractDecoder,
     "relay_bp": relay_belief_propagation.RelayBeliefPropagationDecoder,
     "bposd": belief_propagation_osd.BeliefPropagationOsdDecoder,
+    "measured_table": measured_table.MeasuredTableDecoder,
 }
 
 # The keys every row of a <tier>_decoder section shares; any other key

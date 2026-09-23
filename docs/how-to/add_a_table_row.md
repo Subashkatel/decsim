@@ -132,8 +132,8 @@ name, with the rows printed:
 
 ```
 weak_decoder.kind 'my_decodr' is not a row of its table; the rows are
-['belief_matching', 'bposd', 'pymatching', 'relay_bp', 'tesseract',
-'union_find', 'unweighted_pymatching']
+['belief_matching', 'bposd', 'measured_table', 'pymatching', 'relay_bp',
+'tesseract', 'union_find', 'unweighted_pymatching']
 ```
 
 One function does that for every table (`decsim/tables.py`, `row`), so

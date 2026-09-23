@@ -213,14 +213,9 @@ def _parse_gate_line(raw_line: str) -> Optional[tuple]:
     line = code.strip()
     if not line:
         return None
-    tokens = line.split()
-    mnemonic = tokens[0]
-    blocked_by = None
-    if "blocked_by" in tokens:
-        token_index = tokens.index("blocked_by")
-        value_index = token_index + 1
-        blocked_by = int(tokens[value_index])
-        tokens = tokens[:token_index]
+    words = line.split()
+    mnemonic = words[0]
+    tokens, blocked_by = _split_blocked_by(words)
     qubits = _qubits_of(tokens)
     angle = None
     lowered = mnemonic.lower()
@@ -230,13 +225,38 @@ def _parse_gate_line(raw_line: str) -> Optional[tuple]:
     return (mnemonic, qubits, is_clifford, blocked_by)
 
 
+def _split_blocked_by(words: list[str]) -> tuple:
+    """The words before blocked_by, and the operation id it names."""
+    if "blocked_by" not in words:
+        return words, None
+    keyword_index = words.index("blocked_by")
+    value_start = keyword_index + 1
+    values = words[value_start:]
+    if len(values) != 1 or not values[0].isdigit():
+        raise ValueError(
+            f"blocked_by takes one operation id and nothing after it, got "
+            f"{values}"
+        )
+    blocked_by = int(values[0])
+    return words[:keyword_index], blocked_by
+
+
 def _qubits_of(tokens: list[str]) -> tuple[int, ...]:
     """The qubit indices named by q<index> tokens after the mnemonic."""
     qubits = []
     for token in tokens[1:]:
         if _is_qubit_token(token):
-            qubits.append(int(token[1:]))
+            qubit = _qubit_index(token)
+            qubits.append(qubit)
     return tuple(qubits)
+
+
+def _qubit_index(token: str) -> int:
+    """The index of a q<index> token; any other q word is refused."""
+    digits = token[1:]
+    if not digits.isdigit():
+        raise ValueError(f"qubit {token!r} is not q followed by an index")
+    return int(digits)
 
 
 def _angle_token(tokens: list[str]) -> Optional[str]:

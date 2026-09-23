@@ -125,6 +125,20 @@ def test_the_text_ir_refuses_a_rotation_angle_it_cannot_read():
         frontend.build()
 
 
+def test_a_qubit_word_without_an_index_is_refused():
+    frontend = circuit_frontend.SurgeryIRFrontend("cnot q0 qx\n")
+
+    with pytest.raises(ValueError, match="qubit 'qx' is not q followed by"):
+        frontend.build()
+
+
+def test_a_blocked_by_without_its_operation_id_is_refused():
+    frontend = circuit_frontend.SurgeryIRFrontend("cnot q0 q1 blocked_by\n")
+
+    with pytest.raises(ValueError, match="blocked_by takes one operation id"):
+        frontend.build()
+
+
 def test_a_quarter_turn_rotation_is_clifford():
     """rz(pi/2) is S up to a global phase."""
     frontend = circuit_frontend.SurgeryIRFrontend("rz q0 pi/2\n")

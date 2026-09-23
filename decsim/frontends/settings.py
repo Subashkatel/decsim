@@ -29,15 +29,20 @@ class RoundsPerShot:
 
     @classmethod
     def from_yaml(cls, value) -> "RoundsPerShot":
-        """`rounds_per_shot`: an int, or "<n>d"."""
-        if isinstance(value, int):
+        """`rounds_per_shot`: a count, or "<n>d", each at least one round.
+
+        Stim's generator refuses fewer: "Need rounds >= 1."
+        """
+        is_count = isinstance(value, int) and not isinstance(value, bool)
+        if is_count and value >= 1:
             return cls(fixed=value)
         if _is_per_distance_text(value):
             per_distance = int(value[:-1])
             return cls(per_distance=per_distance)
         raise ValueError(
-            "workload.rounds_per_shot is a round count or '<n>d' (rounds "
-            f"per unit of distance), got {value!r}"
+            "workload.rounds_per_shot is a round count of at least 1 or "
+            f"'<n>d' (n rounds per unit of distance, n at least 1), got "
+            f"{value!r}"
         )
 
     def rounds_for(self, distance: int) -> int:
@@ -234,13 +239,15 @@ class QlxWorkload:
 
 
 def _is_per_distance_text(value) -> bool:
-    """True for "<n>d": digits then a d."""
+    """True for "<n>d": digits naming at least one round, then a d."""
     if not isinstance(value, str):
         return False
     if not value.endswith("d"):
         return False
     digits = value[:-1]
-    return digits.isdigit()
+    if not digits.isdigit():
+        return False
+    return int(digits) >= 1
 
 
 # workload.kind names one of these rows: a row reads its own section

@@ -75,6 +75,17 @@ def test_a_kind_off_the_table_is_refused_naming_the_rows(tmp_path):
         experiment.load_experiment(config_path)
 
 
+@pytest.mark.parametrize("rounds_per_shot", [0, -1, True, "0d"])
+def test_a_shot_of_fewer_than_one_round_is_refused_at_load(
+    tmp_path, rounds_per_shot
+):
+    workload = {**yaml_configs.MINIMAL_CONFIG["workload"]}
+    workload["rounds_per_shot"] = rounds_per_shot
+    config_path = yaml_configs.write_config(tmp_path, {"workload": workload})
+    with pytest.raises(ValueError, match="a round count of at least 1"):
+        experiment.load_experiment(config_path)
+
+
 def test_each_python_only_row_refuses_a_yaml_by_name(tmp_path):
     """A row a yaml cannot carry says what it needs and where to build it."""
     sentences = {

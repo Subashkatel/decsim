@@ -154,6 +154,14 @@ def test_an_unknown_decoder_manager_key_is_refused(tmp_path):
         experiment.load_experiment(config_path)
 
 
+def test_a_qpu_key_other_than_kind_is_refused(tmp_path):
+    qpu = {"kind": "stim_device", "distance": 5}
+    config_path = write_config(tmp_path, {"qpu": qpu})
+    sentence = r"the qpu section takes one key, kind, and was given"
+    with pytest.raises(ValueError, match=sentence):
+        experiment.load_experiment(config_path)
+
+
 def test_a_mode_without_its_tier_is_refused(tmp_path):
     from decsim.machine import Machine
 

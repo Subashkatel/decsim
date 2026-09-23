@@ -77,11 +77,18 @@ class QpuSettings:
     def from_yaml(cls, section: Mapping) -> "QpuSettings":
         """The `qpu` section: the source kind; the sweep sets the rest.
 
-        The kind is looked up here, where the yaml enters, so a misspelt
-        source is refused before `decsim show` prints it or a run folder
-        exists; the build looks it up again to use it.
+        kind is the section's one key, so a distance or a period written
+        here, which the sweep would silently replace, is refused. The kind
+        is looked up here, where the yaml enters, so a misspelt source is
+        refused before `decsim show` prints it or a run folder exists.
         """
-        kind = section.get("kind")
+        if set(section) != {"kind"}:
+            listed = sorted(section)
+            raise ValueError(
+                f"the qpu section takes one key, kind, and was given "
+                f"{listed}; the sweep sets the distance and the round period"
+            )
+        kind = section["kind"]
         tables.row(SYNDROME_SOURCES, "qpu.kind", kind)
         return cls(kind=kind)
 

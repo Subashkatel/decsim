@@ -26,12 +26,22 @@ FAR_BOUNDARY_KEY = (1, 4)
 REGION_ROUND_KEYS = ((1, 4), (1, 5), (1, 6))
 
 
-def _weak_job() -> decoding_records.DecodeJob:
+def _weak_job(owed_boundaries: int = 0) -> decoding_records.DecodeJob:
+    window = window_records.Window(
+        operation_id=1,
+        window_index=2,
+        commit_lo=4,
+        commit_hi=6,
+        buffer_hi=9,
+        round_count=6,
+    )
+    window.deps_remaining = owed_boundaries
     return decoding_records.DecodeJob(
         operation_id=1,
         window_id=2,
         round_count=6,
         strong_label="strong(mem1 W2)",
+        window=window,
     )
 
 
@@ -260,6 +270,25 @@ def test_a_sibling_started_with_the_weak_job_is_selected_as_it_is():
     assert len(shape.planned) == 1
     assert len(output.selections) == 1
     assert queue.calls == [("await", WINDOW_KEY, strong_job.request_key)]
+
+
+def test_a_sibling_is_planned_when_its_weak_job_leaves_its_park():
+    """Step 1 starts both decoders together (2510.25222 lines 598-601).
+
+    A weak job that still owes a boundary parks, so its sibling is
+    planned at the unpark and not at the submission.
+    """
+    strong_job = _strong_job(5)
+    shape = _Shape(strong_job, is_held=False)
+    redecode, _output, _strong, _queue, _done = _redecode(shape)
+    weak_job = _weak_job(owed_boundaries=1)
+    parked = redecode.parallel_strong_submission(weak_job)
+    planned_while_parked = len(shape.planned)
+    submission = redecode.unparked_submission(WINDOW_KEY)
+    assert parked is None
+    assert planned_while_parked == 0
+    assert submission.job is strong_job
+    assert redecode.unparked_submission(WINDOW_KEY) is None
 
 
 def test_a_strong_input_landed_before_its_selection_waits_for_it():

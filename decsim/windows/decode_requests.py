@@ -598,12 +598,19 @@ class DecodeRequester:
         window.t_dispatch = None
         window.service_began = False
 
-    def release_parked(self, window_key: tuple) -> None:
+    def release_parked(self, window_key: tuple, strong_redecode) -> None:
         """The window's last boundary arrived: its parked decodes may start.
 
         The window's weak decode parks on the chip's manager; a strong
-        sibling or re-decode of the same window parks on the host's.
+        sibling or re-decode of the same window parks on the host's. A
+        sibling the strong side waited to plan until the weak job left
+        its park is submitted first, so the two start together.
         """
+        if strong_redecode is not None:
+            sibling = strong_redecode.unparked_submission(window_key)
+            started = _sibling_submissions(sibling)
+            for submission in started:
+                self.enqueue(submission)
         self.decode_queue.release_parked(window_key)
         if self.strong_decode_queue is not None:
             self.strong_decode_queue.release_parked(window_key)

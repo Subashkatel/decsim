@@ -78,14 +78,37 @@ class StrongRedecode:
     ) -> Optional[decoding_records.Submission]:
         """The strong sibling started with the weak job (the paper's Step 1).
 
-        Its context is held and its send built now; the verdict selects
-        it or cancels it. A sibling whose input has not landed yet is
-        held instead and enqueued when its condition fires, so there is
-        no submission for the requester to make: Step 1 feeds both
-        decoders the same data (2510.25222 lines 598-601), and in a
-        model that prices transport the strong decoder starts when its
-        copy has arrived.
+        Step 1 feeds both decoders the same window and starts them
+        together (2510.25222 lines 598-601), and a weak job whose window
+        still owes a boundary parks until it lands, so its sibling is
+        planned when the weak job leaves the park (unparked_submission):
+        a strong window that pins a face reads the neighbour's final
+        commit, and under held boundaries that commit is what unparks
+        the weak job. A planned sibling has its context held and its
+        send built now; the verdict selects it or cancels it. One whose
+        input has not landed yet is held instead and enqueued when its
+        condition fires, so there is no submission for the requester to
+        make: in a model that prices transport the strong decoder starts
+        when its copy has arrived.
         """
+        key = (weak_job.operation_id, weak_job.window_id)
+        if weak_job.window.deps_remaining > 0:
+            self.selections.park_sibling(key, weak_job)
+            return None
+        return self._planned_sibling(weak_job)
+
+    def unparked_submission(
+        self, window_key: tuple
+    ) -> Optional[decoding_records.Submission]:
+        """The window's weak job left its park: plan its strong sibling."""
+        weak_job = self.selections.unpark_sibling(window_key)
+        if weak_job is None:
+            return None
+        return self._planned_sibling(weak_job)
+
+    def _planned_sibling(
+        self, weak_job: decoding_records.DecodeJob
+    ) -> Optional[decoding_records.Submission]:
         key = (weak_job.operation_id, weak_job.window_id)
         assignment = self.shape.plan(weak_job)
         self.selections.remember_sibling(key, assignment.request_key)
@@ -353,15 +376,27 @@ class StrongRedecode:
 class _StrongSelections:
     """The selection handshake's state.
 
-    Which strong sibling each window may select (the paper's Step 1),
+    Which weak jobs wait in their park for their sibling to be planned,
+    which strong sibling each window may select (the paper's Step 1),
     which selections have arrived over weak_decoder_to_strong_decoder,
     and which landed strong inputs wait for one that has not.
     """
 
     def __init__(self) -> None:
         self.sibling_key_by_window: dict = {}
+        self.parked_weak_job_by_window: dict = {}
         self.delivered_request_keys: set = set()
         self.landing_by_request_key: dict = {}
+
+    def park_sibling(
+        self, window_key: tuple, weak_job: decoding_records.DecodeJob
+    ) -> None:
+        self.parked_weak_job_by_window[window_key] = weak_job
+
+    def unpark_sibling(
+        self, window_key: tuple
+    ) -> Optional[decoding_records.DecodeJob]:
+        return self.parked_weak_job_by_window.pop(window_key, None)
 
     def remember_sibling(
         self, window_key: tuple, request_key: window_records.DecoderRequestKey

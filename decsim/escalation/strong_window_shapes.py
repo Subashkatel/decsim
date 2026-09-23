@@ -259,7 +259,9 @@ class NearSeamWindow(StrongWindowPorts):
     which a committed boundary is a final one; and the neighbour has
     committed by the time its dependent escalates, since a window's weak
     decode starts only once every boundary it owes has arrived and the
-    escalation follows that decode. The escalated window that has no
+    escalation follows that decode; a Step 1 sibling is planned at that
+    same instant, when the weak job leaves its park (strong_redecode.py,
+    parallel_strong_submission). The escalated window that has no
     earlier neighbour pins nothing: its past face is the operation's
     first round layer, closed by the initialisation.
 

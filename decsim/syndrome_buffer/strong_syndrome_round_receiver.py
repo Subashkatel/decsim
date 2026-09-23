@@ -33,6 +33,7 @@ import dataclasses
 import functools
 from typing import Optional
 
+import decsim.engine as engine_module
 import decsim.ports as ports
 import decsim.records.log_sources as log_sources
 import decsim.records.rounds as round_records
@@ -68,7 +69,7 @@ class StrongSyndromeRoundReceiver:
     output = ports.Port(ports.SyndromeBufferOutput)
     memory_arrivals = ports.Port(ports.MemoryRoundArrivals)
 
-    def __init__(self, engine) -> None:
+    def __init__(self, engine: engine_module.Engine) -> None:
         self.engine = engine
         # the bits each crossing round will take, by its key, held
         # against the store until it lands

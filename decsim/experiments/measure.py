@@ -87,7 +87,7 @@ POINTS = (
     # for a window the first decode committed
     "weak_attempt",
     # weak decoder -> strong decoder, the escalation hop: from its first
-    # transfer's send to its last transfer's delivery, the selection and
+    # transfer's request to its last transfer's delivery, the selection and
     # then the rounds the strong store lacked, which the strong input
     # hop waits for; zero for a window that did not escalate. Under
     # run_both_at_once the rounds cross at the weak dispatch and the
@@ -240,7 +240,7 @@ def link_totals(traffic: dict) -> dict:
 
 
 def link_delay_by_window(transfers: list) -> dict:
-    """Ticks from the first send to the last delivery by (path, window key).
+    """Ticks from the first request to the last delivery by (path, window key).
 
     A hop's transfers for one window can overlap, as the escalation's
     selection and its rounds do, so the span is what the window waited
@@ -258,7 +258,7 @@ def link_delay_by_window(transfers: list) -> dict:
     bucket, commitStats[tid] and thread[tid]->threadStats
     (tmp/resources/gem5/src/cpu/o3/cpu.cc:1156-1174).
     """
-    first_send = {}
+    first_request = {}
     last_delivery = {}
     for row in transfers:
         attribution = row["attribution"]
@@ -267,15 +267,15 @@ def link_delay_by_window(transfers: list) -> dict:
             recorded_operation
         )
         key = (row["path"], operation_id, attribution["window_id"])
-        send = row["send_ticks"]
-        earliest_send = first_send.get(key, send)
-        first_send[key] = min(earliest_send, send)
+        request = _hop_start_ticks(row)
+        earliest_request = first_request.get(key, request)
+        first_request[key] = min(earliest_request, request)
         delivery = row["delivery_ticks"]
         latest_delivery = last_delivery.get(key, delivery)
         last_delivery[key] = max(latest_delivery, delivery)
     delay = {}
-    for key, send in first_send.items():
-        delay[key] = last_delivery[key] - send
+    for key, request in first_request.items():
+        delay[key] = last_delivery[key] - request
     return delay
 
 
@@ -296,7 +296,7 @@ def input_hop_by_request(transfers: list) -> dict:
             continue
         key = (row["path"], row["attribution"]["window_id"], run_sequence)
         delay, landing = hops.get(key, (0, 0))
-        delay += row["delivery_ticks"] - row["send_ticks"]
+        delay += row["total_delay_ticks"]
         landing = max(landing, row["delivery_ticks"])
         hops[key] = (delay, landing)
     return hops
@@ -323,7 +323,7 @@ def controller_to_weak_buffer_delays_us(transfers: list) -> list:
     for row in transfers:
         if row["path"] != "controller_to_weak_buffer":
             continue
-        delay = _span_microseconds(row["delivery_ticks"], row["send_ticks"])
+        delay = ticks_to_microseconds(row["total_delay_ticks"])
         delays.append(delay)
     return delays
 
@@ -384,15 +384,16 @@ def strong_store_round_keys(stored_rounds: list) -> list:
 
 
 def qpu_send_ticks(transfers: list) -> dict:
-    """The tick each round left the QPU (its earliest QC send), by round."""
+    """The tick each round left the QPU (its earliest QC request), by round."""
     send = {}
     for row in transfers:
         if row["path"] != "qpu_to_controller":
             continue
         round_index = row["attribution"]["round_lo"]
         earlier = send.get(round_index)
-        if earlier is None or row["send_ticks"] < earlier:
-            send[round_index] = row["send_ticks"]
+        start = _hop_start_ticks(row)
+        if earlier is None or start < earlier:
+            send[round_index] = start
     return send
 
 
@@ -423,7 +424,7 @@ def window_points_us(
     The decode's own time and the time it waited are two points, not
     one: a window's service is what its compute took on the unit, and
     the park before that compute is two points by cause. dep_block is
-    the dependency wait: from the verdict to the input hop's send, which
+    the dependency wait: from the verdict to the input hop's request, which
     is a strong decode waiting for its escalated rounds to land in the
     strong store, and from the input landing in the unit's memory to
     the first tick the decode may start, which is where the
@@ -993,6 +994,20 @@ def parallel_processes_needed(
 def _span_microseconds(end_ticks: int, start_ticks: int) -> float:
     span_ticks = end_ticks - start_ticks
     return ticks_to_microseconds(span_ticks)
+
+
+def _hop_start_ticks(row: dict) -> int:
+    """The tick a transfer was asked for, which is where its hop starts.
+
+    A transfer's send_ticks follows its wait for the channel's setup
+    engine and its own setup, and total_delay_ticks counts from the
+    request (records/transfers.py, Transfer), so the request is the
+    delivery less the total. The setup is the hop's own cost: gem5 adds
+    a DMA's fixed delay to the completion its requester sees
+    (src/dev/dma_device.cc:116-118), and a point that started at the
+    send would charge it to whatever wait comes before the hop.
+    """
+    return row["delivery_ticks"] - row["total_delay_ticks"]
 
 
 def _committed_decode(stages, frame_record) -> _CommittedDecode:

@@ -912,6 +912,52 @@ def test_the_store_wait_is_not_in_the_hop_the_round_then_crosses(tmp_path):
     assert measurement.means["cwb_stall_per_round"] == 51.912 / 30
 
 
+def test_a_hops_setup_is_in_the_hop_and_not_in_the_wait_before_it(tmp_path):
+    """A DMA's fixed delay is part of the latency its requester sees.
+
+    gem5 adds a DMA's delay to the completion it schedules for the
+    device (src/dev/dma_device.cc:116-118). The input hop here is one
+    cycle of the 250 MHz fridge clock plus a five-cycle setup, 0.024 us,
+    on every window, and a 0.1 us unit keeps pace with the rounds, so
+    no window owes anything and none waits before its input hop.
+    """
+    raw = dict(MINIMAL_CONFIG)
+    workload = dict(MINIMAL_CONFIG["workload"])
+    workload["rounds_per_shot"] = 30
+    raw["workload"] = workload
+    links = dict(ONE_TIER_LINKS)
+    input_hop = fridge_hop(1)
+    input_hop["setup_cycles_per_transfer"] = 5
+    links["weak_buffer_to_weak_decoder"] = input_hop
+    raw["links"] = links
+    raw["weak_decoder"] = {
+        "kind": 0.1,
+        "units": 1,
+        "unit_memory": {"bits": None},
+        "engine": {
+            "clock": "fridge",
+            "fetch_cycles_per_round": 1,
+            "fetch_cycles_per_job": 0,
+            "release_cycles_per_job": 10,
+            "release_cycles_per_round": 0,
+        },
+    }
+    config_path = tmp_path / "input_setup.yaml"
+    config_text = yaml.safe_dump(raw)
+    config_path.write_text(config_text)
+    config = experiment.load_experiment(config_path)
+    measurement = measure_point_shot(
+        config,
+        physical_error_probability=0.001,
+        distance=3,
+        round_period_us=1.0,
+        seed=0,
+    )
+
+    assert measurement.samples["input_link_per_window"] == [0.024] * 9
+    assert measurement.samples["dep_block"] == [0.0] * 9
+
+
 def seam_streams(stream_count: int) -> tuple:
     """That many memory streams, one patch and one qubit each.
 

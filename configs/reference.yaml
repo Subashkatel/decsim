@@ -787,8 +787,8 @@ weak_decoder:                      # the lightweight tier: fast, higher LER
                                    # closing edges joined no two clusters
                                    # changes nothing. A step that joins clusters
                                    # without moving a parity costs its deepest
-                                   # flood, because only roots and the touching
-                                   # flag move. A step that moves a parity costs
+                                   # flood, at least one cycle, because only
+                                   # roots and the touching flag move. A step that moves a parity costs
                                    # one cycle for the root plus two a level,
                                    # because the parity climbs while the odd
                                    # flag descends. A step's hop count is the

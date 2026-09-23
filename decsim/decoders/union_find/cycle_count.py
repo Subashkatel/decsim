@@ -222,7 +222,9 @@ def _fusion_changes(step: evidence_records.GrowthStep) -> int:
     """The cycles one step's fusions ripple through the cluster they fused.
 
     A fusion that moves no parity settles a root and the touching flag a
-    level a cycle. One that moves a parity moves the root once and then
+    level a cycle, and takes one cycle when the cluster it fused is a
+    lone detector, a detector meeting the boundary, with no level to
+    cross. One that moves a parity moves the root once and then
     climbs the parity and descends the odd flag a level a cycle, and
     those two floods overlap the root's own descent, so a chain of depth
     D settles in 1 + 2 D changes.

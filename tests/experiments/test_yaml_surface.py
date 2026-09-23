@@ -241,6 +241,12 @@ def test_unknown_algorithms_and_stale_keys_fail_loudly(tmp_path):
         experiment.load_experiment(fixed_distance_key)
 
 
+def test_a_qpu_kind_off_its_table_is_refused_when_the_yaml_loads(tmp_path):
+    misspelt_source = write_config(tmp_path, {"qpu": {"kind": "stim_devic"}})
+    with pytest.raises(ValueError, match="qpu.kind 'stim_devic' is not a row"):
+        experiment.load_experiment(misspelt_source)
+
+
 def test_a_cycle_count_on_a_kind_that_is_not_union_find_is_refused(tmp_path):
     from decsim.machine import Machine
 

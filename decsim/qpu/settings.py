@@ -16,6 +16,7 @@ import decsim.qpu.magic_state_factories as magic_state_factories
 import decsim.qpu.stim_device as stim_device
 import decsim.qpu.streaming_stim_device as streaming_stim_device
 import decsim.qpu.syndrome_devices as syndrome_devices
+import decsim.tables as tables
 
 # qpu.kind names one of these rows: the device that emits the readout.
 SYNDROME_SOURCES = {
@@ -74,8 +75,15 @@ class QpuSettings:
 
     @classmethod
     def from_yaml(cls, section: Mapping) -> "QpuSettings":
-        """The `qpu` section: the source kind; the sweep sets the rest."""
-        return cls(kind=section["kind"])
+        """The `qpu` section: the source kind; the sweep sets the rest.
+
+        The kind is looked up here, where the yaml enters, so a misspelt
+        source is refused before `decsim show` prints it or a run folder
+        exists; the build looks it up again to use it.
+        """
+        kind = section.get("kind")
+        tables.row(SYNDROME_SOURCES, "qpu.kind", kind)
+        return cls(kind=kind)
 
     def build_code(
         self,

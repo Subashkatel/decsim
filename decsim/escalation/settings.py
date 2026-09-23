@@ -51,12 +51,13 @@ THRESHOLD_SOURCES = {
 }
 # How many of the strong region's buffer regions the restarted weak
 # window re-reads under the forward strong window (Toshio 2510.25222
-# Sec. III C, Fig. 12). 0, the default, is the paper: the weak decoder
-# resumes on the commit plus buffer rounds stored after the strong
-# region and reads nothing inside it. 1 reads one buffer region of the
-# strong region as
-# the restart window's far-boundary context, which is what decsim's
-# forward window did until 2026-09-07.
+# Sec. III C). The text has the weak decoder resume once r_com + r_buf
+# rounds are stored after the strong region (lines 1229-1235), which
+# both values meet. 0, the default, reads nothing inside the region. 1
+# reads its last buffer region as the restart window's past context,
+# which is how Fig. 12 step 5 draws the restart window: that block is
+# half assigned to the strong decoder and half the weak decoder's
+# buffer.
 RESTART_REREAD_BUFFER_REGIONS = (0, 1)
 ESCALATION_KEYS = (
     "kind",
@@ -567,8 +568,9 @@ def _check_far_pin_reread(strong_window: str, reread_regions: int) -> None:
 
     A row that pins its far face on the restart window's commit needs
     the restart window to share no round with the strong region, which
-    is escalation.restart_reread_buffer_regions 0, the paper's value
-    (Toshio et al. 2510.25222 Sec. III C, Fig. 12). With a re-read the
+    is escalation.restart_reread_buffer_regions 0, the default (Toshio
+    et al. 2510.25222 Fig. 12 step 5 draws the restart window re-reading
+    one buffer region, which is 1). With a re-read the
     restart window commits rounds inside the region, so pinning on its
     correction would carry an explanation of those rounds into an input
     that already holds them raw, the double count Bombin et al.

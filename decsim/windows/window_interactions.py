@@ -244,7 +244,7 @@ class DefaultWindowInteraction:
         With no re-read the restart window shares no round with the
         strong region, so it owns the faults of the rounds it reads and
         the strong region owns nothing past its committed edge (Toshio
-        2510.25222 Sec. III C, Fig. 12). With a re-read the crossing
+        2510.25222 Sec. III C). With a re-read the crossing
         rounds are read twice, and the strong region keeps them: it
         decoded them with both boundaries determined.
         """

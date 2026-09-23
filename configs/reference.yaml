@@ -226,18 +226,19 @@ escalation:
 #                                  # forward_seam_pinned, whose far pin needs
 #                                  # 0): how many of the
 #                                  # strong region's buffer regions the
-#                                  # restarted weak window re-reads. 0 is the
-#                                  # paper (Toshio 2510.25222 Sec. III C lines
-#                                  # 1241-1246, Fig. 12): the weak decoder
-#                                  # resumes on the commit plus buffer rounds
-#                                  # stored after the strong region and reads
-#                                  # nothing inside it, and the restart window
-#                                  # owns the faults of the rounds it reads.
-#                                  # 1 re-reads one buffer region of the strong
-#                                  # region as the restart window's far
-#                                  # boundary, and the strong region keeps the
-#                                  # crossing faults; it costs the weak syndrome buffer one
-#                                  # more buffer region per bounded window
+#                                  # restarted weak window re-reads. Toshio
+#                                  # 2510.25222 lines 1229-1235 resume the weak
+#                                  # decoder once commit plus buffer rounds are
+#                                  # stored after the strong region, which both
+#                                  # values meet. 0 reads nothing inside the
+#                                  # region, and the restart window owns the
+#                                  # faults of the rounds it reads. 1 re-reads
+#                                  # the region's last buffer region as the
+#                                  # restart window's past context, as Fig. 12
+#                                  # step 5 draws it, and the strong region
+#                                  # keeps the crossing faults; it costs the
+#                                  # weak syndrome buffer one more buffer
+#                                  # region per bounded window
 #                                  # The complementary gap is two solves of
 #                                  # one window, each pinned to one logical
 #                                  # class, submitted at one instant as two

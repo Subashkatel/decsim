@@ -52,7 +52,7 @@ def test_the_paper_restart_reads_no_round_of_the_strong_region():
     """Width 0: the restart begins at the round after the strong region.
 
     It shares no round with the strong region, so it owns the faults of
-    the rounds it reads (Fig. 12).
+    the rounds it reads.
     """
     boundary_payload = boundary_payloads.DenseSeamMask()
     interaction = window_interactions.DefaultWindowInteraction(

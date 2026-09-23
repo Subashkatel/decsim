@@ -444,7 +444,7 @@ def test_the_paper_width_restarts_on_the_round_after_the_strong_region():
     The absorbed W5 and the restart W6 land in unit memory before W3's
     verdict. With no re-read W6 begins at round 19, the round after the
     strong region, and owns the faults of the rounds it reads (Toshio
-    2510.25222 Sec. III C, Fig. 12); the run completes, and commits the
+    2510.25222 Sec. III C); the run completes, and commits the
     same tiers, as it does with one buffer region of re-read.
     """
     machine = _gate_forward_window_machine(3, 3, 40.0, 5.0, 2, 0)
@@ -1072,8 +1072,7 @@ def test_a_pinned_far_face_refuses_a_re_reading_restart_window():
     With escalation.restart_reread_buffer_regions 1 the restart window
     commits rounds inside the strong region, so pinning the far face on
     its correction would carry an explanation of rounds the input holds
-    raw: the double count Bombin 2303.04846 lines 775-788 rule out. 0 is
-    the paper's value (Toshio 2510.25222 Sec. III C, Fig. 12), and the
+    raw: the double count Bombin 2303.04846 lines 775-788 rule out. The
     section refuses the pairing at load rather than reconciling it.
     """
     clocks = config.ClockSettings({})

@@ -680,11 +680,12 @@ class ForwardSeamWindow(ForwardWindow):
     there is no earlier commit to pin on.
 
     The row needs escalation.restart_reread_buffer_regions 0, the
-    paper's value: with a re-read the restart window shares rounds with
-    the strong region, and pinning the far face on a correction that
-    explains rounds inside the region is the double count Bombin's
-    input adaptation rules out. The escalation section refuses the
-    pairing at load.
+    default (Fig. 12 step 5 draws a re-read of one buffer region, which
+    this row does not take): with a re-read the restart window shares
+    rounds with the strong region, and pinning the far face on a
+    correction that explains rounds inside the region is the double
+    count Bombin's input adaptation rules out. The escalation section
+    refuses the pairing at load.
     """
 
     pins_the_far_face = True

@@ -87,6 +87,26 @@ def test_property_shared_raw_shots_preserve_every_detector_and_observable(
 
 
 @pytest.mark.usefixtures("explorer")
+@pytest.mark.parametrize("family", ["rotated_surface", "repetition"])
+@pytest.mark.parametrize("basis", ["X", "Z"])
+@pytest.mark.parametrize("round_count", [1, 2, 5])
+def test_the_finite_memory_has_the_error_model_of_its_assembled_rounds(
+    family: str, basis: str, round_count: int
+) -> None:
+    fragments = deltakit.memory_rounds(
+        family, 3, basis, 0.003, round_period_microseconds=1.1
+    )
+    assembled, assembled_rounds = fragments.assemble(round_count)
+    finite, finite_rounds = deltakit.memory_circuit(
+        family, 3, round_count, basis, 0.003
+    )
+    assembled_model = assembled.detector_error_model(flatten_loops=True)
+    finite_model = finite.detector_error_model(flatten_loops=True)
+    assert finite_model == assembled_model
+    assert finite_rounds == assembled_rounds
+
+
+@pytest.mark.usefixtures("explorer")
 @pytest.mark.parametrize("basis", ["X", "Z"])
 def test_noiseless_memory_has_no_detection_events_or_observable_flips(
     basis: str,

@@ -232,6 +232,7 @@ def _fusion_changes(step: evidence_records.GrowthStep) -> int:
 
 
 def _check_keys(section: Mapping) -> None:
+    """The block names its clock and no key the count does not read."""
     known = set(CYCLE_FIELDS)
     known.add("clock")
     known.add("cycles_per_edge")
@@ -241,6 +242,10 @@ def _check_keys(section: Mapping) -> None:
         raise ValueError(
             f"cycle_count has no key {listed}; its keys are clock, "
             f"cycles_per_edge and {list(CYCLE_FIELDS)}"
+        )
+    if "clock" not in section:
+        raise ValueError(
+            "cycle_count needs clock, the domain its cycles are counted in"
         )
 
 

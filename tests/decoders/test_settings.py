@@ -436,3 +436,15 @@ def test_a_weight_step_that_is_not_a_number_is_refused_with_a_sentence(
         decoder_settings.DecoderSettings.from_yaml(
             section, clocks, "weak_decoder"
         )
+
+
+def test_a_cycle_count_block_without_a_clock_is_refused_by_name():
+    clocks = config.ClockSettings({"decoder": 250.0})
+    section = _tier_section({"bits": None})
+    section["kind"] = "union_find"
+    section["cycle_count"] = {"delay_cycles": 3}
+
+    with pytest.raises(ValueError, match="cycle_count needs clock"):
+        decoder_settings.DecoderSettings.from_yaml(
+            section, clocks, "weak_decoder"
+        )

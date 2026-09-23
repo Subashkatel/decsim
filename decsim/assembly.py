@@ -308,7 +308,6 @@ SEED_ROOTS = (
     ("idle_policy", "plan.idle_policy"),
     ("conditional_release", "conditional_release"),
     ("controller", "controller"),
-    ("qpu", "qpu"),
     ("execution_runtime", "execution_runtime"),
     ("pauli_frame", "pauli_frame"),
 )

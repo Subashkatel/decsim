@@ -163,7 +163,13 @@ def wilson_interval(failures: int, shots: int, z: float = 1.96) -> tuple:
 
 
 def percentile_of_counts(multiset: dict, fraction: float) -> float:
-    """The value at `fraction` of the samples, nearest rank.
+    """The value at `fraction` of the samples, numpy's nearest method.
+
+    The index is round((n - 1) * fraction) into the sorted samples, which
+    is numpy.percentile(method="nearest"); a position half way between
+    two samples takes the even index, so the median of an even count is
+    the lower middle for 2 or 6 samples and the upper for 4. It is not
+    the classical nearest rank, ceil(n * fraction).
 
     multiset maps a microsecond value to how many samples carry it.
     Expanding it and sorting gives the list this walks in place, so a

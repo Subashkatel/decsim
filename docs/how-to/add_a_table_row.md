@@ -34,7 +34,8 @@ class MyDecoder(decoder_module.WindowDecoderBase):
         def from_yaml(cls, section, clocks):
             return cls(**section)
 
-    def __init__(self, latency_model=None, settings=None):
+    def __init__(self, settings=None):
+        decoder_module.WindowDecoderBase.__init__(self)
         ...
 ```
 
@@ -72,7 +73,7 @@ study most often extends:
 
 | Table | The root builds your row as | Where |
 | --- | --- | --- |
-| `DECODERS` | `row(latency_model=None)`, or `row(latency_model=None, settings=...)` for a row with a `Settings` | `decsim/build/decoders.py`, `_algorithm` |
+| `DECODERS` | `row()`, or `row(settings=...)` for a row with a `Settings` | `decsim/build/decoders.py`, `_algorithm` |
 | `WINDOWING_SCHEMES` | `row(card)`, a `WindowingSchemeCard`, or `row(card, settings=...)` for a row with a `Settings` | `decsim/build/plan.py`, `_chosen_scheme` |
 | `SYNDROME_SOURCES` | `row()`, with `code=card` when `takes_code_card` and `settings=...` for a row with a `Settings` | `decsim/build/plan.py`, `_syndrome_source` |
 | `CODE_CARDS` (the `CodeModel` port) | `row(commit_rounds_override=..., buffer_rounds_override=...)`, the windows section's sizes, with `distance=` when the sweep sets one and `settings=...` for a row with a `Settings` | `decsim/qpu/settings.py`, `QpuSettings._named_card` |

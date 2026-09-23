@@ -310,8 +310,10 @@ def _without_unset(value_by_pool: dict) -> dict:
 def _algorithm(tier_settings: decoder_settings.DecoderSettings, tier: str):
     """A tier's algorithm: a table row, or a fixed latency on MWPM.
 
-    A row with keys of its own is built with its Settings record, which
-    the section reader split off the tier's keys (decsim/tables.py).
+    A table row is built from its own settings alone: with keys of its
+    own it takes the Settings record the section reader split off the
+    tier's keys (decsim/tables.py), and with none it takes nothing, so a
+    new row declares no parameter it does not read.
     """
     kind = tier_settings.kind
     if not isinstance(kind, str):
@@ -320,8 +322,8 @@ def _algorithm(tier_settings: decoder_settings.DecoderSettings, tier: str):
     row = tables.row(decoder_settings.DECODERS, f"{tier}_decoder.kind", kind)
     row_settings = tier_settings.row_settings
     if row_settings is None:
-        return row(latency_model=None)
-    return row(latency_model=None, settings=row_settings)
+        return row()
+    return row(settings=row_settings)
 
 
 def _check_serves_the_confidence(

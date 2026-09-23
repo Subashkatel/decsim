@@ -457,7 +457,7 @@ def test_a_strong_unit_cannot_admit_a_window_wider_than_its_memory() -> None:
 
 @pytest.mark.parametrize(
     ("idle_policy", "load_job_count"),
-    [("separate_decode_jobs", 1), ("ignore", 0), ("extend_stream", 0)],
+    [("separate_decode_jobs", 2), ("ignore", 0), ("extend_stream", 0)],
 )
 def test_static_idle_rounds_use_strong_slots_until_the_decoder_arrival(
     idle_policy: str, load_job_count: int
@@ -876,9 +876,11 @@ def _memory_on_stim_device(
 def _two_patch_memory(weak_decoder) -> machine_settings.MachineSettings:
     """Two memory operations on two patches; the second starts at round 4.
 
-    Patch 1 idles for four rounds first, and the default idle policy
-    (separate_decode_jobs) charges that idle region as one load-only
-    decode job, a job without a window model.
+    Patch 0 idles for the four rounds after the first operation ends,
+    while the second runs, and the default idle policy
+    (separate_decode_jobs) charges them as load-only decode jobs, jobs
+    without a window model: one commit region of three rounds, and the
+    one round left when the workload completes.
     """
     first = program_records.Operation(
         id=1, name="mem0", qubits=(0,), patches=(0,), circuit=MEMORY_CIRCUIT
@@ -915,10 +917,10 @@ def test_a_load_only_job_on_a_measured_unit_holds_it_for_zero_algorithm_ticks():
     operation_ids = {1, 2}
     load_only = [r for r in algorithm if r.operation_id not in operation_ids]
     windows = [r for r in algorithm if r.operation_id in operation_ids]
-    assert len(load_only) == 1
+    assert len(load_only) == 2
     assert len(windows) == 2
     idle_ticks = [r.end_ticks - r.start_ticks for r in load_only]
-    assert idle_ticks == [0]
+    assert idle_ticks == [0, 0]
     assert all(r.end_ticks > r.start_ticks for r in windows)
     idle_lines = [
         line for line in machine.observation.log.lines if "mem(" in line

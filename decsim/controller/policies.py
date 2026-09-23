@@ -63,12 +63,12 @@ class SeparateDecodeJobs:
     Every commit region of them costs one synthetic load-only decode job,
     sized to the region plus the buffer rounds and carrying no real
     syndrome contents. The rounds left over when an operation claims the
-    patch cost one shorter job: a final window may be smaller than a
-    regular one (Tan et al. 2209.09219; Skoric et al. 2209.08552), and no
-    validated system leaves the end of a stream undecoded (Google's
-    streaming decoder, LILLIPUT's per-cycle decode, Bombin's modular
-    decoding of idle memory). The honest default for throughput,
-    utilization, backlog, or unit-count claims.
+    patch, or when the workload completes, cost one shorter job: a final
+    window may be smaller than a regular one (Tan et al. 2209.09219;
+    Skoric et al. 2209.08552), and no validated system leaves the end of
+    a stream undecoded (Google's streaming decoder, LILLIPUT's per-cycle
+    decode, Bombin's modular decoding of idle memory). The honest default
+    for throughput, utilization, backlog, or unit-count claims.
     """
 
     def relay(self, idle_rounds, operation, patch, round_index: int) -> None:

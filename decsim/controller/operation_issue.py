@@ -84,10 +84,15 @@ class OperationIssuer:
         waits_for_blocked: bool,
         is_workload_complete: bool,
     ) -> None:
-        """Successors released: close boundaries, seal streams, stop the QPU."""
+        """Successors released: close boundaries, seal streams, stop the QPU.
+
+        At the workload's end the idle rounds no operation claimed are
+        settled too.
+        """
         self.streams.close_feedback_boundary(operation, waits_for_blocked)
         if is_workload_complete:
             self.streams.seal_finished_streams()
+            self.idle_rounds.end_every_idle_period()
             self.output.finish()
 
     def stream_binding_for(

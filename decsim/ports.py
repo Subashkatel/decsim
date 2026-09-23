@@ -1933,15 +1933,16 @@ class IdlePolicy(Protocol):
     (controller/policies.py, beside the accounting they serve). relay
     carries one idle round through the
     idle accounting it is given (controller/idle_rounds.py);
-    end_idle_period runs when an operation claims the patch, so rounds
-    the policy has not charged yet can be settled.
+    end_idle_period runs when an operation claims the patch and, for
+    every idle patch, when the workload completes, so rounds the policy
+    has not charged yet can be settled.
     """
 
     def relay(self, idle_rounds, operation, patch, round_index: int) -> None:
         """Carry one idle round of the patch through the idle accounting."""
 
     def end_idle_period(self, idle_rounds, operation, patch) -> None:
-        """Settle the uncharged rounds when an operation claims the patch."""
+        """Settle the uncharged rounds: a claim, or the workload's end."""
 
 
 # ---------------------------- the rows the root reads before it builds

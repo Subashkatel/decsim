@@ -52,6 +52,9 @@ class RecordingIdleRounds:
     def end_idle_period(self, operation, patch):
         self.ended.append((operation.id, patch))
 
+    def end_every_idle_period(self):
+        self.ended.append("every idle patch")
+
     def claim(self, operation):
         del operation
         return self.claimed
@@ -180,3 +183,19 @@ def test_the_last_release_stops_the_qpu():
 
     assert running is False
     assert qpu.finished is True
+
+
+def test_the_last_release_settles_every_idle_patch():
+    engine = engine_module.Engine()
+    qpu = RecordingQpu()
+    idle_rounds = RecordingIdleRounds()
+    windows = RecordingWindows()
+    issuer = issuer_with(engine, qpu, idle_rounds, windows, None)
+    operation = program_records.Operation(1, "memory", (0,), patches=(0,))
+
+    issuer.after_successor_release(operation, False, False)
+    settled_before_the_end = list(idle_rounds.ended)
+    issuer.after_successor_release(operation, False, True)
+
+    assert settled_before_the_end == []
+    assert idle_rounds.ended == ["every idle patch"]

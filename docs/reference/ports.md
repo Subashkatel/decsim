@@ -626,7 +626,7 @@ How idle rounds travel while an operation waits for feedback.
 | Method | What it does |
 | --- | --- |
 | `relay` | Carry one idle round of the patch through the idle accounting. |
-| `end_idle_period` | Settle the uncharged rounds when an operation claims the patch. |
+| `end_idle_period` | Settle the uncharged rounds: a claim, or the workload's end. |
 
 ## the rows the root reads before it builds
 

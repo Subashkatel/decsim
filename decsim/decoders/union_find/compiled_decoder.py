@@ -406,12 +406,16 @@ def _intervals(is_closed, lower_tick, upper_tick) -> tuple:
 def _require_one_interval_per_edge(
     edge_count: int, edge_intervals: tuple
 ) -> None:
-    """The C reads one interval per edge and sizes nothing itself."""
+    """The C reads one interval per edge and sizes nothing itself.
+
+    The intervals are a decode's own on the same graph, so a count that
+    differs is a caller's bug, refused before the C reads past a buffer.
+    """
     interval_count = len(edge_intervals)
     if interval_count == edge_count:
         return
-    raise ValueError(
-        "the Union-Find cluster gap walks one interval per edge: the "
+    raise RuntimeError(
+        "the Union-Find growth reads one interval per edge: the "
         f"graph has {edge_count} edges and the growth left "
         f"{interval_count} intervals"
     )

@@ -117,6 +117,27 @@ def test_every_factory_row_fills_the_port_it_is_built_behind():
         assert isinstance(row, ports.MagicStateFactory), type(row)
 
 
+class _StartRequestShutdown:
+    """A factory row that keeps no engine: the three calls, nothing else."""
+
+    def start(self):
+        """Nothing ahead of a request."""
+
+    def request(self, operation_id, callback):
+        """Deliver at once."""
+        del operation_id
+        callback()
+
+    def shutdown(self):
+        """Nothing runs."""
+
+
+def test_the_port_asks_a_row_for_its_three_calls_and_no_engine():
+    """No caller reads a factory's engine, so the port does not ask for one."""
+    row = _StartRequestShutdown()
+    assert isinstance(row, ports.MagicStateFactory)
+
+
 def test_the_infinite_factory_delivers_at_once():
     engine = decsim.engine.Engine()
     factory = infinite(engine)

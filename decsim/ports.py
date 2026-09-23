@@ -1978,8 +1978,6 @@ class MagicStateFactory(Protocol):
     tmp/resources/gem5/src/sim/sim_object.hh lines 194 and 280).
     """
 
-    engine: Any
-
     def start(self) -> None:
         """Queue whatever the factory does before the first request."""
 

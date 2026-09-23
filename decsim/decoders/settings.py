@@ -287,6 +287,7 @@ class DecoderSettings:
         boundary_fold = _copy_row(
             section, section_name, "boundary_fold", DECODER_BOUNDARY_FOLDS
         )
+        _check_fold_has_a_memory(section_name, input_kind, boundary_fold)
         result_blocks_unit = section.get("result_blocks_unit", False)
         _check_boolean(section_name, "result_blocks_unit", result_blocks_unit)
         units = _unit_count(section, section_name)
@@ -482,6 +483,24 @@ def _copy_row(
     name = section.get(key, "copy")
     tables.row(table, f"{section_name}.{key}", name)
     return name
+
+
+def _check_fold_has_a_memory(
+    section_name: str, input_kind: str, boundary_fold: str
+) -> None:
+    """Folding into the unit's memory needs the unit to hold a copy.
+
+    A tier that reads its input in place holds no rounds of its own, so
+    there is no single-writer memory to XOR the mask into (Helios
+    2301.08419 lines 632-640).
+    """
+    if input_kind == "copy" or boundary_fold == "copy":
+        return
+    raise ValueError(
+        f"{section_name}.boundary_fold in_place needs the unit's own copy "
+        "of the rounds, and input in_place reads them where the store "
+        "keeps them; fold into a copy, or copy the input"
+    )
 
 
 def _unit_count(section: Mapping, section_name: str) -> int:

@@ -285,8 +285,10 @@ class DecoderSettings:
         unit_memory = UnitMemorySettings.from_yaml(
             section["unit_memory"], section_name
         )
-        input_kind = section.get("input", "copy")
-        boundary_fold = section.get("boundary_fold", "copy")
+        input_kind = _copy_row(section, section_name, "input", DECODER_INPUTS)
+        boundary_fold = _copy_row(
+            section, section_name, "boundary_fold", DECODER_BOUNDARY_FOLDS
+        )
         stage_cycles = _engine_stage_cycles(engine, section_name)
         formation_latency = _formation_latency_cycles(engine)
         formation_rate = _formation_cycles_per_round(engine)
@@ -465,6 +467,15 @@ def _check_boolean(section_name: str, key: str, value) -> None:
     raise ValueError(
         f"{section_name}.{key} {value!r} is not a boolean; write true or false"
     )
+
+
+def _copy_row(
+    section: Mapping, section_name: str, key: str, table: dict
+) -> str:
+    """A copy-or-in-place key's row name, copy when the yaml leaves it out."""
+    name = section.get(key, "copy")
+    tables.row(table, f"{section_name}.{key}", name)
+    return name
 
 
 def _unit_count(section: Mapping, section_name: str) -> int:

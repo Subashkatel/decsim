@@ -396,3 +396,18 @@ def test_a_unit_count_that_is_not_a_whole_count_is_refused_by_name(units):
         decoder_settings.DecoderSettings.from_yaml(
             section, clocks, "weak_decoder"
         )
+
+
+@pytest.mark.parametrize("key", ["input", "boundary_fold"])
+def test_a_memory_row_that_is_not_a_row_is_refused_at_load_by_name(key):
+    """The two copy-or-in-place keys are refused where the yaml enters."""
+    clocks = config.ClockSettings({"decoder": 250.0})
+    section = _tier_section({"bits": None})
+    section[key] = "in-place"
+
+    with pytest.raises(
+        ValueError, match=f"weak_decoder.{key} 'in-place' is not a row"
+    ):
+        decoder_settings.DecoderSettings.from_yaml(
+            section, clocks, "weak_decoder"
+        )

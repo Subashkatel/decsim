@@ -514,7 +514,13 @@ def _gap_threshold_decibels(
             "escalation.kind switching needs gap_threshold_db, the keep "
             "threshold in decibels"
         )
-    return float(section["gap_threshold_db"])
+    value = section["gap_threshold_db"]
+    if isinstance(value, bool) or not isinstance(value, Real):
+        raise ValueError(
+            "escalation.gap_threshold_db must be a number of decibels "
+            f"(got {value!r})"
+        )
+    return _checked_decibels(float(value), "escalation.gap_threshold_db")
 
 
 def _calibrated_threshold(
@@ -654,8 +660,34 @@ def _certified_nats(
             f"p={physical_error_probability}: the {column} entry is empty "
             "(not enough evidence at calibration time)"
         )
-    gap_threshold_decibels = float(cell)
-    return decibels_to_nats(gap_threshold_decibels)
+    entry = (
+        f"threshold_table {table_path} entry {column} at d={distance} "
+        f"p={physical_error_probability}"
+    )
+    try:
+        gap_threshold_decibels = float(cell)
+    except ValueError:
+        raise ValueError(
+            f"{entry} must be a number of decibels (got {cell!r})"
+        ) from None
+    checked_decibels = _checked_decibels(gap_threshold_decibels, entry)
+    return decibels_to_nats(checked_decibels)
+
+
+def _checked_decibels(decibels: float, name: str) -> float:
+    """A keep threshold is finite and not negative, wherever it is read.
+
+    Every signal's gap is a weight difference or a growth spent, never
+    below zero, so a negative threshold keeps every window, as 0 dB
+    already does, and an infinite or undefined one is no likelihood
+    ratio (Toshio et al. 2510.25222 Sec. III A, step 3: keep at g >=
+    g_th, with g_th in decibels).
+    """
+    if not math.isfinite(decibels) or decibels < 0.0:
+        raise ValueError(
+            f"{name} must be finite and not negative (got {decibels!r})"
+        )
+    return decibels
 
 
 def _confidence_walk_microseconds(section: Mapping) -> Optional[float]:

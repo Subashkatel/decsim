@@ -260,6 +260,23 @@ def test_a_kind_written_as_a_list_is_refused_with_the_rows(tmp_path):
         load_experiment(config_path)
 
 
+@pytest.mark.parametrize(
+    "threshold, sentence",
+    [
+        (-1.0, "gap_threshold_db must be finite and not negative"),
+        (math.inf, "gap_threshold_db must be finite and not negative"),
+        (True, "gap_threshold_db must be a number of decibels"),
+        ("20", "gap_threshold_db must be a number of decibels"),
+    ],
+)
+def test_a_threshold_that_is_no_nonnegative_decibel_count_is_refused(
+    tmp_path, threshold, sentence
+):
+    config_path = switching_config(tmp_path, threshold)
+    with pytest.raises(ValueError, match=sentence):
+        load_experiment(config_path)
+
+
 def test_threshold_converts_decibels_to_natural_log_weight(tmp_path):
     config_path = switching_config(tmp_path, 20.0)
     config = load_experiment(config_path)

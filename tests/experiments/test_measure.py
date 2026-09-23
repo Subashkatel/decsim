@@ -606,7 +606,7 @@ def test_a_kept_weak_result_is_measured_on_the_weak_hops(tmp_path):
     is the plain case beside it: 1.064 us of dependency wait and no
     structural wait at all.
     """
-    measurement = switching_shot(tmp_path, -1000000.0, seed=50)
+    measurement = switching_shot(tmp_path, 0.0, seed=50)
 
     samples = measurement.samples
     weak_hops = [0.004] * 3 + [0.0] + [0.004] * 6
@@ -820,7 +820,7 @@ def test_a_cancelled_siblings_card_is_not_the_windows_algorithm(tmp_path):
     same window key. The window's algorithm point is the decode that
     committed, which is the 1.0 us weak one on every window here.
     """
-    measurement = switching_shot(tmp_path, -1000000.0, True)
+    measurement = switching_shot(tmp_path, 0.0, True)
 
     samples = measurement.samples
     assert samples["algorithm"] == [1.0] * 10
@@ -835,7 +835,7 @@ def test_a_second_forced_solve_is_not_the_windows_algorithm(tmp_path):
     (decisions D2 and D7), so the window's algorithm point is one card's
     1.0 us and never their sum.
     """
-    measurement = switching_shot(tmp_path, -1000000.0)
+    measurement = switching_shot(tmp_path, 0.0)
 
     assert measurement.samples["algorithm"] == [1.0] * 10
 
@@ -850,7 +850,7 @@ def test_a_cancelled_siblings_record_ends_at_the_cancel(tmp_path):
     record per window, each ending at that window's verdict rather than
     ten microseconds later, and the weak decode's own records untouched.
     """
-    shot = switching_run(tmp_path, -1000000.0, True)
+    shot = switching_run(tmp_path, 0.0, True)
 
     stages = shot.machine.observation.stages
     windows = shot.machine.observation.windows.windows

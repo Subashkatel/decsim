@@ -121,6 +121,24 @@ def test_table_source_resolves_the_sweep_point_and_refuses_others(tmp_path):
     assert math.isclose(resolved_decibels, 2.5)
 
 
+@pytest.mark.parametrize(
+    "cell, sentence",
+    [("-5.0", "must be finite and not negative"), ("abc", "number of dec")],
+)
+def test_a_table_entry_that_is_no_nonnegative_decibel_count_is_refused(
+    tmp_path, cell, sentence
+):
+    table_path = tmp_path / "negative_table.csv"
+    table_path.write_text(f"distance,p,gth_eq4_wilson\n3,0.002,{cell}\n")
+    card = {"threshold_source": "table", "threshold_table": table_path.name}
+    config_path = source_config(tmp_path, card)
+    config = load_experiment(config_path)
+    with pytest.raises(ValueError, match=sentence):
+        resolve_gap_threshold_nats(
+            config, physical_error_probability=0.002, distance=3
+        )
+
+
 def test_table_source_key_guards(tmp_path):
     table = calibration_table(tmp_path)
     both_sources_card = {

@@ -129,7 +129,9 @@ escalation:
 #                                  # gap is at or above this, in the paper's
 #                                  # decibels (Toshio 2510.25222 gth = 20 dB).
 #                                  # threshold_source table computes the value
-#                                  # instead and refuses this key
+#                                  # instead and refuses this key. A negative,
+#                                  # infinite or non-numeric value is refused,
+#                                  # here and in a table entry
 #   threshold_source: fixed        # fixed | table | online. fixed uses
 #                                  # gap_threshold_db as given. table looks the
 #                                  # sweep point up in an offline calibration csv

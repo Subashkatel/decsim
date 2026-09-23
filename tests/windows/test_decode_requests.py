@@ -601,8 +601,9 @@ def test_withdrawal_cancels_a_pending_decision_and_releases_its_input():
 
 def test_a_delayed_restart_read_keeps_all_its_input_rounds():
     clock = config.Clock(1_000_000)
+    costs = syndrome_buffer_module.SyndromeBuffer.Settings(read_cycles=3)
     settings = syndrome_buffer_settings.SyndromeBufferSettings(
-        clock=clock, read_cycles=3
+        clock=clock, row_settings=costs
     )
     machine = declared_fabric.switching_machine(
         rounds=15,

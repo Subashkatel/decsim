@@ -11,6 +11,7 @@ import dataclasses
 import pytest
 
 import decsim.config as config
+import decsim.engine as engine_module
 import decsim.syndrome_buffer.settings as syndrome_buffer_settings
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 
@@ -18,10 +19,30 @@ BUFFER_ROWS = syndrome_buffer_module.SYNDROME_BUFFERS
 
 
 def test_a_charged_store_cost_needs_its_clock():
+    costs = syndrome_buffer_module.SyndromeBuffer.Settings(read_cycles=1)
+    settings = syndrome_buffer_settings.SyndromeBufferSettings(
+        row_settings=costs
+    )
+    engine = engine_module.Engine()
+
     with pytest.raises(
         ValueError, match="charged weak_syndrome_buffer costs need a clock"
     ):
-        syndrome_buffer_settings.SyndromeBufferSettings(read_cycles=1)
+        syndrome_buffer_module.SyndromeBuffer(settings, engine)
+
+
+def test_the_default_rows_costs_are_its_own_keys():
+    clocks = config.ClockSettings.from_yaml({"fridge": 250.0})
+    section = {"clock": "fridge", "write_cycles": 2, "read_cycles": 3}
+
+    settings = syndrome_buffer_settings.SyndromeBufferSettings.from_yaml(
+        section, "weak_syndrome_buffer", clocks, BUFFER_ROWS
+    )
+
+    expected = syndrome_buffer_module.SyndromeBuffer.Settings(
+        write_cycles=2, read_cycles=3
+    )
+    assert settings.row_settings == expected
 
 
 def test_the_chips_formation_charge_is_read_from_the_section():

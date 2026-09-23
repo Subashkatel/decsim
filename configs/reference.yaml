@@ -580,7 +580,9 @@ links:                             # a kind, then one card per path; null = the
 
 weak_syndrome_buffer:            # the weak syndrome buffer, on the decoder chip
   clock: fridge                    # a clocks domain; absent uses controller.clock
-  write_cycles: 0                  # per-round write before storage/publication
+  write_cycles: 0                  # this and read_cycles are the
+                                   # syndrome_buffer row's own keys.
+                                   # per-round write before storage/publication
   read_cycles: 0                   # one read of a decode's rounds, paid when
                                    # they leave the store at dispatch, for copy
                                    # (then the move) or in_place (then the

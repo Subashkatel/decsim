@@ -218,8 +218,9 @@ def test_a_window_round_is_in_flight_until_its_write_publishes_it():
     engine = engine_module.Engine()
     profile = priced_cwb_profile()
     clock = config.Clock(CYCLE_TICKS)
+    costs = syndrome_buffer_module.SyndromeBuffer.Settings(write_cycles=5)
     settings = syndrome_buffer_settings.SyndromeBufferSettings(
-        clock=clock, write_cycles=5
+        clock=clock, row_settings=costs
     )
     transmitter, _store, windows, _recorder, _ledger = transmitter_with(
         engine, profile, settings=settings

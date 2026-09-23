@@ -641,8 +641,9 @@ def test_a_write_completes_its_write_cycles_after_the_edge_at_or_after_now():
     engine = engine_module.Engine()
     engine.now = 1
     clock = config.Clock(10)
+    costs = syndrome_buffer_module.SyndromeBuffer.Settings(write_cycles=3)
     settings = syndrome_buffer_settings.SyndromeBufferSettings(
-        clock=clock, write_cycles=3
+        clock=clock, row_settings=costs
     )
     the_store = syndrome_buffer_module.SyndromeBuffer(settings, engine)
 

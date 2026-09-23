@@ -83,8 +83,11 @@ class _Link:
 def _store(engine, read_cycles=0) -> syndrome_buffer_module.SyndromeBuffer:
     """An unbounded store on a 10-tick clock, its read priced as asked."""
     clock = config.Clock(10)
+    costs = syndrome_buffer_module.SyndromeBuffer.Settings(
+        read_cycles=read_cycles
+    )
     settings = syndrome_buffer_settings.SyndromeBufferSettings(
-        clock=clock, read_cycles=read_cycles
+        clock=clock, row_settings=costs
     )
     return syndrome_buffer_module.SyndromeBuffer(settings, engine)
 

@@ -145,8 +145,7 @@ same way, with the keys the section reads and your row's own listed:
 
 ```
 weak_syndrome_buffer does not know ['banks']; its keys are ['kind',
-'bits', 'clock', 'write_cycles', 'read_cycles',
-'detection_event_cycles_per_round', 'bank_count']
+'bits', 'clock', 'detection_event_cycles_per_round', 'bank_count']
 ```
 
 A yaml section that no package owns is refused the same way, with the

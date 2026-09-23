@@ -328,8 +328,9 @@ def test_the_sender_hears_the_publication_after_the_windows_do():
     engine = engine_module.Engine()
     engine.now = 1
     clock = config.Clock(10)
+    costs = syndrome_buffer_module.SyndromeBuffer.Settings(write_cycles=3)
     settings = syndrome_buffer_settings.SyndromeBufferSettings(
-        bits=BITS_PER_ROUND, clock=clock, write_cycles=3
+        bits=BITS_PER_ROUND, clock=clock, row_settings=costs
     )
     store = syndrome_buffer_module.SyndromeBuffer(settings, engine)
     receiver, windows = _receiver_with(engine, store)
@@ -351,8 +352,9 @@ def test_a_priced_write_keeps_its_reservation_until_the_write_edge():
     engine = engine_module.Engine()
     engine.now = 1
     clock = config.Clock(10)
+    costs = syndrome_buffer_module.SyndromeBuffer.Settings(write_cycles=3)
     settings = syndrome_buffer_settings.SyndromeBufferSettings(
-        bits=BITS_PER_ROUND, clock=clock, write_cycles=3
+        bits=BITS_PER_ROUND, clock=clock, row_settings=costs
     )
     store = syndrome_buffer_module.SyndromeBuffer(settings, engine)
     receiver, windows = _receiver_with(engine, store)
@@ -412,10 +414,13 @@ def test_the_chips_formation_cycles_are_added_to_the_write_cycles():
     clock = config.Clock(10)
     formation_cycles = 5
     write_cycles = 3
+    costs = syndrome_buffer_module.SyndromeBuffer.Settings(
+        write_cycles=write_cycles
+    )
     settings = syndrome_buffer_settings.SyndromeBufferSettings(
         clock=clock,
-        write_cycles=write_cycles,
         detection_event_cycles_per_round=formation_cycles,
+        row_settings=costs,
     )
     store = syndrome_buffer_module.SyndromeBuffer(settings, engine)
     former = _ChipFormer()

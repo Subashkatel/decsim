@@ -27,6 +27,7 @@ import dataclasses
 from collections.abc import Mapping
 from typing import Optional
 
+import decsim.config as config
 import decsim.engine as engine_module
 import decsim.ports as ports
 import decsim.records.identity as identity_records
@@ -77,11 +78,42 @@ class SyndromeBuffer:
     # with nobody to tell
     held_rounds = ports.Port(ports.HeldRounds, optional=True)
 
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The row's own keys: a flat cost per write and per read, in cycles.
+
+        A write of a round costs write_cycles and a read of a decode's
+        rounds read_cycles, on the section's clock, whatever their width,
+        and no access waits for another: SimpleMemory's latency with no
+        bandwidth term (gem5 src/mem/SimpleMemory.py:49, simple_mem.cc:174).
+        A row built on this store with keys of its own answers book_write
+        and book_read itself, or declares these two keys too.
+        """
+
+        write_cycles: int = 0
+        read_cycles: int = 0
+
+        def __post_init__(self) -> None:
+            config.check_cycles(
+                "weak_syndrome_buffer.write_cycles", self.write_cycles
+            )
+            config.check_cycles(
+                "weak_syndrome_buffer.read_cycles", self.read_cycles
+            )
+
+        @classmethod
+        def from_yaml(cls, section: Mapping) -> "SyndromeBuffer.Settings":
+            """Both costs, zero when absent."""
+            write_cycles = section.get("write_cycles", 0)
+            read_cycles = section.get("read_cycles", 0)
+            return cls(write_cycles=write_cycles, read_cycles=read_cycles)
+
     def __init__(
         self,
         settings: syndrome_buffer_settings.SyndromeBufferSettings,
         engine: engine_module.Engine,
     ) -> None:
+        _check_costs_have_a_clock(settings)
         self.settings = settings
         self.engine = engine
         self.round_by_key: dict = {}
@@ -153,7 +185,8 @@ class SyndromeBuffer:
         (src/mem/simple_mem.cc:174), and a zero cost completes now.
         """
         del round_key, bits
-        return self._access_completion_tick(self.settings.write_cycles)
+        costs = _costs(self.settings)
+        return self._access_completion_tick(costs.write_cycles)
 
     def book_read(self, round_keys: tuple) -> int:
         """The tick a read of these rounds completes: read_cycles on its clock.
@@ -162,7 +195,8 @@ class SyndromeBuffer:
         width, and never waits for another access (book_write).
         """
         del round_keys
-        return self._access_completion_tick(self.settings.read_cycles)
+        costs = _costs(self.settings)
+        return self._access_completion_tick(costs.read_cycles)
 
     def release_round(self, round_key) -> None:
         """Free one unheld round; its consumers are done with it."""
@@ -454,6 +488,24 @@ class SyndromeBuffer:
         self.trace.round_released.fire(round_key)
         if self.held_rounds is not None:
             self.held_rounds.retry()
+
+
+def _costs(
+    settings: syndrome_buffer_settings.SyndromeBufferSettings,
+) -> "SyndromeBuffer.Settings":
+    """The default row's costs; a section built with none charges nothing."""
+    if settings.row_settings is None:
+        return SyndromeBuffer.Settings()
+    return settings.row_settings
+
+
+def _check_costs_have_a_clock(
+    settings: syndrome_buffer_settings.SyndromeBufferSettings,
+) -> None:
+    costs = _costs(settings)
+    charged = costs.write_cycles + costs.read_cycles
+    if charged > 0 and settings.clock is None:
+        raise ValueError("charged weak_syndrome_buffer costs need a clock")
 
 
 def _round_ranges_text(sorted_round_indices: list) -> str:

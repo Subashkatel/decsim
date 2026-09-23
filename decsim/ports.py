@@ -1983,7 +1983,7 @@ class MagicStateFactory(Protocol):
     def start(self) -> None:
         """Queue whatever the factory does before the first request."""
 
-    def request(self, operation_id: int, callback: Callable[[], None]):
+    def request(self, operation_id: int, callback: Callable[[], None]) -> None:
         """Ask for one state; callback runs once it is ready."""
 
     def shutdown(self) -> None:

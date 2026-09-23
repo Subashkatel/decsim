@@ -55,7 +55,6 @@ import decsim.machine as machine_module
 import decsim.observe.settings as observe_settings
 import decsim.qpu.code_geometry as code_geometry
 import decsim.qpu.cycle_clock as cycle_clock
-import decsim.qpu.magic_state_factories as magic_state_factories
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
 import decsim.qpu.stim_device as stim_device
@@ -1239,12 +1238,6 @@ class AlwaysReadyFactory:
         """Deliver at once and remember who asked."""
         self.requests.append(operation_id)
         callback()
-        return magic_state_factories.Ticket(operation_id, (), self)
-
-    def cancel(self, ticket):
-        """Nothing is ever pending."""
-        del ticket
-        return False
 
     def shutdown(self):
         """Nothing runs, so nothing stops."""

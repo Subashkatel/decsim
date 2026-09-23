@@ -31,7 +31,7 @@ import dataclasses
 import functools
 import math
 from collections.abc import Mapping
-from typing import Any, Callable, Optional, Protocol
+from typing import Any, Callable, Optional
 
 import decsim.config as config
 import decsim.engine
@@ -51,19 +51,6 @@ class StateTrace:
     correction_done_tick: Optional[int] = None
     released_tick: Optional[int] = None
     delivered_tick: Optional[int] = None
-
-
-@dataclasses.dataclass
-class Ticket:
-    """A cancellable handle on one factory request."""
-
-    operation_id: int
-    request: tuple
-    factory: "_CancellingFactory"
-
-    def cancel(self) -> bool:
-        """Withdraw the request; False when it was already delivered."""
-        return self.factory.cancel(self)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -95,17 +82,10 @@ class InfiniteFactory:
     def start(self) -> None:
         """Nothing is made ahead of a request, so nothing is queued."""
 
-    def request(
-        self, operation_id: int, callback: Callable[[], None]
-    ) -> Ticket:
+    def request(self, operation_id: int, callback: Callable[[], None]) -> None:
         """Deliver at once."""
+        del operation_id
         callback()
-        return Ticket(operation_id, (), self)
-
-    def cancel(self, ticket: Ticket) -> bool:
-        """Nothing is ever pending, so nothing is cancelled."""
-        del ticket
-        return False
 
     def shutdown(self) -> None:
         """Nothing runs, so nothing stops."""
@@ -132,9 +112,7 @@ class DistillationFactory(seeding._RandomSeedConsumer):
             return
         self.engine.schedule(0, self._start_attempts, label="factory_start")
 
-    def request(
-        self, operation_id: int, callback: Callable[[], None]
-    ) -> Ticket:
+    def request(self, operation_id: int, callback: Callable[[], None]) -> None:
         """Deliver a state now if one is in stock, else when one is ready."""
         request = (operation_id, callback)
         self.waiting.append(request)
@@ -147,15 +125,6 @@ class DistillationFactory(seeding._RandomSeedConsumer):
         )
         self._deliver_to_waiting()
         self._start_attempts()
-        return Ticket(operation_id, request, self)
-
-    def cancel(self, ticket: Ticket) -> bool:
-        """Withdraw an undelivered request; the others keep their order."""
-        if ticket.request not in self.waiting:
-            return False
-        self.waiting.remove(ticket.request)
-        self._stall_start_by_operation_id.pop(ticket.operation_id, None)
-        return True
 
     def shutdown(self) -> None:
         """Stop launching attempts; the program is complete."""
@@ -422,9 +391,7 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
             return
         self.engine.schedule(0, self._start_work, label="factory_start")
 
-    def request(
-        self, operation_id: int, callback: Callable[[], None]
-    ) -> Ticket:
+    def request(self, operation_id: int, callback: Callable[[], None]) -> None:
         """Record the demand for a final state and pull the chain."""
         request = (operation_id, callback)
         self.waiting.append(request)
@@ -438,15 +405,6 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
             f"(top-level store {top_store}, waiting {waiting_count})",
         )
         self._start_work()
-        return Ticket(operation_id, request, self)
-
-    def cancel(self, ticket: Ticket) -> bool:
-        """Withdraw an undelivered request; the others keep their order."""
-        if ticket.request not in self.waiting:
-            return False
-        self.waiting.remove(ticket.request)
-        self._stall_start_by_operation_id.pop(ticket.operation_id, None)
-        return True
 
     def shutdown(self) -> None:
         """Stop the production loop; the program is complete."""
@@ -748,12 +706,6 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
 
 
 _LATENCY_STAGES = ("distill", "corr_decode", "deliver", "total")
-
-
-class _CancellingFactory(Protocol):
-    """A factory a Ticket can withdraw its request from."""
-
-    def cancel(self, ticket: Ticket) -> bool: ...
 
 
 @dataclasses.dataclass

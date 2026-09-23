@@ -403,18 +403,6 @@ def test_a_shut_down_factory_launches_no_attempt():
     assert factory.produced_count == 0
 
 
-def test_a_cancelled_request_is_never_delivered():
-    engine = decsim.engine.Engine()
-    factory = single_stage(engine)
-    delivered = []
-    ticket = factory.request(1, lambda: delivered.append(engine.now))
-    assert ticket.cancel() is True
-    assert ticket.cancel() is False
-    engine.run()
-    assert delivered == []
-    assert factory.stored_state_count == 1
-
-
 def test_an_unknown_production_mode_is_refused():
     engine = decsim.engine.Engine()
     with pytest.raises(ValueError, match="production_mode must be"):
@@ -693,20 +681,6 @@ def test_a_continuous_chain_refills_the_state_a_delivery_takes():
     assert engine.now == 800
     assert factory.counters_by_level[1].stored_state_count == 1
     assert factory.counters_by_level[1].produced_count == 2
-
-
-def test_a_cancelled_chain_request_starts_no_round():
-    engine = decsim.engine.Engine()
-    level = magic_state_factories.DistillLevel(unit_count=1, distance=3)
-    factory = chain(engine, [level])
-    delivered = []
-    ticket = factory.request(1, lambda: delivered.append(engine.now))
-    assert ticket.cancel() is True
-    engine.run()
-    assert delivered == []
-    assert engine.now == 10
-    assert factory.counters_by_level[0].stored_state_count == 15
-    assert factory.counters_by_level[1].produced_count == 0
 
 
 def test_a_shut_down_chain_serves_no_request():

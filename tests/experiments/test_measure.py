@@ -1167,3 +1167,44 @@ def test_link_totals_sum_every_binding_of_one_semantic_path(
     totals = measure.link_totals(traffic)
 
     assert totals["qpu_to_controller"][metric_name] == 5
+
+
+def test_a_shot_fails_when_any_of_its_patches_reads_a_wrong_observable(
+    tmp_path,
+):
+    """Two patches, a burst on the second: the first right, the shot wrong.
+
+    The burst region, radius 4 about patch 1's centre (11, 3) on the
+    patches' shared plane, misses patch 0 entirely; at seed 1 patch 1's
+    observable comes out wrong.
+    """
+    raw = dict(MINIMAL_CONFIG)
+    raw["workload"] = {
+        "kind": "memory_patches",
+        "code_task": "surface_code:rotated_memory_z",
+        "rounds_per_shot": 6,
+        "patch_count": 2,
+    }
+    raw["qpu"] = {
+        "kind": "burst_stim",
+        "burst_radius": 4.0,
+        "burst_center": [11.0, 3.0],
+        "burst_error_probability": 0.3,
+    }
+    config_path = tmp_path / "two_patches.yaml"
+    config_text = yaml.safe_dump(raw)
+    config_path.write_text(config_text)
+    config = experiment.load_experiment(config_path)
+    task = config.point_task(
+        physical_error_probability=0.001,
+        distance=3,
+        round_period_microseconds=1.0,
+        shots=2,
+    )
+    shot = collect.run_shot(task, 1)
+    measurement = measure.measure_shot(shot)
+    first, second = shot.result.operation_results
+
+    assert first.logical_observables == first.observable_truth
+    assert second.logical_observables != second.observable_truth
+    assert measurement.logical_failure is True

@@ -821,15 +821,23 @@ def _logical_verdicts(
     observation: observation_module.Observation,
     result: result_records.RunResult,
 ) -> _LogicalVerdicts:
-    """The loop's observables beside the truth and beside the reference."""
-    operation_result = result.operation_results[0]
-    operation_id = operation_result.operation_id
-    reference_prediction = direct_prediction(observation, operation_id)
-    truth = tuple(operation_result.observable_truth)
-    loop_prediction = tuple(operation_result.logical_observables)
-    is_logical_failure = loop_prediction != truth
-    is_direct_failure = reference_prediction != truth
-    is_direct_mismatch = loop_prediction != reference_prediction
+    """The loop's observables beside the truth and beside the reference.
+
+    A shot fails when any of its operations reads a wrong observable, as
+    a computation fails when any of its logical qubits does; a workload
+    of several patches is judged over all of them.
+    """
+    is_logical_failure = False
+    is_direct_failure = False
+    is_direct_mismatch = False
+    for operation_result in result.operation_results:
+        operation_id = operation_result.operation_id
+        reference_prediction = direct_prediction(observation, operation_id)
+        truth = tuple(operation_result.observable_truth)
+        loop_prediction = tuple(operation_result.logical_observables)
+        is_logical_failure |= loop_prediction != truth
+        is_direct_failure |= reference_prediction != truth
+        is_direct_mismatch |= loop_prediction != reference_prediction
     return _LogicalVerdicts(
         logical_failure=is_logical_failure,
         direct_failure=is_direct_failure,

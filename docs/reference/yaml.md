@@ -34,8 +34,9 @@ Both refusals are checked by `tests/machine/test_machine.py`.
 
 Read it top to bottom as the pipeline: `qpu` is where a readout starts
 and `observation` is where the run is watched. Each key carries its unit
-in its name (`_us` for microseconds, `_cycles` for clock cycles,
-`_rounds` for rounds, `_count` for a count), and the comment beside it
+in its name (`_microseconds`, `_cycles` for clock cycles, `_rounds` for
+rounds, `_count` for a count; the sweep axis `round_period_us` is the
+one key still spelled short), and the comment beside it
 says what the key means and, where the value came from a paper or a
 reference implementation, which one. A key whose comment cites, for
 example, `Toshio 2510.25222 Sec. III C`, has that section as its source,
@@ -46,14 +47,18 @@ Three conventions are worth knowing before you read:
 - `null` means "the component decides". For example
   `windows.commit_rounds: null` leaves the commit region at the code
   distance.
-- A key that only one `kind` reads is refused for every other kind. The
-  switching keys of the `escalation` section are commented out in the
-  reference file for that reason, with the comment saying which config
-  runs them.
-- The file is the documentation of the yaml surface, and
-  `tests/experiments/test_yaml_surface.py` fails when the file and the
-  readers drift apart. Any commit that changes the config surface
-  changes this file in the same commit.
+- Some keys only one `kind` reads are refused for every other kind: the
+  switching keys of the `escalation` section, which the reference file
+  carries as comments for that reason, and `cycle_count` off the
+  `union_find` row. Others are read and ignored by the kinds that have no
+  use for them (`weight_step`, `terminal_policy`), and their comments
+  say so.
+- The file is the documentation of the yaml surface.
+  `tests/experiments/test_yaml_surface.py` loads it and every shipped
+  config, so a key the readers stopped knowing fails in a section that
+  refuses unknown keys; a key a reader gained is caught by no test.
+  Any commit that changes the config surface changes this file in the
+  same commit.
 
 ## Starting from another file
 

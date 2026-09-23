@@ -6,8 +6,7 @@ txTime, bits over the DataRate (point-to-point-net-device.cc:243), for
 its law; Caune et al. 2410.05202 (a 32-bit bus word) and Fruitwala et al.
 2404.15260 (a 128-bit instruction word) for the default payloads; the
 provisioning rule of the bandwidth card (each path carries its nominal
-traffic in one commit region, ns-3's per-device DataRate); gem5-Aladdin's
-setup cost (Shao et al., MICRO 2016) for with_transfer_overhead; Backline
+traffic in one commit region, ns-3's per-device DataRate); Backline
 2609.09270 Table III, the CPU and GPU echo rows, for the two measured
 RoCE v2 rows.
 """
@@ -391,23 +390,6 @@ def test_a_cards_cycles_cost_its_clocks_period_in_whole_ticks():
     assert path.channel.propagation_latency_ticks == 9999
     assert path.setup_ticks == 9999
     assert transfer.serialization_ticks == 3333
-
-
-def test_the_setup_cost_lands_on_the_two_decoder_input_paths():
-    reference = link_profiles.logical_reference_profile()
-    profile = link_profiles.with_transfer_overhead(
-        reference, overhead_microseconds=0.4
-    )
-    assert (
-        profile.weak_buffer_to_weak_decoder.setup_ticks
-        == config.microseconds_to_ticks(0.4)
-    )
-    assert (
-        profile.strong_buffer_to_strong_decoder.setup_ticks
-        == config.microseconds_to_ticks(0.4)
-    )
-    assert profile.qpu_to_controller.setup_ticks == 0
-    assert profile.profile_name == "logical_reference+transfer_overhead"
 
 
 def test_the_reference_weak_loop_is_yangs_control_electronics():

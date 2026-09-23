@@ -11,7 +11,8 @@ contention becomes measurable; capacity_scale sweeps the whole fabric.
 roce_v2_measured_profile is the reference card with the strong tier's
 off-board path priced by Backline's measured RoCE v2 round trip; it is
 the roce_v2_cpu and roce_v2_gpu rows. from_yaml puts the yaml's own card
-on any path; with_transfer_overhead adds a setup cost to any fabric.
+on any path, a per-transfer setup cost (setup_cycles_per_transfer)
+included.
 
 Every number carries a source string on the settings record it sets,
 and a payload's source also travels into the traffic report with every
@@ -726,37 +727,6 @@ def from_yaml(
         **replacements,
         kind=kind,
         profile_name=f"{name}.yaml",
-    )
-
-
-def with_transfer_overhead(
-    profile: settings.FabricSettings,
-    *,
-    overhead_microseconds: float,
-    paths: tuple = (
-        "weak_buffer_to_weak_decoder",
-        "strong_buffer_to_strong_decoder",
-    ),
-) -> settings.FabricSettings:
-    """The profile with a fixed per-transfer setup cost on the listed paths.
-
-    The default paths are the two decoder-input DMA paths. The wire keeps
-    streaming during a setup, but successive setups on one channel
-    serialize (gem5-Aladdin's one delayed-DMA event).
-    """
-    setup_ticks = config.microseconds_to_ticks(overhead_microseconds)
-    replacements = {}
-    for path in paths:
-        path_settings = getattr(profile, path)
-        if path_settings is None:
-            raise ValueError(f"{path} is not wired on this card")
-        replacements[path] = dataclasses.replace(
-            path_settings, setup_ticks=setup_ticks
-        )
-    return dataclasses.replace(
-        profile,
-        **replacements,
-        profile_name=f"{profile.profile_name}+transfer_overhead",
     )
 
 

@@ -142,12 +142,12 @@ ROCE_V2_GPU_SOURCE = (
 
 # decsim prices one number per hop, so each leg of the round trip is
 # charged half of it and the coprocessor's own poll is charged nothing.
-# The legs the measurement covers are the controller's write into the
-# ring (paper lines 1611-1613), the coprocessor's poll of the slot
-# (1616-1618, the Catalyst runtime's poll_message_arrival spinning on
-# seq_num) and the reply's write back (1618-1620).
+# The legs the measurement covers are the controller's one-sided write
+# into the coprocessor's memory (paper lines 1610-1612), the coprocessor's
+# poll "on the expected memory buffer" (1616-1617) and the reply's
+# one-sided write back (1617-1620).
 ROCE_V2_WRITE_LEG = (
-    "the controller's one-sided write into the coprocessor's ring, one "
+    "the controller's one-sided write into the coprocessor's memory, one "
     "half of the measured round trip; the paper gives no per-direction "
     "split"
 )
@@ -157,8 +157,8 @@ ROCE_V2_ESCALATION_LEG = (
     "gives no per-direction split"
 )
 ROCE_V2_POLL_LEG = (
-    "zero: the coprocessor polls its own memory for the slot the write "
-    "landed in"
+    "zero: the coprocessor polls the buffer in its own memory that the "
+    "write landed in"
 )
 ROCE_V2_REPLY_LEG = (
     "the reply's one-sided write back to the controller, one half of the "
@@ -455,12 +455,12 @@ def roce_v2_measured_profile(coprocessor: str) -> settings.FabricSettings:
     RoCE v2 with a one-sided RDMA write, the coprocessor polls that
     buffer and writes the reply back, and the controller times the whole
     round trip in its own clock. The paper gives no per-direction
-    number, and neither does the published code, so the split below is
-    decsim's rule rather than a measurement: the controller's write into
-    strong syndrome buffer, the escalation request and the strong decoder's
-    reply to the frame are each one half of the round trip, and the
+    number, so the split below is decsim's rule rather than a
+    measurement: the controller's write into strong syndrome buffer, the
+    escalation request and the strong decoder's reply to the frame are
+    each one half of the round trip, and the
     strong store's read into the strong decoder is zero because the
-    coprocessor polls a slot in its own memory. The escalation round
+    coprocessor polls a buffer in its own memory. The escalation round
     trip on this card, weak_decoder_to_strong_decoder plus
     strong_buffer_to_strong_decoder plus strong_decoder_to_frame, is
     therefore the measured median exactly.

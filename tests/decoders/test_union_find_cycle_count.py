@@ -263,7 +263,8 @@ def test_a_counted_unit_is_held_for_the_counted_cycles():
     cannot say so in advance, as a measured unit cannot.
     """
     engine = engine_module.Engine()
-    decoder = union_find.UnionFindDecoder(cycle_count=HELIOS)
+    settings = union_find.UnionFindDecoder.Settings(cycle_count=HELIOS)
+    decoder = union_find.UnionFindDecoder(settings=settings)
     timing = staged_decoder.UnitTiming((), (), CLOCK)
     unit = staged_decoder.StagedDecoder(decoder, timing)
     model = hand_graph._model()

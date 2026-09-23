@@ -202,8 +202,6 @@ def test_a_mode_without_its_tier_is_refused(tmp_path):
 
 
 def test_unknown_algorithms_and_stale_keys_fail_loudly(tmp_path):
-    from decsim.machine import Machine
-
     unknown_algorithm = write_config(
         tmp_path,
         {
@@ -213,14 +211,10 @@ def test_unknown_algorithms_and_stale_keys_fail_loudly(tmp_path):
             }
         },
     )
-    config = experiment.load_experiment(unknown_algorithm)
-    settings = config.point_settings(
-        physical_error_probability=0.001, distance=3, round_period_us=1.0
-    )
     with pytest.raises(
         ValueError, match="weak_decoder.kind 'lookup_table' is not a row"
     ):
-        Machine.build(settings)
+        experiment.load_experiment(unknown_algorithm)
 
     old_flat_decoder = write_config(
         tmp_path,
@@ -281,8 +275,11 @@ def test_a_qpu_kind_off_its_table_is_refused_when_the_yaml_loads(tmp_path):
 
 
 def test_a_cycle_count_on_a_kind_that_is_not_union_find_is_refused(tmp_path):
-    from decsim.machine import Machine
+    """cycle_count is the union_find row's own key: pymatching declares none.
 
+    The refusal names the keys the pymatching tier does read, so the
+    yaml is refused when it loads, before a machine is built.
+    """
     counted_matching = write_config(
         tmp_path,
         {
@@ -293,14 +290,13 @@ def test_a_cycle_count_on_a_kind_that_is_not_union_find_is_refused(tmp_path):
             }
         },
     )
-    config = experiment.load_experiment(counted_matching)
-    settings = config.point_settings(
-        physical_error_probability=0.001, distance=3, round_period_us=1.0
+    sentence = (
+        r"weak_decoder does not know \['cycle_count'\]; its keys are "
+        r"\['kind', 'units', 'input', 'boundary_fold', 'result_blocks_unit', "
+        r"'unit_memory', 'engine'\]"
     )
-    with pytest.raises(
-        ValueError, match="weak_decoder.cycle_count is the union_find row's"
-    ):
-        Machine.build(settings)
+    with pytest.raises(ValueError, match=sentence):
+        experiment.load_experiment(counted_matching)
 
 
 def test_engine_clock_must_name_a_clock_domain(tmp_path):

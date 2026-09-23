@@ -287,8 +287,11 @@ def test_the_row_builds_from_the_threshold_and_the_weak_row():
         confidence="extra_cluster_gap",
         gap_threshold_nats=TWENTY_DECIBELS_NATS,
     )
+    union_find_settings = union_find.UnionFindDecoder.Settings(
+        weight_step=0.2, cycle_count=count
+    )
     weak = decoder_settings.DecoderSettings(
-        kind="union_find", weight_step=0.2, cycle_count=count
+        kind="union_find", row_settings=union_find_settings
     )
 
     signal = extra_cluster.ExtraClusterGap.from_settings(escalation, weak)

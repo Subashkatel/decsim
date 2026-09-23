@@ -18,7 +18,7 @@ ESCALATION = escalation_settings.EscalationSettings(
     confidence_walk_microseconds=0.5,
     gap_threshold_nats=2.0,
 )
-WEAK = decoder_settings.DecoderSettings(kind="union_find", weight_step=0.1)
+WEAK = decoder_settings.DecoderSettings(kind="union_find")
 
 
 def test_the_shipped_rows_are_reachable_by_the_name_the_yaml_writes():

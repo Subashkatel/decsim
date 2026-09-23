@@ -310,27 +310,18 @@ def _without_unset(value_by_pool: dict) -> dict:
 def _algorithm(tier_settings: decoder_settings.DecoderSettings, tier: str):
     """A tier's algorithm: a table row, or a fixed latency on MWPM.
 
-    A cycle_count block is the union_find row's own timing; on any other
-    kind it is refused by name.
+    A row with keys of its own is built with its Settings record, which
+    the section reader split off the tier's keys (decsim/tables.py).
     """
     kind = tier_settings.kind
-    cycle_count = tier_settings.cycle_count
-    if cycle_count is not None and kind != "union_find":
-        raise ValueError(
-            f"{tier}_decoder.cycle_count is the union_find row's own "
-            f"timing; kind {kind!r} has no cycle count"
-        )
     if not isinstance(kind, str):
         latency_model = decoders.PresetLatencyDecoder(kind)
         return minimum_weight_perfect_matching.PyMatchingDecoder(latency_model)
     row = tables.row(decoder_settings.DECODERS, f"{tier}_decoder.kind", kind)
-    if kind != "union_find":
+    row_settings = tier_settings.row_settings
+    if row_settings is None:
         return row(latency_model=None)
-    return row(
-        latency_model=None,
-        weight_step=tier_settings.weight_step,
-        cycle_count=cycle_count,
-    )
+    return row(latency_model=None, settings=row_settings)
 
 
 def _check_serves_the_confidence(

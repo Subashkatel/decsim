@@ -48,11 +48,14 @@ Three conventions are worth knowing before you read:
   `windows.commit_rounds: null` leaves the commit region at the code
   distance.
 - Some keys only one `kind` reads are refused for every other kind: the
-  switching keys of the `escalation` section, which the reference file
-  carries as comments for that reason, and `cycle_count` off the
-  `union_find` row. Others are read and ignored by the kinds that have no
-  use for them (`weight_step`, `terminal_policy`), and their comments
-  say so.
+  switching keys of the `escalation` section, and a row's own keys. A
+  row with keys of its own declares them on a nested `Settings` record,
+  and they sit in its section beside the keys every row of that table
+  shares (`decsim/tables.py`, `row_settings`): `union_find`'s
+  `weight_step` and `cycle_count` in a decoder tier. The reference file
+  carries both kinds as comments for that reason. Others are read and
+  ignored by the kinds that have no use for them (`terminal_policy`),
+  and their comments say so.
 - The file is the documentation of the yaml surface.
   `tests/experiments/test_yaml_surface.py` loads it and every shipped
   config, so a key the readers stopped knowing fails in a section that

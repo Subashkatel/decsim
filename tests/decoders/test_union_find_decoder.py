@@ -146,7 +146,8 @@ def test_both_decoders_reproduce_every_syndrome_an_error_produces():
     """A property test: 200 random errors, both corrections reproduce them."""
     model = _model()
     referee = _referee()
-    row = union_find.UnionFindDecoder(weight_step=0.1)
+    settings = union_find.UnionFindDecoder.Settings(weight_step=0.1)
+    row = union_find.UnionFindDecoder(settings=settings)
     rng = random.Random(11)
     for _ in range(200):
         error = _random_error(rng)
@@ -167,7 +168,8 @@ def test_both_decoders_reproduce_every_syndrome_an_error_produces():
 def test_a_single_fault_is_named_by_both_decoders():
     model = _model()
     referee = _referee()
-    row = union_find.UnionFindDecoder(weight_step=0.1)
+    settings = union_find.UnionFindDecoder.Settings(weight_step=0.1)
+    row = union_find.UnionFindDecoder(settings=settings)
     for fault in range(FAULT_COUNT):
         syndrome = CHECK[:, fault]
         ldpc_correction = referee.decode(syndrome)
@@ -193,7 +195,8 @@ def test_an_unsatisfiable_syndrome_is_marked_and_a_satisfiable_one_is_not():
     fault and carries no status at all.
     """
     model = _model()
-    row = union_find.UnionFindDecoder(weight_step=0.1)
+    settings = union_find.UnionFindDecoder.Settings(weight_step=0.1)
+    row = union_find.UnionFindDecoder(settings=settings)
     unsatisfiable = [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
     unsatisfiable_job = _job(model, unsatisfiable)
     unsatisfiable_result = row.decode(unsatisfiable_job)

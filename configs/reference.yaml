@@ -684,7 +684,10 @@ weak_decoder:                      # the lightweight tier: fast, higher LER
                                    # decodes; a window larger than the memory
                                    # stops the run. A bounded memory needs
                                    # rounds that state their size
-  weight_step: 0.1                 # the union_find row's growth resolution: the
+  # A row's own keys sit in this section beside the shared keys above
+  # (its Settings, decsim/tables.py row_settings), and any other kind
+  # refuses them. union_find's two, with their defaults:
+  # weight_step: 0.1               # the union_find row's growth resolution: the
                                    # natural-log units of weight one tick of an
                                    # edge length is (Huang, Newman and Brown
                                    # 2004.04693, weighted growth). An edge of
@@ -695,12 +698,10 @@ weak_decoder:                      # the lightweight tier: fast, higher LER
                                    # the engine's cycles directly. Helios's own
                                    # weights run 2 to 16 (2301.08419 lines
                                    # 1242-1254, the weight resolution wmax).
-                                   # Read on any kind and used by union_find
-  cycle_count: null                # the union_find row's own timing, in place of
+  # cycle_count: null             # the union_find row's own timing, in place of
                                    # its host wall clock: the decoder's cycle
                                    # count per growth tick, on a named clock.
-                                   # null = the wall clock. Refused on any other
-                                   # kind. The count is
+                                   # null = the wall clock. The count is
                                    #   1
                                    #   + setup_cycles
                                    #   + setup_cycles_per_vertex x detectors
@@ -833,10 +834,8 @@ strong_decoder:                    # the accurate tier: slow, lower LER
                                    # is the copy row
   unit_memory:
     bits: null                     # as above
-  weight_step: 0.1                 # as above; the union_find row's growth
-                                   # resolution
-  cycle_count: null                # as above; the union_find row's own
-                                   # timing
+                                   # a union_find strong tier takes
+                                   # weight_step and cycle_count here, as above
   engine:
     clock: room                    # the strong unit lives room-side
     fetch_cycles_per_round: 1

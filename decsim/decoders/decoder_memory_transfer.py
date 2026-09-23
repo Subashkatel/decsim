@@ -23,6 +23,7 @@ data (Toshio 2510.25222 lines 1248-1250).
 """
 
 import dataclasses
+import functools
 from typing import Any, Callable, Optional, Protocol, runtime_checkable
 
 import decsim.decoders.decoder_memory as decoder_memory_module
@@ -121,26 +122,9 @@ class DecoderInputStaging:
             return
         send_input = job.send_input
         job.send_input = None
-
-        def land(_delivered: decoding_records.DecodeJob) -> None:
-            job.input_landing_ticks = self.engine.now
-            # the width that crossed the link is the width that left the
-            # store, before this tier forms anything out of it
-            bits = job.payload_bits()
-            self._form_detection_events(job)
-            job.decoder_input = memory.deposit(job)
-            job.payloads = []
-            job.memory = memory
-            if job.decoder_input.rounds:
-                source_name = job.input_source_name
-                self.trace.copy_made.fire(job, bits, source_name, memory.name)
-            hold = job.input_hold
-            if hold is not None:  # the weak buffer may drop the rounds now
-                hold()
-                job.input_hold = None
-            self._land_joined(landing_key, memory)
-            on_landed(job)
-
+        land = functools.partial(
+            self._land, job, memory, landing_key, on_landed
+        )
         awaited = _AwaitedLanding(memory, self.engine.now, [])
         self.awaited_by_input[landing_key] = awaited
         expected_delay_ticks = self.transport.deliver(job, send_input, land)
@@ -223,6 +207,34 @@ class DecoderInputStaging:
         if formation is None:
             return
         job.payloads = formation.form(job.payloads)
+
+    def _land(
+        self,
+        job: decoding_records.DecodeJob,
+        memory,
+        landing_key: tuple,
+        on_landed: Callable[[decoding_records.DecodeJob], None],
+        delivered: decoding_records.DecodeJob,
+    ) -> None:
+        """The input's transfer landed: deposit it, drop the store's hold."""
+        del delivered
+        job.input_landing_ticks = self.engine.now
+        # the width that crossed the link is the width that left the
+        # store, before this tier forms anything out of it
+        bits = job.payload_bits()
+        self._form_detection_events(job)
+        job.decoder_input = memory.deposit(job)
+        job.payloads = []
+        job.memory = memory
+        if job.decoder_input.rounds:
+            source_name = job.input_source_name
+            self.trace.copy_made.fire(job, bits, source_name, memory.name)
+        hold = job.input_hold
+        if hold is not None:  # the weak buffer may drop the rounds now
+            hold()
+            job.input_hold = None
+        self._land_joined(landing_key, memory)
+        on_landed(job)
 
     def _read_in_place(
         self,

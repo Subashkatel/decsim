@@ -69,7 +69,6 @@ def test_fake_bits_are_as_wide_as_the_syndrome():
     payload = first_payload(device, operation, 1)
     assert len(payload.bits) == 8
     assert payload.size_bits == 8
-    assert payload.code == "rotated surface code (d=3)"
 
 
 def test_fake_bits_grow_with_the_codes_distance():

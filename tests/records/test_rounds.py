@@ -131,7 +131,6 @@ def test_retained_fragment_normalizes_readout_bits():
         patch_ids=("patch",),
         round_index=2,
         bits=[True, 0],
-        code="code",
         fragment_index=3,
         size_bits=2,
     )

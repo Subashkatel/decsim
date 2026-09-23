@@ -86,7 +86,6 @@ class QPUReadout:
     patch_ids: tuple
     round_index: int
     bits: Optional[Any] = None
-    code: Optional[str] = None
     fragment_count: int = 1
     fragment_index: int = 0
     size_bits: Optional[int] = None

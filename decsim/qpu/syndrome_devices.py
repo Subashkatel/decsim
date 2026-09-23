@@ -386,7 +386,6 @@ class SyndromeBitDevice(seeding._AtomicRunSeedConsumer):
             patches,
             global_round,
             bits=bits,
-            code=self.code.name,
             size_bits=len(bits),
         )
 

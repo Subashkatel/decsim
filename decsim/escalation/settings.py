@@ -97,9 +97,10 @@ class OnlineThresholdSettings:
     windows; one revised audit multiplies the target by adjust_factor,
     and only ceil(3 / kept_bad_budget) consecutive clean audits divide it
     back. The target stays inside [min_escalation_rate,
-    max_escalation_rate]. The audits reach the strong tier on top of the
-    target, so the strong duty is at most max_escalation_rate plus
-    audit_rate (threshold_sources.py, OnlineThresholdController).
+    max_escalation_rate - audit_rate], because the audits reach the strong
+    tier beside the target and max_escalation_rate bounds the strong
+    duty they make together (threshold_sources.py,
+    OnlineThresholdController).
     Defaults are the validated drift-replay configuration.
     """
 
@@ -188,11 +189,13 @@ class OnlineThresholdSettings:
                 "escalation.online needs 0 < min_escalation_rate <= "
                 f"max_escalation_rate <= 1 (got {low} and {high})"
             )
-        if not low <= self.target_escalation_rate <= high:
+        target_cap = high - self.audit_rate
+        if not low <= self.target_escalation_rate <= target_cap:
             raise ValueError(
                 "escalation.online.target_escalation_rate must lie inside "
-                "[min_escalation_rate, max_escalation_rate] "
-                f"(got {self.target_escalation_rate})"
+                "[min_escalation_rate, max_escalation_rate - audit_rate], "
+                "since the audits reach the strong tier beside it "
+                f"(got {self.target_escalation_rate}, cap {target_cap})"
             )
 
 

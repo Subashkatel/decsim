@@ -206,10 +206,11 @@ escalation:
 #                                  # rate under the budget (the rule of three)
 #     adjust_factor: 2.0           # the raise/relax multiplier
 #     min_escalation_rate: 1e-5    # the target's floor
-#     max_escalation_rate: 0.30    # the target's cap. The audits reach the
-#                                  # strong tier on top of it, so the strong
-#                                  # duty Theorem 1 bounds is at most this plus
-#                                  # audit_rate
+#     max_escalation_rate: 0.30    # the strong duty's cap, audits included:
+#                                  # the audits reach the strong tier beside
+#                                  # the target, so the target stays at or
+#                                  # under this minus audit_rate and the duty
+#                                  # Theorem 1 bounds stays under this
 #   run_both_at_once: false        # Toshio 2510.25222 Sec. III A Step 1 (lines
 #                                  # 598-601): the strong decoder starts with the
 #                                  # weak one on the same syndrome and is cancelled

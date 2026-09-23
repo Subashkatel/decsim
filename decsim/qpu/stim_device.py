@@ -727,11 +727,15 @@ def burst_circuit(
     pair when either qubit is in the region. The idle copy lands right
     after the round's first TICK, where qec-burst-scaling inserts its
     one DEPOLARIZE1 per round (qecburst/circuit.py inject_burst_profile).
+    A circuit the burst adds nothing to, a patch the region misses, is
+    returned as it is, so its shot is the one stim_device draws.
 
     Raises:
-        ValueError: the burst adds no instruction, so the shot would run
-            without the burst the settings name.
+        ValueError: the burst starts after the shot's last round, so no
+            shot would run with the burst the settings name.
     """
+    if burst.burst_onset_round > table.round_count:
+        _refuse_a_late_onset(burst, table.round_count)
     region = _burst_region(circuit, burst)
     round_ends = _round_ends(table)
     flattened = circuit.flattened()
@@ -749,7 +753,7 @@ def burst_circuit(
         sampled.append(instruction)
         measurement_count += instruction.num_measurements
     if inserted_count == 0:
-        _refuse_an_empty_burst(burst, table.round_count)
+        return circuit
     return sampled
 
 
@@ -1136,13 +1140,10 @@ def _pairs_touching(targets: list, region: frozenset) -> list:
     return kept
 
 
-def _refuse_an_empty_burst(
+def _refuse_a_late_onset(
     burst: BurstStimDevice.Settings, round_count: int
 ) -> None:
     raise ValueError(
-        f"the burst adds no noise to the circuit: no instruction of the "
-        f"channels {list(burst.burst_channels)} touches the region in "
-        f"rounds {burst.burst_onset_round} to {round_count}. Check "
-        "qpu.burst_onset_round against the shot's rounds, and "
-        "burst_radius and burst_center against the circuit's QUBIT_COORDS"
+        f"qpu.burst_onset_round {burst.burst_onset_round} is after the "
+        f"shot's last round, {round_count}; the burst would never start"
     )

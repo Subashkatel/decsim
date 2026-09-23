@@ -897,11 +897,25 @@ def test_a_burst_the_decoders_are_not_told_of_leaves_their_models_alone():
     assert list(burst_faults.priors) == list(plain_faults.priors)
 
 
-def test_a_burst_that_adds_no_noise_is_refused():
+def test_a_burst_that_starts_after_the_shot_is_refused():
     circuit = memory_circuit(3, 3)
-    sentence = "the burst adds no noise to the circuit"
+    sentence = "burst_onset_round 4 is after the shot's last round, 3"
     with pytest.raises(ValueError, match=sentence):
         burst_of(circuit, 3, burst_onset_round=4, burst_error_probability=0.1)
+
+
+def test_a_patch_the_burst_region_misses_draws_its_own_circuit():
+    """Nothing is added, so its shot is the one stim_device draws."""
+    circuit = memory_circuit(3, 3)
+    burst = burst_of(
+        circuit,
+        3,
+        burst_radius=1.0,
+        burst_center=(40.0, 0.0),
+        burst_error_probability=0.1,
+    )
+
+    assert burst is circuit
 
 
 @pytest.mark.parametrize(

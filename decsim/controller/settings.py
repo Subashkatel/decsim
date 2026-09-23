@@ -36,6 +36,18 @@ DETECTION_EVENT_FORMATION = {
     "decoder": detection_event_formation.DecoderSideFormation,
 }
 
+# The controller section's keys.
+_CONTROLLER_KEYS = (
+    "clock",
+    "readout_to_bits_cycles",
+    "packing_cycles_per_round",
+    "decision_to_pulse_cycles",
+    "detection_event_cycles_per_round",
+    "packing_rounds_in_flight",
+    "packing_overflow",
+    "detection_events_formed_at",
+)
+
 
 class PackingOverflowPolicy(enum.Enum):
     """What the controller does with a finished round its store cannot take.
@@ -125,6 +137,7 @@ class ControllerSettings:
         cls, section: Mapping, clocks: config.ClockSettings
     ) -> "ControllerSettings":
         """The `controller` section: its cycle counts, and its clock."""
+        _check_section_keys(section)
         clock = clocks.clock(section["clock"])
         readout_cycles = section["readout_to_bits_cycles"]
         packing_cycles = section["packing_cycles_per_round"]
@@ -194,6 +207,22 @@ class IdlePolicySettings:
 
     kind: str = "separate_decode_jobs"
     policy: Optional[ports.IdlePolicy] = None
+
+
+def _check_section_keys(section: Mapping) -> None:
+    """The section names no key it does not have.
+
+    gem5 refuses a parameter its class does not declare
+    (src/python/m5/SimObject.py:932-936), as the decoder_manager and
+    escalation sections here do.
+    """
+    unknown = set(section) - set(_CONTROLLER_KEYS)
+    if unknown:
+        listed = sorted(unknown)
+        raise ValueError(
+            f"controller does not know {listed}; its keys are "
+            f"{list(_CONTROLLER_KEYS)}"
+        )
 
 
 def _is_round_count(value) -> bool:

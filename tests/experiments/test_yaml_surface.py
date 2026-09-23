@@ -146,6 +146,15 @@ def test_a_packing_bound_that_is_not_a_count_of_rounds_is_refused(
         experiment.load_experiment(config_path)
 
 
+def test_an_unknown_controller_key_is_refused(tmp_path):
+    controller = dict(MINIMAL_CONFIG["controller"])
+    controller["packing_cycles"] = 3
+    config_path = write_config(tmp_path, {"controller": controller})
+    sentence = r"controller does not know \['packing_cycles'\]; its keys are"
+    with pytest.raises(ValueError, match=sentence):
+        experiment.load_experiment(config_path)
+
+
 def test_the_bulk_strong_key_reaches_the_decoder_manager(tmp_path):
     config_path = write_config(
         tmp_path, {"decoder_manager": {"bulk_strong": True}}

@@ -30,6 +30,10 @@ import decsim.trace_source as trace_source
 
 ObservableBits = tuple[int, ...]
 
+# The keys with no default: a frame card states the write's cost and the
+# clock it counts on.
+_REQUIRED_PAULI_FRAME_KEYS = ("clock", "write_cycles")
+
 
 @dataclasses.dataclass(frozen=True)
 class PauliFrameConfig:
@@ -61,6 +65,7 @@ class PauliFrameConfig:
         cls, section: Mapping, clocks: config.ClockSettings
     ) -> "PauliFrameConfig":
         """The `pauli_frame` section: a kind, and write_cycles on its clock."""
+        _check_section_keys(section)
         kind = section.get("kind", "logical_register")
         tables.row(FRAMES, "pauli_frame.kind", kind)
         clock = clocks.clock(section["clock"])
@@ -266,6 +271,17 @@ class PauliFrame:
         )
         self.trace.correction_committed.fire(record)
         pending.on_committed()
+
+
+def _check_section_keys(section: Mapping) -> None:
+    """The section names the keys it cannot do without."""
+    missing = set(_REQUIRED_PAULI_FRAME_KEYS) - set(section)
+    if missing:
+        listed = sorted(missing)
+        raise ValueError(
+            f"pauli_frame needs the keys {listed}; configs/reference.yaml "
+            "holds every key with its unit"
+        )
 
 
 @dataclasses.dataclass(frozen=True)

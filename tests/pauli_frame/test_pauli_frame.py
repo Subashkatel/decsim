@@ -205,6 +205,22 @@ def test_a_charged_write_without_a_clock_is_refused():
         PauliFrameConfig(write_cycles=1)
 
 
+@pytest.mark.parametrize("key", ["clock", "write_cycles"])
+def test_a_section_without_a_required_key_is_refused_by_name(key):
+    """A sweep that leaves a key out reads a sentence, not a KeyError."""
+    clocks = config.ClockSettings({"fridge": 250.0})
+    section = {"kind": "logical_register", "clock": "fridge"}
+    section["write_cycles"] = 1
+    del section[key]
+
+    with pytest.raises(ValueError) as refusal:
+        PauliFrameConfig.from_yaml(section, clocks)
+    assert str(refusal.value) == (
+        f"pauli_frame needs the keys ['{key}']; configs/reference.yaml "
+        "holds every key with its unit"
+    )
+
+
 def test_a_free_write_is_accepted_and_needs_no_clock():
     settings = PauliFrameConfig(write_cycles=0)
     assert settings.write_cycles == 0

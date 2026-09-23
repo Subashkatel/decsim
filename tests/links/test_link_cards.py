@@ -244,3 +244,24 @@ def test_a_boolean_header_in_a_card_is_refused():
         _load_readout_card(card)
     message = str(refusal.value)
     assert message == "header_bits_per_transfer must be a finite whole number"
+
+
+@pytest.mark.parametrize(
+    ("key", "cycles"),
+    [
+        ("latency_cycles", True),
+        ("latency_cycles", 1.5),
+        ("setup_cycles_per_transfer", True),
+    ],
+)
+def test_a_cycle_count_that_is_not_whole_is_refused_naming_the_card(
+    key, cycles
+):
+    card = dict(GOOD_CARD)
+    card[key] = cycles
+    with pytest.raises(ValueError) as refusal:
+        _load_readout_card(card)
+    message = str(refusal.value)
+    assert message == (
+        f"links.qpu_to_controller.{key} must be a nonnegative integer"
+    )

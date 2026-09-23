@@ -757,6 +757,17 @@ def _check_card(path_name: str, card) -> None:
     _check_bits_per_cycle(card_name, card["bits_per_cycle"])
     lane_count = card.get("channels", 1)
     _check_lane_count(card_name, lane_count)
+    _check_cycle_counts(card_name, card)
+
+
+def _check_cycle_counts(card_name: str, card: Mapping) -> None:
+    """The latency and the setup, when written, are whole cycle counts."""
+    config.check_cycles(f"{card_name}.latency_cycles", card["latency_cycles"])
+    setup_cycles = card.get("setup_cycles_per_transfer")
+    if setup_cycles is None:
+        return
+    setup_name = f"{card_name}.setup_cycles_per_transfer"
+    config.check_cycles(setup_name, setup_cycles)
 
 
 def _check_bits_per_cycle(card_name: str, bits_per_cycle) -> None:
@@ -816,7 +827,6 @@ def _card_ticks(card: Mapping, clocks: config.ClockSettings) -> tuple:
     clock = clocks.clock(card["clock"])
     period_ticks = clock.period_ticks
     latency_cycles = card["latency_cycles"]
-    config.check_cycles("latency_cycles", latency_cycles)
     latency_ticks = latency_cycles * period_ticks
     bits_per_cycle = card["bits_per_cycle"]
     lane_count = card.get("channels", 1)
@@ -829,7 +839,6 @@ def _card_ticks(card: Mapping, clocks: config.ClockSettings) -> tuple:
     setup_cycles = card.get("setup_cycles_per_transfer")
     setup_ticks = 0
     if setup_cycles is not None:
-        config.check_cycles("setup_cycles_per_transfer", setup_cycles)
         setup_ticks = setup_cycles * period_ticks
     return latency_ticks, bits_per_microsecond, setup_ticks
 

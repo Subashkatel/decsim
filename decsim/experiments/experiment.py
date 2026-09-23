@@ -395,4 +395,3 @@ def _check_shots(shots, index: int) -> None:
         f"sweep block {index} shots must be a whole number of at least 1, "
         f"got {shots!r}"
     )
-

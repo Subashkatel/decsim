@@ -138,9 +138,11 @@ escalation:
 #                                  # and refuses uncalibrated points. online
 #                                  # starts at gap_threshold_db and adapts it
 #                                  # across the point's shots (serial only)
-#   threshold_table: cal.csv       # table only: calibrate_threshold.py's
-#                                  # calibration_table.csv (one row per d and p,
-#                                  # thresholds in dB), path relative to this
+#   threshold_table: cal.csv       # table only: a calibration csv with
+#                                  # columns distance and p and one threshold
+#                                  # column per method, in dB, set as Toshio
+#                                  # 2510.25222 Sec. III B sets g_th (brute
+#                                  # force, or Eq. (4)); path relative to this
 #                                  # config file. Calibrate for this run's
 #                                  # window geometry; thresholds do not transfer
 #                                  # between geometries

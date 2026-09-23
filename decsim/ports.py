@@ -1736,9 +1736,9 @@ class ThresholdSource(Protocol):
     online row labels a kept window by re-decoding it on the strong
     tier) needs one serial strong re-decode per window, so Switching
     refuses it beside run_both_at_once and the forward strong window.
-    reads_a_calibration_table says the point's number comes from
-    calibrate_threshold.py's csv rather than from the section's card, so
-    the settings demand threshold_table. built_per_sweep_point says the
+    reads_a_calibration_table says the point's number comes from an
+    offline calibration csv rather than from the section's card, so the
+    settings demand threshold_table. built_per_sweep_point says the
     row builds one instance of itself for a whole sweep point, which
     the experiments layer hands to every shot, because the row learns
     across the point's windows; every other row is built by the root

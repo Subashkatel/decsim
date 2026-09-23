@@ -8,7 +8,7 @@ at a target, and an audit lane that strong-decodes a random sample of
 kept windows to learn whether the target is safe; it is one instance
 per sweep point, shared by every shot. The yaml's third source, table,
 is resolved by the experiments layer to a fixed threshold per sweep
-point (decoders/settings.py, threshold_nats_for), so at run time it is
+point (escalation/settings.py, threshold_nats_for), so at run time it is
 FixedThreshold. Both rows fill the ThresholdSource port
 (decsim/ports.py). Thresholds and gaps are natural-log weight (nats),
 the unit the decoder compares in; the yaml converts the paper's
@@ -65,9 +65,10 @@ class FixedThreshold:
 class TableThreshold(FixedThreshold):
     """The calibration table's g_th for this sweep point.
 
-    calibrate_threshold.py writes one row per (distance, p) of
-    calibration_table.csv with the threshold in decibels; the
-    experiments layer looks the point up and converts it before the
+    An offline calibration csv holds one row per (distance, p) with the
+    threshold in decibels, set as Toshio et al. 2510.25222 Sec. III B
+    sets it (by brute force, or as Eq. (4)'s smallest g_th, line 890);
+    the experiments layer looks the point up and converts it before the
     machine is built
     (EscalationSettings.threshold_nats_for), so at run time this row
     decides on a constant exactly as FixedThreshold does. What it

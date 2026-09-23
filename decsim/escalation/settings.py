@@ -324,10 +324,12 @@ class EscalationSettings:
         """The sweep point's threshold in nats, per threshold_source.
 
         fixed and online read the card (online starts there and adapts);
-        table looks the point up in the calibration csv
-        (calibrate_threshold.py's calibration_table.csv: one row per
-        distance and p, thresholds in dB) and refuses a point the table
-        does not certify, instead of guessing.
+        table looks the point up in the calibration csv (columns
+        distance and p, then one threshold column per method, in dB;
+        Toshio et al. 2510.25222 Sec. III B sets g_th by brute force
+        over P_L(g_th), lines 855-863, or as the smallest g_th with
+        P_L,th(g_th) <= epsilon P_L,strong, Eq. (4) at line 890) and
+        refuses a point the table does not certify, instead of guessing.
         """
         if not self._decides_on_a_confidence():
             return None

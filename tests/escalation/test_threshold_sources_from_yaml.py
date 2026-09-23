@@ -2,7 +2,7 @@
 
 fixed uses the card's gap_threshold_db as given (the paper's constant
 gth). table computes nothing at run time: it looks the sweep point up
-in an offline calibration csv (calibrate_threshold.py's shape) and
+in an offline calibration csv (one row per distance and p) and
 refuses a point the table does not certify. online starts at
 gap_threshold_db and adapts it across the point's shots with the
 two-loop controller (rate tracker + audit lane); one calibrator per

@@ -1261,10 +1261,9 @@ def _write_trace(shot, run_dir, label: str) -> Optional[str]:
     of its own is written where it says, with the shot's seed in the
     name when trace_shots asks for more than one, so no shot overwrites
     another's file. Only the shots trace_shots names are written, so a
-    sweep point of two thousand shots writes one file
-    (trace_and_viewer.md section 10, ruling 1). The file it wrote comes
-    back, so the shot's measurement can say where its trace is; a shot
-    that was not traced returns None.
+    sweep point of two thousand shots writes one file. The file it wrote
+    comes back, so the shot's measurement can say where its trace is; a
+    shot that was not traced returns None.
     """
     observation = shot.task.settings.observation
     if not observation.writes_trace:

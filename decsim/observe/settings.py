@@ -47,11 +47,12 @@ class ObservationSettings:
     every window with the Tesseract referee and counts disagreements,
     never priced. record_switching_windows keeps every request and
     service record for the switching views; syndrome_buffer_occupancy builds
-    the L5 listener on the weak syndrome buffer; backlog_trace builds the
-    decode backlog sampler the D7 harness reads; decoder_memory_occupancy
-    builds the memory sweep's sampler (the decoder utilization is always
-    integrated, every run's pool columns read it); data_movement builds
-    the copy, reference and move counters the RunResult carries.
+    the occupancy listener on the weak syndrome buffer; backlog_trace
+    builds the sampler of the rounds waiting to be decoded;
+    decoder_memory_occupancy builds the memory sweep's sampler (the
+    decoder utilization is always integrated, every run's pool columns
+    read it); data_movement builds the copy, reference and move counters
+    the RunResult carries.
     """
 
     log: str = "off"

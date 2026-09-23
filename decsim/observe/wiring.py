@@ -189,7 +189,7 @@ def _syndrome_buffer_occupancy(
     engine: engine_module.Engine,
     weak_syndrome_buffer,
 ):
-    """The L5 listener on the weak syndrome buffer, only when asked for."""
+    """The weak syndrome buffer's occupancy listener, only when asked."""
     if not observation.syndrome_buffer_occupancy:
         return None
     occupancy = occupancy_module.SyndromeBufferOccupancy(engine)

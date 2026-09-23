@@ -357,6 +357,35 @@ def test_a_capacity_scale_of_zero_is_refused():
         )
 
 
+def test_a_cards_cycles_cost_its_clocks_period_in_whole_ticks():
+    """gem5 cyclesToTicks, clockPeriod() * c (clocked_object.hh:227).
+
+    At 300 MHz the period is 3333 ticks, so three cycles are 9999 ticks
+    and eight bits at eight bits per cycle take one period, the same
+    ticks every other component on the domain charges.
+    """
+    clocks = config.ClockSettings({"fridge": 300.0})
+    card = {
+        "latency_cycles": 3,
+        "clock": "fridge",
+        "bits_per_cycle": 8.0,
+        "setup_cycles_per_transfer": 3,
+    }
+    section = {"controller_to_weak_buffer": card}
+    profile = link_profiles.from_yaml(section, clocks, "clocked")
+    path = profile.controller_to_weak_buffer
+    engine = decsim.engine.Engine()
+    channel = channel_module.Channel(path.channel, engine)
+    framed = channel_module.FramedPayload(8)
+    delivered = []
+    channel.send(framed, 0, 0, delivered.append)
+    engine.run()
+    transfer = delivered[0]
+    assert path.channel.propagation_latency_ticks == 9999
+    assert path.setup_ticks == 9999
+    assert transfer.serialization_ticks == 3333
+
+
 def test_the_setup_cost_lands_on_the_two_decoder_input_paths():
     reference = link_profiles.logical_reference_profile()
     profile = link_profiles.with_transfer_overhead(

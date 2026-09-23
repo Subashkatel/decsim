@@ -710,23 +710,34 @@ def _roce_v2_strong_paths(
     }
 
 
-def _card_microseconds(card: Mapping, clocks: config.ClockSettings) -> tuple:
-    """(latency, aggregate rate, setup) of one card in microseconds."""
-    megahertz = clocks.megahertz(card["clock"])
+def _card_ticks(card: Mapping, clocks: config.ClockSettings) -> tuple:
+    """(latency ticks, aggregate rate, setup ticks) of one card.
+
+    A cycle costs its domain's period in whole ticks, gem5's
+    cyclesToTicks (src/sim/clocked_object.hh:227, clockPeriod() * c),
+    so a link's cycles and every other component's cycles on one domain
+    are the same ticks. The rate moves bits_per_cycle on each lane every
+    period, kept as an exact fraction of the card's decimals.
+    """
+    clock = clocks.clock(card["clock"])
+    period_ticks = clock.period_ticks
     latency_cycles = card["latency_cycles"]
     config.check_cycles("latency_cycles", latency_cycles)
-    latency_microseconds = latency_cycles / megahertz
+    latency_ticks = latency_cycles * period_ticks
     bits_per_cycle = card["bits_per_cycle"]
     lane_count = card.get("channels", 1)
     bits_per_microsecond = None
     if bits_per_cycle is not None:
-        bits_per_microsecond = bits_per_cycle * lane_count * megahertz
+        lane_bits_per_cycle = fractions.Fraction(str(bits_per_cycle))
+        bits_per_period = lane_bits_per_cycle * lane_count
+        bits_per_tick = bits_per_period / period_ticks
+        bits_per_microsecond = bits_per_tick * config.TICKS_PER_MICROSECOND
     setup_cycles = card.get("setup_cycles_per_transfer")
-    setup_microseconds = None
+    setup_ticks = 0
     if setup_cycles is not None:
         config.check_cycles("setup_cycles_per_transfer", setup_cycles)
-        setup_microseconds = setup_cycles / megahertz
-    return latency_microseconds, bits_per_microsecond, setup_microseconds
+        setup_ticks = setup_cycles * period_ticks
+    return latency_ticks, bits_per_microsecond, setup_ticks
 
 
 def _carded_path(
@@ -737,9 +748,7 @@ def _carded_path(
     source: str,
 ) -> settings.PathSettings:
     """The reference path with the card's channel and setup cost."""
-    latency_microseconds, bits_per_microsecond, setup_microseconds = (
-        _card_microseconds(card, clocks)
-    )
+    latency_ticks, bits_per_microsecond, setup_ticks = _card_ticks(card, clocks)
     capacity = None
     if bits_per_microsecond is not None:
         capacity = settings.CapacitySettings(
@@ -748,13 +757,9 @@ def _carded_path(
             None,
             source,
         )
-    latency_ticks = config.microseconds_to_ticks(latency_microseconds)
     channel = settings.ChannelSettings(
         path_name, latency_ticks, capacity, source
     )
-    setup_ticks = 0
-    if setup_microseconds:
-        setup_ticks = config.microseconds_to_ticks(setup_microseconds)
     header_bits = card.get("header_bits_per_transfer", 0)
     return dataclasses.replace(
         path_settings,

@@ -20,8 +20,13 @@ from collections.abc import Mapping
 
 
 def row(table: dict, section: str, kind):
-    """The table row a section's kind names; a kind off the table is refused."""
-    if kind not in table:
+    """The table row a section's kind names; a kind off the table is refused.
+
+    A yaml list or mapping in the kind's place is off the table too, and
+    is refused with the same sentence rather than by the dict's own
+    TypeError, since neither can be a key.
+    """
+    if isinstance(kind, (list, Mapping)) or kind not in table:
         rows = sorted(table)
         raise ValueError(
             f"{section} {kind!r} is not a row of its table; the rows are {rows}"

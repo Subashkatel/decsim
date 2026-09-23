@@ -252,6 +252,14 @@ def test_a_run_both_at_once_that_is_not_a_flag_is_refused(tmp_path):
         load_experiment(config_path)
 
 
+def test_a_kind_written_as_a_list_is_refused_with_the_rows(tmp_path):
+    card = {"escalation": {"kind": ["switching"]}}
+    config_path = write_config(tmp_path, card)
+    sentence = r"escalation.kind \['switching'\] is not a row of its table"
+    with pytest.raises(ValueError, match=sentence):
+        load_experiment(config_path)
+
+
 def test_threshold_converts_decibels_to_natural_log_weight(tmp_path):
     config_path = switching_config(tmp_path, 20.0)
     config = load_experiment(config_path)

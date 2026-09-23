@@ -378,13 +378,16 @@ class WindowDecode:
     that produced the correction: the minimum weight inside the class a
     forced solve was pinned to, and the growth a cluster-based decode
     did (Meister et al. 2405.07433 Algorithm 2 lines 518-525 reads the
-    graph and the radii). A row leaves what it does not produce None.
+    graph and the radii). ``iterations`` is the message-passing
+    iterations an iterative decode ran, which is what its time on a
+    device scales with. A row leaves what it does not produce None.
     """
 
     selected_faults: Any
     decode_status: Optional[Any] = None
     forced_class_weight: Optional[float] = None
     cluster_evidence: Optional[Any] = None
+    iterations: Optional[int] = None
 
 
 @dataclass
@@ -402,6 +405,9 @@ class DecodeResult:
     # the growth a cluster-based decode did, what a cluster gap reads;
     # None from a row that grows no clusters
     cluster_evidence: Optional[Any] = None
+    # the message-passing iterations the decode ran, what a measured
+    # device time law reads; None from a row that runs no iterations
+    iterations: Optional[int] = None
     # round-keyed seam defects (synthetic decoders, recovery lock
     # scenarios)
     boundary_defects: Optional[dict] = None

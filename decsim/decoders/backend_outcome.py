@@ -148,7 +148,9 @@ def window_decode_of(
     if not outcome.succeeded:
         decode_status = outcome.status
     return decoding_records.WindowDecode(
-        outcome.physical_correction, decode_status
+        outcome.physical_correction,
+        decode_status,
+        iterations=outcome.iterations,
     )
 
 

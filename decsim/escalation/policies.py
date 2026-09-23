@@ -28,7 +28,7 @@ class EscalationCollaborators:
     decides on none reads nothing. This is the shape the rows of
     STRONG_WINDOW_SHAPES have, and gem5's params object, where a SimObject's
     collaborators arrive as one structure rather than as a signature per
-    subclass (tmp/resources/gem5/src/python/m5/SimObject.py:204-205).
+    subclass (gem5 src/python/m5/SimObject.py:204-205).
 
     threshold is the ThresholdSource the row decides keep on,
     expected_source is the soft output source the run's confidence

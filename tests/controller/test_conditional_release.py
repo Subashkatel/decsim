@@ -22,13 +22,6 @@ import types
 import decsim.controller.conditional_release as conditional_release
 
 
-class RecordingEngine:
-    """A clock a test sets."""
-
-    def __init__(self, now=0):
-        self.now = now
-
-
 class RecordingDispatch:
     """The frame's end: which decisions were sent, and with what delivery."""
 
@@ -59,16 +52,14 @@ def operation(operation_id, name="decode", requires_return=False):
 
 def bare_release():
     """The unit with no dispatch bound: only its decisions are read."""
-    engine = RecordingEngine()
-    return conditional_release.ConditionalRelease(engine)
+    return conditional_release.ConditionalRelease()
 
 
 def connected_release():
     """The unit bound to a recording dispatch and one runtime."""
-    engine = RecordingEngine(now=13)
     dispatch = RecordingDispatch()
     runtime = RecordingRuntime()
-    unit = conditional_release.ConditionalRelease(engine)
+    unit = conditional_release.ConditionalRelease()
     unit.dispatch = dispatch
     unit.runtime = runtime
     return unit, dispatch, runtime

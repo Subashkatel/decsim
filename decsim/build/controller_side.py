@@ -37,7 +37,8 @@ def build_conditional_release(
     parts: build_parts.Parts,
 ) -> conditional_release_module.ConditionalRelease:
     """The gate a conditional operation's release waits at."""
-    return conditional_release_module.ConditionalRelease(parts.engine)
+    del parts
+    return conditional_release_module.ConditionalRelease()
 
 
 def build_strong_requests(

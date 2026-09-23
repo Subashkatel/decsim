@@ -78,10 +78,13 @@ study most often extends:
 | `SYNDROME_BUFFERS` | `row(settings)`, the section's record, whose `row_settings` holds the row's own `Settings` | `decsim/build/stores.py` |
 | `IDLE_POLICIES`, `BOUNDARY_POLICIES`, `BOUNDARY_PAYLOADS` | `row()` | `decsim/build/plan.py` |
 
-A syndrome source is also the run's window model source unless Python
-names another (`QpuSettings.error_model_provider`), so a new source
-answers `WindowModelSource` as well as `SyndromeSource`; a source with
-no circuit answers it with nothing, as `TimingOnlyDevice` does.
+A syndrome source also says where the run's window models come from,
+through its `window_model_source` method, unless Python names another
+provider (`QpuSettings.error_model_provider`). A source with a circuit
+returns itself and answers `WindowModelSource` too, as `StimDevice`
+does; a source with no circuit returns
+`syndrome_devices.NO_WINDOW_MODELS`, which answers every model question
+with nothing, as `TimingOnlyDevice` does.
 
 ## 2. Add the row
 

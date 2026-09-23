@@ -163,6 +163,10 @@ class StreamingStimDevice(seeding._AtomicRunSeedConsumer):
             return None
         return truth
 
+    def window_model_source(self) -> "StreamingStimDevice":
+        """This source: the fragments it executes grow the window models."""
+        return self
+
     def sampled_detection_events(self, operation_id: Any) -> tuple[int, ...]:
         """Convert the executed prefix, without hypothetical future rounds."""
         stream = self._stream_for(operation_id)

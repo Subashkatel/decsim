@@ -152,7 +152,7 @@ def build_plan(
     device = _syndrome_source(settings.qpu, code)
     error_model_provider = settings.qpu.error_model_provider
     if error_model_provider is None:
-        error_model_provider = device
+        error_model_provider = device.window_model_source()
     _install_operation_circuits(device, error_model_provider, all_operations)
     idle_policy = _idle_policy(settings.idle_policy)
     return Plan(

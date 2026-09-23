@@ -97,6 +97,10 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
             return None
         return _as_int_bits(shot.truth)
 
+    def window_model_source(self) -> "StimDevice":
+        """This source: the circuit it samples is the window models' too."""
+        return self
+
     def sampled_detection_events(self, operation_id: Any) -> tuple[bool, ...]:
         """The shot's detection events, in the circuit's detector order."""
         shot = self._shot_for(operation_id)

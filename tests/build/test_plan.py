@@ -17,6 +17,7 @@ import decsim.escalation.settings as escalation_settings
 import decsim.frontends.settings as workload_settings
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
+import decsim.qpu.syndrome_devices as syndrome_devices
 import decsim.records.decoding as decoding_records
 import decsim.records.windows as window_records
 import decsim.settings as machine_settings
@@ -71,6 +72,20 @@ def test_a_row_shaped_by_the_code_card_is_built_with_the_runs_card():
     plan = _plan(qpu=named_by_kind)
 
     assert plan.device.code is plan.code
+
+
+def test_a_stim_source_is_its_own_window_model_source():
+    stim_source = qpu_settings.QpuSettings(kind="stim_device", distance=3)
+
+    plan = _plan(qpu=stim_source)
+
+    assert plan.error_model_provider is plan.device
+
+
+def test_a_circuit_less_source_wires_the_model_source_that_builds_nothing():
+    plan = _plan()
+
+    assert plan.error_model_provider is syndrome_devices.NO_WINDOW_MODELS
 
 
 def test_a_run_that_never_escalates_gets_the_flush_tail():

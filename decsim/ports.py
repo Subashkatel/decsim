@@ -1349,6 +1349,17 @@ class SyndromeSource(Protocol):
     ) -> Optional[tuple[int, ...]]:
         """The observable flips the source drew, or None when it draws none."""
 
+    def window_model_source(self) -> "WindowModelSource":
+        """Where the run's window error models come from, by default.
+
+        A source with a circuit answers itself, since its circuit is the
+        model; a source without one answers a component that builds no
+        model. The plan wires this unless Python names another provider
+        (qpu.error_model_provider), as sinter derives a task's model from
+        its circuit only when none is given (sinter/_data/_task.py lines
+        71 and 87-89): the sampler is never asked to be the model.
+        """
+
 
 @runtime_checkable
 class DetectionEventFormer(Protocol):
@@ -1421,12 +1432,13 @@ class DetectionEventPlacement(Protocol):
 class WindowModelSource(Protocol):
     """Who builds the decoder-facing error model of one window.
 
-    The window planner holds one of these and asks it per window; the
-    run's syndrome source is the shipped answer, since the model comes
-    from the same circuit the readouts come from, but the plan takes it
-    as its own collaborator (qpu.error_model_provider) so a model built
-    anywhere else plugs in. A run whose source builds no models supplies
-    none at all: the planner holds None and asks nothing.
+    The window planner holds one of these and asks it per window. The
+    run's syndrome source names the shipped answer
+    (SyndromeSource.window_model_source): itself when the model comes
+    from the same circuit the readouts come from, or a component that
+    answers every question with nothing when it has no circuit. The plan
+    takes it as its own collaborator (qpu.error_model_provider) so a
+    model built anywhere else plugs in.
 
     The requirement and the returned model are the detector error
     model's records; this port names them by position only, so the

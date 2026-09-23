@@ -6,15 +6,19 @@ lines 235-237) ahead of its store, and the decoder side (Caune et al.
 2410.05202 lines 1252-1256, LILLIPUT 2108.06569 lines 499-510), and the
 values are a parity of the raw outcomes in every row. The former's
 order law is LILLIPUT's: a detector compares a round against the one
-before it, so the rounds of an operation are formed in order.
+before it, so the rounds of an operation are formed in order. The
+referent for the values is Stim's own converter,
+stim.Circuit.compile_m2d_converter.
 """
 
 import dataclasses
 from collections.abc import Callable
 
 import pytest
+import stim
 
 import decsim.detector_error_model.detection_event_formation as formation
+import decsim.detector_error_model.detector_formation as detector_formation
 import decsim.ports as ports
 import decsim.records.rounds as round_records
 
@@ -234,3 +238,84 @@ def test_joint_round_is_formed_once_in_measurement_order(
     assert formed.patch_ids == (0, "other")
     assert formed.bits == (1, 1, 0)
     assert formed.size_bits == 3
+
+
+def test_rounds_split_into_fragments_form_stims_events_on_sampled_shots():
+    """The controller row, fed each round as three shuffled fragments.
+
+    The first round compares against the reset and the last folds in
+    the data readout, so a four-round memory covers all three layers.
+    """
+    circuit = stim.Circuit.generated(
+        "surface_code:rotated_memory_z",
+        rounds=4,
+        distance=3,
+        before_measure_flip_probability=0.05,
+        after_clifford_depolarization=0.05,
+    )
+    sampler = circuit.compile_sampler(seed=11)
+    measurements = sampler.sample(32)
+    converter = circuit.compile_m2d_converter()
+    expected = converter.convert(
+        measurements=measurements, append_observables=False
+    )
+
+    formed = _formed_at_the_controller(circuit, 4, measurements)
+
+    assert formed == _as_rows(expected)
+    assert any(any(row) for row in formed)
+
+
+class _StimFormer:
+    """StimDevice.form_round over one shot's formation table."""
+
+    def __init__(self, table: detector_formation.FormationTable) -> None:
+        self.former = detector_formation.StreamingDetectorFormer(table)
+
+    def form_round(self, operation_id, round_index, raw_bits):
+        del operation_id
+        events, _ = self.former.feed_packet(round_index, raw_bits)
+        return tuple(value for _, value in events)
+
+
+def _formed_at_the_controller(circuit, round_count, measurements) -> list:
+    table = detector_formation.build_formation_table(circuit, round_count)
+    rows = []
+    after_last_round = round_count + 1
+    for shot in measurements:
+        former = _StimFormer(table)
+        row = formation.ControllerSideFormation(former, 0)
+        packets = detector_formation.split_measurements_into_packets(
+            table, shot
+        )
+        events = []
+        for round_index in range(1, after_last_round):
+            fragments = _in_three_shuffled_fragments(
+                round_index, packets[round_index]
+            )
+            (leaving,) = row.form_before_departure(fragments)
+            events.extend(leaving.bits)
+        rows.append(tuple(events))
+    return rows
+
+
+def _in_three_shuffled_fragments(round_index, packet) -> tuple:
+    third = len(packet) // 3
+    edges = (0, third, 2 * third, len(packet))
+    fragments = []
+    for index in range(3):
+        start = edges[index]
+        end = edges[index + 1]
+        bits = tuple(packet[start:end])
+        part = fragment(round_index, bits=bits)
+        part = dataclasses.replace(part, fragment_index=index)
+        fragments.append(part)
+    return (fragments[2], fragments[0], fragments[1])
+
+
+def _as_rows(events) -> list:
+    rows = []
+    for shot in events:
+        bits = tuple(int(bit) for bit in shot)
+        rows.append(bits)
+    return rows

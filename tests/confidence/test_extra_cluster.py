@@ -147,6 +147,12 @@ def test_a_growth_limit_that_is_not_a_weight_is_refused():
     assert "finite nonnegative" in str(refusal.value)
 
 
+def test_a_growth_limit_past_the_64_bit_tick_counter_is_refused():
+    """union_find_extra_growth reads the limit as an int64_t."""
+    with pytest.raises(ValueError, match="64-bit tick counter"):
+        extra_cluster.growth_limit_ticks(1e30, 0.1)
+
+
 def test_the_chain_decode_takes_one_step_and_leaves_the_ends_open():
     """The chain's decode: e1 closes at tick 2 and the pair goes even."""
     evidence = chain_evidence()

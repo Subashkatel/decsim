@@ -1830,11 +1830,14 @@ class WindowingScheme(Protocol):
 class RoundsPolicy(Protocol):
     """How many syndrome rounds an operation runs for; always at least 1.
 
-    Rows: fixed_rounds, per_operation_rounds, distance_rounds
-    (qpu/round_policies.py); the workload's section names one and the
-    QLX frontend fills a per-operation row from each task's duration. The
-    lattice-surgery unit of d rounds per step is Horsman 1111.4022 Sec.
-    3.1 and Litinski 1808.02892.
+    The policies are FixedRounds, PerOperationRounds, CodeRounds,
+    GateRounds and TemporalRounds (qpu/round_policies.py), with no table
+    and no yaml key: the memory_circuit row fixes its rounds, the QLX
+    frontend fills a PerOperationRounds from each task's duration (a
+    zero-duration task there runs none), a Python workload may pass its
+    own, and GateRounds is the default. The lattice-surgery unit of d
+    rounds per step is Horsman 1111.4022 Sec. 3.1 and Litinski
+    1808.02892.
     """
 
     def rounds_for(
@@ -1892,7 +1895,10 @@ class IdlePolicy(Protocol):
 class Workload(Protocol):
     """What the machine runs: the operations, wired in program order.
 
-    Table rows: memory_circuit, circuit_list, surgery_ir, qlx.
+    The lowered program a Python workload hands the qlx row
+    (WorkloadSettings.program): QLXProgram answers it, as the two hand
+    frontends in frontends/circuit_frontend.py do. The rows of WORKLOADS
+    are not Workloads; they turn a workload section into operations.
     """
 
     def build(self) -> list[program_records.Operation]:

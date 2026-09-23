@@ -13,8 +13,6 @@ from typing import Optional
 
 import decsim.records.decoding as decoding_records
 
-OWNERSHIP_KINDS = ("ordinary_window", "strong_window")
-
 
 class LogicalLedger:
     """The contributions by owner key, and one observable arity per stream."""
@@ -84,11 +82,6 @@ class LogicalLedger:
         An owner never changes kind or extent, extents never overlap,
         and one stream has one observable arity.
         """
-        if contribution.ownership_kind not in OWNERSHIP_KINDS:
-            raise ValueError(
-                "logical contribution ownership_kind must be "
-                "'ordinary_window' or 'strong_window'"
-            )
         if contribution.commit_lo < 1:
             _refuse_extent(contribution)
         if contribution.commit_hi < contribution.commit_lo:

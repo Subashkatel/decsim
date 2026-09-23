@@ -8,6 +8,14 @@ SlidingWindowDecoder tail rule (qLDPC src/qldpc/decoders/sinter.py:
 776-777), or a regular stride whose last commit is what is left. Tan et
 al. 2209.09219 lines 952-955 let the last window be shorter than a
 regular one; the flush, like qLDPC, never lays one shorter than W.
+
+A round here is decsim's round, and the data readout's detector layer
+folds into the last one (detector_error_model/detector_chronology.py).
+cudaqx's sliding window keeps that layer as a boundary layer of its own
+(cudaqx libs/qec/lib/decoders/sliding_window.cpp:143-146, the
+[B | S...S | B] layout), so a window whose rounds reach the last round
+reads one layer more than the cudaqx window over the same rounds; every
+earlier window reads the same layers.
 """
 
 import math

@@ -351,9 +351,22 @@ def _sweep_block(block: dict, index: int) -> SweepBlock:
             "plus shots (the algorithm lives on the decoder card, not in "
             "the sweep)"
         )
+    shots = block["shots"]
+    _check_shots(shots, index)
     return SweepBlock(
         physical_error_probabilities=tuple(block["physical_error_probability"]),
         distances=tuple(block["distance"]),
         round_periods_microseconds=tuple(block["round_period_us"]),
-        shots=block["shots"],
+        shots=shots,
+    )
+
+
+def _check_shots(shots, index: int) -> None:
+    """A point runs seeds 0 to shots - 1 (decsim/collect.py), so a count."""
+    is_whole_number = isinstance(shots, int) and not isinstance(shots, bool)
+    if is_whole_number and shots >= 1:
+        return
+    raise refusal.RefusalError(
+        f"sweep block {index} shots must be a whole number of at least 1, "
+        f"got {shots!r}"
     )

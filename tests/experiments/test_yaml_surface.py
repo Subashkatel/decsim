@@ -7,6 +7,7 @@ and a run writes its manifest and its per-shot records.
 """
 
 import pytest
+import yaml
 
 import decsim.controller.settings as controller_settings
 import decsim.experiments.collect_command as collect_command
@@ -151,6 +152,29 @@ def test_an_unknown_decoder_manager_key_is_refused(tmp_path):
     config_path = write_config(tmp_path, {"decoder_manager": {"units": 2}})
     sentence = r"decoder_manager does not know \['units'\]"
     with pytest.raises(ValueError, match=sentence):
+        experiment.load_experiment(config_path)
+
+
+def test_a_yaml_without_a_sweep_is_refused(tmp_path):
+    config_path = write_config(tmp_path, {})
+    text = config_path.read_text()
+    sections = yaml.safe_load(text)
+    del sections["sweep"]
+    config_text = yaml.safe_dump(sections)
+    config_path.write_text(config_text)
+    with pytest.raises(ValueError, match="has no sweep"):
+        experiment.load_experiment(config_path)
+
+
+def test_a_sweep_axis_given_as_one_value_is_refused(tmp_path):
+    block = {
+        "physical_error_probability": [0.001],
+        "distance": 3,
+        "round_period_us": [1.0],
+        "shots": 1,
+    }
+    config_path = write_config(tmp_path, {"sweep": [block]})
+    with pytest.raises(ValueError, match="distance must be a list"):
         experiment.load_experiment(config_path)
 
 

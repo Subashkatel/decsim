@@ -203,6 +203,11 @@ def load_experiment(path) -> ExperimentConfig:
     path = Path(path)
     _refuse_a_path_that_is_not_a_file(path)
     sections, config_files = _yaml_sections(path)
+    if "sweep" not in sections:
+        raise refusal.RefusalError(
+            f"{path} has no sweep; a yaml names at least one sweep block "
+            "(configs/reference.yaml)"
+        )
     sweep_section = sections.pop("sweep")
     sweep = _sweep_blocks(sweep_section)
     settings = _settings_of(sections, path)
@@ -390,3 +395,4 @@ def _check_shots(shots, index: int) -> None:
         f"sweep block {index} shots must be a whole number of at least 1, "
         f"got {shots!r}"
     )
+

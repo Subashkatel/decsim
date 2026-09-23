@@ -361,7 +361,7 @@ def test_rounds_per_shot_scales_with_the_swept_distance(tmp_path):
         },
     )
     config = experiment.load_experiment(config_path)
-    rounds_per_shot = config.settings.workload.rounds_per_shot
+    rounds_per_shot = config.settings.workload.row_settings.rounds_per_shot
     assert rounds_per_shot.rounds_for(3) == 30
     assert rounds_per_shot.rounds_for(5) == 50
     assert str(rounds_per_shot) == "10d"

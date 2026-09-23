@@ -7,6 +7,8 @@ tests below add a row from outside decsim and run it from a yaml, and
 pin the sentence each Python-only shipped row refuses a yaml with.
 """
 
+import dataclasses
+
 import pytest
 
 import decsim.experiments.experiment as experiment
@@ -22,20 +24,21 @@ class TwoPatchMemory:
 
     has_frontend = False
 
-    @staticmethod
-    def from_yaml(section):
-        """This row reads one key of its own, the rounds each patch runs."""
-        return {
-            "rounds_per_shot": workload_settings.RoundsPerShot(
-                fixed=section["rounds_per_shot"]
-            )
-        }
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """This row's one key of its own, the rounds each patch runs."""
+
+        patch_rounds: int = 1
+
+        @classmethod
+        def from_yaml(cls, section):
+            return cls(**section)
 
     @staticmethod
     def operations(settings, code):
         """Two single-patch memory operations of the settings' rounds."""
         del code
-        rounds = settings.rounds_per_shot.rounds_for(1)
+        rounds = settings.row_settings.patch_rounds
         first = program_records.Operation(
             id=1, name="a", qubits=(1,), patches=(1,)
         )
@@ -53,7 +56,7 @@ def test_a_workload_row_written_outside_decsim_runs_from_a_yaml(
     monkeypatch.setitem(
         workload_settings.WORKLOADS, "two_patch_memory", TwoPatchMemory
     )
-    workload = {"kind": "two_patch_memory", "rounds_per_shot": 6}
+    workload = {"kind": "two_patch_memory", "patch_rounds": 6}
     card = {"workload": workload, "qpu": {"kind": "timing_only"}}
     config_path = yaml_configs.write_config(tmp_path, card)
     config = experiment.load_experiment(config_path)
@@ -65,6 +68,7 @@ def test_a_workload_row_written_outside_decsim_runs_from_a_yaml(
 
     assert result.terminal_status == "complete"
     assert len(machine.operations) == 2
+    assert settings.workload.row_settings.patch_rounds == 6
 
 
 def test_a_kind_off_the_table_is_refused_naming_the_rows(tmp_path):
@@ -94,7 +98,7 @@ def test_each_python_only_row_refuses_a_yaml_by_name(tmp_path):
         "qlx": "a lowered QLX program object",
     }
     for kind, sentence in sentences.items():
-        workload = {"kind": kind, "rounds_per_shot": 6}
+        workload = {"kind": kind}
         config_path = yaml_configs.write_config(
             tmp_path, {"workload": workload}
         )
@@ -108,7 +112,21 @@ def test_a_memory_circuit_key_off_its_list_is_refused():
         "code_task": "surface_code:rotated_memory_z",
         "round_per_shot": 15,
     }
-    with pytest.raises(ValueError, match="memory_circuit reads the keys"):
+    sentence = (
+        r"workload does not know \['round_per_shot'\]; its keys are "
+        r"\['kind', 'code_task', 'rounds_per_shot'\]"
+    )
+    with pytest.raises(ValueError, match=sentence):
+        workload_settings.WorkloadSettings.from_yaml(section)
+
+
+def test_a_memory_circuit_key_left_out_is_refused_rather_than_defaulted():
+    section = {
+        "kind": "memory_circuit",
+        "code_task": "surface_code:rotated_memory_z",
+    }
+    sentence = r"memory_circuit needs \['rounds_per_shot'\] beside kind"
+    with pytest.raises(ValueError, match=sentence):
         workload_settings.WorkloadSettings.from_yaml(section)
 
 

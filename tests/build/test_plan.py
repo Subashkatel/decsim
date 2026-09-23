@@ -302,10 +302,16 @@ def test_a_row_that_fixes_its_rounds_refuses_a_second_rounds_policy():
     silence, since no circuit is there to disagree.
     """
     seven_rounds = round_policies.FixedRounds(7)
+    fifteen_rounds = workload_settings.RoundsPerShot(fixed=15)
+    memory = workload_settings.MemoryCircuitWorkload.Settings(
+        code_task="surface_code:rotated_memory_z",
+        rounds_per_shot=fifteen_rounds,
+    )
     workload = workload_settings.WorkloadSettings(
         kind="memory_circuit",
         physical_error_probability=0.001,
         rounds_policy=seven_rounds,
+        row_settings=memory,
     )
     qpu = declared_run.declared_qpu()
     settings = machine_settings.MachineSettings(workload=workload, qpu=qpu)

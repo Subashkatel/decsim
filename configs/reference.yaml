@@ -493,7 +493,10 @@ links:                             # a kind, then one card per path; null = the
                                    # 2.305 us median on each leg it crosses.
                                    # roce_v2_gpu is the same card on the FPGA-to-GPU
                                    # round trip, 4.5 us in the median.
-                                   # Each card, in cycles of its named clock domain:
+                                   # Each card, in cycles of its named clock domain;
+                                   # every card writes latency_cycles, clock and
+                                   # bits_per_cycle, and a key not listed here is
+                                   # refused:
                                    #   latency_cycles: propagation latency
                                    #   clock: the domain (a clocks: key)
                                    #   bits_per_cycle: per-lane capacity

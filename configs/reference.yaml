@@ -13,7 +13,7 @@
 # added here by hand, in the same commit. Knobs the yaml
 # cannot reach are Python objects on the settings records: multi-op
 # workloads, dynamic streams, routers, escalation families, schedulers,
-# devices, policies, magic state factories.
+# devices, policies.
 
 qpu:
   kind: stim_device                # stim_device | timing_only | syndrome_bits
@@ -971,6 +971,39 @@ idle_policy:
                                    # ignore is the optimistic card for active-path
                                    # latency studies. Inert while the workload is a
                                    # single always-busy operation.
+
+magic_state_factory:
+  kind: infinite                   # infinite | distillation | multi_level
+                                   # (MAGIC_STATE_FACTORIES, qpu/settings.py):
+                                   # where an operation that needs a magic
+                                   # state gets it. infinite always has one in
+                                   # stock. distillation is one 15-to-1 stage
+                                   # (Litinski 1905.06903 Sec. 4) whose eleven
+                                   # correction decodes per state compete with
+                                   # the core's windows for the decoder; its
+                                   # keys are unit_count, attempt_ticks and
+                                   # correction_round_count (no default),
+                                   # correction_decode_count (11),
+                                   # return_ticks (0), success_probability
+                                   # (1.0), seed, initial_store (0),
+                                   # production_mode (demand | continuous) and
+                                   # buffer_capacity; the two durations are
+                                   # engine ticks. multi_level is Silva et al.'s
+                                   # chain (2411.04270 Sec. II B): levels, a
+                                   # list of {unit_count, distance,
+                                   # logical_cycles_per_round (13 at the first
+                                   # level, 15 above), success_probability},
+                                   # and inputs_per_round (15),
+                                   # outputs_per_round (1),
+                                   # preparation_unit_count (1),
+                                   # preparation_logical_cycles (2),
+                                   # preparation_distance (3),
+                                   # preparation_success_probability (1.0),
+                                   # correction_round_count (0),
+                                   # correction_decode_count (0), seed,
+                                   # production_mode and buffer_capacity. A
+                                   # memory workload asks for no state, so
+                                   # the row is inert here
 
 observation:                       # what a run records beyond its results
   check_windows_with: none         # none | tesseract. tesseract re-decodes every

@@ -53,12 +53,12 @@ def distillation(engine, *, decode_queue=None, **arguments):
 
 def unstarted_distillation(engine, *, decode_queue=None, **arguments):
     """The same row, built and bound and not started."""
+    row = magic_state_factories.DistillationFactory
+    settings = row.Settings(**arguments)
     collaborators = magic_state_factories.FactoryCollaborators(
-        engine=engine,
-        round_ticks=0,
-        arguments=arguments,
+        engine=engine, round_ticks=0, settings=settings
     )
-    factory = magic_state_factories.DistillationFactory(collaborators)
+    factory = row(collaborators)
     if decode_queue is not None:
         factory.decode_queue = decode_queue
     return factory
@@ -66,12 +66,12 @@ def unstarted_distillation(engine, *, decode_queue=None, **arguments):
 
 def multi_level(engine, *, round_ticks, decode_queue=None, **arguments):
     """One level chain, built, bound and started the way the root does."""
+    row = magic_state_factories.MultiLevelDistillationFactory
+    settings = row.Settings(**arguments)
     collaborators = magic_state_factories.FactoryCollaborators(
-        engine=engine,
-        round_ticks=round_ticks,
-        arguments=arguments,
+        engine=engine, round_ticks=round_ticks, settings=settings
     )
-    factory = magic_state_factories.MultiLevelDistillationFactory(collaborators)
+    factory = row(collaborators)
     if decode_queue is not None:
         factory.decode_queue = decode_queue
     factory.start()

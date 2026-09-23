@@ -146,7 +146,7 @@ def build_factory(parts: build_parts.Parts) -> ports.MagicStateFactory:
     collaborators = magic_state_factories.FactoryCollaborators(
         engine=parts.engine,
         round_ticks=parts.plan.round_ticks,
-        arguments=settings.arguments,
+        settings=settings.row_settings,
     )
     return row(collaborators)
 

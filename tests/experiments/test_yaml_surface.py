@@ -239,6 +239,60 @@ class _EveryNthIdlePolicy:
             return cls(**section)
 
 
+def test_a_factory_row_named_in_the_yaml_is_built_with_its_own_keys(
+    tmp_path,
+):
+    """The magic_state_factory section reads its row's keys like any other."""
+    factory = {
+        "kind": "multi_level",
+        "levels": [{"unit_count": 2, "distance": 5}],
+        "preparation_unit_count": 4,
+    }
+    config_path = write_config(tmp_path, {"magic_state_factory": factory})
+    config = experiment.load_experiment(config_path)
+    settings = config.point_settings(
+        physical_error_probability=0.001,
+        distance=3,
+        round_period_microseconds=1.0,
+    )
+
+    machine = machine_module.Machine.build(settings, 0)
+
+    built = machine.factory
+    level = built.levels[0]
+    assert built.card.preparation_unit_count == 4
+    assert (level.unit_count, level.distance) == (2, 5)
+    assert level.logical_cycles_per_round == 13
+
+
+def test_a_key_no_factory_row_declares_is_refused(tmp_path):
+    factory = {"kind": "infinite", "unit_count": 2}
+    config_path = write_config(tmp_path, {"magic_state_factory": factory})
+    sentence = (
+        r"magic_state_factory does not know \['unit_count'\]; its keys are "
+        r"\['kind'\]"
+    )
+    with pytest.raises(ValueError, match=sentence):
+        experiment.load_experiment(config_path)
+
+
+def test_a_distillation_row_without_its_three_counts_is_refused(tmp_path):
+    factory = {"kind": "distillation", "unit_count": 2}
+    config_path = write_config(tmp_path, {"magic_state_factory": factory})
+    sentence = (
+        r"magic_state_factory kind distillation needs "
+        r"\['attempt_ticks', 'correction_round_count'\]"
+    )
+    with pytest.raises(ValueError, match=sentence):
+        experiment.load_experiment(config_path)
+
+
+def test_a_yaml_without_a_factory_section_runs_the_infinite_row(tmp_path):
+    config_path = write_config(tmp_path, {})
+    config = experiment.load_experiment(config_path)
+    assert config.settings.magic_state_factory.kind == "infinite"
+
+
 def test_the_bulk_strong_key_reaches_the_decoder_manager(tmp_path):
     config_path = write_config(
         tmp_path, {"decoder_manager": {"bulk_strong": True}}

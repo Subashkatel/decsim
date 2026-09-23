@@ -11,10 +11,8 @@ the classes it lists, in the package that owns the part, and
 `decsim/tables.py` is the one function that reads them all, so
 a name that is not a row is refused the same way everywhere
 with the rows printed. Each class fills the port named in
-[The ports](ports.md). The key a table is named under is a yaml
-key when `configs/reference.yaml` carries it. One does not:
-`magic_state_factory.kind` has no yaml section today and is set
-from Python, on `MachineSettings`.
+[The ports](ports.md). The key a table is named under is the
+yaml key `configs/reference.yaml` carries.
 
 ## `BOUNDARY_PAYLOADS`
 

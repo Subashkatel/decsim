@@ -46,6 +46,7 @@ SECTIONS = (
     "escalation",
     "pauli_frame",
     "workload",
+    "magic_state_factory",
     "observation",
 )
 # The sections from_mapping reads without a default; the rest fall back
@@ -70,7 +71,7 @@ class MachineSettings:
     Every field has a default, so a Python caller names only what
     differs from a timing-only run of three-qubit surface code patches
     with no decoder at all. links is the fabric card; the reference card
-    prices propagation only. magic_state_factory has no yaml key today.
+    prices propagation only.
     """
 
     clocks: config.ClockSettings = config.ClockSettings()
@@ -145,6 +146,7 @@ class MachineSettings:
         escalation_section = sections.get("escalation", {})
         decoder_manager_section = sections.get("decoder_manager", {})
         observation_section = sections.get("observation", {})
+        factory_section = sections.get("magic_state_factory", {})
         qpu = qpu_settings.QpuSettings.from_yaml(sections["qpu"])
         controller = controller_settings.ControllerSettings.from_yaml(
             sections["controller"], clocks
@@ -186,6 +188,9 @@ class MachineSettings:
         workload = workload_settings.WorkloadSettings.from_yaml(
             sections["workload"]
         )
+        magic_state_factory = qpu_settings.FactorySettings.from_yaml(
+            factory_section
+        )
         observation = observe_settings.ObservationSettings.from_yaml(
             observation_section
         )
@@ -204,6 +209,7 @@ class MachineSettings:
             escalation=escalation,
             pauli_frame=pauli_frame,
             workload=workload,
+            magic_state_factory=magic_state_factory,
             observation=observation,
         )
 

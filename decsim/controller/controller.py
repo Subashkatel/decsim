@@ -52,6 +52,7 @@ class Controller:
         """
         fragment = round_records.RetainedSyndromeFragment.from_readout(readout)
         fragment_count = readout.fragment_count
+        self.assembler.expect_round(fragment, route)
         round_key = (fragment.operation_id, fragment.round_index)
         self.trace.copy_made.fire(
             round_key, readout.size_bits, "readout", "controller intake"

@@ -1,7 +1,7 @@
 """The traffic ledger: what the links carried, and the JSON the run exports.
 
 The ledger listens to the fabric (LinkFabric hands it every finished
-transfer once) and keeps counters per path and per channel and the list
+transfer once) and keeps counters per path/channel binding and the list
 of every transfer in request order; a channel's counters are the sum of
 its paths' counters by construction. traffic_json_value is
 result.link_traffic, and every key and value in it is pinned by the gate.
@@ -89,7 +89,7 @@ class TrafficCounters:
 
 @dataclasses.dataclass(frozen=True)
 class PathSnapshot:
-    """One wired path, its channel's alias, its counters."""
+    """One path/channel binding, its channel alias, and its counters."""
 
     path: transfer_records.LinkPath
     physical_alias: str
@@ -122,18 +122,16 @@ class TrafficLedger:
     first meet it; the reports name channels by alias.
     """
 
-    def __init__(self, fabric_settings: link_settings.FabricSettings):
+    def __init__(self, fabric_settings: link_settings.FabricSettings) -> None:
         self._settings = fabric_settings
         self._alias_by_channel: dict[str, str] = {}
-        self._counters_by_path: dict[
-            transfer_records.LinkPath, TrafficCounters
-        ] = {}
+        self._counters_by_binding: dict[tuple, TrafficCounters] = {}
         self._counters_by_channel: dict[str, TrafficCounters] = {}
         self._records: list[transfer_records.TransferRecord] = []
-        for path in transfer_records.LinkPath:
-            path_settings = fabric_settings.path_settings(path)
+        bindings = fabric_settings.path_bindings()
+        for path, path_settings in bindings:
             channel_name = path_settings.channel.name
-            self._counters_by_path[path] = TrafficCounters()
+            self._counters_by_binding[(path, channel_name)] = TrafficCounters()
             if channel_name in self._alias_by_channel:
                 continue
             alias = f"channel-{len(self._alias_by_channel)}"
@@ -143,8 +141,9 @@ class TrafficLedger:
     def on_transfer(self, record: transfer_records.TransferRecord) -> None:
         """Count one delivered transfer for its path and its channel."""
         transfer = record.transfer
-        path_counters = self._counters_by_path[record.path]
-        self._counters_by_path[record.path] = path_counters.plus_transfer(
+        binding = (record.path, record.channel)
+        path_counters = self._counters_by_binding[binding]
+        self._counters_by_binding[binding] = path_counters.plus_transfer(
             transfer
         )
         channel_counters = self._counters_by_channel[record.channel]
@@ -156,8 +155,8 @@ class TrafficLedger:
     def snapshot(self) -> FabricSnapshot:
         """A frozen view: the wiring, every counter, every transfer."""
         paths = []
-        for path in self._counters_by_path:
-            path_snapshot = self._path_snapshot(path)
+        for binding in self._counters_by_binding:
+            path_snapshot = self._path_snapshot(binding)
             paths.append(path_snapshot)
         channels = []
         for channel_name in self._alias_by_channel:
@@ -179,13 +178,11 @@ class TrafficLedger:
         reconciliation of each channel against its member paths.
         """
         snapshot = self.snapshot()
-        setup_ticks_by_path = {path.path: 0 for path in snapshot.paths}
-        for record in snapshot.transfers:
-            setup_ticks_by_path[record.path] += record.transfer.setup_ticks
+        setup_ticks_by_binding = self._setup_ticks_by_binding(snapshot)
         semantic_edges = []
         for path_snapshot in snapshot.paths:
             semantic_edge = _semantic_edge_json(
-                path_snapshot, setup_ticks_by_path
+                path_snapshot, setup_ticks_by_binding
             )
             semantic_edges.append(semantic_edge)
         physical_channels = []
@@ -200,7 +197,7 @@ class TrafficLedger:
         for record in snapshot.transfers:
             transfer_json = _transfer_json(record, self._alias_by_channel)
             transfers.append(transfer_json)
-        path_order = [path.path.value for path in snapshot.paths]
+        path_order = [path.value for path in transfer_records.LinkPath]
         return {
             "schema_version": 1,
             "path_order": path_order,
@@ -210,48 +207,64 @@ class TrafficLedger:
             "reconciliation": reconciliation,
         }
 
-    def _path_snapshot(self, path: transfer_records.LinkPath) -> PathSnapshot:
-        path_settings = self._settings.path_settings(path)
-        alias = self._alias_by_channel[path_settings.channel.name]
+    def _setup_ticks_by_binding(self, snapshot: FabricSnapshot) -> dict:
+        setup_ticks_by_binding = {}
+        for path in snapshot.paths:
+            setup_ticks_by_binding[(path.path, path.physical_alias)] = 0
+        for record in snapshot.transfers:
+            alias = self._alias_by_channel[record.channel]
+            binding = (record.path, alias)
+            setup_ticks_by_binding[binding] += record.transfer.setup_ticks
+        return setup_ticks_by_binding
+
+    def _path_snapshot(self, binding: tuple) -> PathSnapshot:
+        path, channel_name = binding
+        alias = self._alias_by_channel[channel_name]
         return PathSnapshot(
             path=path,
             physical_alias=alias,
-            counters=self._counters_by_path[path],
+            counters=self._counters_by_binding[binding],
         )
 
     def _channel_snapshot(self, channel_name: str) -> ChannelSnapshot:
         member_paths = []
         channel_settings = None
-        for path in self._counters_by_path:
-            path_settings = self._settings.path_settings(path)
+        bindings = self._settings.path_bindings()
+        for path, path_settings in bindings:
             if path_settings.channel.name == channel_name:
                 member_paths.append(path)
                 channel_settings = path_settings.channel
+        distinct_paths = dict.fromkeys(member_paths)
         return ChannelSnapshot(
             alias=self._alias_by_channel[channel_name],
-            member_paths=tuple(member_paths),
+            member_paths=tuple(distinct_paths),
             settings=channel_settings,
             counters=self._counters_by_channel[channel_name],
         )
 
     def _channel_json(self, channel_snapshot: ChannelSnapshot) -> tuple:
         semantic_sum = TrafficCounters()
+        channel_name = channel_snapshot.settings.name
         for path in channel_snapshot.member_paths:
-            semantic_sum = semantic_sum.plus(self._counters_by_path[path])
+            binding = (path, channel_name)
+            counters = self._counters_by_binding[binding]
+            semantic_sum = semantic_sum.plus(counters)
         assert semantic_sum == channel_snapshot.counters, (
             "a channel's counters are the sum of its paths' counters"
         )
         member_paths = [path.value for path in channel_snapshot.member_paths]
+        physical_counters = channel_snapshot.counters.to_json_value()
+        semantic_counters = semantic_sum.to_json_value()
         channel_json = {
             "physical_alias": channel_snapshot.alias,
             "member_paths": member_paths,
-            "counters": channel_snapshot.counters.to_json_value(),
+            "counters": physical_counters,
         }
         reconciliation_json = {
             "physical_alias": channel_snapshot.alias,
             "member_paths": member_paths,
-            "semantic_counter_sum": semantic_sum.to_json_value(),
-            "physical_counters": channel_snapshot.counters.to_json_value(),
+            "semantic_counter_sum": semantic_counters,
+            "physical_counters": physical_counters,
             "reconciles": True,
         }
         return channel_json, reconciliation_json
@@ -262,13 +275,14 @@ def _request_sequence(record: transfer_records.TransferRecord) -> int:
 
 
 def _semantic_edge_json(
-    path_snapshot: PathSnapshot, setup_ticks_by_path: dict
+    path_snapshot: PathSnapshot, setup_ticks_by_binding: dict
 ) -> dict:
+    binding = (path_snapshot.path, path_snapshot.physical_alias)
     return {
         "path": path_snapshot.path.value,
         "physical_alias": path_snapshot.physical_alias,
         "counters": path_snapshot.counters.to_json_value(),
-        "setup_ticks": setup_ticks_by_path[path_snapshot.path],
+        "setup_ticks": setup_ticks_by_binding[binding],
     }
 
 

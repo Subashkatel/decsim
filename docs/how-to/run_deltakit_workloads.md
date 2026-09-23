@@ -132,6 +132,43 @@ This path supports rotated-surface memory and trailing-buffer feedback.
 It does not implement arbitrary result-dependent quantum gates. Canonical
 replay of the physical-noise example works without the SDK installed.
 
+## Declare separate readout transport channels
+
+This is a Python configuration surface shared by all circuit providers.
+`RepeatedStimCircuit.readout_partitions` maps fragment names (`first_round`,
+`repeated_round`, `final_round`, `single_round`) to tuples of
+`records.rounds.MeasurementPartition(patch_ids, measurement_count)`. Counts
+consume the raw measurement record consecutively, cover it completely, and name
+subsets of the owner's footprint. Omitted fragments remain aggregate.
+
+For finite `StimDevice` or `RecordedStimDevice`, `readout_partitions` maps the
+emitting operation id to a mapping from one-based stream round to partitions.
+Use distinct emitting operation ids for a terminal syndrome prefix and its
+separate data finalizer. Their declared fragment slots cover the combined round.
+The finite source currently infers separate terminal data only for its supported
+generated-circuit layout. With an explicit `measurement_rounds` map, keep final
+syndrome and data in one round emission; a separately declared terminal-data
+boundary is not yet represented by that map.
+
+Set `FabricSettings.readout_routes` to a tuple of
+`links.settings.ReadoutRoute(patch_ids, path_settings)`. A route matches the
+complete footprint, independent of patch ordering. Choose different channel
+names for independent queues or one name for a shared serializer. Use the
+existing `ChannelSettings` and `PathSettings` for bandwidth, propagation and
+setup. The default readout path handles any unmatched footprint.
+
+The runnable public-interface tests cover live out-of-order arrival and recorded
+measurement partitions at both detector-formation sites:
+
+```bash
+PYTHONPATH=. .venv-deltakit/bin/python -m pytest tests/machine/test_machine.py \
+  -k 'channel_reordering or interleaved_joint' -q
+```
+
+This models channel transport after round completion. It does not establish
+intra-round measurement timing or hardware calibration. DECSIM still owns
+protection rounds, decoder scheduling and feedback release.
+
 ## Supply a joint group or a CSS code block
 
 `RepeatedStimCircuit` describes one shared physical history. Assign the complete

@@ -393,6 +393,44 @@ def test_a_declared_terminal_fragment_holds_back_the_data_readout():
     ]
 
 
+def test_terminal_emitters_partition_their_own_measurement_groups() -> None:
+    circuit = memory_circuit(3, 3)
+    head = memory_operation(circuit, 1, stream_id="s", stream_offset=0)
+    finalizer = memory_operation(circuit, 2, stream_id="s", stream_offset=2)
+    syndrome_groups = (
+        round_records.MeasurementPartition((0,), 4),
+        round_records.MeasurementPartition((0,), 4),
+    )
+    data_groups = (
+        round_records.MeasurementPartition((0,), 3),
+        round_records.MeasurementPartition((0,), 6),
+    )
+    device = recorded_device(
+        THREE_ROUND_ROW,
+        terminal_detector_ids={"s": (20,)},
+        readout_partitions={1: {3: syndrome_groups}, 2: {3: data_groups}},
+    )
+    device.begin_operation(head, 3, 3, round_period_ticks=1_100_000)
+
+    syndrome = device.round_payloads(head, 3)
+    final = device.finalize_stream_round(finalizer, 3)
+
+    syndrome_bits = [readout.bits for readout in syndrome]
+    assert syndrome_bits == [
+        (0, 0, 0, 0),
+        (1, 0, 0, 1),
+    ]
+    final_bits = [readout.bits for readout in final]
+    assert final_bits == [
+        (0, 1, 0),
+        (0, 0, 0, 0, 1, 0),
+    ]
+    syndrome_ids = [readout.operation_id for readout in syndrome]
+    assert syndrome_ids == ["s", "s"]
+    final_ids = [readout.operation_id for readout in final]
+    assert final_ids == ["s", "s"]
+
+
 def test_an_idle_stream_round_replays_the_shots_packet_of_that_round():
     circuit = memory_circuit(3, 3)
     head = memory_operation(circuit, 1, stream_id="s", stream_offset=0)

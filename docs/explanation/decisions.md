@@ -894,6 +894,55 @@ list-of-readouts contract. The current aggregate source does not establish
 independent per-patch acquisition latency, variable-duration rounds, dynamic
 tableau merging or arbitrary conditional gates.
 
+## D27. Readout channels route canonical footprints and retire rounds in order
+
+**Problem.** One semantic readout path previously selected one physical channel.
+That could not represent separate wires for two entangled blocks, or replay a
+recorded experiment with several readout channels. Both require one chronological
+measurement record even when a later round reaches the controller first.
+
+**Existing contracts.** `SyndromeSource.round_payloads` already returns ordered
+acquisitions, and `Link.send` already carries their complete patch footprint.
+They remain the handoffs. `MeasurementPartition` describes contiguous portions of
+the source's raw record. Live Stim fragments and finite/recorded Stim sources
+use that same record. Partitioning does not split or resample quantum state.
+An operation's explicit `syndrome_fragment_index` now denotes the first slot of
+its contiguous group. Its fragment count covers the entire round, including a
+separate final-data emitter. This removes the former one-payload-only restriction.
+
+**Ownership and references.** The fabric matches complete footprints against
+configured `ReadoutRoute` cards, with the ordinary path card as the default.
+This borrows gem5 `src/mem/xbar.cc::findPort` configured routing and default
+selection. Existing `Channel` objects still own serialization, setup and
+contention. The same channel name means the same resource. Physical quantum
+state stays in its source, following the separation of storage and access
+timing in gem5 `src/mem/abstract_mem.hh`.
+
+The controller announces round emission before transport. Its assembler admits
+actual arrivals against packing capacity and releases complete rounds in each
+stream's emission order. This borrows ready-head retirement from gem5
+`src/cpu/o3/commit.cc::commitInsts`; independent streams do not wait for each
+other. Announcements store identities only and consume no packing slot. A round
+retains its slot during packing, reordering and charged detector formation,
+then moves into the existing downstream capacity account. Overflow retains the
+configured stop/drop behavior. The QPU does not gain an upstream holding queue.
+
+**Accounting.** The ledger counts each distinct path/channel binding. Per-path
+experiment totals sum those bindings. Channel totals reconcile against them,
+including several routes sharing one wire. Every readout card is checked against
+separately charged controller discrimination. The attribution-free delay estimator
+refuses a routed readout path because it cannot select its physical channel;
+current decoder delay estimates continue through the same method.
+
+**Provider neutrality and limits.** Direct Stim, recorded workloads and optional
+Deltakit exports use the same partition and readout records. A future compiler
+can supply the same groups without changing transport, windows or decoders.
+Removing Deltakit leaves both routing and causal assembly useful. These cards
+model transport after a whole physical round's outcomes become available. They
+do not schedule separate analog acquisition resources or move measurements within
+a round. Unequal round durations, arbitrary decoded conditional gates and dynamic
+composition of retained histories remain separate work.
+
 ## What is not modelled yet
 
 These are open, recorded rather than hidden, so that a reader does not

@@ -35,13 +35,15 @@ import decsim.trace_source as trace_source
 class StimDevice(seeding._AtomicRunSeedConsumer):
     """Streams one sampled Stim shot as raw measurement packets, by round.
 
-    The optional maps are keyed by stream identity and use one-based
+    The model maps are keyed by stream identity and use one-based
     emitted rounds. detector_rounds says which round each detector belongs
     to when the circuit does not follow Stim's generator layout;
     measurement_rounds declares the QPU's packet schedule for the same
     reason. A non-empty terminal_detector_ids entry says the stream's
     final data readout arrives as its own fragment, through
-    finalize_stream_round.
+    finalize_stream_round. Readout partitions are keyed by the emitting
+    operation id, then by the one-based stream round. Separate syndrome
+    and data emitters can therefore declare different acquisition groups.
 
     Trace source: shot_sampled(operation, detection_events) once per
     fresh shot, with the whole-circuit detection events a reference
@@ -56,12 +58,14 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         detector_rounds: Optional[dict] = None,
         terminal_detector_ids: Optional[dict] = None,
         measurement_rounds: Optional[dict] = None,
-    ):
+        readout_partitions: Optional[dict] = None,
+    ) -> None:
         self._seed = validated_seed(seed)
         self._initialize_run_seed_binding(self._seed)
         detector_rounds_override = _rounds_by_key(detector_rounds)
         terminal_ids = _detector_ids_by_key(terminal_detector_ids)
         measurement_rounds_override = _rounds_by_key(measurement_rounds)
+        self._readout_partitions = _partitions_by_key(readout_partitions)
         self._shots = _ShotTable(
             detector_rounds_override=detector_rounds_override,
             terminal_detector_ids=terminal_ids,
@@ -151,19 +155,14 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
     def round_payloads(
         self, operation: program_records.Operation, round_index: int
     ) -> list[round_records.QPUReadout]:
-        """This operation round as one raw measurement packet."""
+        """This operation round in its declared raw measurement partitions."""
         key = _sample_key_of(operation)
         stream_offset = 0
         if operation.stream_offset is not None:
             stream_offset = operation.stream_offset
         global_round = round_index + stream_offset
         bits = self._round_packet_bits(key, global_round)
-        patches = program_records.patches_of(operation)
-        return [
-            round_records.QPUReadout(
-                key, patches, global_round, bits=bits, size_bits=len(bits)
-            )
-        ]
+        return self._readouts(key, operation, global_round, bits)
 
     def finalize_stream_round(
         self, operation: program_records.Operation, source_round_count: int
@@ -194,12 +193,7 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
             raise RuntimeError("terminal finalizer has no folded readout bits")
         final_packet = shot.packets[table.round_count]
         bits = final_packet[table.readout_slot_start :]
-        patches = program_records.patches_of(operation)
-        return [
-            round_records.QPUReadout(
-                key, patches, final_round, bits=bits, size_bits=len(bits)
-            )
-        ]
+        return self._readouts(key, operation, final_round, bits)
 
     def idle_round_payloads(
         self,
@@ -210,19 +204,14 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         is_final: bool,
         round_period_ticks: int,
     ) -> list[round_records.QPUReadout]:
-        """This idle stream round as one raw measurement packet."""
-        patches = program_records.patches_of(operation)
+        """This idle stream round in the owner's measurement partitions."""
         del is_final
         del round_period_ticks
         binding = self._shots.source_binding_by_key[stream_id]
         if not 1 <= global_round <= binding.round_count:
             raise ValueError("idle round is outside the finite source")
         bits = self._round_packet_bits(stream_id, global_round)
-        return [
-            round_records.QPUReadout(
-                stream_id, patches, global_round, bits=bits, size_bits=len(bits)
-            )
-        ]
+        return self._readouts(stream_id, operation, global_round, bits)
 
     def declare_stream(
         self,
@@ -438,6 +427,15 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         sample_seed = self._sample_seed_for(key)
         return circuit.compile_sampler(seed=sample_seed)
 
+    def _readouts(self, key, operation, round_index, bits):
+        patches = program_records.patches_of(operation)
+        readout = round_records.QPUReadout(
+            key, patches, round_index, bits=bits, size_bits=len(bits)
+        )
+        by_round = self._readout_partitions.get(operation.id, {})
+        partitions = by_round.get(round_index, ())
+        return round_records.partition_measurements(readout, partitions)
+
     def _sample_shot(
         self,
         key,
@@ -544,13 +542,15 @@ class RecordedStimDevice(StimDevice):
         detector_rounds: Optional[dict] = None,
         terminal_detector_ids: Optional[dict] = None,
         measurement_rounds: Optional[dict] = None,
-    ):
+        readout_partitions: Optional[dict] = None,
+    ) -> None:
         StimDevice.__init__(
             self,
             seed=seed,
             detector_rounds=detector_rounds,
             terminal_detector_ids=terminal_detector_ids,
             measurement_rounds=measurement_rounds,
+            readout_partitions=readout_partitions,
         )
         self.measurements = measurements
         self.shot = shot
@@ -736,6 +736,16 @@ class _ShotTable:
     sample_key_by_operation_id: dict = dataclasses.field(default_factory=dict)
     stream_model_by_id: dict = dataclasses.field(default_factory=dict)
     source_binding_by_key: dict = dataclasses.field(default_factory=dict)
+
+
+def _partitions_by_key(declared: Optional[dict]) -> dict:
+    declared = declared or {}
+    copied = {}
+    for key, by_round in declared.items():
+        copied[key] = {
+            index: tuple(partitions) for index, partitions in by_round.items()
+        }
+    return copied
 
 
 def _rounds_by_key(declared: Optional[dict]) -> dict:

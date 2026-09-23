@@ -6,6 +6,7 @@ defect text is the sparse form the I/O trace prints.
 """
 
 import numpy as np
+import pytest
 
 import decsim.records.rounds as round_records
 
@@ -21,6 +22,79 @@ def make_fragment(**overrides):
     }
     values.update(overrides)
     return round_records.RetainedSyndromeFragment(**values)
+
+
+def test_measurement_partitions_preserve_interleaved_patch_order() -> None:
+    readout = round_records.QPUReadout(
+        7, ("left", "right"), 1, bits=(1, 0, 1, 1), size_bits=4
+    )
+    partitions = (
+        round_records.MeasurementPartition(("left",), 1),
+        round_records.MeasurementPartition(("right",), 2),
+        round_records.MeasurementPartition(("left",), 1),
+    )
+
+    readouts = round_records.partition_measurements(readout, partitions)
+
+    measurement_groups = [part.bits for part in readouts]
+    assert measurement_groups == [(1,), (0, 1), (1,)]
+    footprints = [part.patch_ids for part in readouts]
+    assert footprints == [
+        ("left",),
+        ("right",),
+        ("left",),
+    ]
+    widths = [part.size_bits for part in readouts]
+    assert widths == [1, 2, 1]
+
+
+def test_measurement_partitions_cannot_omit_raw_outcomes() -> None:
+    readout = round_records.QPUReadout(7, ("left",), 1, bits=(1, 0))
+    partitions = (round_records.MeasurementPartition(("left",), 1),)
+
+    with pytest.raises(ValueError, match="cover every measurement"):
+        round_records.partition_measurements(readout, partitions)
+
+
+def test_measurement_partitions_cannot_name_an_unrelated_patch() -> None:
+    readout = round_records.QPUReadout(7, ("left",), 1, bits=(1,))
+    partitions = (round_records.MeasurementPartition(("right",), 1),)
+
+    with pytest.raises(ValueError, match="outside the readout footprint"):
+        round_records.partition_measurements(readout, partitions)
+
+
+@pytest.mark.parametrize("count", [-1, 1.5, True])
+def test_partition_counts_are_nonnegative_integers(count: object) -> None:
+    with pytest.raises(ValueError, match="must be a nonnegative integer"):
+        round_records.MeasurementPartition((0,), count)
+
+
+@pytest.mark.parametrize("patches", [(True,), (1.0,), ([1],)])
+def test_partition_footprints_use_stable_identities(patches: tuple) -> None:
+    with pytest.raises(ValueError, match="must be stable identities"):
+        round_records.MeasurementPartition(patches, 1)
+
+
+@pytest.mark.parametrize("patches", [(), (0, 0)])
+def test_partition_footprints_require_distinct_patches(patches: tuple) -> None:
+    with pytest.raises(ValueError, match="needs unique patches"):
+        round_records.MeasurementPartition(patches, 1)
+
+
+def test_partitioning_requires_physical_measurement_bits() -> None:
+    readout = round_records.QPUReadout(7, (0,), 1)
+    partitions = (round_records.MeasurementPartition((0,), 1),)
+    with pytest.raises(ValueError, match="require raw outcomes"):
+        round_records.partition_measurements(readout, partitions)
+
+
+def test_an_empty_measurement_round_keeps_its_declared_footprint() -> None:
+    readout = round_records.QPUReadout(7, (0,), 1, bits=())
+    partitions = (round_records.MeasurementPartition((0,), 0),)
+    readouts = round_records.partition_measurements(readout, partitions)
+    expected = round_records.QPUReadout(7, (0,), 1, bits=(), size_bits=0)
+    assert readouts == [expected]
 
 
 def test_a_timing_only_readout_retains_no_bits():

@@ -88,6 +88,19 @@ class RoundAssembler:
         self.workspace = _Workspace(settings.packing_overflow)
         self.trace = _TraceSources()
 
+    def expect_round(
+        self,
+        fragment: round_records.RetainedSyndromeFragment,
+        route: round_records.SyndromePacketRoute,
+    ) -> None:
+        """Declare emission order before transport can reorder arrivals.
+
+        This reserves identity only. Packing capacity starts at arrival,
+        and a ready round retires after its predecessors, as gem5's
+        src/cpu/o3/commit.cc commitInsts retires the ready head per thread.
+        """
+        self.workspace.expect_round(fragment, route)
+
     def add(
         self,
         fragment: round_records.RetainedSyndromeFragment,
@@ -136,19 +149,16 @@ class RoundAssembler:
         None when the round was dropped for want of a context.
         """
         round_key = (fragment.operation_id, fragment.round_index)
-        identity = (
-            route.kind.name,
-            route.source_operation_id,
-            fragment.operation_id,
-            fragment.round_index,
-        )
+        identity = _round_identity(fragment, route)
         context = self.workspace.context_by_identity.get(identity)
         if context is not None:
             return context
         if self.workspace.has_room(self.rounds_in_flight):
-            return self._open_context(
+            context = _PackingContext(
                 identity, round_key, route, fragment_count
             )
+            self.workspace.context_by_identity[identity] = context
+            return context
         dropped = self.workspace.refuse(
             self.rounds_in_flight, round_key, self.engine.now
         )
@@ -162,14 +172,22 @@ class RoundAssembler:
                 fragment.patch_ids,
             )
             self.trace.round_event.fire(drop)
+            self.workspace.retire(identity)
+            self._release_ready_rounds(identity)
         return None
 
-    def _open_context(self, identity, round_key, route, fragment_count):
-        context = _PackingContext(identity, round_key, route, fragment_count)
-        self.workspace.context_by_identity[identity] = context
-        return context
-
     def _finish_packing(self, context) -> None:
+        context.is_ready = True
+        self._release_ready_rounds(context.identity)
+
+    def _release_ready_rounds(self, identity) -> None:
+        first = self.workspace.first_for(identity)
+        while first is not None and first.is_ready:
+            self.workspace.retire(first.identity)
+            self._form_round(first)
+            first = self.workspace.first_for(identity)
+
+    def _form_round(self, context) -> None:
         """The round is complete: merge, form detection events, hand on."""
         operation_id, round_index = context.round_key
         raw_fragments = _merge_adjacent_fragments(context.fragments)
@@ -198,11 +216,10 @@ class RoundAssembler:
             round_index=round_index,
             fragments=leaving,
         )
-        self.workspace.forget(context)
         packed = round_records.PackedRound(packet, context.route, wire_bits)
-        self._depart(packed)
+        self._depart(packed, context)
 
-    def _depart(self, packed: round_records.PackedRound) -> None:
+    def _depart(self, packed: round_records.PackedRound, context) -> None:
         """Hand the round on, after the placement's own time is charged.
 
         The controller row pays for the conversion it does here
@@ -213,13 +230,17 @@ class RoundAssembler:
             self.detection_events.detection_event_formation_cycles
         )
         if detection_event_formation_cycles == 0:
-            self.syndrome_round_sender.admit(packed)
+            self._hand_on(packed, context)
             return
         delay = self._delay(detection_event_formation_cycles)
-        hand_on = functools.partial(self.syndrome_round_sender.admit, packed)
+        hand_on = functools.partial(self._hand_on, packed, context)
         self.engine.schedule(
             delay, hand_on, label="controller form detection events"
         )
+
+    def _hand_on(self, packed, context) -> None:
+        self.workspace.forget(context)
+        self.syndrome_round_sender.admit(packed)
 
     def _delay(self, cycles: int) -> int:
         """The ticks from now to the controller clock edge `cycles` away."""
@@ -237,6 +258,7 @@ class _PackingContext:
     route: round_records.SyndromePacketRoute
     fragment_count: int
     fragments: list = dataclasses.field(default_factory=list)
+    is_ready: bool = False
 
 
 class _Workspace:
@@ -248,9 +270,36 @@ class _Workspace:
     ) -> None:
         self.overflow = overflow
         self.context_by_identity: dict = {}
+        self.expected_by_stream: dict[tuple, dict] = {}
         # rounds refused for want of a context; their later fragments
         # are ignored
         self.dropped_round_keys: set = set()
+
+    def expect_round(
+        self,
+        fragment: round_records.RetainedSyndromeFragment,
+        route: round_records.SyndromePacketRoute,
+    ) -> None:
+        round_key = (fragment.operation_id, fragment.round_index)
+        if self.is_dropped(round_key):
+            return
+        identity = _round_identity(fragment, route)
+        stream = identity[:-1]
+        pending = self.expected_by_stream.setdefault(stream, {})
+        pending.setdefault(identity, None)
+
+    def first_for(self, identity: tuple) -> Optional[_PackingContext]:
+        stream = identity[:-1]
+        pending = self.expected_by_stream.get(stream, {})
+        first_identity = next(iter(pending), None)
+        return self.context_by_identity.get(first_identity)
+
+    def retire(self, identity: tuple) -> None:
+        stream = identity[:-1]
+        pending = self.expected_by_stream[stream]
+        del pending[identity]
+        if not pending:
+            del self.expected_by_stream[stream]
 
     def has_room(self, rounds_in_flight: RoundsInFlight) -> bool:
         in_assembly = len(self.context_by_identity)
@@ -282,7 +331,19 @@ class _Workspace:
         self.context_by_identity.pop(context.identity, None)
 
     def partial_identities(self) -> tuple:
-        return tuple(self.context_by_identity)
+        outstanding = dict.fromkeys(self.context_by_identity)
+        for pending in self.expected_by_stream.values():
+            outstanding.update(pending)
+        return tuple(outstanding)
+
+
+def _round_identity(fragment, route) -> tuple:
+    return (
+        route.kind.name,
+        route.source_operation_id,
+        fragment.operation_id,
+        fragment.round_index,
+    )
 
 
 def _fragment_index(fragment: round_records.RetainedSyndromeFragment) -> int:

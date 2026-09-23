@@ -1299,7 +1299,8 @@ class SyndromeSource(Protocol):
 
         Each acquisition names its contributing patches. The QPU assigns
         fragment_index from list order before transport, unless the operation
-        declares a single fragment's slot in a partitioned round. Sources
+        declares the first slot of a contiguous group in a partitioned round.
+        The declared fragment count covers the complete round. Sources
         preserve circuit measurement order here; numbered fragments may
         arrive out of order downstream without changing that record order.
         """

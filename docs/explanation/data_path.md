@@ -72,6 +72,14 @@ by the controller's intake.
 What crosses: one acquisition fragment of classified measurements for a round.
 `patch_ids` names its contributing patch group; `fragment_index` preserves
 measurement order when a source emits several acquisitions.
+Python fabric cards can set `readout_routes` to select a `PathSettings` by
+that complete footprint. Unmatched groups use the default `qpu_to_controller`
+card. Equal channel names share one wire; different names give separate queues.
+These delays start when the physical round emits its outcomes, so they model
+post-measurement transport. They are not independent analog acquisition times.
+The controller announces round order before sending; the assembler waits for
+prior emitted rounds in the same stream before forming or forwarding later
+ones. Each arrived round occupies packing capacity through detector formation.
 The count is `readout.size_bits`, set where the device builds the
 readout (`decsim/qpu/stim_device.py`, `decsim/qpu/syndrome_devices.py`).
 For a distance 3 rotated surface code that is 8 bits per round, the

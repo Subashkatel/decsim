@@ -355,15 +355,36 @@ def test_undeclared_fragments_are_numbered_in_emission_order():
     )
 
 
-def test_a_declared_fragment_slot_refuses_two_payloads():
+def test_a_declared_fragment_slot_starts_a_contiguous_payload_group() -> None:
     source = SplitSource(2)
     engine, qpu, log = clocked_qpu(10, source)
     body = memory_body(
-        1, 1, 10, syndrome_fragment_index=0, syndrome_fragment_count=2
+        1, 1, 10, syndrome_fragment_index=1, syndrome_fragment_count=4
     )
     qpu.issue(body)
     engine.schedule(10, qpu.finish)
-    with pytest.raises(ValueError, match="must emit one payload"):
+    engine.run()
+    first, _ = log.readouts[0]
+    second, _ = log.readouts[1]
+    expected_first = round_records.QPUReadout(
+        1, (0,), 1, fragment_count=4, fragment_index=1
+    )
+    assert first == expected_first
+    expected_second = round_records.QPUReadout(
+        1, (0,), 1, fragment_count=4, fragment_index=2
+    )
+    assert second == expected_second
+
+
+def test_a_payload_group_cannot_exceed_the_declared_round_size() -> None:
+    source = SplitSource(2)
+    engine, qpu, log = clocked_qpu(10, source)
+    body = memory_body(
+        1, 1, 10, syndrome_fragment_index=1, syndrome_fragment_count=2
+    )
+    qpu.issue(body)
+    engine.schedule(10, qpu.finish)
+    with pytest.raises(ValueError, match="exceeds the declared syndrome"):
         engine.run()
 
 

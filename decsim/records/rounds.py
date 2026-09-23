@@ -7,11 +7,13 @@ record; the bits themselves are raw measurements, and detection events
 are formed later, downstream of these records.
 """
 
+import dataclasses
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Any, Optional
 
+import decsim.records.identity as identity_records
 import decsim.records.windows as window_records
 
 
@@ -43,6 +45,31 @@ class SyndromePacketRoute:
 
 
 WINDOW_INPUT_ROUTE = SyndromePacketRoute(SyndromePacketRouteKind.WINDOW_INPUT)
+
+
+@dataclass(frozen=True)
+class MeasurementPartition:
+    """One contiguous part of a round's raw record and its physical footprint.
+
+    Counts consume the record in declared order. They describe delivery
+    groups, not separate quantum simulations or reordered measurements.
+    """
+
+    patch_ids: tuple
+    measurement_count: int
+
+    def __post_init__(self) -> None:
+        measurement_count = self.measurement_count
+        if type(measurement_count) is not int or measurement_count < 0:
+            raise ValueError("measurement_count must be a nonnegative integer")
+        patches = tuple(self.patch_ids)
+        if not identity_records.is_stable_identity(patches):
+            raise ValueError(
+                "measurement partition patches must be stable identities"
+            )
+        if not patches or len(set(patches)) != len(patches):
+            raise ValueError("a measurement partition needs unique patches")
+        object.__setattr__(self, "patch_ids", patches)
 
 
 @dataclass(frozen=True)
@@ -236,6 +263,30 @@ class ControllerOutputEvent:
     payload: object
 
 
+def partition_measurements(
+    readout: QPUReadout,
+    partitions: tuple[MeasurementPartition, ...],
+) -> list[QPUReadout]:
+    """Split one physical record without changing its measurement order."""
+    if not partitions:
+        return [readout]
+    _check_measurement_partitions(readout, partitions)
+    first_measurement = 0
+    readouts = []
+    for part in partitions:
+        after_last_measurement = first_measurement + part.measurement_count
+        bits = readout.bits[first_measurement:after_last_measurement]
+        fragment = dataclasses.replace(
+            readout,
+            patch_ids=part.patch_ids,
+            bits=bits,
+            size_bits=part.measurement_count,
+        )
+        readouts.append(fragment)
+        first_measurement = after_last_measurement
+    return readouts
+
+
 def fragment_wire_bits(fragments) -> Optional[int]:
     """The fragments' wire size, None when any fragment has no known size."""
     fragment_sizes = [fragment.size_bits for fragment in fragments]
@@ -253,3 +304,18 @@ def fragment_patch_ids(
         patches.extend(fragment.patch_ids)
     distinct = dict.fromkeys(patches)
     return tuple(distinct)
+
+
+def _check_measurement_partitions(readout, partitions) -> None:
+    if readout.bits is None:
+        raise ValueError("measurement partitions require raw outcomes")
+    measurement_count = sum(part.measurement_count for part in partitions)
+    if measurement_count != len(readout.bits):
+        raise ValueError("measurement partitions must cover every measurement")
+    footprint = set(readout.patch_ids)
+    for part in partitions:
+        patches = set(part.patch_ids)
+        if not patches.issubset(footprint):
+            raise ValueError(
+                "measurement partition is outside the readout footprint"
+            )

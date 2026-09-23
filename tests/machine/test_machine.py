@@ -517,6 +517,62 @@ def test_longer_joint_feedback_protects_both_blocks_without_resampling() -> (
     _assert_joint_acquisitions(second)
 
 
+@pytest.mark.parametrize("placement", ["controller", "decoder"])
+def test_channel_reordering_preserves_live_detector_formation(
+    placement: str,
+) -> None:
+    """Keep channel delays, arrival order and the quantum oracle together.
+
+    This complete scenario stays in one function so each observed timing
+    can be read beside the channel card that causes it.
+    """
+    program = _partitioned_joint_program()
+    settings = _joint_settings(program, placement)
+    base_path = settings.links.qpu_to_controller
+    joint = _readout_route(base_path, ("left", "right"), "joint", 4_500_000)
+    left = _readout_route(base_path, ("left",), "left", 100_000)
+    right = _readout_route(base_path, ("right",), "right", 200_000)
+    links = dataclasses.replace(
+        settings.links, readout_routes=(joint, left, right)
+    )
+    settings = dataclasses.replace(settings, links=links)
+
+    run = _run(settings)
+
+    _assert_actual_truth(run)
+    _assert_direct_strong_path(run)
+    _assert_drained(run)
+    events = run.machine.observation.round_events.events
+    binary_events = [
+        event for event in events if event.kind == "BINARY_AVAILABLE"
+    ]
+    first_round_arrival_ticks = [
+        event.tick for event in binary_events if event.round_index == 1
+    ]
+    second_round_arrival_ticks = [
+        event.tick for event in binary_events if event.round_index == 2
+    ]
+    last_second_arrival_ticks = max(second_round_arrival_ticks)
+    first_arrival_ticks = min(first_round_arrival_ticks)
+    assert last_second_arrival_ticks < first_arrival_ticks
+    packed = [event.round_index for event in events if event.kind == "PACKED"]
+    after_last_round = len(packed) + 1
+    expected_rounds = list(range(1, after_last_round))
+    assert packed == expected_rounds
+    transfers = run.result.link_traffic["transfers"]
+    readouts = [row for row in transfers if row["path"] == "qpu_to_controller"]
+    delay_ticks = {row["total_delay_ticks"] for row in readouts}
+    assert delay_ticks == {
+        100_000,
+        200_000,
+        4_500_000,
+    }
+    assert len(readouts) == len(run.packets)
+    raw_bits = _raw_bits(run.packets)
+    payload_bits = sum(row["payload_bits"] for row in readouts)
+    assert payload_bits == len(raw_bits)
+
+
 @pytest.mark.parametrize(
     "basis, has_logical_flips", [("X", False), ("Z", True)]
 )
@@ -608,6 +664,8 @@ def test_interleaved_joint_recording_matches_complete_stim_conversion(
 
     The explicit setup shows that three acquisition fragments carry one
     quantum history, with the same fault and measurement map at both ends.
+    It stays in one function so the complete recorded input and its decoder
+    oracle remain visible beside the declared partitions.
     """
     program = memory_programs.joint_repetition_program(True, 0.12)
     circuit, mapping = program.assemble(3)
@@ -617,11 +675,18 @@ def test_interleaved_joint_recording_matches_complete_stim_conversion(
         circuit, 3, measurement_rounds=mapping
     )
     detector_rounds = table.detector_rounds()
-    source = _FragmentedRecording(
+    first = round_records.MeasurementPartition(("left",), 1)
+    middle = round_records.MeasurementPartition(("left", "right"), 2)
+    right = round_records.MeasurementPartition(("right",), 1)
+    last = round_records.MeasurementPartition(("left", "right"), 7)
+    partitions = {1: (first, middle, right), 2: (first, middle, right)}
+    partitions[3] = (first, middle, last)
+    source = stim_device.RecordedStimDevice(
         measurements,
         0,
         measurement_rounds={100: mapping},
         detector_rounds={100: detector_rounds},
+        readout_partitions={100: partitions},
     )
     settings = _joint_settings(program, placement)
     code = finite_example.RepetitionMemory(3, 3)
@@ -649,6 +714,36 @@ def test_interleaved_joint_recording_matches_complete_stim_conversion(
     assert expected == (1,)
     assert result.logical_observables == expected
     assert result.observable_truth == expected
+
+
+@pytest.mark.parametrize("placement", ["controller", "decoder"])
+def test_separate_terminal_emitters_preserve_the_complete_record(
+    placement: str,
+) -> None:
+    settings, measurements, circuit = _terminal_partitioned_settings(placement)
+
+    run = _run(settings)
+
+    _assert_actual_truth(run)
+    _assert_direct_strong_path(run)
+    _assert_drained(run)
+    raw_bits = _raw_bits(run.packets)
+    expected_raw_bits = tuple(measurements[0])
+    assert raw_bits == expected_raw_bits
+    final_packets = [
+        packet for packet in run.packets if packet.round_index == 3
+    ]
+    final_indices = [packet.fragment_index for packet in final_packets]
+    final_fragment_counts = [packet.fragment_count for packet in final_packets]
+    final_width_bits = [packet.size_bits for packet in final_packets]
+    assert final_indices == [0, 1, 2, 3]
+    assert final_fragment_counts == [4, 4, 4, 4]
+    assert final_width_bits == [4, 4, 3, 6]
+    source = settings.qpu.device
+    expected_prediction = _direct_matching_prediction(circuit, source)
+    result = run.result.operation_results[-1]
+    assert result.operation_id == 100
+    assert result.logical_observables == expected_prediction
 
 
 @pytest.mark.parametrize("placement", ["controller", "decoder"])
@@ -2649,6 +2744,34 @@ def _assert_held_rounds_retried(run: _Run) -> None:
     assert "RELEASED" in kinds
 
 
+def _partitioned_joint_program() -> circuit_records.RepeatedStimCircuit:
+    """Keep the first acquisition joint, then separate the two blocks."""
+    program = memory_programs.joint_repetition_program(True, 0.04)
+    left_checks = round_records.MeasurementPartition(("left",), 2)
+    right_checks = round_records.MeasurementPartition(("right",), 2)
+    left_data = round_records.MeasurementPartition(("left",), 3)
+    right_data = round_records.MeasurementPartition(("right",), 3)
+    bulk = (left_checks, right_checks)
+    final = (left_checks, right_checks, left_data, right_data)
+    partitions = {"repeated_round": bulk, "final_round": final}
+    return dataclasses.replace(program, readout_partitions=partitions)
+
+
+def _readout_route(
+    base: link_settings.PathSettings,
+    patches: tuple,
+    channel_name: str,
+    propagation_ticks: int,
+) -> link_settings.ReadoutRoute:
+    channel = dataclasses.replace(
+        base.channel,
+        name=channel_name,
+        propagation_latency_ticks=propagation_ticks,
+    )
+    path = dataclasses.replace(base, channel=channel)
+    return link_settings.ReadoutRoute(patches, path)
+
+
 def _joint_settings(
     program: circuit_records.RepeatedStimCircuit, placement: str
 ) -> machine_settings.MachineSettings:
@@ -2660,6 +2783,76 @@ def _joint_settings(
         base.workload, operations=operations, dynamic_streams=owners
     )
     return dataclasses.replace(base, workload=workload)
+
+
+def _terminal_partitioned_settings(placement: str) -> tuple:
+    program = memory_programs.memory_program(physical_error_probability=0.12)
+    circuit, _mapping = program.assemble(3)
+    sampler = circuit.compile_sampler(seed=73)
+    measurements = sampler.sample(shots=1)
+    table = detector_formation.build_formation_table(circuit, 3)
+    detector_rounds = table.detector_rounds()
+    terminal_ids = tuple(
+        recipe.detector_index
+        for recipe in table.detectors
+        if recipe.kind is detector_formation.LayerKind.READOUT
+    )
+    syndrome_group = round_records.MeasurementPartition(("stream-patch",), 4)
+    first_data_group = round_records.MeasurementPartition(("stream-patch",), 3)
+    last_data_group = round_records.MeasurementPartition(("stream-patch",), 6)
+    source = stim_device.RecordedStimDevice(
+        measurements,
+        0,
+        detector_rounds={100: detector_rounds},
+        terminal_detector_ids={100: terminal_ids},
+        readout_partitions={
+            2: {3: (syndrome_group, syndrome_group)},
+            3: {3: (first_data_group, last_data_group)},
+        },
+    )
+    settings = _settings(program, "live", placement)
+    qpu = dataclasses.replace(settings.qpu, device=source)
+    workload = _terminal_partitioned_workload(circuit)
+    settings = dataclasses.replace(settings, qpu=qpu, workload=workload)
+    return settings, measurements, circuit
+
+
+def _terminal_partitioned_workload(
+    circuit: stim.Circuit,
+) -> workload_settings.WorkloadSettings:
+    owner = program_records.Operation(
+        100,
+        "memory",
+        ("stream-patch",),
+        patches=("stream-patch",),
+        circuit=circuit,
+    )
+    prefix = dataclasses.replace(
+        owner, id=1, name="prefix", stream_id=100, stream_offset=0
+    )
+    syndrome = dataclasses.replace(
+        prefix,
+        id=2,
+        name="last syndrome",
+        stream_offset=2,
+        predecessors=(1,),
+        syndrome_fragment_index=0,
+        syndrome_fragment_count=4,
+    )
+    finalizer = dataclasses.replace(
+        syndrome,
+        id=3,
+        name="data readout",
+        predecessors=(2,),
+        finalizes_stream_round=True,
+        syndrome_fragment_index=2,
+    )
+    policy = round_policies.PerOperationRounds({100: 3, 1: 2, 2: 1, 3: 0})
+    return workload_settings.WorkloadSettings(
+        operations=(prefix, syndrome, finalizer),
+        decode_operations=(owner,),
+        rounds_policy=policy,
+    )
 
 
 def _operations_on_group(operations: tuple, patches: tuple) -> tuple:
@@ -2802,28 +2995,6 @@ def _direct_matching_prediction(
     events = source.sampled_detection_events(100)
     prediction = matching.decode(events)
     return tuple(prediction)
-
-
-class _FragmentedRecording(stim_device.RecordedStimDevice):
-    """Return one real acquisition as chronological A, B, A fragments."""
-
-    def round_payloads(
-        self, operation: program_records.Operation, round_index: int
-    ) -> list[round_records.QPUReadout]:
-        parent = super()
-        (original,) = parent.round_payloads(operation, round_index)
-        pieces = (original.bits[:1], original.bits[1:3], original.bits[3:])
-        footprints = (("left",), ("right",), ("left",))
-        fragments = []
-        for index, bits in enumerate(pieces):
-            fragment = dataclasses.replace(
-                original,
-                patch_ids=footprints[index],
-                bits=bits,
-                size_bits=len(bits),
-            )
-            fragments.append(fragment)
-        return fragments
 
 
 def _transfer_paths(run: _Run) -> set[str]:

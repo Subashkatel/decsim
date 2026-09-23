@@ -37,9 +37,17 @@ SLOW_SETTINGS = controller_settings.ControllerSettings(
 
 
 class RecordingAssembler:
-    def __init__(self, engine):
+    def __init__(self, engine: engine_module.Engine) -> None:
         self.engine = engine
         self.added = []
+        self.expected = []
+
+    def expect_round(
+        self,
+        fragment: round_records.RetainedSyndromeFragment,
+        route: round_records.SyndromePacketRoute,
+    ) -> None:
+        self.expected.append((fragment, route))
 
     def add(self, fragment, fragment_count, route):
         self.added.append((self.engine.now, fragment, fragment_count, route))
@@ -52,7 +60,9 @@ def controller_with(engine, links, assembler, settings=SETTINGS):
     return controller
 
 
-def test_a_readout_reaches_the_assembler_after_the_crossing_and_the_delay():
+def test_a_readout_reaches_the_assembler_after_the_crossing_and_the_delay() -> (
+    None
+):
     engine = engine_module.Engine()
     reference = link_profiles.logical_reference_profile()
     links = fabric_module.LinkFabric(reference, engine)
@@ -66,11 +76,14 @@ def test_a_readout_reaches_the_assembler_after_the_crossing_and_the_delay():
     )
 
     controller.accept_qpu_readout(readout, round_records.WINDOW_INPUT_ROUTE)
+    assert len(assembler.expected) == 1
+    assert assembler.added == []
     engine.run()
 
     (added,) = assembler.added
     tick, fragment, fragment_count, route = added
-    assert tick == crossing_ticks + READOUT_TICKS
+    expected_tick = crossing_ticks + READOUT_TICKS
+    assert tick == expected_tick
     assert fragment.bits == (1, 0, 1, 0)
     assert fragment.size_bits == 4
     assert fragment_count == 1

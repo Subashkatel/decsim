@@ -259,23 +259,9 @@ class QPUDevice:
             raise ValueError(
                 "a detector-emitting round must emit at least one readout"
             )
-        fragment_index = operation.syndrome_fragment_index
-        declared_count = operation.syndrome_fragment_count
-        if fragment_index is not None and len(payloads) != 1:
-            raise ValueError(
-                "an explicit syndrome fragment slot must emit one payload"
-            )
-        fragment_count = declared_count
-        if declared_count is None:
-            fragment_count = len(payloads)
-        elif fragment_index is None and declared_count != len(payloads):
-            raise ValueError(
-                "declared syndrome fragment count must match emitted readouts"
-            )
+        fragment_count, first_index = _fragment_slots(operation, len(payloads))
         for local_index, payload in enumerate(payloads):
-            index = local_index
-            if fragment_index is not None:
-                index = fragment_index
+            index = first_index + local_index
             readout = dataclasses.replace(
                 payload, fragment_count=fragment_count, fragment_index=index
             )
@@ -296,6 +282,25 @@ class QPUDevice:
         )
         self.trace.round_event.fire(emitted)
         self.readout_receiver.accept_qpu_readout(readout, route)
+
+
+def _fragment_slots(operation, payload_count: int) -> tuple[int, int]:
+    first_index = operation.syndrome_fragment_index
+    fragment_count = operation.syndrome_fragment_count
+    if fragment_count is None:
+        fragment_count = payload_count
+    if first_index is None:
+        if fragment_count != payload_count:
+            raise ValueError(
+                "declared syndrome fragment count must match emitted readouts"
+            )
+        return fragment_count, 0
+    after_last_index = first_index + payload_count
+    if after_last_index > fragment_count:
+        raise ValueError(
+            "readout group exceeds the declared syndrome fragment count"
+        )
+    return fragment_count, first_index
 
 
 @dataclasses.dataclass

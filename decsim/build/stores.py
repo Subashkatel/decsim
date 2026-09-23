@@ -210,9 +210,15 @@ def check_readout_cost_is_priced(
     charge for that work would count it twice.
     """
     readout_cycles = settings.controller.readout_to_bits_cycles
-    readout_hop = settings.links.qpu_to_controller
-    if readout_cycles > 0 and not readout_hop.excludes_receiver_processing:
-        raise ValueError(
-            "a separate controller readout cost requires a "
-            "qpu_to_controller card whose latency excludes that cost"
-        )
+    if readout_cycles == 0:
+        return
+    readout_hops = [settings.links.qpu_to_controller]
+    readout_hops.extend(
+        route.settings for route in settings.links.readout_routes
+    )
+    for readout_hop in readout_hops:
+        if not readout_hop.excludes_receiver_processing:
+            raise ValueError(
+                "a separate controller readout cost requires a "
+                "qpu_to_controller card whose latency excludes that cost"
+            )

@@ -29,6 +29,7 @@ is the decoder-to-decoder seam.
 
 import math
 
+import pytest
 import yaml
 
 import decsim.collect as collect
@@ -39,6 +40,7 @@ import decsim.experiments.measure as measure
 import decsim.experiments.report as report
 import decsim.frontends.settings as workload_settings
 import decsim.links.link_profiles as link_profiles
+import decsim.observe.link_traffic as link_traffic
 import decsim.pauli_frame.pauli_frame as pauli_frame_module
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
@@ -1037,3 +1039,43 @@ def test_every_streams_window_is_measured_against_its_own_frame_record():
     one_stream_commits = one_stream.samples["frame_commit"]
     assert one_stream_commits == [0.004] * 9
     assert two_streams.samples["frame_commit"] == one_stream_commits * 2
+
+
+@pytest.mark.parametrize(
+    "counter_name, metric_name, scale",
+    [
+        ("transfer_count", "transfers", 1),
+        ("known_payload_bits", "payload_bits", 1),
+        ("unknown_payload_transfer_count", "unknown_payload_transfers", 1),
+        ("queue_wait_ticks", "queue_wait_us", 1_000_000),
+        ("serialization_ticks", "serialization_us", 1_000_000),
+        ("propagation_ticks", "propagation_us", 1_000_000),
+    ],
+)
+def test_link_totals_sum_every_binding_of_one_semantic_path(
+    counter_name: str, metric_name: str, scale: int
+) -> None:
+    first_value = 2 * scale
+    second_value = 3 * scale
+    first = link_traffic.TrafficCounters(**{counter_name: first_value})
+    second = link_traffic.TrafficCounters(**{counter_name: second_value})
+    first_counters = first.to_json_value()
+    second_counters = second.to_json_value()
+    traffic = {
+        "semantic_edges": [
+            {
+                "path": "qpu_to_controller",
+                "physical_alias": "left",
+                "counters": first_counters,
+            },
+            {
+                "path": "qpu_to_controller",
+                "physical_alias": "right",
+                "counters": second_counters,
+            },
+        ]
+    }
+
+    totals = measure.link_totals(traffic)
+
+    assert totals["qpu_to_controller"][metric_name] == 5

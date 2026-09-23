@@ -11,6 +11,7 @@ EscalationPolicy), so a row written outside decsim is measured like any
 other.
 """
 
+import collections
 import dataclasses
 import math
 import pathlib
@@ -212,10 +213,14 @@ def ticks_to_microseconds(ticks: int) -> float:
 
 def link_totals(traffic: dict) -> dict:
     """The ledger's own counters for this shot by path, in microseconds."""
-    totals = {}
+    counters_by_path = {}
     for edge in traffic["semantic_edges"]:
-        counters = edge["counters"]
-        totals[edge["path"]] = {
+        empty_counters = collections.Counter()
+        counters = counters_by_path.setdefault(edge["path"], empty_counters)
+        counters.update(edge["counters"])
+    totals = {}
+    for path, counters in counters_by_path.items():
+        totals[path] = {
             "transfers": counters["transfer_count"],
             "payload_bits": counters["known_payload_bits"],
             "unknown_payload_transfers": counters[

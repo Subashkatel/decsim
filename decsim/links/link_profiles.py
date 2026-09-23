@@ -15,8 +15,9 @@ off-board path priced by Backline's measured RoCE v2 round trip; it is
 the roce_v2_cpu and roce_v2_gpu rows. from_yaml puts the yaml's own card
 on any path; with_transfer_overhead adds a setup cost to any fabric.
 
-Every number carries a source string that travels into the traffic
-report; paper locators are arXiv numbers and sections. To
+Every number carries a source string on the settings record it sets,
+and a payload's source also travels into the traffic report with every
+transfer; paper locators are arXiv numbers and sections. To
 change a number, copy a card into your own file and edit it, then pass
 it as the machine's links setting.
 """

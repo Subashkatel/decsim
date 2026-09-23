@@ -339,3 +339,17 @@ def test_an_engine_card_without_a_clock_is_refused_by_name():
         decoder_settings.DecoderSettings.from_yaml(
             section, clocks, "weak_decoder"
         )
+
+
+def test_an_unknown_key_on_the_engine_card_is_refused_by_name():
+    clocks = config.ClockSettings({"decoder": 250.0})
+    section = _tier_section({"bits": None})
+    section["engine"]["fetch_cycle_per_round"] = 2
+
+    with pytest.raises(
+        ValueError,
+        match=r"weak_decoder.engine does not know \['fetch_cycle_per_round'\]",
+    ):
+        decoder_settings.DecoderSettings.from_yaml(
+            section, clocks, "weak_decoder"
+        )

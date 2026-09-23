@@ -74,6 +74,14 @@ ENGINE_CYCLE_KEYS = {
     "release_cycles_per_round": "the release stage's cost for each round",
 }
 
+# Every key a <tier>_decoder.engine card may hold; any other is refused.
+_ENGINE_KEYS = (
+    "clock",
+    *ENGINE_CYCLE_KEYS,
+    "detection_event_latency_cycles",
+    "detection_event_cycles_per_round",
+)
+
 # weak_decoder.input and strong_decoder.input name one of these rows:
 # how a tier's unit gets the rounds it decodes. copy moves them over the
 # tier's input link into the unit's own memory, which is what a hardware
@@ -270,6 +278,7 @@ class DecoderSettings:
             row, section_name, section, DECODER_KEYS, clocks
         )
         engine = section["engine"]
+        _check_engine_keys(engine, section_name)
         engine_clock = _engine_clock(engine, clocks, section_name)
         unit_memory = UnitMemorySettings.from_yaml(
             section["unit_memory"], section_name
@@ -381,6 +390,23 @@ def _check_required_keys(section: Mapping, section_name: str) -> None:
     raise ValueError(
         f"{section_name} needs the keys {listed}; configs/reference.yaml "
         "holds every key with its unit"
+    )
+
+
+def _check_engine_keys(engine: Mapping, section_name: str) -> None:
+    """An engine card holds no key it does not price.
+
+    gem5 refuses a parameter its class does not declare
+    (src/python/m5/SimObject.py:932-936), so a misspelt stage key is
+    refused rather than left at nothing.
+    """
+    unknown = set(engine) - set(_ENGINE_KEYS)
+    if not unknown:
+        return
+    listed = sorted(unknown)
+    raise ValueError(
+        f"{section_name}.engine does not know {listed}; its keys are "
+        f"{list(_ENGINE_KEYS)}"
     )
 
 

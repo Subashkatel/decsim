@@ -37,6 +37,8 @@ import json
 import types
 from typing import Any, Optional
 
+import stim
+
 import decsim.qpu.round_policies as round_policies
 import decsim.records.program as program_records
 
@@ -709,8 +711,6 @@ def _add_physical_stream(
 def _check_physical_inputs(
     program: QLXProgram, circuit, metadata, decode_operation_id
 ) -> None:
-    import stim
-
     circuit_type = type(circuit)
     if circuit_type is not stim.Circuit:
         raise ValueError("physical_circuit must be an exact stim.Circuit")

@@ -54,7 +54,7 @@ def send_at(engine, channel, tick, payload_bits, setup_ticks, delivered):
 
 
 def closed_form(arrivals, bits, rate_bits_per_us, propagation_ticks):
-    """The row L1 closed form: start = max(arrival, end of the previous)."""
+    """The point-to-point closed form: start = max(arrival, previous end)."""
     deliveries = []
     serializer_free = 0
     rate_text = str(rate_bits_per_us)
@@ -273,7 +273,7 @@ def test_a_setup_after_the_engine_went_idle_costs_only_its_own_ticks():
 
 
 def test_two_paths_with_setups_on_one_channel_take_the_wire_in_setup_order():
-    """The row L1 shared-channel case.
+    """Three setups from two paths on one shared channel.
 
     A at 10, A at 11, B at 12, five-tick setups, 8 bits on a 1000 bits
     per microsecond wire. The setups serialize on the channel's one

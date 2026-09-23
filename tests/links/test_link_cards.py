@@ -115,7 +115,7 @@ def _card_yaml_without_the_readout_hop() -> str:
 def test_a_readout_hop_the_yaml_never_wrote_keeps_its_own_cost_inside(
     tmp_path,
 ):
-    """C7 item 4: the claim belongs to the card it is about.
+    """The claim belongs to the card it is about.
 
     The reference qpu_to_controller latency is the whole transfer, the
     controller's own turning of the readout into bits included. A yaml

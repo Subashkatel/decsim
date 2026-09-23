@@ -13,15 +13,38 @@ and the generated page [The plug-in tables](../reference/tables.md),
 which `python tools/docs_map.py` rewrites from the tables. If it takes
 more, something is wrong with the port rather than with your class.
 
-Two parts take more today, and the recipe says where:
+A row with yaml keys of its own declares them on a nested frozen
+dataclass named `Settings`: its fields are the keys, its classmethod
+`from_yaml(section)` reads and checks the ones the yaml wrote, and your
+constructor takes the record as `settings`. The section keeps the keys
+every row of its table shares and hands your row the rest
+(`decsim/tables.py`, `row_settings`); a key that neither declares is
+refused by name when the yaml loads. A row with no keys of its own
+declares no `Settings`. A decoder row's `from_yaml` is also handed the
+run's clocks, since a decoder's own timing names a clock domain:
 
-- A row that reads a yaml key of its own needs a field on its
-  section's settings record and a line in that record's `from_yaml`
-  ([How to add a yaml key](add_a_yaml_key.md)), because a table's rows
-  share one record per section. Only a `workload` row reads its own
-  keys, and it still returns them as fields of that one record.
-- A code card has no table and no yaml key. It plugs in from Python
-  ([How to plug a component in without a table row](plug_in_without_a_table_row.md)).
+```python
+class MyDecoder(decoder_module.WindowDecoderBase):
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        step_count: int = 1
+
+        @classmethod
+        def from_yaml(cls, section, clocks):
+            return cls(**section)
+
+    def __init__(self, latency_model=None, settings=None):
+        ...
+```
+
+```yaml
+weak_decoder:
+  kind: my_decoder
+  step_count: 4          # MyDecoder's own key, beside the tier's keys
+```
+
+A code card has no table and no yaml key yet. It plugs in from Python
+([How to plug a component in without a table row](plug_in_without_a_table_row.md)).
 
 ## 1. Find the port and fill it
 

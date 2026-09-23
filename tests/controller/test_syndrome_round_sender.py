@@ -180,6 +180,50 @@ def test_a_round_with_no_room_is_held_and_written_in_order_when_a_slot_frees():
     assert stalled == [2]
 
 
+def test_a_narrow_round_waits_behind_a_held_round_it_would_fit_beside():
+    """A round that finds the line non-empty joins it, room or not.
+
+    gem5's refused requester waits for the retry before it sends again
+    (src/mem/port.hh:244-255) and its packet queue keeps later packets
+    behind the refused front (src/mem/packet_queue.cc:155-162), so the
+    one-bit round 3, which fits beside the in-flight round 1, still
+    waits for the two-bit round 2 held ahead of it.
+    """
+    engine = engine_module.Engine()
+    sender, weak_receiver, transmitter, _recorder = sender_with(
+        engine, weak_bits=3
+    )
+    first = packed(1)
+    second = packed(2)
+    narrow = _one_bit_round(3)
+
+    sender.admit(first)
+    sender.admit(second)
+    narrow_admitted = sender.admit(narrow)
+    sent_while_held = list(transmitter.sent)
+    weak_receiver.receive_round(first)
+    weak_receiver.store.release_round((1, 1))
+
+    assert narrow_admitted is False
+    assert sent_while_held == [1]
+    assert transmitter.sent == [1, 2, 3]
+
+
+def _one_bit_round(round_index):
+    fragment = round_records.RetainedSyndromeFragment(
+        operation_id=1,
+        patch_ids=(0,),
+        round_index=round_index,
+        bits=(1,),
+        size_bits=1,
+        fragment_index=0,
+    )
+    packet = round_records.SyndromeRoundPacket(1, round_index, (fragment,))
+    return round_records.PackedRound(
+        packet, round_records.WINDOW_INPUT_ROUTE, 1
+    )
+
+
 def test_strong_primary_rounds_use_only_the_strong_store() -> None:
     engine = engine_module.Engine()
     strong_receiver = RecordingStrongReceiver()

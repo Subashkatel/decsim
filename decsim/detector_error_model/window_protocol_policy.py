@@ -55,11 +55,6 @@ def validate_window_protocol(
     """Refuse a plan that does not meet its protocol's contract."""
     if window_protocol is window_records.WindowProtocol.GENERIC:
         return
-    if (
-        window_protocol
-        is not window_records.WindowProtocol.TAN_ZERO_SEAM_GRAPHLIKE
-    ):
-        raise ValueError("unsupported window protocol")
     seam_indices = tuple(range(1, len(entries), 2))
     is_graphlike_only = (
         fault_model_requirement.representations

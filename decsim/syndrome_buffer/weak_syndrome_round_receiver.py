@@ -53,11 +53,11 @@ packed round lands over controller_to_weak_buffer: this end stores it as the
 run's detection event placement says the store holds it, the landed outcomes or
 the events formed from them here (controller.detection_events_formed_at),
 narrates the copy and the intake, and announces the published round to the
-window manager. And a timing-only feedback-memory round is handed over to be
-sent: it takes its slot here, because the weak syndrome buffer is where it
-waits, and it leaves by the store's own outgoing port (round_output.py), which
-frees the slot at the delivery. A timing-only round is never published: no
-window reads it.
+window manager. And a timing-only feedback-memory round lands over the same
+hop to be sent on: the store writes it, it takes its slot once written,
+because the weak syndrome buffer is where it waits, and it leaves by the
+store's own outgoing port (round_output.py), which frees the slot at the
+delivery. A timing-only round is never published: no window reads it.
 """
 
 import dataclasses
@@ -150,16 +150,24 @@ class WeakSyndromeRoundReceiver:
         packed: round_records.PackedRound,
         on_delivered: Callable[[], None],
     ) -> None:
-        """Take one timing-only round and send it to the store's decoder.
+        """Write one landed timing-only round, then send it to the decoder.
 
-        The round waits in the weak syndrome buffer until the wire takes it, so
-        it takes its slot here, where the store has it; the outgoing port frees
-        that slot at the delivery. It is not published: no window reads
-        a timing-only round, so nothing may be told it is readable.
+        The round waits in the weak syndrome buffer until the wire takes it,
+        so it takes its slot here once the store's write of it completes;
+        the outgoing port frees that slot at the delivery. It is not
+        published: no window reads a timing-only round, so nothing may be
+        told it is readable. It carries no outcomes to form.
         """
-        self._give_back_reservation(packed)
-        self._take_slot(packed, "packing", None)
-        self.output.send_memory_round(packed, on_delivered)
+        stored_bits = round_records.fragment_wire_bits(packed.packet.fragments)
+        written_tick = self.store.book_write(packed.round_key, stored_bits)
+        send_on = functools.partial(
+            self._send_memory_round_on, packed, on_delivered
+        )
+        if written_tick == self.engine.now:
+            send_on()
+            return
+        delay = written_tick - self.engine.now
+        self.engine.schedule(delay, send_on, label="syndrome buffer write")
 
     def check_settled(self) -> None:
         """At the end of a run no write is on the wire and no bit is stored.
@@ -205,6 +213,15 @@ class WeakSyndromeRoundReceiver:
         self._fire_published(packed)
         self.windows.accept_window_input(packed.packet)
         on_published()
+
+    def _send_memory_round_on(
+        self,
+        packed: round_records.PackedRound,
+        on_delivered: Callable[[], None],
+    ) -> None:
+        self._give_back_reservation(packed)
+        self._take_slot(packed, "controller_to_weak_buffer", None)
+        self.output.send_memory_round(packed, on_delivered)
 
     def _give_back_reservation(self, packed: round_records.PackedRound) -> None:
         """The crossing is over: it gives back exactly what it reserved."""

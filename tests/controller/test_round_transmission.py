@@ -2,8 +2,9 @@
 
 A window-input round rides controller_to_weak_buffer and reaches Buffer
 0's incoming port at delivery, which publishes it. A feedback-memory
-round tells the windows at delivery and frees its slot. The sender never
-waits for a landing:
+round rides the same hop into the store, as the strong route's rounds
+ride controller_to_strong_buffer, then tells the windows at its delivery
+to the decoder and frees its slot. The sender never waits for a landing:
 two memory rounds one QEC cycle apart on a 5 us weak_buffer_to_weak_decoder
 land one cycle apart (Yang et al. 2605.04892 and Google 2408.13687 stream
 every round; gem5 src/dev/dma_device.cc transmitList; ns-3
@@ -242,7 +243,7 @@ def test_a_window_round_is_in_flight_until_its_write_publishes_it():
     assert transmitter.in_flight == 0
 
 
-def test_a_memory_round_tells_the_windows_at_delivery_and_frees_its_slot():
+def test_a_memory_round_crosses_the_store_hop_then_tells_the_windows():
     engine = engine_module.Engine()
     profile = five_microsecond_wbd_profile()
     transmitter, store, windows, recorder, _ledger = transmitter_with(
@@ -253,10 +254,11 @@ def test_a_memory_round_tells_the_windows_at_delivery_and_frees_its_slot():
     reserve_and_send(transmitter, memory_round)
     engine.run()
 
-    assert windows.memory_rounds == [(WBD_TICKS, 7)]
+    delivery_ticks = STORE_HOP_TICKS + WBD_TICKS
+    assert windows.memory_rounds == [(delivery_ticks, 7)]
     assert store.occupancy == 0
     kinds_and_ticks = [(event.kind, event.tick) for event in recorder.events]
-    assert kinds_and_ticks == [("FEEDBACK_MEMORY_DELIVERED", WBD_TICKS)]
+    assert kinds_and_ticks == [("FEEDBACK_MEMORY_DELIVERED", delivery_ticks)]
 
 
 def test_memory_rounds_pipeline_onto_the_link_without_a_landing_wait():
@@ -275,16 +277,17 @@ def test_memory_rounds_pipeline_onto_the_link_without_a_landing_wait():
     engine.schedule(CYCLE_TICKS, lambda: send(second))
     engine.run()
 
+    delivery_ticks = STORE_HOP_TICKS + WBD_TICKS
     assert windows.memory_rounds == [
-        (WBD_TICKS, 7),
-        (CYCLE_TICKS + WBD_TICKS, 7),
+        (delivery_ticks, 7),
+        (CYCLE_TICKS + delivery_ticks, 7),
     ]
 
 
 @pytest.mark.parametrize(
     "memory_send_ticks, memory_delivery, input_delivery, wire_order",
     [
-        (0, 5_064_000, 5_128_000, [1, 9]),
+        (0, 5_104_000, 5_168_000, [1, 9]),
         (STORE_HOP_TICKS, 5_168_000, 5_104_000, [9, 1]),
     ],
 )
@@ -295,15 +298,16 @@ def test_two_routes_take_one_wire_in_the_order_they_reach_it(
 
     A memory round and a decode input share a bandwidth-bounded
     weak_buffer_to_weak_decoder (5 us, 1000 bits per microsecond,
-    64-bit rounds, so 0.064 us on the wire). The window round crosses
-    controller_to_weak_buffer into the weak syndrome buffer first, so the
-    decode input the windows send at its publication reaches the shared wire one
-    store hop after the round was sent: a memory round sent with the
-    window round is ahead of it, and one sent at the publication tick
-    is behind it. gem5's DmaPort queues at the request
-    (src/dev/dma_device.cc transmitList) and ns-3's device starts the
-    next packet at TransmitComplete (point-to-point-net-device.cc): no
-    arbitration event between the routes.
+    64-bit rounds, so 0.064 us on the wire). Both rounds cross
+    controller_to_weak_buffer into the weak syndrome buffer first, and the
+    decode input the windows send at the window round's publication
+    reaches the shared wire one store hop after that round was sent: a
+    memory round sent just before the window round is ahead of it, and
+    one sent at the publication tick is behind it. gem5's DmaPort
+    queues at the request (src/dev/dma_device.cc transmitList) and
+    ns-3's device starts the next packet at TransmitComplete
+    (point-to-point-net-device.cc): no arbitration event between the
+    routes.
     """
     engine = engine_module.Engine()
     profile = five_microsecond_wbd_profile(bits_per_microsecond=1000.0)
@@ -316,8 +320,8 @@ def test_two_routes_take_one_wire_in_the_order_they_reach_it(
     def send(finished):
         reserve_and_send(transmitter, finished)
 
-    engine.schedule(0, lambda: send(window_round))
     engine.schedule(memory_send_ticks, lambda: send(memory_round))
+    engine.schedule(0, lambda: send(window_round))
     engine.run()
 
     assert windows.memory_rounds == [(memory_delivery, 7)]

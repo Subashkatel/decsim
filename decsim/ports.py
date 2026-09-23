@@ -377,7 +377,7 @@ class WeakSyndromeRoundReceiver(Protocol):
         packed: round_records.PackedRound,
         on_delivered: Callable[[], None],
     ) -> None:
-        """Send one timing-only round to the decoder side the store feeds."""
+        """Write one landed timing-only round, then send it to the decoder."""
 
 
 @runtime_checkable

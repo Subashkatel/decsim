@@ -101,7 +101,7 @@ The weak syndrome round receiver, as the controller sees it.
 | `has_room` | Whether this round fits beside the stored and the crossing ones. |
 | `reserve_write` | Take the room this crossing round will need, before it leaves. |
 | `receive_round` | Take one landed round: store it, announce it, then on_published. |
-| `send_memory_round` | Send one timing-only round to the decoder side the store feeds. |
+| `send_memory_round` | Write one landed timing-only round, then send it to the decoder. |
 
 ### `SyndromeBufferOutput`
 

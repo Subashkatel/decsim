@@ -265,6 +265,30 @@ def test_a_timing_only_round_takes_its_slot_here_and_is_never_published():
     assert windows.published == []
 
 
+def test_a_timing_only_round_takes_its_slot_once_its_write_completes():
+    """Three write cycles of a 10-tick clock from tick 1 end at 40."""
+    engine = engine_module.Engine()
+    engine.now = 1
+    clock = config.Clock(10)
+    costs = syndrome_buffer_module.SyndromeBuffer.Settings(write_cycles=3)
+    settings = syndrome_buffer_settings.SyndromeBufferSettings(
+        clock=clock, row_settings=costs
+    )
+    store = syndrome_buffer_module.SyndromeBuffer(settings, engine)
+    output = _Output()
+    receiver, _windows = _receiver_with(engine, store, output)
+    packed = _packed(2, route=MEMORY_ROUTE)
+    delivered = []
+
+    receiver.reserve_write(packed)
+    receiver.send_memory_round(packed, lambda: delivered.append(engine.now))
+    sent_before_the_write_ends = list(output.sent)
+    engine.run()
+
+    assert sent_before_the_write_ends == []
+    assert delivered == [40]
+
+
 def test_a_write_still_in_flight_at_the_end_of_a_run_is_a_failure():
     engine = engine_module.Engine()
     store = _store(engine)

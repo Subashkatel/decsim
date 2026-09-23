@@ -1,11 +1,12 @@
 """The transmitter: a stored round leaves on its route at the write.
 
-A window-input round rides controller_to_weak_buffer, whose sending end
-this is; the weak syndrome buffer's own incoming port handles the landing,
-which is where the round is published. A feedback-memory round rides
-weak_buffer_to_weak_decoder, whose sending end is the weak syndrome buffer, so
-the store's own outgoing port sends it and frees the slot, and the decoders'
-own end takes its landing; this transmitter only asks and counts. The
+Every round rides controller_to_weak_buffer, whose sending end this is;
+the weak syndrome buffer's own incoming port handles the landing. A
+window-input round is published there. A feedback-memory round is written
+there like any round and then rides weak_buffer_to_weak_decoder, whose
+sending end is the weak syndrome buffer, so the store's own outgoing port
+sends it and frees the slot, and the decoders' own end takes its landing;
+this transmitter only sends it up, asks and counts. The
 sender never waits for a round to land before sending the next: the DAQs
 of Yang et al. (2605.04892) and Google's control electronics
 (2408.13687) stream every round, Caune et al. (2410.05202) publish each
@@ -109,12 +110,22 @@ class RoundTransmitter:
         self.in_flight -= 1
 
     def _send_feedback_memory(self, packed: round_records.PackedRound) -> None:
-        """Ask the store to send it; the controller is at neither end.
+        """Send it up to the store, which writes it and sends it on.
 
-        The round leaves the weak syndrome buffer for the weak decoder, so the
-        store's own outgoing port executes the send and frees the slot; this
-        transmitter only asks and hears the landing.
+        A timing-only round occupies a slot once its write completes, as
+        any round does (weak_syndrome_round_receiver.py), so it crosses
+        controller_to_weak_buffer first, as the strong route's rounds
+        cross controller_to_strong_buffer. It then leaves the weak
+        syndrome buffer for the weak decoder: the store's own outgoing
+        port executes that send and frees the slot, and this transmitter
+        only hears the landing.
         """
+        landed = functools.partial(self._write_feedback_memory, packed)
+        self._send(
+            transfer_records.LinkPath.CONTROLLER_TO_WEAK_BUFFER, packed, landed
+        )
+
+    def _write_feedback_memory(self, packed: round_records.PackedRound) -> None:
         deliver = functools.partial(self._deliver_feedback_memory, packed)
         self.weak_receiver.send_memory_round(packed, deliver)
 

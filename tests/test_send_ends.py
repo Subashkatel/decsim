@@ -131,6 +131,7 @@ DELIVERY_CALLBACKS = {
     ("controller/instruction_output.py", "CONTROLLER_TO_QPU"): ("delivered",),
     ("controller/round_transmission.py", "CONTROLLER_TO_WEAK_BUFFER"): (
         "_publish",
+        "_write_feedback_memory",
     ),
     ("controller/syndrome_round_sender.py", "CONTROLLER_TO_STRONG_BUFFER"): (
         "_land_in_strong_store",

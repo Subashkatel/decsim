@@ -129,7 +129,9 @@ same end decides whether the buffer has space. It counts the bits
 already stored and the bits reserved for the writes still crossing the
 link, and the controller's sender reserves the round's bits before it
 leaves. The transmitter is told when the round lands, and only so that
-it can keep its own count of the rounds in flight.
+it can keep its own count of the rounds in flight. A timing-only
+feedback-memory round crosses this hop too, is written like any round,
+and then leaves for the decoder on hop 4; it is never published.
 
 What crosses: one **packed round**, every fragment that leaves the
 controller. The bit count is `PackedRound.wire_bits`, computed in

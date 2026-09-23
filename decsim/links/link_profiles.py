@@ -165,6 +165,16 @@ ROCE_V2_REPLY_LEG = (
 )
 
 
+# The keys a path's card writes: the first three on every card, the rest
+# only when the path has lanes, a setup or a header to price.
+_REQUIRED_CARD_KEYS = ("latency_cycles", "clock", "bits_per_cycle")
+_CARD_KEYS = _REQUIRED_CARD_KEYS + (
+    "channels",
+    "setup_cycles_per_transfer",
+    "header_bits_per_transfer",
+)
+
+
 def logical_reference_profile() -> settings.FabricSettings:
     """The default card: Khalid's latencies, unbounded bandwidth.
 
@@ -604,6 +614,7 @@ def from_yaml(
             continue
         if card is None:
             continue
+        _check_card(path_name, card)
         path_settings = getattr(profile, path_name)
         carded = _carded_path(path_name, path_settings, card, clocks, source)
         replacements[path_name] = dataclasses.replace(
@@ -714,6 +725,27 @@ def _roce_v2_strong_paths(
         "strong_buffer_to_strong_decoder": strong_buffer_to_strong_decoder,
         "strong_decoder_to_frame": strong_decoder_to_frame,
     }
+
+
+def _check_card(path_name: str, card) -> None:
+    """A path's card is a mapping that writes the three keys every card needs.
+
+    Refused here, once, with the card's yaml name, so a card never reaches
+    the arithmetic below as a list or with a key missing.
+    """
+    card_name = f"links.{path_name}"
+    if not isinstance(card, Mapping):
+        raise ValueError(
+            f"{card_name} holds {card!r}; a path's card is a mapping of "
+            f"{list(_CARD_KEYS)}, or null for the row's own numbers"
+        )
+    missing = [key for key in _REQUIRED_CARD_KEYS if key not in card]
+    if missing:
+        raise ValueError(
+            f"{card_name} needs {missing}; a card writes "
+            f"{list(_REQUIRED_CARD_KEYS)}, with bits_per_cycle null for an "
+            f"unbounded wire"
+        )
 
 
 def _card_ticks(card: Mapping, clocks: config.ClockSettings) -> tuple:

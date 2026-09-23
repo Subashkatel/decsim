@@ -6,6 +6,8 @@ cycles of a named clock), and decsim/links/link_profiles.from_yaml.
 
 import pytest
 
+import decsim.config as config_module
+import decsim.links.link_profiles as link_profiles
 import decsim.machine as machine_module
 from decsim.config import microseconds_to_ticks
 from decsim.experiments.experiment import load_experiment
@@ -47,6 +49,15 @@ CARD_YAML = (
     "release_cycles_per_round: 0}\n"
     "pauli_frame: {clock: fridge, write_cycles: 1}\n"
 )
+
+CLOCKS = config_module.ClockSettings.from_yaml({"fridge": 250.0})
+GOOD_CARD = {"latency_cycles": 1, "clock": "fridge", "bits_per_cycle": 1.0}
+
+
+def _load_readout_card(card):
+    """The links section with one card on the readout hop, read."""
+    section = {"qpu_to_controller": card}
+    return link_profiles.from_yaml(section, CLOCKS, "probe")
 
 
 def test_the_setup_cost_key_reaches_the_path(tmp_path):
@@ -138,3 +149,24 @@ def test_a_separate_readout_cost_is_refused_on_an_uncarded_readout_hop(
     with pytest.raises(ValueError) as refusal:
         machine_module.Machine.build(settings, 0)
     assert "qpu_to_controller card" in str(refusal.value)
+
+
+def test_a_card_that_is_not_a_mapping_is_refused_naming_its_path():
+    with pytest.raises(ValueError) as refusal:
+        _load_readout_card([1, 2])
+    message = str(refusal.value)
+    assert message.startswith(
+        "links.qpu_to_controller holds [1, 2]; a path's card is a mapping"
+    )
+
+
+@pytest.mark.parametrize("key", ["latency_cycles", "clock", "bits_per_cycle"])
+def test_a_card_missing_a_key_every_card_writes_is_refused_naming_it(key):
+    card = dict(GOOD_CARD)
+    del card[key]
+    with pytest.raises(ValueError) as refusal:
+        _load_readout_card(card)
+    message = str(refusal.value)
+    assert message.startswith(
+        f"links.qpu_to_controller needs ['{key}']; a card writes"
+    )

@@ -175,6 +175,11 @@ def _trace_word_or_path(section: Mapping) -> str:
             f"{trace!r}; yaml reads a bare `on` as true, so quote a path "
             "that looks like a word"
         )
+    if not trace:
+        raise ValueError(
+            "observation.trace is empty, which names no file; write off, "
+            "chrome, or a path"
+        )
     if trace in NARRATOR_MODES:
         raise ValueError(
             f"observation.trace no longer names the engine narrator; "

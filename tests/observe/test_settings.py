@@ -66,6 +66,18 @@ def test_a_bare_on_for_the_trace_is_refused():
     )
 
 
+def test_an_empty_trace_path_is_refused_before_the_run():
+    """An empty path would fail only when the first traced shot writes."""
+    section = _section("observation:\n  trace: ''\n")
+
+    with pytest.raises(ValueError) as refusal:
+        observe_settings.ObservationSettings.from_yaml(section)
+
+    assert "observation.trace is empty, which names no file" in str(
+        refusal.value
+    )
+
+
 def test_a_bare_off_for_the_trace_and_the_log_is_the_word_off():
     """In yaml 1.1 a bare `off` is False, and both keys mean off."""
     section = _section("observation:\n  trace: off\n  log: off\n")

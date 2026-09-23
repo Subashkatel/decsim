@@ -137,7 +137,7 @@ def test_noiseless_memory_has_no_detection_events_or_observable_flips(
             "round_count must be a positive integer",
         ),
         ("repetition", 3, 3, "Y", 0.01, "memory basis must be X or Z"),
-        ("repetition", 3, 3, "Z", float("nan"), "must be finite"),
+        ("repetition", 3, 3, "Z", float("nan"), r"must lie in \[0, 1\]"),
         ("repetition", 3, 3, "Z", 1.1, r"must lie in \[0, 1\]"),
     ],
 )
@@ -264,7 +264,7 @@ def test_physical_idle_noise_uses_the_declared_cadence(
             "must be finite and positive",
         ),
         ({"physical_error_probability": -0.1}, r"must lie in \[0, 1\]"),
-        ({"physical_error_probability": float("nan")}, "must be finite"),
+        ({"physical_error_probability": float("nan")}, r"must lie in \[0, 1\]"),
         ({"relaxation_time_microseconds": 20}, "SD6 does not use"),
         ({"noise_model": "physical"}, "requires relaxation and dephasing"),
         (

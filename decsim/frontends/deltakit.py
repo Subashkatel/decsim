@@ -225,9 +225,11 @@ def check_positive_integer(value: int, name: str) -> None:
 
 
 def check_probability(probability: float) -> None:
-    """Refuse a physical error probability outside [0, 1] or not finite."""
-    if not math.isfinite(probability):
-        raise ValueError("physical_error_probability must be finite")
+    """Refuse a physical error probability outside [0, 1].
+
+    A NaN or an infinity is outside it: every comparison with a NaN is
+    false, so no separate finiteness test is needed.
+    """
     if not 0 <= probability <= 1:
         raise ValueError("physical_error_probability must lie in [0, 1]")
 

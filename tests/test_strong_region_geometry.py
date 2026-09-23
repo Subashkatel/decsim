@@ -54,7 +54,7 @@ def _provisioned_region_round_count() -> float:
     """The rounds the bandwidth card provisions the strong input for."""
     profile = link_profiles.bandwidth_limited_profile(**GEOMETRY)
     path = profile.strong_buffer_to_strong_decoder
-    bits = path.default_payload.aggregate_bits
+    bits = path.default_payload.input_bits
     return bits / SYNDROME_BITS_PER_ROUND
 
 

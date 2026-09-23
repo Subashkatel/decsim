@@ -128,8 +128,8 @@ def test_the_reference_card_leaves_unbounded_only_the_parallel_hops():
 
 def test_the_reference_card_prices_a_bus_word_and_an_instruction_word():
     profile = link_profiles.logical_reference_profile()
-    assert profile.frame_to_controller.default_payload.aggregate_bits == 32
-    assert profile.controller_to_qpu.default_payload.aggregate_bits == 128
+    assert profile.frame_to_controller.default_payload.input_bits == 32
+    assert profile.controller_to_qpu.default_payload.input_bits == 128
 
 
 def test_the_reference_card_prices_a_boundary_on_the_seam_it_updates():
@@ -336,20 +336,16 @@ def test_the_bandwidth_card_keeps_the_reference_latencies():
 
 def test_the_bandwidth_cards_default_payloads_are_one_regions_traffic():
     profile = link_profiles.bandwidth_limited_profile(**DISTANCE_5_GEOMETRY)
-    assert profile.qpu_to_controller.default_payload.aggregate_bits == 24
+    assert profile.qpu_to_controller.default_payload.input_bits == 24
+    assert profile.weak_buffer_to_weak_decoder.default_payload.input_bits == 240
     assert (
-        profile.weak_buffer_to_weak_decoder.default_payload.aggregate_bits
-        == 240
-    )
-    assert (
-        profile.strong_buffer_to_strong_decoder.default_payload.aggregate_bits
+        profile.strong_buffer_to_strong_decoder.default_payload.input_bits
         == 360
     )
     assert (
-        profile.weak_decoder_to_strong_decoder.default_payload.aggregate_bits
-        == 360
+        profile.weak_decoder_to_strong_decoder.default_payload.input_bits == 360
     )
-    assert profile.decoder_to_decoder.default_payload.aggregate_bits == 24
+    assert profile.decoder_to_decoder.default_payload.input_bits == 24
 
 
 def test_the_capacity_scale_multiplies_every_rate():
@@ -732,7 +728,7 @@ def test_an_instruction_hop_moves_its_word_in_one_cycle():
         profile.controller_to_qpu,
     )
     for path_settings in instruction_paths:
-        word_bits = path_settings.default_payload.aggregate_bits
+        word_bits = path_settings.default_payload.input_bits
         capacity = path_settings.channel.capacity
         rate = capacity.exact_aggregate_bits_per_microsecond()
         word_ticks = word_bits * config.TICKS_PER_MICROSECOND / rate

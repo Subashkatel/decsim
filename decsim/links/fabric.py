@@ -220,7 +220,7 @@ def _select_payload(
     default_payload = path_settings.default_payload
     if default_payload is not None:
         return (
-            default_payload.aggregate_bits,
+            default_payload.input_bits,
             transfer_records.PayloadSelection.CONFIGURED_DEFAULT,
             default_payload.source,
         )

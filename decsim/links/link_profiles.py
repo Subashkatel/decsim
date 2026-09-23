@@ -270,11 +270,13 @@ def logical_reference_profile() -> settings.FabricSettings:
     Actual-payload paths price the runtime's own bit counts;
     default-payload paths price a stated word width.
     """
-    word_rate = _capacity(_WORD_BITS_PER_MICROSECOND, _WORD_RATE_SOURCE)
-    instruction_rate = _capacity(
+    word_rate = settings.CapacitySettings(
+        _WORD_BITS_PER_MICROSECOND, _WORD_RATE_SOURCE
+    )
+    instruction_rate = settings.CapacitySettings(
         _INSTRUCTION_BITS_PER_MICROSECOND, _INSTRUCTION_RATE_SOURCE
     )
-    off_board_rate = _capacity(
+    off_board_rate = settings.CapacitySettings(
         _OFF_BOARD_BITS_PER_MICROSECOND, _OFF_BOARD_RATE_SOURCE
     )
     qpu_to_controller = _actual_path(
@@ -952,12 +954,7 @@ def _carded_path(
     latency_ticks, bits_per_microsecond, setup_ticks = _card_ticks(card, clocks)
     capacity = None
     if bits_per_microsecond is not None:
-        capacity = settings.CapacitySettings(
-            bits_per_microsecond,
-            settings.QuantityBasis.AGGREGATE,
-            None,
-            source,
-        )
+        capacity = settings.CapacitySettings(bits_per_microsecond, source)
     channel = settings.ChannelSettings(
         path_name, latency_ticks, capacity, source
     )
@@ -988,31 +985,15 @@ class _Provisioning:
         actual_payload_source: Optional[str],
     ) -> settings.PathSettings:
         rate = nominal_bits_per_microsecond * self._capacity_scale
-        capacity = settings.CapacitySettings(
-            rate, settings.QuantityBasis.AGGREGATE, None, source
-        )
+        capacity = settings.CapacitySettings(rate, source)
         reference_path = getattr(self._reference, name)
         reference_channel = reference_path.channel
         latency_ticks = reference_channel.propagation_latency_ticks
         channel = settings.ChannelSettings(
             name, latency_ticks, capacity, source
         )
-        payload = _aggregate_payload(bits, source)
+        payload = settings.PayloadSettings(bits, source)
         return settings.PathSettings(channel, payload, actual_payload_source)
-
-
-def _aggregate_payload(bits: int, source: str) -> settings.PayloadSettings:
-    return settings.PayloadSettings(
-        bits, settings.QuantityBasis.AGGREGATE, None, source
-    )
-
-
-def _capacity(
-    bits_per_microsecond: int, source: str
-) -> settings.CapacitySettings:
-    return settings.CapacitySettings(
-        bits_per_microsecond, settings.QuantityBasis.AGGREGATE, None, source
-    )
 
 
 def _channel(
@@ -1045,5 +1026,5 @@ def _default_path(
     capacity: settings.CapacitySettings,
 ) -> settings.PathSettings:
     channel = _channel(name, latency_microseconds, latency_source, capacity)
-    payload = _aggregate_payload(bits, payload_source)
+    payload = settings.PayloadSettings(bits, payload_source)
     return settings.PathSettings(channel, payload, None)

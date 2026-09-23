@@ -18,7 +18,6 @@ import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 
 PATH = transfer_records.LinkPath
-AGGREGATE = link_settings.QuantityBasis.AGGREGATE
 FREE_CHANNEL = link_settings.ChannelSettings("free", 0, None, "test")
 FREE_PATH = link_settings.PathSettings(FREE_CHANNEL, None, "test payload")
 OPERATION_ID = ("experiment", 7)
@@ -95,9 +94,7 @@ BOUNDARY_RELATION_KEYS = {
 def bounded_path(
     name, bits_per_microsecond, latency_ticks, setup_ticks=0, header_bits=0
 ):
-    capacity = link_settings.CapacitySettings(
-        bits_per_microsecond, AGGREGATE, None, "test"
-    )
+    capacity = link_settings.CapacitySettings(bits_per_microsecond, "test")
     channel = link_settings.ChannelSettings(
         name, latency_ticks, capacity, "test"
     )

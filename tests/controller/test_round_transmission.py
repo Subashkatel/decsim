@@ -128,12 +128,7 @@ def five_microsecond_wbd_profile(bits_per_microsecond=None):
     edge = reference.weak_buffer_to_weak_decoder
     capacity = None
     if bits_per_microsecond is not None:
-        capacity = link_settings.CapacitySettings(
-            bits_per_microsecond,
-            link_settings.QuantityBasis.AGGREGATE,
-            None,
-            "test",
-        )
+        capacity = link_settings.CapacitySettings(bits_per_microsecond, "test")
     channel = link_settings.ChannelSettings(
         edge.channel.name, WBD_TICKS, capacity, "test"
     )

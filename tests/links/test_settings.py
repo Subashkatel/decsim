@@ -2,8 +2,8 @@
 
 The yaml and the number cards are where link numbers enter decsim, so
 each check here is a boundary check (STYLE.md rule 4). The arithmetic
-is ns-3's DataRate (point-to-point-net-device.cc): a per-lane rate times
-the lane count is the wire's rate, exactly.
+is ns-3's DataRate (point-to-point-net-device.cc): the wire's rate is
+read exactly as the card writes it.
 """
 
 import fractions
@@ -14,18 +14,16 @@ import pytest
 import decsim.links.settings as link_settings
 import decsim.records.transfers as transfer_records
 
-AGGREGATE = link_settings.QuantityBasis.AGGREGATE
-PER_LANE = link_settings.QuantityBasis.PER_LANE
 FREE_CHANNEL = link_settings.ChannelSettings("free", 0, None, "test")
 FREE_PATH = link_settings.PathSettings(FREE_CHANNEL, None, "test payload")
 
 
-def capacity(rate, basis=AGGREGATE, lane_count=None):
-    return link_settings.CapacitySettings(rate, basis, lane_count, "test")
+def capacity(rate):
+    return link_settings.CapacitySettings(rate, "test")
 
 
-def payload(bits, basis=AGGREGATE, lane_count=None):
-    return link_settings.PayloadSettings(bits, basis, lane_count, "test")
+def payload(bits):
+    return link_settings.PayloadSettings(bits, "test")
 
 
 def channel(name="test", latency_ticks=0, capacity_settings=None):
@@ -62,21 +60,10 @@ def card(**paths):
     return link_settings.FabricSettings(profile_name="test", **wiring)
 
 
-def test_a_per_lane_rate_is_multiplied_exactly():
-    per_lane = capacity(0.7, PER_LANE, 3)
-    exact = per_lane.exact_aggregate_bits_per_microsecond()
-    assert exact == fractions.Fraction(21, 10)
-
-
 def test_an_aggregate_rate_is_read_as_the_decimal_on_the_card():
     decimal_rate = capacity(0.20846)
     exact = decimal_rate.exact_aggregate_bits_per_microsecond()
     assert exact == fractions.Fraction("0.20846")
-
-
-def test_a_per_lane_payload_is_the_input_times_the_lane_count():
-    per_lane = payload(9, PER_LANE, 4)
-    assert per_lane.aggregate_bits == 36
 
 
 def test_a_zero_capacity_is_refused():
@@ -94,21 +81,6 @@ def test_a_negative_capacity_is_refused():
 def test_a_capacity_that_is_not_finite_is_refused():
     with pytest.raises(ValueError, match="must be a finite number"):
         capacity(math.inf)
-
-
-def test_an_aggregate_capacity_with_a_lane_count_is_refused():
-    with pytest.raises(ValueError, match="an aggregate capacity has no lane"):
-        capacity(1.0, AGGREGATE, 2)
-
-
-def test_a_per_lane_capacity_without_a_lane_count_is_refused():
-    with pytest.raises(ValueError, match="per-lane capacity count must be"):
-        capacity(1.0, PER_LANE, None)
-
-
-def test_a_per_lane_capacity_with_a_zero_lane_count_is_refused():
-    with pytest.raises(ValueError, match="per-lane capacity count must be"):
-        capacity(1.0, PER_LANE, 0)
 
 
 def test_a_negative_payload_is_refused():
@@ -175,22 +147,6 @@ def test_a_fractional_setup_cost_is_refused():
 def test_a_path_without_a_payload_rule_is_refused():
     with pytest.raises(ValueError, match="a path needs a default payload"):
         link_settings.PathSettings(FREE_CHANNEL, None, None)
-
-
-def test_a_default_payload_on_another_basis_than_the_capacity_is_refused():
-    four_lanes = capacity(2.0, PER_LANE, 4)
-    bounded = channel(capacity_settings=four_lanes)
-    aggregate_payload = payload(8)
-    with pytest.raises(ValueError, match="bases must match"):
-        link_settings.PathSettings(bounded, aggregate_payload, None)
-
-
-def test_a_default_payload_with_another_lane_count_is_refused():
-    four_lanes = capacity(2.0, PER_LANE, 4)
-    bounded = channel(capacity_settings=four_lanes)
-    three_lane_payload = payload(8, PER_LANE, 3)
-    with pytest.raises(ValueError, match="lane counts must match"):
-        link_settings.PathSettings(bounded, three_lane_payload, None)
 
 
 def test_a_card_that_leaves_out_a_path_is_refused_naming_it():

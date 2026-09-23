@@ -19,6 +19,7 @@ list.
 """
 
 import dataclasses
+import gzip
 import json
 from typing import Optional
 
@@ -929,8 +930,6 @@ def _thread_sort_event(tid: int) -> dict:
 def _open_for(path: str):
     """A gzip file when the path says so, a plain one otherwise."""
     if path.endswith(".gz"):
-        import gzip
-
         return gzip.open
     return open
 

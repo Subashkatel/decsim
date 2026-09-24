@@ -19,6 +19,7 @@ import decsim.machine as machine_module
 import decsim.observe.settings as observation_settings
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
+import decsim.qpu.stim_device as stim_device
 import decsim.qpu.streaming_stim_device as streaming_stim_device
 import decsim.records.program as program_records
 import decsim.records.transfers as transfer_records
@@ -135,6 +136,81 @@ def _emission_recorder(machine: machine_module.Machine, emission_ticks: list):
     return listener
 
 
+@pytest.mark.parametrize("distance", [3, 5])
+@pytest.mark.parametrize("round_count", [3, 4])
+def test_a_finite_source_closed_at_its_end_keeps_its_own_windows(
+    round_count: int, distance: int
+) -> None:
+    """The source fixed the stream's windows, and its end closes them.
+
+    A feedback source that spans the whole finite circuit closes the
+    stream on its last round, so measurement_closed and trailing_buffer
+    commit the same windows.
+    """
+    closed = _finite_windows(round_count, distance, "measurement_closed")
+    trailing = _finite_windows(round_count, distance, "trailing_buffer")
+    assert closed == trailing
+
+
+def _finite_windows(round_count: int, distance: int, mode: str) -> list:
+    """The committed windows of a finite Stim stream fed back in full."""
+    circuit = memory_programs.memory_circuit(round_count, distance)
+    owner = program_records.Operation(
+        100, "memory", (0,), patches=(0,), circuit=circuit
+    )
+    prefix = dataclasses.replace(
+        owner, id=1, name="prefix", stream_id=100, stream_offset=0
+    )
+    waiting = program_records.Operation(
+        2,
+        "waiting",
+        (1,),
+        patches=(1,),
+        predecessors=(1,),
+        blocked_by=1,
+        emits_detector_data=False,
+    )
+    after_circuit = memory_programs.memory_circuit(3, distance)
+    after = program_records.Operation(
+        3, "after", (0,), patches=(0,), predecessors=(1,), circuit=after_circuit
+    )
+    counts = {100: round_count, 1: round_count, 2: 1, 3: 3}
+    policy = round_policies.PerOperationRounds(counts)
+    workload = workload_settings.WorkloadSettings(
+        operations=(prefix, waiting, after),
+        dynamic_streams=(owner,),
+        rounds_policy=policy,
+        feedback_boundary_mode=mode,
+    )
+    device = stim_device.StimDevice()
+    qpu = qpu_settings.QpuSettings(distance=distance, device=device)
+    clock = config.Clock(1000)
+    engine = decoder_settings.EngineSettings(clock=clock)
+    decoder = decoder_settings.DecoderSettings(kind=0.1, engine=engine)
+    settings = machine_settings.MachineSettings(
+        workload=workload, qpu=qpu, weak_decoder=decoder
+    )
+    machine = machine_module.Machine.build(settings, 5)
+    windows = []
+    sources = machine.window_manager.window_sources()
+    recorder = _window_recorder(windows)
+    sources.window_committed.connect(recorder)
+    result = machine.run()
+    assert result.terminal_status == "complete"
+    return windows
+
+
+def _window_recorder(windows: list):
+    """A listener that records each committed window's span."""
+
+    def listener(window, contribution) -> None:
+        del contribution
+        span = (window.key, window.commit_hi, window.buffer_hi)
+        windows.append(span)
+
+    return listener
+
+
 def _segment(
     operation_id: int, stream_offset: int, predecessors: tuple
 ) -> program_records.Operation:
@@ -150,10 +226,11 @@ def _segment(
     )
 
 
+@pytest.mark.parametrize("distance", [3, 5])
 @pytest.mark.parametrize("idle_policy", ["separate_decode_jobs", "ignore"])
 @pytest.mark.parametrize("waiting_patch", [0, 1])
 def test_a_closed_stream_boundary_releases_as_a_finite_operation_does(
-    idle_policy: str, waiting_patch: int
+    idle_policy: str, waiting_patch: int, distance: int
 ) -> None:
     """The stream's last window is queued before the seal reaches it.
 
@@ -163,23 +240,34 @@ def test_a_closed_stream_boundary_releases_as_a_finite_operation_does(
     layer: its last round reads the data qubits out and forms c/2 more
     events, which the open stream does not, and they cross two links
     first. Both start the waiting operation at the same round boundary.
-    The stream run then also decodes the rounds its idle patch kept
-    producing, so it ends later.
+    At distance 5 the three-round prefix ends inside a commit region,
+    and that window commits through the boundary as the finite
+    operation's one window does. The stream run then also decodes the
+    rounds its idle patch kept producing, so it ends later.
     """
     closed = "measurement_closed"
-    stream_run = _feedback_run(True, idle_policy, waiting_patch, closed)
-    finite_run = _feedback_run(False, idle_policy, waiting_patch, closed)
+    stream_run = _feedback_run(
+        True, idle_policy, waiting_patch, closed, distance
+    )
+    finite_run = _feedback_run(
+        False, idle_policy, waiting_patch, closed, distance
+    )
     stream_events, stream_done_tick = stream_run
     finite_events, finite_done_tick = finite_run
-    expected_events = _released_later(stream_events, 2, CLOSING_LAYER_TICKS)
+    closing_ticks = _closing_layer_ticks(distance)
+    expected_events = _released_later(stream_events, 2, closing_ticks)
     assert expected_events == finite_events
     assert stream_done_tick > finite_done_tick
 
 
-# c/2 = 4 events at d=3, over the controller-to-buffer and
-# buffer-to-decoder links at 8000 bits a microsecond, 125 ticks a bit
-# (link_profiles.logical_reference_profile)
-CLOSING_LAYER_TICKS = 2 * 4 * 125
+def _closing_layer_ticks(distance: int) -> int:
+    """The closing layer's c/2 events over two links, 125 ticks a bit.
+
+    The controller-to-buffer and buffer-to-decoder links move 8000 bits
+    a microsecond (link_profiles.logical_reference_profile).
+    """
+    closing_events = (distance * distance - 1) // 2
+    return 2 * closing_events * 125
 
 
 def _released_later(events: tuple, operation_id: int, ticks: int) -> tuple:
@@ -331,7 +419,11 @@ def _commit_recorder(machine: machine_module.Machine, commit_ticks: list):
 
 
 def _feedback_run(
-    is_stream: bool, idle_policy: str, waiting_patch: int, mode: str
+    is_stream: bool,
+    idle_policy: str,
+    waiting_patch: int,
+    mode: str,
+    distance: int = 3,
 ) -> tuple:
     """When the prefix ends, the release lands and the run finishes."""
     prefix = program_records.Operation(1, "prefix", (0,), patches=(0,))
@@ -357,8 +449,9 @@ def _feedback_run(
     engine = decoder_settings.EngineSettings(clock=clock)
     decoder = decoder_settings.DecoderSettings(kind=0.1, engine=engine)
     idle = controller_settings.IdlePolicySettings(kind=idle_policy)
+    qpu = qpu_settings.QpuSettings(distance=distance)
     settings = machine_settings.MachineSettings(
-        workload=workload, weak_decoder=decoder, idle_policy=idle
+        workload=workload, qpu=qpu, weak_decoder=decoder, idle_policy=idle
     )
     machine = machine_module.Machine.build(settings, 0)
     return _events_and_end(machine)

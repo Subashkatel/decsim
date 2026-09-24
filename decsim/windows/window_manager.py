@@ -209,11 +209,18 @@ class WindowManager:
         self.results.finish_workload_if_ready()
 
     def close_stream_boundary(self, stream_id, stream_round_count: int) -> None:
-        """Mark a live stream round as a measurement-closed boundary."""
+        """Mark a live stream round as a measurement-closed boundary.
+
+        The window whose commit region holds the boundary commits through
+        it, and the next window starts after it. A finite source's
+        windows are its own, and it closes only at its end.
+        """
         if not self.planner.has_stream(stream_id):
             return
         self.tracker.close_boundary(stream_id, stream_round_count)
         self._grow_stream(stream_id, stream_round_count, None)
+        if not self.planner.is_finite_stream(stream_id):
+            self.planner.trim_stream_tail(stream_id, stream_round_count)
         self._refresh_unqueued_stream_windows(stream_id)
         self.check_windows_for_operation(stream_id)
 

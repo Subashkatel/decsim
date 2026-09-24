@@ -286,6 +286,42 @@ def test_the_seal_clips_the_window_holding_the_last_round():
     assert planner.trim_stream_tail("stream", 20) is None
 
 
+@pytest.mark.parametrize("boundary", [1, 2, 3, 4, 5, 6, 7])
+def test_a_closed_boundary_ends_a_commit_region_and_restarts_the_stride(
+    boundary: int,
+) -> None:
+    """No window commits across a closed boundary; the next starts after it.
+
+    The window holding the boundary commits through it, and the rounds
+    after it are windowed from the boundary on, each window committing
+    the stride, until the seal clips the last one.
+    """
+    planner = _planner()
+    stream = _stream()
+    planner.register_stream(stream, None)
+    planner.grow_stream("stream", boundary, None)
+    clipped = planner.trim_stream_tail("stream", boundary)
+    assert clipped.commit_hi == boundary
+    stream_round_count = boundary + 7
+    planner.grow_stream("stream", stream_round_count, stream_round_count)
+    planner.trim_stream_tail("stream", stream_round_count)
+    commits = [
+        (window.commit_lo, window.commit_hi)
+        for window in planner.windows_of("stream")
+    ]
+    after = [commit for commit in commits if commit[0] > boundary]
+    assert after[0][0] == boundary + 1
+    covered = []
+    for commit_lo, commit_hi in commits:
+        stop = commit_hi + 1
+        covered.extend(range(commit_lo, stop))
+    after_last_round = stream_round_count + 1
+    every_round = range(1, after_last_round)
+    assert covered == list(every_round)
+    stride_ends = [commit_hi for _, commit_hi in after[:-1]]
+    assert stride_ends == [boundary + 3, boundary + 6]
+
+
 def test_idle_rounds_fold_only_into_a_batch_style_operation():
     plan = _empty_plan()
     window = window_records.Window(

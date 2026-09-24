@@ -432,10 +432,15 @@ class WindowPlanner:
     def trim_stream_tail(
         self, stream_id, stream_round_count: int
     ) -> Optional[window_records.Window]:
-        """Clip the one window whose commit region holds the sealed length.
+        """Clip the one window whose commit region holds a closed tail.
 
-        Its buffer follows the new commit end; the window is returned so
-        its holds can shrink with it. None when no window is clipped.
+        The tail is the sealed length or a measurement-closed boundary.
+        The window commits through it, its buffer follows the new commit
+        end, and the stream's next window starts on the round after it:
+        a last window may be smaller than the others (Tan et al.
+        2209.09219 lines 1052-1056; Skoric et al. 2209.08552 lines
+        692-700). The window is returned so its holds can shrink with
+        it. None when no window is clipped.
         """
         growth = self.growth_by_stream[stream_id]
         for window in self.windows_of(stream_id):
@@ -443,6 +448,7 @@ class WindowPlanner:
                 window.commit_hi = stream_round_count
                 window.buffer_hi = stream_round_count + growth.buffer_rounds
                 window.round_count = window.buffer_hi - window.start_round + 1
+                growth.next_commit_lo = stream_round_count + 1
                 return window
         return None
 
@@ -491,6 +497,7 @@ class WindowPlanner:
         self.plan.window_count[stream_id] += 1
         self.plan.total_windows += 1
         growth.next_window_index += 1
+        growth.next_commit_lo = geometry.commit_hi + 1
         self.trace.window_planned.fire(window)
         return window
 
@@ -580,6 +587,8 @@ class _StreamGrowth:
         self.buffer_rounds = buffer_rounds
         self.finite_geometries = finite_geometries
         self.next_window_index = 0
+        # a closed boundary restarts the stride on the round after it
+        self.next_commit_lo = 1
 
     def finite_geometries_begun(self, highest_known_round: int) -> list:
         """The source's next geometries whose commit region has begun."""
@@ -597,14 +606,13 @@ class _StreamGrowth:
     def arithmetic_geometries_begun(
         self, highest_known_round: int, round_cap: Optional[int]
     ) -> list:
-        """Window k commits [k*ncom+1, (k+1)*ncom], clipped at the cap."""
+        """Each window commits the ncom rounds after the last, to the cap."""
         begun = []
-        index = self.next_window_index
+        commit_lo = self.next_commit_lo
         while True:
-            commit_lo = index * self.commit_rounds + 1
             if commit_lo > highest_known_round:
                 return begun
-            commit_hi = (index + 1) * self.commit_rounds
+            commit_hi = commit_lo + self.commit_rounds - 1
             if round_cap is not None:
                 commit_hi = min(commit_hi, round_cap)
             buffer_hi = commit_hi + self.buffer_rounds
@@ -615,7 +623,7 @@ class _StreamGrowth:
                 buffer_hi=buffer_hi,
             )
             begun.append(geometry)
-            index += 1
+            commit_lo = commit_hi + 1
 
 
 @dataclasses.dataclass(frozen=True)

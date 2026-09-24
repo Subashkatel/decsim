@@ -95,6 +95,8 @@ BLOCK_STATEMENTS = (ast.For, ast.While, ast.If, ast.With, ast.Try)
 ARITHMETIC = (ast.BinOp, ast.Compare, ast.BoolOp)
 FUNCTIONS = (ast.FunctionDef, ast.AsyncFunctionDef)
 COMPREHENSIONS = (ast.ListComp, ast.SetComp, ast.GeneratorExp, ast.DictComp)
+# a lambda's body and a comprehension are checked where they are visited
+UNCHECKED_ARGUMENTS = (ast.Lambda, *COMPREHENSIONS)
 
 
 def wide_state_exemptions():
@@ -389,13 +391,15 @@ class Checker(ast.NodeVisitor):
         """Report one argument that does more than name a value."""
         if isinstance(argument, ast.Starred):
             argument = argument.value
-        if isinstance(argument, ast.Lambda):
-            return
-        if isinstance(argument, COMPREHENSIONS):
+        if isinstance(argument, UNCHECKED_ARGUMENTS):
             return
         if is_allowed_call(argument):
             self.check_arguments(argument)
             return
+        self.report_busy_argument(call, argument)
+
+    def report_busy_argument(self, call, argument):
+        """Report an argument that calls or computes."""
         if calls_inside(argument):
             self.report(call, "nested call")
         if arithmetic_inside(argument):
@@ -523,6 +527,15 @@ def main(arguments):
     for path in python_files(arguments):
         file_findings = check_file(path)
         findings.extend(file_findings)
+    failures, reports = split_findings(findings)
+    print_findings(failures, reports)
+    if failures:
+        return 1
+    return 0
+
+
+def split_findings(findings):
+    """The findings that fail the check, and the size prompts it reports."""
     failures = []
     reports = []
     for finding in findings:
@@ -530,6 +543,11 @@ def main(arguments):
             reports.append(finding)
         else:
             failures.append(finding)
+    return failures, reports
+
+
+def print_findings(failures, reports):
+    """Print the failures with their count, then the size prompts."""
     for finding in failures:
         print(finding)
     failure_paths = {finding.path for finding in failures}
@@ -538,9 +556,6 @@ def main(arguments):
         print("reports (size prompts, answered in the change's report):")
     for finding in reports:
         print(finding)
-    if failures:
-        return 1
-    return 0
 
 
 if __name__ == "__main__":

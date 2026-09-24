@@ -160,26 +160,33 @@ def _exemption_entries(guide: str) -> dict:
     """Each exempt (class, path) mapped to the whole text of its entry."""
     entries = {}
     current = None
-    listing = False
-    for line in guide.splitlines():
-        if line.startswith(EXEMPTION_HEADING):
-            listing = True
-            continue
-        if listing and line.startswith("## "):
-            break
-        if not listing:
-            continue
+    for line in _exemption_listing(guide):
         match = ENTRY_LINE.match(line)
         if match is not None:
             current = (match.group(1), match.group(2))
             entries[current] = line
             continue
-        if current is None:
-            continue
         stripped = line.strip()
-        if stripped:
-            entries[current] = entries[current] + " " + stripped
+        if current is None or not stripped:
+            continue
+        entries[current] = entries[current] + " " + stripped
     return entries
+
+
+def _exemption_listing(guide: str) -> list:
+    """The guide's lines after the exemption heading, up to the next section."""
+    guide_lines = guide.splitlines()
+    lines = iter(guide_lines)
+    for line in lines:
+        if line.startswith(EXEMPTION_HEADING):
+            break
+    # the same iterator resumes after the heading
+    listing = []
+    for line in lines:
+        if line.startswith("## "):
+            break
+        listing.append(line)
+    return listing
 
 
 def test_every_exemption_sentence_names_every_attribute_its_class_holds():

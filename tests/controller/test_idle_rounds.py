@@ -34,8 +34,11 @@ class RecordingStreams:
     def is_live_protected_patch(self, patch):
         return patch in self.live_patches
 
-    def extend_live_stream(self, operation: program_records.Operation) -> bool:
+    def extend_live_stream(
+        self, operation: program_records.Operation, patch
+    ) -> bool:
         del operation
+        del patch
         return False
 
 

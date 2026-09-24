@@ -32,7 +32,8 @@ class RecordingIdleRounds:
     def emit_memory_round(self, operation, patch, round_index):
         self.memory_rounds.append((operation, patch, round_index))
 
-    def extend_live_stream(self, operation: str) -> bool:
+    def extend_live_stream(self, operation: str, patch: str) -> bool:
+        del patch
         if not self.is_stream_live:
             return False
         self.stream_rounds.append(operation)

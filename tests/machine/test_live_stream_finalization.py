@@ -62,13 +62,17 @@ def test_a_closed_stream_boundary_releases_as_a_finite_operation_does(
     layer: its last round reads the data qubits out and forms c/2 more
     events, which the open stream does not, and they cross two links
     first. Both start the waiting operation at the same round boundary.
+    The stream run then also decodes the rounds its idle patch kept
+    producing, so it ends later.
     """
-    stream_events, stream_done = _closed_boundary_run(
-        True, idle_policy, waiting_patch
-    )
-    finite_run = _closed_boundary_run(False, idle_policy, waiting_patch)
+    closed = "measurement_closed"
+    stream_run = _feedback_run(True, idle_policy, waiting_patch, closed)
+    finite_run = _feedback_run(False, idle_policy, waiting_patch, closed)
+    stream_events, stream_done_tick = stream_run
+    finite_events, finite_done_tick = finite_run
     expected_events = _released_later(stream_events, 2, CLOSING_LAYER_TICKS)
-    assert (expected_events, stream_done) == finite_run
+    assert expected_events == finite_events
+    assert stream_done_tick > finite_done_tick
 
 
 # c/2 = 4 events at d=3, over the controller-to-buffer and
@@ -97,8 +101,29 @@ def _recorder(events: list, kind: str):
     return listener
 
 
-def _closed_boundary_run(
-    is_stream: bool, idle_policy: str, waiting_patch: int
+@pytest.mark.parametrize("idle_policy", ["separate_decode_jobs", "ignore"])
+@pytest.mark.parametrize("waiting_patch", [0, 1])
+def test_a_waiting_stream_decision_reads_its_buffer_from_the_idle_patch(
+    idle_policy: str, waiting_patch: int
+) -> None:
+    """The prefix's patch keeps its qubit in memory while the release waits.
+
+    Each idle cycle is the stream's next round whatever the idle policy,
+    so the prefix's last window reads its three buffer rounds from them
+    and the release lands where the continuous-stream policy puts it.
+    """
+    trailing = "trailing_buffer"
+    run = _feedback_run(True, idle_policy, waiting_patch, trailing)
+    reference = _feedback_run(True, "extend_stream", waiting_patch, trailing)
+    events = run[0]
+    assert events == reference[0]
+    ticks = {(kind, operation): tick for kind, operation, tick in events}
+    wait_ticks = ticks[("released", 2)] - ticks[("finished", 1)]
+    assert wait_ticks > 3 * 1_100_000
+
+
+def _feedback_run(
+    is_stream: bool, idle_policy: str, waiting_patch: int, mode: str
 ) -> tuple:
     """When the prefix ends, the release lands and the run finishes."""
     prefix = program_records.Operation(1, "prefix", (0,), patches=(0,))
@@ -118,7 +143,7 @@ def _closed_boundary_run(
         operations=(prefix, waiting),
         dynamic_streams=streams,
         rounds_policy=policy,
-        feedback_boundary_mode="measurement_closed",
+        feedback_boundary_mode=mode,
     )
     clock = config.Clock(1000)
     engine = decoder_settings.EngineSettings(clock=clock)
@@ -128,6 +153,13 @@ def _closed_boundary_run(
         workload=workload, weak_decoder=decoder, idle_policy=idle
     )
     machine = machine_module.Machine.build(settings, 0)
+    return _events_and_end(machine)
+
+
+def _events_and_end(machine: machine_module.Machine) -> tuple:
+    """Run to the end; the runtime's events and the fully-done tick."""
+    guard = _refuse_past(1_000_000_000)
+    machine.engine.action_done.connect(guard)
     events = []
     trace = machine.execution_runtime.trace
     finished = _recorder(events, "finished")
@@ -138,6 +170,20 @@ def _closed_boundary_run(
     trace.operation_started.connect(started)
     result = machine.run()
     return tuple(events), result.fully_done_ticks
+
+
+def _refuse_past(limit_ticks: int):
+    """A listener that fails a run still going past the limit.
+
+    A decision that never gets its buffer leaves the idle rounds
+    ticking forever, so the run fails here instead of hanging.
+    """
+
+    def listener(now: int) -> None:
+        if now > limit_ticks:
+            raise AssertionError(f"the run did not end by tick {limit_ticks}")
+
+    return listener
 
 
 def _machine(

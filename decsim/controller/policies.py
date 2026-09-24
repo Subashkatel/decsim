@@ -46,7 +46,7 @@ class ExtendStream:
 
     def relay(self, idle_rounds, operation, patch, round_index: int) -> None:
         """Extend the live stream, or send a memory round."""
-        extended = idle_rounds.extend_live_stream(operation)
+        extended = idle_rounds.extend_live_stream(operation, patch)
         if not extended:
             idle_rounds.emit_memory_round(operation, patch, round_index)
 

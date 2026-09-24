@@ -59,8 +59,10 @@ class Streams(Protocol):
     def is_live_protected_patch(self, patch) -> bool:
         """True when a live protected region already emits this patch."""
 
-    def extend_live_stream(self, operation: program_records.Operation) -> bool:
-        """Emit one more round of the live stream on this patch."""
+    def extend_live_stream(
+        self, operation: program_records.Operation, patch
+    ) -> bool:
+        """Emit one more round of the stream the idle patch holds."""
 
 
 class NoFeedbackStreams:
@@ -108,9 +110,12 @@ class NoFeedbackStreams:
         del patch
         return False
 
-    def extend_live_stream(self, operation: program_records.Operation) -> bool:
+    def extend_live_stream(
+        self, operation: program_records.Operation, patch
+    ) -> bool:
         """No stream to extend."""
         del operation
+        del patch
         return False
 
 
@@ -125,6 +130,7 @@ class _LiveStream:
     is_boundary_open: bool = False
     is_close_requested: bool = False
     last_emission_tick: Optional[int] = None
+    is_sealed: bool = False
 
 
 class FeedbackStreams:
@@ -150,6 +156,8 @@ class FeedbackStreams:
         self.live_by_stream_id: dict = {}
         # operation id -> StreamBinding
         self.bindings: dict = {}
+        # patch -> the stream of the last segment that ran on it
+        self.stream_by_patch: dict = {}
 
     # ---- program load
 
@@ -193,6 +201,7 @@ class FeedbackStreams:
             self._reserve_stream_rounds(operation)
         else:
             self._bind_protected_feedback_source(operation, protected_stream_id)
+        self._hold_patches(operation)
 
     # ---- ending an operation
 
@@ -243,12 +252,21 @@ class FeedbackStreams:
         live_patches = self._live_protected_patches()
         return patch in live_patches
 
-    def extend_live_stream(self, operation: program_records.Operation) -> bool:
-        """Advance an idle group once per tick, after proving all are idle."""
-        binding = self.bindings.get(operation.id)
-        if binding is None:
+    def extend_live_stream(
+        self, operation: program_records.Operation, patch
+    ) -> bool:
+        """Advance the stream the idle patch holds, once per tick.
+
+        The patch keeps its logical qubit in memory while it waits, so
+        each idle cycle is the next round of that qubit's stream, and the
+        stream's windows read those rounds as their buffer (Terhal
+        1302.3428 lines 3176-3178; Skoric et al. 2209.08552 lines
+        196-199). Every patch of the stream's group must be idle after
+        the same operation.
+        """
+        stream_id = self._stream_held_after(operation, patch)
+        if stream_id is None:
             return False
-        stream_id = binding.stream_id
         if not self.windows.has_dynamic_stream(stream_id):
             return False
         patches = self.table.patches_of_stream(stream_id)
@@ -279,6 +297,43 @@ class FeedbackStreams:
         owner = self.table.owner_of(stream_id)
         self.qpu.validate_stream_length(owner, stream_round_count)
         self.windows.seal_stream(stream_id, stream_round_count)
+        live = self._live(stream_id)
+        live.is_sealed = True
+
+    def _hold_patches(self, operation) -> None:
+        """Record the stream each of the operation's patches holds after it.
+
+        A segment's patches hold its stream. Any other detector-emitting
+        operation clears them, since its rounds are its own detector
+        history; an operation without detector data leaves them as they
+        are.
+        """
+        patches = program_records.patches_of(operation)
+        binding = self.bindings.get(operation.id)
+        if binding is not None:
+            for patch in patches:
+                self.stream_by_patch[patch] = binding.stream_id
+            return
+        if not operation.emits_detector_data:
+            return
+        for patch in patches:
+            self.stream_by_patch.pop(patch, None)
+
+    def _stream_held_after(self, operation, patch):
+        """The unsealed stream the patch holds while idle after the operation.
+
+        A segment leaves its own stream until the next operation starts,
+        even when that one is already issued; any other operation leaves
+        what the patch holds.
+        """
+        stream_id = self.stream_by_patch.get(patch)
+        binding = self.bindings.get(operation.id)
+        if binding is not None:
+            stream_id = binding.stream_id
+        live = self.live_by_stream_id.get(stream_id)
+        if live is None or live.is_sealed:
+            return None
+        return stream_id
 
     def _live(self, stream_id) -> _LiveStream:
         live = self.live_by_stream_id.get(stream_id)

@@ -133,13 +133,54 @@ def test_per_patch_idle_callbacks_advance_a_joint_stream_only_once() -> None:
         window_manager=windows,
     )
     streams.begin(operation)
-    assert streams.extend_live_stream(operation)
-    assert streams.extend_live_stream(operation)
-    extend = functools.partial(streams.extend_live_stream, operation)
+    assert streams.extend_live_stream(operation, "A")
+    assert streams.extend_live_stream(operation, "B")
+    extend = functools.partial(streams.extend_live_stream, operation, "A")
     engine.schedule(1000, extend)
     engine.run()
     assert qpu.emissions == [(7, 7, 0, False), (7, 8, 1000, False)]
     assert qpu.emission_owner_ids == [7, 7]
+
+
+@pytest.mark.parametrize(
+    ("emits_detector_data", "is_held"), [(False, True), (True, False)]
+)
+def test_an_idle_group_continues_the_stream_its_last_segment_left(
+    emits_detector_data: bool, is_held: bool
+) -> None:
+    follower = _operation(
+        2, patches=("A", "B"), emits_detector_data=emits_detector_data
+    )
+    program = _unprotected_group_program()
+    operations = program.operations + (follower,)
+    program = dataclasses.replace(program, operations=operations)
+    engine = engine_module.Engine()
+    qpu = _RoundLogQpu(engine, idle_group=(2, ("A", "B")))
+    windows = _Windows()
+    streams = _streams(
+        program, regions=(), engine=engine, qpu=qpu, window_manager=windows
+    )
+    streams.begin(program.operations[0])
+    streams.begin(follower)
+
+    assert streams.extend_live_stream(follower, "A") is is_held
+
+
+def test_a_sealed_stream_is_continued_by_no_idle_patch() -> None:
+    program = _unprotected_group_program()
+    operation = program.operations[0]
+    engine = engine_module.Engine()
+    qpu = _RoundLogQpu(engine, idle_group=(1, ("A", "B")))
+    windows = _Windows()
+    streams = _streams(
+        program, regions=(), engine=engine, qpu=qpu, window_manager=windows
+    )
+    streams.begin(operation)
+    streams.seal_finished_streams()
+
+    assert windows.seals == [(7, 6)]
+    assert streams.extend_live_stream(operation, "A") is False
+    assert qpu.emissions == []
 
 
 def test_a_partial_idle_group_cannot_advance_its_joint_physical_history() -> (
@@ -161,7 +202,7 @@ def test_a_partial_idle_group_cannot_advance_its_joint_physical_history() -> (
     with pytest.raises(
         RuntimeError, match="cannot extend a partially idle patch group"
     ):
-        streams.extend_live_stream(operation)
+        streams.extend_live_stream(operation, "A")
     assert qpu.emissions == []
 
 
@@ -471,7 +512,7 @@ def test_the_empty_row_holds_no_operation_and_seals_nothing():
     assert empty.binding_for(1) is None
     assert empty.blocks_start(operation) is False
     assert empty.is_live_protected_patch("p0") is False
-    assert empty.extend_live_stream(operation) is False
+    assert empty.extend_live_stream(operation, "p0") is False
 
 
 def _resolved_patch(patch_identity):

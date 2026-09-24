@@ -60,9 +60,16 @@ class UnionFindDecoder(decoder_module.WindowDecoderBase):
 
         @classmethod
         def from_yaml(
-            cls, section: Mapping, clocks: config.ClockSettings
+            cls,
+            section: Mapping,
+            clocks: config.ClockSettings,
+            section_name: str,
         ) -> "UnionFindDecoder.Settings":
-            """Both keys, checked where they enter; absent is the default."""
+            """Both keys, checked where they enter; absent is the default.
+
+            section_name is the tier section the row sits in, which a
+            cycle_count refusal names.
+            """
             weight_step = section.get(
                 "weight_step", evidence_records.DEFAULT_WEIGHT_STEP
             )
@@ -72,7 +79,9 @@ class UnionFindDecoder(decoder_module.WindowDecoderBase):
             block = section.get("cycle_count")
             if block is None:
                 return cls(weight_step=normalized_step)
-            cycle_count = cycle_count_module.CycleCount.from_yaml(block, clocks)
+            cycle_count = cycle_count_module.CycleCount.from_yaml(
+                block, clocks, section_name
+            )
             return cls(weight_step=normalized_step, cycle_count=cycle_count)
 
     def __init__(

@@ -2181,8 +2181,10 @@ class RowSettings(Protocol):
     Settings that fills this: its fields are the keys, and from_yaml
     reads and checks the ones the yaml wrote, which are all it is
     handed. context is whatever the row's section passes on, nothing
-    for most sections and the run's clocks (config.ClockSettings) for a
-    decoder tier, whose timing names a clock domain. A row with no keys
+    for most sections, and for a decoder tier the run's clocks
+    (config.ClockSettings), since its timing names a clock domain, then
+    the tier's section name, since both tiers take the same rows and a
+    refusal names the key by its whole yaml path. A row with no keys
     declares no Settings. The section splits its keys from the row's
     and refuses a key neither declares (decsim/tables.py row_settings);
     how the record reaches the row is its table's build call. The shape

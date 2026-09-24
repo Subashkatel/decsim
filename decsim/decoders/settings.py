@@ -272,7 +272,7 @@ class DecoderSettings:
         kind = section["kind"]
         row = _decoder_row(kind, section_name)
         row_settings = tables.row_settings(
-            row, section_name, section, DECODER_KEYS, clocks
+            row, section_name, section, DECODER_KEYS, clocks, section_name
         )
         engine_section = _block(section, section_name, "engine")
         engine = _engine_card(engine_section, clocks, section_name)

@@ -45,7 +45,9 @@ def row_settings(
     is neither those nor the row's is refused by name, as gem5 refuses
     a parameter its class does not declare
     (src/python/m5/SimObject.py:932-936). context rides to from_yaml
-    (the decoder tiers hand it the run's clocks). None for a row with no
+    (the decoder tiers hand it the run's clocks and their own section
+    name, weak_decoder or strong_decoder, which a refusal names, since
+    the two tiers share their rows' keys). None for a row with no
     Settings, including no row at all.
     """
     settings_class = getattr(row_class, "Settings", None)

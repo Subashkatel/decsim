@@ -311,3 +311,19 @@ def test_without_burst_priors_a_flagged_window_keeps_its_model():
     model = _window_model(12, 17)
     kept = detector.with_burst_priors(window, model)
     assert kept is model
+
+
+def test_a_flag_with_no_anomalous_position_keeps_the_model():
+    """One loud round fires the patch count, no position's own count."""
+    settings = burst_detectors.EventCountBurstDetector.Settings(
+        raise_strong_priors=True
+    )
+    detector = _detector(settings)
+    quiet_before = _quiet_rounds(11)
+    rounds = [*quiet_before, BULK_ROUND_LOUD]
+    _feed(detector, rounds)
+    window = _window(12, 12)
+    model = _window_model(12, 12)
+    kept = detector.with_burst_priors(window, model)
+    assert detector.is_burst_window(window)
+    assert kept is model

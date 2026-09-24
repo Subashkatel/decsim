@@ -297,6 +297,10 @@ class _Calibration:
         for position, is_member in enumerate(is_in_region):
             if is_member:
                 region_priors.append(self.position_priors[position])
+        # a flag the patch count raised may leave no position anomalous
+        # on its own: there is then no region whose priors to raise
+        if not region_priors:
+            return 1.0
         usual_rate = _mean_detection_probability(region_priors, 1.0)
         if measured_rate <= usual_rate:
             return 1.0

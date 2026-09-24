@@ -129,16 +129,18 @@ class ControllerSettings:
 
     def __post_init__(self) -> None:
         config.check_cycles(
-            "readout_to_bits_cycles", self.readout_to_bits_cycles
+            "controller.readout_to_bits_cycles", self.readout_to_bits_cycles
         )
         config.check_cycles(
-            "packing_cycles_per_round", self.packing_cycles_per_round
+            "controller.packing_cycles_per_round",
+            self.packing_cycles_per_round,
         )
         config.check_cycles(
-            "decision_to_pulse_cycles", self.decision_to_pulse_cycles
+            "controller.decision_to_pulse_cycles",
+            self.decision_to_pulse_cycles,
         )
         config.check_cycles(
-            "detection_event_cycles_per_round",
+            "controller.detection_event_cycles_per_round",
             self.detection_event_cycles_per_round,
         )
         self._check_rounds_in_flight()

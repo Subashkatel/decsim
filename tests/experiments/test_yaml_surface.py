@@ -167,6 +167,24 @@ def test_a_controller_without_its_clock_is_refused_naming_the_key(tmp_path):
         experiment.load_experiment(config_path)
 
 
+@pytest.mark.parametrize(
+    "key",
+    [
+        "readout_to_bits_cycles",
+        "packing_cycles_per_round",
+        "decision_to_pulse_cycles",
+        "detection_event_cycles_per_round",
+    ],
+)
+def test_a_controller_cycle_count_refusal_names_its_yaml_path(tmp_path, key):
+    controller = dict(MINIMAL_CONFIG["controller"])
+    controller[key] = -1
+    config_path = write_config(tmp_path, {"controller": controller})
+    sentence = f"controller.{key} must not be negative"
+    with pytest.raises(ValueError, match=sentence):
+        experiment.load_experiment(config_path)
+
+
 def test_a_formation_placement_off_its_table_is_refused_when_the_yaml_loads(
     tmp_path,
 ):

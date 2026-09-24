@@ -29,9 +29,13 @@ refused by name (sinter/_decoding/_decoding.py "Unrecognized decoder").
 
 import csv
 import dataclasses
+import decimal
+import fractions
 import pathlib
 import re
+import shutil
 
+import numpy
 import pytest
 import stim
 import yaml
@@ -518,3 +522,93 @@ def test_two_tasks_whose_round_policies_differ_in_count_are_two_tasks():
     unique = collect.unique_tasks([three_task, five_task])
 
     assert len(unique) == 2
+
+
+def _bandwidth_tasks(tmp_path, widths: tuple) -> list:
+    """data_movement_switching.yaml's task with its readout hop at each width.
+
+    One file is edited in place between loads, so the tasks differ in
+    the hop's rate and in nothing else, the path included.
+    """
+    configs = tmp_path / "configs"
+    shutil.copytree(CONFIGS, configs)
+    path = configs / "data_movement_switching.yaml"
+    text = path.read_text()
+    unpriced = "clock: fridge, bits_per_cycle: null}"
+    readout_hop = f"qpu_to_controller:  {{latency_cycles: 1, {unpriced}"
+    assert readout_hop in text
+    tasks = []
+    for bits_per_cycle in widths:
+        priced = f"clock: fridge, bits_per_cycle: {bits_per_cycle}}}"
+        priced_hop = readout_hop.replace(unpriced, priced)
+        priced_text = text.replace(readout_hop, priced_hop)
+        path.write_text(priced_text)
+        config = experiment.load_experiment(path)
+        task = config.point_task(
+            physical_error_probability=0.001,
+            distance=3,
+            round_period_microseconds=1.0,
+            shots=1,
+        )
+        tasks.append(task)
+    return tasks
+
+
+def _readout_rate(shot) -> str:
+    """The readout hop's rate, the one setting two bandwidth tasks differ in."""
+    capacity = shot.task.settings.links.qpu_to_controller.channel.capacity
+    return str(capacity.input_bits_per_microsecond)
+
+
+def test_two_tasks_that_differ_only_in_bandwidth_are_two_tasks(tmp_path):
+    """A yaml link rate is an exact Fraction and enters the id as its text.
+
+    sinter's strong id is the sha256 of every value's json text
+    (sinter/_data/_task.py strong_id_value), so two values give two ids.
+    """
+    narrow, wide = _bandwidth_tasks(tmp_path, (8, 64))
+
+    unique = collect.unique_tasks([narrow, wide])
+    rows = collect.collect([narrow, wide], _readout_rate)
+
+    assert narrow.strong_id() != wide.strong_id()
+    assert len(unique) == 2
+    assert rows == ["2000", "16000"]
+    assert collect.json_value(narrow.settings) != collect.json_value(
+        wide.settings
+    )
+
+
+# Each number beside the json value it enters the strong id as.
+EXACT_NUMBERS = [
+    (fractions.Fraction(80, 11), "80/11"),
+    (fractions.Fraction(16000), "16000"),
+    (decimal.Decimal("1.10"), "1.10"),
+    (numpy.int64(7), 7),
+    (numpy.float32(0.5), 0.5),
+    (numpy.bool_(True), True),
+    (True, True),
+    (7, 7),
+    (0.001, 0.001),
+]
+
+
+@pytest.mark.parametrize(("value", "written"), EXACT_NUMBERS)
+def test_a_number_enters_the_json_exactly(value, written):
+    """A json number stays as written; any other number is its exact text."""
+    json_number = collect.json_value(value)
+
+    assert json_number == written
+    assert type(json_number) is type(written)
+
+
+def test_a_number_json_cannot_hold_reads_back_to_itself():
+    """The written text is what Fraction and Decimal read back exactly."""
+    rate = fractions.Fraction(80, 11)
+    amount = decimal.Decimal("1.10")
+
+    rate_text = collect.json_value(rate)
+    amount_text = collect.json_value(amount)
+
+    assert fractions.Fraction(rate_text) == rate
+    assert decimal.Decimal(amount_text) == amount

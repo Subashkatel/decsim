@@ -31,7 +31,8 @@ import tests.qpu.memory_programs as memory_programs
 def test_final_readout_uses_the_final_model_before_same_tick_decoding(
     final_round: int, data_hop_ticks: int
 ) -> None:
-    machine, source = _machine(final_round, data_hop_ticks)
+    workload = _workload(final_round)
+    machine, source = _machine(workload, data_hop_ticks)
     packets = []
     machine.qpu.trace.round_emitted.connect(packets.append)
     result = machine.run()
@@ -47,6 +48,44 @@ def test_final_readout_uses_the_final_model_before_same_tick_decoding(
     assert owner_result.operation_id == 100
     assert owner_result.observable_truth == truth
     assert owner_result.logical_failure is not None
+
+
+@pytest.mark.parametrize("segment_count", [1, 2])
+def test_a_live_stream_that_no_region_ends_is_refused_at_its_seal(
+    segment_count: int,
+) -> None:
+    """Only a protected region's end reads a live stream out.
+
+    A workload whose live stream has no region never asks for the
+    destructive readout, so the seal at the workload's end is refused
+    rather than reported with no logical outcome.
+    """
+    owner = program_records.Operation(100, "memory", (0,), patches=(0,))
+    first = _segment(1, 0, ())
+    second = _segment(2, 3, (1,))
+    segments = (first, second)[:segment_count]
+    policy = round_policies.PerOperationRounds({100: 0, 1: 3, 2: 3})
+    workload = workload_settings.WorkloadSettings(
+        operations=segments, dynamic_streams=(owner,), rounds_policy=policy
+    )
+    machine, _ = _machine(workload, 0)
+    with pytest.raises(RuntimeError, match="no protected region ends it"):
+        machine.run()
+
+
+def _segment(
+    operation_id: int, stream_offset: int, predecessors: tuple
+) -> program_records.Operation:
+    """A three-round segment of stream 100 on patch 0."""
+    return program_records.Operation(
+        operation_id,
+        f"segment{operation_id}",
+        (0,),
+        patches=(0,),
+        stream_id=100,
+        stream_offset=stream_offset,
+        predecessors=predecessors,
+    )
 
 
 @pytest.mark.parametrize("idle_policy", ["separate_decode_jobs", "ignore"])
@@ -188,11 +227,10 @@ def _refuse_past(limit_ticks: int):
 
 
 def _machine(
-    final_round: int, data_hop_ticks: int
+    workload: workload_settings.WorkloadSettings, data_hop_ticks: int
 ) -> tuple[machine_module.Machine, streaming_stim_device.StreamingStimDevice]:
     program = memory_programs.memory_program()
     source = streaming_stim_device.StreamingStimDevice(programs={100: program})
-    workload = _workload(final_round)
     qpu = qpu_settings.QpuSettings(
         distance=3, device=source, round_period_microseconds=1.0
     )

@@ -53,6 +53,30 @@ def test_a_protected_group_emits_and_releases_once_per_shared_cycle() -> None:
     assert not streams.is_live_protected_patch("B")
 
 
+def test_a_region_begun_between_edges_emits_on_the_qpu_cycle() -> None:
+    """A released operation starts a region between two QPU cycle edges."""
+    program = _group_program()
+    engine = engine_module.Engine()
+    qpu = _RoundLogQpu(engine)
+    windows = _Windows()
+    streams = _streams(
+        program,
+        regions=program.protected_regions,
+        engine=engine,
+        qpu=qpu,
+        window_manager=windows,
+    )
+    streams.runtime = _Runtime()
+    first, final = program.operations
+    begin = functools.partial(streams.begin, first)
+    close = functools.partial(streams.request_closes, final)
+    engine.schedule(400, begin)
+    engine.schedule(2000, close)
+    engine.run()
+    assert qpu.emissions == [(7, 1, 1000, False), (7, 2, 2000, True)]
+    assert windows.seals == [(7, 2)]
+
+
 def test_a_seal_the_qpu_refuses_never_reaches_the_windows() -> None:
     """Only the QPU's source saw the rounds, so it attests before the seal."""
     program = _group_program()
@@ -112,8 +136,9 @@ def test_a_protected_owner_requires_nonempty_unique_patches(
 def test_a_new_group_waits_while_any_member_is_protected() -> None:
     program = _overlapping_group_program()
     engine = engine_module.Engine()
+    qpu = _Qpu(engine)
     streams = _streams(
-        program, regions=program.protected_regions, engine=engine
+        program, regions=program.protected_regions, engine=engine, qpu=qpu
     )
     streams.begin(program.operations[0])
     assert streams.blocks_start(program.operations[2])
@@ -418,7 +443,7 @@ def test_every_cadence_change_of_a_protected_region_reaches_the_runtime():
     region = _region(7, 1, 2)
     engine = engine_module.Engine()
     patch = _resolved_patch("p0")
-    qpu = _Qpu()
+    qpu = _Qpu(engine)
     windows = _Windows()
     streams = _streams(
         program,
@@ -546,6 +571,14 @@ class _Runtime:
 class _Qpu:
     """The protected-round QPU, with opaque stream and patch identities."""
 
+    def __init__(self, engine: engine_module.Engine) -> None:
+        self.engine = engine
+
+    def next_boundary(self) -> int:
+        """The cycle edge at or after now, on the fixture's 1000-tick cycle."""
+        whole_cycles = -(-self.engine.now // 1000)
+        return whole_cycles * 1000
+
     def are_patches_idle(self, operation_id: Any, patches: tuple) -> bool:
         """The protected fixture owns no ordinary idle group."""
         del operation_id
@@ -604,6 +637,11 @@ class _RoundLogQpu:
         self.attested_lengths: list[tuple] = []
         # a seal at this length differs from the rounds executed
         self.refused_length: Optional[int] = None
+
+    def next_boundary(self) -> int:
+        """The cycle edge at or after now, on the fixture's 1000-tick cycle."""
+        whole_cycles = -(-self.engine.now // 1000)
+        return whole_cycles * 1000
 
     def are_patches_idle(self, operation_id: Any, patches: tuple) -> bool:
         """Only the explicitly declared group is idle after that operation."""

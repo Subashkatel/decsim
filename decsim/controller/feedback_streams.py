@@ -501,15 +501,29 @@ class FeedbackStreams:
     # ---- private: the protected cycle, boundary, round, seal
 
     def _schedule_next_boundary(self, region, *, boundary_round: int) -> None:
+        """Schedule the stream's next round on the QPU's cycle clock.
+
+        The QPU reads a cycle's rounds out at the edge that ends it
+        (qpu/cycle_clock.py _cross_boundary). On an edge that edge's
+        round is out, so the next ends one cycle later. A region a
+        released operation starts is activated between two edges, and
+        the cycle in progress is its first round, as gem5's clockEdge
+        moves a tick between edges to the next edge
+        (gem5 src/sim/clocked_object.hh:162-181).
+        """
         stream_id = region.stream_id
         cadence = self.table.round_ticks_of_stream(stream_id)
         live = self._live(stream_id)
-        live.next_boundary_tick = self.engine.now + cadence
+        next_edge = self.qpu.next_boundary()
+        if next_edge == self.engine.now:
+            next_edge += cadence
+        live.next_boundary_tick = next_edge
+        delay = next_edge - self.engine.now
         open_boundary = functools.partial(
             self._open_protected_boundary, stream_id
         )
         self.engine.schedule(
-            cadence,
+            delay,
             open_boundary,
             label=f"protected-boundary({stream_id},{boundary_round})",
         )

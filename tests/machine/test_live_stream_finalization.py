@@ -73,6 +73,68 @@ def test_a_live_stream_that_no_region_ends_is_refused_at_its_seal(
         machine.run()
 
 
+@pytest.mark.parametrize("readout_round", [8, 10])
+def test_a_region_a_released_operation_starts_keeps_the_qpu_cycle(
+    readout_round: int,
+) -> None:
+    """The release lands between two cycle edges; the region's rounds do not.
+
+    The waiting operation starts the region the moment its decode
+    releases it, and its readout ends the region on a cycle edge. Every
+    cycle reads one round out on its edge, and the executed record is
+    Stim's own memory circuit of that many rounds.
+    """
+    owner = program_records.Operation(100, "memory", (0,), patches=(0,))
+    prefix = _segment(1, 0, ())
+    waiting = program_records.Operation(
+        2,
+        "waiting",
+        (0,),
+        patches=(0,),
+        predecessors=(1,),
+        blocked_by=1,
+        emits_detector_data=False,
+    )
+    readout = program_records.Operation(
+        3,
+        "readout",
+        (0,),
+        patches=(0,),
+        predecessors=(2,),
+        scheduled_start_round=readout_round,
+        emits_detector_data=False,
+    )
+    region = program_records.ProtectedRegion(100, 2, 3)
+    policy = round_policies.PerOperationRounds({100: 0, 1: 3, 2: 1, 3: 0})
+    workload = workload_settings.WorkloadSettings(
+        operations=(prefix, waiting, readout),
+        dynamic_streams=(owner,),
+        protected_regions=(region,),
+        rounds_policy=policy,
+    )
+    machine, source = _machine(workload, 0)
+    emission_ticks = []
+    listener = _emission_recorder(machine, emission_ticks)
+    machine.qpu.trace.round_emitted.connect(listener)
+    result = machine.run()
+    assert result.terminal_status == "complete"
+    after_last_round = readout_round + 1
+    cycles = range(1, after_last_round)
+    every_cycle_edge = [cycle * 1_000_000 for cycle in cycles]
+    assert emission_ticks == every_cycle_edge
+    _assert_complete_record(source, readout_round)
+
+
+def _emission_recorder(machine: machine_module.Machine, emission_ticks: list):
+    """A listener that records the tick each stream round is read out."""
+
+    def listener(readout) -> None:
+        del readout
+        emission_ticks.append(machine.engine.now)
+
+    return listener
+
+
 def _segment(
     operation_id: int, stream_offset: int, predecessors: tuple
 ) -> program_records.Operation:

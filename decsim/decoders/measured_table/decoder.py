@@ -4,10 +4,10 @@ MeasuredTable is the first row of the StrongBackend port
 (decsim/ports.py). It answers with decsim's own Relay-BP decode (the
 relay_bp row) and prices it from a line measured on the device
 (measurements.py): intercept plus slope times the iterations decsim's
-decode ran. The measured time is one decode call with the syndrome's
-copies to and from the device and the launch inside it, and no link, so
-it is the time beyond the echo the port asks for with the launch folded
-in.
+decode ran, and never less than the fastest decode the cell measured.
+The measured time is one decode call with the syndrome's copies to and
+from the device and the launch inside it, and no link, so it is the
+time beyond the echo the port asks for with the launch folded in.
 
 The time follows decsim's own iteration count rather than a draw from
 the measured samples, so a hard region is slow on the device exactly
@@ -104,8 +104,7 @@ class MeasuredTable:
         decodes_running = running + 1
         cell = _nearest_cell(self.cells, decodes_running, detectors)
         iterations = _iterations_of(result)
-        per_iteration = cell.microseconds_per_iteration * iterations
-        microseconds = cell.intercept_microseconds + per_iteration
+        microseconds = cell.decode_microseconds(iterations)
         service_ticks = config.microseconds_to_ticks(microseconds)
         return _Ticket(result, service_ticks)
 

@@ -12,6 +12,7 @@ import pytest
 
 import decsim.config as config
 import decsim.decoders.measured_table.decoder as measured_table
+import decsim.decoders.measured_table.measurements as measurements
 import decsim.decoders.relay_belief_propagation.decoder as relay
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.records.seeds as seed_records
@@ -111,7 +112,8 @@ def test_a_region_is_priced_by_the_measured_region_nearest_in_size():
     )
 
 
-def test_a_region_with_no_faults_costs_the_intercept_alone():
+def test_a_region_with_no_faults_costs_the_cells_fastest_decode():
+    """The line reads 78.957 us at none; no decode took under 85.872."""
     pytest.importorskip("relay_bp")
     circuit = windows.memory_circuit(5, 15, 0.0)
     model = windows.whole_circuit_window(circuit, 15, REQUIREMENT)
@@ -120,7 +122,22 @@ def test_a_region_with_no_faults_costs_the_intercept_alone():
     settings = measured_table.MeasuredTableSettings("a100", "whole")
     table = measured_table.MeasuredTable(settings)
     ticket = table.submit(job, 0)
-    assert table.service_ticks(ticket) == config.microseconds_to_ticks(78.957)
+    assert table.service_ticks(ticket) == config.microseconds_to_ticks(85.872)
+
+
+@pytest.mark.parametrize("iterations", [1, 3])
+def test_a_decode_is_never_priced_under_its_cells_fastest_decode(iterations):
+    """1g.10gb, d = 13: the line reads 522 us at 3 iterations, below 0 at 1.
+
+    The fastest of the cell's 2,000 decodes took 1,405.683 us (the
+    minimum of its time_ns column), so both price that.
+    """
+    cells = measurements.RELAY_BP_TIMES
+    slice_cells = [cell for cell in cells if cell.partition == "1g.10gb"]
+    largest_region = slice_cells[-1]
+    microseconds = largest_region.decode_microseconds(iterations)
+    assert largest_region.detectors == 6552
+    assert microseconds == 1405.683
 
 
 def test_the_device_runs_one_decode_at_a_time():

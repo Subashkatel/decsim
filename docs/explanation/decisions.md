@@ -1006,7 +1006,9 @@ blocks finish" (CUDA C++ Programming Guide, preemption).
 **The first row.** `measured_table` answers with decsim's own Relay-BP
 decode and prices it from a line measured on a GPU: intercept plus slope
 times the iterations decsim's decode ran, per device, partition,
-decodes running and region size (`decsim/decoders/measured_table/`).
+decodes running and region size, and never less than the fastest decode
+the cell measured, since below it a line extrapolates to times the
+device never showed (`decsim/decoders/measured_table/`).
 The line is fitted on NVIDIA's nv-qldpc-decoder run on decsim's own
 regions, one decode at a time; the time follows decsim's iteration count
 rather than a draw from the samples because the two implementations

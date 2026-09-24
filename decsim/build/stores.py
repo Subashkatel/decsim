@@ -16,6 +16,7 @@ import decsim.records.windows as window_records
 import decsim.settings as machine_settings
 import decsim.syndrome_buffer.ported_syndrome_buffer as ported_syndrome_buffer
 import decsim.syndrome_buffer.round_output as round_output
+import decsim.syndrome_buffer.settings as syndrome_buffer_settings
 import decsim.tables as tables
 from decsim.syndrome_buffer import (
     strong_syndrome_round_receiver as strong_syndrome_round_receiver_module,
@@ -73,7 +74,8 @@ def check_store_kinds(settings: machine_settings.MachineSettings) -> None:
 
     A run that never reads the room side builds no store for it, so the
     kind its yaml names would otherwise go unread; a kind off the table
-    is a mistake in the file either way.
+    is a mistake in the file either way, and so is a ported strong store,
+    which a Python-built settings record reaches without the yaml.
     """
     tables.row(
         ported_syndrome_buffer.SYNDROME_BUFFERS,
@@ -84,6 +86,9 @@ def check_store_kinds(settings: machine_settings.MachineSettings) -> None:
         ported_syndrome_buffer.SYNDROME_BUFFERS,
         "strong_syndrome_buffer.kind",
         settings.strong_syndrome_buffer.kind,
+    )
+    syndrome_buffer_settings.check_strong_store_kind(
+        settings.strong_syndrome_buffer.kind
     )
 
 

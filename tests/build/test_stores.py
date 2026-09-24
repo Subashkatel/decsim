@@ -9,19 +9,31 @@ and is the one row that may carry that chip's formation charge.
 """
 
 import dataclasses
+import pathlib
+import shutil
 
 import pytest
 
 import decsim.build.parts as build_parts
 import decsim.build.stores as store_build
+import decsim.config as config
+import decsim.decoders.decoders as decoders
+import decsim.decoders.settings as decoder_settings
 import decsim.detector_error_model.detection_event_formation as formation
 import decsim.engine as engine_module
+import decsim.escalation.policies as escalation_policies
+import decsim.escalation.settings as escalation_settings
+import decsim.experiments.experiment as experiment
 import decsim.links.settings as link_settings
+import decsim.machine as machine_module
 import decsim.records.windows as window_records
 import decsim.settings as machine_settings
 import decsim.syndrome_buffer.ported_syndrome_buffer as ported_syndrome_buffer
 import decsim.syndrome_buffer.settings as store_settings
 import tests.declared_run as declared_run
+
+THIS_FILE = pathlib.Path(__file__)
+CONFIGS = THIS_FILE.parents[2] / "configs"
 
 
 class _Policy:
@@ -74,6 +86,71 @@ def test_a_room_side_kind_that_names_no_row_is_refused_though_unused():
         store_build.check_store_kinds(settings)
 
     assert "strong_syndrome_buffer.kind" in str(refusal.value)
+
+
+# A ported strong store's row settings: the default byte FIFO, and AFS's
+# 32-bit word at four cycles an access (ported_syndrome_buffer.py).
+PORTED_ROW_SETTINGS = [
+    ported_syndrome_buffer.PortedSyndromeBuffer.Settings(),
+    ported_syndrome_buffer.PortedSyndromeBuffer.Settings(
+        word_bits=32, cycles_per_access=4
+    ),
+]
+
+
+@pytest.mark.parametrize("row_settings", PORTED_ROW_SETTINGS)
+@pytest.mark.parametrize("plan", ["weak_only", "strong_only"])
+def test_a_ported_strong_store_is_refused_at_build(row_settings, plan):
+    """Its writes land unbooked, so its reads alone would be priced.
+
+    The build refuses it whether or not a tier reads the room side, as
+    it refuses a kind off the table.
+    """
+    storage_clock = config.Clock(1000)
+    strong_syndrome_buffer = store_settings.SyndromeBufferSettings(
+        kind="ported_syndrome_buffer",
+        clock=storage_clock,
+        row_settings=row_settings,
+    )
+    settings = _machine_settings(strong_syndrome_buffer=strong_syndrome_buffer)
+    planned = _with_one_tier(settings, plan)
+
+    with pytest.raises(ValueError, match="ported_syndrome_buffer prices"):
+        machine_module.Machine.build(planned)
+
+
+def test_a_ported_strong_store_is_refused_alike_from_yaml_and_python(
+    tmp_path,
+):
+    """Both routes ask the one check, so they refuse in one sentence."""
+    configs = tmp_path / "configs"
+    shutil.copytree(CONFIGS, configs)
+    path = configs / "data_movement_switching.yaml"
+    text = path.read_text()
+    config = experiment.load_experiment(path)
+    settings = config.point_settings(
+        physical_error_probability=0.001,
+        distance=3,
+        round_period_microseconds=1.0,
+    )
+    ported_strong = dataclasses.replace(
+        settings.strong_syndrome_buffer, kind="ported_syndrome_buffer"
+    )
+    python_built = dataclasses.replace(
+        settings, strong_syndrome_buffer=ported_strong
+    )
+    ported_section = "strong_syndrome_buffer:\n  kind: ported_syndrome_buffer\n"
+    ported_text = text + ported_section
+    path.write_text(ported_text)
+
+    with pytest.raises(ValueError) as yaml_refusal:
+        experiment.load_experiment(path)
+    with pytest.raises(ValueError) as python_refusal:
+        machine_module.Machine.build(python_built)
+
+    yaml_sentence = str(yaml_refusal.value)
+    python_sentence = str(python_refusal.value)
+    assert yaml_sentence.endswith(python_sentence)
 
 
 def test_a_weak_only_run_reads_nothing_from_the_room_side():
@@ -308,3 +385,16 @@ def test_a_ported_store_beside_an_unrated_link_is_accepted():
     settings = _ported_run_with_a_rate(None)
 
     store_build.check_one_price_for_a_read(settings)
+
+
+def _with_one_tier(settings, plan: str):
+    """The settings with one decoding tier: the weak one or the strong one."""
+    decoder = decoders.PresetLatencyDecoder(1.0)
+    tier = decoder_settings.DecoderSettings(decoder=decoder)
+    if plan == "weak_only":
+        return dataclasses.replace(settings, weak_decoder=tier)
+    policy = escalation_policies.StrongOnly(escalation_policies.NO_CONFIDENCE)
+    escalation = escalation_settings.EscalationSettings(policy=policy)
+    return dataclasses.replace(
+        settings, strong_decoder=tier, escalation=escalation
+    )

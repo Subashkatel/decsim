@@ -17,9 +17,6 @@ import decsim.windows.schemes.window_data as window_data
 class TanSandwichScheme:
     """Tan et al.'s zero-seam sandwich decoder for graphlike memory DEMs."""
 
-    scheme_label = (
-        "Tan zero-seam sandwich (type-1 cores / type-2 seam reconciliation)"
-    )
     # The last core commits to the operation's last round, so its read
     # window ends where its commit ends.
     has_trailing_tail_context = False

@@ -33,7 +33,6 @@ class SlidingWindowScheme:
     rounds past its own commit and a strong recovery has context to read.
     """
 
-    scheme_label = "sliding-window (serial commit/buffer chain)"
     commits_in_one_serial_chain = True
     supports_dynamic_streams = True
 

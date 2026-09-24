@@ -162,32 +162,34 @@ def test_the_engine_card_reads_the_per_job_and_per_round_stage_cycles():
     assert settings.release_cycles_per_round == 4
 
 
-def test_a_negative_stage_cycle_count_is_refused_by_name():
+@pytest.mark.parametrize("section_name", ["weak_decoder", "strong_decoder"])
+@pytest.mark.parametrize(
+    "key",
+    [
+        "fetch_cycles_per_round",
+        "fetch_cycles_per_job",
+        "release_cycles_per_job",
+        "release_cycles_per_round",
+        "detection_event_latency_cycles",
+        "detection_event_cycles_per_round",
+    ],
+)
+def test_an_engine_cycle_count_refusal_names_its_tier_and_card(
+    section_name, key
+):
+    """Weak and strong share the keys, so the sentence says which tier."""
     clocks = config.ClockSettings({"decoder": 250.0})
-    section = {
-        "kind": "pymatching",
-        "units": 1,
-        "unit_memory": {"bits": None},
-        "engine": {
-            "clock": "decoder",
-            "fetch_cycles_per_round": 1,
-            "fetch_cycles_per_job": -1,
-            "release_cycles_per_job": 1,
-            "release_cycles_per_round": 0,
-        },
-    }
+    section = _tier_section({"bits": None})
+    section["engine"][key] = -1
 
-    with pytest.raises(ValueError, match="fetch_cycles_per_job"):
+    with pytest.raises(ValueError) as refusal:
         decoder_settings.DecoderSettings.from_yaml(
-            section, clocks, "weak_decoder"
+            section, clocks, section_name
         )
-
-    section["engine"]["fetch_cycles_per_job"] = 0
-    section["engine"]["release_cycles_per_round"] = -2
-    with pytest.raises(ValueError, match="release_cycles_per_round"):
-        decoder_settings.DecoderSettings.from_yaml(
-            section, clocks, "weak_decoder"
-        )
+    assert str(refusal.value) == (
+        f"{section_name}.engine.{key} must not be negative: cycles must be "
+        "nonnegative"
+    )
 
 
 def test_an_engine_card_without_a_stage_key_is_refused_by_name():

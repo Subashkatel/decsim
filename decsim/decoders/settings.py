@@ -260,27 +260,6 @@ class DecoderSettings:
     # the row's own Settings record, opaque to the tier
     row_settings: Optional[Any] = None
 
-    def __post_init__(self) -> None:
-        config.check_cycles(
-            "fetch_cycles_per_round", self.fetch_cycles_per_round
-        )
-        config.check_cycles("fetch_cycles_per_job", self.fetch_cycles_per_job)
-        config.check_cycles(
-            "release_cycles_per_job", self.release_cycles_per_job
-        )
-        config.check_cycles(
-            "release_cycles_per_round", self.release_cycles_per_round
-        )
-        if self.detection_event_latency_cycles is not None:
-            config.check_cycles(
-                "detection_event_latency_cycles",
-                self.detection_event_latency_cycles,
-            )
-        config.check_cycles(
-            "detection_event_cycles_per_round",
-            self.detection_event_cycles_per_round,
-        )
-
     @classmethod
     def from_yaml(
         cls,
@@ -430,9 +409,9 @@ def _engine_card(
     _check_engine_keys(engine, section_name)
     fields = _engine_stage_cycles(engine, section_name)
     fields["engine_clock"] = _engine_clock(engine, clocks, section_name)
-    latency = _formation_latency_cycles(engine)
+    latency = _formation_latency_cycles(engine, section_name)
     fields["detection_event_latency_cycles"] = latency
-    rate = _formation_cycles_per_round(engine)
+    rate = _formation_cycles_per_round(engine, section_name)
     fields["detection_event_cycles_per_round"] = rate
     return fields
 
@@ -482,21 +461,29 @@ def _engine_cycles(engine: Mapping, section_name: str, key: str) -> int:
             f"{section_name}.engine needs {key}, {priced} in cycles of "
             "its clock"
         )
-    return engine[key]
+    cycles = engine[key]
+    config.check_cycles(f"{section_name}.engine.{key}", cycles)
+    return cycles
 
 
-def _formation_latency_cycles(engine: Mapping) -> Optional[int]:
+def _formation_latency_cycles(
+    engine: Mapping, section_name: str
+) -> Optional[int]:
     """The fixed latency of the tier's event-detection stage; null is off."""
-    if "detection_event_latency_cycles" not in engine:
-        return DETECTION_EVENT_LATENCY_CYCLES
-    return engine["detection_event_latency_cycles"]
+    key = "detection_event_latency_cycles"
+    latency = engine.get(key, DETECTION_EVENT_LATENCY_CYCLES)
+    if latency is None:
+        return None
+    config.check_cycles(f"{section_name}.engine.{key}", latency)
+    return latency
 
 
-def _formation_cycles_per_round(engine: Mapping) -> int:
+def _formation_cycles_per_round(engine: Mapping, section_name: str) -> int:
     """The rate that stage accepts rounds at, one a clock by default."""
-    if "detection_event_cycles_per_round" not in engine:
-        return DETECTION_EVENT_CYCLES_PER_ROUND
-    return engine["detection_event_cycles_per_round"]
+    key = "detection_event_cycles_per_round"
+    rate = engine.get(key, DETECTION_EVENT_CYCLES_PER_ROUND)
+    config.check_cycles(f"{section_name}.engine.{key}", rate)
+    return rate
 
 
 def _check_boolean(section_name: str, key: str, value) -> None:

@@ -228,3 +228,19 @@ def test_raising_priors_is_true_or_false():
     section = {"kind": "event_count", "raise_strong_priors": "yes"}
     with pytest.raises(ValueError, match="must be true or false"):
         escalation_settings.BurstDetectorSettings.from_yaml(section, CLOCKS)
+
+
+def test_burst_mode_ends_when_the_counts_return_to_their_usual_rate():
+    """One loud round fires the patch count for W = 4 rounds, no longer."""
+    settings = burst_detectors.EventCountBurstDetector.Settings(
+        patch_window_rounds=4, detector_window_rounds=20
+    )
+    detector = _detector(settings)
+    quiet_before = _quiet_rounds(11)
+    quiet_after = [BULK_ROUND_QUIET] * 8
+    rounds = [*quiet_before, BULK_ROUND_LOUD, *quiet_after]
+    _feed(detector, rounds)
+    last_firing = _window(15, 15)
+    after_it = _window(16, 20)
+    assert detector.is_burst_window(last_firing)
+    assert not detector.is_burst_window(after_it)

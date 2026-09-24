@@ -14,6 +14,7 @@ threshold comes from is its ThresholdSource (threshold_sources.py).
 import dataclasses
 from typing import Any, Optional
 
+import decsim.ports as ports
 import decsim.records.decoding as decoding_records
 import decsim.records.windows as window_records
 
@@ -141,6 +142,11 @@ class Switching(EscalationPolicyBase):
     decides_on_a_confidence = True
     requires_strong_context = True
     primary_tier = window_records.DecoderTier.WEAK
+    # The burst detector: while one of its flags meets a window, the
+    # machine is in burst mode and the window escalates whatever its
+    # confidence. Unbound when burst_detector.kind is none, the machine
+    # in normal mode throughout.
+    burst_detector = ports.Port(ports.BurstDetector, optional=True)
 
     def __init__(self, collaborators: EscalationCollaborators) -> None:
         threshold = collaborators.threshold
@@ -186,9 +192,15 @@ class Switching(EscalationPolicyBase):
     def verdict_for_weak_result(self, job, result) -> decoding_records.Verdict:
         """Keep a confident weak result; otherwise escalate its window.
 
-        The decision is made exactly once per window, since an online
-        source learns from every call.
+        A window a published burst flag meets escalates first, without
+        asking the threshold: Q3DE decodes the anomalous span again once
+        the anomaly is detected (Suzuki et al. 2501.00331 lines
+        966-981), and the strong tier is that decode here. The decision
+        is made exactly once per window, since an online source learns
+        from every call it is asked.
         """
+        if self._is_in_a_burst(job.window):
+            return decoding_records.Verdict.ESCALATE
         soft_output = result.soft_output
         if soft_output is None:
             return decoding_records.Verdict.ESCALATE
@@ -205,6 +217,11 @@ class Switching(EscalationPolicyBase):
     def learn_from_strong_result(self, window_key: tuple, result) -> None:
         """The threshold source hears the strong tier's answer."""
         self.threshold.learn_from_strong_result(window_key, result)
+
+    def _is_in_a_burst(self, window: window_records.Window) -> bool:
+        if self.burst_detector is None:
+            return False
+        return self.burst_detector.is_burst_window(window)
 
     def _refuse_absorbing_window_contradictions(
         self, plan: decoding_records.RunShape

@@ -223,6 +223,7 @@ WIRES = (
     ("requester.decode_queue", "decoder_manager"),
     ("requester.strong_decode_queue", "strong_decoder_manager"),
     ("requester.escalation_policy", "escalation_policy"),
+    ("escalation_policy.burst_detector", "burst_detector"),
     ("requester.verdict", "verdict"),
     ("requester.store_output", "primary_output"),
     ("requester.gap_join", "gap_join"),

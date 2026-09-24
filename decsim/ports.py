@@ -2169,10 +2169,9 @@ class MagicStateFactory(Protocol):
 class IdlePolicy(Protocol):
     """How idle rounds travel while an operation waits for feedback.
 
-    Table rows: separate_decode_jobs, ignore, extend_stream
-    (controller/policies.py, beside the accounting they serve). relay
-    carries one idle round through the
-    idle accounting it is given (controller/idle_rounds.py);
+    Table rows: separate_decode_jobs, ignore (controller/policies.py,
+    beside the accounting they serve). relay carries one idle round
+    through the idle accounting it is given (controller/idle_rounds.py);
     end_idle_period runs when an operation claims the patch and, for
     every idle patch, when the workload completes, so rounds the policy
     has not charged yet can be settled.

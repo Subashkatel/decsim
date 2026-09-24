@@ -115,7 +115,6 @@ In `decsim/controller/settings.py`. A row of it is named under `idle_policy.kind
 | --- | --- | --- |
 | `separate_decode_jobs` | `SeparateDecodeJobs` in `decsim/controller/policies.py` | Idle rounds travel as memory rounds and are charged as decode jobs. |
 | `ignore` | `Ignore` in `decsim/controller/policies.py` | Idle rounds travel as feedback-memory rounds and cost no decode work. |
-| `extend_stream` | `ExtendStream` in `decsim/controller/policies.py` | Idle rounds extend the operation's live stream when it has one. |
 
 ## `LINK_FABRICS`
 

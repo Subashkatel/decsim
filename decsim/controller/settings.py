@@ -19,7 +19,6 @@ import decsim.tables as tables
 IDLE_POLICIES = {
     "separate_decode_jobs": policies.SeparateDecodeJobs,
     "ignore": policies.Ignore,
-    "extend_stream": policies.ExtendStream,
 }
 # The keys every row of the idle_policy section shares; any other key is
 # the row's own (its Settings, decsim/tables.py row_settings).
@@ -173,16 +172,16 @@ class ControllerSettings:
 class IdlePolicySettings:
     """The yaml's `idle_policy` section: how an idle patch's rounds are charged.
 
-    Table rows (IDLE_POLICIES, above): separate_decode_jobs, ignore,
-    extend_stream. Idle rounds are decoder workload, because the backlog
-    bound counts every generated syndrome bit against the decoder's
-    processing rate (Terhal 1302.3428 lines 3151-3159; Battistel et al.
-    2303.00054 line 144), so separate_decode_jobs is the default; ignore
-    is the optimistic card for active-path latency studies;
-    extend_stream folds them into a live stream. A Python-built policy is
-    used as it is. row_settings is the row's own Settings, read from the
-    section's keys other than kind, or None for a row that declares
-    none.
+    Table rows (IDLE_POLICIES, above): separate_decode_jobs, ignore. Idle
+    rounds are decoder workload, because the backlog bound counts every
+    generated syndrome bit against the decoder's processing rate (Terhal
+    1302.3428 lines 3151-3159; Battistel et al. 2303.00054 line 144), so
+    separate_decode_jobs is the default; ignore is the optimistic card
+    for active-path latency studies. A patch that holds a stream
+    continues it under either row (controller/idle_rounds.py). A
+    Python-built policy is used as it is. row_settings is the row's own
+    Settings, read from the section's keys other than kind, or None for
+    a row that declares none.
     """
 
     kind: str = "separate_decode_jobs"

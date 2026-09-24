@@ -116,12 +116,6 @@ class IdleRoundAccounting:
         """The round travels as a feedback-memory round of the operation."""
         self.qpu.emit_feedback_memory_round(operation.id, patch, round_index)
 
-    def extend_live_stream(
-        self, operation: program_records.Operation, patch
-    ) -> bool:
-        """Advance the stream the idle patch holds, once per cycle."""
-        return self.streams.extend_live_stream(operation, patch)
-
     def submit_idle_decode_if_due(self, operation, patch, round_index) -> None:
         """Count one idle round toward the patch's next decode job.
 

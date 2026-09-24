@@ -101,22 +101,23 @@ def _recorder(events: list, kind: str):
     return listener
 
 
-@pytest.mark.parametrize("idle_policy", ["separate_decode_jobs", "ignore"])
 @pytest.mark.parametrize("waiting_patch", [0, 1])
 def test_a_waiting_stream_decision_reads_its_buffer_from_the_idle_patch(
-    idle_policy: str, waiting_patch: int
+    waiting_patch: int,
 ) -> None:
     """The prefix's patch keeps its qubit in memory while the release waits.
 
     Each idle cycle is the stream's next round whatever the idle policy,
-    so the prefix's last window reads its three buffer rounds from them
-    and the release lands where the continuous-stream policy puts it.
+    so the prefix's last window reads its three buffer rounds from them:
+    the release follows the third idle round, under both policies alike.
     """
     trailing = "trailing_buffer"
-    run = _feedback_run(True, idle_policy, waiting_patch, trailing)
-    reference = _feedback_run(True, "extend_stream", waiting_patch, trailing)
-    events = run[0]
-    assert events == reference[0]
+    charged = _feedback_run(
+        True, "separate_decode_jobs", waiting_patch, trailing
+    )
+    ignored = _feedback_run(True, "ignore", waiting_patch, trailing)
+    events = charged[0]
+    assert events == ignored[0]
     ticks = {(kind, operation): tick for kind, operation, tick in events}
     wait_ticks = ticks[("released", 2)] - ticks[("finished", 1)]
     assert wait_ticks > 3 * 1_100_000

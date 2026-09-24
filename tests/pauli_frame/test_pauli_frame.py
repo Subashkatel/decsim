@@ -194,9 +194,16 @@ def test_a_snapshot_does_not_change_when_the_frame_does():
     assert after.commit_count == 2
 
 
-def test_a_write_cost_that_is_not_a_cycle_count_is_refused():
-    with pytest.raises(ValueError, match="must not be negative"):
-        PauliFrameConfig(write_cycles=-1)
+def test_a_write_cost_refusal_names_its_yaml_path():
+    clocks = config.ClockSettings({"fridge": 250.0})
+    section = {"clock": "fridge", "write_cycles": -1}
+
+    with pytest.raises(ValueError) as refusal:
+        PauliFrameConfig.from_yaml(section, clocks)
+    assert str(refusal.value) == (
+        "pauli_frame.write_cycles must not be negative: cycles must be "
+        "nonnegative"
+    )
 
 
 def test_a_charged_write_without_a_clock_is_refused():

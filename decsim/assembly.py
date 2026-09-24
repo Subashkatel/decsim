@@ -231,6 +231,7 @@ WIRES = (
     ("regions.tracker", "tracker"),
     ("regions.retention", "retention"),
     ("regions.interaction", "window_interaction"),
+    ("regions.burst_detector", "burst_detector"),
     ("shape.regions", "regions"),
     ("shape.planner", "planner"),
     ("shape.retention", "retention"),

@@ -13,6 +13,8 @@ import pytest
 
 import decsim.config as config
 import decsim.detector_error_model.detector_formation as detector_formation
+import decsim.detector_error_model.fault_model_contracts as fault_contracts
+import decsim.detector_error_model.window_slicer as window_slicer
 import decsim.engine as engine_module
 import decsim.escalation.burst_detectors as burst_detectors
 import decsim.escalation.settings as escalation_settings
@@ -31,6 +33,7 @@ FIRST_ROUND_QUIET = (0,) * 12
 BULK_ROUND_QUIET = (0,) * 24
 BULK_ROUND_LOUD = (1,) * 24
 CLOCKS = config.ClockSettings({"fridge": 250.0})
+GRAPHLIKE = fault_contracts.FaultRepresentation.GRAPHLIKE
 
 
 def _circuit():
@@ -244,3 +247,67 @@ def test_burst_mode_ends_when_the_counts_return_to_their_usual_rate():
     after_it = _window(16, 20)
     assert detector.is_burst_window(last_firing)
     assert not detector.is_burst_window(after_it)
+
+
+def _window_model(first_round, last_round):
+    """The window's model as the planner slices it: rows and columns."""
+    circuit = _circuit()
+    slicer = window_slicer.WindowSlicer(
+        circuit,
+        round_count=ROUNDS,
+        fault_model_requirement=fault_contracts.GRAPHLIKE_FAULT_MODEL_REQUIRED,
+    )
+    return slicer.slice_window(
+        first_round, first_round, last_round, last_round, is_last=False
+    )
+
+
+def _flagged_detector(raise_strong_priors):
+    """Every detector loud from round 12 to 17: the whole patch in burst."""
+    settings = burst_detectors.EventCountBurstDetector.Settings(
+        raise_strong_priors=raise_strong_priors
+    )
+    detector = _detector(settings)
+    quiet_before = _quiet_rounds(11)
+    loud = [BULK_ROUND_LOUD] * 6
+    rounds = [*quiet_before, *loud]
+    _feed(detector, rounds)
+    return detector
+
+
+def test_burst_priors_raise_the_priors_and_keep_the_graph():
+    """IonQ 2608.25027 lines 334-340: only the prior vector changes.
+
+    Every detector fires every round, a rate no prior below one half
+    explains, so every column the flagged rows see sits at the cap.
+    """
+    detector = _flagged_detector(raise_strong_priors=True)
+    window = _window(12, 17)
+    model = _window_model(12, 17)
+    raised = detector.with_burst_priors(window, model)
+    faults = model.require_faults(GRAPHLIKE)
+    raised_faults = raised.require_faults(GRAPHLIKE)
+    changed_checks = faults.check != raised_faults.check
+    assert changed_checks.nnz == 0
+    assert raised.detector_ids == model.detector_ids
+    assert raised_faults.source_fault_ids == faults.source_fault_ids
+    is_capped = raised_faults.priors == 0.5
+    was_below_cap = faults.priors < 0.5
+    assert numpy.all(is_capped)
+    assert numpy.all(was_below_cap)
+
+
+def test_a_window_before_the_flag_keeps_its_model():
+    detector = _flagged_detector(raise_strong_priors=True)
+    window = _window(1, 6)
+    model = _window_model(1, 6)
+    kept = detector.with_burst_priors(window, model)
+    assert kept is model
+
+
+def test_without_burst_priors_a_flagged_window_keeps_its_model():
+    detector = _flagged_detector(raise_strong_priors=False)
+    window = _window(12, 17)
+    model = _window_model(12, 17)
+    kept = detector.with_burst_priors(window, model)
+    assert kept is model

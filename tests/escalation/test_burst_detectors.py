@@ -10,6 +10,7 @@ priors change is IonQ's (2608.25027 lines 334-340).
 
 import numpy
 import pytest
+import scipy.stats
 
 import decsim.config as config
 import decsim.detector_error_model.detector_formation as detector_formation
@@ -327,3 +328,192 @@ def test_a_flag_with_no_anomalous_position_keeps_the_model():
     kept = detector.with_burst_priors(window, model)
     assert detector.is_burst_window(window)
     assert kept is model
+
+
+def _noiseless_detector(settings):
+    """The detector calibrated on the d = 5 memory circuit at p = 0."""
+    circuit = workload_settings.memory_circuit(CODE_TASK, ROUNDS, DISTANCE, 0.0)
+    circuits = {1: (circuit, ROUNDS)}
+    engine = engine_module.Engine()
+    return burst_detectors.EventCountBurstDetector(settings, engine, circuits)
+
+
+@pytest.mark.filterwarnings("error")
+def test_a_noiseless_background_fires_on_its_first_event():
+    """No fault reaches a detector, so one event is rarer than any budget.
+
+    The law of a count no fault reaches is a count that is always zero,
+    and a region no fault reaches keeps its priors.
+    """
+    settings = burst_detectors.EventCountBurstDetector.Settings(
+        raise_strong_priors=True
+    )
+    detector = _noiseless_detector(settings)
+    quiet_before = _quiet_rounds(11)
+    one_event = (1,) + BULK_ROUND_QUIET[1:]
+    _feed(detector, quiet_before)
+    quiet_window = _window(1, 11)
+    was_quiet = detector.is_burst_window(quiet_window)
+    detector.observe_round(1, 12, one_event)
+    window = _window(12, 12)
+    model = _window_model(12, 12)
+    kept = detector.with_burst_priors(window, model)
+
+    assert not was_quiet
+    assert detector.is_burst_window(window)
+    assert kept is model
+
+
+def _exact_independent_tails(priors):
+    """P(count >= k) for independent detectors: the Poisson binomial.
+
+    Each fault flips its own detector, so the count's distribution is
+    the convolution of the faults' Bernoulli terms.
+    """
+    distribution = numpy.array([1.0])
+    for prior in priors:
+        bernoulli = [1.0 - prior, prior]
+        distribution = numpy.convolve(distribution, bernoulli)
+    reversed_distribution = distribution[::-1]
+    reversed_tails = numpy.cumsum(reversed_distribution)
+    return reversed_tails[::-1]
+
+
+def _exact_chain_tails(priors):
+    """P(count >= k) when fault i flips detectors i and i + 1, enumerated.
+
+    Two neighbouring faults cancel on the detector they share, as Stim
+    XORs them, which is the case a sum of priors gets wrong.
+    """
+    fault_count = len(priors)
+    detector_count = fault_count + 1
+    incidence = _chain_incidence(fault_count)
+    count_values = detector_count + 1
+    distribution = numpy.zeros(count_values)
+    mask_count = 1 << fault_count
+    misses = 1.0 - priors
+    for fired_mask in range(mask_count):
+        fired = _fired_faults(fired_mask, fault_count)
+        chances = numpy.where(fired, priors, misses)
+        chance = numpy.prod(chances)
+        flipped = incidence[fired].sum(axis=0) % 2
+        flipped_count = flipped.sum()
+        distribution[flipped_count] += chance
+    reversed_distribution = distribution[::-1]
+    reversed_tails = numpy.cumsum(reversed_distribution)
+    return reversed_tails[::-1]
+
+
+def _fired_faults(fired_mask: int, fault_count: int):
+    shifts = numpy.arange(fault_count)
+    shifted = fired_mask >> shifts
+    bits = shifted & 1
+    return bits.astype(bool)
+
+
+def _chain_incidence(fault_count: int):
+    shape = (fault_count, fault_count + 1)
+    incidence = numpy.zeros(shape, dtype=numpy.uint8)
+    for fault in range(fault_count):
+        incidence[fault, fault] = 1
+        incidence[fault, fault + 1] = 1
+    return incidence
+
+
+def _drawn_standard_errors(law):
+    """Each tail's sampling error: the drawn conditional tails' spread."""
+    fault_counts = numpy.arange(len(law.conditional_tails))
+    weights = scipy.stats.poisson.pmf(fault_counts, law.fault_rate)
+    conditional = law.conditional_tails
+    spread = conditional * (1.0 - conditional)
+    squared_weights = weights**2
+    variance = squared_weights @ spread
+    draws = burst_detectors.DRAWS_PER_FAULT_COUNT
+    variance_of_mean = variance / draws
+    return numpy.sqrt(variance_of_mean)
+
+
+# The priors the exact grid runs, from a quiet chip to ten times Google's
+# burst floor, and the fault counts each shape runs at.
+GRID_PRIORS = [1e-3, 1e-2, 3e-2, 0.1]
+INDEPENDENT_FAULT_COUNTS = [5, 12, 40]
+CHAIN_FAULT_COUNTS = [5, 10]
+# The smallest tail the grid compares, a tenth of the smallest budget a
+# row is likely to ask for; the draws do not resolve smaller ones.
+SMALLEST_COMPARED_TAIL = 1e-9
+# The float rounding a tail of one carries, where no draw varies.
+TAIL_ROUNDING = 1e-12
+
+
+def _assert_the_law_is_the_exact_tail(priors, incidence, exact_tails):
+    law = burst_detectors.tail_law(priors, incidence, 1e-8)
+    tails = law.tails(1.0)
+    standard_errors = _drawn_standard_errors(law)
+    is_compared = exact_tails >= SMALLEST_COMPARED_TAIL
+    compared_counts = numpy.flatnonzero(is_compared)
+    law_tails = tails[compared_counts]
+    exact = exact_tails[compared_counts]
+    errors = standard_errors[compared_counts]
+    signed_differences = law_tails - exact
+    differences = numpy.abs(signed_differences)
+    allowed = 5 * errors + TAIL_ROUNDING
+    is_within = differences <= allowed
+    assert numpy.all(is_within)
+
+
+@pytest.mark.parametrize("prior", GRID_PRIORS)
+@pytest.mark.parametrize("fault_count", INDEPENDENT_FAULT_COUNTS)
+@pytest.mark.parametrize("is_mixed", [False, True])
+def test_the_tail_law_is_the_poisson_binomial_tail(
+    prior, fault_count, is_mixed
+):
+    """Independent faults on their own detectors, equal or mixed priors.
+
+    Within five of the law's own sampling errors of the exact tail at
+    every count whose tail is at least 1e-9; a law that fired each fault
+    at a Poisson rate equal to its prior sat as much as 75 errors low.
+    """
+    priors = numpy.full(fault_count, prior)
+    if is_mixed:
+        generator = numpy.random.default_rng(fault_count)
+        spread = generator.uniform(0.2, 1.8, fault_count)
+        priors = priors * spread
+    incidence = numpy.eye(fault_count, dtype=numpy.uint8)
+    exact_tails = _exact_independent_tails(priors)
+
+    _assert_the_law_is_the_exact_tail(priors, incidence, exact_tails)
+
+
+@pytest.mark.parametrize("prior", GRID_PRIORS)
+@pytest.mark.parametrize("fault_count", CHAIN_FAULT_COUNTS)
+def test_the_tail_law_is_the_exact_tail_where_faults_cancel(prior, fault_count):
+    priors = numpy.full(fault_count, prior)
+    incidence = _chain_incidence(fault_count)
+    exact_tails = _exact_chain_tails(priors)
+
+    _assert_the_law_is_the_exact_tail(priors, incidence, exact_tails)
+
+
+def test_a_budget_just_above_the_exact_tail_takes_the_exact_threshold():
+    """20 faults at 1e-2: count 4 has tail 4.26e-5, over a 4.2e-5 budget."""
+    priors = numpy.full(20, 1e-2)
+    incidence = numpy.eye(20, dtype=numpy.uint8)
+    exact_tails = _exact_independent_tails(priors)
+    law = burst_detectors.tail_law(priors, incidence, 4.2e-5)
+
+    threshold = law.threshold(4.2e-5, 1.0)
+
+    assert exact_tails[4] > 4.2e-5
+    assert threshold == 5
+
+
+def test_a_count_no_fault_reaches_is_always_zero():
+    priors = numpy.zeros(3)
+    incidence = numpy.eye(3, dtype=numpy.uint8)
+    law = burst_detectors.tail_law(priors, incidence, 1e-6)
+
+    tails = law.tails(1.0)
+    threshold = law.threshold(1e-6, 1.0)
+
+    assert list(tails) == [1.0, 0.0, 0.0, 0.0, 0.0]
+    assert threshold == 1

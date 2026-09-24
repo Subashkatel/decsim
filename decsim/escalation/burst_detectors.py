@@ -9,7 +9,8 @@ one round's syndrome of Tan et al. (2406.18897 lines 956-966) widened to
 W rounds, or (b) one position's count over the last
 detector_window_rounds, Q3DE's active node counter (Suzuki et al.
 2501.00331 lines 713-727). A threshold is the smallest count whose tail
-under the usual rates is at most the row's false-alarm rate per round.
+under the usual rates, as TailLaw estimates it, is at most the row's
+false-alarm rate per round.
 
 A flag runs from the estimated onset, the firing round less the window
 of the statistic that fired (Q3DE lines 727-728), to the last round the
@@ -42,14 +43,14 @@ import decsim.records.windows as window_records
 REGION_FALSE_ALARMS = 0.01
 # The draws per fault count that integrate a count's tail given that
 # many faults; tests/escalation/test_burst_detectors.py holds the tail
-# against Stim's sampled one.
+# against Stim's sampled one and against exact tails.
 DRAWS_PER_FAULT_COUNT = 4000
 # The draws are a numerical integral over the circuit's own model, so
 # they take one fixed seed and every shot of a run gets the same law.
 CALIBRATION_SEED = 0
 # The fault counts the law integrates cover a rate twice the calibrated
 # one; past that the truncated remainder is counted as a firing, so the
-# law stays an upper bound on the tail.
+# truncation can only raise the tail.
 RATE_HEADROOM = 2.0
 # The truncated remainder is kept this far below the smallest
 # false-alarm rate the law answers for.
@@ -178,21 +179,37 @@ class EventCountBurstDetector:
 class TailLaw:
     """The tail of one count under the usual rates.
 
-    Faults fire as a Poisson process of rate fault_rate over the counted
-    detectors, and conditional_tails[n][k] is the chance that n faults,
-    picked in proportion to their priors and XOR-ed onto the counted
-    detectors, leave at least k of them flipped, so two faults that
-    cancel on a shared detector count as Stim counts them. The tail is
-    sum_n Poisson(n; rate) conditional_tails[n][k], plus the truncated
-    remainder counted as a firing.
+    Each fault of prior p fires a Poisson number of times of rate
+    -ln(1 - 2p) / 2, whose chance of being odd, (1 - e^(-2 rate)) / 2, is
+    p: only a fault's parity reaches the detectors, so the counted
+    detectors flip exactly as under Stim's independent faults (the
+    odd-number law of Tan et al. 2406.18897 lines 956-960). The firings
+    are one Poisson process of rate fault_rate, the rates' sum, and
+    conditional_tails[n][k] is the chance that n firings, picked in
+    proportion to the rates and XOR-ed onto the counted detectors, leave
+    at least k of them flipped, so two faults that cancel on a shared
+    detector count as Stim counts them. The tail is sum_n Poisson(n;
+    rate) conditional_tails[n][k] plus the truncated remainder counted
+    as a firing. It is exact but for two things: conditional_tails is
+    drawn, DRAWS_PER_FAULT_COUNT draws per fault count, so the tail is
+    an estimate with that sampling error, and the truncation raises it
+    by at most the remainder. A law with no faults is a count that is
+    always zero.
     """
 
     fault_rate: float
     conditional_tails: Any
 
     def tails(self, rate_scale: float) -> Any:
-        """P(count >= k) for every k, with every prior scaled."""
+        """P(count >= k) for every k, with every fault's rate scaled.
+
+        A scale s on the rates gives a fault of prior p the odd chance
+        (1 - (1 - 2p)^s) / 2, the law of s copies of the fault; s = 1 is
+        the calibrated law.
+        """
         rate = self.fault_rate * rate_scale
+        if rate == 0:
+            return self.conditional_tails[0]
         fault_count_limit = len(self.conditional_tails)
         fault_counts = numpy.arange(fault_count_limit)
         # Poisson(n; rate) = exp(n log rate - rate - log n!), the form
@@ -232,13 +249,16 @@ def tail_law(priors: Any, incidence: Any, smallest_false_alarms: float):
     times the calibrated rate until the Poisson remainder is below
     TRUNCATION_SHARE of the smallest false-alarm rate asked for.
     """
-    fault_rate = numpy.sum(priors)
+    fault_rates = _parity_rates(priors)
+    fault_rate = numpy.sum(fault_rates)
+    if fault_rate == 0:
+        return _faultless_law(incidence)
     headroom_rate = fault_rate * RATE_HEADROOM
     remainder_bound = smallest_false_alarms * TRUNCATION_SHARE
     largest_fault_count = _fault_count_bound(headroom_rate, remainder_bound)
     generator = numpy.random.default_rng(CALIBRATION_SEED)
     conditional_tails = _conditional_tails(
-        priors, incidence, largest_fault_count, generator
+        fault_rates, incidence, largest_fault_count, generator
     )
     return TailLaw(fault_rate, conditional_tails)
 
@@ -293,15 +313,15 @@ class _Calibration:
         marginal of Tan et al. 2406.18897 lines 956-960), equals the rate
         measured over the flagged rounds.
         """
-        region_priors = []
-        for position, is_member in enumerate(is_in_region):
-            if is_member:
-                region_priors.append(self.position_priors[position])
+        region_priors = self._region_priors(is_in_region)
         # a flag the patch count raised may leave no position anomalous
         # on its own: there is then no region whose priors to raise
         if not region_priors:
             return 1.0
         usual_rate = _mean_detection_probability(region_priors, 1.0)
+        # a region no fault reaches has no prior a scale could raise
+        if usual_rate == 0:
+            return 1.0
         if measured_rate <= usual_rate:
             return 1.0
         largest_scale = _saturating_scale(region_priors)
@@ -309,6 +329,14 @@ class _Calibration:
         if measured_rate >= saturated:
             return largest_scale
         return _bisected_scale(region_priors, measured_rate, largest_scale)
+
+    def _region_priors(self, is_in_region: Any) -> list:
+        """The priors behind each position of the region."""
+        region_priors = []
+        for position, is_member in enumerate(is_in_region):
+            if is_member:
+                region_priors.append(self.position_priors[position])
+        return region_priors
 
 
 @dataclasses.dataclass(frozen=True)
@@ -482,7 +510,7 @@ class _OperationCounts:
         patch_count = numpy.sum(recent)
         tracked_total = numpy.sum(self.tracked_rates)
         calibrated_total = numpy.sum(self.calibration.calibrated_rates)
-        rate_scale = tracked_total / calibrated_total
+        rate_scale = _rate_scales(tracked_total, calibrated_total)
         false_alarms = self.settings.false_alarms_per_round / 2
         law = self.calibration.patch_law
         threshold = law.threshold(false_alarms, rate_scale)
@@ -509,7 +537,8 @@ class _OperationCounts:
 
     def _position_thresholds(self, false_alarms: float):
         """Each position's threshold at its own tracked rate."""
-        rate_scales = self.tracked_rates / self.calibration.calibrated_rates
+        calibrated_rates = self.calibration.calibrated_rates
+        rate_scales = _rate_scales(self.tracked_rates, calibrated_rates)
         thresholds = []
         for law, rate_scale in zip(self.calibration.position_laws, rate_scales):
             threshold = law.threshold(false_alarms, rate_scale)
@@ -749,11 +778,33 @@ def _fault_count_bound(rate: float, remainder_bound: float) -> int:
     return largest_fault_count
 
 
-def _conditional_tails(priors, incidence, largest_fault_count: int, generator):
-    """P(count >= k | n faults) for n up to the bound, by drawing."""
+def _parity_rates(priors):
+    """Each fault's Poisson rate whose odd chance is its prior.
+
+    A Poisson count of rate r is odd with chance (1 - e^(-2r)) / 2, which
+    is p at r = -ln(1 - 2p) / 2.
+    """
+    survivals = 1.0 - 2.0 * priors
+    log_survivals = numpy.log(survivals)
+    return -log_survivals / 2.0
+
+
+def _faultless_law(incidence) -> TailLaw:
+    """The law of a count no fault reaches: zero, with tail one at k = 0."""
+    column_count = incidence.shape[1]
+    tail_width = column_count + 2
+    tails = numpy.zeros((1, tail_width))
+    tails[0, 0] = 1.0
+    return TailLaw(0.0, tails)
+
+
+def _conditional_tails(
+    fault_rates, incidence, largest_fault_count: int, generator
+):
+    """P(count >= k | n firings) for n up to the bound, by drawing."""
     column_count = incidence.shape[1]
     packed = numpy.packbits(incidence, axis=1)
-    choice_weights = priors / numpy.sum(priors)
+    choice_weights = fault_rates / numpy.sum(fault_rates)
     row_count = largest_fault_count + 1
     tail_width = column_count + 2
     tails = numpy.zeros((row_count, tail_width))
@@ -817,6 +868,20 @@ def _odd_probability(priors, scale: float) -> float:
     survivals = 1.0 - 2.0 * scaled
     product = numpy.prod(survivals)
     return (1.0 - product) / 2.0
+
+
+def _rate_scales(tracked_rates, calibrated_rates):
+    """Each tracked rate over its calibrated one; one where that is zero.
+
+    A calibrated rate of zero is a detector no fault reaches, whose law
+    is the faultless one at any scale.
+    """
+    tracked = numpy.asarray(tracked_rates, dtype=numpy.float64)
+    calibrated = numpy.asarray(calibrated_rates, dtype=numpy.float64)
+    scales = numpy.ones_like(tracked)
+    is_calibrated = calibrated > 0
+    numpy.divide(tracked, calibrated, out=scales, where=is_calibrated)
+    return scales
 
 
 def _mean_detection_probability(region_priors: list, scale: float) -> float:

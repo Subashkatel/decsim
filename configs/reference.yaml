@@ -302,7 +302,9 @@ burst_detector:
 #                                  # smallest count whose tail under the
 #                                  # usual rates is at most its share,
 #                                  # calibrated from the operation's own
-#                                  # circuit
+#                                  # circuit: its faults' exact law, the
+#                                  # tail estimated by draws, so a
+#                                  # noiseless circuit fires on one event
 #   rate_tracking_rounds: 10000    # time constant of each position's usual
 #                                  # rate, an exponential average frozen
 #                                  # while a flag fires (DGR 2311.16214

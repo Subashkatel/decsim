@@ -62,7 +62,11 @@ qpu:
                                    # after a unitary, after the round's first
                                    # TICK, before a measurement, after a
                                    # reset. [idle] is qec-burst-scaling's
-                                   # one DEPOLARIZE1 per round on data qubits
+                                   # one DEPOLARIZE1 per round on data qubits.
+                                   # A burst raises the circuit's own noise,
+                                   # so one whose region covers the patch
+                                   # and finds none of its channels there
+                                   # (a sweep point at p = 0) is refused
   code_card: rotated_surface       # rotated_surface | bivariate_bicycle: the
                                    # code card the run prices, at the sweep's
                                    # distance, with windows.commit_rounds and

@@ -727,12 +727,17 @@ def burst_circuit(
     pair when either qubit is in the region. The idle copy lands right
     after the round's first TICK, where qec-burst-scaling inserts its
     one DEPOLARIZE1 per round (qecburst/circuit.py inject_burst_profile).
-    A circuit the burst adds nothing to, a patch the region misses, is
-    returned as it is, so its shot is the one stim_device draws.
+    A patch the region misses is returned as it is, so its shot is the
+    one stim_device draws. A region on the patch with none of the named
+    noise to raise is refused: qec-burst-scaling locates its burst on the
+    background noise too, and refuses a circuit without it
+    (qecburst/geometry.py get_data_qubits, "Ensure p0 > 0";
+    circuit.py build_background_circuit, "expects 0 < p0").
 
     Raises:
-        ValueError: the burst starts after the shot's last round, so no
-            shot would run with the burst the settings name.
+        ValueError: the burst starts after the shot's last round, or its
+            region covers the patch and finds no noise of its channels,
+            so no shot would run with the burst the settings name.
     """
     if burst.burst_onset_round > table.round_count:
         _refuse_a_late_onset(burst, table.round_count)
@@ -752,9 +757,11 @@ def burst_circuit(
             inserted_count += 1
         sampled.append(instruction)
         measurement_count += instruction.num_measurements
-    if inserted_count == 0:
-        return circuit
-    return sampled
+    if inserted_count > 0:
+        return sampled
+    if region:
+        _refuse_a_burst_with_no_noise_to_raise(burst)
+    return circuit
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1138,6 +1145,19 @@ def _pairs_touching(targets: list, region: frozenset) -> list:
         if first.value in region or second.value in region:
             kept.extend((first, second))
     return kept
+
+
+def _refuse_a_burst_with_no_noise_to_raise(
+    burst: BurstStimDevice.Settings,
+) -> None:
+    channels = " or ".join(burst.burst_channels)
+    raise ValueError(
+        f"the burst region covers qubits of the patch, and the circuit "
+        f"has no {channels} noise on them from round "
+        f"{burst.burst_onset_round}; a burst raises the circuit's own "
+        "noise, so give the circuit that noise or name a channel it has "
+        "in qpu.burst_channels"
+    )
 
 
 def _refuse_a_late_onset(

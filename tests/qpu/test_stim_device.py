@@ -918,6 +918,64 @@ def test_a_patch_the_burst_region_misses_draws_its_own_circuit():
     assert burst is circuit
 
 
+# Each burst channel beside the Stim generator parameter that puts its
+# noise into a generated circuit (stim_device.BURST_CHANNELS).
+GENERATOR_NOISE = {
+    "gate": "after_clifford_depolarization",
+    "idle": "before_round_data_depolarization",
+    "measurement": "before_measure_flip_probability",
+    "reset": "after_reset_flip_probability",
+}
+# The circuits the grid samples: noiseless, each channel alone, and all.
+NOISY_CHANNELS = [(), ("gate",), ("idle",), ("measurement",), ("reset",)]
+NOISY_CHANNELS.append(stim_device.BURST_CHANNELS)
+# The channels a burst names: each one alone, and all four.
+NAMED_CHANNELS = [("gate",), ("idle",), ("measurement",), ("reset",)]
+NAMED_CHANNELS.append(stim_device.BURST_CHANNELS)
+
+
+@pytest.mark.parametrize("noisy", NOISY_CHANNELS)
+@pytest.mark.parametrize("named", NAMED_CHANNELS)
+def test_a_burst_on_the_patch_raises_noise_or_is_refused(noisy, named):
+    """A burst copies the circuit's own noise, as qec-burst-scaling does.
+
+    Where the circuit has a named channel's noise the burst adds to it;
+    where it has none the burst would add nothing and is refused, as
+    qecburst/geometry.py get_data_qubits refuses a circuit without
+    background noise ("Ensure p0 > 0").
+    """
+    noise = {}
+    for channel in noisy:
+        parameter = GENERATOR_NOISE[channel]
+        noise[parameter] = 0.001
+    circuit = stim.Circuit.generated(
+        "surface_code:rotated_memory_z", distance=3, rounds=3, **noise
+    )
+    shared = set(noisy) & set(named)
+    settings = {"burst_error_probability": 0.1, "burst_channels": named}
+
+    if not shared:
+        with pytest.raises(ValueError, match="no .* noise on them"):
+            burst_of(circuit, 3, **settings)
+        return
+    burst = burst_of(circuit, 3, **settings)
+    assert inserted_lines(circuit, burst)
+
+
+def test_a_patch_the_burst_region_misses_is_not_refused_without_noise():
+    """A noiseless patch the region misses has nothing the burst names."""
+    circuit = memory_circuit(3, 3, noise=0.0)
+    burst = burst_of(
+        circuit,
+        3,
+        burst_radius=1.0,
+        burst_center=(40.0, 0.0),
+        burst_error_probability=0.1,
+    )
+
+    assert burst is circuit
+
+
 @pytest.mark.parametrize(
     ("key", "value", "sentence"),
     [

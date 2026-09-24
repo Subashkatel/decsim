@@ -73,3 +73,24 @@ def test_the_row_returns_the_backends_error_indices():
         flipped = numpy.flatnonzero(result.correction)
         selected = flipped.tolist()
         assert selected == expected
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "error_type"),
+    [
+        ("detector_beam", 15.0, TypeError),
+        ("detector_order_count", True, TypeError),
+        ("detector_beam", -1, ValueError),
+        ("priority_queue_limit", 0, ValueError),
+        ("detector_order_count", 0, ValueError),
+        ("beam_climbing", 1, TypeError),
+        ("no_revisit_detectors", None, TypeError),
+    ],
+)
+def test_a_search_setting_of_the_wrong_type_or_range_is_refused(
+    field: str, value, error_type: type
+) -> None:
+    """Integers and booleans are exact built-ins; limits are in range."""
+    settings = {field: value}
+    with pytest.raises(error_type, match=field):
+        tesseract_window.TesseractDecoderConfig(**settings)

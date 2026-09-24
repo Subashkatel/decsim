@@ -27,6 +27,7 @@ import decsim.collect as collect
 import decsim.config as config_module
 import decsim.decoders.decode_queue as decode_queue
 import decsim.decoders.decoder_output as decoder_output
+import decsim.experiments.refusal as refusal
 import decsim.observe.observation as observation_module
 import decsim.records.identity as identity_records
 import decsim.records.results as result_records
@@ -613,9 +614,20 @@ def direct_prediction(
     """Whole-circuit PyMatching on the detection events the device sampled.
 
     The reference the loop must agree with. The shot is the one the
-    source drew for this operation, heard at sampling time.
+    source drew for this operation, heard at sampling time. A source that
+    draws no shot (qpu.kind timing_only and syndrome_bits) leaves the loop
+    nothing to be judged against, so the shot is refused rather than
+    counted as right or wrong.
     """
-    shot = observation.sampled_shots.shots_by_operation[operation_id]
+    shots_by_operation = observation.sampled_shots.shots_by_operation
+    if operation_id not in shots_by_operation:
+        raise refusal.RefusalError(
+            "decsim collect judges every shot against the logical "
+            "observables its syndrome source sampled, and the source "
+            f"sampled none for operation {operation_id}; name a qpu.kind "
+            "that samples the circuit, such as stim_device"
+        )
+    shot = shots_by_operation[operation_id]
     circuit: stim.Circuit = shot.circuit
     detector_error_model = circuit.detector_error_model(decompose_errors=True)
     matching = pymatching.Matching.from_detector_error_model(

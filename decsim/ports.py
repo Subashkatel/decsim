@@ -1622,7 +1622,8 @@ class WindowModelSource(Protocol):
         """Bind the terminal boundary; return whether pending models changed.
 
         Physical source validation has already succeeded. A finite model
-        checks its declared length; an evolving model fixes its final length.
+        keeps the length it registered; an evolving model fixes its final
+        length.
         The provider needs no physical execution state to answer this call.
         True requests rebuilding unqueued models without changing any queued
         or committed model's semantics. False retains the installed models.

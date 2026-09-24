@@ -143,6 +143,22 @@ def test_unbounded_models_cannot_remove_the_finite_source_seal_limit() -> None:
         machine.run()
 
 
+def test_a_live_stream_sealed_short_of_its_finite_models_stops_the_run():
+    """The live source ends at 12 rounds; the models were built for 24.
+
+    The source's own length check passes, since its history really did
+    end there, and the decoder input then misses the models' rows.
+    """
+    program = memory_programs.memory_program()
+    circuit, _ = program.assemble(24)
+    source = streaming_stim_device.StreamingStimDevice({100: program})
+    models = stim_device.StimDevice()
+    workload = _workload(circuit, 24, 10)
+    machine = _machine(source, models, workload, 4.0)
+    with pytest.raises(RuntimeError):
+        machine.run()
+
+
 def test_unbounded_models_cannot_extend_the_finite_physical_source() -> None:
     program = memory_programs.memory_program()
     circuit, _ = program.assemble(24)

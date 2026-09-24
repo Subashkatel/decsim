@@ -48,9 +48,7 @@ class Streams(Protocol):
     def request_closes(self, operation) -> None:
         """Ask the region this operation ends to close at its boundary."""
 
-    def close_feedback_boundary(
-        self, operation, waiting_blocked_successor: bool
-    ) -> None:
+    def close_feedback_boundary(self, operation) -> None:
         """Close the boundary the operation's last round reached."""
 
     def seal_finished_streams(self) -> None:
@@ -95,12 +93,9 @@ class NoFeedbackStreams:
         """Nothing to close."""
         del operation
 
-    def close_feedback_boundary(
-        self, operation, waiting_blocked_successor: bool
-    ) -> None:
+    def close_feedback_boundary(self, operation) -> None:
         """No boundary to close."""
         del operation
-        del waiting_blocked_successor
 
     def seal_finished_streams(self) -> None:
         """No stream to seal."""
@@ -214,17 +209,18 @@ class FeedbackStreams:
             live = self._live(region.stream_id)
             live.is_close_requested = True
 
-    def close_feedback_boundary(
-        self, operation, waiting_blocked_successor: bool
-    ) -> None:
+    def close_feedback_boundary(self, operation) -> None:
         """Close the stream boundary at the body measurement.
 
-        Only in measurement_closed mode, and only for a feedback source
-        that still blocks a successor.
+        Only in measurement_closed mode, and only for a feedback source:
+        an operation some other operation is blocked by, the rule the
+        round tracker applies to a finite source. Who waits, and through
+        which operations, does not move a window's time boundary; the
+        measurement does (Tan et al. 2209.09219 lines 898-903).
         """
         if operation.feedback_boundary_mode != "measurement_closed":
             return
-        if not waiting_blocked_successor:
+        if not self.table.is_feedback_source(operation.id):
             return
         binding = self.bindings.get(operation.id)
         if binding is None:

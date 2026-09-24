@@ -162,6 +162,112 @@ def test_a_waiting_stream_decision_reads_its_buffer_from_the_idle_patch(
     assert wait_ticks > 3 * 1_100_000
 
 
+@pytest.mark.parametrize("waiting_patch", [0, 1])
+def test_a_zero_round_step_does_not_hide_the_blocked_operation(
+    waiting_patch: int,
+) -> None:
+    """The prefix's boundary closes when anything is blocked by it.
+
+    A zero-round operation between the prefix and the operation it
+    releases leaves the release where it is without that step.
+    """
+    closed = "measurement_closed"
+    direct = _prefix_run("direct", waiting_patch, closed)
+    stepped = _prefix_run("stepped", waiting_patch, closed)
+    assert stepped == direct
+    release_wait_ticks, _ = stepped
+    assert release_wait_ticks < 1_100_000
+
+
+@pytest.mark.parametrize("waiting_patch", [0, 1])
+def test_an_operation_blocked_elsewhere_leaves_the_boundary_open(
+    waiting_patch: int,
+) -> None:
+    """A successor blocked by another operation does not close the prefix.
+
+    The prefix is no feedback source, so measurement_closed leaves its
+    window as trailing_buffer does: the release and the commit agree.
+    """
+    closed = _prefix_run("elsewhere", waiting_patch, "measurement_closed")
+    trailing = _prefix_run("elsewhere", waiting_patch, "trailing_buffer")
+    assert closed == trailing
+
+
+def _prefix_run(shape: str, waiting_patch: int, mode: str) -> tuple:
+    """Ticks from the prefix's end to the release, and to its commit.
+
+    shape direct: the waiting operation follows the prefix; stepped: a
+    zero-round operation sits between them; elsewhere: the waiting
+    operation is blocked by a third operation, not by the prefix.
+    """
+    prefix = program_records.Operation(
+        1, "prefix", (0,), patches=(0,), stream_id=100, stream_offset=0
+    )
+    step = program_records.Operation(
+        2,
+        "step",
+        (0,),
+        patches=(0,),
+        predecessors=(1,),
+        emits_detector_data=False,
+    )
+    other = program_records.Operation(4, "other", (2,), patches=(2,))
+    patches = (waiting_patch,)
+    waiting = program_records.Operation(
+        3,
+        "waiting",
+        patches,
+        patches=patches,
+        predecessors=(1,),
+        blocked_by=1,
+    )
+    operations = (prefix, waiting)
+    if shape == "stepped":
+        waiting = dataclasses.replace(waiting, predecessors=(2,))
+        operations = (prefix, step, waiting)
+    if shape == "elsewhere":
+        waiting = dataclasses.replace(
+            waiting, predecessors=(1, 4), blocked_by=4
+        )
+        operations = (prefix, other, waiting)
+    stream = program_records.Operation(100, "memory", (0,), patches=(0,))
+    policy = round_policies.PerOperationRounds({100: 0, 1: 3, 2: 0, 3: 1, 4: 3})
+    workload = workload_settings.WorkloadSettings(
+        operations=operations,
+        dynamic_streams=(stream,),
+        rounds_policy=policy,
+        feedback_boundary_mode=mode,
+    )
+    clock = config.Clock(1000)
+    engine = decoder_settings.EngineSettings(clock=clock)
+    decoder = decoder_settings.DecoderSettings(kind=0.1, engine=engine)
+    settings = machine_settings.MachineSettings(
+        workload=workload, weak_decoder=decoder
+    )
+    machine = machine_module.Machine.build(settings, 0)
+    commit_ticks = []
+    sources = machine.window_manager.window_sources()
+    recorder = _commit_recorder(machine, commit_ticks)
+    sources.window_committed.connect(recorder)
+    events, _ = _events_and_end(machine)
+    ticks = {(kind, operation): tick for kind, operation, tick in events}
+    prefix_end_tick = ticks[("finished", 1)]
+    release_wait_ticks = ticks[("released", 3)] - prefix_end_tick
+    commit_wait_ticks = commit_ticks[0] - prefix_end_tick
+    return release_wait_ticks, commit_wait_ticks
+
+
+def _commit_recorder(machine: machine_module.Machine, commit_ticks: list):
+    """A listener that records when the stream's first window commits."""
+
+    def listener(window, contribution) -> None:
+        del contribution
+        if window.key == (100, 0):
+            commit_ticks.append(machine.engine.now)
+
+    return listener
+
+
 def _feedback_run(
     is_stream: bool, idle_policy: str, waiting_patch: int, mode: str
 ) -> tuple:

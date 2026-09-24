@@ -1330,7 +1330,6 @@ class OperationIssuer(Protocol):
     def after_successor_release(
         self,
         operation: program_records.Operation,
-        waits_for_blocked: bool,
         is_workload_complete: bool,
     ) -> None:
         """Successors released: close boundaries, seal streams, stop the QPU."""

@@ -66,10 +66,8 @@ class RecordingIssuer:
     def before_successor_release(self, operation):
         self.engine.calls.append(("before", operation.id))
 
-    def after_successor_release(
-        self, operation, waits_for_blocked, is_workload_complete
-    ):
-        del waits_for_blocked, is_workload_complete
+    def after_successor_release(self, operation, is_workload_complete):
+        del is_workload_complete
         self.engine.calls.append(("after", operation.id))
 
 

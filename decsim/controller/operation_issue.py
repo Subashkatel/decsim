@@ -82,7 +82,6 @@ class OperationIssuer:
     def after_successor_release(
         self,
         operation: program_records.Operation,
-        waits_for_blocked: bool,
         is_workload_complete: bool,
     ) -> None:
         """Successors released: close boundaries, seal streams, stop the QPU.
@@ -90,7 +89,7 @@ class OperationIssuer:
         At the workload's end the idle rounds no operation claimed are
         settled too.
         """
-        self.streams.close_feedback_boundary(operation, waits_for_blocked)
+        self.streams.close_feedback_boundary(operation)
         if is_workload_complete:
             self.streams.seal_finished_streams()
             self.idle_rounds.end_every_idle_period()

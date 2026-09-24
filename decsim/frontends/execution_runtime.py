@@ -219,22 +219,7 @@ class ExecutionRuntime:
                 f"QPU finished. All {operation_count} operations are "
                 "physically complete; decoder may still be draining.",
             )
-        waits_for_blocked = self.waiting_blocked_successor(operation.id)
-        self.issuer.after_successor_release(
-            operation, waits_for_blocked, self.workload_complete
-        )
-
-    def waiting_blocked_successor(self, operation_id) -> bool:
-        """True while a feedback-blocked successor awaits its decode release."""
-        for successor_id in self.schedule.successors[operation_id]:
-            successor = self.schedule.operations[successor_id]
-            if successor.blocked_by is None:
-                continue
-            if successor.id in self.lifecycle.started_operation_ids:
-                continue
-            if successor.id not in self.lifecycle.released_operation_ids:
-                return True
-        return False
+        self.issuer.after_successor_release(operation, self.workload_complete)
 
     def retry_ready_operations(self) -> None:
         """Retry every state-ready operation after a cadence change."""

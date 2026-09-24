@@ -40,6 +40,7 @@ import decsim.experiments.measure as measure
 import decsim.experiments.report as report
 import decsim.frontends.settings as workload_settings
 import decsim.links.link_profiles as link_profiles
+import decsim.machine as machine_module
 import decsim.observe.link_traffic as link_traffic
 import decsim.pauli_frame.pauli_frame as pauli_frame_module
 import decsim.qpu.round_policies as round_policies
@@ -1293,6 +1294,80 @@ def test_a_strong_requests_wait_is_lindleys_one_server_wait(tmp_path):
     assert measurement.strong_wait_max_us > 0
 
 
+class StrongResidentsWaitingOnCompute:
+    """Each tick's strong decodes held in a unit, off the units' own slots.
+
+    A resident whose input landed, that is not parked on a boundary and
+    has not started, is in the unit's memory waiting for its compute.
+    The last sample of a tick is the depth the tick ends at.
+    """
+
+    def __init__(self, machine) -> None:
+        self.units = []
+        for manager in (
+            machine.decoder_manager,
+            machine.strong_decoder_manager,
+        ):
+            if manager is not None:
+                pool_units = manager.service.pool.units()
+                self.units.extend(pool_units)
+        self.depth_by_tick = {}
+
+    def sample(self, now: int) -> None:
+        """Count the strong residents waiting for compute now."""
+        waiting = 0
+        for unit in self.units:
+            waiting += _strong_residents_waiting(unit)
+        self.depth_by_tick[now] = waiting
+
+
+def _strong_residents_waiting(unit) -> int:
+    waiting = 0
+    for resident in unit.residents:
+        if _is_strong_and_waiting(resident):
+            waiting += 1
+    return waiting
+
+
+def _is_strong_and_waiting(resident) -> bool:
+    """A strong decode landed, not parked, and not started."""
+    strong = window_records.DecoderTier.STRONG
+    if resident.request_key.tier is not strong:
+        return False
+    if resident.is_parked or resident.service_started:
+        return False
+    return resident.input_landed
+
+
+def test_the_strong_decodes_held_in_units_are_the_units_own_residents(
+    tmp_path, monkeypatch
+):
+    """A unit takes the next decode into its memory while it computes.
+
+    The column reads the most strong decodes held at once off the stage
+    ledger; the units' own slots, sampled after every engine action, give
+    the same peak. One unit holds two residents, the decode it computes
+    and the next one (decode_service.py, resident_capacity), so one is
+    the most it can hold waiting.
+    """
+    samplers = []
+    build = machine_module.Machine.build
+
+    def build_and_sample(settings, seed):
+        machine = build(settings, seed)
+        sampler = StrongResidentsWaitingOnCompute(machine)
+        machine.engine.action_done.connect(sampler.sample)
+        samplers.append(sampler)
+        return machine
+
+    monkeypatch.setattr(machine_module.Machine, "build", build_and_sample)
+    _, measurement = escalating_shot(tmp_path, 1)
+    (sampler,) = samplers
+    depths = sampler.depth_by_tick.values()
+
+    assert measurement.strong_held_in_units_max == max(depths) == 1
+
+
 def test_enough_strong_units_leave_the_same_windows_and_no_wait(tmp_path):
     """The paired run: the same seed, the real unit count and ten.
 
@@ -1310,6 +1385,7 @@ def test_enough_strong_units_leave_the_same_windows_and_no_wait(tmp_path):
     assert ample.escalated_windows == real.escalated_windows == 30
     assert ample.strong_wait_max_us == 0.0
     assert real.strong_wait_max_us > 0.0
+    assert ample.strong_held_in_units_max == 0
     assert ample.backlog_peak_rounds < real.backlog_peak_rounds
 
 

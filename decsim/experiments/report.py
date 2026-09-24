@@ -88,6 +88,7 @@ LOAD_MEANS = (
 LOAD_MAXES = (
     "weak_syndrome_weight_max",
     "strong_wait_max_us",
+    "strong_held_in_units_max",
     "backlog_peak_rounds",
 )
 # which role each field of shots.csv plays in a sweep point's row: a

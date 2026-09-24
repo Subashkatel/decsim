@@ -116,7 +116,8 @@ so check first that `escalated_windows` is equal in the two rows. Then:
   `_max`, `weak_service_mean_us` and `escalated_fraction`, each read
   against the same run with `burst_error_probability: 0`.
 - What the extra units take away is the overload: `strong_wait_mean_us`
-  and `_max` fall to zero, and `strong_queue_max`,
+  and `_max` and `strong_held_in_units_max` fall to zero, and
+  `strong_queue_max`,
   `backlog_peak_rounds` and the reaction-time points fall with them.
   The difference between the two rows is the overload alone.
 

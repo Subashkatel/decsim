@@ -1025,7 +1025,10 @@ strong_decoder:                    # the accurate tier: slow, lower LER
                                    # 0.8.0) on that GPU, one decode at a time
                                    # (decoders/measured_table/measurements.py)
   # partition: whole               # how the GPU was shared when measured:
-                                   # whole | mps (a100 only)
+                                   # whole | mps | 3g.40gb | 1g.10gb, the
+                                   # last three a100 only; 3g.40gb and
+                                   # 1g.10gb are one Multi-Instance GPU
+                                   # slice of that NVIDIA profile
   engine:
     clock: room                    # the strong unit lives room-side
     fetch_cycles_per_round: 1

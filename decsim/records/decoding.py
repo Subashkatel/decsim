@@ -456,7 +456,7 @@ class RunShape:
     STRONG_WINDOW_SHAPES the escalation section named, so a refusal
     names the shape the yaml chose; is_absorbing_strong_window is that
     row's own declaration that its region replaces the weak windows it
-    covers (the forward rows of Toshio et al. 2510.25222 Sec. III C;
+    covers (the forward row of Toshio et al. 2510.25222 Sec. III C;
     the near-seam row absorbs nothing); is_bulk_strong is the
     decoder manager's merging of queued strong re-decodes; operations
     are the workload's planning views; commit_round_count and

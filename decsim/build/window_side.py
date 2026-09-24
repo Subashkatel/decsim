@@ -150,7 +150,7 @@ def build_regions(parts):
 def build_strong_window_shape(parts):
     """The strong window of the escalation's row.
 
-    escalation.strong_window names the row: the near-seam window, or a
+    escalation.strong_window names the row: the near-seam window, or the
     forward window of Toshio Sec. III C.
     """
     row = escalation_build.strong_window_row(parts.settings.escalation)

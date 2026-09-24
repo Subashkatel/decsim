@@ -1,13 +1,13 @@
 """The strong window's shape: which rounds the strong tier re-decodes, and when.
 
-Three rows of STRONG_WINDOW_SHAPES (escalation/settings.py), named by
+Two rows of STRONG_WINDOW_SHAPES (escalation/settings.py), named by
 escalation.strong_window
-(Toshio et al. 2510.25222). One reads every face raw and two pin a face
-on a neighbour's committed correction, which is Bombin et al.
-2303.04846's input adaptation (lines 775-788): NearSeamWindow is the
-escalated window's commit region with its past face pinned, and
-ForwardSeamWindow is the forward row's extent with both faces pinned. A
-fourth shape, both faces pinned and absorbing nothing, is not a row: it
+(Toshio et al. 2510.25222). Both pin a face on a neighbour's committed
+correction, which is Bombin et al. 2303.04846's input adaptation (lines
+775-788): NearSeamWindow is the escalated window's commit region with
+its past face pinned, and ForwardSeamWindow is Sec. III C's forward
+extent with both faces pinned. A third shape, both faces pinned and
+absorbing nothing, is not a row: it
 waits for the window after it, which waits for its own strong result,
 and the serial sliding chain deadlocks. What would make it a row is a
 windowing scheme whose windows do not commit in one serial chain, the
@@ -16,9 +16,9 @@ shape Skoric et al. 2209.08552 decode block by block (lines 398-401,
 way it reads absorption off itself, and refuse a scheme that does not
 declare it.
 NearSeamWindow is built the moment its rounds are stored in the strong
-syndrome buffer. ForwardWindow is Sec. III C and Fig. 12: a strong window
-that starts at the escalated commit and extends forward, absorbs the
-weak windows it covers, re-slices the window past it (the restart
+syndrome buffer. ForwardSeamWindow is Sec. III C and Fig. 12: a strong
+window that starts at the escalated commit and extends forward, absorbs
+the weak windows it covers, re-slices the window past it (the restart
 window) and is held until that window's weak commit or, at the
 operation's end, until its last round is stored. A shape builds the
 strong job on the window components (planner, tracker, retention,
@@ -26,15 +26,6 @@ builder) and hands it to the StrongRedecode, which submits it
 (strong_redecode.py); a row that cannot build its job at the escalation
 declares what releases it instead (pending_strong_windows.py), and the
 redecode holds the assignment until those conditions fire.
-
-Seam modelling of the forward window: both faces are decoded as
-two-sided windows, one buffer of raw context per face, exact
-fault-ownership partition, no folded decoded defects (folding at a
-raw-read face double-counts). Unlike the paper's exactly-r_strong read
-with weak-pinned faces, the context reads are extra: seam-edge accuracy
-is slightly optimistic, and the strong window is priced for the whole
-context it reads rather than the r_strong rounds it commits, so its
-decode cost is conservative against Theorem 1 rather than optimistic.
 
 The restart window's weak decode may read back into the strong region
 from the weak syndrome buffer (escalation.restart_reread_buffer_regions buffer
@@ -208,8 +199,8 @@ class NearSeamWindow(StrongWindowPorts):
     determined by the weak decoder" (Toshio et al. 2510.25222 lines
     1249-1250): pinning the future face too without absorbing the
     window after it is the both-faces shape this module refuses, since
-    that window waits for this one's strong result. The forward rows
-    are the Fig. 12 geometry.
+    that window waits for this one's strong result. The forward row is
+    the Fig. 12 geometry.
     """
 
     absorbs_weak_windows = False
@@ -248,16 +239,61 @@ class NearSeamWindow(StrongWindowPorts):
         return _rounds_not_stored(self, assignment.held_plan)
 
 
-class ForwardWindow(StrongWindowPorts):
-    """Sec. III C, Fig. 12: a strong window that absorbs what it covers.
+class ForwardSeamWindow(StrongWindowPorts):
+    """Sec. III C, Fig. 12 as the paper states it: both faces pinned.
 
     The window starts at the escalated commit and extends forward by
-    the interaction's plan; the weak chain skips the windows it absorbs
-    and restarts past it on a re-sliced window; the strong result owns
-    the whole extent. The job is held until both of its boundaries are
-    weak-determined: the commits before it, and the restart window's
-    commit or the terminal boundary. The weak pipeline never waits on
-    strong work. One strong job per escalation; a second is refused.
+    the interaction's plan, r_strong = r_com + 2 r_buf rounds (Toshio et
+    al. 2510.25222 line 1250); the weak chain skips the windows it
+    absorbs and restarts past it on a re-sliced window; the strong
+    result owns the whole extent. It is read with no context at all:
+    "the strong decoder processes all the assigned data at once, after
+    the boundary conditions at both ends have been determined by the
+    weak decoder" (lines 1248-1250), and a determined boundary condition
+    needs no buffer behind it (Bombin et al. 2303.04846 lines
+    1456-1458). Tan et al. 2209.09219 lines 1026-1029 call a window
+    closed at both ends a type-2 window, "the entire window is the core
+    region".
+
+    The job is held until both of its boundaries are weak-determined:
+    the near face is pinned on the window before the escalated one, the
+    far face on the restart window's weak commit. This row absorbs the
+    windows it covers, so the circular wait that a non-absorbing
+    both-faces row runs into does not arise: the weak chain keeps
+    committing and the restart window commits the rounds past the
+    strong region. The weak pipeline never waits on strong work. One
+    strong job per escalation; a second is refused.
+
+    A strong window at the end of the operation has no later window, so
+    it has no far pin: its future face is closed by the readout and it
+    waits for the terminal data, which is what Tan says of the last
+    window (2209.09219 lines 953-955, "both time boundaries of the last
+    windows are closed").
+
+    At a back-to-back seam, where the escalated window is the one that
+    restarted the weak chain after an earlier strong region, the near
+    face pins on that window's own weak commit. The absorption takes its
+    dependency out of the chain, so no neighbour commits the round
+    before it and it owns the faults crossing that seam itself; the
+    region ending at the seam is pinned on its choice of them, so this
+    region keeps it: those faults are prior faults of its model, their
+    committed effect is folded into its input, and their observable
+    flips stay with the window when the strong result replaces its
+    prediction.
+
+    Only the region at the operation's first round reads a face open,
+    with one buffer region of raw context (Bombin lines 850-852), since
+    there is no earlier commit to pin on.
+
+    The restart window owns the faults crossing the far face at every
+    escalation.restart_reread_buffer_regions width, since this region
+    reads no round past its commit (strong_regions.py,
+    forward_seam_region). At width 1, the width Fig. 12 step 5 draws,
+    the restart window reads the region's last buffer region raw as its
+    own past context and commits nothing inside the region, so the far
+    pin carries only those crossing faults and no round of the input is
+    explained twice (Bombin lines 775-788).
+
     Trace source: window_absorbed(key, owner_key) for every window the
     strong window at owner_key covers.
     """
@@ -288,8 +324,11 @@ class ForwardWindow(StrongWindowPorts):
             window_records.DecoderTier.STRONG,
         )
         strong_request_created_ticks = self.engine.now
-        resolved_region = self._resolved_region(key)
-        folded_boundaries = self._declared_faces(key, resolved_region)
+        near_source_key = self.regions.forward_near_face(key)
+        resolved_region = self.regions.forward_seam_region(
+            key, near_source_key=near_source_key
+        )
+        folded_boundaries = _pinned_faces(near_source_key, resolved_region)
         plan = resolved_region.plan
         restart_key = resolved_region.restart_window_key
         strong_window = resolved_region.strong_window
@@ -350,27 +389,20 @@ class ForwardWindow(StrongWindowPorts):
     def release_conditions(
         self, assignment: StrongAssignment
     ) -> pending_strong_windows.ReleaseConditions:
-        """The restart window's commit and then its rounds, or the stored tail.
+        """The far boundary, and its own weak commit when it pins on it.
 
-        A strong window bounded by a later weak window waits for that
-        window to commit, and then for the rounds it reads to be carried
-        up and stored; one at the end of the stream has no later window,
-        so it waits for its stored rounds alone (Toshio et al.
+        A region at a back-to-back seam reads its near boundary
+        condition off the escalated window's own weak commit, so it
+        waits for that commit as it waits for the far one (Toshio et al.
         2510.25222 lines 1248-1250).
         """
-        held = assignment.held_plan
-        restart_key = held.resolved_region.restart_window_key
-        if restart_key is None:
-            return pending_strong_windows.ReleaseConditions(
-                stored_data_of_operation=held.key[0],
-                name="terminal_data",
-                released_description="terminal data complete",
-            )
-        return pending_strong_windows.ReleaseConditions(
-            committed_windows=(restart_key,),
-            stored_data_of_operation=held.key[0],
-            name="far_boundary",
-            released_description="far-side weak boundary determined",
+        conditions = self._far_face_conditions(assignment.held_plan)
+        key = assignment.held_plan.key
+        if key not in assignment.folded_boundaries:
+            return conditions
+        committed_windows = conditions.committed_windows + (key,)
+        return dataclasses.replace(
+            conditions, committed_windows=committed_windows
         )
 
     def held_job(
@@ -398,24 +430,32 @@ class ForwardWindow(StrongWindowPorts):
             held.key, held.resolved_region.context_round_keys
         )
 
-    # ---- the two facts a row of this geometry declares
+    # ---- private: what releases the job
 
-    def _resolved_region(self, key: tuple) -> strong_regions.ForwardRegion:
-        """The extent, read with one buffer of raw context per face."""
-        return self.regions.forward_region(key)
+    def _far_face_conditions(
+        self, held: "_HeldForwardWindow"
+    ) -> pending_strong_windows.ReleaseConditions:
+        """The restart window's commit and then its rounds, or the stored tail.
 
-    def _declared_faces(
-        self, key: tuple, resolved_region: strong_regions.ForwardRegion
-    ) -> tuple:
-        """Which neighbours' boundaries the row folds in: none here.
-
-        Both faces are read raw, and a mask on a raw-read face would
-        double count the rounds behind it (Bombin et al. 2303.04846
-        lines 775-788).
+        A strong window bounded by a later weak window waits for that
+        window to commit, and then for the rounds it reads to be carried
+        up and stored; one at the end of the stream has no later window,
+        so it waits for its stored rounds alone (Toshio et al.
+        2510.25222 lines 1248-1250).
         """
-        del key
-        del resolved_region
-        return FOLDS_NO_BOUNDARY
+        restart_key = held.resolved_region.restart_window_key
+        if restart_key is None:
+            return pending_strong_windows.ReleaseConditions(
+                stored_data_of_operation=held.key[0],
+                name="terminal_data",
+                released_description="terminal data complete",
+            )
+        return pending_strong_windows.ReleaseConditions(
+            committed_windows=(restart_key,),
+            stored_data_of_operation=held.key[0],
+            name="far_boundary",
+            released_description="far-side weak boundary determined",
+        )
 
     # ---- private: the plan
 
@@ -540,9 +580,9 @@ class ForwardWindow(StrongWindowPorts):
     ) -> decoding_records.DecodeJob:
         """The strong window's job, once both of its boundaries exist.
 
-        The strong window commits all r_strong rounds and reads one
-        buffer of raw context per face, owning nothing that touches
-        rounds before its extent.
+        The strong window commits all r_strong rounds and reads only
+        those, its faces pinned, owning nothing that touches rounds
+        before its extent.
         """
         payloads = strong_job_payloads(
             self,
@@ -567,106 +607,8 @@ class ForwardWindow(StrongWindowPorts):
         )
 
 
-class ForwardSeamWindow(ForwardWindow):
-    """Sec. III C, Fig. 12 read as the paper states it: both faces pinned.
-
-    The extent is the forward row's, r_strong = r_com + 2 r_buf rounds
-    from the escalated window's commit start (Toshio et al. 2510.25222
-    line 1250), and it is read with no context at all: "the strong
-    decoder processes all the assigned data at once, after the boundary
-    conditions at both ends have been determined by the weak decoder"
-    (lines 1248-1250), and a determined boundary condition needs no
-    buffer behind it (Bombin et al. 2303.04846 lines 1456-1458). At
-    r_com = r_buf = d the row reads 3d rounds where the shipped forward
-    row reads 5d. Tan et al. 2209.09219 lines 1026-1029 call a window
-    closed at both ends a type-2 window, "the entire window is the core
-    region".
-
-    The near face is pinned on the window before the escalated one, the
-    far face on the restart window's weak commit, which is exactly the
-    boundary the shipped forward row already waits for, so the wait does
-    not change and the circular wait that a non-absorbing both-faces row
-    runs into does not arise: this row absorbs the windows it covers,
-    the weak chain keeps committing, and the restart window commits the
-    rounds past the strong region.
-
-    A strong window at the end of the operation has no later window, so
-    it has no far pin: its future face is closed by the readout and it
-    waits for the terminal data, which is what Tan says of the last
-    window (2209.09219 lines 953-955, "both time boundaries of the last
-    windows are closed").
-
-    At a back-to-back seam, where the escalated window is the one that
-    restarted the weak chain after an earlier strong region, the near
-    face pins on that window's own weak commit. The absorption takes its
-    dependency out of the chain, so no neighbour commits the round
-    before it and it owns the faults crossing that seam itself; the
-    region ending at the seam is pinned on its choice of them, so this
-    region keeps it: those faults are prior faults of its model, their
-    committed effect is folded into its input, and their observable
-    flips stay with the window when the strong result replaces its
-    prediction.
-
-    Only the region at the operation's first round reads a face open,
-    with one buffer region of raw context (Bombin lines 850-852), since
-    there is no earlier commit to pin on.
-
-    The restart window owns the faults crossing the far face at every
-    escalation.restart_reread_buffer_regions width, since this region
-    reads no round past its commit (strong_regions.py,
-    forward_seam_region). At width 1, the width Fig. 12 step 5 draws,
-    the restart window reads the region's last buffer region raw as its
-    own past context and commits nothing inside the region, so the far
-    pin carries only those crossing faults and no round of the input is
-    explained twice (Bombin lines 775-788).
-    """
-
-    def release_conditions(
-        self, assignment: StrongAssignment
-    ) -> pending_strong_windows.ReleaseConditions:
-        """The far boundary, and its own weak commit when it pins on it.
-
-        A region at a back-to-back seam reads its near boundary
-        condition off the escalated window's own weak commit, so it
-        waits for that commit as it waits for the far one (Toshio et al.
-        2510.25222 lines 1248-1250).
-        """
-        forward_window = super()
-        conditions = forward_window.release_conditions(assignment)
-        key = assignment.held_plan.key
-        if key not in assignment.folded_boundaries:
-            return conditions
-        committed_windows = conditions.committed_windows + (key,)
-        return dataclasses.replace(
-            conditions, committed_windows=committed_windows
-        )
-
-    def _resolved_region(self, key: tuple) -> strong_regions.ForwardRegion:
-        """The extent, read with no context on the faces it pins."""
-        near_source_key = self.regions.forward_near_face(key)
-        return self.regions.forward_seam_region(
-            key, near_source_key=near_source_key
-        )
-
-    def _declared_faces(
-        self, key: tuple, resolved_region: strong_regions.ForwardRegion
-    ) -> tuple:
-        """The commit closing the near face, and the window restarting after.
-
-        The restart window's weak commit is the far boundary (Toshio et
-        al. 2510.25222 lines 1253-1259); a terminal region has no
-        restart window and no far pin.
-        """
-        near_source_key = self.regions.forward_near_face(key)
-        faces = _declared_faces(near_source_key)
-        restart_key = resolved_region.restart_window_key
-        if restart_key is None:
-            return faces
-        return faces + (restart_key,)
-
-
-# a row that reads raw rounds on both faces folds no committed
-# neighbour boundary into the strong job's input
+# a row that pins no face, the near-seam window at the operation's
+# first round, folds no committed neighbour boundary into its input
 FOLDS_NO_BOUNDARY: tuple = ()
 
 
@@ -675,6 +617,23 @@ def _declared_faces(pinned_source_key: Optional[tuple]) -> tuple:
     if pinned_source_key is None:
         return FOLDS_NO_BOUNDARY
     return (pinned_source_key,)
+
+
+def _pinned_faces(
+    near_source_key: Optional[tuple],
+    resolved_region: strong_regions.ForwardRegion,
+) -> tuple:
+    """The commit closing the near face, and the window restarting after.
+
+    The restart window's weak commit is the far boundary (Toshio et al.
+    2510.25222 lines 1253-1259); a terminal region has no restart window
+    and no far pin.
+    """
+    faces = _declared_faces(near_source_key)
+    restart_key = resolved_region.restart_window_key
+    if restart_key is None:
+        return faces
+    return faces + (restart_key,)
 
 
 def _held_redo(
@@ -858,7 +817,7 @@ class _HeldStrongRedo:
 
 @dataclasses.dataclass(frozen=True)
 class _HeldForwardWindow:
-    """All the forward row keeps from its plan until it builds the job."""
+    """All the forward window keeps from its plan until it builds the job."""
 
     key: tuple
     weak_job: decoding_records.DecodeJob

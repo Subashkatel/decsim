@@ -178,7 +178,7 @@ def test_online_card_guards(tmp_path):
     forward_window_card = {
         "threshold_source": "online",
         "gap_threshold_db": 20.0,
-        "strong_window": "forward",
+        "strong_window": "forward_seam_pinned",
     }
     forward_window_path = source_config(tmp_path, forward_window_card)
     with pytest.raises(ValueError, match="serial-only"):

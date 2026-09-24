@@ -453,7 +453,9 @@ def switching_parallel_mode(_generator, rounds):
 def switching_forward_mode(_generator, rounds):
     """Escalation under the forward window, which holds no boundary."""
     return declared_run.switching_run(
-        rounds=rounds, escalation_probability=1.0, strong_window="forward"
+        rounds=rounds,
+        escalation_probability=1.0,
+        strong_window="forward_seam_pinned",
     )
 
 

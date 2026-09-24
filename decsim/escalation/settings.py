@@ -39,7 +39,6 @@ ESCALATIONS = {
 # builds the row with the window components it needs.
 STRONG_WINDOW_SHAPES = {
     "near_seam_pinned": strong_window_shapes.NearSeamWindow,
-    "forward": strong_window_shapes.ForwardWindow,
     "forward_seam_pinned": strong_window_shapes.ForwardSeamWindow,
 }
 # escalation.threshold_source names one of these rows: where the
@@ -229,12 +228,11 @@ class EscalationSettings:
     default, re-decodes the escalated window's commit region with its
     past face pinned on the earlier neighbour's committed correction and
     one buffer ahead (Bombin et al. 2303.04846 lines 775-788 and
-    1456-1458); forward is the paper's Sec. III C scheme, and
-    restart_reread_buffer_regions is how many of the strong region's
-    buffer regions the restarted weak window re-reads under the forward
-    shapes; forward_seam_pinned is
-    forward's extent read with no context, both faces pinned, which is
-    Toshio's Sec. III C as it is stated (lines 1248-1259).
+    1456-1458); forward_seam_pinned is the paper's Sec. III C scheme as
+    it is stated, an r_com + 2 r_buf extent read with no context, both
+    faces pinned (lines 1248-1259), and restart_reread_buffer_regions
+    is how many of the strong region's buffer regions the restarted
+    weak window re-reads under it.
     confidence names the signal the weak tier reports and the threshold
     decides on (confidence/signals.py), and the yaml refuses a
     weak decoder whose decode cannot produce that signal's evidence;

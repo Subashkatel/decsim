@@ -68,13 +68,14 @@ class UnionFindDecoder(decoder_module.WindowDecoderBase):
             """Both keys, checked where they enter; absent is the default.
 
             section_name is the tier section the row sits in, which a
-            cycle_count refusal names.
+            weight_step or cycle_count refusal names.
             """
             weight_step = section.get(
                 "weight_step", evidence_records.DEFAULT_WEIGHT_STEP
             )
+            key = f"{section_name}.weight_step"
             normalized_step = evidence_records.normalized_weight_step(
-                weight_step
+                weight_step, key
             )
             block = section.get("cycle_count")
             if block is None:

@@ -324,10 +324,12 @@ def test_a_weight_step_that_is_not_positive_is_refused_with_a_sentence():
         },
     }
 
-    with pytest.raises(ValueError, match="finite and positive"):
+    with pytest.raises(ValueError) as refusal:
         decoder_settings.DecoderSettings.from_yaml(
             section, clocks, "weak_decoder"
         )
+    message = str(refusal.value)
+    assert message == "weak_decoder.weight_step must be finite and positive"
 
 
 def test_the_cycle_count_block_is_read_and_absent_is_none():
@@ -472,9 +474,10 @@ def test_a_manager_clock_the_clocks_do_not_have_is_refused_at_no_cost():
         decoder_settings.DecoderManagerSettings.from_yaml(section, clocks)
 
 
+@pytest.mark.parametrize("section_name", ["weak_decoder", "strong_decoder"])
 @pytest.mark.parametrize("weight_step", [True, "0.1", None])
-def test_a_weight_step_that_is_not_a_number_is_refused_with_a_sentence(
-    weight_step,
+def test_a_weight_step_that_is_not_a_number_is_refused_naming_its_tier(
+    section_name, weight_step
 ):
     """A ValueError, so the experiments layer names the file it is in."""
     clocks = config.ClockSettings({"decoder": 250.0})
@@ -482,10 +485,12 @@ def test_a_weight_step_that_is_not_a_number_is_refused_with_a_sentence(
     section["kind"] = "union_find"
     section["weight_step"] = weight_step
 
-    with pytest.raises(ValueError, match="weight_step must be a real number"):
+    with pytest.raises(ValueError) as refusal:
         decoder_settings.DecoderSettings.from_yaml(
-            section, clocks, "weak_decoder"
+            section, clocks, section_name
         )
+    message = str(refusal.value)
+    assert message == f"{section_name}.weight_step must be a real number"
 
 
 def test_a_cycle_count_block_without_a_clock_is_refused_by_name():

@@ -13,20 +13,18 @@ folds back together.
 
 import csv
 import functools
-import math
 import sys
 from pathlib import Path
 from typing import Optional
 
 import decsim.collect as collect
+import decsim.escalation.settings as escalation_settings
 import decsim.experiments.experiment as experiment
 import decsim.experiments.measure as measure
 import decsim.experiments.plots as plots
 import decsim.experiments.report as report
 import decsim.experiments.residence as residence
 import decsim.experiments.run_folder as run_folder
-
-NATS_TO_DECIBELS = 10.0 / math.log(10.0)
 
 
 def run_sweep(
@@ -175,7 +173,8 @@ def _write_online_threshold_record(
     converts to the paper's decibels.
     """
     summary = calibrator.summary()
-    threshold_db = summary["threshold"] * NATS_TO_DECIBELS
+    final_threshold_nats = summary["threshold"]
+    threshold_db = escalation_settings.nats_to_decibels(final_threshold_nats)
     summary_line = _threshold_summary_line(summary, threshold_db)
     print(summary_line, file=sys.stderr)
     if run_dir is None:
@@ -188,7 +187,7 @@ def _write_online_threshold_record(
         writer = csv.writer(record_file)
         writer.writerow(["window_count", "threshold_db", "event"])
         for window_count, threshold_nats, event in calibrator.trajectory:
-            row_db = threshold_nats * NATS_TO_DECIBELS
+            row_db = escalation_settings.nats_to_decibels(threshold_nats)
             writer.writerow([window_count, row_db, event])
         writer.writerow([summary["windows"], threshold_db, "end"])
 

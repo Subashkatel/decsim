@@ -136,7 +136,7 @@ class PathSettings:
             )
         setup_ticks = _as_count(self.setup_ticks, "setup_ticks")
         object.__setattr__(self, "setup_ticks", setup_ticks)
-        header_bits = _as_count(self.header_bits, "header_bits_per_transfer")
+        header_bits = _as_count(self.header_bits, "header_bits")
         object.__setattr__(self, "header_bits", header_bits)
 
 

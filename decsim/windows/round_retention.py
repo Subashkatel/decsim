@@ -2,9 +2,9 @@
 
 A window holds [start_round, buffer_hi] plus the successor overflow in
 the store its tier reads; when the strong tier may re-decode it, the
-same rounds plus one buffer of context on each side are held as a
-potential strong read (Skoric et al. 2209.08552: the buffer region is
-re-read by the next window) in both stores: in the weak syndrome
+same rounds and the ones a strong redo of it reads (its commit and one
+buffer past it, records/windows.py strong_context_bounds) are held as a
+potential strong read in both stores: in the weak syndrome
 buffer, because the chip keeps them until the verdict and carries them
 up with the escalation (Toshio 2510.25222 lines 1247 to 1250), and in
 the strong syndrome buffer, where they are expected. At admission the
@@ -359,11 +359,9 @@ class RoundRetention:
 
         From the request's first round on, every round the absorbed
         window's own strong window would have read is the request's or
-        the restart window's. The rounds behind that first round are
-        behind the strong window too, and the absorbed window is never
-        decoded, so no reader of them is left: a potential read reaches
-        one buffer behind its commit region, further back than a near
-        face pinned on the commit before it reads.
+        the restart window's. A round behind that first round is behind
+        the strong window too, and the absorbed window is never decoded,
+        so no reader of it is left.
         """
         absorbed = decoding_records.PotentialStrong(key)
         absorbed_identities = self.strong_store.hold_round_identities(absorbed)

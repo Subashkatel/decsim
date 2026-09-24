@@ -1845,8 +1845,8 @@ class EscalationPolicy(Protocol):
     # link) follows from this one declaration.
     primary_tier: window_records.DecoderTier
     # Whether the policy may escalate a window, so the run keeps the
-    # strong syndrome buffer, one buffer of context on each side of every
-    # window, and the strong tier's window side.
+    # strong syndrome buffer, every window's rounds a strong redo would
+    # read, and the strong tier's window side.
     requires_strong_context: bool
     # Whether the policy reads a confidence to decide keep, so the
     # escalation section carries the confidence keys, the weak decoder

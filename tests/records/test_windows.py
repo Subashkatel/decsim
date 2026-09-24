@@ -119,8 +119,8 @@ def test_two_requests_for_one_window_and_tier_differ_by_their_ordinal():
     assert len({first, retry}) == 2
 
 
-def test_strong_context_is_one_buffer_on_each_side_of_the_commit():
-    """A strong redo reads a buffer region past each end of its commit."""
+def test_a_strong_context_starts_at_the_commit_and_ends_a_buffer_past_it():
+    """A pinned past face reads no round behind the commit (Bombin 1456)."""
     window = window_records.Window(
         operation_id=1,
         window_index=2,
@@ -130,18 +130,4 @@ def test_strong_context_is_one_buffer_on_each_side_of_the_commit():
         round_count=5,
     )
     bounds = window_records.strong_context_bounds(window)
-    assert bounds == (5, 7, 9, 11)
-
-
-def test_a_strong_context_is_clipped_at_the_operations_first_round():
-    """The context cannot start before the operation's first round."""
-    window = window_records.Window(
-        operation_id=1,
-        window_index=0,
-        commit_lo=1,
-        commit_hi=3,
-        buffer_hi=5,
-        round_count=5,
-    )
-    bounds = window_records.strong_context_bounds(window)
-    assert bounds == (1, 1, 3, 5)
+    assert bounds == (7, 7, 9, 11)

@@ -461,7 +461,7 @@ def _near_pinned_window_of(
     weak_window: window_records.Window,
 ) -> window_records.Window:
     """The weak window's commit rounds plus one trailing buffer region."""
-    bounds = window_records.near_pinned_bounds(weak_window)
+    bounds = window_records.strong_context_bounds(weak_window)
     return _window_over(
         weak_window.operation_id, weak_window.window_index, bounds
     )

@@ -367,7 +367,7 @@ def _forward_window_settings(
 def test_a_forward_window_crossing_a_later_commit_region_is_refused(
     commit_rounds, buffer_rounds
 ):
-    """The slice note's ruling 5: the crossing shape is decided at build.
+    """The crossing shape is decided at build.
 
     The strong region is commit plus two buffers; when twice the buffer
     is not a multiple of the commit, it ends inside a later window's

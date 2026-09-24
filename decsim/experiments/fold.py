@@ -2,7 +2,7 @@
 
 A run folder records only facts that add up, so folding folders is
 reading their rows and adding them. The rows are what an experiment
-has most of: the 500 shard folders of the 2026-09-09 weak_ler sweep hold
+has most of: the 500 shard folders of one weak_ler sweep hold
 115 million link rows and 10.5 million shot rows, and one row as a dict
 of typed Python values costs about a kilobyte, so reading them into
 lists costs a hundred gigabytes. This module holds what the fold needs
@@ -181,7 +181,7 @@ class ExactSum:
         partials loop stays in this one function because a fold of the
         500-folder experiment adds four hundred million values and each
         call of it walks the whole partials list: measured over a
-        million calls on 2026-09-12, 0.43 us for a value whose
+        million calls, 0.43 us for a value whose
         magnitude is the ones before it (two partials), 1.86 us across a
         1e-30 to 1e30 spread (fourteen), and 0.07 us for a zero, which
         is skipped. That is STYLE.md's one concession to a hot path.

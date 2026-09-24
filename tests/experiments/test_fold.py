@@ -5,8 +5,8 @@ the merged order is the stable sort of the folders' rows, a streamed sum
 is math.fsum of the values it was given, what a fold holds does not grow
 with the shots the folders hold, and a summary reports the latency
 points its folders' rows hold. The third is the reason the module
-exists: `decsim combine` over the 500 shard folders of the 2026-09-09
-weak_ler experiment was OOM-killed at 120 GB while reading their 115
+exists: `decsim combine` over the 500 shard folders of one weak_ler
+experiment was OOM-killed at 120 GB while reading their 115
 million link rows into lists. The fourth is why that experiment can be
 folded at all: its shards hold the sixteen latency points that tree
 measured, and this tree measures twenty-two.
@@ -411,7 +411,7 @@ def _with_a_renamed_point(run_dir, name, renamed):
 def test_a_fold_reports_the_latency_points_the_folders_rows_hold(tmp_path):
     """A newer tree folds the folders an older tree wrote.
 
-    The 500 shard folders of the 2026-09-09 experiment hold sixteen
+    The 500 shard folders of one weak_ler experiment hold sixteen
     latency points and this tree measures twenty-two, so a summary that
     asked for its own columns could not read those folders at all. Here
     two folders lose one point's columns, as an older tree's folders

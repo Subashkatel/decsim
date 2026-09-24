@@ -1,4 +1,4 @@
-# The shared base of the sixteen 2026-09 experiments
+# The shared base of the sixteen decoder experiments
 # (configs/experiments_2026_09/PLAN.md): each of pymatching, union find,
 # Relay-BP and BP-OSD as the weak tier alone, as the strong tier alone
 # (belief matching too), and switching from a weak tier that reports a
@@ -39,7 +39,7 @@ sweep:                             # one table for all sixteen, so the
                                    # histories, reach every decoder: each point
                                    # sized for about 100 logical failures
                                    # (sinter's max_errors rule, applied ahead
-                                   # of time) from the 2026-08-27 strong_ler
+                                   # of time) from the strong_ler pilot's
                                    # rates, floor 400, cap 200,000; four points
                                    # that would see under 3 failures at the cap
                                    # are left out (PLAN.md)

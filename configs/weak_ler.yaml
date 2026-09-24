@@ -1,7 +1,7 @@
 # The weak tier's LER sweep (plot 1). Runs with `decsim collect`;
 # every key is documented in reference.yaml. Shot counts sized from the
-# 2026-08-27 pilot cost table: >= 100 failures where reachable, ~350
-# core-hours total; d 9 and 11 at the two lowest p plot as upper bounds.
+# pilot cost table: >= 100 failures where reachable, ~350 core-hours
+# total; d 9 and 11 at the two lowest p plot as upper bounds.
 #
 # 10.4 M shots is a Slurm array, not one job:
 # `RUN=results/weak_ler sbatch -a 0-199 slurm/slurm_run.sh

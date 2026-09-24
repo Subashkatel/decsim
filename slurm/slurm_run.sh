@@ -39,8 +39,7 @@ python=${DECSIM_PYTHON:-.venv/bin/python}
 # The tree the interpreter imports decsim from, which is the code this
 # task runs, and which is not always the folder the job was submitted
 # from. gem5 prints its version, build date, host and command line at
-# every start for the same reason (tmp/resources/gem5,
-# src/python/m5/main.py:524-537).
+# every start for the same reason (gem5 src/python/m5/main.py:524-537).
 checkout=$("$python" -c \
   'import pathlib, decsim; print(pathlib.Path(decsim.__file__).resolve().parent.parent)')
 if commit=$(git -C "$checkout" rev-parse HEAD 2>/dev/null); then

@@ -1,7 +1,7 @@
 # The strong tier's LER sweep (plot 1). Runs with `decsim collect`;
 # every key is documented in reference.yaml. Shot counts sized from the
-# 2026-08-27 pilot cost table: >= 100 failures where reachable, ~400
-# core-hours total; sub-threshold points at d >= 7 plot as upper bounds.
+# pilot cost table: >= 100 failures where reachable, ~400 core-hours
+# total; sub-threshold points at d >= 7 plot as upper bounds.
 #
 # 1.4 M shots is a Slurm array, not one job: per array task run
 # `decsim collect configs/strong_ler.yaml --out $RUN/$ID

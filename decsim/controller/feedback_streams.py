@@ -126,6 +126,8 @@ class _LiveStream:
     is_close_requested: bool = False
     last_emission_tick: Optional[int] = None
     is_sealed: bool = False
+    # an operation took part of the stream's patch group
+    is_group_split: bool = False
 
 
 class FeedbackStreams:
@@ -258,7 +260,8 @@ class FeedbackStreams:
         stream's windows read those rounds as their buffer (Terhal
         1302.3428 lines 3176-3178; Skoric et al. 2209.08552 lines
         196-199). Every patch of the stream's group must be idle after
-        the same operation.
+        the same operation. Once an operation has started on part of a
+        split group, the patches left idle hold no stream.
         """
         stream_id = self._stream_held_after(operation, patch)
         if stream_id is None:
@@ -266,12 +269,14 @@ class FeedbackStreams:
         if not self.windows.has_dynamic_stream(stream_id):
             return False
         patches = self.table.patches_of_stream(stream_id)
+        live = self._live(stream_id)
         if not self.qpu.are_patches_idle(operation.id, patches):
+            if live.is_group_split:
+                return False
             raise RuntimeError(
                 f"stream {stream_id!r} cannot extend a partially idle patch "
                 f"group {patches!r} after operation {operation.id}"
             )
-        live = self._live(stream_id)
         if live.last_emission_tick == self.engine.now:
             return True
         live.next_round += 1
@@ -302,18 +307,51 @@ class FeedbackStreams:
         A segment's patches hold its stream. Any other detector-emitting
         operation clears them, since its rounds are its own detector
         history; an operation without detector data leaves them as they
-        are.
+        are. An operation that claims only part of a stream's patch group
+        first ends the hold of the whole group (_release_split_groups).
         """
         patches = program_records.patches_of(operation)
+        self._release_split_groups(patches)
         binding = self.bindings.get(operation.id)
         if binding is not None:
             for patch in patches:
                 self.stream_by_patch[patch] = binding.stream_id
+            live = self._live(binding.stream_id)
+            live.is_group_split = False
             return
         if not operation.emits_detector_data:
             return
         for patch in patches:
             self.stream_by_patch.pop(patch, None)
+
+    def _release_split_groups(self, patches) -> None:
+        """End the hold of every stream group the patches claim part of.
+
+        The stream's logical qubit no longer spans its group once part of
+        the group is taken: shrinking a patch measures the released data
+        qubits out (Horsman et al. 1111.4022 lines 349-351; Litinski
+        1808.02892 lines 225-228), so the patches left idle hold no
+        stream and their rounds are the idle policy's. The group keeps
+        the stream until the operation starts (extend_live_stream).
+        """
+        claimed = set(patches)
+        for patch in patches:
+            stream_id = self.stream_by_patch.get(patch)
+            if stream_id is None:
+                continue
+            if not self.windows.has_dynamic_stream(stream_id):
+                continue
+            group = self.table.patches_of_stream(stream_id)
+            if not claimed.issuperset(group):
+                self._release_group(stream_id, group)
+
+    def _release_group(self, stream_id, group) -> None:
+        """No patch of the group holds the stream, and it is split."""
+        for member in group:
+            if self.stream_by_patch.get(member) == stream_id:
+                del self.stream_by_patch[member]
+        live = self._live(stream_id)
+        live.is_group_split = True
 
     def _stream_held_after(self, operation, patch):
         """The unsealed stream the patch holds while idle after the operation.

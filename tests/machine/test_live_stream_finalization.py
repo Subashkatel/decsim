@@ -211,6 +211,62 @@ def _window_recorder(windows: list):
     return listener
 
 
+@pytest.mark.parametrize("idle_policy", ["separate_decode_jobs", "ignore"])
+def test_a_stream_group_shrunk_to_one_patch_runs_to_completion(
+    idle_policy: str,
+) -> None:
+    """A stream on patches 0 and 1, then an operation on patch 0 alone.
+
+    Once the operation starts, patch 1 holds no stream and idles for the
+    policy, so the run ends as it did before idle patches continued
+    their streams.
+    """
+    ticks = _shrunk_group_run(None, idle_policy)
+    assert ("started", 2) in ticks
+
+
+@pytest.mark.parametrize("idle_policy", ["separate_decode_jobs", "ignore"])
+def test_a_shrunk_group_gives_the_waiting_decision_its_buffer(
+    idle_policy: str,
+) -> None:
+    """While the operation on patch 0 waits, both patches stay idle.
+
+    Both continue the stream, so its last window reads its three buffer
+    rounds from them and the release follows the third.
+    """
+    ticks = _shrunk_group_run(1, idle_policy)
+    wait_ticks = ticks[("released", 2)] - ticks[("finished", 1)]
+    assert 3 * 1_100_000 < wait_ticks < 4 * 1_100_000
+
+
+def _shrunk_group_run(blocked_by, idle_policy: str) -> dict:
+    """The runtime's ticks for a two-patch stream then a patch-0 operation."""
+    group = (0, 1)
+    owner = program_records.Operation(100, "memory", group, patches=group)
+    segment = dataclasses.replace(
+        owner, id=1, name="segment", stream_id=100, stream_offset=0
+    )
+    later = program_records.Operation(
+        2, "later", (0,), patches=(0,), predecessors=(1,), blocked_by=blocked_by
+    )
+    policy = round_policies.PerOperationRounds({100: 0, 1: 3, 2: 1})
+    workload = workload_settings.WorkloadSettings(
+        operations=(segment, later),
+        dynamic_streams=(owner,),
+        rounds_policy=policy,
+    )
+    clock = config.Clock(1000)
+    engine = decoder_settings.EngineSettings(clock=clock)
+    decoder = decoder_settings.DecoderSettings(kind=0.1, engine=engine)
+    idle = controller_settings.IdlePolicySettings(kind=idle_policy)
+    settings = machine_settings.MachineSettings(
+        workload=workload, weak_decoder=decoder, idle_policy=idle
+    )
+    machine = machine_module.Machine.build(settings, 0)
+    events, _ = _events_and_end(machine)
+    return {(kind, operation): tick for kind, operation, tick in events}
+
+
 def _segment(
     operation_id: int, stream_offset: int, predecessors: tuple
 ) -> program_records.Operation:

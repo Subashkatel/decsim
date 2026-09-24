@@ -208,6 +208,39 @@ def test_a_sealed_stream_is_continued_by_no_idle_patch() -> None:
     assert qpu.emissions == []
 
 
+@pytest.mark.parametrize("emits_detector_data", [True, False])
+def test_an_operation_on_part_of_a_group_ends_the_groups_stream(
+    emits_detector_data: bool,
+) -> None:
+    """The group keeps the stream until the operation starts, then none.
+
+    Taking part of the group shrinks the logical qubit's footprint, so
+    the patch left idle holds no stream and its round is the policy's.
+    """
+    follower = _operation(
+        2, patches=("A",), emits_detector_data=emits_detector_data
+    )
+    program = _unprotected_group_program()
+    operations = program.operations + (follower,)
+    program = dataclasses.replace(program, operations=operations)
+    engine = engine_module.Engine()
+    qpu = _RoundLogQpu(engine, idle_group=(1, ("A", "B")))
+    windows = _Windows()
+    streams = _streams(
+        program, regions=(), engine=engine, qpu=qpu, window_manager=windows
+    )
+    segment = program.operations[0]
+    streams.begin(segment)
+    streams.begin(follower)
+    assert streams.extend_live_stream(segment, "B") is True
+    qpu.idle_group = (1, ("B",))
+    extend = functools.partial(streams.extend_live_stream, segment, "B")
+    engine.schedule(1000, extend)
+    engine.run()
+    assert qpu.emissions == [(7, 7, 0, False)]
+    assert streams.extend_live_stream(follower, "A") is False
+
+
 def test_a_partial_idle_group_cannot_advance_its_joint_physical_history() -> (
     None
 ):

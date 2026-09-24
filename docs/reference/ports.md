@@ -434,6 +434,7 @@ The QPU, as the controller sees it.
 | `are_patches_idle` | Every patch is idle after this same operation, as the QPU owns it. |
 | `emit_idle_stream_round` | Deliver one protection round, including readout when it is final. |
 | `emit_feedback_memory_round` | Deliver the timing-only round of an idle patch. |
+| `validate_stream_length` | Refuse a seal whose length differs from the rounds executed. |
 
 ### `SyndromeSource`
 

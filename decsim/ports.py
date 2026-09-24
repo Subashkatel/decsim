@@ -1354,6 +1354,17 @@ class Qpu(Protocol):
     ) -> None:
         """Deliver the timing-only round of an idle patch."""
 
+    def validate_stream_length(
+        self,
+        stream_operation: program_records.Operation,
+        stream_round_count: int,
+    ) -> None:
+        """Refuse a seal whose length differs from the rounds executed.
+
+        The controller asks before it seals a stream: only the QPU's
+        source can attest that the stream physically ended there.
+        """
+
 
 @runtime_checkable
 class SyndromeSource(Protocol):

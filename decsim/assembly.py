@@ -177,7 +177,6 @@ WIRES = (
     ("planner.models", "models"),
     ("tracker.scheme", "scheme"),
     ("tracker.planner", "planner"),
-    ("tracker.source", "syndrome_source"),
     ("retention.weak_store", "weak_syndrome_buffer"),
     ("retention.strong_store", "strong_syndrome_buffer"),
     ("retention.planner", "planner"),

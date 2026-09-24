@@ -53,6 +53,31 @@ def test_a_protected_group_emits_and_releases_once_per_shared_cycle() -> None:
     assert not streams.is_live_protected_patch("B")
 
 
+def test_a_seal_the_qpu_refuses_never_reaches_the_windows() -> None:
+    """Only the QPU's source saw the rounds, so it attests before the seal."""
+    program = _group_program()
+    engine = engine_module.Engine()
+    qpu = _RoundLogQpu(engine)
+    qpu.refused_length = 2
+    windows = _Windows()
+    streams = _streams(
+        program,
+        regions=program.protected_regions,
+        engine=engine,
+        qpu=qpu,
+        window_manager=windows,
+    )
+    streams.runtime = _Runtime()
+    first, final = program.operations
+    streams.begin(first)
+    close = functools.partial(streams.request_closes, final)
+    engine.schedule(2000, close)
+    with pytest.raises(RuntimeError, match="sealed length differs"):
+        engine.run()
+    assert qpu.attested_lengths == [(7, 2)]
+    assert windows.seals == []
+
+
 def test_a_group_endpoint_must_hold_every_owner_patch() -> None:
     program = _group_program()
     first, final = program.operations
@@ -496,6 +521,11 @@ class _Qpu:
     ) -> None:
         """One protected round."""
 
+    def validate_stream_length(
+        self, stream_operation: program_records.Operation, round_count: int
+    ) -> None:
+        """Every length is the one executed."""
+
 
 class _Windows:
     """The window side the seal reaches."""
@@ -530,6 +560,9 @@ class _RoundLogQpu:
         self.emissions: list[tuple] = []
         self.emission_owner_ids: list[int] = []
         self.idle_group = idle_group
+        self.attested_lengths: list[tuple] = []
+        # a seal at this length differs from the rounds executed
+        self.refused_length: Optional[int] = None
 
     def are_patches_idle(self, operation_id: Any, patches: tuple) -> bool:
         """Only the explicitly declared group is idle after that operation."""
@@ -547,6 +580,14 @@ class _RoundLogQpu:
         self.emission_owner_ids.append(operation.id)
         emission = (stream_id, stream_round, self.engine.now, is_final)
         self.emissions.append(emission)
+
+    def validate_stream_length(
+        self, stream_operation: program_records.Operation, round_count: int
+    ) -> None:
+        """Record the attestation; refuse the one length the test names."""
+        self.attested_lengths.append((stream_operation.id, round_count))
+        if round_count == self.refused_length:
+            raise RuntimeError("sealed length differs from executed rounds")
 
 
 class _CrossingRegionRuntime:

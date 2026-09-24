@@ -142,6 +142,16 @@ class QPUDevice:
         )
         self._deliver(payloads, operation)
 
+    def validate_stream_length(
+        self,
+        stream_operation: program_records.Operation,
+        stream_round_count: int,
+    ) -> None:
+        """The source's own answer: it alone saw the rounds it executed."""
+        self.syndrome_source.validate_stream_length(
+            stream_operation, stream_round_count
+        )
+
     def emit_feedback_memory_round(
         self, operation_id: Any, patch: Any, round_index: int
     ) -> None:

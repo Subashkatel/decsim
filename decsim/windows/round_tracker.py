@@ -13,7 +13,7 @@ counter. A stream's length knowledge (its source limit, its sealed length, its
 closed feedback boundaries) lives here; its geometry is the planner's.
 """
 
-from typing import Any, Optional
+from typing import Optional
 
 import decsim.ports as ports
 import decsim.records.identity as identity_records
@@ -28,7 +28,6 @@ class RoundTracker:
 
     scheme = ports.Port(ports.WindowingScheme)
     planner = ports.Port(window_planner.WindowPlanner)
-    source = ports.Port(ports.SyndromeSource)
 
     def __init__(self) -> None:
         self.operation_by_id: dict = {}
@@ -131,20 +130,6 @@ class RoundTracker:
             return False
         arrived = self.rounds_arrived(stream_id)
         return arrived >= stream.source_round_limit
-
-    def finalize_stream_models(
-        self, stream_id: Any, stream_round_count: int
-    ) -> bool:
-        """Validate physical completion before fixing the terminal models.
-
-        The stream identity is opaque; only its declared source can attest
-        physical completion, independently of the selected model provider.
-        """
-        stream_operation = self.operation_by_id[stream_id]
-        self.source.validate_stream_length(stream_operation, stream_round_count)
-        return self.planner.models.finalize_stream_models(
-            stream_operation, stream_round_count
-        )
 
     def seal(self, stream_id, stream_round_count: int) -> None:
         """The stream's full length has arrived."""

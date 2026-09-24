@@ -96,6 +96,13 @@ def test_a_run_that_decides_on_no_confidence_has_no_gap_join_row():
     assert "strong_redecode" in names
 
 
+def test_a_run_whose_burst_detector_is_none_has_no_detector_row():
+    settings = _switching_settings()
+    parts = _parts_of(settings)
+    names = _seat_names(parts)
+    assert "burst_detector" not in names
+
+
 def test_an_escalating_run_builds_the_room_side():
     settings = _switching_settings()
     parts = _parts_of(settings)

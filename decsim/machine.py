@@ -31,9 +31,9 @@ what tools/check_uses_graph.py prints and check.sh enforces:
 
     0  config, records, tables, trace_source
     1  engine, ports, seeding
-    2  detector_error_model, escalation, links, pauli_frame,
-       syndrome_buffer, windows
-    3  controller, decoders, qpu
+    2  detector_error_model, links, pauli_frame, syndrome_buffer,
+       windows
+    3  controller, decoders, escalation, qpu
     4  confidence, frontends, observe
     5  settings
     6  build
@@ -153,8 +153,11 @@ class Machine:
             settings.escalation, settings.weak_decoder
         )
         plan = plan_build.build_plan(settings, escalation_policy)
+        burst_detector = escalation_build.build_burst_detector(
+            settings, engine, plan, escalation_policy
+        )
         detection_events = controller_side.build_detection_events(
-            settings, plan.device
+            settings, plan.device, burst_detector
         )
         pool = decoder_build.build_decoder_pool(
             settings, plan, escalation_policy, detection_events
@@ -173,6 +176,7 @@ class Machine:
             escalation_policy=escalation_policy,
             pool=pool,
             detection_events=detection_events,
+            burst_detector=burst_detector,
         )
         seats = assembly.build_seats(parts)
         wires = assembly.wires_for(parts)

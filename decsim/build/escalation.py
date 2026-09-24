@@ -161,3 +161,84 @@ def _sweep_point_source(settings: escalation_settings.EscalationSettings):
             "through it"
         )
     return settings.online_threshold
+
+
+def build_burst_detector(settings, engine, plan, escalation_policy):
+    """The detector burst_detector.kind names; None for the row none.
+
+    The detector feeds escalation, so a policy that never escalates is
+    refused beside it; it counts detection events, so every operation
+    it counts brings the circuit they are formed from, and it is
+    calibrated from that circuit and its round count.
+    """
+    section = settings.burst_detector
+    row = tables.row(
+        escalation_settings.BURST_DETECTORS,
+        "burst_detector.kind",
+        section.kind,
+    )
+    if row is None:
+        return None
+    _refuse_a_policy_that_cannot_escalate(section.kind, escalation_policy)
+    circuits = _counted_circuits(section, plan)
+    return row(section.row_settings, engine, circuits)
+
+
+def _refuse_a_policy_that_cannot_escalate(kind: str, escalation_policy):
+    if escalation_policy.requires_strong_context:
+        return
+    raise ValueError(
+        f"burst_detector.kind {kind} sends a burst's windows to the "
+        "strong decoder, which only escalation.kind switching does; "
+        "write burst_detector: {kind: none}, or escalate with switching"
+    )
+
+
+def _counted_circuits(section, plan) -> dict:
+    """Each counted operation's circuit and round count, by operation id."""
+    round_count_by_operation = {}
+    for resolved in plan.run_plan.resolved_operations:
+        operation_id = resolved.operation_id
+        round_count_by_operation[operation_id] = resolved.round_count
+    circuits = {}
+    for operation in plan.planned_operations:
+        _refuse_an_uncounted_operation(operation)
+        round_count = round_count_by_operation[operation.id]
+        _refuse_a_short_operation(section, operation, round_count)
+        circuits[operation.id] = (operation.circuit, round_count)
+    return circuits
+
+
+def _refuse_an_uncounted_operation(operation) -> None:
+    """The detector counts one standalone operation's events per circuit."""
+    if operation.circuit is None:
+        raise ValueError(
+            f"operation {operation.id} has no circuit, so no detection "
+            "events are formed for the burst detector to count"
+        )
+    if operation.stream_id is not None:
+        raise ValueError(
+            f"operation {operation.id} is a segment of stream "
+            f"{operation.stream_id!r}; the burst detector counts "
+            "standalone operations, one circuit each"
+        )
+
+
+def _refuse_a_short_operation(section, operation, round_count: int) -> None:
+    """A law is read off a slab of bulk rounds inside the operation.
+
+    Round one has no bulk detector and the last round is kept off the
+    slab, so the longer window needs two rounds more than itself.
+    """
+    row_settings = section.row_settings
+    patch_window = row_settings.patch_window_rounds
+    detector_window = row_settings.detector_window_rounds
+    longest_window = max(patch_window, detector_window)
+    fewest_rounds = longest_window + 2
+    if round_count >= fewest_rounds:
+        return
+    raise ValueError(
+        f"operation {operation.id} has {round_count} rounds; the burst "
+        f"detector's windows need at least {fewest_rounds}, two more "
+        "than its longer window"
+    )

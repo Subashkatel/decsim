@@ -19,8 +19,8 @@ sections, in the order the root reads them:
 
 `clocks`, `qpu`, `controller`, `idle_policy`, `links`, `weak_syndrome_buffer`,
 `strong_syndrome_buffer`, `windows`, `weak_decoder`, `strong_decoder`,
-`decoder_manager`, `escalation`, `pauli_frame`, `workload`,
-`magic_state_factory`, `observation`.
+`decoder_manager`, `escalation`, `burst_detector`, `pauli_frame`,
+`workload`, `magic_state_factory`, `observation`.
 
 A section a component owns carries a `kind` key naming a row of that
 component's table, and [The plug-in tables](tables.md) lists every table with

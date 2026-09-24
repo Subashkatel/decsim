@@ -12,14 +12,14 @@ correction, the frame releases the controller, the controller instructs
 the QPU, and every hop between components rides a link.
 
 The pluggable parts (SyndromeSource, SyndromeBuffer, Decoder,
-StrongBackend, Link, EscalationPolicy, ThresholdSource, ConfidenceSignal,
-WindowingScheme, IdlePolicy) have their abstract class here, sinter's
-Decoder shape (sinter/_decoding/_decoding_decoder_class.py, one class
-with the methods a row of the table must offer), written as a Protocol
-because the implementations fill it without inheriting. Observation
-(metrics, the traffic ledger, the trace) reaches a component through
-callbacks it fires, never through a port, so every component runs with
-no observer.
+StrongBackend, Link, EscalationPolicy, BurstDetector, ThresholdSource,
+ConfidenceSignal, WindowingScheme, IdlePolicy) have their abstract
+class here, sinter's Decoder shape
+(sinter/_decoding/_decoding_decoder_class.py, one class with the methods
+a row of the table must offer), written as a Protocol because the
+implementations fill it without inheriting. Observation (metrics, the
+traffic ledger, the trace) reaches a component through callbacks it
+fires, never through a port, so every component runs with no observer.
 
 A component names its neighbours by declaring a Port (below) for each
 one, and the root binds them by assignment once every component exists.
@@ -1864,6 +1864,33 @@ class EscalationPolicy(Protocol):
         self, window_key: tuple, result: decoding_records.DecodeResult
     ) -> None:
         """The strong tier answered for the window; a source may learn."""
+
+
+@runtime_checkable
+class BurstDetector(Protocol):
+    """Whether an error burst is under way, read off the detection events.
+
+    Table rows: none and event_count (BURST_DETECTORS,
+    escalation/settings.py), named by burst_detector.kind; none builds
+    no detector. The former the detection event placement forms through
+    hands every round to observe_round as it forms it, in round order;
+    the switching policy asks is_burst_window at a verdict, and the
+    strong regions ask with_burst_priors for a strong window's model.
+    Both answers read only the rounds the detector has published by the
+    engine's current tick, so its own latency delays them. The model is
+    the detector error model's record, named here by position only.
+    """
+
+    def observe_round(
+        self, operation_id: Any, round_index: int, events: Sequence[int]
+    ) -> None:
+        """Count one round's detection events, in detector order."""
+
+    def is_burst_window(self, window: window_records.Window) -> bool:
+        """Whether a burst the detector has flagged meets the window."""
+
+    def with_burst_priors(self, window: window_records.Window, model):
+        """The window's model with the burst region's priors raised."""
 
 
 @runtime_checkable

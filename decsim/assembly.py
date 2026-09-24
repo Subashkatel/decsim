@@ -18,7 +18,7 @@ takes None and binds nothing.
 
 A run the machine has no use for a seat in has no SEATS row for it and
 no WIRES row either, so no port is ever bound to None; seats_for reads
-the five conditions that decide that, once.
+the six conditions that decide that, once.
 
 Two rows name a seat another row built, because the class takes that
 neighbour at construction and cannot take it as a port: the primary
@@ -72,6 +72,10 @@ def _detection_events(parts):
     return parts.detection_events
 
 
+def _burst_detector(parts):
+    return parts.burst_detector
+
+
 SEATS = (
     ("escalation_policy", _escalation_policy),
     ("scheme", _scheme),
@@ -81,6 +85,7 @@ SEATS = (
     ("syndrome_source", _syndrome_source),
     ("router", _router),
     ("detection_events", _detection_events),
+    ("burst_detector", _burst_detector),
     ("conditional_release", controller_side.build_conditional_release),
     ("links", store_build.build_links),
     ("held_rounds", store_build.build_held_rounds),
@@ -430,6 +435,8 @@ def _absent_named_seats(parts: build_parts.Parts) -> set:
         absent.update(("confidence_signal", "gap_join"))
     if parts.plan.error_model_provider is None:
         absent.add("error_model_provider")
+    if parts.burst_detector is None:
+        absent.add("burst_detector")
     return absent
 
 

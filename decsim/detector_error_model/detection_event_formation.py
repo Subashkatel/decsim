@@ -241,6 +241,32 @@ class RememberedDetectionEvents:
         )
 
 
+class ObservedDetectionEvents:
+    """A former that hands every round it forms to the burst detector.
+
+    The detector reads the events where they are formed, once per round
+    and in round order (ports.py BurstDetector), so the placement row
+    that forms them is wrapped around this former and nothing else
+    changes: the values it returns are the source's own.
+    """
+
+    def __init__(
+        self,
+        former: ports.DetectionEventFormer,
+        burst_detector: ports.BurstDetector,
+    ) -> None:
+        self.former = former
+        self.burst_detector = burst_detector
+
+    def form_round(
+        self, operation_id: Any, round_index: int, raw_bits: Sequence[int]
+    ) -> tuple:
+        """The round's detection events, counted by the detector first."""
+        events = self.former.form_round(operation_id, round_index, raw_bits)
+        self.burst_detector.observe_round(operation_id, round_index, events)
+        return events
+
+
 def sized_by_its_bits(
     fragment: round_records.RetainedSyndromeFragment,
 ) -> round_records.RetainedSyndromeFragment:

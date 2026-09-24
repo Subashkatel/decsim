@@ -276,6 +276,51 @@ escalation:
 #                                  # restart window owns the faults of the
 #                                  # rounds it reads
 
+burst_detector:
+  kind: none                       # none | event_count. none builds no
+                                   # detector. event_count counts each
+                                   # round's bulk detection events where
+                                   # they are formed and flags a burst; a
+                                   # flagged window escalates under
+                                   # escalation.kind switching, the only kind
+                                   # it is accepted with. Its keys (refused
+                                   # under none, so documented as comments):
+# burst_detector:
+#   kind: event_count
+#   patch_window_rounds: 4         # W: fires when the patch's events over
+#                                  # the last W rounds pass their threshold
+#                                  # (Tan 2406.18897 lines 956-966 at W = 1)
+#   detector_window_rounds: 20     # c_win: fires when one stabiliser
+#                                  # position's events over the last c_win
+#                                  # rounds pass its own threshold (Q3DE
+#                                  # 2501.00331 lines 713-727)
+#   false_alarms_per_round: 1.0e-6 # the detector's false-alarm budget per
+#                                  # round per patch, half for each count,
+#                                  # the per-position half split evenly
+#                                  # over the positions; a threshold is the
+#                                  # smallest count whose tail under the
+#                                  # usual rates is at most its share,
+#                                  # calibrated from the operation's own
+#                                  # circuit
+#   rate_tracking_rounds: 10000    # time constant of each position's usual
+#                                  # rate, an exponential average frozen
+#                                  # while a flag fires (DGR 2311.16214
+#                                  # lines 216-218)
+#   clock: fridge                  # a clocks domain; needed when
+#                                  # cycles_per_round is above 0
+#   cycles_per_round: 0            # what counting one round costs; a
+#                                  # round's verdict is published that many
+#                                  # cycles after it is formed, rounds in
+#                                  # order. 0 leaves it unpriced (Q3DE gives
+#                                  # no count, lines 1428-1434)
+#   raise_strong_priors: false     # true gives a flagged strong window's
+#                                  # model the burst priors: the faults at
+#                                  # the anomalous positions in the flagged
+#                                  # rounds get their priors scaled to
+#                                  # explain the measured rate, the graph
+#                                  # unchanged (IonQ 2608.25027 lines
+#                                  # 334-340)
+
 workload:
   kind: memory_circuit             # memory_circuit | memory_patches are the
                                    # yaml rows; the other rows (circuit_list,

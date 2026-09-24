@@ -1,10 +1,10 @@
 """An independent reading of Meister et al. 2405.07433 Definition 9.
 
-Written for round V1 from the paper text alone, not from decsim's code.
+Written from the paper text alone, not from decsim's code.
 
-Definition 1 (line 209 of tmp/papers/txt/2405.07433.txt): the cluster set
-is the union of balls B_{r_v}(v) in the metric space X_G, so a ball may
-cover part of an edge, not only whole edges.
+Definition 1 (line 209): the cluster set is the union of balls
+B_{r_v}(v) in the metric space X_G, so a ball may cover part of an edge,
+not only whole edges.
 
 Definition 9 (lines 511-520): "Define a new metric space (X'_GD, d'_GD)
 that is the quotient of (X_GD, d_GD) by each C_i i.e. identify each C_i

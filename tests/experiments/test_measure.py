@@ -28,6 +28,7 @@ is the decoder-to-decoder seam.
 """
 
 import math
+from typing import Optional
 
 import pytest
 import yaml
@@ -175,6 +176,7 @@ def switching_run(
     strong_units: int = 1,
     observation: tuple = (),
     patch_count: int = 1,
+    commit_rounds: Optional[int] = None,
 ):
     """One collected shot of a 1.0 us weak tier beside a 10.0 us one.
 
@@ -183,9 +185,14 @@ def switching_run(
     run_both_at_once starts the strong sibling with the weak job and
     cancels it when the weak result is kept, which is Toshio et al.
     2510.25222 Sec. III A step 1. observation names the section's flags
-    the shot turns on; more than one patch runs the memory_patches row.
+    the shot turns on; more than one patch runs the memory_patches row;
+    commit_rounds sets windows.commit_rounds, the code distance when
+    None.
     """
     raw = dict(MINIMAL_CONFIG)
+    windows = dict(MINIMAL_CONFIG["windows"])
+    windows["commit_rounds"] = commit_rounds
+    raw["windows"] = windows
     raw["observation"] = dict.fromkeys(observation, True)
     workload = dict(MINIMAL_CONFIG["workload"])
     workload["rounds_per_shot"] = 30
@@ -542,6 +549,40 @@ def test_toshios_per_decode_bound_is_commit_time_over_escalated_share(
     assert measurement.strong_decoded_rounds == 57
     assert measurement.strong_service_mean_us == 10.0628
     assert rows[0]["strong_service_bound_us"] == 3.0
+    assert rows[0]["escalated_windows"] == 10
+
+
+def test_the_per_decode_bound_reads_r_com_off_the_commit_rounds_column(
+    tmp_path,
+):
+    """Theorem 1 per decode at r_com = 2, not d = 3.
+
+    With windows.commit_rounds 2 the window period is 2 tau_gen, so
+    tau_gen r_com windows / escalated windows is 1.0 us x 2 x 15 / 15 =
+    2 us over the fifteen windows of 30 rounds, every one escalated
+    (Toshio 2510.25222 eq. (6), gamma_switch per d rounds, lines
+    1254-1255). A bound read with r_com = d would say 3 us.
+    """
+    shot = switching_run(tmp_path, 1000000.0, commit_rounds=2)
+    measurement = measure.measure_shot(shot)
+    record = report.record_of([measurement])
+    rows = report.summarize(record.shots, record.window_samples)
+
+    assert record.shots[0]["commit_rounds"] == 2
+    assert measurement.windows == 15
+    assert measurement.escalated_windows == 15
+    assert rows[0]["strong_service_bound_us"] == 2.0
+
+
+def test_a_folder_without_commit_rounds_gets_no_bound(tmp_path):
+    """An older tree's shots name no r_com, so the point states no bound."""
+    measurement = switching_shot(tmp_path, 1000000.0)
+    record = report.record_of([measurement])
+    older_shot = dict(record.shots[0])
+    del older_shot["commit_rounds"]
+    rows = report.summarize([older_shot], record.window_samples)
+
+    assert "strong_service_bound_us" not in rows[0]
     assert rows[0]["escalated_windows"] == 10
 
 

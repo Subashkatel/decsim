@@ -150,11 +150,13 @@ class ShotMeasurement:
     weak_busy_fraction: float
     strong_busy_fraction: float
     # the windows the strong tier committed, the rounds its decodes read
-    # and their mean service: the report forms Toshio's Theorem 1 bound
-    # on that service per sweep point from the first (2510.25222 eq. (6))
+    # and their mean service, and r_com, the rounds a window commits: the
+    # report forms Toshio's Theorem 1 bound on that service per sweep
+    # point from the first and the last (2510.25222 eq. (6))
     escalated_windows: int
     strong_decoded_rounds: int
     strong_service_mean_us: float
+    commit_rounds: int
     # Skoric's least count of parallel decoding processes, ceil(2 tau_W
     # / ((n_com + n_W) tau_rd)) (2209.08552 lines 429-438)
     parallel_processes_needed: int
@@ -652,12 +654,20 @@ def chain_load(
     service_us = _mean_or_zero(samples["service"])
     confidence_us = _mean_or_zero(samples["confidence"])
     handoff_us = _mean_or_zero(samples["dd_per_window"])
-    commit_rounds = settings.windows.commit_rounds
-    if commit_rounds is None:
-        commit_rounds = distance
+    commit_rounds = commit_round_count(settings, distance)
     inter_arrival_us = commit_rounds * round_period_microseconds
     chain_us = service_us + confidence_us + handoff_us
     return chain_us / inter_arrival_us
+
+
+def commit_round_count(
+    settings: machine_settings.MachineSettings, distance: int
+) -> int:
+    """r_com: the rounds a window commits, the code distance when null."""
+    commit_rounds = settings.windows.commit_rounds
+    if commit_rounds is None:
+        return distance
+    return commit_rounds
 
 
 def active_decoder_kind(settings: machine_settings.MachineSettings):
@@ -726,6 +736,7 @@ def _measurement(
     referee = _referee_counts(observation)
     decoded_windows = len(samples["service"])
     load = chain_load(samples, settings, distance, round_period_microseconds)
+    commit_rounds = commit_round_count(settings, distance)
     algorithm = active_decoder_kind(settings)
     queued = observation.queue_depth.peak
     primary_tier = escalation_build.primary_tier(settings.escalation)
@@ -763,6 +774,7 @@ def _measurement(
         escalated_windows=strong.windows,
         strong_decoded_rounds=strong.rounds,
         strong_service_mean_us=strong.service_mean_us,
+        commit_rounds=commit_rounds,
         parallel_processes_needed=processes,
         weak_syndrome_weight_mean=tiers.weak_syndrome_weight_mean,
         weak_syndrome_weight_max=tiers.weak_syndrome_weight_max,
@@ -1173,9 +1185,7 @@ def parallel_processes_needed(
     needs; the serial chain's own condition is chain_load.
     """
     service_us = _mean_or_zero(samples["service"])
-    commit_rounds = settings.windows.commit_rounds
-    if commit_rounds is None:
-        commit_rounds = distance
+    commit_rounds = commit_round_count(settings, distance)
     buffer_rounds = settings.windows.buffer_rounds
     if buffer_rounds is None:
         buffer_rounds = distance

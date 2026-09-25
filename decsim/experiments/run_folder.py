@@ -1,16 +1,11 @@
-"""The run folder: where a sweep's results, config and identity land.
+"""The run folder: where a run's results, config and identity land.
 
-results/<utc stamp>-<name>/, never reused unless the caller names one
-with --out; the config chain copied verbatim beside the rows, any
-uncommitted or untracked code as a patch, and a manifest that says which
-commit, container, host, packages and compiled Union-Find library
-produced them. Each sweep point, named by its content, has every value
-it ran with in resolved/ and the workload it ran in inputs/, and the
-maker that made it is in producer.json, so a rerun needs neither the
-yaml's maker nor its defaults. A folder whose run ended holds the
-finished flag. gem5
-writes its output to m5out/ the same way, out of the code tree and
-never overwritten (src/python/m5/main.py --outdir).
+results/<utc stamp>-<name>/, or the folder --out names, holds the config
+chain, the code state as a patch, a manifest of the commit, container,
+host and packages, each sweep point's values (resolved/) and workload
+(inputs/), the maker (producer.json), and the finished flag last. gem5
+writes m5out/ the same way, out of the code tree and never overwritten
+(src/python/m5/main.py --outdir).
 """
 
 import datetime
@@ -23,6 +18,7 @@ import platform
 import shutil
 import subprocess
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Optional
 
@@ -30,7 +26,9 @@ import decsim.build.escalation as escalation_build
 import decsim.build.plan as plan_build
 import decsim.collect as collect
 import decsim.decoders.union_find.compiled_decoder as compiled_decoder
+import decsim.experiments.experiment as experiment
 import decsim.frontends.circuit_frontend as circuit_frontend
+import decsim.frontends.settings as workload_settings
 
 RESULTS_DIR = Path("results")
 RESOLVED_FOLDER = "resolved"
@@ -93,7 +91,7 @@ def new_run_dir(config) -> Path:
 
 
 def start_run(
-    config,
+    config: Optional[experiment.ExperimentConfig],
     run_dir: Path,
     *,
     shard: Optional[tuple] = None,
@@ -101,8 +99,7 @@ def start_run(
 ) -> str:
     """The code state and the manifest, before the first shot; the time.
 
-    config is None for a run no yaml describes (tools/deltakit_example.py
-    and tools/live_memory_example.py), whose values are in resolved/.
+    config is None for a run no yaml describes (the tools/ examples).
     """
     snapshot_code_state(config, run_dir)
     started_utc = utc_now()
@@ -112,7 +109,7 @@ def start_run(
 
 
 def finish_run(
-    config,
+    config: Optional[experiment.ExperimentConfig],
     run_dir: Path,
     started_utc: str,
     *,
@@ -126,7 +123,9 @@ def finish_run(
     mark_finished(run_dir)
 
 
-def snapshot_code_state(config, run_dir: Path) -> None:
+def snapshot_code_state(
+    config: Optional[experiment.ExperimentConfig], run_dir: Path
+) -> None:
     """Copy the run's exact inputs next to its results.
 
     The config chain goes verbatim into config/, and any uncommitted code
@@ -170,7 +169,7 @@ def read_the_tree() -> None:
 
 
 def write_manifest(
-    config,
+    config: Optional[experiment.ExperimentConfig],
     run_dir: Path,
     started_utc: str,
     finished_utc: Optional[str] = None,
@@ -241,16 +240,15 @@ def write_combined_manifest(
     _write_the_manifest(manifest, run_dir)
 
 
-def record_point(run_dir: Path, task, seeds: Optional[list] = None) -> str:
-    """One sweep point's every value and its workload, named by content.
+def record_point(
+    run_dir: Path, task: collect.Task, seeds: Optional[list] = None
+) -> str:
+    """One sweep point's values and workload, named by its strong id.
 
-    resolved/<id>.json holds the point's metadata, the seeds it ran
-    when they are known (seed_ranges), every setting, and the values
-    the build derives from the settings a shot runs (_built_values);
-    inputs/<id>/ holds the workload the point ran as the files row
-    reads it (circuit_frontend.write_workload), with each file's sha256
-    in hashes.json, so a rerun needs no maker installed. id is the task's
-    strong id, the name the collect gives it. Returns it.
+    resolved/<id>.json holds the metadata, the seed ranges run, every
+    setting and the values the build derives; inputs/<id>/ holds the
+    workload as the files row reads it, with each file's sha256 in
+    hashes.json, so a rerun needs no maker installed. Returns the id.
     """
     point_id = task.strong_id()
     settings = task.settings
@@ -273,13 +271,13 @@ def record_point(run_dir: Path, task, seeds: Optional[list] = None) -> str:
     return point_id
 
 
-def write_producer(run_dir: Path, workload) -> None:
-    """producer.json: the maker a producer row names, when it names one.
+def write_producer(
+    run_dir: Path, workload: workload_settings.WorkloadSettings
+) -> None:
+    """producer.json: a producer row's maker, arguments and package version.
 
-    Its name as the yaml gives it, its yaml arguments and the version of
-    the package that ships it (importlib.metadata). The name's first
-    dotted word is that package in both forms pkgutil.resolve_name
-    reads, module:function and module.function.
+    The name's first dotted word is the package in both forms
+    pkgutil.resolve_name reads, module:function and module.function.
     """
     if workload.kind != "producer":
         return
@@ -307,6 +305,43 @@ def is_finished(run_dir: Path) -> bool:
     """Whether a run into this folder ended, which a rerun then skips."""
     finished_path = Path(run_dir) / FINISHED_FILE
     return finished_path.exists()
+
+
+def point_of(row: Mapping) -> tuple:
+    """The sweep point a sweep.csv row or a point's metadata names."""
+    values = []
+    for axis in experiment.SWEEP_AXES:
+        value = row.get(axis)
+        values.append(value)
+    return tuple(values)
+
+
+def resolved_by_point(run_dir: Path) -> dict:
+    """Each point's resolved/ record, keyed by its sweep point."""
+    records = {}
+    resolved_dir = Path(run_dir) / RESOLVED_FOLDER
+    paths = resolved_dir.glob("*.json")
+    for path in sorted(paths):
+        text = path.read_text()
+        record = json.loads(text)
+        point = point_of(record["metadata"])
+        records[point] = record
+    return records
+
+
+def resolved_values(record: dict, names: tuple) -> dict:
+    """The named parts of a resolved record, each value at its dotted path.
+
+    resolved_values(record, ("settings",)) gives
+    settings.qpu.distance and every other setting as one mapping.
+    """
+    values = {}
+    for name in names:
+        part = record.get(name)
+        for path, value in experiment.value_leaves(part, (name,)):
+            dotted = ".".join(path)
+            values[dotted] = value
+    return values
 
 
 def seed_ranges(ranges: list) -> list:

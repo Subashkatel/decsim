@@ -230,7 +230,7 @@ def value_lines(config: ExperimentConfig) -> list:
     documented = _documented_keys()
     swept = _swept_values(config.sweep)
     settings = collect.json_value(config.settings)
-    leaves = _leaves(settings, ())
+    leaves = value_leaves(settings, ())
     lines = []
     for path, value in leaves:
         key = _yaml_key(path)
@@ -243,6 +243,21 @@ def value_lines(config: ExperimentConfig) -> list:
             line = f"{line}  [{origin}]"
         lines.append(line)
     return lines
+
+
+def value_leaves(value, path: tuple) -> list:
+    """Every value under a json value that is not a mapping, with its path.
+
+    An empty mapping is a leaf of its own.
+    """
+    if not isinstance(value, Mapping) or not value:
+        return [(path, value)]
+    leaves = []
+    for key, item in value.items():
+        item_path = path + (str(key),)
+        item_leaves = value_leaves(item, item_path)
+        leaves.extend(item_leaves)
+    return leaves
 
 
 def task_positions(recorded_sweep: list) -> dict:
@@ -599,18 +614,6 @@ def _values_of(sweep: tuple, field_name: str) -> list:
         values.extend(block_values)
     unique_values = dict.fromkeys(values)
     return list(unique_values)
-
-
-def _leaves(value, path: tuple) -> list:
-    """Every value under a json value that is not a mapping, with its path."""
-    if not isinstance(value, Mapping) or not value:
-        return [(path, value)]
-    leaves = []
-    for key, item in value.items():
-        item_path = path + (str(key),)
-        item_leaves = _leaves(item, item_path)
-        leaves.extend(item_leaves)
-    return leaves
 
 
 def _yaml_key(path: tuple) -> tuple:

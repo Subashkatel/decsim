@@ -2,7 +2,7 @@
 
 # How to compare two runs
 
-Two run folders can be compared three ways, and which one you want
+Two run folders can be compared several ways, and which one you want
 depends on what the two runs are.
 
 ## If they are shards of one sweep, add them
@@ -47,6 +47,59 @@ the frame.
 That comparison is between a software wall clock and a hardware card,
 which is a comparison of two questions rather than of two machines. Say
 so when you report it. [Time](../explanation/time.md) says why.
+
+## Let decsim say what differs
+
+```bash
+decsim diff results/<first> results/<second>
+```
+
+`diff` matches the two folders' points by their sweep values and prints
+three sections. `settings` lists every value that differs at a point,
+the ones the build derived included (`resolved/`). `inputs` lists each
+workload file whose sha256 differs (`inputs/<id>/hashes.json`).
+`results` lists each `sweep.csv` column that differs, and says whether
+the two values agree within their error bars: a logical error rate by
+its Wilson interval, a mean over shots by the standard error of its
+shots in `shots.csv`. A column with no error bar (a median, a p99, a
+maximum, a count) is compared exactly. `sim_wall_seconds_per_shot` is
+the host's own time and is never compared. A section with nothing to
+list says `the same`.
+
+Two runs of one yaml on one commit give the same numbers when every
+decoder is priced by a card. A decoder charged its measured wall clock
+moves the tick columns from run to run, and `diff` says for each mean
+whether the move is within its error bars.
+
+## Read the folders from Python
+
+`decsim.results` reads run folders into one table, a row per point with
+a column per result and one per setting (`settings.` and the setting's
+dotted path), and draws the logical error rate the way sinter's
+`plot_error_rate` does:
+
+```python
+from matplotlib.figure import Figure
+
+import decsim.results as results
+
+folders = ["results/first", "results/second"]
+rows = results.load(*folders)
+figure = Figure()
+ax = figure.subplots()
+results.plot_error_rate(
+    ax=ax,
+    rows=rows,
+    x="physical_error_probability",
+    group="distance",
+    where={"round_period_microseconds": 1.0},
+)
+results.save_figure(figure, "ler.png", rows, folders)
+```
+
+`save_figure` writes `ler.png` and, beside it, `ler.py` (a copy of the
+script that drew it), `ler.csv` (the rows drawn) and `ler.json` (the
+folders they came from).
 
 ## If you want a picture, hand `plot` both folders
 

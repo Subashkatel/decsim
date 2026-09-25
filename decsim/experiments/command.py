@@ -10,6 +10,7 @@ loads Stim. The console script and `python -m decsim` both land here.
         [--shots-per-unit N]
     decsim combine <run_dir>... [--out DIR]
     decsim show <yaml>
+    decsim diff <run_dir> <run_dir>
     decsim plot <run_dir>... [--figure NAME] [--out PATH] [--probability P]
     decsim trace follow <file> --round k:n | --window k:n [--html PATH]
 
@@ -154,6 +155,21 @@ def _show(argv: list) -> None:
     print(text)
 
 
+def _diff(argv: list) -> None:
+    """How two run folders differ: settings, inputs, then results."""
+    import argparse
+
+    import decsim.experiments.report as report
+
+    parser = argparse.ArgumentParser(prog="decsim diff")
+    parser.add_argument("first", help="the first run folder")
+    parser.add_argument("second", help="the run folder to compare it with")
+    parsed = parser.parse_args(argv)
+    lines = report.diff(parsed.first, parsed.second)
+    text = "\n".join(lines)
+    print(text)
+
+
 def _plot(argv: list) -> None:
     """One figure, drawn from run folders' csv and trace files."""
     import argparse
@@ -274,6 +290,7 @@ _RUN_BY_VERB = {
     "collect": _collect,
     "combine": _combine,
     "show": _show,
+    "diff": _diff,
     "plot": _plot,
     "trace": _trace,
 }

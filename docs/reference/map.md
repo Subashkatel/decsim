@@ -330,12 +330,16 @@ docstring.
 - `decsim/experiments/report.py`: Shot measurements -> a run folder's additive facts -> the summaries.
 - `decsim/experiments/residence.py`: How long the data sat, and how long a move waited, per sweep point.
 - `decsim/experiments/run_command.py`: `decsim run`: one seeded shot of one yaml, narrated.
-- `decsim/experiments/run_folder.py`: The run folder: where a sweep's results, config and identity land.
+- `decsim/experiments/run_folder.py`: The run folder: where a run's results, config and identity land.
 - `decsim/experiments/trace_file.py`: One shot's Chrome trace, read back from disk and indexed.
 - `decsim/experiments/trace_follow.py`: `decsim trace follow`: one round's or one window's path, hop by hop.
 
-## Level 11: __main__
+## Level 11: __main__, results
 
 ### __main__
 
 - `decsim/__main__.py`: `python -m decsim <verb>`: the same command set as the console script.
+
+### results
+
+- `decsim/results.py`: Run folders read back as one table, drawn and saved.

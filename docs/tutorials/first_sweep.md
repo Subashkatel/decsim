@@ -68,7 +68,7 @@ decsim show configs/my_first_sweep.yaml
 ## Step 2. Run it, on four processes
 
 ```bash
-decsim collect configs/my_first_sweep.yaml --processes 4
+decsim collect configs/my_first_sweep.yaml --processes 4 --out results/first_sweep
 ```
 
 `--processes` gives each worker one work unit at a time. A work unit is
@@ -136,7 +136,7 @@ fraction of the shots is a broken machine.
 ## Step 3. Read the error bars
 
 ```bash
-cut -d, -f1,2,5,7,8,9,10 results/<run>/sweep.csv
+cut -d, -f1,2,5,7,8,9,10 results/first_sweep/sweep.csv
 ```
 
 ```
@@ -180,11 +180,11 @@ or quote the point as an upper bound.
 ## Step 4. Draw it
 
 ```bash
-decsim plot results/<run> --figure ler_vs_d --probability 0.003
+decsim plot results/first_sweep --figure ler_vs_d --probability 0.003
 ```
 
 ```
-results/<run>/ler_vs_distance.png
+results/first_sweep/ler_vs_distance.png
 ```
 
 `ler_vs_d` plots the logical error rate against the code distance at one
@@ -200,7 +200,7 @@ something small.
 ```bash
 decsim collect configs/my_first_sweep.yaml --shard 0/2 --out results/shards/0 --shots-per-unit 100
 decsim collect configs/my_first_sweep.yaml --shard 1/2 --out results/shards/1 --shots-per-unit 100
-decsim combine results/shards/0 results/shards/1
+decsim combine results/shards/0 results/shards/1 --out results/combined
 ```
 
 `--shots-per-unit 100` cuts each point's 400 shots into four work units.
@@ -208,7 +208,11 @@ decsim combine results/shards/0 results/shards/1
 commands between them run every unit exactly once. `combine` reads both
 folders' additive files, adds them, and recomputes the summary.
 
-The combined report says:
+The combined report's counts:
+
+```bash
+cut -d, -f1,5,7,8 results/combined/sweep.csv
+```
 
 ```
 distance,shots,logical_failures,logical_error_rate

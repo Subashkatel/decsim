@@ -42,14 +42,15 @@ shot.
 ## Step 2. Run one shot
 
 ```bash
-decsim run configs/reference.yaml --seed 0 --trace
+decsim run configs/reference.yaml --seed 0 --trace --out results/first_shot
 ```
 
 A **shot** is one complete run of the workload from start to finish,
 with one random seed. `configs/reference.yaml` is the reference
 configuration: it carries every key the yaml layer reads, and its sweep
 is deliberately tiny so that it runs in seconds. `--trace` asks for a
-record of the data path, which step 6 reads.
+record of the data path, which step 6 reads, and `--out` names the
+folder it goes in.
 
 The output:
 
@@ -60,7 +61,7 @@ terminal status: complete
 execution done: 15000000 ticks
 fully done: 37356000 ticks
 operation 1: logical_observables, observables (0,), truth (0,)
-run dir: results/2026-09-25T18-03-49Z-reference
+run dir: results/first_shot
 ```
 
 Line by line:
@@ -99,7 +100,7 @@ how to run a timing study that does not depend on your hardware.
 results, use `collect`, which runs every point of the yaml's sweep:
 
 ```bash
-decsim collect configs/reference.yaml
+decsim collect configs/reference.yaml --out results/reference
 ```
 
 It first prints what the yaml resolved to, one line per component, then
@@ -121,7 +122,7 @@ ready to frame commit: median 15.772 us, p99 22.726 us
 
 data movement: observation.data_movement was off, so this run counted no copies, references or moves
 
-every column: results/2026-09-25T18-03-50Z-reference/sweep.csv
+every column: results/reference/sweep.csv
 ```
 
 Two new words:
@@ -150,7 +151,7 @@ references and moves, because the key `data_movement` in the
 ## Step 4. Open the run folder
 
 ```bash
-ls results/2026-09-25T18-03-50Z-reference
+ls results/reference
 ```
 
 ```
@@ -167,9 +168,9 @@ trace
 window_samples.csv
 ```
 
-Your folder has a different name: it is stamped with the UTC time the
-run started, so no two collects ever share one. Substitute yours in the
-commands below.
+`--out` names the folder, and running the command again writes over
+it. Without `--out`, `collect` writes a new folder named with the UTC
+time the run started, so no two collects share one.
 
 The folder is written under `results/`, which is output and is not
 tracked by git. `config/` holds a verbatim copy of the yaml files that
@@ -183,7 +184,7 @@ the csv files the facts.
 columns. The first few:
 
 ```bash
-cut -d, -f1-10 results/2026-09-25T18-03-50Z-reference/sweep.csv
+cut -d, -f1-10 results/reference/sweep.csv
 ```
 
 ```
@@ -201,11 +202,11 @@ shots to make it narrow.
 `collect` also drew a figure. Draw a second one:
 
 ```bash
-decsim plot results/2026-09-25T18-03-50Z-reference --figure stage_breakdown
+decsim plot results/reference --figure stage_breakdown
 ```
 
 ```
-results/2026-09-25T18-03-50Z-reference/stage_breakdown.png
+results/reference/stage_breakdown.png
 ```
 
 `stage_breakdown.png` shows where a window's time went, stage by stage:
@@ -229,7 +230,7 @@ For one round, decsim prints the path itself:
 
 ```bash
 decsim trace follow \
-  results/2026-09-25T18-03-50Z-reference/trace/p0.001_d3_algopymatching_round1us_seed0.trace.json \
+  results/reference/trace/p0.001_d3_algopymatching_round1us_seed0.trace.json \
   --round 1:1
 ```
 
@@ -284,7 +285,7 @@ The same command follows a window instead of a round:
 
 ```bash
 decsim trace follow \
-  results/2026-09-25T18-03-50Z-reference/trace/p0.001_d3_algopymatching_round1us_seed0.trace.json \
+  results/reference/trace/p0.001_d3_algopymatching_round1us_seed0.trace.json \
   --window 1:0
 ```
 

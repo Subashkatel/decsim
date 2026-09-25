@@ -150,7 +150,7 @@ the strong decoder, and nothing else in this run.
 ## Step 2. Run the sweep
 
 ```bash
-decsim collect configs/two_tiers.yaml
+decsim collect configs/two_tiers.yaml --out results/two_tiers
 ```
 
 The command prints the same resolved config, then one line per point as
@@ -183,7 +183,7 @@ ready to frame commit: median 28.368 us, p99 70.340 us
 
 data movement: observation.data_movement was off, so this run counted no copies, references or moves
 
-every column: results/2026-09-25T18-11-10Z-two_tiers/sweep.csv
+every column: results/two_tiers/sweep.csv
 ```
 
 Read `service time per window, mean` against the weak card of one
@@ -205,7 +205,7 @@ A sweep gives averages. To see one window escalate you need the trace,
 so run a single shot with `--trace`.
 
 ```bash
-decsim run configs/two_tiers.yaml --seed 1 --trace
+decsim run configs/two_tiers.yaml --seed 1 --trace --out results/two_tiers_shot
 ```
 
 ```
@@ -215,16 +215,14 @@ terminal status: complete
 execution done: 30000000 ticks
 fully done: 80316000 ticks
 operation 1: logical_observables, observables (1,), truth (1,)
-run dir: results/2026-09-25T18-15-33Z-two_tiers
+run dir: results/two_tiers_shot
 ```
-
-Substitute your own run folder's name in the two commands below.
 
 ## Step 4. A window that was kept
 
 ```bash
 decsim trace follow \
-  results/2026-09-25T18-15-33Z-two_tiers/trace/p0.008_d3_algo1.0_round1us_seed1.trace.json \
+  results/two_tiers_shot/trace/p0.008_d3_algo1.0_round1us_seed1.trace.json \
   --window 1:0
 ```
 
@@ -280,7 +278,7 @@ costs.
 
 ```bash
 decsim trace follow \
-  results/2026-09-25T18-15-33Z-two_tiers/trace/p0.008_d3_algo1.0_round1us_seed1.trace.json \
+  results/two_tiers_shot/trace/p0.008_d3_algo1.0_round1us_seed1.trace.json \
   --window 1:3
 ```
 

@@ -56,7 +56,7 @@ sentence naming this command.
 ## One run
 
 ```bash
-decsim run configs/reference.yaml --seed 0 --trace
+decsim run configs/reference.yaml --seed 0 --trace --out results/first_shot
 ```
 
 That is one shot of the reference config, the one that documents every

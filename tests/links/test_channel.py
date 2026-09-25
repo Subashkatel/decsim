@@ -433,3 +433,22 @@ def test_the_expected_delay_leaves_the_channel_untouched():
     transfer = delivered[0]
     assert transfer.serializer_start_ticks == 15
     assert transfer.physical_sequence == 0
+
+
+def test_a_channel_reports_each_transfer_as_one_whole_frame():
+    """The ideal row's inside is one frame: the transfer's own interval."""
+    engine = decsim.engine.Engine()
+    channel = bounded_channel(engine, 1000.0, 300)
+    frames = []
+    channel.trace.frame_landed.connect(frames.append)
+    delivered = []
+    send_at(engine, channel, 0, 8, 0, delivered)
+
+    engine.run()
+
+    record = frames[0]
+    transfer = delivered[0]
+    assert len(frames) == 1
+    assert record.timing.bits == 8
+    assert record.timing.start_ticks == transfer.serializer_start_ticks
+    assert record.timing.landed_ticks == transfer.delivery_ticks

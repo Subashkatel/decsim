@@ -36,9 +36,11 @@ ChannelClass = Callable[
 class LinkFabric:
     """One run's fabric: the wired paths on their channels.
 
-    Trace source: transfer_delivered(record), one TransferRecord per
+    Trace sources: transfer_delivered(record), one TransferRecord per
     delivered transfer, carrying the path, the attribution and the
-    Transfer with its send, serializer and delivery ticks.
+    Transfer with its send, serializer and delivery ticks; and
+    frame_landed(record), one FrameRecord per frame a channel moves,
+    the transfer's inside.
     """
 
     def __init__(
@@ -47,7 +49,6 @@ class LinkFabric:
         engine: decsim.engine.Engine,
         channel_class: ChannelClass,
     ) -> None:
-        self.trace = _TraceSources()
         self._channel_by_name: dict[str, ports.Channel] = {}
         self._binding_by_path: dict[
             transfer_records.LinkPath, _PathBinding
@@ -66,6 +67,10 @@ class LinkFabric:
             )
             binding = _PathBinding(route.settings, channel)
             self._readout_by_footprint[route.patch_ids] = binding
+        built_channels = self._channel_by_name.values()
+        channels = tuple(built_channels)
+        frame_landed = _EveryChannelsFrames(channels)
+        self.trace = _TraceSources(frame_landed=frame_landed)
 
     def expected_delay_ticks(
         self,
@@ -246,4 +251,29 @@ class _TraceSources:
     listener reaches all of them through one name.
     """
 
+    frame_landed: "_EveryChannelsFrames"
     transfer_delivered: trace_source.TraceSource = trace_source.new_source()
+
+
+class _EveryChannelsFrames:
+    """The frame_landed sources of every channel, heard as one.
+
+    A listener is connected to each channel's own source, so a channel
+    with no listener builds no frame record.
+    """
+
+    def __init__(self, channels: tuple) -> None:
+        self._channels = channels
+
+    def connect(self, listener: Callable) -> None:
+        """Hear every frame of every channel from now on."""
+        for channel in self._channels:
+            channel.trace.frame_landed.connect(listener)
+
+    @property
+    def has_listeners(self) -> bool:
+        """Whether any channel's frames are heard."""
+        for channel in self._channels:
+            if channel.trace.frame_landed.has_listeners:
+                return True
+        return False

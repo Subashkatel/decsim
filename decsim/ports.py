@@ -1683,7 +1683,8 @@ class Link(Protocol):
     tick of the transfer on the record.
 
     trace holds transfer_delivered, a trace source the fabric fires once
-    per delivered transfer with a TransferRecord. It is on the port
+    per delivered transfer with a TransferRecord, and frame_landed, one
+    FrameRecord per frame a channel moves. It is on the port
     because the machine connects the traffic ledger, the data-movement
     ledger and the trace writer to whatever answers this port
     (decsim/observe/wiring.py), as the Decoder port carries
@@ -1796,7 +1797,13 @@ class Channel(Protocol):
     channel is one class and no fabric subclass. framed is a
     FramedPayload (decsim/links/channel.py): the payload bits a
     component sent and the header bits its path adds.
+
+    trace holds frame_landed, fired with one FrameRecord
+    (decsim/links/channel.py) per frame, the transfer's inside, which
+    the fabric's own frame_landed hears for every channel.
     """
+
+    trace: Any
 
     def send(
         self,

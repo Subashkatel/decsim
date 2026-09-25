@@ -24,6 +24,7 @@ import json
 from typing import Optional
 
 import decsim.config as config
+import decsim.links.channel as channel_module
 import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
 import decsim.records.transfers as transfer_records
@@ -243,6 +244,27 @@ class TraceWriter:
         if attribution.window_id is not None:
             window_key = (attribution.operation_id, attribution.window_id)
             self._step_window_flow(thread, window_key, start)
+
+    def frame_landed(self, record: channel_module.FrameRecord) -> None:
+        """One frame on its channel's frame lane, from its start to its end.
+
+        The span is the wire's occupancy by the frame; its credit wait and
+        landing tick ride in args. A lost frame and a resent one are named
+        so, which shows a reliable hop's inside.
+        """
+        timing = record.timing
+        thread = f"{record.channel} frames"
+        name = _frame_name(record)
+        duration = timing.end_ticks - timing.start_ticks
+        args = {
+            "bits": timing.bits,
+            "transfer": record.transfer_sequence,
+            "frame": record.frame_index,
+            "credit_wait_ticks": timing.credit_wait_ticks,
+            "landed_tick": timing.landed_ticks,
+        }
+        start = timing.start_ticks
+        self._complete(thread, name, "frame", start, duration, args)
 
     # ---- the stores
 
@@ -1147,3 +1169,12 @@ class _OpenSlices:
     counter_value: dict = dataclasses.field(default_factory=dict)
     unnamed_threads: int = 0
     flows_started: int = 0
+
+
+def _frame_name(record) -> str:
+    """A frame's name: lost, resent, or plain."""
+    if record.is_lost:
+        return "lost frame"
+    if record.is_retransmission:
+        return "resent frame"
+    return "frame"

@@ -653,3 +653,26 @@ def _lane_spans_overlap(accesses, tid) -> bool:
     ends = [row["ts"] + row["dur"] for row in spans[:-1]]
     starts = [row["ts"] for row in spans[1:]]
     return any(start < end for start, end in zip(starts, ends))
+
+
+def test_each_transfer_is_one_frame_on_its_channels_frame_lane(traced):
+    """An ideal channel moves each transfer as one frame, one at a time.
+
+    ns-3's point-to-point device starts a packet only when its
+    transmitter is READY (point-to-point-net-device.cc, TransmitStart),
+    so the frames on one channel's lane never overlap, one per move.
+    """
+    _machine, _result, document = traced
+    frames = [row for row in document if row.get("cat") == "frame"]
+    moves = [row for row in document if _is_a_move(row)]
+    frame_lanes = {row["tid"] for row in frames}
+
+    assert len(frames) == len(moves)
+    for tid in frame_lanes:
+        assert _lane_spans_overlap(frames, tid) is False
+
+
+def _is_a_move(row) -> bool:
+    """Whether the row is a move on a link path's lane."""
+    category = row.get("cat", "")
+    return category.endswith(",link")

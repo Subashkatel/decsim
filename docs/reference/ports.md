@@ -531,6 +531,10 @@ The link fabric, as a sender that names a window or a job sees it.
 
 One physical channel under the fabric: its setup engine and its wire.
 
+| Member | Type |
+| --- | --- |
+| `trace` | `Any` |
+
 | Method | What it does |
 | --- | --- |
 | `send` | Carry one framed payload; on_delivered runs at its delivery. |

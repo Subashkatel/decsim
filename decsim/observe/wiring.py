@@ -288,6 +288,7 @@ def _connect_trace_writer(
     qpu.trace.command_event.connect(trace_writer.command_event)
     links = seats["links"]
     links.trace.transfer_delivered.connect(trace_writer.transfer_delivered)
+    links.trace.frame_landed.connect(trace_writer.frame_landed)
     for source in _copy_sources(seats):
         source.connect(trace_writer.copy_made)
     assembler = seats["assembler"]

@@ -723,3 +723,25 @@ def test_every_decoder_unit_consumes_stims_events_from_every_seat(
     mismatched = [key for key, bits in landed if bits != expected[key]]
     assert landed
     assert mismatched == []
+
+
+@pytest.mark.parametrize(
+    "where, seat",
+    [
+        ("controller", "controller"),
+        ("weak_syndrome_buffer", "weak_syndrome_buffer"),
+        ("decoder", "weak_decoder"),
+    ],
+)
+def test_the_forming_seat_reports_the_two_raw_rounds_it_holds(where, seat):
+    """d=3: a bulk detector reads the round before, so a seat holds two.
+
+    The most is the last round's 8 check bits and 9 data bits beside the
+    8 of the round before it.
+    """
+    machine = _machine_formed_at(where)
+
+    machine.run()
+
+    data_movement = machine.observation.data_movement
+    assert data_movement.formation_state_bits_by_seat == {seat: 25}

@@ -273,6 +273,8 @@ def _connect_data_movement(
             source.connect(data_movement.hold_registered)
     for source in _copy_sources(seats):
         source.connect(data_movement.copy_made)
+    formation = seats["detection_events"]
+    formation.trace.state_held.connect(data_movement.formation_state_held)
 
 
 def _connect_trace_writer(

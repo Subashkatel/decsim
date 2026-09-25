@@ -34,6 +34,7 @@ import decsim.detector_error_model.detector_formation as detector_formation
 import decsim.detector_error_model.settings as detection_event_settings
 import decsim.ports as ports
 import decsim.records.rounds as round_records
+import decsim.trace_source as trace_source
 
 
 class SeatedFormation:
@@ -44,6 +45,12 @@ class SeatedFormation:
     (ports.DetectionEventFormer); each seat forms from its own packets.
     The burst detector, when the run has one, counts the rounds one
     seat forms, the first seat on the path the primary tier reads.
+
+    Trace source: state_held(seat, operation_id, bits) each time a seat
+    takes a raw round, bits being the raw packets the seat then holds
+    for that operation: the state a former keeps, IBM's running
+    syndrome (Maurer 2510.21600 Algorithm 2, lines 760-770), which no
+    referent sizes, so it is reported and never refused.
     """
 
     def __init__(
@@ -55,12 +62,15 @@ class SeatedFormation:
     ) -> None:
         self.settings = settings
         self.clock = settings.clock
+        self.trace = _TraceSources()
         self.history_by_seat = {}
         for seat in settings.formed_at:
             observer = None
             if seat == observed_seat:
                 observer = burst_detector
-            self.history_by_seat[seat] = _SeatHistory(seat, source, observer)
+            history = _SeatHistory(seat, source, observer)
+            history.state_held = self.trace.state_held
+            self.history_by_seat[seat] = history
 
     def forms_at(self, seat: str) -> bool:
         """Whether the named seat forms the rounds that cross it."""
@@ -126,9 +136,13 @@ class _SeatHistory:
         source: Optional[ports.DetectionEventFormer],
         observer: Optional[ports.BurstDetector],
     ) -> None:
+        self.seat = seat
         # the source's recipes, read per operation
         self.recipes = source
         self.observer = observer
+        # where the seat reports the raw bits it holds; bound by the
+        # placement, silent for a history on its own
+        self.state_held = trace_source.SILENT
         self.keeps_landed_width = seat in detection_event_settings.DECODER_SEATS
         self.former_by_operation: dict = {}
         self.events_by_round: dict = {}
@@ -159,6 +173,7 @@ class _SeatHistory:
             first = round_fragments[0]
             former = self._former_for(first.operation_id)
             former.hold_packet(first.round_index, bits)
+            self._report_state(first.operation_id, former)
 
     def has_formed(self, round_key: tuple) -> bool:
         """Whether a source with no recipes, or this seat, formed the round.
@@ -198,13 +213,24 @@ class _SeatHistory:
         remembered = self.events_by_round.get(key)
         if remembered is not None:
             former.hold_packet(round_index, raw_bits)
+            self._report_state(operation_id, former)
             return remembered
         events, _ = former.feed_packet(round_index, raw_bits)
+        self._report_state(operation_id, former)
         values = tuple(value for _, value in events)
         self.events_by_round[key] = values
         if self.observer is not None:
             self.observer.observe_round(operation_id, round_index, values)
         return values
+
+    def _report_state(
+        self,
+        operation_id: Any,
+        former: detector_formation.StreamingDetectorFormer,
+    ) -> None:
+        """The raw bits this seat holds for the operation, now."""
+        held_bits = former.held_bits()
+        self.state_held.fire(self.seat, operation_id, held_bits)
 
     def _former_for(
         self, operation_id: Any
@@ -260,3 +286,15 @@ def _rounds_in_order(fragments) -> list:
 
 def _fragment_order(fragment):
     return fragment.fragment_index
+
+
+@dataclasses.dataclass(frozen=True)
+class _TraceSources:
+    """Every event the seated former reports, as one member.
+
+    gem5 groups a component's statistics into one nested Group member
+    (gem5 src/base/stats/group.hh:60-92); a component's events are the
+    same shape.
+    """
+
+    state_held: trace_source.TraceSource = trace_source.new_source()

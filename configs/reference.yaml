@@ -1152,8 +1152,11 @@ observation:                       # what a run records beyond its results
   decoder_memory_occupancy: false  # true samples each unit memory's held-bit count,
                                    # for a sweep over unit_memory.bits
   data_movement: false             # true counts the copies, references and moves of
-                                   # every round, on the RunResult without the trace,
-                                   # and writes them to the run folder:
+                                   # every round, and the most raw bits each
+                                   # forming seat's former held
+                                   # (detection_events), on the RunResult without
+                                   # the trace, and writes the counts to the run
+                                   # folder:
                                    # shot_data_movement.csv, one row per shot per path,
                                    # and data_movement.csv, the point's mean over shots
                                    # by path and then by memory class. false writes

@@ -1,0 +1,33 @@
+# A fresh clone on a clean runner, installed the way the README says,
+# on the lowest and the highest Python constraints.txt was resolved and
+# tested for: the tutorials' runs on the run extra alone, then the style
+# checks and the whole suite with the test and dev extras.
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  fresh-install:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install the run extra
+        run: python -m pip install -e ".[run]" -c constraints.txt
+      - name: The README's first run and the tutorials
+        run: python tools/check_tutorial_runs.py
+      - name: Install the test and dev extras
+        run: python -m pip install -e ".[run,test,dev]" -c constraints.txt
+      - name: Style checks
+        run: tools/check.sh
+      - name: Suite
+        run: python -m pytest tests -rs

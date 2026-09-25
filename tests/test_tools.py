@@ -22,6 +22,7 @@ TESTS_PATH = TESTS_FILE.resolve()
 PACKAGE_ROOT = TESTS_PATH.parent.parent
 TOOLS = PACKAGE_ROOT / "tools"
 SLURM_RUNNER = PACKAGE_ROOT / "slurm" / "slurm_run.sh"
+EXPERIMENT_RUNNER = PACKAGE_ROOT / "slurm" / "experiment_run.sh"
 CHECK_SCRIPT = TOOLS / "check.sh"
 
 
@@ -224,6 +225,39 @@ def test_the_slurm_runner_falls_back_to_the_arrays_own_count(tmp_path):
 
     assert "shard: 3 of 200" in printed
     assert arguments[arguments.index("--shard") + 1] == "3/200"
+
+
+def test_the_experiment_runner_runs_the_python_of_the_jobs_environment(
+    tmp_path,
+):
+    """With DECSIM_PYTHON unset, the task runs the python on PATH.
+
+    The shard is the offset plus the task id, of the experiment's count.
+    """
+    _stub, recorded = _stub_python(tmp_path)
+    environment = dict(os.environ)
+    environment.pop("DECSIM_PYTHON", None)
+    environment["SLURM_SUBMIT_DIR"] = str(PACKAGE_ROOT)
+    environment["SLURM_ARRAY_TASK_ID"] = "3"
+    run_dir = tmp_path / "run"
+    environment["RUN"] = str(run_dir)
+    environment["SHARDS"] = "500"
+    environment["OFFSET"] = "150"
+    path = environment.get("PATH", "")
+    environment["PATH"] = f"{tmp_path}:{path}"
+
+    completed = subprocess.run(
+        ["bash", str(EXPERIMENT_RUNNER), "configs/weak_ler.yaml"],
+        capture_output=True,
+        text=True,
+        env=environment,
+    )
+
+    recorded_text = recorded.read_text()
+    arguments = recorded_text.splitlines()
+    assert completed.returncode == 0, completed.stderr
+    assert arguments[:3] == ["-m", "decsim", "collect"]
+    assert arguments[arguments.index("--shard") + 1] == "153/500"
 
 
 def _stub_git(tmp_path, status):

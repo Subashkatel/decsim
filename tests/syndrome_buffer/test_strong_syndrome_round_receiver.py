@@ -37,6 +37,7 @@ from decsim.syndrome_buffer import (
 LANDING_TICKS = config.microseconds_to_ticks(0.5)
 # every round this file sends carries one fragment of three bits
 BITS_PER_ROUND = 3
+FORMING_CYCLES = 5
 
 
 def packet(round_index: int) -> round_records.SyndromeRoundPacket:
@@ -102,6 +103,20 @@ class RecordingFormer:
         held = tuple(fragment.round_index for fragment in round_before)
         self.formed.append((seat, fragments[0].round_index, held))
         return fragments
+
+
+class FormingInCycles(RecordingFormer):
+    """A seat that takes FORMING_CYCLES of a 10-tick clock to form."""
+
+    clock = config.Clock(10)
+
+    def cycles_at(self, seat, round_count):
+        self.cycles_asked.append((seat, round_count))
+        return FORMING_CYCLES
+
+
+def _nothing() -> None:
+    """A landing whose stored rounds wake no one."""
 
 
 def room_side(
@@ -291,7 +306,9 @@ def test_an_escalated_region_lands_whole_and_each_round_wakes_the_windows():
 
     receiver.reserve_region(carried)
     room_while_crossing = receiver.has_room(asked)
-    engine.schedule(LANDING_TICKS, lambda: receiver.receive_region(carried))
+    engine.schedule(
+        LANDING_TICKS, lambda: receiver.receive_region(carried, _nothing)
+    )
     engine.run()
 
     assert carried.wire_bits == two_rounds_bits
@@ -327,7 +344,7 @@ def test_the_round_before_a_region_lands_raw_and_forms_the_first_round():
     carried = region(1, 2, 3, first_round=2)
 
     receiver.reserve_region(carried)
-    receiver.receive_region(carried)
+    receiver.receive_region(carried, _nothing)
 
     seat = "strong_syndrome_buffer"
     assert carried.carries_the_round_before
@@ -335,6 +352,30 @@ def test_the_round_before_a_region_lands_raw_and_forms_the_first_round():
     assert receiver.detection_events.cycles_asked == [(seat, 2)]
     assert receiver.detection_events.formed == [(seat, 2, (1,)), (seat, 3, ())]
     assert receiver.store.occupancy == 3
+
+
+def test_a_region_formed_here_is_reported_stored_once_every_round_is():
+    """Five cycles of a 10-tick clock: the store holds both rounds at 50.
+
+    The sender counts the region's rounds as carried until then, so a
+    wake-up at the landing does not send them again.
+    """
+    engine = engine_module.Engine()
+    former = FormingInCycles()
+    receiver = room_side(engine, detection_events=former)
+    reads = decoding_records.WindowReads((1, 0))
+    receiver.store.register_hold(reads, [(1, 1), (1, 2)])
+    carried = region(1, 2)
+    stored_at = []
+
+    def record_stored() -> None:
+        stored_at.append((engine.now, receiver.store.occupancy))
+
+    receiver.reserve_region(carried)
+    receiver.receive_region(carried, record_stored)
+    engine.run()
+
+    assert stored_at == [(50, 2)]
 
 
 def test_a_regions_reservation_is_its_bits_and_the_refusal_names_them():

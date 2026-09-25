@@ -341,8 +341,16 @@ class StrongSyndromeRoundReceiver(Protocol):
     def reserve_region(self, region: round_records.EscalatedRegion) -> None:
         """Take the room an escalated region's rounds will need, or refuse."""
 
-    def receive_region(self, region: round_records.EscalatedRegion) -> None:
-        """Take an escalated region that landed here: every round its slot."""
+    def receive_region(
+        self,
+        region: round_records.EscalatedRegion,
+        on_stored: Callable[[], None],
+    ) -> None:
+        """Take an escalated region that landed here: every round its slot.
+
+        on_stored is called once the store holds every round, which is
+        later than the landing when this seat forms the rounds first.
+        """
 
 
 @runtime_checkable

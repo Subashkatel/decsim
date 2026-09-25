@@ -35,6 +35,7 @@ window.
 
 import dataclasses
 import functools
+from collections.abc import Callable
 from typing import Optional
 
 import decsim.engine as engine_module
@@ -105,7 +106,9 @@ class StrongSyndromeRoundReceiver:
         if packed.route.kind is window_input:
             packets = (packed.packet,)
             packet_bits = (packed.wire_bits,)
-            self._form_then_land(packets, packet_bits, CONTROLLER_WRITE)
+            self._form_then_land(
+                packets, packet_bits, CONTROLLER_WRITE, False, _nothing
+            )
             return
         self._forward_memory_round(packed)
 
@@ -127,8 +130,16 @@ class StrongSyndromeRoundReceiver:
             reserved[round_key] = round_records.stated_bits(bits)
         self.reserved_bits_by_round = reserved
 
-    def receive_region(self, region: round_records.EscalatedRegion) -> None:
-        """Take an escalated region that landed here: every round its slot."""
+    def receive_region(
+        self,
+        region: round_records.EscalatedRegion,
+        on_stored: Callable[[], None],
+    ) -> None:
+        """Take an escalated region that landed here: every round its slot.
+
+        on_stored is called once the store holds every round, after this
+        seat has formed them when it forms them.
+        """
         for round_key in region.round_keys:
             del self.reserved_bits_by_round[round_key]
         packet_bits = []
@@ -140,6 +151,7 @@ class StrongSyndromeRoundReceiver:
             packet_bits,
             ESCALATION,
             region.carries_the_round_before,
+            on_stored,
         )
 
     def _refuse_region(self, region: round_records.EscalatedRegion) -> None:
@@ -190,7 +202,8 @@ class StrongSyndromeRoundReceiver:
         packets,
         packet_bits,
         hop: _Hop,
-        carries_the_round_before: bool = False,
+        carries_the_round_before: bool,
+        on_stored: Callable[[], None],
     ) -> None:
         """Land the rounds once this seat has formed them, if it forms them.
 
@@ -207,6 +220,7 @@ class StrongSyndromeRoundReceiver:
             packet_bits,
             hop,
             carries_the_round_before,
+            on_stored,
         )
         if cycles == 0:
             land()
@@ -217,7 +231,12 @@ class StrongSyndromeRoundReceiver:
         self.engine.schedule(delay, land, label="detection event formation")
 
     def _land_formed(
-        self, packets, packet_bits, hop: _Hop, carries_the_round_before: bool
+        self,
+        packets,
+        packet_bits,
+        hop: _Hop,
+        carries_the_round_before: bool,
+        on_stored: Callable[[], None],
     ) -> None:
         """Each round as the store holds it; its copy reports the hop's bits.
 
@@ -237,6 +256,7 @@ class StrongSyndromeRoundReceiver:
             round_before = ()
             stored = dataclasses.replace(packet, fragments=fragments)
             self._land(stored, bits, hop)
+        on_stored()
 
     def _land(
         self,
@@ -342,3 +362,7 @@ class _TraceSources:
 
     copy_made: trace_source.TraceSource = trace_source.new_source()
     round_event: trace_source.TraceSource = trace_source.new_source()
+
+
+def _nothing() -> None:
+    """A controller write's rounds wake nothing once stored."""

@@ -282,9 +282,14 @@ class StrongRedecode:
 
         The rounds count as carried until the store has all of them: a
         landing wakes the held windows round by round, and a wake-up in
-        the middle must not send the rest of the same region again.
+        the middle must not send the rest of the same region again. A
+        strong seat that forms the rounds stores them only once it has
+        formed them, later than the landing.
         """
-        self.strong_receiver.receive_region(region)
+        stored = functools.partial(self._region_stored, region)
+        self.strong_receiver.receive_region(region, stored)
+
+    def _region_stored(self, region: round_records.EscalatedRegion) -> None:
         self.carried_round_keys.difference_update(region.round_keys)
 
     # ---- private: submitting a strong job with its input send

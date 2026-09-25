@@ -129,8 +129,14 @@ def _parallel_machine_formed_at(where: str):
     return machine_module.Machine.build(settings, 0)
 
 
-def _seated_machine(config_name, windows_kind, strong_window, formed_at):
-    """A d=3 run of the config on that shape, formed at those seats."""
+def _seated_machine(
+    config_name, windows_kind, strong_window, formed_at, latency_cycles=0
+):
+    """A d=3 run of the config on that shape, formed at those seats.
+
+    The seats form in latency_cycles on the section's clock, none by
+    default, the reference card's cost.
+    """
     config_path = CONFIGS / config_name
     config = experiment.load_experiment(config_path)
     settings = config.point_settings(
@@ -139,7 +145,9 @@ def _seated_machine(config_name, windows_kind, strong_window, formed_at):
         round_period_microseconds=1.0,
     )
     detection_events = dataclasses.replace(
-        settings.detection_events, formed_at=formed_at
+        settings.detection_events,
+        formed_at=formed_at,
+        latency_cycles=latency_cycles,
     )
     windows = dataclasses.replace(settings.windows, kind=windows_kind)
     escalation = dataclasses.replace(
@@ -713,6 +721,30 @@ def test_every_decoder_unit_consumes_stims_events_from_every_seat(
     """
     machine = _seated_machine(
         config_name, windows_kind, strong_window, formed_at
+    )
+    emitted = _raw_rounds(machine)
+    landed = _landed_rounds(machine)
+
+    machine.run()
+
+    expected = _stims_events_by_round(machine, emitted)
+    mismatched = [key for key, bits in landed if bits != expected[key]]
+    assert landed
+    assert mismatched == []
+
+
+def test_a_strong_seat_forming_in_cycles_stores_each_escalated_round_once():
+    """Five cycles at the strong buffer: formed after it lands, sent once.
+
+    A window woken between the landing and the store sends nothing
+    again; each unit still consumes Stim's events, and the run ends.
+    """
+    machine = _seated_machine(
+        "seam_pinned_switching.yaml",
+        "sliding",
+        "near_seam_pinned",
+        CHIP_THEN_HOST_DECODER,
+        latency_cycles=5,
     )
     emitted = _raw_rounds(machine)
     landed = _landed_rounds(machine)

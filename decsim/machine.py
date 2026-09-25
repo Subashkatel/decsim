@@ -157,13 +157,10 @@ class Machine:
             settings, engine, plan, escalation_policy
         )
         detection_events = controller_side.build_detection_events(
-            settings, plan.device, burst_detector
+            settings, plan.device, escalation_policy, burst_detector
         )
         pool = decoder_build.build_decoder_pool(
             settings, plan, escalation_policy, detection_events
-        )
-        store_build.check_weak_syndrome_buffer_formation(
-            settings, escalation_policy, detection_events
         )
         store_build.check_readout_cost_is_priced(settings)
         store_build.check_one_price_for_a_read(settings)

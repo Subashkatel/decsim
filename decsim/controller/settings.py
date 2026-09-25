@@ -13,7 +13,6 @@ import decsim.config as config
 import decsim.controller.policies as policies
 import decsim.ports as ports
 import decsim.tables as tables
-from decsim.detector_error_model import detection_event_formation
 
 # idle_policy.kind names one of these rows: what the controller does
 # with the rounds of a patch that is idle.
@@ -26,30 +25,14 @@ IDLE_POLICIES = {
 # the row's own (its Settings, decsim/tables.py row_settings).
 _IDLE_POLICY_KEYS = ("kind",)
 
-# controller.detection_events_formed_at names one of these rows: where
-# the machine turns a round's measurement outcomes into its detection
-# events, and so which width crosses the store and the tier's input
-# link. Each row is a component built with the run's former and the
-# controller's own formation cost
-# (detector_error_model/detection_event_formation.py).
-DETECTION_EVENT_FORMATION = {
-    "controller": detection_event_formation.ControllerSideFormation,
-    "weak_syndrome_buffer": (
-        detection_event_formation.WeakSyndromeBufferSideFormation
-    ),
-    "decoder": detection_event_formation.DecoderSideFormation,
-}
-
 # The controller section's keys.
 _CONTROLLER_KEYS = (
     "clock",
     "readout_to_bits_cycles",
     "packing_cycles_per_round",
     "decision_to_pulse_cycles",
-    "detection_event_cycles_per_round",
     "packing_rounds_in_flight",
     "packing_overflow",
-    "detection_events_formed_at",
 )
 # The keys with no default: a controller card states its clock and its
 # three per-round costs.
@@ -105,27 +88,17 @@ class ControllerSettings:
     packing stage at once, each from its first fragment until the windows
     hear of it (round_assembly.RoundsInFlight); None is unbounded.
     packing_overflow is what happens to a finished round the store cannot
-    take: the yaml's stall or drop_round.
-    detection_events_formed_at names a row of
-    DETECTION_EVENT_FORMATION: where the round's outcomes become its
-    detection events, and so which width the store and the tier's input
-    link carry. detection_event_cycles_per_round is what that
-    conversion costs the controller, charged once per round before the
-    round leaves it and read by the controller row alone (the weak
-    syndrome buffer's own charge is in its section); no paper
-    publishes a controller-side figure, so it is zero by default. clock
-    is the domain all four cycle counts are charged on; a cost of zero
-    cycles is uncharged rather than rounded up to the next edge.
+    take: the yaml's stall or drop_round. clock is the domain all
+    three cycle counts are charged on; a cost of zero cycles is
+    uncharged rather than rounded up to the next edge.
     """
 
     clock: Optional[config.Clock] = None
     readout_to_bits_cycles: int = 0
     packing_cycles_per_round: int = 0
     decision_to_pulse_cycles: int = 0
-    detection_event_cycles_per_round: int = 0
     packing_rounds_in_flight: Optional[int] = None
     packing_overflow: PackingOverflowPolicy = PackingOverflowPolicy.STALL
-    detection_events_formed_at: str = "controller"
 
     def __post_init__(self) -> None:
         config.check_cycles(
@@ -138,10 +111,6 @@ class ControllerSettings:
         config.check_cycles(
             "controller.decision_to_pulse_cycles",
             self.decision_to_pulse_cycles,
-        )
-        config.check_cycles(
-            "controller.detection_event_cycles_per_round",
-            self.detection_event_cycles_per_round,
         )
         self._check_rounds_in_flight()
         self._check_clock()
@@ -156,24 +125,15 @@ class ControllerSettings:
         readout_cycles = section["readout_to_bits_cycles"]
         packing_cycles = section["packing_cycles_per_round"]
         decision_cycles = section["decision_to_pulse_cycles"]
-        formation_cycles = _formation_cycles(section)
         packing_rounds_in_flight = section.get("packing_rounds_in_flight")
         packing_overflow = _packing_overflow(section)
-        formed_at = section.get("detection_events_formed_at", "controller")
-        tables.row(
-            DETECTION_EVENT_FORMATION,
-            "controller.detection_events_formed_at",
-            formed_at,
-        )
         return cls(
             clock=clock,
             readout_to_bits_cycles=readout_cycles,
             packing_cycles_per_round=packing_cycles,
             decision_to_pulse_cycles=decision_cycles,
-            detection_event_cycles_per_round=formation_cycles,
             packing_rounds_in_flight=packing_rounds_in_flight,
             packing_overflow=packing_overflow,
-            detection_events_formed_at=formed_at,
         )
 
     def _check_rounds_in_flight(self) -> None:
@@ -202,7 +162,6 @@ class ControllerSettings:
         charged = self.readout_to_bits_cycles
         charged += self.packing_cycles_per_round
         charged += self.decision_to_pulse_cycles
-        charged += self.detection_event_cycles_per_round
         if charged > 0:
             raise ValueError(
                 "a charged controller cost needs the clock domain its "
@@ -277,19 +236,6 @@ def _is_round_count(value) -> bool:
     if not isinstance(value, int):
         return False
     return value >= 1
-
-
-def _formation_cycles(section: Mapping) -> int:
-    """detection_event_cycles_per_round, the controller's own formation cost.
-
-    null is the default and means the controller charges nothing for the
-    conversion: Google's workstation converts measurements into
-    detections (2408.13687 lines 474-476) and publishes no time for it.
-    """
-    cycles = section.get("detection_event_cycles_per_round")
-    if cycles is None:
-        return 0
-    return cycles
 
 
 def _packing_overflow(section: Mapping) -> PackingOverflowPolicy:

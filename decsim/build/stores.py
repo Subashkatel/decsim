@@ -109,6 +109,7 @@ def build_weak_output(
         transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER,
         "weak syndrome buffer",
         reads_in_place,
+        "weak_decoder",
     )
 
 
@@ -122,6 +123,7 @@ def build_strong_output(
         transfer_records.LinkPath.STRONG_BUFFER_TO_STRONG_DECODER,
         "strong syndrome buffer",
         reads_in_place,
+        "strong_decoder",
     )
 
 
@@ -173,40 +175,6 @@ def uses_the_room_side(escalation_policy: ports.EscalationPolicy) -> bool:
     """Whether the plan's decoding tier reads the strong syndrome buffer."""
     strong = window_records.DecoderTier.STRONG
     return escalation_policy.primary_tier is strong
-
-
-def check_weak_syndrome_buffer_formation(
-    settings: machine_settings.MachineSettings,
-    escalation_policy: ports.EscalationPolicy,
-    detection_events: ports.DetectionEventPlacement,
-) -> None:
-    """The weak decoder chip forms events only for rounds that reach it.
-
-    A run whose plan decodes on the strong tier writes its rounds
-    straight into the strong syndrome buffer
-    (controller/syndrome_round_sender.py), so a placement on the weak
-    decoder chip would leave them unformed; and a formation charge on
-    that chip belongs to the one row that forms there, or a run that
-    forms elsewhere would pay for the conversion twice.
-    """
-    forms_here = detection_events.forms_at_the_weak_syndrome_buffer
-    if forms_here and uses_the_room_side(escalation_policy):
-        raise ValueError(
-            "controller.detection_events_formed_at weak_syndrome_buffer "
-            "forms a round as the weak syndrome buffer stores it, and this "
-            "run's windows are decoded on the strong tier, whose rounds "
-            "never reach that buffer; form them at the controller or at "
-            "the decoder"
-        )
-    buffer_settings = settings.weak_syndrome_buffer
-    formation_cycles = buffer_settings.detection_event_cycles_per_round
-    if formation_cycles > 0 and not forms_here:
-        raise ValueError(
-            "weak_syndrome_buffer.detection_event_cycles_per_round charges "
-            "the weak decoder chip for a conversion this run does elsewhere "
-            "(controller.detection_events_formed_at); write "
-            "weak_syndrome_buffer there, or leave the charge out"
-        )
 
 
 def check_one_price_for_a_read(

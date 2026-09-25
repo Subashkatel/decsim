@@ -25,7 +25,6 @@ import decsim.controller.settings as controller_settings
 import decsim.engine as engine_module
 import decsim.observe.round_events as round_events
 import decsim.records.rounds as round_records
-from decsim.detector_error_model import detection_event_formation
 
 PACKING_TICKS = config.microseconds_to_ticks(1.0)
 # a 1 MHz controller, so one packing cycle is the packing time above
@@ -53,11 +52,9 @@ def rounds_in_flight(capacity, held=0, on_route=0):
     return bound
 
 
-def formation(former, detection_event_formation_cycles=0):
-    """The controller row: this assembler forms the round before it leaves."""
-    return detection_event_formation.ControllerSideFormation(
-        former, detection_event_formation_cycles
-    )
+def formation(former, cycles=0, clock=PACKING_CLOCK):
+    """The former seated at the controller, charging cycles on clock."""
+    return _Placement(former, "controller", cycles, clock)
 
 
 def assembler_with(engine, packed, recorder, **settings_fields):
@@ -139,7 +136,7 @@ def test_formation_retains_capacity_until_the_round_leaves() -> None:
         clock=PACKING_CLOCK, packing_rounds_in_flight=1
     )
     assembler = round_assembly.RoundAssembler(engine, settings)
-    assembler.detection_events = formation(None, 10)
+    assembler.detection_events = formation(None, cycles=10)
     assembler.rounds_in_flight = rounds_in_flight(1)
     assembler.syndrome_round_sender = types.SimpleNamespace(
         admit=departures.record
@@ -357,7 +354,7 @@ def test_detection_events_are_formed_once_from_the_merged_bits() -> None:
     (formed,) = round.packet.fragments
     assert formed.bits == (0, 1, 1)
     assert formed.size_bits == 3
-    # the row forms events here, so the round leaves three bits wide,
+    # the seat forms events here, so the round leaves three bits wide,
     # not the four measurement outcomes it was merged from
     assert round.wire_bits == 3
 
@@ -369,7 +366,7 @@ def test_events_formed_at_the_decoder_keep_the_raw_measurement_width() -> None:
     former = _Former((0, 1, 1))
 
     settings = controller_settings.ControllerSettings()
-    events = detection_event_formation.DecoderSideFormation(former, 0)
+    events = _Placement(former, "weak_decoder")
     unbounded = rounds_in_flight(None)
     assembler = round_assembly.RoundAssembler(engine, settings)
     assembler.detection_events = events
@@ -391,15 +388,15 @@ def test_events_formed_at_the_decoder_keep_the_raw_measurement_width() -> None:
     assert former.asked == []
 
 
-def test_the_controller_row_delays_the_round_by_its_formation_time() -> None:
+def test_the_controller_seat_delays_the_round_by_its_formation_time() -> None:
     """The charge moves the departure and nothing else."""
     engine = engine_module.Engine()
     departures = _Departures(engine)
     formation_ticks = config.microseconds_to_ticks(0.02)
     formation_clock = config.Clock(formation_ticks)
-    settings = controller_settings.ControllerSettings(clock=formation_clock)
+    settings = controller_settings.ControllerSettings()
     former = _Former((0, 1, 1))
-    events = formation(former, detection_event_formation_cycles=1)
+    events = formation(former, cycles=1, clock=formation_clock)
     unbounded = rounds_in_flight(None)
     assembler = round_assembly.RoundAssembler(engine, settings)
     assembler.detection_events = events
@@ -419,7 +416,7 @@ def test_the_controller_row_delays_the_round_by_its_formation_time() -> None:
     assert round.wire_bits == 3
 
 
-def test_an_uncharged_controller_row_hands_the_round_on_at_once() -> None:
+def test_an_uncharged_controller_seat_hands_the_round_on_at_once() -> None:
     engine = engine_module.Engine()
     departures = _Departures(engine)
     settings = controller_settings.ControllerSettings()
@@ -489,13 +486,52 @@ class _Departures:
 
 
 class _Former:
-    """A formation table answering one round's events, and what it was asked."""
+    """One round's events whatever its bits, and the bits it was asked."""
 
     def __init__(self, events):
         self.events = events
         self.asked = []
 
-    def form_round(self, operation_id, round_index, bits):
-        """One round's detection events."""
-        self.asked.append((operation_id, round_index, bits))
-        return self.events
+    def form(self, fragments):
+        """The round's fragments as one fragment of the events."""
+        first = fragments[0]
+        bits = []
+        for fragment in sorted(fragments, key=_fragment_order):
+            bits.extend(fragment.bits)
+        self.asked.append((first.operation_id, first.round_index, tuple(bits)))
+        size_bits = len(self.events)
+        formed = dataclasses.replace(
+            first, bits=self.events, size_bits=size_bits
+        )
+        return (formed,)
+
+
+class _Placement:
+    """A detection event placement seated at one seat, with its own cost."""
+
+    def __init__(self, former, seat, cycles=0, clock=None):
+        self.former = former
+        self.seat = seat
+        self.cycles = cycles
+        self.clock = clock
+
+    def forms_at(self, seat):
+        """Whether this is the seat."""
+        return seat == self.seat
+
+    def form_at(self, seat, fragments):
+        """The round formed at the seat, as it came anywhere else."""
+        if seat != self.seat or self.former is None:
+            return fragments
+        return self.former.form(fragments)
+
+    def cycles_at(self, seat, round_count):
+        """The cost at the seat, nothing anywhere else."""
+        del round_count
+        if seat != self.seat:
+            return 0
+        return self.cycles
+
+
+def _fragment_order(fragment):
+    return fragment.fragment_index

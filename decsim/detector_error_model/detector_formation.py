@@ -135,12 +135,14 @@ def build_formation_table(
 
 
 class StreamingDetectorFormer:
-    """The controller stage: one raw packet in per round, events out.
+    """One seat's former for one operation: a raw packet in, events out.
 
-    A ring buffer keeps the last max_record_span + 1 packets (two for a
-    memory experiment). Every detector of the arriving round starts at its
-    reference parity and XORs in its listed bits. The observables come out
-    with the last round.
+    A ring buffer keeps the max_record_span + 1 packets ending at the
+    round last given (two for a memory experiment), so a seat holds the
+    state IBM's windowed form keeps as its running syndrome (Maurer
+    2510.21600 Algorithm 2, lines 760-770). Every detector of the
+    arriving round starts at its reference parity and XORs in its listed
+    bits. The observables come out with the last round.
     """
 
     def __init__(self, table: FormationTable):
@@ -157,16 +159,7 @@ class StreamingDetectorFormer:
         pairs, observables as (observable index, bit) pairs on the last
         round and None before it.
         """
-        packet = tuple(int(bit) for bit in bits)
-        expected_bit_count = self.table.packet_width_by_round[round_index]
-        if len(packet) != expected_bit_count:
-            raise ValueError(
-                f"round {round_index}: packet has {len(packet)} bits, "
-                f"the formation table expects {expected_bit_count}"
-            )
-        self.packets[round_index] = packet
-        newest_stale_round = round_index - self.kept_packet_count
-        self._forget_through(newest_stale_round)
+        self.hold_packet(round_index, bits)
         recipes = self.table.detectors_of_round(round_index)
         events = [
             (recipe.detector_index, self._form_parity(recipe))
@@ -179,6 +172,27 @@ class StreamingDetectorFormer:
                 for recipe in self.table.observables
             ]
         return events, observables
+
+    def hold_packet(self, round_index: int, bits: Iterable[int]) -> None:
+        """Keep one round's packet, for the rounds after it, forming nothing.
+
+        The ring ends at this round: the packets it holds are the ones a
+        recipe of the next round can reach, whatever order the rounds
+        came in.
+        """
+        packet = tuple(int(bit) for bit in bits)
+        expected_bit_count = self.table.packet_width_by_round[round_index]
+        if len(packet) != expected_bit_count:
+            raise ValueError(
+                f"round {round_index}: packet has {len(packet)} bits, "
+                f"the formation table expects {expected_bit_count}"
+            )
+        self.packets[round_index] = packet
+        self._keep_the_ring_ending_at(round_index)
+
+    def held_bits(self) -> int:
+        """The raw bits the ring holds."""
+        return sum(len(packet) for packet in self.packets.values())
 
     def extend_table(self, table: FormationTable) -> None:
         """Append recipes without changing earlier rounds or losing history.
@@ -198,19 +212,28 @@ class StreamingDetectorFormer:
         )
         self.table = table
 
-    def _forget_through(self, newest_stale_round: int) -> None:
-        stale_rounds = [
-            kept_round
-            for kept_round in self.packets
-            if kept_round <= newest_stale_round
-        ]
-        for stale_round in stale_rounds:
-            del self.packets[stale_round]
+    def _keep_the_ring_ending_at(self, round_index: int) -> None:
+        oldest_kept_round = round_index - self.kept_packet_count + 1
+        outside_rounds = []
+        for kept_round in self.packets:
+            if oldest_kept_round <= kept_round <= round_index:
+                continue
+            outside_rounds.append(kept_round)
+        for outside_round in outside_rounds:
+            del self.packets[outside_round]
 
     def _form_parity(self, recipe) -> int:
         value = recipe.reference_parity
         for record_round, slot in recipe.records:
-            value ^= self.packets[record_round][slot]
+            packet = self.packets.get(record_round)
+            if packet is None:
+                raise RuntimeError(
+                    f"round {recipe.round_index} reads round {record_round}, "
+                    "which this former does not hold: a detector compares "
+                    "a round against the one before it (LILLIPUT 2108.06569 "
+                    "lines 499-510), so its seat must be given that round"
+                )
+            value ^= packet[slot]
         return value
 
 

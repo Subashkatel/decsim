@@ -1,250 +1,274 @@
-"""Where a round's outcomes become events: the three rows and the former.
+"""The former seated where detection_events.formed_at names.
 
-The rows are placements of one conversion: Google's workstation
-(2408.13687 lines 474-476), the decoder's own chip (Maurer 2510.21600
-lines 235-237) ahead of its store, and the decoder side (Caune et al.
-2410.05202 lines 1252-1256, LILLIPUT 2108.06569 lines 499-510), and the
-values are a parity of the raw outcomes in every row. The former's
-order law is LILLIPUT's: a detector compares a round against the one
-before it, so the rounds of an operation are formed in order. The
-referent for the values is Stim's own converter,
-stim.Circuit.compile_m2d_converter.
+The seats are placements of one conversion: Google's workstation
+(2408.13687 lines 474-476), the decoder chip's input path (Maurer
+2510.21600 lines 234-236) and the decoder itself (Caune et al.
+2410.05202 lines 1252-1255, LILLIPUT 2108.06569 lines 500-509), and the
+values are a parity of the raw outcomes at every seat. A detector
+compares a round against the one before it (LILLIPUT lines 499-510), so
+each seat forms from the packets it holds. The referent for the values
+is Stim's own converter, stim.Circuit.compile_m2d_converter.
 """
 
 import dataclasses
-from collections.abc import Callable
 
 import pytest
 import stim
 
+import decsim.config as config
 import decsim.detector_error_model.detection_event_formation as formation
 import decsim.detector_error_model.detector_formation as detector_formation
-import decsim.ports as ports
+import decsim.detector_error_model.settings as event_settings
 import decsim.records.rounds as round_records
 
+# a distance-3 memory: 8 raw bits a round, 17 on the last; 4 events on
+# the first round, 8 in the bulk and 12 on the last
+CIRCUIT = stim.Circuit.generated(
+    "surface_code:rotated_memory_z", rounds=4, distance=3
+)
+TABLE = detector_formation.build_formation_table(CIRCUIT, 4)
 
-class DeviceTable:
-    """A formation table: the round's events are its bits, ones first."""
+
+class CircuitSource:
+    """A source whose recipes are one circuit's, for every operation."""
+
+    def __init__(self, table=TABLE):
+        self.table = table
+
+    def formation_table(self, operation_id):
+        """The one table."""
+        del operation_id
+        return self.table
+
+
+class CountingDetector:
+    """A burst detector that records every round it is shown."""
 
     def __init__(self):
-        self.asked = []
+        self.observed = []
 
-    def form_round(self, operation_id, round_index, raw_bits):
-        """One round's detection events."""
-        self.asked.append((operation_id, round_index, tuple(raw_bits)))
-        return (round_index % 2, 1, 0)
+    def observe_round(self, operation_id, round_index, events):
+        """One round's events."""
+        self.observed.append((operation_id, round_index, tuple(events)))
 
 
-def fragment(round_index, bits=(1, 0, 1, 1)):
+FORMER_CLOCK = config.Clock(4000)
+
+
+def seated(formed_at, latency_cycles=0, cycles_per_round=0):
+    settings = event_settings.DetectionEventSettings(
+        formed_at=formed_at,
+        clock=FORMER_CLOCK,
+        latency_cycles=latency_cycles,
+        cycles_per_round=cycles_per_round,
+    )
+    source = CircuitSource()
+    return formation.SeatedFormation(source, settings)
+
+
+def rounds(*round_indices, operation_id=1) -> tuple:
+    """One zero fragment of each round, in the order given."""
+    fragments = []
+    for round_index in round_indices:
+        carried = fragment(round_index, operation_id=operation_id)
+        fragments.append(carried)
+    return tuple(fragments)
+
+
+def fragment(round_index, bits=None, operation_id=1):
+    if bits is None:
+        width = TABLE.packet_width_by_round[round_index]
+        bits = (0,) * width
     return round_records.RetainedSyndromeFragment(
-        operation_id=1,
+        operation_id=operation_id,
         patch_ids=(0,),
         round_index=round_index,
-        bits=bits,
+        bits=tuple(bits),
         size_bits=len(bits),
         fragment_index=0,
     )
 
 
-def test_the_controller_row_sends_the_events_at_their_own_width():
-    table = DeviceTable()
-    row = formation.ControllerSideFormation(table, 0)
-    raw = fragment(1)
+def test_a_seat_not_in_the_list_hands_the_round_on_as_it_came():
+    placement = seated(("controller",))
+    raw = (fragment(1),)
 
-    (leaving,) = row.form_before_departure((raw,))
+    leaving = placement.form_at("weak_syndrome_buffer", raw)
 
-    assert leaving.bits == (1, 1, 0)
-    assert leaving.size_bits == 3
-
-
-def test_the_decoder_row_sends_the_raw_outcomes_at_their_own_width():
-    table = DeviceTable()
-    row = formation.DecoderSideFormation(table, 0)
-    raw = fragment(1)
-
-    (leaving,) = row.form_before_departure((raw,))
-
-    assert leaving.bits == (1, 0, 1, 1)
-    assert leaving.size_bits == 4
+    assert leaving is raw
+    assert not placement.forms_at("weak_syndrome_buffer")
 
 
-def test_the_weak_syndrome_buffer_row_sends_raw_and_stores_the_events():
-    table = DeviceTable()
-    row = formation.WeakSyndromeBufferSideFormation(table, 0)
-    raw = fragment(1)
+def test_a_seat_outside_a_decoder_sends_the_events_at_their_own_width():
+    placement = seated(("weak_syndrome_buffer",))
+    raw = rounds(1)
 
-    (leaving,) = row.form_before_departure((raw,))
-    (stored,) = row.form_before_storage((leaving,))
+    (first,) = placement.form_at("weak_syndrome_buffer", raw)
 
-    assert leaving.bits == (1, 0, 1, 1)
-    assert stored.bits == (1, 1, 0)
-    assert stored.size_bits == 3
+    assert first.bits == (0, 0, 0, 0)
+    assert first.size_bits == 4
 
 
-def test_the_controller_and_decoder_rows_store_the_round_as_it_landed():
-    table = DeviceTable()
-    at_the_controller = formation.ControllerSideFormation(table, 0)
-    at_the_decoder = formation.DecoderSideFormation(table, 0)
-    landed = fragment(1)
+def test_a_decoder_seat_keeps_the_width_that_landed():
+    """The unit's input memory was written the raw round."""
+    placement = seated(("weak_decoder",))
+    raw = rounds(1)
 
-    (from_the_controller,) = at_the_controller.form_before_storage((landed,))
-    (for_the_decoder,) = at_the_decoder.form_before_storage((landed,))
+    (first,) = placement.form_at("weak_decoder", raw)
 
-    assert from_the_controller is landed
-    assert for_the_decoder is landed
-    assert table.asked == []
-
-
-def test_only_the_decoder_row_hands_a_former_to_the_decoder_side():
-    table = DeviceTable()
-
-    at_the_controller = formation.ControllerSideFormation(table, 0)
-    at_the_decoder = formation.DecoderSideFormation(table, 0)
-    at_the_weak_syndrome_buffer = formation.WeakSyndromeBufferSideFormation(
-        table, 0
-    )
-
-    assert at_the_controller.decoder_side_former() is None
-    assert at_the_weak_syndrome_buffer.decoder_side_former() is None
-    assert at_the_decoder.decoder_side_former() is not None
-
-
-def test_a_source_with_no_formation_table_forms_nothing_either_way():
-    at_the_controller = formation.ControllerSideFormation(None, 0)
-    at_the_decoder = formation.DecoderSideFormation(None, 0)
-    raw = fragment(1)
-
-    (kept,) = at_the_controller.form_before_departure((raw,))
-
-    assert kept.bits == (1, 0, 1, 1)
-    assert at_the_decoder.decoder_side_former() is None
+    assert first.bits == (0, 0, 0, 0)
+    assert first.size_bits == 8
 
 
 def test_a_timing_only_round_is_handed_on_as_it_is():
     """A round with no bits has no outcomes to form events from."""
-    table = DeviceTable()
-    row = formation.ControllerSideFormation(table, 0)
+    placement = seated(("controller",))
     timing_only = round_records.RetainedSyndromeFragment(
         operation_id=1,
         patch_ids=(0,),
         round_index=1,
         bits=None,
-        size_bits=12,
+        size_bits=8,
         fragment_index=0,
     )
 
-    (kept,) = row.form_before_departure((timing_only,))
+    (kept,) = placement.form_at("controller", (timing_only,))
 
     assert kept is timing_only
 
 
-def test_a_controller_charge_under_the_weak_syndrome_buffer_row_is_refused():
-    """The controller cannot be charged for work the chip does."""
-    table = DeviceTable()
+def test_a_source_with_no_recipes_forms_nothing():
+    settings = event_settings.DetectionEventSettings(formed_at=("controller",))
+    placement = formation.SeatedFormation(None, settings)
+    raw = (fragment(1),)
 
-    with pytest.raises(ValueError) as refusal:
-        formation.WeakSyndromeBufferSideFormation(table, 250)
+    leaving = placement.form_at("controller", raw)
 
-    sentence = str(refusal.value)
-    assert "controller.detection_event_cycles_per_round" in sentence
-    assert "weak_syndrome_buffer.detection_event_cycles_per_round" in sentence
+    assert leaving is raw
 
 
-def test_a_controller_charge_under_the_decoder_row_is_refused():
-    """The controller cannot be charged for work it does not do."""
-    table = DeviceTable()
+def test_a_round_the_seat_formed_before_is_answered_from_what_it_holds():
+    """Two windows of one tier read one round; it is formed once."""
+    detector = CountingDetector()
+    settings = event_settings.DetectionEventSettings(
+        formed_at=("weak_decoder",)
+    )
+    source = CircuitSource()
+    placement = formation.SeatedFormation(
+        source, settings, "weak_decoder", detector
+    )
+    first_job = rounds(1, 2)
+    second_job = rounds(2, 3)
 
-    with pytest.raises(ValueError) as refusal:
-        formation.DecoderSideFormation(table, 250)
+    placement.form_at("weak_decoder", first_job)
+    placement.form_at("weak_decoder", second_job)
 
-    sentence = str(refusal.value)
-    assert "controller.detection_event_cycles_per_round" in sentence
-    assert "detection_event_latency_cycles, or write null" in sentence
-
-
-def test_the_former_forms_each_round_once_and_remembers_it():
-    """Both tiers read one round's events; the table is fed once."""
-    table = DeviceTable()
-    former = formation.RememberedDetectionEvents(table)
-
-    first = former.form_round(1, 1, (1, 0, 1, 1))
-    second = former.form_round(1, 1, (1, 0, 1, 1))
-
-    assert first == (1, 1, 0)
-    assert second == (1, 1, 0)
-    assert table.asked == [(1, 1, (1, 0, 1, 1))]
+    observed_rounds = [round_index for _, round_index, _ in detector.observed]
+    assert observed_rounds == [1, 2, 3]
 
 
-def test_the_rounds_of_an_operation_are_formed_in_order():
-    table = DeviceTable()
-    former = formation.RememberedDetectionEvents(table)
-
-    former.form_round(1, 1, (1, 0, 1, 1))
-    former.form_round(1, 2, (0, 0, 1, 1))
-
-    assert table.asked == [
-        (1, 1, (1, 0, 1, 1)),
-        (1, 2, (0, 0, 1, 1)),
-    ]
-
-
-def test_a_round_asked_for_before_the_one_before_it_is_refused():
-    """The table no longer holds the packet that round is compared against."""
-    table = DeviceTable()
-    former = formation.RememberedDetectionEvents(table)
-    former.form_round(1, 1, (1, 0, 1, 1))
+def test_each_seat_forms_from_the_packets_it_was_given():
+    """The strong decoder never saw round 1, so it cannot form round 2."""
+    placement = seated(("weak_decoder", "strong_decoder"))
+    first_two = rounds(1, 2)
+    second = rounds(2)
+    placement.form_at("weak_decoder", first_two)
 
     with pytest.raises(RuntimeError) as refusal:
-        former.form_round(1, 3, (0, 1, 1, 0))
+        placement.form_at("strong_decoder", second)
 
     sentence = str(refusal.value)
-    assert "is at round 1 and was asked for round 3" in sentence
+    assert "round 2 reads round 1, which this former does not hold" in sentence
     assert "LILLIPUT 2108.06569 lines 499-510" in sentence
 
 
+def test_a_seat_given_the_round_before_forms_the_round_after_it():
+    """The round before is held, not formed and not handed on."""
+    placement = seated(("strong_decoder",))
+    third = rounds(3)
+    second = rounds(2)
+
+    formed = placement.form_at("strong_decoder", third, second)
+
+    assert [carried.round_index for carried in formed] == [3]
+    assert formed[0].bits == (0,) * 8
+
+
+def test_a_seat_that_has_not_formed_a_round_needs_the_one_before():
+    placement = seated(("weak_decoder",))
+
+    assert placement.needs_the_round_before("weak_decoder", 1, 3)
+
+
+def test_a_seat_needs_nothing_before_a_round_it_formed():
+    placement = seated(("weak_decoder",))
+    first_two = rounds(1, 2)
+    placement.form_at("weak_decoder", first_two)
+
+    assert not placement.needs_the_round_before("weak_decoder", 1, 2)
+
+
+def test_an_operations_first_round_needs_nothing_before_it():
+    """It compares against the reset (LILLIPUT 2108.06569 lines 499-510)."""
+    placement = seated(("weak_decoder",))
+
+    assert not placement.needs_the_round_before("weak_decoder", 1, 1)
+
+
+def test_a_seat_that_does_not_form_needs_nothing():
+    placement = seated(("controller",))
+
+    assert not placement.needs_the_round_before("weak_decoder", 1, 3)
+
+
 def test_each_operation_is_formed_from_its_own_first_round():
-    table = DeviceTable()
-    former = formation.RememberedDetectionEvents(table)
-    former.form_round(1, 1, (1, 0, 1, 1))
-    former.form_round(1, 2, (1, 0, 1, 1))
+    placement = seated(("controller",))
+    first = rounds(1)
+    second = rounds(2)
+    other_first = rounds(1, operation_id=2)
+    placement.form_at("controller", first)
+    placement.form_at("controller", second)
 
-    events = former.form_round(2, 1, (0, 1, 0, 1))
+    (other,) = placement.form_at("controller", other_first)
 
-    assert events == (1, 1, 0)
+    assert other.bits == (0, 0, 0, 0)
 
 
-@pytest.mark.parametrize(
-    "placement",
-    [
-        formation.ControllerSideFormation,
-        formation.WeakSyndromeBufferSideFormation,
-    ],
-)
-def test_joint_round_is_formed_once_in_measurement_order(
-    placement: Callable[..., ports.DetectionEventPlacement],
-) -> None:
-    table = DeviceTable()
-    row = placement(table, 0)
-    first = fragment(1, bits=(1,))
-    middle = fragment(1, bits=(0,))
+@pytest.mark.parametrize("seat", ["controller", "weak_syndrome_buffer"])
+def test_a_joint_round_is_formed_once_in_measurement_order(seat):
+    placement = seated((seat,))
+    first = fragment(1, bits=(1, 0, 0))
+    middle = fragment(1, bits=(0, 1, 0))
     middle = dataclasses.replace(middle, patch_ids=("other",), fragment_index=1)
-    last = fragment(1, bits=(1,))
+    last = fragment(1, bits=(0, 0))
     last = dataclasses.replace(last, fragment_index=2)
 
-    leaving = row.form_before_departure((last, first, middle))
-    (formed,) = row.form_before_storage(leaving)
+    (formed,) = placement.form_at(seat, (last, first, middle))
 
-    assert table.asked == [(1, 1, (1, 0, 1))]
     assert formed.patch_ids == (0, "other")
-    assert formed.bits == (1, 1, 0)
-    assert formed.size_bits == 3
+    assert len(formed.bits) == 4
+    assert formed.size_bits == 4
 
 
-def test_rounds_split_into_fragments_form_stims_events_on_sampled_shots():
-    """The controller row, fed each round as three shuffled fragments.
+def test_forming_rounds_together_costs_the_latency_once_and_the_rate_after():
+    """Yang 2605.04892 lines 1273-1275: a pipelined stage, 5 then 1 a round."""
+    placement = seated(("weak_decoder",), latency_cycles=5, cycles_per_round=1)
+
+    assert placement.cycles_at("weak_decoder", 1) == 5
+    assert placement.cycles_at("weak_decoder", 4) == 8
+    assert placement.cycles_at("weak_decoder", 0) == 0
+    assert placement.cycles_at("controller", 4) == 0
+
+
+@pytest.mark.parametrize("seat", event_settings.SEATS)
+def test_every_seat_forms_stims_events_on_sampled_shots(seat):
+    """Each round split into three shuffled fragments, at every seat.
 
     The first round compares against the reset and the last folds in
     the data readout, so a four-round memory covers all three layers.
+    The rounds come as two windows out of order, the later first, and
+    overlapping, so a seat forms a round from the round before it that
+    it is given and answers a round it formed from what it remembers.
     """
     circuit = stim.Circuit.generated(
         "surface_code:rotated_memory_z",
@@ -260,43 +284,58 @@ def test_rounds_split_into_fragments_form_stims_events_on_sampled_shots():
         measurements=measurements, append_observables=False
     )
 
-    formed = _formed_at_the_controller(circuit, 4, measurements)
+    formed = _formed_at(seat, circuit, measurements)
 
     assert formed == _as_rows(expected)
     assert any(any(row) for row in formed)
 
 
-class _StimFormer:
-    """StimDevice.form_round over one shot's formation table."""
-
-    def __init__(self, table: detector_formation.FormationTable) -> None:
-        self.former = detector_formation.StreamingDetectorFormer(table)
-
-    def form_round(self, operation_id, round_index, raw_bits):
-        del operation_id
-        events, _ = self.former.feed_packet(round_index, raw_bits)
-        return tuple(value for _, value in events)
-
-
-def _formed_at_the_controller(circuit, round_count, measurements) -> list:
-    table = detector_formation.build_formation_table(circuit, round_count)
+def _formed_at(seat, circuit, measurements) -> list:
+    table = detector_formation.build_formation_table(circuit, 4)
+    settings = event_settings.DetectionEventSettings(formed_at=(seat,))
     rows = []
-    after_last_round = round_count + 1
     for shot in measurements:
-        former = _StimFormer(table)
-        row = formation.ControllerSideFormation(former, 0)
+        source = CircuitSource(table)
+        placement = formation.SeatedFormation(source, settings)
         packets = detector_formation.split_measurements_into_packets(
             table, shot
         )
-        events = []
-        for round_index in range(1, after_last_round):
-            fragments = _in_three_shuffled_fragments(
-                round_index, packets[round_index]
-            )
-            (leaving,) = row.form_before_departure(fragments)
-            events.extend(leaving.bits)
-        rows.append(tuple(events))
+        row = _one_shot_formed_at(placement, seat, packets)
+        rows.append(row)
     return rows
+
+
+def _one_shot_formed_at(placement, seat, packets) -> tuple:
+    """One shot's events, its rounds given as two windows out of order."""
+    events_by_round = {}
+    for window in ((3, 4), (1, 2, 3)):
+        fragments = _window_fragments(window, packets)
+        before = _round_before(placement, seat, window[0], packets)
+        formed = placement.form_at(seat, fragments, before)
+        for carried in formed:
+            events_by_round[carried.round_index] = carried.bits
+    row = []
+    for round_index in (1, 2, 3, 4):
+        row.extend(events_by_round[round_index])
+    return tuple(row)
+
+
+def _round_before(placement, seat, first_round, packets) -> tuple:
+    """The raw round before first_round, when the seat needs it."""
+    if not placement.needs_the_round_before(seat, 1, first_round):
+        return ()
+    round_before = first_round - 1
+    return _in_three_shuffled_fragments(round_before, packets[round_before])
+
+
+def _window_fragments(window, packets) -> tuple:
+    fragments = []
+    for round_index in window:
+        shuffled = _in_three_shuffled_fragments(
+            round_index, packets[round_index]
+        )
+        fragments.extend(shuffled)
+    return tuple(fragments)
 
 
 def _in_three_shuffled_fragments(round_index, packet) -> tuple:

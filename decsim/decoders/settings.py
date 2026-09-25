@@ -84,8 +84,6 @@ ENGINE_CYCLE_KEYS = {
 _ENGINE_KEYS = (
     "clock",
     *ENGINE_CYCLE_KEYS,
-    "detection_event_latency_cycles",
-    "detection_event_cycles_per_round",
 )
 
 # weak_decoder.input and strong_decoder.input name one of these rows:
@@ -113,22 +111,6 @@ DECODER_INPUTS = {"copy": True, "in_place": False}
 # writer (2301.08419 lines 632-640). One input read by two jobs has no
 # single writer, so in_place is refused there by name.
 DECODER_BOUNDARY_FOLDS = {"copy": True, "in_place": False}
-
-# <tier>_decoder.engine.detection_event_latency_cycles, the fixed
-# latency of the tier's event-detection stage: Yang et al. 2605.04892
-# lines 1273-1275, "All variables are stored in FPGA registers, enabling
-# fully pipelined operation. The total latency of the preprocessing
-# stage for syndrome calculation is fixed at 20 ns (5 FPGA clock
-# cycles)", counted inside the decoder's own subtotal (Table I, lines
-# 1049-1052).
-DETECTION_EVENT_LATENCY_CYCLES = 5
-
-# <tier>_decoder.engine.detection_event_cycles_per_round, the pipelined
-# stage's rate: fully pipelined (Yang 2605.04892 line 1273) means the
-# stage takes a new round every clock, which is the rate the fetch stage
-# already reads at (LILLIPUT 2108.06569 line 593, the FIFO of the last m
-# rounds).
-DETECTION_EVENT_CYCLES_PER_ROUND = 1
 
 
 @dataclasses.dataclass(frozen=True)
@@ -222,17 +204,6 @@ class DecoderSettings:
     polled status register, the decoder holding its output until the
     reader takes it (2410.05202 lines 1256-1259). It is read on the tier
     that decodes the plan's windows.
-    detection_event_latency_cycles and detection_event_cycles_per_round
-    price this tier's own event-detection logic, charged only when the
-    rounds reach it raw (controller.detection_events_formed_at decoder).
-    The stage is pipelined, so a job forming n rounds pays the fixed
-    latency once and the rate for every round after the first: Yang et
-    al. 2605.04892 lines 1273-1275 store "All variables ... in FPGA
-    registers, enabling fully pipelined operation" and fix "The total
-    latency of the preprocessing stage for syndrome calculation ... at
-    20 ns (5 FPGA clock cycles)", which is the latency default; the rate
-    default is one round a clock. A null latency is uncharged and the
-    rate is then read by nobody.
     row_settings is the row's own Settings, read from the section's keys
     outside DECODER_KEYS (union_find's weight_step and cycle_count), or
     None for a row that declares none; the tier never reads it.
@@ -251,10 +222,6 @@ class DecoderSettings:
     fetch_cycles_per_job: int = 0
     release_cycles_per_job: int = 1
     release_cycles_per_round: int = 0
-    detection_event_latency_cycles: Optional[int] = (
-        DETECTION_EVENT_LATENCY_CYCLES
-    )
-    detection_event_cycles_per_round: int = DETECTION_EVENT_CYCLES_PER_ROUND
     engine_clock: Optional[config.Clock] = None
     decoder: Optional[ports.Decoder] = None
     # the row's own Settings record, opaque to the tier
@@ -409,10 +376,6 @@ def _engine_card(
     _check_engine_keys(engine, section_name)
     fields = _engine_stage_cycles(engine, section_name)
     fields["engine_clock"] = _engine_clock(engine, clocks, section_name)
-    latency = _formation_latency_cycles(engine, section_name)
-    fields["detection_event_latency_cycles"] = latency
-    rate = _formation_cycles_per_round(engine, section_name)
-    fields["detection_event_cycles_per_round"] = rate
     return fields
 
 
@@ -464,26 +427,6 @@ def _engine_cycles(engine: Mapping, section_name: str, key: str) -> int:
     cycles = engine[key]
     config.check_cycles(f"{section_name}.engine.{key}", cycles)
     return cycles
-
-
-def _formation_latency_cycles(
-    engine: Mapping, section_name: str
-) -> Optional[int]:
-    """The fixed latency of the tier's event-detection stage; null is off."""
-    key = "detection_event_latency_cycles"
-    latency = engine.get(key, DETECTION_EVENT_LATENCY_CYCLES)
-    if latency is None:
-        return None
-    config.check_cycles(f"{section_name}.engine.{key}", latency)
-    return latency
-
-
-def _formation_cycles_per_round(engine: Mapping, section_name: str) -> int:
-    """The rate that stage accepts rounds at, one a clock by default."""
-    key = "detection_event_cycles_per_round"
-    rate = engine.get(key, DETECTION_EVENT_CYCLES_PER_ROUND)
-    config.check_cycles(f"{section_name}.engine.{key}", rate)
-    return rate
 
 
 def _check_boolean(section_name: str, key: str, value) -> None:

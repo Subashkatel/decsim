@@ -100,6 +100,7 @@ def build_plan(
         settings.escalation
     )
     reread_regions = settings.escalation.restart_reread_buffer_regions
+    strong_side_forms = settings.detection_events.forms_on_the_strong_side()
     window_interaction = _window_interaction(settings.windows, reread_regions)
     if dynamic_streams and not scheme.supports_dynamic_streams:
         raise ValueError(
@@ -147,6 +148,7 @@ def build_plan(
         absorbs_weak_windows=absorbs_weak_windows,
         restart_reread_buffer_regions=reread_regions,
         has_open_ended_dynamic_streams=bool(dynamic_streams),
+        strong_side_forms=strong_side_forms,
     )
     resource_claims = _resource_claims(operations, view_by_id, layout)
     device = _syndrome_source(settings.qpu, code)

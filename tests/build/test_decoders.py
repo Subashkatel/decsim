@@ -21,6 +21,7 @@ import decsim.decoders.decoders as decoders
 import decsim.decoders.settings as decoder_settings
 import decsim.decoders.union_find.decoder as union_find
 import decsim.detector_error_model.detection_event_formation as event_formation
+import decsim.detector_error_model.settings as event_settings
 import decsim.escalation.settings as escalation_settings
 import decsim.records.decoding as decoding_records
 import decsim.settings as machine_settings
@@ -57,7 +58,10 @@ def _pool(settings, detection_events=None):
     )
     plan = plan_build.build_plan(settings, policy)
     if detection_events is None:
-        detection_events = event_formation.ControllerSideFormation(None, 0)
+        at_the_controller = event_settings.DetectionEventSettings()
+        detection_events = event_formation.SeatedFormation(
+            None, at_the_controller
+        )
     return decoder_build.build_decoder_pool(
         settings, plan, policy, detection_events
     )
@@ -215,13 +219,17 @@ def test_every_pool_declares_whether_its_unit_takes_a_copy():
     assert sorted(pool.blocks_unit_by_pool) == sorted(pool.unit_pools)
 
 
-def test_the_decoder_row_gives_each_pool_its_stage_whatever_the_source():
-    """A source with no former has nothing to convert and the stage to pay."""
+def test_a_decoder_seat_gives_each_pool_its_stage_whatever_the_source():
+    """A source with no recipes has nothing to convert and the stage to pay."""
     weak = _preset(10.0)
     settings = _settings(weak=weak)
-    no_former = None
-    at_the_decoder = event_formation.DecoderSideFormation(no_former, 0)
-    at_the_controller = event_formation.ControllerSideFormation(no_former, 0)
+    no_recipes = None
+    both_tiers = event_settings.DetectionEventSettings(
+        formed_at=("weak_decoder", "strong_decoder")
+    )
+    at_the_decoder = event_formation.SeatedFormation(no_recipes, both_tiers)
+    controller = event_settings.DetectionEventSettings()
+    at_the_controller = event_formation.SeatedFormation(no_recipes, controller)
 
     formed_at_the_decoder = _pool(settings, at_the_decoder)
     formed_at_the_controller = _pool(settings, at_the_controller)

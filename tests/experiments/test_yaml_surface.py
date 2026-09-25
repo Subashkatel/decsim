@@ -173,7 +173,6 @@ def test_a_controller_without_its_clock_is_refused_naming_the_key(tmp_path):
         "readout_to_bits_cycles",
         "packing_cycles_per_round",
         "decision_to_pulse_cycles",
-        "detection_event_cycles_per_round",
     ],
 )
 def test_a_controller_cycle_count_refusal_names_its_yaml_path(tmp_path, key):
@@ -185,16 +184,20 @@ def test_a_controller_cycle_count_refusal_names_its_yaml_path(tmp_path, key):
         experiment.load_experiment(config_path)
 
 
-def test_a_formation_placement_off_its_table_is_refused_when_the_yaml_loads(
+@pytest.mark.parametrize("key", ["latency_cycles", "cycles_per_round"])
+def test_a_formation_cycle_count_refusal_names_its_yaml_path(tmp_path, key):
+    config_path = write_config(tmp_path, {"detection_events": {key: -1}})
+    sentence = f"detection_events.{key} must not be negative"
+    with pytest.raises(ValueError, match=sentence):
+        experiment.load_experiment(config_path)
+
+
+def test_a_formation_seat_off_the_path_is_refused_when_the_yaml_loads(
     tmp_path,
 ):
-    controller = dict(MINIMAL_CONFIG["controller"])
-    controller["detection_events_formed_at"] = "nowhere"
-    config_path = write_config(tmp_path, {"controller": controller})
-    sentence = (
-        "controller.detection_events_formed_at 'nowhere' is not a row of "
-        "its table"
-    )
+    section = {"formed_at": ["nowhere"]}
+    config_path = write_config(tmp_path, {"detection_events": section})
+    sentence = "detection_events.formed_at names 'nowhere', which is not a seat"
     with pytest.raises(ValueError, match=sentence):
         experiment.load_experiment(config_path)
 

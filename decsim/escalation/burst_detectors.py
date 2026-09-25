@@ -598,7 +598,7 @@ def _formation_table(circuit: stim.Circuit, round_count: int):
 
     StimDevice builds the same table from the same circuit
     (qpu/stim_device.py _bind_source and _sample_shot), so the values
-    form_round hands over sit in this table's detector order.
+    a seat forms sit in this table's detector order.
     """
     detector_rounds = detector_chronology.resolve_detector_rounds(
         circuit, None, round_count

@@ -135,10 +135,10 @@ and then leaves for the decoder on hop 4; it is never published.
 
 What crosses: one **packed round**, every fragment that leaves the
 controller. The bit count is `PackedRound.wire_bits`, computed in
-`decsim/controller/round_assembly.py`. Under the `controller` row of
-`DETECTION_EVENT_FORMATION` that width is the detection events, which is
-narrower than the raw outcomes; under the `decoder` row it is the raw
-outcomes and each tier forms its own events.
+`decsim/controller/round_assembly.py`. When `detection_events.formed_at`
+names the `controller` seat that width is the detection events, which is
+narrower than the raw outcomes; when it names a seat after the
+controller it is the raw outcomes, and that seat forms the events.
 
 Move, on board, with a copy into the weak syndrome buffer's record at the landing. The
 round occupies a slot when its bits are in the store, and it is readable

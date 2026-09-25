@@ -32,6 +32,7 @@ import decsim.config as config
 import decsim.controller.settings as controller_settings
 import decsim.controller.syndrome_round_sender as syndrome_round_sender
 import decsim.detector_error_model.detection_event_formation as formation
+import decsim.detector_error_model.settings as event_settings
 import decsim.engine as engine_module
 import decsim.links.channel as channel_module
 import decsim.links.fabric as fabric_module
@@ -53,6 +54,12 @@ DROP = controller_settings.PackingOverflowPolicy.DROP_ROUND
 # every round this file sends carries one fragment of two bits
 BITS_PER_ROUND = 2
 MEMORY_ROUTE = round_records.SyndromePacketRoute.feedback_memory_round(9)
+
+
+def formed_at_the_controller():
+    """The run's former seated at the controller, forming nothing here."""
+    at_the_controller = event_settings.DetectionEventSettings()
+    return formation.SeatedFormation(None, at_the_controller)
 
 
 def packed(round_index, route=round_records.WINDOW_INPUT_ROUTE):
@@ -134,7 +141,7 @@ def sender_with(
     )
     weak_receiver.store = weak_store
     weak_receiver.windows = windows
-    weak_receiver.detection_events = formation.ControllerSideFormation(None, 0)
+    weak_receiver.detection_events = formed_at_the_controller()
     sender = syndrome_round_sender.SyndromeRoundSender(engine)
     sender.link = links
     sender.weak_receiver = weak_receiver
@@ -267,6 +274,7 @@ def test_the_controller_carries_the_round_to_the_room_side_and_lands_it():
         engine
     )
     room_side.store = strong_store
+    room_side.detection_events = formed_at_the_controller()
     sender, _weak_store, _transmitter, _recorder = sender_with(
         engine, strong_receiver=room_side, publishes_from_strong_store=True
     )

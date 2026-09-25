@@ -91,8 +91,8 @@ class DecoderInputStaging:
         # pool name -> whether that tier copies its input into the unit;
         # a pool this map does not name copies, which is the default
         self.copies_input_by_pool = copies_input_by_pool or {}
-        # pool name -> that tier's event-detection logic, for a run whose
-        # rounds arrive raw (controller.detection_events_formed_at)
+        # pool name -> that tier's event-detection logic, for a run that
+        # seats the former at the tier's decoder (detection_events)
         self.formation_by_pool = formation_by_pool or {}
 
     def stage(
@@ -200,14 +200,17 @@ class DecoderInputStaging:
     def _form_detection_events(self, job: decoding_records.DecodeJob) -> None:
         """This tier's event-detection logic runs on the rounds it received.
 
-        The landing is the first demand for them. Under controller-side
-        formation no tier holds any logic and the rounds arrived formed
-        (controller.detection_events_formed_at).
+        The landing is the first demand for them. The round before them,
+        when the store sent it, is held by the logic and not deposited.
+        A tier whose decoder is not a seat of detection_events.formed_at
+        holds no logic, and its rounds arrived formed.
         """
+        round_before = job.round_before
+        job.round_before = ()
         formation = self.formation_by_pool.get(job.pool)
         if formation is None:
             return
-        job.payloads = formation.form(job.payloads)
+        job.payloads = formation.form(job.payloads, round_before)
 
     def _land(
         self,

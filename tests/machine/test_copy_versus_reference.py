@@ -17,6 +17,7 @@ processing on the decoder's own chip (2510.21600 lines 235-237).
 import dataclasses
 import pathlib
 
+import numpy
 import pytest
 
 import decsim.build.decoders as decoder_build
@@ -26,6 +27,80 @@ import decsim.records.transfers as transfer_records
 
 CONFIGS = pathlib.Path("configs")
 WEAK_INPUT_PATH = transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER
+# the seats each placement named here forms at
+SEATS = {
+    "controller": ("controller",),
+    "weak_syndrome_buffer": ("weak_syndrome_buffer",),
+    "decoder": ("weak_decoder", "strong_decoder"),
+}
+WEAK_SEATS = ("weak_decoder",)
+BOTH_DECODERS = ("weak_decoder", "strong_decoder")
+CHIP_THEN_HOST_DECODER = ("weak_decoder", "strong_syndrome_buffer")
+# (config, windows.kind, escalation.strong_window, formed_at): every seat
+# on every path a round takes, on the window shapes that read a round
+# whose predecessor the seat never formed (Skoric's B blocks, and the
+# strong side's regions of both shapes)
+STIM_GRID = (
+    (
+        "weak_decoder_baseline.yaml",
+        "sliding",
+        "near_seam_pinned",
+        ("controller",),
+    ),
+    (
+        "weak_decoder_baseline.yaml",
+        "sliding",
+        "near_seam_pinned",
+        ("weak_syndrome_buffer",),
+    ),
+    ("weak_decoder_baseline.yaml", "sliding", "near_seam_pinned", WEAK_SEATS),
+    ("weak_decoder_baseline.yaml", "parallel", "near_seam_pinned", WEAK_SEATS),
+    (
+        "seam_pinned_switching.yaml",
+        "sliding",
+        "near_seam_pinned",
+        ("weak_syndrome_buffer",),
+    ),
+    (
+        "seam_pinned_switching.yaml",
+        "sliding",
+        "near_seam_pinned",
+        BOTH_DECODERS,
+    ),
+    (
+        "seam_pinned_switching.yaml",
+        "sliding",
+        "near_seam_pinned",
+        CHIP_THEN_HOST_DECODER,
+    ),
+    (
+        "seam_pinned_switching.yaml",
+        "sliding",
+        "forward_seam_pinned",
+        BOTH_DECODERS,
+    ),
+    (
+        "seam_pinned_switching.yaml",
+        "sliding",
+        "forward_seam_pinned",
+        CHIP_THEN_HOST_DECODER,
+    ),
+    (
+        "strong_decoder_baseline.yaml",
+        "sliding",
+        "near_seam_pinned",
+        ("strong_syndrome_buffer",),
+    ),
+    (
+        "strong_decoder_baseline.yaml",
+        "sliding",
+        "near_seam_pinned",
+        ("strong_decoder",),
+    ),
+)
+# a decoder seat priced as Yang et al. price theirs: 5 cycles, then one
+# round a clock (2605.04892 lines 1273-1275)
+YANG_CYCLES = {"decoder": (5, 1)}
 
 
 def _machine_formed_at(where: str, distance: int = 3):
@@ -37,14 +112,120 @@ def _machine_formed_at(where: str, distance: int = 3):
         distance=distance,
         round_period_microseconds=1.0,
     )
-    controller = dataclasses.replace(
-        settings.controller, detection_events_formed_at=where
-    )
+    detection_events = _formed_at(settings, where)
     observation = dataclasses.replace(settings.observation, data_movement=True)
     settings = dataclasses.replace(
-        settings, controller=controller, observation=observation
+        settings, detection_events=detection_events, observation=observation
     )
     return machine_module.Machine.build(settings, 0)
+
+
+def _parallel_machine_formed_at(where: str):
+    """The weak baseline on Skoric's A/B blocks, formed there."""
+    formed_there = _machine_formed_at(where)
+    settings = formed_there.settings
+    windows = dataclasses.replace(settings.windows, kind="parallel")
+    settings = dataclasses.replace(settings, windows=windows)
+    return machine_module.Machine.build(settings, 0)
+
+
+def _seated_machine(config_name, windows_kind, strong_window, formed_at):
+    """A d=3 run of the config on that shape, formed at those seats."""
+    config_path = CONFIGS / config_name
+    config = experiment.load_experiment(config_path)
+    settings = config.point_settings(
+        physical_error_probability=0.008,
+        distance=3,
+        round_period_microseconds=1.0,
+    )
+    detection_events = dataclasses.replace(
+        settings.detection_events, formed_at=formed_at
+    )
+    windows = dataclasses.replace(settings.windows, kind=windows_kind)
+    escalation = dataclasses.replace(
+        settings.escalation, strong_window=strong_window
+    )
+    settings = dataclasses.replace(
+        settings,
+        detection_events=detection_events,
+        windows=windows,
+        escalation=escalation,
+    )
+    return machine_module.Machine.build(settings, 0)
+
+
+def _landed_rounds(machine) -> list:
+    """Every round each decoder unit consumed, as its memory took it.
+
+    The landing is where the unit's input is deposited; the masked
+    duplicate a boundary fold makes afterwards is not a landing.
+    """
+    landed = []
+
+    def record(job, bits, source_name, memory_name) -> None:
+        del bits, source_name
+        if memory_name == "masked view":
+            return
+        for fragment in job.decoder_input.fragments():
+            key = (fragment.operation_id, fragment.round_index)
+            landed.append((key, fragment.bits))
+
+    for service in _services(machine):
+        service.staging.trace.copy_made.connect(record)
+    return landed
+
+
+def _raw_rounds(machine) -> dict:
+    """Every round's raw bits as the QPU emits them, and each operation."""
+    device = machine.syndrome_source
+    emitted = {"bits": {}, "operations": {}}
+    emit = device.round_payloads
+
+    def recording(operation, round_index):
+        readouts = emit(operation, round_index)
+        bits = []
+        for readout in readouts:
+            bits.extend(readout.bits)
+        emitted["bits"][(operation.id, round_index)] = bits
+        emitted["operations"][operation.id] = operation
+        return readouts
+
+    device.round_payloads = recording
+    return emitted
+
+
+def _stims_events_by_round(machine, emitted) -> dict:
+    """Stim's own converter's events on the emitted rows, by round."""
+    device = machine.syndrome_source
+    events_by_round = {}
+    for operation_id, operation in emitted["operations"].items():
+        table = device.formation_table(operation_id)
+        by_round = _stims_events_of(operation, table, emitted["bits"])
+        events_by_round.update(by_round)
+    return events_by_round
+
+
+def _stims_events_of(operation, table, bits_by_round) -> dict:
+    """One operation's events from Stim's converter, keyed by round."""
+    after_last_round = table.round_count + 1
+    round_indices = range(1, after_last_round)
+    row = []
+    for round_index in round_indices:
+        row.extend(bits_by_round[(operation.id, round_index)])
+    converter = operation.circuit.compile_m2d_converter()
+    measurements = numpy.array([row], dtype=numpy.bool_)
+    converted = converter.convert(
+        measurements=measurements, append_observables=False
+    )
+    shot_events = converted[0]
+    by_round = {}
+    for round_index in round_indices:
+        recipes = table.detectors_of_round(round_index)
+        bits = []
+        for recipe in recipes:
+            bits.append(int(shot_events[recipe.detector_index]))
+        by_round[(operation.id, round_index)] = tuple(bits)
+    return by_round
 
 
 def _timing_only_machine_formed_at(where: str):
@@ -74,10 +255,8 @@ def _switching_machine_formed_at(where: str):
         distance=3,
         round_period_microseconds=1.0,
     )
-    controller = dataclasses.replace(
-        settings.controller, detection_events_formed_at=where
-    )
-    settings = dataclasses.replace(settings, controller=controller)
+    detection_events = _formed_at(settings, where)
+    settings = dataclasses.replace(settings, detection_events=detection_events)
     return machine_module.Machine.build(settings, 0)
 
 
@@ -95,16 +274,26 @@ def _forward_switching_at_the_decoder():
         distance=3,
         round_period_microseconds=1.0,
     )
-    controller = dataclasses.replace(
-        settings.controller, detection_events_formed_at="decoder"
-    )
+    detection_events = _formed_at(settings, "decoder")
     escalation = dataclasses.replace(
         settings.escalation, strong_window="forward_seam_pinned"
     )
     settings = dataclasses.replace(
-        settings, controller=controller, escalation=escalation
+        settings, detection_events=detection_events, escalation=escalation
     )
     return machine_module.Machine.build(settings, 0)
+
+
+def _formed_at(settings, where: str):
+    """The detection_events card forming at the seats where names."""
+    seats = SEATS[where]
+    latency_cycles, cycles_per_round = YANG_CYCLES.get(where, (0, 0))
+    return dataclasses.replace(
+        settings.detection_events,
+        formed_at=seats,
+        latency_cycles=latency_cycles,
+        cycles_per_round=cycles_per_round,
+    )
 
 
 def _services(machine) -> list:
@@ -382,7 +571,7 @@ def test_events_formed_at_the_decoder_widen_the_tiers_input_link():
 
 
 def test_the_same_events_are_decoded_wherever_they_were_formed():
-    """The row moves the width and the time, never a bit of the syndrome."""
+    """The seat moves the width and the time, never a bit of the syndrome."""
     for distance in (3, 5):
         at_the_controller = _machine_formed_at("controller", distance)
         controller_inputs = _decoder_inputs(at_the_controller)
@@ -394,7 +583,7 @@ def test_the_same_events_are_decoded_wherever_they_were_formed():
         assert _observables(decoder_result) == _observables(controller_result)
 
 
-def test_the_widths_the_two_rows_send_are_the_events_and_the_outcomes():
+def test_the_widths_the_two_seats_send_are_the_events_and_the_outcomes():
     """d=3: 240 event bits into the weak syndrome buffer, 249 outcome bits."""
     at_the_controller = _machine_formed_at("controller")
     at_the_controller.run()
@@ -450,7 +639,7 @@ def test_a_tier_pays_yangs_latency_then_one_round_a_clock():
     assert charged[1] == (7, 3, 28000)
 
 
-def test_the_controller_row_charges_no_tier_for_a_formation_it_did():
+def test_the_controller_seat_charges_no_tier_for_a_formation_it_did():
     at_the_controller = _machine_formed_at("controller")
     at_the_controller.run()
     assert _formation_stages(at_the_controller) == []
@@ -491,39 +680,46 @@ def test_no_round_a_tier_read_goes_uncharged_on_that_tier():
     assert read["strong"] - charged["strong"] == set()
 
 
-def test_a_shape_that_reads_disjoint_ranges_cannot_form_at_the_decoder():
-    """A tier asked out of order refuses.
+def test_disjoint_ranges_formed_at_the_decoder_decode_the_same_events():
+    """Each block's decoder reads the raw round before the block.
 
     Skoric A/B blocks decode disjoint round ranges (2209.08552 sec. I.C),
-    so a tier is asked for a round whose predecessor its table has
-    forgotten, and it refuses rather than form the wrong syndrome.
+    so a B block starts at a round whose predecessor its tier never
+    formed; the store sends that round with the block, and every decode
+    reads what it reads when the controller forms the events.
     """
-    config_path = CONFIGS / "weak_decoder_baseline.yaml"
-    config = experiment.load_experiment(config_path)
-    settings = config.point_settings(
-        physical_error_probability=0.001,
-        distance=3,
-        round_period_microseconds=1.0,
+    at_the_decoder = _parallel_machine_formed_at("decoder")
+    decoder_inputs = _decoder_inputs(at_the_decoder)
+    at_the_controller = _parallel_machine_formed_at("controller")
+    controller_inputs = _decoder_inputs(at_the_controller)
+
+    at_the_decoder.run()
+    at_the_controller.run()
+
+    assert decoder_inputs == controller_inputs
+
+
+@pytest.mark.parametrize(
+    "config_name, windows_kind, strong_window, formed_at", STIM_GRID
+)
+def test_every_decoder_unit_consumes_stims_events_from_every_seat(
+    config_name, windows_kind, strong_window, formed_at
+):
+    """What each unit's memory takes is Stim's events, bit for bit.
+
+    The referent is stim.Circuit.compile_m2d_converter on the raw rows
+    the QPU emitted, so the check reads what the decoder consumes after
+    every hop, whichever seat formed it.
+    """
+    machine = _seated_machine(
+        config_name, windows_kind, strong_window, formed_at
     )
-    controller = dataclasses.replace(
-        settings.controller, detection_events_formed_at="decoder"
-    )
-    windows = dataclasses.replace(settings.windows, kind="parallel")
-    settings = dataclasses.replace(
-        settings, controller=controller, windows=windows
-    )
-    machine = machine_module.Machine.build(settings, 0)
+    emitted = _raw_rounds(machine)
+    landed = _landed_rounds(machine)
 
-    with pytest.raises(RuntimeError) as refusal:
-        machine.run()
+    machine.run()
 
-    sentence = str(refusal.value)
-    assert "the rounds of an operation are formed in order" in sentence
-    assert "form its events at the controller" in sentence
-
-
-def test_a_formation_place_that_is_not_a_row_is_refused_by_name():
-    with pytest.raises(
-        ValueError, match="controller.detection_events_formed_at 'workstation'"
-    ):
-        _machine_formed_at("workstation")
+    expected = _stims_events_by_round(machine, emitted)
+    mismatched = [key for key, bits in landed if bits != expected[key]]
+    assert landed
+    assert mismatched == []

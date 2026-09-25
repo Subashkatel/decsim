@@ -61,16 +61,32 @@ docstring.
 
 - `decsim/seeding.py`: Deterministic seeds for every stochastic component of one run.
 
-## Level 2: detector_error_model, links, pauli_frame, syndrome_buffer, windows
+## Level 2: controller, detector_error_model, links, pauli_frame, syndrome_buffer, windows
+
+### controller
+
+- `decsim/controller/__init__.py`: The controller: the room-side machine between the QPU and the stores.
+- `decsim/controller/conditional_release.py`: Conditional release: letting go of the operations that waited on a result.
+- `decsim/controller/controller.py`: The controller's intake: a QPU readout becomes a fragment for the assembler.
+- `decsim/controller/feedback_streams.py`: Stream bookkeeping on the controller's QPU-facing side.
+- `decsim/controller/idle_rounds.py`: Idle rounds per patch: how they travel and what decode work they cost.
+- `decsim/controller/instruction_output.py`: The controller's output: commands and decisions to the QPU.
+- `decsim/controller/operation_issue.py`: The issuer: an admitted operation becomes one QPU command.
+- `decsim/controller/policies.py`: How an idle round of a waiting patch travels: the idle policy rows.
+- `decsim/controller/round_assembly.py`: The assembler: raw measurement fragments become one packed round.
+- `decsim/controller/round_transmission.py`: The transmitter: a stored round leaves on its route at the write.
+- `decsim/controller/settings.py`: The controller's settings, and the idle policy it relays through.
+- `decsim/controller/syndrome_round_sender.py`: The sender: a finished round into every store it must reach, or held.
 
 ### detector_error_model
 
 - `decsim/detector_error_model/__init__.py`: Slices a circuit's Stim detector error model into per-window decoder inputs.
-- `decsim/detector_error_model/detection_event_formation.py`: Where a round's measurement outcomes become its detection events.
+- `decsim/detector_error_model/detection_event_formation.py`: The detection event former, seated at the points the yaml names.
 - `decsim/detector_error_model/detector_chronology.py`: Which round each detector belongs to, and where it sits in that round.
 - `decsim/detector_error_model/detector_formation.py`: Turns raw measurement bits into detection events, round by round.
 - `decsim/detector_error_model/fault_identity_validation.py`: Reduces one fault identity modulo two, where the catalog is built.
 - `decsim/detector_error_model/fault_model_contracts.py`: What a decoder is handed: fault representations, requirements, windows.
+- `decsim/detector_error_model/settings.py`: The yaml's `detection_events` section: where the former sits, and its cost.
 - `decsim/detector_error_model/stim_fault_catalog.py`: The whole-circuit fault catalog, read off Stim's detector error model.
 - `decsim/detector_error_model/window_model_builders.py`: The entry points that turn a window plan into window models.
 - `decsim/detector_error_model/window_ownership_dag.py`: Decides which window owns each fault when windows form a dependency graph.
@@ -128,22 +144,7 @@ docstring.
 - `decsim/windows/window_manager.py`: The windows facade: the window life cycle of every operation.
 - `decsim/windows/window_planner.py`: The window planner: which windows exist, planned or grown.
 
-## Level 3: controller, decoders, escalation, qpu
-
-### controller
-
-- `decsim/controller/__init__.py`: The controller: the room-side machine between the QPU and the stores.
-- `decsim/controller/conditional_release.py`: Conditional release: letting go of the operations that waited on a result.
-- `decsim/controller/controller.py`: The controller's intake: a QPU readout becomes a fragment for the assembler.
-- `decsim/controller/feedback_streams.py`: Stream bookkeeping on the controller's QPU-facing side.
-- `decsim/controller/idle_rounds.py`: Idle rounds per patch: how they travel and what decode work they cost.
-- `decsim/controller/instruction_output.py`: The controller's output: commands and decisions to the QPU.
-- `decsim/controller/operation_issue.py`: The issuer: an admitted operation becomes one QPU command.
-- `decsim/controller/policies.py`: How an idle round of a waiting patch travels: the idle policy rows.
-- `decsim/controller/round_assembly.py`: The assembler: raw measurement fragments become one packed round.
-- `decsim/controller/round_transmission.py`: The transmitter: a stored round leaves on its route at the write.
-- `decsim/controller/settings.py`: The controller's settings, and the idle policy it relays through.
-- `decsim/controller/syndrome_round_sender.py`: The sender: a finished round into every store it must reach, or held.
+## Level 3: decoders, escalation, qpu
 
 ### decoders
 

@@ -56,9 +56,12 @@ def build_tracker(parts):
 def build_retention(parts):
     """Which store holds a window's rounds, and for how long."""
     policy = parts.escalation_policy
+    detection_events = parts.settings.detection_events
+    strong_side_forms = detection_events.forms_on_the_strong_side()
     return round_retention_module.RoundRetention(
         is_strong_context_retained=policy.requires_strong_context,
         primary_tier=policy.primary_tier,
+        strong_side_forms=strong_side_forms,
     )
 
 

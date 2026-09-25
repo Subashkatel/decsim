@@ -169,19 +169,29 @@ class EscalatedRegion:
     (cudaqx_realtime_decoding.h lines 27 to 35). wire_bits is the sum of
     the packets' fragment sizes, the width each round left the controller
     at (PackedRound.wire_bits), and None when any fragment has no size.
+    carries_the_round_before is true when the first packet is the raw
+    round before the strong window's first, which a strong side that
+    forms the events reads for that round's detectors
+    (windows/round_retention.py, strong_round_before).
     """
 
     request_key: window_records.DecoderRequestKey
     packets: tuple[SyndromeRoundPacket, ...]
     wire_bits: Optional[int]
+    carries_the_round_before: bool = False
 
     @classmethod
     def of(
         cls,
         request_key: window_records.DecoderRequestKey,
         packets: tuple,
+        first_round: int = 1,
     ) -> "EscalatedRegion":
-        """The region of these packets, its width summed from the fragments."""
+        """The region of these packets, its width summed from the fragments.
+
+        first_round is the strong window's first round; a packet before
+        it is the round before.
+        """
         wire_bits = 0
         for packet in packets:
             packet_bits = fragment_wire_bits(packet.fragments)
@@ -189,8 +199,12 @@ class EscalatedRegion:
                 wire_bits = None
                 break
             wire_bits += packet_bits
+        carries_the_round_before = packets[0].round_index < first_round
         return cls(
-            request_key=request_key, packets=packets, wire_bits=wire_bits
+            request_key=request_key,
+            packets=packets,
+            wire_bits=wire_bits,
+            carries_the_round_before=carries_the_round_before,
         )
 
     @property
@@ -208,8 +222,8 @@ class PackedRound:
 
     The packet, its route, and its size on the wire: what leaves the
     controller, which is the detection events where the controller forms
-    them and the raw measurement outcomes where the weak syndrome buffer
-    or the decoder does (controller.detection_events_formed_at).
+    them and the raw measurement outcomes where a seat after it does
+    (detection_events.formed_at).
     """
 
     packet: SyndromeRoundPacket

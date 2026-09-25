@@ -264,7 +264,7 @@ class StrongRedecode:
             return
         packets = self.retention.escalated_rounds(missing)
         region = round_records.EscalatedRegion.of(
-            assignment.request_key, packets
+            assignment.request_key, packets, assignment.first_round
         )
         self.strong_receiver.reserve_region(region)
         self.carried_round_keys.update(missing)

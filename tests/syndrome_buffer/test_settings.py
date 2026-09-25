@@ -46,17 +46,6 @@ def test_the_default_rows_costs_are_its_own_keys():
     assert settings.row_settings == expected
 
 
-def test_the_chips_formation_charge_is_read_from_the_section():
-    clocks = config.ClockSettings.from_yaml({"fridge": 250.0})
-    section = {"clock": "fridge", "detection_event_cycles_per_round": 5}
-
-    settings = syndrome_buffer_settings.SyndromeBufferSettings.from_yaml(
-        section, "weak_syndrome_buffer", clocks, BUFFER_ROWS
-    )
-
-    assert settings.detection_event_cycles_per_round == 5
-
-
 @pytest.mark.parametrize("capacity", [0, -8, True, 8.0])
 def test_a_store_capacity_that_is_not_whole_bits_is_refused_by_name(capacity):
     clocks = config.ClockSettings.from_yaml({"fridge": 250.0})
@@ -115,7 +104,6 @@ def test_an_unknown_key_under_a_store_section_is_refused_by_name():
         "clock",
         "write_cycles",
         "read_cycles",
-        "detection_event_cycles_per_round",
     ],
 )
 @pytest.mark.parametrize("value", [3, 0, "3x"])

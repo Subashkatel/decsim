@@ -51,13 +51,13 @@ stores answer the same question by the same shape of object.
 Two calls of the controller arrive here, both about the weak syndrome buffer. A
 packed round lands over controller_to_weak_buffer: this end stores it as the
 run's detection event placement says the store holds it, the landed outcomes or
-the events formed from them here (controller.detection_events_formed_at),
-narrates the copy and the intake, and announces the published round to the
-window manager. And a timing-only feedback-memory round lands over the same
-hop to be sent on: the store writes it, it takes its slot once written,
-because the weak syndrome buffer is where it waits, and it leaves by the
-store's own outgoing port (round_output.py), which frees the slot at the
-delivery. A timing-only round is never published: no window reads it.
+the events formed from them here (detection_events.formed_at), narrates the
+copy and the intake, and announces the published round to the window manager.
+And a timing-only feedback-memory round lands over the same hop to be sent on:
+the store writes it, it takes its slot once written, because the weak syndrome
+buffer is where it waits, and it leaves by the store's own outgoing port
+(round_output.py), which frees the slot at the delivery. A timing-only round is
+never published: no window reads it.
 """
 
 import dataclasses
@@ -70,6 +70,9 @@ import decsim.records.log_sources as log_sources
 import decsim.records.rounds as round_records
 import decsim.syndrome_buffer.settings as syndrome_buffer_settings
 import decsim.trace_source as trace_source
+
+# the seat this end is on the path, as detection_events.formed_at names it
+_SEAT = "weak_syndrome_buffer"
 
 
 class WeakSyndromeRoundReceiver:
@@ -122,9 +125,10 @@ class WeakSyndromeRoundReceiver:
         the bits become readable when they are here and not before, and
         the announcement follows the record, so the window manager never
         hears of a round the store does not yet call readable. The
-        chip's formation cycles come first, on the buffer's clock, then
-        the store is asked when the write of the width it keeps
-        completes: a round is readable once it is formed and written.
+        formation cycles come first when this seat forms the round, on
+        the former's clock, then the store is asked when the write of
+        the width it keeps completes: a round is readable once it is
+        formed and written.
         on_published runs after the announcement.
 
         A round whose operation closed while it crossed is dropped at the
@@ -136,11 +140,12 @@ class WeakSyndromeRoundReceiver:
         the device emitting more rounds than the plan expects, so there
         is no drop to make here.
         """
-        formation_cycles = self.settings.detection_event_cycles_per_round
+        formation_cycles = self.detection_events.cycles_at(_SEAT, 1)
         if formation_cycles == 0:
             self._write(packed, on_published)
             return
-        edge = self.settings.clock.edge(formation_cycles, self.engine.now)
+        clock = self.detection_events.clock
+        edge = clock.edge(formation_cycles, self.engine.now)
         delay = edge - self.engine.now
         write = functools.partial(self._write, packed, on_published)
         self.engine.schedule(delay, write, label="detection event formation")
@@ -235,8 +240,8 @@ class WeakSyndromeRoundReceiver:
         wire_bits stays what crossed controller_to_weak_buffer, because
         the intake copy reports the hop's bits, not the store's.
         """
-        fragments = self.detection_events.form_before_storage(
-            landed.packet.fragments
+        fragments = self.detection_events.form_at(
+            _SEAT, landed.packet.fragments
         )
         packet = dataclasses.replace(landed.packet, fragments=fragments)
         return dataclasses.replace(landed, packet=packet)

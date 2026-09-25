@@ -4,8 +4,8 @@ The controller's packing stage merges the fragments of a round in
 fragment order, charges the packing time once per complete round, asks
 the run's detection event placement for the round that leaves, and hands
 it to the writer once that placement's own time is charged
-(detector_error_model/detection_event_formation.py, named by
-controller.detection_events_formed_at). Caune et al. 2410.05202 measure
+(detector_error_model/detection_event_formation.py, seated by
+detection_events.formed_at). Caune et al. 2410.05202 measure
 250 to 370 FPGA cycles for packetization, bus transfer, result return
 and the conditional together, an upper bound for the packing time. The stage
 admits a bounded number of rounds at once
@@ -27,6 +27,10 @@ import decsim.ports as ports
 import decsim.records.identity as identity_records
 import decsim.records.rounds as round_records
 import decsim.trace_source as trace_source
+
+# the seat the assembler is on the path, as detection_events.formed_at
+# names it
+_SEAT = "controller"
 
 
 class RoundsInFlight:
@@ -216,10 +220,10 @@ class RoundAssembler:
             "PACKED", self.engine.now, operation_id, round_index, context.route
         )
         self.trace.round_event.fire(packed_event)
-        leaving = self.detection_events.form_before_departure(raw_fragments)
+        leaving = self.detection_events.form_at(_SEAT, raw_fragments)
         # the link out of the controller carries what leaves it: the
-        # detection events when this row forms them here, the raw
-        # outcomes when the decoder forms them
+        # detection events when this seat forms them, the raw outcomes
+        # when a seat after it does
         wire_bits = round_records.fragment_wire_bits(leaving)
         packet = round_records.SyndromeRoundPacket(
             operation_id=operation_id,
@@ -232,17 +236,18 @@ class RoundAssembler:
     def _depart(self, packed: round_records.PackedRound, context) -> None:
         """Hand the round on, after the placement's own time is charged.
 
-        The controller row pays for the conversion it does here
-        (controller.detection_event_cycles_per_round); the decoder row
-        pays nothing at the controller, so the round leaves at once.
+        The controller pays for a conversion it does here, one round's
+        latency on the former's clock (detection_events); a seat after
+        it pays its own, so the round leaves at once.
         """
-        detection_event_formation_cycles = (
-            self.detection_events.detection_event_formation_cycles
-        )
-        if detection_event_formation_cycles == 0:
+        formation_cycles = self.detection_events.cycles_at(_SEAT, 1)
+        if formation_cycles == 0:
             self._hand_on(packed, context)
             return
-        delay = self._delay(detection_event_formation_cycles)
+        clock = self.detection_events.clock
+        now = self.engine.now
+        edge = clock.edge(formation_cycles, now)
+        delay = edge - now
         hand_on = functools.partial(self._hand_on, packed, context)
         self.engine.schedule(
             delay, hand_on, label="controller form detection events"

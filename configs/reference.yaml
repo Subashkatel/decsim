@@ -483,66 +483,75 @@ controller:                        # controller work per round, in cycles of its
                                    # LILLIPUT's readout buffer overwrites the latest
                                    # value (2108.06569), a storage choice neither
                                    # word models
-  detection_events_formed_at: controller
-                                   # controller | weak_syndrome_buffer |
-                                   # decoder: where the round's measurement
-                                   # outcomes become detection events.
-                                   # controller forms them in the assembler and
-                                   # sends the events on, so the weak syndrome
-                                   # buffer and the tier's input link carry the
-                                   # narrower round: "inside the workstation,
-                                   # measurements are converted into detections
-                                   # and then streamed to the real-time decoding
+
+detection_events:                  # where a round's raw measurement outcomes
+                                   # become its detection events, and what it
+                                   # costs. The events are a parity of the raw
+                                   # outcomes, the same wherever they form; the
+                                   # seat moves the width every hop after it
+                                   # carries, the state the seat holds and the
+                                   # clock the conversion is charged on
+  formed_at: [controller]          # the seats that form: controller |
+                                   # weak_syndrome_buffer |
+                                   # strong_syndrome_buffer | weak_decoder |
+                                   # strong_decoder, each named once. Every
+                                   # path a round takes to a decoder crosses
+                                   # exactly one of them, refused at build
+                                   # otherwise: controller, weak buffer, weak
+                                   # decoder; controller, weak buffer, strong
+                                   # buffer, strong decoder (a switching run's
+                                   # escalated region); controller, strong
+                                   # buffer, strong decoder (strong_only).
+                                   # controller is Google's workstation,
+                                   # "inside the workstation, measurements are
+                                   # converted into detections and then
+                                   # streamed to the real-time decoding
                                    # software via a shared memory buffer"
-                                   # (Google 2408.13687 lines 474-476). decoder
-                                   # sends the raw outcomes on instead, so the
-                                   # store and that link carry the wider round,
-                                   # and each tier forms the rounds it reads:
-                                   # the controller writes the outcomes
-                                   # "sequentially to the decoder" and "The
-                                   # decoder computes the syndrome from
-                                   # measurement outcomes and decodes it" (Caune
-                                   # et al. 2410.05202 lines 1252-1256), and
-                                   # LILLIPUT's Event Detection Logic block sits
-                                   # inside the decoder (2108.06569 lines
-                                   # 499-510). weak_syndrome_buffer sends the
-                                   # raw outcomes to the weak decoder chip,
-                                   # which forms them once as it stores the
-                                   # round, so controller_to_weak_buffer carries
-                                   # the wider round and the store, the weak
-                                   # unit's input link and the escalation hop
-                                   # carry the events, and no tier forms
-                                   # anything. The decoder's own chip forming
-                                   # them is IBM's "detector window processing
-                                   # component" (Maurer 2510.21600 lines
-                                   # 235-237); that it sits ahead of the store
-                                   # is this row's own choice, the papers being
-                                   # silent on the order. Refused on a run whose
-                                   # windows are decoded on the strong tier,
-                                   # whose rounds never reach that buffer. The
-                                   # events themselves are the same under every
-                                   # row, since a detection event is a parity of
-                                   # the raw outcomes; what moves is the width
-                                   # above and the clock the formation is
-                                   # charged on: this section's
-                                   # detection_event_cycles_per_round under the
-                                   # controller row, weak_syndrome_buffer.
-                                   # detection_event_cycles_per_round under the
-                                   # weak_syndrome_buffer row, and each tier's
-                                   # engine card under the decoder row
-  detection_event_cycles_per_round: null
-                                   # what the conversion above costs the
-                                   # controller, charged once per completed round
-                                   # on the clock this section names, before the
-                                   # round leaves for the stores. null =
-                                   # uncharged, which is where the field leaves
-                                   # it: Google's workstation converts the
-                                   # measurements into detections (2408.13687
-                                   # lines 474-476) and publishes no time for it.
-                                   # Read by the controller row of
-                                   # detection_events_formed_at, and refused
-                                   # under the other two rows, which charge the
-                                   # weak decoder chip or the tiers instead
+                                   # (2408.13687 lines 474-476). A store seat is
+                                   # the decoder chip's input path, whose
+                                   # "detector window processing component
+                                   # calculates parities of groups of
+                                   # measurements" (Maurer 2510.21600 lines
+                                   # 234-236), ahead of the store. A decoder
+                                   # seat is the tier's own logic in front of
+                                   # its core: the controller writes the
+                                   # outcomes "sequentially to the decoder" and
+                                   # "The decoder computes the syndrome from
+                                   # measurement outcomes" (Caune 2410.05202
+                                   # lines 1252-1255), LILLIPUT's Event
+                                   # Detection Logic block (2108.06569 lines
+                                   # 500-509). Every seat keeps its own history
+                                   # of the raw packets its recipes read. A
+                                   # detector compares a round against the one
+                                   # before it (LILLIPUT lines 499-510), so a
+                                   # decoder seat that has not formed a job's
+                                   # first round reads the raw round before it
+                                   # with the job, and a strong side that forms
+                                   # reads the raw round before each escalated
+                                   # region; both ride as raw bits
+  # clock: fridge                  # the clock the cycles below count on;
+                                   # absent uses controller.clock
+  latency_cycles: 0                # one conversion's fixed latency. A seat
+                                   # that forms a round at a time (the
+                                   # controller, a store) pays it per round; a
+                                   # decoder seat forming a job's n new rounds
+                                   # pays it once plus cycles_per_round for
+                                   # each round after the first. Yang et al.
+                                   # 2605.04892 lines 1273-1275: "All variables
+                                   # are stored in FPGA registers, enabling
+                                   # fully pipelined operation. The total
+                                   # latency of the preprocessing stage for
+                                   # syndrome calculation is fixed at 20 ns (5
+                                   # FPGA clock cycles)", counted inside
+                                   # "Subtotal (decoder) 148" in their Table I
+                                   # (lines 1049-1052), so a Yang-shaped decoder
+                                   # seat writes 5 here. No source publishes a
+                                   # controller-side or store-side figure, so
+                                   # 0 is the default
+  cycles_per_round: 0              # the rate the pipelined stage takes rounds
+                                   # at: fully pipelined (Yang 2605.04892 line
+                                   # 1273) is one round a clock, so 1 beside
+                                   # Yang's latency
 
 clocks:                            # clock domain name -> MHz; a link prices its
                                    # cycles on the domain it names. More domains
@@ -676,15 +685,6 @@ weak_syndrome_buffer:            # the weak syndrome buffer, on the decoder chip
                                    # 2510.21600 lines 500-509; separate stage
                                    # cycles: gem5 src/mem/XBar.py frontend_latency
                                    # and forward_latency
-  detection_event_cycles_per_round: 0
-                                   # what forming a round's detection events
-                                   # costs the weak decoder chip, charged ahead
-                                   # of write_cycles on this clock. Read under
-                                   # controller.detection_events_formed_at
-                                   # weak_syndrome_buffer and refused when
-                                   # positive under any other row. Yang et al.
-                                   # fix theirs at 5 FPGA clock cycles
-                                   # (2605.04892 lines 1273-1275)
   kind: syndrome_buffer            # syndrome_buffer | ported_syndrome_buffer.
                                    # syndrome_buffer prices a write and a read
                                    # by write_cycles and read_cycles above, and
@@ -978,38 +978,6 @@ weak_decoder:                      # the lightweight tier: fast, higher LER
                                    # ceil(correction bits per round / 8) bytes
                                    # of it (lines 217-224), so its row is that
                                    # sum here
-    detection_event_latency_cycles: 5
-                                   # the fixed latency of this tier's own
-                                   # event-detection logic, charged only when the
-                                   # rounds reach it raw (controller.
-                                   # detection_events_formed_at decoder), and
-                                   # then under every qpu.kind: a timing_only
-                                   # source has no outcomes to convert and the
-                                   # same stage to pay. 5
-                                   # cycles is Yang et al. 2605.04892 lines
-                                   # 1273-1275: "All variables are stored in FPGA
-                                   # registers, enabling fully pipelined
-                                   # operation. The total latency of the
-                                   # preprocessing stage for syndrome
-                                   # calculation is fixed at 20 ns (5 FPGA clock
-                                   # cycles)", counted inside "Subtotal
-                                   # (decoder) 148" in their Table I (lines
-                                   # 1049-1052); the stage sits in front of the
-                                   # decoder core, as LILLIPUT's Event Detection
-                                   # Logic block does (2108.06569 lines
-                                   # 499-510). A round two windows of this tier
-                                   # read is formed once and charged once.
-                                   # null = uncharged, and the rate below is
-                                   # then read by nobody
-    detection_event_cycles_per_round: 1
-                                   # the rate that pipelined stage accepts rounds
-                                   # at, so a job forming n rounds pays the
-                                   # latency above once and this for each round
-                                   # after the first. Fully pipelined (Yang
-                                   # 2605.04892 line 1273) is one round a clock,
-                                   # the rate the fetch stage above reads at
-                                   # (LILLIPUT's FIFO of the last m rounds,
-                                   # 2108.06569 line 593)
 
 strong_decoder:                    # the accurate tier: slow, lower LER
   kind: belief_matching
@@ -1043,13 +1011,6 @@ strong_decoder:                    # the accurate tier: slow, lower LER
     fetch_cycles_per_job: 0
     release_cycles_per_job: 1
     release_cycles_per_round: 0
-    detection_event_latency_cycles: 5
-                                   # as above, on this tier's own clock: the
-                                   # strong tier reads the strong syndrome buffer, so it forms the
-                                   # rounds it reads itself
-    detection_event_cycles_per_round: 1
-                                   # as above: one round a clock through the
-                                   # pipelined stage
 
 decoder_manager:                   # the manager that gives ready windows a unit
   bulk_strong: false               # true serves the strong pool's queued

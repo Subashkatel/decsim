@@ -12,7 +12,9 @@ import stim
 
 import decsim.config as config
 import decsim.decoders.settings as decoder_settings
+import decsim.detector_error_model.detection_event_formation as formation
 import decsim.detector_error_model.fault_model_contracts as fault_models
+import decsim.detector_error_model.settings as event_settings
 import decsim.frontends.deltakit as deltakit
 import decsim.frontends.settings as workload_settings
 import decsim.links.link_profiles as link_profiles
@@ -286,6 +288,9 @@ def _source(round_period_microseconds=None):
 
 
 def _execute(source, owner, round_count):
+    """Every round's events, formed at the controller as the stream grows."""
+    at_the_controller = event_settings.DetectionEventSettings()
+    placement = formation.SeatedFormation(source, at_the_controller)
     events = []
     after_last_round = round_count + 1
     for round_index in range(1, after_last_round):
@@ -298,9 +303,8 @@ def _execute(source, owner, round_count):
             is_final=is_final,
             round_period_ticks=1_100_000,
         )
-        packet = packets[0]
-        formed = source.form_round(owner.id, round_index, packet.bits)
-        events.extend(formed)
+        (formed,) = placement.form_at("controller", tuple(packets))
+        events.extend(formed.bits)
     return events
 
 

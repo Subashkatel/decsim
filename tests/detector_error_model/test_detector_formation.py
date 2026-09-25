@@ -233,6 +233,48 @@ def test_the_former_keeps_only_the_packets_a_recipe_can_reach():
     assert set(former.packets) == {2, 3}
 
 
+def test_the_ring_ends_at_the_round_last_given_whatever_its_order():
+    """A window read out of order leaves only its own packets held."""
+    table = formation_table(4)
+    former = detector_formation.StreamingDetectorFormer(table)
+    empty_packet = [0] * 8
+    former.feed_packet(1, empty_packet)
+    former.feed_packet(2, empty_packet)
+    former.feed_packet(3, empty_packet)
+    former.hold_packet(1, empty_packet)
+    assert set(former.packets) == {1}
+    assert former.held_bits() == 8
+
+
+def test_a_held_packet_forms_nothing_and_serves_the_round_after_it():
+    """The round before a window, fetched raw, lets its first round form."""
+    circuit = surface_code_circuit(4)
+    table = detector_formation.build_formation_table(circuit, 4)
+    sampler = circuit.compile_sampler(seed=3)
+    measurements = sampler.sample(1)
+    packets = detector_formation.split_measurements_into_packets(
+        table, measurements[0]
+    )
+    stim_events, _ = formed_by_stim(circuit, measurements)
+    former = detector_formation.StreamingDetectorFormer(table)
+
+    former.hold_packet(2, packets[2])
+    events, _ = former.feed_packet(3, packets[3])
+
+    formed = [bit for _, bit in events]
+    stim_row = stim_events[0]
+    expected = [int(stim_row[index]) for index, _ in events]
+    assert formed == expected
+
+
+def test_a_round_whose_round_before_is_not_held_is_refused():
+    table = formation_table(4)
+    former = detector_formation.StreamingDetectorFormer(table)
+    zero_packet = (0,) * 8
+    with pytest.raises(RuntimeError, match="round 3 reads round 2"):
+        former.feed_packet(3, zero_packet)
+
+
 def test_a_round_count_the_circuit_does_not_announce_is_refused():
     circuit = surface_code_circuit(4)
     with pytest.raises(ValueError, match="asked for 3"):

@@ -2,8 +2,9 @@
 
 Every round carries one bit per measure qubit and the final round of a
 memory circuit also carries the data-qubit readout (Stim,
-src/stim/gen/gen_surface_code.cc); detection events are formed at the
-decoder input by form_round. One shot is sampled per stream identity,
+src/stim/gen/gen_surface_code.cc); detection events are formed wherever
+detection_events.formed_at seats the former, from the recipes
+formation_table reads off the circuit. One shot is sampled per stream identity,
 under that identity's substream of the root seed (seeding.substream_seed)
 so a run is reproducible across processes, and reused by every segment
 of the stream.
@@ -13,7 +14,7 @@ import bisect
 import dataclasses
 import math
 import numbers
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from typing import Any, Optional
 
 import numpy
@@ -162,21 +163,17 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         assert key not in self._shots.shot_by_key, f"{key!r} has already begun"
         self._sample_shot(key, operation, source_round_count, detector_rounds)
 
-    def form_round(
-        self, operation_id: Any, round_index: int, raw_bits: Sequence[int]
-    ) -> tuple[int, ...]:
-        """The detection events of one complete round, in detector order.
-
-        Formed at the decoder input from the round's raw packet.
-        """
+    def formation_table(
+        self, operation_id: Any
+    ) -> detector_formation.FormationTable:
+        """The recipes the operation's rounds are formed by, off its circuit."""
         shot = self._shot_for(operation_id)
         if shot is None:
             raise KeyError(
-                f"no detector formation state for identity {operation_id!r}; "
+                f"no detector formation table for identity {operation_id!r}; "
                 "the operation has not begun"
             )
-        events, _ = shot.former.feed_packet(round_index, raw_bits)
-        return tuple(value for _, value in events)
+        return shot.table
 
     def round_payloads(
         self, operation: program_records.Operation, round_index: int
@@ -465,13 +462,12 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
             table, measurement_row
         )
         # The whole-shot formation is the oracle for the truth and for
-        # sampled_detection_events; the streaming former is what the
-        # decoder input runs, one packet at a time.
+        # sampled_detection_events; each seat that forms the rounds runs
+        # the same table one packet at a time.
         formed_events, formed_truth = detector_formation.form_shot(
             table, packets
         )
-        former = detector_formation.StreamingDetectorFormer(table)
-        shot = _SampledShot(packets, table, former, formed_events, formed_truth)
+        shot = _SampledShot(packets, table, formed_events, formed_truth)
         self._shots.shot_by_key[key] = shot
         self._shots.sample_key_by_operation_id[operation.id] = key
         self.shot_sampled.fire(operation, formed_events)
@@ -770,7 +766,6 @@ class _SampledShot:
 
     packets: dict
     table: detector_formation.FormationTable
-    former: detector_formation.StreamingDetectorFormer
     detection_events: tuple
     truth: tuple
 

@@ -143,9 +143,13 @@ class _SeatHistory:
         # where the seat reports the raw bits it holds; bound by the
         # placement, silent for a history on its own
         self.state_held = trace_source.SILENT
-        self.keeps_landed_width = seat in detection_event_settings.DECODER_SEATS
         self.former_by_operation: dict = {}
         self.events_by_round: dict = {}
+
+    @property
+    def keeps_landed_width(self) -> bool:
+        """A decoder seat keeps the width a round landed at."""
+        return self.seat in detection_event_settings.DECODER_SEATS
 
     def form(self, fragments: tuple) -> tuple:
         """Every round among the fragments formed, in the order they came.

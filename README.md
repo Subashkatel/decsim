@@ -17,9 +17,10 @@ a decoder with a number instead of measuring one.
 
 ## Install
 
-Python 3.9 or newer, and the `run` extra: the root imports Stim, and a
-run on real syndrome data needs PyMatching, numpy, scipy and matplotlib
-as well.
+Python 3.9 or newer, and the `run` extra: the root imports Stim, the
+yaml layer reads PyYAML, the decoder table imports ldpc, and a run on
+real syndrome data needs PyMatching, numpy, scipy and matplotlib as
+well.
 
 ```bash
 python -m pip install -e ".[run]"

@@ -952,3 +952,28 @@ def test_a_refused_combine_leaves_no_folder(tmp_path):
         command.main(["combine", str(missing), "--out", str(out_dir)])
     assert exit_info.value.code == 1
     assert not out_dir.exists()
+
+
+def test_a_build_refusal_under_run_is_one_line(tmp_path, capsys):
+    """A yaml that loads but that a row refuses at build, as a sentence.
+
+    burst_detector kind event_count sends a burst's windows to the
+    strong decoder, which only escalation kind switching has, so the
+    weak baseline is refused when the machine is built
+    (decsim/build/escalation.py).
+    """
+    base_path = CONFIGS_DIR / "weak_decoder_baseline.yaml"
+    config_path = tmp_path / "burst.yaml"
+    config_path.write_text(
+        f"extends: {base_path}\nburst_detector:\n  kind: event_count\n"
+    )
+
+    with pytest.raises(SystemExit) as stopped:
+        command.main(["run", str(config_path)])
+
+    printed = capsys.readouterr()
+    assert stopped.value.code == 1
+    assert printed.err.count("\n") == 1
+    assert printed.err.startswith(
+        f"decsim: {config_path}: burst_detector.kind event_count"
+    )

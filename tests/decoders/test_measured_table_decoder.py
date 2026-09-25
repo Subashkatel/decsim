@@ -14,6 +14,7 @@ import decsim.config as config
 import decsim.decoders.measured_table.decoder as measured_table
 import decsim.decoders.measured_table.measurements as measurements
 import decsim.decoders.relay_belief_propagation.decoder as relay
+import decsim.decoders.strong_backend as strong_backend
 import decsim.detector_error_model.basis_split as basis_split
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.engine as engine_module
@@ -23,6 +24,13 @@ from tests.decoders import windows
 
 PHYSICAL = fault_models.FaultRepresentation.PHYSICAL
 REQUIREMENT = fault_models.PHYSICAL_FAULT_MODEL_REQUIRED
+
+
+def _decode_ticks(table, ticket) -> int:
+    """The ticks of the one step a measured decode is: the decode."""
+    steps = table.steps(ticket)
+    (decode,) = steps
+    return decode.ticks
 
 
 def _bind_seed(component) -> None:
@@ -48,7 +56,7 @@ def test_the_time_is_the_measured_line_at_relay_bps_own_iterations():
     ticket = table.submit(job, 0)
     microseconds = 78.957 + 9.762 * detailed.iterations
     assert physical.check.shape[0] == 360
-    assert table.service_ticks(ticket) == config.microseconds_to_ticks(
+    assert _decode_ticks(table, ticket) == config.microseconds_to_ticks(
         microseconds
     )
 
@@ -75,7 +83,7 @@ def test_a_multi_instance_gpu_slice_is_priced_by_its_own_measured_line(
     result = table.result(ticket)
     per_iteration = microseconds_per_iteration * result.iterations
     microseconds = intercept_microseconds + per_iteration
-    assert table.service_ticks(ticket) == config.microseconds_to_ticks(
+    assert _decode_ticks(table, ticket) == config.microseconds_to_ticks(
         microseconds
     )
 
@@ -111,7 +119,7 @@ def test_a_region_is_priced_by_the_measured_region_nearest_in_size():
     microseconds = 95.243 + 11.044 * result.iterations
     physical = model.require_faults(PHYSICAL)
     assert physical.check.shape[0] == 960
-    assert table.service_ticks(ticket) == config.microseconds_to_ticks(
+    assert _decode_ticks(table, ticket) == config.microseconds_to_ticks(
         microseconds
     )
 
@@ -126,7 +134,7 @@ def test_a_region_with_no_faults_costs_the_cells_fastest_decode():
     settings = measured_table.MeasuredTableSettings("a100", "whole")
     table = measured_table.MeasuredTable(settings)
     ticket = table.submit(job, 0)
-    assert table.service_ticks(ticket) == config.microseconds_to_ticks(85.872)
+    assert _decode_ticks(table, ticket) == config.microseconds_to_ticks(85.872)
 
 
 @pytest.mark.parametrize("iterations", [1, 3])
@@ -147,7 +155,7 @@ def test_a_decode_is_never_priced_under_its_cells_fastest_decode(iterations):
 def test_the_device_runs_one_decode_at_a_time():
     settings = measured_table.MeasuredTableSettings("a100", "mps")
     table = measured_table.MeasuredTable(settings)
-    assert table.capacity() == 1
+    assert table.capacities() == {strong_backend.DISPATCHER: 1}
 
 
 def test_a_device_and_partition_never_measured_are_refused():

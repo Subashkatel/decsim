@@ -1026,6 +1026,16 @@ recursion and the two cancels; `tests/decoders/test_measured_table_decoder.py`
 holds the line against relay-bp's own iteration count and the answer
 against the relay_bp row under one run seed.
 
+**Widened since.** `service_ticks(ticket)` became `steps(ticket)`, the
+decode as named steps each with its time and the resource it holds, and
+`capacity()` became `capacities()`, the count of each resource: the
+dispatcher every request enters by, and on a host path its workers.
+`StrongBackendDecoder` keeps one arrival-order queue per resource, and a
+step that moves to a new resource holds the old one until it ends, as
+CUDA-Q's host monitor launches a graph on the worker it found before it
+moves on (host_api.md lines 1090-1112). `measured_table` answers one
+step, `decode`, on the dispatcher, so it prices exactly as before.
+
 ## D29. The detection events form at a list of seats, one on each path
 
 **Decided.** The `detection_events` section names the seats that form a

@@ -1155,8 +1155,9 @@ class StrongBackend(Protocol):
     """The device a strong decode runs on, as the strong decoder sees it.
 
     Rows: measured_table, a device's measured time law with decsim's own
-    answer. A live device (a real GPU process decsim hands the region to
-    and waits for) answers the same four methods.
+    answer, one step on the dispatcher. A live device (a real GPU
+    process decsim hands the region to and waits for) answers the same
+    four methods.
 
     A strong decode crosses the link in, lands, is noticed, waits, is
     decoded and is written back before the link out. The link cards
@@ -1175,22 +1176,34 @@ class StrongBackend(Protocol):
     decode ends before its next begins (cudaqx
     docs/sphinx/examples_rst/qec/realtime_relay_bp.rst:49-50).
 
+    A decode is a sequence of steps (decoding_records.Step), each with
+    its time and the resource it holds: the dispatcher every request
+    enters by, in slot order (cuda-quantum dispatch_kernel.cu v0.15.2
+    lines 552-555), or a worker, one graph and stream of the host path
+    (host_api.md lines 1065-1113). capacities says how many of each the
+    device has; decsim keeps one arrival-order queue per resource. A
+    step on a new resource holds the old one until it ends, as the host
+    monitor launches a graph on the idle worker it found before it moves
+    on. The echo's own steps appear with zero ticks and the card they
+    are priced on, so every tick is counted once.
+
     submit takes the region with the count of decodes already running on
     the device, because the device's time depends on it (IonQ lines
-    550-554 time every decode under full co-running load). The ticket
-    lets a device answer after its own call returns; service_ticks and
-    result are asked after submit, once each.
+    550-554 time every decode under full co-running load); it is called
+    once the request holds the dispatcher. The ticket lets a device
+    answer after its own call returns; steps and result are asked after
+    submit, once each.
     """
 
-    def capacity(self) -> int:
-        """Decodes the device runs at once; decsim queues the rest."""
+    def capacities(self) -> Mapping[str, int]:
+        """Each resource's count; the dispatcher's is always there."""
 
     # The ticket is an opaque identity only the backend that issued it reads.
     def submit(self, request: decoding_records.DecodeJob, running: int) -> Any:
         """Start one region's decode with running others on the device."""
 
-    def service_ticks(self, ticket: Any) -> int:
-        """The decode's time beyond the echo on the same path, in ticks."""
+    def steps(self, ticket: Any) -> tuple[decoding_records.Step, ...]:
+        """The decode's steps beyond the echo on the same path, in order."""
 
     def result(self, ticket: Any) -> decoding_records.DecodeResult:
         """The correction and observables; decode_status marks unconverged."""

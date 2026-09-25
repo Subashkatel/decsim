@@ -359,9 +359,9 @@ The device a strong decode runs on, as the strong decoder sees it.
 
 | Method | What it does |
 | --- | --- |
-| `capacity` | Decodes the device runs at once; decsim queues the rest. |
+| `capacities` | Each resource's count; the dispatcher's is always there. |
 | `submit` | Start one region's decode with running others on the device. |
-| `service_ticks` | The decode's time beyond the echo on the same path, in ticks. |
+| `steps` | The decode's steps beyond the echo on the same path, in order. |
 | `result` | The correction and observables; decode_status marks unconverged. |
 
 ## the frame commits the correction

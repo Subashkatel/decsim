@@ -1,10 +1,12 @@
-"""The strong decoder on a device: a FIFO queue in front of its capacity.
+"""The strong decoder on a device: FIFO queues in front of its resources.
 
 StrongBackendDecoder answers the Decoder port for a row whose decode
 runs on a StrongBackend (decsim/ports.py). The decoder manager's units
-hand it decodes once their input has landed; up to the backend's
-capacity run at once and the rest wait in arrival order. Arrival order
-is what every referent here serves in: an IonQ decoding core
+hand it decodes once their input has landed. A decode walks the steps
+the device states, each holding a resource, the dispatcher or a
+worker; each resource serves up to its count at once and the rest
+wait in arrival order. Arrival order is what every referent here
+serves in: an IonQ decoding core
 "processes those blocks sequentially" (2608.25027 lines 509-511), and a
 CUDA-Q dispatcher serves its ring's slots in turn, `current_slot =
 (current_slot + 1) % num_slots` (cuda-quantum
@@ -44,15 +46,22 @@ import decsim.seeding as seeding
 # line 291). The value says whether the region is split.
 BASIS_DECODES = {"together": False, "apart": True}
 
+# The resource every request enters by: a CUDA-Q dispatcher on the
+# device path, the host monitor on the host path, both in slot order.
+DISPATCHER = "dispatcher"
+# One graph and its stream on the host path, idle again when the stream
+# is done (cuda-quantum host_api.md lines 1065-1113).
+WORKER = "worker"
+
 
 class StrongBackendDecoder(decoder_module.DecoderBase):
     """The Decoder port served by a StrongBackend, FIFO past its capacity.
 
     A decode's time is known only once the device has it, so the unit
     declares no occupancy in advance, the measured decoder's shape
-    (DecoderBase). A cancelled waiting decode leaves the queue. A
-    cancelled running decode holds the device until its service time
-    ends and its result is dropped: a GPU does not stop a running
+    (DecoderBase). A cancelled decode still waiting for the dispatcher
+    leaves the queue. A cancelled running decode walks its steps to the
+    end and its result is dropped: a GPU does not stop a running
     kernel, it schedules other work "as the currently running ...
     kernel's thread blocks finish" (CUDA C++ Programming Guide,
     preemption).
@@ -74,13 +83,14 @@ class StrongBackendDecoder(decoder_module.DecoderBase):
             self.fault_model_requirement = row_requirement.joined(
                 fault_models.DETECTOR_BASES_REQUIRED
             )
-        # (job, on_result) in arrival order, waiting for the device
-        self._waiting: collections.deque = collections.deque()
+        capacities = backend.capacities()
+        self.resources = _Resources(capacities)
         # id() of a split region -> its part jobs, while any may run
         self._parts_by_region: dict = {}
+        # decodes submitted to the device and not yet finished
         self._running_count = 0
         # id() of each job cancelled while it ran; the job stays alive in
-        # its finish event until then, so its id is not reused meanwhile
+        # its walk until then, so its id is not reused meanwhile
         self._cancelled_job_ids: set = set()
 
     def run_seed_children(self) -> tuple:
@@ -123,8 +133,7 @@ class StrongBackendDecoder(decoder_module.DecoderBase):
     ) -> None:
         """Queue the decode, or its two parts; each runs once there is room."""
         if not self.splits_by_basis:
-            self._waiting.append((job, on_result))
-            self._run_waiting(engine)
+            self._arrive(job, on_result, engine)
             return
         parts = _part_jobs(job)
         region_id = id(job)
@@ -134,8 +143,7 @@ class StrongBackendDecoder(decoder_module.DecoderBase):
         join = _RegionJoin(job, len(parts), on_result, forget)
         for basis, part in parts.items():
             on_part = join.on_part(basis)
-            self._waiting.append((part, on_part))
-        self._run_waiting(engine)
+            self._arrive(part, on_part, engine)
 
     def cancel(self, job: decoding_records.DecodeJob) -> None:
         """Drop a waiting decode; a running one finishes and says nothing."""
@@ -150,52 +158,136 @@ class StrongBackendDecoder(decoder_module.DecoderBase):
         return lambda: self._parts_by_region.pop(region_id, None)
 
     def _cancel_one(self, job: decoding_records.DecodeJob) -> None:
-        for index, entry in enumerate(self._waiting):
-            if entry[0] is job:
-                del self._waiting[index]
-                return
+        if self.resources.withdraw(job):
+            return
         job_id = id(job)
         self._cancelled_job_ids.add(job_id)
 
-    def _run_waiting(self, engine) -> None:
-        """Start waiting decodes in arrival order while the device has room."""
-        capacity = self.backend.capacity()
-        while self._waiting and self._running_count < capacity:
-            job, on_result = self._waiting.popleft()
-            self._run(job, on_result, engine)
-
-    def _run(
+    def _arrive(
         self,
         job: decoding_records.DecodeJob,
         on_result: decoder_module.OnResult,
         engine,
     ) -> None:
-        ticket = self.backend.submit(job, self._running_count)
+        """A decode queues for the dispatcher, in arrival order."""
+        walk = _Walk(job, on_result)
+        if self.resources.acquire(DISPATCHER, walk):
+            self._enter(walk, engine)
+
+    def _enter(self, walk: "_Walk", engine) -> None:
+        """Holding the dispatcher, the decode is handed to the device."""
+        walk.ticket = self.backend.submit(walk.job, self._running_count)
         self._running_count += 1
-        service_ticks = self.backend.service_ticks(ticket)
+        walk.steps = self.backend.steps(walk.ticket)
+        walk.held = DISPATCHER
+        self._next_step(walk, engine)
+
+    def _next_step(self, walk: "_Walk", engine) -> None:
+        """Run the walk's next step once its resource is held, or finish."""
+        if walk.index == len(walk.steps):
+            self._finish(walk, engine)
+            return
+        step = walk.steps[walk.index]
+        needed = step.resource
+        if needed is None or needed == walk.held:
+            self._run_step(walk, engine)
+            return
+        if self.resources.acquire(needed, walk):
+            self._run_step(walk, engine)
+
+    def _run_step(self, walk: "_Walk", engine) -> None:
+        """The step's time; a resource it moves off is freed at its end."""
+        step = walk.steps[walk.index]
+        released = None
+        if step.resource != walk.held:
+            released = walk.held
+        walk.held = step.resource
         engine.schedule(
-            service_ticks,
-            lambda: self._finish(job, ticket, on_result, engine),
-            label=f"decode_done({job.label})",
+            step.ticks,
+            lambda: self._step_done(walk, released, engine),
+            label=f"{step.name}_done({walk.job.label})",
         )
 
-    def _finish(
-        self,
-        job: decoding_records.DecodeJob,
-        ticket: Any,
-        on_result: decoder_module.OnResult,
-        engine,
+    def _step_done(
+        self, walk: "_Walk", released: Optional[str], engine
     ) -> None:
-        """The device is free again; the decode's answer goes out."""
+        walk.index += 1
+        if released is not None:
+            self._release(released, engine)
+        self._next_step(walk, engine)
+
+    def _release(self, resource: str, engine) -> None:
+        """Free one unit; the decode waiting longest for it goes on."""
+        waiting = self.resources.release(resource)
+        if waiting is None:
+            return
+        if waiting.ticket is None:
+            self._enter(waiting, engine)
+            return
+        self._run_step(waiting, engine)
+
+    def _finish(self, walk: "_Walk", engine) -> None:
+        """The device is done with the decode; its answer goes out."""
         self._running_count -= 1
-        job_id = id(job)
+        job_id = id(walk.job)
         was_cancelled = job_id in self._cancelled_job_ids
         self._cancelled_job_ids.discard(job_id)
-        self._run_waiting(engine)
+        if walk.held is not None:
+            self._release(walk.held, engine)
         if was_cancelled:
             return
-        result = self.backend.result(ticket)
-        on_result(result)
+        result = self.backend.result(walk.ticket)
+        walk.on_result(result)
+
+
+@dataclasses.dataclass
+class _Walk:
+    """One decode on its way through the device's steps."""
+
+    job: decoding_records.DecodeJob
+    on_result: decoder_module.OnResult
+    ticket: Any = None
+    steps: tuple = ()
+    # the step to run next, and the resource the decode holds now
+    index: int = 0
+    held: Optional[str] = None
+
+
+class _Resources:
+    """Each resource's free count and its decodes waiting, in arrival order.
+
+    A freed unit passes straight to the decode waiting longest for it.
+    """
+
+    def __init__(self, capacities) -> None:
+        self.free = dict(capacities)
+        self.waiting = {name: collections.deque() for name in capacities}
+
+    def acquire(self, resource: str, walk: _Walk) -> bool:
+        """Take a unit now, or queue for one; True when taken."""
+        queue = self.waiting[resource]
+        if self.free[resource] > 0 and not queue:
+            self.free[resource] -= 1
+            return True
+        queue.append(walk)
+        return False
+
+    def release(self, resource: str) -> Optional[_Walk]:
+        """Free a unit; the next decode waiting for it, which now holds it."""
+        queue = self.waiting[resource]
+        if queue:
+            return queue.popleft()
+        self.free[resource] += 1
+        return None
+
+    def withdraw(self, job: decoding_records.DecodeJob) -> bool:
+        """Take a decode not yet on the device out of the dispatcher's queue."""
+        queue = self.waiting[DISPATCHER]
+        for walk in queue:
+            if walk.job is job:
+                queue.remove(walk)
+                return True
+        return False
 
 
 class _RegionJoin:

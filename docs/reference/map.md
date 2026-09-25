@@ -184,7 +184,7 @@ docstring.
 - `decsim/decoders/schedulers.py`: The ready-queue discipline of a decoder pool: which waiting job is next.
 - `decsim/decoders/settings.py`: The settings of the decoder tiers, their manager and the escalation.
 - `decsim/decoders/staged_decoder.py`: The decoder unit's timing around one algorithm: stages and a pipeline.
-- `decsim/decoders/strong_backend.py`: The strong decoder on a device: a FIFO queue in front of its capacity.
+- `decsim/decoders/strong_backend.py`: The strong decoder on a device: FIFO queues in front of its resources.
 - `decsim/decoders/strong_requests.py`: Which destination window waits for which strong result.
 - `decsim/decoders/tesseract/__init__.py`: Tesseract decoders backed by the optional tesseract-decoder package.
 - `decsim/decoders/tesseract/decoder.py`: The Tesseract adapter: the referee's decoder as a tier of its own.

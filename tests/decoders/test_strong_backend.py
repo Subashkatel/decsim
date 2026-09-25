@@ -41,8 +41,8 @@ class _FixedDevice:
         # (label, running, tick) of every submit, in order
         self.submits: list = []
 
-    def capacity(self) -> int:
-        return self.capacity_count
+    def capacities(self) -> dict:
+        return {strong_backend.DISPATCHER: self.capacity_count}
 
     def submit(self, request, running: int) -> _Ticket:
         entry = (request.label, running, self.engine.now)
@@ -50,8 +50,11 @@ class _FixedDevice:
         ticks = self.ticks_by_label[request.label]
         return _Ticket(request, ticks)
 
-    def service_ticks(self, ticket: _Ticket) -> int:
-        return ticket.service_ticks
+    def steps(self, ticket: _Ticket) -> tuple:
+        decode = decoding_records.Step(
+            "decode", ticket.service_ticks, strong_backend.DISPATCHER
+        )
+        return (decode,)
 
     def result(self, ticket: _Ticket) -> decoding_records.DecodeResult:
         job = ticket.job
@@ -239,16 +242,17 @@ class _RelayDevice:
     def __init__(self) -> None:
         self.decoder = relay.RelayBeliefPropagationDecoder(gamma_table_seed=5)
 
-    def capacity(self) -> int:
-        return 1
+    def capacities(self) -> dict:
+        return {strong_backend.DISPATCHER: 1}
 
     def submit(self, request, running: int):
         del running
         return self.decoder.decode(request)
 
-    def service_ticks(self, ticket) -> int:
+    def steps(self, ticket) -> tuple:
         del ticket
-        return 1
+        decode = decoding_records.Step("decode", 1, strong_backend.DISPATCHER)
+        return (decode,)
 
     def result(self, ticket):
         return ticket
@@ -302,3 +306,74 @@ def test_a_cancelled_split_region_withdraws_both_its_parts():
     engine.run()
     assert device.submits == [("A X", 0, 0), ("A Z", 0, 10)]
     assert ended == {"A": 30}
+
+
+# A decode as steps on resources: the host path's monitor and workers.
+
+
+class _HostPathDevice:
+    """One monitor and some workers: launch on a worker, then its work."""
+
+    def __init__(self, workers: int, launch: int, work: int) -> None:
+        self.workers = workers
+        self.launch = launch
+        self.work = work
+
+    def capacities(self) -> dict:
+        return {
+            strong_backend.DISPATCHER: 1,
+            strong_backend.WORKER: self.workers,
+        }
+
+    def submit(self, request, running: int):
+        del running
+        return request
+
+    def steps(self, ticket) -> tuple:
+        del ticket
+        worker = strong_backend.WORKER
+        launch = decoding_records.Step("launch", self.launch, worker)
+        work = decoding_records.Step("work", self.work, worker)
+        return (launch, work)
+
+    def result(self, ticket) -> decoding_records.DecodeResult:
+        return decoding_records.DecodeResult(ticket.operation_id, 0)
+
+
+def _host_monitor(arrivals: tuple, workers: int, launch: int, work: int):
+    """The host monitor's loop by hand (cuda-quantum host_api.md 1065-1113).
+
+    In slot order it waits for an idle worker, launches the graph on it
+    and moves on; the worker is idle again when its stream is done.
+    """
+    monitor_free = 0
+    worker_free = [0] * workers
+    ends = []
+    for arrival in arrivals:
+        start = max(arrival, monitor_free)
+        worker = worker_free.index(min(worker_free))
+        start = max(start, worker_free[worker])
+        monitor_free = start + launch
+        end = monitor_free + work
+        worker_free[worker] = end
+        ends.append(end)
+    return ends
+
+
+@pytest.mark.parametrize("workers", [1, 2, 3])
+@pytest.mark.parametrize("arrivals", [(0, 0, 0), (0, 2, 4, 6), (0, 20, 21, 50)])
+def test_host_path_decodes_overlap_on_workers_as_the_monitor_launches(
+    workers, arrivals
+):
+    engine = engine_module.Engine()
+    device = _HostPathDevice(workers, 3, 10)
+    decoder = strong_backend.StrongBackendDecoder(device)
+    ended = {}
+    for index, arrival in enumerate(arrivals):
+        job = _job(str(index), index)
+        record = _recorder(ended, str(index), engine)
+        start = functools.partial(decoder.start, job, engine, record)
+        engine.schedule(arrival, start)
+    engine.run()
+    expected = _host_monitor(arrivals, workers, 3, 10)
+    assert [ended[str(index)] for index in range(len(arrivals))] == expected

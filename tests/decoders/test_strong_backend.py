@@ -137,6 +137,30 @@ def test_a_cancelled_running_decode_holds_the_device_and_reports_nothing():
     assert finished == [15]
 
 
+def test_a_cancel_after_the_decode_ended_leaves_its_next_run_alone():
+    """A cancel that finds the job neither waiting nor running is a no-op.
+
+    The same job object decoded again reports: a cancel that came after
+    the first run's answer does not reach the second.
+    """
+    engine = engine_module.Engine()
+    device = _FixedDevice(1, {"A": 10}, engine)
+    decoder = strong_backend.StrongBackendDecoder(device)
+    finished = []
+
+    def record_finish(result) -> None:
+        del result
+        finished.append(engine.now)
+
+    job = _job("A", 0)
+    decoder.start(job, engine, record_finish)
+    engine.run()
+    decoder.cancel(job)
+    decoder.start(job, engine, record_finish)
+    engine.run()
+    assert finished == [10, 20]
+
+
 def test_a_device_with_no_seeded_parts_names_no_seed_children():
     engine = engine_module.Engine()
     device = _FixedDevice(1, {}, engine)

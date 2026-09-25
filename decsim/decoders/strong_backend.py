@@ -87,11 +87,6 @@ class StrongBackendDecoder(decoder_module.DecoderBase):
         self.resources = _Resources(capacities)
         # id() of a split region -> its part jobs, while any may run
         self._parts_by_region: dict = {}
-        # decodes submitted to the device and not yet finished
-        self._running_count = 0
-        # id() of each job cancelled while it ran; the job stays alive in
-        # its walk until then, so its id is not reused meanwhile
-        self._cancelled_job_ids: set = set()
 
     def run_seed_children(self) -> tuple:
         """The backend's own children, at the paths it names."""
@@ -160,8 +155,7 @@ class StrongBackendDecoder(decoder_module.DecoderBase):
     def _cancel_one(self, job: decoding_records.DecodeJob) -> None:
         if self.resources.withdraw(job):
             return
-        job_id = id(job)
-        self._cancelled_job_ids.add(job_id)
+        self.resources.silence(job)
 
     def _arrive(
         self,
@@ -176,8 +170,9 @@ class StrongBackendDecoder(decoder_module.DecoderBase):
 
     def _enter(self, walk: "_Walk", engine) -> None:
         """Holding the dispatcher, the decode is handed to the device."""
-        walk.ticket = self.backend.submit(walk.job, self._running_count)
-        self._running_count += 1
+        running = self.resources.running_count()
+        walk.ticket = self.backend.submit(walk.job, running)
+        self.resources.enter(walk)
         walk.steps = self.backend.steps(walk.ticket)
         walk.held = DISPATCHER
         self._next_step(walk, engine)
@@ -228,13 +223,10 @@ class StrongBackendDecoder(decoder_module.DecoderBase):
 
     def _finish(self, walk: "_Walk", engine) -> None:
         """The device is done with the decode; its answer goes out."""
-        self._running_count -= 1
-        job_id = id(walk.job)
-        was_cancelled = job_id in self._cancelled_job_ids
-        self._cancelled_job_ids.discard(job_id)
+        self.resources.leave(walk)
         if walk.held is not None:
             self._release(walk.held, engine)
-        if was_cancelled:
+        if walk.cancelled:
             return
         result = self.backend.result(walk.ticket)
         walk.on_result(result)
@@ -251,17 +243,44 @@ class _Walk:
     # the step to run next, and the resource the decode holds now
     index: int = 0
     held: Optional[str] = None
+    # cancelled on the device: it walks to the end and reports nothing
+    cancelled: bool = False
 
 
 class _Resources:
-    """Each resource's free count and its decodes waiting, in arrival order.
+    """Each resource's free count and waiting decodes, and those on the device.
 
-    A freed unit passes straight to the decode waiting longest for it.
+    A freed unit passes straight to the decode waiting longest for it. A
+    decode is on the device from its submit to its last step's end.
     """
 
     def __init__(self, capacities) -> None:
         self.free = dict(capacities)
         self.waiting = {name: collections.deque() for name in capacities}
+        # id() of each job on the device -> its walk; the walk keeps the
+        # job alive, so its id is not reused meanwhile
+        self.on_device: dict = {}
+
+    def running_count(self) -> int:
+        """The decodes on the device now."""
+        return len(self.on_device)
+
+    def enter(self, walk: _Walk) -> None:
+        """The decode is submitted to the device."""
+        job_id = id(walk.job)
+        self.on_device[job_id] = walk
+
+    def leave(self, walk: _Walk) -> None:
+        """The decode's last step has ended."""
+        job_id = id(walk.job)
+        del self.on_device[job_id]
+
+    def silence(self, job: decoding_records.DecodeJob) -> None:
+        """Mark a decode on the device to report nothing when it ends."""
+        job_id = id(job)
+        walk = self.on_device.get(job_id)
+        if walk is not None:
+            walk.cancelled = True
 
     def acquire(self, resource: str, walk: _Walk) -> bool:
         """Take a unit now, or queue for one; True when taken."""

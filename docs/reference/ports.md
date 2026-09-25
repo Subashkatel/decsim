@@ -689,6 +689,7 @@ A code card: the numbers the machine reads off a QEC code.
 | `buffer_rounds` | Look-ahead rounds per decode window. |
 | `spatial_nodes` | The per-round graph size a latency model prices this card at. |
 | `syndrome_bits_per_round` | Syndrome bits one round of this many patches produces. |
+| `data_bits_per_readout` | Data-qubit bits the final readout of this many patches adds. |
 
 ### `RowSettings`
 

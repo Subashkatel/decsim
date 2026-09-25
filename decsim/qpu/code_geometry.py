@@ -87,6 +87,11 @@ class SurfaceCodeModel:
         stabilizer_count = qubit_count - 1
         return num_patches * stabilizer_count
 
+    def data_bits_per_readout(self, num_patches: int) -> int:
+        """Bits the final readout adds: the d*d data qubits of every patch."""
+        qubit_count = self.distance * self.distance
+        return num_patches * qubit_count
+
 
 @dataclasses.dataclass(frozen=True)
 class BivariateBicycleCodeModel:
@@ -185,6 +190,10 @@ class BivariateBicycleCodeModel:
 
     def syndrome_bits_per_round(self, num_patches: int) -> int:
         """Bits read out per round: the n X-plus-Z checks of every patch."""
+        return num_patches * self.settings.qubit_count
+
+    def data_bits_per_readout(self, num_patches: int) -> int:
+        """Bits the final readout adds: the n data qubits of every patch."""
         return num_patches * self.settings.qubit_count
 
 

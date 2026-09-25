@@ -25,6 +25,8 @@ import decsim.records.rounds as round_records
 
 CODE = code_geometry.SurfaceCodeModel(distance=3)
 BITS_PER_ROUND = 8
+# the d=3 card's data qubits, read out on an operation's last round
+DATA_BITS = 9
 
 
 class ReadoutLog:
@@ -94,6 +96,8 @@ class SplitSource(syndrome_devices.TimingOnlyDevice):
     """A timing-only source that emits a fixed number of payloads."""
 
     def __init__(self, payload_count):
+        timing_only = super()
+        timing_only.__init__(CODE)
         self.payload_count = payload_count
 
     def round_payloads(self, operation, round_index):
@@ -415,14 +419,17 @@ def test_a_declared_fragment_slot_is_stamped_on_the_one_payload():
     engine.schedule(10, qpu.finish)
     engine.run()
     payload, route = log.readouts[0]
-    assert payload == round_records.QPUReadout(
+    last_round_bits = BITS_PER_ROUND + DATA_BITS
+    stamped = round_records.QPUReadout(
         1,
         (0,),
         1,
-        size_bits=BITS_PER_ROUND,
+        size_bits=last_round_bits,
         fragment_count=3,
         fragment_index=1,
+        event_bits=BITS_PER_ROUND,
     )
+    assert payload == stamped
     assert route == round_records.WINDOW_INPUT_ROUTE
 
 

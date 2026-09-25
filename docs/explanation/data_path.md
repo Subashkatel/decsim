@@ -102,6 +102,9 @@ them on the first round, `d*d - 1` in the bulk and `3*(d*d - 1)/2` on
 the last, since the first round has no round before it to difference
 against and the last closes on the data readout
 (`tests/links/test_data_through.py` derives each count from the circuit).
+A source with no circuit states the same two widths layer by layer
+(`decsim/qpu/syndrome_devices.py`), so the seat that forms the events
+prices the width it holds for every source.
 A bounded link therefore serializes the last round longer than the rest.
 
 Move, off board, and the landing is also a copy into the controller's

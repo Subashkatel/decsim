@@ -2174,6 +2174,9 @@ class CodeModel(Protocol):
     def syndrome_bits_per_round(self, num_patches: int) -> int:
         """Syndrome bits one round of this many patches produces."""
 
+    def data_bits_per_readout(self, num_patches: int) -> int:
+        """Data-qubit bits the final readout of this many patches adds."""
+
 
 @runtime_checkable
 class RowSettings(Protocol):

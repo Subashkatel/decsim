@@ -1483,6 +1483,9 @@ class OutsideCodeCard:
     def syndrome_bits_per_round(self, num_patches):
         return 3 * num_patches
 
+    def data_bits_per_readout(self, num_patches):
+        return 4 * num_patches
+
 
 def _resolved_geometry(machine):
     """The geometry the run resolved, read off the issuer's table."""

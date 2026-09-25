@@ -22,7 +22,12 @@ qpu:
                                    # each round. stim_device samples the
                                    # workload's circuit (real detector data);
                                    # timing_only states each round's size, the
-                                   # code's syndrome bits per round, and
+                                   # code's check bits per round and its data
+                                   # qubits on an operation's last, and the
+                                   # width its events take once a seat forms
+                                   # them (half the checks on the first round,
+                                   # all of them after, and half again on the
+                                   # last, as Stim's memory lays them out), and
                                    # carries no values (gem5's packet trace
                                    # keeps a size and no data,
                                    # src/proto/packet.proto); syndrome_bits

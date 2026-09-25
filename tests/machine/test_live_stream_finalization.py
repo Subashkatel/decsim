@@ -57,12 +57,44 @@ def test_a_closed_stream_boundary_releases_as_a_finite_operation_does(
     """The stream's last window is queued before the seal reaches it.
 
     A measurement_closed boundary lets the prefix's window decode on its
-    own rounds, so the waiting operation starts at the same tick as when
-    the prefix is an ordinary finite operation.
+    own rounds, so the waiting operation is released as when the prefix
+    is an ordinary finite operation, less the finite prefix's closing
+    layer: its last round reads the data qubits out and forms c/2 more
+    events, which the open stream does not, and they cross two links
+    first. Both start the waiting operation at the same round boundary.
     """
-    stream_run = _closed_boundary_run(True, idle_policy, waiting_patch)
+    stream_events, stream_done = _closed_boundary_run(
+        True, idle_policy, waiting_patch
+    )
     finite_run = _closed_boundary_run(False, idle_policy, waiting_patch)
-    assert stream_run == finite_run
+    expected_events = _released_later(stream_events, 2, CLOSING_LAYER_TICKS)
+    assert (expected_events, stream_done) == finite_run
+
+
+# c/2 = 4 events at d=3, over the controller-to-buffer and
+# buffer-to-decoder links at 8000 bits a microsecond, 125 ticks a bit
+# (link_profiles.logical_reference_profile)
+CLOSING_LAYER_TICKS = 2 * 4 * 125
+
+
+def _released_later(events: tuple, operation_id: int, ticks: int) -> tuple:
+    """The events with one operation's release moved later by ticks."""
+    moved = []
+    for kind, identity, tick in events:
+        if (kind, identity) == ("released", operation_id):
+            tick += ticks
+        moved.append((kind, identity, tick))
+    return tuple(moved)
+
+
+def _recorder(events: list, kind: str):
+    """A listener that keeps each event under its kind."""
+
+    def listener(*event) -> None:
+        kept = (kind, *event)
+        events.append(kept)
+
+    return listener
 
 
 def _closed_boundary_run(
@@ -97,9 +129,12 @@ def _closed_boundary_run(
     machine = machine_module.Machine.build(settings, 0)
     events = []
     trace = machine.execution_runtime.trace
-    trace.body_finished.connect(lambda *event: events.append(event))
-    trace.decode_released.connect(lambda *event: events.append(event))
-    trace.operation_started.connect(lambda *event: events.append(event))
+    finished = _recorder(events, "finished")
+    released = _recorder(events, "released")
+    started = _recorder(events, "started")
+    trace.body_finished.connect(finished)
+    trace.decode_released.connect(released)
+    trace.operation_started.connect(started)
     result = machine.run()
     return tuple(events), result.fully_done_ticks
 

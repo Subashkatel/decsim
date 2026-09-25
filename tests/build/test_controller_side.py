@@ -76,13 +76,21 @@ STRONG_ONLY = _policy("strong")
 def test_a_source_that_does_not_answer_the_port_forms_nothing():
     settings = _settings()
     device = _DeviceWithNoFormationTable()
-    carried = ("a fragment",)
+    fragment = round_records.RetainedSyndromeFragment(
+        operation_id=1,
+        patch_ids=(0,),
+        round_index=1,
+        bits=None,
+        size_bits=8,
+        fragment_index=0,
+    )
+    carried = (fragment,)
 
     placement = controller_side.build_detection_events(
         settings, device, WEAK_BASELINE
     )
 
-    assert placement.form_at("controller", carried) is carried
+    assert placement.form_at("controller", carried) == carried
 
 
 @pytest.mark.parametrize(

@@ -150,17 +150,32 @@ class _SeatHistory:
     def form(self, fragments: tuple) -> tuple:
         """Every round among the fragments formed, in the order they came.
 
-        The fragments as they came when there is nothing to form them
-        with or from: no source recipes, or a timing-only round that
-        carries no bits.
+        A source with no recipes states the width its events take
+        (QPUReadout.event_bits), and the fragments leave at it. The
+        fragments as they came when there is nothing to form them with
+        or from: a timing-only round of a circuit source, which carries
+        no bits.
         """
         if self.recipes is None:
-            return fragments
+            return self._at_the_stated_width(fragments)
         formed = []
         for round_fragments in _rounds_in_order(fragments):
             leaving = self._form_round(round_fragments)
             formed.extend(leaving)
         return tuple(formed)
+
+    def _at_the_stated_width(self, fragments: tuple) -> tuple:
+        """Each fragment at the event width its source stated.
+
+        A decoder seat keeps the width that landed, as for any round.
+        """
+        if self.keeps_landed_width:
+            return fragments
+        leaving = []
+        for fragment in fragments:
+            stated = _as_stated_events(fragment)
+            leaving.append(stated)
+        return tuple(leaving)
 
     def hold(self, fragments: tuple) -> None:
         """Keep raw rounds for the detectors of the rounds after them."""
@@ -249,6 +264,25 @@ class _SeatHistory:
         if former.table is not table:
             former.extend_table(table)
         return former
+
+
+def _as_stated_events(
+    fragment: round_records.RetainedSyndromeFragment,
+) -> round_records.RetainedSyndromeFragment:
+    """The fragment formed at its stated width; as it came when none is.
+
+    A fake-bit source's events are the first of its random bits, since
+    random bits carry no parity to form.
+    """
+    event_bits = fragment.event_bits
+    if event_bits is None:
+        return fragment
+    bits = fragment.bits
+    if bits is not None:
+        bits = bits[:event_bits]
+    return dataclasses.replace(
+        fragment, bits=bits, size_bits=event_bits, event_bits=None
+    )
 
 
 def _sized_by_its_bits(

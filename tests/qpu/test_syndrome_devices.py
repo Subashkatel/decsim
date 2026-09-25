@@ -12,7 +12,9 @@ import dataclasses
 import random
 
 import pytest
+import stim
 
+import decsim.detector_error_model.detector_formation as detector_formation
 import decsim.ports as ports
 import decsim.qpu.code_geometry as code_geometry
 import decsim.qpu.syndrome_devices as syndrome_devices
@@ -33,7 +35,9 @@ def test_a_timing_only_round_states_the_codes_width_and_no_values():
         id=4, name="memory", qubits=(2,), patches=(7,)
     )
     payload = first_payload(device, operation, 3)
-    assert payload == round_records.QPUReadout(4, (7,), 3, size_bits=8)
+    assert payload == round_records.QPUReadout(
+        4, (7,), 3, size_bits=8, event_bits=8
+    )
     assert payload.bits is None
 
 
@@ -54,7 +58,9 @@ def test_a_timing_only_idle_round_is_one_patch_wide():
     (payload,) = device.idle_round_payloads(
         operation, "s", 5, is_final=False, round_period_ticks=1
     )
-    assert payload == round_records.QPUReadout("s", (2,), 5, size_bits=8)
+    assert payload == round_records.QPUReadout(
+        "s", (2,), 5, size_bits=8, event_bits=8
+    )
 
 
 def test_a_stream_segment_reports_its_stream_and_global_round():
@@ -64,7 +70,9 @@ def test_a_stream_segment_reports_its_stream_and_global_round():
         id=4, name="tail", qubits=(2,), stream_id="s", stream_offset=6
     )
     payload = first_payload(device, operation, 2)
-    assert payload == round_records.QPUReadout("s", (2,), 8, size_bits=8)
+    assert payload == round_records.QPUReadout(
+        "s", (2,), 8, size_bits=8, event_bits=8
+    )
 
 
 def test_fake_bits_are_as_wide_as_the_syndrome():
@@ -174,3 +182,77 @@ def test_a_circuit_less_source_names_a_model_source_that_builds_nothing():
     assert models is syndrome_devices.NO_WINDOW_MODELS
     assert isinstance(models, ports.WindowModelSource)
     assert not isinstance(source, ports.WindowModelSource)
+
+
+@pytest.mark.parametrize("distance", [3, 5, 7])
+@pytest.mark.parametrize("round_count", [1, 2, 4])
+def test_every_rounds_widths_are_those_of_stims_memory(distance, round_count):
+    """Raw and event widths per round, as Stim's own memory lays them out.
+
+    The referent is the formation table of stim.Circuit.generated's
+    rotated memory: its packet widths are the raw outcomes a round reads
+    out, and its detectors per round the events a seat forms.
+    """
+    circuit = stim.Circuit.generated(
+        "surface_code:rotated_memory_z",
+        rounds=round_count,
+        distance=distance,
+    )
+    table = detector_formation.build_formation_table(circuit, round_count)
+    code = code_geometry.SurfaceCodeModel(distance=distance)
+    device = syndrome_devices.TimingOnlyDevice(code)
+    operation = program_records.Operation(id=1, name="memory", qubits=(0,))
+    device.begin_operation(
+        operation, round_count, round_count, round_period_ticks=1
+    )
+
+    stated = _stated_widths(device, operation, round_count)
+
+    assert stated == _stims_widths(table)
+
+
+def test_a_final_idle_round_reads_out_the_data_qubits():
+    code = code_geometry.SurfaceCodeModel(distance=3)
+    device = syndrome_devices.TimingOnlyDevice(code)
+    operation = program_records.Operation(id=4, name="idle", qubits=(2,))
+
+    (payload,) = device.idle_round_payloads(
+        operation, "s", 5, is_final=True, round_period_ticks=1
+    )
+
+    assert payload.size_bits == 17
+    assert payload.event_bits == 12
+
+
+def test_fake_bits_are_as_wide_as_the_raw_round_they_stand_for():
+    """The last round's 8 checks and 9 data qubits: 17 random bits."""
+    code = code_geometry.SurfaceCodeModel(distance=3)
+    device = syndrome_devices.SyndromeBitDevice(code, seed=1)
+    operation = program_records.Operation(id=1, name="memory", qubits=(0,))
+    device.begin_operation(operation, 2, 2, round_period_ticks=1)
+
+    payload = first_payload(device, operation, 2)
+
+    assert len(payload.bits) == 17
+    assert payload.event_bits == 12
+
+
+def _stated_widths(device, operation, round_count) -> list:
+    """Each round's (raw, event) widths as the device states them."""
+    widths = []
+    after_last_round = round_count + 1
+    for round_index in range(1, after_last_round):
+        payload = first_payload(device, operation, round_index)
+        widths.append((payload.size_bits, payload.event_bits))
+    return widths
+
+
+def _stims_widths(table) -> list:
+    """Each round's (raw, event) widths off Stim's formation table."""
+    widths = []
+    after_last_round = table.round_count + 1
+    for round_index in range(1, after_last_round):
+        raw_bits = table.packet_width_by_round[round_index]
+        detectors = table.detectors_of_round(round_index)
+        widths.append((raw_bits, len(detectors)))
+    return widths

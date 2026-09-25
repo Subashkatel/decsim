@@ -137,14 +137,61 @@ def test_a_timing_only_round_is_handed_on_as_it_is():
     assert kept is timing_only
 
 
-def test_a_source_with_no_recipes_forms_nothing():
-    settings = event_settings.DetectionEventSettings(formed_at=("controller",))
-    placement = formation.SeatedFormation(None, settings)
-    raw = (fragment(1),)
+def test_a_source_with_no_recipes_and_no_stated_width_forms_nothing():
+    placement = no_recipes_at("controller")
+    raw = rounds(1)
 
     leaving = placement.form_at("controller", raw)
 
-    assert leaving is raw
+    assert leaving == raw
+
+
+def stated(bits=None, size_bits=17, event_bits=12):
+    """A circuit-less source's last round: its raw and its events' width."""
+    return round_records.RetainedSyndromeFragment(
+        operation_id=1,
+        patch_ids=(0,),
+        round_index=4,
+        bits=bits,
+        size_bits=size_bits,
+        fragment_index=0,
+        event_bits=event_bits,
+    )
+
+
+def no_recipes_at(seat):
+    settings = event_settings.DetectionEventSettings(formed_at=(seat,))
+    return formation.SeatedFormation(None, settings)
+
+
+def test_a_circuit_less_round_leaves_a_store_seat_at_its_stated_width():
+    placement = no_recipes_at("weak_syndrome_buffer")
+    raw = (stated(),)
+
+    (formed,) = placement.form_at("weak_syndrome_buffer", raw)
+
+    assert formed.size_bits == 12
+    assert formed.event_bits is None
+
+
+def test_a_circuit_less_round_keeps_its_landed_width_at_a_decoder_seat():
+    placement = no_recipes_at("weak_decoder")
+    raw = (stated(),)
+
+    leaving = placement.form_at("weak_decoder", raw)
+
+    assert leaving == raw
+
+
+def test_fake_bits_formed_are_the_first_of_the_random_bits():
+    """Random bits carry no parity, so the events are their first bits."""
+    placement = no_recipes_at("controller")
+    random_bits = (1, 0) * 8 + (1,)
+    raw = (stated(bits=random_bits),)
+
+    (formed,) = placement.form_at("controller", raw)
+
+    assert formed.bits == random_bits[:12]
 
 
 def test_a_round_the_seat_formed_before_is_answered_from_what_it_holds():

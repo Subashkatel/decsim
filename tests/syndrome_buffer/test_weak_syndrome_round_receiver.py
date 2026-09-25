@@ -309,14 +309,14 @@ def test_a_write_still_in_flight_at_the_end_of_a_run_is_a_failure():
 
 
 def test_a_weak_store_too_small_for_a_window_stops_the_run_at_its_hold():
-    """The declared rounds are 8 bits and the first window reads six."""
+    """The first round forms 4 events, the rest 8; the window reads six."""
     settings = syndrome_buffer_settings.SyndromeBufferSettings(bits=16)
 
     with pytest.raises(RuntimeError) as stop:
         declared_run.weak_only_run(weak_syndrome_buffer=settings)
 
     sentence = str(stop.value)
-    assert "16 of its 16 bits" in sentence
+    assert "12 of its 16 bits" in sentence
     assert "widest live hold WindowReads(window_key=(1, 0))" in sentence
     assert "waits for [(1, 3), (1, 4), (1, 5), (1, 6)]" in sentence
 

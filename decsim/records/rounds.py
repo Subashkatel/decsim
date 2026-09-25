@@ -84,7 +84,10 @@ class QPUReadout:
     patch_ids the patches whose checks the bits read. fragment_index
     (zero-based) and fragment_count place the readout among its round's
     fragments. size_bits is its width on the wire, None when the source
-    states none.
+    states none. event_bits is the width its detection events take once
+    a seat forms them, stated by a source with no circuit to form them
+    from (qpu/syndrome_devices.py); None when a formation table sizes
+    them, or nothing does.
     """
 
     operation_id: Any
@@ -94,11 +97,15 @@ class QPUReadout:
     fragment_count: int = 1
     fragment_index: int = 0
     size_bits: Optional[int] = None
+    event_bits: Optional[int] = None
 
 
 @dataclass(frozen=True)
 class RetainedSyndromeFragment:
-    """One validated immutable fragment retained after controller packing."""
+    """One validated immutable fragment retained after controller packing.
+
+    event_bits is the readout's, until a seat forms the fragment.
+    """
 
     operation_id: Any
     patch_ids: tuple
@@ -106,6 +113,7 @@ class RetainedSyndromeFragment:
     bits: Optional[tuple[int, ...]]
     size_bits: Optional[int]
     fragment_index: int
+    event_bits: Optional[int] = None
 
     @classmethod
     def from_readout(cls, readout: QPUReadout) -> "RetainedSyndromeFragment":
@@ -124,6 +132,7 @@ class RetainedSyndromeFragment:
             bits=bits,
             size_bits=readout.size_bits,
             fragment_index=readout.fragment_index,
+            event_bits=readout.event_bits,
         )
 
 

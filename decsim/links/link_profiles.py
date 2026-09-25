@@ -704,7 +704,7 @@ def from_yaml(
     bits per cycle per lane (null is unbounded), the lane count, an
     optional per-transfer setup cost, an optional per-transfer header
     in bits, and an optional packet protocol (a PROTOCOLS row of
-    links/fabric.py, with its framing and buffer keys; none is
+    links/fabric.py, with its framing, buffer and recovery keys; none is
     the ideal row). A null card keeps the chosen row's
     numbers for that path. The config prices readout classification on
     its own line, so its qpu_to_controller card is link propagation only,

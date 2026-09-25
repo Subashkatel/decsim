@@ -647,7 +647,7 @@ links:                             # a kind, then one card per path; null = the
                                    #     unbounded receive buffer, nothing
                                    #     lost, the law above. A packet
                                    #     protocol needs a bounded wire:
-                                   #     kind: ideal | credit
+                                   #     kind: ideal | credit | reliable
                                    #     framing: how a message is cut into
                                    #       frames (FRAMINGS, links/framings.py):
                                    #       {kind: whole} one frame;
@@ -667,13 +667,22 @@ links:                             # a kind, then one card per path; null = the
                                    #     receive_buffer_frames: frames the
                                    #       receiver holds; a frame goes only
                                    #       with a credit (Garnet OutVcState.cc
-                                   #       56-63)
+                                   #       56-63); credit and reliable
                                    #     credit_latency_cycles: from the
                                    #       receiver taking a frame to its
                                    #       credit at the sender; Aurora's
                                    #       native flow control is this row
                                    #       with its 256-block bound here
-                                   #     For example:
+                                   #     window_packets, ack_every_packets,
+                                   #       retransmit_timeout_cycles,
+                                   #       bit_error_rate: reliable only; the
+                                   #       go-back-N recovery of Linux rxe
+                                   #       (rxe_req.c, rxe_resp.c), whose
+                                   #       own constants are a window of 129
+                                   #       and an ACK every 66 packets. Each
+                                   #       lost frame is resent inside the
+                                   #       link, so messages still arrive
+                                   #       once and in order. For example:
                                    #   controller_to_weak_buffer: {latency_cycles: 1,
                                    #     clock: fridge, bits_per_cycle: 8.0,
                                    #     protocol: {kind: credit, framing:

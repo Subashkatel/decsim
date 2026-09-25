@@ -365,3 +365,47 @@ def test_a_binding_credit_card_on_the_weak_store_hop_runs_a_shot(tmp_path):
     credit_waits = [frame.timing.credit_wait_ticks for frame in frames]
     assert result.terminal_status == "complete"
     assert max(credit_waits) > 0
+
+
+def _off_board_card(protocol: dict) -> dict:
+    """The strong node one chassis hop away at 100 Gb/s (the reference card)."""
+    return {
+        "latency_cycles": 65,
+        "clock": "room",
+        "bits_per_cycle": 400.0,
+        "protocol": protocol,
+    }
+
+
+def test_a_reliable_card_at_no_errors_runs_as_its_credit_card(tmp_path):
+    """A gate point: RoCE v2 frames on the escalation hop, nothing lost."""
+    credit = {
+        "kind": "credit",
+        "framing": {"kind": "roce_v2", "path_mtu_bytes": 1024},
+        "receive_buffer_frames": 8,
+        "credit_latency_cycles": 65,
+    }
+    reliable = dict(
+        credit,
+        kind="reliable",
+        window_packets=128,
+        ack_every_packets=66,
+        retransmit_timeout_cycles=100_000,
+        bit_error_rate=0.0,
+    )
+    base_path = yaml_configs.CONFIGS_DIR / "two_tiers.yaml"
+    base = str(base_path)
+    links = {"weak_decoder_to_strong_decoder": _off_board_card(credit)}
+    by_credit = _built_from(tmp_path, {"extends": base, "links": links})
+    links = {"weak_decoder_to_strong_decoder": _off_board_card(reliable)}
+    by_reliable = _built_from(tmp_path, {"extends": base, "links": links})
+    frames = []
+    by_reliable.links.trace.frame_landed.connect(frames.append)
+
+    credit_result = by_credit.run()
+    reliable_result = by_reliable.run()
+
+    assert reliable_result.terminal_status == "complete"
+    assert len(frames) > 0
+    assert reliable_result.operation_results == credit_result.operation_results
+    assert reliable_result.link_traffic == credit_result.link_traffic

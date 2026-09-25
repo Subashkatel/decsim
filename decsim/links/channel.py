@@ -22,7 +22,8 @@ buffer and nothing lost, the lossless reference gem5's SimpleNetwork
 gives with its default infinite buffers (src/mem/ruby/network/simple/
 SimpleNetwork.py:53-57) and ns-3's device with no error model
 (point-to-point-net-device.cc:55-59). The packet rows keep the setup
-engine and replace the wire (decsim/links/credit_channel.py).
+engine and replace the wire (decsim/links/credit_channel.py,
+decsim/links/reliable_channel.py).
 """
 
 import collections
@@ -78,7 +79,8 @@ class FrameRecord:
     """One frame on one channel, reported when its message is delivered.
 
     transfer_sequence is the channel's count of the message the frame
-    belongs to and frame_index its place in the message.
+    belongs to and frame_index its place in the message. A reliable
+    channel also reports each lost frame and each retransmission.
     """
 
     channel: str

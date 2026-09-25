@@ -90,8 +90,8 @@ class ProtocolSettings:
     """What a channel's frames follow: a PROTOCOLS row and its keys.
 
     ideal is the whole transfer on an unbounded buffer with nothing
-    lost; credit is a packet row (decsim/links/fabric.py PROTOCOLS).
-    row_settings is the row's own Settings record, None for
+    lost; credit and reliable are packet rows (decsim/links/fabric.py
+    PROTOCOLS). row_settings is the row's own Settings record, None for
     ideal; its cycles count on clock, the card's clock domain.
     """
 

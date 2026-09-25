@@ -213,8 +213,8 @@ class Transfer:
     packet protocol the transfer is its frames: serializer_start_ticks
     is the first frame's start and serializer_end_ticks the last
     frame's end, serialization_ticks the time its frames held the wire,
-    and queue_wait_ticks the rest of that span, the credit waits with
-    the queue.
+    lost and resent ones included, and queue_wait_ticks the rest of
+    that span, the credit waits and the recovery with the queue.
     """
 
     payload_bits: Optional[int]

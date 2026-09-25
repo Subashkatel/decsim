@@ -14,7 +14,8 @@ TracedCallback fired at the device's transition
 (point-to-point-net-device.cc TransmitComplete). The channels are what
 the row's build names (the Channel port in decsim/ports.py), one per
 channel name; the shipped rows build the PROTOCOLS row each card's
-protocol names.
+protocol names. The fabric is the seed composite of its channels, so a
+channel that draws (the reliable row's losses) is seeded under its name.
 """
 
 import dataclasses
@@ -25,8 +26,10 @@ import decsim.config as config
 import decsim.engine
 import decsim.links.channel as channel_module
 import decsim.links.credit_channel as credit_channel
+import decsim.links.reliable_channel as reliable_channel
 import decsim.links.settings as link_settings
 import decsim.ports as ports
+import decsim.records.seeds as seed_records
 import decsim.records.transfers as transfer_records
 import decsim.tables as tables
 import decsim.trace_source as trace_source
@@ -40,10 +43,11 @@ ChannelClass = Callable[
 # links.<path>.protocol.kind names one of these rows: how the path's
 # channel moves a message. ideal is the whole transfer on an unbounded
 # buffer with nothing lost; credit cuts it into frames that wait for
-# receive-buffer credits.
+# receive-buffer credits; reliable adds loss and go-back-N recovery.
 PROTOCOLS = {
     "ideal": channel_module.Channel,
     "credit": credit_channel.CreditChannel,
+    "reliable": reliable_channel.ReliableChannel,
 }
 
 
@@ -175,6 +179,15 @@ class LinkFabric:
             binding.settings.setup_ticks,
             lambda transfer: self._finish(outgoing, transfer),
         )
+
+    def run_seed_children(self) -> tuple:
+        """Every channel, under its name; only a channel that draws binds."""
+        children = []
+        for name, channel in self._channel_by_name.items():
+            segment = seed_records.RunSeedPathSegment("string_key", name)
+            child = seed_records.RunSeedChild((segment,), channel)
+            children.append(child)
+        return tuple(children)
 
     def _binding_for(
         self,

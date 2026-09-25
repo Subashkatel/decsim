@@ -29,6 +29,8 @@ a page is enforced here.
    pyproject.toml's requires-python declares, the one pip enforces.
 9. constraints.txt, which the install commands read, pins every package
    the run, test and dev extras name.
+10. No page sends a reader to one maintainer's environment: a private
+    container, its wrapper interpreter or its dependency folder.
 """
 
 import ast
@@ -70,6 +72,11 @@ NAMED_PYTHON = re.compile(r"Python (3\.\d+)\s+or\s+newer")
 PINNED_EXTRA = re.compile(r"^(?:run|test|dev) = \[(.*)\]$", re.MULTILINE)
 REQUIREMENT_NAME = re.compile(r'"([A-Za-z0-9_.-]+)')
 PINNED_NAME = re.compile(r"^([A-Za-z0-9_.-]+)==", re.MULTILINE)
+PRIVATE_ENVIRONMENT = re.compile(
+    r"apptainer|singularity|\.sif\b|container wrapper|\.venv/bin/python"
+    r"|\.pydeps",
+    re.IGNORECASE,
+)
 
 # Names decsim does not define, written in backticks because they name
 # the referent a decision came from.
@@ -579,3 +586,20 @@ def test_the_constraints_file_pins_every_package_the_extras_name():
         f"constraints.txt pins no version of {sorted(unpinned)}; rerun "
         "the command in its first lines"
     )
+
+
+def test_no_page_installs_from_a_maintainers_private_environment():
+    """A reader has the README's install and nothing a checkout lacks."""
+    for page in _markdown_pages():
+        text = page.read_text()
+        named = PRIVATE_ENVIRONMENT.findall(text)
+        assert named == [], f"{page.name} names {named}"
+
+
+def _markdown_pages() -> tuple:
+    """The pages a reader reads, without pyproject.toml's tool settings."""
+    pages = []
+    for path in _prose_files():
+        if path.suffix == ".md":
+            pages.append(path)
+    return tuple(pages)

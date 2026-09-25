@@ -363,8 +363,7 @@ eight things happen that did not happen for window 0.
   all. Only a final answer is published to the frame.
 
 `W3 committed` at 17.140 is worth reading carefully. The window
-provisionally commits on the weak answer as soon as the verdict is in,
-so the windows behind it are not blocked
+provisionally commits on the weak answer as soon as the verdict is in
 (`decsim/windows/window_commits.py`, `commit`). What it does not do is
 ship its boundary: this run's boundary policy is `held`, chosen for you
 because the escalation may escalate and `near_seam_pinned` does not
@@ -376,6 +375,36 @@ the weak window never ships a boundary of its own
 boundary ships only when the strong answer lands, which is the
 `decoder_to_decoder` move at 27.220
 (`decsim/windows/window_commits.py`, `finish_strong`).
+
+The window behind it waits for that boundary. Follow window 4:
+
+```bash
+decsim trace follow \
+  results/two_tiers_shot/trace/p0.008_d3_algo1.0_round1us_seed1.trace.json \
+  --window 1:4
+```
+
+```
+window 1:4 of decsim switching d3 p0.008 seed1
+
+tick (us)  where                            what                                                           dur (us)  transfer  bits
+18.008     Window planner                   W4 ready
+18.008     Window planner                   queued, dispatched to default#0                                0.000
+18.008     Window planner                   queued, dispatched to default#0                                0.000
+18.008     weak_buffer_to_weak_decoder      move, with W4 rounds 13..18                                    0.004     move      48
+18.012     Decoder unit default#0           unit default#0 memory copy                                               copy      48
+18.012     Decoder unit default#0           residence, unbounded, data ready 18.012, freed at decode done  11.340    copy      48
+27.224     Window planner                   masked view copy                                                         copy      48
+27.224     Decoder unit default#0           stage fetch                                                    0.024
+27.224     Decoder unit default#0           decode service                                                 1.064
+27.248     Decoder unit default#0           stage algorithm                                                1.000
+28.248     Decoder unit default#0           stage release                                                  0.040
+```
+
+Window 4 has its rounds at 18.008 and they are staged in the decoder
+unit's memory at 18.012, but its first solve starts at 27.224, the tick
+window 3's boundary lands. Staging goes on while window 3 is escalated;
+decoding the next window waits on the held boundary.
 
 That last number is the whole trade in one line. This window's answer
 was more likely to be right, and it arrived 10 microseconds later than

@@ -826,7 +826,10 @@ def _drawn_tail(
     picked_rows = packed[picks]
     parity = numpy.bitwise_xor.reduce(picked_rows, axis=1)
     flipped_bits = numpy.unpackbits(parity, axis=1)
-    flipped_counts = flipped_bits.sum(axis=1)
+    # bincount converts its input to intp (numpy
+    # _core/src/multiarray/compiled_base.c, arr_bincount); a sum of uint8
+    # is uint64, which numpy 2.0 and 2.1 refuse to cast to intp.
+    flipped_counts = flipped_bits.sum(axis=1, dtype=numpy.intp)
     histogram = numpy.bincount(flipped_counts, minlength=tail_width)
     reversed_histogram = histogram[::-1]
     reversed_tails = numpy.cumsum(reversed_histogram)

@@ -517,3 +517,26 @@ def test_a_count_no_fault_reaches_is_always_zero():
 
     assert list(tails) == [1.0, 0.0, 0.0, 0.0, 0.0]
     assert threshold == 1
+
+
+def test_the_tail_law_hands_bincount_counts_it_casts_safely(monkeypatch):
+    """Before 2.2, numpy casts bincount's input to intp only when safe.
+
+    The stand-in holds numpy 2.2's bincount to that older rule, so the
+    law is checked on every numpy: uint64 counts, which numpy.sum gives
+    for uint8 bits, raised TypeError there.
+    """
+    bincount = numpy.bincount
+
+    def safe_casting_bincount(counts, minlength=0):
+        assert numpy.can_cast(counts.dtype, numpy.intp), counts.dtype
+        return bincount(counts, minlength=minlength)
+
+    monkeypatch.setattr(numpy, "bincount", safe_casting_bincount)
+    priors = numpy.full(3, 1e-2)
+    incidence = numpy.eye(3, dtype=numpy.uint8)
+
+    law = burst_detectors.tail_law(priors, incidence, 1e-6)
+
+    tails = law.tails(1.0)
+    assert tails[0] == 1.0

@@ -65,9 +65,16 @@ in, explanation for the design and its sources, and a link to every page.
 
 ## The tests
 
+The `test` extra adds pytest and the reference decoders the suite checks
+decsim against:
+
 ```bash
+python -m pip install -e ".[run,test]"
 python -m pytest tests
 ```
+
+A test whose optional backend is absent (the `bb-decoders` and Deltakit
+extras) is skipped and says which module it could not import.
 
 `tools/check.sh` runs the style and structure checks that `STYLE.md`
 describes.

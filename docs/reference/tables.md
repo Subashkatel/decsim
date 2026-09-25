@@ -74,6 +74,7 @@ In `decsim/decoders/settings.py`. A row of it is named under `<tier>_decoder.kin
 | `relay_bp` | `RelayBeliefPropagationDecoder` in `decsim/decoders/relay_belief_propagation/decoder.py` | Use Relay-BP for corrections and an injected model for service time. |
 | `bposd` | `BeliefPropagationOsdDecoder` in `decsim/decoders/belief_propagation_osd/decoder.py` | Decode one window with BP-OSD; ldpc's argument names are kept. |
 | `measured_table` | `MeasuredTableDecoder` in `decsim/decoders/measured_table/decoder.py` | The measured_table row: the strong decoder over a MeasuredTable. |
+| `dispatch_steps` | `DispatchStepsDecoder` in `decsim/decoders/dispatch_steps/decoder.py` | The dispatch_steps row: the strong decoder over DispatchSteps. |
 
 ## `ESCALATIONS`
 

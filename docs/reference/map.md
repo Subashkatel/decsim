@@ -171,6 +171,9 @@ docstring.
 - `decsim/decoders/decoder_unit.py`: One decoder unit's occupancy: slots, memory, compute claim, flights.
 - `decsim/decoders/decoders.py`: Timing-only decoders, the routers and the sampled-confidence wrapper.
 - `decsim/decoders/detection_events.py`: One tier's event-detection logic: it forms the rounds that tier reads.
+- `decsim/decoders/dispatch_steps/__init__.py`: The dispatch_steps row: Relay-BP behind a CUDA-Q dispatcher, step by step.
+- `decsim/decoders/dispatch_steps/decoder.py`: Relay-BP on a GPU behind a CUDA-Q dispatcher, step by step.
+- `decsim/decoders/dispatch_steps/measurements.py`: A CUDA-Q dispatcher's steps on NVIDIA GPUs, each timed on its own.
 - `decsim/decoders/measured_table/__init__.py`: The measured_table row: Relay-BP priced by a GPU's measured time.
 - `decsim/decoders/measured_table/decoder.py`: Relay-BP on a measured GPU: decsim's own answer, the device's time.
 - `decsim/decoders/measured_table/measurements.py`: Relay-BP decode times measured on NVIDIA GPUs, as a line in iterations.

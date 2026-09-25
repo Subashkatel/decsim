@@ -121,7 +121,8 @@ class MeasuredTable:
         result = self.decoder.decode(request)
         detectors = _region_detectors(request)
         decodes_running = running + 1
-        cell = _nearest_cell(self.cells, decodes_running, detectors)
+        cells = _cells_running(self.cells, decodes_running)
+        cell = nearest_in_size(cells, detectors)
         iterations = _iterations_of(result)
         microseconds = cell.decode_microseconds(iterations)
         decode_ticks = config.microseconds_to_ticks(microseconds)
@@ -200,21 +201,25 @@ def _iterations_of(result: decoding_records.DecodeResult) -> int:
     return result.iterations
 
 
-def _nearest_cell(
-    cells: tuple, decodes_running: int, detectors: int
-) -> measurements.MeasuredTime:
-    """The cell with this many decodes whose region is nearest in size."""
-    nearest = None
-    nearest_gap = None
+def _cells_running(cells: tuple, decodes_running: int) -> tuple:
+    """The cells measured with this many decodes at once."""
+    running = []
     for cell in cells:
-        if cell.decodes_running != decodes_running:
-            continue
-        size_difference = cell.detectors - detectors
-        size_gap = abs(size_difference)
-        if nearest is None or size_gap < nearest_gap:
-            nearest = cell
-            nearest_gap = size_gap
-    assert nearest is not None, (
-        f"no measured cell runs {decodes_running} decodes at once"
-    )
+        if cell.decodes_running == decodes_running:
+            running.append(cell)
+    assert running, f"no measured cell runs {decodes_running} decodes at once"
+    return tuple(running)
+
+
+def nearest_in_size(rows: tuple, detectors: int):
+    """The row whose region is nearest in detectors; the first on a tie.
+
+    Rows are in region order, so the first is the smaller region.
+    """
+    nearest = rows[0]
+    for row in rows:
+        size_difference = row.detectors - detectors
+        nearest_difference = nearest.detectors - detectors
+        if abs(size_difference) < abs(nearest_difference):
+            nearest = row
     return nearest

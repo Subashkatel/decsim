@@ -830,7 +830,9 @@ weak_decoder:                      # the lightweight tier: fast, higher LER
                                    # real algorithm,
                                    # measured wall clock per window;
                                    # measured_table: relay_bp's answer at a
-                                   # GPU's measured time; or a
+                                   # GPU's measured time; dispatch_steps:
+                                   # the same answer, timed step by step
+                                   # on a CUDA-Q dispatcher; or a
                                    # number: fixed core latency in us.
                                    # Known number cards: 0.028 = LILLIPUT-class
                                    # core, [d=3, m=2] 7 cycles at 250 MHz
@@ -1061,7 +1063,8 @@ strong_decoder:                    # the accurate tier: slow, lower LER
                                    # a union_find strong tier takes
                                    # weight_step and cycle_count here, as above
   # device: a100                   # the measured_table row's GPU: a100 |
-                                   # gh200. Its time is intercept plus slope
+                                   # gh200 (dispatch_steps names one too,
+                                   # gh200 by default). Its time is intercept plus slope
                                    # times the iterations decsim's own
                                    # Relay-BP ran, a line measured with
                                    # NVIDIA's nv-qldpc-decoder (cudaq-qec
@@ -1086,6 +1089,18 @@ strong_decoder:                    # the accurate tier: slow, lower LER
                                    # (decoders/strong_backend.py). A CSS
                                    # circuit only: a detector of neither
                                    # type is refused
+  # path: device                   # the dispatch_steps row's CUDA-Q
+                                   # dispatcher path: device (gh200 only,
+                                   # its graph fire needs compute
+                                   # capability 9.0) | host. Its decode is
+                                   # the traced Relay-BP kernel line plus
+                                   # the path's fire, or launch and copies,
+                                   # each timed alone; the echo steps are
+                                   # the link card's
+                                   # (decoders/dispatch_steps/measurements.py)
+  # workers: 1                     # the host path's graph workers, each
+                                   # with its own stream; the device path
+                                   # decodes on its one dispatcher
   engine:
     clock: room                    # the strong unit lives room-side
     fetch_cycles_per_round: 1

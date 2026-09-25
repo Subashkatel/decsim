@@ -1128,6 +1128,51 @@ against Stim's own decomposition of the same circuit and a windowed part
 against the recipe; `tests/decoders/test_strong_backend.py` holds the
 two requests against the first-come first-served recursion.
 
+## D31. A dispatcher's decode is priced step by step
+
+**Decided.** `dispatch_steps` is the second strong backend row. It
+answers with decsim's own Relay-BP, as `measured_table` does, and
+states each decode as the steps of a CUDA-Q dispatcher path, each timed
+alone: on the device path notice, check, handle, fire, decode and
+respond, all on the one dispatcher; on the host path notice and check
+on the dispatcher, then launch, copy in, decode and copy out on a
+worker. `path` names which, `workers` the host path's graph workers.
+Notice, check, handle and respond are inside the link card's echo, so
+they are zero-tick steps that name it.
+
+**Why.** `measured_table`'s line is one decode() call from Python, and
+an Nsight Systems trace of those same decodes shows what it holds: one
+cooperative kernel whose time is a line in the iterations (r2 at
+least 0.9995, the whole call's per-iteration slope to within 3 percent
+on the GH200 and 11 percent on the A100), 8 to 50 microseconds of the
+binding's copies, and 52 to 278 microseconds at the median of its host
+work, which a dispatcher does not run. The host path pays one stream
+sync a decode, in its launch step; the copies inside the graph are
+priced at the GPU's own time for a small copy, 1.1 to 1.5
+microseconds. Priced whole, a strong decode behind a dispatcher carries
+that host work; priced by steps, it carries the kernel, the launch or
+fire, and the copies.
+
+**Sources.** cuda-quantum releases/v0.15.2 dispatch_kernel.cu (the
+device path, and `#if __CUDA_ARCH__ >= 900` at line 491, which leaves
+the A100 without one) and host_api.md lines 1065-1113 (the host
+monitor); the kernel lines from the trace, the launch and copies from
+a microbenchmark of each piece, and the fire from two GH200 round trips
+through dispatch_kernel.cu, a fired graph less a call in place
+(`decsim/decoders/dispatch_steps/measurements.py`).
+
+**Where to see it.** `decsim/decoders/dispatch_steps/`;
+`tests/decoders/test_dispatch_steps_decoder.py` holds a decode's end
+against the fire and the kernel line at relay-bp's own iterations,
+each path's steps and resources, and the echo identity: the echo steps
+add no ticks, so on the `roce_v2_gpu` and `nvqlink_gpu` cards the link
+legs alone are the published round trips, 4.5 and 3.839 microseconds.
+The fire is priced against the GH200's own echo, 4.576 microseconds,
+which Backline's 4.5 differs from by 1.7 percent.
+
+The row decodes X and Z together only: its kernel lines were traced on
+whole regions.
+
 ## What is not modelled yet
 
 These are open, recorded rather than hidden, so that a reader does not

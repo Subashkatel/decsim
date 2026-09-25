@@ -1155,9 +1155,10 @@ class StrongBackend(Protocol):
     """The device a strong decode runs on, as the strong decoder sees it.
 
     Rows: measured_table, a device's measured time law with decsim's own
-    answer, one step on the dispatcher. A live device (a real GPU
-    process decsim hands the region to and waits for) answers the same
-    four methods.
+    answer, one step on the dispatcher; dispatch_steps, the steps a
+    CUDA-Q dispatcher and its workers take, each timed on its own. A
+    live device (a real GPU process decsim hands the region to and
+    waits for) answers the same four methods.
 
     A strong decode crosses the link in, lands, is noticed, waits, is
     decoded and is written back before the link out. The link cards

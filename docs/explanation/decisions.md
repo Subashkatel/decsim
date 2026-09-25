@@ -417,6 +417,15 @@ RDMA write, the round trip read from the engine's own timer.
 holds the split, the exact escalation sum, the unchanged remainder of the
 card, the four Backline citations and both rows running from a yaml.
 
+**Widened since.** A third row, `nvqlink_gpu`, takes the same split from
+NVQLink's measurement: an FPGA sends RoCE packets over 100 Gb Ethernet
+into GPU memory, a persistent GPU kernel loops each back, and the FPGA
+times the round trip, 3.839 microseconds in the steady-state median
+(Caldwell, McCaskey et al. 2510.25213 line 485; the setup at lines 391
+to 403 and 526 to 533). NVQLink runs an unreliable connection on
+purpose (lines 376 to 388), so the row keeps the ideal protocol, which
+retransmits nothing.
+
 ## D15. The park before a decode is two points, by what it waited for
 
 **Decided.** The park is the stretch after a decode's input has landed

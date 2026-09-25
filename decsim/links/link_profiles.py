@@ -222,6 +222,24 @@ ROCE_V2_GPU_SOURCE = (
     "FPGA controller to GPU coprocessor over RoCE v2"
 )
 
+# NVQLink (NVIDIA), arXiv 2510.25213, Sec. 2.4. An FPGA sends 32-byte
+# payloads as RoCE packets over 100 Gb Ethernet to a ConnectX-7 NIC,
+# which writes them into GPU memory by RDMA; a persistent GPU kernel
+# waits for each packet and loops it back through the NIC with no host
+# processor involved (lines 391-403, 526-533; Fig. 2, lines 438-439),
+# and the FPGA times the round trip (line 400). The connection is
+# unreliable by choice: a dropped packet is not retransmitted (lines
+# 376-388). The steady-state mean and median are 3.839 us (line 485).
+NVQLINK_ROUND_TRIP_MICROSECONDS = 3.839
+NVQLINK_SOURCE = (
+    "NVQLink 2510.25213 line 485, 3.839 us steady-state median round "
+    "trip, FPGA to a persistent GPU kernel and back over RoCE"
+)
+_NVQLINK_RATE_SOURCE = (
+    "100 Gb/s, NVQLink 2510.25213 line 382 and Fig. 2 (lines 438-439), "
+    "the FPGA's Ethernet link to the GPU host's NIC"
+)
+
 # decsim prices one number per hop, so each leg of the round trip is
 # charged half of it and the coprocessor's own poll is charged nothing.
 # The legs the measurement covers are the controller's one-sided write
@@ -573,11 +591,51 @@ def roce_v2_measured_profile(coprocessor: str) -> settings.FabricSettings:
     round_trip_microseconds, measurement_source = _roce_v2_measurement(
         coprocessor
     )
+    cable_rate = settings.CapacitySettings(
+        _OFF_BOARD_BITS_PER_MICROSECOND, _OFF_BOARD_RATE_SOURCE
+    )
     strong_paths = _roce_v2_strong_paths(
-        round_trip_microseconds, measurement_source
+        round_trip_microseconds, measurement_source, cable_rate
     )
     reference = logical_reference_profile()
     row_name = f"roce_v2_{coprocessor}"
+    return dataclasses.replace(
+        reference, **strong_paths, profile_name=row_name, kind=row_name
+    )
+
+
+def nvqlink_measured_profile() -> settings.FabricSettings:
+    """The reference card with the strong path on NVQLink's round trip.
+
+    NVQLink (arXiv 2510.25213, Sec. 2.4) measures one number the way
+    Backline does: an FPGA sends RoCE packets that land in GPU memory, a
+    persistent GPU kernel loops each back, and the FPGA times the round
+    trip, 3.839 us in the steady-state median (line 485). The split is
+    roce_v2_measured_profile's: the write, the escalation request and
+    the reply each half of the round trip, the poll of the GPU's own
+    memory zero, so the escalation round trip sums to the median. The
+    three legs that cross the 100 Gb Ethernet link (line 382, Fig. 2)
+    serialize their bits at its rate.
+
+    The connection is unreliable by choice (lines 376-388), so a frame
+    is never retransmitted: the ideal protocol row, whose wire loses
+    nothing, since the 100G cables are engineered for a bit error rate
+    under 1e-15 (lines 381-383). No framing row is attached: the
+    measured round trip already holds the framing of its 32-byte RoCE
+    echo (line 403), and the credit row that carries a framing needs a
+    receive buffer and a credit latency the paper does not state. The
+    card prices the steady-state median, not the warm-up period at the
+    start of a run (lines 413-416, Fig. 4: a 95th percentile of 4.02 us)
+    nor the tail (standard deviation 35 ns, maximum 3.96 us, line 485).
+    """
+    cable_rate = settings.CapacitySettings(
+        _OFF_BOARD_BITS_PER_MICROSECOND, _NVQLINK_RATE_SOURCE
+    )
+    strong_paths = _roce_v2_strong_paths(
+        NVQLINK_ROUND_TRIP_MICROSECONDS, NVQLINK_SOURCE, cable_rate
+    )
+    reference = logical_reference_profile()
+    row_name = "nvqlink_gpu"
     return dataclasses.replace(
         reference, **strong_paths, profile_name=row_name, kind=row_name
     )
@@ -684,6 +742,29 @@ class RoceV2GpuFabric:
         return fabric.LinkFabric(card, engine, fabric.protocol_channel)
 
 
+class NvqlinkGpuFabric:
+    """The reference card with the strong path on NVQLink's GPU round trip.
+
+    The four strong-side hops are priced by NVQLink's measured round
+    trip from an FPGA to a persistent GPU kernel over RoCE, 3.839 us in
+    the steady-state median (arXiv 2510.25213, line 485): half of it on
+    each leg the packet crosses, nothing for the kernel's poll of its own
+    memory. Every other hop keeps the reference numbers.
+    """
+
+    @staticmethod
+    def base_card() -> settings.FabricSettings:
+        """The numbers a yaml's per-path cards override."""
+        return nvqlink_measured_profile()
+
+    @staticmethod
+    def build(
+        card: settings.FabricSettings, engine: decsim.engine.Engine
+    ) -> ports.Link:
+        """The object that carries this run's transfers."""
+        return fabric.LinkFabric(card, engine, fabric.protocol_channel)
+
+
 # links.kind names one of these rows: which fabric model carries the
 # transfers and which numbers the section's per-path cards override. A
 # row answers base_card at the yaml boundary and build at the root.
@@ -692,6 +773,7 @@ LINK_FABRICS = {
     "bandwidth_limited": BandwidthLimitedFabric,
     "roce_v2_cpu": RoceV2CpuFabric,
     "roce_v2_gpu": RoceV2GpuFabric,
+    "nvqlink_gpu": NvqlinkGpuFabric,
 }
 
 
@@ -748,18 +830,17 @@ def _roce_v2_measurement(coprocessor: str) -> tuple:
 
 
 def _roce_v2_strong_paths(
-    round_trip_microseconds: float, measurement_source: str
+    round_trip_microseconds: float,
+    measurement_source: str,
+    cable_rate: settings.CapacitySettings,
 ) -> dict:
     """The four strong-side paths, priced from one measured round trip.
 
-    The three legs that cross Backline's cable serialize their bits at
-    its 100 Gb/s, as the reference card's strong hops do; the poll reads
-    the coprocessor's own memory, crosses no cable and stays unbounded.
+    The three legs that cross the measured cable serialize their bits at
+    its rate, as the reference card's strong hops do; the poll reads the
+    coprocessor's own memory, crosses no cable and stays unbounded.
     """
     leg_microseconds = round_trip_microseconds / 2
-    cable_rate = settings.CapacitySettings(
-        _OFF_BOARD_BITS_PER_MICROSECOND, _OFF_BOARD_RATE_SOURCE
-    )
     write_source = f"{measurement_source}; {ROCE_V2_WRITE_LEG}"
     escalation_source = f"{measurement_source}; {ROCE_V2_ESCALATION_LEG}"
     poll_source = f"{measurement_source}; {ROCE_V2_POLL_LEG}"

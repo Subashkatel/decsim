@@ -575,7 +575,7 @@ clocks:                            # clock domain name -> MHz; a link prices its
 links:                             # a kind, then one card per path; null = the
                                    # chosen row's numbers for that path
   kind: logical_reference          # logical_reference | bandwidth_limited |
-                                   # roce_v2_cpu | roce_v2_gpu
+                                   # roce_v2_cpu | roce_v2_gpu | nvqlink_gpu
                                    # (LINK_FABRICS, links/link_profiles.py). The row
                                    # supplies the numbers the per-path cards below
                                    # override and builds the fabric the run sends
@@ -612,6 +612,12 @@ links:                             # a kind, then one card per path; null = the
                                    # bits at the cable's 100 Gb/s on top.
                                    # roce_v2_gpu is the same card on the FPGA-to-GPU
                                    # round trip, 4.5 us in the median.
+                                   # nvqlink_gpu is the same split on NVQLink's
+                                   # FPGA-to-GPU round trip over RoCE, a persistent
+                                   # kernel looping each packet back, 3.839 us in
+                                   # the steady-state median (2510.25213 line 485),
+                                   # at its 100 Gb Ethernet rate, on an unreliable
+                                   # connection, so the ideal protocol row.
                                    # Each card, in cycles of its named clock domain;
                                    # every card writes latency_cycles, clock and
                                    # bits_per_cycle, and a key not listed here is

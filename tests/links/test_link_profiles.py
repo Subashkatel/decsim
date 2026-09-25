@@ -792,3 +792,83 @@ def test_the_measured_gpu_row_runs_from_a_yaml(tmp_path):
     assert settings.links.kind == "roce_v2_gpu"
     assert result.terminal_status == "complete"
     assert "2609.09270" in strong_buffer_source_of(built)
+
+
+def test_the_nvqlink_row_charges_half_the_measured_round_trip_on_each_leg():
+    """NVQLink 2510.25213 line 485: 3.839 us, the steady-state median.
+
+    The write, the escalation and the reply each carry half; the GPU
+    kernel's poll of its own memory is free, so the escalation round
+    trip is the measured median exactly.
+    """
+    profile = link_profiles.nvqlink_measured_profile()
+    latencies = latencies_of(profile)
+    half = config.microseconds_to_ticks(1.9195)
+    assert latencies["controller_to_strong_buffer"] == half
+    assert latencies["weak_decoder_to_strong_decoder"] == half
+    assert latencies["strong_buffer_to_strong_decoder"] == 0
+    assert latencies["strong_decoder_to_frame"] == half
+    escalation_round_trip = (
+        latencies["weak_decoder_to_strong_decoder"]
+        + latencies["strong_buffer_to_strong_decoder"]
+        + latencies["strong_decoder_to_frame"]
+    )
+    assert escalation_round_trip == config.microseconds_to_ticks(3.839)
+
+
+def test_the_nvqlink_rows_strong_side_sources_cite_nvqlink():
+    """The four strong-side hops read one measurement, 2510.25213."""
+    profile = link_profiles.nvqlink_measured_profile()
+    sources = sources_of(profile)
+    cited = _named_where(sources, _cites_nvqlink)
+    assert cited == [
+        "controller_to_strong_buffer",
+        "strong_buffer_to_strong_decoder",
+        "strong_decoder_to_frame",
+        "weak_decoder_to_strong_decoder",
+    ]
+
+
+def test_the_nvqlink_rows_strong_side_retransmits_nothing():
+    """An unreliable connection by choice (2510.25213 lines 376-388)."""
+    profile = link_profiles.nvqlink_measured_profile()
+    strong_side = (
+        profile.controller_to_strong_buffer,
+        profile.weak_decoder_to_strong_decoder,
+        profile.strong_buffer_to_strong_decoder,
+        profile.strong_decoder_to_frame,
+    )
+    protocols = [path.channel.protocol.kind for path in strong_side]
+    assert protocols == ["ideal"] * 4
+
+
+def test_the_nvqlink_rows_cable_legs_serialize_at_100_gbps():
+    """NVQLink's 100 Gb Ethernet link (2510.25213 line 382, Fig. 2)."""
+    profile = link_profiles.nvqlink_measured_profile()
+    cable_legs = (
+        profile.controller_to_strong_buffer,
+        profile.weak_decoder_to_strong_decoder,
+        profile.strong_decoder_to_frame,
+    )
+    rates = []
+    for path in cable_legs:
+        capacity = path.channel.capacity
+        rate = capacity.exact_aggregate_bits_per_microsecond()
+        rates.append(rate)
+    assert rates == [100000] * 3
+
+
+def test_the_nvqlink_row_keeps_the_reference_card_off_the_strong_side():
+    reference = link_profiles.logical_reference_profile()
+    measured = link_profiles.nvqlink_measured_profile()
+    unchanged = paths_outside_the_strong_side(reference)
+    assert paths_outside_the_strong_side(measured) == unchanged
+
+
+def _cites_nvqlink(source: str) -> bool:
+    """Whether one source carries NVQLink's arXiv identifier."""
+    found = ARXIV.search(source)
+    if found is None:
+        return False
+    identifier = found.group()
+    return identifier == "2510.25213"

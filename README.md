@@ -84,10 +84,12 @@ python -m pytest tests
 A test whose optional backend is absent (the `bb-decoders` and Deltakit
 extras) is skipped and says which module it could not import.
 
-The tutorials show what their commands print. The lines of it that
-depend on the config and the seed alone are held to a fresh run by
-`tools/check_tutorial_runs.py`, which needs only the `run` extra and
-takes about five minutes on four cores:
+The tutorials show what their commands print.
+`tools/check_tutorial_runs.py` runs each page's commands and holds what
+the page shows to what they print: every line on a page whose decoders
+are priced by cards, and the lines no decoder's wall clock moves on the
+others. It needs only the `run` extra and takes about ten minutes on
+four cores:
 
 ```bash
 python tools/check_tutorial_runs.py

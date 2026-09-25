@@ -12,7 +12,10 @@ import ast
 import importlib.util
 import os
 import pathlib
+import re
 import subprocess
+
+import pytest
 
 TESTS_FILE = pathlib.Path(__file__)
 TESTS_PATH = TESTS_FILE.resolve()
@@ -340,27 +343,86 @@ def test_the_check_script_runs_the_active_environments_python(tmp_path):
     assert "ruff" in recorded_text
 
 
-def test_the_tutorial_check_finds_counts_on_every_page_it_reads():
-    """A page with no line the check reads would pass it vacuously."""
+def _page_and_its_own_output(check, page: str):
+    """A page, and outputs that print exactly what its blocks show."""
+    path = PACKAGE_ROOT / page
+    text = path.read_text()
+    outputs = []
+    for block in check.fenced_blocks(text):
+        printed = check.Printed(command="decsim", lines=tuple(block.lines))
+        outputs.append(printed)
+    return text, outputs
+
+
+def test_the_tutorial_check_runs_the_pages_own_commands():
+    """decsim, cut and ls lines, a continued line joined, nothing else."""
     check = _tool("check_tutorial_runs")
-    for tutorial in check.TUTORIALS:
-        path = PACKAGE_ROOT / tutorial.page
-        text = path.read_text()
-        counts = check.COLLECT_LINE.findall(text)
-        assert counts != [], tutorial.page
+    text = (
+        "```bash\n"
+        'python -m pip install -e ".[run]"\n'
+        "decsim trace follow \\\n"
+        "  results/shot/trace/one.trace.json \\\n"
+        "  --round 1:1\n"
+        "cut -d, -f1 results/shot/sweep.csv\n"
+        "```\n"
+    )
+
+    commands = check.page_commands(text)
+
+    assert len(commands) == 2
+    assert commands[0].split() == [
+        "decsim",
+        "trace",
+        "follow",
+        "results/shot/trace/one.trace.json",
+        "--round",
+        "1:1",
+    ]
+    assert commands[1] == "cut -d, -f1 results/shot/sweep.csv"
 
 
-def test_the_tutorial_check_compares_a_csv_block_column_by_column():
-    """The block's own header picks the sweep.csv columns it is held to."""
+@pytest.mark.parametrize(
+    "shown_line, moved_line",
+    [
+        (r"^(queue wait, mean: )[0-9.]+", r"\g<1>999.000"),
+        (r"^27\.224 ", "27.225 "),
+    ],
+    ids=["summary timing", "trace tick"],
+)
+def test_a_priced_tutorial_fails_the_check_when_a_value_moves(
+    shown_line, moved_line
+):
+    """On two_tiers every tick is priced, so every line is held."""
     check = _tool("check_tutorial_runs")
-    sweep_rows = [{"distance": "3", "shots": "400", "load": "2.53"}]
+    tutorial = check.TUTORIALS[2]
+    text, outputs = _page_and_its_own_output(check, tutorial.page)
+    moved = re.sub(shown_line, moved_line, text, count=1, flags=re.MULTILINE)
 
-    kept = check.block_differences(
-        "page.md", "distance,shots\n3,400", sweep_rows
+    unmoved_differences = check.page_differences(tutorial, text, outputs)
+    moved_differences = check.page_differences(tutorial, moved, outputs)
+
+    assert tutorial.is_priced
+    assert moved != text
+    assert unmoved_differences == []
+    assert len(moved_differences) == 1
+
+
+def test_a_wall_clock_tutorial_holds_its_counts_and_not_its_timings():
+    """first_run's load is the host's; its failure count is the seed's."""
+    check = _tool("check_tutorial_runs")
+    tutorial = check.TUTORIALS[0]
+    text, outputs = _page_and_its_own_output(check, tutorial.page)
+    new_load = re.sub(
+        r"^(load .*: )[0-9.]+", r"\g<1>99.99", text, count=1, flags=re.MULTILINE
     )
-    drifted = check.block_differences(
-        "page.md", "distance,shots\n3,401", sweep_rows
+    new_count = text.replace(
+        "logical failures: 0 of 2 shots", "logical failures: 1 of 2 shots"
     )
 
-    assert kept == []
-    assert len(drifted) == 1
+    load_differences = check.page_differences(tutorial, new_load, outputs)
+    count_differences = check.page_differences(tutorial, new_count, outputs)
+
+    assert not tutorial.is_priced
+    assert new_load != text
+    assert load_differences == []
+    assert len(count_differences) == 1

@@ -183,10 +183,11 @@ whether those objects are meant to be used locally or remotely" (lines
 has a card, a payload a record names, and a send at one end; a call
 inside a unit is never priced. Memory access is made explicit per hop by
 the memory class and by the copy-or-reference key. Partial failure is
-not modelled at all, and that is written into `decsim/machine.py`'s own
-docstring as a stated scope rather than left for a reader to discover:
-no hop drops, duplicates or reorders what it carries, and nothing
-retries.
+modelled on a hop only when its card names a protocol that has it, and
+`decsim/machine.py`'s own docstring says which: the default `ideal` row
+drops, duplicates and reorders nothing and never retries, and the
+`reliable` row loses frames and resends them inside the link, so the
+component above the hop still sees each message once and in order.
 
 ## What is not here
 

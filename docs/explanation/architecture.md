@@ -150,11 +150,14 @@ line, and Waldo is quoted for it in
 A call across a hop has a card, a payload a record names, and a send at
 one end; a call inside a unit is never priced.
 
-Across that line decsim models latency and memory access and no partial
-failure at all: no hop drops, duplicates or reorders what it carries,
-and nothing retries. That is a stated scope, written into
-`decsim/machine.py`'s own docstring, not an omission. A retry added to a
-hop as a tuning knob would be a modelling change, not a parameter.
+Across that line decsim models latency, memory access, and partial
+failure only where a card's protocol names it, as `decsim/machine.py`'s
+own docstring states. The `ideal` row, every card's default, drops,
+duplicates and reorders nothing and never retries. The `credit` row
+cuts a message into frames that wait for a finite receive buffer's
+credits. The `reliable` row loses frames at the card's bit error rate
+and resends them by go-back-N, so every message still arrives once and
+in order and no component above the hop ever sees the loss.
 
 [The data path, hop by hop](data_path.md) walks all eleven.
 

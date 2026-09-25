@@ -2258,24 +2258,20 @@ class RowSettings(Protocol):
 class WorkloadRow(Protocol):
     """A workload row: what the machine runs, as the root reads it.
 
-    Table rows: memory_circuit, memory_patches, circuit_list, surgery_ir
-    (WORKLOADS, frontends/settings.py), named by workload.kind. The root
+    Table rows: memory_circuit, memory_patches, circuit_list (WORKLOADS,
+    frontends/settings.py), named by workload.kind. The root
     never builds a workload row; it reads the class. operations turns the
     workload section's record (frontends/settings.py WorkloadSettings,
     whose row_settings holds the row's own RowSettings) and the run's
     code card into the operations and the rounds policy the row fixes,
     or None where the workload's policy applies (build/plan.py
-    _operations). has_frontend says whether an operation chain is built
-    in front of the run, a fact of the run shape the escalation policy
-    checks (build/plan.py build_plan). A row that no yaml can name
+    _operations). A row that no yaml can name
     declares a Settings whose from_yaml refuses with a sentence. gem5's
     Workload is the same shape: a SimObject whose parameters sit on its
     class and whose few answers the system reads before it runs
     (gem5 src/sim/Workload.py:46-52,
     src/sim/workload.hh:103-105).
     """
-
-    has_frontend: bool
 
     def operations(self, settings, code: CodeModel) -> tuple:
         """The operations, and the rounds policy the row fixes or None."""

@@ -715,10 +715,6 @@ A table row's own yaml keys, read into one record.
 
 A workload row: what the machine runs, as the root reads it.
 
-| Member | Type |
-| --- | --- |
-| `has_frontend` | `bool` |
-
 | Method | What it does |
 | --- | --- |
 | `operations` | The operations, and the rounds policy the row fixes or None. |

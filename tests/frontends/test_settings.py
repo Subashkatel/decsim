@@ -23,8 +23,6 @@ import tests.experiments.yaml_configs as yaml_configs
 class TwoPatchMemory:
     """A workload row written outside decsim: two patches, fixed rounds."""
 
-    has_frontend = False
-
     @dataclasses.dataclass(frozen=True)
     class Settings:
         """This row's one key of its own, the rounds each patch runs."""
@@ -97,7 +95,6 @@ def test_each_python_only_row_refuses_a_yaml_by_name(tmp_path):
     """A row a yaml cannot carry says what it needs and where to build it."""
     sentences = {
         "circuit_list": "a list of Operation records",
-        "surgery_ir": "the qubit_to_patch mapping",
     }
     for kind, sentence in sentences.items():
         workload = {"kind": kind}

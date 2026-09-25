@@ -219,4 +219,3 @@ In `decsim/frontends/settings.py`. A row of it is named under `workload.kind`.
 | `memory_circuit` | `MemoryCircuitWorkload` in `decsim/frontends/settings.py` | The memory_circuit row: Stim's generated memory circuit. |
 | `memory_patches` | `MemoryPatchesWorkload` in `decsim/frontends/settings.py` | The memory_patches row: independent memory patches run at once. |
 | `circuit_list` | `CircuitListWorkload` in `decsim/frontends/settings.py` | The circuit_list row: the operations as the caller built them. |
-| `surgery_ir` | `SurgeryIRWorkload` in `decsim/frontends/settings.py` | The surgery_ir row: the line-based text IR parsed and wired. |

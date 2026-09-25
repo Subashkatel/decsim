@@ -6,7 +6,6 @@ from typing import Any, Optional
 
 import stim
 
-import decsim.frontends.circuit_frontend as circuit_frontend
 import decsim.ports as ports
 import decsim.qpu.round_policies as round_policies
 import decsim.records.program as program_records
@@ -68,8 +67,8 @@ class WorkloadSettings:
     memory circuit for the code task, one physical error probability on
     all four of Stim's noise channels, rounds_per_shot rounds, both keys
     its own Settings), memory_patches (patch_count such circuits, one
-    operation per patch, at once), circuit_list (a Python-built operation list),
-    surgery_ir (the line-based text IR).
+    operation per patch, at once), circuit_list (a Python-built operation
+    list).
     The other fields are Python-only: the decode owners, the dynamic
     streams and protected regions of a feedback workload, the round policy
     (GateRounds by default; the memory circuit fixes its rounds and
@@ -84,8 +83,6 @@ class WorkloadSettings:
     kind: str = "circuit_list"
     physical_error_probability: Optional[float] = None
     operations: tuple = ()
-    text: str = ""
-    qubit_to_patch: Optional[dict] = None
     decode_operations: Optional[tuple] = None
     dynamic_streams: tuple = ()
     protected_regions: tuple = ()
@@ -143,8 +140,6 @@ class MemoryCircuitWorkload:
     rounds_per_shot, so the run has no operation chain in front of it.
     """
 
-    has_frontend = False
-
     @dataclasses.dataclass(frozen=True)
     class Settings:
         """The row's own keys: Stim's code task and the rounds a shot runs."""
@@ -189,8 +184,6 @@ class MemoryPatchesWorkload:
     patches it reaches (McEwen 2104.05219: a burst starts at one spot and
     spreads over the chip). Each copy draws its own shot.
     """
-
-    has_frontend = False
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
@@ -250,8 +243,6 @@ class MemoryPatchesWorkload:
 class CircuitListWorkload:
     """The circuit_list row: the operations as the caller built them."""
 
-    has_frontend = False
-
     @dataclasses.dataclass(frozen=True)
     class Settings:
         """No key: the yaml cannot name this row at all."""
@@ -271,37 +262,6 @@ class CircuitListWorkload:
         """The operations as given."""
         del code
         return tuple(settings.operations), None
-
-
-class SurgeryIRWorkload:
-    """The surgery_ir row: the line-based text IR parsed and wired."""
-
-    has_frontend = True
-
-    @dataclasses.dataclass(frozen=True)
-    class Settings:
-        """No key: the yaml cannot name this row at all."""
-
-        @classmethod
-        def from_yaml(cls, section: Mapping):
-            """Refused: this row needs the caller's qubit-to-patch mapping."""
-            del section
-            raise ValueError(
-                "workload.kind surgery_ir takes the IR text and the "
-                "qubit_to_patch mapping the caller allocated its patches "
-                "with, which no yaml key carries today; build it in Python "
-                "(WorkloadSettings(text=..., qubit_to_patch=...))"
-            )
-
-    @staticmethod
-    def operations(settings: "WorkloadSettings", code) -> tuple:
-        """The text IR parsed and wired."""
-        del code
-        frontend = circuit_frontend.SurgeryIRFrontend(
-            settings.text, settings.qubit_to_patch
-        )
-        operations = frontend.build()
-        return tuple(operations), None
 
 
 def _generated_memory(
@@ -355,5 +315,4 @@ WORKLOADS = {
     "memory_circuit": MemoryCircuitWorkload,
     "memory_patches": MemoryPatchesWorkload,
     "circuit_list": CircuitListWorkload,
-    "surgery_ir": SurgeryIRWorkload,
 }

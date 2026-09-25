@@ -141,14 +141,6 @@ def test_a_boundaries_row_written_in_the_section_wins_over_the_default():
     assert isinstance(plan.boundary_policy, boundary_policies.Held)
 
 
-def test_the_workload_row_declares_whether_the_run_has_a_frontend():
-    """The plan reads the declared fact, not the kind string."""
-    rows = workload_settings.WORKLOADS
-
-    for kind, row in rows.items():
-        assert isinstance(row.has_frontend, bool), kind
-
-
 def test_a_windows_kind_that_names_no_row_is_refused():
     windows = window_settings.WindowSettings(kind="diagonal")
 

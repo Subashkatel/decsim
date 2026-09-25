@@ -107,10 +107,6 @@ def build_plan(
             "dynamic streams require a windowing scheme that supports them"
         )
     has_static_decode_plan = settings.workload.decode_operations is not None
-    workload_row = tables.row(
-        workload_settings.WORKLOADS, "workload.kind", settings.workload.kind
-    )
-    has_frontend = workload_row.has_frontend
     commit_round_count = code.commit_rounds()
     buffer_round_count = code.buffer_rounds()
     run_shape = decoding_records.RunShape(
@@ -124,7 +120,6 @@ def build_plan(
         is_bulk_strong=settings.decoder_manager.bulk_strong,
         has_dynamic_streams=bool(dynamic_streams),
         has_static_decode_plan=has_static_decode_plan,
-        has_frontend=has_frontend,
     )
     escalation_policy.check_plan(run_shape)
     planned_operations = _decode_plan_operations(

@@ -331,8 +331,8 @@ burst_detector:
 
 workload:
   kind: memory_circuit             # memory_circuit | memory_patches are the
-                                   # yaml rows; the other rows (circuit_list,
-                                   # surgery_ir) are built in Python.
+                                   # yaml rows; circuit_list is built in
+                                   # Python.
                                    # memory_patches runs patch_count copies of
                                    # the memory circuit at once, one operation
                                    # per patch sharing the decoder units

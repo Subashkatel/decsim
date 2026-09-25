@@ -16,6 +16,13 @@ and times the whole packet, and the receiver has it txTime plus the
 channel delay later). A fractional tick of serialization rounds up,
 because a transfer never ends before its exact time. An unbounded
 channel serializes nothing and never queues.
+
+This is the protocol row `ideal`: one whole frame, an unbounded receive
+buffer and nothing lost, the lossless reference gem5's SimpleNetwork
+gives with its default infinite buffers (src/mem/ruby/network/simple/
+SimpleNetwork.py:53-57) and ns-3's device with no error model
+(point-to-point-net-device.cc:55-59). The packet rows keep the setup
+engine and replace the wire (decsim/links/credit_channel.py).
 """
 
 import collections

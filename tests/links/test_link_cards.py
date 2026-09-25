@@ -9,6 +9,7 @@ import pytest
 import decsim.config as config_module
 import decsim.links.link_profiles as link_profiles
 import decsim.machine as machine_module
+import tests.experiments.yaml_configs as yaml_configs
 from decsim.config import microseconds_to_ticks
 from decsim.experiments.experiment import load_experiment
 
@@ -273,3 +274,94 @@ def test_a_cycle_count_that_is_not_whole_is_refused_naming_the_card(
     assert message == (
         f"links.qpu_to_controller.{key} must be a nonnegative integer"
     )
+
+
+# A credit card: 8-bit flits one a cycle, one flit of receive buffer and a
+# one-cycle credit return, so a round of several flits waits for credits.
+CREDIT_PROTOCOL = {
+    "kind": "credit",
+    "framing": {"kind": "flits", "flit_bits": 8},
+    "receive_buffer_frames": 1,
+    "credit_latency_cycles": 1,
+}
+CREDIT_CARD = {
+    "latency_cycles": 1,
+    "clock": "fridge",
+    "bits_per_cycle": 8.0,
+    "protocol": CREDIT_PROTOCOL,
+}
+
+
+def test_a_card_without_a_protocol_is_the_ideal_row():
+    profile = _load_readout_card(GOOD_CARD)
+
+    protocol = profile.qpu_to_controller.channel.protocol
+    assert protocol.kind == "ideal"
+    assert protocol.row_settings is None
+
+
+def test_a_protocol_card_reaches_the_channel_counted_on_its_clock():
+    profile = _load_readout_card(CREDIT_CARD)
+
+    protocol = profile.qpu_to_controller.channel.protocol
+    assert protocol.kind == "credit"
+    assert protocol.row_settings.receive_buffer_frames == 1
+    assert protocol.row_settings.framing.row_settings.flit_bits == 8
+    assert protocol.clock.period_ticks == microseconds_to_ticks(0.004)
+
+
+def test_a_protocol_off_the_table_is_refused_naming_the_rows():
+    card = dict(CREDIT_CARD, protocol={"kind": "carrier_pigeon"})
+
+    with pytest.raises(ValueError, match="is not a row of its table"):
+        _load_readout_card(card)
+
+
+def test_a_packet_protocol_on_an_unbounded_wire_is_refused():
+    card = dict(CREDIT_CARD, bits_per_cycle=None)
+
+    with pytest.raises(ValueError, match="give it a bounded wire"):
+        _load_readout_card(card)
+
+
+def test_a_protocol_key_its_row_does_not_declare_is_refused():
+    protocol = dict(CREDIT_PROTOCOL, window_packets=128)
+    card = dict(CREDIT_CARD, protocol=protocol)
+
+    with pytest.raises(ValueError, match="does not know"):
+        _load_readout_card(card)
+
+
+def test_a_credit_protocol_without_its_buffer_is_refused():
+    protocol = dict(CREDIT_PROTOCOL)
+    del protocol["receive_buffer_frames"]
+    card = dict(CREDIT_CARD, protocol=protocol)
+
+    with pytest.raises(ValueError, match="needs receive_buffer_frames"):
+        _load_readout_card(card)
+
+
+def _built_from(tmp_path, overrides: dict):
+    config_path = yaml_configs.write_config(tmp_path, overrides)
+    experiment_config = load_experiment(config_path)
+    settings = experiment_config.point_settings(
+        physical_error_probability=0.008,
+        distance=3,
+        round_period_microseconds=1.0,
+    )
+    return machine_module.Machine.build(settings, 0)
+
+
+def test_a_binding_credit_card_on_the_weak_store_hop_runs_a_shot(tmp_path):
+    """A gate point: a round's flits wait for the one-flit buffer's credit."""
+    links = dict(yaml_configs.MINIMAL_CONFIG["links"])
+    links["controller_to_weak_buffer"] = CREDIT_CARD
+    built = _built_from(tmp_path, {"links": links})
+    frames = []
+    built.links.trace.frame_landed.connect(frames.append)
+
+    result = built.run()
+
+    credit_waits = [frame.timing.credit_wait_ticks for frame in frames]
+    assert result.terminal_status == "complete"
+    assert max(credit_waits) > 0

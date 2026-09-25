@@ -1794,7 +1794,9 @@ class Channel(Protocol):
     A Link row's build hands the fabric a channel class, which the
     fabric calls once per channel name with that channel's
     ChannelSettings and the engine, so a jittered or credit-limited
-    channel is one class and no fabric subclass. framed is a
+    channel is one class and no fabric subclass. The shipped rows hand
+    it the PROTOCOLS row each card names: ideal and credit
+    (links/fabric.py), named by links.<path>.protocol.kind. framed is a
     FramedPayload (decsim/links/channel.py): the payload bits a
     component sent and the header bits its path adds.
 

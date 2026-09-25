@@ -11,19 +11,24 @@ its wire and its setup engine. The shape is gem5's: a SimObject owns its
 parameters and its children and is reached through its ports
 (src/sim/sim_object.hh, src/mem/port.hh); the trace source is ns-3's
 TracedCallback fired at the device's transition
-(point-to-point-net-device.cc TransmitComplete). The channels are the
-class the row's build names (the Channel port in decsim/ports.py), one
-per channel name.
+(point-to-point-net-device.cc TransmitComplete). The channels are what
+the row's build names (the Channel port in decsim/ports.py), one per
+channel name; the shipped rows build the PROTOCOLS row each card's
+protocol names.
 """
 
 import dataclasses
+from collections.abc import Mapping
 from typing import Callable, Optional
 
+import decsim.config as config
 import decsim.engine
 import decsim.links.channel as channel_module
+import decsim.links.credit_channel as credit_channel
 import decsim.links.settings as link_settings
 import decsim.ports as ports
 import decsim.records.transfers as transfer_records
+import decsim.tables as tables
 import decsim.trace_source as trace_source
 
 # What a Link row's build hands the fabric: called once per channel name
@@ -31,6 +36,44 @@ import decsim.trace_source as trace_source
 ChannelClass = Callable[
     [link_settings.ChannelSettings, decsim.engine.Engine], ports.Channel
 ]
+
+# links.<path>.protocol.kind names one of these rows: how the path's
+# channel moves a message. ideal is the whole transfer on an unbounded
+# buffer with nothing lost; credit cuts it into frames that wait for
+# receive-buffer credits.
+PROTOCOLS = {
+    "ideal": channel_module.Channel,
+    "credit": credit_channel.CreditChannel,
+}
+
+
+def protocol_channel(
+    channel_settings: link_settings.ChannelSettings,
+    engine: decsim.engine.Engine,
+) -> ports.Channel:
+    """The channel of the PROTOCOLS row the channel's settings name."""
+    row = PROTOCOLS[channel_settings.protocol.kind]
+    return row(channel_settings, engine)
+
+
+def protocol_settings_from_yaml(
+    section, clock: config.Clock, path_name: str
+) -> link_settings.ProtocolSettings:
+    """A card's protocol mapping: a kind, and the keys its row declares."""
+    section_name = f"links.{path_name}.protocol"
+    if not isinstance(section, Mapping):
+        raise ValueError(
+            f"{section_name} holds {section!r}; it is a mapping with a kind, "
+            f"one of {sorted(PROTOCOLS)}"
+        )
+    kind = section.get("kind", "ideal")
+    row = tables.row(PROTOCOLS, f"links.{path_name}.protocol.kind", kind)
+    row_settings = tables.row_settings(
+        row, section_name, section, ("kind",), path_name
+    )
+    return link_settings.ProtocolSettings(
+        kind=kind, row_settings=row_settings, clock=clock
+    )
 
 
 class LinkFabric:

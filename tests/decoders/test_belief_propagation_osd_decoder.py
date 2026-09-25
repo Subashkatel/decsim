@@ -7,11 +7,13 @@ stimbposd's (bp_osd.py:62-68): max(0, min(order, n - m)).
 """
 
 import numpy
-import qldpc.decoders
+import pytest
 
 import decsim.decoders.belief_propagation_osd.decoder as adapter
 import decsim.detector_error_model.fault_model_contracts as fault_models
 from tests.decoders import windows
+
+qldpc_decoders = pytest.importorskip("qldpc.decoders")
 
 ROUNDS = 3
 SHOTS = 25
@@ -32,7 +34,7 @@ def _window_and_shots():
 def _qldpc_referee(physical):
     check = physical.check.toarray()
     error_channel = list(physical.priors)
-    return qldpc.decoders.get_decoder_BP_OSD(
+    return qldpc_decoders.get_decoder_BP_OSD(
         check,
         error_channel=error_channel,
         max_iter=5,

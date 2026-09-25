@@ -17,7 +17,6 @@ uncommitted, decsim/escalation/strong_window_shapes) with no paper referent.
 
 import numpy
 import pytest
-import qldpc.decoders
 import stim
 
 from decsim.detector_error_model import (
@@ -26,6 +25,8 @@ from decsim.detector_error_model import (
     stim_fault_catalog,
     window_model_builders,
 )
+
+qldpc_decoders = pytest.importorskip("qldpc.decoders")
 
 GRAPHLIKE = fault_model_contracts.FaultRepresentation.GRAPHLIKE
 GRAPHLIKE_REQUIRED = fault_model_contracts.GRAPHLIKE_FAULT_MODEL_REQUIRED
@@ -84,7 +85,7 @@ def qldpc_sliding_windows(circuit, rounds, window_size, stride):
         circuit, None, rounds
     )
     model = circuit.detector_error_model(decompose_errors=True)
-    decoder = qldpc.decoders.SlidingWindowDecoder(
+    decoder = qldpc_decoders.SlidingWindowDecoder(
         window_size,
         stride,
         detector_to_time=lambda detector: round_of_detector[detector],

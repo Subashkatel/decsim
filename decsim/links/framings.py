@@ -52,6 +52,11 @@ UDP_HEADER_BYTES = 8
 # (rxe_hdr.h:55; paylen at rxe_req.c:430).
 ROCE_BASE_TRANSPORT_HEADER_BYTES = 12
 ROCE_RDMA_EXTENDED_HEADER_BYTES = 16
+# An acknowledgement is its own packet, opcode RC_ACKNOWLEDGE: the base
+# header and the 4-byte ACK extended transport header, no payload, then
+# the invariant CRC (rxe_opcode.c:317-321, "RXE_BTH_BYTES +
+# RXE_AETH_BYTES"; rxe_hdr.h:773-775; paylen at rxe_resp.c:779-780).
+ROCE_ACK_EXTENDED_HEADER_BYTES = 4
 ROCE_INVARIANT_CRC_BYTES = 4
 ROCE_PAYLOAD_ALIGNMENT_BYTES = 4
 
@@ -203,6 +208,18 @@ class RoceV2:
             frame_bits = frame_bytes * BITS_PER_BYTE
             frames.append(frame_bits)
         return tuple(frames)
+
+    def acknowledgement_bits(self) -> int:
+        """The wire bits of one ACK or NAK, whatever the path MTU."""
+        transport_bytes = (
+            ROCE_BASE_TRANSPORT_HEADER_BYTES
+            + ROCE_ACK_EXTENDED_HEADER_BYTES
+            + ROCE_INVARIANT_CRC_BYTES
+        )
+        headers_bytes = IPV4_HEADER_BYTES + UDP_HEADER_BYTES
+        datagram_bytes = headers_bytes + transport_bytes
+        frame_bytes = _ethernet_frame_bytes(datagram_bytes)
+        return frame_bytes * BITS_PER_BYTE
 
 
 class EthernetUdp:

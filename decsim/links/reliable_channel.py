@@ -13,11 +13,19 @@ transcribed step by step:
   packet that finds noack_pkts above RXE_MAX_PKT_PER_ACK, 64, so rxe is
   ack_every_packets 66;
 - a frame fails its CRC with probability 1 - (1 - BER)^bits and the
-  receiver drops it (rxe_hdr.h:55, the invariant CRC);
+  receiver drops it (rxe_hdr.h:55, the invariant CRC), an
+  acknowledgement as well as a data packet;
 - the responder takes the PSN it expects; a PSN ahead of it is dropped
   with one sequence NAK carrying the expected PSN, and no second NAK
   until the gap closes; a PSN behind it is a duplicate, answered with
-  an ACK of the last PSN taken (rxe_resp.c:70-95, 1257-1288, 1563-1568);
+  an ACK of the last PSN taken, so a lost ACK is made good when the
+  timer resends (rxe_resp.c:70-95, 1257-1288, 1563-1568; IBA C9-105);
+- an ACK or a NAK is a packet of its own, built by prepare_ack_packet
+  and sent by rxe_xmit_packet (rxe_resp.c:763-810, 1169-1191): a
+  RoCE v2 RC_ACKNOWLEDGE frame (framings.RoceV2.acknowledgement_bits)
+  on the channel's reverse direction, serialized at the card's rate
+  behind the ACKs before it, one propagation long, with the forward
+  direction's credit loop, and lost by the same law;
 - an ACK acknowledges its PSN and every one before; a NAK acknowledges
   every PSN before its own and sends the requester back to it, unless a
   retry started by a NAK is already under way (rxe_comp.c:303-322,
@@ -36,9 +44,13 @@ qp->req.psn = qp->comp.psn (rxe_req.c:38-53), so every message is
 delivered once, in order, when its last packet is taken. Frames that
 are lost still took the wire and a credit, and their credit returns as
 any other: the receiver's buffer took them before the CRC failed. The
-acknowledgements ride the reverse wire at the credit latency and are
-never lost. Linux's rxe itself needs a kernel module; the reference
-this row is checked against is a transcription of the lines above.
+row is RoCE's, so its frames are roce_v2 frames: the ACK is a RoCE
+packet, and no other framing has one. rxe keeps its send queue as work
+requests, a message each here, and this row keeps PSNs: the completer's
+checks of the oldest work request's state (get_wqe, check_psn,
+rxe_comp.c:137-213) are read as PSN comparisons.
+Linux's rxe itself needs a kernel module; the reference this row is
+checked against is a transcription of the lines above.
 """
 
 import dataclasses
@@ -86,7 +98,7 @@ class ReliableChannel(channel_module.Channel, seeding._RandomSeedConsumer):
             """The keys of a card's protocol mapping."""
             credit_keys = credit_channel.read_credit_keys(section, path_name)
             framing = credit_keys[0]
-            _refuse_pcie_framing(framing, path_name)
+            _require_roce_framing(framing, path_name)
             connection_keys = _read_connection_keys(section, path_name)
             return cls(*credit_keys, *connection_keys)
 
@@ -101,6 +113,10 @@ class ReliableChannel(channel_module.Channel, seeding._RandomSeedConsumer):
         self._sending = _SendState()
         self._receiving = _ReceiveState()
         self._timer = _TimerState()
+        # the reverse direction: the responder's ACKs to the requester
+        self._reverse_wire = self._new_wire()
+        framing = self._reverse_wire.framing
+        self._acknowledgement_bits = framing.acknowledgement_bits()
 
     def _new_wire(self) -> credit_channel.CreditWire:
         """The credit row's wire."""
@@ -317,10 +333,16 @@ class ReliableChannel(channel_module.Channel, seeding._RandomSeedConsumer):
         self._answer(is_nak=True, psn=receiving.expected_psn)
 
     def _answer(self, is_nak: bool, psn: int) -> None:
-        """Send an ACK or a NAK back; it arrives one credit latency later."""
-        delay_ticks = credit_channel.credit_latency_ticks(self._settings)
+        """Send an ACK or a NAK back on the reverse direction as a frame."""
+        bits = self._acknowledgement_bits
+        now_ticks = self._engine.now
+        timing = self._reverse_wire.cross_frame(bits, now_ticks)
+        is_lost = self._draw_loss(bits)
+        if is_lost:
+            return
+        landing_delay = timing.landed_ticks - now_ticks
         self._engine.schedule(
-            delay_ticks,
+            landing_delay,
             lambda: self._acknowledged(is_nak, psn),
             label="link acknowledgement",
         )
@@ -426,21 +448,23 @@ class _TimerState:
     expiry: Optional[decsim.engine.Event] = None
 
 
-def _refuse_pcie_framing(
+def _require_roce_framing(
     framing: link_settings.FramingSettings, path_name: str
 ) -> None:
-    """PCIe TLPs recover by the data link layer's replay, not by this row.
+    """This row is RoCE's go-back-N, whose ACKs are RoCE packets.
 
-    The replay needs the PCIe base specification's data link layer,
-    which is not in hand, and this row is RoCE's go-back-N, so a
-    pcie_tlp framing runs on the credit row only.
+    PCIe recovers by its data link layer's replay, which needs the base
+    specification, not in hand; flits, Aurora blocks and UDP datagrams
+    have no acknowledgement packet of their own. Those run on the credit
+    row.
     """
-    if framing.kind != "pcie_tlp":
+    if framing.kind == "roce_v2":
         return
     raise ValueError(
-        f"links.{path_name}.protocol runs the reliable row on pcie_tlp "
-        f"frames; PCIe's own replay is not modelled, so pcie_tlp runs on "
-        f"the credit row"
+        f"links.{path_name}.protocol runs the reliable row on "
+        f"{framing.kind} frames; the row is RoCE's go-back-N and its "
+        f"acknowledgements are RoCE packets, so it runs on roce_v2 "
+        f"frames, and {framing.kind} runs on the credit row"
     )
 
 

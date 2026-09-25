@@ -656,9 +656,9 @@ links:                             # a kind, then one card per path; null = the
                                    #       n octets in n/8 + 1 66-bit blocks
                                    #       (SP011); {kind: pcie_tlp,
                                    #       max_payload_bytes: MPS} 24 bytes on
-                                   #       every TLP (pcie-bench), on the
-                                   #       credit row only; {kind: roce_v2,
-                                   #       path_mtu_bytes: M} and
+                                   #       every TLP (pcie-bench); {kind:
+                                   #       roce_v2, path_mtu_bytes: M}, the
+                                   #       one framing of the reliable row, and
                                    #       {kind: ethernet_udp, mtu_bytes: M}
                                    #       with their headers (Linux rxe,
                                    #       pcie-bench eth.py). Line-coded rows
@@ -680,10 +680,12 @@ links:                             # a kind, then one card per path; null = the
                                    #       go-back-N recovery of Linux rxe
                                    #       (rxe_req.c, rxe_resp.c), whose
                                    #       own constants are a window of 129
-                                   #       and an ACK every 66 packets. Each
-                                   #       lost frame is resent inside the
-                                   #       link, so messages still arrive
-                                   #       once and in order. For example:
+                                   #       and an ACK every 66 packets. ACKs
+                                   #       and NAKs are RoCE frames on the
+                                   #       reverse direction, lost by the same
+                                   #       law. Each lost frame is resent
+                                   #       inside the link, so messages still
+                                   #       arrive once and in order. For example:
                                    #   controller_to_weak_buffer: {latency_cycles: 1,
                                    #     clock: fridge, bits_per_cycle: 8.0,
                                    #     protocol: {kind: credit, framing:

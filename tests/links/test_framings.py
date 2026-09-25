@@ -99,6 +99,14 @@ def test_a_roce_v2_payload_is_padded_to_four_bytes():
     assert frames == (padded_bytes * 8,)
 
 
+def test_a_roce_v2_acknowledgement_is_bth_aeth_and_icrc_in_a_frame():
+    """rxe_opcode.c:317-321: RC_ACKNOWLEDGE is BTH 12 and AETH 4."""
+    roce = framing("roce_v2", path_mtu_bytes=1024)
+
+    acknowledgement_bytes = 38 + 20 + 8 + 12 + 4 + 4
+    assert roce.acknowledgement_bits() == acknowledgement_bytes * 8
+
+
 def test_a_short_udp_datagram_is_padded_to_ethernets_minimum_payload():
     udp = framing("ethernet_udp", mtu_bytes=1500)
 

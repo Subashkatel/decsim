@@ -88,8 +88,26 @@ decsim show configs/reference.yaml
 ```
 
 prints the resolved sections, one line per component, and the sweep
-blocks, without running anything. This is the fastest way to check that
-an `extends` chain says what you meant.
+blocks, without running anything. Then, under `values:`, it prints
+every value the machine is built with, one per line, gem5's
+`config.ini` in one list (`src/python/m5/simulate.py:122-127`). Three
+of `decsim show configs/weak_ler.yaml`'s:
+
+```
+qpu.distance = [3, 5, 7, 9, 11]  [sweep, configs/weak_ler.yaml:17-33]
+controller.decision_to_pulse_cycles = 0  [preset weak_decoder_baseline.yaml, configs/weak_decoder_baseline.yaml:45]
+controller.packing_overflow = "STALL"  [default, configs/reference.yaml:513]
+```
+
+The bracket names the layer that set the value, `your file`, `preset`
+and the file's name for a file your `extends` chain reads, `sweep`, or
+`default`, then the line of the yaml key that set it. A default's line
+is where `configs/reference.yaml` documents the key. A value that is no
+one key's, such as a link's ticks derived from its card or
+`clocks.megahertz_by_name.fridge` read from `clocks.fridge`, prints no
+bracket, since show names only a source it is sure of. A swept value
+lists the sweep's values. This is the fastest way to check that an `extends`
+chain says what you meant.
 
 ## The shipped configs
 

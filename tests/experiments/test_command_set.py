@@ -7,6 +7,7 @@ command line is never the only record of a number.
 """
 
 import csv
+import functools
 import hashlib
 import json
 import pathlib
@@ -16,6 +17,7 @@ import sys
 
 import pytest
 import stim
+import yaml
 
 import decsim.decoders.union_find.compiled_decoder as compiled_decoder
 import decsim.experiments.command as command
@@ -237,6 +239,181 @@ def test_show_names_the_fabric_card_the_run_resolved_to():
     lines = experiment.resolved_description(config)
     text = "\n".join(lines)
     assert "links: card reference.yaml" in text
+
+
+def _line_number_of(path, text: str) -> int:
+    file_text = path.read_text()
+    lines = file_text.splitlines()
+    return lines.index(text) + 1
+
+
+def test_show_names_each_values_layer_and_the_line_that_set_it(tmp_path):
+    """Every value, the layer that set it and the yaml line it came from.
+
+    A value your file writes, one a preset it extends writes, a swept
+    one and one no file writes (its line is the one reference.yaml
+    documents it on).
+    """
+    reference_path = CONFIGS_DIR / "reference.yaml"
+    preset_path = tmp_path / "preset.yaml"
+    preset_path.write_text(
+        f"extends: {reference_path}\n"
+        "controller:\n"
+        "  clock: fridge\n"
+        "  readout_to_bits_cycles: 0\n"
+        "  packing_cycles_per_round: 0\n"
+        "  decision_to_pulse_cycles: 3\n"
+    )
+    config_path = tmp_path / "mine.yaml"
+    config_path.write_text(
+        "extends: preset.yaml\n"
+        "pauli_frame:\n"
+        "  kind: logical_register\n"
+        "  clock: fridge\n"
+        "  write_cycles: 5\n"
+    )
+    config = experiment.load_experiment(config_path)
+
+    lines = experiment.value_lines(config)
+
+    sweep_line = _line_number_of(reference_path, "sweep:")
+    last_shots_line = _line_number_of(reference_path, "    shots: 2")
+    overflow_line = _line_number_of(
+        reference_path,
+        "  packing_overflow: stall          # stall | drop_round: what the "
+        "controller does",
+    )
+    assert (
+        f"controller.decision_to_pulse_cycles = 3  [preset preset.yaml, "
+        f"{preset_path}:6]"
+    ) in lines
+    assert (
+        f"pauli_frame.write_cycles = 5  [your file, {config_path}:5]" in lines
+    )
+    assert (
+        f"qpu.distance = [3]  [sweep, {reference_path}:{sweep_line}-"
+        f"{last_shots_line}]"
+    ) in lines
+    assert (
+        f'controller.packing_overflow = "STALL"  '
+        f"[default, configs/reference.yaml:{overflow_line}]"
+    ) in lines
+
+
+def test_show_names_no_line_for_a_value_no_key_names_alone(tmp_path):
+    """A derived or renamed value prints no source, never a guessed one.
+
+    A channel's ticks come from its card's latency and clock, and
+    megahertz_by_name.fridge is read from clocks.fridge; neither is one
+    yaml key's value. unit_memory.bits is its own key's.
+    """
+    reference_path = CONFIGS_DIR / "reference.yaml"
+    config_path = tmp_path / "mine.yaml"
+    config_path.write_text(
+        f"extends: {reference_path}\n"
+        "links:\n"
+        "  qpu_to_controller:\n"
+        "    clock: fridge\n"
+        "    bits_per_cycle: null\n"
+        "    latency_cycles: 7\n"
+    )
+    config = experiment.load_experiment(config_path)
+
+    lines = experiment.value_lines(config)
+
+    bits_line = _first_line_starting(reference_path, "    bits: null")
+    assert (
+        "links.qpu_to_controller.channel.propagation_latency_ticks = 28000"
+    ) in lines
+    assert "clocks.megahertz_by_name.fridge = 250.0" in lines
+    assert (
+        "weak_decoder.unit_memory.bits = null  "
+        f"[preset reference.yaml, {reference_path}:{bits_line}]"
+    ) in lines
+
+
+@functools.cache
+def _key_paths_by_line(path) -> dict:
+    """Each line of a yaml file that writes a mapping key, and that key."""
+    with open(path) as handle:
+        root = yaml.compose(handle)
+    by_line = {}
+    pending = [((), root)]
+    while pending:
+        prefix, node = pending.pop()
+        if node.id != "mapping":
+            continue
+        for key_node, value_node in node.value:
+            key = prefix + (key_node.value,)
+            line = key_node.start_mark.line + 1
+            by_line[line] = key
+            pending.append((key, value_node))
+    return by_line
+
+
+def _cited_line(value_line: str) -> tuple:
+    """The file and the first line a value line's bracket cites."""
+    _, _, bracket = value_line.rpartition("  [")
+    origin = bracket.removesuffix("]")
+    _, _, source = origin.rpartition(", ")
+    file_text, _, lines = source.rpartition(":")
+    first_line, _, _ = lines.partition("-")
+    return file_text, int(first_line)
+
+
+def _value_key(value_line: str) -> tuple:
+    """The yaml key a value line's value is read from."""
+    dotted, _, _ = value_line.partition(" = ")
+    names = dotted.split(".")
+    path = tuple(names)
+    key = experiment._yaml_key(path)
+    if key in experiment.SWEEP_PATHS:
+        return ("sweep",)
+    return key
+
+
+def _cites_its_own_key(value_line: str) -> bool:
+    """Whether the line a value line cites writes that value's key."""
+    file_text, first_line = _cited_line(value_line)
+    cited_path = CONFIGS_DIR.parent / file_text
+    key_paths = _key_paths_by_line(cited_path)
+    return key_paths[first_line] == _value_key(value_line)
+
+
+@pytest.mark.parametrize("name", yaml_configs.SHIPPED_CONFIGS)
+def test_every_line_show_cites_holds_the_key_of_its_value(name):
+    """Run on a shipped config, show cites only its values' own keys."""
+    config_path = CONFIGS_DIR / name
+    config = experiment.load_experiment(config_path)
+    lines = experiment.value_lines(config)
+    cited = [line for line in lines if "  [" in line]
+
+    miscited = [line for line in cited if not _cites_its_own_key(line)]
+
+    assert cited
+    assert miscited == []
+
+
+def _first_line_starting(path, start: str) -> int:
+    text = path.read_text()
+    lines = text.splitlines()
+    for number, line in enumerate(lines, start=1):
+        if line.startswith(start):
+            return number
+    raise AssertionError(f"{path} has no line starting {start!r}")
+
+
+def test_show_prints_every_value_after_the_sections(capsys):
+    config_path = CONFIGS_DIR / "reference.yaml"
+    config = experiment.load_experiment(config_path)
+    value_lines = experiment.value_lines(config)
+
+    command.main(["show", str(config_path)])
+    printed = capsys.readouterr()
+
+    lines = printed.out.splitlines()
+    values_at = lines.index("values:")
+    assert lines[values_at + 1 :] == value_lines
 
 
 def test_run_prints_the_result_fields_the_gate_hashes(tmp_path):

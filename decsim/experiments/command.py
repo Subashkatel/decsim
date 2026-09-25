@@ -147,6 +147,9 @@ def _show(argv: list) -> None:
     settings = first_point.shot_settings()
     config.built_machine(settings, 0)
     lines = experiment.resolved_description(config)
+    lines.append("values:")
+    value_lines = experiment.value_lines(config)
+    lines.extend(value_lines)
     text = "\n".join(lines)
     print(text)
 

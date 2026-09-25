@@ -61,7 +61,6 @@ import decsim.qpu.magic_state_factories as magic_state_factories
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
 import decsim.qpu.stim_device as stim_device
-import decsim.qpu.streaming_stim_device as streaming_stim_device
 import decsim.qpu.syndrome_devices as syndrome_devices
 import decsim.records.circuits as circuit_records
 import decsim.records.decoding as decoding_records
@@ -354,7 +353,8 @@ def test_zero_delay_terminal_round_uses_its_actual_strong_model(
 ) -> None:
     program = memory_programs.memory_program()
     settings = _settings(program, "live", placement)
-    workload = _scheduled_workload(final_round)
+    physical = settings.workload.physical_circuits
+    workload = _scheduled_workload(final_round, physical)
     links = _zero_delay_links(settings.links)
     settings = dataclasses.replace(settings, workload=workload, links=links)
     run = _run(settings)
@@ -488,7 +488,8 @@ def test_single_terminal_window_matches_direct_pymatching(
 ) -> None:
     program = memory_programs.memory_program(physical_error_probability=0.08)
     settings = _settings(program, "live", placement)
-    workload = _scheduled_workload(2)
+    physical = settings.workload.physical_circuits
+    workload = _scheduled_workload(2, physical)
     settings = dataclasses.replace(settings, workload=workload)
     run = _run(settings)
     circuit = run.shots[0][0].circuit
@@ -642,7 +643,8 @@ def test_bb_block_decodes_all_eight_outputs_against_direct_bp_osd(
     pytest.importorskip("deltakit_explorer")
     program = _bb_memory(basis)
     settings = _bb_settings(program, placement, commit_round_count=10)
-    workload = _scheduled_workload(3)
+    physical = settings.workload.physical_circuits
+    workload = _scheduled_workload(3, physical)
     workload = _bb_logical_qubits(workload)
     settings = dataclasses.replace(settings, workload=workload)
 
@@ -2554,9 +2556,8 @@ def _physical_settings(
     period_microseconds: float,
 ) -> machine_settings.MachineSettings:
     if history == "live":
-        source = streaming_stim_device.StreamingStimDevice({100: program})
         return live_example.live_settings(
-            source,
+            program,
             distance=3,
             round_period_microseconds=period_microseconds,
             prefix_round_count=3,
@@ -2566,11 +2567,9 @@ def _physical_settings(
         )
     circuit, mapping = program.assemble(24)
     workload = finite_example.protection_workload(
-        circuit, 24, 3, "stream-patch"
+        circuit, mapping, 24, 3, "stream-patch"
     )
     return finite_example.supplied_settings(
-        circuit,
-        mapping,
         workload,
         distance=3,
         round_count=24,
@@ -2583,10 +2582,10 @@ def _run(
     settings: machine_settings.MachineSettings, seed: int = RUN_SEED
 ) -> _Run:
     """One run of the machine: one shot of the source at the seed."""
-    source = settings.qpu.device
-    shots = []
-    source.shot_sampled.connect(lambda *sample: shots.append(sample))
     machine = machine_module.Machine.build(settings, seed)
+    shots = []
+    source = machine.syndrome_source
+    source.shot_sampled.connect(lambda *sample: shots.append(sample))
     packets = []
     weak_writes = []
     strong_occupancies = []
@@ -2743,7 +2742,14 @@ def _command_tick(run: _Run, kind: str, operation_id: int) -> int:
     return ticks[0]
 
 
-def _scheduled_workload(final_round: int) -> workload_settings.WorkloadSettings:
+def _scheduled_workload(
+    final_round: int, physical_circuits
+) -> workload_settings.WorkloadSettings:
+    """Protected from the first round, with no segment the lowering reads.
+
+    The live source is built from the physical circuits the replaced
+    section carried (decsim/build/plan.py _syndrome_source).
+    """
     owner = program_records.Operation(
         100, "memory", ("stream-patch",), patches=("stream-patch",)
     )
@@ -2770,6 +2776,7 @@ def _scheduled_workload(final_round: int) -> workload_settings.WorkloadSettings:
         dynamic_streams=(owner,),
         protected_regions=(region,),
         rounds_policy=policy,
+        physical_circuits=physical_circuits,
     )
 
 
@@ -3009,7 +3016,7 @@ def _operations_on_group(operations: tuple, patches: tuple) -> tuple:
 
 
 def _assert_joint_acquisitions(run: _Run) -> None:
-    source = run.machine.settings.qpu.device
+    source = run.machine.syndrome_source
     identities = [
         (packet.operation_id, packet.round_index) for packet in run.packets
     ]

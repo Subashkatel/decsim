@@ -22,6 +22,7 @@ import decsim.decoders.settings as decoder_settings
 import decsim.detector_error_model.detector_formation as formation
 import decsim.frontends.deltakit as deltakit
 import decsim.machine as machines
+import decsim.producers as producers
 import decsim.qpu.stim_device as sources
 import decsim.syndrome_buffer.settings as buffer_settings
 import tools.deltakit_example as example
@@ -174,12 +175,12 @@ def test_protected_segments_emit_one_faulted_history_without_resampling() -> (
     faulty = _logical_fault_after_first_round(noiseless, 9)
     sampler = faulty.compile_sampler(seed=10)
     measurements = sampler.sample(1)
-    workload = example.protection_workload(circuit, 24, 3, "patch")
-    settings = _settings(circuit, mapping, workload, 3, 24)
+    workload = example.protection_workload(circuit, mapping, 24, 3, "patch")
+    settings = _settings(workload, 3, 24)
     source = sources.RecordedStimDevice(
         measurements,
         0,
-        measurement_rounds={example.STREAM_OWNER_ID: mapping},
+        measurement_rounds={producers.LIVE_STREAM_ID: mapping},
     )
     qpu = dataclasses.replace(settings.qpu, device=source)
     settings = dataclasses.replace(settings, qpu=qpu)
@@ -191,7 +192,7 @@ def test_protected_segments_emit_one_faulted_history_without_resampling() -> (
     assert emitted == tuple(measurements[0])
     assert [packet.round_index for packet in readouts] == list(range(1, 25))
     assert {packet.operation_id for packet in readouts} == {
-        example.STREAM_OWNER_ID
+        producers.LIVE_STREAM_ID
     }
     assert result.operation_results[-1].observable_truth == (1,)
     assert result.operation_results[-1].logical_failure is True
@@ -201,9 +202,9 @@ def test_a_protected_stream_cannot_use_truth_from_a_later_final_readout() -> (
     None
 ):
     circuit, mapping = deltakit.memory_circuit("rotated_surface", 3, 24, "Z", 0)
-    workload = example.protection_workload(circuit, 24, 3, "patch")
+    workload = example.protection_workload(circuit, mapping, 24, 3, "patch")
     workload.operations[-1].scheduled_start_round = 20
-    settings = _settings(circuit, mapping, workload, 3, 24)
+    settings = _settings(workload, 3, 24)
     machine = machines.Machine.build(settings, 0)
     with pytest.raises(RuntimeError, match="sealed at 20 rounds"):
         machine.run()
@@ -297,8 +298,8 @@ def test_bounded_buffer_and_unit_memory_use_the_normal_data_path() -> None:
     circuit, mapping = deltakit.memory_circuit(
         "rotated_surface", 3, 24, "Z", 0.001
     )
-    workload = example.protection_workload(circuit, 24, 3, "patch")
-    settings = _settings(circuit, mapping, workload, 3, 24)
+    workload = example.protection_workload(circuit, mapping, 24, 3, "patch")
+    settings = _settings(workload, 3, 24)
     # twelve rounds of the distance-three memory, the final round's data
     # readout included: 11 * 8 + 17 bits
     twelve_rounds_bits = 11 * 8 + 17
@@ -318,8 +319,6 @@ def test_bounded_buffer_and_unit_memory_use_the_normal_data_path() -> None:
 
 
 def _settings(
-    circuit,
-    mapping,
     workload,
     distance,
     round_count,
@@ -327,8 +326,6 @@ def _settings(
     feedback_microseconds=4.0,
 ):
     return example.supplied_settings(
-        circuit,
-        mapping,
         workload,
         distance=distance,
         round_count=round_count,
@@ -338,14 +335,14 @@ def _settings(
 
 
 def _memory_machine(circuit, mapping, distance, round_count):
-    workload = example.memory_workload(circuit, round_count, "patch")
-    settings = _settings(circuit, mapping, workload, distance, round_count)
+    workload = example.memory_workload(circuit, mapping, round_count, "patch")
+    settings = _settings(workload, distance, round_count)
     return machines.Machine.build(settings, 0)
 
 
 def _repetition_replay(circuit, mapping, measurements, distance, round_count):
-    workload = example.memory_workload(circuit, round_count, "patch")
-    settings = _settings(circuit, mapping, workload, distance, round_count)
+    workload = example.memory_workload(circuit, mapping, round_count, "patch")
+    settings = _settings(workload, distance, round_count)
     table = formation.build_formation_table(
         circuit, round_count, measurement_rounds=mapping
     )
@@ -370,10 +367,8 @@ def _protected_machine(
     circuit, mapping = deltakit.memory_circuit(
         "rotated_surface", 3, 24, "Z", 0.001
     )
-    workload = example.protection_workload(circuit, 24, 3, "patch")
+    workload = example.protection_workload(circuit, mapping, 24, 3, "patch")
     settings = _settings(
-        circuit,
-        mapping,
         workload,
         3,
         24,

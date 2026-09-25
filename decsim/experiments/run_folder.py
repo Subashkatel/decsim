@@ -2,14 +2,21 @@
 
 results/<utc stamp>-<name>/, never reused unless the caller names one
 with --out; the config chain copied verbatim beside the rows, any
-uncommitted code as a patch, and a manifest that says which commit,
-container, host and package versions produced them. gem5 writes its
-output to m5out/ the same way, out of the code tree and never
-overwritten (src/python/m5/main.py --outdir).
+uncommitted or untracked code as a patch, and a manifest that says which
+commit, container, host, packages and compiled Union-Find library
+produced them. Each sweep point, named by its content, has every value
+it ran with in resolved/ and the workload it ran in inputs/, and the
+maker that made it is in producer.json, so a rerun needs neither the
+yaml's maker nor its defaults. A folder whose run ended holds the
+finished flag. gem5
+writes its output to m5out/ the same way, out of the code tree and
+never overwritten (src/python/m5/main.py --outdir).
 """
 
 import datetime
 import functools
+import hashlib
+import importlib.metadata
 import json
 import os
 import platform
@@ -19,13 +26,20 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-import numpy
-import pymatching
-import stim
-
+import decsim.build.escalation as escalation_build
+import decsim.build.plan as plan_build
 import decsim.collect as collect
+import decsim.decoders.union_find.compiled_decoder as compiled_decoder
+import decsim.frontends.circuit_frontend as circuit_frontend
 
 RESULTS_DIR = Path("results")
+RESOLVED_FOLDER = "resolved"
+INPUTS_FOLDER = "inputs"
+PRODUCER_FILE = "producer.json"
+HASHES_FILE = "hashes.json"
+# Written last, once a run's rows, report and manifest are all in place;
+# a folder without it is a run that stopped or is still running.
+FINISHED_FILE = "finished"
 # What the launcher saw of the tree it was about to run, for a process
 # whose interpreter has no git of its own (slurm/slurm_run.sh exports
 # it): "1" dirty, "0" clean, unset means nobody looked.
@@ -78,29 +92,66 @@ def new_run_dir(config) -> Path:
             suffix += 1
 
 
+def start_run(
+    config,
+    run_dir: Path,
+    *,
+    shard: Optional[tuple] = None,
+    shots_per_unit: Optional[int] = None,
+) -> str:
+    """The code state and the manifest, before the first shot; the time.
+
+    config is None for a run no yaml describes (tools/deltakit_example.py
+    and tools/live_memory_example.py), whose values are in resolved/.
+    """
+    snapshot_code_state(config, run_dir)
+    started_utc = utc_now()
+    how_it_ran = {"shard": shard, "shots_per_unit": shots_per_unit}
+    write_manifest(config, run_dir, started_utc, **how_it_ran)
+    return started_utc
+
+
+def finish_run(
+    config,
+    run_dir: Path,
+    started_utc: str,
+    *,
+    shard: Optional[tuple] = None,
+    shots_per_unit: Optional[int] = None,
+) -> None:
+    """The manifest again with the time the run ended, then the flag."""
+    finished_utc = utc_now()
+    how_it_ran = {"shard": shard, "shots_per_unit": shots_per_unit}
+    write_manifest(config, run_dir, started_utc, finished_utc, **how_it_ran)
+    mark_finished(run_dir)
+
+
 def snapshot_code_state(config, run_dir: Path) -> None:
     """Copy the run's exact inputs next to its results.
 
     The config chain goes verbatim into config/, and any uncommitted code
-    into code_state.patch, so manifest commit + patch + config = the
+    into code_state.patch, an untracked file as a patch that creates it
+    (git diff --no-index), so manifest commit + patch + config = the
     whole experiment. The patch is the imported tree's, for the reason
     the manifest's commit is (_checkout).
     """
-    config_dir = run_dir / "config"
-    config_dir.mkdir(exist_ok=True)
-    chain_folder = _chain_folder(config.config_files)
-    for config_file in config.config_files:
-        config_path = Path(config_file)
-        source = config_path.resolve()
-        place = source.relative_to(chain_folder)
-        target = config_dir / place
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, target)
+    run_dir.mkdir(parents=True, exist_ok=True)
+    if config is not None:
+        _copy_the_config_chain(config.config_files, run_dir)
     checkout = _checkout()
     diff = _git_output("git", "-C", str(checkout), "diff", "HEAD")
+    patches = []
     if diff:
+        patches.append(diff)
+    untracked = _untracked_files(checkout) or []
+    for relative in untracked:
+        patch = _untracked_patch(checkout, relative)
+        patches.append(patch)
+    if patches:
         patch_path = run_dir / "code_state.patch"
-        patch_path.write_text(diff)
+        patch_text = "\n".join(patches)
+        patch_lines = patch_text + "\n"
+        patch_path.write_text(patch_lines)
 
 
 def read_the_tree() -> None:
@@ -130,7 +181,9 @@ def write_manifest(
     """Write the run's identity: enough to interpret or reproduce it.
 
     Sampling is deterministic from (stim version, circuit, distance,
-    rounds, p, seed), so the manifest plus seeds are the raw data.
+    rounds, p, seed), so the manifest plus seeds are the raw data. config
+    is None for a run no yaml describes (tools/deltakit_example.py),
+    whose every value is in resolved/.
 
     `shard` and `shots_per_unit` are facts of how this run ran, the way
     the host and the slurm job id are: which share of the sweep's work
@@ -139,10 +192,12 @@ def write_manifest(
     rows in the order the recorded sweep gives; they say what a folder
     holds when a Slurm array leaves a hundred of them behind.
     """
-    json_safe_config = collect.json_value(config)
+    json_safe_config = None
     config_files = []
-    for path in config.config_files:
-        config_files.append(str(path))
+    if config is not None:
+        json_safe_config = collect.json_value(config)
+        for path in config.config_files:
+            config_files.append(str(path))
     manifest = {
         "config_files": config_files,
         "resolved_config": json_safe_config,
@@ -186,10 +241,111 @@ def write_combined_manifest(
     _write_the_manifest(manifest, run_dir)
 
 
+def record_point(run_dir: Path, task, seeds: Optional[tuple] = None) -> str:
+    """One sweep point's every value and its workload, named by content.
+
+    resolved/<id>.json holds the point's metadata, the seeds it ran
+    when they are known, every setting, and the values the build derives
+    from the settings a shot runs (_built_values); inputs/<id>/ holds the
+    workload the point ran as the files row reads it
+    (circuit_frontend.write_workload), with each file's sha256 in
+    hashes.json, so a rerun needs no maker installed. id is the task's
+    strong id, the name the collect gives it. Returns it.
+    """
+    point_id = task.strong_id()
+    settings = task.settings
+    shot_settings = task.shot_settings()
+    resolved = {
+        "id": point_id,
+        "metadata": collect.json_value(task.metadata),
+        "seeds": seeds,
+        "settings": collect.json_value(settings),
+        "built": _built_values(shot_settings),
+    }
+    resolved_dir = run_dir / RESOLVED_FOLDER
+    resolved_dir.mkdir(parents=True, exist_ok=True)
+    resolved_path = resolved_dir / f"{point_id}.json"
+    write_json(resolved_path, resolved)
+    record = settings.workload.workload_record
+    if record is not None:
+        inputs_dir = run_dir / INPUTS_FOLDER / point_id
+        _write_inputs(inputs_dir, record)
+    return point_id
+
+
+def write_producer(run_dir: Path, workload) -> None:
+    """producer.json: the maker a producer row names, when it names one.
+
+    Its name as the yaml gives it, its yaml arguments and the version of
+    the package that ships it (importlib.metadata). The name's first
+    dotted word is that package in both forms pkgutil.resolve_name
+    reads, module:function and module.function.
+    """
+    if workload.kind != "producer":
+        return
+    row_settings = workload.row_settings
+    function = row_settings.function
+    module_name, _, _ = function.partition(":")
+    producer = {
+        "function": function,
+        "arguments": collect.json_value(row_settings.arguments),
+        "version": _package_version(module_name),
+    }
+    producer_path = run_dir / PRODUCER_FILE
+    write_json(producer_path, producer)
+
+
+def mark_finished(run_dir: Path) -> None:
+    """The finished flag, the last thing a run writes: the time it ended."""
+    finished_utc = utc_now()
+    finished_line = finished_utc + "\n"
+    finished_path = run_dir / FINISHED_FILE
+    finished_path.write_text(finished_line)
+
+
+def copy_point_records(run_dirs: list, out_dir: Path) -> None:
+    """The folded folders' resolved/, inputs/ and producer.json, in one.
+
+    A point's files are named by its content, so the same point in two
+    shards is the same file, and the union is every point's.
+    """
+    for run_dir_name in run_dirs:
+        run_dir = Path(run_dir_name)
+        for name in (RESOLVED_FOLDER, INPUTS_FOLDER):
+            source = run_dir / name
+            target = out_dir / name
+            shutil.copytree(source, target, dirs_exist_ok=True)
+        producer_path = run_dir / PRODUCER_FILE
+        if producer_path.exists():
+            target = out_dir / PRODUCER_FILE
+            shutil.copy2(producer_path, target)
+
+
+def write_json(path: Path, value) -> None:
+    """A json file of the run folder: indented, ending in a newline."""
+    text = json.dumps(value, indent=2)
+    lines = text + "\n"
+    path.write_text(lines)
+
+
 def utc_now() -> str:
     """This moment as an iso timestamp, for the manifest's times."""
     now = datetime.datetime.now(datetime.timezone.utc)
     return now.isoformat()
+
+
+def _copy_the_config_chain(config_files: tuple, run_dir: Path) -> None:
+    """Every yaml of the chain into config/, each at its place."""
+    config_dir = run_dir / "config"
+    config_dir.mkdir(exist_ok=True)
+    chain_folder = _chain_folder(config_files)
+    for config_file in config_files:
+        config_path = Path(config_file)
+        source = config_path.resolve()
+        place = source.relative_to(chain_folder)
+        target = config_dir / place
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
 
 
 def _chain_folder(config_files: tuple) -> Path:
@@ -221,10 +377,124 @@ def _how_it_ran() -> dict:
         "git": _git_state(),
         "container": _container(),
         "versions": _versions(),
+        "union_find_library_sha256": _union_find_library_hash(),
         "host": platform.node(),
         "slurm_job_id": os.environ.get("SLURM_JOB_ID"),
         "argv": sys.argv,
     }
+
+
+def _built_values(settings) -> dict:
+    """The values the build derives from the settings, before it wires.
+
+    The code card at the point's distance with the window sizes a null
+    commit_rounds or buffer_rounds resolves to, the rows the plan built
+    (the boundary and terminal defaults the escalation row names among
+    them), and the run plan: every operation's rounds and windows.
+    """
+    escalation_policy = escalation_build.build_escalation_policy(
+        settings.escalation, settings.weak_decoder
+    )
+    plan = plan_build.build_plan(settings, escalation_policy)
+    code = plan.code
+    rows = {
+        "layout": collect.json_value(plan.layout),
+        "scheme": collect.json_value(plan.scheme),
+        "boundary_policy": collect.json_value(plan.boundary_policy),
+        "window_interaction": collect.json_value(plan.window_interaction),
+        "idle_policy": collect.json_value(plan.idle_policy),
+    }
+    return {
+        "code": collect.json_value(code),
+        "commit_rounds": code.commit_rounds(),
+        "buffer_rounds": code.buffer_rounds(),
+        "rows": rows,
+        "run_plan": collect.json_value(plan.run_plan),
+    }
+
+
+def _write_inputs(inputs_dir: Path, record) -> None:
+    """The workload as files, and each file's sha256 in hashes.json.
+
+    A folder recorded again holds its earlier hashes.json, which is the
+    record of the inputs and not one of them.
+    """
+    circuit_frontend.write_workload(record, inputs_dir)
+    hashes_path = inputs_dir / HASHES_FILE
+    hashes = {}
+    written = inputs_dir.rglob("*")
+    for path in sorted(written):
+        if not path.is_file() or path == hashes_path:
+            continue
+        relative = path.relative_to(inputs_dir)
+        hashes[str(relative)] = _sha256_of(path)
+    write_json(hashes_path, hashes)
+
+
+def _package_version(module_name: str) -> Optional[str]:
+    """The installed version of the package a module belongs to, or None."""
+    names = module_name.split(".")
+    package = names[0]
+    try:
+        return importlib.metadata.version(package)
+    except importlib.metadata.PackageNotFoundError:
+        return None
+
+
+def _sha256_of(path: Path) -> str:
+    contents = path.read_bytes()
+    digest = hashlib.sha256(contents)
+    return digest.hexdigest()
+
+
+def _union_find_library_hash() -> Optional[str]:
+    """The compiled Union-Find library's sha256; None when it is not built.
+
+    It is built from tracked C source by tools/build_union_find.sh and
+    is not tracked itself, so the commit does not name the bytes a
+    union_find decoder ran.
+    """
+    path = compiled_decoder.library_path()
+    if not path.exists():
+        return None
+    return _sha256_of(path)
+
+
+def _untracked_files(checkout: Path) -> Optional[list]:
+    """The tree's untracked files git does not ignore, which it runs too.
+
+    None when git cannot answer (the container ships none), where
+    slurm/slurm_run.sh refuses a tree with untracked files unless told
+    to run it anyway.
+    """
+    listed = _git_output(
+        "git",
+        "-C",
+        str(checkout),
+        "ls-files",
+        "--others",
+        "--exclude-standard",
+    )
+    if listed is None:
+        return None
+    return listed.splitlines()
+
+
+def _untracked_patch(checkout: Path, relative: str) -> str:
+    """A patch that creates one untracked file; git exits 1 on a difference."""
+    arguments = [
+        "git",
+        "-C",
+        str(checkout),
+        "diff",
+        "--no-index",
+        "--binary",
+        "--",
+        "/dev/null",
+        relative,
+    ]
+    completed = subprocess.run(arguments, capture_output=True, text=True)
+    return completed.stdout.rstrip("\n")
 
 
 def _shard_text(shard: Optional[tuple]) -> Optional[str]:
@@ -418,11 +688,15 @@ def _packed_reference(packed: Path, reference: str) -> Optional[str]:
 
 
 def _versions() -> dict:
+    """Python's version and every installed package's, by name."""
     version_words = sys.version.split()
     python_version = version_words[0]
-    return {
-        "python": python_version,
-        "stim": stim.__version__,
-        "pymatching": pymatching.__version__,
-        "numpy": numpy.__version__,
-    }
+    packages = {}
+    for distribution in importlib.metadata.distributions():
+        name = distribution.metadata["Name"]
+        packages[name] = distribution.version
+    names = sorted(packages)
+    ordered = {}
+    for name in names:
+        ordered[name] = packages[name]
+    return {"python": python_version, "packages": ordered}

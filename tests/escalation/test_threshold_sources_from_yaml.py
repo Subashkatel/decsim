@@ -285,7 +285,8 @@ def test_online_source_learns_across_a_point_and_records_the_path(tmp_path):
     run_dir = tmp_path / "results"
     run_dir.mkdir()
 
-    measurements = run_sweep(config, run_dir)
+    tasks = config.tasks()
+    measurements = run_sweep(tasks, run_dir)
 
     assert len(measurements) == 2
     windows_per_shot = measurements[0].windows
@@ -325,8 +326,10 @@ def test_online_source_reproduces_its_decisions(tmp_path):
     config_path = source_config(tmp_path, online_card, shots=2)
     config = load_experiment(config_path)
 
-    first = run_sweep(config, None)
-    second = run_sweep(config, None)
+    first_tasks = config.tasks()
+    second_tasks = config.tasks()
+    first = run_sweep(first_tasks, None)
+    second = run_sweep(second_tasks, None)
 
     first_links = [
         measurement.link_totals["weak_decoder_to_strong_decoder"]["transfers"]

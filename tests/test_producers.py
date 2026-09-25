@@ -17,7 +17,6 @@ import decsim.experiments.experiment as experiment
 import decsim.frontends.deltakit as deltakit
 import decsim.machine as machine_module
 import decsim.producers as producers
-import decsim.qpu.streaming_stim_device as streaming_stim_device
 import tests.experiments.yaml_configs as yaml_configs
 import tools.deltakit_example as deltakit_example
 import tools.live_memory_example as live_memory_example
@@ -152,11 +151,9 @@ def test_the_yaml_deltakit_memory_runs_what_the_example_tool_runs(tmp_path):
         "rotated_surface", 3, 24, "Z", 0.001
     )
     tool_workload = deltakit_example.memory_workload(
-        circuit, 24, "memory-patch"
+        circuit, rounds, 24, "memory-patch"
     )
     tool_settings = deltakit_example.supplied_settings(
-        circuit,
-        rounds,
         tool_workload,
         distance=3,
         round_count=24,
@@ -182,12 +179,9 @@ def test_the_yaml_live_deltakit_memory_runs_what_the_live_tool_runs(tmp_path):
     program = deltakit.memory_rounds(
         "rotated_surface", 3, "Z", 0.001, round_period_microseconds=1.1
     )
-    stream_id = live_memory_example.STREAM_OWNER_ID
-    source = streaming_stim_device.StreamingStimDevice(
-        programs={stream_id: program}
-    )
+    stream_id = producers.LIVE_STREAM_ID
     tool_settings = live_memory_example.live_settings(
-        source,
+        program,
         distance=3,
         round_period_microseconds=1.1,
         prefix_round_count=3,
@@ -198,9 +192,9 @@ def test_the_yaml_live_deltakit_memory_runs_what_the_live_tool_runs(tmp_path):
     tool_machine = machine_module.Machine.build(tool_settings, 17)
     tool_result = tool_machine.run()
     measurements = machine.syndrome_source.sampled_measurements(stream_id)
-    tool_measurements = source.sampled_measurements(stream_id)
+    tool_source = tool_machine.syndrome_source
+    tool_measurements = tool_source.sampled_measurements(stream_id)
 
-    assert stream_id == producers.LIVE_STREAM_ID
     assert dataclasses.asdict(result) == dataclasses.asdict(tool_result)
     assert _commands(machine) == _commands(tool_machine)
     assert measurements == tool_measurements

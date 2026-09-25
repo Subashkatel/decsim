@@ -161,6 +161,20 @@ def strong_unit(algorithm) -> dict:
     }
 
 
+def online_threshold() -> dict:
+    """The overrides of a switching machine whose threshold learns online."""
+    weak_decoder = dict(MINIMAL_CONFIG["weak_decoder"], kind="pymatching")
+    escalation = {
+        "kind": "switching",
+        "gap_threshold_db": 15.0,
+        "threshold_source": "online",
+    }
+    overrides = {"escalation": escalation, "weak_decoder": weak_decoder}
+    strong_decoder = strong_unit("pymatching")
+    overrides.update(strong_decoder)
+    return overrides
+
+
 def example_tool_config(
     tmp_path, qpu_kind: str, workload: dict, feedback_microseconds=4.0
 ) -> Path:

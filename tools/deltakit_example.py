@@ -14,27 +14,32 @@ from typing import Optional
 
 import stim
 
+import decsim.collect as collect
 import decsim.config as config
 import decsim.decoders.settings as decoder_settings
-import decsim.detector_error_model.detector_formation as detector_formation
+import decsim.experiments.run_command as run_command
+import decsim.experiments.run_folder as run_folder
+import decsim.frontends.circuit_frontend as circuit_frontend
 import decsim.frontends.deltakit as deltakit
 import decsim.frontends.settings as workload_settings
 import decsim.links.link_profiles as link_profiles
 import decsim.machine as machine_module
 import decsim.observe.settings as observation_settings
-import decsim.qpu.round_policies as round_policies
+import decsim.producers as producers
 import decsim.qpu.settings as qpu_settings
-import decsim.qpu.stim_device as stim_device
 import decsim.records.program as program_records
+import decsim.records.workload as workload_records
 import decsim.settings as machine_settings
-
-# The stream owner: the operation whose live stream the segments extend
-# and whose complete result the run scores.
-STREAM_OWNER_ID = 100
 
 
 def main() -> None:
-    """Write the input circuit, settings, result and trace into one folder."""
+    """Write the input circuit, settings, result and trace into one folder.
+
+    The folder is a run folder (decsim/experiments/run_folder.py): its
+    manifest, every value of the run in resolved/, its workload in
+    inputs/, the shot's files as decsim run writes them and the finished
+    flag, beside the arguments and the setup time.
+    """
     arguments = _arguments()
     _resolve_memory_parameters(arguments)
     if arguments.mode == "protection" and arguments.family == "repetition":
@@ -43,14 +48,18 @@ def main() -> None:
         )
     started = time.perf_counter()
     circuit, measurement_rounds = _circuit(arguments)
-    workload = memory_workload(circuit, arguments.rounds, arguments.patch)
+    workload = memory_workload(
+        circuit, measurement_rounds, arguments.rounds, arguments.patch
+    )
     if arguments.mode == "protection":
         workload = protection_workload(
-            circuit, arguments.rounds, arguments.prefix_rounds, arguments.patch
+            circuit,
+            measurement_rounds,
+            arguments.rounds,
+            arguments.prefix_rounds,
+            arguments.patch,
         )
     settings = supplied_settings(
-        circuit,
-        measurement_rounds,
         workload,
         distance=arguments.distance,
         round_count=arguments.rounds,
@@ -65,100 +74,91 @@ def main() -> None:
     machine = machine_module.Machine.build(settings, arguments.seed)
     prepared = time.perf_counter()
     setup_seconds = prepared - started
+    started_utc = _start_the_run_folder(arguments, settings)
     result = machine.run()
-    _write_run(arguments, circuit, measurement_rounds, machine, result)
+    label = f"seed{arguments.seed}"
+    run_command.write_shot(machine, settings, arguments.output, label, result)
+    argument_path = arguments.output / "arguments.json"
+    selected_arguments = vars(arguments)
+    argument_values = collect.json_value(selected_arguments)
+    run_folder.write_json(argument_path, argument_values)
     setup_path = arguments.output / "setup_seconds.json"
-    _write_json(setup_path, setup_seconds)
+    run_folder.write_json(setup_path, setup_seconds)
+    run_folder.finish_run(None, arguments.output, started_utc)
     print(f"complete: {arguments.output}; setup {setup_seconds:.6f} seconds")
 
 
 def memory_workload(
-    circuit: stim.Circuit, round_count: int, patch: str
-) -> workload_settings.WorkloadSettings:
+    circuit: stim.Circuit,
+    measurement_rounds: dict[int, int],
+    round_count: int,
+    patch: str,
+) -> workload_records.Workload:
     """One finite memory, including its final data measurement."""
     operation = program_records.Operation(
-        1, "memory", (patch,), patches=(patch,), circuit=circuit
+        1, "memory", (patch,), patches=(patch,)
     )
-    policy = round_policies.FixedRounds(round_count)
-    return workload_settings.WorkloadSettings(
-        operations=(operation,), rounds_policy=policy
-    )
+    physical = workload_records.FiniteCircuit(circuit, measurement_rounds)
+    return workload_records.Workload((operation,), {1: round_count}, physical)
 
 
 def protection_workload(
-    circuit: stim.Circuit, round_count: int, prefix_round_count: int, patch: str
-) -> workload_settings.WorkloadSettings:
+    circuit: stim.Circuit,
+    measurement_rounds: dict[int, int],
+    round_count: int,
+    prefix_round_count: int,
+    patch: str,
+) -> workload_records.Workload:
     """One history protected until a declared horizon after a feedback wait.
 
     The continuation is an identity operation with a scheduling dependency
     on the prefix's decoded result. The physical circuit remains memory.
-    A late continuation exhausts the finite source loudly.
+    A late continuation exhausts the finite source loudly. The stream's
+    owner, its protected region and its round counts are derived when
+    the workload is lowered (decsim/frontends/circuit_frontend.py).
     """
     if not 1 <= prefix_round_count < round_count:
         raise ValueError("prefix rounds must lie inside the finite horizon")
-    owner = program_records.Operation(
-        STREAM_OWNER_ID,
-        "protected-memory",
-        (patch,),
-        patches=(patch,),
-        circuit=circuit,
-    )
+    patches = (patch,)
     prefix = program_records.Operation(
         1,
         "prefix",
-        (patch,),
-        patches=(patch,),
-        circuit=circuit,
-        stream_id=STREAM_OWNER_ID,
+        patches,
+        patches=patches,
+        stream_id=producers.LIVE_STREAM_ID,
         stream_offset=0,
     )
     begin = program_records.Operation(
         2,
         "begin-protection",
-        (patch,),
-        patches=(patch,),
-        predecessors=(1,),
+        patches,
+        patches=patches,
         emits_detector_data=False,
     )
     resume = program_records.Operation(
         3,
         "continue-memory",
-        (patch,),
-        patches=(patch,),
-        predecessors=(2,),
+        patches,
+        patches=patches,
         blocked_by=1,
         emits_detector_data=False,
     )
     finish = program_records.Operation(
         4,
         "final-readout",
-        (patch,),
-        patches=(patch,),
-        predecessors=(3,),
+        patches,
+        patches=patches,
         scheduled_start_round=round_count,
         emits_detector_data=False,
     )
-    region = program_records.ProtectedRegion(STREAM_OWNER_ID, 2, 4)
-    counts = {
-        STREAM_OWNER_ID: round_count,
-        1: prefix_round_count,
-        2: 0,
-        3: 1,
-        4: 0,
-    }
-    policy = round_policies.PerOperationRounds(counts)
-    return workload_settings.WorkloadSettings(
-        operations=(prefix, begin, resume, finish),
-        dynamic_streams=(owner,),
-        protected_regions=(region,),
-        rounds_policy=policy,
-    )
+    operations = (prefix, begin, resume, finish)
+    round_counts = {1: prefix_round_count, 2: 0, 3: 1, 4: 0}
+    physical = workload_records.FiniteCircuit(circuit, measurement_rounds)
+    return workload_records.Workload(operations, round_counts, physical)
 
 
 def supplied_settings(
-    circuit: stim.Circuit,
-    measurement_rounds: dict[int, int],
-    workload: workload_settings.WorkloadSettings,
+    workload: workload_records.Workload,
     *,
     distance: int,
     round_count: int,
@@ -166,28 +166,23 @@ def supplied_settings(
     feedback_microseconds: float,
     decoder_microseconds: float = 0.1,
 ) -> machine_settings.MachineSettings:
-    """Build the ordinary supplied-circuit path, regardless of its producer."""
-    if circuit.num_observables != 1:
+    """The machine a yaml names stim_device and a finite circuit with.
+
+    The source is built from the workload's circuit and round map
+    (decsim/build/plan.py _syndrome_source), whatever made them.
+    """
+    physical = workload.physical
+    if physical.circuit.num_observables != 1:
         raise ValueError("the memory example requires one logical observable")
-    declared_rounds = measurement_rounds.values()
+    declared_rounds = physical.measurement_rounds.values()
     if max(declared_rounds) != round_count:
         raise ValueError(
             "the declared horizon must equal the final readout round"
         )
-    table = detector_formation.build_formation_table(
-        circuit, round_count, measurement_rounds=measurement_rounds
-    )
-    detector_rounds = table.detector_rounds()
-    owners = workload.operations
-    if workload.dynamic_streams:
-        owners = workload.dynamic_streams
-    measurements = {owner.id: measurement_rounds for owner in owners}
-    detectors = {owner.id: detector_rounds for owner in owners}
-    source = stim_device.StimDevice(
-        measurement_rounds=measurements, detector_rounds=detectors
-    )
+    section = workload_settings.WorkloadSettings()
+    lowered = section.running(workload)
     qpu = qpu_settings.QpuSettings(
-        device=source,
+        kind="stim_device",
         distance=distance,
         round_period_microseconds=period_microseconds,
     )
@@ -195,13 +190,17 @@ def supplied_settings(
     decoder = decoder_settings.DecoderSettings(
         kind=decoder_microseconds, engine_clock=clock
     )
-    links = _feedback_links(feedback_microseconds)
+    reference = link_profiles.logical_reference_profile()
+    feedback_ticks = config.microseconds_to_ticks(feedback_microseconds)
+    links = link_profiles.with_path_latency(
+        reference, "frame_to_controller", feedback_ticks
+    )
     observation = observation_settings.ObservationSettings(
         trace="chrome",
         data_movement=True,
     )
     return machine_settings.MachineSettings(
-        workload=workload,
+        workload=lowered,
         qpu=qpu,
         weak_decoder=decoder,
         links=links,
@@ -246,16 +245,6 @@ class RepetitionMemory:
         return num_patches * checks_per_patch
 
 
-def _feedback_links(feedback_microseconds: float):
-    links = link_profiles.logical_reference_profile()
-    ticks = config.microseconds_to_ticks(feedback_microseconds)
-    channel = dataclasses.replace(
-        links.frame_to_controller.channel, propagation_latency_ticks=ticks
-    )
-    path = dataclasses.replace(links.frame_to_controller, channel=channel)
-    return dataclasses.replace(links, frame_to_controller=path)
-
-
 def _circuit(arguments) -> tuple[stim.Circuit, dict[int, int]]:
     if arguments.input is None:
         return deltakit.memory_circuit(
@@ -265,12 +254,16 @@ def _circuit(arguments) -> tuple[stim.Circuit, dict[int, int]]:
             arguments.basis,
             arguments.probability,
         )
-    circuit_path = arguments.input / "circuit.stim"
-    circuit = stim.Circuit.from_file(str(circuit_path))
-    mapping_path = arguments.input / "measurement_rounds.json"
-    mapping_text = mapping_path.read_text()
-    mapping = json.loads(mapping_text)
-    return circuit, {int(index): value for index, value in mapping.items()}
+    inputs_dir = arguments.input / run_folder.INPUTS_FOLDER
+    (point_folder,) = inputs_dir.iterdir()
+    operations_path = point_folder / "operations.json"
+    circuit_path = point_folder / "circuit.stim"
+    rounds_path = point_folder / "measurement_rounds.json"
+    workload = circuit_frontend.read_workload(
+        operations_path, circuit_path, rounds_path
+    )
+    physical = workload.physical
+    return physical.circuit, physical.measurement_rounds
 
 
 def _arguments() -> argparse.Namespace:
@@ -329,41 +322,19 @@ def _check_replay_parameter(input_folder, name, selected, recorded) -> None:
         raise ValueError(f"{name} differs from the exported circuit parameters")
 
 
-def _write_run(arguments, circuit, measurement_rounds, machine, result) -> None:
+def _start_the_run_folder(arguments, settings) -> str:
+    """The manifest and the run's resolved values, before the shot runs."""
     folder = arguments.output
-    folder.mkdir(parents=True, exist_ok=True)
-    circuit_path = folder / "circuit.stim"
-    circuit.to_file(str(circuit_path))
-    mapping_path = folder / "measurement_rounds.json"
-    _write_json(mapping_path, measurement_rounds)
-    result_value = dataclasses.asdict(result)
-    result_path = folder / "result.json"
-    _write_json(result_path, result_value)
-    command_values = [
-        _command_value(event)
-        for event in machine.observation.command_events.events
-    ]
-    commands_path = folder / "commands.json"
-    _write_json(commands_path, command_values)
-    trace_path = folder / "trace.json"
-    machine.observation.trace_writer.write(str(trace_path))
-    argument_values = vars(arguments)
-    arguments_path = folder / "arguments.json"
-    _write_json(arguments_path, argument_values)
-
-
-def _command_value(event) -> dict:
-    return {
-        "kind": event.kind,
-        "tick": event.tick,
-        "operation_id": event.command.operation.id,
+    started_utc = run_folder.start_run(None, folder)
+    metadata = {
+        "physical_error_probability": arguments.probability,
+        "distance": arguments.distance,
+        "round_period_microseconds": arguments.period_microseconds,
     }
-
-
-def _write_json(path: pathlib.Path, value) -> None:
-    text = json.dumps(value, indent=2, default=str)
-    document = text + "\n"
-    path.write_text(document)
+    seeds = (arguments.seed, 1)
+    task = collect.Task(settings, 1, metadata)
+    run_folder.record_point(folder, task, seeds)
+    return started_utc
 
 
 if __name__ == "__main__":

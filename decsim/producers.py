@@ -137,7 +137,7 @@ def deltakit_live_memory(
     """A live Deltakit memory decoded after some rounds, then read out.
 
     The four fragments of frontends/deltakit.py memory_rounds, their
-    period the sweep's, run as the live program _live_memory builds.
+    period the sweep's, run as the live program live_memory builds.
     """
     program = deltakit.memory_rounds(
         "rotated_surface",
@@ -149,30 +149,15 @@ def deltakit_live_memory(
         relaxation_time_microseconds=relaxation_time_microseconds,
         dephasing_time_microseconds=dephasing_time_microseconds,
     )
-    return _live_memory(program, decode_after_rounds, patch)
+    return live_memory(program, decode_after_rounds, patch)
 
 
-def _generated_memory(
-    code_task: str,
-    rounds_per_shot: Union[int, str],
-    distance: int,
-    physical_error_probability: float,
-) -> tuple:
-    """Stim's memory circuit at the sweep's point, and its round count."""
-    shot_length = workload_settings.RoundsPerShot.from_yaml(rounds_per_shot)
-    rounds = shot_length.rounds_for(distance)
-    circuit = workload_settings.memory_circuit(
-        code_task, rounds, distance, physical_error_probability
-    )
-    return circuit, rounds
-
-
-def _live_memory(
+def live_memory(
     program: circuit_records.RepeatedStimCircuit,
     decode_after_rounds: int,
     patch: str = "memory-patch",
 ) -> workload_records.Workload:
-    """Decode after decode_after_rounds rounds, then wait for the answer.
+    """Live fragments decoded after some rounds, then read out.
 
     The prefix runs the stream's first rounds and is decoded; the patch
     waits, protected, until the decoded result releases the one round
@@ -204,3 +189,18 @@ def _live_memory(
     operations = (prefix, protect, resume, readout)
     round_counts = {1: decode_after_rounds, 2: 0, 3: 1, 4: 0}
     return workload_records.Workload(operations, round_counts, program)
+
+
+def _generated_memory(
+    code_task: str,
+    rounds_per_shot: Union[int, str],
+    distance: int,
+    physical_error_probability: float,
+) -> tuple:
+    """Stim's memory circuit at the sweep's point, and its round count."""
+    shot_length = workload_settings.RoundsPerShot.from_yaml(rounds_per_shot)
+    rounds = shot_length.rounds_for(distance)
+    circuit = workload_settings.memory_circuit(
+        code_task, rounds, distance, physical_error_probability
+    )
+    return circuit, rounds

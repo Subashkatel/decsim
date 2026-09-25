@@ -362,7 +362,7 @@ def read_workload(
     operations, round_counts = _read_operations(operations_path)
     physical = None
     if fragments_path is not None:
-        physical = _read_fragments(fragments_path)
+        physical = read_fragments(fragments_path)
     if circuit_path is not None:
         physical = _read_finite_circuit(circuit_path, measurement_rounds_path)
     return workload_records.Workload(operations, round_counts, physical)
@@ -451,8 +451,12 @@ def _read_finite_circuit(
     return workload_records.FiniteCircuit(circuit, measurement_rounds)
 
 
-def _read_fragments(folder: pathlib.Path):
-    """The four live fragments and the period physical.json declares."""
+def read_fragments(folder: pathlib.Path):
+    """The four live fragments and the period physical.json declares.
+
+    A fragments folder of the files row, which a run folder's
+    inputs/<id>/fragments is, and tools/live_memory_example.py reads.
+    """
     fragments = {}
     for name in FRAGMENT_NAMES:
         fragment_path = folder / f"{name}.stim"

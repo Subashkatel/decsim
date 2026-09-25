@@ -134,7 +134,8 @@ def _stable_columns(row: dict) -> dict:
 
 def test_reference_yaml_rows_equal_the_recorded_sweep_and_links(tmp_path):
     config = experiment.load_experiment(REFERENCE_YAML)
-    measurements = run.run_sweep(config, None)
+    tasks = config.tasks()
+    measurements = run.run_sweep(tasks, None)
     record = sweep_report.record_of(measurements)
     summary_rows = sweep_report.summarize(record.shots, record.window_samples)
     link_rows = sweep_report.link_rows(record.shot_links)

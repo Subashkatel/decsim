@@ -50,9 +50,11 @@ uses a whole-shot window in this example; the protection mode requires
 rotated surface memory. `--patch` names the patch the operations occupy;
 the default is `memory-patch`.
 
-The output folder contains the circuit, measurement map, argument values,
-result, command arrival/start events and Chrome trace. Inspect
-`result.json`, `commands.json` and `trace.json` together. The separate
+The output folder is a run folder. Its `inputs/<id>/` holds the circuit
+and its measurement map, beside the argument values, the result, the
+command arrival/start events and the Chrome trace, which `decsim run`
+writes in the same places. Inspect `result.json`, `commands.json` and
+`trace/seed<seed>.trace.json` together. The separate
 `setup_seconds.json` measures host export/build time, not simulated latency.
 Sampling and execution also consume host time during the run; that cost
 is not included in this setup measurement.
@@ -71,8 +73,9 @@ circuit, measurement_rounds = deltakit.memory_circuit(
 )
 ```
 
-Pass these outputs through the existing supplied-circuit API, as
-`supplied_settings` in the runnable example does. The map assigns every
+Hand these outputs to decsim as a workload's physical circuit
+(`decsim.records.workload.FiniteCircuit`), as `memory_workload` and
+`supplied_settings` in the runnable example do. The map assigns every
 absolute measurement index to a one-based round. Final data measurements
 join the last packet. Preserve this map with the circuit.
 
@@ -85,9 +88,13 @@ PYTHONPATH=. .venv-deltakit/bin/python tools/live_memory_example.py \
   --output results/live-memory
 
 PYTHONPATH=. .venv-deltakit/bin/python tools/live_memory_example.py \
-  --input results/live-memory --feedback-microseconds 8 \
+  --input results/live-memory/inputs/*/fragments --feedback-microseconds 8 \
   --output results/live-memory-slower
 ```
+
+The rerun runs the point the first folder recorded: its distance,
+probability and period come from that point's `resolved/<id>.json`, and
+a value on the command line replaces the recorded one.
 
 The default noise model is SD6. The prefix requests decoding, protection
 continues on the same live stream, and decoded release permits resume
@@ -115,15 +122,16 @@ intervals. The exporter calibrates the native schedule to the declared
 cadence. SD6 instead uses its probability at gates, resets, measurements
 and idle locations; it does not use relaxation or dephasing times.
 
-Live output saves four reusable ordinary Stim fragments and
-`physical_parameters.json`. It also saves the actual `executed.stim`,
+Live output is a run folder whose `inputs/<id>/fragments` holds the four
+reusable ordinary Stim fragments and `physical.json`, the form the
+`files` workload row reads. It also saves the actual `executed.stim`,
 `measurement_rounds.json`, `measurements.json`, result, commands, trace and
 arguments. The actual circuit and raw measurements can be checked with
 Stim's measurement-to-detector converter after the runtime-selected stop.
 
-Live `--input` loads these canonical fragments without selecting Deltakit.
-It preserves every physical parameter, including cadence, and rejects
-conflicting overrides. Prefix length, feedback latency, decoder service
+Live `--input` loads a fragments folder in that form without selecting
+Deltakit. The fragments carry the physics, and `physical.json` their
+cadence; a different `--round-period-microseconds` is refused. Prefix length, feedback latency, decoder service
 time, seed and patch remain runtime choices. Use `--prefix-rounds`,
 `--decoder-microseconds`, `--seed` and `--patch` to set them explicitly.
 Replay executes the fragments again; `measurements.json` separately records

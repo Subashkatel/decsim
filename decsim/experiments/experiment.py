@@ -7,6 +7,7 @@ sweep blocks stay here, since the machine knows nothing of sweeps.
 the top-level keys this file names.
 """
 
+import contextlib
 import dataclasses
 import itertools
 from pathlib import Path
@@ -148,13 +149,14 @@ class ExperimentConfig:
             settings, qpu=qpu, workload=workload, escalation=escalation
         )
 
-    def first_point_settings(self) -> machine_settings.MachineSettings:
-        """The machine at the first point of the first sweep block."""
+    def first_point_task(self) -> collect.Task:
+        """The task of the first point of the first sweep block, one shot."""
         block = self.sweep[0]
-        return self.point_settings(
+        return self.point_task(
             physical_error_probability=block.physical_error_probabilities[0],
             distance=block.distances[0],
             round_period_microseconds=block.round_periods_microseconds[0],
+            shots=1,
         )
 
     def built_machine(
@@ -167,19 +169,15 @@ class ExperimentConfig:
         input refused, so `decsim run` and `decsim show`, which both
         build the first point, report it as one sentence naming the file.
         """
-        try:
+        path = self.config_files[0]
+        with _refused_in(path):
             return machine_module.Machine.build(settings, seed)
-        except ValueError as refused:
-            path = self.config_files[0]
-            raise refusal.RefusalError(f"{path}: {refused}") from refused
 
     def _workload_at(self, sweep_values: dict):
         """The workload section at one point, a maker's refusal one line."""
-        try:
+        path = self.config_files[0]
+        with _refused_in(path):
             return self.settings.workload.at_point(sweep_values)
-        except ValueError as refused:
-            path = self.config_files[0]
-            raise refusal.RefusalError(f"{path}: {refused}") from refused
 
     @property
     def active_tier(self) -> str:
@@ -277,10 +275,17 @@ def _settings_of(
     refused key reaches the user as one sentence naming the file it is
     in.
     """
-    try:
+    with _refused_in(path):
         return machine_settings.MachineSettings.from_mapping(
             sections, name=path.stem, section_folders=section_folders
         )
+
+
+@contextlib.contextmanager
+def _refused_in(path: Path):
+    """A ValueError raised inside, as one sentence naming the yaml file."""
+    try:
+        yield
     except ValueError as refused:
         raise refusal.RefusalError(f"{path}: {refused}") from refused
 

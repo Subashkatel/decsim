@@ -553,6 +553,7 @@ def combine(run_dirs: list, out_dir: Path) -> list:
     _refuse_a_repeated_shot(folders, order)
     out_dir.mkdir(parents=True, exist_ok=True)
     rows = _fold_the_folders(folders, order, out_dir)
+    run_folder.copy_point_records(folders, out_dir)
     finished_utc = run_folder.utc_now()
     run_folder.write_combined_manifest(
         recorded_config,
@@ -561,6 +562,7 @@ def combine(run_dirs: list, out_dir: Path) -> list:
         started_utc,
         finished_utc=finished_utc,
     )
+    run_folder.mark_finished(out_dir)
     return rows
 
 

@@ -26,6 +26,7 @@ from tests.experiments.yaml_configs import (
     SHIPPED_CONFIGS,
     measure_point_shot,
     memory_workload,
+    online_threshold,
     write_config,
 )
 
@@ -706,7 +707,7 @@ def test_a_run_writes_its_manifest_and_per_shot_records(tmp_path, monkeypatch):
     manifest_path = run_dir / "manifest.json"
     manifest_text = manifest_path.read_text()
     manifest = json.loads(manifest_text)
-    assert manifest["versions"]["stim"]
+    assert manifest["versions"]["packages"]["stim"]
     assert (
         manifest["resolved_config"]["settings"]["escalation"]["kind"]
         == "weak_baseline"
@@ -722,6 +723,20 @@ def test_a_run_writes_its_manifest_and_per_shot_records(tmp_path, monkeypatch):
     assert run_dir.name.endswith("-unit_test_config")
     assert (run_dir / "config" / "unit_test_config.yaml").exists()
     assert (run_dir / "sweep.csv").exists() and (run_dir / "links.csv").exists()
+
+
+def test_a_run_with_an_online_threshold_records_its_trajectory(
+    tmp_path, monkeypatch
+):
+    """The point's threshold is built per point, so every file is written."""
+    overrides = online_threshold()
+    config_path = write_config(tmp_path, overrides)
+    monkeypatch.chdir(tmp_path)
+    run_dir, rows = collect_command.run_experiment(config_path)
+
+    records = run_dir.glob("online_threshold_*.csv")
+    assert len(rows) == 1 and len(list(records)) == 1
+    assert (run_dir / "finished").exists()
 
 
 def test_two_config_files_of_one_name_are_both_copied(tmp_path):

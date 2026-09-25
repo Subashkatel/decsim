@@ -14,6 +14,7 @@ import dataclasses
 from pathlib import Path
 from typing import Optional
 
+import decsim.collect as collect
 import decsim.experiments.experiment as experiment
 import decsim.experiments.measure as measure
 import decsim.experiments.run_folder as run_folder
@@ -32,22 +33,24 @@ def run_one_shot(
 ) -> list:
     """Build the first sweep point at one seed, run it, and say what it did.
 
-    Returns the lines the command prints. The log and the trace are
-    written into the run folder when this run asked for them; a run that
-    asks for neither writes no folder at all.
+    Returns the lines the command prints. The shot writes a run folder as
+    a collect does (run_folder.py): the manifest, the config, the point's
+    every value and its workload, the result, the QPU's commands, and the
+    log and the trace when this run asked for them, the finished flag last.
     """
     config = experiment.load_experiment(config_path)
-    settings = config.first_point_settings()
-    settings = _with_observation(settings, log, trace)
-    writes_files = settings.observation.writes_log
-    if settings.observation.writes_trace:
-        writes_files = True
-    run_dir = None
-    if writes_files:
-        run_dir = run_folder.run_dir_for(config, out_dir)
+    task = config.first_point_task()
+    settings = _with_observation(task.settings, log, trace)
+    task = dataclasses.replace(task, settings=settings)
     machine = config.built_machine(settings, seed)
+    run_dir = run_folder.run_dir_for(config, out_dir)
+    started_utc = run_folder.start_run(config, run_dir)
+    run_folder.write_producer(run_dir, settings.workload)
+    run_folder.record_point(run_dir, task, (seed, 1))
     result = machine.run()
-    _write_files(machine, settings, run_dir, seed)
+    label = measure.shot_label(settings, seed)
+    write_shot(machine, settings, run_dir, label, result)
+    run_folder.finish_run(config, run_dir, started_utc)
     return _result_lines(config, settings, seed, result, run_dir)
 
 
@@ -84,7 +87,7 @@ def _parsed(argv: list) -> _Arguments:
         "--seed", type=int, default=0, help="the shot's seed (default 0)"
     )
     parser.add_argument(
-        "--out", default=None, help="the folder the log and trace go in"
+        "--out", default=None, help="the run folder the shot writes"
     )
     parser.add_argument(
         "--log",
@@ -107,6 +110,24 @@ def _parsed(argv: list) -> _Arguments:
     )
 
 
+def write_shot(
+    machine: machine_module.Machine,
+    settings: machine_settings.MachineSettings,
+    run_dir: Path,
+    label: str,
+    result: result_records.RunResult,
+) -> None:
+    """A shot's files in its run folder, the log and the trace named label.
+
+    result.json and commands.json always, and the log and the trace when
+    the observation asks for them. tools/deltakit_example.py and
+    tools/live_memory_example.py write their shot through it too.
+    """
+    _write_files(machine, settings, run_dir, label)
+    _write_result(result, run_dir)
+    _write_commands(machine, run_dir)
+
+
 def _with_observation(
     settings: machine_settings.MachineSettings,
     log: Optional[str],
@@ -124,16 +145,34 @@ def _with_observation(
     return dataclasses.replace(settings, observation=observation)
 
 
+def _write_result(result: result_records.RunResult, run_dir: Path) -> None:
+    """result.json: every field of the shot's result record."""
+    value = collect.json_value(result)
+    result_path = run_dir / "result.json"
+    run_folder.write_json(result_path, value)
+
+
+def _write_commands(machine: machine_module.Machine, run_dir: Path) -> None:
+    """commands.json: when each QPU command arrived and when it started."""
+    values = []
+    for event in machine.observation.command_events.events:
+        value = {
+            "kind": event.kind,
+            "tick": event.tick,
+            "operation_id": event.command.operation.id,
+        }
+        values.append(value)
+    commands_path = run_dir / "commands.json"
+    run_folder.write_json(commands_path, values)
+
+
 def _write_files(
     machine: machine_module.Machine,
     settings: machine_settings.MachineSettings,
-    run_dir: Optional[Path],
-    seed: int,
+    run_dir: Path,
+    label: str,
 ) -> None:
     """The shot's log and trace, each where its knob says."""
-    if run_dir is None:
-        return
-    label = measure.shot_label(settings, seed)
     observation = settings.observation
     if observation.writes_log:
         log_dir = run_dir / "log"
@@ -163,7 +202,7 @@ def _result_lines(
     settings: machine_settings.MachineSettings,
     seed: int,
     result: result_records.RunResult,
-    run_dir: Optional[Path],
+    run_dir: Path,
 ) -> list:
     """The point, the terminal status, the ticks and every result."""
     lines = [
@@ -179,8 +218,7 @@ def _result_lines(
     for row in result.operation_results:
         operation_line = _operation_line(row)
         lines.append(operation_line)
-    if run_dir is not None:
-        lines.append(f"run dir: {run_dir}")
+    lines.append(f"run dir: {run_dir}")
     return lines
 
 

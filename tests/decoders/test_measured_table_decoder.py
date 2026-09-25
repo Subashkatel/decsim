@@ -160,6 +160,7 @@ def test_a_device_and_partition_never_measured_are_refused():
         "strong_decoder.device 'gh200' with partition 'mps' and bases "
         "'together' has no measurement in measured_table; the measured "
         "ones are [('a100', 'whole', 'together'), "
+        "('a100', 'whole', 'apart'), "
         "('a100', 'mps', 'together'), ('a100', '3g.40gb', 'together'), "
         "('a100', '1g.10gb', 'together'), ('gh200', 'whole', 'together'), "
         "('gh200', 'whole', 'apart')]"
@@ -178,8 +179,17 @@ def test_a_bases_row_off_the_table_is_refused():
     )
 
 
-def test_a_region_decoded_apart_is_its_two_parts_on_their_own_lines():
-    """gh200, d = 5, 15 rounds: the X part's 168 detectors, then the Z's 192.
+@pytest.mark.parametrize(
+    "device, x_line, z_line",
+    [
+        ("gh200", (54.440, 6.678), (55.712, 6.664)),
+        ("a100", (59.437, 7.752), (59.673, 7.346)),
+    ],
+)
+def test_a_region_decoded_apart_is_its_two_parts_on_their_own_lines(
+    device, x_line, z_line
+):
+    """At d = 5 and 15 rounds: the X part's 168 detectors, then the Z's 192.
 
     One dispatcher runs the two in series, so the region ends when the
     Z part's line at its own iterations has run after the X part's.
@@ -190,7 +200,7 @@ def test_a_region_decoded_apart_is_its_two_parts_on_their_own_lines():
     model = windows.whole_circuit_window(circuit, 15, requirement)
     detection_events, _ = windows.sampled_shots(circuit, 1, 11)
     job = windows.job_for(model, detection_events[0])
-    settings = measured_table.MeasuredTableSettings("gh200", "whole", "apart")
+    settings = measured_table.MeasuredTableSettings(device, "whole", "apart")
     row = measured_table.MeasuredTableDecoder(settings)
     reference = relay.RelayBeliefPropagationDecoder()
     _bind_seed(row)
@@ -200,8 +210,10 @@ def test_a_region_decoded_apart_is_its_two_parts_on_their_own_lines():
     z_job = windows.job_for(parts["Z"], detection_events[0])
     x_answer = reference.decode(x_job)
     z_answer = reference.decode(z_job)
-    x_microseconds = 54.440 + 6.678 * x_answer.iterations
-    z_microseconds = 55.712 + 6.664 * z_answer.iterations
+    x_intercept, x_slope = x_line
+    z_intercept, z_slope = z_line
+    x_microseconds = x_intercept + x_slope * x_answer.iterations
+    z_microseconds = z_intercept + z_slope * z_answer.iterations
     x_ticks = config.microseconds_to_ticks(x_microseconds)
     z_ticks = config.microseconds_to_ticks(z_microseconds)
     engine = engine_module.Engine()

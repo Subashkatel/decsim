@@ -37,7 +37,9 @@ count, and each part is a row of its own, named by its detector count.
 
 Every whole-card and MPS line explains its cell's times with r2 at
 least 0.996 except the GH200 at d = 13, 0.683, where a few slow outliers
-sit off the line; the part lines explain r2 0.990 to 1.000. The slice
+sit off the line; the part lines explain r2 0.990 to 1.000 except the
+A100's d = 5 X part, 0.864, where one decode of one iteration took
+1,704 us, an outlier the line cannot follow. The slice
 lines explain r2 0.951 to 0.9999, and a line leans on the long decodes:
 at a cell's median decode a slice's line reads 1 percent high to 13
 percent low, the whole card's 1 percent high to 6 percent low. The
@@ -96,6 +98,26 @@ RELAY_BP_TIMES = (
     MeasuredTime(
         "a100", "whole", "together", 1, 6552, 310.036, 48.329, 464.768
     ),
+    # d 5, X part, 0.8641
+    MeasuredTime("a100", "whole", "apart", 1, 168, 59.437, 7.752, 64.058),
+    # d 5, Z part, 0.9991
+    MeasuredTime("a100", "whole", "apart", 1, 192, 59.673, 7.346, 64.831),
+    # d 7, X part, 0.9996
+    MeasuredTime("a100", "whole", "apart", 1, 480, 67.169, 10.024, 74.726),
+    # d 7, Z part, 0.9999
+    MeasuredTime("a100", "whole", "apart", 1, 528, 69.844, 11.465, 77.773),
+    # d 9, X part, 0.9997
+    MeasuredTime("a100", "whole", "apart", 1, 1040, 80.712, 20.042, 98.627),
+    # d 9, Z part, 0.9994
+    MeasuredTime("a100", "whole", "apart", 1, 1120, 85.380, 20.228, 99.995),
+    # d 11, X part, 1.0000
+    MeasuredTime("a100", "whole", "apart", 1, 1920, 92.328, 22.866, 118.381),
+    # d 11, Z part, 0.9989
+    MeasuredTime("a100", "whole", "apart", 1, 2040, 96.495, 25.718, 124.116),
+    # d 13, X part, 0.9999
+    MeasuredTime("a100", "whole", "apart", 1, 3192, 125.165, 28.965, 163.399),
+    # d 13, Z part, 0.9985
+    MeasuredTime("a100", "whole", "apart", 1, 3360, 123.099, 32.976, 162.063),
     # d 5, 0.9971
     MeasuredTime("a100", "mps", "together", 1, 360, 80.911, 9.839, 86.273),
     # d 9, 0.9985

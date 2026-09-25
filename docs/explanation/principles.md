@@ -187,7 +187,8 @@ modelled on a hop only when its card names a protocol that has it, and
 `decsim/machine.py`'s own docstring says which: the default `ideal` row
 drops, duplicates and reorders nothing and never retries, and the
 `reliable` row loses frames and resends them inside the link, so the
-component above the hop still sees each message once and in order.
+component above the hop still sees each message once and in order, or,
+when the retries run out, the run stops with an error.
 
 ## What is not here
 

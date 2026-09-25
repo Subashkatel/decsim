@@ -48,16 +48,20 @@ def reliable_settings(
     window_packets=16,
     buffer_frames=16,
     ack_every_packets=66,
+    retry_count=7,
+    credit_latency_cycles=2,
+    timeout_cycles=200,
 ):
     roce_settings = framings.RoceV2.Settings(PATH_MTU_BYTES)
     framing_settings = link_settings.FramingSettings("roce_v2", roce_settings)
     row = reliable_channel.ReliableChannel.Settings(
         framing=framing_settings,
         receive_buffer_frames=buffer_frames,
-        credit_latency_cycles=2,
+        credit_latency_cycles=credit_latency_cycles,
         window_packets=window_packets,
         ack_every_packets=ack_every_packets,
-        retransmit_timeout_cycles=200,
+        retransmit_timeout_cycles=timeout_cycles,
+        retry_count=retry_count,
         bit_error_rate=bit_error_rate,
     )
     protocol = link_settings.ProtocolSettings("reliable", row, CLOCK)
@@ -220,6 +224,75 @@ def test_a_lost_ack_is_made_good_by_the_timer_and_a_duplicate_ack():
     assert engine.now == TIMEOUT_TICKS + 298 + PROPAGATION + 86 + PROPAGATION
 
 
+def test_a_retry_with_none_left_fails_the_run_naming_the_frame():
+    """A count of one: the first timeout retries, the second gives up.
+
+    The lone packet is lost at 0 and again at 10_000, when the timer
+    resent it; at 20_000 no retry is left (rxe_comp.c:771-792).
+    """
+    seed = seed_losing((True, True))
+    engine = decsim.engine.Engine()
+    settings = reliable_settings(BIT_ERROR_RATE, retry_count=1)
+    channel = seeded_channel(engine, settings, seed)
+    send_at(engine, channel, 0, 200, [])
+
+    message = "channel 'test' gave up on frame 0 of transfer 0 [(]PSN 0[)]"
+    with pytest.raises(RuntimeError, match=message):
+        engine.run()
+    assert engine.now == 2 * TIMEOUT_TICKS
+
+
+def test_an_ack_that_moves_the_psn_fills_the_retry_count_again():
+    """Each of two messages is lost once and retried once on a count of 1.
+
+    The first is lost at 0, resent at 10_000 and ACKed at 10_984, which
+    fills the count (rxe_comp.c:165-170, 303-306); the second, sent at
+    20_000, is lost, resent at 30_000 and delivered.
+    """
+    pattern = (True, False, False, True, False, False)
+    seed = seed_losing(pattern)
+    engine = decsim.engine.Engine()
+    settings = reliable_settings(BIT_ERROR_RATE, retry_count=1)
+    channel = seeded_channel(engine, settings, seed)
+    delivered = []
+    send_at(engine, channel, 0, 200, delivered)
+    send_at(engine, channel, 20_000, 200, delivered)
+
+    engine.run()
+
+    deliveries = [transfer.delivery_ticks for transfer in delivered]
+    assert deliveries == [10_598, 30_598]
+
+
+def test_an_answer_while_the_message_waits_to_be_resent_is_dropped():
+    """get_wqe drops it (rxe_comp.c:150-151), so it fills no count.
+
+    One 298-tick packet, one frame of buffer, credits back 500 ticks
+    after landing, a 600-tick timer and one retry. The packet lands at
+    598 and its credit is back at 1098; the timer fires at 600 and
+    goes back, but the resend waits for the credit, and the ACK that
+    lands at 984 finds the message waiting and is dropped. The resend
+    at 1098 starts a timer that fires at 1698, before the duplicate's
+    ACK is back at 2082, with no retry left.
+    """
+    engine = decsim.engine.Engine()
+    settings = reliable_settings(
+        0.0,
+        buffer_frames=1,
+        retry_count=1,
+        credit_latency_cycles=10,
+        timeout_cycles=12,
+    )
+    channel = seeded_channel(engine, settings, 1)
+    delivered = []
+    send_at(engine, channel, 0, 200, delivered)
+
+    with pytest.raises(RuntimeError, match="gave up on frame 0"):
+        engine.run()
+    assert engine.now == 1698
+    assert [transfer.delivery_ticks for transfer in delivered] == [598]
+
+
 def test_the_run_ends_at_the_last_acknowledgement_not_at_the_timer():
     """The timer stops when every packet is acknowledged.
 
@@ -331,6 +404,7 @@ def _reliable_section(framing: dict, bit_error_rate: float) -> dict:
         "window_packets": 128,
         "ack_every_packets": 66,
         "retransmit_timeout_cycles": 1000,
+        "retry_count": 7,
         "bit_error_rate": bit_error_rate,
     }
 
@@ -351,3 +425,12 @@ def test_a_reliable_card_on_frames_other_than_roce_v2_is_refused():
 
     with pytest.raises(ValueError, match="flits runs on the credit row"):
         settings_class.from_yaml(section, "p")
+
+
+def test_a_retry_count_above_seven_is_refused():
+    framing = {"kind": "roce_v2", "path_mtu_bytes": 1024}
+    section = _reliable_section(framing, 0.0)
+    section["retry_count"] = 8
+
+    with pytest.raises(ValueError, match="from 0 to 7"):
+        reliable_channel.ReliableChannel.Settings.from_yaml(section, "p")

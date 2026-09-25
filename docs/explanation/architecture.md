@@ -157,7 +157,9 @@ duplicates and reorders nothing and never retries. The `credit` row
 cuts a message into frames that wait for a finite receive buffer's
 credits. The `reliable` row loses frames at the card's bit error rate
 and resends them by go-back-N, so every message still arrives once and
-in order and no component above the hop ever sees the loss.
+in order and no component above the hop ever sees the loss; when the
+card's retry count runs out, the link has failed and the run stops with
+an error naming the channel and the frame.
 
 [The data path, hop by hop](data_path.md) walks all eleven.
 

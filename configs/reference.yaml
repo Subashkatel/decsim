@@ -676,7 +676,8 @@ links:                             # a kind, then one card per path; null = the
                                    #       with its 256-block bound here
                                    #     window_packets, ack_every_packets,
                                    #       retransmit_timeout_cycles,
-                                   #       bit_error_rate: reliable only; the
+                                   #       retry_count, bit_error_rate:
+                                   #       reliable only; the
                                    #       go-back-N recovery of Linux rxe
                                    #       (rxe_req.c, rxe_resp.c), whose
                                    #       own constants are a window of 129
@@ -685,7 +686,12 @@ links:                             # a kind, then one card per path; null = the
                                    #       reverse direction, lost by the same
                                    #       law. Each lost frame is resent
                                    #       inside the link, so messages still
-                                   #       arrive once and in order. For example:
+                                   #       arrive once and in order. retry_count
+                                   #       (0 to 7) is rxe's retry_cnt: the
+                                   #       retries allowed without an ACK
+                                   #       between them, 7 never spent; a retry
+                                   #       with none left fails the run, naming
+                                   #       the channel and the frame. For example:
                                    #   controller_to_weak_buffer: {latency_cycles: 1,
                                    #     clock: fridge, bits_per_cycle: 8.0,
                                    #     protocol: {kind: credit, framing:

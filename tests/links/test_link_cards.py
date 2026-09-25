@@ -391,6 +391,7 @@ def test_a_reliable_card_at_no_errors_runs_as_its_credit_card(tmp_path):
         window_packets=128,
         ack_every_packets=66,
         retransmit_timeout_cycles=100_000,
+        retry_count=7,
         bit_error_rate=0.0,
     )
     base_path = yaml_configs.CONFIGS_DIR / "two_tiers.yaml"

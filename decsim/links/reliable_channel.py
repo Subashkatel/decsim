@@ -36,8 +36,16 @@ transcribed step by step:
   (rxe_req.c:588-590, 684-692; rxe_comp.c:616-636), except at a NAK
   that starts a retry, which leaves it running (rxe_comp.c:668-669);
   it stops when every packet is acknowledged, where rxe leaves it
-  pending with a deadline a later send inherits; the retries never run
-  out, where rxe gives up after retry_cnt, at most 7, timeouts.
+  pending with a deadline a later send inherits;
+- each retry, by NAK or by timeout, spends one of retry_count, which
+  every ACK that moves the first unacknowledged PSN fills again; a
+  retry with none left fails the channel and the run, naming the frame
+  (rxe_comp.c:165-170, 752-792; IB_WC_RETRY_EXC_ERR at 789-791). rxe
+  never spends a count of 7 (rxe_comp.c:772-773), so 7 retries for
+  ever;
+- while nothing is out, the oldest message waits to be resent, and an
+  answer that arrives then is dropped (get_wqe, rxe_comp.c:150-151):
+  it neither moves the PSN nor fills the count.
 
 Going back resends from the first unacknowledged PSN in order,
 qp->req.psn = qp->comp.psn (rxe_req.c:38-53), so every message is
@@ -48,7 +56,10 @@ row is RoCE's, so its frames are roce_v2 frames: the ACK is a RoCE
 packet, and no other framing has one. rxe keeps its send queue as work
 requests, a message each here, and this row keeps PSNs: the completer's
 checks of the oldest work request's state (get_wqe, check_psn,
-rxe_comp.c:137-213) are read as PSN comparisons.
+rxe_comp.c:137-213) are read as PSN comparisons; the oldest request
+waits to be resent exactly when nothing is out. The two readings part
+only when a NAK carries a PSN past the requester's next one, which
+takes a go-back between the NAK's sending and its arrival.
 Linux's rxe itself needs a kernel module; the reference this row is
 checked against is a transcription of the lines above.
 """
@@ -65,6 +76,10 @@ import decsim.links.credit_channel as credit_channel
 import decsim.links.settings as link_settings
 import decsim.seeding as seeding
 
+# rxe's completer never spends a retry count of 7, the largest a card
+# may write (rxe_comp.c:772-773), so a card of 7 retries for ever
+UNSPENT_RETRY_COUNT = 7
+
 
 class ReliableChannel(channel_module.Channel, seeding._RandomSeedConsumer):
     """A channel whose lost frames are resent by go-back-N.
@@ -80,7 +95,9 @@ class ReliableChannel(channel_module.Channel, seeding._RandomSeedConsumer):
         window_packets is the most unacknowledged packets in flight;
         ack_every_packets bounds the packets between two acknowledgement
         requests; retransmit_timeout_cycles is on the card's clock;
-        bit_error_rate is the probability that one wire bit is wrong.
+        retry_count is rxe's retry_cnt, 0 to 7, the retries allowed
+        without an ACK between them; bit_error_rate is the probability
+        that one wire bit is wrong.
         """
 
         framing: link_settings.FramingSettings
@@ -89,6 +106,7 @@ class ReliableChannel(channel_module.Channel, seeding._RandomSeedConsumer):
         window_packets: int
         ack_every_packets: int
         retransmit_timeout_cycles: int
+        retry_count: int
         bit_error_rate: float
 
         @classmethod
@@ -110,7 +128,7 @@ class ReliableChannel(channel_module.Channel, seeding._RandomSeedConsumer):
         channel_module.Channel.__init__(self, channel_settings, engine)
         self._initialize_run_seed_state(None)
         self._connection = channel_settings.protocol.row_settings
-        self._sending = _SendState()
+        self._sending = _SendState(retries_left=self._connection.retry_count)
         self._receiving = _ReceiveState()
         self._timer = _TimerState()
         # the reverse direction: the responder's ACKs to the requester
@@ -228,32 +246,59 @@ class ReliableChannel(channel_module.Channel, seeding._RandomSeedConsumer):
         completer goes to done with need_retry set and reaches
         reset_retry_timer only on a later pass (rxe_comp.c:668-669,
         743-749). Any other answer restarts it while packets are out.
+        With nothing out, the oldest message waits to be resent and the
+        answer is dropped (get_wqe, rxe_comp.c:150-151).
         """
         sending = self._sending
+        is_waiting_to_resend = sending.next_psn <= sending.unacked_psn
+        if is_waiting_to_resend:
+            self._restart_timer_if_out()
+            return
         if not is_nak and psn >= sending.unacked_psn:
             sending.unacked_psn = psn + 1
             sending.is_retry_started = False
+            sending.retries_left = self._connection.retry_count
         if is_nak and psn > sending.unacked_psn:
             sending.unacked_psn = psn
-        is_retry = is_nak and self._go_back(is_timeout=False)
+        is_retry = is_nak and self._error_retry(is_timeout=False)
         if not is_retry:
             self._restart_timer_if_out()
         self._send_next()
 
-    def _go_back(self, is_timeout: bool) -> bool:
-        """Resend from the first unacknowledged PSN (rxe_req.c:38-53).
+    def _error_retry(self, is_timeout: bool) -> bool:
+        """Resend from the first unacknowledged PSN, or give up.
 
-        A NAK does not start a second retry while one is under way; a
-        timeout always does (rxe_comp.c:760-785). Whether it went back.
+        rxe's COMPST_ERROR_RETRY (rxe_comp.c:752-792): nothing out is
+        nothing to retry; a NAK does not start a second retry while one
+        is under way, a timeout always does; each retry spends one of the
+        count, and a retry with none left fails. The go-back is
+        req_retry's (rxe_req.c:38-53). Whether it went back.
         """
         sending = self._sending
-        if sending.is_retry_started and not is_timeout:
-            return False
         if sending.next_psn <= sending.unacked_psn:
             return False
+        if sending.is_retry_started and not is_timeout:
+            return False
+        if sending.retries_left == 0:
+            self._give_up()
+        if sending.retries_left != UNSPENT_RETRY_COUNT:
+            sending.retries_left -= 1
         sending.next_psn = sending.unacked_psn
         sending.is_retry_started = True
         return True
+
+    def _give_up(self) -> None:
+        """IB_WC_RETRY_EXC_ERR: the link has failed, and the run stops."""
+        sending = self._sending
+        psn = sending.unacked_psn
+        packet = sending.packets[psn]
+        retry_count = self._connection.retry_count
+        raise RuntimeError(
+            f"channel {self._settings.name!r} gave up on frame "
+            f"{packet.frame_index} of transfer {packet.message.sequence} "
+            f"(PSN {psn}) after {retry_count} retries without an "
+            f"acknowledgement: the link failed"
+        )
 
     # ---- the retransmit timer
 
@@ -298,7 +343,7 @@ class ReliableChannel(channel_module.Channel, seeding._RandomSeedConsumer):
     def _timer_expired(self) -> None:
         """The expiry sends the requester back, then it sends again."""
         self._timer.expiry = None
-        self._go_back(is_timeout=True)
+        self._error_retry(is_timeout=True)
         self._send_next()
 
     # ---- the responder
@@ -424,6 +469,7 @@ class _Transmission:
 class _SendState:
     """The requester's side: rxe's req.psn, comp.psn and counters."""
 
+    retries_left: int
     packets: list = dataclasses.field(default_factory=list)
     next_psn: int = 0
     unacked_psn: int = 0
@@ -469,7 +515,7 @@ def _require_roce_framing(
 
 
 def _read_connection_keys(section: Mapping, path_name: str) -> tuple:
-    """(window, ack interval, timeout cycles, bit error rate) of a card."""
+    """(window, ack interval, timeout, retry count, bit error rate)."""
     section_name = f"links.{path_name}.protocol"
     window_packets = _positive_key(section, "window_packets", section_name)
     ack_every_packets = _positive_key(
@@ -482,8 +528,27 @@ def _read_connection_keys(section: Mapping, path_name: str) -> tuple:
     config.check_cycles(timeout_name, timeout_cycles)
     if timeout_cycles == 0:
         raise ValueError(f"{timeout_name} must be positive")
+    retry_count = _retry_count(section, section_name)
     bit_error_rate = _bit_error_rate(section, section_name)
-    return window_packets, ack_every_packets, timeout_cycles, bit_error_rate
+    return (
+        window_packets,
+        ack_every_packets,
+        timeout_cycles,
+        retry_count,
+        bit_error_rate,
+    )
+
+
+def _retry_count(section: Mapping, section_name: str) -> int:
+    """The card's retry count, rxe's retry_cnt: a whole number, 0 to 7."""
+    value = _required(section, "retry_count", section_name)
+    is_whole = isinstance(value, int) and not isinstance(value, bool)
+    if is_whole and 0 <= value <= UNSPENT_RETRY_COUNT:
+        return value
+    raise ValueError(
+        f"{section_name}.retry_count is {value!r}; it is a whole number "
+        f"from 0 to {UNSPENT_RETRY_COUNT}"
+    )
 
 
 def _bit_error_rate(section: Mapping, section_name: str) -> float:

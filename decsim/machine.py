@@ -57,7 +57,8 @@ that wait for a finite receive buffer's credits and loses nothing. The
 reliable row loses frames at the card's bit error rate and resends them
 by go-back-N until each message is delivered once and in order, so a
 component above a hop never sees a loss, a duplicate or a reordering
-on any row (decsim/links/fabric.py PROTOCOLS).
+on any row (decsim/links/fabric.py PROTOCOLS); when its retry count
+runs out, the link has failed and the run stops with an error.
 """
 
 import dataclasses

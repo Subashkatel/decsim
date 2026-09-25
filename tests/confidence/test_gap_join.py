@@ -40,8 +40,9 @@ def _switching_machine(
     sections["weak_decoder"]["units"] = weak_units
     sections["strong_decoder"]["kind"] = 20.0
     base_directory = pathlib.Path(".")
+    section_folders = dict.fromkeys(sections, base_directory)
     settings = machine_settings.MachineSettings.from_mapping(
-        sections, name="switching_validation", base_directory=base_directory
+        sections, name="switching_validation", section_folders=section_folders
     )
     qpu = dataclasses.replace(
         settings.qpu, distance=3, round_period_microseconds=1.0

@@ -278,8 +278,9 @@ def _gate_forward_window_machine(
         reread_buffer_regions
     )
     base_directory = pathlib.Path(".")
+    section_folders = dict.fromkeys(sections, base_directory)
     settings = machine_settings.MachineSettings.from_mapping(
-        sections, name="switching_validation", base_directory=base_directory
+        sections, name="switching_validation", section_folders=section_folders
     )
     qpu = dataclasses.replace(
         settings.qpu, distance=3, round_period_microseconds=1.0
@@ -676,8 +677,9 @@ def _slow_boundary_machine(strong_window: str) -> machine_module.Machine:
         "bits_per_cycle": None,
     }
     base_directory = pathlib.Path(".")
+    section_folders = dict.fromkeys(sections, base_directory)
     settings = machine_settings.MachineSettings.from_mapping(
-        sections, name="pinned_delivery", base_directory=base_directory
+        sections, name="pinned_delivery", section_folders=section_folders
     )
     qpu = dataclasses.replace(
         settings.qpu, distance=3, round_period_microseconds=1.0
@@ -703,8 +705,9 @@ def _gate_machine(strong_window: str) -> machine_module.Machine:
     sections = copy.deepcopy(GATE_SWITCHING_CARD)
     sections["escalation"]["strong_window"] = strong_window
     base_directory = pathlib.Path(".")
+    section_folders = dict.fromkeys(sections, base_directory)
     settings = machine_settings.MachineSettings.from_mapping(
-        sections, name="switching_validation", base_directory=base_directory
+        sections, name="switching_validation", section_folders=section_folders
     )
     qpu = dataclasses.replace(
         settings.qpu, distance=3, round_period_microseconds=1.0

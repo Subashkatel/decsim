@@ -77,8 +77,9 @@ def _machine(distance: int, rounds: int, seed: int, strong_window: str):
     sections["escalation"]["strong_window"] = strong_window
     sections["workload"]["arguments"]["rounds_per_shot"] = rounds
     base_directory = pathlib.Path(".")
+    section_folders = dict.fromkeys(sections, base_directory)
     settings = machine_settings.MachineSettings.from_mapping(
-        sections, name="seam_pinned", base_directory=base_directory
+        sections, name="seam_pinned", section_folders=section_folders
     )
     qpu = dataclasses.replace(
         settings.qpu, distance=distance, round_period_microseconds=1.0

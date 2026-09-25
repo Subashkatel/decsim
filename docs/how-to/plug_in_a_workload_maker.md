@@ -62,6 +62,92 @@ memories at once), and, with the `deltakit` extra installed,
 `decsim.producers:deltakit_live_memory` (a live memory decoded after
 some rounds, then read out).
 
+## Or read the two outputs from files
+
+A maker that runs elsewhere writes its two outputs to disk, and the
+`files` row reads them, paths relative to the folder of the yaml that
+writes the `workload` section (a base's section, inherited through
+`extends`, reads beside the base):
+
+```yaml
+workload:
+  kind: files
+  operations: merge.json            # required
+  # circuit: history.stim           # a finite circuit, with
+  # measurement_rounds: rounds.json  # each measurement index's round
+  # fragments: live/                # or the four live fragments
+```
+
+The operation list is json with the schema `decsim.ops/1`:
+
+```json
+{
+  "schema": "decsim.ops/1",
+  "operations": [
+    {"id": 1, "name": "mem0", "patches": [0], "kind": "MEMORY"},
+    {"id": 2, "name": "mem1", "patches": [1], "kind": "MEMORY"},
+    {"id": 3, "name": "merge01", "patches": [0, 1], "kind": "MERGE"},
+    {"id": 4, "name": "measure", "patches": [0], "kind": "MEASURE"}
+  ]
+}
+```
+
+`id` and `patches` are required. The other keys are `qubits`, `name`,
+`kind` (a member of `records/program.py` `OpKind`: IDLE, MEMORY, MERGE,
+MEASURE, INJECT or GENERIC),
+`rounds`, `predecessors`, `blocked_by`, `stream_id`, `stream_offset`,
+`emits_detector_data`, `scheduled_start_round`, `clifford` and
+`circuit` (the operation's own
+`.stim`, relative to the operations file). A key left out takes the
+default of `records/program.py` `Operation`. `measurement_rounds` maps
+each measurement index, as a string, to its one-based round. A
+`fragments` folder holds `first_round.stim`, `repeated_round.stim`,
+`final_round.stim`, `single_round.stim` and `physical.json`, which holds
+`round_period_microseconds`, the period the fragments' noise was built
+for. `decsim show` builds the first point, which reads the files, so a
+missing or malformed one stops it with Python's or Stim's own error,
+and an operations file of another schema is refused.
+`decsim.frontends.circuit_frontend.write_workload` writes a Python
+maker's workload in this form.
+
+## Run a live memory from a yaml
+
+A live memory runs on `qpu: {kind: streaming_stim}`: the stream's
+first rounds are decoded, the patch keeps measuring while it waits for
+the decoded answer, one round resumes it, and the readout ends it. With
+Deltakit:
+
+```yaml
+qpu: {kind: streaming_stim}
+workload:
+  kind: producer
+  function: decsim.producers:deltakit_live_memory
+  arguments: {decode_after_rounds: 3}
+```
+
+or with fragments on disk, the four operations written out:
+
+```json
+{
+  "schema": "decsim.ops/1",
+  "operations": [
+    {"id": 1, "name": "prefix", "patches": ["memory-patch"],
+     "stream_id": 100, "stream_offset": 0, "rounds": 3},
+    {"id": 2, "name": "protect", "patches": ["memory-patch"],
+     "emits_detector_data": false, "rounds": 0},
+    {"id": 3, "name": "resume", "patches": ["memory-patch"],
+     "blocked_by": 1, "emits_detector_data": false, "rounds": 1},
+    {"id": 4, "name": "readout", "patches": ["memory-patch"],
+     "emits_detector_data": false, "rounds": 0}
+  ]
+}
+```
+
+Both run what `tools/live_memory_example.py` builds by hand in Python
+(`tests/test_live_memory_example.py` and `tests/test_producers.py`
+compare them field by field). The stream's owner, its protected region
+and its rounds are derived, as the next section says.
+
 ## 3. Know what decsim derives
 
 You write the operations; decsim fills in what follows from them

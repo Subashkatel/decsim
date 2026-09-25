@@ -8,6 +8,7 @@ below run a maker written outside decsim with no change to decsim's
 tables, and pin the sentence every refusal reads as.
 """
 
+import json
 import textwrap
 
 import pytest
@@ -143,4 +144,129 @@ def test_a_shot_of_fewer_than_one_round_is_refused_at_the_point(
     config_path = yaml_configs.write_config(tmp_path, {"workload": workload})
 
     with pytest.raises(ValueError, match="a round count of at least 1"):
+        _point(config_path)
+
+
+# The audit's merge probe: two memories, their merge, a measurement, as
+# an operation list with kinds and no circuit, run on the code card's
+# timing alone. The merge's predecessors come from patch order.
+MERGE_OPERATIONS = {
+    "schema": "decsim.ops/1",
+    "operations": [
+        {"id": 1, "name": "mem0", "patches": [0], "kind": "MEMORY"},
+        {"id": 2, "name": "mem1", "patches": [1], "kind": "MEMORY"},
+        {"id": 3, "name": "merge01", "patches": [0, 1], "kind": "MERGE"},
+        {"id": 4, "name": "measure", "patches": [0], "kind": "MEASURE"},
+    ],
+}
+
+
+def _write_json(folder, name: str, value) -> None:
+    text = json.dumps(value)
+    path = folder / name
+    path.write_text(text)
+
+
+def _files_config(tmp_path, workload: dict, qpu_kind="timing_only"):
+    card = {"workload": workload, "qpu": {"kind": qpu_kind}}
+    return yaml_configs.write_config(tmp_path, card)
+
+
+def test_the_merge_probe_runs_from_an_operations_file(tmp_path):
+    """Paths are read from the yaml's folder, not the working directory."""
+    _write_json(tmp_path, "merge.json", MERGE_OPERATIONS)
+    workload = {"kind": "files", "operations": "merge.json"}
+    config_path = _files_config(tmp_path, workload)
+    settings = _point(config_path)
+    machine = machine_module.Machine.build(settings, 0)
+    result = machine.run()
+    merge = machine.operations[2]
+    policy = settings.workload.rounds_policy
+
+    assert result.terminal_status == "complete"
+    assert len(result.operation_results) == 4
+    assert merge.predecessors == (1, 2)
+    assert policy is None
+
+
+def test_an_inherited_files_row_reads_beside_the_yaml_that_wrote_it(
+    tmp_path,
+):
+    """A child that extends a base in another folder reads the base's files.
+
+    A file of the same name beside the child is not the one read.
+    """
+    base_folder = tmp_path / "base"
+    base_folder.mkdir()
+    _write_json(base_folder, "merge.json", MERGE_OPERATIONS)
+    _write_json(tmp_path, "merge.json", {"schema": "not decsim.ops/1"})
+    workload = {"kind": "files", "operations": "merge.json"}
+    base_path = _files_config(base_folder, workload)
+    child_path = tmp_path / "child.yaml"
+    child_path.write_text(f"extends: base/{base_path.name}\n")
+    expected_path = base_folder / "merge.json"
+
+    config = experiment.load_experiment(child_path)
+
+    files = config.settings.workload.row_settings
+    assert files.operations == expected_path
+
+
+def test_one_circuit_under_two_operations_from_files_is_refused(tmp_path):
+    """No merged circuit is built, so each needs its round range."""
+    operations = {
+        "schema": "decsim.ops/1",
+        "operations": [
+            {"id": 1, "patches": [0]},
+            {"id": 2, "patches": [0, 1]},
+        ],
+    }
+    _write_json(tmp_path, "ops.json", operations)
+    circuit_path = tmp_path / "history.stim"
+    circuit_path.write_text("M 0\nDETECTOR rec[-1]\n")
+    _write_json(tmp_path, "rounds.json", {"0": 1})
+    workload = {
+        "kind": "files",
+        "operations": "ops.json",
+        "circuit": "history.stim",
+        "measurement_rounds": "rounds.json",
+    }
+    config_path = _files_config(tmp_path, workload, "stim_device")
+
+    with pytest.raises(ValueError, match="none names its round range"):
+        _point(config_path)
+
+
+def test_a_files_section_naming_two_physical_circuits_is_refused(tmp_path):
+    """read_workload would read one and leave the other unread."""
+    workload = {
+        "kind": "files",
+        "operations": "ops.json",
+        "circuit": "c.stim",
+        "measurement_rounds": "r.json",
+        "fragments": "live",
+    }
+    config_path = _files_config(tmp_path, workload)
+
+    with pytest.raises(ValueError, match="a workload carries one physical"):
+        experiment.load_experiment(config_path)
+
+
+def test_a_files_section_naming_a_missing_file_stops_at_the_point(tmp_path):
+    """Python's own error names the file."""
+    workload = {"kind": "files", "operations": "absent.json"}
+    config_path = _files_config(tmp_path, workload)
+
+    with pytest.raises(FileNotFoundError, match="absent.json"):
+        _point(config_path)
+
+
+def test_an_operations_file_of_another_schema_is_refused(tmp_path):
+    """Another schema's fields could read as decsim.ops/1's and run wrong."""
+    document = {"schema": "decsim.ops/2", "operations": []}
+    _write_json(tmp_path, "ops.json", document)
+    workload = {"kind": "files", "operations": "ops.json"}
+    config_path = _files_config(tmp_path, workload)
+
+    with pytest.raises(ValueError, match="is not a decsim.ops/1 operation"):
         _point(config_path)

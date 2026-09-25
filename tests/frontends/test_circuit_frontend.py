@@ -9,12 +9,15 @@ waiting patch keeps measuring (Terhal 1302.3428 lines 2697-2698,
 Holmes 2004.04794 line 451).
 """
 
+import dataclasses
+
 import pytest
 import stim
 
 import decsim.frontends.circuit_frontend as circuit_frontend
 import decsim.records.circuits as circuit_records
 import decsim.records.program as program_records
+import decsim.records.rounds as round_records
 import decsim.records.workload as workload_records
 
 
@@ -163,3 +166,72 @@ def test_the_one_operation_running_a_circuit_takes_the_circuits_rounds():
     assert operation.circuit == circuit
     assert program.rounds_policy.rounds_by_operation == {1: 2}
     assert program.physical_circuits == {1: physical}
+
+
+def test_a_finite_workload_reads_back_what_was_written(tmp_path):
+    memory = program_records.Operation(
+        1, "memory", (0,), patches=(0,), kind=program_records.OpKind.MEMORY
+    )
+    readout = program_records.Operation(
+        2,
+        "readout",
+        (0,),
+        patches=(0,),
+        emits_detector_data=False,
+        scheduled_start_round=2,
+    )
+    circuit = stim.Circuit("M 0\nM 0\nDETECTOR rec[-1] rec[-2]")
+    physical = workload_records.FiniteCircuit(circuit, {0: 1, 1: 2})
+    workload = workload_records.Workload((memory, readout), {1: 2}, physical)
+
+    keys = circuit_frontend.write_workload(workload, tmp_path)
+    operations_path = tmp_path / keys["operations"]
+    circuit_path = tmp_path / keys["circuit"]
+    rounds_path = tmp_path / keys["measurement_rounds"]
+    read = circuit_frontend.read_workload(
+        operations_path, circuit_path, rounds_path
+    )
+
+    assert read == workload
+
+
+def test_live_fragments_read_back_what_was_written(tmp_path):
+    workload = _live_workload()
+    period = 1.1
+    program = dataclasses.replace(
+        workload.physical, round_period_microseconds=period
+    )
+    workload = dataclasses.replace(workload, physical=program)
+
+    keys = circuit_frontend.write_workload(workload, tmp_path)
+    operations_path = tmp_path / keys["operations"]
+    fragments_path = tmp_path / keys["fragments"]
+    read = circuit_frontend.read_workload(
+        operations_path, fragments_path=fragments_path
+    )
+
+    assert read == workload
+
+
+def test_an_operation_field_the_file_form_does_not_carry_is_refused(tmp_path):
+    """Writing it would lose it, so a run folder could not rerun the run."""
+    staged = program_records.Operation(
+        1, "memory", (0,), finalizes_stream_round=True
+    )
+    workload = workload_records.Workload((staged,))
+
+    with pytest.raises(ValueError, match=r"sets \['finalizes_stream_round'\]"):
+        circuit_frontend.write_workload(workload, tmp_path)
+
+
+def test_live_fragments_with_readout_groups_are_refused(tmp_path):
+    """physical.json carries no groups, so a rerun would read out otherwise."""
+    workload = _live_workload()
+    partition = round_records.MeasurementPartition(("p",), 1)
+    program = dataclasses.replace(
+        workload.physical, readout_partitions={"repeated_round": (partition,)}
+    )
+    workload = dataclasses.replace(workload, physical=program)
+
+    with pytest.raises(ValueError, match="name readout_partitions"):
+        circuit_frontend.write_workload(workload, tmp_path)

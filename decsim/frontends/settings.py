@@ -10,6 +10,7 @@ fields in directly.
 
 import dataclasses
 import inspect
+import pathlib
 import pkgutil
 from collections.abc import Mapping
 from typing import Any, Optional
@@ -73,21 +74,11 @@ class RoundsPerShot:
 class WorkloadSettings:
     """The yaml's `workload` section, and the program it lowers to.
 
-    kind names the row that makes the workload (WORKLOADS, below):
-    producer (a maker function named module:function, and its
-    arguments) or files (a maker's two outputs read from disk). None is
-    a Python-built workload, its fields handed in directly. A row's
-    workload is made at each sweep point (at_point) and lowered into
-    the fields below: the operations, the dynamic streams and protected
-    regions of a feedback workload, the round policy (GateRounds when
-    none is given), and physical_circuits, the physical circuit each
-    stream key runs, which a circuit source is built with (build/plan.py
-    _syndrome_source). The other fields are Python-only: the decode
-    owners, the feedback boundary mode every operation takes unless it
-    names its own, and the window error models a task built once for
-    all of its shots (built_window_models; a Machine built alone gets
-    none and builds its own). row_settings is the row's own Settings,
-    read from the section's keys beside kind.
+    kind names the row that makes the workload (WORKLOADS, below); None
+    is a Python-built workload, its fields handed in directly. A row's
+    workload is made at each sweep point and lowered into the fields
+    below. decode_operations, feedback_boundary_mode and built_models
+    are Python-only; a Machine built alone builds its own window models.
     """
 
     kind: Optional[str] = None
@@ -112,12 +103,10 @@ class WorkloadSettings:
             )
 
     @classmethod
-    def from_yaml(cls, section: Mapping, base_directory) -> "WorkloadSettings":
-        """The `workload` section: the kind's row reads its own keys.
-
-        base_directory is the yaml's folder, which a row's relative
-        paths are read from.
-        """
+    def from_yaml(
+        cls, section: Mapping, base_directory: Optional[pathlib.Path]
+    ) -> "WorkloadSettings":
+        """The `workload` section; relative paths are from base_directory."""
         kind = section.get("kind")
         row = tables.row(WORKLOADS, "workload.kind", kind)
         row_settings = tables.row_settings(
@@ -153,14 +142,12 @@ class WorkloadSettings:
 class ProducerWorkload:
     """The producer row: a maker function and the arguments it is called with.
 
-    function is module:function, the form Python's own entry points
-    name an object in, resolved by pkgutil.resolve_name (CPython
-    Lib/pkgutil.py), and Hydra's
-    instantiate calls a named target with its keyword arguments
-    (hydra/_internal/instantiate/_instantiate2.py:76-82); decsim takes
-    that shape and neither framework. The maker is called once per
-    sweep point with its yaml arguments and the sweep values its
-    parameters name, and returns a records.workload.Workload.
+    function is module:function, resolved by pkgutil.resolve_name as
+    Python's entry points are; Hydra's instantiate calls a named target
+    with its keyword arguments the same way
+    (hydra/_internal/instantiate/_instantiate2.py:76-82). The maker is
+    called once per sweep point with its arguments and the sweep values
+    its parameters name.
     """
 
     @dataclasses.dataclass(frozen=True)
@@ -172,7 +159,7 @@ class ProducerWorkload:
 
         @classmethod
         def from_yaml(
-            cls, section: Mapping, base_directory
+            cls, section: Mapping, base_directory: Optional[pathlib.Path]
         ) -> "ProducerWorkload.Settings":
             """The function and its arguments, as the yaml writes them."""
             del base_directory
@@ -201,6 +188,50 @@ class ProducerWorkload:
         )
 
 
+class FilesWorkload:
+    """The files row: a maker's two outputs read from disk.
+
+    operations is a decsim.ops/1 json; the physical circuit is circuit,
+    a finite .stim, with measurement_rounds, or fragments, a folder of
+    the four live fragments, or neither for a run on the code card's
+    timing alone.
+    """
+
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The workload's files, their paths resolved."""
+
+        operations: pathlib.Path
+        circuit: Optional[pathlib.Path] = None
+        measurement_rounds: Optional[pathlib.Path] = None
+        fragments: Optional[pathlib.Path] = None
+
+        @classmethod
+        def from_yaml(
+            cls, section: Mapping, base_directory: pathlib.Path
+        ) -> "FilesWorkload.Settings":
+            """The paths, checked to name one physical circuit at most."""
+            paths = {}
+            for key, value in section.items():
+                paths[key] = pathlib.Path(base_directory, value)
+            settings = cls(**paths)
+            _check_one_physical_circuit(settings)
+            return settings
+
+    @staticmethod
+    def workload(
+        settings: "FilesWorkload.Settings", sweep_values: Mapping
+    ) -> workload_records.Workload:
+        """The workload the files hold, the same at every sweep point."""
+        del sweep_values
+        return circuit_frontend.read_workload(
+            settings.operations,
+            settings.circuit,
+            settings.measurement_rounds,
+            settings.fragments,
+        )
+
+
 def memory_circuit(
     code_task: str, rounds: int, distance: int, probability: float
 ) -> stim.Circuit:
@@ -220,16 +251,22 @@ def memory_circuit(
 
 
 def _maker(function: str) -> Any:
-    """The callable module:function names; one not there is refused.
-
-    pkgutil.resolve_name reads the name as Python's own entry points do.
-    """
+    """The callable module:function names; one not there is refused."""
     try:
         return pkgutil.resolve_name(function)
     except (ImportError, AttributeError) as missing:
         raise ValueError(
             f"workload.function {function} names no maker: {missing}"
         ) from missing
+
+
+def _check_one_physical_circuit(settings: "FilesWorkload.Settings") -> None:
+    """A finite circuit or the fragments; with both, one would go unread."""
+    if settings.circuit is not None and settings.fragments is not None:
+        raise ValueError(
+            "workload.circuit and workload.fragments are both set; a "
+            "workload carries one physical circuit"
+        )
 
 
 def _is_per_distance_text(value) -> bool:
@@ -248,4 +285,5 @@ def _is_per_distance_text(value) -> bool:
 # (decsim/ports.py).
 WORKLOADS = {
     "producer": ProducerWorkload,
+    "files": FilesWorkload,
 }

@@ -15,11 +15,53 @@ import pytest
 import stim
 
 import decsim.config as config
+import decsim.experiments.experiment as experiment
+import decsim.frontends.circuit_frontend as circuit_frontend
 import decsim.machine as machine_module
 import decsim.qpu.streaming_stim_device as streaming_stim_device
 import decsim.records.circuits as circuit_records
+import tests.experiments.yaml_configs as yaml_configs
 import tests.qpu.memory_programs as memory_programs
 import tools.live_memory_example as example
+
+# The tool's protection workload as a decsim.ops/1 file: decode after
+# three rounds, wait for the answer, resume one round, read out. The
+# stream's owner, its protected region and its rounds are derived.
+LIVE_OPERATIONS = {
+    "schema": "decsim.ops/1",
+    "operations": [
+        {
+            "id": 1,
+            "name": "prefix",
+            "patches": ["memory-patch"],
+            "stream_id": 100,
+            "stream_offset": 0,
+            "rounds": 3,
+        },
+        {
+            "id": 2,
+            "name": "protect",
+            "patches": ["memory-patch"],
+            "emits_detector_data": False,
+            "rounds": 0,
+        },
+        {
+            "id": 3,
+            "name": "resume",
+            "patches": ["memory-patch"],
+            "blocked_by": 1,
+            "emits_detector_data": False,
+            "rounds": 1,
+        },
+        {
+            "id": 4,
+            "name": "readout",
+            "patches": ["memory-patch"],
+            "emits_detector_data": False,
+            "rounds": 0,
+        },
+    ],
+}
 
 
 def test_saved_fragments_reproduce_results_trace_and_actual_history(
@@ -194,6 +236,73 @@ def test_public_settings_keep_the_user_patch_in_a_complete_live_run() -> None:
     result = machine.run()
     assert result.terminal_status == "complete"
     assert source.logical_observable_truth(example.STREAM_OWNER_ID) is not None
+
+
+@pytest.mark.parametrize("feedback_microseconds", [4.0, 8.0, 20.0])
+def test_the_files_row_runs_what_the_tool_builds_by_hand(
+    tmp_path: pathlib.Path, feedback_microseconds: float
+) -> None:
+    """The canonical fragments from a yaml, against the tool's own run."""
+    program = memory_programs.memory_program()
+    program = dataclasses.replace(program, round_period_microseconds=1.1)
+    folder = _live_files(tmp_path, program)
+    workload = {
+        "kind": "files",
+        "operations": "live/operations.json",
+        "fragments": "live/fragments",
+    }
+    config_path = yaml_configs.example_tool_config(
+        folder, "streaming_stim", workload, feedback_microseconds
+    )
+    config = experiment.load_experiment(config_path)
+    settings = config.point_settings(
+        physical_error_probability=0.003,
+        distance=3,
+        round_period_microseconds=1.1,
+    )
+    machine = machine_module.Machine.build(settings, 17)
+    result = machine.run()
+    source = streaming_stim_device.StreamingStimDevice(
+        programs={example.STREAM_OWNER_ID: program}
+    )
+    tool_settings = example.live_settings(
+        source,
+        distance=3,
+        round_period_microseconds=1.1,
+        prefix_round_count=3,
+        patch="memory-patch",
+        feedback_microseconds=feedback_microseconds,
+        decoder_microseconds=0.1,
+    )
+    tool_machine = machine_module.Machine.build(tool_settings, 17)
+    tool_result = tool_machine.run()
+    stream_id = example.STREAM_OWNER_ID
+    yaml_source = machine.syndrome_source
+    measurements = yaml_source.sampled_measurements(stream_id)
+    tool_measurements = source.sampled_measurements(stream_id)
+    executed = yaml_source.executed_circuit(stream_id)
+    tool_executed = source.executed_circuit(stream_id)
+
+    assert dataclasses.asdict(result) == dataclasses.asdict(tool_result)
+    assert measurements == tool_measurements
+    assert executed == tool_executed
+
+
+def _live_files(folder: pathlib.Path, program) -> pathlib.Path:
+    """The live operations and the fragments, as the files row reads them."""
+    live = folder / "live"
+    live.mkdir()
+    operations_text = json.dumps(LIVE_OPERATIONS)
+    operations_path = live / "operations.json"
+    operations_path.write_text(operations_text)
+    fragments = live / "fragments"
+    fragments.mkdir()
+    _write_fragments(fragments, program)
+    physical = {"round_period_microseconds": 1.1}
+    physical_path = fragments / circuit_frontend.PHYSICAL_FILE_NAME
+    physical_text = json.dumps(physical)
+    physical_path.write_text(physical_text)
+    return folder
 
 
 def _canonical_inputs(folder: pathlib.Path) -> pathlib.Path:

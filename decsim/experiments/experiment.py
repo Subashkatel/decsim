@@ -210,7 +210,7 @@ def load_experiment(path) -> ExperimentConfig:
     """Read one yaml file, its extends chain applied, into settings."""
     path = Path(path)
     _refuse_a_path_that_is_not_a_file(path)
-    sections, config_files = _yaml_sections(path)
+    sections, section_folders, config_files = _yaml_sections(path)
     if "sweep" not in sections:
         raise refusal.RefusalError(
             f"{path} has no sweep; a yaml names at least one sweep block "
@@ -218,7 +218,7 @@ def load_experiment(path) -> ExperimentConfig:
         )
     sweep_section = sections.pop("sweep")
     sweep = _sweep_blocks(sweep_section)
-    settings = _settings_of(sections, path)
+    settings = _settings_of(sections, path, section_folders)
     return ExperimentConfig(
         name=path.stem,
         settings=settings,
@@ -242,7 +242,7 @@ def _refuse_a_path_that_is_not_a_file(path: Path) -> None:
 
 
 def _settings_of(
-    sections: dict, path: Path
+    sections: dict, path: Path, section_folders: dict
 ) -> machine_settings.MachineSettings:
     """The machine's settings records, one per section of the file.
 
@@ -253,7 +253,7 @@ def _settings_of(
     """
     try:
         return machine_settings.MachineSettings.from_mapping(
-            sections, name=path.stem, base_directory=path.parent
+            sections, name=path.stem, section_folders=section_folders
         )
     except ValueError as refused:
         raise refusal.RefusalError(f"{path}: {refused}") from refused
@@ -327,22 +327,26 @@ def _observation_lines(observation) -> list:
 
 
 def _yaml_sections(path: Path) -> tuple:
-    """The file's sections with its `extends` chain applied, and its files.
+    """The file's sections with `extends` applied, their folders, its files.
 
     The files come this file first, then the base it extends, and so on.
     A key this file names replaces the base's key whole: a child that
-    declares `sweep` ignores the base's sweep entirely.
+    declares `sweep` ignores the base's sweep entirely. So a relative
+    path in a section is the one its own file wrote, and it resolves
+    against that file's folder, as a relative `extends` does.
     """
     with open(path) as handle:
         sections = yaml.safe_load(handle)
     base_name = sections.pop("extends", None)
+    folders = dict.fromkeys(sections, path.parent)
     if base_name is None:
-        return sections, (path,)
+        return sections, folders, (path,)
     base_path = path.parent / base_name
-    base_sections, base_paths = _yaml_sections(base_path)
+    base_sections, base_folders, base_paths = _yaml_sections(base_path)
     base_sections.update(sections)
+    base_folders.update(folders)
     files = (path,) + base_paths
-    return base_sections, files
+    return base_sections, base_folders, files
 
 
 def _sweep_blocks(sweep_section: list) -> tuple:

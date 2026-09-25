@@ -217,3 +217,4 @@ In `decsim/frontends/settings.py`. A row of it is named under `workload.kind`.
 | Row | Class | What it is |
 | --- | --- | --- |
 | `producer` | `ProducerWorkload` in `decsim/frontends/settings.py` | The producer row: a maker function and the arguments it is called with. |
+| `files` | `FilesWorkload` in `decsim/frontends/settings.py` | The files row: a maker's two outputs read from disk. |

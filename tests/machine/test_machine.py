@@ -289,7 +289,7 @@ def test_a_yaml_section_nobody_owns_is_refused_naming_the_sections():
         ValueError, match=r"the yaml has no section \['buffers'\]; the sections"
     ):
         machine_settings.MachineSettings.from_mapping(
-            {"buffers": {}}, name="x", base_directory=None
+            {"buffers": {}}, name="x", section_folders={}
         )
 
 
@@ -307,7 +307,7 @@ def test_a_section_missing_or_not_a_mapping_is_refused_with_a_sentence(
     sections.update(qpu_entry)
     with pytest.raises(ValueError, match=sentence):
         machine_settings.MachineSettings.from_mapping(
-            sections, name="x", base_directory=None
+            sections, name="x", section_folders={}
         )
 
 

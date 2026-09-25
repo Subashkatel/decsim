@@ -11,9 +11,8 @@
 # settings.py). tests/experiments/test_yaml_surface.py loads this file, so
 # a key its section no longer knows fails there; a key a reader gained is
 # added here by hand, in the same commit. Knobs the yaml
-# cannot reach are Python objects on the settings records: multi-op
-# workloads, dynamic streams, routers, escalation families, schedulers,
-# devices, policies.
+# cannot reach are Python objects on the settings records: routers,
+# escalation families, schedulers, devices, policies.
 
 qpu:
   kind: stim_device                # stim_device | timing_only | syndrome_bits
@@ -374,6 +373,16 @@ workload:
                                    # Toshio 2510.25222 Fig. 4)
     # patch_count: 4               # memory_patches only, and required there:
                                    # the patches, at least 1
+  # The files row's keys, instead of function and arguments; paths are
+  # read from this file's folder:
+  # operations: ops.json           # the operation list, schema decsim.ops/1
+                                   # (frontends/circuit_frontend.py
+                                   # OPERATION_KEYS); required
+  # circuit: history.stim          # a finite physical circuit, with
+  # measurement_rounds: rounds.json   # each measurement index's round
+  # fragments: live/               # or the four live fragments' .stim files
+                                   # and physical.json (their period); with
+                                   # neither, the code card sizes the rounds
 
 # The plan, a word the comments below use, is the list of windows the scheme
 # lays out for each operation before the run starts.

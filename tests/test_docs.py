@@ -25,6 +25,8 @@ a page is enforced here.
 7. Every relative link in docs/ and README.md opens a file in the tree,
    its anchor names a heading of that file, and docs/README.md links to
    every page, so a reader can reach any page from the front page.
+8. Every page that says which Python to install names the floor
+   pyproject.toml's requires-python declares, the one pip enforces.
 """
 
 import ast
@@ -61,6 +63,8 @@ MERMAID_CLOSE = "```"
 RELATIVE_LINK = re.compile(r"\]\(([^)#:]+)(?:#([^)]+))?\)")
 HEADING = re.compile(r"^#+\s+(.*?)\s*$", re.MULTILINE)
 NOT_A_SLUG_CHARACTER = re.compile(r"[^a-z0-9 _-]")
+REQUIRED_PYTHON = re.compile(r'requires-python = ">=(3\.\d+)"')
+NAMED_PYTHON = re.compile(r"Python (3\.\d+)\s+or\s+newer")
 
 # Names decsim does not define, written in backticks because they name
 # the referent a decision came from.
@@ -528,4 +532,25 @@ def test_the_front_page_links_to_every_page():
             continue
         assert page.resolve() in linked, (
             f"docs/README.md does not link to {page.name}"
+        )
+
+
+def test_every_page_names_the_python_floor_pyproject_declares():
+    """A reader installs on the Python pip will accept, and no older one."""
+    pyproject = CHECKOUT / "pyproject.toml"
+    declaration = pyproject.read_text()
+    required = REQUIRED_PYTHON.search(declaration)
+    floor = required.group(1)
+    for page in _prose_files():
+        text = page.read_text()
+        named = NAMED_PYTHON.findall(text)
+        _check_one_python_floor(named, floor, page)
+
+
+def _check_one_python_floor(named: list, floor: str, page) -> None:
+    """Every "Python 3.N or newer" of one page."""
+    for version in named:
+        assert version == floor, (
+            f"{page.name} says Python {version} or newer, and "
+            f"pyproject.toml requires Python {floor} or newer"
         )

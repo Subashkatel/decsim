@@ -7,7 +7,7 @@ shot of the reference configuration, opened the folder it wrote, read a
 figure and followed one round of syndrome data through the machine.
 
 You do not need to know anything about decsim, and the words you need
-are defined as they appear. You do need a terminal and a Python 3.9 or
+are defined as they appear. You do need a terminal and a Python 3.10 or
 newer interpreter.
 
 ## What decsim is, in one paragraph

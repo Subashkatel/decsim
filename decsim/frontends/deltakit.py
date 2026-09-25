@@ -9,7 +9,6 @@ import dataclasses
 import importlib.util
 import itertools
 import math
-import sys
 from typing import TYPE_CHECKING, Optional
 
 import stim
@@ -235,8 +234,6 @@ def check_probability(probability: float) -> None:
 
 
 def _require_explorer() -> None:
-    if sys.version_info < (3, 10):
-        raise ValueError("Deltakit memory requires Python 3.10 or newer")
     specification = importlib.util.find_spec("deltakit_explorer")
     if specification is None:
         raise ValueError(

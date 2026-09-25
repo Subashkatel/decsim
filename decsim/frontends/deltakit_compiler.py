@@ -6,7 +6,6 @@ public terminal MeasurementReg outputs using the declared logical support.
 
 import contextlib
 import importlib.util
-import sys
 from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable, Optional
@@ -66,8 +65,6 @@ class _CodeSchedule:
 
 
 def _require_compiler() -> None:
-    if sys.version_info < (3, 10):
-        raise ValueError("Deltakit compiler requires Python 3.10 or newer")
     for module in ("deltakit_compile", "deltakit_explorer"):
         specification = importlib.util.find_spec(module)
         if specification is None:

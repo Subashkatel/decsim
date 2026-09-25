@@ -291,8 +291,8 @@ The Google Python Style Guide applies wherever the rules above are
 silent. Import modules, not names: `import decsim.records.program as
 program_records`, then `program_records.Decision`; the exceptions are
 `typing`, `dataclasses`, `collections.abc` and `enum`. No module uses
-`from __future__ import annotations`; `Optional[X]` is written out
-because the package runs on Python 3.9.
+`from __future__ import annotations`; `Optional[X]` is written out, the
+form the whole package uses.
 
 `ruff` enforces the rest with the settings in `pyproject.toml`: 80
 columns, pycodestyle (E, W), pyflakes (F), pep8-naming (N), Google

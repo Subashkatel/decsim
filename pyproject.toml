@@ -7,7 +7,7 @@ name = "decsim"
 version = "0.1.0"
 description = "QEC control/decoding simulator package scaffold"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dependencies = []
 
 [project.scripts]
@@ -21,20 +21,20 @@ pymatching = ["pymatching"]
 run = ["stim", "pymatching", "numpy", "scipy", "matplotlib", "pyyaml", "ldpc"]
 deltakit = [
     "stim",
-    "deltakit-explorer==0.9.2; python_version >= '3.10'",
-    "deltakit-circuit==0.9.1; python_version >= '3.10'",
-    "deltakit-core==0.9.1; python_version >= '3.10'",
-    "deltakit-decode==0.9.1; python_version >= '3.10'",
-    "deltakit-stim==0.2.5; python_version >= '3.10'",
+    "deltakit-explorer==0.9.2",
+    "deltakit-circuit==0.9.1",
+    "deltakit-core==0.9.1",
+    "deltakit-decode==0.9.1",
+    "deltakit-stim==0.2.5",
 ]
 deltakit-compile = [
     "stim",
-    "deltakit-explorer==0.9.2; python_version >= '3.10'",
-    "deltakit-circuit==0.9.1; python_version >= '3.10'",
-    "deltakit-core==0.9.1; python_version >= '3.10'",
-    "deltakit-decode==0.9.1; python_version >= '3.10'",
-    "deltakit-stim==0.2.5; python_version >= '3.10'",
-    "deltakit-compile==0.1.0; python_version >= '3.10'",
+    "deltakit-explorer==0.9.2",
+    "deltakit-circuit==0.9.1",
+    "deltakit-core==0.9.1",
+    "deltakit-decode==0.9.1",
+    "deltakit-stim==0.2.5",
+    "deltakit-compile==0.1.0",
 ]
 bb-decoders = ["quits==1.1.0", "relay-bp==0.2.2", "tesseract-decoder==0.1.1.dev20260802231159"]
 
@@ -78,7 +78,7 @@ ignore = [
   "D107",  # __init__ is described by the class docstring
   "D203",  # no blank line before a class docstring
   "D213",  # summary on the first line
-  "UP007", # Optional[X] stays readable and runs on 3.9
+  "UP007", # Optional[X] stays, the form the package is written in
   "UP045", # same
 ]
 

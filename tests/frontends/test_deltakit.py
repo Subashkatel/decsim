@@ -19,7 +19,6 @@ import decsim.frontends.deltakit as deltakit
 
 EXPLORER_SPECIFICATION = importlib.util.find_spec("deltakit_explorer")
 HAS_EXPLORER = EXPLORER_SPECIFICATION is not None
-REQUIRES_NEWER_PYTHON = sys.version_info < (3, 10)
 
 
 @pytest.fixture
@@ -41,10 +40,6 @@ def test_importing_the_provider_does_not_import_deltakit() -> None:
 @pytest.mark.skipif(
     HAS_EXPLORER,
     reason="the dependency-absent job checks the real missing import",
-)
-@pytest.mark.skipif(
-    REQUIRES_NEWER_PYTHON,
-    reason="unsupported Python is refused before optional dependency selection",
 )
 def test_selecting_an_absent_provider_names_the_required_extra() -> None:
     with pytest.raises(ValueError, match=r"optional decsim\[deltakit\] extra"):

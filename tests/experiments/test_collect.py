@@ -51,6 +51,8 @@ import decsim.experiments.measure as measure_shot
 import decsim.experiments.report as sweep_report
 import decsim.frontends.settings as workload_settings
 import decsim.qpu.round_policies as round_policies
+import decsim.qpu.settings as qpu_settings
+import decsim.qpu.stim_device as stim_device
 import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.settings as machine_settings
@@ -522,6 +524,82 @@ def test_two_tasks_whose_round_policies_differ_in_count_are_two_tasks():
     unique = collect.unique_tasks([three_task, five_task])
 
     assert len(unique) == 2
+
+
+class _SlottedRounds:
+    """A user's round policy that keeps its count in __slots__."""
+
+    __slots__ = ("round_count",)
+
+    def __init__(self, round_count: int) -> None:
+        self.round_count = round_count
+
+    def rounds_for(self, operation, code) -> int:
+        del operation, code
+        return self.round_count
+
+
+def _slotted_rounds_task(round_count: int) -> collect.Task:
+    rounds_policy = _SlottedRounds(round_count)
+    workload = workload_settings.WorkloadSettings(rounds_policy=rounds_policy)
+    settings = machine_settings.MachineSettings(workload=workload)
+    return collect.Task(settings, 1, {"point": 1})
+
+
+def test_two_slotted_round_policies_that_differ_in_count_are_two_tasks():
+    """A component's __slots__ enter the strong id as its __dict__ does."""
+    three_rounds = _slotted_rounds_task(3)
+    six_rounds = _slotted_rounds_task(6)
+
+    unique = collect.unique_tasks([three_rounds, six_rounds])
+
+    assert len(unique) == 2
+
+
+def _device_task(round_count: int) -> collect.Task:
+    """A task whose settings hold a Python-built finite source."""
+    device = stim_device.StimDevice(measurement_rounds={1: {0: round_count}})
+    qpu = qpu_settings.QpuSettings(device=device)
+    settings = machine_settings.MachineSettings(qpu=qpu)
+    return collect.Task(settings, 1, {"point": 1})
+
+
+def test_two_python_built_sources_that_hold_different_values_are_two_tasks():
+    """A component with no record form enters the id by its content."""
+    first = _device_task(1)
+    second = _device_task(2)
+
+    unique = collect.unique_tasks([first, second])
+
+    assert len(unique) == 2
+
+
+def _recorded_device_task(flip: int) -> collect.Task:
+    """A task whose settings hold a recorded shot, its last bit flip."""
+    measurements = numpy.array([[0, flip]], dtype=bool)
+    device = stim_device.RecordedStimDevice(measurements, 0)
+    qpu = qpu_settings.QpuSettings(device=device)
+    settings = machine_settings.MachineSettings(qpu=qpu)
+    return collect.Task(settings, 1, {"point": 1})
+
+
+def test_two_recorded_sources_that_replay_different_shots_are_two_tasks():
+    """An array a component holds enters the id by its values."""
+    first = _recorded_device_task(0)
+    second = _recorded_device_task(1)
+
+    unique = collect.unique_tasks([first, second])
+
+    assert len(unique) == 2
+
+
+def test_two_python_built_sources_that_hold_the_same_values_are_one_task():
+    first = _device_task(1)
+    same = _device_task(1)
+
+    unique = collect.unique_tasks([first, same])
+
+    assert len(unique) == 1
 
 
 def _bandwidth_tasks(tmp_path, widths: tuple) -> list:

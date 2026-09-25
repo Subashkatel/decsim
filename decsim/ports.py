@@ -1820,6 +1820,26 @@ class Channel(Protocol):
         """What the transfer would pay if nothing else reached the channel."""
 
 
+@runtime_checkable
+class Framing(Protocol):
+    """How a packet channel cuts one message into its wire's frames.
+
+    Table rows: whole, flits, aurora_64b66b, pcie_tlp, roce_v2,
+    ethernet_udp (FRAMINGS, links/framings.py), named by
+    links.<path>.protocol.framing.kind. A message is the path's header
+    and its payload; the frames carry it with the protocol's own
+    framing, and the channel serializes, credits and acknowledges them
+    one by one. The cut is Garnet's, where a network interface turns a
+    message into divCeil(size, width) flits (gem5
+    src/mem/ruby/network/garnet/NetworkInterface.cc:382-387), and ns-3's,
+    where a device adds its header to every packet
+    (point-to-point-net-device.cc:528).
+    """
+
+    def frames(self, payload_bits: int, header_bits: int) -> tuple[int, ...]:
+        """The wire bits of each frame, in sending order; at least one."""
+
+
 # ------------------------------------ the pluggable policies off the path
 
 

@@ -73,6 +73,18 @@ class PayloadSettings:
 
 
 @dataclasses.dataclass(frozen=True)
+class FramingSettings:
+    """How a packet channel cuts a message: a FRAMINGS row and its keys.
+
+    row_settings is the row's own Settings record, None for a row with
+    no keys (decsim/links/framings.py).
+    """
+
+    kind: str = "whole"
+    row_settings: Optional[object] = None
+
+
+@dataclasses.dataclass(frozen=True)
 class ChannelSettings:
     """One physical channel: its name, a propagation latency, a bandwidth.
 

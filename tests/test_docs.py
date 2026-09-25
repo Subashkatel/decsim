@@ -19,7 +19,7 @@ a page is enforced here.
 5. Every uppercase name in backticks in docs/ and README.md is a name
    the tree defines: a module-level name of decsim/ or tests/, or a
    shell variable one of the scripts reads, apart from the foreign names
-   listed in FOREIGN_NAMES; and there are eighteen plug-in tables.
+   listed in FOREIGN_NAMES; and there are nineteen plug-in tables.
 6. No em dash in docs/, README.md, STYLE.md, or any docstring of the
    package, the tests or the tools.
 7. Every relative link in docs/ and README.md opens a file in the tree,
@@ -44,7 +44,7 @@ TESTS = CHECKOUT / "tests"
 TOOLS = CHECKOUT / "tools"
 SLURM = CHECKOUT / "slurm"
 EM_DASH = "—"
-TABLE_COUNT = 18
+TABLE_COUNT = 19
 
 PATH_PREFIXES = ("decsim/", "tests/", "tools/", "docs/", "configs/", "slurm/")
 ROOT_FILES = ("README.md", "STYLE.md", "pyproject.toml")
@@ -317,7 +317,7 @@ def test_every_module_opens_with_one_sentence_saying_what_it_is():
         )
 
 
-def test_every_eighteen_plug_in_tables_are_on_the_tables_page():
+def test_every_plug_in_table_is_on_the_tables_page():
     """The tables page is the whole set, not a subset that fell behind."""
     tool = _docs_map()
     entries = tool.tables_of(CHECKOUT)

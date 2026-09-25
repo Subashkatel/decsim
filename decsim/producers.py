@@ -1,4 +1,4 @@
-"""The workload makers decsim ships: Stim's generated memories.
+"""The workload makers decsim ships: Stim's and Deltakit's memories.
 
 A maker is a plain function a yaml names as module:function under
 workload.kind producer. decsim hands it the sweep point's values its
@@ -7,16 +7,26 @@ arguments, and it returns a records.workload.Workload. A maker written
 outside decsim has the same shape; these are the ones that ship.
 """
 
+from typing import Optional, Union
+
 import stim
 
+import decsim.frontends.deltakit as deltakit
 import decsim.frontends.settings as workload_settings
+import decsim.records.circuits as circuit_records
 import decsim.records.program as program_records
 import decsim.records.workload as workload_records
+
+# The stream a live memory's segments extend: an identity local to the
+# workload, which also names the stream's substream seed
+# (seeding.substream_seed), so it is the one tools/live_memory_example.py
+# uses and a run reproduces that tool's draws.
+LIVE_STREAM_ID = 100
 
 
 def memory_circuit(
     code_task: str,
-    rounds_per_shot,
+    rounds_per_shot: Union[int, str],
     distance: int,
     physical_error_probability: float,
 ) -> workload_records.Workload:
@@ -39,7 +49,7 @@ def memory_circuit(
 
 def memory_patches(
     code_task: str,
-    rounds_per_shot,
+    rounds_per_shot: Union[int, str],
     patch_count: int,
     distance: int,
     physical_error_probability: float,
@@ -87,9 +97,64 @@ def memory_patches(
     )
 
 
+def deltakit_memory(
+    rounds: int,
+    distance: int,
+    physical_error_probability: float,
+    family: str = "rotated_surface",
+    basis: str = "Z",
+    patch: str = "memory-patch",
+) -> workload_records.Workload:
+    """Deltakit's finite memory, one operation for the whole circuit.
+
+    The Explorer's css_code_memory_circuit with SD6 noise at the sweep's
+    probability, exported with its measurement-to-round map
+    (frontends/deltakit.py memory_circuit), as tools/deltakit_example.py
+    builds it by hand. The optional deltakit extra is imported only when
+    this maker runs.
+    """
+    circuit, measurement_rounds = deltakit.memory_circuit(
+        family, distance, rounds, basis, physical_error_probability
+    )
+    operation = program_records.Operation(
+        1, "memory", (patch,), patches=(patch,)
+    )
+    physical = workload_records.FiniteCircuit(circuit, measurement_rounds)
+    return workload_records.Workload((operation,), {1: rounds}, physical)
+
+
+def deltakit_live_memory(
+    distance: int,
+    physical_error_probability: float,
+    round_period_microseconds: float,
+    decode_after_rounds: int,
+    basis: str = "Z",
+    noise_model: str = "sd6",
+    relaxation_time_microseconds: Optional[float] = None,
+    dephasing_time_microseconds: Optional[float] = None,
+    patch: str = "memory-patch",
+) -> workload_records.Workload:
+    """A live Deltakit memory decoded after some rounds, then read out.
+
+    The four fragments of frontends/deltakit.py memory_rounds, their
+    period the sweep's, run as the live program _live_memory builds.
+    """
+    program = deltakit.memory_rounds(
+        "rotated_surface",
+        distance,
+        basis,
+        physical_error_probability,
+        round_period_microseconds=round_period_microseconds,
+        noise_model=noise_model,
+        relaxation_time_microseconds=relaxation_time_microseconds,
+        dephasing_time_microseconds=dephasing_time_microseconds,
+    )
+    return _live_memory(program, decode_after_rounds, patch)
+
+
 def _generated_memory(
     code_task: str,
-    rounds_per_shot,
+    rounds_per_shot: Union[int, str],
     distance: int,
     physical_error_probability: float,
 ) -> tuple:
@@ -100,3 +165,42 @@ def _generated_memory(
         code_task, rounds, distance, physical_error_probability
     )
     return circuit, rounds
+
+
+def _live_memory(
+    program: circuit_records.RepeatedStimCircuit,
+    decode_after_rounds: int,
+    patch: str = "memory-patch",
+) -> workload_records.Workload:
+    """Decode after decode_after_rounds rounds, then wait for the answer.
+
+    The prefix runs the stream's first rounds and is decoded; the patch
+    waits, protected, until the decoded result releases the one round
+    that resumes it, and the readout ends the stream.
+    """
+    patches = (patch,)
+    prefix = program_records.Operation(
+        1,
+        "prefix",
+        patches,
+        patches=patches,
+        stream_id=LIVE_STREAM_ID,
+        stream_offset=0,
+    )
+    protect = program_records.Operation(
+        2, "protect", patches, patches=patches, emits_detector_data=False
+    )
+    resume = program_records.Operation(
+        3,
+        "resume",
+        patches,
+        patches=patches,
+        blocked_by=1,
+        emits_detector_data=False,
+    )
+    readout = program_records.Operation(
+        4, "readout", patches, patches=patches, emits_detector_data=False
+    )
+    operations = (prefix, protect, resume, readout)
+    round_counts = {1: decode_after_rounds, 2: 0, 3: 1, 4: 0}
+    return workload_records.Workload(operations, round_counts, program)

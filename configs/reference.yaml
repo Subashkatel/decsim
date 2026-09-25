@@ -358,7 +358,13 @@ workload:
                                    # 2406.17995 lines 121-123), side by side
                                    # along x, 2d + 2 Stim coordinate units
                                    # apart, so a qpu burst region covers the
-                                   # patches it reaches
+                                   # patches it reaches; deltakit_memory,
+                                   # Deltakit's finite memory for
+                                   # stim_device; deltakit_live_memory, a
+                                   # live memory for streaming_stim decoded
+                                   # after decode_after_rounds rounds, its
+                                   # stream owner, protected region and
+                                   # rounds derived (the deltakit extra)
   arguments:                       # the maker's own arguments; a sweep value
                                    # written here stops the maker's call
     code_task: surface_code:rotated_memory_z   # stim generator task

@@ -56,8 +56,11 @@ argument.
 
 The makers decsim ships are named the same way, from
 `decsim/producers.py`: `decsim.producers:memory_circuit` (Stim's
-generated memory) and `decsim.producers:memory_patches` (several such
-memories at once).
+generated memory), `decsim.producers:memory_patches` (several such
+memories at once), and, with the `deltakit` extra installed,
+`decsim.producers:deltakit_memory` (Deltakit's finite memory) and
+`decsim.producers:deltakit_live_memory` (a live memory decoded after
+some rounds, then read out).
 
 ## 3. Know what decsim derives
 

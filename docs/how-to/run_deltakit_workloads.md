@@ -4,9 +4,13 @@
 
 Deltakit supplies a circuit and its measurement schedule. The existing
 decsim machine runs them through readout, stores, windows, decoding and
-feedback. The finite example is `tools/deltakit_example.py`;
+feedback. From a yaml, the makers `decsim.producers:deltakit_memory`
+and `decsim.producers:deltakit_live_memory` run the finite and the live
+memory ([plug in a workload maker](plug_in_a_workload_maker.md)). The
+finite example `tools/deltakit_example.py` adds the repetition family
+and the protection mode on one finite history;
 `tools/live_memory_example.py` keeps memory live until decoded feedback
-permits final readout. Neither adds a yaml workload row.
+permits final readout and saves the executed history.
 
 ## Install in a separate environment
 

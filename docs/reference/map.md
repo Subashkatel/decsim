@@ -277,7 +277,7 @@ docstring.
 
 ### producers
 
-- `decsim/producers.py`: The workload makers decsim ships: Stim's generated memories.
+- `decsim/producers.py`: The workload makers decsim ships: Stim's and Deltakit's memories.
 
 ### settings
 

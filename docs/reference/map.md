@@ -81,6 +81,7 @@ docstring.
 ### detector_error_model
 
 - `decsim/detector_error_model/__init__.py`: Slices a circuit's Stim detector error model into per-window decoder inputs.
+- `decsim/detector_error_model/basis_split.py`: A CSS region's physical fault model split into its X and Z parts.
 - `decsim/detector_error_model/detection_event_formation.py`: The detection event former, seated at the points the yaml names.
 - `decsim/detector_error_model/detector_chronology.py`: Which round each detector belongs to, and where it sits in that round.
 - `decsim/detector_error_model/detector_formation.py`: Turns raw measurement bits into detection events, round by round.

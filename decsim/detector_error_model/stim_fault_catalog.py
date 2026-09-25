@@ -78,7 +78,7 @@ def detector_error_model_to_faults(
         )
         for key in keys:
             current_probability = merged.get(key, 0.0)
-            merged[key] = _merge_probability(
+            merged[key] = merge_probability(
                 current_probability, record.probability
             )
     detector_sets = [key[0] for key in merged]
@@ -122,7 +122,7 @@ def prepare_fault_catalogs(
     return catalogs, None
 
 
-def _merge_probability(current: float, incoming: float) -> float:
+def merge_probability(current: float, incoming: float) -> float:
     """Independent faults combine as p (+) q = p(1-q) + q(1-p)."""
     return current * (1 - incoming) + incoming * (1 - current)
 
@@ -300,7 +300,7 @@ def _catalog_from_detector_error_model(
                 record.aggregate_logical_observables,
             )
             current_probability = merged.get(key, 0.0)
-            merged[key] = _merge_probability(
+            merged[key] = merge_probability(
                 current_probability, record.probability
             )
         detector_sets = [key[0] for key in merged]
@@ -380,7 +380,7 @@ def _mechanisms_by_key(decomposed_model) -> dict:
         )
         mechanism_key = (physical_key, tuple(sorted(component_keys)))
         current_probability = mechanisms.get(mechanism_key, 0.0)
-        mechanisms[mechanism_key] = _merge_probability(
+        mechanisms[mechanism_key] = merge_probability(
             current_probability, record.probability
         )
     return mechanisms
@@ -435,7 +435,7 @@ def _check_same_physical_faults(
     )
     for key, prior in zip(identities, physical_catalog.priors):
         current_probability = reconstructed.get(key, 0.0)
-        reconstructed[key] = _merge_probability(current_probability, prior)
+        reconstructed[key] = merge_probability(current_probability, prior)
     if set(reconstructed) != set(undecomposed):
         raise ValueError(
             "decomposed and undecomposed Stim models disagree on "

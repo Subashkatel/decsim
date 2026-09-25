@@ -14,6 +14,7 @@ from typing import Optional
 import stim
 
 from decsim.detector_error_model import (
+    basis_split,
     detector_chronology,
     fault_model_contracts,
     stim_fault_catalog,
@@ -49,6 +50,11 @@ class WindowSlicer:
         self.committed_elsewhere = {
             representation: set() for representation in self.catalogs
         }
+        # (type by detector, type by observable), read only when the
+        # decoder splits a region by type
+        self.bases = None
+        if fault_model_requirement.detector_bases:
+            self.bases = basis_split.circuit_bases(circuit)
 
     def slice_window(
         self,
@@ -181,6 +187,7 @@ class WindowSlicer:
             self.chronology.detector_coordinates, rows
         )
         defect_positions = self._defect_positions(rows, placed)
+        detector_bases, observable_bases = self._bases_of(defect_positions)
         return fault_model_contracts.WindowErrorModel(
             detector_ids=tuple(rows),
             detector_coordinates=coordinates,
@@ -189,7 +196,19 @@ class WindowSlicer:
             graphlike_faults=graphlike,
             physical_faults=physical,
             physical_to_graphlike_detector_projection=local_link,
+            detector_bases=detector_bases,
+            observable_bases=observable_bases,
         )
+
+    def _bases_of(self, defect_positions: dict) -> tuple:
+        """The types of the window's detectors and of every observable."""
+        if self.bases is None:
+            return None, None
+        type_by_detector, observable_bases = self.bases
+        detector_bases = {}
+        for detector_id in defect_positions:
+            detector_bases[detector_id] = type_by_detector[detector_id]
+        return detector_bases, observable_bases
 
     def _defect_positions(
         self,

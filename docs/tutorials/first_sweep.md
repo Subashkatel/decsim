@@ -89,24 +89,27 @@ distance: 3
 physical error rate: 0.003
 algorithm: pymatching
 round period: 1 us
-load (service per window / window inter-arrival): 7.70
-logical failures: 26 of 400 shots
+load (service per window / window inter-arrival): 2.53
+logical failures: 16 of 400 shots
 mismatches vs direct PyMatching: 0
-throughput: 0.259 rounds per us
-queue wait, mean: 27.580 us
-service time per window, mean: 23.108 us
-ready to frame commit: median 50.063 us, p99 103.937 us
+throughput: 0.412 rounds per us
+queue wait, mean: 12.764 us
+service time per window, mean: 7.593 us
+ready to frame commit: median 26.504 us, p99 55.052 us
 
 distance: 5
 ...
-logical failures: 8 of 400 shots
+logical failures: 12 of 400 shots
+mismatches vs direct PyMatching: 0
 ...
 distance: 7
 ...
-logical failures: 5 of 400 shots
+logical failures: 8 of 400 shots
+mismatches vs direct PyMatching: 0
+...
 ```
 
-Twenty-six failures out of 400 at distance 3, eight at distance 5, five
+Sixteen failures out of 400 at distance 3, twelve at distance 5, eight
 at distance 7. The logical error rate falls as the code gets bigger,
 which is what a code below its threshold does: more physical qubits buy
 a better logical qubit.
@@ -138,20 +141,20 @@ cut -d, -f1,2,5,7,8,9,10 results/<run>/sweep.csv
 
 ```
 distance,physical_error_probability,shots,logical_failures,logical_error_rate,ler_wilson_low,ler_wilson_high
-3,0.003,400,26,0.065,0.04474017569726697,0.09353582162445521
-5,0.003,400,8,0.02,0.010168264597915496,0.038963870377777945
-7,0.003,400,5,0.0125,0.005350671853550634,0.02892415273113802
+3,0.003,400,16,0.04,0.024768847722620668,0.06398278162908555
+5,0.003,400,12,0.03,0.017242849034032177,0.05169903312966765
+7,0.003,400,8,0.02,0.010168264597915496,0.038963870377777945
 ```
 
 `logical_error_rate` is the failures divided by the shots. It is an
-estimate, and 26 out of 400 would have come out differently with
+estimate, and 16 out of 400 would have come out differently with
 different seeds. The two Wilson columns say how differently.
 
 A **Wilson interval** is a range of true failure probabilities that
 would plausibly produce the count you saw. decsim computes it at
 `z = 1.96`, which is the conventional 95 percent (`wilson_interval` in
 `decsim/experiments/report.py`). Read the distance 3 row as: the true rate is
-somewhere between about 4.5 percent and about 9.4 percent, and 6.5
+somewhere between about 2.5 percent and about 6.4 percent, and 4
 percent is the middle of the evidence.
 
 Why Wilson and not the textbook interval you may have met, the estimate
@@ -163,8 +166,8 @@ exactly from having seen no failures at all. The Wilson interval stays
 inside 0 and 1 and stays sensible at zero counts, which is why it is the
 one decsim reports.
 
-Now look at the rows together. Distance 5's interval runs from 1.0 to
-3.9 percent and distance 7's from 0.5 to 2.9 percent. They overlap. On
+Now look at the rows together. Distance 5's interval runs from 1.7 to
+5.2 percent and distance 7's from 1.0 to 3.9 percent. They overlap. On
 400 shots this run has **not** shown that distance 7 is better than
 distance 5, even though its estimate is lower. That is the honest
 reading, and it is the reason `configs/weak_ler.yaml` runs a million
@@ -209,9 +212,9 @@ The combined report says:
 
 ```
 distance,shots,logical_failures,logical_error_rate
-3,400,26,0.065
-5,400,8,0.02
-7,400,5,0.0125
+3,400,16,0.04
+5,400,12,0.03
+7,400,8,0.02
 ```
 
 The same three counts as the single run. That is not luck: a shot's seed

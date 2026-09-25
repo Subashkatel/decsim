@@ -58,9 +58,9 @@ config: reference
 point: p0.001 d3 round period 1 us seed 0
 terminal status: complete
 execution done: 15000000 ticks
-fully done: 60969000 ticks
+fully done: 37356000 ticks
 operation 1: logical_observables, observables (0,), truth (0,)
-run dir: results/2026-09-10T02-29-32Z-reference
+run dir: results/2026-09-25T18-03-49Z-reference
 ```
 
 Line by line:
@@ -75,7 +75,7 @@ Line by line:
   unit of time, and one microsecond is a million ticks
   (`decsim/config.py`). So the QPU finished its quantum work after 15
   microseconds: 15 rounds at one microsecond each.
-- `fully done: 60969000 ticks`. The classical loop finished 61
+- `fully done: 37356000 ticks`. The classical loop finished 37
   microseconds in. The gap between the two numbers is the point of the
   whole simulator: the decoder was still working long after the QPU
   stopped.
@@ -111,17 +111,17 @@ distance: 3
 physical error rate: 0.001
 algorithm: pymatching
 round period: 1 us
-load (service per window / window inter-arrival): 7.31
+load (service per window / window inter-arrival): 2.39
 logical failures: 0 of 2 shots
 mismatches vs direct PyMatching: 0
-throughput: 0.267 rounds per us
-queue wait, mean: 7.150 us
-service time per window, mean: 21.922 us
-ready to frame commit: median 32.910 us, p99 42.246 us
+throughput: 0.449 rounds per us
+queue wait, mean: 2.603 us
+service time per window, mean: 7.158 us
+ready to frame commit: median 15.772 us, p99 22.726 us
 
 data movement: observation.data_movement was off, so this run counted no copies, references or moves
 
-every column: results/2026-09-10T02-29-33Z-reference/sweep.csv
+every column: results/2026-09-25T18-03-50Z-reference/sweep.csv
 ```
 
 Two new words:
@@ -138,7 +138,7 @@ Two new words:
 
 `load` is the ratio of the time a window spends being decoded to the
 time between windows arriving. Above 1 the decoder cannot keep up, and
-work queues. It is far above 1 here because PyMatching in Python on a
+work queues. It is above 1 here because PyMatching in Python on a
 small window is slow compared to one microsecond a round; the figure
 itself is this host's, like every tick in the block.
 
@@ -150,7 +150,7 @@ references and moves, because the key `data_movement` in the
 ## Step 4. Open the run folder
 
 ```bash
-ls results/2026-09-10T02-29-33Z-reference
+ls results/2026-09-25T18-03-50Z-reference
 ```
 
 ```
@@ -183,7 +183,7 @@ the csv files the facts.
 columns. The first few:
 
 ```bash
-cut -d, -f1-10 results/2026-09-10T02-29-33Z-reference/sweep.csv
+cut -d, -f1-10 results/2026-09-25T18-03-50Z-reference/sweep.csv
 ```
 
 ```
@@ -201,11 +201,11 @@ shots to make it narrow.
 `collect` also drew a figure. Draw a second one:
 
 ```bash
-decsim plot results/2026-09-10T02-29-33Z-reference --figure stage_breakdown
+decsim plot results/2026-09-25T18-03-50Z-reference --figure stage_breakdown
 ```
 
 ```
-results/2026-09-10T02-29-33Z-reference/stage_breakdown.png
+results/2026-09-25T18-03-50Z-reference/stage_breakdown.png
 ```
 
 `stage_breakdown.png` shows where a window's time went, stage by stage:
@@ -229,7 +229,7 @@ For one round, decsim prints the path itself:
 
 ```bash
 decsim trace follow \
-  results/2026-09-10T02-29-33Z-reference/trace/p0.001_d3_algopymatching_round1us_seed0.trace.json \
+  results/2026-09-25T18-03-50Z-reference/trace/p0.001_d3_algopymatching_round1us_seed0.trace.json \
   --round 1:1
 ```
 
@@ -249,10 +249,10 @@ tick (us)  where                        what                                    
 6.012      Window planner               W0 ready
 6.012      weak_buffer_to_weak_decoder  move, with W0 rounds 1..6                                            0.004     move       44
 6.016      Decoder unit default#0       unit default#0 memory copy                                                     copy       44
-6.016      Decoder unit default#0       residence, unbounded, data ready 6.016, freed at decode done         16.926    copy       44
+6.016      Decoder unit default#0       residence, unbounded, data ready 6.016, freed at decode done         11.548    copy       44
 
 copies 4, references 1 job and 1 hold, moves 3
-longest residence: 16.926 us in Decoder unit default#0 (residence, unbounded, data ready 6.016, freed at decode done)
+longest residence: 11.548 us in Decoder unit default#0 (residence, unbounded, data ready 6.016, freed at decode done)
 longest queue wait: none
 ```
 
@@ -268,7 +268,7 @@ only half the checks have a value to compare against
 round moved into the weak syndrome buffer, the store the decoder reads from, and sat
 there 5 microseconds waiting for the rest of its window. At 6.012 microseconds window 0 had all six of its rounds, so
 all 44 bits moved together into the decoder unit's memory, and the
-decode held that unit for the wall clock PyMatching took, 16.9
+decode held that unit for the wall clock PyMatching took, 11.5
 microseconds on this host.
 
 The `transfer` column is the vocabulary decsim uses for data movement: a
@@ -284,7 +284,7 @@ The same command follows a window instead of a round:
 
 ```bash
 decsim trace follow \
-  results/2026-09-10T02-29-33Z-reference/trace/p0.001_d3_algopymatching_round1us_seed0.trace.json \
+  results/2026-09-25T18-03-50Z-reference/trace/p0.001_d3_algopymatching_round1us_seed0.trace.json \
   --window 1:0
 ```
 

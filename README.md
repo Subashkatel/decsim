@@ -84,6 +84,15 @@ python -m pytest tests
 A test whose optional backend is absent (the `bb-decoders` and Deltakit
 extras) is skipped and says which module it could not import.
 
+The tutorials show what their commands print. The lines of it that
+depend on the config and the seed alone are held to a fresh run by
+`tools/check_tutorial_runs.py`, which needs only the `run` extra and
+takes about five minutes on four cores:
+
+```bash
+python tools/check_tutorial_runs.py
+```
+
 `tools/check.sh` runs the style and structure checks that `STYLE.md`
 describes, with the ruff the `dev` extra installs:
 

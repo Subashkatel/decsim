@@ -338,3 +338,29 @@ def test_the_check_script_runs_the_active_environments_python(tmp_path):
     recorded_text = recorded.read_text()
     assert completed.returncode == 0, completed.stderr
     assert "ruff" in recorded_text
+
+
+def test_the_tutorial_check_finds_counts_on_every_page_it_reads():
+    """A page with no line the check reads would pass it vacuously."""
+    check = _tool("check_tutorial_runs")
+    for tutorial in check.TUTORIALS:
+        path = PACKAGE_ROOT / tutorial.page
+        text = path.read_text()
+        counts = check.COLLECT_LINE.findall(text)
+        assert counts != [], tutorial.page
+
+
+def test_the_tutorial_check_compares_a_csv_block_column_by_column():
+    """The block's own header picks the sweep.csv columns it is held to."""
+    check = _tool("check_tutorial_runs")
+    sweep_rows = [{"distance": "3", "shots": "400", "load": "2.53"}]
+
+    kept = check.block_differences(
+        "page.md", "distance,shots\n3,400", sweep_rows
+    )
+    drifted = check.block_differences(
+        "page.md", "distance,shots\n3,401", sweep_rows
+    )
+
+    assert kept == []
+    assert len(drifted) == 1

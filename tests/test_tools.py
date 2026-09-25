@@ -249,15 +249,19 @@ def _stub_git(tmp_path, status):
 
 
 def _refused_run(tmp_path, status):
-    """The runner started against a tree, with no ALLOW_DIRTY to excuse it."""
+    """The runner started against a tree, with no ALLOW_DIRTY to excuse it.
+
+    No DECSIM_PYTHON is set, so the runner takes the python on PATH,
+    which is the stub.
+    """
     checkout = tmp_path / "checkout"
     checkout.mkdir()
-    stub, _recorded = _stub_python(tmp_path, checkout)
+    _stub_python(tmp_path, checkout)
     _stub_git(tmp_path, status)
     environment = dict(os.environ)
     environment.pop("ALLOW_DIRTY", None)
+    environment.pop("DECSIM_PYTHON", None)
     environment["SLURM_SUBMIT_DIR"] = str(PACKAGE_ROOT)
-    environment["DECSIM_PYTHON"] = str(stub)
     path = environment.get("PATH", "")
     environment["PATH"] = f"{tmp_path}:{path}"
     return subprocess.run(
@@ -297,11 +301,18 @@ def test_the_slurm_runner_refuses_a_tree_git_cannot_read(tmp_path):
 
 
 def test_the_slurm_runner_starts_from_a_clean_tree(tmp_path):
-    """A tree git vouches for runs, and the refusals read only the tree."""
+    """A tree git vouches for runs, on the python of the job's environment.
+
+    The refusals read only the tree, and with DECSIM_PYTHON unset the
+    collect runs on the python on PATH, as a fresh clone's job does.
+    """
     completed = _refused_run(tmp_path, "clean")
 
+    recorded = tmp_path / "argv.txt"
+    recorded_text = recorded.read_text()
     assert completed.returncode == 0, completed.stderr
     assert "dirty: 0" in completed.stdout
+    assert "collect" in recorded_text
 
 
 def test_the_check_script_runs_the_active_environments_python(tmp_path):

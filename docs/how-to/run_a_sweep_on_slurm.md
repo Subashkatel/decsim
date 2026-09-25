@@ -91,8 +91,9 @@ The script's own `#SBATCH` lines are the defaults: one node, one task,
 two cpus, 16 gigabytes, 16 hours, on the `cpu` partition. Override them
 on the `sbatch` command line, or edit the script for your cluster.
 
-The interpreter is `${DECSIM_PYTHON:-.venv/bin/python}`, so a cluster
-whose Python is elsewhere sets `DECSIM_PYTHON` in the environment.
+The interpreter is the `python` of the environment the job starts in,
+which `sbatch` copies from the shell that submits it; `DECSIM_PYTHON`
+names another one.
 
 ## 4. Fold the shards
 

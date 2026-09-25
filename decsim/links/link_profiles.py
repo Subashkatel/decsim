@@ -74,8 +74,8 @@ ESCALATION_PAYLOAD_SOURCE = "EscalatedRegion.wire_bits"
 
 # The two controller-to-store hops carry the packed round at the width
 # it leaves the controller: the detection events where the controller
-# forms them and the raw measurement outcomes where the decoder does
-# (controller.detection_events_formed_at,
+# forms them and the raw measurement outcomes where a later seat does
+# (detection_events.formed_at,
 # controller/round_assembly.py's wire_bits of the fragments that leave).
 ROUND_PAYLOAD_SOURCE = "PackedRound.wire_bits"
 

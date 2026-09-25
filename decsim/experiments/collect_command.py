@@ -70,6 +70,9 @@ def run_experiment(
     """
     config = experiment.load_experiment(config_path)
     run_dir = run_folder.run_dir_for(config, out_dir)
+    if run_folder.is_finished(run_dir):
+        _report_the_finished_folder(run_dir)
+        return run_dir, []
     how_it_ran = {"shard": shard, "shots_per_unit": shots_per_unit}
     tasks = config.tasks()
     started_utc = _start_the_run_folder(config, run_dir, tasks, how_it_ran)
@@ -100,22 +103,45 @@ def _start_the_run_folder(
 ) -> str:
     """Everything a run folder holds before its first shot; the start time."""
     started_utc = run_folder.start_run(config, run_dir, **how_it_ran)
-    _record_the_points(config, run_dir, tasks)
+    _record_the_points(config, run_dir, tasks, **how_it_ran)
     return started_utc
 
 
-def _record_the_points(config, run_dir: Path, tasks: list) -> None:
+def _record_the_points(
+    config, run_dir: Path, tasks: list, shard, shots_per_unit
+) -> None:
     """The maker, and every point's values and workload, before any shot.
 
-    Every shard records every point, so a shard's folder alone says what
-    its sweep was and combine folds the content-named files into one set.
-    Recording builds each point's plan, so a point the build refuses
-    stops the run before any shot.
+    Every shard records every point, with its own units' seeds, so a
+    shard's folder alone says what its sweep was and combine folds the
+    content-named files into one set. Recording builds each point's
+    plan, so a point the build refuses stops the run before any shot.
     """
     run_folder.write_producer(run_dir, config.settings.workload)
-    for task in collect.unique_tasks(tasks):
-        seeds = (0, task.shots)
+    unique = collect.unique_tasks(tasks)
+    units = collect.work_units(unique, shots_per_unit)
+    selected = collect.shard_of(units, shard)
+    for task in unique:
+        seeds = _seeds_of(task, selected)
         run_folder.record_point(run_dir, task, seeds)
+
+
+def _seeds_of(task, units: list) -> list:
+    """The seed ranges of the task's units among these."""
+    ranges = []
+    for unit in units:
+        if unit.task is task:
+            ranges.append((unit.first_seed, unit.seeds))
+    return run_folder.seed_ranges(ranges)
+
+
+def _report_the_finished_folder(run_dir: Path) -> None:
+    """One line for a folder a run already finished, which is left as it is."""
+    print(
+        f"{run_dir} holds a finished run, so this run leaves it as it is; "
+        "name another --out to run the sweep again",
+        file=sys.stderr,
+    )
 
 
 def _report_no_work_unit() -> None:

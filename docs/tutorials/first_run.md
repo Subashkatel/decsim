@@ -173,8 +173,9 @@ trace
 window_samples.csv
 ```
 
-`--out` names the folder, and running the command again writes over
-it. Without `--out`, `collect` writes a new folder named with the UTC time
+`--out` names the folder. A run writes `finished` into it last, and
+running the command again into a finished folder leaves it as it is.
+Without `--out`, `collect` writes a new folder named with the UTC time
 the run started, so no two collects share one.
 
 The folder is written under `results/`, which is output and is not

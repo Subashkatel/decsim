@@ -241,15 +241,15 @@ def write_combined_manifest(
     _write_the_manifest(manifest, run_dir)
 
 
-def record_point(run_dir: Path, task, seeds: Optional[tuple] = None) -> str:
+def record_point(run_dir: Path, task, seeds: Optional[list] = None) -> str:
     """One sweep point's every value and its workload, named by content.
 
     resolved/<id>.json holds the point's metadata, the seeds it ran
-    when they are known, every setting, and the values the build derives
-    from the settings a shot runs (_built_values); inputs/<id>/ holds the
-    workload the point ran as the files row reads it
-    (circuit_frontend.write_workload), with each file's sha256 in
-    hashes.json, so a rerun needs no maker installed. id is the task's
+    when they are known (seed_ranges), every setting, and the values
+    the build derives from the settings a shot runs (_built_values);
+    inputs/<id>/ holds the workload the point ran as the files row
+    reads it (circuit_frontend.write_workload), with each file's sha256
+    in hashes.json, so a rerun needs no maker installed. id is the task's
     strong id, the name the collect gives it. Returns it.
     """
     point_id = task.strong_id()
@@ -303,18 +303,44 @@ def mark_finished(run_dir: Path) -> None:
     finished_path.write_text(finished_line)
 
 
+def is_finished(run_dir: Path) -> bool:
+    """Whether a run into this folder ended, which a rerun then skips."""
+    finished_path = Path(run_dir) / FINISHED_FILE
+    return finished_path.exists()
+
+
+def seed_ranges(ranges: list) -> list:
+    """Seed ranges as [first, how many], in order, touching ones joined.
+
+    A combine into a folder that already holds the fold sees the same
+    seeds again, so ranges that overlap are joined too.
+    """
+    joined = []
+    for first, count in sorted(ranges):
+        if joined and sum(joined[-1]) >= first:
+            last = joined[-1]
+            last_end = sum(last)
+            new_end = first + count
+            end = max(last_end, new_end)
+            last[1] = end - last[0]
+            continue
+        joined.append([first, count])
+    return joined
+
+
 def copy_point_records(run_dirs: list, out_dir: Path) -> None:
     """The folded folders' resolved/, inputs/ and producer.json, in one.
 
     A point's files are named by its content, so the same point in two
-    shards is the same file, and the union is every point's.
+    shards is the same file, and the union is every point's. Its record
+    holds the seeds every folder ran of it.
     """
     for run_dir_name in run_dirs:
         run_dir = Path(run_dir_name)
-        for name in (RESOLVED_FOLDER, INPUTS_FOLDER):
-            source = run_dir / name
-            target = out_dir / name
-            shutil.copytree(source, target, dirs_exist_ok=True)
+        _fold_resolved(run_dir, out_dir)
+        source = run_dir / INPUTS_FOLDER
+        target = out_dir / INPUTS_FOLDER
+        shutil.copytree(source, target, dirs_exist_ok=True)
         producer_path = run_dir / PRODUCER_FILE
         if producer_path.exists():
             target = out_dir / PRODUCER_FILE
@@ -346,6 +372,23 @@ def _copy_the_config_chain(config_files: tuple, run_dir: Path) -> None:
         target = config_dir / place
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
+
+
+def _fold_resolved(run_dir: Path, out_dir: Path) -> None:
+    """One folder's point records into the fold's, their seeds joined."""
+    target_dir = out_dir / RESOLVED_FOLDER
+    target_dir.mkdir(parents=True, exist_ok=True)
+    paths = (run_dir / RESOLVED_FOLDER).glob("*.json")
+    for path in sorted(paths):
+        record_text = path.read_text()
+        record = json.loads(record_text)
+        target = target_dir / path.name
+        if target.exists():
+            folded_text = target.read_text()
+            folded = json.loads(folded_text)
+            ranges = folded["seeds"] + record["seeds"]
+            record["seeds"] = seed_ranges(ranges)
+        write_json(target, record)
 
 
 def _chain_folder(config_files: tuple) -> Path:

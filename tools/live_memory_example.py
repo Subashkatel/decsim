@@ -57,7 +57,7 @@ def main() -> None:
         "distance": parameters["distance"],
         "round_period_microseconds": parameters["round_period_microseconds"],
     }
-    seeds = (arguments.seed, 1)
+    seeds = [(arguments.seed, 1)]
     task = collect.Task(settings, 1, metadata)
     run_folder.record_point(arguments.output, task, seeds)
     result = machine.run()

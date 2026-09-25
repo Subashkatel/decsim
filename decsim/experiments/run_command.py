@@ -46,7 +46,7 @@ def run_one_shot(
     run_dir = run_folder.run_dir_for(config, out_dir)
     started_utc = run_folder.start_run(config, run_dir)
     run_folder.write_producer(run_dir, settings.workload)
-    run_folder.record_point(run_dir, task, (seed, 1))
+    run_folder.record_point(run_dir, task, [(seed, 1)])
     result = machine.run()
     label = measure.shot_label(settings, seed)
     write_shot(machine, settings, run_dir, label, result)

@@ -307,7 +307,7 @@ def test_a_run_folder_holds_the_points_values_workload_and_maker(tmp_path):
     producer = json.loads(producer_text)
 
     assert "terminal status: complete" in lines[2]
-    assert resolved["seeds"] == [0, 1]
+    assert resolved["seeds"] == [[0, 1]]
     assert resolved["built"]["commit_rounds"] == 3
     assert resolved["settings"]["qpu"]["distance"] == 3
     assert hashes == _hashes_of(
@@ -414,6 +414,26 @@ def test_a_point_recorded_again_hashes_only_its_inputs(tmp_path):
     assert sorted(hashes) == ["operation_1.stim", "operations.json"]
 
 
+def test_a_sweep_rerun_into_a_finished_folder_leaves_it_as_it_is(
+    tmp_path, capsys
+):
+    """A Slurm array rerun runs again only the shards that did not finish."""
+    config_path = yaml_configs.write_config(tmp_path, {})
+    out_dir = tmp_path / "out"
+    command.main(["collect", str(config_path), "--out", str(out_dir)])
+    sweep_path = out_dir / "sweep.csv"
+    first_status = sweep_path.stat()
+    capsys.readouterr()
+
+    command.main(["collect", str(config_path), "--out", str(out_dir)])
+    printed = capsys.readouterr()
+
+    assert (out_dir / "finished").exists()
+    second_status = sweep_path.stat()
+    assert second_status.st_mtime_ns == first_status.st_mtime_ns
+    assert "holds a finished run" in printed.err
+
+
 def test_a_combined_folder_holds_every_shards_points(tmp_path):
     """A point's records are named by content, so the union is every point."""
     config_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)
@@ -430,6 +450,47 @@ def test_a_combined_folder_holds_every_shards_points(tmp_path):
     assert len(resolved) == 4
     assert (combined_dir / "producer.json").exists()
     assert (combined_dir / "finished").exists()
+
+
+def _seeds_of_the_one_point(run_dir):
+    resolved_dir = run_dir / "resolved"
+    resolved_path = _one_file(resolved_dir, "*.json")
+    resolved_text = resolved_path.read_text()
+    resolved = json.loads(resolved_text)
+    return resolved["seeds"]
+
+
+def test_a_shards_record_holds_the_seeds_it_ran(tmp_path):
+    """Each shard records its own seeds, and the fold records all of them."""
+    four_shots = {"sweep": [dict(yaml_configs.MINIMAL_CONFIG["sweep"][0])]}
+    four_shots["sweep"][0]["shots"] = 4
+    config_path = yaml_configs.write_config(tmp_path, four_shots)
+    first_dir = tmp_path / "first"
+    second_dir = tmp_path / "second"
+    combined_dir = tmp_path / "combined"
+    _collect_one_shard(config_path, first_dir, "0/2", 2)
+    _collect_one_shard(config_path, second_dir, "1/2", 2)
+    _combined(first_dir, second_dir, combined_dir)
+
+    assert _seeds_of_every_shot(second_dir) == ["2", "3"]
+    assert _seeds_of_the_one_point(first_dir) == [[0, 2]]
+    assert _seeds_of_the_one_point(second_dir) == [[2, 2]]
+    assert _seeds_of_the_one_point(combined_dir) == [[0, 4]]
+
+
+def test_a_second_combine_into_the_same_folder_keeps_its_seeds(tmp_path):
+    four_shots = {"sweep": [dict(yaml_configs.MINIMAL_CONFIG["sweep"][0])]}
+    four_shots["sweep"][0]["shots"] = 4
+    config_path = yaml_configs.write_config(tmp_path, four_shots)
+    first_dir = tmp_path / "first"
+    second_dir = tmp_path / "second"
+    combined_dir = tmp_path / "combined"
+    _collect_one_shard(config_path, first_dir, "0/2", 2)
+    _collect_one_shard(config_path, second_dir, "1/2", 2)
+    _combined(first_dir, second_dir, combined_dir)
+    _combined(first_dir, second_dir, combined_dir)
+
+    assert _seeds_of_the_one_point(combined_dir) == [[0, 4]]
 
 
 def test_a_manifest_names_every_installed_package(tmp_path):

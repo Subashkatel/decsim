@@ -331,7 +331,7 @@ def _start_the_run_folder(arguments, settings) -> str:
         "distance": arguments.distance,
         "round_period_microseconds": arguments.period_microseconds,
     }
-    seeds = (arguments.seed, 1)
+    seeds = [(arguments.seed, 1)]
     task = collect.Task(settings, 1, metadata)
     run_folder.record_point(folder, task, seeds)
     return started_utc

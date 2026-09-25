@@ -282,3 +282,20 @@ def test_a_bit_error_rate_of_one_is_refused():
 
     with pytest.raises(ValueError, match="below 1"):
         reliable_channel.ReliableChannel.Settings.from_yaml(section, "path")
+
+
+def test_a_reliable_card_on_pcie_frames_is_refused():
+    """PCIe recovers by its data link replay, which this row is not."""
+    section = {
+        "framing": {"kind": "pcie_tlp", "max_payload_bytes": 256},
+        "receive_buffer_frames": 16,
+        "credit_latency_cycles": 2,
+        "window_packets": 16,
+        "ack_every_packets": 66,
+        "retransmit_timeout_cycles": 200,
+        "bit_error_rate": 0.0,
+    }
+    settings_class = reliable_channel.ReliableChannel.Settings
+
+    with pytest.raises(ValueError, match="pcie_tlp runs on the credit row"):
+        settings_class.from_yaml(section, "p")

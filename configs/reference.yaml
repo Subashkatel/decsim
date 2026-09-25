@@ -656,8 +656,9 @@ links:                             # a kind, then one card per path; null = the
                                    #       n octets in n/8 + 1 66-bit blocks
                                    #       (SP011); {kind: pcie_tlp,
                                    #       max_payload_bytes: MPS} 24 bytes on
-                                   #       every TLP (pcie-bench); {kind:
-                                   #       roce_v2, path_mtu_bytes: M} and
+                                   #       every TLP (pcie-bench), on the
+                                   #       credit row only; {kind: roce_v2,
+                                   #       path_mtu_bytes: M} and
                                    #       {kind: ethernet_udp, mtu_bytes: M}
                                    #       with their headers (Linux rxe,
                                    #       pcie-bench eth.py). Line-coded rows

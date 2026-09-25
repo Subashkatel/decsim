@@ -25,9 +25,11 @@ transcribed step by step:
 - the retransmit timer starts when a packet is sent and none is
   running, restarts at every acknowledgement while packets are out, and
   on expiry sends the requester back to the first unacknowledged PSN
-  (rxe_req.c:588-590, 684-692; rxe_comp.c:616-636); it stops when every
-  packet is acknowledged, where rxe leaves it pending with a deadline a
-  later send inherits; the retries are unlimited, rxe's retry_cnt of 7.
+  (rxe_req.c:588-590, 684-692; rxe_comp.c:616-636), except at a NAK
+  that starts a retry, which leaves it running (rxe_comp.c:668-669);
+  it stops when every packet is acknowledged, where rxe leaves it
+  pending with a deadline a later send inherits; the retries never run
+  out, where rxe gives up after retry_cnt, at most 7, timeouts.
 
 Going back resends from the first unacknowledged PSN in order,
 qp->req.psn = qp->comp.psn (rxe_req.c:38-53), so every message is
@@ -83,6 +85,8 @@ class ReliableChannel(channel_module.Channel, seeding._RandomSeedConsumer):
         ) -> "ReliableChannel.Settings":
             """The keys of a card's protocol mapping."""
             credit_keys = credit_channel.read_credit_keys(section, path_name)
+            framing = credit_keys[0]
+            _refuse_pcie_framing(framing, path_name)
             connection_keys = _read_connection_keys(section, path_name)
             return cls(*credit_keys, *connection_keys)
 
@@ -420,6 +424,24 @@ class _TimerState:
     """The retransmit timer: its queued expiry, or None when stopped."""
 
     expiry: Optional[decsim.engine.Event] = None
+
+
+def _refuse_pcie_framing(
+    framing: link_settings.FramingSettings, path_name: str
+) -> None:
+    """PCIe TLPs recover by the data link layer's replay, not by this row.
+
+    The replay needs the PCIe base specification's data link layer,
+    which is not in hand, and this row is RoCE's go-back-N, so a
+    pcie_tlp framing runs on the credit row only.
+    """
+    if framing.kind != "pcie_tlp":
+        return
+    raise ValueError(
+        f"links.{path_name}.protocol runs the reliable row on pcie_tlp "
+        f"frames; PCIe's own replay is not modelled, so pcie_tlp runs on "
+        f"the credit row"
+    )
 
 
 def _read_connection_keys(section: Mapping, path_name: str) -> tuple:

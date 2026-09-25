@@ -32,7 +32,7 @@ This lesson's config ships with decsim, as `configs/two_tiers.yaml`.
 Both tiers are priced by cards rather than measured, so every tick
 below is the same on your machine as on this page's.
 
-```yaml
+```yaml configs/two_tiers.yaml
 # Two tiers on priced cards, so the whole switching loop is
 # deterministic and the same on every host. The weak card is one
 # syndrome generation time at this sweep's round period and the strong
@@ -57,8 +57,8 @@ links:
   decoder_to_decoder:  {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
   weak_decoder_to_frame: {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
   strong_decoder_to_frame:  {latency_cycles: 1, clock: room, bits_per_cycle: null}
-  frame_to_controller:  null
-  controller_to_qpu:  null
+  frame_to_controller:  {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
+  controller_to_qpu:  {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
 
 weak_decoder:
   kind: 1.0                         # one tau_gen

@@ -33,6 +33,9 @@ a page is enforced here.
     container image, the container wrapper around its interpreter, or the
     .pydeps dependency folder. A portable setup (a venv, Apptainer in
     general) is a page's to describe.
+11. A yaml block whose fence names a config (```yaml configs/x.yaml) is
+    that file, byte for byte, and every yaml block of a tutorial names
+    one, because a tutorial's results come from the file, not the page.
 """
 
 import ast
@@ -74,6 +77,11 @@ NAMED_PYTHON = re.compile(r"Python (3\.\d+)\s+or\s+newer")
 PINNED_EXTRA = re.compile(r"^(?:run|test|dev) = \[(.*)\]$", re.MULTILINE)
 REQUIREMENT_NAME = re.compile(r'"([A-Za-z0-9_.-]+)')
 PINNED_NAME = re.compile(r"^([A-Za-z0-9_.-]+)==", re.MULTILINE)
+LISTING_FLAGS = re.MULTILINE | re.DOTALL
+CONFIG_LISTING = re.compile(
+    r"^```yaml (configs/\S+\.yaml)\n(.*?)^```$", LISTING_FLAGS
+)
+YAML_FENCE = re.compile(r"^```yaml(.*)$", re.MULTILINE)
 PRIVATE_ENVIRONMENT = re.compile(
     r"qlx|container wrapper|\.pydeps", re.IGNORECASE
 )
@@ -603,3 +611,27 @@ def _markdown_pages() -> tuple:
         if path.suffix == ".md":
             pages.append(path)
     return tuple(pages)
+
+
+def test_every_config_listing_in_the_docs_is_the_file_it_names():
+    """A page that copies a config shows the one its results come from."""
+    for page in _markdown_pages():
+        text = page.read_text()
+        for name, listing in CONFIG_LISTING.findall(text):
+            config = CHECKOUT / name
+            contents = config.read_text()
+            assert listing == contents, (
+                f"{page.name} lists {name}, and the file differs from it"
+            )
+
+
+def test_every_yaml_block_of_a_tutorial_names_its_config():
+    """An unnamed listing would escape the check above."""
+    tutorials = DOCS / "tutorials"
+    pages = tutorials.glob("*.md")
+    for page in sorted(pages):
+        text = page.read_text()
+        for named in YAML_FENCE.findall(text):
+            assert named.startswith(" configs/"), (
+                f"{page.name} has a yaml block naming no config"
+            )

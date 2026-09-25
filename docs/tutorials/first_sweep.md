@@ -20,7 +20,7 @@ This lesson's config ships with decsim, as
 `configs/my_first_sweep.yaml`, so you can read it here rather than
 type it:
 
-```yaml
+```yaml configs/my_first_sweep.yaml
 # My first sweep: three distances at one physical error rate.
 extends: weak_decoder_baseline.yaml
 

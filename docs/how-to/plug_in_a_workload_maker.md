@@ -47,12 +47,12 @@ workload:
 ```
 
 The module is imported by name, so it needs to be importable where
-decsim runs (installed, or on `PYTHONPATH`). A module that does not
-import or a function that is not there is refused with one sentence
-when the point calls the maker, and an argument the function does not
-take, one it needs and is not given, or a sweep value written as an
-argument stops the call with Python's own error, which names the
-argument.
+decsim runs (installed, or on `PYTHONPATH`). `decsim show` builds the
+first point, so it stops where a run would: a module that does not
+import or a function that is not there is refused with one sentence,
+and an argument the function does not take, one it needs and is not
+given, or a sweep value written as an argument stops the call with
+Python's own error, which names the argument.
 
 The makers decsim ships are named the same way, from
 `decsim/producers.py`: `decsim.producers:memory_circuit` (Stim's

@@ -17,6 +17,7 @@ import decsim.build.escalation as escalation_build
 import decsim.collect as collect
 import decsim.decoders.settings as decoder_settings
 import decsim.experiments.refusal as refusal
+import decsim.machine as machine_module
 import decsim.settings as machine_settings
 
 _THIS_FILE = Path(__file__)
@@ -146,6 +147,31 @@ class ExperimentConfig:
         return dataclasses.replace(
             settings, qpu=qpu, workload=workload, escalation=escalation
         )
+
+    def first_point_settings(self) -> machine_settings.MachineSettings:
+        """The machine at the first point of the first sweep block."""
+        block = self.sweep[0]
+        return self.point_settings(
+            physical_error_probability=block.physical_error_probabilities[0],
+            distance=block.distances[0],
+            round_period_microseconds=block.round_periods_microseconds[0],
+        )
+
+    def built_machine(
+        self, settings: machine_settings.MachineSettings, seed: int
+    ) -> machine_module.Machine:
+        """The machine the settings build, a build refusal one sentence.
+
+        Machine.build refuses rows it cannot wire together with a
+        ValueError (STYLE.md rule 4); from a yaml that is the file's
+        input refused, so `decsim run` and `decsim show`, which both
+        build the first point, report it as one sentence naming the file.
+        """
+        try:
+            return machine_module.Machine.build(settings, seed)
+        except ValueError as refused:
+            path = self.config_files[0]
+            raise refusal.RefusalError(f"{path}: {refused}") from refused
 
     def _workload_at(self, sweep_values: dict):
         """The workload section at one point, a maker's refusal one line."""

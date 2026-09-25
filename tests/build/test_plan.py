@@ -113,6 +113,29 @@ def _live_fragments_workload():
     return section.running(workload)
 
 
+@pytest.mark.parametrize(
+    "kind, sentence",
+    [
+        ("recorded_stim", "required positional arguments: 'measurements'"),
+        ("streaming_stim", "required positional argument: 'programs'"),
+    ],
+)
+def test_a_source_the_workload_cannot_fill_stops_its_call(kind, sentence):
+    """Python's own call names the argument the source is not given."""
+    source = qpu_settings.QpuSettings(kind=kind, distance=3)
+
+    with pytest.raises(TypeError, match=sentence):
+        _plan(qpu=source)
+
+
+def test_live_fragments_under_a_finite_circuit_source_stop_its_call():
+    source = qpu_settings.QpuSettings(kind="stim_device", distance=3)
+    workload = _live_fragments_workload()
+
+    with pytest.raises(TypeError, match="unexpected keyword argument"):
+        _plan(qpu=source, workload=workload)
+
+
 def test_live_fragments_build_the_streaming_source_from_a_yaml_kind():
     source = qpu_settings.QpuSettings(kind="streaming_stim", distance=3)
     workload = _live_fragments_workload()

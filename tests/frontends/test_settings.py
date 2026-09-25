@@ -119,6 +119,46 @@ def test_a_maker_that_returns_no_workload_is_refused_at_the_point(
         _point(config_path)
 
 
+@pytest.mark.parametrize(
+    "function, sentence",
+    [
+        ("decsim.no_such_module:maker", "No module named 'decsim.no_such"),
+        ("decsim.producers:no_such_maker", "no attribute 'no_such_maker'"),
+    ],
+)
+def test_a_maker_that_is_not_there_is_refused_at_the_point(
+    tmp_path, function, sentence
+):
+    workload = _producer(function, {})
+    config_path = yaml_configs.write_config(tmp_path, {"workload": workload})
+
+    with pytest.raises(ValueError, match=sentence):
+        _point(config_path)
+
+
+@pytest.mark.parametrize(
+    "arguments, sentence",
+    [
+        (
+            {"code_task": "x", "rounds_per_shot": 3, "colour": 1},
+            "got an unexpected keyword argument 'colour'",
+        ),
+        ({"code_task": "x"}, "missing 1 required positional argument"),
+        (
+            {"code_task": "x", "rounds_per_shot": 3, "distance": 5},
+            "got multiple values for keyword argument 'distance'",
+        ),
+    ],
+)
+def test_a_bad_argument_stops_the_makers_call(tmp_path, arguments, sentence):
+    """Python's own call names the argument; decsim adds no check."""
+    workload = _producer("decsim.producers:memory_circuit", arguments)
+    config_path = yaml_configs.write_config(tmp_path, {"workload": workload})
+
+    with pytest.raises(TypeError, match=sentence):
+        _point(config_path)
+
+
 def test_a_kind_off_the_table_is_refused_naming_the_rows(tmp_path):
     """The table's own refusal, at the yaml boundary."""
     workload = {"kind": "memory_circuit", "rounds_per_shot": 6}

@@ -130,7 +130,11 @@ def _combine(argv: list) -> None:
 
 
 def _show(argv: list) -> None:
-    """What one yaml resolves to, before anything runs."""
+    """What one yaml resolves to, before anything runs.
+
+    The first point's machine is built and not run, so show refuses
+    whatever `decsim run` would refuse.
+    """
     import argparse
 
     import decsim.experiments.experiment as experiment
@@ -139,6 +143,8 @@ def _show(argv: list) -> None:
     parser.add_argument("config", help="the experiment yaml to resolve")
     parsed = parser.parse_args(argv)
     config = experiment.load_experiment(parsed.config)
+    first_point = config.first_point_settings()
+    config.built_machine(first_point, 0)
     lines = experiment.resolved_description(config)
     text = "\n".join(lines)
     print(text)

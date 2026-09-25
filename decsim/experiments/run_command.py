@@ -16,7 +16,6 @@ from typing import Optional
 
 import decsim.experiments.experiment as experiment
 import decsim.experiments.measure as measure
-import decsim.experiments.refusal as refusal
 import decsim.experiments.run_folder as run_folder
 import decsim.machine as machine_module
 import decsim.records.results as result_records
@@ -38,7 +37,7 @@ def run_one_shot(
     asks for neither writes no folder at all.
     """
     config = experiment.load_experiment(config_path)
-    settings = _first_point_settings(config)
+    settings = config.first_point_settings()
     settings = _with_observation(settings, log, trace)
     writes_files = settings.observation.writes_log
     if settings.observation.writes_trace:
@@ -46,7 +45,7 @@ def run_one_shot(
     run_dir = None
     if writes_files:
         run_dir = run_folder.run_dir_for(config, out_dir)
-    machine = _built_machine(settings, seed, config_path)
+    machine = config.built_machine(settings, seed)
     result = machine.run()
     _write_files(machine, settings, run_dir, seed)
     return _result_lines(config, settings, seed, result, run_dir)
@@ -105,31 +104,6 @@ def _parsed(argv: list) -> _Arguments:
         out=parsed.out,
         log=parsed.log,
         trace=parsed.trace,
-    )
-
-
-def _built_machine(
-    settings: machine_settings.MachineSettings, seed: int, config_path
-) -> machine_module.Machine:
-    """The machine, or the build's refusal as one sentence naming the yaml.
-
-    A row that refuses its settings at build raises ValueError (STYLE.md
-    rule 4), which is the user's mistake, so it reaches the command as
-    the experiments layer's refusal rather than as a traceback.
-    """
-    try:
-        return machine_module.Machine.build(settings, seed)
-    except ValueError as refused:
-        raise refusal.RefusalError(f"{config_path}: {refused}") from refused
-
-
-def _first_point_settings(config) -> machine_settings.MachineSettings:
-    """The machine at the first point of the first sweep block."""
-    block = config.sweep[0]
-    return config.point_settings(
-        physical_error_probability=block.physical_error_probabilities[0],
-        distance=block.distances[0],
-        round_period_microseconds=block.round_periods_microseconds[0],
     )
 
 

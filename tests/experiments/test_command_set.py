@@ -161,6 +161,46 @@ def test_show_lists_every_sections_kind_of_every_shipped_config():
         assert "trace: " in text
 
 
+@pytest.mark.parametrize(
+    "qpu_kind, sentence",
+    [
+        ("recorded_stim", "required positional arguments: 'measurements'"),
+        ("streaming_stim", "required positional argument: 'programs'"),
+    ],
+)
+@pytest.mark.parametrize("verb", ["show", "run"])
+def test_show_and_run_stop_at_a_source_the_yaml_cannot_build(
+    tmp_path, verb, qpu_kind, sentence
+):
+    """The first point's machine is built, so show stops where run would."""
+    qpu = {"qpu": {"kind": qpu_kind}}
+    config_path = yaml_configs.write_config(tmp_path, qpu)
+
+    with pytest.raises(TypeError, match=sentence):
+        command.main([verb, str(config_path)])
+
+
+@pytest.mark.parametrize("verb", ["show", "run"])
+def test_show_and_run_refuse_a_maker_that_is_not_there_in_one_line(
+    tmp_path, capsys, verb
+):
+    """The first point makes the workload, so show refuses what run would."""
+    workload = {
+        "kind": "producer",
+        "function": "decsim.producers:no_such_maker",
+        "arguments": {},
+    }
+    config_path = yaml_configs.write_config(tmp_path, {"workload": workload})
+
+    with pytest.raises(SystemExit) as stopped:
+        command.main([verb, str(config_path)])
+    printed = capsys.readouterr()
+
+    assert stopped.value.code == 1
+    assert printed.err.count("\n") == 1
+    assert "names no maker" in printed.err
+
+
 def test_show_names_the_fabric_card_the_run_resolved_to():
     """The card is one line, because every hop on it is priced.
 

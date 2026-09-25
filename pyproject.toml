@@ -40,6 +40,8 @@ deltakit-compile = [
 # beliefmatching, qLDPC's sliding windows), at the versions it passes on;
 # the tests cite beliefmatching's and qLDPC's source lines at these.
 test = ["pytest==9.1.1", "sinter==1.16.0", "beliefmatching==0.2.0", "qldpc==0.3.3"]
+# The style gate tools/check.sh runs, at the ruff whose rules STYLE.md reads.
+dev = ["ruff==0.16.5"]
 bb-decoders = ["quits==1.1.0", "relay-bp==0.2.2", "tesseract-decoder==0.1.1.dev20260802231159"]
 
 # Flat layout: the decsim/ package sits at the repo root. Discover it and every

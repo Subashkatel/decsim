@@ -77,4 +77,9 @@ A test whose optional backend is absent (the `bb-decoders` and Deltakit
 extras) is skipped and says which module it could not import.
 
 `tools/check.sh` runs the style and structure checks that `STYLE.md`
-describes.
+describes, with the ruff the `dev` extra installs:
+
+```bash
+python -m pip install -e ".[run,test,dev]"
+tools/check.sh
+```

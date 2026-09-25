@@ -79,8 +79,7 @@ shows the shape.
 ## 4. Run the checks
 
 ```bash
-DECSIM_PYTHON=/path/to/decsim/.venv/bin/python \
-DECSIM_PYDEPS=/path/to/decsim/.pydeps tools/check.sh
+tools/check.sh
 python -m pytest tests
 ```
 

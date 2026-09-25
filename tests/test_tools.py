@@ -19,6 +19,7 @@ TESTS_PATH = TESTS_FILE.resolve()
 PACKAGE_ROOT = TESTS_PATH.parent.parent
 TOOLS = PACKAGE_ROOT / "tools"
 SLURM_RUNNER = PACKAGE_ROOT / "slurm" / "slurm_run.sh"
+CHECK_SCRIPT = TOOLS / "check.sh"
 
 
 def _tool(name: str):
@@ -301,3 +302,28 @@ def test_the_slurm_runner_starts_from_a_clean_tree(tmp_path):
 
     assert completed.returncode == 0, completed.stderr
     assert "dirty: 0" in completed.stdout
+
+
+def test_the_check_script_runs_the_active_environments_python(tmp_path):
+    """With DECSIM_PYTHON unset, check.sh runs the python on PATH.
+
+    A fresh clone has no .venv of its own, so a default naming one
+    refused to start in every environment but the maintainer's.
+    """
+    _stub, recorded = _stub_python(tmp_path)
+    environment = dict(os.environ)
+    environment.pop("DECSIM_PYTHON", None)
+    environment.pop("DECSIM_PYDEPS", None)
+    path = environment.get("PATH", "")
+    environment["PATH"] = f"{tmp_path}:{path}"
+
+    completed = subprocess.run(
+        ["bash", str(CHECK_SCRIPT), "tools/check.sh"],
+        capture_output=True,
+        text=True,
+        env=environment,
+    )
+
+    recorded_text = recorded.read_text()
+    assert completed.returncode == 0, completed.stderr
+    assert "ruff" in recorded_text

@@ -512,8 +512,7 @@ def _switching_config(
     if threshold_source is not None:
         escalation["threshold_source"] = threshold_source
     weak_decoder = _weak_unit()
-    workload = dict(yaml_configs.MINIMAL_CONFIG["workload"])
-    workload["rounds_per_shot"] = 9
+    workload = yaml_configs.memory_workload(9)
     sweep_point = {
         "physical_error_probability": [0.008],
         "distance": [3],

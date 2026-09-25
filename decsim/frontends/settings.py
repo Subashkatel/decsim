@@ -1,14 +1,24 @@
-"""The workload settings: what the machine runs, and for how many rounds."""
+"""The workload settings: what the machine runs, and for how many rounds.
+
+A yaml names what makes its workload (WORKLOADS, below): a maker
+function with its arguments (producer), or the maker's two outputs read
+from disk (files). A maker runs once per sweep point (at_point) and its
+records.workload.Workload is lowered into the operations the machine
+issues (circuit_frontend.lowered); a Python caller hands the same
+fields in directly.
+"""
 
 import dataclasses
+import inspect
+import pkgutil
 from collections.abc import Mapping
 from typing import Any, Optional
 
 import stim
 
+import decsim.frontends.circuit_frontend as circuit_frontend
 import decsim.ports as ports
-import decsim.qpu.round_policies as round_policies
-import decsim.records.program as program_records
+import decsim.records.workload as workload_records
 import decsim.tables as tables
 import decsim.windows.built_window_models as built_window_models
 
@@ -42,7 +52,7 @@ class RoundsPerShot:
             per_distance = int(value[:-1])
             return cls(per_distance=per_distance)
         raise ValueError(
-            "workload.rounds_per_shot is a round count of at least 1 or "
+            "rounds_per_shot is a round count of at least 1 or "
             f"'<n>d' (n rounds per unit of distance, n at least 1), got "
             f"{value!r}"
         )
@@ -61,32 +71,33 @@ class RoundsPerShot:
 
 @dataclasses.dataclass(frozen=True)
 class WorkloadSettings:
-    """The yaml's `workload` section.
+    """The yaml's `workload` section, and the program it lowers to.
 
-    Table rows (WORKLOADS, below): memory_circuit (Stim's generated
-    memory circuit for the code task, one physical error probability on
-    all four of Stim's noise channels, rounds_per_shot rounds, both keys
-    its own Settings), memory_patches (patch_count such circuits, one
-    operation per patch, at once), circuit_list (a Python-built operation
-    list).
-    The other fields are Python-only: the decode owners, the dynamic
-    streams and protected regions of a feedback workload, the round policy
-    (GateRounds by default; the memory circuit fixes its rounds and
-    refuses one), the feedback boundary mode every operation takes
-    unless it names its own, and the window error models a task built
-    once for all of its shots (built_window_models; a Machine built
-    alone gets none and builds its own). row_settings is the row's own
-    Settings, read from the section's keys beside kind, or None for a
-    row that declares none.
+    kind names the row that makes the workload (WORKLOADS, below):
+    producer (a maker function named module:function, and its
+    arguments) or files (a maker's two outputs read from disk). None is
+    a Python-built workload, its fields handed in directly. A row's
+    workload is made at each sweep point (at_point) and lowered into
+    the fields below: the operations, the dynamic streams and protected
+    regions of a feedback workload, the round policy (GateRounds when
+    none is given), and physical_circuits, the physical circuit each
+    stream key runs, which a circuit source is built with (build/plan.py
+    _syndrome_source). The other fields are Python-only: the decode
+    owners, the feedback boundary mode every operation takes unless it
+    names its own, and the window error models a task built once for
+    all of its shots (built_window_models; a Machine built alone gets
+    none and builds its own). row_settings is the row's own Settings,
+    read from the section's keys beside kind.
     """
 
-    kind: str = "circuit_list"
+    kind: Optional[str] = None
     physical_error_probability: Optional[float] = None
     operations: tuple = ()
     decode_operations: Optional[tuple] = None
     dynamic_streams: tuple = ()
     protected_regions: tuple = ()
     rounds_policy: Optional[ports.RoundsPolicy] = None
+    physical_circuits: Mapping = dataclasses.field(default_factory=dict)
     feedback_boundary_mode: str = "trailing_buffer"
     built_models: Optional[built_window_models.BuiltWindowModels] = None
     # the row's own Settings record, opaque to the section
@@ -101,18 +112,93 @@ class WorkloadSettings:
             )
 
     @classmethod
-    def from_yaml(cls, section: Mapping) -> "WorkloadSettings":
+    def from_yaml(cls, section: Mapping, base_directory) -> "WorkloadSettings":
         """The `workload` section: the kind's row reads its own keys.
 
-        The yaml names its kind: the dataclass's default, circuit_list, is
-        for Python-built runs, and a section without one is refused.
+        base_directory is the yaml's folder, which a row's relative
+        paths are read from.
         """
         kind = section.get("kind")
         row = tables.row(WORKLOADS, "workload.kind", kind)
         row_settings = tables.row_settings(
-            row, "workload", section, WORKLOAD_KEYS
+            row, "workload", section, WORKLOAD_KEYS, base_directory
         )
         return cls(kind=kind, row_settings=row_settings)
+
+    def at_point(self, sweep_values: Mapping) -> "WorkloadSettings":
+        """The section at one sweep point, its row's workload made there."""
+        probability = sweep_values["physical_error_probability"]
+        placed = dataclasses.replace(
+            self, physical_error_probability=probability
+        )
+        row = tables.row(WORKLOADS, "workload.kind", self.kind)
+        workload = row.workload(self.row_settings, sweep_values)
+        return placed.running(workload)
+
+    def running(
+        self, workload: workload_records.Workload
+    ) -> "WorkloadSettings":
+        """This section running a maker's workload, lowered for the machine."""
+        program = circuit_frontend.lowered(workload)
+        return dataclasses.replace(
+            self,
+            operations=program.operations,
+            dynamic_streams=program.dynamic_streams,
+            protected_regions=program.protected_regions,
+            rounds_policy=program.rounds_policy,
+            physical_circuits=program.physical_circuits,
+        )
+
+
+class ProducerWorkload:
+    """The producer row: a maker function and the arguments it is called with.
+
+    function is module:function, the form Python's own entry points
+    name an object in, resolved by pkgutil.resolve_name (CPython
+    Lib/pkgutil.py), and Hydra's
+    instantiate calls a named target with its keyword arguments
+    (hydra/_internal/instantiate/_instantiate2.py:76-82); decsim takes
+    that shape and neither framework. The maker is called once per
+    sweep point with its yaml arguments and the sweep values its
+    parameters name, and returns a records.workload.Workload.
+    """
+
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The maker's name and its own arguments."""
+
+        function: str
+        arguments: Mapping
+
+        @classmethod
+        def from_yaml(
+            cls, section: Mapping, base_directory
+        ) -> "ProducerWorkload.Settings":
+            """The function and its arguments, as the yaml writes them."""
+            del base_directory
+            arguments = section.get("arguments", {})
+            return cls(function=section["function"], arguments=arguments)
+
+    @staticmethod
+    def workload(
+        settings: "ProducerWorkload.Settings", sweep_values: Mapping
+    ) -> workload_records.Workload:
+        """The maker's workload at one sweep point."""
+        maker = _maker(settings.function)
+        signature = inspect.signature(maker)
+        named = {}
+        for name, value in sweep_values.items():
+            if name in signature.parameters:
+                named[name] = value
+        made = maker(**settings.arguments, **named)
+        if isinstance(made, workload_records.Workload):
+            return made
+        made_type = type(made)
+        raise ValueError(
+            f"workload.function {settings.function} returned a "
+            f"{made_type.__name__}; a maker returns a "
+            "decsim.records.workload.Workload"
+        )
 
 
 def memory_circuit(
@@ -133,168 +219,17 @@ def memory_circuit(
     )
 
 
-class MemoryCircuitWorkload:
-    """The memory_circuit row: Stim's generated memory circuit.
+def _maker(function: str) -> Any:
+    """The callable module:function names; one not there is refused.
 
-    One operation for the whole shot, its rounds fixed by
-    rounds_per_shot, so the run has no operation chain in front of it.
+    pkgutil.resolve_name reads the name as Python's own entry points do.
     """
-
-    @dataclasses.dataclass(frozen=True)
-    class Settings:
-        """The row's own keys: Stim's code task and the rounds a shot runs."""
-
-        code_task: str
-        rounds_per_shot: RoundsPerShot
-
-        @classmethod
-        def from_yaml(
-            cls, section: Mapping
-        ) -> "MemoryCircuitWorkload.Settings":
-            """Both keys; a missing one is refused rather than defaulted."""
-            _refuse_missing_keys(cls, section, "memory_circuit")
-            rounds_per_shot = RoundsPerShot.from_yaml(
-                section["rounds_per_shot"]
-            )
-            return cls(
-                code_task=section["code_task"], rounds_per_shot=rounds_per_shot
-            )
-
-    @staticmethod
-    def operations(settings: "WorkloadSettings", code) -> tuple:
-        """One operation, its rounds fixed."""
-        circuit, rounds = _generated_memory(settings, code, "memory_circuit")
-        operation = program_records.Operation(
-            id=1, name="memory", qubits=(0,), patches=(0,), circuit=circuit
-        )
-        return (operation,), round_policies.FixedRounds(rounds)
-
-
-class MemoryPatchesWorkload:
-    """The memory_patches row: independent memory patches run at once.
-
-    patch_count copies of the memory_circuit row's circuit, each its own
-    operation on its own patch and logical qubit, all from round one, so
-    their windows share the decoder tiers' units, Elastic's "smaller pool
-    of decoders" shared across logical qubits (2406.17995 lines 121-123).
-    The copies sit side by side along x in one Stim coordinate frame,
-    patch p shifted by p (2 d + 2) with a SHIFT_COORDS ahead of its
-    circuit, so a surface-code patch, 2 d units wide, starts one lattice
-    step past its neighbour and a burst region in that frame covers the
-    patches it reaches (McEwen 2104.05219: a burst starts at one spot and
-    spreads over the chip). Each copy draws its own shot.
-    """
-
-    @dataclasses.dataclass(frozen=True)
-    class Settings:
-        """The memory_circuit row's two keys and the number of patches."""
-
-        code_task: str
-        rounds_per_shot: RoundsPerShot
-        patch_count: int
-
-        def __post_init__(self) -> None:
-            count = self.patch_count
-            is_count = isinstance(count, int) and not isinstance(count, bool)
-            if is_count and count >= 1:
-                return
-            raise ValueError(
-                f"workload.patch_count is a number of patches, at least 1; "
-                f"got {count!r}"
-            )
-
-        @classmethod
-        def from_yaml(
-            cls, section: Mapping
-        ) -> "MemoryPatchesWorkload.Settings":
-            """All three keys; a missing one is refused, not defaulted."""
-            _refuse_missing_keys(cls, section, "memory_patches")
-            rounds_per_shot = RoundsPerShot.from_yaml(
-                section["rounds_per_shot"]
-            )
-            return cls(
-                code_task=section["code_task"],
-                rounds_per_shot=rounds_per_shot,
-                patch_count=section["patch_count"],
-            )
-
-    @staticmethod
-    def operations(settings: "WorkloadSettings", code) -> tuple:
-        """One operation per patch, every one fixed at the same rounds."""
-        circuit, rounds = _generated_memory(settings, code, "memory_patches")
-        pitch = 2 * code.distance + 2
-        operations = []
-        for patch in range(settings.row_settings.patch_count):
-            offset = patch * pitch
-            shift = stim.Circuit(f"SHIFT_COORDS({offset}, 0)")
-            placed = shift + circuit
-            operation_id = patch + 1
-            operation = program_records.Operation(
-                id=operation_id,
-                name=f"memory{patch}",
-                qubits=(patch,),
-                patches=(patch,),
-                circuit=placed,
-            )
-            operations.append(operation)
-        return tuple(operations), round_policies.FixedRounds(rounds)
-
-
-class CircuitListWorkload:
-    """The circuit_list row: the operations as the caller built them."""
-
-    @dataclasses.dataclass(frozen=True)
-    class Settings:
-        """No key: the yaml cannot name this row at all."""
-
-        @classmethod
-        def from_yaml(cls, section: Mapping):
-            """Refused: this row's operations are Operation records."""
-            del section
-            raise ValueError(
-                "workload.kind circuit_list takes a list of Operation records "
-                "with their Stim circuits, which a yaml scalar cannot carry; "
-                "build it in Python (WorkloadSettings(operations=...))"
-            )
-
-    @staticmethod
-    def operations(settings: "WorkloadSettings", code) -> tuple:
-        """The operations as given."""
-        del code
-        return tuple(settings.operations), None
-
-
-def _generated_memory(
-    settings: "WorkloadSettings", code, row_name: str
-) -> tuple:
-    """Stim's memory circuit at the sweep's point, and its round count."""
-    if settings.physical_error_probability is None:
+    try:
+        return pkgutil.resolve_name(function)
+    except (ImportError, AttributeError) as missing:
         raise ValueError(
-            f"a {row_name} workload needs physical_error_probability; "
-            "the sweep sets it per point"
-        )
-    row_settings = settings.row_settings
-    rounds_per_shot = row_settings.rounds_per_shot
-    rounds = rounds_per_shot.rounds_for(code.distance)
-    circuit = memory_circuit(
-        row_settings.code_task,
-        rounds,
-        code.distance,
-        settings.physical_error_probability,
-    )
-    return circuit, rounds
-
-
-def _refuse_missing_keys(settings_class, section: Mapping, row_name: str):
-    """Every field of the row's Settings is a key the yaml must write."""
-    missing = []
-    for field in dataclasses.fields(settings_class):
-        if field.name not in section:
-            missing.append(field.name)
-    if missing:
-        raise ValueError(
-            f"workload.kind {row_name} needs {missing} beside kind"
-        )
+            f"workload.function {function} names no maker: {missing}"
+        ) from missing
 
 
 def _is_per_distance_text(value) -> bool:
@@ -312,7 +247,5 @@ def _is_per_distance_text(value) -> bool:
 # workload.kind names one of these rows; each fills the WorkloadRow port
 # (decsim/ports.py).
 WORKLOADS = {
-    "memory_circuit": MemoryCircuitWorkload,
-    "memory_patches": MemoryPatchesWorkload,
-    "circuit_list": CircuitListWorkload,
+    "producer": ProducerWorkload,
 }

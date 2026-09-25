@@ -85,10 +85,12 @@ the shared plane, so their centres are at x = 5 and 17):
 ```yaml
 extends: two_tiers.yaml
 workload:
-  kind: memory_patches
-  code_task: surface_code:rotated_memory_z
-  rounds_per_shot: 40
-  patch_count: 4
+  kind: producer
+  function: decsim.producers:memory_patches
+  arguments:
+    code_task: surface_code:rotated_memory_z
+    rounds_per_shot: 40
+    patch_count: 4
 qpu:
   kind: burst_stim
   burst_onset_round: 15

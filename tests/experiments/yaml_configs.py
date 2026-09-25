@@ -70,9 +70,12 @@ MINIMAL_CONFIG = {
     "qpu": {"kind": "stim_device"},
     "escalation": {"kind": "weak_baseline"},
     "workload": {
-        "kind": "memory_circuit",
-        "code_task": "surface_code:rotated_memory_z",
-        "rounds_per_shot": 15,
+        "kind": "producer",
+        "function": "decsim.producers:memory_circuit",
+        "arguments": {
+            "code_task": "surface_code:rotated_memory_z",
+            "rounds_per_shot": 15,
+        },
     },
     "windows": {
         "kind": "sliding",
@@ -118,6 +121,18 @@ MINIMAL_CONFIG = {
     },
     "pauli_frame": {"clock": "fridge", "write_cycles": 1},
 }
+
+
+def memory_workload(rounds_per_shot) -> dict:
+    """The minimal config's workload section at another shot length."""
+    return {
+        "kind": "producer",
+        "function": "decsim.producers:memory_circuit",
+        "arguments": {
+            "code_task": "surface_code:rotated_memory_z",
+            "rounds_per_shot": rounds_per_shot,
+        },
+    }
 
 
 def write_config(tmp_path, overrides: dict) -> Path:

@@ -18,20 +18,14 @@ window jobs use the strong decoder, and corrections return through the frame.
 There is no weak decode or escalation hop. Detection events may be formed at
 the controller or decoder; formation in the weak buffer is incompatible.
 
-## 1. Know why this one is Python and not yaml
+## 1. Know why this one is Python
 
-`workload.kind` names one of four rows, and the row that takes an
-operation list refuses a yaml:
-
-```
-workload.kind circuit_list takes a list of Operation records with their
-Stim circuits, which a yaml scalar cannot carry; build it in Python
-(WorkloadSettings(operations=...))
-```
-
-`memory_circuit`, the row every shipped config uses, builds one
-operation for the whole shot, so there is nothing for a second operation
-to wait on. Build this one as a machine, in Python.
+`decsim.producers:memory_circuit`, the maker every shipped config names,
+builds one operation for the whole shot, so there is nothing for a
+second operation to wait on. This page builds the operation list as a
+machine, in Python, to show each field; a maker function that returns
+the same list runs it from a yaml
+([plug in a workload maker](plug_in_a_workload_maker.md)).
 
 ## 2. Build the two operations
 
@@ -81,7 +75,7 @@ result = machine.run()
 
 Three of those lines are choices worth naming.
 
-**`rounds_policy`.** A `circuit_list` workload does not fix its own
+**`rounds_policy`.** A workload built in Python does not fix its own
 rounds, so say how many each operation runs. `FixedRounds(6)` is six for
 every operation, matching the circuit built above.
 

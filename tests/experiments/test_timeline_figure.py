@@ -43,8 +43,7 @@ def _traced_switching_run(tmp_path, trace_path):
     commits rounds 7 to 9 and names rounds 10 to 12 in its buffer, rounds
     the stream never has.
     """
-    workload = dict(yaml_configs.MINIMAL_CONFIG["workload"])
-    workload["rounds_per_shot"] = 9
+    workload = yaml_configs.memory_workload(9)
     sweep_point = {
         "physical_error_probability": [0.008],
         "distance": [3],

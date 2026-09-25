@@ -46,9 +46,12 @@ def _switching_machine(
     qpu = dataclasses.replace(
         settings.qpu, distance=3, round_period_microseconds=1.0
     )
-    workload = dataclasses.replace(
-        settings.workload, physical_error_probability=0.008
-    )
+    sweep_values = {
+        "physical_error_probability": 0.008,
+        "distance": 3,
+        "round_period_microseconds": 1.0,
+    }
+    workload = settings.workload.at_point(sweep_values)
     trace = "off"
     if trace_path is not None:
         trace = str(trace_path)

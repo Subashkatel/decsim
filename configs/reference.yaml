@@ -330,22 +330,36 @@ burst_detector:
 #                                  # 334-340)
 
 workload:
-  kind: memory_circuit             # memory_circuit | memory_patches are the
-                                   # yaml rows; circuit_list is built in
-                                   # Python.
-                                   # memory_patches runs patch_count copies of
-                                   # the memory circuit at once, one operation
-                                   # per patch sharing the decoder units
-                                   # (Elastic 2406.17995 lines 121-123), side
-                                   # by side along x, 2d + 2 Stim coordinate
-                                   # units apart, so a qpu burst region covers
-                                   # the patches it reaches
-  code_task: surface_code:rotated_memory_z   # stim generator task
-  rounds_per_shot: 15              # QEC rounds per shot: a fixed count, or
+  kind: producer                   # producer | files (WORKLOADS,
+                                   # frontends/settings.py): what makes the
+                                   # workload, an operation list and its
+                                   # physical circuit (records/workload.py).
+                                   # producer calls a maker function once
+                                   # per sweep point with its arguments and
+                                   # the sweep values its parameters name
+                                   # (physical_error_probability, distance,
+                                   # round_period_microseconds); files reads
+                                   # a maker's two outputs from disk
+                                   # (docs/how-to/plug_in_a_workload_maker.md)
+  function: decsim.producers:memory_circuit   # module:function. The
+                                   # makers decsim ships (decsim/producers.py):
+                                   # memory_circuit, Stim's generated memory
+                                   # circuit, one operation for the shot;
+                                   # memory_patches, patch_count such
+                                   # circuits, one operation per patch
+                                   # sharing the decoder units (Elastic
+                                   # 2406.17995 lines 121-123), side by side
+                                   # along x, 2d + 2 Stim coordinate units
+                                   # apart, so a qpu burst region covers the
+                                   # patches it reaches
+  arguments:                       # the maker's own arguments; a sweep value
+                                   # written here stops the maker's call
+    code_task: surface_code:rotated_memory_z   # stim generator task
+    rounds_per_shot: 15            # QEC rounds per shot: a fixed count, or
                                    # "<n>d" to scale with the swept distance
                                    # ("10d" = the 10 d-round memory experiment,
                                    # Toshio 2510.25222 Fig. 4)
-  # patch_count: 4                 # memory_patches only, and required there:
+    # patch_count: 4               # memory_patches only, and required there:
                                    # the patches, at least 1
 
 # The plan, a word the comments below use, is the list of windows the scheme

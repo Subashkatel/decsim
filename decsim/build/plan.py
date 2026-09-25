@@ -78,7 +78,7 @@ def build_plan(
         buffer_rounds_override=settings.windows.buffer_rounds,
     )
     operations, decode_operations, dynamic_streams, rounds_policy = _operations(
-        settings.workload, code
+        settings.workload
     )
     external_decode_operations = decode_operations + dynamic_streams
     every_operation = operations + external_decode_operations
@@ -206,31 +206,18 @@ def _window_interaction(settings, reread_regions):
     )
 
 
-def _operations(settings: workload_settings.WorkloadSettings, code) -> tuple:
+def _operations(settings: workload_settings.WorkloadSettings) -> tuple:
     """The workload's private operation copies and its rounds policy.
 
     The run never mutates the caller's operations; an operation without
-    its own feedback boundary mode takes the workload's. A row that fixes
-    its rounds built its operations for that count, so a second policy
-    is refused rather than one of the two winning in silence.
+    its own feedback boundary mode takes the workload's.
     """
-    row = tables.row(
-        workload_settings.WORKLOADS, "workload.kind", settings.kind
-    )
-    source_operations, fixed_rounds_policy = row.operations(settings, code)
     rounds_policy = settings.rounds_policy
-    if fixed_rounds_policy is not None and rounds_policy is not None:
-        raise ValueError(
-            f"workload.kind {settings.kind} fixes its own rounds, so the "
-            "workload takes no rounds_policy"
-        )
-    if rounds_policy is None:
-        rounds_policy = fixed_rounds_policy
     if rounds_policy is None:
         rounds_policy = round_policies.GateRounds()
     decode_operations = settings.decode_operations or ()
     copies = {}
-    operations = _copies(source_operations, copies, settings)
+    operations = _copies(settings.operations, copies, settings)
     decode_copies = _copies(decode_operations, copies, settings)
     stream_copies = _copies(settings.dynamic_streams, copies, settings)
     planner.check_workload_identity(operations, decode_copies, stream_copies)

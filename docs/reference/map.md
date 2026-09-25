@@ -38,6 +38,7 @@ docstring.
 - `decsim/records/seeds.py`: The run-level seed graph's records: a path edge, a child, a reservation.
 - `decsim/records/transfers.py`: One transfer on one link: its hop, its bits, its timing, its ledger.
 - `decsim/records/windows.py`: One decoder window: its geometry, its plan, its boundaries, its state.
+- `decsim/records/workload.py`: What a workload maker hands decsim: an operation list and its circuit.
 
 ### tables
 
@@ -239,7 +240,7 @@ docstring.
 ### frontends
 
 - `decsim/frontends/__init__.py`: Everything that happens to a program before and while it runs.
-- `decsim/frontends/circuit_frontend.py`: Workloads written as an operation list, wired in program order.
+- `decsim/frontends/circuit_frontend.py`: A maker's workload lowered into the program the machine runs.
 - `decsim/frontends/deltakit.py`: Deltakit memory circuits exported into the supplied-circuit frontend.
 - `decsim/frontends/deltakit_compiler.py`: Compile finite rotated-code experiments through Deltakit's CircuitBuilder.
 - `decsim/frontends/execution_runtime.py`: Which operation runs when: readiness, resource ownership, timestamps.
@@ -272,7 +273,11 @@ docstring.
 - `decsim/observe/window_ledger.py`: The window ledger: every window's record, what owns it, what absorbed it.
 - `decsim/observe/wiring.py`: Every listener of one run, built from the observation section and wired.
 
-## Level 5: settings
+## Level 5: producers, settings
+
+### producers
+
+- `decsim/producers.py`: The workload makers decsim ships: Stim's generated memories.
 
 ### settings
 

@@ -140,7 +140,8 @@ class MachineSettings:
         """One yaml's sections, each handed to the package that owns it.
 
         name labels the links card in the traffic ledger; base_directory
-        resolves the escalation section's relative table path.
+        resolves the escalation section's relative table path and the
+        workload's relative files.
         """
         unknown = set(sections) - set(SECTIONS)
         if unknown:
@@ -204,7 +205,7 @@ class MachineSettings:
             sections["pauli_frame"], clocks
         )
         workload = workload_settings.WorkloadSettings.from_yaml(
-            sections["workload"]
+            sections["workload"], base_directory
         )
         magic_state_factory = qpu_settings.FactorySettings.from_yaml(
             factory_section

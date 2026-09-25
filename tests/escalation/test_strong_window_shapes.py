@@ -108,9 +108,12 @@ GATE_SWITCHING_CARD = {
     "escalation": {"kind": "switching", "gap_threshold_db": 20.0},
     "pauli_frame": {"clock": "fridge", "write_cycles": 1},
     "workload": {
-        "kind": "memory_circuit",
-        "code_task": "surface_code:rotated_memory_z",
-        "rounds_per_shot": "10d",
+        "kind": "producer",
+        "function": "decsim.producers:memory_circuit",
+        "arguments": {
+            "code_task": "surface_code:rotated_memory_z",
+            "rounds_per_shot": "10d",
+        },
     },
     "observation": {
         "check_windows_with": "none",
@@ -281,9 +284,12 @@ def _gate_forward_window_machine(
     qpu = dataclasses.replace(
         settings.qpu, distance=3, round_period_microseconds=1.0
     )
-    workload = dataclasses.replace(
-        settings.workload, physical_error_probability=0.008
-    )
+    sweep_values = {
+        "physical_error_probability": 0.008,
+        "distance": 3,
+        "round_period_microseconds": 1.0,
+    }
+    workload = settings.workload.at_point(sweep_values)
     settings = dataclasses.replace(settings, qpu=qpu, workload=workload)
     return machine_module.Machine.build(settings, 1)
 
@@ -676,9 +682,12 @@ def _slow_boundary_machine(strong_window: str) -> machine_module.Machine:
     qpu = dataclasses.replace(
         settings.qpu, distance=3, round_period_microseconds=1.0
     )
-    workload = dataclasses.replace(
-        settings.workload, physical_error_probability=0.008
-    )
+    sweep_values = {
+        "physical_error_probability": 0.008,
+        "distance": 3,
+        "round_period_microseconds": 1.0,
+    }
+    workload = settings.workload.at_point(sweep_values)
     settings = dataclasses.replace(settings, qpu=qpu, workload=workload)
     return machine_module.Machine.build(settings, 0)
 
@@ -700,9 +709,12 @@ def _gate_machine(strong_window: str) -> machine_module.Machine:
     qpu = dataclasses.replace(
         settings.qpu, distance=3, round_period_microseconds=1.0
     )
-    workload = dataclasses.replace(
-        settings.workload, physical_error_probability=0.008
-    )
+    sweep_values = {
+        "physical_error_probability": 0.008,
+        "distance": 3,
+        "round_period_microseconds": 1.0,
+    }
+    workload = settings.workload.at_point(sweep_values)
     settings = dataclasses.replace(settings, qpu=qpu, workload=workload)
     return machine_module.Machine.build(settings, 0)
 

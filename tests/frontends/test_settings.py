@@ -1,153 +1,60 @@
-"""The workload section: the kind's row reads its own keys.
+"""The workload section: a maker named in the yaml makes the workload.
 
-STYLE.md rule 7: adding a component is one class, one table row and its
-section in the yaml reference, and nothing else. WORKLOADS
-(decsim/frontends/settings.py) is the table workload.kind names; the
-tests below add a row from outside decsim and run it from a yaml, and
-pin the sentence each Python-only shipped row refuses a yaml with.
+A maker is a module:function and its arguments, loaded the way Python's
+entry points load a named object (CPython Lib/importlib/metadata/
+__init__.py:199-207) and called the way Hydra's instantiate calls a
+target (hydra/_internal/instantiate/_instantiate2.py:76-82). The tests
+below run a maker written outside decsim with no change to decsim's
+tables, and pin the sentence every refusal reads as.
 """
 
-import dataclasses
+import textwrap
 
 import pytest
 
 import decsim.experiments.experiment as experiment
 import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
-import decsim.qpu.code_geometry as code_geometry
-import decsim.qpu.round_policies as round_policies
-import decsim.records.program as program_records
 import tests.experiments.yaml_configs as yaml_configs
 
-
-class TwoPatchMemory:
-    """A workload row written outside decsim: two patches, fixed rounds."""
-
-    @dataclasses.dataclass(frozen=True)
-    class Settings:
-        """This row's one key of its own, the rounds each patch runs."""
-
-        patch_rounds: int = 1
-
-        @classmethod
-        def from_yaml(cls, section):
-            return cls(**section)
-
-    @staticmethod
-    def operations(settings, code):
-        """Two single-patch memory operations of the settings' rounds."""
-        del code
-        rounds = settings.row_settings.patch_rounds
-        first = program_records.Operation(
-            id=1, name="a", qubits=(1,), patches=(1,)
-        )
-        second = program_records.Operation(
-            id=2, name="b", qubits=(2,), patches=(2,)
-        )
-        policy = round_policies.FixedRounds(rounds)
-        return (first, second), policy
+OUTSIDE_MAKER = '''
+import decsim.records.program as program_records
+import decsim.records.workload as workload_records
 
 
-def test_a_workload_row_written_outside_decsim_runs_from_a_yaml(
-    monkeypatch, tmp_path
-):
-    """One table row and one yaml kind is the whole edit."""
-    monkeypatch.setitem(
-        workload_settings.WORKLOADS, "two_patch_memory", TwoPatchMemory
-    )
-    workload = {"kind": "two_patch_memory", "patch_rounds": 6}
-    card = {"workload": workload, "qpu": {"kind": "timing_only"}}
-    config_path = yaml_configs.write_config(tmp_path, card)
-    config = experiment.load_experiment(config_path)
-    settings = config.point_settings(
-        physical_error_probability=0.001,
-        distance=3,
-        round_period_microseconds=1.0,
-    )
-    machine = machine_module.Machine.build(settings, 0)
-    result = machine.run()
-
-    assert result.terminal_status == "complete"
-    assert len(machine.operations) == 2
-    assert settings.workload.row_settings.patch_rounds == 6
+def two_patch_memory(patch_rounds, distance):
+    """Two single-patch memory operations, d rounds apart."""
+    first = program_records.Operation(1, "a", (1,), patches=(1,))
+    second = program_records.Operation(2, "b", (2,), patches=(2,))
+    rounds = {1: patch_rounds, 2: patch_rounds + distance}
+    return workload_records.Workload((first, second), rounds)
 
 
-def test_a_kind_off_the_table_is_refused_naming_the_rows(tmp_path):
-    """The table's own refusal, at the yaml boundary."""
-    workload = {"kind": "not_a_row", "rounds_per_shot": 6}
-    config_path = yaml_configs.write_config(tmp_path, {"workload": workload})
-    with pytest.raises(ValueError, match="workload.kind 'not_a_row' is not"):
-        experiment.load_experiment(config_path)
+def not_a_workload(distance):
+    return [distance]
 
 
-@pytest.mark.parametrize("rounds_per_shot", [0, -1, True, "0d"])
-def test_a_shot_of_fewer_than_one_round_is_refused_at_load(
-    tmp_path, rounds_per_shot
-):
-    workload = {**yaml_configs.MINIMAL_CONFIG["workload"]}
-    workload["rounds_per_shot"] = rounds_per_shot
-    config_path = yaml_configs.write_config(tmp_path, {"workload": workload})
-    with pytest.raises(ValueError, match="a round count of at least 1"):
-        experiment.load_experiment(config_path)
+def rounds_from_keywords(distance, physical_error_probability, **options):
+    """A maker that reads its round count out of its keyword arguments."""
+    operation = program_records.Operation(1, "a", (1,), patches=(1,))
+    rounds = options.get("rounds", distance)
+    return workload_records.Workload((operation,), {1: rounds})
+'''
 
 
-def test_each_python_only_row_refuses_a_yaml_by_name(tmp_path):
-    """A row a yaml cannot carry says what it needs and where to build it."""
-    sentences = {
-        "circuit_list": "a list of Operation records",
-    }
-    for kind, sentence in sentences.items():
-        workload = {"kind": kind}
-        config_path = yaml_configs.write_config(
-            tmp_path, {"workload": workload}
-        )
-        with pytest.raises(ValueError, match=sentence):
-            experiment.load_experiment(config_path)
+def _outside_package(tmp_path, monkeypatch) -> None:
+    """A package outside decsim that holds two makers."""
+    package = tmp_path / "outside_makers"
+    package.mkdir()
+    init_path = package / "__init__.py"
+    init_path.write_text("")
+    module_path = package / "makers.py"
+    maker_text = textwrap.dedent(OUTSIDE_MAKER)
+    module_path.write_text(maker_text)
+    monkeypatch.syspath_prepend(str(tmp_path))
 
 
-def test_a_memory_circuit_key_off_its_list_is_refused():
-    section = {
-        "kind": "memory_circuit",
-        "code_task": "surface_code:rotated_memory_z",
-        "round_per_shot": 15,
-    }
-    sentence = (
-        r"workload does not know \['round_per_shot'\]; its keys are "
-        r"\['kind', 'code_task', 'rounds_per_shot'\]"
-    )
-    with pytest.raises(ValueError, match=sentence):
-        workload_settings.WorkloadSettings.from_yaml(section)
-
-
-def test_a_memory_circuit_key_left_out_is_refused_rather_than_defaulted():
-    section = {
-        "kind": "memory_circuit",
-        "code_task": "surface_code:rotated_memory_z",
-    }
-    sentence = r"memory_circuit needs \['rounds_per_shot'\] beside kind"
-    with pytest.raises(ValueError, match=sentence):
-        workload_settings.WorkloadSettings.from_yaml(section)
-
-
-def test_a_workload_without_a_kind_is_refused_naming_the_rows():
-    """The one default kind is the dataclass's, for Python-built runs."""
-    section = {
-        "code_task": "surface_code:rotated_memory_z",
-        "rounds_per_shot": 15,
-    }
-    with pytest.raises(ValueError, match="workload.kind None is not a row"):
-        workload_settings.WorkloadSettings.from_yaml(section)
-
-
-def patches_workload(tmp_path, patch_count):
-    workload = {
-        "kind": "memory_patches",
-        "code_task": "surface_code:rotated_memory_z",
-        "rounds_per_shot": 6,
-        "patch_count": patch_count,
-    }
-    card = {"workload": workload}
-    config_path = yaml_configs.write_config(tmp_path, card)
+def _point(config_path):
     config = experiment.load_experiment(config_path)
     return config.point_settings(
         physical_error_probability=0.001,
@@ -156,66 +63,84 @@ def patches_workload(tmp_path, patch_count):
     )
 
 
-def test_memory_patches_runs_one_memory_per_patch_at_once(tmp_path):
-    """Three patches, three operations, a shot drawn for each."""
-    settings = patches_workload(tmp_path, 3)
+def _producer(function: str, arguments: dict) -> dict:
+    return {"kind": "producer", "function": function, "arguments": arguments}
+
+
+def test_a_maker_written_outside_decsim_runs_from_a_yaml(monkeypatch, tmp_path):
+    """Its module:function and its arguments are the whole edit."""
+    _outside_package(tmp_path, monkeypatch)
+    workload = _producer(
+        "outside_makers.makers:two_patch_memory", {"patch_rounds": 4}
+    )
+    card = {"workload": workload, "qpu": {"kind": "timing_only"}}
+    config_path = yaml_configs.write_config(tmp_path, card)
+    settings = _point(config_path)
     machine = machine_module.Machine.build(settings, 0)
     result = machine.run()
-    shots = machine.observation.sampled_shots.shots_by_operation
+    rounds = settings.workload.rounds_policy.rounds_by_operation
 
     assert result.terminal_status == "complete"
-    assert [operation.patches for operation in machine.operations] == [
-        (0,),
-        (1,),
-        (2,),
-    ]
-    assert len(result.operation_results) == 3
-    assert sorted(shots) == [1, 2, 3]
+    assert len(machine.operations) == 2
+    assert rounds == {1: 4, 2: 7}
 
 
-def test_memory_patches_sit_side_by_side_two_d_plus_two_apart():
-    """Patch p is the memory circuit with every x shifted by p (2 d + 2).
-
-    Stim's SHIFT_COORDS moves the qubit and the detector coordinates that
-    follow it; the detectors' last coordinate, their round, stays.
-    """
-    section = {
-        "kind": "memory_patches",
-        "code_task": "surface_code:rotated_memory_z",
-        "rounds_per_shot": 4,
-        "patch_count": 2,
-    }
-    workload = workload_settings.WorkloadSettings.from_yaml(section)
-    workload = dataclasses.replace(workload, physical_error_probability=0.001)
-    code = code_geometry.SurfaceCodeModel(distance=3)
-    row = workload_settings.MemoryPatchesWorkload
-    operations, policy = row.operations(workload, code)
-    first = operations[0].circuit.get_final_qubit_coordinates()
-    second = operations[1].circuit.get_final_qubit_coordinates()
-    first_detectors = operations[0].circuit.get_detector_coordinates()
-    second_detectors = operations[1].circuit.get_detector_coordinates()
-
-    assert policy.round_count == 4
-    assert first[10] == [3.0, 3.0]
-    assert second[10] == [11.0, 3.0]
-    assert first_detectors[30] == [4.0, 4.0, 4.0]
-    assert second_detectors[30] == [12.0, 4.0, 4.0]
-
-
-@pytest.mark.parametrize("patch_count", [0, True, "2"])
-def test_a_patch_count_that_is_not_a_count_of_patches_is_refused(
-    tmp_path, patch_count
+@pytest.mark.parametrize("arguments, rounds", [({}, 3), ({"rounds": 9}, 9)])
+def test_a_maker_with_keyword_arguments_takes_what_the_yaml_writes(
+    monkeypatch, tmp_path, arguments, rounds
 ):
-    with pytest.raises(ValueError, match="patch_count is a number of patches"):
-        patches_workload(tmp_path, patch_count)
+    """Python's own call rules: **options takes any argument the yaml has."""
+    _outside_package(tmp_path, monkeypatch)
+    workload = _producer(
+        "outside_makers.makers:rounds_from_keywords", arguments
+    )
+    card = {"workload": workload, "qpu": {"kind": "timing_only"}}
+    config_path = yaml_configs.write_config(tmp_path, card)
+
+    settings = _point(config_path)
+
+    policy = settings.workload.rounds_policy
+    assert policy.rounds_by_operation == {1: rounds}
 
 
-def test_a_memory_patches_workload_without_its_count_is_refused():
-    section = {
-        "kind": "memory_patches",
-        "code_task": "surface_code:rotated_memory_z",
-        "rounds_per_shot": 4,
-    }
-    sentence = r"memory_patches needs \['patch_count'\] beside kind"
+def test_a_maker_that_returns_no_workload_is_refused_at_the_point(
+    monkeypatch, tmp_path
+):
+    _outside_package(tmp_path, monkeypatch)
+    workload = _producer("outside_makers.makers:not_a_workload", {})
+    config_path = yaml_configs.write_config(tmp_path, {"workload": workload})
+    sentence = (
+        "outside_makers.makers:not_a_workload returned a list; a maker "
+        "returns a decsim.records.workload.Workload"
+    )
+
     with pytest.raises(ValueError, match=sentence):
-        workload_settings.WorkloadSettings.from_yaml(section)
+        _point(config_path)
+
+
+def test_a_kind_off_the_table_is_refused_naming_the_rows(tmp_path):
+    """The table's own refusal, at the yaml boundary."""
+    workload = {"kind": "memory_circuit", "rounds_per_shot": 6}
+    config_path = yaml_configs.write_config(tmp_path, {"workload": workload})
+
+    with pytest.raises(ValueError, match="workload.kind 'memory_circuit' is"):
+        experiment.load_experiment(config_path)
+
+
+def test_a_workload_without_a_kind_is_refused_naming_the_rows():
+    """None is the kind of a Python-built workload, never a yaml's."""
+    section = {"function": "decsim.producers:memory_circuit"}
+
+    with pytest.raises(ValueError, match="workload.kind None is not a row"):
+        workload_settings.WorkloadSettings.from_yaml(section, None)
+
+
+@pytest.mark.parametrize("rounds_per_shot", [0, -1, True, "0d"])
+def test_a_shot_of_fewer_than_one_round_is_refused_at_the_point(
+    tmp_path, rounds_per_shot
+):
+    workload = yaml_configs.memory_workload(rounds_per_shot)
+    config_path = yaml_configs.write_config(tmp_path, {"workload": workload})
+
+    with pytest.raises(ValueError, match="a round count of at least 1"):
+        _point(config_path)

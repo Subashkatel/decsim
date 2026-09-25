@@ -49,6 +49,8 @@ RECORD_TYPES = frozenset(
         "evidence_records.Closed",
         "transfer_records.BoundaryTransferRelation",
         "window_records.DependencyResidual",
+        "workload_records.FiniteCircuit",
+        "workload_records.Workload",
     }
 )
 

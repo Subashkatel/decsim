@@ -134,7 +134,7 @@ strong_decoder: kind 10.0
 escalation: kind switching
 burst_detector: kind none
 pauli_frame: kind logical_register
-workload: kind memory_circuit
+workload: kind producer
 magic_state_factory: kind infinite
 links: card two_tiers.yaml
 sweep block 1: p [0.008], d [3, 5], round period [1.0] us, 50 shots

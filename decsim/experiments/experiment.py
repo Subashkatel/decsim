@@ -120,9 +120,10 @@ class ExperimentConfig:
     ) -> machine_settings.MachineSettings:
         """The machine at one sweep point.
 
-        The point sets the QPU's distance and round period, the memory
-        circuit's noise, and the escalation threshold the point
-        certifies.
+        The point sets the QPU's distance and round period, the workload
+        its maker makes there, and the escalation threshold the point
+        certifies. A maker's refusal is the yaml's input refused, so it
+        reaches the user as one sentence naming the file.
         """
         settings = self.settings
         qpu = dataclasses.replace(
@@ -130,10 +131,12 @@ class ExperimentConfig:
             distance=distance,
             round_period_microseconds=round_period_microseconds,
         )
-        workload = dataclasses.replace(
-            settings.workload,
-            physical_error_probability=physical_error_probability,
-        )
+        sweep_values = {
+            "physical_error_probability": physical_error_probability,
+            "distance": distance,
+            "round_period_microseconds": round_period_microseconds,
+        }
+        workload = self._workload_at(sweep_values)
         threshold_nats = settings.escalation.threshold_nats_for(
             physical_error_probability, distance
         )
@@ -143,6 +146,14 @@ class ExperimentConfig:
         return dataclasses.replace(
             settings, qpu=qpu, workload=workload, escalation=escalation
         )
+
+    def _workload_at(self, sweep_values: dict):
+        """The workload section at one point, a maker's refusal one line."""
+        try:
+            return self.settings.workload.at_point(sweep_values)
+        except ValueError as refused:
+            path = self.config_files[0]
+            raise refusal.RefusalError(f"{path}: {refused}") from refused
 
     @property
     def active_tier(self) -> str:

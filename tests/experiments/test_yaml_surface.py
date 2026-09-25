@@ -25,6 +25,7 @@ from tests.experiments.yaml_configs import (
     MINIMAL_CONFIG,
     SHIPPED_CONFIGS,
     measure_point_shot,
+    memory_workload,
     write_config,
 )
 
@@ -653,13 +654,11 @@ def test_report_rows_carry_the_algorithm_column(tmp_path):
 def test_rounds_per_shot_scales_with_the_swept_distance(tmp_path):
     # "10d" is Toshio 2510.25222's memory-experiment convention: the shot
     # length follows the swept code distance.
+    workload = memory_workload("10d")
     config_path = write_config(
         tmp_path,
         {
-            "workload": {
-                **MINIMAL_CONFIG["workload"],
-                "rounds_per_shot": "10d",
-            },
+            "workload": workload,
             "sweep": [
                 {
                     "physical_error_probability": [0.001],
@@ -671,10 +670,18 @@ def test_rounds_per_shot_scales_with_the_swept_distance(tmp_path):
         },
     )
     config = experiment.load_experiment(config_path)
-    rounds_per_shot = config.settings.workload.row_settings.rounds_per_shot
-    assert rounds_per_shot.rounds_for(3) == 30
-    assert rounds_per_shot.rounds_for(5) == 50
-    assert str(rounds_per_shot) == "10d"
+    at_three = config.point_settings(
+        physical_error_probability=0.001,
+        distance=3,
+        round_period_microseconds=1.0,
+    )
+    at_five = config.point_settings(
+        physical_error_probability=0.001,
+        distance=5,
+        round_period_microseconds=1.0,
+    )
+    assert at_three.workload.rounds_policy.rounds_by_operation[1] == 30
+    assert at_five.workload.rounds_policy.rounds_by_operation[1] == 50
     measurement = measure_point_shot(
         config,
         physical_error_probability=0.001,

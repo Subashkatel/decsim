@@ -16,9 +16,9 @@ from decsim.experiments.experiment import load_experiment
 CARD_YAML = (
     "qpu: {kind: stim_device}\n"
     "escalation: {kind: weak_baseline}\n"
-    "workload: {kind: memory_circuit, "
-    "code_task: surface_code:rotated_memory_z,\n"
-    "           rounds_per_shot: 15}\n"
+    "workload: {kind: producer, function: decsim.producers:memory_circuit,\n"
+    "           arguments: {code_task: surface_code:rotated_memory_z,\n"
+    "                       rounds_per_shot: 15}}\n"
     "windows: {kind: sliding, commit_rounds: null, buffer_rounds: null}\n"
     "sweep: [{physical_error_probability: [0.001], distance: [3],\n"
     "         round_period_microseconds: [1.0], shots: 1}]\n"

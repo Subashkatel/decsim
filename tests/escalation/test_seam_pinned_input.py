@@ -75,7 +75,7 @@ def _machine(distance: int, rounds: int, seed: int, strong_window: str):
     """The gate's switching card at that distance, on the named row."""
     sections = copy.deepcopy(shape_tests.GATE_SWITCHING_CARD)
     sections["escalation"]["strong_window"] = strong_window
-    sections["workload"]["rounds_per_shot"] = rounds
+    sections["workload"]["arguments"]["rounds_per_shot"] = rounds
     base_directory = pathlib.Path(".")
     settings = machine_settings.MachineSettings.from_mapping(
         sections, name="seam_pinned", base_directory=base_directory
@@ -83,10 +83,12 @@ def _machine(distance: int, rounds: int, seed: int, strong_window: str):
     qpu = dataclasses.replace(
         settings.qpu, distance=distance, round_period_microseconds=1.0
     )
-    workload = dataclasses.replace(
-        settings.workload,
-        physical_error_probability=PHYSICAL_ERROR_PROBABILITY,
-    )
+    sweep_values = {
+        "physical_error_probability": PHYSICAL_ERROR_PROBABILITY,
+        "distance": distance,
+        "round_period_microseconds": 1.0,
+    }
+    workload = settings.workload.at_point(sweep_values)
     settings = dataclasses.replace(settings, qpu=qpu, workload=workload)
     return machine_module.Machine.build(settings, seed)
 

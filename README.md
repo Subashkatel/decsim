@@ -23,8 +23,16 @@ real syndrome data needs PyMatching, numpy, scipy and matplotlib as
 well.
 
 ```bash
-python -m pip install -e ".[run]"
+python -m pip install -e ".[run]" -c constraints.txt
 ```
+
+`constraints.txt` pins every package the `run`, `test` and `dev` extras
+install, at versions tested together on Python 3.10, 3.12 and 3.13; pip
+installs only what the extras ask for, at those versions. It is uv's
+universal resolution, one file for every platform, and its first lines
+are the command that regenerates it after an extra changes.
+beliefmatching caps numpy at 2.2.6, which ships no wheel past Python
+3.13.
 
 The `bb-decoders` extra adds the three optional backends (Relay-BP,
 Tesseract, BP-OSD through quits). decsim keeps its choices in tables: a
@@ -69,7 +77,7 @@ The `test` extra adds pytest and the reference decoders the suite checks
 decsim against:
 
 ```bash
-python -m pip install -e ".[run,test]"
+python -m pip install -e ".[run,test]" -c constraints.txt
 python -m pytest tests
 ```
 
@@ -80,6 +88,6 @@ extras) is skipped and says which module it could not import.
 describes, with the ruff the `dev` extra installs:
 
 ```bash
-python -m pip install -e ".[run,test,dev]"
+python -m pip install -e ".[run,test,dev]" -c constraints.txt
 tools/check.sh
 ```

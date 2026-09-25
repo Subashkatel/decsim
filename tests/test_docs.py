@@ -27,6 +27,8 @@ a page is enforced here.
    every page, so a reader can reach any page from the front page.
 8. Every page that says which Python to install names the floor
    pyproject.toml's requires-python declares, the one pip enforces.
+9. constraints.txt, which the install commands read, pins every package
+   the run, test and dev extras name.
 """
 
 import ast
@@ -65,6 +67,9 @@ HEADING = re.compile(r"^#+\s+(.*?)\s*$", re.MULTILINE)
 NOT_A_SLUG_CHARACTER = re.compile(r"[^a-z0-9 _-]")
 REQUIRED_PYTHON = re.compile(r'requires-python = ">=(3\.\d+)"')
 NAMED_PYTHON = re.compile(r"Python (3\.\d+)\s+or\s+newer")
+PINNED_EXTRA = re.compile(r"^(?:run|test|dev) = \[(.*)\]$", re.MULTILINE)
+REQUIREMENT_NAME = re.compile(r'"([A-Za-z0-9_.-]+)')
+PINNED_NAME = re.compile(r"^([A-Za-z0-9_.-]+)==", re.MULTILINE)
 
 # Names decsim does not define, written in backticks because they name
 # the referent a decision came from.
@@ -554,3 +559,23 @@ def _check_one_python_floor(named: list, floor: str, page) -> None:
             f"{page.name} says Python {version} or newer, and "
             f"pyproject.toml requires Python {floor} or newer"
         )
+
+
+def test_the_constraints_file_pins_every_package_the_extras_name():
+    """An extra that grew without a new constraints.txt installs unpinned."""
+    pyproject = CHECKOUT / "pyproject.toml"
+    declaration = pyproject.read_text()
+    extras = PINNED_EXTRA.findall(declaration)
+    named = set()
+    for listed in extras:
+        names = REQUIREMENT_NAME.findall(listed)
+        named.update(names)
+    constraints = CHECKOUT / "constraints.txt"
+    pinned_text = constraints.read_text()
+    pinned = PINNED_NAME.findall(pinned_text)
+    unpinned = named.difference(pinned)
+    assert len(extras) == 3
+    assert unpinned == set(), (
+        f"constraints.txt pins no version of {sorted(unpinned)}; rerun "
+        "the command in its first lines"
+    )

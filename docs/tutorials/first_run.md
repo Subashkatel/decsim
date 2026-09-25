@@ -30,7 +30,7 @@ answer wrong.
 From the checkout:
 
 ```bash
-python -m pip install -e ".[run]"
+python -m pip install -e ".[run]" -c constraints.txt
 ```
 
 The `run` extra brings Stim (which simulates the quantum circuit and

@@ -17,15 +17,18 @@ OutVcState.cc:56-63), a flit is sent only while it has one and takes one
 (NetworkInterface.cc:506, 530), and the receiver returns the credit when
 the flit leaves its buffer (InputUnit.cc:140-150, and at once in a
 network interface, NetworkInterface.cc:236-274), over a credit link of
-its own latency (NetworkLink.cc:92-102). Aurora's native flow control,
-where a receiver asks its partner to send idles within the time of 256
-blocks (Xilinx SP011 sections 3.1 and 3.3, pages 29-30), is this row
-with that bound as its credit latency: an equivalence, not Aurora's own
-mechanism. PCIe's flow-control credits and NVIDIA's real-time ring,
-whose producer reuses a slot only when its flags are clear (cuda-quantum
-realtime/lib/daemon/dispatcher/cudaq_realtime_api.cpp:360-364), have the
-same shape. With unbounded credits and the whole framing the law is the
-ideal row's.
+its own latency (NetworkLink.cc:92-102). The credits travel on backward
+flow-control links of their own, a CreditLink beside each forward link
+(GarnetLink.py:60-63, 84-88, 126-142), so a credit takes no time on the
+data wire and is never lost, which is how this row returns it.
+Aurora's native flow control, where a receiver asks its partner to send
+idles within the time of 256 blocks (Xilinx SP011 sections 3.1 and 3.3,
+pages 29-30), is this row with that bound as its credit latency: an
+equivalence, not Aurora's own mechanism. PCIe's flow-control credits
+and NVIDIA's real-time ring, whose producer reuses a slot only when its
+flags are clear (cuda-quantum realtime/lib/daemon/dispatcher/
+cudaq_realtime_api.cpp:360-364), have the same shape. With unbounded
+credits and the whole framing the law is the ideal row's.
 
 Garnet's own loop is this one with two cycles more than its link
 latency, which a card that means Garnet writes into

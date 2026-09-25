@@ -32,10 +32,17 @@ qpu:
                                    # keeps a size and no data,
                                    # src/proto/packet.proto); syndrome_bits
                                    # fills that size with seeded random bits.
-                                   # streaming_stim takes repeated circuit
-                                   # records keyed by dynamic stream owner,
-                                   # which no yaml key carries: build it in
-                                   # Python (QpuSettings(device=...)).
+                                   # stim_device and streaming_stim read
+                                   # the workload's physical circuit: a
+                                   # finite circuit with its round map, or
+                                   # the four live fragments a
+                                   # streaming_stim stream executes as the
+                                   # controller asks for rounds.
+                                   # recorded_stim replays a released
+                                   # experiment's measurements, which no
+                                   # yaml key carries: build it in Python
+                                   # (QpuSettings(device=...)); a yaml
+                                   # naming it stops at its build.
                                    # burst_stim is stim_device drawing each
                                    # shot from the circuit plus one error
                                    # burst the decoders are not told of

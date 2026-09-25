@@ -8,12 +8,14 @@ system before it wires a single port.
 
 import copy
 import dataclasses
+from collections.abc import Mapping
 from typing import Any
 
 import stim
 
 import decsim.build.escalation as escalation_build
 import decsim.controller.settings as controller_settings
+import decsim.detector_error_model.detector_formation as detector_formation
 import decsim.escalation.settings as escalation_settings
 import decsim.frontends.planner as planner
 import decsim.frontends.settings as workload_settings
@@ -22,6 +24,7 @@ import decsim.qpu.settings as qpu_settings
 import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
 import decsim.records.windows as window_records
+import decsim.records.workload as workload_records
 import decsim.settings as machine_settings
 import decsim.tables as tables
 import decsim.windows.settings as window_settings
@@ -146,7 +149,8 @@ def build_plan(
         strong_side_forms=strong_side_forms,
     )
     resource_claims = _resource_claims(operations, view_by_id, layout)
-    device = _syndrome_source(settings.qpu, code)
+    physical_circuits = settings.workload.physical_circuits
+    device = _syndrome_source(settings.qpu, code, physical_circuits)
     error_model_provider = settings.qpu.error_model_provider
     if error_model_provider is None:
         error_model_provider = device.window_model_source()
@@ -406,12 +410,16 @@ def _idle_policy(settings: controller_settings.IdlePolicySettings):
     return row(settings=settings.row_settings)
 
 
-def _syndrome_source(settings: qpu_settings.QpuSettings, code):
+def _syndrome_source(
+    settings: qpu_settings.QpuSettings, code, physical_circuits: Mapping
+):
     """The device of the qpu kind, or the Python-built one.
 
     A row that shapes its payloads by the code card is built with the
     run's card, so a yaml that names it needs no argument of its own; a
-    row with keys of its own is built with its Settings record too.
+    row that reads its widths off a circuit is built with the
+    workload's physical circuits instead; a row with keys of its own is
+    built with its Settings record too.
     """
     if settings.device is not None:
         return settings.device
@@ -419,9 +427,49 @@ def _syndrome_source(settings: qpu_settings.QpuSettings, code):
     arguments = {}
     if row.takes_code_card:
         arguments["code"] = code
+    else:
+        circuit_arguments = _circuit_arguments(physical_circuits)
+        arguments.update(circuit_arguments)
     if settings.row_settings is not None:
         arguments["settings"] = settings.row_settings
     return row(**arguments)
+
+
+def _circuit_arguments(physical_circuits: Mapping) -> dict:
+    """The source's constructor arguments for the workload's circuits.
+
+    A finite circuit is its measurement schedule and the round each
+    detector completes in, keyed by the stream that runs it, which is
+    StimDevice's declaration (qpu/stim_device.py); live fragments are
+    the programs StreamingStimDevice executes.
+    """
+    measurement_rounds = {}
+    detector_rounds = {}
+    programs = {}
+    for key, physical in physical_circuits.items():
+        if isinstance(physical, workload_records.FiniteCircuit):
+            measurement_rounds[key] = dict(physical.measurement_rounds)
+            detector_rounds[key] = _detector_rounds(physical)
+            continue
+        programs[key] = physical
+    arguments = {}
+    if measurement_rounds:
+        arguments["measurement_rounds"] = measurement_rounds
+        arguments["detector_rounds"] = detector_rounds
+    if programs:
+        arguments["programs"] = programs
+    return arguments
+
+
+def _detector_rounds(physical: workload_records.FiniteCircuit) -> dict:
+    """Each detector's round, formed off the declared measurement schedule."""
+    schedule = physical.measurement_rounds
+    rounds = schedule.values()
+    round_count = max(rounds)
+    table = detector_formation.build_formation_table(
+        physical.circuit, round_count, measurement_rounds=schedule
+    )
+    return table.detector_rounds()
 
 
 def _install_operation_circuits(device, model_provider, operations) -> None:

@@ -10,6 +10,7 @@ would leave them.
 import dataclasses
 
 import pytest
+import stim
 
 import decsim.build.escalation as escalation_build
 import decsim.build.plan as plan_build
@@ -17,9 +18,13 @@ import decsim.controller.policies as policies
 import decsim.controller.settings as controller_settings
 import decsim.escalation.settings as escalation_settings
 import decsim.qpu.settings as qpu_settings
+import decsim.qpu.streaming_stim_device as streaming_stim_device
 import decsim.qpu.syndrome_devices as syndrome_devices
+import decsim.records.circuits as circuit_records
 import decsim.records.decoding as decoding_records
+import decsim.records.program as program_records
 import decsim.records.windows as window_records
+import decsim.records.workload as workload_records
 import decsim.settings as machine_settings
 import decsim.trace_source as trace_source
 import decsim.windows.boundary_policies as boundary_policies
@@ -28,7 +33,9 @@ import decsim.windows.settings as window_settings
 import tests.declared_run as declared_run
 
 
-def _plan(*, escalation=None, windows=None, qpu=None, idle_policy=None):
+def _plan(
+    *, escalation=None, windows=None, qpu=None, idle_policy=None, workload=None
+):
     """The plan of a six-round memory run with the given sections."""
     if idle_policy is None:
         idle_policy = controller_settings.IdlePolicySettings()
@@ -38,7 +45,8 @@ def _plan(*, escalation=None, windows=None, qpu=None, idle_policy=None):
         windows = window_settings.WindowSettings()
     if qpu is None:
         qpu = declared_run.declared_qpu()
-    workload = declared_run.declared_workload(None, 6)
+    if workload is None:
+        workload = declared_run.declared_workload(None, 6)
     links = declared_run.declared_profile()
     controller = declared_run.declared_controller()
     frame = declared_run.declared_frame()
@@ -89,6 +97,29 @@ def test_a_circuit_less_source_wires_the_model_source_that_builds_nothing():
     plan = _plan()
 
     assert plan.error_model_provider is syndrome_devices.NO_WINDOW_MODELS
+
+
+def _live_fragments_workload():
+    """One live segment on a stream, its fragments a single measurement."""
+    segment = program_records.Operation(
+        1, "prefix", ("p",), patches=("p",), stream_id=100, stream_offset=0
+    )
+    fragment = stim.Circuit("M 0")
+    program = circuit_records.RepeatedStimCircuit(
+        fragment, fragment, fragment, fragment
+    )
+    workload = workload_records.Workload((segment,), {1: 3}, program)
+    section = declared_run.declared_workload(None, 6)
+    return section.running(workload)
+
+
+def test_live_fragments_build_the_streaming_source_from_a_yaml_kind():
+    source = qpu_settings.QpuSettings(kind="streaming_stim", distance=3)
+    workload = _live_fragments_workload()
+
+    plan = _plan(qpu=source, workload=workload)
+
+    assert isinstance(plan.device, streaming_stim_device.StreamingStimDevice)
 
 
 def test_a_run_that_never_escalates_gets_the_flush_tail():

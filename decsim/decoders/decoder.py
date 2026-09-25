@@ -366,12 +366,9 @@ def result_from_selected_faults(
     residual_detector_ids = _detector_ids_from_columns(
         placed_faults.boundary_flips, committed
     )
-    defects = _defects_from_detector_ids(model, residual_detector_ids)
     correction = committed.astype(numpy.uint8)
     logical_observables = bit_tuple(observable_flips)
-    boundary_data = window_records.DependencyResidual(
-        detector_ids=residual_detector_ids, defects=defects
-    )
+    boundary_data = dependency_residual(model, residual_detector_ids)
     crossing_commit = _crossing_commit(model, placed_faults, committed)
     return decoding_records.DecodeResult(
         job.operation_id,
@@ -381,6 +378,16 @@ def result_from_selected_faults(
         boundary_data=boundary_data,
         decode_status=decode_status,
         crossing_commit=crossing_commit,
+    )
+
+
+def dependency_residual(
+    model, detector_ids: tuple
+) -> window_records.DependencyResidual:
+    """The detectors a commit flips, with their mask by round and position."""
+    defects = _defects_from_detector_ids(model, detector_ids)
+    return window_records.DependencyResidual(
+        detector_ids=detector_ids, defects=defects
     )
 
 
@@ -402,10 +409,7 @@ def _crossing_commit(
     detector_ids = _detector_ids_from_columns(
         placed_faults.boundary_flips, crossing
     )
-    defects = _defects_from_detector_ids(model, detector_ids)
-    residual = window_records.DependencyResidual(
-        detector_ids=detector_ids, defects=defects
-    )
+    residual = dependency_residual(model, detector_ids)
     observable_flips = parity_product(placed_faults.observables, crossing)
     logical_observables = bit_tuple(observable_flips)
     return window_records.CrossingCommit(residual, logical_observables)

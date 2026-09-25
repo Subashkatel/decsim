@@ -9,10 +9,20 @@ times, so every start and end is known by hand.
 """
 
 import dataclasses
+import functools
 
+import numpy
+import pytest
+
+import decsim.decoders.decoder as decoder_module
+import decsim.decoders.relay_belief_propagation.decoder as relay
 import decsim.decoders.strong_backend as strong_backend
+import decsim.detector_error_model.basis_split as basis_split
+import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.engine as engine_module
 import decsim.records.decoding as decoding_records
+import decsim.records.windows as window_records
+from tests.decoders import windows
 
 
 @dataclasses.dataclass(frozen=True)
@@ -129,3 +139,166 @@ def test_a_device_with_no_seeded_parts_names_no_seed_children():
     device = _FixedDevice(1, {}, engine)
     decoder = strong_backend.StrongBackendDecoder(device)
     assert decoder.run_seed_children() == ()
+
+
+# A region decoded with X and Z apart: two requests on the same queue.
+
+REQUIREMENT = fault_models.PHYSICAL_FAULT_MODEL_REQUIRED.joined(
+    fault_models.DETECTOR_BASES_REQUIRED
+)
+
+
+def _region_job(label: str, window_id: int) -> decoding_records.DecodeJob:
+    """A d = 3 memory's whole window over three rounds, one shot on it."""
+    circuit = windows.memory_circuit(3, 3, 0.003)
+    model = windows.whole_circuit_window(circuit, 3, REQUIREMENT)
+    detection_events, _ = windows.sampled_shots(circuit, 1, 11)
+    job = windows.job_for(model, detection_events[0], window_id)
+    job.label = label
+    return job
+
+
+class _FixedAnsweringDevice(_FixedDevice):
+    """The fixed-time device, answering each part with an empty correction."""
+
+    def result(self, ticket: _Ticket) -> decoding_records.DecodeResult:
+        job = ticket.job
+        nothing = window_records.DependencyResidual()
+        no_correction = numpy.zeros(0, dtype=numpy.uint8)
+        no_crossing = window_records.CrossingCommit(nothing, (0,))
+        return decoding_records.DecodeResult(
+            job.operation_id,
+            job.window_id,
+            correction=no_correction,
+            logical_observables=(0,),
+            boundary_data=nothing,
+            crossing_commit=no_crossing,
+        )
+
+
+def _served(capacity: int, regions: tuple) -> dict:
+    """Each region's end under the Kiefer-Wolfowitz recursion.
+
+    regions is (arrival, X part ticks, Z part ticks) in arrival order;
+    the X part arrives first, and a region ends when its later part does.
+    """
+    free_at = [0] * capacity
+    ends = {}
+    for label, (arrival, *part_ticks) in enumerate(regions):
+        part_ends = []
+        for ticks in part_ticks:
+            server = free_at.index(min(free_at))
+            start = max(arrival, free_at[server])
+            end = start + ticks
+            free_at[server] = end
+            part_ends.append(end)
+        ends[str(label)] = max(part_ends)
+    return ends
+
+
+@pytest.mark.parametrize("capacity", [1, 2, 3])
+@pytest.mark.parametrize(
+    "regions",
+    [
+        ((0, 10, 20),),
+        ((0, 10, 20), (0, 5, 5)),
+        ((0, 7, 3), (5, 4, 9), (12, 6, 2)),
+    ],
+)
+def test_a_split_regions_parts_queue_as_two_requests(capacity, regions):
+    """Series on one server, side by side on two: the recursion decides."""
+    engine = engine_module.Engine()
+    ticks_by_label = {}
+    for label, (_, x_ticks, z_ticks) in enumerate(regions):
+        ticks_by_label[f"{label} X"] = x_ticks
+        ticks_by_label[f"{label} Z"] = z_ticks
+    device = _FixedAnsweringDevice(capacity, ticks_by_label, engine)
+    decoder = strong_backend.StrongBackendDecoder(device, "apart")
+    ended = {}
+    for label, (arrival, _, _) in enumerate(regions):
+        name = str(label)
+        job = _region_job(name, label)
+        record = _recorder(ended, name, engine)
+        start = functools.partial(decoder.start, job, engine, record)
+        engine.schedule(arrival, start)
+    engine.run()
+    assert ended == _served(capacity, regions)
+
+
+def _recorder(ended: dict, label: str, engine):
+    def record(result) -> None:
+        del result
+        ended[label] = engine.now
+
+    return record
+
+
+class _RelayDevice:
+    """One server that answers with decsim's Relay-BP at once."""
+
+    def __init__(self) -> None:
+        self.decoder = relay.RelayBeliefPropagationDecoder(gamma_table_seed=5)
+
+    def capacity(self) -> int:
+        return 1
+
+    def submit(self, request, running: int):
+        del running
+        return self.decoder.decode(request)
+
+    def service_ticks(self, ticket) -> int:
+        del ticket
+        return 1
+
+    def result(self, ticket):
+        return ticket
+
+
+def test_a_split_regions_answer_joins_its_two_parts_decoded_alone():
+    """Observables XOR and flipped detectors union, as each part says."""
+    pytest.importorskip("relay_bp")
+    circuit = windows.memory_circuit(3, 3, 0.003)
+    model = windows.whole_circuit_window(circuit, 3, REQUIREMENT)
+    detection_events, _ = windows.sampled_shots(circuit, 1, 11)
+    job = windows.job_for(model, detection_events[0])
+    device = _RelayDevice()
+    decoder = strong_backend.StrongBackendDecoder(device, "apart")
+    reference = relay.RelayBeliefPropagationDecoder(gamma_table_seed=5)
+    part_by_basis = basis_split.split_by_basis(model)
+    parts = part_by_basis.values()
+    observables = numpy.zeros(1, dtype=numpy.uint8)
+    flipped = []
+    for part in parts:
+        part_job = windows.job_for(part, detection_events[0])
+        answer = reference.decode(part_job)
+        observables ^= numpy.asarray(answer.logical_observables, dtype="uint8")
+        flipped.extend(answer.boundary_data.detector_ids)
+    joined = decoder.decode(job)
+    expected_observables = decoder_module.bit_tuple(observables)
+    assert joined.logical_observables == expected_observables
+    assert joined.boundary_data.detector_ids == tuple(sorted(flipped))
+
+
+def test_decoding_apart_asks_the_window_model_for_detector_types():
+    engine = engine_module.Engine()
+    device = _FixedDevice(1, {}, engine)
+    decoder = strong_backend.StrongBackendDecoder(device, "apart")
+    assert decoder.fault_model_requirement.detector_bases
+
+
+def test_a_cancelled_split_region_withdraws_both_its_parts():
+    engine = engine_module.Engine()
+    ticks = {"A X": 10, "A Z": 20, "B X": 5, "B Z": 5}
+    device = _FixedAnsweringDevice(1, ticks, engine)
+    decoder = strong_backend.StrongBackendDecoder(device, "apart")
+    ended = {}
+    kept = _region_job("A", 0)
+    cancelled = _region_job("B", 1)
+    record_kept = _recorder(ended, "A", engine)
+    record_cancelled = _recorder(ended, "B", engine)
+    decoder.start(kept, engine, record_kept)
+    decoder.start(cancelled, engine, record_cancelled)
+    decoder.cancel(cancelled)
+    engine.run()
+    assert device.submits == [("A X", 0, 0), ("A Z", 0, 10)]
+    assert ended == {"A": 30}

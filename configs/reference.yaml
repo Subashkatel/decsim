@@ -1068,6 +1068,18 @@ strong_decoder:                    # the accurate tier: slow, lower LER
                                    # last three a100 only; 3g.40gb and
                                    # 1g.10gb are one Multi-Instance GPU
                                    # slice of that NVIDIA profile
+  # bases: together                # the measured_table row's BASIS_DECODES
+                                   # row: together | apart. apart decodes a
+                                   # region's X and Z detectors as two
+                                   # smaller models (Relay-BP 2506.01779
+                                   # lines 674-700), each observable on its
+                                   # own type; the two are two requests to
+                                   # the device's queue, priced by parts
+                                   # measured on that GPU, and they overlap
+                                   # only as far as its capacity lets them
+                                   # (decoders/strong_backend.py). A CSS
+                                   # circuit only: a detector of neither
+                                   # type is refused
   engine:
     clock: room                    # the strong unit lives room-side
     fetch_cycles_per_round: 1

@@ -14,7 +14,9 @@ import decsim.config as config
 import decsim.decoders.measured_table.decoder as measured_table
 import decsim.decoders.measured_table.measurements as measurements
 import decsim.decoders.relay_belief_propagation.decoder as relay
+import decsim.detector_error_model.basis_split as basis_split
 import decsim.detector_error_model.fault_model_contracts as fault_models
+import decsim.engine as engine_module
 import decsim.records.seeds as seed_records
 import decsim.seeding as seeding
 from tests.decoders import windows
@@ -155,9 +157,60 @@ def test_a_device_and_partition_never_measured_are_refused():
             section, None, "strong_decoder"
         )
     assert str(refusal.value) == (
-        "strong_decoder.device 'gh200' with partition 'mps' has no "
-        "measurement in measured_table; the measured pairs are "
-        "[('a100', 'whole'), "
-        "('a100', 'mps'), ('a100', '3g.40gb'), ('a100', '1g.10gb'), "
-        "('gh200', 'whole')]"
+        "strong_decoder.device 'gh200' with partition 'mps' and bases "
+        "'together' has no measurement in measured_table; the measured "
+        "ones are [('a100', 'whole', 'together'), "
+        "('a100', 'mps', 'together'), ('a100', '3g.40gb', 'together'), "
+        "('a100', '1g.10gb', 'together'), ('gh200', 'whole', 'together'), "
+        "('gh200', 'whole', 'apart')]"
     )
+
+
+def test_a_bases_row_off_the_table_is_refused():
+    section = {"device": "gh200", "bases": "xz"}
+    with pytest.raises(ValueError) as refusal:
+        measured_table.MeasuredTableSettings.from_yaml(
+            section, None, "strong_decoder"
+        )
+    assert str(refusal.value) == (
+        "strong_decoder.bases 'xz' is not a row of its table; the rows are "
+        "['apart', 'together']"
+    )
+
+
+def test_a_region_decoded_apart_is_its_two_parts_on_their_own_lines():
+    """gh200, d = 5, 15 rounds: the X part's 168 detectors, then the Z's 192.
+
+    One dispatcher runs the two in series, so the region ends when the
+    Z part's line at its own iterations has run after the X part's.
+    """
+    pytest.importorskip("relay_bp")
+    circuit = windows.memory_circuit(5, 15, 0.003)
+    requirement = REQUIREMENT.joined(fault_models.DETECTOR_BASES_REQUIRED)
+    model = windows.whole_circuit_window(circuit, 15, requirement)
+    detection_events, _ = windows.sampled_shots(circuit, 1, 11)
+    job = windows.job_for(model, detection_events[0])
+    settings = measured_table.MeasuredTableSettings("gh200", "whole", "apart")
+    row = measured_table.MeasuredTableDecoder(settings)
+    reference = relay.RelayBeliefPropagationDecoder()
+    _bind_seed(row)
+    _bind_seed(reference)
+    parts = basis_split.split_by_basis(model)
+    x_job = windows.job_for(parts["X"], detection_events[0])
+    z_job = windows.job_for(parts["Z"], detection_events[0])
+    x_answer = reference.decode(x_job)
+    z_answer = reference.decode(z_job)
+    x_microseconds = 54.440 + 6.678 * x_answer.iterations
+    z_microseconds = 55.712 + 6.664 * z_answer.iterations
+    x_ticks = config.microseconds_to_ticks(x_microseconds)
+    z_ticks = config.microseconds_to_ticks(z_microseconds)
+    engine = engine_module.Engine()
+    ended = []
+
+    def record_end(result) -> None:
+        del result
+        ended.append(engine.now)
+
+    row.start(job, engine, record_end)
+    engine.run()
+    assert ended == [x_ticks + z_ticks]
